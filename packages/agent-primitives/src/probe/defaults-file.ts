@@ -2,8 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { linkEntryUsageError } from "./link-list.js";
 
-/** The repo-level defaults file every probe invocation reads (D-006
- * task `6c7e1532`): `.agent-primitives.json` at the repository root --
+/** The repo-level defaults file every probe invocation reads:
+ * `.agent-primitives.json` at the repository root --
  * the directory `probe` treats as the repo root (the git work-tree
  * root, or `cwd` when not in a repository), never a subdirectory the
  * invocation `cwd` happens to sit in. */

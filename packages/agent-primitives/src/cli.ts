@@ -34,8 +34,7 @@ import {
 } from "./probe/index.js";
 import { parsePlanFile, type ProbePlanSpec } from "./probe/plan.js";
 import { reconcileEnvelopeDiffTruncation } from "./probe/mutant.js";
-import { containmentRoot } from "./probe/containment.js";
-import { linkEntryUsageError, mergeLinkSources } from "./probe/link-list.js";
+import { linkEntryUsageError } from "./probe/link-list.js";
 import {
   init,
   ALL_HARNESSES,
@@ -1174,7 +1173,8 @@ async function runProbePlanCommand(
   start: number,
 ): Promise<void> {
   requirePlanExclusive(opts);
-  const parsed = parsePlanFile(path.resolve(global.cwd, opts.plan ?? ""));
+  const planPath = path.resolve(global.cwd, opts.plan ?? "");
+  const parsed = parsePlanFile(planPath);
   if (!parsed.ok) {
     const { envelope, exitCode } = buildEnvelope({
       version: VERSION,
@@ -1203,17 +1203,6 @@ async function runProbePlanCommand(
     : (plan.expect ?? opts.expect);
   const timeoutMs =
     opts.timeout !== undefined ? Number(opts.timeout) * 1000 : plan.timeoutMs;
-  // The plan's own `link` (relative to the repository root) merged with
-  // `--link` (relative to `global.cwd`); the repo defaults file is
-  // merged in ahead of THIS merged result by `probePlan` itself, on
-  // every invocation, so the full precedence is "defaults file, then
-  // plan, then CLI" (D-006 task `6c7e1532`). Resolved to absolute paths
-  // here so the merge's dedup compares like with like regardless of
-  // which of the two bases produced a given value.
-  const links = mergeLinkSources([
-    { base: containmentRoot(global.cwd), values: plan.link ?? [] },
-    { base: global.cwd, values: opts.link ?? [] },
-  ]);
   // Handed to `probePlan` for the duration of the call, the same as for a
   // single probe: it owns SIGINT and SIGTERM while it runs, because it
   // has a mutated file to restore before the process may end.
@@ -1227,7 +1216,15 @@ async function runProbePlanCommand(
       isolation,
       expect,
       timeoutMs,
-      links,
+      // The plan's own `link` stays SEPARATE from `--link` all the way
+      // into `probePlan`, which merges all three sources itself in one
+      // place ("defaults file, then plan, then CLI"): the plan's
+      // entries are repository content and the link policy holds them
+      // to a stricter rule than an operator's own `--link`, which a
+      // merge here would erase.
+      links: opts.link ?? [],
+      planLinks: plan.link ?? [],
+      planPath,
       allowOutside: opts.allowOutside ?? false,
       cwd: global.cwd,
       logDir: global.logDir,

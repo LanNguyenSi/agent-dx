@@ -24,6 +24,7 @@ import {
   type InplaceSession,
   type WorktreeSyncSuccess,
 } from "./isolation.js";
+import type { LinkCandidate } from "./link-policy.js";
 import type { MutantDiffField, MutantForm } from "./mutant.js";
 
 /**
@@ -1033,7 +1034,13 @@ export async function prepareWorktreeSession(input: {
   realRoot: string;
   logDir: string;
   wtScratchRoot: string;
-  absLinks: string[];
+  /** Every extra directory to link into the copy, each carrying its
+   * provenance for the link policy (see `LinkCandidate`). */
+  linkCandidates: LinkCandidate[];
+  /** Absolute, realpath'd path of every file this run mutates; handed
+   * to `beginWorktree` so no link can be created over a directory the
+   * run itself writes into. */
+  mutatedPaths: string[];
   controller: RunController;
   warnings: string[];
 }): Promise<
@@ -1196,7 +1203,8 @@ export async function prepareWorktreeSession(input: {
     root,
     cwd,
     logDir,
-    links: input.absLinks,
+    links: input.linkCandidates,
+    mutatedPaths: input.mutatedPaths,
     signal: controller.execController.signal,
     track,
     // Before `git worktree add` runs, with the whole sync still

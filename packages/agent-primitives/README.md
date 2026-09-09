@@ -595,53 +595,74 @@ submodule directory is tracked as a gitlink, not walked into.
 
 Every `node_modules` directory or directory symlink (e.g. a hoisted or
 workspace-linked install) found in the source tree up to 3 levels deep
-(never one nested inside another `node_modules`) is symlinked into the
-worktree at the same relative path. A composer project gets the same
-treatment: wherever a `composer.json` sits, at the same depth (the
-repository root included), its `vendor-dir` and `bin-dir` -- read from
-`composer.json`'s own `config` object, defaulting to `vendor` and
-`vendor/bin` the way composer itself does -- are symlinked in, provided
-each already exists as a directory on disk and resolves inside the
-containment root (a `vendor-dir`/`bin-dir` naming a path outside the
-root, e.g. via `../..`, is skipped, with a warning naming the
-`composer.json` and the value, rather than linked: the same
-cycle/containment guard the node_modules walk gets from never following
-an arbitrary symlinked directory; a `vendor-dir`/`bin-dir` that simply
-does not exist on disk yet, the common case before `composer install`
-has run, stays silent). A `bin-dir` that resolves inside its own
-project's `vendor-dir` -- composer's own defaults, `vendor` and
-`vendor/bin`, are exactly this shape -- is linked once, as part of
-`vendor-dir`, never listed a second time: linking a directory already
-covered by another linked directory would symlink-create through the
-parent link and reach the SOURCE tree, not the worktree, wherever a
-path resolves inside a directory this run already linked (see the next
-paragraph). Neither the node_modules nor the composer walk descends
-into what it just matched anywhere in the walk, not only inside the
-directory a `composer.json` itself sits in, so a vendored package's own
-nested `node_modules`/`composer.json`, however many directories below a
-matched `vendor-dir`, is never linked a second time. All of that, plus
-every `--link` extra, a `--plan` file's own `link`, and the repository
-defaults file's `link` (see below, and "Non-JS repositories"), is
-merged and deduplicated and symlinked into the worktree at the same
-relative path, so installed dependencies and tool caches are shared
-rather than reinstalled per probe. `--pre`/`-t` run with their cwd
-mapped onto the worktree at `--cwd`'s own relative offset from the
-containment root. Any non-zero exit while syncing, or a genuine
-filesystem failure while copying/linking, is `status: "inconclusive"`,
+(never one nested inside another `node_modules`) is a candidate for
+being symlinked into the worktree at the same relative path. A composer
+project gets the same treatment: wherever a `composer.json` sits, at the
+same depth (the repository root included), its `vendor-dir` and
+`bin-dir` -- read from `composer.json`'s own `config` object, defaulting
+to `vendor` and `vendor/bin` the way composer itself does -- are
+candidates too, provided each already exists as a directory on disk (one
+that does not exist yet, the common case before `composer install` has
+run, is not a candidate at all, and is not reported either). Neither the
+node_modules nor the composer walk descends into what it just matched
+anywhere in the walk, not only inside the directory a `composer.json`
+itself sits in, so a vendored package's own nested
+`node_modules`/`composer.json`, however many directories below a matched
+`vendor-dir`, is never found a second time. All of that, plus every
+`--link` extra, a `--plan` file's own `link`, and the repository
+defaults file's `link` (see below, and "Non-JS repositories"), is merged
+and deduplicated into one candidate list, and everything the link policy
+below accepts is symlinked into the worktree at the same relative path,
+so installed dependencies and tool caches are shared rather than
+reinstalled per probe. `--pre`/`-t` run with their cwd mapped onto the
+worktree at `--cwd`'s own relative offset from the containment root. Any
+non-zero exit while syncing, or a genuine filesystem failure while
+copying/linking, is `status: "inconclusive"`,
 `reason: "worktree_sync_failed"`, exit `2`, never a verdict.
 
-Two guards apply to every directory this linking step symlinks in,
-auto-discovered or explicit alike, and each skip is a warning, never a
-silent drop: a candidate is skipped when it does not resolve (through
-realpath, on both sides of the comparison, so a repository reached
-through a symlinked ancestor -- macOS's `/tmp` -> `/private/tmp` is the
-common case -- links exactly the same as one reached directly) inside
-the repository root, and a candidate is skipped when it resolves inside
-a directory this run has already linked, whether that directory was
-auto-discovered or itself an explicit `--link`/plan-link/defaults-file
-entry: linking it would run its symlink-create THROUGH the already-
-linked parent's symlink and land back in the SOURCE tree instead of the
-worktree.
+The link policy decides about every candidate, from every source, BEFORE
+any link is created, and every refusal is a warning in the envelope,
+never a silent drop. Each link is a delete followed by a symlink-create
+at a path inside the copy, and both of those resolve symlinks in the
+path they are given: a link created at the copy's own root, over a
+directory this run writes into, or underneath a link the same step
+already created does not replace something inside the copy at all -- it
+reaches straight back into the real source tree, which is why the
+decision comes first rather than as a check afterwards. Four rules, in
+this order:
+
+1. Where a candidate SITS decides whether it is inside the repository,
+   never where it points. A `node_modules` that is itself a symlink to a
+   directory outside the repository (a checkout provisioned by
+   symlinking a sibling checkout's install) sits inside the repository
+   and is linked, and the copy gets the same symlink the real tree has;
+   a candidate whose own parent chain leaves the root (a `vendor-dir` of
+   `../../elsewhere`) is skipped. The parent chain is resolved through
+   realpath on both sides of the comparison, so a repository reached
+   through a symlinked ancestor (macOS's `/tmp` -> `/private/tmp` is the
+   common case) links exactly the same as one reached directly.
+2. The copy's own root is never linked, and neither is any directory
+   that CONTAINS the cwd `--pre`/`-t` will run in or the directory a
+   mutant is written into: those have to stay real directories of the
+   copy's, or this run's own writes land in the source tree. A
+   `composer.json` carrying `"bin-dir": "."`, or a defaults file naming
+   the directory under test, is exactly this shape.
+3. A directory named by repository CONTENT -- a composer `config` value,
+   a `--plan` file's `link`, the repository defaults file's `link` -- is
+   linked only when git does not track it. Those three inputs exist for
+   gitignored runtime output (`vendor/`, an install directory, a tool
+   cache); a tracked directory is source, and source is copied into the
+   isolation copy, never shared with the tree being isolated from. A
+   tracked directory named by one of those files is refused with a
+   warning naming the file and the entry. `--link`, typed by the person
+   running the probe, keeps its latitude here; rules 1, 2 and 4 apply to
+   it the same as to everything else.
+4. A candidate at or underneath a path this run already linked is
+   skipped as already covered (composer's own defaults, `vendor` and
+   `vendor/bin`, are exactly this shape). Nesting is judged on the
+   destination paths inside the copy, not on what the links resolve to,
+   so two different in-repo symlinks pointing at one shared install are
+   both linked.
 
 The sync runs under the same abort machinery as `--pre`/`-t`: every git
 call it makes is killed on `SIGINT`/`SIGTERM` and waited for before
@@ -867,7 +888,9 @@ nothing), and a present-but-unparsable file (not JSON, not a JSON
 object, `link` not an array of valid link strings) is a usage error
 naming the path. An absent file is not an error: nothing to add. Every
 `link` entry is checked the same way `--link`/a plan's own `link` is
-(non-empty, no `$(...)` or backtick).
+(non-empty, no `$(...)` or backtick), and, like a plan's own `link` and
+a composer `config` value, may only name a directory git does not track
+(rule 3 of the link policy above).
 
 Precedence across all three `link` sources is additive, not an
 override: the defaults file's own entries, then the plan's, then
@@ -1351,7 +1374,7 @@ from the patch: every path in the plan is known before the run starts, so
 the containment check below can cover all of them up front. Paths in a
 plan file (`file`, `patch`) are resolved against the invocation cwd
 (`-C/--cwd`); `link` is the one exception, resolved against the
-repository root instead (task `6c7e1532`) so a plan's own `link` entries
+repository root instead, so a plan's own `link` entries
 mean the same thing regardless of which subdirectory `--cwd` names, the
 same way the repository defaults file's entries do. An unknown key, a
 missing `test`, an empty `mutants`, a mutant with two forms or none, a
@@ -1378,8 +1401,8 @@ three a plan file can set -- `-i` (`isolation`), `--expect` (`expect`)
 and `--timeout` (`timeout`); a mutant's own `expect` wins over both,
 since it is the only one of them that is per mutant rather than per run.
 `--allow-outside` has no plan key at all: for a plan it is command-line
-only and there is nothing for it to override. `--link` is different
-(task `6c7e1532`): a plan's own `link` (see above) is not a run-shaping
+only and there is nothing for it to override. `--link` is different:
+a plan's own `link` (see above) is not a run-shaping
 override at all, so the CLI/plan precedence rule above does not apply to
 it -- instead it is merged and deduplicated with `--link`'s own values
 (and with the repository defaults file's `link`, read for a plan the

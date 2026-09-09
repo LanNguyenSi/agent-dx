@@ -404,11 +404,10 @@ async function runProbePipeline(
       dryRunLogPaths: derivationLogPaths,
     };
   }
-  // The repo defaults file (D-006 task `6c7e1532`), read on every
-  // invocation, merged ahead of `opts.links` (`--link`, already merged
-  // with a `--plan` file's own `link` by the caller when there is one --
-  // see `cli.ts`'s `runProbePlanCommand`): "defaults file, then plan,
-  // then CLI", all three additive, never overriding one another.
+  // The repo defaults file, read on every invocation and merged ahead
+  // of `opts.links` (`--link`): "defaults file, then plan, then CLI",
+  // all three additive, never overriding one another (a single probe
+  // has no plan of its own; see `probePlan` for the three-source form).
   const defaultsFile = readDefaultsFile(root);
   if (!defaultsFile.ok) {
     return {
@@ -419,8 +418,12 @@ async function runProbePipeline(
       dryRunLogPaths: derivationLogPaths,
     };
   }
-  const displayLinks = mergeLinkSources([
-    { base: root, values: defaultsFile.links },
+  const mergedLinks = mergeLinkSources([
+    {
+      base: root,
+      values: defaultsFile.links,
+      namedIn: `the "link" list of ${defaultsFile.path}`,
+    },
     { base: cwd, values: opts.links ?? [] },
   ]);
 
@@ -435,7 +438,11 @@ async function runProbePipeline(
   // `/private/var`) is what "display the user path" means here.
   const realRoot = resolveDeepestExisting(root);
   const absFile = resolveDeepestExisting(displayFile);
-  const absLinks = displayLinks.map(resolveDeepestExisting);
+  const links = mergedLinks.map((link) => ({
+    display: link.value,
+    abs: resolveDeepestExisting(link.value),
+    ...(link.namedBy !== undefined ? { namedBy: link.namedBy } : {}),
+  }));
   // The `--log-dir` this run's worktree (if any) is created under,
   // recorded in the repository-keyed marker and handed to every
   // `cleanupWorktree` call for this session, the leftover recovery
@@ -482,8 +489,7 @@ async function runProbePipeline(
       wtScratchRoot,
       isolation: opts.isolation,
       allowOutside: opts.allowOutside ?? false,
-      displayLinks,
-      absLinks,
+      links,
       timeoutMs: opts.timeoutMs,
       gitApplyTimeoutMs,
       testCommand: opts.testCommand,
@@ -729,7 +735,17 @@ export interface ProbePlanOptions {
   /** The plan-level default; a mutant's own `expect` wins over it. */
   expect: ExpectVerdict;
   timeoutMs?: number;
+  /** `--link`, relative to `cwd`: an operator's own values. */
   links?: string[];
+  /** The plan file's own `link` entries, relative to the repository
+   * root, kept SEPARATE from `links` rather than pre-merged by the
+   * caller: they are repository content, and the link policy holds
+   * repository-content links to a stricter rule than an operator's own
+   * `--link` (see `link-policy.ts`). */
+  planLinks?: string[];
+  /** The plan file's path, named in a warning about one of its own
+   * `link` entries. */
+  planPath?: string;
   allowOutside?: boolean;
   cwd: string;
   logDir: string;
@@ -954,20 +970,36 @@ export async function probePlan(
       "--plan carries no mutants; a plan needs at least one",
     );
   }
-  // The repo defaults file (D-006 task `6c7e1532`), read on every
-  // invocation, merged ahead of `opts.links` (`--link`, already merged
-  // with the plan's own `link` by the caller -- see `cli.ts`'s
-  // `runProbePlanCommand`): "defaults file, then plan, then CLI", all
-  // three additive, never overriding one another.
+  // The three `link` sources, merged here in their one documented
+  // precedence: the repo defaults file (read on every invocation), then
+  // the plan's own `link` (both relative to the repository root and
+  // both repository CONTENT, so both carry the phrase naming their file
+  // and entry -- see `link-policy.ts`'s rule for what that provenance
+  // costs them), then `--link` (relative to the invocation cwd, an
+  // operator's own value). All three additive, never overriding one
+  // another.
   const defaultsFile = readDefaultsFile(root);
   if (!defaultsFile.ok) {
     return refuse("usage_error", defaultsFile.reason, defaultsFile.message);
   }
-  const displayLinks = mergeLinkSources([
-    { base: root, values: defaultsFile.links },
+  const mergedLinks = mergeLinkSources([
+    {
+      base: root,
+      values: defaultsFile.links,
+      namedIn: `the "link" list of ${defaultsFile.path}`,
+    },
+    {
+      base: root,
+      values: opts.planLinks ?? [],
+      namedIn: `the "link" list of ${opts.planPath ?? "the --plan file"}`,
+    },
     { base: cwd, values: opts.links ?? [] },
   ]);
-  const absLinks = displayLinks.map(resolveDeepestExisting);
+  const links = mergedLinks.map((link) => ({
+    display: link.value,
+    abs: resolveDeepestExisting(link.value),
+    ...(link.namedBy !== undefined ? { namedBy: link.namedBy } : {}),
+  }));
   for (const item of planned) {
     if (item.spec.form !== "patch" && item.spec.line === undefined) {
       return refuse(
@@ -1020,8 +1052,7 @@ export async function probePlan(
       wtScratchRoot,
       isolation: opts.isolation,
       allowOutside: opts.allowOutside ?? false,
-      displayLinks,
-      absLinks,
+      links,
       timeoutMs: opts.timeoutMs,
       gitApplyTimeoutMs,
       testCommand: opts.testCommand,

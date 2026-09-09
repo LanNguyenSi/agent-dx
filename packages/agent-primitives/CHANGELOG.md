@@ -12,20 +12,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `probe -i worktree`'s isolation copy auto-links a composer project's
   `vendor-dir`/`bin-dir` the same way it already auto-links
   `node_modules` (task `6c7e1532`, issue #225): wherever a
-  `composer.json` sits, at the same depth cutoff and behind the same
-  containment/cycle guard, its `config.vendor-dir`/`config.bin-dir`
-  (defaulting to `vendor`/`vendor/bin`) are symlinked in, so a composer
-  project's gitignored runtime no longer needs a `--link` per
-  invocation. A `--plan` file now accepts its own `link` field (paths
-  relative to the repository root, the same `$(...)`/backtick check
-  `--link` itself now applies), merged and deduplicated with `--link`.
-  A new repo-level defaults file, `.agent-primitives.json` at the
-  repository root (`{ "link": [...] }` only; an unknown key or an
-  unparsable file is a usage error naming the path), is read on every
-  `probe`/`--plan` invocation; the full precedence across all three
-  `link` sources is additive -- defaults file, then plan, then
-  `--link`, each only ever adding a path, never removing one an
-  earlier source already named.
+  `composer.json` sits, at the same depth cutoff and through the same
+  link policy, its `config.vendor-dir`/`config.bin-dir` (defaulting to
+  `vendor`/`vendor/bin`) are symlinked in, so a composer project's
+  gitignored runtime no longer needs a `--link` per invocation. A
+  `--plan` file now accepts its own `link` field (paths relative to the
+  repository root, the same `$(...)`/backtick check `--link` itself now
+  applies), merged and deduplicated with `--link`. A new repo-level
+  defaults file, `.agent-primitives.json` at the repository root
+  (`{ "link": [...] }` only; an unknown key or an unparsable file is a
+  usage error naming the path), is read on every `probe`/`--plan`
+  invocation; the full precedence across all three `link` sources is
+  additive -- defaults file, then plan, then `--link`, each only ever
+  adding a path, never removing one an earlier source already named.
+- One link policy for every directory `probe -i worktree` links into
+  the isolation copy, applied before any link is created and documented
+  in the README's isolation section (task `6c7e1532`): containment
+  judged on where a candidate sits rather than on where a symlinked
+  candidate points (so a `node_modules` symlinked to a sibling
+  checkout's install is linked, as the same symlink); the copy's root,
+  the mapped cwd and the directory of every file the run mutates never
+  linked over; a directory named by repository content (a composer
+  `config` value, a `--plan` file's `link`, the defaults file's `link`)
+  linked only when git does not track it; and nesting judged on the
+  destination paths inside the copy, so two in-repo symlinks pointing
+  at one shared install are both linked.
 
 ### Changed
 
@@ -35,6 +46,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `link` field (see the Added bullet above) -- applied to `--link`
   itself too so all three `link` sources genuinely share one rule
   rather than the command-line flag being merely assumed safe.
+- Every link `probe -i worktree` does NOT create is now a warning in
+  the envelope naming the directory, the file and entry that asked for
+  it when repository content did, and the rule that refused it (task
+  `6c7e1532`, behaviour change): a candidate outside the repository, a
+  candidate over the copy's root or over a directory the run writes
+  into, a tracked directory named by repository content, and a
+  candidate already covered by a directory linked earlier in the same
+  run (composer's default `vendor/bin` inside `vendor` is that last
+  case, and is now reported rather than dropped before the policy sees
+  it).
 - Test hygiene from the PR #218 reviews (task `482c3ef7`, no behaviour
   change): the node `--test` dot-reporter fixture builder shared by
   `test/probe-zero-tests.test.ts` and `test/plan.test.ts` now lives once

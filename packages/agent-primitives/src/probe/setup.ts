@@ -9,6 +9,7 @@ import {
 } from "../lock.js";
 import { isPathContained } from "./containment.js";
 import type { WorktreeSyncSuccess } from "./isolation.js";
+import type { LinkCandidate } from "./link-policy.js";
 import { detectKnownZeroTestsEvidence } from "./zero-tests.js";
 import {
   createRunController,
@@ -219,8 +220,16 @@ export interface RunSetupInput {
   wtScratchRoot: string;
   isolation: IsolationMode;
   allowOutside: boolean;
-  displayLinks: string[];
-  absLinks: string[];
+  /** Every `link` value this run carries, in precedence order and
+   * already merged: the display path the operator (or the file) named,
+   * the realpath'd form containment is judged on, and, for a value
+   * repository content named, the phrase naming that file and entry
+   * (see `LinkCandidate.namedBy`). */
+  links: {
+    display: string;
+    abs: string;
+    namedBy?: string;
+  }[];
   timeoutMs?: number;
   gitApplyTimeoutMs: number;
   testCommand: string;
@@ -321,8 +330,7 @@ export async function openRunSetup(
     logDir,
     wtScratchRoot,
     allowOutside,
-    displayLinks,
-    absLinks,
+    links,
     warnings,
     isolationField,
     priorLogPaths,
@@ -390,7 +398,7 @@ export async function openRunSetup(
         display: target.displayFile,
         real: target.absFile,
       })),
-      ...displayLinks.map((display, i) => ({ display, real: absLinks[i] })),
+      ...links.map((link) => ({ display: link.display, real: link.abs })),
     ].filter((p) => !isPathContained(realRoot, p.real));
     if (outside.length > 0) {
       return refuse(
@@ -505,7 +513,13 @@ export async function openRunSetup(
       realRoot,
       logDir,
       wtScratchRoot,
-      absLinks,
+      linkCandidates: links.map((link): LinkCandidate => ({
+        absDir: link.abs,
+        ...(link.namedBy !== undefined ? { namedBy: link.namedBy } : {}),
+      })),
+      // Every distinct target of this run, so the link policy can
+      // refuse a link over any directory a mutant is written into.
+      mutatedPaths: distinct.map((target) => target.absFile),
       controller,
       warnings,
     });

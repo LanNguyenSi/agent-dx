@@ -3,6 +3,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { isPidAlive } from "../lock.js";
 import { isPathContained, resolveDeepestExisting } from "./containment.js";
+import { linkRelPath, planLinks, type LinkCandidate } from "./link-policy.js";
 import { GIT_CONTENT_WRITE_CONFIG_ARGS } from "./mutant.js";
 import { runArgv, type RunArgvResult } from "./run.js";
 
@@ -153,36 +154,29 @@ function readComposerDirOption(
 /**
  * The `vendor-dir` and `bin-dir` a `composer.json` at `dir` declares (or
  * composer's own defaults), each resolved to an absolute path and kept
- * only when it exists as a directory (or a symlink to one) AND resolves
- * inside `rootReal` -- the same cycle guard `node_modules` gets from
- * never following an arbitrary symlinked directory during the walk
- * itself: `composer.json`'s `vendor-dir`/`bin-dir` are strings read out
- * of repository content, not a name this walk discovered on disk, so a
- * value like `../../etc` is checked against containment explicitly
- * rather than being trusted to stay under `dir`; a value skipped for
- * that reason is named, with `dir`'s own `composer.json` path and the
- * raw value, in `warnings` (a value skipped only because the directory
- * does not exist on disk stays silent: that is the common, harmless
- * case of a project that has not run `composer install` yet). Malformed
- * JSON, or a `composer.json` that is not a JSON object, yields no
- * directories rather than failing the whole probe: a broken
- * `composer.json` is the project's own problem, not a reason to refuse
- * isolation for the rest of the tree. Deduplicated by exact path so a
- * `bin-dir` configured to the very same path as `vendor-dir` is not
- * listed twice, and a `bin-dir` that resolves INSIDE `vendor-dir` (the
- * common case: composer's own default `bin-dir`, `vendor/bin`, sits
- * inside its own default `vendor-dir`, `vendor`) is dropped rather than
- * listed as a second entry -- linking `vendor-dir` already carries
- * whatever sits under it, and `beginWorktree`'s linking loop must never
- * be asked to link a path nested inside a directory it is about to link
- * (or already has): the whole reason that nesting is dangerous rather
- * than merely redundant.
+ * only when it exists as a directory (or a symlink to one) on disk: a
+ * value that names nothing yet (the common, harmless case of a project
+ * that has not run `composer install`) is not a directory this walk
+ * found, so it is dropped here and silently -- there is no candidate to
+ * decide about. Malformed JSON, or a `composer.json` that is not a JSON
+ * object, yields no directories rather than failing the whole probe: a
+ * broken `composer.json` is the project's own problem, not a reason to
+ * refuse isolation for the rest of the tree. Deduplicated by exact path
+ * so a `bin-dir` configured to the very same path as `vendor-dir` is
+ * not listed twice.
+ *
+ * This function DISCOVERS candidates; it does not decide about them.
+ * Whether a value that escapes the repository root, names the root
+ * itself, names a directory git tracks, or nests inside another linked
+ * directory (composer's own defaults, `vendor` and `vendor/bin`, are
+ * exactly that last shape) may be linked is `link-policy.ts`'s single
+ * decision for every candidate from every source, warned about in one
+ * format -- never a second containment rule here that would skip a
+ * value before the policy ever sees it. Each candidate carries the
+ * `composer.json` that named it and the raw value, since a refusal has
+ * to name both.
  */
-function composerLinkDirsFor(
-  dir: string,
-  rootReal: string,
-  warnings: string[],
-): string[] {
+function composerLinkDirsFor(dir: string): LinkCandidate[] {
   const composerJsonPath = path.join(dir, "composer.json");
   let parsed: unknown;
   try {
@@ -202,9 +196,8 @@ function composerLinkDirsFor(
     "bin-dir",
     COMPOSER_DEFAULT_BIN_DIR,
   );
-  const found: string[] = [];
+  const found: LinkCandidate[] = [];
   const seen = new Set<string>();
-  let vendorAbsReal: string | undefined;
   for (const [rel, key] of [
     [vendorDir, "vendor-dir"],
     [binDir, "bin-dir"],
@@ -213,25 +206,10 @@ function composerLinkDirsFor(
     if (seen.has(abs)) continue;
     seen.add(abs);
     if (!isDirectoryFollowingLink(abs)) continue;
-    const absReal = resolveDeepestExisting(abs);
-    if (!isPathContained(rootReal, absReal)) {
-      warnings.push(
-        `skipped composer.json's "${key}" (${rel}) at ${composerJsonPath}: resolves outside the repository root`,
-      );
-      continue;
-    }
-    if (key === "vendor-dir") {
-      vendorAbsReal = absReal;
-    } else if (
-      vendorAbsReal !== undefined &&
-      isPathContained(vendorAbsReal, absReal)
-    ) {
-      // bin-dir nested inside vendor-dir: already covered by linking
-      // vendor-dir itself; listing it too is exactly the shape
-      // `beginWorktree`'s linking loop must never see.
-      continue;
-    }
-    found.push(abs);
+    found.push({
+      absDir: abs,
+      namedBy: `"${rel}" named in "${key}" of ${composerJsonPath}`,
+    });
   }
   return found;
 }
@@ -259,16 +237,12 @@ function composerLinkDirsFor(
  * prove a directory (or a `composer.json`) at the next depth is excluded
  * rather than simply unvisited.
  */
-function walkAutoLinkDirs(
-  root: string,
-  warnings: string[],
-): {
+function walkAutoLinkDirs(root: string): {
   nodeModules: string[];
-  composer: string[];
+  composer: LinkCandidate[];
 } {
   const nodeModules: string[] = [];
-  const composer: string[] = [];
-  const rootReal = resolveDeepestExisting(path.resolve(root));
+  const composer: LinkCandidate[] = [];
   // Every composer directory matched ANYWHERE in this walk so far, not
   // just in the directory currently being listed: a directory whose
   // `composer.json` names a nested `vendor-dir` (e.g. `deps/vendor`) is
@@ -302,9 +276,9 @@ function walkAutoLinkDirs(
           (composerEntry.isSymbolicLink() &&
             isFileFollowingLink(composerJsonPath)));
       if (isComposerFile) {
-        for (const abs of composerLinkDirsFor(dir, rootReal, warnings)) {
-          composer.push(abs);
-          matchedComposerDirs.push(abs);
+        for (const candidate of composerLinkDirsFor(dir)) {
+          composer.push(candidate);
+          matchedComposerDirs.push(candidate.absDir);
         }
       }
     }
@@ -335,34 +309,29 @@ function walkAutoLinkDirs(
  * Exported (and kept to this exact behaviour) for the existing unit
  * tests and for any caller that wants node_modules alone. */
 export function findNodeModulesDirs(root: string): string[] {
-  return walkAutoLinkDirs(root, []).nodeModules;
+  return walkAutoLinkDirs(root).nodeModules;
 }
 
 /** Every composer `vendor-dir`/`bin-dir` `walkAutoLinkDirs` finds for a
- * `composer.json` in range; see that function's own docblock. Exported
- * for direct unit testing of the composer matcher in isolation from
- * `node_modules`. `warnings` (default: discarded) collects a note for
- * every `vendor-dir`/`bin-dir` value skipped for resolving outside the
- * repository root; see `composerLinkDirsFor`. */
-export function findComposerLinkDirs(
-  root: string,
-  warnings: string[] = [],
-): string[] {
-  return walkAutoLinkDirs(root, warnings).composer;
+ * `composer.json` in range, as paths; see that function's own docblock.
+ * Exported for direct unit testing of the composer matcher in isolation
+ * from `node_modules`. Discovery only: whether each may actually be
+ * linked is the link policy's decision (`planLinks`), never this
+ * function's. */
+export function findComposerLinkDirs(root: string): string[] {
+  return walkAutoLinkDirs(root).composer.map((c) => c.absDir);
 }
 
-/** Every directory `beginWorktree` auto-links into the isolation copy
+/** Every candidate `beginWorktree` auto-links into the isolation copy
  * without an explicit `--link`: `node_modules` directories first (the
  * pre-existing order), then composer `vendor-dir`/`bin-dir`s -- one
  * shared walk (`walkAutoLinkDirs`) rather than two separate traversals
- * of the same tree. `warnings` (default: discarded) is threaded to
- * `findComposerLinkDirs`'s own. */
-export function findAutoLinkDirs(
-  root: string,
-  warnings: string[] = [],
-): string[] {
-  const { nodeModules, composer } = walkAutoLinkDirs(root, warnings);
-  return [...nodeModules, ...composer];
+ * of the same tree. A `node_modules` carries no `namedBy`: the walk
+ * found the directory itself on disk, rather than repository content
+ * naming a path (see `LinkCandidate`). */
+export function findAutoLinkDirs(root: string): LinkCandidate[] {
+  const { nodeModules, composer } = walkAutoLinkDirs(root);
+  return [...nodeModules.map((absDir) => ({ absDir })), ...composer];
 }
 
 /** Number of file records in a `git diff --numstat -z` listing. Parsed
@@ -464,10 +433,22 @@ export interface BeginWorktreeOptions {
   /** Scratch space: this run's own subdirectory (see the docblock below)
    * is created under here. */
   logDir: string;
-  /** Absolute, already-contained extra directories to symlink into the
-   * worktree in addition to the `node_modules` directories this
-   * function finds on its own. */
-  links: string[];
+  /** Extra directories to symlink into the worktree in addition to the
+   * ones this function discovers on its own (`findAutoLinkDirs`), each
+   * carrying its provenance: an operator's `--link` has no `namedBy`, a
+   * `--plan` file's or the repo defaults file's `link` entry names
+   * itself and its file. Every one of them goes through the same link
+   * policy as a discovered candidate (`planLinks`); none is linked
+   * because a caller already checked it. */
+  links: LinkCandidate[];
+  /** Absolute, realpath'd path of every file this run mutates. Their
+   * directories are what the isolation copy must keep as real
+   * directories of its own: a link created over one of them (or over
+   * any ancestor of one) sends this run's own mutant write into the
+   * operator's source tree. Required, not optional: a caller that
+   * knows its targets and forgets to pass them here is exactly how
+   * that hole reopens. */
+  mutatedPaths: string[];
   /** The caller's abort signal, threaded into every git call this
    * function makes and checked between batches of the untracked-file
    * copy. Without it a SIGINT/SIGTERM landing mid-sync would leave the
@@ -673,9 +654,13 @@ function yieldToEventLoop(): Promise<void> {
  * a source file to sync into the very worktree it is scratch space for.
  * Every `node_modules` directory (or directory symlink) up to
  * `NODE_MODULES_LINK_DEPTH`, every composer project's `vendor-dir`/
- * `bin-dir` at the same depth, plus every `--link` extra (`--link`
- * itself already merged with a `--plan` file's own `link` and the repo
- * defaults file by the caller; see `findAutoLinkDirs`) is symlinked. Any
+ * `bin-dir` at the same depth (`findAutoLinkDirs`), plus every extra
+ * the caller passes in `links` (`--link` merged with a `--plan` file's
+ * own `link` and the repo defaults file, each carrying its provenance),
+ * is a link CANDIDATE. Which of them are actually symlinked is
+ * `link-policy.ts`'s single decision, taken for all of them before the
+ * first link is created and reported in `warnings` for each one it
+ * refuses; nothing below performs a link the policy did not return. Any
  * non-zero git exit, or a genuine I/O failure while copying, is
  * `worktree_sync_failed`; the caller (`probe/session.ts`'s
  * `prepareWorktreeSession`) never treats a sync failure as a verdict.
@@ -899,64 +884,114 @@ export async function beginWorktree(
     };
   }
 
-  // Resolved through realpath, on both sides of every comparison below:
-  // `root` is a display path, never realpath'd by any caller, while an
-  // explicit link (`--link`, a `--plan` file's own `link`, or the repo
-  // defaults file's `link`) reaches here already realpath'd (see
-  // `index.ts`'s `absLinks`). Comparing an unresolved `root` against a
-  // resolved `absDir` makes `path.relative` return a bogus `..`-prefixed
-  // path for EVERY explicit link whenever `root` sits under a symlinked
-  // ancestor (macOS's `/tmp` -> `/private/tmp`, or any symlinked
-  // checkout path), silently dropping a perfectly valid link with no
-  // warning. Auto-discovered directories (`autoLinkDirs`) are built from
-  // this same unresolved `root` by `findAutoLinkDirs`'s own walk, so
-  // resolving them here changes nothing for them; it is what makes an
-  // explicit link comparable to `root` on the same footing.
+  // `root` is a display path, never realpath'd by any caller, so it is
+  // resolved once here and every candidate is judged against THIS
+  // spelling of the root (see `linkRelPath` for the matching care taken
+  // on the candidate's own side). Comparing an unresolved `root`
+  // against a resolved candidate makes `path.relative` return a bogus
+  // `..`-prefixed path whenever `root` sits under a symlinked ancestor
+  // (macOS's `/tmp` -> `/private/tmp`, or any symlinked checkout path),
+  // silently dropping perfectly valid links.
   const rootReal = resolveDeepestExisting(path.resolve(root));
-  const autoLinkDirs = findAutoLinkDirs(root, syncWarnings);
+  const candidates: LinkCandidate[] = [...findAutoLinkDirs(root), ...links];
+  // What the copy must keep as real directories of its own: the
+  // directory each mutant is written into, and the cwd `--pre`/`-t`
+  // will run in. The repository root itself is never listed (nothing
+  // can contain it, and the policy refuses a candidate that IS the
+  // root outright), and a path that does not sit under the root cannot
+  // be shadowed by an in-root link either.
+  const protectedRelPaths = [
+    ...opts.mutatedPaths.map((p) => path.dirname(p)),
+    resolveDeepestExisting(path.resolve(cwd)),
+  ]
+    .map((p) => path.relative(rootReal, p))
+    .filter(
+      (rel) => rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel),
+    );
+  // Rule 4 of the link policy: a directory named by repository content
+  // (a composer config value, a `--plan` file's or the repo defaults
+  // file's `link`) may only be linked when git does not track it. Asked
+  // once, for every such candidate that sits inside the root, rather
+  // than per candidate: one `git ls-files` listing restricted to those
+  // paths, whose output is any tracked path under any of them.
+  const fileSourced = candidates
+    .filter((c) => c.namedBy !== undefined)
+    .map((c) => ({ candidate: c, relPath: linkRelPath(c.absDir, rootReal) }))
+    .filter(
+      (entry): entry is { candidate: LinkCandidate; relPath: string } =>
+        entry.relPath !== undefined,
+    );
+  const trackedRelPaths: string[] = [];
+  // Fail closed: a listing that could not run leaves every file-sourced
+  // candidate treated as tracked (so none is linked) rather than
+  // treated as untracked, which is the direction that reaches the
+  // source tree.
+  let trackedUnknown = false;
+  if (fileSourced.length > 0) {
+    const lsFilesResult = await runGit(
+      [
+        "ls-files",
+        "-z",
+        "--",
+        // `:(literal)` so a path containing a glob character is matched
+        // as the literal directory it is, never as a pattern.
+        ...fileSourced.map((entry) => `:(literal)${entry.relPath}`),
+      ],
+      "link-tracked-files.log",
+      root,
+    );
+    logPaths.push(lsFilesResult.logPath);
+    if (lsFilesResult.aborted) {
+      return abortedResult("the link-policy tracked-file listing");
+    }
+    if (lsFilesResult.exitCode !== 0) {
+      trackedUnknown = true;
+      syncWarnings.push(
+        `git ls-files could not check which link candidates git tracks (see ${lsFilesResult.logPath}); ` +
+          "every directory named by repository content is treated as tracked",
+      );
+    } else {
+      trackedRelPaths.push(
+        ...lsFilesResult.stdout.split("\0").filter((p) => p.length > 0),
+      );
+    }
+  }
+  const isTrackedPath = (relPath: string): boolean => {
+    if (trackedUnknown) return true;
+    const prefix = relPath + path.sep;
+    return trackedRelPaths.some(
+      (tracked) => tracked === relPath || tracked.startsWith(prefix),
+    );
+  };
+
+  // One decision per candidate, for every source, BEFORE any of the
+  // `rmSync`/`symlinkSync` pairs below runs: see `planLinks` for why
+  // the order matters rather than being a matter of taste.
+  const plan = planLinks(candidates, {
+    rootReal,
+    protectedRelPaths,
+    isTrackedPath,
+  });
+  syncWarnings.push(...plan.warnings);
   const linked: string[] = [];
-  // Every directory this run has already linked, resolved, in link
-  // order: checked before each further candidate so a target nested
-  // inside one of these (a composer `bin-dir` left, despite
-  // `composerLinkDirsFor`'s own containment skip, nested inside its
-  // `vendor-dir` by some path this walk did not anticipate; an
-  // operator's own `--link` nested inside an auto-linked directory; two
-  // `--link` entries where one nests inside the other) is never itself
-  // linked. Linking it would resolve `dest`'s `rmSync`/`symlinkSync`
-  // THROUGH the symlink this loop just created for the containing
-  // directory, deleting the real, still-live directory in the SOURCE
-  // tree rather than anything inside the worktree -- the data-loss bug
-  // this guard exists to close. Checked by containment
-  // (`isPathContained`), not exact-path membership, so it also catches a
-  // candidate several levels below an already-linked directory.
-  const linkedReal: string[] = [];
   try {
-    for (const absDir of [...autoLinkDirs, ...links]) {
-      const resolvedDir = resolveDeepestExisting(absDir);
-      const relPath = path.relative(rootReal, resolvedDir);
-      if (relPath.startsWith("..") || path.isAbsolute(relPath)) {
-        syncWarnings.push(
-          `skipped linking ${absDir}: it does not resolve inside the repository root`,
-        );
-        continue;
-      }
-      if (
-        linkedReal.some((existing) => isPathContained(existing, resolvedDir))
-      ) {
-        syncWarnings.push(
-          `skipped linking ${absDir}: nested inside a directory already linked in this run`,
-        );
-        continue;
-      }
+    for (const { candidate, relPath } of plan.links) {
+      // `relPath` is built from a parent chain the policy already
+      // resolved through realpath (`linkRelPath`), so no segment of
+      // `dest` is a symlink the source tree carries -- the copy
+      // recreates a source symlink as a symlink at its own path, and
+      // this destination is spelled through the resolved directories
+      // instead. Together with rule 4 (nothing under a link this loop
+      // created), that is what makes the `rmSync` below a delete
+      // inside the copy rather than one that resolves out of it.
       const dest = path.join(worktreePath, relPath);
       fs.mkdirSync(path.dirname(dest), { recursive: true });
       // A sync step above (or the checkout itself) may already have
       // created something at this path; clear it first so the symlink
       // create is never blocked by EEXIST.
       fs.rmSync(dest, { recursive: true, force: true });
-      fs.symlinkSync(absDir, dest, "dir");
-      linked.push(absDir);
-      linkedReal.push(resolvedDir);
+      fs.symlinkSync(candidate.absDir, dest, "dir");
+      linked.push(candidate.absDir);
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

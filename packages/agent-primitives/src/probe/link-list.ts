@@ -28,6 +28,29 @@ export function linkEntryUsageError(value: unknown): string | undefined {
   return undefined;
 }
 
+/** One `link` source's values, and where they came from. */
+export interface LinkSourceGroup {
+  /** What each value is resolved against: the repository root for a
+   * `--plan` file's and the repo defaults file's entries, the
+   * invocation cwd for `--link`. */
+  base: string;
+  values: readonly string[];
+  /** Set for a source that is a FILE in the repository, to the phrase
+   * naming it (`the "link" list of /r/.agent-primitives.json`): each
+   * merged value then carries `"<value>" named in <namedIn>`, which is
+   * both the message fragment a refusal needs and the flag that marks
+   * the value as repository content rather than something an operator
+   * typed (see `link-policy.ts`). Absent for `--link`. */
+  namedIn?: string;
+}
+
+/** One merged `link` value: the resolved absolute path, plus the
+ * provenance phrase for a value repository content named. */
+export interface MergedLink {
+  value: string;
+  namedBy?: string;
+}
+
 /**
  * Merges `link` values from several sources into one deduplicated list,
  * each source's own `values` resolved against its own `base` before
@@ -37,20 +60,28 @@ export function linkEntryUsageError(value: unknown): string | undefined {
  * file" sections). Groups are folded in the order given; a later
  * group's value that resolves to a path an earlier group already added
  * is dropped, never the other way around, so "later sources add, none
- * removes" (D-006 task 6c7e1532): every distinct resolved path from
- * every group survives, each exactly once, in first-seen order.
+ * removes": every distinct resolved path from every group survives,
+ * each exactly once, in first-seen order. A path several sources name
+ * therefore keeps the FIRST source's provenance, which is the
+ * conservative direction: the defaults file and the plan are checked
+ * as repository content even when `--link` names the same path too.
  */
 export function mergeLinkSources(
-  groups: readonly { base: string; values: readonly string[] }[],
-): string[] {
+  groups: readonly LinkSourceGroup[],
+): MergedLink[] {
   const seen = new Set<string>();
-  const merged: string[] = [];
+  const merged: MergedLink[] = [];
   for (const group of groups) {
     for (const value of group.values) {
       const abs = path.resolve(group.base, value);
       if (seen.has(abs)) continue;
       seen.add(abs);
-      merged.push(abs);
+      merged.push({
+        value: abs,
+        ...(group.namedIn !== undefined
+          ? { namedBy: `"${value}" named in ${group.namedIn}` }
+          : {}),
+      });
     }
   }
   return merged;
