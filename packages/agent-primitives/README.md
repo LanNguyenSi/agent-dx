@@ -200,18 +200,54 @@ diagnostics), and `eslint`'s stylish formatter (a file header line, then
 with the rule id appended to the message when the row carries one, and
 omitted for a rule-less row such as a `Parsing error: ...`; `warning` rows
 count into `summary.warnings` alone and never become a failure, even on a
-zero-exit check). No reporter flags are injected: whichever of these three
-shapes a check's own script happens to print is parsed as-is; a check that
-emits more than one shape at once (a `pretest` build followed by `vitest`,
-say) is ambiguous and falls back to `generic`, same as any other ambiguous
-case. Every file-path capture across the three detectors is matched
+zero-exit check). Three more default candidates cover PHP: `phpunit`
+(`OK (N tests, M assertions)`; `FAILURES!`/`ERRORS!`/`WARNINGS!`/`OK,
+but incomplete, skipped, or risky tests!` plus a `Tests: N, Assertions:
+M, ...` tally line whose named counts -- `Errors`, `Failures`,
+`Warnings`, `Skipped`, `Incomplete`, `Risky` -- are read by name, not
+position, since PHPUnit's own field order changes with which marker
+fired; and `No tests executed!`; a PHP-level deprecation notice on an
+otherwise green run is reported as a detector warning, not a failure.
+The counts are derived by spending the run's own stated total, one
+category at a time: Skipped, Incomplete and Warnings did not execute
+(PHPUnit counts a warning such as `No tests found in class "X".` as a
+whole synthetic test), Failures, Errors and Risky did (a risky test ran,
+it just asserted nothing), so `passed` is what remains of the executed
+count after failures and errors, never a negative number and never more
+than the run itself reported. A numbered `N) Class::method` entry
+becomes a `failures` entry only under an error or failure section
+header, since a risky or incomplete entry carries the same header
+shape),
+`phpstan` (` [OK] No errors`, or a per-file table closed by ` [ERROR]
+Found N errors`, `summary.errors` preferring that stated total over the
+row count), and `phpcs` (one `FOUND N ERRORS ... AFFECTING M LINES`
+summary PER FILE, summed across every file rather than read from the
+first alone, over one `<line> | ERROR | message` row per finding; a
+clean run prints nothing at all, so there is no "no errors" shape for
+this one to match, same as the tsc/eslint detectors' own clean
+captures). All three target each tool's own DEFAULT non-colorized text
+output; a non-default format (PHPUnit's JUnit XML, PHPCS's
+`--error-format=raw`, or forced ANSI colors on any of the three) is out
+of scope and falls to `generic`. PHPUnit's `--testdox` and `--teamcity`
+reporters are the measured exception: both still print the run's marker
+line and its `Tests: N, Assertions: M, ...` tally unchanged, so
+`phpunit` is still selected and every summary count is right under them;
+what they drop is the numbered `N) Class::method` entries, so `failures`
+comes back empty. See "Non-JS test runners" below for the exit-code
+assumption these three inherit like every other check here.
+No reporter flags are injected: whichever of these shapes a check's own
+script happens to print is parsed as-is; a check that emits more than
+one shape at once (a `pretest` build followed by `vitest`, say) is
+ambiguous and falls back to `generic`, same as any other ambiguous
+case. Every file-path capture across these detectors is matched
 structurally (up to the shape's own separator, such as vitest's `>` or
 tsc's `(line,col):`), never merely up to the first whitespace, so a path
 containing a space is still captured whole. ANSI color codes are stripped
-before any of these three detectors matches or parses, since a tool run in
-a fully non-interactive environment can still default to colorized output
-(only SGR sequences are stripped; none of these three tools' default text
-output emits cursor-movement or other non-SGR escape sequences). eslint 10
+before any of the vitest/tsc/eslint detectors matches or parses, since a
+tool run in a fully non-interactive environment can still default to
+colorized output (only SGR sequences are stripped; none of these three
+tools' default text output emits cursor-movement or other non-SGR
+escape sequences). eslint 10
 (a devDependency, used only for this package's own lint check and for the
 `eslint` detector's fixtures) requires Node `^20.19.0 || ^22.13.0 ||
 
@@ -1627,8 +1663,10 @@ identifiers still present at `--head` in a Markdown/plain-text doc or in
 a source comment (never a code line). A doc site is any line of a
 `.md`/`.mdx`/`.txt` file; a comment site is a `//`, `/* ... */` or
 `*`-continuation line in a `.ts`/`.tsx`/`.js`/`.jsx`/`.mjs`/`.cjs` file,
-or a `#` line in a `.py`/`.sh`/`.yml`/`.yaml` file. Every other file
-extension is out of scope and never scanned at all. Matching is
+a `#` line in a `.py`/`.sh`/`.yml`/`.yaml` file, or (PHP accepts both
+comment grammars) a `//`, `#`, `/* ... */`, or docblock `*`-continuation
+line in a `.php` file. Every other file extension is out of scope and
+never scanned at all. Matching is
 whole-word (`RuntimeError` never matches `setRuntimeError`), so a
 mention only reports when the removed name reappears as its own word.
 `--base`/`--head`/`--allow` and every reported path are resolved
@@ -1708,6 +1746,58 @@ than about 60 characters before the identifier's own mention (or behind
 a `. `/`; ` sentence boundary within that lookback), or more than about
 20 characters after it, is still reported rather than allowlisted; use
 `--allow` or reword the mention to bring it inside the window.
+
+## Non-JS test runners
+
+`verify`, `probe`, and `drift` were built against Node tooling first,
+but nothing in any of the three assumes JavaScript: a PHP repository
+using PHPUnit, PHPStan, and PHP_CodeSniffer works the same way, with
+three things worth naming explicitly.
+
+**The exit-code assumption.** `verify`'s `classifyStatus` reads
+`pass`/`fail` from the command's own exit code (`0` is `pass`,
+`126`/`127` are infra `error`s, anything else non-zero is `fail`), and
+`probe`'s `survived`/`killed` verdict is built on the same exit code
+too. PHPUnit and PHPStan follow this convention directly (PHPUnit exits
+non-zero on any failure or error; PHPStan exits `1` when it finds
+errors). PHPCS's own mapping, measured against real captures (see
+`test/fixtures/README.md`), is `0` clean, `1` when it finds only
+warnings, `2` when it finds any errors (fixable or not), `3` on a
+processing error (e.g. a `--standard` naming no sniffs at all) -- so a
+warnings-only PHPCS run reads as `fail` under this rule's plain
+"anything non-zero is fail", the same as an errors run, even though
+PHPCS itself distinguishes the two by exit code. PHPUnit has a
+zero-exit hole of its own: a run whose only outcome is a PHPUnit-level
+warning (`No tests found in class "X".`) exits `0` under 9.6 even though
+nothing ran, which is why the zero-tests guard below, and not the exit
+code, is what catches that shape. No wrapper is needed to make a
+`composer.json` `scripts` entry (or an `-x` override) work with any of
+the three commands as-is. The PHPUnit-specific corollary lives in
+`probe`'s zero-tests guard, below.
+
+**The zero-tests guard now knows PHPUnit.** The same
+`no_tests_executed` refusal `probe` already applies to vitest's
+all-skipped/no-test-files shapes and node `--test`'s zero-count summary
+now also recognizes PHPUnit's own `No tests executed!` line and any run
+whose executed count is zero: the stated total less every tally category
+that did not execute (Skipped, Incomplete and Warnings), which covers an
+all-skipped run, a warnings-only run, and a stated `OK (0 tests, 0
+assertions)` (defensive -- not observed from a real capture; PHPUnit
+9.6.36 prints `No tests executed!` for an empty suite instead). A red
+run that is ALSO all-skipped/incomplete does not confuse this guard,
+since it never relies on `passed`/`failed`/`errors` alone; an all-risky
+run is deliberately not flagged, since a risky test did run. A baseline
+(or mutant run) that exits `0` with nothing actually executed is
+`status: "inconclusive"`, `reason: "no_tests_executed"`, never read as a
+real pass, exactly like the vitest/node cases documented under `probe`
+above.
+
+**The pass predicate and the composer link rule** are two more PHP-
+relevant additions on their own tasks (issue #225 parts 1 and 2: a
+`--pass-regex`/`passWhen` pass predicate, and a composer
+`vendor-dir`/`bin-dir` link rule); each documents its own option in its
+own section. This section only names the exit-code assumption they, like
+every other check here, still inherit.
 
 ## Output shape
 

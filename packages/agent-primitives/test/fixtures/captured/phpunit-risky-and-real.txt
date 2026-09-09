@@ -1,0 +1,15 @@
+PHPUnit 9.6.36 by Sebastian Bergmann and contributors.
+
+.R                                                                  2 / 2 (100%)
+
+Time: [elided]
+
+There was 1 risky test:
+
+1) RiskyRealTest::testNoAssertions
+This test did not perform any assertions
+
+tests/RiskyRealTest.php:12
+
+OK, but incomplete, skipped, or risky tests!
+Tests: 2, Assertions: 1, Risky: 1.

@@ -1,0 +1,15 @@
+PHPUnit 9.6.36 by Sebastian Bergmann and contributors.
+
+.E                                                                  2 / 2 (100%)
+
+Time: [elided]
+
+There was 1 error:
+
+1) PortTest::testUnreachable
+RuntimeException: upstream unreachable at api.example.com:8080
+
+tests/PortTest.php:14
+
+ERRORS!
+Tests: 2, Assertions: 1, Errors: 1.

@@ -1,0 +1,24 @@
+
+FILE: phpcs-errors/Bad.php
+--------------------------------------------------------------------------------
+FOUND 12 ERRORS AFFECTING 5 LINES
+--------------------------------------------------------------------------------
+ 1 | ERROR | [x] Header blocks must be separated by a single blank line
+ 2 | ERROR | [ ] Each class must be in a namespace of at least one level (a
+   |       |     top-level vendor name)
+ 2 | ERROR | [x] Opening brace of a class must be on the line after the
+   |       |     definition
+ 3 | ERROR | [x] Spaces must be used to indent lines; tabs are not allowed
+ 3 | ERROR | [ ] Visibility must be declared on method "add"
+ 3 | ERROR | [x] Expected 1 space between comma and argument "$b"; 0 found
+ 3 | ERROR | [x] Opening brace should be on a new line
+ 4 | ERROR | [x] Spaces must be used to indent lines; tabs are not allowed
+ 4 | ERROR | [x] Line indented incorrectly; expected at least 8 spaces, found 4
+ 4 | ERROR | [x] Expected at least 1 space before "+"; 0 found
+ 4 | ERROR | [x] Expected at least 1 space after "+"; 0 found
+ 5 | ERROR | [x] Spaces must be used to indent lines; tabs are not allowed
+--------------------------------------------------------------------------------
+PHPCBF CAN FIX THE 10 MARKED SNIFF VIOLATIONS AUTOMATICALLY
+--------------------------------------------------------------------------------
+
+Time: [elided]

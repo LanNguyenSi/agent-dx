@@ -8,6 +8,9 @@ import { genericDetector } from "./detectors/generic.js";
 import { vitestDetector } from "./detectors/vitest.js";
 import { tscDetector } from "./detectors/tsc.js";
 import { eslintDetector } from "./detectors/eslint.js";
+import { phpunitDetector } from "./detectors/phpunit.js";
+import { phpstanDetector } from "./detectors/phpstan.js";
+import { phpcsDetector } from "./detectors/phpcs.js";
 import type {
   CheckResult,
   CheckStatus,
@@ -38,20 +41,38 @@ export { genericDetector } from "./detectors/generic.js";
 export { vitestDetector } from "./detectors/vitest.js";
 export { tscDetector } from "./detectors/tsc.js";
 export { eslintDetector } from "./detectors/eslint.js";
+export { phpunitDetector } from "./detectors/phpunit.js";
+export { phpstanDetector } from "./detectors/phpstan.js";
+export { phpcsDetector } from "./detectors/phpcs.js";
 
 /** Default check order, matching the CI convention: build before
  * typecheck (a suite that executes built output needs the build first). */
 export const DEFAULT_CHECKS = ["build", "typecheck", "lint", "test"];
 
-/** Default candidate detectors, in priority order (used only as a
- * tiebreak input alongside command text when two or more candidates'
- * shapes both match; see `selectDetector`). `generic` is never part of
- * this list: it is the fallback (`fallbackDetector` in `VerifyOptions`),
- * consulted when zero, or more than one ambiguous, candidate matches. */
+/** Default candidate detectors. Selection is shape-first
+ * (`selectDetector` filters by `matches(input)`, each detector's output
+ * shape, before it ever looks at command text): this array's own order
+ * only matters as a stable enumeration, and as the tiebreak input
+ * alongside command text on the rare case where two or more candidates'
+ * shapes both match a check's output. The JS detectors (vitest, tsc,
+ * eslint) are listed first and the PHP detectors (phpunit, phpstan,
+ * phpcs) after them by convention, not because list position changes
+ * which candidate wins: each detector's `matches` is written against a
+ * real captured shape disjoint from every other detector's (see each
+ * detector's own file, and `verify.test.ts`'s "captured real output"
+ * describe blocks, which pin every JS fixture as never matching a PHP
+ * detector and vice versa), so a vitest fixture selects `vitest`
+ * regardless of where `phpunitDetector` sits in this array. `generic` is
+ * never part of this list: it is the fallback (`fallbackDetector` in
+ * `VerifyOptions`), consulted when zero, or more than one ambiguous,
+ * candidate matches. */
 export const DEFAULT_DETECTORS: Detector[] = [
   vitestDetector,
   tscDetector,
   eslintDetector,
+  phpunitDetector,
+  phpstanDetector,
+  phpcsDetector,
 ];
 
 export const DEFAULT_MAX_FAILURES = 20;

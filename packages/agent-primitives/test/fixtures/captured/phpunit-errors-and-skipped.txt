@@ -1,0 +1,15 @@
+PHPUnit 9.6.36 by Sebastian Bergmann and contributors.
+
+.ES                                                                 3 / 3 (100%)
+
+Time: [elided]
+
+There was 1 error:
+
+1) ErrSkipTest::testError
+RuntimeException: boom
+
+tests/ErrSkipTest.php:14
+
+ERRORS!
+Tests: 3, Assertions: 1, Errors: 1, Skipped: 1.
