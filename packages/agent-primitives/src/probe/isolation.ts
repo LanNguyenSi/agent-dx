@@ -1142,24 +1142,29 @@ export async function beginWorktree(
       // Re-checked after the `mkdirSync`, which is itself a filesystem
       // change, and before the two calls that DELETE and then create:
       // the parent again, plus the destination itself when something is
-      // already there. Only the PARENT of the destination's realpath is
-      // required to sit inside the copy, never the realpath itself: a
-      // destination that is a symlink is unlinked by `rmSync` rather
-      // than followed (measured), so a copied source symlink pointing
-      // outside is a link to replace, not a path that reaches out of
-      // the copy. Nothing between this check and the `symlinkSync`
-      // needs a third one: `rmSync` only ever removes, and removing an
-      // entry cannot make a path resolve somewhere it did not already.
+      // already there. The destination is judged by its PARENT, so a
+      // link is still replaceable by a link; what this refuses is a
+      // destination that already resolves out of the copy, which the
+      // untracked sync produces when the source tree carries a
+      // non-ignored symlink at that path and recreates it in the copy.
+      // Refusing there is conservative rather than protective (`rmSync`
+      // on a symlink unlinks the link and leaves its target alone,
+      // measured), and it costs nothing: the copy already carries the
+      // very symlink the link would have created. Nothing between this
+      // check and the `symlinkSync` needs a third one: `rmSync` only
+      // ever removes, and removing an entry cannot make a path resolve
+      // somewhere it did not already.
       const parentAfter = resolveDeepestExisting(path.dirname(dest));
-      const destParent = existingDestParent(dest);
-      if (
-        !isPathContained(wtReal, parentAfter) ||
-        (destParent !== undefined && !isPathContained(wtReal, destParent))
-      ) {
+      const destResolved = existingDestResolved(dest);
+      const stillInsideCopy =
+        isPathContained(wtReal, parentAfter) &&
+        (destResolved === undefined ||
+          isPathContained(wtReal, path.dirname(destResolved)));
+      if (!stillInsideCopy) {
         syncWarnings.push(
           skippedLinkWarning(
             candidate,
-            outsideCopy(relPath, destParent ?? parentAfter),
+            outsideCopy(relPath, destResolved ?? parentAfter),
           ),
         );
         continue;
@@ -1244,18 +1249,18 @@ export async function beginWorktree(
   };
 }
 
-/** The parent of what `dest` actually resolves to, or `undefined` when
- * nothing is there at all. A dangling symlink counts as something being
- * there (`rmSync` still has a link to unlink) and resolves through
- * `resolveDeepestExisting`, so it reports the parent it sits in rather
+/** What `dest` actually resolves to, or `undefined` when nothing is
+ * there at all. A dangling symlink counts as something being there
+ * (`rmSync` still has a link to unlink) and resolves through
+ * `resolveDeepestExisting`, so it reports the path it sits at rather
  * than nothing. */
-function existingDestParent(dest: string): string | undefined {
+function existingDestResolved(dest: string): string | undefined {
   try {
     fs.lstatSync(dest);
   } catch {
     return undefined;
   }
-  return path.dirname(resolveDeepestExisting(dest));
+  return resolveDeepestExisting(dest);
 }
 
 /** The shape of every worktree this module creates: a directory named
