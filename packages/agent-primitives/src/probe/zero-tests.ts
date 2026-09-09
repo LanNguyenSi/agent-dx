@@ -1,4 +1,8 @@
 import { vitestDetector } from "../verify/detectors/vitest.js";
+import {
+  phpunitDetector,
+  phpunitZeroTestsExecuted,
+} from "../verify/detectors/phpunit.js";
 import { combinedOutput } from "../exec.js";
 
 /**
@@ -19,9 +23,19 @@ import { combinedOutput } from "../exec.js";
  * fallback that compares against the baseline's own output); see the
  * `"no_tests_executed"` `RefusalReason` in `session.ts` for how a hit
  * here turns into a refusal or a verdict override.
+ *
+ * A third shape, PHPUnit's, reuses `phpunitDetector.matches` (to decide
+ * whether the output is PHPUnit's at all) and `phpunitZeroTestsExecuted`
+ * (the actual zero-tests verdict, built on PHPUnit's own STATED total
+ * less every category that did not execute -- Skipped, Incomplete and
+ * Warnings, per the tally-category table in
+ * `verify/detectors/phpunit.ts` -- rather than on
+ * `passed`/`failed`/`errors`, since a run with both a real failure and a
+ * real skip parses those three to `0` too) from that same module, so
+ * this module never re-implements PHPUnit's own regexes.
  */
 
-export type ZeroTestsDetectorName = "vitest" | "node_test";
+export type ZeroTestsDetectorName = "vitest" | "node_test" | "phpunit";
 
 export interface ZeroTestsEvidence {
   detected: boolean;
@@ -62,6 +76,18 @@ export function detectKnownZeroTestsEvidence(
     }
     return { detected: false };
   }
+  if (phpunitDetector.matches(input)) {
+    // Built on PHPUnit's own STATED total (via `phpunitZeroTestsExecuted`),
+    // never on `passed`/`failed`/`errors` alone: those three parse to `0`
+    // for a run that had a real failure alongside a real skip too, and a
+    // warnings-only run (`Tests: 1, Assertions: 0, Warnings: 1.`, exit
+    // `0`) reads as `passed: 1` on any derivation that counts a synthetic
+    // PHPUnit warning as an executed test (see that function's docblock).
+    if (phpunitZeroTestsExecuted(combined)) {
+      return { detected: true, via: "phpunit" };
+    }
+    return { detected: false };
+  }
   const nodeMatch = NODE_TEST_SUMMARY_LINE.exec(combined);
   if (nodeMatch !== null && Number(nodeMatch[1]) === 0) {
     return { detected: true, via: "node_test" };
@@ -93,7 +119,11 @@ export function hasKnownTestSummary(
   stderrTail: string,
 ): boolean {
   const combined = combinedOutput(stdoutTail, stderrTail);
-  if (vitestDetector.matches({ output: combined, command: "", exitCode: 0 })) {
+  const input = { output: combined, command: "", exitCode: 0 };
+  if (vitestDetector.matches(input)) {
+    return true;
+  }
+  if (phpunitDetector.matches(input)) {
     return true;
   }
   return hasNodeTestSummaryLine(combined);

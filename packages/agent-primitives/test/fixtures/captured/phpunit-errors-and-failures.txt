@@ -1,0 +1,24 @@
+PHPUnit 9.6.36 by Sebastian Bergmann and contributors.
+
+..FESI                                                              6 / 6 (100%)
+
+Time: [elided]
+
+There was 1 error:
+
+1) ErrFailTest::testError
+RuntimeException: boom
+
+tests/ErrFailTest.php:26
+
+--
+
+There was 1 failure:
+
+1) ErrFailTest::testFail
+Failed asserting that 4 is identical to 5.
+
+tests/ErrFailTest.php:21
+
+ERRORS!
+Tests: 6, Assertions: 3, Errors: 1, Failures: 1, Skipped: 1, Incomplete: 1.

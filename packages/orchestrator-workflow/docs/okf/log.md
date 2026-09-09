@@ -1,5 +1,25 @@
 # Bundle log
 
+- 2026-09-09T07:08:12Z (sibling-guard allowlist claim off-by-one fixed,
+  task agent-dx eecdb292): corrected `SIBLING_GUARD_BUNDLE_ALLOWLIST`'s
+  `47aedb12` entry's claim string in `test/docs-consistency.test.ts`,
+  which enumerated clause-level line numbers one line before the doc's
+  own inline citations (`:541`/`:511`/`:518`/`:524`/`:531`/`:536`
+  instead of the actual `:542`/`:512`/`:519`/`:525`/`:532`/`:537`).
+  Dropped the wrong numeric enumeration and kept the claim's prose
+  meaning (which clauses, in which paragraph), retaining a correct
+  `line 341` mention so the entry still satisfies the suite's own
+  falsifiability check. The edit is a single-line string replacement
+  with no line-count change, so no citation into this file shifted.
+  Re-verified the four docs listing this file as a source
+  (`model-preselection.md`, `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md`,
+  `subagent-contracts-superset.md`) against the new head and re-stamped
+  their `timestamp` to `2026-09-09T07:08:12Z`. `npm test` passed all 815
+  tests across all 19 files; `npx okf-kit check docs/okf` reported 0
+  errors, 0 warnings, 17 notices, matching the pre-edit baseline
+  exactly.
+
 - 2026-09-09T05:19:57Z (five review-round-2 lows on the shared
   `PATH_SHAPED_BEFORE_RE` and `resolveLogCitationPath` guards, task
   agent-dx 4ece8e1e round 2): fixed four of the round's five findings.
