@@ -1,4 +1,11 @@
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { fileURLToPath } from "node:url";
 import { resolve as resolvePath, sep } from "node:path";
 
@@ -5203,8 +5210,8 @@ describe("the reviewer checklist items mirrored in this table still carry their 
 // Citations`'s continuation-vs-full-tail filter, and `checkLogCitations`'s
 // own continuation-form rule) read the SAME regex object rather than each
 // carrying its own byte-identical hand copy with no coupling between them
-// (round 2's `PATH_SHAPED_BEFORE_MATCH_RE` and the log guard's own
-// `PATH_SHAPED_BEFORE_RE`, previously declared locally inside each
+// (round 2's sibling-guard copy and the log guard's own separate copy of
+// the same pattern, both previously declared locally inside each
 // function). A single definition makes a drift between the two copies
 // structurally impossible, rather than merely asserted: a real
 // continuation is never directly preceded by a bare path (e.g. a `.toml`
@@ -6457,37 +6464,37 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "subagent-contracts-superset.md",
     kind: "duplicate-citation",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 535,
-    end: 535,
+    start: 542,
+    end: 542,
     anchorKey: "47aedb12",
     paragraphLine: 336,
     secondCitationLine: 341,
     claim:
-      "the paragraph opens at :534 by naming the test that pins the 0.11.0 misfire rule, then closes at line 341 with an enumeration of that same test's clause-level pins (:504, :511, :517, :524, :529) whose last item is the review-gate consequence clause the :534 opening citation already named; the enumeration is complete, so the line-341 repeat is the doc's closing-list convention, not a skipped sibling.",
+      "the paragraph opens at :541 by naming the test that pins the 0.11.0 misfire rule, then closes at line 341 with an enumeration of that same test's clause-level pins (:511, :518, :524, :531, :536) whose last item is the review-gate consequence clause the :541 opening citation already named; the enumeration is complete, so the line-341 repeat is the doc's closing-list convention, not a skipped sibling.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "duplicate-citation",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1056,
-    end: 1056,
+    start: 1063,
+    end: 1063,
     anchorKey: "03317257",
     paragraphLine: 421,
     secondCitationLine: 425,
     claim:
-      "same opening-citation-then-closing-enumeration convention as the 534 entry, here at :1055/line 425: the closing list walks :1030, :1038, :1043 and ends on the cross-copy equality check the :1055 opening sentence named, leaving no further assertion of that block uncited.",
+      "same opening-citation-then-closing-enumeration convention as the 541 entry, here at :1062/line 425: the closing list walks :1037, :1045, :1050 and ends on the cross-copy equality check the :1062 opening sentence named, leaving no further assertion of that block uncited.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "duplicate-citation",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1170,
-    end: 1170,
+    start: 1177,
+    end: 1177,
     anchorKey: "b19680bb",
     paragraphLine: 549,
     secondCitationLine: 555,
     claim:
-      "same convention again, here at :1169/line 555: the closing list walks :1135, :1141, :1148, :1163 and ends on the not-applicable-clause pin the :1169 opening sentence named, leaving no further assertion of that block uncited.",
+      "same convention again, here at :1176/line 555: the closing list walks :1142, :1148, :1155, :1170 and ends on the not-applicable-clause pin the :1176 opening sentence named, leaving no further assertion of that block uncited.",
   },
   {
     doc: "install-fence-mechanics.md",
@@ -7718,8 +7725,30 @@ describe("docs/okf/log.md's own citations resolve, and it carries no path-less c
     // `candidate.startsWith(repoRoot + sep)` conjunct rejects.
     // Neutralising that conjunct to `true &&` would let this resolve
     // (the file exists), silently reading and anchor-checking a real
-    // file outside the repository.
+    // file outside the repository. Assert the premise first: a runner
+    // where this file is absent would otherwise pass this fixture for
+    // the wrong reason (nothing to wrongly resolve, not the conjunct
+    // correctly rejecting it).
+    expect(existsSync("/etc/hosts")).toBe(true);
     expect(resolveLogCitationPath("/etc/hosts").real).toBeUndefined();
+    // Round 4 lows, review round 2 finding 1: the containment conjunct
+    // is `candidate.startsWith(`${resolvePath(repoRoot)}${sep}`)`, with a
+    // trailing `${sep}`. Dropping just that suffix (leaving a bare
+    // `startsWith(repoRoot)`) is not caught by `/etc/hosts` above, since
+    // that candidate does not even share `repoRoot` as a string prefix.
+    // A sibling directory whose name extends `repoRoot`'s own basename
+    // (`${repoRoot}-other`) does share the prefix without being inside
+    // it, and pins the `${sep}` suffix specifically.
+    const siblingDir = `${resolvePath(repoRoot)}-other`;
+    const siblingFile = `${siblingDir}/README.md`;
+    mkdirSync(siblingDir, { recursive: true });
+    writeFileSync(siblingFile, "not part of this repository\n");
+    try {
+      expect(existsSync(siblingFile)).toBe(true);
+      expect(resolveLogCitationPath(siblingFile).real).toBeUndefined();
+    } finally {
+      rmSync(siblingDir, { recursive: true, force: true });
+    }
   });
 
   it("fixture: a bare basename that also exists at the repository root is reported ambiguous, not silently bound to this package's own file", () => {
@@ -7737,6 +7766,27 @@ describe("docs/okf/log.md's own citations resolve, and it carries no path-less c
       const explicit = EXTRA_LOG_CITATION_TARGETS[name];
       expect(resolveLogCitationPath(explicit).real).toBe(explicit);
     }
+  });
+
+  // Round 4 lows, review round 2 finding 2: `PATH_SHAPED_BEFORE_RE` (the
+  // module-scope const, shared with the sibling-drift guard above) has
+  // two consumers; the sibling guard's own use was already pinned
+  // (`.toml`-shaped continuation tails there), but this guard's own
+  // `.filter((m) => !PATH_SHAPED_BEFORE_RE.test(...))` line had no fixture
+  // of its own, so replacing it with `() => true` still passed every
+  // existing test here. `ANCHOR_CITATION_RE`'s extension allowlist
+  // (ts|js|mjs|md|yml|yaml|json) never matches `.toml`, so a `.toml`
+  // citation's own `:N-M#"..."` tail produces no `fullMatches` entry to
+  // overlap against, and would otherwise be misread as a real,
+  // path-less continuation.
+  it('fixture: a `.toml`-style path\'s own `:N-M#"..."` tail is not reported as a forbidden continuation form', () => {
+    const doc = [
+      "# Bundle log",
+      "",
+      '- an entry citing `fake/config.toml:12-18#"some setting"`.',
+    ].join("\n");
+    const result = checkLogCitations(doc, fixtureResolve, fixtureReadTarget);
+    expect(result.continuationForms).toEqual([]);
   });
 
   // Round 4 (MEDIUM 3), the paired half of the fence throw: a scan that
