@@ -91,12 +91,15 @@ export interface LinkPolicyContext {
    */
   protectedRelPaths: readonly string[];
   /**
-   * Whether git tracks anything at or under this worktree-relative
-   * path. Consulted only for a file-sourced candidate (rule 3); the
-   * caller computes it (one `git ls-files` listing) so this function
-   * stays a pure decision over already-collected facts. Always asked
-   * with a path `canonicalRelPath` has already spelled, since the
-   * caller's listing is restricted to those same spellings.
+   * Whether git tracks anything at or under this repository-relative
+   * path. Both halves of rule 3 ask it: the destination of a candidate
+   * repository content named, spelled by `canonicalRelPath`, and the
+   * resolved target of every candidate but an operator's own `--link`,
+   * spelled by `canonicalRootRelPath`. The caller computes it (one `git
+   * ls-files` listing) so this function stays a pure decision over
+   * already-collected facts. Always asked with a path one of those two
+   * canonicalisers has already spelled, since the caller's listing is
+   * restricted to those same spellings.
    */
   isTrackedPath: (relPath: string) => boolean;
   /**
