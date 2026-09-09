@@ -23,22 +23,14 @@
   historical mentions excepted) and three of
   `SIBLING_GUARD_BUNDLE_ALLOWLIST`'s own recorded `start`/`end`/claim
   values (the `535`/`1056`/`1170` entries, now `542`/`1063`/`1177`);
-  `npx vitest run test/docs-consistency.test.ts` is green (333/333)
-  after the re-point. Finding (4), converting this file's own two
-  `CHANGELOG.md:604#"the keyed placeholder line's exact text,"`
-  historical citations to the heading form with the same content anchor,
-  is not applied: at head that anchor text sits under `## [0.26.0]` (line 577),
-  not `[Unreleased]` (line 8, next heading at 354, per
-  `awk 'NR<=604 && /^## /{h=NR": "$0} END{print h}' CHANGELOG.md`), since
-  0.27.0 through 0.31.0 released after the account was written. A
-  heading-form citation into `[Unreleased]` with that same content
-  anchor would not resolve there, and would only be ambiguous besides:
-  five lines in the Unreleased section end in three dots. Task agent-dx
-  25dfbf57's own entry above already excluded this file's historical
-  prose from the heading-only sweep, and `index.md`'s Maintenance
-  section states the same carve-out; converting would cite a heading
-  section the text no longer sits inside. Left as an open question for
-  the orchestrator rather than forced through.
+  `npx vitest run test/docs-consistency.test.ts` is green after the
+  re-point. Finding (4): this file's own two live line-form citations
+  into CHANGELOG line 604 (the round-1 re-point from line 591) are
+  converted to the heading form with the same content anchor; the
+  anchor text sits under the 0.26.0 heading, not under Unreleased (the
+  reviewer's suggested section, where it would not resolve), so both
+  now cite the 0.26.0 section. Applied by the orchestrator as the
+  round-2 closing edit.
 
 - 2026-09-09T04:49:10Z (CHANGELOG citations stay heading-form, task
   agent-dx 25dfbf57): re-checked every live `CHANGELOG.md:N`-shaped
@@ -439,7 +431,7 @@
   narration further below in this same file, needed re-pointing for: the
   misstating-the-past account (old line 256, now line 294) and the
   review-round-2-HIGH-1 account's own re-point chain (old line 420, now
-  `CHANGELOG.md:604#"the keyed placeholder line's exact text,"`, chain
+  `CHANGELOG.md:#[0.26.0]#"the keyed placeholder line's exact text,"`, chain
   total 213 -> 251). Also bumped `timestamp` in `model-preselection.md`
   and `run-state-lifecycle-and-markers.md`, both flagged
   `sources-fresh` STALE by the CHANGELOG.md/docs-consistency.test.ts
@@ -3861,7 +3853,7 @@ live count of 315.
 Review round 2's HIGH 1 (the CHANGELOG citation drift this round fixes)
 traces to a real edit, not a hypothetical: the `[Unreleased]` bullet
 naming this round's own widened `src/**`/`assets/templates/**` scope
-(`CHANGELOG.md:604#"the keyed placeholder line's exact text,"`,
+(`CHANGELOG.md:#[0.26.0]#"the keyed placeholder line's exact text,"`,
 re-pointed by 251 lines since this account was first written (+38 more,
 from task agent-dx b50fd903's own two round-1 `[Unreleased]` bullets
 added above it, the continuation-citation-coverage sibling-drift-guard
