@@ -68,17 +68,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `warnings` on both sides and no reason string added to the contract.
   A kill the wrapper shell SURVIVES is a different, un-ruled-out shape
   and is documented as such: an OOM killer picks the memory hog rather
-  than the group leader, the shell then exits normally and reports the
-  death as an ordinary exit code 128 + N, and a green summary line
+  than the group leader, and whether the shell then reports the death as
+  an ordinary exit code 128 + N depends on what runs after the killed
+  command in the `-t`/`--pre` string itself -- a trailing `; exit $?`
+  reports it that way, but a script whose last command still succeeds
+  afterward (`; echo done`) or a pipeline (`| tee log`) reports that
+  command's own exit code instead (typically `0`, no warning at all),
+  and the single bare command most values actually are is `exec`'d by
+  the wrapper in place of itself, so a kill on it reaches the
+  process-group leader and lands in the no-exit-code case above, never
+  in the 128 + N one. When the code IS reported, a green summary line
   printed before the kill still reads as a pass, one more inherent limit
   of an output-only predicate (nothing distinguishes `137` from a shell
-  reporting SIGKILL from `137` a runner chose itself). Both sides warn
-  on it: a `--pass-regex` pass resting on an exit code in the 128 + N
-  band (`129` through `192`, 128 plus every signal number a POSIX system
-  can deliver) gets a `warnings` entry naming the code, the signal
-  number it would encode and that the suite may have been cut short, in
-  place of the plain "matched despite a non-zero exit code" entry every
-  other non-zero code gets; the verdict is unchanged.
+  reporting SIGKILL from `137` a runner chose itself). Both verdict
+  directions warn on it: an exit code in the 128 + N band (`129` through
+  `192`, 128 plus every signal number a POSIX system can deliver) gets a
+  `warnings` entry naming the code, the signal number it would encode
+  and that the run may have been cut short, in place of the plain
+  "matched despite a non-zero exit code" entry every other non-zero code
+  gets -- whether the run's own predicate reads that code as a pass or
+  as a genuine failure; the verdict is unchanged.
   The mutant-run miss warning fires only for an AMBIGUOUS miss (a
   truncated tail, an exit code of `0` disagreeing with the predicate, or
   `--expect pass`, where a miss means the mutant
