@@ -4619,6 +4619,76 @@ describe("probe(): --pass-regex", () => {
       expect(result.baseline?.exitCode).toBeNull();
     }, 10000);
 
+    it("a baseline that matches, TRAPS the timeout signal and exits with a code of its own is still baseline_failed: `timedOut` carries this on its own, with no `null` exit code to fall back on", async () => {
+      useLockDir();
+      const { repo } = initHangingRunnerRepo();
+
+      // The plain hanging shape ends `exitCode: null`, which the
+      // `exitCode === null` disjunct of `baselineFailed` catches
+      // whether or not `timedOut` is read at all. A runner that traps
+      // the SIGTERM `exec.ts` sends the run's process group and exits
+      // `3` of its own accord separates the two: the pattern matched
+      // the line it printed before hanging, the exit code is a real
+      // number, and only `timedOut` is left to say that this baseline
+      // never actually finished a single run of the suite.
+      const result = await probe({
+        file: "runner.js",
+        line: 1,
+        form: "replace",
+        replaceText: 'console.log("irrelevant");',
+        testCommand: 'trap "exit 3" TERM; node runner.js & wait',
+        isolation: "inplace",
+        expect: "fail",
+        cwd: repo,
+        logDir: makeTmpDir(),
+        timeoutMs: 1000,
+        passRegex: /^OK \(/,
+      });
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("baseline_failed");
+      expect(result.baseline?.timedOut).toBe(true);
+      expect(result.baseline?.exitCode).toBe(3);
+    }, 20000);
+
+    it("mirrors on the mutant side: a mutant run that matches, TRAPS the timeout signal and exits with a code of its own is inconclusive/timeout, never a pass", async () => {
+      useLockDir();
+      // The baseline prints the matching line and exits 0 right away
+      // (`wait` returns before the bound), so the probe reaches the
+      // mutant; the mutant hangs, so the same command times out, traps
+      // the signal and exits `3` -- a real exit code, with the matching
+      // line already printed.
+      const repo = makeTmpDir();
+      git(repo, ["init", "-q"]);
+      git(repo, ["config", "user.email", "test@example.com"]);
+      git(repo, ["config", "user.name", "test"]);
+      fs.writeFileSync(
+        path.join(repo, "runner.js"),
+        'console.log("OK (3 tests, 5 assertions)");\n',
+      );
+      git(repo, ["add", "-A"]);
+      git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+
+      const result = await probe({
+        file: "runner.js",
+        line: 1,
+        form: "replace",
+        replaceText: HANGING_RUNNER_JS.trimEnd(),
+        testCommand: 'trap "exit 3" TERM; node runner.js & wait',
+        isolation: "inplace",
+        expect: "fail",
+        cwd: repo,
+        logDir: makeTmpDir(),
+        timeoutMs: 1000,
+        passRegex: /^OK \(/,
+      });
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("timeout");
+      expect(result.test?.timedOut).toBe(true);
+      expect(result.test?.exitCode).toBe(3);
+    }, 20000);
+
     it("a timed-out baseline that TRAPPED the signal and exited with a code of its own stays baseline_failed with both regexes too: `timedOut`, not the `null` exit code, is what excludes it", async () => {
       useLockDir();
       const { repo } = initHangingRunnerRepo();
