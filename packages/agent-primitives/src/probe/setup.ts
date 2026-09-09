@@ -13,7 +13,13 @@ import {
   readMarkerFor,
   removeMarkerFor,
 } from "../lock.js";
-import { isPathContained } from "./containment.js";
+import {
+  escapingRootMentions,
+  isPathContained,
+  ISOLATION_ESCAPE_CHANNEL_LABEL,
+  ISOLATION_ESCAPE_FIX_HINT,
+  ISOLATION_ESCAPE_ENV_FIX_HINT,
+} from "./containment.js";
 import type { WorktreeSyncSuccess } from "./isolation.js";
 import type { LinkCandidate } from "./link-policy.js";
 import { detectKnownZeroTestsEvidence } from "./zero-tests.js";
@@ -429,6 +435,90 @@ export async function openRunSetup(
       "worktree_allow_outside_unsupported",
       "--isolation worktree cannot be combined with --allow-outside",
     );
+  }
+
+  // `-i worktree` mutates a throwaway copy, but the test command, any
+  // `--pre`, and any `--env` value the caller supplied run wherever
+  // their OWN cwd/args/environment point them: an absolute path in any
+  // of the three naming the real repository root (a `cd <abs>` back
+  // into the checkout, an absolute file/dir argument under it, or an
+  // `--env NAME=/abs/...` override) never touches the isolated copy at
+  // all, so the run exercises the unmutated real tree while the mutant
+  // sits in a copy nobody ran anything against -- reported `survived`
+  // no matter what the mutant actually does, the wrong verdict this
+  // refusal exists to prevent. Detected by scanning all three channels
+  // for a LITERAL spelling of the root (`containment.ts`'s
+  // `escapingRootMentions`) rather than by tokenising or parsing a
+  // shell command; what that scope does and does not cover, and the
+  // residuals it leaves, are stated on that function and in the
+  // README. A `-i worktree` isolation copy lives outside `root` by
+  // construction UNLESS `--log-dir` itself was pointed inside the
+  // repository, so `escapingRootMentions` is given this run's own
+  // scratch root (`wtScratchRoot`, resolved the same way
+  // `cleanupWorktree` checks removals against) to exempt -- the copy
+  // itself does not need to exist yet for this check to hold, and the
+  // exemption only applies when that scratch root is a PROPER
+  // descendant of the root, so a `--log-dir` AT or ABOVE the root
+  // cannot exempt the root itself and pass an escape. `-i inplace` is
+  // exempt: the real tree IS the intended target there, so an absolute
+  // path back into it is not an escape.
+  if (effectiveIsolation === "worktree") {
+    // Each channel carries its own remedy: an `--env` VALUE is not a
+    // command, so the command hint's "run the command as a relative
+    // command"/`--link` advice names nothing its caller can act on.
+    const escapes: { channel: string; hint: string; regions: string[] }[] = [];
+    const testRegions = escapingRootMentions(
+      input.testCommand,
+      root,
+      wtScratchRoot,
+    );
+    if (testRegions.length > 0) {
+      escapes.push({
+        channel: ISOLATION_ESCAPE_CHANNEL_LABEL.testCommand,
+        hint: ISOLATION_ESCAPE_FIX_HINT,
+        regions: testRegions,
+      });
+    }
+    if (input.preCommand !== undefined) {
+      const preRegions = escapingRootMentions(
+        input.preCommand,
+        root,
+        wtScratchRoot,
+      );
+      if (preRegions.length > 0) {
+        escapes.push({
+          channel: ISOLATION_ESCAPE_CHANNEL_LABEL.pre,
+          hint: ISOLATION_ESCAPE_FIX_HINT,
+          regions: preRegions,
+        });
+      }
+    }
+    if (input.env !== undefined) {
+      for (const [name, value] of Object.entries(input.env)) {
+        const envRegions = escapingRootMentions(value, root, wtScratchRoot);
+        if (envRegions.length > 0) {
+          escapes.push({
+            channel: ISOLATION_ESCAPE_CHANNEL_LABEL.env(name),
+            hint: ISOLATION_ESCAPE_ENV_FIX_HINT,
+            regions: envRegions,
+          });
+        }
+      }
+    }
+    if (escapes.length > 0) {
+      const channels = escapes.map((e) => e.channel);
+      const named = [...new Set(escapes.flatMap((e) => e.regions))];
+      const hints = [...new Set(escapes.map((e) => e.hint))];
+      return refuse(
+        "usage_error",
+        "test_command_escapes_isolation",
+        `${channels.join(" and ")} name${channels.length === 1 ? "s" : ""} ` +
+          `an absolute path under the real repository root (${root}), ` +
+          `which "-i worktree" never mutates, so the run would exercise ` +
+          `the real tree instead of the isolated copy, matched as: ` +
+          `${named.join(", ")}. ${hints.join(" ")}`,
+      );
+    }
   }
 
   // Containment for EVERY target of the run (and every `--link`) up

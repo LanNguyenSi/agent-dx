@@ -575,6 +575,232 @@ The add that checks out the worktree and the apply that replays the
 tracked diff also use the content-write pins above; the capture and
 listing calls do not alter checkout content.
 
+`-i worktree` mutates a throwaway copy, but the `-t`/`--test-command`,
+`--pre`, and every `--env NAME=VALUE` value you supply run wherever
+THEIR OWN cwd/args/environment point them: nothing about the isolation
+copy touches any of the three. An absolute path named in any of them
+under the real repository root (a `cd <abs>` back into the checkout,
+an absolute file/dir argument under it, or an `--env` value carrying
+it) never runs against the isolated copy at all, so the run exercises
+the unmutated real tree while the mutant sits untested in a copy
+nobody ran anything against, and reports `killed`/`survived` for
+whichever verdict the REAL tree happened to produce, whatever the
+mutant actually did. `probe` refuses this outright (`reason:
+"test_command_escapes_isolation"`, a `usage_error`) rather than warn.
+What it refuses is precisely this: a channel that SPELLS THE
+REPOSITORY ROOT OUT LITERALLY, IN A FORM THE SCAN MODELS. That is a
+text scan, not a shell parse,
+so it does not depend on tokenising the command: an absolute path
+under the root contains the root spelled out whatever quoting,
+escaping, `=`-form or wrapper surrounds it (a plain `cd /abs/...`, a
+single- or double-quoted path containing whitespace, a
+backslash-escaped space, the value half of a `--key=/abs` token, or
+the whole command wrapped in `sh -c "..."`), and separator noise
+inside the path (`<root>//pkg`, `<root>/./pkg`, a backslash-escaped
+separator `<parent>\/<base>/pkg`, which the shell reads as a plain
+`/`, and a line continuation `<parent>\`+newline+`/<base>/pkg`, which
+the shell deletes) is tolerated because it names the same directory. A
+path outside the root never spells the root, so nothing outside the
+root is ever flagged. It is not a proof that a command stays inside
+the copy: a command that reaches the root WITHOUT spelling it
+literally is a residual, and the residuals known today are listed at
+the end of this section. The root is matched under two spellings (its
+own, as resolved, and its realpath, so a repository root itself
+reached through a symlink still refuses under either spelling), each
+also with every space backslash-escaped, and three further rules shape
+the match:
+
+- A match is a mention of the root unless the text CONTINUES THE PATH WORD
+  with a further name character there; a boundary is required only at the
+  END of the match, not at its START, so a longer path that merely
+  CONTAINS the root's spelling somewhere inside it
+  (`/mnt/backup<root>/pkg`, a bind mount or backup mirror at
+  `/mnt/host<root>/...`) is refused too, with the reported region starting
+  at the root's own spelling rather than at the start of the longer path.
+  The rule enumerates what continues a path word, not what terminates one,
+  and it takes that alphabet from POSIX shell word lexing, since the
+  scanned string is what `sh -c` is handed. A path word is continued by a
+  portable filename character (`A-Z a-z 0-9 . _ -`) or any non-ASCII
+  character, which makes the match a DIFFERENT path's prefix and not a
+  mention; by `/`, a further component, which leaves it a mention
+  (`<root>/pkg`); by `\` plus any character other than `/`, a newline, or
+  an ANSI-C numeric-escape starter (see below), an escaped character
+  inside the same word, which again is not a mention; and by `\` plus a
+  newline plus a continuation, since the shell deletes that pair before it
+  lexes the word, so what follows the pair decides. A `\` before a `/` is
+  a separator, not an escaped character, so `<root>\/pkg` is a mention. A
+  `\` before `x`, `u`, `U`, or an octal digit (`0`-`7`) is ALSO a boundary
+  rather than an in-word escape: bash/dash's `$'...'` (ANSI-C) quoting
+  decodes `\xHH`, `\uHHHH`/`\UHHHHHHHH` (hex) and `\NNN` (one to three
+  octal digits) by numeric value, and `/` (0x2f) is reachable through any
+  of the three (`\x2f`, `/`, `\057`), so `$'<root>\x2fpkg'` reaches
+  `<root>/pkg` exactly as `$'<root>/pkg'` itself does; this over-refuses a
+  spelling like `$'<root>\x71pkg'` (`\x71` decodes to `q`, a sibling), the
+  same trade the rest of this rule already makes, and the scan does not
+  decode the escape to compute a deeper reported region -- it stops right
+  before the `\`. This WIDE rule is what matches the root's own spelling;
+  matching the `--log-dir` spelling for the exclusion below uses the
+  opposite, NARROW rule instead (a `\`+ANSI-C-starter there is an ordinary
+  in-word escape, not a boundary), since widening it too would let an
+  escape right after a `--log-dir` spelling manufacture an excluded region
+  the root's own mention then falls into. Everything else ends the word
+  and therefore marks a boundary: the end of the string, whitespace,
+  either quote, every POSIX operator character (`|`, `&`, `;`, `<`, `>`,
+  `(`, `)` and a backtick), `$`, and punctuation such as `,`, `=`, `:`,
+  `#`, `!`, `*`, `?`, `{`, `}`, `[`, `]` and `~`. So a sibling directory
+  whose name merely starts with the root (`<root>2`, `<root>-backup`,
+  `<root>\ backup`, where the backslash escapes a space belonging to the
+  sibling's own name, or `<root>\`+newline+`-backup`) is not a mention and
+  is not refused, while `cd <root>>/dev/null`, `cd <root><&-` and a
+  backtick closing right after the root all name the root itself and are.
+  Enumerating the continuations is what makes this total: a character
+  nobody thought of ends the word, so an unforeseen spelling over-refuses
+  (with a named remedy) instead of silently reaching the real tree, at the
+  cost of a false refusal for a sibling named with a character outside the
+  portable set (`<root>~`, the likeliest real hit -- an editor's own
+  backup-directory convention -- and `<root>@2`). The scan also reads raw
+  text rather than shell semantics, so a mention sitting in a here-doc
+  body, or anywhere else the root's spelling occurs as DATA rather than as
+  a path the shell would actually resolve, is refused the same way, and so
+  is a single-quoted `'<root>\`+newline+`/pkg'`, where the shell does NOT
+  delete the `\`+newline pair (single quotes suspend backslash processing
+  entirely) even though this scan's separator pattern tolerates one there.
+  The `\` rules come from the shell, and an `--env` VALUE is not
+  shell-processed, so the same widening over-refuses an env value naming a
+  directory whose own name carries a literal backslash (`<root>\/pkg` read
+  as a path rather than as a separator) by design; its two remedies below
+  apply to it unchanged.
+- On a filesystem that resolves a differently-cased spelling to the
+  same directory, both sides are compared CASE-FOLDED, so
+  `cd '/PRIVATE/TMP/MY REPO/PKG'` is refused exactly as the
+  exactly-cased spelling is. Whether the filesystem does that is
+  measured, not assumed: the root is stat'ed again under the
+  case-flipped spelling of its own absolute path and the two are
+  compared by device and inode (macOS's default APFS volume and
+  Windows answer yes; a case-sensitive volume answers no, and so does
+  any stat error). On a case-sensitive filesystem the match stays
+  exact, since a miscased spelling there names a different path.
+- A match that resolves under this run's own `--log-dir` is EXCLUDED
+  rather than refused: that is the one case an absolute path under the
+  repository root legitimately names the isolation copy itself
+  (`--log-dir` pointed inside the repository puts the copy at
+  `<log-dir subpath>/wt-<uuid>/wt`, still under the repository root).
+  The exclusion applies only when `--log-dir` is STRICTLY under the
+  repository root, and only to a mention that itself ends at a path
+  boundary: with `--log-dir` at the repository root (or above it) the
+  exclusion would erase every mention of the root and pass an escape
+  as plain as `cd '<root>/pkg'`, and a `--log-dir` of `<root>/logs`
+  must not swallow the unrelated `<root>/logsrc/x.js`. That boundary
+  is decided by the NARROW rule, not the root's own wide one: a `\`
+  plus an ANSI-C numeric-escape starter right after the `--log-dir`
+  spelling does not end the exclusion's own match there, so it cannot
+  manufacture an excluded region the root's own mention then falls
+  into (`-l <root>/l` with `$'<root>/l\x69b/fixture.test.js'` in the
+  test command still refuses the root mention, rather than reading the
+  escape as ending the `--log-dir` spelling at a boundary). With
+  `--log-dir` at or above the root, an absolute mention under the root
+  is refused like any other, with the same fixes. The narrow rule cuts
+  the other way too: a `--log-dir` mention whose junction is spelled
+  with an ANSI-C separator escape (`$'<root>/l\x2fib/t.js'` for a
+  `--log-dir` of `<root>/l`) is refused rather than excluded, the same
+  over-refusal trade the root's own wide rule makes, with the same
+  fixes.
+
+The refusal message names the offending channel(s) (the test command,
+`--pre`, or `--env NAME`), the matched REGION as that channel spells
+it (the root spelling plus the path text that follows it, e.g.
+`<root>/pkg`, rather than the bare root, which would read as if the
+command had named the root itself), and the fix FOR THAT CHANNEL. For
+the test command and `--pre`: run the command as a relative invocation
+resolved inside the copy, or pass `--isolation inplace` (exempt from
+this check entirely, since the real tree IS the intended target
+there). For an `--env` value, which is not a command and cannot be
+"run relatively": pass the value as a path relative to the package
+directory, which resolves inside the copy because both `--pre` and the
+test command run with the copy's package directory as their cwd, or
+pass `--isolation inplace`. An absolute path to a runner binary under
+the root (e.g. `node <repo>/tools/runner.js`, or an absolute
+`node_modules/.bin` entry) is refused for the same reason and by the
+same message; the fix there is the same relative-invocation form, or
+`--link` naming the binary's own directory so the isolation copy
+carries it too.
+
+The check cannot tell a path that pulls the run back into the real
+tree apart from a path under the root that would have been harmless,
+so a legitimate cache or output directory named absolutely (`--env
+CACHE_DIR=<root>/.cache`, or the same path inside `-t`) is refused
+too, and takes those same two fixes: name it relative to the package
+directory, or pass `--isolation inplace`. That is the deliberate
+trade, in both directions: a false refusal names itself and has a
+remedy, whereas the verdict this check prevents is a silent
+`survived` for a mutant the tests would have killed.
+
+The residuals known today follow directly from a rule that matches the
+root's two spellings as text, in the forms the scan models. Read the
+list as open: it names the shapes this rule is known not to catch, and
+is not a proof that no other shape reaches the real tree. A path reached
+only through a shell variable this tool does not own (`cd "$REPO" &&
+...`), or through a command substitution whose own text does not spell
+the root out (`$(git rev-parse --show-toplevel)`, `$(cat .repo-path)`),
+is invisible, since neither ever spells the root literally in the
+scanned string. A substitution that DOES spell it is not a residual:
+backticks included, it is refused like any other literal spelling, since
+the backtick or `)` closing it ends the path word. `~` expansion is the
+invisible shape again (`cd ~/git/repo && ...` reaches the root without
+the scanned string ever containing it), as is any other expansion the
+shell performs at run time. A RELATIVE path that walks out of the
+isolation copy via `..` (e.g. `cd ../../real-checkout && ...`) is not
+inspected either, since it never names the root as an absolute path at
+all -- and neither is an ABSOLUTE path that walks back into the root
+through `..` (`cd /abs/x/../my repo && ...`): the scan does not
+normalise a path, it matches a spelling, so a `..` segment (unlike a
+`//` or a `/.`, which name the same directory) makes the spelling a
+different one. A spelling BROKEN UP FROM THE INSIDE by quoting or
+backslash escaping is not matched either: `cd /x/re"p"o/pkg` and `cd
+/x/re\po/pkg` both reach `/x/repo/pkg`, because the shell strips the
+quotes and the backslash before it ever opens the path, but the scan
+does not model what the shell decodes there, and this scan sees only the
+raw string. An ANSI-C (`$'...'`) escape that decodes a root CHARACTER
+rather than the separator, or a `\c`-style control escape (which cannot
+decode to a separator either), is the same shape: `$'/x/re\x70o/pkg'`
+(`\x70` decodes to `p`) reaches `/x/repo/pkg` exactly as the unescaped
+spelling does, but the literal text `/x/re\x70o/pkg` never contains
+`/x/repo` contiguously, so the scan does not match it at all (measured:
+`probe` reports `survived` against this spelling, never a refusal). The
+`$'...'` family is a residual for a root CHARACTER this way, and ALSO
+for a separator escape sitting INSIDE the root's own spelling rather
+than at its end: `$'<parent>\x2f<base>/pkg'`, where `<parent>/<base>` is
+the root, decodes its interior `\x2f` to the separator between them, but
+the boundary rule that widens for an ANSI-C starter only ever fires at
+the END of an already-matched spelling, never while a match is still
+forming, so this is a residual the same way. Only a separator escape AT
+OR AFTER the end of the root's own spelling (`\xHH`,
+`\uHHHH`/`\UHHHHHHHH`, `\NNN` decoding to `/`) is covered (see the
+boundary bullet above). The `--log-dir` exclusion has a residual of its
+own: a path whose spelling starts with the `--log-dir`'s spelling and
+continues with a character the rule reads as a word terminator although
+a filename may carry it (`@`, `~`, `,`, `=`, `$`, `{`, `?`:
+`<root>/l@2/y.js` beside a `--log-dir` of `<root>/l`) ends the
+exclusion's own match at that character and is EXCLUDED rather than
+refused, so a sibling of the log dir named that way reaches the real
+tree unrefused. It needs `--log-dir` under the repository root and such
+a sibling, and it is named here rather than closed. Separator noise, an escaped separator and a line
+continuation are the exceptions the rule does tolerate; an escape or a
+quote INSIDE a path component is not. A spelling that differs from the
+root's only in unicode normalisation (a decomposed form of a composed
+root, or the reverse, which macOS in particular may resolve to the same
+directory) is not matched for the same reason. A wrapper script that
+itself `cd`s using a path not spelled out in the scanned string is
+shell-level indirection like the first group; a path reaching the root
+only through a THIRD, unrelated symlink alias (one that is neither the
+root's own as-given spelling nor its realpath) is not recognized, since
+the rule matches spellings, not filesystem identity; and a repository
+root containing a character neither spelling represents (e.g. a literal
+quote inside the path) falls outside what the two spellings cover. Each
+of these reaches the real tree with `-i worktree` and is NOT refused, so
+a run whose command is built that way still needs `-i inplace` (or a
+relative command) to be trustworthy.
+
 `-i worktree` needs git 2.35 or newer: the sync relies on `git apply
 --allow-empty`, which an older git rejects, so the run ends in
 `inconclusive`/`worktree_sync_failed`, never a verdict (`-i inplace` has
@@ -604,6 +830,14 @@ against an empty diff, so a clean tree exercises the same steps as a
 dirty one); the file count in `isolation.syncedTrackedFiles` comes from
 a separate `git diff HEAD --numstat -z`, never from scanning the diff's
 own text.
+
+Left at its default, `--log-dir` places this scratch subdirectory (and
+so the `-i worktree` copy itself) under the OS temp directory. A test
+whose own precondition is that its cwd sits OUTSIDE the OS temp
+directory -- for instance, one proving that a temp-directory exemption
+elsewhere does not silently swallow the non-exempt case too -- cannot
+rely on that precondition once it runs inside the copy; pointing
+`--log-dir` at a directory outside the OS temp directory avoids it.
 
 Every untracked, non-ignored path (`git ls-files --others
 --exclude-standard`) is synced by its own type: a regular file is
@@ -1623,6 +1857,7 @@ above.
 | `reason` | `mutant` | `mutation_probe` | When it fires |
 | --- | --- | --- | --- |
 | `worktree_allow_outside_unsupported` | absent | absent | `--allow-outside` combined with `--isolation worktree`; refused before containment is even checked |
+| `test_command_escapes_isolation` | absent | absent | `-i worktree`'s test command, `--pre`, or an `--env` value spells the real repository root out literally, in a form the scan models (any quoting, escaping, `=`-form, wrapper, separator noise such as `//`, `/./` or an escaped `\/`, an ANSI-C `$'...'` escape decoding to a separator, and any casing on a case-insensitive filesystem), which the isolated copy never receives -- unless the mention resolves under a `--log-dir` strictly inside the repository, which the isolated copy does |
 | `file_outside_root` | absent | absent | `--file` (or a `--link`) resolves outside the containment root |
 | `probe_in_progress` | absent | absent | the repository- or file-scoped lock is already held by another run |
 | `lock_unavailable` | absent | absent | the lock directory itself could not be acquired (an unwritable lock dir, an ancestor owned by another user) |
