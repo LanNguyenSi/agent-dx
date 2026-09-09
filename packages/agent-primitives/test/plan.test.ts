@@ -849,7 +849,7 @@ describe("probePlan(): refusals before the lock, the marker or any worktree", ()
     );
   });
 
-  it("refuses a test command that escapes -i worktree's isolation copy (task 5bf16459), with every mutant not_run, and leaves no worktree, lock, or marker behind", async () => {
+  it("refuses a test command that escapes -i worktree's isolation copy, with every mutant not_run, and leaves no worktree, lock, or marker behind", async () => {
     const lockDir = useLockDir();
     const { repo } = initRepo();
 
@@ -871,10 +871,10 @@ describe("probePlan(): refusals before the lock, the marker or any worktree", ()
     expect(result.reason).toBe("test_command_escapes_isolation");
     expect(result.warnings.join(" ")).toContain(repo);
     expect(result.results.map((r) => r.status)).toEqual(["not_run", "not_run"]);
-    // Round 3 (D-033): round 2's review found this refusal pinned only
-    // the reason, unlike the single-probe side of the same refusal
-    // (`probe-refusal-contract.test.ts`), which already asserted no
-    // worktree, lock, or marker was left behind.
+    // The plan side of this refusal is pinned the same way as the
+    // single-probe side (`probe-refusal-contract.test.ts`): not only
+    // the reason, but that no worktree, lock, or marker was left
+    // behind.
     expectNoIsolationLeftovers(repo, lockDir);
   });
 });

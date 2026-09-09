@@ -10,17 +10,16 @@ import {
 } from "../src/probe/containment.js";
 
 /**
- * Direct unit tests for `escapingRootMentions` (task 5bf16459, round 3
- * redesign): rounds 1 and 2 tokenized the command string and each round's
- * reviewer found a fresh quoting/escaping/wrapper shape the tokenizer had
- * not enumerated (a quoted absolute path containing whitespace, a
- * `--key=/abs` form, `--pre` never scanned, then `sh -c "cd /abs && ..."`
- * read as one opaque quoted token and a backslash-escaped space splitting
- * a path in two). Round 3 replaces the tokenizer with a substring rule:
- * an absolute path under the real repository root contains that root as
- * a substring under every quoting/escaping/wrapper shape, so the rule
- * needs no shape enumeration. These tests pin the substring rule's own
- * contract directly, beneath the full `probe()` harness
+ * Direct unit tests for `escapingRootMentions`: the rule matches a
+ * LITERAL spelling of the real repository root in the scanned text
+ * rather than tokenising or shell-parsing the command, so an absolute
+ * path under the root is caught whatever quoting, escaping, `=`-form,
+ * wrapper or separator noise surrounds it, and everything that reaches
+ * the root without spelling it that way is a residual (the scope
+ * statement and the residual list live on the function itself, in the
+ * README and in the CHANGELOG entry). These tests pin that contract
+ * directly -- which spellings count, where a match ends, what the
+ * scratch-root exemption covers -- beneath the full `probe()` harness
  * `probe-refusal-contract.test.ts` and `plan.test.ts` exercise.
  */
 
@@ -45,7 +44,7 @@ describe("escapingRootMentions()", () => {
     fs.mkdirSync(inside);
     // The reported string is the whole path the command names, not the
     // bare root: a message saying only `<root>` reads as if the command
-    // had named the root itself (round-3 review, MEDIUM).
+    // had named the root itself.
     expect(
       escapingRootMentions(`cd ${inside} && npx vitest run`, root),
     ).toEqual([inside]);
@@ -79,7 +78,7 @@ describe("escapingRootMentions()", () => {
     ).toEqual([root]);
   });
 
-  it("a backslash-escaped space in the path is reported (the round-2 survivor)", () => {
+  it("a backslash-escaped space in the path is reported", () => {
     const parent = makeTmpDir();
     const root = resolveDeepestExisting(
       path.resolve(fs.mkdtempSync(path.join(parent, "my repo-"))),
@@ -169,17 +168,16 @@ describe("escapingRootMentions()", () => {
     ).toEqual([other]);
   });
 
-  // --- Round 4: the exemption's own boundary, the case rule, and the
-  // path boundary after a match (round-3 review: two HIGHs and a
-  // MEDIUM, each reproduced 3/3). ---
+  // --- The exemption's own boundary, the case rule, and the path
+  // boundary after a match. ---
 
   it("does NOT strip when the scratchRoot IS the root itself: the exemption would otherwise erase every mention", () => {
     const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
     const inside = path.join(root, "pkg");
     fs.mkdirSync(inside);
     // `--log-dir <root>`: `isPathContained(root, root)` is true, so a
-    // containment test alone would strip the root's own spelling out of
-    // the text and pass this escape (the round-3 defect).
+    // containment test alone would exempt the root's own spelling and
+    // pass this escape.
     expect(
       escapingRootMentions(`cd '${inside}' && node t.js`, root, root),
     ).toEqual([inside]);
@@ -287,6 +285,110 @@ describe("escapingRootMentions()", () => {
     const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
     const outside = resolveDeepestExisting(path.resolve(makeTmpDir()));
     expect(escapingRootMentions(outside, root)).toEqual([]);
+  });
+
+  // --- Separator noise INSIDE the root prefix. `<root>//pkg` and
+  // `<root>/./pkg` reach exactly the directory `<root>/pkg` does, so a
+  // needle matched character for character let the shell walk back
+  // into the real tree while the run still produced a verdict. ---
+
+  /** `<root>` with the separator before its last component doubled, so
+   * the noise sits INSIDE the root prefix rather than after it. */
+  function doubledSeparator(root: string): string {
+    return `${path.dirname(root)}//${path.basename(root)}`;
+  }
+
+  /** `<root>` with a `.` ("this directory") segment before its last
+   * component, again inside the root prefix. */
+  function dotSegment(root: string): string {
+    return `${path.dirname(root)}/./${path.basename(root)}`;
+  }
+
+  it("a duplicated separator inside the root prefix is still a mention of the root", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const noisy = `${doubledSeparator(root)}/pkg`;
+    expect(escapingRootMentions(`cd '${noisy}' && node t.js`, root)).toEqual([
+      noisy,
+    ]);
+  });
+
+  it("a `/./` segment inside the root prefix is still a mention of the root", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const noisy = `${dotSegment(root)}/pkg`;
+    expect(escapingRootMentions(`cd '${noisy}' && node t.js`, root)).toEqual([
+      noisy,
+    ]);
+  });
+
+  it("separator noise is tolerated in a --pre-shaped and an --env-shaped value too, and in a root spelled with a space", () => {
+    const parent = makeTmpDir();
+    const root = resolveDeepestExisting(
+      path.resolve(fs.mkdtempSync(path.join(parent, "my repo-"))),
+    );
+    // The scan is channel-agnostic: `--pre` is another command string,
+    // an `--env` value is the bare path, and both go through this same
+    // function (`setup.ts`), so the noise tolerance holds for all
+    // three.
+    const pre = `cd ${dotSegment(root).replace(/ /g, "\\ ")} && npm ci`;
+    expect(escapingRootMentions(pre, root)).toEqual([
+      dotSegment(root).replace(/ /g, "\\ "),
+    ]);
+    const envValue = `${doubledSeparator(root)}/.cache`;
+    expect(escapingRootMentions(envValue, root)).toEqual([envValue]);
+  });
+
+  it("the scratch-root exemption tolerates the same separator noise, so a noisy isolation-copy path stays exempt", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "aplogs");
+    fs.mkdirSync(scratchRoot, { recursive: true });
+    const noisyCopy = `${doubledSeparator(scratchRoot)}/wt-1/wt`;
+    // The noisy spelling names the isolation copy just as the exact
+    // spelling does, so the exemption has to see it the same way the
+    // detection sees the root.
+    expect(
+      escapingRootMentions(`cd ${noisyCopy} && node t.js`, root, scratchRoot),
+    ).toEqual([]);
+    // ... and still only for the scratch root: noise does not exempt a
+    // sibling of it.
+    const sibling = `${doubledSeparator(root)}/aplogsrc/x.js`;
+    expect(escapingRootMentions(`node ${sibling}`, root, scratchRoot)).toEqual([
+      sibling,
+    ]);
+  });
+
+  it("a `..` segment is NOT tolerated: it names a different directory, and normalising is outside this rule (documented residual)", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const walked = `${path.dirname(root)}/x/../${path.basename(root)}/pkg`;
+    expect(escapingRootMentions(`cd '${walked}' && node t.js`, root)).toEqual(
+      [],
+    );
+  });
+
+  it("a root containing regex metacharacters matches only itself: a sibling differing at one of them is not a mention, and the root's own spelling still is", () => {
+    const parent = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    // A false POSITIVE if `.` reaches the matcher unescaped: it would
+    // match ANY character there, so a sibling differing exactly at the
+    // dot would read as a mention of the root.
+    const dotted = path.join(parent, "re.po");
+    fs.mkdirSync(dotted);
+    expect(
+      escapingRootMentions(`cd ${dotted}/pkg && node t.js`, dotted),
+    ).toEqual([`${dotted}/pkg`]);
+    expect(
+      escapingRootMentions(
+        `cd ${path.join(parent, "reXpo")}/pkg && node t.js`,
+        dotted,
+      ),
+    ).toEqual([]);
+    // A false NEGATIVE (or an outright crash) if the others do: `+`
+    // would quantify the character before it, `(` would open a group,
+    // and an unterminated `[` does not compile at all, so the root
+    // would stop matching its own literal spelling.
+    const meta = path.join(parent, "a+b(c)[d");
+    fs.mkdirSync(meta);
+    expect(escapingRootMentions(`cd '${meta}' && node t.js`, meta)).toEqual([
+      meta,
+    ]);
   });
 });
 

@@ -178,9 +178,9 @@ async function provokeWorktreeAllowOutsideUnsupported(): Promise<ProbeResult> {
   );
 }
 
-/** The D-033 shape (batch 45): a `-t` command that `cd`s back into the
- * real repository root under `-i worktree`, which never touches the
- * isolated worktree copy at all. */
+/** The shape this refusal exists for: a `-t` command that `cd`s back
+ * into the real repository root under `-i worktree`, which never
+ * touches the isolated worktree copy at all. */
 async function provokeTestCommandEscapesIsolation(): Promise<ProbeResult> {
   useLockDir();
   const { repo } = initRepo();
@@ -615,7 +615,7 @@ describe("probe(): REFUSAL_RESULT_SHAPE contract, every RefusalReason provoked f
     // `computeMutant`, the call `prepareMutant`'s dry run makes, before
     // the baseline ever runs), but with `reasonCode: "aborted"` instead
     // of `"git_apply_timeout"`: this is the `step.ts:110-122` abort
-    // path the round-3 review named, distinct from the baseline-phase
+    // path, distinct from the baseline-phase
     // `aborted` the loop above already provokes through
     // `provokeAbortedBaselineTest`. `REFUSAL_RESULT_SHAPE.aborted.mutant`
     // is `true` (it also covers the baseline-phase pair, where a mutant
@@ -640,27 +640,23 @@ describe("probe(): REFUSAL_RESULT_SHAPE contract, every RefusalReason provoked f
 });
 
 /**
- * Task 5bf16459 (batch 46, D-006): `-i worktree` mutates a throwaway
- * copy while a `-t` command that names an absolute path back into the
- * real repository root runs against the REAL, unmutated tree -- the
- * exact shape that gave a false `survived` in batch 45 (D-033: `cd
- * /abs/worktree/backend && npx vitest run ...`). Round 3 (D-033, this
- * batch) replaced the tokenizer both round 1 and round 2 built on with
- * a substring rule (`containment.ts`'s `escapingRootMentions`): each of
- * those rounds closed one reviewer-found quoting/escaping shape and
- * left another (a quoted path with whitespace, a `--key=/abs` value,
- * `--pre` never scanned, then a `sh -c "..."` wrapper read as one
- * opaque token and a backslash-escaped space splitting a path in two).
- * These tests pin the fix's actual boundary, beyond the generic
- * contract loop above (which only checks that the reason/shape match,
- * not the surrounding cases): every shape the three rounds enumerated,
- * a `--env` value (the round-2 survivor closed this round), the
- * `--log-dir`-inside-the-repo exemption, root reached via its own
- * symlink spelling, an absolute path OUTSIDE the repo left alone, and
- * `-i inplace` exempt entirely. Direct unit coverage of the substring
- * rule itself lives in `containment.test.ts`.
+ * `-i worktree` mutates a throwaway copy while a `-t` command that
+ * names an absolute path back into the real repository root runs
+ * against the REAL, unmutated tree, so the run reports a verdict for a
+ * mutant nothing was ever run against (`cd /abs/worktree/backend &&
+ * npx vitest run ...` is the shape that did it). `probe` refuses that
+ * by scanning all three caller-owned channels for a literal spelling
+ * of the root (`containment.ts`'s `escapingRootMentions`; see the
+ * CHANGELOG entry for the scope and the residuals). These tests pin
+ * the refusal's actual boundary, beyond the generic contract loop
+ * above (which only checks that the reason/shape match, not the
+ * surrounding cases): the quoting, escaping, `=`-form and wrapper
+ * shapes, an `--env` value, the `--log-dir`-inside-the-repo exemption,
+ * root reached via its own symlink spelling, an absolute path OUTSIDE
+ * the repo left alone, and `-i inplace` exempt entirely. Direct unit
+ * coverage of the rule itself lives in `containment.test.ts`.
  */
-describe("probe(): test-command isolation-escape detection (task 5bf16459)", () => {
+describe("probe(): test-command isolation-escape detection", () => {
   it("fixture pair: the absolute-cd shape is refused, the same test relative from the package dir is killed", async () => {
     useLockDir();
     const { repo } = initRepo();
@@ -697,7 +693,7 @@ describe("probe(): test-command isolation-escape detection (task 5bf16459)", () 
     // spells the repository root via its REALPATH instead (which, on a
     // macOS runner, differs from `repo`'s own as-given spelling too --
     // /var is itself a symlink to /private/var -- so this resolves
-    // through BOTH symlinks). The substring rule recognizes a root's
+    // through BOTH symlinks). The scan recognizes a root's
     // as-given spelling and its realpath (`containment.test.ts` pins
     // this directly); a third, unrelated symlink alias pointing at the
     // same target is a documented residual (README), not covered here.
@@ -738,9 +734,9 @@ describe("probe(): test-command isolation-escape detection (task 5bf16459)", () 
     expect(result.reason).toBeUndefined();
   });
 
-  // --- Round 2: two of three fail-open shapes review found in round 1's
-  // whitespace-split, prefix-only tokenizer (the third, --pre, is its
-  // own test below). Still closed by the round-3 substring rule. ---
+  // --- Quoting and `=`-form shapes a whitespace-split, prefix-only
+  // token scan reads as something other than a path (the third such
+  // channel, --pre, is its own test below). ---
 
   it("a quoted absolute path containing a space is refused, not read as a plain string prefix", async () => {
     useLockDir();
@@ -801,10 +797,10 @@ describe("probe(): test-command isolation-escape detection (task 5bf16459)", () 
     expect(relative.reason).toBeUndefined();
   });
 
-  // --- Round 3 (D-033 redesign): the two shapes round 2's tokenizer
-  // still missed (a `sh -c` wrapper, a backslash-escaped space), the
-  // third unscanned channel (`--env`), and the scratch-root wiring
-  // pinned at the probe level (round 2's review found it unpinned). ---
+  // --- Shapes a tokenizer reads as one opaque token or splits in two
+  // (a `sh -c` wrapper, a backslash-escaped space), the third
+  // caller-owned channel (`--env`), and the scratch-root wiring pinned
+  // at the probe level rather than only in the unit tests. ---
 
   it("a sh -c wrapper naming the repository root is refused, even though the whole command is one shell-quoted string", async () => {
     useLockDir();
@@ -868,7 +864,7 @@ describe("probe(): test-command isolation-escape detection (task 5bf16459)", () 
     expect(result.reason).toBeUndefined();
   });
 
-  it("an absolute path under a --log-dir pointed inside the repository does not trigger the refusal (the scratch-root exemption; the round-2 survivor)", async () => {
+  it("an absolute path under a --log-dir pointed inside the repository does not trigger the refusal (the scratch-root exemption)", async () => {
     useLockDir();
     const { repo } = initRepo();
     const logDir = path.join(repo, "aplogs");
@@ -890,12 +886,11 @@ describe("probe(): test-command isolation-escape detection (task 5bf16459)", () 
     expect(result.status).toBe("killed");
   });
 
-  // --- Round 4 (D-042): the scratch-root exemption's own boundary (a
-  // `--log-dir` AT or ABOVE the root erased every mention and passed
-  // the D-033 shape), a miscased spelling on a case-insensitive
-  // filesystem, the path boundary after a match, and the `--env`
-  // channel's own fix hint. Each of the four was reproduced 3/3 by the
-  // round-3 review. ---
+  // --- The scratch-root exemption's own boundary (a `--log-dir` AT or
+  // ABOVE the root must not exempt the root itself and pass the escape
+  // this refusal exists for), a miscased spelling on a
+  // case-insensitive filesystem, the path boundary after a match, and
+  // the `--env` channel's own fix hint. ---
 
   it("--log-dir pointed AT the repository root does not exempt the root itself: the escaping command is still refused", async () => {
     useLockDir();
@@ -959,9 +954,9 @@ describe("probe(): test-command isolation-escape detection (task 5bf16459)", () 
     const result = await probe(
       baseOptions(repo, {
         isolation: "worktree",
-        // `<repo>2` is a different directory; a substring test without a
-        // path boundary after the match refuses this and reports the
-        // bare root as "matched" (round-3 review, MEDIUM).
+        // `<repo>2` is a different directory; a match test without a
+        // path boundary after it refuses this and reports the bare root
+        // as "matched".
         testCommand: `ls '${repo}2' > /dev/null 2>&1; node fixture.test.js`,
       }),
     );
@@ -1033,5 +1028,62 @@ describe("probe(): test-command isolation-escape detection (task 5bf16459)", () 
     // worktree was ever added, since the refusal happens before
     // `beginWorktree` runs at all.
     expectNoIsolationLeftovers(repo, lockDir);
+  });
+
+  // --- Separator noise INSIDE the repository root prefix. The shell
+  // reaches exactly the same directory through `<root>//pkg` and
+  // `<root>/./pkg` as through `<root>/pkg`, so a scan matching the
+  // root character for character let the command run against the real
+  // tree while the run still reported a verdict. One test per channel,
+  // since each is scanned at its own call site (`setup.ts`). ---
+
+  it("a duplicated separator inside the repository root prefix is refused in the test command", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const noisy = `${path.dirname(repo)}//${path.basename(repo)}/pkg`;
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        testCommand: `cd '${noisy}' && node fixture.test.js`,
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+    expect(result.warnings.join(" ")).toContain(noisy);
+  });
+
+  it("a `/./` segment inside the repository root prefix is refused in --pre", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const noisy = `${path.dirname(repo)}/./${path.basename(repo)}`;
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        preCommand: `cd '${noisy}' && true`,
+        testCommand: "node fixture.test.js",
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+    expect(result.warnings.join(" ")).toContain("--pre");
+    expect(result.warnings.join(" ")).toContain(noisy);
+  });
+
+  it("a duplicated separator in an --env value is refused, with the value channel's own remedy", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const noisy = `${path.dirname(repo)}//${path.basename(repo)}/.cache`;
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        env: { CACHE_DIR: noisy },
+        testCommand: "node fixture.test.js",
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+    expect(result.warnings.join(" ")).toContain("--env CACHE_DIR");
+    expect(result.warnings.join(" ")).toContain(noisy);
+    expect(result.warnings.join(" ")).toContain(ISOLATION_ESCAPE_ENV_FIX_HINT);
   });
 });

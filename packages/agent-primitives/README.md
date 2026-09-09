@@ -551,19 +551,24 @@ nobody ran anything against, and reports `killed`/`survived` for
 whichever verdict the REAL tree happened to produce, whatever the
 mutant actually did. `probe` refuses this outright
 (`reason: "test_command_escapes_isolation"`, a `usage_error`) rather
-than warn: it is a SUBSTRING check, not a shell parse -- an absolute
-path under the real repository root always CONTAINS that root as a
-literal substring, whatever quoting, escaping, `=`-form or wrapper
-surrounds it (a plain `cd /abs/...`, a single- or double-quoted path
-containing whitespace, a backslash-escaped space, the value half of a
-`--key=/abs` token, or the whole command wrapped in `sh -c "..."`), so
-the rule needs no shape enumeration to be exhaustive for a literal
-absolute path; a path outside the root never contains it, so nothing
-outside the root is ever flagged. The root is matched under two
-spellings (its own, as resolved, and its realpath, so a repository
-root itself reached through a symlink still refuses under either
-spelling), each also with every space backslash-escaped, and three
-rules narrow the plain substring test:
+than warn. What it refuses is precisely this: a channel that SPELLS
+THE REPOSITORY ROOT OUT LITERALLY. That is a text scan, not a shell
+parse, so it does not depend on tokenising the command: an absolute
+path under the root contains the root spelled out whatever quoting,
+escaping, `=`-form or wrapper surrounds it (a plain `cd /abs/...`, a
+single- or double-quoted path containing whitespace, a
+backslash-escaped space, the value half of a `--key=/abs` token, or
+the whole command wrapped in `sh -c "..."`), and separator noise
+inside the path (`<root>//pkg`, `<root>/./pkg`) is tolerated because
+it names the same directory. A path outside the root never spells the
+root, so nothing outside the root is ever flagged. It is not a proof
+that a command stays inside the copy: a command that reaches the root
+WITHOUT spelling it literally is a residual, listed at the end of this
+section. The root is matched under two spellings (its own, as
+resolved, and its realpath, so a repository root itself reached
+through a symlink still refuses under either spelling), each also with
+every space backslash-escaped, and three further rules shape the
+match:
 
 - A match must END AT A PATH BOUNDARY: the end of the string, a `/`,
   or a character that cannot continue a path component (whitespace,
@@ -623,29 +628,34 @@ trade, in both directions: a false refusal names itself and has a
 remedy, whereas the verdict this check prevents is a silent
 `survived` for a mutant the tests would have killed.
 
-Known residuals follow directly from a substring rule matching only
-the root's own two spellings: a path reached only through a shell
-variable this tool does not own (`cd "$REPO" && ...`) or a command
-substitution (`$(...)`) is invisible, since neither ever spells the
-root out literally in the scanned string; `~` expansion is the same
-shape (`cd ~/git/repo && ...` reaches the root without the scanned
-string ever containing it), as is any other expansion the shell
-performs at run time; a RELATIVE path that walks out of the isolation
-copy via `..` (e.g. `cd ../../real-checkout && ...`) is not inspected
-either, since it never names the root as an absolute path at all; a
-wrapper script that itself `cd`s using a path not spelled out in the
-scanned string is the same shell-level indirection; a path reaching
-the root only through a THIRD, unrelated symlink alias (one that is
-neither the root's own as-given spelling nor its realpath) is not
-recognized, since the rule matches spellings, not filesystem identity;
-and a repository root containing a character neither spelling
-represents (e.g. a literal quote inside the path) falls outside what
-the two spellings cover. These are the shapes a substring rule
-structurally cannot see, as opposed to rounds 1 and 2's
-tokenizer, which missed shapes a tokenizer COULD have been extended to
-catch (and each extension left another) -- the substring rule is
-exhaustive for every literal-absolute-path shape, and its residuals
-are exactly the shapes that are not a literal absolute path at all.
+Known residuals follow directly from a rule that matches the root's
+two spellings as text. A path reached only through a shell variable
+this tool does not own (`cd "$REPO" && ...`) or a command substitution
+(`$(...)`) is invisible, since neither ever spells the root out
+literally in the scanned string; `~` expansion is the same shape (`cd
+~/git/repo && ...` reaches the root without the scanned string ever
+containing it), as is any other expansion the shell performs at run
+time. A RELATIVE path that walks out of the isolation copy via `..`
+(e.g. `cd ../../real-checkout && ...`) is not inspected either, since
+it never names the root as an absolute path at all -- and neither is
+an ABSOLUTE path that walks back into the root through `..`
+(`cd /abs/x/../my repo && ...`): the scan does not normalise a path,
+it matches a spelling, so a `..` segment (unlike a `//` or a `/.`,
+which name the same directory) makes the spelling a different one. A
+spelling that differs from the root's only in unicode normalisation (a
+decomposed form of a composed root, or the reverse, which macOS in
+particular may resolve to the same directory) is not matched for the
+same reason. A wrapper script that itself `cd`s using a path not
+spelled out in the scanned string is shell-level indirection like the
+first group; a path reaching the root only through a THIRD, unrelated
+symlink alias (one that is neither the root's own as-given spelling
+nor its realpath) is not recognized, since the rule matches spellings,
+not filesystem identity; and a repository root containing a character
+neither spelling represents (e.g. a literal quote inside the path)
+falls outside what the two spellings cover. Each of these reaches the
+real tree with `-i worktree` and is NOT refused, so a run whose
+command is built that way still needs `-i inplace` (or a relative
+command) to be trustworthy.
 
 `-i worktree` needs git 2.35 or newer: the sync relies on `git apply
 --allow-empty`, which an older git rejects, so the run ends in
@@ -1283,7 +1293,7 @@ above.
 | `reason` | `mutant` | `mutation_probe` | When it fires |
 | --- | --- | --- | --- |
 | `worktree_allow_outside_unsupported` | absent | absent | `--allow-outside` combined with `--isolation worktree`; refused before containment is even checked |
-| `test_command_escapes_isolation` | absent | absent | `-i worktree`'s test command, `--pre`, or an `--env` value names the real repository root as a literal path (any quoting, escaping, `=`-form, wrapper, and any casing on a case-insensitive filesystem), which the isolated copy never receives -- unless the mention resolves under a `--log-dir` strictly inside the repository, which the isolated copy does |
+| `test_command_escapes_isolation` | absent | absent | `-i worktree`'s test command, `--pre`, or an `--env` value spells the real repository root out literally (any quoting, escaping, `=`-form, wrapper, separator noise such as `//` or `/./`, and any casing on a case-insensitive filesystem), which the isolated copy never receives -- unless the mention resolves under a `--log-dir` strictly inside the repository, which the isolated copy does |
 | `file_outside_root` | absent | absent | `--file` (or a `--link`) resolves outside the containment root |
 | `probe_in_progress` | absent | absent | the repository- or file-scoped lock is already held by another run |
 | `lock_unavailable` | absent | absent | the lock directory itself could not be acquired (an unwritable lock dir, an ancestor owned by another user) |

@@ -395,25 +395,23 @@ export async function openRunSetup(
   // `--env NAME=/abs/...` override) never touches the isolated copy at
   // all, so the run exercises the unmutated real tree while the mutant
   // sits in a copy nobody ran anything against -- reported `survived`
-  // no matter what the mutant actually does (batch 45, D-033:
-  // `cd /abs/worktree/backend && npx vitest run ...` did exactly this).
-  // Detected as a SUBSTRING scan of all three channels
-  // (`containment.ts`'s `escapingRootMentions`), not a token/shell
-  // parse: two rounds of tokenizer each closed one reviewer-found
-  // quoting/escaping shape and left another (see that function's own
-  // doc comment for the history and the residuals this rule still
-  // carries). A `-i worktree` isolation copy lives outside `root` by
+  // no matter what the mutant actually does, the wrong verdict this
+  // refusal exists to prevent. Detected by scanning all three channels
+  // for a LITERAL spelling of the root (`containment.ts`'s
+  // `escapingRootMentions`) rather than by tokenising or parsing a
+  // shell command; what that scope does and does not cover, and the
+  // residuals it leaves, are stated on that function and in the
+  // README. A `-i worktree` isolation copy lives outside `root` by
   // construction UNLESS `--log-dir` itself was pointed inside the
   // repository, so `escapingRootMentions` is given this run's own
   // scratch root (`wtScratchRoot`, resolved the same way
-  // `cleanupWorktree` checks removals against) to strip first -- the
-  // copy itself does not need to exist yet for this check to hold, and
-  // the strip only applies when that scratch root is a PROPER
+  // `cleanupWorktree` checks removals against) to exempt -- the copy
+  // itself does not need to exist yet for this check to hold, and the
+  // exemption only applies when that scratch root is a PROPER
   // descendant of the root, so a `--log-dir` AT or ABOVE the root
-  // cannot blank the root out of the text and pass an escape (round
-  // 3's own defect). `-i inplace` is exempt: the real tree IS the
-  // intended target there, so an absolute path back into it is not an
-  // escape.
+  // cannot exempt the root itself and pass an escape. `-i inplace` is
+  // exempt: the real tree IS the intended target there, so an absolute
+  // path back into it is not an escape.
   if (effectiveIsolation === "worktree") {
     // Each channel carries its own remedy: an `--env` VALUE is not a
     // command, so the command hint's "run the command as a relative

@@ -87,10 +87,6 @@ function pathSpellings(p: string): string[] {
  * command string, so a path that ends right before one of them is
  * finished: whitespace, either quote, and the shell separators that
  * can follow a path without a space (`;`, `&`, `|`, `)`, `,`).
- * `\u0000` is in the set for the scratch-root blanking in
- * `escapingRootMentions` below, which overwrites a stripped mention
- * with a NUL run of the same length rather than deleting it (so every
- * index still lines up with the original text).
  */
 const PATH_REGION_TERMINATORS = new Set([
   " ",
@@ -106,7 +102,6 @@ const PATH_REGION_TERMINATORS = new Set([
   "|",
   ")",
   ",",
-  "\u0000",
 ]);
 
 /**
@@ -149,21 +144,74 @@ function pathRegionEnd(text: string, start: number): number {
 }
 
 /**
- * `s` with every character that has a single-character lowercase form
- * replaced by it, and every other character kept as it is. Unlike a
- * plain `toLowerCase()` this is LENGTH-PRESERVING (a few code points,
- * e.g. `U+0130`, lowercase into two characters), which every index in
- * the scan below depends on: the match is found in the folded text and
- * then sliced out of the ORIGINAL text, so the caller sees the
+ * `s` with every regular-expression metacharacter escaped, so a
+ * spelling matches only itself: a repository root may contain any of
+ * them (`/x/re.po`, `/x/a+b`, `/x/pkg (old)`, `/x/[wip]`), and an
+ * unescaped `.` would match any character at that position (a sibling
+ * `/x/reXpo` reading as a mention of `/x/re.po`), while an unescaped
+ * `(` or `[` would not compile at all.
+ */
+function escapeRegExp(s: string): string {
+  return s.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
+}
+
+/**
+ * What one `/` in a spelling matches: a run of one or more separators
+ * with any number of `.` ("this directory") segments among them, so
+ * `<root>//pkg` and `<root>/./pkg`, which reach the same directory as
+ * `<root>/pkg`, are matched as mentions of it. A `..` segment is
+ * deliberately not in here: it names a DIFFERENT directory, so
+ * accepting one would mean normalising the path rather than matching
+ * its spelling (named as a residual on `escapingRootMentions`).
+ */
+const PATH_SEPARATOR_PATTERN = "/+(?:\\./+)*";
+
+/**
+ * A matcher for one spelling: every character matched literally
+ * (`escapeRegExp`) except the separators, which tolerate the noise
+ * above. Global, so `matchedRegions` can walk every occurrence, and
+ * case-insensitive when the root's filesystem resolves a miscased
+ * spelling to the same directory -- which lets the scan run over the
+ * ORIGINAL text, so every index it reports is an index into the
  * spelling the command actually used.
  */
-function foldCase(s: string): string {
-  let out = "";
-  for (const ch of s) {
-    const lower = ch.toLowerCase();
-    out += lower.length === ch.length ? lower : ch;
+function spellingMatcher(spelling: string, caseInsensitive: boolean): RegExp {
+  const source = spelling
+    .split("/")
+    .map(escapeRegExp)
+    .join(PATH_SEPARATOR_PATTERN);
+  return new RegExp(source, caseInsensitive ? "gi" : "g");
+}
+
+/** One occurrence of a spelling in the scanned text. */
+interface SpellingMatch {
+  start: number;
+  end: number;
+}
+
+/**
+ * Every occurrence of any of `spellings` in `text` that ends at a path
+ * boundary, spelling by spelling and, within one spelling, left to
+ * right. Each spelling is an absolute path, so its matcher always
+ * consumes at least the leading separator and the walk always
+ * advances.
+ */
+function matchedRegions(
+  text: string,
+  spellings: string[],
+  caseInsensitive: boolean,
+): SpellingMatch[] {
+  const found: SpellingMatch[] = [];
+  for (const spelling of spellings) {
+    if (spelling.length === 0) continue;
+    const matcher = spellingMatcher(spelling, caseInsensitive);
+    let match: RegExpExecArray | null;
+    while ((match = matcher.exec(text)) !== null) {
+      const end = match.index + match[0].length;
+      if (isPathBoundaryAt(text, end)) found.push({ start: match.index, end });
+    }
   }
-  return out;
+  return found;
 }
 
 /** `s` with the case of every letter flipped, used to probe the
@@ -215,90 +263,86 @@ export function isCaseInsensitiveFilesystem(dir: string): boolean {
 }
 
 /**
- * Whether `scratchRoot`'s spellings may be stripped from the scanned
- * text before `root` is looked for: only when the scratch root is a
- * PROPER descendant of the root, compared on both sides' realpaths the
- * way every other consumer of `isPathContained` compares.
+ * Whether mentions of `scratchRoot` may be exempted from the scan for
+ * `root`: only when the scratch root is a PROPER descendant of the
+ * root, compared on both sides' realpaths the way every other consumer
+ * of `isPathContained` compares.
  *
  * `isPathContained` alone is not the test, because it also answers
  * true for the root ITSELF (`path.relative` returns `""`): a
  * `--log-dir` pointed AT the repository root (or above it, which
- * `isPathContained` does reject) would then blank every mention of the
- * root out of the text and pass a command that escapes as plainly as
- * `cd '<root>/pkg' && node t.js` (round 3's own defect, reproduced 3/3
- * by that round's review). The exemption exists for the isolation copy
- * at `<log-dir>/wt-<uuid>/wt`; with `--log-dir` AT the root the
- * exemption would have to swallow the root itself, so it is not
- * granted at all and such a mention is refused, with the same two
+ * `isPathContained` does reject) would then exempt every mention of
+ * the root and pass a command that escapes as plainly as
+ * `cd '<root>/pkg' && node t.js`. The exemption exists for the
+ * isolation copy at `<log-dir>/wt-<uuid>/wt`; with `--log-dir` AT the
+ * root the exemption would have to swallow the root itself, so it is
+ * not granted at all and such a mention is refused, with the same two
  * remedies the message already names.
  */
-function stripsScratchRoot(root: string, scratchRoot: string): boolean {
+function exemptsScratchRoot(root: string, scratchRoot: string): boolean {
   const realRoot = resolveDeepestExisting(path.resolve(root));
   const realScratch = resolveDeepestExisting(path.resolve(scratchRoot));
   return realScratch !== realRoot && isPathContained(realRoot, realScratch);
 }
 
 /**
- * Every mention of `root` in `text`: each region of `text` that starts
- * with one of `root`'s spellings (see `pathSpellings`), ends at a path
- * boundary, and does not resolve under `scratchRoot` instead. The
- * returned strings are the matched REGIONS as the text spells them
- * (the root spelling plus any deeper path text after it, e.g.
- * `<root>/pkg`), deduplicated, empty when `root` is not mentioned at
- * all.
+ * Every mention of `root` in `text`: each region of `text` that spells
+ * `root` literally (see `pathSpellings` for the spellings recognized
+ * and `spellingMatcher` for the separator noise tolerated inside one),
+ * ends at a path boundary, and does not sit inside a mention of
+ * `scratchRoot`. The returned strings are the matched REGIONS as the
+ * text spells them (the root spelling plus any deeper path text after
+ * it, e.g. `<root>/pkg`), deduplicated, empty when `root` is not
+ * mentioned at all.
  *
- * Three things narrow the plain substring test:
+ * `setup.ts` refuses `-i worktree`'s test command, `--pre`, and the
+ * VALUE half of every `--env NAME=VALUE` against this. The rule reads
+ * the raw text instead of tokenising it or parsing a shell command: an
+ * absolute path under `root` spells `root` out whatever quoting,
+ * escaping, `=`-form or wrapper surrounds it, and a path outside
+ * `root` never spells it, so nothing outside the root is flagged.
+ * Four things shape the match itself:
  *
+ * - separator noise inside a spelling is tolerated, so `<root>//pkg`
+ *   and `<root>/./pkg` are mentions of `root` (`spellingMatcher`);
  * - a match must be followed by a path boundary (`isPathBoundaryAt`),
  *   so a sibling `<root>2` is NOT a mention of `root`;
  * - on a case-insensitive filesystem (measured, see
  *   `isCaseInsensitiveFilesystem`; `caseInsensitive` overrides the
- *   measurement, for tests) both sides are case-folded, so a miscased
- *   but literal spelling that the filesystem resolves to the same
+ *   measurement, for tests) the match ignores case, so a miscased but
+ *   literal spelling that the filesystem resolves to the same
  *   directory is matched too; on a case-sensitive filesystem the match
  *   stays exact, since a miscased spelling there names a different
  *   path;
- * - every occurrence of `scratchRoot`'s own spellings is blanked out
- *   of the scanned text first, but ONLY when the scratch root is a
- *   proper descendant of `root` (`stripsScratchRoot`) and only where
- *   the occurrence itself ends at a path boundary -- so a `--log-dir`
- *   pointed inside the repository (the one case an absolute path under
- *   `root` legitimately names the isolation copy itself, at
+ * - a match that starts inside a mention of `scratchRoot` is skipped,
+ *   but ONLY when the scratch root is a proper descendant of `root`
+ *   (`exemptsScratchRoot`) and only where that scratch mention itself
+ *   ends at a path boundary -- so a `--log-dir` pointed inside the
+ *   repository (the one case an absolute path under `root`
+ *   legitimately names the isolation copy itself, at
  *   `<scratchRoot>/wt-<uuid>/wt`) does not read as an escape, while
  *   `<scratchRoot>rc/x.js`, an unrelated path that merely starts with
- *   those characters, is left in the text and still reported.
+ *   those characters, is still reported.
  *
- * `setup.ts` refuses `-i worktree`'s test command, `--pre`, and the
- * VALUE half of every `--env NAME=VALUE` against this: a SUBSTRING
- * rule rather than a token/shell parse. Rounds 1 and 2 of task
- * 5bf16459 were both tokenizers, and each round's reviewer found a
- * fresh quoting/escaping/wrapper shape the tokenizer had not
- * enumerated -- a quoted absolute path containing whitespace, a
- * `--key=/abs` form, `--pre` never scanned at all, then
- * `sh -c "cd /abs && ..."` read as one opaque quoted token and a
- * backslash-escaped space splitting a single path into two
- * non-existent fragments. An absolute path under `root` contains
- * `root` as a substring under EVERY quoting, escaping, `=`-form or
- * wrapper that can surround it, so this rule needs no shape
- * enumeration to be exhaustive for a literal absolute path -- unlike a
- * path outside `root`, which never contains it, so nothing outside the
- * root is ever flagged.
- *
- * Known residuals (see README): a path reached only through a shell
- * variable this tool does not own (`cd "$REPO" && ...`) or a command
- * substitution (`$(...)`); a RELATIVE path that walks out of the
- * isolation copy via `..`; a wrapper script that itself `cd`s using a
- * path not spelled out in the scanned string; a path reaching `root`
- * only through a symlink alias that is neither `root`'s own as-given
- * spelling nor its realpath (only those two, and their space-escaped
- * variants, are recognized here -- a third, unrelated symlink pointing
- * at the same target is invisible to a substring scan, unlike round
- * 1/2's per-token realpath resolution, which this rule deliberately
- * drops along with the tokenizer it belonged to); a path the shell
- * expands into the root only at run time, `~` expansion included
- * (`cd ~/git/repo && ...` never spells the root out); and a repository
- * root containing a character neither spelling represents (e.g. a
- * literal quote inside the path).
+ * The scope is a LITERALLY SPELLED root path, not "every way a command
+ * can reach the real tree". Quoting, backslash escaping, `=`-forms,
+ * wrappers, separator noise and, where the filesystem folds case,
+ * casing are covered; anything that reaches the root without spelling
+ * it that way is a residual this rule does not claim. The residuals
+ * (the README's `-i worktree` section carries the same list for
+ * callers): a path built at run time from a shell variable this tool
+ * does not own (`cd "$REPO" && ...`), a command substitution
+ * (`$(...)`), or `~` expansion; a RELATIVE path that walks out of the
+ * isolation copy via `..`; an absolute path that walks back INTO the
+ * root through `..` (`/abs/x/../my repo`), which this scan does not
+ * normalise; a spelling that differs only in unicode normalisation (a
+ * decomposed spelling of a composed root, which a filesystem may
+ * resolve to the same directory); a wrapper script that itself `cd`s
+ * using a path not spelled out in the scanned string; a path reaching
+ * `root` only through a symlink alias that is neither `root`'s own
+ * as-given spelling nor its realpath; and a repository root containing
+ * a character neither spelling represents (e.g. a literal quote inside
+ * the path).
  */
 export function escapingRootMentions(
   text: string,
@@ -306,51 +350,28 @@ export function escapingRootMentions(
   scratchRoot?: string,
   caseInsensitive?: boolean,
 ): string[] {
-  const folds =
+  const ignoresCase =
     caseInsensitive ?? isCaseInsensitiveFilesystem(path.resolve(root));
-  const fold = (s: string): string => (folds ? foldCase(s) : s);
 
-  // The scan runs over the FOLDED text and every index is used to slice
-  // the original `text`, which only works because `foldCase` and the
-  // blanking below both preserve length exactly.
-  let scanned = fold(text);
-  if (scratchRoot !== undefined && stripsScratchRoot(root, scratchRoot)) {
-    for (const spelling of pathSpellings(scratchRoot)) {
-      const needle = fold(spelling);
-      if (needle.length === 0) continue;
-      let from = 0;
-      while (true) {
-        const at = scanned.indexOf(needle, from);
-        if (at === -1) break;
-        const end = at + needle.length;
-        if (isPathBoundaryAt(scanned, end)) {
-          scanned =
-            scanned.slice(0, at) +
-            "\u0000".repeat(needle.length) +
-            scanned.slice(end);
-        }
-        from = end;
-      }
-    }
-  }
+  // The scratch root is matched with the SAME construction as the root
+  // and its matches are SKIPPED rather than removed from the text: the
+  // scan runs over the original `text` throughout, so every index below
+  // indexes the spelling the command actually used.
+  const exempt =
+    scratchRoot !== undefined && exemptsScratchRoot(root, scratchRoot)
+      ? matchedRegions(text, pathSpellings(scratchRoot), ignoresCase)
+      : [];
 
   const regions: string[] = [];
   const seen = new Set<string>();
-  for (const spelling of pathSpellings(root)) {
-    const needle = fold(spelling);
-    if (needle.length === 0) continue;
-    let from = 0;
-    while (true) {
-      const at = scanned.indexOf(needle, from);
-      if (at === -1) break;
-      const end = at + needle.length;
-      from = end;
-      if (!isPathBoundaryAt(scanned, end)) continue;
-      const region = text.slice(at, pathRegionEnd(text, end));
-      if (seen.has(region)) continue;
-      seen.add(region);
-      regions.push(region);
+  for (const match of matchedRegions(text, pathSpellings(root), ignoresCase)) {
+    if (exempt.some((e) => match.start >= e.start && match.start < e.end)) {
+      continue;
     }
+    const region = text.slice(match.start, pathRegionEnd(text, match.end));
+    if (seen.has(region)) continue;
+    seen.add(region);
+    regions.push(region);
   }
   return regions;
 }

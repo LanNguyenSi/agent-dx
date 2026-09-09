@@ -11,9 +11,9 @@ import { resolveDeepestExisting } from "../../src/probe/containment.js";
  * repo itself, shows up in `git worktree list`), no stale in-flight
  * marker was written for it, and no lock file remains in `lockDir`.
  * Shared by `probe-refusal-contract.test.ts` (the single-probe path)
- * and `plan.test.ts` (the plan path), task 5bf16459 round 3: round 2's
- * review found the plan side of this refusal asserted only the reason,
- * not these three no-leftover checks the single-probe side already had.
+ * and `plan.test.ts` (the plan path), so both sides of the refusal
+ * assert the same three no-leftover checks rather than only the
+ * refusal reason.
  */
 export function expectNoIsolationLeftovers(repo: string, lockDir: string) {
   const list = execFileSync("git", ["worktree", "list", "--porcelain"], {
