@@ -533,6 +533,33 @@ export async function runMutantAttempt(
     status = killed ? "killed" : "survived";
     mutationProbeResult = status;
 
+    // The 128 + N band (see `exec.ts`'s `signalNumberFromExitCode`):
+    // computed once here, ahead of the `--pass-regex`-only block below,
+    // because the FAIL direction below needs it whether or not
+    // `--pass-regex` is even given -- the plain exit-code default reads
+    // a band code as an ordinary non-zero failure exactly the same way
+    // a real one would.
+    const mutantSignalCode = signalNumberFromExitCode(testResult.exitCode);
+    // A kill that lands on the test process while its `sh -c` wrapper
+    // SURVIVES arrives as an ordinary non-zero exit code, never as the
+    // `null` the no-verdict branch above catches. On the FAIL direction
+    // (`!testPassed`: the plain exit-code default reading a band code
+    // as a failure, or `--pass-regex` failing to match a run the kill
+    // cut off before it printed) that ordinary-looking exit code is
+    // read as a genuine failure -- which under `--expect fail` is
+    // exactly the KILLED verdict this whole mechanism exists to
+    // certify -- with nothing said about it unless this fires. The
+    // verdict is not second-guessed (nothing here can tell that code
+    // apart from a runner exiting `137` on its own); the reader is
+    // told. The PASS direction gets its own wording below, scoped to
+    // `--pass-regex` (the plain default can never read a non-zero exit
+    // code as a pass), so the two never both fire for the same run.
+    if (!testPassed && mutantSignalCode !== undefined) {
+      warnings.push(
+        `the mutant run exited with ${String(testResult.exitCode)}, the code a shell reports for a process killed by signal ${String(mutantSignalCode)}; the ${status} verdict may rest on a run that was cut short; see ${testResult.logPath}`,
+      );
+    }
+
     if (rt.passRegex !== undefined) {
       if (testPassed && testResult.exitCode !== 0) {
         // Same deprecation-notice shape `setup.ts` warns about for the
@@ -553,7 +580,6 @@ export async function runMutantAttempt(
         // code apart from a runner exiting `137` on its own, and
         // `--pass-regex` means "ignore the exit code" by construction);
         // the reader is told.
-        const mutantSignalCode = signalNumberFromExitCode(testResult.exitCode);
         warnings.push(
           mutantSignalCode !== undefined
             ? `--pass-regex (${rt.passRegex.source}) matched the mutant run's output but the mutant run exited with ${String(testResult.exitCode)}, the code a shell reports for a process killed by signal ${String(mutantSignalCode)}; the suite may have been cut short; see ${testResult.logPath}`

@@ -923,6 +923,26 @@ export async function openRunSetup(
         `the baseline run was terminated by a signal, no exit code was reported; nothing about the suite was measured; see ${baselineTest.logPath}`,
       );
     }
+    // The 128 + N band, on the FAIL direction: a kill that lands on the
+    // test process while its `sh -c` wrapper SURVIVES arrives as an
+    // ordinary non-zero exit code, distinct from the no-verdict shape
+    // `wasSignalKilled` just above catches. Scoped to a baseline that
+    // reported a real exit code of its own (`reportedNoVerdict`
+    // excludes it otherwise, and that shape already got its own warning
+    // above), and fires whether the plain exit-code default or a
+    // `--pass-regex` miss is what made this baseline fail: either way
+    // the `baseline_failed` verdict may rest on a run that was cut
+    // short, the same thing the PASS direction, further down, already
+    // warns about for a baseline that matched despite a band exit code.
+    const baselineFailSignalCode =
+      !baselineTest.aborted && !reportedNoVerdict(baselineTest)
+        ? signalNumberFromExitCode(baselineTest.exitCode)
+        : undefined;
+    if (baselineFailSignalCode !== undefined) {
+      warnings.push(
+        `the baseline run exited with ${String(baselineTest.exitCode)}, the code a shell reports for a process killed by signal ${String(baselineFailSignalCode)}; the baseline_failed verdict may rest on a run that was cut short; see ${baselineTest.logPath}`,
+      );
+    }
     // A `--pass-regex` miss (reached here means the baseline is not
     // aborted, so this fires only when `baselineFailed` is true BECAUSE
     // the pattern did not match, never merely because the baseline timed

@@ -1472,6 +1472,67 @@ describe("probe(): a non-zero --pre is pre_failed, never a verdict", () => {
       false,
     );
   }, 20000);
+
+  it("a MUTANT-side --pre that is only signal-killed once the mutant is applied is named as terminated during the mutant run, never as `--pre exited null`", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+
+    // `--pre` here stands in for a rebuild/lint step that reads the
+    // target file back: harmless against the unmutated baseline
+    // (`grep` finds nothing, `|| true` keeps the command green), but
+    // once the mutant's default replacement (`  return false;`) has
+    // landed on disk, the same `--pre` run kills its own process group
+    // before ever reporting an exit code of its own. Distinct from the
+    // baseline-side signal-killed test above: this one exercises
+    // `step.ts`'s own `--pre` no-verdict prose, never reached by a
+    // `--pre` that only ever runs against the baseline.
+    const result = await probe(
+      baseOptions(repo, {
+        preCommand: 'grep -q "return false" fixture.js && kill -9 -$$ || true',
+      }),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("pre_failed");
+    expect(
+      result.warnings.some((w) =>
+        /--pre was terminated by a signal during the mutant run, no exit code was reported/.test(
+          w,
+        ),
+      ),
+    ).toBe(true);
+    expect(result.warnings.some((w) => w.includes("--pre exited null"))).toBe(
+      false,
+    );
+  }, 20000);
+
+  it("a BASELINE-side --pre that times out reports `--pre timed out`, never `--pre exited null`", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+
+    // `--pre` itself is what hits `--timeout` here, before the baseline
+    // test command ever runs: distinct from the signal-killed case
+    // above (`timedOut: true` vs. `timedOut: false`, this package's own
+    // bound firing rather than a kill from outside it), and from every
+    // other `--pre timed out` test in this file, which all exercise the
+    // TEST command timing out, not `--pre` itself.
+    const result = await probe(
+      baseOptions(repo, { preCommand: "sleep 5", timeoutMs: 300 }),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("pre_failed");
+    expect(
+      result.warnings.some((w) =>
+        /--pre timed out during the baseline run, no exit code was reported/.test(
+          w,
+        ),
+      ),
+    ).toBe(true);
+    expect(result.warnings.some((w) => w.includes("--pre exited null"))).toBe(
+      false,
+    );
+  }, 10000);
 });
 
 describe("probe(): the post-apply hash-changed check", () => {
@@ -4376,12 +4437,12 @@ describe("probe(): --pass-regex", () => {
   const NO_EXIT_CODE_SIGNAL_WARNING =
     /terminated by a signal, no exit code was reported/;
 
-  // The motivating case (GitHub issue #225): phpunit
-  // 9.6 prints its usual green summary but still exits 1 because of
-  // deprecation notices. `RUNNER_JS` reproduces that exact shape (a
-  // real pass, wrong exit code) without needing phpunit itself: a pure
-  // text/exit-code fixture is enough to provoke the predicate. Every
-  // fixture below mutates line 2 or line 4, never anything else.
+  // The motivating case (GitHub issue #225): phpunit 9.6 prints its usual
+  // green summary but still exits 1 because of deprecation notices.
+  // `RUNNER_JS` reproduces that exact shape (a real pass, wrong exit code)
+  // without needing phpunit itself: a pure text/exit-code fixture is enough to
+  // provoke the predicate. Every fixture below mutates line 2 or line 4, never
+  // anything else.
   const RUNNER_JS = [
     "function summary() {",
     '  return "OK (3 tests, 5 assertions)";',
@@ -5164,6 +5225,114 @@ describe("probe(): --pass-regex", () => {
       expect(result.warnings.some((w) => /killed by signal/.test(w))).toBe(
         false,
       );
+    }, 20000);
+
+    // The three cases above all go through `--pass-regex`: the PASS
+    // direction (`testPassed && exitCode !== 0`) can only ever be
+    // reached that way, since the plain exit-code default can never
+    // read a non-zero code as a pass. The FAIL direction is different:
+    // a band exit code reads as an ordinary failure under the plain
+    // default too, with nothing said about it before this task -- these
+    // three tests are that gap, one per shape named in the round-5
+    // review: the default path, `--pass-regex` with the kill landing
+    // before the match, and the baseline side failing in the band.
+    const FAIL_DIRECTION_MUTANT_WARNING =
+      /the mutant run exited with 137, the code a shell reports for a process killed by signal 9; the killed verdict may rest on a run that was cut short/;
+    const FAIL_DIRECTION_BASELINE_WARNING =
+      /the baseline run exited with 137, the code a shell reports for a process killed by signal 9; the baseline_failed verdict may rest on a run that was cut short/;
+
+    it("the DEFAULT path (no --pass-regex): a mutant whose test process is killed under a surviving wrapper is still `killed`, with the 137 named as a possibly cut-short run", async () => {
+      useLockDir();
+      const { repo } = initRepoWith('console.log("OK"); process.exit(0);\n');
+
+      const result = await probe({
+        file: "runner.js",
+        line: 1,
+        form: "replace",
+        replaceText:
+          'console.log("mutant"); process.kill(process.pid, "SIGKILL");',
+        testCommand: WRAPPED_TEST_COMMAND,
+        isolation: "inplace",
+        expect: "fail",
+        cwd: repo,
+        logDir: makeTmpDir(),
+      });
+
+      expect(result.status).toBe("killed");
+      expect(result.test?.exitCode).toBe(137);
+      expect(result.test?.timedOut).toBe(false);
+      expect(
+        result.warnings.some((w) => FAIL_DIRECTION_MUTANT_WARNING.test(w)),
+      ).toBe(true);
+      expect(
+        result.warnings.some((w) => NO_EXIT_CODE_SIGNAL_WARNING.test(w)),
+      ).toBe(false);
+    }, 20000);
+
+    it("under --pass-regex, a mutant killed BEFORE printing anything that could match is still `killed`, with the 137 named as a possibly cut-short run, not as the plain miss warning", async () => {
+      useLockDir();
+      const { repo } = initRepoWith(SELF_KILLING_RUNNER_JS);
+
+      const result = await probe({
+        file: "runner.js",
+        line: 1,
+        form: "replace",
+        // Self-kills immediately, before ever printing a matching (or
+        // any) line: the regex fails to match the mutant's own output
+        // for a reason that has nothing to do with the mutation itself.
+        replaceText: 'process.kill(process.pid, "SIGKILL");',
+        testCommand: WRAPPED_TEST_COMMAND,
+        isolation: "inplace",
+        expect: "fail",
+        cwd: repo,
+        logDir: makeTmpDir(),
+        passRegex: /^OK \(/,
+      });
+
+      expect(result.status).toBe("killed");
+      expect(result.test?.exitCode).toBe(137);
+      expect(
+        result.warnings.some((w) => FAIL_DIRECTION_MUTANT_WARNING.test(w)),
+      ).toBe(true);
+      // Neither the empty-output-crash wording nor the plain "did not
+      // match" miss wording applies here: the shell's own "Killed: 9"
+      // line on stderr means the run's output was not actually empty,
+      // and the miss is not ambiguous by the existing gate's own
+      // criteria (non-truncated, non-zero exit code, `--expect fail`).
+      expect(
+        result.warnings.some((w) => /produced no output at all/.test(w)),
+      ).toBe(false);
+      expect(
+        result.warnings.some((w) => /did not match the mutant run/.test(w)),
+      ).toBe(false);
+    }, 20000);
+
+    it("the BASELINE side, default path (no --pass-regex): a baseline killed under a surviving wrapper is `baseline_failed`, with the 137 named as a possibly cut-short run", async () => {
+      useLockDir();
+      const { repo } = initRepoWith(SELF_KILLING_RUNNER_JS);
+
+      const result = await probe({
+        file: "runner.js",
+        line: 1,
+        form: "replace",
+        replaceText: 'console.log("irrelevant");',
+        testCommand: WRAPPED_TEST_COMMAND,
+        isolation: "inplace",
+        expect: "fail",
+        cwd: repo,
+        logDir: makeTmpDir(),
+      });
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("baseline_failed");
+      expect(result.baseline?.exitCode).toBe(137);
+      expect(result.baseline?.timedOut).toBe(false);
+      expect(
+        result.warnings.some((w) => FAIL_DIRECTION_BASELINE_WARNING.test(w)),
+      ).toBe(true);
+      expect(
+        result.warnings.some((w) => NO_EXIT_CODE_SIGNAL_WARNING.test(w)),
+      ).toBe(false);
     }, 20000);
   });
 
