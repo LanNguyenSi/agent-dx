@@ -598,10 +598,8 @@ function exemptsScratchRoot(root: string, scratchRoot: string): boolean {
  * granted, even where the shell would in fact still reach the
  * isolation copy. Practical shapes this covers: a `--log-dir` mention
  * immediately followed by a shell operator with legitimate isolation
- * traffic after it (`cd <log-dir> && node t.js`); a command whose line
- * ending after the mention is CRLF rather than a bare `\n` (the `\r`
- * is not one of the four terminators, so `skipLineContinuations` never
- * reaches the newline that would otherwise validate it); a mention
+ * traffic after it (`cd <log-dir> && node t.js`); any line ending
+ * directly after the mention (LF or CRLF); a mention
  * immediately followed by a comment marker (`<log-dir>#note`); and a
  * mention used as an unquoted `PATH` segment (`PATH=<log-dir>:/usr/bin`,
  * where `:` is not a terminator either). Each of these reaches the

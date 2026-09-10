@@ -487,97 +487,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `escapingRootMentions`'s `--log-dir` exclusion no longer swallows a
-  SIBLING of the log dir along with it (task `5f9c57de`, closing the
-  residual task `5bf16459` left named: `probe` reported `survived`
-  instead of `test_command_escapes_isolation` for `-l <root>/l` beside a
-  test command naming `<root>/l@2/y.js`, measured on the built CLI).
-  The wide/narrow split task `5bf16459` introduced for the `\`+ANSI-C
-  sub-rule only is now the WHOLE boundary decision for the SCRATCH
-  (`--log-dir`) spelling, in its own function (`isScratchPathBoundaryAt`)
-  rather than a parameter shared with the root's own rule
-  (`isPathBoundaryAt`): only `/`, a backslash-escaped `/`, a
-  backslash-newline pair followed by one of those, and a hard shell word
-  ender (`isHardWordEnder`: the shell's own separator set and nothing
-  wider -- space, tab, newline, `|`, `&`, `;`, `<`, `>`, `(`, `)`, or the
-  end of the text) end the scratch match now, not every character a
-  filename may still legally carry (`@`, `~`, `,`, `=`, `{`, `?`) or `$`,
-  which starts a shell expansion the scan does not model. The root's own
-  wide rule (`isPathBoundaryAt`) is unchanged. Pinned both directions: a
-  `@` sibling, a `~` sibling and a `$`-expansion suffix right after the
-  log-dir spelling are reported, the same at the `escapingRootMentions`
-  level and through a real `probe` run; the genuine exemption (a path
-  under the log dir, e.g. `<root>/l/wt-1/wt`) still holds; the narrow
-  rule's own over-refusal at an ANSI-C junction (README, this residual
-  list) stays a documented residual, unclosed by this task.
-
-  A follow-up round on the same task closed a second gap the
-  `isHardWordEnder` above still had, both introduced by the ender set
-  above rather than pre-existing: `/\s/`, the regex class the ender
-  check first shipped with, admits every non-ASCII whitespace code
-  point (U+00A0, U+2000-U+200A, U+2028/U+2029, U+202F, U+205F, U+3000,
-  U+FEFF, and CR/VT/FF) even though none of them is a shell IFS
-  separator and all of them are legal filename characters, so a
-  `<log-dir><NBSP>2` sibling (or one named with any of the others) read
-  as ending the scratch match validly and was exempted, `probe`
-  reporting `survived` instead of `test_command_escapes_isolation`
-  (measured on the built CLI; refused before the class was widened).
-  Fixed by enumerating the shell's ASCII separators explicitly instead
-  of a regex whitespace class. The same round also removed `'`, `"` and
-  a backtick from the ender set (pre-existing, not introduced by this
-  task, but left open by the round that closed the sibling gap above):
-  the shell RE-JOINS a word across a quoted or backtick-substituted
-  segment (`/x/l"2"/y.js` lexes as one word, `/x/l2/y.js`), so treating
-  one of those characters as ending the scratch match was not proof the
-  log dir's spelling stood alone there, and `<log-dir>"2"/y.js`,
-  `<log-dir>'2'/y.js` and `` <log-dir>`2`/y.js `` each exempted the real
-  sibling `<root>/l2` along with the log dir. The cost of closing it: a
-  BARE quoted `--log-dir` mention that ends exactly at its own closing
-  quote, with nothing shell-significant after it, is now refused rather
-  than exempted -- a new documented residual (README, this file, this
-  function's own docblock), the over-refusal trade this scan makes
-  everywhere else. Pinned at the `escapingRootMentions` level (the
+  SIBLING of the log dir along with it (task `5f9c57de`): the scratch
+  (`--log-dir`) spelling now has its own boundary function,
+  `isScratchPathBoundaryAt`, separate from the root's own wide rule
+  (`isPathBoundaryAt`, unchanged). It accepts exactly four terminators --
+  `/`, a backslash-escaped `/`, a backslash-newline pair followed by one
+  of those two, or the end of the text -- none of which is ever itself a
+  legal filename character, so none can manufacture an exempt region a
+  sibling name rides through. This closes every sibling shape whose name
+  continues the log dir's own spelling with a filename-legal word
+  terminator -- `@`, `~`, `,`, `=`, `{`, `?`, a non-ASCII whitespace code
+  point, or a quote (bare or wrapping a continuing sibling, including
+  under `'`, `"` or a backtick, since the shell re-joins a word across a
+  quoted or backtick-substituted segment) -- and the shell's own
+  separator set (space, tab, newline, `|`, `&`, `;`, `<`, `>`, `(`, `)`)
+  once quoted, all previously read as ending the scratch match and
+  exempting the sibling, and the root mention underneath it, right along
+  with the log dir itself. The trade is one GENERAL over-refusal instead:
+  a bare `--log-dir` mention followed by anything other than the four
+  terminators is refused rather than excluded, even where the shell would
+  in fact still reach the isolation copy -- for example a mention
+  immediately followed by a shell operator with legitimate isolation
+  traffic after it (`cd <log-dir> && node t.js`), any line ending
+  directly after the mention (LF or CRLF), a trailing comment marker
+  (`<log-dir>#note`), or an unquoted `PATH` segment
+  (`PATH=<log-dir>:/usr/bin`). Pinned at the `escapingRootMentions` level
+  (the quoted-ender siblings under every quote style and `&`/`(`/`;`, the
   non-ASCII whitespace siblings including a miscased one under an
-  injected `caseInsensitive` flag, the three quoted/backtick sibling
-  forms, the bare-quoted-mention residual itself, and the genuine
-  exemption still holding, including inside quotes) and through a real
-  `probe` run (a U+00A0 sibling directory).
-
-  A third round on the same task (`5f9c57de`) closed the boundary
-  rule's remaining gap: `isHardWordEnder` (the shell's own separator
-  set -- space, tab, newline, `|`, `&`, `;`, `<`, `>`, `(`, `)`) is
-  deleted outright, because every one of those characters is ALSO a
-  legal filename character once quoted, so a sibling directory named
-  `<log-dir> 2`, `<log-dir>&2`, `<log-dir>(2` or `<log-dir>;2` still
-  rode through the ender set: `-l <root>/l` beside a real `<root>/l 2`
-  sibling directory, reached through a test command naming `node
-  "<root>/l 2/y.js"`, let the double-quoted space sibling run against
-  the real tree, `probe` reporting `survived` instead of
-  `test_command_escapes_isolation` (measured on the built CLI, pre-fix
-  and post-fix). `isScratchPathBoundaryAt` now accepts exactly four
-  terminators: `/`, a backslash-escaped `/`, a backslash-newline pair
-  followed by one of those two, or the end of the text -- none of which
-  is ever itself a filename character, so none can manufacture an
-  exempt region a sibling name rides through. This is a strictly
-  narrower rule than the ender set it replaces, so the fix is a
-  redesign rather than an enumeration fix: no finite set of "hard"
-  enders closes the class, since a quote turns any shell separator
-  character into a legal filename byte somewhere. The cost is now one
-  GENERAL over-refusal rather than two named ones: a bare `--log-dir`
-  mention followed by anything other than the four terminators above is
-  refused rather than excluded, even where the shell would in fact
-  still reach the isolation copy -- for example `cd <log-dir> && node
-  t.js`, a CRLF-spelled command line, `<log-dir>#note`, or an unquoted
-  `PATH=<log-dir>:/usr/bin`. The ANSI-C-junction and bare-quoted-mention
-  residuals named by the previous two rounds are folded into this one
-  general rule, not separate cases. Pinned at the `escapingRootMentions`
-  level (the quoted-ender siblings under every quote style and `&`/`(`/
-  `;`, the unquoted space sibling, the accepting half unquoted and
-  quoted and across a backslash-escaped separator, a backslash-newline
-  pair and end of text, the `cd <log-dir> && ...` and CRLF
-  over-refusals, and a miscased quoted-ender sibling under an injected
-  `caseInsensitive` flag) and through a real `probe` run (a double-
-  quoted `<root>/l 2` sibling directory refused; a genuine `-i
-  worktree` run under the same `--log-dir` still completes).
+  injected `caseInsensitive` flag, the unquoted space sibling, the
+  accepting half unquoted and quoted and across a backslash-escaped
+  separator, a backslash-newline pair and end of text, and the general
+  over-refusal shapes above) and through a real `probe` run (a double-
+  quoted `<root>/l 2` sibling directory refused; a genuine `-i worktree`
+  run under the same `--log-dir` still completes).
 
 - `probe` refuses a test command, `--pre`, or an `--env` value that
   escapes `-i worktree`'s isolation copy (task `5bf16459`): a `-t` command

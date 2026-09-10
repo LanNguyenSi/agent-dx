@@ -804,8 +804,8 @@ text) is refused rather than excluded, even where the shell would in
 fact still reach the isolation copy through it. Practical shapes this
 covers: a `--log-dir` mention immediately followed by a shell operator
 with legitimate isolation traffic after it (`cd <log-dir> && node
-t.js`); a command whose line ending after the mention is CRLF rather
-than a bare `\n`; a mention immediately followed by a comment marker
+t.js`); any line ending directly after the mention (LF or CRLF); a
+mention immediately followed by a comment marker
 (`<log-dir>#note`); and a mention used as an unquoted `PATH` segment
 (`PATH=<log-dir>:/usr/bin`). (Every sibling shape this closes is
 folded into that one general rule now: a sibling of the log dir whose
