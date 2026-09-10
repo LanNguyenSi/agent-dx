@@ -942,3 +942,126 @@ describe("escapingRootMentions(): closing isHardWordEnder's non-ASCII-whitespace
     ]);
   });
 });
+
+describe("escapingRootMentions(): the scratch match's own boundary is closed to `/`, `\\/`, a backslash-newline pair, or end of text only (round 3)", () => {
+  it("quoted-ender siblings are reported, not exempted: a shell separator character that is ALSO a legal filename character no longer validates the scratch match once it sits inside a quoted or bare sibling name", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    // Every one of these reaches a REAL sibling directory
+    // (`<root>/l 2`, `<root>/l&2`, `<root>/l(2`, `<root>/l;2`) once the
+    // shell lexes the quoting: `"<root>/l 2/y.js"` and
+    // `'<root>/l 2/y.js'` are each a single shell word, and the same
+    // holds for the `&`/`(`/`;` forms. The round-2 `isHardWordEnder`
+    // rule treated the character right after the log dir's spelling
+    // (space, `&`, `(`, `;`) as ending the scratch match there,
+    // exempting the sibling -- and the root mention underneath it --
+    // along with the log dir itself; that is the halt this round
+    // closes.
+    for (const text of [
+      `node "${scratchRoot} 2/y.js"`,
+      `node '${scratchRoot} 2/y.js'`,
+      `node "${scratchRoot}&2/y.js"`,
+      `node "${scratchRoot}(2/y.js"`,
+      `node '${scratchRoot};2/y.js'`,
+    ]) {
+      expect({
+        text,
+        mentions: escapingRootMentions(text, root, scratchRoot),
+      }).toEqual({ text, mentions: [scratchRoot] });
+    }
+  });
+
+  it("an unquoted sibling separated from the log dir's spelling by a bare space is reported too: a bare mention followed by a space and a further name is a SIBLING spelling, not a terminator", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const text = `node ${scratchRoot} 2/y.js`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([
+      scratchRoot,
+    ]);
+  });
+
+  it("the accepting half stays pinned: a genuine isolation-copy path under the log dir is exempt unquoted and inside either quote style", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const copy = path.join(scratchRoot, "wt-1", "wt", "x.js");
+    for (const text of [`node ${copy}`, `node "${copy}"`, `node '${copy}'`]) {
+      expect({
+        text,
+        mentions: escapingRootMentions(text, root, scratchRoot),
+      }).toEqual({ text, mentions: [] });
+    }
+  });
+
+  it("the accepting half stays pinned: a backslash-escaped separator (`\\/`) right after the log dir's spelling is exempt", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const text = `node ${scratchRoot}\\/wt-1/wt`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([]);
+  });
+
+  it("the accepting half stays pinned: a backslash-newline pair right after the log dir's spelling, followed by a `/`, is exempt", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const text = `node ${scratchRoot}\\\n/wt-1/wt`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([]);
+  });
+
+  it("the accepting half stays pinned: a bare log-dir mention at the end of the text is exempt", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const text = `node ${scratchRoot}`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([]);
+  });
+
+  it("a bare log-dir mention immediately followed by a shell operator over-refuses: `cd <log-dir> && ...` is reported even though a real shell still reaches the isolation copy through it", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    // Documented over-refusal (this file's `escapingRootMentions`
+    // docblock, README, CHANGELOG): a space is not one of the four
+    // accepted terminators, so the scratch match is not validated
+    // here, and the mention is reported instead of exempted.
+    const text = `cd ${scratchRoot} && node t.js`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([
+      scratchRoot,
+    ]);
+  });
+
+  it("a CRLF line ending right after the log-dir mention over-refuses: CR is not one of the four accepted terminators", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const text = `node ${scratchRoot}\r\n2/y.js`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([
+      scratchRoot,
+    ]);
+  });
+
+  it("the exact-name sibling `<root>/l2` stays refused, unaffected control: it never validated the scratch match under the wide rule, the ender rule, or this rule", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const text = `node ${scratchRoot}2/y.js`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([
+      text.slice(5),
+    ]);
+  });
+
+  it("a miscased quoted-ender sibling is reported under an injected caseInsensitive flag", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const miscased = scratchRoot.toUpperCase();
+    expect(miscased).not.toBe(scratchRoot);
+    const text = `node "${miscased} 2/y.js"`;
+    expect(escapingRootMentions(text, root, scratchRoot, true)).toEqual([
+      miscased,
+    ]);
+  });
+});

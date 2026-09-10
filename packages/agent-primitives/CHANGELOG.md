@@ -542,6 +542,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exemption still holding, including inside quotes) and through a real
   `probe` run (a U+00A0 sibling directory).
 
+  A third round on the same task (`5f9c57de`) closed the boundary
+  rule's remaining gap: `isHardWordEnder` (the shell's own separator
+  set -- space, tab, newline, `|`, `&`, `;`, `<`, `>`, `(`, `)`) is
+  deleted outright, because every one of those characters is ALSO a
+  legal filename character once quoted, so a sibling directory named
+  `<log-dir> 2`, `<log-dir>&2`, `<log-dir>(2` or `<log-dir>;2` still
+  rode through the ender set: `-l <root>/l` beside a real `<root>/l 2`
+  sibling directory, reached through a test command naming `node
+  "<root>/l 2/y.js"`, let the double-quoted space sibling run against
+  the real tree, `probe` reporting `survived` instead of
+  `test_command_escapes_isolation` (measured on the built CLI, pre-fix
+  and post-fix). `isScratchPathBoundaryAt` now accepts exactly four
+  terminators: `/`, a backslash-escaped `/`, a backslash-newline pair
+  followed by one of those two, or the end of the text -- none of which
+  is ever itself a filename character, so none can manufacture an
+  exempt region a sibling name rides through. This is a strictly
+  narrower rule than the ender set it replaces, so the fix is a
+  redesign rather than an enumeration fix: no finite set of "hard"
+  enders closes the class, since a quote turns any shell separator
+  character into a legal filename byte somewhere. The cost is now one
+  GENERAL over-refusal rather than two named ones: a bare `--log-dir`
+  mention followed by anything other than the four terminators above is
+  refused rather than excluded, even where the shell would in fact
+  still reach the isolation copy -- for example `cd <log-dir> && node
+  t.js`, a CRLF-spelled command line, `<log-dir>#note`, or an unquoted
+  `PATH=<log-dir>:/usr/bin`. The ANSI-C-junction and bare-quoted-mention
+  residuals named by the previous two rounds are folded into this one
+  general rule, not separate cases. Pinned at the `escapingRootMentions`
+  level (the quoted-ender siblings under every quote style and `&`/`(`/
+  `;`, the unquoted space sibling, the accepting half unquoted and
+  quoted and across a backslash-escaped separator, a backslash-newline
+  pair and end of text, the `cd <log-dir> && ...` and CRLF
+  over-refusals, and a miscased quoted-ender sibling under an injected
+  `caseInsensitive` flag) and through a real `probe` run (a double-
+  quoted `<root>/l 2` sibling directory refused; a genuine `-i
+  worktree` run under the same `--log-dir` still completes).
+
 - `probe` refuses a test command, `--pre`, or an `--env` value that
   escapes `-i worktree`'s isolation copy (task `5bf16459`): a `-t` command
   of the shape `cd /abs/worktree/backend && npx vitest run ...` never
