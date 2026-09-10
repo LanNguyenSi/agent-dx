@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `probe`'s 128 + N band warning on a failing baseline now precedes
+  every baseline-side refusal (task `150b07ba`): the two refusals that
+  used to return ahead of it, the evidence gate
+  (`baseline_evidence_not_matched`) and the zero-tests gate
+  (`no_tests_executed`), now carry it too. Separately, the warning
+  names the reason the result actually carries (`no_tests_executed`,
+  `baseline_evidence_not_matched`, or `baseline_failed`) instead of
+  always reading "the baseline_failed verdict"; on the plain
+  `baseline_failed` path only that wording changed. A baseline killed under a surviving wrapper (exit `137`)
+  with both `--pass-regex` and `--require-baseline-evidence` set now
+  reports both that nothing proves tests ran and that the run may have
+  been cut short, not only the former; the same pairing now also holds
+  for a band-code baseline whose own output shows zero tests executed.
+
 ### Added
 
 - `probe -i worktree`'s isolation copy auto-links a composer project's
