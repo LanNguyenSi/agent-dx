@@ -36,10 +36,12 @@ Each package is self-contained, no root install.
 
 Publishing runs in CI via npm Trusted Publishing (OIDC, `id-token: write`;
 see `.github/workflows/publish-npm.yml`) and needs no npm token. The other
-npm writes (deprecate, dist-tag) still run via the `NPM_TOKEN` repository
-secret (see `npm-deprecate.yml` and `npm-dist-tag.yml`), since OIDC only
-covers `npm publish`. There is no working local npm token; do not debug a
-local `E401`/`E404`, trigger the workflow instead.
+npm writes (deprecate, dist-tag) still run via the `NPM_AGENT_DX_TOKEN`
+repository secret, a granular automation token scoped to this workflow's
+allowlisted packages (orchestrator-workflow, okf-kit) (see `npm-deprecate.yml`
+and `npm-dist-tag.yml`), since OIDC only covers `npm publish`. There is no
+working local npm token; do not debug a local `E401`/`E404`, trigger the
+workflow instead.
 
 ### Releasing okf-kit
 
