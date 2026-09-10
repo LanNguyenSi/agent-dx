@@ -1324,4 +1324,111 @@ describe("probe(): test-command isolation-escape detection", () => {
     expect(result.reason).toBeUndefined();
     expect(result.status).toBe("killed");
   });
+
+  it("a --log-dir under the repository root does not exempt a `@` SIBLING of the log dir: the test command still refuses", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const logDir = path.join(repo, "l");
+    fs.mkdirSync(logDir, { recursive: true });
+    // `<repo>/l@2/y.js` names a SIBLING of the log dir (`<repo>/l@2`),
+    // not the log dir itself or a path under it, so the exemption must
+    // not swallow it along with the log dir's own spelling: the
+    // repository-root mention the sibling's path also contains (the
+    // `<repo>/l` prefix it shares with the log dir) must still refuse
+    // the run.
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        logDir,
+        testCommand: `node ${logDir}@2/y.js`,
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+  });
+
+  it("a --log-dir under the repository root does not exempt a sibling directory named with a non-ASCII whitespace code point (U+00A0): the test command still refuses", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const logDir = path.join(repo, "l");
+    fs.mkdirSync(logDir, { recursive: true });
+    // `<repo>/l 2` is a real SIBLING directory of the log dir, not
+    // the log dir itself or a path under it: U+00A0 is not a shell IFS
+    // separator and is a legal filename character, so it must not be
+    // read as ending the log dir's own spelling either. Uses a real
+    // directory (rather than only the containment-level unit test)
+    // because the case-insensitivity measurement and the actual
+    // filesystem round-trip both run for real through `probe()` here.
+    const sibling = `${logDir} 2`;
+    fs.mkdirSync(sibling, { recursive: true });
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        logDir,
+        testCommand: `node ${sibling}/y.js`,
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+  });
+
+  // --- Round 3: the scratch match's own boundary no longer accepts
+  // the shell's separator set (space, tab, newline, `|`, `&`, `;`,
+  // `<`, `>`, `(`, `)`) as ending the log dir's spelling, only `/`,
+  // `\/`, a backslash-newline pair followed by one of those, or the
+  // end of the text -- every one of those separator characters is
+  // also a legal filename character once quoted, so a QUOTED sibling
+  // directory rode through the old rule: `-l <repo>/l` beside a real
+  // `<repo>/l 2` directory, reached through `-t 'node "<repo>/l
+  // 2/y.js"'`, used to read as ending the scratch match at the space
+  // (a "hard ender"), exempting the sibling and the root mention
+  // beneath it and letting the test command run against the real
+  // tree. ---
+
+  it("a real `<log-dir> 2` sibling directory reached through a double-quoted test command is refused, not exempted", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const logDir = path.join(repo, "l");
+    fs.mkdirSync(logDir, { recursive: true });
+    // The sibling is a REAL directory (not merely a string this scan
+    // has to reason about) and the command reaches it through a
+    // DOUBLE-QUOTED path: `"<repo>/l 2/y.js"` lexes as the single
+    // shell word `<repo>/l 2/y.js`, so the space inside the quotes is
+    // not a shell word boundary at all, and the scratch match must not
+    // read it as one either.
+    const sibling = `${logDir} 2`;
+    fs.mkdirSync(sibling, { recursive: true });
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        logDir,
+        testCommand: `node "${sibling}/y.js"`,
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+  });
+
+  it("the genuine --log-dir exemption still completes a real -i worktree run: an isolation-copy path under `-l <repo>/l` does not over-refuse the run itself", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const logDir = path.join(repo, "l");
+    fs.mkdirSync(logDir, { recursive: true });
+    const underLogDir = path.join(logDir, "wt-1", "wt");
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        logDir,
+        // The mention resolves under this run's own --log-dir (a `/`
+        // continues the scratch match right past the log dir's own
+        // spelling, one of the four accepted terminators), so it must
+        // not read as an escape; the command still runs for real, so
+        // this reaches an actual kill verdict rather than merely
+        // avoiding a refusal.
+        testCommand: `echo ${underLogDir} > /dev/null && node fixture.test.js`,
+      }),
+    );
+    expect(result.reason).toBeUndefined();
+    expect(result.status).toBe("killed");
+  });
 });

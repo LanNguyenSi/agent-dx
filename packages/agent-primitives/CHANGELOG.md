@@ -502,6 +502,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `escapingRootMentions`'s `--log-dir` exclusion no longer swallows a
+  SIBLING of the log dir along with it (task `5f9c57de`): the scratch
+  (`--log-dir`) spelling now has its own boundary function,
+  `isScratchPathBoundaryAt`, separate from the root's own wide rule
+  (`isPathBoundaryAt`, unchanged). It accepts exactly four terminators --
+  `/`, a backslash-escaped `/`, a backslash-newline pair followed by one
+  of those two, or the end of the text -- none of which is ever itself a
+  legal filename character, so none can manufacture an exempt region a
+  sibling name rides through. This closes every sibling shape whose name
+  continues the log dir's own spelling with a filename-legal word
+  terminator -- `@`, `~`, `,`, `=`, `{`, `?`, a non-ASCII whitespace code
+  point, or a quote (bare or wrapping a continuing sibling, including
+  under `'`, `"` or a backtick, since the shell re-joins a word across a
+  quoted or backtick-substituted segment) -- and the shell's own
+  separator set (space, tab, newline, `|`, `&`, `;`, `<`, `>`, `(`, `)`)
+  once quoted, all previously read as ending the scratch match and
+  exempting the sibling, and the root mention underneath it, right along
+  with the log dir itself. The trade is one GENERAL over-refusal instead:
+  a bare `--log-dir` mention followed by anything other than the four
+  terminators is refused rather than excluded, even where the shell would
+  in fact still reach the isolation copy -- for example a mention
+  immediately followed by a shell operator with legitimate isolation
+  traffic after it (`cd <log-dir> && node t.js`), any line ending
+  directly after the mention (LF or CRLF), a trailing comment marker
+  (`<log-dir>#note`), or an unquoted `PATH` segment
+  (`PATH=<log-dir>:/usr/bin`). Pinned at the `escapingRootMentions` level
+  (the quoted-ender siblings under every quote style and `&`/`(`/`;`, the
+  non-ASCII whitespace siblings including a miscased one under an
+  injected `caseInsensitive` flag, the unquoted space sibling, the
+  accepting half unquoted and quoted and across a backslash-escaped
+  separator, a backslash-newline pair and end of text, and the general
+  over-refusal shapes above) and through a real `probe` run (a double-
+  quoted `<root>/l 2` sibling directory refused; a genuine `-i worktree`
+  run under the same `--log-dir` still completes).
+
 - `probe` refuses a test command, `--pre`, or an `--env` value that
   escapes `-i worktree`'s isolation copy (task `5bf16459`): a `-t` command
   of the shape `cd /abs/worktree/backend && npx vitest run ...` never
@@ -614,10 +649,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cd`s using an unspelled path, a third unrelated symlink alias to the
   root, and a root path containing a character neither spelling represents
   each reach the real tree without being refused (README, same list); so
-  does, for the `--log-dir` exclusion only, a sibling of the log dir whose
+  did, for the `--log-dir` exclusion only, a sibling of the log dir whose
   name continues its spelling with a filename-legal word terminator
   (`<root>/l@2/y.js` beside `--log-dir <root>/l`), which the exclusion
-  swallows along with the log dir itself (named, not closed). The
+  swallowed along with the log dir itself (named, not closed at the time;
+  closed by task `5f9c57de`, below). The
   rounds this took, the shapes each one closed and the reproductions
   behind them are in the run files for this task.
 

@@ -775,3 +775,321 @@ describe("isPathContained() (sanity, unchanged by this task)", () => {
     expect(isPathContained("/a/b", "/a")).toBe(false);
   });
 });
+
+describe("escapingRootMentions(): the SCRATCH spelling's own boundary rule", () => {
+  it("a `@` sibling of the --log-dir is reported, not exempted: the exclusion's match must not read `@` as ending the log dir's spelling", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    // `<root>/l@2/y.js` names a SIBLING of the log dir (`<root>/l@2`),
+    // not the log dir itself, so it must not be excluded along with
+    // it; the root mention it also contains (the `<root>/l` prefix it
+    // shares with the log dir's own spelling) must survive.
+    const text = `node ${scratchRoot}@2/y.js`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([
+      scratchRoot,
+    ]);
+  });
+
+  it("a `~` sibling of the --log-dir is reported, not exempted", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const text = `node ${scratchRoot}~2/y.js`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([
+      scratchRoot,
+    ]);
+  });
+
+  it("a `$`-expansion suffix right after the --log-dir spelling is reported: `$` starts an expansion this scan does not model, so it must not end the exclusion's match either", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const text = `node ${scratchRoot}$SUFFIX/y.js`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([
+      scratchRoot,
+    ]);
+  });
+
+  it("the other filename-legal word terminators from the same sibling shape (`,`, `=`, `{`, `?`) are reported too", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    for (const suffix of [",2/y.js", "=2/y.js", "{2}/y.js", "?2/y.js"]) {
+      const text = `node ${scratchRoot}${suffix}`;
+      expect({
+        suffix,
+        mentions: escapingRootMentions(text, root, scratchRoot),
+      }).toEqual({ suffix, mentions: [scratchRoot] });
+    }
+  });
+
+  it("the real exemption still holds: a genuine isolation-copy path under the --log-dir is excluded, not reported", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const copy = path.join(scratchRoot, "wt-1", "wt");
+    expect(
+      escapingRootMentions(`cd ${copy} && node t.js`, root, scratchRoot),
+    ).toEqual([]);
+  });
+
+  it("the exact-name sibling `<root>/l2` stays refused (unaffected control): a portable-set character right after the log dir's spelling never validated the exclusion's match, before or after this change", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    // `<root>/l2/y.js` is itself a path under the repository root (not
+    // merely a prefix collision with the log dir), so it is a genuine
+    // root mention and must stay refused; "2" never validated the
+    // scratch match as ending at the log dir's spelling either, under
+    // the old narrow rule or the new one, so this control is
+    // unaffected by the boundary change.
+    const text = `node ${scratchRoot}2/y.js`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([
+      text.slice(5),
+    ]);
+  });
+});
+
+describe("escapingRootMentions(): non-ASCII-whitespace and quoted-ender siblings are reported, not exempted", () => {
+  it("siblings named with a non-ASCII whitespace code point (U+00A0, U+3000, U+FEFF) right after the --log-dir spelling are reported, not exempted", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    // None of these is a shell IFS separator and all are legal
+    // filename characters, so `/\s/` (the regex class the ender check
+    // shipped with) wrongly treated each as ending the scratch match;
+    // a `$` right after the whitespace char stops the reported
+    // region's own extension so the expectation stays a single
+    // appended character.
+    for (const ws of [" ", "　", "﻿"]) {
+      const text = `node ${scratchRoot}${ws}$X`;
+      expect({
+        ws,
+        mentions: escapingRootMentions(text, root, scratchRoot),
+      }).toEqual({ ws, mentions: [`${scratchRoot}${ws}`] });
+    }
+  });
+
+  it("a sibling named with a CR right after the --log-dir spelling is reported, not exempted", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    // CR is not a shell IFS separator either and is a legal filename
+    // character; unlike the non-ASCII cases above, `continuesComponentName`
+    // already rejects it (it is ASCII and outside the portable set), so
+    // the reported region stops right at it rather than absorbing it.
+    const text = `node ${scratchRoot}\r2/y.js`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([
+      scratchRoot,
+    ]);
+  });
+
+  it("siblings continued by a quote or a backtick right after the --log-dir spelling are reported, not exempted: the shell re-joins the word across the quoted or substituted segment", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    // `/x/l"2"/y.js` lexes as the single shell word `/x/l2/y.js`, and a
+    // backtick command substitution re-joins the same way, so treating
+    // the quote or backtick as ending the scratch match wrongly
+    // exempted the real sibling `<root>/l2` along with the log dir.
+    for (const suffix of ['"2"/y.js', "'2'/y.js", "`2`/y.js"]) {
+      const text = `node ${scratchRoot}${suffix}`;
+      expect({
+        suffix,
+        mentions: escapingRootMentions(text, root, scratchRoot),
+      }).toEqual({ suffix, mentions: [scratchRoot] });
+    }
+  });
+
+  it("a BARE quoted --log-dir mention that ends exactly at its own closing quote is now reported: the documented over-refusal fix 2 trades for closing the quote/backtick sibling gap above", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const text = `cd '${scratchRoot}' && node t.js`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([
+      scratchRoot,
+    ]);
+  });
+
+  it("the genuine exemption still holds, unquoted and inside quotes, when a further path segment follows", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const copy = path.join(scratchRoot, "wt-1", "wt");
+    expect(
+      escapingRootMentions(`cd ${copy} && node t.js`, root, scratchRoot),
+    ).toEqual([]);
+    // Wrapping the same genuine mention in quotes does not disturb the
+    // exemption: it is decided by the character right after the
+    // literal --log-dir spelling (here `/`, which
+    // `isScratchPathBoundaryAt` accepts as a terminator), not by
+    // whether a quote encloses the whole thing.
+    expect(
+      escapingRootMentions(`cd '${copy}' && node t.js`, root, scratchRoot),
+    ).toEqual([]);
+  });
+
+  it("a miscased sibling named with a non-ASCII whitespace code point is reported under an injected caseInsensitive flag", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const miscased = scratchRoot.toUpperCase();
+    expect(miscased).not.toBe(scratchRoot);
+    const text = `node ${miscased} $X`;
+    expect(escapingRootMentions(text, root, scratchRoot, true)).toEqual([
+      `${miscased} `,
+    ]);
+  });
+});
+
+describe("escapingRootMentions(): the scratch match's own boundary is closed to `/`, `\\/`, a backslash-newline pair, or end of text only", () => {
+  it("quoted-ender siblings are reported, not exempted: a shell separator character that is ALSO a legal filename character no longer validates the scratch match once it sits inside a quoted or bare sibling name", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    // Every one of these reaches a REAL sibling directory
+    // (`<root>/l 2`, `<root>/l&2`, `<root>/l(2`, `<root>/l;2`) once the
+    // shell lexes the quoting: `"<root>/l 2/y.js"` and
+    // `'<root>/l 2/y.js'` are each a single shell word, and the same
+    // holds for the `&`/`(`/`;` forms. An earlier, ender-based rule
+    // treated the character right after the log dir's spelling
+    // (space, `&`, `(`, `;`) as ending the scratch match there,
+    // exempting the sibling -- and the root mention underneath it --
+    // along with the log dir itself; that is the halt this round
+    // closes.
+    for (const text of [
+      `node "${scratchRoot} 2/y.js"`,
+      `node '${scratchRoot} 2/y.js'`,
+      `node "${scratchRoot}&2/y.js"`,
+      `node "${scratchRoot}(2/y.js"`,
+      `node '${scratchRoot};2/y.js'`,
+    ]) {
+      expect({
+        text,
+        mentions: escapingRootMentions(text, root, scratchRoot),
+      }).toEqual({ text, mentions: [scratchRoot] });
+    }
+  });
+
+  it("an unquoted sibling separated from the log dir's spelling by a bare space is reported too: a bare mention followed by a space and a further name is a SIBLING spelling, not a terminator", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const text = `node ${scratchRoot} 2/y.js`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([
+      scratchRoot,
+    ]);
+  });
+
+  it("the accepting half stays pinned: a genuine isolation-copy path under the log dir is exempt unquoted and inside either quote style", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const copy = path.join(scratchRoot, "wt-1", "wt", "x.js");
+    for (const text of [`node ${copy}`, `node "${copy}"`, `node '${copy}'`]) {
+      expect({
+        text,
+        mentions: escapingRootMentions(text, root, scratchRoot),
+      }).toEqual({ text, mentions: [] });
+    }
+  });
+
+  it("the accepting half stays pinned: a backslash-escaped separator (`\\/`) right after the log dir's spelling is exempt", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const text = `node ${scratchRoot}\\/wt-1/wt`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([]);
+  });
+
+  it("the accepting half stays pinned: a backslash-newline pair right after the log dir's spelling, followed by a `/`, is exempt", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const text = `node ${scratchRoot}\\\n/wt-1/wt`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([]);
+  });
+
+  it("the accepting half stays pinned: a bare log-dir mention at the end of the text is exempt", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const text = `node ${scratchRoot}`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([]);
+  });
+
+  it("a bare log-dir mention immediately followed by a shell operator over-refuses: `cd <log-dir> && ...` is reported even though a real shell still reaches the isolation copy through it", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    // Documented over-refusal (this file's `escapingRootMentions`
+    // docblock, README, CHANGELOG): a space is not one of the four
+    // accepted terminators, so the scratch match is not validated
+    // here, and the mention is reported instead of exempted.
+    const text = `cd ${scratchRoot} && node t.js`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([
+      scratchRoot,
+    ]);
+  });
+
+  it("a CRLF line ending right after the log-dir mention over-refuses: CR is not one of the four accepted terminators", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const text = `node ${scratchRoot}\r\n2/y.js`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([
+      scratchRoot,
+    ]);
+  });
+
+  it("the exact-name sibling `<root>/l2` stays refused, unaffected control: it never validated the scratch match under the wide rule, the ender rule, or this rule", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const text = `node ${scratchRoot}2/y.js`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([
+      text.slice(5),
+    ]);
+  });
+
+  it("a miscased quoted-ender sibling is reported under an injected caseInsensitive flag", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const miscased = scratchRoot.toUpperCase();
+    expect(miscased).not.toBe(scratchRoot);
+    const text = `node "${miscased} 2/y.js"`;
+    expect(escapingRootMentions(text, root, scratchRoot, true)).toEqual([
+      miscased,
+    ]);
+  });
+
+  it("a backslash-newline pair followed by a sibling character is reported, not exempted: the pair is only a terminator when a `/` or `\\/` follows it", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    // Bash deletes a `\`+newline pair outright before running the
+    // word, so `<log-dir>\`+newline+`@2/y.js` lexes as
+    // `<log-dir>@2/y.js` and would reach the real sibling. The pair
+    // itself is not one of the four terminators; only a `/` or `\/`
+    // right after it is, so this stays reported.
+    const text = `node ${scratchRoot}\\\n@2/y.js`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([
+      `${scratchRoot}\\\n`,
+    ]);
+  });
+
+  it("a bare LF directly after the log-dir mention over-refuses: newline is not one of the four accepted terminators", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    // The general over-refusal's most likely real hit: a `--log-dir`
+    // value used on one shell line followed by an unrelated command on
+    // the next.
+    const text = `mkdir -p ${scratchRoot}\nnpm run build`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([
+      scratchRoot,
+    ]);
+  });
+});

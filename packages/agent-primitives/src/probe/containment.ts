@@ -197,31 +197,31 @@ function startsAnsiCNumericEscape(ch: string): boolean {
  * separator) by design; the remedies `ISOLATION_ESCAPE_ENV_FIX_HINT`
  * already names apply to it unchanged.
  *
- * The `ansiCIsBoundary` parameter picks which of the two directions
- * above applies to the `\`+ANSI-C rule specifically, since it is
- * right for one caller and wrong for the other: matching the ROOT's
- * own spelling wants the WIDE rule (`true`, over-refuse), but matching
- * the SCRATCH-ROOT spelling that decides the `--log-dir` exemption in
- * `escapingRootMentions` wants the NARROW rule (`false`, the
- * pre-widening behaviour, where `\`+ANSI-C-starter is just another
- * in-word escape and not a boundary). Widening the scratch match too
- * let a `--log-dir` under the root exempt a region it had no business
- * exempting: with `-l <root>/l` and a test command containing
- * `$'<root>/l\x69b/fixture.test.js'`, the scratch spelling `<root>/l`
- * matched ending right at the `\`+`x`; under the wide rule that reads
- * as a boundary, so the resulting exempt region started at the same
- * index as the ROOT's own mention, and `escapingRootMentions` skipped
- * that root mention too, reaching the real tree unrefused. Under the
- * narrow rule the scratch match ending there is rejected outright
- * (the same as it would be for a component name character), so the
- * outer root mention survives and is reported, same as it would be
- * without a `--log-dir` naming that spot at all.
+ * This decision is ROOT-only. It used to also decide the SCRATCH-ROOT
+ * spelling that the `--log-dir` exemption in `escapingRootMentions`
+ * matches, gated by an `ansiCIsBoundary` parameter that widened only
+ * the `\`+ANSI-C sub-rule above for the root and narrowed it for the
+ * scratch match. That per-character carve-out closed
+ * one shape (an ANSI-C starter right after a `--log-dir` spelling could
+ * no longer manufacture an exempt region reaching past it) but left the
+ * REST of this function's boundary decision wide for the scratch match
+ * too: every character `continuesComponentName` does not recognize --
+ * not only the true shell word enders, but also a filename-legal
+ * character outside the POSIX-portable set (`@`, `~`, `,`, `=`, `{`,
+ * `?`) and `$`, which starts an expansion this scan does not model --
+ * still ended the scratch match there. A sibling of the log dir whose
+ * name continues the log dir's own spelling with one of those
+ * characters (`<root>/l@2/y.js` beside `--log-dir <root>/l`) then read
+ * as ending the exemption's match at the same boundary, and the
+ * exemption swallowed the sibling, and the root mention underneath it,
+ * right along with the log dir itself. The scratch
+ * match now has its own function, `isScratchPathBoundaryAt` below,
+ * which owns the WHOLE boundary decision instead of sharing this one
+ * through a parameter. That function has since been narrowed again,
+ * past an enumerated "hard ender" set that still under-refused a
+ * quoted sibling (see its own docblock for the current, closed rule).
  */
-function isPathBoundaryAt(
-  text: string,
-  index: number,
-  ansiCIsBoundary: boolean,
-): boolean {
+function isPathBoundaryAt(text: string, index: number): boolean {
   const i = skipLineContinuations(text, index);
   if (i >= text.length) return true;
   const ch = text[i];
@@ -233,9 +233,71 @@ function isPathBoundaryAt(
     // word. A trailing `\` escapes nothing, so the word ends.
     const next = text[i + 1];
     if (next === undefined || next === "/") return true;
-    return ansiCIsBoundary && startsAnsiCNumericEscape(next);
+    return startsAnsiCNumericEscape(next);
   }
   return !continuesComponentName(ch);
+}
+
+/**
+ * The boundary decision for the SCRATCH-ROOT spelling only -- the
+ * `--log-dir` value `escapingRootMentions` matches to decide its own
+ * exemption -- replacing `isPathBoundaryAt`'s rule rather than sharing
+ * it through a parameter (the parameter this function
+ * replaces, and the shape closing it fixes, are on `isPathBoundaryAt`'s
+ * own docblock). `isPathBoundaryAt`'s WIDE rule is right for the ROOT's
+ * own over-refusing match: everything that is not a portable filename
+ * character ends the word there, on purpose, so an unforeseen spelling
+ * over-refuses instead of silently reaching the real tree. That same
+ * width is wrong here, where ending the SCRATCH match validates an
+ * EXEMPTION rather than a refusal, and the exemption exists for exactly
+ * one shape: the isolation copy at `<log-dir>/wt-<uuid>/wt`, which
+ * always continues with a FURTHER path component. The scratch match
+ * therefore ends here ONLY at one of four terminators: a `/`; a
+ * backslash-escaped `/` (`\/`, the same separator spelling
+ * `isPathBoundaryAt` accepts); a backslash-newline pair (deleted by
+ * `skipLineContinuations` before this function ever looks at `ch`)
+ * followed by one of those two; or the end of the text.
+ *
+ * This is deliberately NOT a claim about where a shell word
+ * terminates. An earlier version of this function accepted the
+ * shell's own separator set (space, tab, newline, `|`, `&`, `;`, `<`,
+ * `>`, `(`, `)`) on that theory, but every one of those characters is
+ * also a legal filename character once quoted: a sibling directory
+ * named `<log-dir> 2`, `<log-dir>&2`, `<log-dir>(2` or `<log-dir>;2`
+ * reads as a complete shell word inside a double- or single-quoted
+ * command (`"<log-dir> 2/y.js"`), so treating any of those characters
+ * as ending the scratch match exempted the sibling -- and the root
+ * mention underneath it -- right along with the log dir itself: the
+ * halt this narrowing closes, `-l <root>/l` beside a test command
+ * naming `node "<root>/l 2/y.js"`. No enumerable set of "hard" word
+ * enders closes this, because a quote (or a bare, unquoted use of the
+ * same character as a literal filename byte) makes every shell
+ * separator character a legal filename character somewhere. Accepting
+ * only `/`, `\/`, and end of text sidesteps the problem instead of
+ * enumerating around it: none of those three spellings is ever itself
+ * a filename character, so accepting them can never manufacture an
+ * exempt region a sibling name rides through.
+ *
+ * Every other character rejects the match instead, protecting the
+ * exemption with the same over-refusal trade `isPathBoundaryAt` makes
+ * for the root's own direct scan: a bare `--log-dir` mention followed
+ * by anything other than a further path component -- a space, an
+ * operator, a quote (bare or around a continuing sibling name), or any
+ * other character -- no longer validates the exemption, so the region
+ * underneath it is scanned and reported like any other unexempted
+ * mention. In general, a bare log-dir mention followed by ANYTHING
+ * other than one of the four terminators above now over-refuses (the
+ * general rule this narrowing adopts); the ANSI-C-escape and
+ * bare-quoted-mention cases the previous, ender-based rule named as
+ * residuals are two instances of this same general over-refusal, not
+ * separate cases (README, `escapingRootMentions` below, CHANGELOG).
+ */
+function isScratchPathBoundaryAt(text: string, index: number): boolean {
+  const i = skipLineContinuations(text, index);
+  if (i >= text.length) return true;
+  const ch = text[i];
+  if (ch === "/") return true;
+  return ch === "\\" && text[i + 1] === "/";
 }
 
 /**
@@ -349,18 +411,19 @@ interface SpellingMatch {
  * boundary, spelling by spelling and, within one spelling, left to
  * right. Each spelling is an absolute path, so its matcher always
  * consumes at least the leading separator and the walk always
- * advances. `ansiCIsBoundary` is threaded straight through to
- * `isPathBoundaryAt`: `true` (the ROOT spelling) for the over-refusing
- * wide rule, `false` (the SCRATCH-ROOT spelling) so an ANSI-C escape
- * sitting right after the scratch spelling does not manufacture an
- * exempt region `escapingRootMentions` cannot actually verify (see
- * `isPathBoundaryAt`'s docblock).
+ * advances. `isBoundaryAt` decides what ends a match: `escapingRootMentions`
+ * passes `isPathBoundaryAt` for the ROOT spelling (the over-refusing
+ * wide rule) and `isScratchPathBoundaryAt` for the SCRATCH-ROOT
+ * spelling (the narrow rule that keeps an exempt region from being
+ * manufactured past a filename-legal or expansion-starting character,
+ * see that function's docblock) -- two whole, independent decisions
+ * now rather than one shared rule gated by a flag.
  */
 function matchedRegions(
   text: string,
   spellings: string[],
   caseInsensitive: boolean,
-  ansiCIsBoundary: boolean,
+  isBoundaryAt: (text: string, index: number) => boolean,
 ): SpellingMatch[] {
   const found: SpellingMatch[] = [];
   for (const spelling of spellings) {
@@ -369,7 +432,7 @@ function matchedRegions(
     let match: RegExpExecArray | null;
     while ((match = matcher.exec(text)) !== null) {
       const end = match.index + match[0].length;
-      if (isPathBoundaryAt(text, end, ansiCIsBoundary)) {
+      if (isBoundaryAt(text, end)) {
         found.push({ start: match.index, end });
       }
     }
@@ -526,12 +589,24 @@ function exemptsScratchRoot(root: string, scratchRoot: string): boolean {
  * end (`$'<parent>\x2f<base>/pkg'`, where `<parent>/<base>` is the
  * root: the boundary rule only ever widens at the end of an
  * already-matched spelling, not while a match is still forming); for
- * the scratch-root EXCLUSION only, a sibling of the `--log-dir` whose
- * name continues the log dir's spelling with a filename-legal word
- * terminator (`@`, `~`, `,`, `=`, `$`, `{`, `?`: `<root>/l@2/y.js`
- * beside `--log-dir <root>/l`), which ends the exclusion's match there
- * and excludes the sibling along with it (named, not closed); a
- * spelling broken up by an ANSI-C escape that decodes a root
+ * the scratch-root EXEMPTION only, a general over-refusal
+ * `isScratchPathBoundaryAt` names on its own docblock: a bare
+ * `--log-dir` mention followed by anything other than the four
+ * accepted terminators (`/`, `\/`, a backslash-newline pair followed
+ * by one of those, or the end of the text) no longer validates the
+ * scratch match as complete, so the exemption is refused rather than
+ * granted, even where the shell would in fact still reach the
+ * isolation copy. Practical shapes this covers: a `--log-dir` mention
+ * immediately followed by a shell operator with legitimate isolation
+ * traffic after it (`cd <log-dir> && node t.js`); any line ending
+ * directly after the mention (LF or CRLF); a mention
+ * immediately followed by a comment marker (`<log-dir>#note`); and a
+ * mention used as an unquoted `PATH` segment (`PATH=<log-dir>:/usr/bin`,
+ * where `:` is not a terminator either). Each of these reaches the
+ * real isolation copy exactly as the shell would run it, but is
+ * refused anyway, the same over-refusal trade this scan makes
+ * everywhere else, applied here to protect the exemption; a spelling
+ * broken up by an ANSI-C escape that decodes a root
  * CHARACTER rather than a separator (`$'/x/re\x70o/pkg'`, where
  * `\x70` decodes to `p`), or by a `\c`-style control escape, which
  * cannot decode to a separator either -- the shell reassembles each
@@ -558,14 +633,21 @@ export function escapingRootMentions(
   // and its matches are SKIPPED rather than removed from the text: the
   // scan runs over the original `text` throughout, so every index below
   // indexes the spelling the command actually used. It is matched with
-  // the NARROW (`false`) boundary rule, not the root's own wide one: a
-  // `\`+ANSI-C-starter right after the scratch spelling is not proof
-  // the shell decodes it into a further scratch-root path component,
-  // so it must not manufacture an exempt region there (see
-  // `isPathBoundaryAt`'s docblock for the regression this closes).
+  // its OWN boundary rule (`isScratchPathBoundaryAt`), narrower than the
+  // root's wide one throughout, not only at the ANSI-C sub-rule: a
+  // character the root's own rule would treat as ending the word but
+  // that a filename may still legally carry, or that starts a shell
+  // expansion this scan does not model, must not manufacture an exempt
+  // region there either (see that function's docblock for the
+  // regression this closes).
   const exempt =
     scratchRoot !== undefined && exemptsScratchRoot(root, scratchRoot)
-      ? matchedRegions(text, pathSpellings(scratchRoot), ignoresCase, false)
+      ? matchedRegions(
+          text,
+          pathSpellings(scratchRoot),
+          ignoresCase,
+          isScratchPathBoundaryAt,
+        )
       : [];
 
   const regions: string[] = [];
@@ -574,7 +656,7 @@ export function escapingRootMentions(
     text,
     pathSpellings(root),
     ignoresCase,
-    true,
+    isPathBoundaryAt,
   )) {
     if (exempt.some((e) => match.start >= e.start && match.start < e.end)) {
       continue;

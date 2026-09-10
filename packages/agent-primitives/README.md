@@ -639,11 +639,12 @@ the match:
   same trade the rest of this rule already makes, and the scan does not
   decode the escape to compute a deeper reported region -- it stops right
   before the `\`. This WIDE rule is what matches the root's own spelling;
-  matching the `--log-dir` spelling for the exclusion below uses the
-  opposite, NARROW rule instead (a `\`+ANSI-C-starter there is an ordinary
-  in-word escape, not a boundary), since widening it too would let an
-  escape right after a `--log-dir` spelling manufacture an excluded region
-  the root's own mention then falls into. Everything else ends the word
+  matching the `--log-dir` spelling for the exclusion below uses its OWN,
+  narrower rule throughout -- not only at the ANSI-C sub-rule -- since
+  ending the `--log-dir` match validates an EXCLUSION rather than a
+  refusal: only a path separator and the shell's own word separators end
+  it there, nothing wider. The exclusion bullet below has the full
+  enumeration and what it costs. Everything else ends the word
   and therefore marks a boundary: the end of the string, whitespace,
   either quote, every POSIX operator character (`|`, `&`, `;`, `<`, `>`,
   `(`, `)` and a backtick), `$`, and punctuation such as `,`, `=`, `:`,
@@ -690,20 +691,38 @@ the match:
   boundary: with `--log-dir` at the repository root (or above it) the
   exclusion would erase every mention of the root and pass an escape
   as plain as `cd '<root>/pkg'`, and a `--log-dir` of `<root>/logs`
-  must not swallow the unrelated `<root>/logsrc/x.js`. That boundary
-  is decided by the NARROW rule, not the root's own wide one: a `\`
-  plus an ANSI-C numeric-escape starter right after the `--log-dir`
-  spelling does not end the exclusion's own match there, so it cannot
-  manufacture an excluded region the root's own mention then falls
-  into (`-l <root>/l` with `$'<root>/l\x69b/fixture.test.js'` in the
-  test command still refuses the root mention, rather than reading the
-  escape as ending the `--log-dir` spelling at a boundary). With
-  `--log-dir` at or above the root, an absolute mention under the root
-  is refused like any other, with the same fixes. The narrow rule cuts
-  the other way too: a `--log-dir` mention whose junction is spelled
-  with an ANSI-C separator escape (`$'<root>/l\x2fib/t.js'` for a
-  `--log-dir` of `<root>/l`) is refused rather than excluded, the same
-  over-refusal trade the root's own wide rule makes, with the same
+  must not swallow the unrelated `<root>/logsrc/x.js`. That boundary is
+  decided by its OWN rule, narrower than the root's wide one throughout
+  -- not only at the ANSI-C sub-rule -- since ending the `--log-dir`
+  match validates an EXCLUSION rather than a refusal, and the exclusion
+  exists for exactly one shape: the isolation copy at `<log-dir>/wt-
+  <uuid>/wt`, which always continues with a FURTHER path component.
+  Only FOUR terminators end the `--log-dir` match: `/`; a
+  backslash-escaped `/`; a backslash-newline pair followed by one of
+  those two; or the end of the text. This is deliberately not a claim
+  about where a shell word terminates -- an earlier rule accepted the
+  shell's own separator set (space, tab, newline, `|`, `&`, `;`, `<`,
+  `>`, `(`, `)`) on that theory, but every one of those characters is
+  also a legal filename character once quoted: a sibling directory
+  named `<root>/l 2`, `<root>/l&2`, `<root>/l(2` or `<root>/l;2` reads
+  as a single shell word once quoted (`"<root>/l 2/y.js"`), so treating
+  any of those characters as ending the `--log-dir` match excluded the
+  sibling -- and the root mention underneath it -- along with the log
+  dir itself: `-l <root>/l` beside a test command naming `node
+  "<root>/l 2/y.js"` used to run against the real tree unrefused. No
+  enumerable set of "hard" word enders closes this, since a quote makes
+  every shell separator character a legal filename character somewhere;
+  restricting the accepted terminators to a spelling that is never
+  itself a filename character sidesteps the problem instead. Every
+  other character rejects the match instead, protecting the exclusion
+  with the same over-refusal trade the root's own wide rule makes: a
+  bare `--log-dir` mention followed by anything other than one of the
+  four terminators above -- a space, an operator, a quote (bare or
+  around a continuing sibling name), or any other character -- no
+  longer excludes the region, so the root mention underneath it is
+  refused instead, the same as it would be without a `--log-dir` naming
+  that spot at all. With `--log-dir` at or above the root, an absolute
+  mention under the root is refused like any other, with the same
   fixes.
 
 The refusal message names the offending channel(s) (the test command,
@@ -776,15 +795,32 @@ the END of an already-matched spelling, never while a match is still
 forming, so this is a residual the same way. Only a separator escape AT
 OR AFTER the end of the root's own spelling (`\xHH`,
 `\uHHHH`/`\UHHHHHHHH`, `\NNN` decoding to `/`) is covered (see the
-boundary bullet above). The `--log-dir` exclusion has a residual of its
-own: a path whose spelling starts with the `--log-dir`'s spelling and
-continues with a character the rule reads as a word terminator although
-a filename may carry it (`@`, `~`, `,`, `=`, `$`, `{`, `?`:
-`<root>/l@2/y.js` beside a `--log-dir` of `<root>/l`) ends the
-exclusion's own match at that character and is EXCLUDED rather than
-refused, so a sibling of the log dir named that way reaches the real
-tree unrefused. It needs `--log-dir` under the repository root and such
-a sibling, and it is named here rather than closed. Separator noise, an escaped separator and a line
+boundary bullet above). The `--log-dir` exclusion's own remaining
+residual is the general over-refusal the exclusion bullet above names:
+a bare `--log-dir` mention followed by anything other than the four
+accepted terminators (`/`, a backslash-escaped `/`, a
+backslash-newline pair followed by one of those, or the end of the
+text) is refused rather than excluded, even where the shell would in
+fact still reach the isolation copy through it. Practical shapes this
+covers: a `--log-dir` mention immediately followed by a shell operator
+with legitimate isolation traffic after it (`cd <log-dir> && node
+t.js`); any line ending directly after the mention (LF or CRLF); a
+mention immediately followed by a comment marker
+(`<log-dir>#note`); and a mention used as an unquoted `PATH` segment
+(`PATH=<log-dir>:/usr/bin`). (Every sibling shape this closes is
+folded into that one general rule now: a sibling of the log dir whose
+name continued its spelling with a filename-legal word terminator such
+as `@`, `~`, `,`, `=`, `{`, `?`, a non-ASCII whitespace code point, a
+quote, or the shell's own separator set (space, tab, newline, `|`,
+`&`, `;`, `<`, `>`, `(`, `)`) -- including a sibling reached only once
+that separator sits inside a quoted word, `"<log-dir> 2/y.js"` -- used
+to reach the real tree EXCLUDED rather than refused; the exclusion's
+own boundary rule, described in the bullet above, no longer treats any
+character other than the four terminators as ending its match, so
+every one of those shapes is refused now, the same as the ANSI-C-
+junction and bare-quoted-mention cases named in earlier revisions of
+this residual.)
+Separator noise, an escaped separator and a line
 continuation are the exceptions the rule does tolerate; an escape or a
 quote INSIDE a path component is not. A spelling that differs from the
 root's only in unicode normalisation (a decomposed form of a composed
