@@ -850,3 +850,95 @@ describe("escapingRootMentions(): the SCRATCH spelling's own boundary rule", () 
     ]);
   });
 });
+
+describe("escapingRootMentions(): closing isHardWordEnder's non-ASCII-whitespace and quote/backtick gaps (round 2)", () => {
+  it("siblings named with a non-ASCII whitespace code point (U+00A0, U+3000, U+FEFF) right after the --log-dir spelling are reported, not exempted", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    // None of these is a shell IFS separator and all are legal
+    // filename characters, so `/\s/` (the regex class the ender check
+    // shipped with) wrongly treated each as ending the scratch match;
+    // a `$` right after the whitespace char stops the reported
+    // region's own extension so the expectation stays a single
+    // appended character.
+    for (const ws of [" ", "　", "﻿"]) {
+      const text = `node ${scratchRoot}${ws}$X`;
+      expect({
+        ws,
+        mentions: escapingRootMentions(text, root, scratchRoot),
+      }).toEqual({ ws, mentions: [`${scratchRoot}${ws}`] });
+    }
+  });
+
+  it("a sibling named with a CR right after the --log-dir spelling is reported, not exempted", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    // CR is not a shell IFS separator either and is a legal filename
+    // character; unlike the non-ASCII cases above, `continuesComponentName`
+    // already rejects it (it is ASCII and outside the portable set), so
+    // the reported region stops right at it rather than absorbing it.
+    const text = `node ${scratchRoot}\r2/y.js`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([
+      scratchRoot,
+    ]);
+  });
+
+  it("siblings continued by a quote or a backtick right after the --log-dir spelling are reported, not exempted: the shell re-joins the word across the quoted or substituted segment", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    // `/x/l"2"/y.js` lexes as the single shell word `/x/l2/y.js`, and a
+    // backtick command substitution re-joins the same way, so treating
+    // the quote or backtick as ending the scratch match wrongly
+    // exempted the real sibling `<root>/l2` along with the log dir.
+    for (const suffix of ['"2"/y.js', "'2'/y.js", "`2`/y.js"]) {
+      const text = `node ${scratchRoot}${suffix}`;
+      expect({
+        suffix,
+        mentions: escapingRootMentions(text, root, scratchRoot),
+      }).toEqual({ suffix, mentions: [scratchRoot] });
+    }
+  });
+
+  it("a BARE quoted --log-dir mention that ends exactly at its own closing quote is now reported: the documented over-refusal fix 2 trades for closing the quote/backtick sibling gap above", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const text = `cd '${scratchRoot}' && node t.js`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([
+      scratchRoot,
+    ]);
+  });
+
+  it("the genuine exemption still holds, unquoted and inside quotes, when a further path segment follows", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const copy = path.join(scratchRoot, "wt-1", "wt");
+    expect(
+      escapingRootMentions(`cd ${copy} && node t.js`, root, scratchRoot),
+    ).toEqual([]);
+    // Wrapping the same genuine mention in quotes does not disturb the
+    // exemption: it is decided by the character right after the
+    // literal --log-dir spelling (here `/`, checked before
+    // `isHardWordEnder` is even consulted), not by whether a quote
+    // encloses the whole thing.
+    expect(
+      escapingRootMentions(`cd '${copy}' && node t.js`, root, scratchRoot),
+    ).toEqual([]);
+  });
+
+  it("a miscased sibling named with a non-ASCII whitespace code point is reported under an injected caseInsensitive flag", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const miscased = scratchRoot.toUpperCase();
+    expect(miscased).not.toBe(scratchRoot);
+    const text = `node ${miscased} $X`;
+    expect(
+      escapingRootMentions(text, root, scratchRoot, true),
+    ).toEqual([`${miscased} `]);
+  });
+});

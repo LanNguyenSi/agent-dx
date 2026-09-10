@@ -1346,4 +1346,29 @@ describe("probe(): test-command isolation-escape detection", () => {
     expect(result.status).toBe("usage_error");
     expect(result.reason).toBe("test_command_escapes_isolation");
   });
+
+  it("a --log-dir under the repository root does not exempt a sibling directory named with a non-ASCII whitespace code point (U+00A0): the test command still refuses", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const logDir = path.join(repo, "l");
+    fs.mkdirSync(logDir, { recursive: true });
+    // `<repo>/l 2` is a real SIBLING directory of the log dir, not
+    // the log dir itself or a path under it: U+00A0 is not a shell IFS
+    // separator and is a legal filename character, so it must not be
+    // read as ending the log dir's own spelling either. Uses a real
+    // directory (rather than only the containment-level unit test)
+    // because the case-insensitivity measurement and the actual
+    // filesystem round-trip both run for real through `probe()` here.
+    const sibling = `${logDir} 2`;
+    fs.mkdirSync(sibling, { recursive: true });
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        logDir,
+        testCommand: `node ${sibling}/y.js`,
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+  });
 });

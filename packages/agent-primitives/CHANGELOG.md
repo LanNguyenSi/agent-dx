@@ -497,18 +497,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rather than a parameter shared with the root's own rule
   (`isPathBoundaryAt`): only `/`, a backslash-escaped `/`, a
   backslash-newline pair followed by one of those, and a hard shell word
-  ender (whitespace, either quote, `|`, `&`, `;`, `<`, `>`, `(`, `)`, a
-  backtick, or the end of the text) end the scratch match now, not every
-  character a filename may still legally carry (`@`, `~`, `,`, `=`, `{`,
-  `?`) or `$`, which starts a shell expansion the scan does not model.
-  The root's own wide rule (`isPathBoundaryAt`) is unchanged. Pinned both
-  directions: a `@` sibling, a `~` sibling and a `$`-expansion suffix
-  right after the log-dir spelling are reported, the same at the
-  `escapingRootMentions` level and through a real `probe` run; the
-  genuine exemption (a path under the log dir, e.g.
-  `<root>/l/wt-1/wt`) still holds; the narrow rule's own over-refusal at
-  an ANSI-C junction (README, this residual list) stays a documented
-  residual, unclosed by this task.
+  ender (`isHardWordEnder`: the shell's own separator set and nothing
+  wider -- space, tab, newline, `|`, `&`, `;`, `<`, `>`, `(`, `)`, or the
+  end of the text) end the scratch match now, not every character a
+  filename may still legally carry (`@`, `~`, `,`, `=`, `{`, `?`) or `$`,
+  which starts a shell expansion the scan does not model. The root's own
+  wide rule (`isPathBoundaryAt`) is unchanged. Pinned both directions: a
+  `@` sibling, a `~` sibling and a `$`-expansion suffix right after the
+  log-dir spelling are reported, the same at the `escapingRootMentions`
+  level and through a real `probe` run; the genuine exemption (a path
+  under the log dir, e.g. `<root>/l/wt-1/wt`) still holds; the narrow
+  rule's own over-refusal at an ANSI-C junction (README, this residual
+  list) stays a documented residual, unclosed by this task.
+
+  A follow-up round on the same task closed a second gap the
+  `isHardWordEnder` above still had, both introduced by the ender set
+  above rather than pre-existing: `/\s/`, the regex class the ender
+  check first shipped with, admits every non-ASCII whitespace code
+  point (U+00A0, U+2000-U+200A, U+2028/U+2029, U+202F, U+205F, U+3000,
+  U+FEFF, and CR/VT/FF) even though none of them is a shell IFS
+  separator and all of them are legal filename characters, so a
+  `<log-dir><NBSP>2` sibling (or one named with any of the others) read
+  as ending the scratch match validly and was exempted, `probe`
+  reporting `survived` instead of `test_command_escapes_isolation`
+  (measured on the built CLI; refused before the class was widened).
+  Fixed by enumerating the shell's ASCII separators explicitly instead
+  of a regex whitespace class. The same round also removed `'`, `"` and
+  a backtick from the ender set (pre-existing, not introduced by this
+  task, but left open by the round that closed the sibling gap above):
+  the shell RE-JOINS a word across a quoted or backtick-substituted
+  segment (`/x/l"2"/y.js` lexes as one word, `/x/l2/y.js`), so treating
+  one of those characters as ending the scratch match was not proof the
+  log dir's spelling stood alone there, and `<log-dir>"2"/y.js`,
+  `<log-dir>'2'/y.js` and `` <log-dir>`2`/y.js `` each exempted the real
+  sibling `<root>/l2` along with the log dir. The cost of closing it: a
+  BARE quoted `--log-dir` mention that ends exactly at its own closing
+  quote, with nothing shell-significant after it, is now refused rather
+  than exempted -- a new documented residual (README, this file, this
+  function's own docblock), the over-refusal trade this scan makes
+  everywhere else. Pinned at the `escapingRootMentions` level (the
+  non-ASCII whitespace siblings including a miscased one under an
+  injected `caseInsensitive` flag, the three quoted/backtick sibling
+  forms, the bare-quoted-mention residual itself, and the genuine
+  exemption still holding, including inside quotes) and through a real
+  `probe` run (a U+00A0 sibling directory).
 
 - `probe` refuses a test command, `--pre`, or an `--env` value that
   escapes `-i worktree`'s isolation copy (task `5bf16459`): a `-t` command

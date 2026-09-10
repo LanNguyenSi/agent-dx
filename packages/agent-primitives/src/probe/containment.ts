@@ -239,17 +239,44 @@ function isPathBoundaryAt(text: string, index: number): boolean {
 
 /**
  * True when `ch` is one of the hard shell word enders `isScratchPathBoundaryAt`
- * below accepts: whitespace, either quote character (each opens a new
- * quoting context rather than continuing the current word), and the
- * POSIX operator characters `|`, `&`, `;`, `<`, `>`, `(`, `)` and a
- * backtick. Every one of these terminates a shell word unconditionally
- * and can neither continue a filename nor start an expansion the shell
- * would later substitute -- the property `isScratchPathBoundaryAt`
- * needs, since anything weaker manufactures an exempt region a sibling
- * name can ride through (see that function's docblock).
+ * below accepts: the shell's own separator set and nothing wider --
+ * space, tab, newline, and the POSIX operator characters `|`, `&`,
+ * `;`, `<`, `>`, `(`, `)`. Every one of these terminates a shell word
+ * unconditionally and can neither continue a filename nor start an
+ * expansion the shell would later substitute -- the property
+ * `isScratchPathBoundaryAt` needs, since anything weaker manufactures
+ * an exempt region a sibling name can ride through (see that
+ * function's docblock).
+ *
+ * Deliberately NOT a `/\s/` regex class: that class admits every
+ * non-ASCII whitespace code point (U+00A0 no-break space,
+ * U+2000-U+200A, U+2028/U+2029, U+202F, U+205F, U+3000 ideographic
+ * space, U+FEFF, and the C1 controls CR/VT/FF among others) even
+ * though NONE of them is a shell IFS separator and ALL of them are
+ * legal filename characters. Treating one as an ender validated a
+ * scratch match as complete right before a sibling directory named
+ * with it (`<log-dir><NBSP>2`), exempting the sibling and the root
+ * mention beneath it from the scan; ASCII space, tab and newline are
+ * enumerated explicitly instead, closing that gap.
+ *
+ * Deliberately NOT here either: either quote character or a backtick.
+ * The shell RE-JOINS a word across a quoted or substituted segment
+ * (`/x/l"2"/y.js` lexes as the single word `/x/l2/y.js`, and a
+ * backtick command substitution re-joins the same way), so a scratch
+ * match ending exactly at one of those characters is not proof the
+ * shell treats the log dir's spelling as a complete word there --
+ * treating it as one exempted the sibling `<log-dir>"2"/y.js` (and the
+ * `<log-dir>'2'/y.js` and `` <log-dir>`2`/y.js `` forms) along with
+ * the log dir itself, the same shape the non-ASCII-whitespace gap
+ * above closes. The one loss this causes -- a BARE quoted `--log-dir`
+ * mention that ends exactly at its own closing quote, with nothing
+ * shell-significant after it, no longer validating the scratch match
+ * as complete there -- is a documented residual
+ * (`escapingRootMentions` below), the same over-refusal trade this
+ * scan makes everywhere else.
  */
 function isHardWordEnder(ch: string): boolean {
-  return /\s/.test(ch) || "'\"|&;<>()`".includes(ch);
+  return ch === " " || ch === "\t" || ch === "\n" || "|&;<>()".includes(ch);
 }
 
 /**
@@ -266,15 +293,20 @@ function isHardWordEnder(ch: string): boolean {
  * EXEMPTION rather than a refusal: only `/`, a backslash-escaped `/`, a
  * backslash-newline pair followed by one of those (both handled by
  * `skipLineContinuations` and the `\\` branch below), and a hard shell
- * word ender (`isHardWordEnder`: whitespace, quotes, `|`, `&`, `;`,
- * `<`, `>`, `(`, `)`, a backtick, or the end of the text) validate the
- * scratch match as ending here. Every other character rejects it
+ * word ender (`isHardWordEnder`: space, tab, newline, `|`, `&`, `;`,
+ * `<`, `>`, `(`, `)`, or the end of the text) validate the scratch
+ * match as ending here. Every other character rejects it
  * instead -- every POSIX-portable filename character exactly as
  * `isPathBoundaryAt` rejects it, but ALSO every filename-legal
  * character outside that portable set (`@`, `~`, `,`, `=`, `{`, `?`,
- * and the rest) and `$`, which starts a shell expansion this scan does
- * not model -- so the match is discarded as a possible sibling name:
- * `--log-dir <root>/l` beside a test command naming `<root>/l@2/y.js`
+ * and the rest), every non-ASCII whitespace code point (none of which
+ * is a shell separator either, `isHardWordEnder`'s own docblock), a
+ * quote or a backtick (the shell re-joins a word across one, so ending
+ * the match there is not proof the log dir's spelling stands alone),
+ * and `$`, which starts a shell expansion this scan does not model --
+ * so the match is discarded as a possible sibling name:
+ * `--log-dir <root>/l` beside a test command naming `<root>/l@2/y.js`,
+ * `<root>/l 2/y.js` (a non-ASCII space) or `<root>/l"2"/y.js`
  * no longer exempts the sibling, and the root mention underneath it
  * (the prefix `<root>/l` shares with the log dir's own spelling)
  * survives and is reported, the over-refusal trade this scan makes
@@ -282,12 +314,13 @@ function isHardWordEnder(ch: string): boolean {
  * the direct scan. A `\`+ANSI-C-starter right after the scratch
  * spelling stays rejected too (the property the earlier narrow rule
  * already pinned): it is not one of the two backslash forms this function
- * accepts, so it does not validate the match either, and the
- * `--log-dir` mention's OWN over-refusal at such a junction (a
- * legitimate isolation-copy path spelled with an ANSI-C separator
- * escape right after the log dir's spelling) stays the documented
- * residual it already was (README, this file's `escapingRootMentions`
- * docblock, CHANGELOG).
+ * accepts, so it does not validate the match either. Two over-refusals
+ * are the documented cost of this narrowing (README, this file's
+ * `escapingRootMentions` docblock, CHANGELOG): a legitimate
+ * isolation-copy path spelled with an ANSI-C separator escape right
+ * after the log dir's spelling, and a BARE quoted `--log-dir` mention
+ * that ends exactly at its own closing quote, with nothing
+ * shell-significant after it.
  */
 function isScratchPathBoundaryAt(text: string, index: number): boolean {
   const i = skipLineContinuations(text, index);
@@ -589,8 +622,19 @@ function exemptsScratchRoot(root: string, scratchRoot: string): boolean {
  * SEPARATOR sitting INSIDE the root's own spelling rather than at its
  * end (`$'<parent>\x2f<base>/pkg'`, where `<parent>/<base>` is the
  * root: the boundary rule only ever widens at the end of an
- * already-matched spelling, not while a match is still forming); a
- * spelling broken up by an ANSI-C escape that decodes a root
+ * already-matched spelling, not while a match is still forming); for
+ * the scratch-root EXEMPTION only, two over-refusals `isScratchPathBoundaryAt`
+ * names on its own docblock: an ANSI-C separator escape sitting right
+ * after the `--log-dir` spelling (`$'<root>/l\x2fib/t.js'` for a
+ * `--log-dir` of `<root>/l`) does not validate the scratch match as
+ * ending there, so a legitimate isolation-copy path spelled that way
+ * is refused rather than exempted; and a BARE quoted `--log-dir`
+ * mention that ends exactly at its own closing quote (`'<log-dir>'`,
+ * `"<log-dir>"`, a backtick command substitution), with nothing
+ * shell-significant after it, is refused the same way, since the
+ * shell re-joins a word across a quote or backtick and a match ending
+ * there is not proof the log dir's spelling stands alone as a
+ * complete word; a spelling broken up by an ANSI-C escape that decodes a root
  * CHARACTER rather than a separator (`$'/x/re\x70o/pkg'`, where
  * `\x70` decodes to `p`), or by a `\c`-style control escape, which
  * cannot decode to a separator either -- the shell reassembles each
