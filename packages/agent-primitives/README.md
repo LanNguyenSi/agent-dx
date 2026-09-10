@@ -1701,9 +1701,11 @@ macOS and Linux share plus Linux's real-time signals 32..64) gets a
 that the run may have been cut short. On the PASS direction (a
 `--pass-regex` match despite the code) it takes the place of the plain
 "matched despite a non-zero exit code" entry every other non-zero code
-gets; on the FAIL direction (the plain exit-code default, or a
-`--pass-regex` miss) it is an additional entry, since a failing run with
-an out-of-band non-zero code carries no warning at all. The verdict is
+gets; on the FAIL direction (the plain exit-code default, a
+`--pass-regex` miss, or a baseline-side refusal such as
+`no_tests_executed` or `baseline_evidence_not_matched`) it is an
+additional entry naming that refusal, since a failing run with an
+out-of-band non-zero code carries no warning at all. The verdict is
 unchanged either way (a killed mutant stays `killed`, a
 matching mutant run stays `survived`); the warning exists so a reader has
 something to check. A runner that exits `137` of its own accord, nothing

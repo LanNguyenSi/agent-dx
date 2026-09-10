@@ -904,6 +904,36 @@ export async function openRunSetup(
     controller.setRestoreState(null);
   };
 
+  // The 128 + N band, on the FAIL direction: a kill that lands on the
+  // test process while its `sh -c` wrapper SURVIVES arrives as an
+  // ordinary non-zero exit code, distinct from the no-verdict shape
+  // `wasSignalKilled` further below catches. Scoped to a baseline that
+  // reported a real exit code of its own (`reportedNoVerdict` excludes
+  // it otherwise), computed once here -- ahead of EVERY baseline-side
+  // early return below, the zero-tests gate included -- because a band
+  // code says the same thing regardless of which reason ends up being
+  // returned: nothing about that refusal disproves a run that was cut
+  // short. `pushBaselineFailBandWarning` is called at each such return
+  // site with the reason that site actually returns (interpolated the
+  // way `step.ts` does with `${status}` on the mutant side), so the
+  // warning always names the truth about the result it precedes,
+  // rather than a hard-coded `baseline_failed` that a different path
+  // (the evidence gate, the zero-tests gate) would carry falsely. Never
+  // fires on a baseline that goes on to pass: the PASS direction,
+  // further down, has its own wording for a band code alongside a
+  // regex match.
+  const baselineFailSignalCode =
+    !baselineTest.aborted && !reportedNoVerdict(baselineTest)
+      ? signalNumberFromExitCode(baselineTest.exitCode)
+      : undefined;
+  const pushBaselineFailBandWarning = (reason: string): void => {
+    if (baselineFailSignalCode !== undefined) {
+      warnings.push(
+        `the baseline run exited with ${String(baselineTest.exitCode)}, the code a shell reports for a process killed by signal ${String(baselineFailSignalCode)}; the ${reason} verdict may rest on a run that was cut short; see ${baselineTest.logPath}`,
+      );
+    }
+  };
+
   // Zero-tests-executed detection: checked BEFORE the exit-code branch
   // below, on both an exit-0 and a non-zero baseline (vitest exits 1 on
   // "No test files found" but 0 on an all-skipped/`-t`-matched-nothing
@@ -924,6 +954,7 @@ export async function openRunSetup(
     );
     if (zeroTestsEvidence.detected) {
       await settleTargetsAfterNonMutatingBaseline("the baseline run");
+      pushBaselineFailBandWarning("no_tests_executed");
       warnings.push(
         `the baseline run's own output shows no test was actually executed (${zeroTestsEvidence.via}); see ${baselineTest.logPath}`,
       );
@@ -1002,6 +1033,7 @@ export async function openRunSetup(
       !input.requireBaselineEvidence.test(baselineCombinedOutput)
     ) {
       await settleTargetsAfterNonMutatingBaseline("the failing baseline run");
+      pushBaselineFailBandWarning("baseline_evidence_not_matched");
       warnings.push(
         `--require-baseline-evidence (${input.requireBaselineEvidence.source}) did not match the baseline output${truncationNote(baselineTest.stdoutTruncated, baselineTest.stderrTruncated)}; see ${baselineTest.logPath}`,
       );
@@ -1014,6 +1046,7 @@ export async function openRunSetup(
     }
 
     await settleTargetsAfterNonMutatingBaseline("the failing baseline run");
+    pushBaselineFailBandWarning("baseline_failed");
     // A baseline killed by a signal without ever reporting an exit code
     // of its own (a `kill` reaching the run's process-group leader, an
     // OOM killer picking that leader, a CI cancel): named explicitly,
@@ -1026,26 +1059,6 @@ export async function openRunSetup(
     if (!baselineTest.aborted && wasSignalKilled(baselineTest)) {
       warnings.push(
         `the baseline run was terminated by a signal, no exit code was reported; nothing about the suite was measured; see ${baselineTest.logPath}`,
-      );
-    }
-    // The 128 + N band, on the FAIL direction: a kill that lands on the
-    // test process while its `sh -c` wrapper SURVIVES arrives as an
-    // ordinary non-zero exit code, distinct from the no-verdict shape
-    // `wasSignalKilled` just above catches. Scoped to a baseline that
-    // reported a real exit code of its own (`reportedNoVerdict`
-    // excludes it otherwise, and that shape already got its own warning
-    // above), and fires whether the plain exit-code default or a
-    // `--pass-regex` miss is what made this baseline fail: either way
-    // the `baseline_failed` verdict may rest on a run that was cut
-    // short, the same thing the PASS direction, further down, already
-    // warns about for a baseline that matched despite a band exit code.
-    const baselineFailSignalCode =
-      !baselineTest.aborted && !reportedNoVerdict(baselineTest)
-        ? signalNumberFromExitCode(baselineTest.exitCode)
-        : undefined;
-    if (baselineFailSignalCode !== undefined) {
-      warnings.push(
-        `the baseline run exited with ${String(baselineTest.exitCode)}, the code a shell reports for a process killed by signal ${String(baselineFailSignalCode)}; the baseline_failed verdict may rest on a run that was cut short; see ${baselineTest.logPath}`,
       );
     }
     // A `--pass-regex` miss (reached here means the baseline is not
