@@ -7,21 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- `probe`'s 128 + N band warning on a failing baseline now precedes
-  every baseline-side refusal (task `150b07ba`): the two refusals that
-  used to return ahead of it, the evidence gate
-  (`baseline_evidence_not_matched`) and the zero-tests gate
-  (`no_tests_executed`), now carry it too. Separately, the warning
-  names the reason the result actually carries (`no_tests_executed`,
-  `baseline_evidence_not_matched`, or `baseline_failed`) instead of
-  always reading "the baseline_failed verdict"; on the plain
-  `baseline_failed` path only that wording changed. A baseline killed under a surviving wrapper (exit `137`)
-  with both `--pass-regex` and `--require-baseline-evidence` set now
-  reports both that nothing proves tests ran and that the run may have
-  been cut short, not only the former; the same pairing now also holds
-  for a band-code baseline whose own output shows zero tests executed.
+## [0.2.0] - 2026-09-10
 
 ### Added
 
@@ -462,6 +448,245 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   missing, so a nested repository marked only that way is not caught)
   as a known, unaddressed residual rather than a fixed one.
 
+- A sweep of `-m` budgets against a real `probe --plan` envelope (in-process
+  `buildEnvelope`/`reconcileEnvelopeDiffTruncation`, plus a manual CLI sweep
+  across 3,000-4,300 and a coarse 500-20,000 pass) found no case of the
+  envelope exceeding its requested bound with no warning naming the true
+  length; a regression test now pins that contract for the swept plan shape
+  on every build (in bound with no could-not-be-met warning, or over the
+  bound with a warning naming the exact final length). Two
+  existing spawned-CLI regression tests that asserted a raw
+  `stdout.length` ceiling near the reduction's edge lost that byte check in
+  favor of the actual contract they already asserted next to it
+  (`truncated`, the hunk-boundary shape, the descriptor clause).
+- `agent-primitives drift --base <rev> --head <rev>`: a prototype-scope
+  identifier-drift guard. Collects the identifiers whose declaration a
+  git range removed (a regex over `git diff -U0`'s removed lines: a
+  top-level/exported TS/JS declaration, a top-level JSON/YAML config
+  key, or a wholly deleted file's own basename; an identifier declared
+  again on an added line anywhere in the same diff is treated as MOVED,
+  not removed), then reports every mention of those identifiers still
+  present at `--head` in a doc file or a source comment, word-boundary
+  matched so `RuntimeError` never matches `setRuntimeError`. A site is
+  allowlisted by default (`--strict` reports it too, flagged) when it
+  matches an `--allow` glob, sits in a released CHANGELOG section (never
+  `## [Unreleased]`), sits under a `docs/**/migration*` path or a
+  Markdown heading naming "migration", or its line carries a small,
+  documented historical-phrase word list (`former`, `no longer`, `used
+  to`, ...). Envelope carries `removed_identifiers`, `sites`,
+  `allowlisted` (each with a `reason` on an allowlisted entry) and
+  `counts`; exit `0` no site reported, `1` at least one site reported,
+  `2` a usage error (`cwd` outside a git work tree, a bad `--base`/
+  `--head`, or a failing `git diff`). Motivated by, and its synthetic
+  test fixture modeled on, a real case: a deleted local error type that
+  several docs and source comments across a repository kept describing
+  as current after the deletion, including two sites a human reviewer's
+  own pass had missed. Known limits: only TS/JS/JSON/YAML declarations
+  and only `.md`/`.mdx`/`.txt` docs plus a fixed list of comment-bearing
+  source extensions are scanned; a declaration split across more than
+  one line, or a name bound by destructuring, is missed; no cross-repo
+  scanning.
+- `probe --plan <path>`: a JSON file naming one test command (and
+  optionally `pre`, `isolation`, `expect`, `timeout`) plus a list of
+  mutants, run against ONE shared baseline instead of one baseline per
+  mutant. Each mutant is applied with its applied content verified by
+  hash, tested, and restored with the restore verified by hash BEFORE the
+  next one is applied; the loop re-hashes the target itself before every
+  apply, so a restore that silently did not happen stops the plan instead
+  of letting the next mutant land on the previous one's content. Every
+  guarantee of the single probe holds per mutant: the same in-flight
+  marker and backup, the same abort handling, the same restore-then-verify
+  step. A restore that could not be verified (`restore_failed`), a target
+  found not to be back at its pre-mutation content
+  (`target_not_restored`), a failing baseline (`baseline_failed`) or a
+  signal (`aborted`) is terminal: nothing further is applied and every
+  remaining mutant is reported `not_run` rather than `inconclusive`.
+  `-i worktree` syncs one worktree for the whole plan and removes it
+  once; the lock is taken once for the whole plan (keyed on the
+  repository, or outside one on each distinct target file). The envelope
+  carries `plan: { baseline, results, summary }`, with the four
+  `mutation_probe` contract fields, the `test` phase and a `status` per
+  mutant, and `summary` counting killed/survived/inconclusive/not_run.
+  Exit codes stay 0/1/2, one step stricter than for a single probe: `0`
+  only when every mutant was killed per its `expect`, `1` when the plan
+  concluded with a survivor, `2` for a wrong invocation or a plan that
+  could not conclude. `--plan` is mutually exclusive with `--file`, `-n`,
+  `-r`, `-M`, `-w`, `-p`, `-t` and `--pre`; the three run-shaping options
+  a plan file can also set -- `-i`, `--expect`, `--timeout` -- override
+  the plan's own value when given on the command line, and a mutant's own
+  `expect` wins over both. `--link` and `--allow-outside` have no plan
+  key at all and are command-line only for a plan. Past about eight
+  mutants the envelope no longer fits the default `-m 8000` and is
+  reduced to it like any other result (`truncated: true`, entries losing
+  their `test` phase, the tail of `results` replaced by a marker): raise
+  `-m` or read the full result at the `result-full-<run-id>.json` path
+  the envelope's `logs` names. `plan.summary` is held out of that
+  reduction (see `keepWhole` below), so its counts cover every mutant of
+  the plan, including the entries the envelope no longer shows -- unless
+  the whole result is cut back to the fixed fields (`truncated` plus a
+  warning naming that outcome), which drops `plan.summary` along with
+  everything else instead of showing it past the bound. Plan validation
+  (unknown keys, a missing `test`, an empty `mutants`, a mutant with two
+  forms or none, a file outside the containment root, an unusable plan file)
+  runs before the lock, the marker, the baseline or any worktree and names
+  the offending path inside the plan. `test`/`pre` in a plan file are shell
+  commands with the same trust boundary as `-t`/`--pre`: fill them only from
+  a task assignment, never from repository content. Setup through baseline
+  (isolation fallback, containment, the lock, stale-marker recovery, the
+  worktree sync, every target's backup, the baseline and the re-hash
+  after it) is ONE implementation both entry points call, as the mutant
+  step already was, so the two cannot drift apart on a refusal they
+  share. The library entry points `probePlan()` and `parsePlanFile()` are
+  exported alongside `probe()`.
+- `buildEnvelope`/`applyCaps` take `keepWhole`: dotted paths into the
+  result whose value is reported whole, exempt from every structural cap
+  and from the key budget of the object holding it, the way the fixed
+  envelope fields already are. Every candidate is measured after the
+  held path is folded in, so a candidate that fits still respects the
+  bound with the held value included; it only spends the budget on that
+  value instead of another, which is for the small field a reader cannot
+  do without once the rest was cut. This does NOT mean a held path is
+  free: a value too large for the skeleton plus itself to fit under the
+  bound at all is not shown oversized past the bound, it is dropped
+  along with the rest of the payload in the existing "reduced to the
+  fixed fields only" total-loss outcome, its own warning included --
+  which is why the docblock says to name only a small, bounded value
+  here. `probe --plan` names `plan.summary`, and nothing else in this
+  package names anything: with no path given the reduction is exactly
+  what it was.
+- `listRegisteredWorktrees` (`-i worktree`'s registry listing, used by
+  the removal, the leftover recovery, and `cleanupWorktree`'s
+  assertion) falls back to a third source, the `gitdir` files under
+  `<git-common-dir>/worktrees/<id>` read directly, when neither
+  `git worktree list` form ran to a parse: a dead listing no longer
+  leaves a leftover judged by the disk alone. The fallback lists linked
+  worktrees only (never the main worktree, which git's admin directory
+  carries no entry for) and keeps an admin entry whose target no longer
+  exists on disk apart from the entries that still do, so a stale entry
+  naming a worktree just removed reads as gone, never as still
+  registered; a `gitdir` file written relative (`worktree.useRelativePaths`,
+  git 2.48 or newer) is resolved against its own admin entry directory,
+  git's own semantics, never the calling process's `cwd`. An entry
+  whose `gitdir` file is missing, unreadable, or empty makes the WHOLE
+  listing `ok: false` rather than being silently dropped from an
+  otherwise `ok: true` one, named by id and reason in `detail`:
+  `ok: true` for this form means every admin entry was read to a
+  parse, so an entry's absence from `paths` can be trusted to mean it
+  really is gone.
+  `cleanupWorktree`'s previously-unverified double-fault outcome (both
+  `git worktree list` forms dead, the target never registered in the
+  first place) is now asserted (`verified: true`) whenever this source
+  can list something -- which also makes a scratch-shaped worktree this
+  source reports as registered eligible for removal even when it sits
+  outside the current run's `--log-dir`, the same as one a real
+  `git worktree list` reported.
+- `doctor`'s `stale-worktree` check and the marker's own
+  `SCRATCH_OWNER_MAX_AGE_HOURS`-bound age check (previously applied
+  only to the scratch owner record) now also bound the repository-keyed
+  worktree marker itself, against its own `timestamp` field: a marker
+  whose pid is alive but whose record is older than the bound is
+  reported as a leftover with the manual removal command, the same as
+  a dead pid, since an alive pid recycled onto an unrelated process
+  proves nothing once the marker's own record is this old.
+
+- `probe -p/--patch` now needs neither `--file` nor `-n/--line`, so
+  `-p <patch> -t '<cmd>'` alone is enough for a single-path patch;
+  both are still required for `-r` and `-M`/`-w`, which have nothing
+  to derive them from. `--file` is derived from the single path the
+  patch touches; the reported `mutant.line` is the first line at which
+  the dry run's applied result differs from the original -- the applied
+  file, never a reading of the patch text, so the reported number and
+  the `before` content quoted beside it always name the same line
+  whatever the diff's shape (leading context or none, a removed `---`,
+  an added `++`, a pure deletion, several hunks, CRLF). A `-n` passed
+  alongside `-p` is neither used nor echoed back: when it names a
+  different line than the patch changes, both numbers go into a
+  warning. A patch touching two or more paths with no explicit `--file`
+  is `status: "usage_error"`, `reason: "patch_file_ambiguous"`,
+  exit `2`. A `-p, --patch` path that cannot be used (missing, not a
+  regular file -- a FIFO, a socket, a directory -- unreadable
+  permissions, or larger than the 8&nbsp;MiB `PATCH_MAX_BYTES` cap) is
+  `status: "usage_error"`, `reason: "patch_not_readable"`, exit `2`,
+  decided once from the path's metadata alone (a `stat` for the kind of
+  file and its size, an access check for the permissions; the patch is
+  never opened in-process, so a FIFO cannot block the probe and an
+  oversized file is never loaded) before the `--file` derivation, the
+  lock, the in-flight marker or any worktree, so it applies the same
+  whether `--file` was given explicitly or is derived from the patch,
+  and a refusal leaves nothing behind.
+- A global `--json` option: a no-op alias for `-f json` (already the
+  default). Combined with an explicit `-f text` it is
+  `status: "usage_error"`, `reason: "format_conflict"`, exit `2`.
+- An unrecognized option's `usage_error` message now names a common
+  alias when it has one (`--text` -> `-f text`; `--json` is itself a
+  real global option now, so it never reaches this hint), and an
+  invalid `-f`/`--format` value that looks like a path adds a hint
+  pointing at `probe`'s `--file` instead.
+- `probe --help`'s description now states that `--file` is long-only
+  because the global `-f` is `--format`, and that every global option
+  may precede the subcommand; the packaged skill (`assets/skill/
+SKILL.md`) and the README gained an "Invocation templates" section
+  with a copy-pasteable line for each mutant form plus `verify` and
+  `doctor`.
+- `probe --env NAME=VALUE` (repeatable, task `b00efca1`): applied to
+  both the baseline and the mutant's `--pre`/`-t` runs (they share one
+  merged environment), and echoed back under the mutant's `test.env` so
+  the isolation a caller asked for is visible in the report instead of
+  only inferable from the command string. Also echoed once at the run
+  level (a top-level `env` field, present whenever `--env` was given, on
+  every status including `baseline_failed`, where there is no `test`
+  phase for a per-test echo to live under). A value whose NAME carries
+  `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`/`CREDENTIALS`, or `KEY` as
+  its own `_`-delimited segment (case-insensitive; anchored via
+  `SECRET_ENV_NAME_PATTERN` in `session.ts`, the segment sitting at the
+  start or end of the name, or between two underscores) is redacted
+  (`"<redacted>"`) in both places; values must not otherwise be assumed
+  private, since the envelope is routinely pasted into PRs and task
+  trackers. The anchoring is a fix in its own right, not just a rewording:
+  the earlier pattern matched the recognized word ANYWHERE in the name, so
+  `TOKENIZER_MODEL` and `KEYBOARD` were redacted despite carrying no
+  secret, false positives now gone (`TOKENIZER_MODEL`/`KEYBOARD` are
+  pinned verbatim in `test/cli.test.ts`'s redaction matrix alongside
+  genuine matches like `API_TOKEN`). This redaction covers only the two
+  echoes (`env`/`test.env`); it never touches `test.stdoutTail`/
+  `test.stderrTail` or the linked exec log, so a value the test command
+  itself prints still appears there verbatim regardless of its NAME.
+  Fixes a friction measured across 109 real `probe`
+  invocations in one batch: `agent-preflight`'s suite needs an isolated
+  `HOME`, and every one of those invocations had to smuggle
+  `HOME=<dir> npx vitest ...` into `-t` instead. No `=`, or an empty
+  name before it, is a usage error. Not wired into `--plan`: combining
+  `--env` with `--plan` is refused outright (added to
+  `PLAN_EXCLUSIVE_OPTIONS` in `src/cli.ts`) rather than silently
+  ignored.
+- `probe`: a one-line stderr notice, printed before the baseline starts,
+  when no `--timeout` was given and the test command looks like a whole
+  test suite rather than one targeted file: `npm test`, `npm run test`/
+  `npm run test:<anything>`, `yarn test`, `pnpm test` (each with nothing
+  after it but flags, a bare `--` argument separator judged by the same
+  rule as any other token -- it is flag-shaped in its own right, so it
+  never alone disqualifies a command from looking full-suite, and
+  whatever follows it is judged the same way, token by token, with no
+  separate stripping step: `npm test -- --coverage` is still full-suite
+  shaped, `npm test -- test/x.test.ts` is not), or `vitest
+  run` (bare, through `npx` or not) with nothing after it but flags,
+  `-t <pattern>` and a forwarded `--` included (task `b00efca1`, round
+  3: the npm/yarn/pnpm shapes above always stripped one leading `--`
+  before judging what followed it, but the `vitest run` shape never did
+  -- so `npx vitest run -- --coverage` was misclassified as NOT
+  full-suite, missing the timing hint for a command that genuinely runs
+  the whole suite twice; both shapes now use the one uniform token rule
+  above, with no separate stripping anywhere, so the same `--` is judged
+  the same way regardless of which prefix precedes it. Pinned in
+  `test/cli.test.ts`'s matcher table). A targeted command such as
+  `vitest run test/x.test.ts` prints nothing. Names that the baseline
+  and the mutant run the command serially with no bound and that
+  `--timeout` caps each run. The result also now carries
+  `totalDurationMs` (wall-clock time of the whole `probe()` call, every
+  branch), the same field name and meaning `verify`'s result already
+  carries. Motivated by the same friction as `--env` above: a probe
+  over a full-suite command runs it twice with no visible runtime hint.
+
 ### Changed
 
 - `--link` (task `6c7e1532`, behaviour change): a value containing
@@ -500,7 +725,137 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--require-baseline-evidence` truncated-tail warning is now also
   exercised on the plan path, not only the single-probe path.
 
+- `test/drift.test.ts`'s "'++ ' as content" case now uses a real rename
+  (`src/old-thing.yaml` -> `src/new-thing.ts`, `---`/`+++` naming
+  different paths) instead of a same-path edit: a same-path edit cannot
+  observe a compound mutant that disables the whole `!sawHunk &&
+  raw.startsWith("+++ ")` header branch, since `newPath ?? oldPath`
+  then falls back to the SAME file either way; a same-extension rename
+  is equally unobservable, since `extractIdentifier` classifies purely
+  by extension bucket. Renaming across buckets (a YAML config key
+  becoming a TS declaration) is what makes the fallback path
+  disagree with the real one.
+- `test/import-boundaries.test.ts`: a new guard, parsing each of
+  `src/probe/session.ts`, `step.ts`, `setup.ts` and `index.ts`'s own
+  import specifiers off the real TypeScript AST (`typescript`'s
+  `createSourceFile`, already a devDependency), that fails if
+  `session.ts` imports `step.ts`, `setup.ts` or `index.ts`, if
+  `step.ts` imports `setup.ts` or `index.ts`, or if `setup.ts` imports
+  `step.ts` or `index.ts` -- pinning the one-way layering `index.ts`'s
+  own docblock already describes (`session.ts <- step.ts <- setup.ts
+  <- index.ts`), so far kept only by convention. Parsing the AST
+  (rather than a regex over the source text) is what lets the guard
+  cover every statement form that actually creates a module
+  dependency -- `import ... from "spec"`, `export ... from "spec"`, a
+  bare side-effect `import "spec";`, and a dynamic `import("spec")` /
+  `await import("spec")` -- while never mistaking a `from "..."`
+  inside a comment or an unrelated string literal for one, and treats
+  a relative specifier without an extension (`./index`) as the same
+  module as its `.js`-suffixed form. A `type`-only import counts as
+  forbidden the same as a value import: it is still a structural
+  dependency, and nothing stops it becoming a value import later. The
+  one documented, tolerated exception is the type-only `index.ts` <->
+  `plan.ts` cycle (`PlanMutantSpec` one way, `ExpectVerdict`/
+  `IsolationMode` the other); the guard does not require that cycle to
+  exist, only that if both directions are present, neither is a value
+  import.
+- README's `--plan` example's `mutants` array now names only neutral
+  placeholders (`src/example.ts`, `src/example-two.ts`,
+  `src/example-three.ts`) instead of mixing one placeholder with a
+  real source line (`src/lock.ts` line 44, `n > 0`) that was already
+  inaccurate and drifts with every edit to that file. A one-line
+  caveat next to the snippet says the example illustrates the plan
+  file's shape only; it was never meant to be run as-is.
+- `test/probe-worktree.test.ts` now pins `session.ts`'s stale-worktree
+  marker removal after a successful recovery (`if (staleWt)
+  removeMarkerFor(realRoot)`) with a test that mocks `beginWorktree` to
+  fail before it reaches its own `onWorktreeAttempt` write: the run's
+  own new-worktree attempt always rewrites the same marker on success,
+  which would otherwise mask an inverted condition there entirely. A
+  negative control confirms a normal run with no marker to recover
+  still writes none.
+- `test/doctor.test.ts`'s "hints: is empty when no required tool is
+  missing" case now runs `doctor()` against a fresh `cwd` and `lockDir`
+  fixture, the same isolation every other case in the file already
+  uses, instead of the real defaults (`process.cwd()`, the uid-scoped
+  tmp directory every `agent-primitives` invocation on this machine
+  shares). This case's assertion is exact (`hints.length` must be `0`),
+  so it is the one case in the file a stray hint from unrelated ambient
+  state under those real defaults would actually break. The cause is
+  reproduced, not merely plausible: a concurrent real `agent-primitives
+  probe -i worktree` run against the same checkout (or any live scratch
+  worktree already registered against it) makes `doctor`'s
+  `stale-worktree` check emit exactly one "a live probe (pid N) owns
+  the scratch worktree at ..." hint, because that check reads `git
+  worktree list` for `containmentRoot(cwd)` regardless of `lockDir`;
+  the shared lock directory is a second, weaker channel through the
+  same check's own worktree-marker lookup. Pinning both `cwd` and
+  `lockDir` to fresh, empty fixtures removes both channels.
+- Internal, with no change to what a single probe reports: `probe()`'s
+  pipeline is split into a shared setup, a per-mutant step
+  (`prepareMutant` + `runMutantAttempt`), and a shared teardown, so
+  `probePlan()` runs the very same step in a loop rather than a second
+  copy of it. The signal, abort and worktree-cleanup machinery moved into
+  one run controller both entry points use. `test/probe.test.ts` guards
+  the extraction against four `probe()` results recorded from the package
+  as it stood before it (`test/fixtures/single-probe-result-master-a908951.json`).
+- Internal, no behavior change: `src/probe/index.ts` (formerly one
+  ~3300-line file) is split into `probe/session.ts` (the run controller:
+  signal/abort handling, the in-flight-run tracking the handler waits
+  on, the `-i worktree` session, and `openTarget`'s per-file
+  backup/restore, plus the shared field-shape result types every layer
+  needs to name), `probe/step.ts` (the per-mutant step, `prepareMutant`
+  + `runMutantAttempt`, built on `session.ts`), and `probe/setup.ts`
+  (the shared `openRunSetup`: isolation fallback, refusals, containment,
+  the lock, stale-marker recovery, the worktree sync, every target's
+  backup, the baseline), with `index.ts` left holding the CLI-facing
+  option/result types and the two entry points, `probe()` and
+  `probePlan()`. Import direction is one way,
+  `session.ts <- step.ts <- setup.ts <- index.ts`; in this codebase
+  `setup.ts` ends up needing only `session.ts` (the mutant step it runs
+  before its own baseline is supplied by its caller). The package's
+  public surface (`src/index.ts`'s exports, `dist/index.d.ts`) is
+  unchanged; the same identity fixture above still passes without
+  regeneration.
+- `-t/--test` is no longer enforced by the option parser (so `--plan` can
+  supply it) but by the probe command itself; omitting both is still
+  `status: "usage_error"`, exit `2`.
+- `probe -r/--replace` and `-M/--match` (with `-w/--with`) without
+  `--file`/`-n` now report `status: "usage_error"` with the message
+  `probe: --file is required for -r/--replace (only -p/--patch can
+derive it from the patch)` / `probe: -n/--line is required for
+-r/--replace (...)`, instead of commander's own `required option
+'--file <path>' not specified`; `status: "usage_error"` and exit `2`
+  are unchanged.
+- `probe -p/--patch` no longer reports
+  `-p/--patch has no hunk header to derive -n from; pass -n explicitly`:
+  nothing reads the patch's text any more, so there is no such
+  condition to detect. A patch with no content change reaches the
+  `--file` derivation as before -- for a rename-only patch that is the
+  rename's destination, which does not exist yet, so the run ends in
+  `status: "usage_error"`, `reason: "file_not_found"` naming that path,
+  instead of `inconclusive`/`mutant_not_applicable`.
+- `probe -p/--patch` with an explicit `-n/--line` reports the patch's
+  first changed line as `mutant.line` instead of echoing `-n`, and
+  warns when the two differ (`-n 5 differs from the patch's first
+changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
+  mutate exactly the line `-n` names.
+
 ### Fixed
+
+- `probe`'s 128 + N band warning on a failing baseline now precedes
+  every baseline-side refusal (task `150b07ba`): the two refusals that
+  used to return ahead of it, the evidence gate
+  (`baseline_evidence_not_matched`) and the zero-tests gate
+  (`no_tests_executed`), now carry it too. Separately, the warning
+  names the reason the result actually carries (`no_tests_executed`,
+  `baseline_evidence_not_matched`, or `baseline_failed`) instead of
+  always reading "the baseline_failed verdict"; on the plain
+  `baseline_failed` path only that wording changed. A baseline killed under a surviving wrapper (exit `137`)
+  with both `--pass-regex` and `--require-baseline-evidence` set now
+  reports both that nothing proves tests ran and that the run may have
+  been cut short, not only the former; the same pairing now also holds
+  for a band-code baseline whose own output shows zero tests executed.
 
 - `escapingRootMentions`'s `--log-dir` exclusion no longer swallows a
   SIBLING of the log dir along with it (task `5f9c57de`): the scratch
@@ -873,367 +1228,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fails to compile -- and asserts the reported envelope matches the
   contract exactly, in both directions. The README's Result shape
   section gained a "Refusal reason shape" table listing all sixteen.
-
-### Added
-
-- A sweep of `-m` budgets against a real `probe --plan` envelope (in-process
-  `buildEnvelope`/`reconcileEnvelopeDiffTruncation`, plus a manual CLI sweep
-  across 3,000-4,300 and a coarse 500-20,000 pass) found no case of the
-  envelope exceeding its requested bound with no warning naming the true
-  length; a regression test now pins that contract for the swept plan shape
-  on every build (in bound with no could-not-be-met warning, or over the
-  bound with a warning naming the exact final length). Two
-  existing spawned-CLI regression tests that asserted a raw
-  `stdout.length` ceiling near the reduction's edge lost that byte check in
-  favor of the actual contract they already asserted next to it
-  (`truncated`, the hunk-boundary shape, the descriptor clause).
-- `agent-primitives drift --base <rev> --head <rev>`: a prototype-scope
-  identifier-drift guard. Collects the identifiers whose declaration a
-  git range removed (a regex over `git diff -U0`'s removed lines: a
-  top-level/exported TS/JS declaration, a top-level JSON/YAML config
-  key, or a wholly deleted file's own basename; an identifier declared
-  again on an added line anywhere in the same diff is treated as MOVED,
-  not removed), then reports every mention of those identifiers still
-  present at `--head` in a doc file or a source comment, word-boundary
-  matched so `RuntimeError` never matches `setRuntimeError`. A site is
-  allowlisted by default (`--strict` reports it too, flagged) when it
-  matches an `--allow` glob, sits in a released CHANGELOG section (never
-  `## [Unreleased]`), sits under a `docs/**/migration*` path or a
-  Markdown heading naming "migration", or its line carries a small,
-  documented historical-phrase word list (`former`, `no longer`, `used
-  to`, ...). Envelope carries `removed_identifiers`, `sites`,
-  `allowlisted` (each with a `reason` on an allowlisted entry) and
-  `counts`; exit `0` no site reported, `1` at least one site reported,
-  `2` a usage error (`cwd` outside a git work tree, a bad `--base`/
-  `--head`, or a failing `git diff`). Motivated by, and its synthetic
-  test fixture modeled on, a real case: a deleted local error type that
-  several docs and source comments across a repository kept describing
-  as current after the deletion, including two sites a human reviewer's
-  own pass had missed. Known limits: only TS/JS/JSON/YAML declarations
-  and only `.md`/`.mdx`/`.txt` docs plus a fixed list of comment-bearing
-  source extensions are scanned; a declaration split across more than
-  one line, or a name bound by destructuring, is missed; no cross-repo
-  scanning.
-- `probe --plan <path>`: a JSON file naming one test command (and
-  optionally `pre`, `isolation`, `expect`, `timeout`) plus a list of
-  mutants, run against ONE shared baseline instead of one baseline per
-  mutant. Each mutant is applied with its applied content verified by
-  hash, tested, and restored with the restore verified by hash BEFORE the
-  next one is applied; the loop re-hashes the target itself before every
-  apply, so a restore that silently did not happen stops the plan instead
-  of letting the next mutant land on the previous one's content. Every
-  guarantee of the single probe holds per mutant: the same in-flight
-  marker and backup, the same abort handling, the same restore-then-verify
-  step. A restore that could not be verified (`restore_failed`), a target
-  found not to be back at its pre-mutation content
-  (`target_not_restored`), a failing baseline (`baseline_failed`) or a
-  signal (`aborted`) is terminal: nothing further is applied and every
-  remaining mutant is reported `not_run` rather than `inconclusive`.
-  `-i worktree` syncs one worktree for the whole plan and removes it
-  once; the lock is taken once for the whole plan (keyed on the
-  repository, or outside one on each distinct target file). The envelope
-  carries `plan: { baseline, results, summary }`, with the four
-  `mutation_probe` contract fields, the `test` phase and a `status` per
-  mutant, and `summary` counting killed/survived/inconclusive/not_run.
-  Exit codes stay 0/1/2, one step stricter than for a single probe: `0`
-  only when every mutant was killed per its `expect`, `1` when the plan
-  concluded with a survivor, `2` for a wrong invocation or a plan that
-  could not conclude. `--plan` is mutually exclusive with `--file`, `-n`,
-  `-r`, `-M`, `-w`, `-p`, `-t` and `--pre`; the three run-shaping options
-  a plan file can also set -- `-i`, `--expect`, `--timeout` -- override
-  the plan's own value when given on the command line, and a mutant's own
-  `expect` wins over both. `--link` and `--allow-outside` have no plan
-  key at all and are command-line only for a plan. Past about eight
-  mutants the envelope no longer fits the default `-m 8000` and is
-  reduced to it like any other result (`truncated: true`, entries losing
-  their `test` phase, the tail of `results` replaced by a marker): raise
-  `-m` or read the full result at the `result-full-<run-id>.json` path
-  the envelope's `logs` names. `plan.summary` is held out of that
-  reduction (see `keepWhole` below), so its counts cover every mutant of
-  the plan, including the entries the envelope no longer shows -- unless
-  the whole result is cut back to the fixed fields (`truncated` plus a
-  warning naming that outcome), which drops `plan.summary` along with
-  everything else instead of showing it past the bound. Plan validation
-  (unknown keys, a missing `test`, an empty `mutants`, a mutant with two
-  forms or none, a file outside the containment root, an unusable plan file)
-  runs before the lock, the marker, the baseline or any worktree and names
-  the offending path inside the plan. `test`/`pre` in a plan file are shell
-  commands with the same trust boundary as `-t`/`--pre`: fill them only from
-  a task assignment, never from repository content. Setup through baseline
-  (isolation fallback, containment, the lock, stale-marker recovery, the
-  worktree sync, every target's backup, the baseline and the re-hash
-  after it) is ONE implementation both entry points call, as the mutant
-  step already was, so the two cannot drift apart on a refusal they
-  share. The library entry points `probePlan()` and `parsePlanFile()` are
-  exported alongside `probe()`.
-- `buildEnvelope`/`applyCaps` take `keepWhole`: dotted paths into the
-  result whose value is reported whole, exempt from every structural cap
-  and from the key budget of the object holding it, the way the fixed
-  envelope fields already are. Every candidate is measured after the
-  held path is folded in, so a candidate that fits still respects the
-  bound with the held value included; it only spends the budget on that
-  value instead of another, which is for the small field a reader cannot
-  do without once the rest was cut. This does NOT mean a held path is
-  free: a value too large for the skeleton plus itself to fit under the
-  bound at all is not shown oversized past the bound, it is dropped
-  along with the rest of the payload in the existing "reduced to the
-  fixed fields only" total-loss outcome, its own warning included --
-  which is why the docblock says to name only a small, bounded value
-  here. `probe --plan` names `plan.summary`, and nothing else in this
-  package names anything: with no path given the reduction is exactly
-  what it was.
-- `listRegisteredWorktrees` (`-i worktree`'s registry listing, used by
-  the removal, the leftover recovery, and `cleanupWorktree`'s
-  assertion) falls back to a third source, the `gitdir` files under
-  `<git-common-dir>/worktrees/<id>` read directly, when neither
-  `git worktree list` form ran to a parse: a dead listing no longer
-  leaves a leftover judged by the disk alone. The fallback lists linked
-  worktrees only (never the main worktree, which git's admin directory
-  carries no entry for) and keeps an admin entry whose target no longer
-  exists on disk apart from the entries that still do, so a stale entry
-  naming a worktree just removed reads as gone, never as still
-  registered; a `gitdir` file written relative (`worktree.useRelativePaths`,
-  git 2.48 or newer) is resolved against its own admin entry directory,
-  git's own semantics, never the calling process's `cwd`. An entry
-  whose `gitdir` file is missing, unreadable, or empty makes the WHOLE
-  listing `ok: false` rather than being silently dropped from an
-  otherwise `ok: true` one, named by id and reason in `detail`:
-  `ok: true` for this form means every admin entry was read to a
-  parse, so an entry's absence from `paths` can be trusted to mean it
-  really is gone.
-  `cleanupWorktree`'s previously-unverified double-fault outcome (both
-  `git worktree list` forms dead, the target never registered in the
-  first place) is now asserted (`verified: true`) whenever this source
-  can list something -- which also makes a scratch-shaped worktree this
-  source reports as registered eligible for removal even when it sits
-  outside the current run's `--log-dir`, the same as one a real
-  `git worktree list` reported.
-- `doctor`'s `stale-worktree` check and the marker's own
-  `SCRATCH_OWNER_MAX_AGE_HOURS`-bound age check (previously applied
-  only to the scratch owner record) now also bound the repository-keyed
-  worktree marker itself, against its own `timestamp` field: a marker
-  whose pid is alive but whose record is older than the bound is
-  reported as a leftover with the manual removal command, the same as
-  a dead pid, since an alive pid recycled onto an unrelated process
-  proves nothing once the marker's own record is this old.
-
-- `probe -p/--patch` now needs neither `--file` nor `-n/--line`, so
-  `-p <patch> -t '<cmd>'` alone is enough for a single-path patch;
-  both are still required for `-r` and `-M`/`-w`, which have nothing
-  to derive them from. `--file` is derived from the single path the
-  patch touches; the reported `mutant.line` is the first line at which
-  the dry run's applied result differs from the original -- the applied
-  file, never a reading of the patch text, so the reported number and
-  the `before` content quoted beside it always name the same line
-  whatever the diff's shape (leading context or none, a removed `---`,
-  an added `++`, a pure deletion, several hunks, CRLF). A `-n` passed
-  alongside `-p` is neither used nor echoed back: when it names a
-  different line than the patch changes, both numbers go into a
-  warning. A patch touching two or more paths with no explicit `--file`
-  is `status: "usage_error"`, `reason: "patch_file_ambiguous"`,
-  exit `2`. A `-p, --patch` path that cannot be used (missing, not a
-  regular file -- a FIFO, a socket, a directory -- unreadable
-  permissions, or larger than the 8&nbsp;MiB `PATCH_MAX_BYTES` cap) is
-  `status: "usage_error"`, `reason: "patch_not_readable"`, exit `2`,
-  decided once from the path's metadata alone (a `stat` for the kind of
-  file and its size, an access check for the permissions; the patch is
-  never opened in-process, so a FIFO cannot block the probe and an
-  oversized file is never loaded) before the `--file` derivation, the
-  lock, the in-flight marker or any worktree, so it applies the same
-  whether `--file` was given explicitly or is derived from the patch,
-  and a refusal leaves nothing behind.
-- A global `--json` option: a no-op alias for `-f json` (already the
-  default). Combined with an explicit `-f text` it is
-  `status: "usage_error"`, `reason: "format_conflict"`, exit `2`.
-- An unrecognized option's `usage_error` message now names a common
-  alias when it has one (`--text` -> `-f text`; `--json` is itself a
-  real global option now, so it never reaches this hint), and an
-  invalid `-f`/`--format` value that looks like a path adds a hint
-  pointing at `probe`'s `--file` instead.
-- `probe --help`'s description now states that `--file` is long-only
-  because the global `-f` is `--format`, and that every global option
-  may precede the subcommand; the packaged skill (`assets/skill/
-SKILL.md`) and the README gained an "Invocation templates" section
-  with a copy-pasteable line for each mutant form plus `verify` and
-  `doctor`.
-- `probe --env NAME=VALUE` (repeatable, task `b00efca1`): applied to
-  both the baseline and the mutant's `--pre`/`-t` runs (they share one
-  merged environment), and echoed back under the mutant's `test.env` so
-  the isolation a caller asked for is visible in the report instead of
-  only inferable from the command string. Also echoed once at the run
-  level (a top-level `env` field, present whenever `--env` was given, on
-  every status including `baseline_failed`, where there is no `test`
-  phase for a per-test echo to live under). A value whose NAME carries
-  `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`/`CREDENTIALS`, or `KEY` as
-  its own `_`-delimited segment (case-insensitive; anchored via
-  `SECRET_ENV_NAME_PATTERN` in `session.ts`, the segment sitting at the
-  start or end of the name, or between two underscores) is redacted
-  (`"<redacted>"`) in both places; values must not otherwise be assumed
-  private, since the envelope is routinely pasted into PRs and task
-  trackers. The anchoring is a fix in its own right, not just a rewording:
-  the earlier pattern matched the recognized word ANYWHERE in the name, so
-  `TOKENIZER_MODEL` and `KEYBOARD` were redacted despite carrying no
-  secret, false positives now gone (`TOKENIZER_MODEL`/`KEYBOARD` are
-  pinned verbatim in `test/cli.test.ts`'s redaction matrix alongside
-  genuine matches like `API_TOKEN`). This redaction covers only the two
-  echoes (`env`/`test.env`); it never touches `test.stdoutTail`/
-  `test.stderrTail` or the linked exec log, so a value the test command
-  itself prints still appears there verbatim regardless of its NAME.
-  Fixes a friction measured across 109 real `probe`
-  invocations in one batch: `agent-preflight`'s suite needs an isolated
-  `HOME`, and every one of those invocations had to smuggle
-  `HOME=<dir> npx vitest ...` into `-t` instead. No `=`, or an empty
-  name before it, is a usage error. Not wired into `--plan`: combining
-  `--env` with `--plan` is refused outright (added to
-  `PLAN_EXCLUSIVE_OPTIONS` in `src/cli.ts`) rather than silently
-  ignored.
-- `probe`: a one-line stderr notice, printed before the baseline starts,
-  when no `--timeout` was given and the test command looks like a whole
-  test suite rather than one targeted file: `npm test`, `npm run test`/
-  `npm run test:<anything>`, `yarn test`, `pnpm test` (each with nothing
-  after it but flags, a bare `--` argument separator judged by the same
-  rule as any other token -- it is flag-shaped in its own right, so it
-  never alone disqualifies a command from looking full-suite, and
-  whatever follows it is judged the same way, token by token, with no
-  separate stripping step: `npm test -- --coverage` is still full-suite
-  shaped, `npm test -- test/x.test.ts` is not), or `vitest
-  run` (bare, through `npx` or not) with nothing after it but flags,
-  `-t <pattern>` and a forwarded `--` included (task `b00efca1`, round
-  3: the npm/yarn/pnpm shapes above always stripped one leading `--`
-  before judging what followed it, but the `vitest run` shape never did
-  -- so `npx vitest run -- --coverage` was misclassified as NOT
-  full-suite, missing the timing hint for a command that genuinely runs
-  the whole suite twice; both shapes now use the one uniform token rule
-  above, with no separate stripping anywhere, so the same `--` is judged
-  the same way regardless of which prefix precedes it. Pinned in
-  `test/cli.test.ts`'s matcher table). A targeted command such as
-  `vitest run test/x.test.ts` prints nothing. Names that the baseline
-  and the mutant run the command serially with no bound and that
-  `--timeout` caps each run. The result also now carries
-  `totalDurationMs` (wall-clock time of the whole `probe()` call, every
-  branch), the same field name and meaning `verify`'s result already
-  carries. Motivated by the same friction as `--env` above: a probe
-  over a full-suite command runs it twice with no visible runtime hint.
-
-### Changed
-
-- `test/drift.test.ts`'s "'++ ' as content" case now uses a real rename
-  (`src/old-thing.yaml` -> `src/new-thing.ts`, `---`/`+++` naming
-  different paths) instead of a same-path edit: a same-path edit cannot
-  observe a compound mutant that disables the whole `!sawHunk &&
-  raw.startsWith("+++ ")` header branch, since `newPath ?? oldPath`
-  then falls back to the SAME file either way; a same-extension rename
-  is equally unobservable, since `extractIdentifier` classifies purely
-  by extension bucket. Renaming across buckets (a YAML config key
-  becoming a TS declaration) is what makes the fallback path
-  disagree with the real one.
-- `test/import-boundaries.test.ts`: a new guard, parsing each of
-  `src/probe/session.ts`, `step.ts`, `setup.ts` and `index.ts`'s own
-  import specifiers off the real TypeScript AST (`typescript`'s
-  `createSourceFile`, already a devDependency), that fails if
-  `session.ts` imports `step.ts`, `setup.ts` or `index.ts`, if
-  `step.ts` imports `setup.ts` or `index.ts`, or if `setup.ts` imports
-  `step.ts` or `index.ts` -- pinning the one-way layering `index.ts`'s
-  own docblock already describes (`session.ts <- step.ts <- setup.ts
-  <- index.ts`), so far kept only by convention. Parsing the AST
-  (rather than a regex over the source text) is what lets the guard
-  cover every statement form that actually creates a module
-  dependency -- `import ... from "spec"`, `export ... from "spec"`, a
-  bare side-effect `import "spec";`, and a dynamic `import("spec")` /
-  `await import("spec")` -- while never mistaking a `from "..."`
-  inside a comment or an unrelated string literal for one, and treats
-  a relative specifier without an extension (`./index`) as the same
-  module as its `.js`-suffixed form. A `type`-only import counts as
-  forbidden the same as a value import: it is still a structural
-  dependency, and nothing stops it becoming a value import later. The
-  one documented, tolerated exception is the type-only `index.ts` <->
-  `plan.ts` cycle (`PlanMutantSpec` one way, `ExpectVerdict`/
-  `IsolationMode` the other); the guard does not require that cycle to
-  exist, only that if both directions are present, neither is a value
-  import.
-- README's `--plan` example's `mutants` array now names only neutral
-  placeholders (`src/example.ts`, `src/example-two.ts`,
-  `src/example-three.ts`) instead of mixing one placeholder with a
-  real source line (`src/lock.ts` line 44, `n > 0`) that was already
-  inaccurate and drifts with every edit to that file. A one-line
-  caveat next to the snippet says the example illustrates the plan
-  file's shape only; it was never meant to be run as-is.
-- `test/probe-worktree.test.ts` now pins `session.ts`'s stale-worktree
-  marker removal after a successful recovery (`if (staleWt)
-  removeMarkerFor(realRoot)`) with a test that mocks `beginWorktree` to
-  fail before it reaches its own `onWorktreeAttempt` write: the run's
-  own new-worktree attempt always rewrites the same marker on success,
-  which would otherwise mask an inverted condition there entirely. A
-  negative control confirms a normal run with no marker to recover
-  still writes none.
-- `test/doctor.test.ts`'s "hints: is empty when no required tool is
-  missing" case now runs `doctor()` against a fresh `cwd` and `lockDir`
-  fixture, the same isolation every other case in the file already
-  uses, instead of the real defaults (`process.cwd()`, the uid-scoped
-  tmp directory every `agent-primitives` invocation on this machine
-  shares). This case's assertion is exact (`hints.length` must be `0`),
-  so it is the one case in the file a stray hint from unrelated ambient
-  state under those real defaults would actually break. The cause is
-  reproduced, not merely plausible: a concurrent real `agent-primitives
-  probe -i worktree` run against the same checkout (or any live scratch
-  worktree already registered against it) makes `doctor`'s
-  `stale-worktree` check emit exactly one "a live probe (pid N) owns
-  the scratch worktree at ..." hint, because that check reads `git
-  worktree list` for `containmentRoot(cwd)` regardless of `lockDir`;
-  the shared lock directory is a second, weaker channel through the
-  same check's own worktree-marker lookup. Pinning both `cwd` and
-  `lockDir` to fresh, empty fixtures removes both channels.
-- Internal, with no change to what a single probe reports: `probe()`'s
-  pipeline is split into a shared setup, a per-mutant step
-  (`prepareMutant` + `runMutantAttempt`), and a shared teardown, so
-  `probePlan()` runs the very same step in a loop rather than a second
-  copy of it. The signal, abort and worktree-cleanup machinery moved into
-  one run controller both entry points use. `test/probe.test.ts` guards
-  the extraction against four `probe()` results recorded from the package
-  as it stood before it (`test/fixtures/single-probe-result-master-a908951.json`).
-- Internal, no behavior change: `src/probe/index.ts` (formerly one
-  ~3300-line file) is split into `probe/session.ts` (the run controller:
-  signal/abort handling, the in-flight-run tracking the handler waits
-  on, the `-i worktree` session, and `openTarget`'s per-file
-  backup/restore, plus the shared field-shape result types every layer
-  needs to name), `probe/step.ts` (the per-mutant step, `prepareMutant`
-  + `runMutantAttempt`, built on `session.ts`), and `probe/setup.ts`
-  (the shared `openRunSetup`: isolation fallback, refusals, containment,
-  the lock, stale-marker recovery, the worktree sync, every target's
-  backup, the baseline), with `index.ts` left holding the CLI-facing
-  option/result types and the two entry points, `probe()` and
-  `probePlan()`. Import direction is one way,
-  `session.ts <- step.ts <- setup.ts <- index.ts`; in this codebase
-  `setup.ts` ends up needing only `session.ts` (the mutant step it runs
-  before its own baseline is supplied by its caller). The package's
-  public surface (`src/index.ts`'s exports, `dist/index.d.ts`) is
-  unchanged; the same identity fixture above still passes without
-  regeneration.
-- `-t/--test` is no longer enforced by the option parser (so `--plan` can
-  supply it) but by the probe command itself; omitting both is still
-  `status: "usage_error"`, exit `2`.
-- `probe -r/--replace` and `-M/--match` (with `-w/--with`) without
-  `--file`/`-n` now report `status: "usage_error"` with the message
-  `probe: --file is required for -r/--replace (only -p/--patch can
-derive it from the patch)` / `probe: -n/--line is required for
--r/--replace (...)`, instead of commander's own `required option
-'--file <path>' not specified`; `status: "usage_error"` and exit `2`
-  are unchanged.
-- `probe -p/--patch` no longer reports
-  `-p/--patch has no hunk header to derive -n from; pass -n explicitly`:
-  nothing reads the patch's text any more, so there is no such
-  condition to detect. A patch with no content change reaches the
-  `--file` derivation as before -- for a rename-only patch that is the
-  rename's destination, which does not exist yet, so the run ends in
-  `status: "usage_error"`, `reason: "file_not_found"` naming that path,
-  instead of `inconclusive`/`mutant_not_applicable`.
-- `probe -p/--patch` with an explicit `-n/--line` reports the patch's
-  first changed line as `mutant.line` instead of echoing `-n`, and
-  warns when the two differ (`-n 5 differs from the patch's first
-changed line 12; mutant.line reports 12`); `-r` and `-M`/`-w` still
-  mutate exactly the line `-n` names.
-
-### Fixed
 
 - `probe -p/--patch`'s result now carries the whole applied change for a
   multi-line patch, not just its first changed line: `mutant.diff`
