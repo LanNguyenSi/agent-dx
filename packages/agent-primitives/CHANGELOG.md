@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `probe`'s `--require-baseline-evidence` refusal on a failing baseline
+  (`baseline_evidence_not_matched`) now carries the 128 + N band warning
+  when the baseline's own exit code is in that band, instead of the
+  refusal returning before the warning was pushed (task `150b07ba`): a
+  baseline killed under a surviving wrapper (exit `137`) with both
+  `--pass-regex` and `--require-baseline-evidence` set now reports both
+  that nothing proves tests ran and that the run may have been cut
+  short, not only the former.
+
 ### Added
 
 - `probe -i worktree`'s isolation copy auto-links a composer project's
