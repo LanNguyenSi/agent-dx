@@ -937,8 +937,8 @@ describe("escapingRootMentions(): closing isHardWordEnder's non-ASCII-whitespace
     const miscased = scratchRoot.toUpperCase();
     expect(miscased).not.toBe(scratchRoot);
     const text = `node ${miscased} $X`;
-    expect(
-      escapingRootMentions(text, root, scratchRoot, true),
-    ).toEqual([`${miscased} `]);
+    expect(escapingRootMentions(text, root, scratchRoot, true)).toEqual([
+      `${miscased} `,
+    ]);
   });
 });
