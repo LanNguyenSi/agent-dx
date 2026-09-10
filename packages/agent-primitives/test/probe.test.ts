@@ -5903,7 +5903,7 @@ describe("probe(): the 128 + N band warning is pushed ahead of the --require-bas
   const WRAPPED_TEST_COMMAND = "node runner.js; exit $?";
 
   const BAND_WARNING =
-    /the baseline run exited with 137, the code a shell reports for a process killed by signal 9; the baseline_failed verdict may rest on a run that was cut short/;
+    /the baseline run exited with 137, the code a shell reports for a process killed by signal 9; the baseline_evidence_not_matched verdict may rest on a run that was cut short/;
   const EVIDENCE_WARNING =
     /--require-baseline-evidence \(this text never appears\) did not match the baseline output/;
 
@@ -5954,6 +5954,47 @@ describe("probe(): the 128 + N band warning is pushed ahead of the --require-bas
     expect(bandIndex).toBeLessThan(evidenceIndex);
   }, 20000);
 
+  // Prints node's own built-in test-runner zero-count summary line
+  // (`detectKnownZeroTestsEvidence`'s `node_test` shape), then SIGKILLs
+  // its own process under the same surviving `sh -c` wrapper -- so the
+  // baseline is BOTH a zero-tests refusal and a band-code exit, at once.
+  // The zero-tests gate is checked ahead of `baselineFailed` itself (see
+  // `setup.ts`), so before this round the band-warning push, still
+  // sitting inside the `baselineFailed` block, never ran for this shape
+  // at all.
+  const SELF_KILLING_ZERO_TESTS_RUNNER_JS = [
+    'console.log("# tests 0");',
+    'process.kill(process.pid, "SIGKILL");',
+    "",
+  ].join("\n");
+
+  const ZERO_TESTS_BAND_WARNING =
+    /the baseline run exited with 137, the code a shell reports for a process killed by signal 9; the no_tests_executed verdict may rest on a run that was cut short/;
+
+  it("a band-code baseline whose own output shows zero tests executed reports no_tests_executed AND the band warning naming that reason", async () => {
+    useLockDir();
+    const { repo } = initRepoWith(SELF_KILLING_ZERO_TESTS_RUNNER_JS);
+
+    const result = await probe({
+      file: "runner.js",
+      line: 1,
+      form: "replace",
+      replaceText: 'console.log("irrelevant");',
+      testCommand: WRAPPED_TEST_COMMAND,
+      isolation: "inplace",
+      expect: "fail",
+      cwd: repo,
+      logDir: makeTmpDir(),
+    });
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("no_tests_executed");
+    expect(result.baseline?.exitCode).toBe(137);
+    expect(result.warnings.some((w) => ZERO_TESTS_BAND_WARNING.test(w))).toBe(
+      true,
+    );
+  }, 20000);
+
   describe("out-of-band control: exit 1 carries no band warning, on either predicate", () => {
     // The fake phpunit-style runner (green suite, exit 1): a real,
     // ordinary non-zero exit code OUTSIDE the 128 + N band. Neither the
@@ -5968,20 +6009,9 @@ describe("probe(): the 128 + N band warning is pushed ahead of the --require-bas
       "",
     ].join("\n");
 
-    function initExitOneRepo(): { repo: string } {
-      const repo = makeTmpDir();
-      git(repo, ["init", "-q"]);
-      git(repo, ["config", "user.email", "test@example.com"]);
-      git(repo, ["config", "user.name", "test"]);
-      fs.writeFileSync(path.join(repo, "runner.js"), RUNNER_JS);
-      git(repo, ["add", "-A"]);
-      git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
-      return { repo };
-    }
-
     it("the DEFAULT path (no --pass-regex): baseline_failed, exit 1, no band warning", async () => {
       useLockDir();
-      const { repo } = initExitOneRepo();
+      const { repo } = initRepoWith(RUNNER_JS);
 
       const result = await probe({
         file: "runner.js",
@@ -6008,7 +6038,7 @@ describe("probe(): the 128 + N band warning is pushed ahead of the --require-bas
 
     it("under --pass-regex: killed, exit 1, no band warning", async () => {
       useLockDir();
-      const { repo } = initExitOneRepo();
+      const { repo } = initRepoWith(RUNNER_JS);
 
       const result = await probe({
         file: "runner.js",

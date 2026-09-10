@@ -9,14 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `probe`'s `--require-baseline-evidence` refusal on a failing baseline
-  (`baseline_evidence_not_matched`) now carries the 128 + N band warning
-  when the baseline's own exit code is in that band, instead of the
-  refusal returning before the warning was pushed (task `150b07ba`): a
-  baseline killed under a surviving wrapper (exit `137`) with both
-  `--pass-regex` and `--require-baseline-evidence` set now reports both
-  that nothing proves tests ran and that the run may have been cut
-  short, not only the former.
+- `probe`'s 128 + N band warning on a failing baseline now precedes
+  EVERY baseline-side refusal that used to return ahead of it (task
+  `150b07ba`), not only `baseline_evidence_not_matched`: the zero-tests
+  gate (`no_tests_executed`) and the plain `baseline_failed` refusal
+  each get it too, and the warning names the actual reason the result
+  carries (`no_tests_executed`, `baseline_evidence_not_matched`, or
+  `baseline_failed`) instead of always reading "the baseline_failed
+  verdict". A baseline killed under a surviving wrapper (exit `137`)
+  with both `--pass-regex` and `--require-baseline-evidence` set now
+  reports both that nothing proves tests ran and that the run may have
+  been cut short, not only the former; the same pairing now also holds
+  for a band-code baseline whose own output shows zero tests executed.
 
 ### Added
 
