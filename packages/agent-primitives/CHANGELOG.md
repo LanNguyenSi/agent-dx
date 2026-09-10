@@ -486,6 +486,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `escapingRootMentions`'s `--log-dir` exclusion no longer swallows a
+  SIBLING of the log dir along with it (task `5f9c57de`, closing the
+  residual task `5bf16459` left named: `probe` reported `survived`
+  instead of `test_command_escapes_isolation` for `-l <root>/l` beside a
+  test command naming `<root>/l@2/y.js`, measured on the built CLI).
+  The wide/narrow split task `5bf16459` introduced for the `\`+ANSI-C
+  sub-rule only is now the WHOLE boundary decision for the SCRATCH
+  (`--log-dir`) spelling, in its own function (`isScratchPathBoundaryAt`)
+  rather than a parameter shared with the root's own rule
+  (`isPathBoundaryAt`): only `/`, a backslash-escaped `/`, a
+  backslash-newline pair followed by one of those, and a hard shell word
+  ender (whitespace, either quote, `|`, `&`, `;`, `<`, `>`, `(`, `)`, a
+  backtick, or the end of the text) end the scratch match now, not every
+  character a filename may still legally carry (`@`, `~`, `,`, `=`, `{`,
+  `?`) or `$`, which starts a shell expansion the scan does not model.
+  The root's own wide rule (`isPathBoundaryAt`) is unchanged. Pinned both
+  directions: a `@` sibling, a `~` sibling and a `$`-expansion suffix
+  right after the log-dir spelling are reported, the same at the
+  `escapingRootMentions` level and through a real `probe` run; the
+  genuine exemption (a path under the log dir, e.g.
+  `<root>/l/wt-1/wt`) still holds; the narrow rule's own over-refusal at
+  an ANSI-C junction (README, this residual list) stays a documented
+  residual, unclosed by this task.
+
 - `probe` refuses a test command, `--pre`, or an `--env` value that
   escapes `-i worktree`'s isolation copy (task `5bf16459`): a `-t` command
   of the shape `cd /abs/worktree/backend && npx vitest run ...` never
@@ -598,10 +622,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cd`s using an unspelled path, a third unrelated symlink alias to the
   root, and a root path containing a character neither spelling represents
   each reach the real tree without being refused (README, same list); so
-  does, for the `--log-dir` exclusion only, a sibling of the log dir whose
+  did, for the `--log-dir` exclusion only, a sibling of the log dir whose
   name continues its spelling with a filename-legal word terminator
   (`<root>/l@2/y.js` beside `--log-dir <root>/l`), which the exclusion
-  swallows along with the log dir itself (named, not closed). The
+  swallowed along with the log dir itself (named, not closed at the time;
+  closed by task `5f9c57de`, below). The
   rounds this took, the shapes each one closed and the reproductions
   behind them are in the run files for this task.
 

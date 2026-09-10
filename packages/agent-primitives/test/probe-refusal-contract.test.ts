@@ -1324,4 +1324,26 @@ describe("probe(): test-command isolation-escape detection", () => {
     expect(result.reason).toBeUndefined();
     expect(result.status).toBe("killed");
   });
+
+  it("a --log-dir under the repository root does not exempt a `@` SIBLING of the log dir: the test command still refuses", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const logDir = path.join(repo, "l");
+    fs.mkdirSync(logDir, { recursive: true });
+    // `<repo>/l@2/y.js` names a SIBLING of the log dir (`<repo>/l@2`),
+    // not the log dir itself or a path under it, so the exemption must
+    // not swallow it along with the log dir's own spelling: the
+    // repository-root mention the sibling's path also contains (the
+    // `<repo>/l` prefix it shares with the log dir) must still refuse
+    // the run.
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        logDir,
+        testCommand: `node ${logDir}@2/y.js`,
+      }),
+    );
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("test_command_escapes_isolation");
+  });
 });

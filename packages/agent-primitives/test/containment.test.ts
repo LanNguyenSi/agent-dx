@@ -775,3 +775,78 @@ describe("isPathContained() (sanity, unchanged by this task)", () => {
     expect(isPathContained("/a/b", "/a")).toBe(false);
   });
 });
+
+describe("escapingRootMentions(): the SCRATCH spelling's own boundary rule", () => {
+  it("a `@` sibling of the --log-dir is reported, not exempted: the exclusion's match must not read `@` as ending the log dir's spelling", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    // `<root>/l@2/y.js` names a SIBLING of the log dir (`<root>/l@2`),
+    // not the log dir itself, so it must not be excluded along with
+    // it; the root mention it also contains (the `<root>/l` prefix it
+    // shares with the log dir's own spelling) must survive.
+    const text = `node ${scratchRoot}@2/y.js`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([
+      scratchRoot,
+    ]);
+  });
+
+  it("a `~` sibling of the --log-dir is reported, not exempted", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const text = `node ${scratchRoot}~2/y.js`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([
+      scratchRoot,
+    ]);
+  });
+
+  it("a `$`-expansion suffix right after the --log-dir spelling is reported: `$` starts an expansion this scan does not model, so it must not end the exclusion's match either", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const text = `node ${scratchRoot}$SUFFIX/y.js`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([
+      scratchRoot,
+    ]);
+  });
+
+  it("the other filename-legal word terminators from the same sibling shape (`,`, `=`, `{`, `?`) are reported too", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    for (const suffix of [",2/y.js", "=2/y.js", "{2}/y.js", "?2/y.js"]) {
+      const text = `node ${scratchRoot}${suffix}`;
+      expect({
+        suffix,
+        mentions: escapingRootMentions(text, root, scratchRoot),
+      }).toEqual({ suffix, mentions: [scratchRoot] });
+    }
+  });
+
+  it("the real exemption still holds: a genuine isolation-copy path under the --log-dir is excluded, not reported", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    const copy = path.join(scratchRoot, "wt-1", "wt");
+    expect(
+      escapingRootMentions(`cd ${copy} && node t.js`, root, scratchRoot),
+    ).toEqual([]);
+  });
+
+  it("the exact-name sibling `<root>/l2` stays refused (unaffected control): a portable-set character right after the log dir's spelling never validated the exclusion's match, before or after this change", () => {
+    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+    const scratchRoot = path.join(root, "l");
+    fs.mkdirSync(scratchRoot);
+    // `<root>/l2/y.js` is itself a path under the repository root (not
+    // merely a prefix collision with the log dir), so it is a genuine
+    // root mention and must stay refused; "2" never validated the
+    // scratch match as ending at the log dir's spelling either, under
+    // the old narrow rule or the new one, so this control is
+    // unaffected by the boundary change.
+    const text = `node ${scratchRoot}2/y.js`;
+    expect(escapingRootMentions(text, root, scratchRoot)).toEqual([
+      text.slice(5),
+    ]);
+  });
+});
