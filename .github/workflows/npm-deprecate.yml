@@ -2,7 +2,19 @@ name: Deprecate an npm version
 
 # Operator tool. Marks ONE published version of ONE allowlisted package as
 # deprecated on the npm registry. Runs here rather than on a workstation
-# because the write-capable NPM_TOKEN lives only as a repository secret.
+# because the write-capable NPM_AGENT_DX_TOKEN lives only as a repository
+# secret.
+#
+# NPM_AGENT_DX_TOKEN is a granular npm automation token scoped to the
+# packages this workflow's allowlist names (orchestrator-workflow, okf-kit),
+# with publish/write permission (deprecation and, in npm-dist-tag.yml,
+# dist-tag moves) and 2FA-bypass enabled so it works non-interactively in CI.
+# The npm CLI cannot create granular tokens, so it was created by hand on
+# npmjs.com (Access Tokens -> Generate New Token -> Granular Access Token).
+# The token has an expiry; its rotation date is tracked by the maintainer
+# outside this repository. This is a separate secret from the
+# shared classic NPM_TOKEN used elsewhere in the org; publish-npm.yml in this
+# repo already uses npm Trusted Publishing (OIDC) and is untouched by this.
 #
 # Why the inputs are validated rather than trusted:
 #
@@ -93,12 +105,12 @@ jobs:
           node-version: 22
           registry-url: "https://registry.npmjs.org"
 
-      - name: Preflight, verify NPM_TOKEN secret is set
+      - name: Preflight, verify NPM_AGENT_DX_TOKEN secret is set
         env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_AGENT_DX_TOKEN: ${{ secrets.NPM_AGENT_DX_TOKEN }}
         run: |
-          if [ -z "${NPM_TOKEN}" ]; then
-            echo "::error::NPM_TOKEN secret is not configured." >&2
+          if [ -z "${NPM_AGENT_DX_TOKEN}" ]; then
+            echo "::error::NPM_AGENT_DX_TOKEN secret is not configured." >&2
             exit 1
           fi
 
@@ -123,7 +135,7 @@ jobs:
         # failure (npm can fail after the write lands). The AFTER step decides.
         continue-on-error: true
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_AGENT_DX_TOKEN }}
           PACKAGE: ${{ inputs.package }}
           VERSION: ${{ inputs.version }}
           MESSAGE: ${{ inputs.message }}
