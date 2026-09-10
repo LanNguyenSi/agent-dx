@@ -10,13 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `probe`'s 128 + N band warning on a failing baseline now precedes
-  EVERY baseline-side refusal that used to return ahead of it (task
-  `150b07ba`), not only `baseline_evidence_not_matched`: the zero-tests
-  gate (`no_tests_executed`) and the plain `baseline_failed` refusal
-  each get it too, and the warning names the actual reason the result
-  carries (`no_tests_executed`, `baseline_evidence_not_matched`, or
-  `baseline_failed`) instead of always reading "the baseline_failed
-  verdict". A baseline killed under a surviving wrapper (exit `137`)
+  every baseline-side refusal (task `150b07ba`): the two refusals that
+  used to return ahead of it, the evidence gate
+  (`baseline_evidence_not_matched`) and the zero-tests gate
+  (`no_tests_executed`), now carry it too. Separately, the warning
+  names the reason the result actually carries (`no_tests_executed`,
+  `baseline_evidence_not_matched`, or `baseline_failed`) instead of
+  always reading "the baseline_failed verdict"; on the plain
+  `baseline_failed` path only that wording changed. A baseline killed under a surviving wrapper (exit `137`)
   with both `--pass-regex` and `--require-baseline-evidence` set now
   reports both that nothing proves tests ran and that the run may have
   been cut short, not only the former; the same pairing now also holds
