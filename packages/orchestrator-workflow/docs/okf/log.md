@@ -8582,3 +8582,29 @@ closing delta's finding-set delta against base is zero.
   were re-stamped after source inspection and these checks. Full checks and
   probe evidence carry forward over this timestamp/journal-only closure: the
   tested source, assets and fixtures are unchanged.
+
+- 2026-09-11 (review-method axis, pandora task 226c532c): added the
+  review-method briefing parameter (`normal | rigorous | adversarial`) to
+  `reviewer.md`, SKILL.md step 7, and the kit-fence Scaling-delegation
+  text in `agents-md-section.md`; added `method_applied`/`withdrawn` to
+  both reviewer output-contract copies; added a per-round `Method` note
+  to `05-review-findings.md`, outside the pinned Findings table. All five
+  edited files are named as `sources:` by one or more of this bundle's
+  docs, so every citation into them was re-derived by a line-diff mapping
+  (the edits are pure insertions, so old-line -> new-line is unambiguous)
+  and applied mechanically across `install-fence-mechanics.md`,
+  `model-preselection.md`, `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`,
+  and this file's own historical citations into `CHANGELOG.md`,
+  `test/init.test.ts`, and `test/template-markers.test.ts` (both of which
+  also gained new tests for this change, shifting their own downstream
+  citations); the citation-sibling-drift guard's allowlist entry for
+  `model-preselection.md` -> `test/init.test.ts:1793-1826` was re-pointed
+  to its new range alongside it. `okf-kit check --json --require-anchors
+  docs/okf` measured 0 errors, 0 warnings, 17 notices both before this
+  change (baseline) and after the citation re-derivation and this
+  re-stamp, with the same notice set (bare-filename ambiguities,
+  pre-existing). `npm run build`, `npm run typecheck`, `npm run
+  typecheck:test`, `npm test` (821 tests), and `npm run format:check`
+  all passed clean. The five re-verified docs above had their `timestamp`
+  bumped to reflect this pass.
