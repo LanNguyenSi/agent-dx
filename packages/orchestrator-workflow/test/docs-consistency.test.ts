@@ -7883,3 +7883,11 @@ describe("docs/okf/log.md's own citations resolve, and it carries no path-less c
     ).toEqual([]);
   });
 });
+
+describe("review-method obligation rows keep their direction word (R2 of the review-method run)", () => {
+  it("both rows say the Check list and Rules sit below the table, never above", () => {
+    const reviewerMd = unwrap(readAsset("agents/reviewer.md"));
+    expect(reviewerMd).toContain("as already required below");
+    expect(reviewerMd).not.toContain("as already required above");
+  });
+});

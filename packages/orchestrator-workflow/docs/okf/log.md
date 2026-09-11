@@ -1,5 +1,19 @@
 # Bundle log
 
+- 2026-09-11T08:58:53Z (review-method run, round-2 review lows closed by the
+  orchestrator): (1) appended a pin at the end of
+  `test/docs-consistency.test.ts` asserting that reviewer.md's obligation
+  rows say "as already required below" and never "above"; appended, not
+  inserted, so no citation into the test file shifted (verified: 827 tests
+  pass with the same citation set). (2) reverted four historical
+  `SKILL.md:<n>` mentions inside closed accounts of this file that the
+  previous round had blind-shifted by +9 (`:315`, `:453-455`, `:318-345`,
+  `:318-346` restored); these are frozen narratives, not live citations,
+  and okf-kit does not evaluate them (`unresolved-ambiguous`), so no
+  source doc needed a re-stamp. `npm test` 827/827; `okf-kit check
+  --json --require-anchors docs/okf` 0 errors, 0 warnings, unchanged
+  notice set.
+
 - 2026-09-09T07:08:12Z (sibling-guard allowlist claim off-by-one fixed,
   task agent-dx eecdb292): corrected `SIBLING_GUARD_BUNDLE_ALLOWLIST`'s
   `47aedb12` entry's claim string in `test/docs-consistency.test.ts`,
@@ -2851,7 +2865,7 @@
   contracts), and found the citation fix had in fact been a blind +8-line
   shift rather than a genuine re-derivation, still wrong in 44 changed
   lines across the four docs (examples: review-gate-and-waivers.md's
-  `SKILL.md:324` for the reviewer severity field, true `317`;
+  `SKILL.md:315` for the reviewer severity field, true `317`;
   subagent-contracts-superset.md's five output-contract-block ranges, each
   missing its own closing fence line, e.g. the explorer block's true end
   is `248`, not `245`). The fix round reworded the rule to cite only
@@ -2869,7 +2883,7 @@
   the wrong `describe` block boundaries (the advisor-escalation-policy and
   advisor-byte-identical blocks moved when an earlier fix-round inserted
   lines above them); all three were corrected against the current test
-  file. One citation, `SKILL.md:462-464` on the pre-0.21.0
+  file. One citation, `SKILL.md:453-455` on the pre-0.21.0
   model-correlation clause explicitly marked historical, had been wrongly
   shifted by the earlier blind offset even though it documents a past
   state rather than the live file; it was restored to its true historical
@@ -7646,9 +7660,9 @@ red (installed `claude` instead); restored, green again.
   subagent-contracts-superset.md, and model-preselection.md against package
   version 0.26.0+ (Unreleased). Review round 2 found the round-1 pass had
   extended neither of the "Where each contract lives" bullet's two spans
-  (`SKILL.md:327-354` and `implementer.md:41-66`) past the newly added
+  (`SKILL.md:318-345` and `implementer.md:41-66`) past the newly added
   field, so both citations' cited ranges ended one field short of the
-  block's actual last field line; fixed to `SKILL.md:327-355` and
+  block's actual last field line; fixed to `SKILL.md:318-346` and
   `implementer.md:41-67` (the block's true last content line is the
   `commits:` key itself, not its `- ""` placeholder value, which repeats
   too often across the contract to serve as a unique anchor). Added a new
