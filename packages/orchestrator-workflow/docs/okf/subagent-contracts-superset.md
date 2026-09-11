@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-11T09:04:45Z
+timestamp: 2026-09-11T14:59:47Z
 sources:
   - packages/orchestrator-workflow/assets/skill/SKILL.md
   - packages/orchestrator-workflow/assets/agents/explorer.md
@@ -639,7 +639,7 @@ never-`adversarial`-on-`-medium` constraint
 (`test/docs-consistency.test.ts:1612#"SKILL.md step 7 states the review-method selection rule by risk class, including the never-adversarial-on-medium constraint"`).
 
 Motivation and the anchoring dogfood evidence live in
-`CHANGELOG.md:#[Unreleased]#"A review-method axis, orthogonal to the effort tier"`,
+`CHANGELOG.md:#[0.32.0]#"A review-method axis, orthogonal to the effort tier"`,
 not here.
 
 ## Cross-links

@@ -63,8 +63,12 @@ citations over bare line ranges for the same reason: only anchored
 citations are covered by the in-repo docs-consistency guard.
 
 `CHANGELOG.md` is cited by heading, never by line number:
-`CHANGELOG.md:#[Unreleased]` or `CHANGELOG.md:#[0.31.0]`, with a
+`CHANGELOG.md:#[0.32.0]` or `CHANGELOG.md:#[0.31.0]`, with a
 `#"..."` content anchor added when the cited text is a specific line.
+Cite a populated version heading rather than `[Unreleased]` in an
+example: the section right after a release is empty by construction,
+so an example citation into it trips okf-kit's `heading-section-empty`
+warning until the next bullet lands.
 A bare `CHANGELOG.md:N` citation shifts under every entry added above
 it (agent-dx task b50fd903: 38 added lines forced two re-points and
 four re-stamps in one round); the heading form resolves against the
