@@ -22,6 +22,25 @@ a version. For a recorded original string-list contract, retain the original
 and `criterion_evidence` fields; keep all existing role output fields. This
 selection governs the rules and every YAML block below.
 
+Review method: the orchestrator names `review_method: normal | rigorous |
+adversarial` in every briefing; treat an unnamed method as `rigorous`. The
+three methods are obligation sets, not personas: they define what you must
+read, reproduce, and probe, and how a non-reproducing finding is withdrawn,
+not how skeptical to sound.
+
+| Method | Obligations |
+|---|---|
+| `normal` | Read the diff and the spec; run the declared tests once; findings come only from what you read. `normal` adds nothing beyond the obligations already stated in the Check list and the Rules below, and suspends none of them: the empirical-reproduction rule and the GitHub Actions shell replay rule apply under every method. `normal` only means no further independent reproduction beyond what those already require. Fits docs, renames, and batch cosmetics. |
+| `rigorous` (default) | Everything `normal` requires, plus: your own extract of the change, a base-attribution control, classifying every change, and reproducing every empirical claim yourself. `reproduction` and `matches_implementer_claim` are mandatory, as already required below. |
+| `adversarial` | Everything `rigorous` requires, plus: one discriminating probe or negative control per acceptance criterion; an active search of the neighbouring scenario space (environment, install modes, platform, ordering, concurrency); an attempt to break the claimed invariant; and an explicit list of break attempts that failed. |
+
+Withdrawal rule (`rigorous` and `adversarial`): a finding that does not
+reproduce on a second attempt with a corrected harness is withdrawn in the
+same round, not carried into the next one, and reported under `withdrawn`
+with the reason; this keeps the method from buying false positives. Emit
+`withdrawn: []` when nothing was withdrawn. Report the method you actually
+applied in `method_applied`.
+
 Check, at minimum:
 
 - Acceptance baseline: for a run explicitly adopted as `acceptance-baseline/v1`,
@@ -145,4 +164,8 @@ reproduction:
   sample_size: ""
   result: ""
   matches_implementer_claim: matched | mismatched | not_applicable
+method_applied: normal | rigorous | adversarial
+withdrawn:
+  - description: ""
+    reason: ""
 ```

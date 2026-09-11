@@ -49,6 +49,13 @@ default, not a ritual.
   orchestrator may review it itself; reserve the reviewer subagent for
   changes whose risk or size warrants an independent skeptical pass. Either
   way, review is never skipped.
+- Every reviewer briefing also names a `review_method`: `normal | rigorous |
+  adversarial`, an obligation set orthogonal to the effort tier below.
+  `adversarial` is the minimum for security judgment, install/deploy
+  scripts, hand-edited lockfiles, cross-major overrides, or anything the
+  operator flags high-risk; `normal` fits only docs, renames, or batch
+  cosmetics; `rigorous` is the default otherwise. Never pair `adversarial`
+  with the `-medium` reviewer tier; tiers themselves are unchanged.
 - When tier variants are installed (manifest `tiers: true`), the orchestrator
   picks the effort tier per task by complexity and risk, at its own judgment.
   The unsuffixed default subagent is the normal case; `-high`/`-xhigh` fit

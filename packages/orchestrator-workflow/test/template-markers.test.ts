@@ -129,6 +129,62 @@ describe("solution-acceptance markers in run templates", () => {
 });
 
 /**
+ * The review-method axis (SKILL.md step 7, assets/agents/reviewer.md) adds a
+ * per-round `review_method`/`method_applied` note to 05-review-findings.md,
+ * deliberately outside the pinned Findings table (whose Severity/Decision
+ * header row the completeness reader locates the table by, per the tests
+ * above). The reader does not parse this note yet (D-002, run
+ * 2026-09-11-review-method-axis); a follow-up task adds that. This pins the
+ * marker's shape and its position above the Findings heading, so a future
+ * edit cannot silently move it inside the guarded table or drop it.
+ */
+describe("05-review-findings.md carries a review-method note per round, outside the Findings table", () => {
+  const reviewTemplate = readAsset("templates/05-review-findings.md");
+
+  const reviewMethodRe = /review-method\[<round>\]\s*=\s*(\S+)/g;
+
+  it("has exactly one review-method marker, offering only the three obligation sets", () => {
+    const matches = [...reviewTemplate.matchAll(reviewMethodRe)];
+    expect(matches).toHaveLength(1);
+    expect(matches[0][1]).toBe("normal|rigorous|adversarial");
+  });
+
+  it("carries the marker line byte-exactly, wrapper included", () => {
+    expect(reviewTemplate).toContain(
+      "<!-- review-method[<round>] = normal|rigorous|adversarial -->",
+    );
+  });
+
+  it("carries a prose Method line naming review_method and method_applied", () => {
+    const lines = reviewTemplate.split(/\r?\n/);
+    const methodLineIndex = lines.findIndex((line) =>
+      line.startsWith("Method:"),
+    );
+    expect(methodLineIndex).toBeGreaterThanOrEqual(0);
+    const methodParagraph = lines
+      .slice(methodLineIndex, methodLineIndex + 3)
+      .join(" ");
+    expect(methodParagraph).toContain("review_method");
+    expect(methodParagraph).toContain("method_applied");
+  });
+
+  it("states the grounding-mcp completeness reader does not parse this note yet", () => {
+    expect(reviewTemplate).toContain(
+      "not parsed\nby the grounding-mcp completeness reader yet",
+    );
+  });
+
+  it("sits above the Findings heading, outside the pinned table", () => {
+    const markerIndex = reviewTemplate.indexOf(
+      "<!-- review-method[<round>] = normal|rigorous|adversarial -->",
+    );
+    const findingsHeadingIndex = reviewTemplate.indexOf("## Findings");
+    expect(markerIndex).toBeGreaterThanOrEqual(0);
+    expect(findingsHeadingIndex).toBeGreaterThan(markerIndex);
+  });
+});
+
+/**
  * The grounding-mcp orchestrator-workflow completeness reader locates the
  * findings table by its header row (a table row whose cells include both
  * `Severity` and `Decision`, case-insensitive) rather than by heading text,
