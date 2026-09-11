@@ -251,7 +251,16 @@ directory and the subagents.
    `reviewer-<tier>` subagents, if any) by the task's complexity and risk, at
    your own judgment, defaulting to the unsuffixed subagent when unsure; record
    a non-default tier choice with a one-line reason in `03-decisions.md` when
-   the task is non-trivial. When the reviewer's environment cannot use version
+   the task is non-trivial. Also name `review_method: normal | rigorous |
+   adversarial` in the briefing; every briefing names one. Pick it by risk
+   class: `adversarial` at minimum for security judgment, install/deploy
+   scripts, hand-edited lockfiles, cross-major overrides, or anything the
+   operator flags high-risk; `normal` only for docs, renames, or batch
+   cosmetics; `rigorous` otherwise. The method is orthogonal to the tier and
+   never substitutes for it: do not pair `adversarial` with the `-medium`
+   reviewer tier, a budget mismatch that names probes without the effort to
+   run them; tiers themselves are unchanged by this axis. When the
+   reviewer's environment cannot use version
    control to see the diff (for example a policy-gated repository), supply the
    diff as a pre-generated file in the briefing instead of expecting the
    reviewer to derive it, and have the reviewer report explicitly if it could
@@ -520,6 +529,10 @@ reproduction:
   sample_size: ""
   result: ""
   matches_implementer_claim: matched | mismatched | not_applicable
+method_applied: normal | rigorous | adversarial
+withdrawn:
+  - description: ""
+    reason: ""
 ```
 
 `acceptance_recommendation` is mandatory: every reviewer return must set it.
@@ -531,6 +544,12 @@ task: `new` for a defect class not previously found here, `repeated` for
 one that already appeared in an earlier round. On a task's first review
 round every finding is `new` by definition. This is what feeds the
 Review-round escalation budget's trigger.
+
+`method_applied` echoes the `review_method` named in the briefing (see step
+7); `withdrawn` lists each finding the reviewer proposed and then retracted
+under the withdrawal rule (`rigorous` and `adversarial` only), with its
+reason. A briefing that named a method the return does not report, or
+reports a weaker one than named, fails completeness.
 
 ## Task slicer output contract
 

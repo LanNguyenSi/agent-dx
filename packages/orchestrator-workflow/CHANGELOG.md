@@ -9,6 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A review-method axis, orthogonal to the effort tier: every reviewer
+  briefing now names `review_method: normal | rigorous | adversarial`
+  (`assets/agents/reviewer.md`, SKILL.md step 7, the kit-fence
+  Scaling-delegation text). The three methods are obligation sets, not
+  personas: `normal` reads the diff and spec and runs the declared tests
+  once, for docs/renames/batch cosmetics; `rigorous` (the default when a
+  briefing names none) adds an independent extract, a base-attribution
+  control, and mandatory reproduction of every empirical claim (the
+  pre-existing `reproduction`/`matches_implementer_claim` requirement);
+  `adversarial` adds one discriminating probe or negative control per
+  acceptance criterion, an active search of the neighbouring scenario
+  space, an attempt to break the claimed invariant, and a list of break
+  attempts that failed. `adversarial` and `rigorous` both carry a
+  withdrawal rule: a finding that does not reproduce on a second attempt
+  with a corrected harness is withdrawn in the same round and reported
+  under a `withdrawn` list with the reason, so the method cannot buy false
+  positives. The reviewer output contract (both copies, `reviewer.md` and
+  SKILL.md) gains `method_applied` and `withdrawn`; a return that omits or
+  weakens a briefing's named method fails completeness.
+  `assets/templates/05-review-findings.md` gains a `Method` line per review
+  round, outside the pinned Findings table
+  (`test/template-markers.test.ts` pins it); the grounding-mcp
+  completeness reader does not parse it yet, tracked as a follow-up in the
+  agent-grounding repo. SKILL.md's selection rule: `adversarial` at
+  minimum for security judgment, install/deploy scripts, hand-edited
+  lockfiles, cross-major overrides, or anything the operator flags
+  high-risk; `normal` only for docs, renames, or batch cosmetics;
+  `rigorous` otherwise; never `adversarial` on the `-medium` reviewer tier
+  (budget mismatch). Tiers themselves are unchanged. Anchored by the
+  pandora run `2026-09-11-cve-sweep`: reviews R1, R13, and R14 found the
+  Critical/Highs by probing, R4/R6/R8/R9 on the default method correctly
+  found nothing, and R5 withdrew a harness artefact. The selection rule
+  stays advisory, not an AGENTS.md rule, until an A/B (same tasks, run
+  once under `rigorous` and once under `adversarial`, counting real
+  Critical/High findings and findings withdrawn) is recorded.
+
 - A citation-sibling-drift guard (`test/docs-consistency.test.ts`, next to
   the existing anchor-load-bearing checks) catches a citation that resolves
   and anchors correctly on its own but names the wrong sibling among a run

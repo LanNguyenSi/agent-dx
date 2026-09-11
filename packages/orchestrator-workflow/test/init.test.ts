@@ -1661,6 +1661,29 @@ describe("tier variants (`--tiers`)", () => {
     expect(agents.size).toBe(15);
   });
 
+  it("the review-method axis (table and method_applied) renders into every installed reviewer tier", () => {
+    runInit({ ...defaultOptions(), profile: "full", tiers: true });
+
+    for (const file of [
+      "reviewer.md",
+      "reviewer-medium.md",
+      "reviewer-xhigh.md",
+    ]) {
+      const rendered = readFileSync(
+        join(target, ".claude", "agents", file),
+        "utf8",
+      );
+      expect(rendered, file).toContain("Review method:");
+      expect(rendered, file).toContain("| `normal` |");
+      expect(rendered, file).toContain("| `rigorous` (default) |");
+      expect(rendered, file).toContain("| `adversarial` |");
+      expect(rendered, file).toContain(
+        "method_applied: normal | rigorous | adversarial",
+      );
+      expect(rendered, file).toContain("withdrawn:");
+    }
+  });
+
   it("opencode default files: reviewer/advisor get variant: high on an anthropic-resolved model, the three medium-default roles get no effort field", () => {
     // The unsuffixed default file's effort line is keyed by the role's own
     // DEFAULT_TIER via opencodeEffortLine, the same dispatch the tier

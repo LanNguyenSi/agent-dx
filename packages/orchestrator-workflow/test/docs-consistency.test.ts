@@ -6584,13 +6584,13 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "model-preselection.md",
     kind: "wrong-sibling-anchor",
     real: "packages/orchestrator-workflow/test/init.test.ts",
-    start: 1793,
-    end: 1826,
+    start: 1816,
+    end: 1849,
     anchorKey: "d90f95bc",
     paragraphLine: 392,
-    uncitedLines: [1827],
+    uncitedLines: [1850],
     claim:
-      "the sentence names only the Claude-family variant-suffix outcomes; line 1826 asserts the low tier gets no `variant:` line, which is what the sentence needs, while uncited 1827 asserts the absence of `reasoningEffort`, opencode's own field for a non-Claude-family, non-Ollama provider (`src/init.ts:461`), not a codex field (codex's own equivalent is `model_reasoning_effort`, `src/codex.ts:50`) -- not part of what this sentence claims (the Ollama-side outcome it does name is cited separately, at a different range).",
+      "the sentence names only the Claude-family variant-suffix outcomes; line 1849 asserts the low tier gets no `variant:` line, which is what the sentence needs, while uncited 1850 asserts the absence of `reasoningEffort`, opencode's own field for a non-Claude-family, non-Ollama provider (`src/init.ts:461`), not a codex field (codex's own equivalent is `model_reasoning_effort`, `src/codex.ts:50`) -- not part of what this sentence claims (the Ollama-side outcome it does name is cited separately, at a different range).",
   },
   {
     doc: "operator-install-and-registry.md",

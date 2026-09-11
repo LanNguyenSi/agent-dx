@@ -125,12 +125,12 @@ Step 1 of the Workflow carries the matching instruction to write the pointer
 in every worktree the run touches
 (SKILL.md:136#"in every worktree the run touches."), and each of the
 three per-harness bullets under Harness notes repeats that the pointer rule
-applies unchanged regardless of harness (SKILL.md:641#"applies unchanged.";
-SKILL.md:644#"pointer rule from Run state applies unchanged."; SKILL.md:659#"pointer rule from Run state applies unchanged.").
+applies unchanged regardless of harness (SKILL.md:660#"applies unchanged.";
+SKILL.md:663#"pointer rule from Run state applies unchanged."; SKILL.md:678#"pointer rule from Run state applies unchanged.").
 The policy section installed into `AGENTS.md` carries the same two facts in
 one bullet: every touched worktree gets the pointer, and `00-goal.md` gets
 one keyed `run-base[<repo-basename>]` marker per repository for a multi-repo
-run (packages/orchestrator-workflow/assets/agents-md-section.md:171#"marker per repository for multi-repo runs").
+run (packages/orchestrator-workflow/assets/agents-md-section.md:178#"marker per repository for multi-repo runs").
 
 For a run that touches more than one repository, the orchestrator records
 one keyed marker per repository on its own line beside the unkeyed one,
@@ -210,9 +210,9 @@ docs-consistency.test.ts:489-495#"expectPointerMention(section)").
 `05-review-findings.md` and `06-handoff.md` each carry one verdict marker,
 opposite in posture to run-base:
 
-- `05-review-findings.md:28#"<!-- solution-acceptance: acceptance-recommendation = TODO -->"`: `<!-- solution-acceptance: acceptance-recommendation = TODO -->`,
+- `05-review-findings.md:33#"<!-- solution-acceptance: acceptance-recommendation = TODO -->"`: `<!-- solution-acceptance: acceptance-recommendation = TODO -->`,
   filled from the Acceptance Recommendation enum `accept | accept_with_notes
-  | fix_required | reject` (packages/orchestrator-workflow/assets/templates/05-review-findings.md:24-26#"accept | accept_with_notes | fix_required | reject").
+  | fix_required | reject` (packages/orchestrator-workflow/assets/templates/05-review-findings.md:29-31#"accept | accept_with_notes | fix_required | reject").
 - `06-handoff.md:43#"<!-- solution-acceptance: final-status = TODO -->"`: `<!-- solution-acceptance: final-status = TODO -->`,
   filled from the Final Status enum `accepted | accepted_with_notes |
   needs_followup | blocked` (packages/orchestrator-workflow/assets/templates/06-handoff.md:39-41#"accepted | accepted_with_notes | needs_followup | blocked").
@@ -221,10 +221,10 @@ SKILL.md's closing instruction: "replace the `TODO` in each
 `<!-- solution-acceptance: ... = TODO -->` marker with the chosen enum
 value. That marker line is the machine-readable signal the harness
 solution-acceptance run-gate reads, so leaving it as `TODO` keeps the run
-non-accepting (fail-closed)" (SKILL.md:348#"non-accepting (fail-closed)."). A freshly-copied run is
+non-accepting (fail-closed)" (SKILL.md:357#"non-accepting (fail-closed)."). A freshly-copied run is
 therefore non-accepting by construction; this contract shipped in 0.7.0
 (`CHANGELOG.md:#[0.7.0]`). Consumer is "the harness solution-acceptance
-run-gate" per SKILL.md:346#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
+run-gate" per SKILL.md:355#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
 does not assert the external gate's internals. Pinned by
 template-markers.test.ts:16-18#"/solution-acceptance:\s*acceptance-recommendation\s*=\s*" (regexes) and template-markers.test.ts:21-22#"const matches = [...handoffTemplate.matchAll(finalStatusRe)];" and template-markers.test.ts:27-28#"const matches = [...reviewTemplate.matchAll(recommendationRe)];" (one marker per
 template, default `TODO`).
@@ -247,7 +247,7 @@ load-bearing comment above the table declares the Severity and Decision
 headers load-bearing: "the orchestrator-workflow completeness reader
 locates this table by its header row and verifies unresolved findings from
 those two columns. Do not rename or drop them."
-(05-review-findings.md:9#"<!-- The Severity and Decision column headers below are load-bearing: the orchestrator-workflow completeness reader locates this table by its header row and verifies unresolved findings from those two columns. Do not rename or drop them. -->"; line 10 and the 0.7.3 changelog entry attribute
+(05-review-findings.md:14#"<!-- The Severity and Decision column headers below are load-bearing: the orchestrator-workflow completeness reader locates this table by its header row and verifies unresolved findings from those two columns. Do not rename or drop them. -->"; line 10 and the 0.7.3 changelog entry attribute
 that reader to grounding-mcp). This was a reactive fix (0.7.3,
 `CHANGELOG.md:#[0.7.3]`): a live run had drifted onto
 `| Severity | Finding | Resolution |` (no Decision column), and the reader
@@ -256,19 +256,19 @@ rather than silently passing. The Decision legend defines
 `RESOLVED_DECISIONS = {accepted, defer}`: a high/critical finding counts as
 resolved only when its Decision is `accepted` or `defer`; every other value
 (`fix`, `reject`, blank, `open`, `TODO`) leaves it unresolved and **arms**
-the completeness gate (05-review-findings.md:10#"<!-- Decision legend: a high/critical finding counts as RESOLVED (the completeness gate passes) only when its Decision is"). The template's example row
+the completeness gate (05-review-findings.md:15#"<!-- Decision legend: a high/critical finding counts as RESOLVED (the completeness gate passes) only when its Decision is"). The template's example row
 was deliberately narrowed to `accepted/defer` only (0.7.4,
 `CHANGELOG.md:#[0.7.4]`) so the template itself never invites `fix`/`reject`
-as if they were resolutions. Pinned by template-markers.test.ts:144-154#"decision"
-(header row carries both `severity` and `decision` cells), template-markers.test.ts:157-158#"expect(reviewTemplate).toMatch(/<!--[^>]*load-bearing[^>]*-->/i);" (the
-load-bearing comment exists), template-markers.test.ts:161-184#"expect(tokens).toEqual([" (example row's Decision cell is
-exactly `accepted/defer`, mutation-checked), and template-markers.test.ts:187-193#"expect(reviewTemplate).toMatch(/arms? the (?:completeness )?gate/i);" (the
+as if they were resolutions. Pinned by template-markers.test.ts:200-210#"decision"
+(header row carries both `severity` and `decision` cells), template-markers.test.ts:213-214#"expect(reviewTemplate).toMatch(/<!--[^>]*load-bearing[^>]*-->/i);" (the
+load-bearing comment exists), template-markers.test.ts:217-240#"expect(tokens).toEqual([" (example row's Decision cell is
+exactly `accepted/defer`, mutation-checked), and template-markers.test.ts:243-249#"expect(reviewTemplate).toMatch(/arms? the (?:completeness )?gate/i);" (the
 `RESOLVED_DECISIONS = {accepted, defer}` string and "arms the ... gate"
 wording are both present verbatim).
 
 ## The findings-table placeholder row (0.13.0): closing the mixed-state bypass
 
-The example/legend row itself (05-review-findings.md:13#"| low/medium/high/critical | correctness/architecture/security/tests/maintainability/performance/docs | <!-- finding --> | <!-- fix --> | accepted/defer |",
+The example/legend row itself (05-review-findings.md:18#"| low/medium/high/critical | correctness/architecture/security/tests/maintainability/performance/docs | <!-- finding --> | <!-- fix --> | accepted/defer |",
 `| low/medium/high/critical | ... | accepted/defer |`) is the shipped
 template's untouched-state signature, and prior to 0.13.0 the contract said
 nothing about what to do with it. grounding-mcp's completeness reader
@@ -279,12 +279,12 @@ a finding — a run that fills the acceptance-recommendation marker with
 `complete: true` with zero findings, indistinguishable from a genuine
 zero-findings review (the "mixed-state bypass"). 0.13.0 documents the fix's
 contract half in this repo: a comment directly below the placeholder row
-(05-review-findings.md:14#"marker does. During findings transfer (step 7), replace this row with each reviewer finding. For a genuine zero-findings review, delete this row instead — a header row with no data rows is a valid, complete table; leaving this row next to real finding rows is also fine. This mirrors grounding-mcp's placeholder-row detection; keep the two in sync. -->") states the rule the orchestrator must follow —
+(05-review-findings.md:19#"marker does. During findings transfer (step 7), replace this row with each reviewer finding. For a genuine zero-findings review, delete this row instead — a header row with no data rows is a valid, complete table; leaving this row next to real finding rows is also fine. This mirrors grounding-mcp's placeholder-row detection; keep the two in sync. -->") states the rule the orchestrator must follow:
 replace the row when transferring findings, or delete it outright for a
 genuine zero-findings review (a header row with no data rows is valid;
 leaving the legend row next to real finding rows is also fine) — and
 SKILL.md's step 7 carries the same one-sentence rule
-(SKILL.md:269#"rows as the template never having been filled in. When"). The runtime half (grounding-mcp's reader treating a
+(SKILL.md:278#"rows as the template never having been filled in. When"). The runtime half (grounding-mcp's reader treating a
 survived, unaccompanied placeholder row as an explicit format blocker,
 instead of silently reporting zero findings) is a lockstep sibling change in
 the grounding-mcp repo, out of scope for this bundle; this doc, like the
@@ -322,12 +322,12 @@ applying this guidance before filling the file: check whether the change
 touched any path a bundle doc claims as a `sources:` entry, and if so either
 update the affected docs (re-verify and re-stamp) or record a follow-up
 task, running the bundle validator when one is available (for example
-`okf-kit check`) (SKILL.md:336#"validator when one is available (for example"). It is explicitly non-gating: "apply
+`okf-kit check`) (SKILL.md:345#"validator when one is available (for example"). It is explicitly non-gating: "apply
 this optional guidance" and "Repos without a bundle are unaffected"
-(SKILL.md:332#"guidance: when the repo carries a curated knowledge"; SKILL.md:337#"without a bundle are unaffected"). Since 0.24.0 (placement rule) step 9 also
+(SKILL.md:341#"guidance: when the repo carries a curated knowledge"; SKILL.md:346#"without a bundle are unaffected"). Since 0.24.0 (placement rule) step 9 also
 carries a one-sentence placement check for the orchestrator: before handing
 off, check that no org-, machine- or point-in-time-bound evidence was added
-to a reusable instruction file (SKILL.md:342#"or the consuming workspace, with a pointer left behind."); the fix is to move the
+to a reusable instruction file (SKILL.md:351#"or the consuming workspace, with a pointer left behind."); the fix is to move the
 evidence to the changelog, the run files, or the consuming workspace, with a
 pointer left behind. `reviewer.md`'s "Check, at minimum" list carries a
 matching check for the same thing on the implementer side of a run. This is

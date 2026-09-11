@@ -4,6 +4,11 @@
 
 <!-- Short summary. -->
 
+<!-- review-method[<round>] = normal|rigorous|adversarial -->
+Method: normal | rigorous | adversarial (the `review_method` named in this
+round's briefing and the `method_applied` the reviewer returned; not parsed
+by the grounding-mcp completeness reader yet).
+
 ## Findings
 
 <!-- The Severity and Decision column headers below are load-bearing: the orchestrator-workflow completeness reader locates this table by its header row and verifies unresolved findings from those two columns. Do not rename or drop them. -->
