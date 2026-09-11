@@ -1,5 +1,54 @@
 # Bundle log
 
+- 2026-09-11T14:59:47Z (release 0.32.0): bumped `package.json` and
+  `package-lock.json` (both `version` fields) from 0.31.0 to 0.32.0 by hand,
+  the same two-line edit `f54a512` made for 0.31.0, not an
+  `npm install --package-lock-only` run. Cut `CHANGELOG.md`'s `[Unreleased]`
+  content under a new `## [0.32.0] - 2026-09-11` heading, leaving an empty
+  `[Unreleased]` heading above it; the file carries no version-compare-link
+  footer to update.
+
+  Re-pointed the one live citation this shifted, in
+  `subagent-contracts-superset.md`, anchored on "A review-method axis,
+  orthogonal to the effort tier": it cited the `[Unreleased]` heading
+  (empty after this cut), now re-pointed to `[0.32.0]` (not restated here
+  as a full heading-form citation, for the same continuation-resolver
+  reason as below, and because a citation into the now-empty
+  `[Unreleased]` heading would itself trip okf-kit's
+  `heading-section-empty` rule). This file's own citation
+  two entries below, into `CHANGELOG.md` at old line 346 (anchored on
+  "Citation scanning is paragraph-joined"), also shifted, by the same
+  2-line heading insertion landing above it in `CHANGELOG.md` too, and is
+  re-pointed there, in that entry, to line 348 (not restated here as a
+  second numeric full citation, so as not to hand okf-kit's continuation
+  resolver an earlier `CHANGELOG.md` line-number anchor that could shadow
+  unrelated bare line numbers named further down this file). `index.md`'s
+  illustrative heading-citation example swapped its `[Unreleased]` example
+  for `[0.32.0]` (keeping `[0.31.0]` as the second): citing the heading
+  while it is empty tripped okf-kit's `heading-section-empty` warning on
+  the committed tree, so the example now names two populated headings
+  instead, with a sentence recording why. No other `CHANGELOG.md`-shaped
+  citation in the bundle or in `test/docs-consistency.test.ts` needed a
+  re-point: every pin on the `[Unreleased]`/release-bullet text in that
+  file already anchors on the bullet's own opening words (re-anchored for
+  exactly this churn during the 0.31.0 release) or on a version heading,
+  not on the `[Unreleased]` heading or an absolute `CHANGELOG.md` line
+  number, so none moved.
+
+  Re-stamped the `sources:` timestamp on the three bundle docs that list
+  `CHANGELOG.md` (`review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`);
+  `model-preselection.md` lists `test/docs-consistency.test.ts` but not
+  `CHANGELOG.md`, and that test file was not touched this round, so it was
+  left as is.
+
+  Verified on the committed tree: `npm run build`, `typecheck`, and
+  `typecheck:test` clean; the full package suite green; `format:check`
+  clean; `okf-kit check --json --require-anchors docs/okf` and the same
+  check without `--require-anchors` both 0 errors / 0 warnings, the notice
+  set byte-for-byte identical to `origin/master`'s (same rule ids, files,
+  and messages, compared as a set).
+
 - 2026-09-11T08:58:53Z (review-method run, round-2 review lows closed by the
   orchestrator): (1) appended a pin at the end of
   `test/docs-consistency.test.ts` asserting that reviewer.md's obligation
@@ -181,7 +230,7 @@
   that binding rather than second-guessing it.
 
   The CHANGELOG bullet for this round is
-  `CHANGELOG.md:346#"Citation scanning is paragraph-joined"`. Verified on
+  `CHANGELOG.md:348#"Citation scanning is paragraph-joined"`. Verified on
   the committed tree: the full package suite, `docs-consistency.test.ts`
   on its own, `typecheck`, `typecheck:test` and `format:check`; the
   figures each guard measured are in its own computed test name, per the

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-09-11
+
 ### Added
 
 - A review-method axis, orthogonal to the effort tier: every reviewer
