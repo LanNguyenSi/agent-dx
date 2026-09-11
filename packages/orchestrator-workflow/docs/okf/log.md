@@ -9,8 +9,12 @@
   `SKILL.md:<n>` mentions inside closed accounts of this file that the
   previous round had blind-shifted by +9 (`:315`, `:453-455`, `:318-345`,
   `:318-346` restored); these are frozen narratives, not live citations,
-  and okf-kit does not evaluate them (`unresolved-ambiguous`), so no
-  source doc needed a re-stamp. `npm test` 827/827; `okf-kit check
+  and okf-kit does not evaluate them (`unresolved-ambiguous`), so those
+  mentions needed no re-stamp; the appended test pin did make the four
+  docs listing `test/docs-consistency.test.ts` as a source stale under
+  the CI freshness guard (measured against the commit time, which the
+  pre-commit local check does not see), so their `timestamp` was
+  re-stamped to 2026-09-11T09:04:45Z in a follow-up commit. `npm test` 827/827; `okf-kit check
   --json --require-anchors docs/okf` 0 errors, 0 warnings, unchanged
   notice set.
 
