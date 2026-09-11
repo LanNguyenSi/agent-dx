@@ -1566,6 +1566,60 @@ describe("reviewer finding recurrence field ships in both output contracts and t
 });
 
 /**
+ * The review-method axis (round 2 of pandora task 226c532c) added
+ * `method_applied`/`withdrawn` to both reviewer output-contract copies.
+ * Round 1 shipped the fields but no named parity pin existed for them
+ * (coverage was only incidental, via whichever ad hoc block comparison a
+ * later change happened to add); this closes that gap the same way the
+ * `reproduction` and `recurrence` fields above are pinned: field presence
+ * in both copies, a byte-for-byte block equality check, plus the
+ * SKILL.md step 7 selection-rule sentence and the reviewer.md
+ * unnamed-method default.
+ */
+describe("review-method axis ships method_applied/withdrawn identically in both output contracts", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+  const reviewerMd = unwrap(readAsset("agents/reviewer.md"));
+
+  it("both copies carry the method_applied field with the three-method enum", () => {
+    const field = "method_applied: normal | rigorous | adversarial";
+    expect(skillMd).toContain(field);
+    expect(reviewerMd).toContain(field);
+  });
+
+  it("both copies carry the withdrawn field with its description/reason sub-fields", () => {
+    const field = 'withdrawn: - description: "" reason: ""';
+    expect(skillMd).toContain(field);
+    expect(reviewerMd).toContain(field);
+  });
+
+  it("the method_applied/withdrawn block is byte-for-byte identical between SKILL.md and reviewer.md (raw, not line-unwrapped)", () => {
+    const extractMethodBlock = (raw: string): string => {
+      const match = raw.match(/^method_applied:.*\n(?:.+\n)*?```/m);
+      expect(match, "method_applied block not found").toBeTruthy();
+      return (match as RegExpMatchArray)[0].replace(/\n```$/, "");
+    };
+    const skillBlock = extractMethodBlock(readAsset("skill/SKILL.md"));
+    const reviewerBlock = extractMethodBlock(readAsset("agents/reviewer.md"));
+    expect(skillBlock.length).toBeGreaterThan(20);
+    expect(skillBlock).toBe(reviewerBlock);
+  });
+
+  it("reviewer.md states rigorous as the default when the briefing names no method", () => {
+    expect(reviewerMd).toContain("treat an unnamed method as `rigorous`");
+    expect(reviewerMd).toContain("`rigorous` (default)");
+  });
+
+  it("SKILL.md step 7 states the review-method selection rule by risk class, including the never-adversarial-on-medium constraint", () => {
+    expect(skillMd).toContain(
+      "Pick it by risk class: `adversarial` at minimum for security judgment, install/deploy scripts, hand-edited lockfiles, cross-major overrides, or anything the operator flags high-risk; `normal` only for docs, renames, or batch cosmetics; `rigorous` otherwise.",
+    );
+    expect(skillMd).toContain(
+      "do not pair `adversarial` with the `-medium` reviewer tier, a budget mismatch that names probes without the effort to run them",
+    );
+  });
+});
+
+/**
  * 0.19.0 adds `--tiers`: `models.ts` gains `ROLE_TIERS` (which effort tiers
  * each role gets a variant file for) and `DEFAULT_TIER` (the tier a role's
  * plain, unsuffixed file already corresponds to, so no variant is ever

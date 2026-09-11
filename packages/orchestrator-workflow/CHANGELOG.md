@@ -25,9 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   withdrawal rule: a finding that does not reproduce on a second attempt
   with a corrected harness is withdrawn in the same round and reported
   under a `withdrawn` list with the reason, so the method cannot buy false
-  positives. The reviewer output contract (both copies, `reviewer.md` and
-  SKILL.md) gains `method_applied` and `withdrawn`; a return that omits or
-  weakens a briefing's named method fails completeness.
+  positives; emit `withdrawn: []` when nothing was withdrawn. The reviewer
+  output contract (both copies, `reviewer.md` and SKILL.md) gains
+  `method_applied` and `withdrawn`; until the grounding-mcp reader parses
+  the marker (agent-grounding follow-up 5df7b809), the orchestrator checks
+  by hand that the return's `method_applied` matches the briefing's
+  `review_method`, resupplying a mismatch or omission rather than
+  accepting it.
   `assets/templates/05-review-findings.md` gains a `Method` line per review
   round, outside the pinned Findings table
   (`test/template-markers.test.ts` pins it); the grounding-mcp
@@ -38,12 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   high-risk; `normal` only for docs, renames, or batch cosmetics;
   `rigorous` otherwise; never `adversarial` on the `-medium` reviewer tier
   (budget mismatch). Tiers themselves are unchanged. Anchored by the
-  pandora run `2026-09-11-cve-sweep`: reviews R1, R13, and R14 found the
-  Critical/Highs by probing, R4/R6/R8/R9 on the default method correctly
-  found nothing, and R5 withdrew a harness artefact. The selection rule
-  stays advisory, not an AGENTS.md rule, until an A/B (same tasks, run
-  once under `rigorous` and once under `adversarial`, counting real
-  Critical/High findings and findings withdrawn) is recorded.
+  pandora run `2026-09-11-cve-sweep`: reviews R1, R5, R11, R13 and R14
+  found the Critical and High findings by probing; R4, R6 and R9 on the
+  default method returned no findings and R8 only two informational lows;
+  R5 withdrew a harness artefact. The selection rule stays advisory, not
+  an AGENTS.md rule, until an A/B (same tasks, run once under `rigorous`
+  and once under `adversarial`, counting real Critical/High findings and
+  findings withdrawn) is recorded.
 
 - A citation-sibling-drift guard (`test/docs-consistency.test.ts`, next to
   the existing anchor-load-bearing checks) catches a citation that resolves

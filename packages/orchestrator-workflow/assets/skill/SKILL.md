@@ -548,8 +548,11 @@ Review-round escalation budget's trigger.
 `method_applied` echoes the `review_method` named in the briefing (see step
 7); `withdrawn` lists each finding the reviewer proposed and then retracted
 under the withdrawal rule (`rigorous` and `adversarial` only), with its
-reason. A briefing that named a method the return does not report, or
-reports a weaker one than named, fails completeness.
+reason; emit `withdrawn: []` when nothing was withdrawn. Until a
+grounding-mcp reader parses the marker (tracked as a cross-repo
+follow-up), the orchestrator checks by hand that the return's
+`method_applied` matches the briefing's `review_method`; a mismatch or
+omission is resupplied, not accepted.
 
 ## Task slicer output contract
 
