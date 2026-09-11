@@ -8670,5 +8670,17 @@ closing delta's finding-set delta against base is zero.
   ambiguities, pre-existing, unaffected by this round's changes). `npm
   run build`, `npm run typecheck`, `npm run typecheck:test`, `npm test`
   (826 tests, up from 821: the new parity describe block), and `npm run
-  format:check` all passed clean on the committed tree. The two edited
-  docs above had their `timestamp` bumped to reflect this pass.
+  format:check` all passed clean. Both new-section docs
+  (`subagent-contracts-superset.md`, `review-gate-and-waivers.md`) had
+  their `timestamp` bumped before the first commit of this round.
+
+  A post-commit re-check surfaced two `sources-fresh` STALE warnings this
+  first pass missed: `model-preselection.md` and
+  `run-state-lifecycle-and-markers.md` both list `SKILL.md`,
+  `test/docs-consistency.test.ts` and (the latter only) `CHANGELOG.md`
+  under `sources:`, and this round's citation re-derivation edited both
+  docs without bumping either `timestamp` -- the same "re-stamp every
+  affected consumer doc, not only the one you added content to" step the
+  round-1 entry above already names. Re-stamped both in a second commit;
+  re-run measured 0 errors, 0 warnings, 17 notices again, unchanged from
+  the first commit's own measurement.
