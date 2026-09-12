@@ -4072,7 +4072,9 @@ describe("probe(): worktree isolation, the removal waits for a sync step that ou
         !args.includes("add") &&
         events.includes("sync:ls-files:started")
       ) {
-        events.push(`cleanup:${args.includes("remove") ? "remove" : "prune"}:started`);
+        events.push(
+          `cleanup:${args.includes("remove") ? "remove" : "prune"}:started`,
+        );
       }
       return actualRun.runArgv(file, args, options);
     });
@@ -5362,7 +5364,11 @@ describe("probe(): worktree isolation when git worktree list cannot run in any f
     >("../src/probe/run.js");
     const mockRun = vi.mocked(runArgv);
     mockRun.mockImplementation(async (file, args, options) => {
-      if (file === "git" && args.includes("worktree") && args.includes("remove")) {
+      if (
+        file === "git" &&
+        args.includes("worktree") &&
+        args.includes("remove")
+      ) {
         // Same technique as the sibling test above: double `--force`
         // on a real git would otherwise clear the locked entry itself.
         return {

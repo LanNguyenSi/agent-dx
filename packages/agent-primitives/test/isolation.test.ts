@@ -67,10 +67,6 @@ function gitCalls(): Parameters<typeof runArgv>[] {
   >[];
 }
 
-function gitSubcommand(args: string[], command: string): boolean {
-  return args.includes(command);
-}
-
 const tmpDirs: string[] = [];
 function makeTmpDir(): string {
   const dir = fs.mkdtempSync(
@@ -1218,7 +1214,11 @@ describe("cleanupWorktree: the removal is asserted, and every delete goes throug
     >("../src/probe/run.js");
     const mockRun = vi.mocked(runArgv);
     mockRun.mockImplementation(async (file, args, options) => {
-      if (file === "git" && args.includes("worktree") && args.includes("remove")) {
+      if (
+        file === "git" &&
+        args.includes("worktree") &&
+        args.includes("remove")
+      ) {
         return {
           exitCode: 128,
           durationMs: 0,
@@ -1512,7 +1512,9 @@ describe("cleanupWorktree: the removal is asserted, and every delete goes throug
     );
     // Refused before any git call beyond the listing: no remove, no prune.
     expect(
-      gitCalls().filter((c) => c[1][0] === "worktree" && c[1][1] !== "list"),
+      gitCalls().filter(
+        (c) => c[1].includes("worktree") && !c[1].includes("list"),
+      ),
     ).toHaveLength(0);
   });
 
@@ -1651,7 +1653,7 @@ describe("listRegisteredWorktrees and cleanupWorktree on a git that rejects -z, 
   /** The `git worktree list` calls made so far, in order. */
   function listCalls(): Parameters<typeof runArgv>[] {
     return gitCalls().filter(
-      (c) => c[1][0] === "worktree" && c[1][1] === "list",
+      (c) => c[1].includes("worktree") && c[1].includes("list"),
     );
   }
 
@@ -2311,7 +2313,9 @@ describe("the scratch owner record", () => {
       expect(registeredPaths(repo)).toContain(resolveDeepestExisting(wt));
       // Refused before any git call beyond the listing: no remove, no prune.
       expect(
-        gitCalls().filter((c) => c[1][0] === "worktree" && c[1][1] !== "list"),
+        gitCalls().filter(
+          (c) => c[1].includes("worktree") && !c[1].includes("list"),
+        ),
       ).toHaveLength(0);
     } finally {
       sleeper.kill("SIGKILL");

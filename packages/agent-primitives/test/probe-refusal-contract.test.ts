@@ -303,7 +303,7 @@ async function provokeWorktreeSyncFailed(): Promise<ProbeResult> {
   const mockRun = vi.mocked(runArgv);
   mockRun.mockImplementation(async (file, args, options) => {
     const result = await actualRun.runArgv(file, args, options);
-    if (args[0] === "diff" && args.includes("--binary")) {
+    if (args.includes("diff") && args.includes("--binary")) {
       const outputArg = args.find((a) => a.startsWith("--output="));
       if (outputArg === undefined) {
         throw new Error("expected a --output= argument on this diff call");
