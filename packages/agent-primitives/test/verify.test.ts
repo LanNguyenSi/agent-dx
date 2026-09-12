@@ -835,6 +835,26 @@ describe("verify: exec rejection is a per-check error, not a thrown promise", ()
     expect(result.checks[1].status).toBe("pass");
     expect(result.status).toBe("error");
   });
+
+  it("a --pass-regex configured for a check whose execFn rejects warns that the predicate was never consulted", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { broken: "x" });
+    const logDir = makeTmpDir();
+    const failingExec: ExecLike = async () => {
+      throw new Error("simulated exec failure: ENOSPC");
+    };
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["broken"],
+      execFn: failingExec,
+      passRegexes: { broken: /ok/ },
+    });
+    expect(result.checks[0].status).toBe("error");
+    expect(result.warnings).toContain(
+      "broken: --pass-regex (ok) was given but the check failed to run (exec failed), so the predicate was never consulted",
+    );
+  });
 });
 
 describe("verify: detector warnings merge", () => {
@@ -1232,6 +1252,60 @@ describe("verify: --pass-regex with a real detector, summary comes from the dete
     expect(
       result.warnings.some((w) => w.includes("pass_regex_matched_nothing")),
     ).toBe(true);
+  });
+});
+
+describe("verify: --pass-regex map lookup guards inherited Object.prototype names", () => {
+  it("a check named 'constructor' with no predicate configured runs normally (does not crash on the inherited Object.prototype.constructor)", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      'printf "hi\\n"': {
+        exitCode: 0,
+        stdoutTail: "hi\n",
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["constructor"],
+      overrides: { constructor: 'printf "hi\\n"' },
+      execFn: fn,
+    });
+    expect(result.checks[0].name).toBe("constructor");
+    expect(result.checks[0].status).toBe("pass");
+    expect(result.status).toBe("pass");
+  });
+
+  it("a check named 'constructor' still runs normally while a predicate is configured for another check", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      'printf "hi\\n"': {
+        exitCode: 0,
+        stdoutTail: "hi\n",
+      },
+      'printf "other\\n"': {
+        exitCode: 0,
+        stdoutTail: "other\n",
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["constructor", "other"],
+      overrides: {
+        constructor: 'printf "hi\\n"',
+        other: 'printf "other\\n"',
+      },
+      passRegexes: { other: /other/ },
+      execFn: fn,
+    });
+    expect(result.checks[0].name).toBe("constructor");
+    expect(result.checks[0].status).toBe("pass");
+    expect(result.checks[1].name).toBe("other");
+    expect(result.checks[1].status).toBe("pass");
+    expect(result.status).toBe("pass");
   });
 });
 

@@ -2601,12 +2601,12 @@ run is deliberately not flagged, since a risky test did run. A baseline
 real pass, exactly like the vitest/node cases documented under `probe`
 above.
 
-**The pass predicate and the composer link rule** are two more PHP-
-relevant additions on their own tasks (issue #225 parts 1 and 2: a
-`--pass-regex`/`passWhen` pass predicate, and a composer
-`vendor-dir`/`bin-dir` link rule); each documents its own option in its
-own section (`probe`'s own under `## probe`; `verify`'s own is the
-paragraph right above naming `--pass-regex`, not this one). For every
+**The pass predicate** (`--pass-regex`/`passWhen.regex`) is implemented on
+both `probe` and `verify`; each documents its own option in its own
+section (`probe`'s own under `## probe`; `verify`'s own is the paragraph
+right above naming `--pass-regex`, not this one). A composer
+`vendor-dir`/`bin-dir` link rule remains its own pending task (issue
+#225 part 2). For every
 check without a predicate, `verify`'s status classification, and
 `probe`'s own baseline verdict, still read the plain exit code exactly
 as described above (the phpunit/phpstan/phpcs detectors parse output

@@ -322,6 +322,24 @@ function resolveCommand(
   return { command: undefined, skipped: true };
 }
 
+/** Looks up a check's `--pass-regex` in the map built from `-x`-style
+ * `name=regex` pairs. Guarded with `hasOwnProperty` (the same idiom
+ * `resolveCommand` above uses for `overrides`/`scripts`) rather than bare
+ * index access: a plain object also answers a lookup for an inherited
+ * `Object.prototype` member name (`constructor`, `toString`,
+ * `valueOf`, ...), which is a legal `CHECK_NAME_PATTERN` check name, and
+ * a bare `passRegexes[name]` there would resolve to that inherited
+ * function instead of `undefined`, crashing the `.test()` call below on
+ * a check with no predicate configured at all. */
+function getPassRegex(
+  passRegexes: Record<string, RegExp>,
+  name: string,
+): RegExp | undefined {
+  return Object.prototype.hasOwnProperty.call(passRegexes, name)
+    ? passRegexes[name]
+    : undefined;
+}
+
 function emptySummary(): Summary {
   return { passed: 0, failed: 0, skipped: 0, errors: 0, warnings: 0 };
 }
@@ -465,7 +483,7 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
       // dropped, the same "no silent no-op" principle the validation
       // above already applies to a name that could never run in the
       // first place.
-      const skippedPassRegex = passRegexes[name];
+      const skippedPassRegex = getPassRegex(passRegexes, name);
       if (skippedPassRegex !== undefined) {
         warnings.push(
           `${name}: --pass-regex (${skippedPassRegex.source}) was given but the check resolved to skipped, so the predicate was never consulted`,
@@ -509,6 +527,17 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
       checks.push(errorResult);
       fullChecks.push(errorResult);
       warnings.push(`${name}: exec failed: ${message}`);
+      // A `--pass-regex` configured for this check was never consulted
+      // either: execFn itself never returned an `ExecResult` for the
+      // predicate to test against. Said out loud, same shape as the
+      // skipped- and aborted-check warnings above, rather than left to
+      // look like the predicate was simply never given.
+      const execFailedPassRegex = getPassRegex(passRegexes, name);
+      if (execFailedPassRegex !== undefined) {
+        warnings.push(
+          `${name}: --pass-regex (${execFailedPassRegex.source}) was given but the check failed to run (exec failed), so the predicate was never consulted`,
+        );
+      }
       if (options.failFast) break;
       continue;
     }
@@ -553,7 +582,7 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
       // the predicate against. Said out loud, same shape as the
       // skipped-check warning above, rather than left to look like the
       // predicate was simply never given.
-      const abortedPassRegex = passRegexes[name];
+      const abortedPassRegex = getPassRegex(passRegexes, name);
       if (abortedPassRegex !== undefined) {
         warnings.push(
           `${name}: --pass-regex (${abortedPassRegex.source}) was given but the check was aborted before it could finish, so the predicate was never consulted`,
@@ -586,7 +615,7 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
     // `exitStatus` is already `error`: a timeout, exit 126/127, or an
     // aborted run (returned above, before this line) answered nothing
     // about pass/fail either way, so a predicate cannot override it.
-    const passRegex = passRegexes[name];
+    const passRegex = getPassRegex(passRegexes, name);
     let status: CheckStatus = exitStatus;
     if (passRegex !== undefined && exitStatus !== "error") {
       const matched = passRegex.test(output);
