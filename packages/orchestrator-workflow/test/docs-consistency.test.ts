@@ -1105,16 +1105,48 @@ describe("mutation probe naming and not-applicable signal ship in step 6 and bot
 
   it("both copies pin the mutation_probes field block by its exact sub-field names, not just cross-copy equality", () => {
     const field =
-      'mutation_probes: - mutant: "" verified_applied_via: "" result: "" restored_verified: "" replayed: false | true';
+      'mutation_probes: - mutant: "" file: "" anchor: "" before: "" after: "" verified_applied_via: "" result: "" expectation: met | violated | not_applicable reason: "" restored_verified: "" replayed: false | true';
     expect(skillMd).toContain(field);
     expect(implementerMd).toContain(field);
   });
 
+  it("both copies scope expectation's met/violated values to a measured result and reserve not_applicable otherwise", () => {
+    const expectationScopeClause =
+      "only alongside a measured `killed` or `survived` `result`; it is `not_applicable` otherwise";
+    expect(skillMd).toContain(expectationScopeClause);
+    expect(implementerMd).toContain(expectationScopeClause);
+  });
+
+  it("both copies distinguish the two not_applicable verdicts by a named reason string (no-definition vs no-longer-applied)", () => {
+    const noDefinition = "`not_applicable` (reason: `no definition recorded`)";
+    const noLongerPresent =
+      "can no longer be applied (reason: `target text no longer present`)";
+    expect(skillMd).toContain(noDefinition);
+    expect(skillMd).toContain(noLongerPresent);
+    expect(implementerMd).toContain(noDefinition);
+    expect(implementerMd).toContain(noLongerPresent);
+  });
+
   it("both copies pin the field enumeration in prose", () => {
     const enumeration =
-      "(mutant, verified_applied_via, result, restored_verified)";
+      "(mutant, file, anchor, before, after, verified_applied_via, result, expectation, reason, restored_verified)";
     expect(skillMd).toContain(enumeration);
     expect(implementerMd).toContain(enumeration);
+  });
+
+  /**
+   * Review round 3 finding (MEDIUM): the two not_applicable verdicts
+   * (no-definition vs no-longer-applied) were distinguished only by
+   * prose, with no field a misfire check could look for. This pins the
+   * new eleventh `mutation_probes` sub-field, `reason`, and its
+   * requiredness rule (free text, required exactly when `result` is
+   * `not_applicable`, empty otherwise), in both copies.
+   */
+  it("both copies state the `reason` sub-field is required exactly when result is not_applicable, empty otherwise", () => {
+    const reasonRule =
+      "required when `result` is `not_applicable`, empty otherwise";
+    expect(skillMd).toContain(reasonRule);
+    expect(implementerMd).toContain(reasonRule);
   });
 });
 
@@ -4365,6 +4397,7 @@ describe("roles prefer connected structural search, verify, and mutation-probe r
         "ast-grep",
         "codebase-oracle",
         "ripgrep",
+        "--expect",
       ]) {
         expect(doc).not.toContain(name);
       }
@@ -4676,43 +4709,49 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
 
   it("step 6 instructs replaying every mutation probe named in an earlier round of this task", () => {
     expect(skillMd).toContain(
-      "On any round after the task's first, the briefing also names every mutation probe named in an earlier round of this task (on the task's first round there are none), drawn from the run's `04-implementation-summary.md`",
+      "On any round after the task's first, the briefing also names every mutation probe named in an earlier round of this task (on the task's first round there are none), drawn from the run's `04-implementation-summary.md`, naming each by its mutant definition (file, anchor, before, after), not merely by its id",
     );
     expect(skillMd).toContain(
-      "the implementer replays each one, not only the round's new probes, before the next reviewer spawn, and reports each in `mutation_probes` with the four evidence fields plus `replayed: true`",
+      "The implementer replays each one, not only the round's new probes, before the next reviewer spawn, and reports each in `mutation_probes` with the evidence fields plus `replayed: true`",
     );
   });
 
   it("step 6 treats a replayed probe that now survives or cannot be applied as a regression signal", () => {
     expect(skillMd).toContain(
-      "A replayed probe whose mutant now survives or can no longer be applied is a regression signal, reported as such (`result` `survived` or `not_applicable` with the reason) and resolved before the next reviewer spawn.",
+      "a probe recorded with only an id and no definition to reapply cannot be replayed and is `not_applicable` (reason: `no definition recorded`), not a regression.",
+    );
+    expect(skillMd).toContain(
+      "A replayed probe whose `expectation` is now `violated`, or which can no longer be applied (reason: `target text no longer present`), is the regression signal; `result` alone is not: reported as such (`result` `survived` or `not_applicable` with the reason) and resolved before the next reviewer spawn.",
     );
   });
 
   it("the installed implementer prompt carries the same replay rule", () => {
     expect(implementerMd).toContain(
-      "On any round after the task's first, the assignment also names every mutation probe named in an earlier round of this task (on the task's first round there are none), drawn from the run's `04-implementation-summary.md`",
+      "On any round after the task's first, the assignment also names every mutation probe named in an earlier round of this task (on the task's first round there are none), drawn from the run's `04-implementation-summary.md`, naming each by its mutant definition (file, anchor, before, after), not merely by its id",
     );
     expect(implementerMd).toContain(
-      "Replay each one, not only this round's new probes, before returning your report, and report each replayed probe in `mutation_probes` with the four evidence fields plus `replayed: true`",
+      "Replay each one, not only this round's new probes, before returning your report, and report each replayed probe in `mutation_probes` with the evidence fields plus `replayed: true`",
     );
   });
 
   it("the installed implementer prompt carries the same regression-signal consequence", () => {
     expect(implementerMd).toContain(
-      "A replayed probe whose mutant now survives or can no longer be applied is a regression signal: report it as such (`result` `survived` or `not_applicable` with the reason) and resolve it before the next reviewer spawn.",
+      "a probe recorded with only an id and no definition to reapply cannot be replayed and is `not_applicable` (reason: `no definition recorded`), not a regression.",
+    );
+    expect(implementerMd).toContain(
+      "A replayed probe whose `expectation` is now `violated`, or which can no longer be applied (reason: `target text no longer present`), is the regression signal; `result` alone is not: report it as such (`result` `survived` or `not_applicable` with the reason) and resolve it before the next reviewer spawn.",
     );
   });
 
   it("SKILL.md's output-contract prose paragraph (a third copy of the replay rule) also states the trigger", () => {
     expect(skillMd).toContain(
-      "On any round after the task's first, the implementer replays every probe named in an earlier round of this task (on the task's first round there are none), not only this round's new probes, before the next reviewer spawn, reporting each one in `mutation_probes` alongside the round's new probes.",
+      "On any round after the task's first, the implementer replays every probe named in an earlier round of this task (on the task's first round there are none), naming each by its mutant definition, not merely by its id, not only this round's new probes, before the next reviewer spawn, reporting each one in `mutation_probes` alongside the round's new probes.",
     );
   });
 
   it("SKILL.md's output-contract prose paragraph also states the regression-signal consequence", () => {
     expect(skillMd).toContain(
-      "A replayed probe whose mutant now survives or can no longer be applied is a regression signal, reported as such and resolved before the next reviewer spawn.",
+      "A replayed probe whose `expectation` is now `violated`, or which can no longer be applied (reason: `target text no longer present`), is the regression signal, reported as such and resolved before the next reviewer spawn; `result` alone is not a regression signal, and a probe recorded with only an id and no definition to reapply is `not_applicable` (reason: `no definition recorded`).",
     );
   });
 
@@ -4743,9 +4782,9 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
     expect(skillBlock).toBe(implementerBlock);
   });
 
-  it("step 7 tells the orchestrator to name the replayed-and-killed probes in the reviewer briefing so the reviewer may skip re-running them, without changing the reviewer contract", () => {
+  it("step 7 tells the orchestrator to name the replayed-and-killed probes in the reviewer briefing by mutant definition, not merely by id, without changing the reviewer contract", () => {
     expect(skillMd).toContain(
-      "the orchestrator's reviewer briefing names the replayed probes the implementer reports as killed together with their `mutant` and `verified_applied_via` values; the reviewer may then skip re-running those. The reviewer output contract itself is unchanged.",
+      "the orchestrator's reviewer briefing names the replayed probes the implementer reports as killed together with their mutant definition (`file`, `anchor`, `before`, `after`) and `verified_applied_via` value, not merely their id; a probe recorded with only an id and no definition cannot be skipped this way and is `not_applicable`. The reviewer may then skip re-running the ones named by definition. The reviewer output contract itself is unchanged.",
     );
   });
 
@@ -4789,7 +4828,7 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
     expect(outputContractBlock).not.toContain("replayed");
   });
 
-  it("both copies' mutation_probes block has exactly the five sub-fields in a fixed order", () => {
+  it("both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order", () => {
     const skillBlock = extractMutationProbesBlock(readAsset("skill/SKILL.md"));
     const implementerBlock = extractMutationProbesBlock(
       readAsset("agents/implementer.md"),
@@ -4799,13 +4838,90 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
     const expectedOrder = [
       "mutation_probes",
       "mutant",
+      "file",
+      "anchor",
+      "before",
+      "after",
       "verified_applied_via",
       "result",
+      "expectation",
+      "reason",
       "restored_verified",
       "replayed",
     ];
     expect(subFieldNames(skillBlock)).toEqual(expectedOrder);
     expect(subFieldNames(implementerBlock)).toEqual(expectedOrder);
+  });
+
+  /**
+   * Review round 1 finding (HIGH): a re-stamp/re-point pass moved this
+   * bundle doc's citations onto the current SKILL.md/implementer.md text
+   * without updating the prose describing what that text says, so the
+   * doc kept citing the current ten-sub-field contract while its own
+   * sentence still said "five", and kept citing the current
+   * `expectation`-qualified regression rule while its own sentence still
+   * said "both copies say so" (true only of the pre-`expectation` rule).
+   * A re-pointed citation proves the line still exists; it proves nothing
+   * about the surrounding prose. This reads the bundle doc's own raw text
+   * (unlike the SKILL.md/implementer.md pins above) and pins the two
+   * sentences a future re-point pass could silently leave stale again.
+   * Review round 3 grew the field count again (ten to eleven, the new
+   * `reason` sub-field): both the superseded "five" and the now-also-
+   * superseded "ten" wording are pinned absent, so a re-point pass that
+   * moves the citations without updating the count sentence fails here
+   * regardless of which prior count it leaves behind.
+   */
+  it("the bundle doc's own prose states the current field count and regression-signal wording, not a superseded one", () => {
+    const bundleDoc = unwrap(
+      readDoc("docs/okf/subagent-contracts-superset.md"),
+    );
+    expect(bundleDoc).toContain(
+      "A further pin locks the eleven `mutation_probes` sub-fields to their fixed order in both copies",
+    );
+    expect(bundleDoc).not.toContain(
+      "A further pin locks the five `mutation_probes` sub-fields",
+    );
+    expect(bundleDoc).not.toContain(
+      "A further pin locks the ten `mutation_probes` sub-fields",
+    );
+    expect(bundleDoc).toContain(
+      "today both copies instead key the regression signal off `expectation`",
+    );
+  });
+
+  /**
+   * Review round 3 finding (MEDIUM): four "see Mutation probe definition
+   * fields and expectation split below" forward pointers in this bundle
+   * doc pointed at a section that did not exist -- a re-point pass had
+   * moved their citations onto current line numbers without ever adding
+   * the section itself. A re-pointed citation proves the cited line
+   * still exists; it proves nothing about a same-doc prose pointer like
+   * this one. This generically scans the doc for every "see <Name>
+   * below" heading-style forward pointer and asserts <Name> is an
+   * actual heading in the file, so a future pointer added without its
+   * target heading fails here instead of silently resolving to nothing.
+   * "see Motivation below" is a distinct, pre-existing convention (a
+   * same-subsection paragraph lead-in repeated under many headings, not
+   * itself a heading) and is excluded from this check.
+   */
+  it("every 'see <name> below' heading-style forward pointer in the bundle doc names a heading that exists in the file", () => {
+    const bundleDocRaw = readDoc("docs/okf/subagent-contracts-superset.md");
+    const bundleDoc = unwrap(bundleDocRaw);
+    const headings = new Set(
+      [...bundleDocRaw.matchAll(/^#{1,6} (.+)$/gm)].map((m) => m[1].trim()),
+    );
+    const pointers = [
+      ...bundleDoc.matchAll(/see ([A-Z][A-Za-z0-9' -]*?) below\b/g),
+    ]
+      .map((m) => m[1].trim())
+      .filter((name) => name !== "Motivation");
+    expect(pointers.length).toBeGreaterThan(0);
+    for (const name of pointers) {
+      expect(
+        headings.has(name),
+        `no heading found for forward pointer "see ${name} below"`,
+      ).toBe(true);
+    }
   });
 
   // The CHANGELOG's own prose description of the replay rule is a fourth
@@ -4848,6 +4964,59 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
     expect(bullet).toContain("every mutation probe named in an earlier round");
     // Names the `replayed` field the evidence is carried in.
     expect(bullet).toContain("`replayed` sub-field");
+  });
+});
+
+/**
+ * Review round 3 finding (MEDIUM): the CHANGELOG's `[Unreleased]`
+ * description of the `mutation_probes` field itself (a fourth copy,
+ * after SKILL.md's contract paragraph, its step-6 prose, and
+ * implementer.md) still described `expectation` as a two-value
+ * `met | violated` enum with no `not_applicable` case and no `reason`
+ * field, both added earlier in this same field. Anchor on a phrase
+ * inside the bullet (not the "[Unreleased]" heading, which moves once
+ * this entry ships under a version heading) and apply the same
+ * fourth-copy pin pattern used above for the replay-rule bullet.
+ */
+describe("the CHANGELOG's own prose copy of the mutation_probes field description names the current expectation enum and the reason field", () => {
+  const changelogMd = readDoc("CHANGELOG.md");
+
+  it("the bullet states the three-value expectation enum, its measured-result scoping, and the reason field with its two canonical strings", () => {
+    const bulletAnchor = "The implementer `mutation_probes` output field";
+    const anchorIndex = changelogMd.indexOf(bulletAnchor);
+    expect(
+      anchorIndex,
+      "CHANGELOG mutation_probes field bullet anchor phrase not found",
+    ).toBeGreaterThanOrEqual(0);
+    const bulletStart = changelogMd.lastIndexOf("\n- ", anchorIndex) + 1;
+    expect(
+      bulletStart,
+      "start of CHANGELOG mutation_probes field bullet not found",
+    ).toBeGreaterThan(0);
+    let bulletEnd = changelogMd.indexOf("\n- ", anchorIndex + 1);
+    if (bulletEnd < 0) {
+      bulletEnd = changelogMd.indexOf("\n#", anchorIndex + 1);
+    }
+    if (bulletEnd < 0) {
+      bulletEnd = changelogMd.length;
+    }
+    const bullet = unwrap(changelogMd.slice(bulletStart, bulletEnd));
+    // The three-value enum, not the superseded two-value one.
+    expect(bullet).toContain("expectation: met | violated | not_applicable");
+    expect(bullet).not.toContain("expectation: met | violated`");
+    // The measured-result scoping and the not_applicable case.
+    expect(bullet).toContain(
+      "scoped to a measured `killed` or `survived` `result`",
+    );
+    expect(bullet).toContain("`not_applicable` otherwise");
+    // The new eleventh sub-field and its requiredness rule.
+    expect(bullet).toContain("an eleventh sub-field, `reason`");
+    expect(bullet).toContain(
+      "required when `result` is `not_applicable`, empty otherwise",
+    );
+    // The two canonical reason strings.
+    expect(bullet).toContain("`no definition recorded`");
+    expect(bullet).toContain("`target text no longer present`");
   });
 });
 
@@ -6521,10 +6690,10 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 542,
     end: 542,
     anchorKey: "47aedb12",
-    paragraphLine: 336,
-    secondCitationLine: 341,
+    paragraphLine: 337,
+    secondCitationLine: 342,
     claim:
-      "the paragraph opens by naming the test that pins the 0.11.0 misfire rule, then closes at line 341 with an enumeration of that same test's clause-level pins (the section heading, both detection signals, the false-positive scoping language, the resume-or-respawn response paired with the non-evidence rule, and the `03-decisions.md` record requirement) whose last item is the review-gate consequence clause the opening citation already named; the enumeration is complete, so the line-341 repeat is the doc's closing-list convention, not a skipped sibling.",
+      "the paragraph opens by naming the test that pins the 0.11.0 misfire rule, then closes at line 342 (task 06330af2 review round 3 shifted this paragraph +1 by adding a sources entry above it) with an enumeration of that same test's clause-level pins (the section heading, both detection signals, the false-positive scoping language, the resume-or-respawn response paired with the non-evidence rule, and the `03-decisions.md` record requirement) whose last item is the review-gate consequence clause the opening citation already named; the enumeration is complete, so the line-342 repeat is the doc's closing-list convention, not a skipped sibling.",
   },
   {
     doc: "subagent-contracts-superset.md",
@@ -6533,22 +6702,22 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1063,
     end: 1063,
     anchorKey: "03317257",
-    paragraphLine: 421,
-    secondCitationLine: 425,
+    paragraphLine: 424,
+    secondCitationLine: 428,
     claim:
-      "same opening-citation-then-closing-enumeration convention as the 541 entry, here at :1062/line 425: the closing list walks :1037, :1045, :1050 and ends on the cross-copy equality check the :1062 opening sentence named, leaving no further assertion of that block uncited.",
+      "same opening-citation-then-closing-enumeration convention as the 541 entry, here at :1063/line 428 (shifted +1 further by task 06330af2 review round 3's sources entry addition above this paragraph): the closing list walks :1038, :1046, :1051 and ends on the cross-copy equality check the :1063 opening sentence named, leaving no further assertion of that block uncited.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "duplicate-citation",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1177,
-    end: 1177,
+    start: 1209,
+    end: 1209,
     anchorKey: "b19680bb",
-    paragraphLine: 549,
-    secondCitationLine: 555,
+    paragraphLine: 628,
+    secondCitationLine: 634,
     claim:
-      "same convention again, here at :1176/line 555: the closing list walks :1142, :1148, :1155, :1170 and ends on the not-applicable-clause pin the :1176 opening sentence named, leaving no further assertion of that block uncited.",
+      "same convention again, here at :1209/line 634 (task 06330af2 review round 3 re-pointed both the citation, from :1194, and this entry's tracked lines to match, after the new Mutation probe definition fields and expectation split section and a sources entry addition shifted this paragraph down): the closing list walks :1175, :1181, :1188, :1203 and ends on the not-applicable-clause pin the :1209 opening sentence named, leaving no further assertion of that block uncited.",
   },
   {
     doc: "install-fence-mechanics.md",

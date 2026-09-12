@@ -218,17 +218,27 @@ directory and the subagents.
    the same commit. On any round after the task's first, the briefing also names
    every mutation probe named in an earlier round of this task (on the
    task's first round there are none), drawn from the run's
-   `04-implementation-summary.md`; the implementer replays each one, not
-   only the round's new probes, before the next reviewer spawn, and
-   reports each in `mutation_probes` with the four evidence fields plus
-   `replayed: true`. A replayed probe whose mutant now survives or can no
-   longer be applied is a regression signal, reported as such (`result`
-   `survived` or `not_applicable` with the reason) and resolved before the
-   next reviewer spawn. Record meaningful decisions in
+   `04-implementation-summary.md`, naming each by its mutant definition
+   (file, anchor, before, after), not merely by its id; a probe recorded
+   with only an id and no definition to reapply cannot be replayed and is
+   `not_applicable` (reason: `no definition recorded`), not a regression.
+   The implementer replays each one, not only the round's new probes,
+   before the next reviewer spawn, and reports each in `mutation_probes`
+   with the evidence fields plus `replayed: true`. A replayed probe whose
+   `expectation` is now `violated`, or which can no longer be applied
+   (reason: `target text no longer present`), is the regression signal;
+   `result` alone is not: reported as such (`result` `survived` or
+   `not_applicable` with the reason) and resolved before the next reviewer
+   spawn. Record meaningful decisions in
    `03-decisions.md` and consolidate evidence in
    `04-implementation-summary.md`, recording each probe the implementer
    reports as a row in `04-implementation-summary.md`'s Mutation Probes
-   subsection, with the round it was named in. For any diff that adds or
+   subsection, with the round it was named in. Each row's Before/After
+   cells hold a single-line excerpt; when the mutant's actual before/after
+   text is multi-line or contains an unescaped `|`, or the mutant is a
+   patch/diff rather than a text swap, the full text or diff goes in the
+   implementer report or a fenced block placed directly under the table,
+   with the row noting where it lives. For any diff that adds or
    changes a GitHub Actions `run:` step, the installed `implementer.md`
    prompt requires replaying it locally under the shell the step actually
    runs, with the expected-success and the expected-failure inputs, before
@@ -304,8 +314,11 @@ directory and the subagents.
    Review-round escalation budget's trigger (see below) without re-deriving it
    by hand. When the implementer's report replays a prior round's mutation
    probe, the orchestrator's reviewer briefing names the replayed probes the
-   implementer reports as killed together with their `mutant` and
-   `verified_applied_via` values; the reviewer may then skip re-running those.
+   implementer reports as killed together with their mutant definition
+   (`file`, `anchor`, `before`, `after`) and `verified_applied_via` value,
+   not merely their id; a probe recorded with only an id and no definition
+   cannot be skipped this way and is `not_applicable`. The reviewer may
+   then skip re-running the ones named by definition.
    The reviewer output contract itself is unchanged. Never run mutation probes
    in place against a worktree a reviewer subagent is concurrently reviewing;
    isolate the probe in a separate worktree or wait until the reviewer has
@@ -461,8 +474,14 @@ tests:
   not_executed_reason: ""
 mutation_probes:
   - mutant: ""
+    file: ""
+    anchor: ""
+    before: ""
+    after: ""
     verified_applied_via: ""
     result: ""
+    expectation: met | violated | not_applicable
+    reason: ""
     restored_verified: ""
     replayed: false | true
 risks:
@@ -488,19 +507,37 @@ identifies the reviewed artifact and revision, reviewer, method, pass/fail
 standard, reasoned result, and baseline/criterion identities; it stays manual.
 
 When the task assignment names mutation probes to run, the implementer
-reports each one in the `mutation_probes` field (mutant,
-verified_applied_via, result, restored_verified); when the assignment
-names none, it returns `mutation_probes: []` rather than omitting the
-field, so 'none asked for' is distinguishable from 'asked for and not
-reported'. Each item also carries `replayed`: `false` for a probe newly
-introduced this round, `true` for a prior round's probe replayed this
-round under the replay rule in step 6. On any round after the task's
-first, the implementer replays every probe named in an earlier round of
-this task (on the task's first round there are none), not only this
-round's new probes, before the next reviewer spawn, reporting each one in
-`mutation_probes` alongside the round's new probes. A replayed probe
-whose mutant now survives or can no longer be applied is a regression
-signal, reported as such and resolved before the next reviewer spawn.
+reports each one in the `mutation_probes` field (mutant, file, anchor,
+before, after, verified_applied_via, result, expectation, reason,
+restored_verified); `file` and `anchor` (a line number or a unique
+surrounding string) locate the mutant, `before` and `after` are the
+exact text swapped there, and `expectation` records whether `result`
+matched what the probe was expected to do (`met`) or not (`violated`),
+independent of `result` itself, only alongside a measured `killed` or
+`survived` `result`; it is `not_applicable` otherwise (for example when
+the mutant could not be applied and no `result` was measured). `reason`
+is free text, required when `result` is `not_applicable`, empty
+otherwise, carrying one of two canonical strings that distinguish a
+non-regression from a regression: `no definition recorded` (a
+prior-round probe recorded with only an id, no definition to reapply)
+and `target text no longer present` (a replayed probe whose mutant can
+no longer be applied). When the assignment names none, it returns
+`mutation_probes: []` rather than
+omitting the field, so 'none asked for' is distinguishable from 'asked
+for and not reported'. Each item also carries `replayed`: `false` for a
+probe newly introduced this round, `true` for a prior round's probe
+replayed this round under the replay rule in step 6. On any round after
+the task's first, the implementer replays every probe named in an
+earlier round of this task (on the task's first round there are none),
+naming each by its mutant definition, not merely by its id, not only
+this round's new probes, before the next reviewer spawn, reporting each
+one in `mutation_probes` alongside the round's new probes. A replayed
+probe whose `expectation` is now `violated`, or which can no longer be
+applied (reason: `target text no longer present`), is the regression
+signal, reported as such and resolved before the next reviewer spawn;
+`result` alone is not a regression signal, and a probe recorded with
+only an id and no definition to reapply is `not_applicable` (reason:
+`no definition recorded`).
 
 The `commits` field lists the full sha of every commit the implementer
 produced on the task branch, in the order produced; when the task

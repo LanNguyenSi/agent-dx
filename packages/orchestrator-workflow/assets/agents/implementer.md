@@ -36,26 +36,51 @@ Rules:
   percentage; cite a percentage only together with the exact commit and the
   run count, since branch coverage can vary between runs of the same commit.
 - When the task assignment names mutation probes to run, run each one and
-  report it in the `mutation_probes` field of your output (mutant,
-  verified_applied_via, result, restored_verified); an output missing that
-  field when probes were named is treated as a misfire, not evidence. When
-  the assignment names no mutation probes, return `mutation_probes: []`
-  rather than omitting the field. Each item also carries `replayed`:
-  `false` for a probe newly introduced this round.
+  report it in the `mutation_probes` field of your output (mutant, file,
+  anchor, before, after, verified_applied_via, result, expectation,
+  reason, restored_verified); an output missing that field when probes
+  were named is treated as a misfire, not evidence. `file` and `anchor`
+  (a line number or a unique surrounding string) locate the mutant;
+  `before` and `after` are the exact text swapped there, so a later round
+  can reapply the same edit without guessing instead of only a prose
+  description. `expectation` records whether `result` matched what the
+  probe was expected to do (`met`) or not (`violated`), independent of
+  `result` itself, only alongside a measured `killed` or `survived`
+  `result`; it is `not_applicable` otherwise (for example when the mutant
+  could not be applied and no `result` was measured). `reason` is free
+  text, required when `result` is `not_applicable`, empty otherwise,
+  carrying one of two canonical strings that distinguish a non-regression
+  from a regression: `no definition recorded` (a prior-round probe
+  recorded with only an id, no definition to reapply) and `target text no
+  longer present` (a replayed probe whose mutant can no longer be
+  applied). When the assignment names no mutation probes, return
+  `mutation_probes: []` rather than omitting the field.
+  Each item also carries `replayed`: `false` for a probe newly
+  introduced this round.
 - On any round after the task's first, the assignment also names every
   mutation probe named in an earlier round of this task (on the task's
   first round there are none), drawn from the run's
-  `04-implementation-summary.md`. Replay each one, not only this round's
-  new probes, before returning your report, and report each replayed
-  probe in `mutation_probes` with the four evidence fields plus
-  `replayed: true`. A replayed probe whose mutant now survives or can no
-  longer be applied is a regression signal: report it as such (`result`
-  `survived` or `not_applicable` with the reason) and resolve it before
-  the next reviewer spawn.
+  `04-implementation-summary.md`, naming each by its mutant definition
+  (file, anchor, before, after), not merely by its id; a probe recorded
+  with only an id and no definition to reapply cannot be replayed and is
+  `not_applicable` (reason: `no definition recorded`), not a regression.
+  Replay each one, not only this round's new probes, before returning your
+  report, and report each replayed probe in `mutation_probes` with the
+  evidence fields plus `replayed: true`. A replayed probe whose
+  `expectation` is now `violated`, or which can no longer be applied
+  (reason: `target text no longer present`), is the regression signal;
+  `result` alone is not: report it as such (`result` `survived` or
+  `not_applicable` with the reason) and resolve it before the next
+  reviewer spawn.
 - When a verify runner is available, run it for the checks the acceptance
   criteria name and report its summary under `tests.executed`; when a
   mutation-probe runner is available, run the named probes through it and
-  copy its fields into `mutation_probes`.
+  copy its fields into `mutation_probes`; when the runner reports a
+  probe's mutant record (`file`, `anchor`, `before`, `after`) separately
+  from its result fields (`verified_applied_via`, `result`, `expectation`,
+  `reason`, `restored_verified`), take the definition fields from that
+  mutant record so the copied report still carries all eleven
+  `mutation_probes` sub-fields.
 - Run every long test, build, or mutation-probe command in the foreground
   and wait for it to finish before returning. When one foreground call
   cannot hold it to completion, poll the backgrounded run to completion
@@ -134,8 +159,14 @@ tests:
   not_executed_reason: ""
 mutation_probes:
   - mutant: ""
+    file: ""
+    anchor: ""
+    before: ""
+    after: ""
     verified_applied_via: ""
     result: ""
+    expectation: met | violated | not_applicable
+    reason: ""
     restored_verified: ""
     replayed: false | true
 risks:

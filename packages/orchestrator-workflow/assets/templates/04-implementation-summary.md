@@ -68,9 +68,15 @@ an optional row cannot stand in for a required criterion.
 
 ### Mutation Probes
 
-| Round | Mutant | Verified Applied Via | Result | Restored Verified | Replayed |
-|---|---|---|---|---|---|
-| <!-- round --> | <!-- mutant --> | <!-- verified_applied_via --> | <!-- result --> | <!-- restored_verified --> | <!-- replayed --> |
+Before/After cells hold a single-line excerpt. When the mutant's actual
+before/after text is multi-line or contains an unescaped `|`, or the mutant
+is a patch/diff rather than a text swap, put the full text or diff in the
+implementer report or a fenced block directly under the table, and note
+where it lives in the row's own cell.
+
+| Round | Mutant | File | Anchor | Before | After | Verified Applied Via | Result | Expectation | Reason | Restored Verified | Replayed |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| <!-- round --> | <!-- mutant --> | <!-- file --> | <!-- anchor --> | <!-- before --> | <!-- after --> | <!-- verified_applied_via --> | <!-- result --> | <!-- expectation --> | <!-- reason --> | <!-- restored_verified --> | <!-- replayed --> |
 
 ## Risks / Notes
 
