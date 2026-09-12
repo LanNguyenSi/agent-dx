@@ -39,13 +39,20 @@ Before claiming that a test discriminates a change, run one mutation
 probe per named case through `agent-primitives probe` instead of editing
 the file by hand: it confirms the unmutated test passes first, applies
 exactly one mutant, reruns the test, and restores the file, verified by
-hash. Copy its `mutation_probe` field (`mutant`, `verified_applied_via`,
-`result`, `restored_verified`) verbatim into a `mutation_probes` report.
+hash. An implementer report needs eleven fields: take `file`, `anchor`
+(`line`), `before`, and `after` from the sibling `mutant` record; take
+`mutant`, `verified_applied_via`, `result`, `expectation`, `reason`, and
+`restored_verified` from `mutation_probe`; set `replayed` to `false` for
+a new probe and `true` for a replay. Use `not_applicable` for an absent
+`expectation` and an empty string for an absent `reason`; never invent a
+missing sibling record. The package README's “Mapping a probe result into
+an implementer report” section gives the complete mapping, including
+`--plan` results.
 `result` is the mutant's actual outcome (`killed` when the test command
 failed with it applied, `survived` when it passed), independent of
-`--expect`; when `--expect` was given, also copy
-`mutation_probe.expectation` (`"met"`/`"violated"`), which says whether
-that outcome matched it -- `result` alone does not.
+`--expect`; when `mutation_probe.expectation` is present, copy its
+`"met"`/`"violated"` value, which says whether that outcome matched it
+-- `result` alone does not.
 `inconclusive` is not a result: fix whatever it names (a failing baseline,
 a mutant that did not apply, a stale marker) and probe again. Pass `--pre`
 whenever the test under probe executes built output rather than the
