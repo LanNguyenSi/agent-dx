@@ -1480,31 +1480,52 @@ each resolved source must already exist as a directory: one that does
 not exist, or exists but is a plain file, is refused, `status:
 "usage_error"`, `reason: "link_source_not_found"`, exit `2`, naming the
 value as given, the absolute path it resolved to, which of the two
-bases it was resolved against, and a remedy (create the missing
-directory, or drop the entry -- from `--link` itself, or from the
-naming file) (GitHub issue #242) -- unlike an auto-discovered candidate
+bases it was resolved against, and a remedy naming what to do about the
+source itself -- create it when nothing is there, point the entry at a
+directory when a plain file sits there instead, or check its
+permissions when the source could not even be stat'ed -- followed by
+dropping the entry (from `--link` itself, or from the naming file)
+(GitHub issue #242) -- unlike an auto-discovered candidate
 (`node_modules`, a composer `vendor-dir`/`bin-dir`), which keeps its own
 documented skip-when-absent behaviour below, an explicitly named source
 that is not there is a usage error, not something to skip past. This
 runs in `probe()`'s own option-shape checks, ahead of any isolation
-decision, so it fires the same way whether the run goes on to `-i
-worktree`'s isolation copy or `-i inplace`'s in-place mutation, but it
-runs AFTER the containment check just above for a value OUTSIDE the
-containment root: a value that is both outside the root and missing is
-`file_outside_root`, not `link_source_not_found` -- existence is never
-even checked for an out-of-root value, so a `--link`/plan/defaults-file
+decision -- for `-i inplace` as much as for `-i worktree` -- but it
+runs AFTER the containment check just above for a value WHOSE RESOLVED
+PATH lies outside the containment root: a value that is both outside
+the root and missing is `file_outside_root`, not
+`link_source_not_found` -- existence is never checked for a value whose
+resolved path lies outside the root, so a `--link`/plan/defaults-file
 entry pointing outside the repository gets the one uniform refusal
 regardless of whether nothing, a file, or a directory happens to sit at
-that path, rather than leaking which of the three it is. Only a value
-that resolves INSIDE the root reaches the existence check at all. It
-runs once, when the invocation starts, checking that each in-root
-source exists at that moment; it is not re-checked immediately before
-the link is actually created. The check is also where the filesystem's
-case rules show: a case-variant spelling (`SRC` for a directory named
-`src`) resolves on a case-insensitive filesystem (macOS's default) and
-reaches the link policy below, but does not exist on a case-sensitive
-one (Linux's default, and what CI runs on), where the same value is
-`link_source_not_found` rather than a skipped or refused link.
+that path, rather than leaking which of the three it is. This applies
+identically to an IN-repo path that is itself a symlink to somewhere
+outside the root (a defaults-file `link` of `oracle`, where `oracle ->
+/etc/hosts`): refused `file_outside_root` before the existence check
+ever runs, whether the far end exists or not, so it cannot be used to
+learn which of the two it is either.
+
+`--allow-outside` disables that later containment check, and with it
+the ordering the previous paragraph describes -- for `-i worktree` the
+combination is refused outright before either check runs
+(`worktree_allow_outside_unsupported`, see below), but for `-i inplace`
+(where `--allow-outside` is otherwise accepted) a value whose resolved
+path lies outside the root has nothing left downstream to catch it, so
+it is refused right here instead: `--allow-outside -i inplace --link
+/outside/missing` is `link_source_not_found`, not silently accepted --
+the flag disables the containment check, not this existence check. Only
+a value that resolves INSIDE the root, or reaches the existence check
+here for want of anything else to catch it under `--allow-outside -i
+inplace`, is checked for existence at all; every other out-of-root value
+is skipped here as described above. It runs once, when the invocation
+starts, checking that each such source exists at that moment; it is not
+re-checked immediately before the link is actually created. The check
+is also where the filesystem's case rules show: a case-variant spelling
+(`SRC` for a directory named `src`) resolves on a case-insensitive
+filesystem (macOS's default) and reaches the link policy below, but
+does not exist on a case-sensitive one (Linux's default, and what CI
+runs on), where the same value is `link_source_not_found` rather than a
+skipped or refused link.
 
 #### Non-JS repositories
 

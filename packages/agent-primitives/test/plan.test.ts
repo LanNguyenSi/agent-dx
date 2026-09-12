@@ -989,6 +989,11 @@ describe("probePlan(): refusals before the lock, the marker or any worktree", ()
     expect(message).toContain(path.join(repo, "nope"));
     expect(message).toContain("the repository root");
     expect(message).toContain(`named in the "link" list of ${planPath}`);
+    // The remedy end to end: create it, or remove the entry from the
+    // plan file that named it.
+    expect(message).toContain(
+      `create it, or remove the entry from ${planPath}`,
+    );
     expectNoIsolationLeftovers(repo, lockDir);
   });
 });

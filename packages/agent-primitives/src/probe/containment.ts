@@ -60,6 +60,64 @@ export function resolveDeepestExisting(p: string): string {
 }
 
 /**
+ * Where a link SOURCE's own containment is judged: `resolveDeepestExisting(p)`,
+ * except when `p` ITSELF is a symlink whose chain does not fully resolve
+ * (a dangling target, or one this process cannot stat). `fs.realpathSync`
+ * throws for that case with no partial information, so
+ * `resolveDeepestExisting`'s own fallback walks up from `p`'s OWN parent
+ * -- exactly right for an ordinary missing path, but wrong here: it
+ * silently reports `p` itself (still inside the repository, since `p` is
+ * one of the three explicit `link` sources, already resolved against
+ * their own base) rather than the directory the symlink actually names,
+ * which may sit anywhere. Two link sources that both point outside the
+ * repository then read differently by nothing but accident: one whose
+ * target happens to exist resolves through `fs.realpathSync` to that
+ * real, out-of-root path and is caught by the ordinary containment
+ * check; one whose target is missing (or unreadable) falls back to `p`'s
+ * own in-root spelling and reaches the existence check instead, which
+ * then discloses -- via `link_source_not_found` vs. the containment
+ * check's own `file_outside_root` -- whether something happens to sit at
+ * an arbitrary path outside the repository (GitHub issue #242's
+ * containment finding).
+ *
+ * This resolves the gap by following the symlink's own `readlinkSync`
+ * target once (resolved against the symlink's own directory when
+ * relative) and running THAT through `resolveDeepestExisting`, so the
+ * deepest existing ancestor reported is always an ancestor of where the
+ * symlink actually points, dangling or not. `p` itself when it is not a
+ * symlink at all (or cannot be lstat'ed, i.e. does not exist under any
+ * spelling): the ordinary resolution already answers correctly there,
+ * since there is no separate "target" to lose track of.
+ *
+ * Deliberately narrow rather than folded into `resolveDeepestExisting`
+ * itself: that function has other callers (a `--file` target, a link's
+ * eventual on-disk destination inside `link-policy.ts`) whose own
+ * fallback behaviour -- reporting the path unresolved when it does not
+ * fully exist -- is exactly what they need, and widening it here would
+ * change what every one of them sees for a plain missing path, not only
+ * for a link source's own containment check.
+ */
+export function resolveLinkSourceTarget(p: string): string {
+  let lst: fs.Stats;
+  try {
+    lst = fs.lstatSync(p);
+  } catch {
+    return resolveDeepestExisting(p);
+  }
+  if (!lst.isSymbolicLink()) return resolveDeepestExisting(p);
+  let rawTarget: string;
+  try {
+    rawTarget = fs.readlinkSync(p);
+  } catch {
+    return resolveDeepestExisting(p);
+  }
+  const target = path.isAbsolute(rawTarget)
+    ? rawTarget
+    : path.resolve(path.dirname(p), rawTarget);
+  return resolveDeepestExisting(target);
+}
+
+/**
  * Every spelling of `p` the isolation-escape scan (`escapingRootMentions`
  * below) recognizes as "the same path": `p` itself resolved
  * (`path.resolve`), its realpath (`resolveDeepestExisting`, in case `p`

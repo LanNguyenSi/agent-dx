@@ -1495,6 +1495,11 @@ describe("probe(): worktree isolation, a link source that does not exist (#242)"
     expect(message).toContain('"does/not/exist"');
     expect(message).toContain(path.join(repo, "does", "not", "exist"));
     expect(message).toContain("the invocation cwd");
+    // The remedy end to end: a missing --link source is told to create
+    // it, or drop the flag naming it -- a mutant deleting the remedy
+    // clause, or one that always advises "create it" regardless of
+    // branch, both fail this.
+    expect(message).toContain("create it, or drop --link");
     // Nothing left behind: no worktree registered, no lock file.
     expect(worktreeList(repo)).not.toContain("does/not/exist");
     expect(fs.readdirSync(lockDir)).toEqual([]);
@@ -1509,14 +1514,21 @@ describe("probe(): worktree isolation, a link source that does not exist (#242)"
 
     expect(result.status).toBe("usage_error");
     expect(result.reason).toBe("link_source_not_found");
-    expect(result.warnings.join(" ")).toContain("is not a directory");
+    const message = result.warnings.join(" ");
+    expect(message).toContain("is not a directory");
+    // A plain FILE source is told to point the entry at a directory,
+    // never "create it": a directory cannot be created where a file
+    // already sits.
+    expect(message).toContain("point it at a directory, or drop --link");
+    expect(message).not.toContain("create it");
   });
 
   it("refuses a repo defaults-file `link` entry naming a directory that does not exist, naming the defaults file and the repository-root base", async () => {
     useLockDir();
     const { repo } = initRepo();
+    const defaultsPath = path.join(repo, ".agent-primitives.json");
     fs.writeFileSync(
-      path.join(repo, ".agent-primitives.json"),
+      defaultsPath,
       JSON.stringify({ link: ["still-not-there"] }),
     );
 
@@ -1530,6 +1542,11 @@ describe("probe(): worktree isolation, a link source that does not exist (#242)"
     expect(message).toContain(
       `named in the "link" list of ${path.join(repo, ".agent-primitives.json")}`,
     );
+    // The remedy end to end: create it, or remove the entry from the
+    // defaults file that named it.
+    expect(message).toContain(
+      `create it, or remove the entry from ${defaultsPath}`,
+    );
   });
 
   it("an out-of-root MISSING --link reports file_outside_root, not link_source_not_found: the containment check runs first for a value outside the root, before the existence check ever stats it", async () => {
@@ -1542,7 +1559,8 @@ describe("probe(): worktree isolation, a link source that does not exist (#242)"
 
     expect(result.status).toBe("inconclusive");
     expect(result.reason).toBe("file_outside_root");
-    expect(result.warnings.join(" ")).not.toContain("link_source_not_found");
+    expect(result.warnings.join(" ")).not.toContain("does not exist");
+    expect(result.warnings.join(" ")).not.toContain("is not a directory");
     expect(result.warnings.join(" ")).toContain(missing);
   });
 
@@ -1574,7 +1592,8 @@ describe("probe(): worktree isolation, a link source that does not exist (#242)"
 
     expect(result.status).toBe("inconclusive");
     expect(result.reason).toBe("file_outside_root");
-    expect(result.warnings.join(" ")).not.toContain("link_source_not_found");
+    expect(result.warnings.join(" ")).not.toContain("does not exist");
+    expect(result.warnings.join(" ")).not.toContain("is not a directory");
   });
 
   it("an IN-root missing --link still reports link_source_not_found (unaffected by the containment-first ordering above)", async () => {
@@ -1610,7 +1629,115 @@ describe("probe(): worktree isolation, a link source that does not exist (#242)"
 
     expect(result.status).toBe("killed");
     expect(result.isolation.linked).not.toContain(path.join(repo, "vendor"));
-    expect(result.warnings.join(" ")).not.toContain("link_source_not_found");
+    expect(result.warnings.join(" ")).not.toContain("does not exist");
+    expect(result.warnings.join(" ")).not.toContain("is not a directory");
+  });
+});
+
+/**
+ * GitHub issue #242's containment finding, narrowed further: an IN-REPO
+ * path (`<root>/oracle`) that is itself a SYMLINK to somewhere outside
+ * the root must never reach the existence check at all, whether the far
+ * end exists or not. `linkSourceMissingMessage` stats `link.value`
+ * directly, which follows the WHOLE symlink chain, so running it here
+ * would answer "does not exist" for a dangling out-of-root target and
+ * nothing at all for an existing one -- an oracle for whether an
+ * arbitrary path outside the repository exists, reachable from a
+ * defaults file or a plan's own `link` as much as from `--link` itself.
+ *
+ * The first two cases below deliberately run under `--allow-outside -i
+ * inplace`: under the DEFAULT options, `setup.ts`'s own later
+ * containment check already refuses an out-of-root target uniformly
+ * (using the same `resolveLinkSourceTarget`-resolved `link.abs`), so a
+ * plain out-of-root symlink target is caught there regardless of
+ * whether `firstLinkSourceRefusal`'s own early check exists at all --
+ * asserting only `file_outside_root` under default options would pass
+ * even with that early check deleted (measured: it does). Only
+ * `--allow-outside -i inplace` disables that later check and leaves the
+ * existence check as the sole remaining gate, which is exactly the
+ * shape the disclosure needs to happen through, so it is the only
+ * combination that actually discriminates this guard. The last two
+ * cases assert the unaffected, in-root shape under the ordinary
+ * default options, since an in-root target never reaches this guard at
+ * all (the outer `!isPathContained` is false before `isSymlinkSource`
+ * is ever asked).
+ */
+describe("probe(): worktree isolation, an in-repo symlink whose own target lies outside the root (#242)", () => {
+  it("an in-repo --link symlink to an EXISTING out-of-root directory is file_outside_root under --allow-outside -i inplace, before the existence check ever runs", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const outside = makeTmpDir();
+    const outsideTarget = path.join(outside, "target");
+    fs.mkdirSync(outsideTarget);
+    const oracle = path.join(repo, "oracle");
+    fs.symlinkSync(outsideTarget, oracle);
+
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "inplace",
+        allowOutside: true,
+        links: ["oracle"],
+      }),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("file_outside_root");
+    expect(result.warnings.join(" ")).toContain(oracle);
+  });
+
+  it("an in-repo --link symlink to a MISSING out-of-root path answers identically under --allow-outside -i inplace, file_outside_root: existence never distinguishes the two", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const outside = makeTmpDir();
+    const missingOutsideTarget = path.join(outside, "does-not-exist");
+    const oracle = path.join(repo, "oracle");
+    fs.symlinkSync(missingOutsideTarget, oracle);
+
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "inplace",
+        allowOutside: true,
+        links: ["oracle"],
+      }),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("file_outside_root");
+    expect(result.warnings.join(" ")).toContain(oracle);
+    // The whole point: a missing far end must not surface as
+    // link_source_not_found (which would tell an operator a directory
+    // simply does not exist yet, rather than that it points outside the
+    // repository entirely) -- the disclosure `--allow-outside -i
+    // inplace` would otherwise open, since it is the one combination
+    // that leaves the existence check as the sole remaining gate.
+    expect(result.warnings.join(" ")).not.toContain("does not exist");
+  });
+
+  it("an in-repo --link symlink to an IN-ROOT directory still links normally, unaffected", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const realDir = path.join(repo, "real-vendor");
+    fs.mkdirSync(realDir);
+    const oracle = path.join(repo, "oracle");
+    fs.symlinkSync(realDir, oracle);
+
+    const result = await probe(baseOptions(repo, { links: ["oracle"] }));
+
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toContain(resolveDeepestExisting(realDir));
+  });
+
+  it("an in-repo DANGLING symlink to an IN-ROOT missing path still reports link_source_not_found, unaffected by the containment fix above", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const oracle = path.join(repo, "oracle");
+    fs.symlinkSync(path.join(repo, "still-not-there"), oracle);
+
+    const result = await probe(baseOptions(repo, { links: ["oracle"] }));
+
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("link_source_not_found");
+    expect(result.warnings.join(" ")).toContain("does not exist");
   });
 });
 
@@ -5190,6 +5317,26 @@ describe("probe(): worktree isolation, --allow-outside is rejected as a usage er
 
     expect(result.status).toBe("usage_error");
     expect(result.reason).toBe("worktree_allow_outside_unsupported");
+  });
+
+  it("--allow-outside with -i inplace and a MISSING out-of-root --link is refused link_source_not_found: --allow-outside disables the later containment check, not this existence check", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const outside = makeTmpDir();
+    const missing = path.join(outside, "does-not-exist");
+
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "inplace",
+        allowOutside: true,
+        links: [missing],
+      }),
+    );
+
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("link_source_not_found");
+    expect(result.warnings.join(" ")).toContain(missing);
+    expect(result.warnings.join(" ")).toContain("does not exist");
   });
 });
 

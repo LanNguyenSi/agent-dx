@@ -49,12 +49,17 @@ export interface LinkSourceGroup {
    * the value as repository content rather than something an operator
    * typed (see `link-policy.ts`). Absent for `--link`. */
   namedIn?: string;
-  /** The remedy clause a `link_source_not_found` refusal appends,
-   * naming what a reader can actually do about it: create the missing
-   * directory, or stop naming it -- "remove the entry from <file>" for
-   * a repository-content source, "drop --link" for the CLI flag,
-   * carried onto every `MergedLink` this group contributes the same
-   * way `basePhrase` is. */
+  /** The "stop naming it" half of a `link_source_not_found` refusal's
+   * remedy clause -- "remove the entry from <file>" for a
+   * repository-content source, "drop --link" for the CLI flag -- carried
+   * onto every `MergedLink` this group contributes the same way
+   * `basePhrase` is. Deliberately just that half: the OTHER half (what
+   * to do about the source itself, "create it" / "point it at a
+   * directory" / "check its permissions") depends on WHICH way the
+   * source is unusable, which only `linkSourceMissingMessage` knows
+   * (the `fs.statSync` result), so it prefixes this clause with the
+   * branch-appropriate half rather than this group naming one fixed
+   * prefix for every branch. */
   remedy: string;
 }
 
@@ -73,7 +78,8 @@ export interface MergedLink {
    * re-derived from `namedBy`. */
   basePhrase: string;
   namedBy?: string;
-  /** The owning group's own `remedy`, copied here the same way. */
+  /** The owning group's own `remedy` (the "stop naming it" half only,
+   * see `LinkSourceGroup.remedy`), copied here the same way. */
   remedy: string;
 }
 
@@ -149,7 +155,17 @@ export function mergeLinkSources(
  * permission this process cannot see through -- it is refused with its
  * own phrase naming the errno instead, equally fail-closed (this
  * function still returns a message, never `undefined`, so the source is
- * never treated as fine merely because it could not be checked).
+ * never treated as fine merely because it could not be checked). The
+ * remedy prefixed onto `link.remedy` (see that field's own docblock for
+ * why only the "stop naming it" half lives there) matches the branch: a
+ * path that does not exist is told to "create it", one that is a plain
+ * file is told to "point it at a directory" (creating a NEW directory
+ * there would still leave the file in the way), and one this process
+ * could not even stat is told to "check its permissions" -- advising
+ * "create it" for either of the last two would be wrong on its face,
+ * the first because the path is already occupied by something that is
+ * not a directory, the second because a permission this process cannot
+ * see through may already have a directory sitting right there.
  */
 export function linkSourceMissingMessage(link: MergedLink): string | undefined {
   let stat: fs.Stats | undefined;
@@ -170,10 +186,16 @@ export function linkSourceMissingMessage(link: MergedLink): string | undefined {
       : statErrorCode === "ENOENT" || statErrorCode === "ENOTDIR"
         ? "does not exist"
         : `could not be checked (${statErrorCode ?? "unknown error"})`;
+  const remedyPrefix =
+    stat !== undefined
+      ? "point it at a directory, or "
+      : statErrorCode === "ENOENT" || statErrorCode === "ENOTDIR"
+        ? "create it, or "
+        : "check its permissions, or ";
   const provenance = link.namedBy !== undefined ? ` (${link.namedBy})` : "";
   return (
     `link "${link.given}" resolved to ${link.value} against ` +
     `${link.basePhrase}, but that path ${problem}${provenance}. ` +
-    `${link.remedy}`
+    `${remedyPrefix}${link.remedy}.`
   );
 }

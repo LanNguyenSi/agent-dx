@@ -6,6 +6,7 @@ import {
   findGitRoot,
   isPathContained,
   resolveDeepestExisting,
+  resolveLinkSourceTarget,
 } from "./containment.js";
 import { readDefaultsFile } from "./defaults-file.js";
 import {
@@ -188,41 +189,92 @@ export interface ProbeResult {
   totalDurationMs: number;
 }
 
+/** What `firstLinkSourceRefusal` found: either shape it may return is a
+ * refusal, the difference is only which reason and message apply. */
+interface LinkSourceRefusal {
+  reason: "file_outside_root" | "link_source_not_found";
+  message: string;
+}
+
 /**
  * Refuses the first merged link whose source is not an existing
- * directory, before the isolation copy is ever created (GitHub issue
- * #242): only the three explicit `link` sources reach this (an
- * auto-discovered candidate is never part of `mergedLinks`), so an
- * auto-discovered composer `vendor-dir` that does not exist yet (the
- * common case before `composer install`) is unaffected. `undefined`
- * when every merged link's source exists.
+ * directory, or whose own resolved TARGET lies outside the containment
+ * root, before the isolation copy is ever created (GitHub issue #242):
+ * only the three explicit `link` sources reach this (an auto-discovered
+ * candidate is never part of `mergedLinks`), so an auto-discovered
+ * composer `vendor-dir` that does not exist yet (the common case before
+ * `composer install`) is unaffected. `undefined` when every merged
+ * link's source is fine.
  *
- * A link whose resolved value lies OUTSIDE `realRoot` is skipped here
- * entirely, existing or not: the later, root-wide containment check
- * (`file_outside_root`, `setup.ts`) already refuses every out-of-root
- * target and link uniformly, and this existence check must not get
- * there first and answer differently depending on what happens to sit
- * at that outside path (a directory, a file, or nothing) -- that would
- * leak filesystem information about paths outside the repository to
- * the untrusted, file-sourced lanes (a defaults file or a plan's own
- * `link`) and give an operator's own `--link /outside/missing` a
- * "does not exist" pointing them at creating a path this run would
- * refuse anyway. `realRoot` and each link's resolved path are both
- * already realpath'd (`resolveDeepestExisting`), matching every other
- * containment comparison in this module.
+ * A link whose resolved value lies OUTSIDE `realRoot` is refused right
+ * here, `file_outside_root`, when it got there through its OWN symlink:
+ * an in-repo path (`<root>/oracle`) that is itself a symlink to
+ * somewhere outside the root must never reach the existence check below,
+ * whether that far end exists or not -- `linkSourceMissingMessage` stats
+ * `link.value` directly, which follows the WHOLE chain, so running it
+ * here would answer "does not exist" for a dangling out-of-root target
+ * and nothing at all for an existing one, disclosing which of the two
+ * sits at a path this repository never named directly (GitHub issue
+ * #242's containment finding, narrowed further). `resolveLinkSourceTarget`
+ * is what makes this catch the dangling case too: plain
+ * `resolveDeepestExisting` falls back to `link.value`'s own (in-root)
+ * spelling when the symlink's target does not fully resolve, which is
+ * exactly the blind spot this closes.
+ *
+ * A link that resolves outside the root WITHOUT going through a symlink
+ * of its own (an out-of-root value named directly, by any of the three
+ * sources) is instead only skipped here, deferred to the later,
+ * root-wide containment check (`file_outside_root`, `setup.ts`) that
+ * already refuses every out-of-root target and link uniformly --
+ * UNLESS `checkOutsideRootExistence` says that later check will never
+ * run (`--allow-outside` with an effective isolation other than
+ * `worktree`, which disables it): the existence check then runs here
+ * instead, since nothing else will, and a missing out-of-root value
+ * that `--allow-outside` would otherwise let through silently is
+ * refused rather than treated as accepted (see the README's `--link`
+ * section). When `checkOutsideRootExistence` is `false`, deferring here
+ * is what keeps this check from leaking filesystem information about
+ * paths outside the repository to the untrusted, file-sourced lanes (a
+ * defaults file or a plan's own `link`) and from giving an operator's
+ * own `--link /outside/missing` a "does not exist" pointing them at
+ * creating a path this run would refuse anyway.
  */
-function firstMissingLinkSourceMessage(
+function firstLinkSourceRefusal(
   mergedLinks: readonly MergedLink[],
+  root: string,
   realRoot: string,
-): string | undefined {
+  checkOutsideRootExistence: boolean,
+): LinkSourceRefusal | undefined {
   for (const link of mergedLinks) {
-    if (!isPathContained(realRoot, resolveDeepestExisting(link.value))) {
-      continue;
+    const target = resolveLinkSourceTarget(link.value);
+    if (!isPathContained(realRoot, target)) {
+      if (isSymlinkSource(link.value)) {
+        return {
+          reason: "file_outside_root",
+          message: `outside the containment root (${root}): ${link.value}`,
+        };
+      }
+      if (!checkOutsideRootExistence) continue;
     }
     const message = linkSourceMissingMessage(link);
-    if (message !== undefined) return message;
+    if (message !== undefined) {
+      return { reason: "link_source_not_found", message };
+    }
   }
   return undefined;
+}
+
+/** Whether `p` itself is a symlink (`lstatSync`, never following it):
+ * `false` both for an ordinary file/directory and for a path that does
+ * not exist at all under any spelling, which is exactly the fallback
+ * `firstLinkSourceRefusal` needs -- a plain missing value has no target
+ * of its own to disclose anything about. */
+function isSymlinkSource(p: string): boolean {
+  try {
+    return fs.lstatSync(p).isSymbolicLink();
+  } catch {
+    return false;
+  }
 }
 
 function emptyIsolationField(mode: IsolationMode): IsolationField {
@@ -482,13 +534,13 @@ async function runProbePipeline(
       basePhrase: "the repository root",
       values: defaultsFile.links,
       namedIn: `the "link" list of ${defaultsFile.path}`,
-      remedy: `create it, or remove the entry from ${defaultsFile.path}`,
+      remedy: `remove the entry from ${defaultsFile.path}`,
     },
     {
       base: cwd,
       basePhrase: "the invocation cwd",
       values: opts.links ?? [],
-      remedy: "create it, or drop --link",
+      remedy: "drop --link",
     },
   ]);
   // Containment and the lock/marker key are resolved through realpath
@@ -501,25 +553,44 @@ async function runProbePipeline(
   // can differ even with no symlink involved, e.g. macOS's `/var` ->
   // `/private/var`) is what "display the user path" means here.
   const realRoot = resolveDeepestExisting(root);
+  // The same `-i worktree` -> `-i inplace` fallback `setup.ts` applies
+  // (no real git work tree to branch a worktree off of), computed here
+  // too: `--allow-outside` disables the later, root-wide containment
+  // check ONLY for the isolation mode that actually runs, so whether the
+  // existence check below must run for an out-of-root value itself
+  // depends on the EFFECTIVE mode, not the one the caller asked for.
+  const effectiveIsolationForLinks =
+    opts.isolation === "worktree" && gitRoot === undefined
+      ? "inplace"
+      : opts.isolation;
   // Fails closed before anything about isolation is set up (GitHub
   // issue #242): a `--link`/plan/defaults-file value whose source is
   // not an existing directory would otherwise reach the worktree sync
   // and either be linked as a dangling symlink or silently skipped,
   // depending on the sync's own ordering, neither of which is what an
-  // explicitly named source failing to exist should do. Computed
-  // AFTER `realRoot` and skipped for a link outside it: an out-of-root
-  // value is refused by the containment check below instead, uniformly
-  // for missing, file, and directory alike (see
-  // `firstMissingLinkSourceMessage`'s own docblock).
-  const missingLinkSource = firstMissingLinkSourceMessage(
+  // explicitly named source failing to exist should do. `--allow-outside`
+  // combined with `-i worktree` is refused outright below
+  // (`worktree_allow_outside_unsupported`), so `checkOutsideRootExistence`
+  // is false there and this existence check keeps deferring to that
+  // later refusal instead of preempting it with a different reason (see
+  // `firstLinkSourceRefusal`'s own docblock for what each branch
+  // decides).
+  const checkOutsideRootExistence =
+    opts.allowOutside === true && effectiveIsolationForLinks !== "worktree";
+  const linkSourceRefusal = firstLinkSourceRefusal(
     mergedLinks,
+    root,
     realRoot,
+    checkOutsideRootExistence,
   );
-  if (missingLinkSource !== undefined) {
+  if (linkSourceRefusal !== undefined) {
     return {
-      status: "usage_error",
-      reason: "link_source_not_found",
-      warnings: [...warnings, missingLinkSource],
+      status:
+        linkSourceRefusal.reason === "file_outside_root"
+          ? "inconclusive"
+          : "usage_error",
+      reason: linkSourceRefusal.reason,
+      warnings: [...warnings, linkSourceRefusal.message],
       isolation: isolationField,
       dryRunLogPaths: derivationLogPaths,
     };
@@ -528,7 +599,7 @@ async function runProbePipeline(
   const absFile = resolveDeepestExisting(displayFile);
   const links = mergedLinks.map((link) => ({
     display: link.value,
-    abs: resolveDeepestExisting(link.value),
+    abs: resolveLinkSourceTarget(link.value),
     ...(link.namedBy !== undefined ? { namedBy: link.namedBy } : {}),
   }));
   // The `--log-dir` this run's worktree (if any) is created under,
@@ -1104,20 +1175,20 @@ export async function probePlan(
       basePhrase: "the repository root",
       values: defaultsFile.links,
       namedIn: `the "link" list of ${defaultsFile.path}`,
-      remedy: `create it, or remove the entry from ${defaultsFile.path}`,
+      remedy: `remove the entry from ${defaultsFile.path}`,
     },
     {
       base: root,
       basePhrase: "the repository root",
       values: opts.planLinks ?? [],
       namedIn: `the "link" list of ${opts.planPath ?? "the --plan file"}`,
-      remedy: `create it, or remove the entry from ${opts.planPath ?? "the --plan file"}`,
+      remedy: `remove the entry from ${opts.planPath ?? "the --plan file"}`,
     },
     {
       base: cwd,
       basePhrase: "the invocation cwd",
       values: opts.links ?? [],
-      remedy: "create it, or drop --link",
+      remedy: "drop --link",
     },
   ]);
   // Same fail-closed check as the single probe (`probe()` above),
@@ -1125,16 +1196,33 @@ export async function probePlan(
   // worktree: a plan whose `link` (its own, the defaults file's, or
   // `--link`'s) names a source that does not exist leaves nothing
   // behind, the same as every other plan-validation refusal above.
-  const missingLinkSource = firstMissingLinkSourceMessage(
+  // `checkOutsideRootExistence` mirrors the single probe's own
+  // computation (see its docblock there): the effective isolation mode
+  // this plan will actually run under, since `--allow-outside` combined
+  // with `-i worktree` is refused outright below regardless of any
+  // link.
+  const effectiveIsolationForLinks =
+    opts.isolation === "worktree" && gitRoot === undefined
+      ? "inplace"
+      : opts.isolation;
+  const checkOutsideRootExistence =
+    opts.allowOutside === true && effectiveIsolationForLinks !== "worktree";
+  const linkSourceRefusal = firstLinkSourceRefusal(
     mergedLinks,
+    root,
     realRoot,
+    checkOutsideRootExistence,
   );
-  if (missingLinkSource !== undefined) {
-    return refuse("usage_error", "link_source_not_found", missingLinkSource);
+  if (linkSourceRefusal !== undefined) {
+    return refuse(
+      "usage_error",
+      linkSourceRefusal.reason,
+      linkSourceRefusal.message,
+    );
   }
   const links = mergedLinks.map((link) => ({
     display: link.value,
-    abs: resolveDeepestExisting(link.value),
+    abs: resolveLinkSourceTarget(link.value),
     ...(link.namedBy !== undefined ? { namedBy: link.namedBy } : {}),
   }));
   for (const item of planned) {

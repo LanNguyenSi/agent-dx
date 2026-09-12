@@ -96,19 +96,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   too): `status: "usage_error"`, `reason: "link_source_not_found"`,
   exit `2`, naming the value as given, the absolute path it resolved to,
   which base it was resolved against (`--link` against the invocation
-  cwd, the other two against the repository root), and a remedy --
-  create the missing directory, or drop the entry (from `--link`
-  itself, or from the file naming it). A link whose resolved value lies
-  OUTSIDE the containment root skips this existence check entirely and
-  is refused by the existing `file_outside_root` check instead, the
-  same as an out-of-root link that exists: an out-of-root value's
-  existence is never even checked, so a missing, a plain-file, and a
-  directory out-of-root value all get the one uniform refusal rather
-  than the existence check leaking which of the three sits there for a
-  path outside the repository -- a repository shipping a defaults-file
-  `link` for a not-yet-installed directory now refuses every probe
-  until that directory exists, so long as the value resolves inside the
-  repository. It used to be linked anyway -- silently dropped, or, for a
+  cwd, the other two against the repository root), and a remedy naming
+  what to do about the source itself -- create it when nothing is
+  there, point the entry at a directory when a plain file sits there
+  instead, or check its permissions when the source could not even be
+  stat'ed -- followed by dropping the entry (from `--link` itself, or
+  from the file naming it). A link whose resolved path lies OUTSIDE the
+  containment root skips this existence check entirely and is refused
+  by the existing `file_outside_root` check instead, the same as an
+  out-of-root link that exists: existence is never checked for a value
+  whose resolved path lies outside the root, so a missing, a plain-file,
+  and a directory out-of-root value all get the one uniform refusal
+  rather than the existence check leaking which of the three sits there
+  for a path outside the repository -- a repository shipping a
+  defaults-file `link` for a not-yet-installed directory now refuses
+  every probe until that directory exists, so long as the value resolves
+  inside the repository. This applies identically to an IN-repo path
+  that is itself a SYMLINK to somewhere outside the root: its own target
+  is resolved and checked for containment before any existence check
+  runs against it, so a dangling out-of-root symlink target and an
+  existing one both get the one `file_outside_root` refusal rather than
+  the existence check disclosing which of the two it is (containment
+  finding, closed in the same change as the ordering fix above --
+  `resolveDeepestExisting`'s own fallback, when a symlink's target does
+  not fully resolve, otherwise reports the symlink's own in-root path
+  rather than where it points, which read as `link_source_not_found`
+  for a dangling target and `file_outside_root` for an existing one).
+  `--allow-outside` disables that later containment check outright, so
+  for `-i inplace` (the only isolation mode it is accepted for; `-i
+  worktree` combined with it is its own usage error, below) an
+  out-of-root value has nothing else downstream to catch it and is
+  checked for existence here instead: `--allow-outside -i inplace
+  --link /outside/missing` is `link_source_not_found`, not silently
+  accepted. It used to be linked anyway -- silently dropped, or, for a
   repository-content source, linked as a dangling symlink -- with no
   warning at all, so an operator's typo in a `--link` value, or a stale
   entry in a `.agent-primitives.json`/`--plan` file, never surfaced

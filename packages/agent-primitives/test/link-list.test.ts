@@ -152,21 +152,20 @@ describe("mergeLinkSources: precedence table (defaults, then plan, then CLI)", (
           basePhrase: "the repository root",
           values: row.defaults,
           namedIn: DEFAULTS_NAMED_IN,
-          remedy:
-            "create it, or remove the entry from /repo/.agent-primitives.json",
+          remedy: "remove the entry from /repo/.agent-primitives.json",
         },
         {
           base: root,
           basePhrase: "the repository root",
           values: row.plan,
           namedIn: PLAN_NAMED_IN,
-          remedy: "create it, or remove the entry from /repo/plan.json",
+          remedy: "remove the entry from /repo/plan.json",
         },
         {
           base: cwd,
           basePhrase: "the invocation cwd",
           values: row.cli,
-          remedy: "create it, or drop --link",
+          remedy: "drop --link",
         },
       ]);
       expect(merged.map((link) => link.value)).toEqual(row.expected);
@@ -189,8 +188,7 @@ describe("mergeLinkSources: precedence table (defaults, then plan, then CLI)", (
         basePhrase: "the repository root",
         values: ["src"],
         namedIn: DEFAULTS_NAMED_IN,
-        remedy:
-          "create it, or remove the entry from /repo/.agent-primitives.json",
+        remedy: "remove the entry from /repo/.agent-primitives.json",
       },
     ]);
 
@@ -203,7 +201,7 @@ describe("mergeLinkSources: precedence table (defaults, then plan, then CLI)", (
         base: cwd,
         basePhrase: "the invocation cwd",
         values: ["extra"],
-        remedy: "create it, or drop --link",
+        remedy: "drop --link",
       },
     ]);
     expect(merged[0].given).toBe("extra");
@@ -233,7 +231,7 @@ describe("linkSourceMissingMessage", () => {
       value: dir,
       given: "vendor",
       basePhrase: "the invocation cwd",
-      remedy: "create it, or drop --link",
+      remedy: "drop --link",
     };
     expect(linkSourceMissingMessage(link)).toBeUndefined();
   });
@@ -245,13 +243,18 @@ describe("linkSourceMissingMessage", () => {
       value: missing,
       given: "does/not/exist",
       basePhrase: "the invocation cwd",
-      remedy: "create it, or drop --link",
+      remedy: "drop --link",
     };
     const message = linkSourceMissingMessage(link);
     expect(message).toContain('"does/not/exist"');
     expect(message).toContain(missing);
     expect(message).toContain("the invocation cwd");
     expect(message).toContain("does not exist");
+    // A missing path is told to create it: the branch-appropriate half
+    // of the remedy, prefixed onto the group's own "stop naming it"
+    // half.
+    expect(message).toContain("create it, or drop --link");
+    expect(message).toContain(link.remedy);
   });
 
   it("refuses a source that exists but is a plain FILE the same way, naming it distinctly from a missing path", () => {
@@ -262,12 +265,19 @@ describe("linkSourceMissingMessage", () => {
       value: filePath,
       given: "not-a-dir",
       basePhrase: "the repository root",
-      remedy:
-        "create it, or remove the entry from /repo/.agent-primitives.json",
+      remedy: "remove the entry from /repo/.agent-primitives.json",
     };
     const message = linkSourceMissingMessage(link);
     expect(message).toContain("is not a directory");
     expect(message).not.toContain("does not exist");
+    // A plain FILE is told to point the entry at a directory instead,
+    // never "create it" -- a directory cannot be created where a file
+    // already sits.
+    expect(message).toContain(
+      "point it at a directory, or remove the entry from " +
+        "/repo/.agent-primitives.json",
+    );
+    expect(message).not.toContain("create it");
   });
 
   it("includes the provenance phrase (`namedBy`) when the value came from repository content", () => {
@@ -279,8 +289,7 @@ describe("linkSourceMissingMessage", () => {
       value: missing,
       given: "gone",
       basePhrase: "the repository root",
-      remedy:
-        "create it, or remove the entry from /repo/.agent-primitives.json",
+      remedy: "remove the entry from /repo/.agent-primitives.json",
       namedBy,
     };
     const message = linkSourceMissingMessage(link);
@@ -306,13 +315,19 @@ describe("linkSourceMissingMessage", () => {
           value: target,
           given: "locked/vendor",
           basePhrase: "the invocation cwd",
-          remedy: "create it, or drop --link",
+          remedy: "drop --link",
         };
         const message = linkSourceMissingMessage(link);
         expect(message).toBeDefined();
         expect(message).toContain("could not be checked");
         expect(message).toContain("EACCES");
         expect(message).not.toContain("does not exist");
+        // A stat failure that is not "not there" is told to check its
+        // permissions, never "create it" -- the path may already have a
+        // directory sitting behind the permission this process cannot
+        // see through.
+        expect(message).toContain("check its permissions, or drop --link");
+        expect(message).not.toContain("create it");
       } finally {
         fs.chmodSync(locked, 0o755);
       }
@@ -329,7 +344,7 @@ describe("linkSourceMissingMessage", () => {
       value: linkPath,
       given: "alias",
       basePhrase: "the invocation cwd",
-      remedy: "create it, or drop --link",
+      remedy: "drop --link",
     };
     expect(linkSourceMissingMessage(link)).toBeUndefined();
   });
@@ -342,7 +357,7 @@ describe("linkSourceMissingMessage", () => {
       value: linkPath,
       given: "dangling",
       basePhrase: "the invocation cwd",
-      remedy: "create it, or drop --link",
+      remedy: "drop --link",
     };
     const message = linkSourceMissingMessage(link);
     expect(message).toContain("does not exist");
