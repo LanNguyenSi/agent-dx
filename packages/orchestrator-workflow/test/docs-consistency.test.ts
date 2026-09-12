@@ -4915,30 +4915,48 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
    * same-subsection paragraph lead-in repeated under many headings, not
    * itself a heading) and is excluded from this check.
    */
-  it("every 'see <name> below' heading-style forward pointer in the bundle doc names a heading that exists in the file", () => {
-    const bundleDocRaw = readDoc("docs/okf/subagent-contracts-superset.md");
-    const bundleDoc = unwrap(bundleDocRaw);
+  function validateForwardPointerHeadings(raw: string): {
+    pointers: string[];
+    diagnostics: string[];
+  } {
     const headings = new Set(
-      [...bundleDocRaw.matchAll(/^#{1,6} (.+)$/gm)].map((m) => m[1].trim()),
+      [...raw.matchAll(/^#{1,6} (.+)$/gm)].map((m) => m[1].trim()),
     );
     const pointers = [
-      ...bundleDoc.matchAll(/see ([A-Z][A-Za-z0-9.' ()-]*?) below\b/g),
+      ...unwrap(raw).matchAll(/see ([A-Z][A-Za-z0-9.' ()-]*?) below\b/g),
     ]
       .map((m) => m[1].trim())
       .filter((name) => name !== "Motivation");
-    expect(pointers.length).toBeGreaterThan(0);
-    for (const name of pointers) {
-      expect(
-        headings.has(name),
-        `no heading found for forward pointer "see ${name} below"`,
-      ).toBe(true);
-    }
+    const diagnostics = pointers.flatMap((name) =>
+      headings.has(name)
+        ? []
+        : [`no heading found for forward pointer "see ${name} below"`],
+    );
+    return { pointers, diagnostics };
+  }
 
-    // A live versioned title exercises the parenthesis branch. The negative
-    // control proves the same heading lookup rejects an invented title.
-    expect(pointers).toContain("Mutation probes requirement (0.16.0)");
-    expect(headings.has("Mutation probes requirement (0.16.0)")).toBe(true);
-    expect(headings.has("Nonexistent thing (9.9.9)")).toBe(false);
+  it("every 'see <name> below' heading-style forward pointer in the bundle doc names a heading that exists in the file", () => {
+    const validation = validateForwardPointerHeadings(
+      readDoc("docs/okf/subagent-contracts-superset.md"),
+    );
+    expect(validation.pointers.length).toBeGreaterThan(0);
+    expect(validation.diagnostics).toEqual([]);
+
+    // A live versioned title exercises the parenthesis branch.
+    expect(validation.pointers).toContain(
+      "Mutation probes requirement (0.16.0)",
+    );
+  });
+
+  it("reports a missing parenthesized forward-pointer heading", () => {
+    const fixture = [
+      "A fixture says see Nonexistent thing (9.9.9) below.",
+      "",
+      "## A real but different heading",
+    ].join("\n");
+    expect(validateForwardPointerHeadings(fixture).diagnostics).toEqual([
+      'no heading found for forward pointer "see Nonexistent thing (9.9.9) below"',
+    ]);
   });
 
   // The CHANGELOG's own prose description of the replay rule is a fourth
