@@ -19,7 +19,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   freshness guard then failed once the commit landed and gave the source a
   new, later commit time. Omit the flag and `sources-fresh` is unchanged;
   see the README's new "Uncommitted edits (`--dirty-as-now`)" section for
-  the recommended pre-commit invocation.
+  the recommended pre-commit invocation. Carries a working-tree analogue of
+  the rule's own co-commit re-stamp rescue: a doc re-stamped locally
+  (uncommitted, on-disk `timestamp` differing from the value committed at
+  `HEAD`; an untracked doc counts as re-stamped too) rescues a dirty source
+  exactly like a real re-stamp landing in the same commit does, so the
+  README's recommended `--dirty-as-now --strict` pre-commit gate can
+  actually be made green by following its own remedy (re-stamp, then
+  commit) while the source stays uncommitted -- without this, the flag's
+  own substitution of "now" for the dirty source raced against the
+  doc's on-disk timestamp value (frozen at the instant it was written) and
+  reported STALE by however many seconds had elapsed since. Reads the
+  work tree's dirty paths once per run (`git --no-optional-locks status
+  --porcelain=v2 -z`), not once per unique source path.
 
 ### Documented
 

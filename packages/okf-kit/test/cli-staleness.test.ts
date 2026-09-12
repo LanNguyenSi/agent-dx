@@ -221,6 +221,66 @@ describe("okf-kit cli staleness (sources-fresh + repo-root auto-detection)", () 
     ).toBe(false);
   });
 
+  it("--dirty-as-now: a clean run is quiet, the flag surfaces a dirty-source STALE line, and --strict then exits 1", () => {
+    repo.commitFile(
+      "source.ts",
+      "export const a = 1;\n",
+      "2025-01-01T00:00:00Z",
+    );
+    // Doc committed and left clean: this test is about the CLI wiring of
+    // --dirty-as-now for a dirty SOURCE, not the doc's own dirty state.
+    repo.commitFile(
+      "bundle/doc.md",
+      "---\ntype: concept\ntimestamp: 2025-06-01T00:00:00Z\nsources:\n  - source.ts\n---\n\n# Doc\n",
+      "2025-06-01T00:00:00Z",
+    );
+    // Dirty the source on disk without committing.
+    fs.writeFileSync(path.join(repo.dir, "source.ts"), "export const a = 2;\n");
+
+    const withoutFlag = runCli([
+      "check",
+      path.join(repo.dir, "bundle"),
+      "--repo-root",
+      repo.dir,
+      "--json",
+    ]);
+    expect(withoutFlag.status).toBe(0);
+    const withoutFlagParsed = JSON.parse(withoutFlag.stdout) as JsonReport;
+    expect(
+      withoutFlagParsed.findings.some((f) => f.ruleId === "sources-fresh"),
+    ).toBe(false);
+
+    const withFlag = runCli([
+      "check",
+      path.join(repo.dir, "bundle"),
+      "--repo-root",
+      repo.dir,
+      "--dirty-as-now",
+      "--json",
+    ]);
+    expect(withFlag.status).toBe(0);
+    const withFlagParsed = JSON.parse(withFlag.stdout) as JsonReport;
+    expect(
+      withFlagParsed.findings.some(
+        (f) =>
+          f.ruleId === "sources-fresh" &&
+          f.severity === "warning" &&
+          f.message.includes("STALE") &&
+          f.message.includes("source.ts"),
+      ),
+    ).toBe(true);
+
+    const withFlagStrict = runCli([
+      "check",
+      path.join(repo.dir, "bundle"),
+      "--repo-root",
+      repo.dir,
+      "--dirty-as-now",
+      "--strict",
+    ]);
+    expect(withFlagStrict.status).toBe(1);
+  });
+
   it("skips staleness with a notice when the bundle is not inside a git work tree", () => {
     const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), "okf-kit-plain-"));
     try {

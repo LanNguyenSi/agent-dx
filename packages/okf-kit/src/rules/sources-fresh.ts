@@ -61,17 +61,33 @@ export const sourcesFreshRule: Rule = {
     // One git call per unique source path across all docs, even though a
     // STALE/untracked finding is reported per (doc, path) below.
     const commitEpochCache = new Map<string, number | null>();
-    // `--dirty-as-now` only: one `git status --porcelain` per unique source
-    // path, same memoization discipline as commitEpochCache. Never
-    // consulted when ctx.dirtyAsNow is falsy, so the default path pays
-    // nothing for it.
-    const dirtyCache = new Map<string, boolean>();
-    const isDirtyFor = (source: string): boolean => {
-      const cached = dirtyCache.get(source);
-      if (cached !== undefined) return cached;
-      const dirty = isSourceDirty(git, repoRoot, source);
-      dirtyCache.set(source, dirty);
-      return dirty;
+    // `--dirty-as-now` only: ONE `git status --porcelain` for the WHOLE
+    // work tree, for the WHOLE run, not one process per unique source path
+    // (or per doc, for the local-restamp rescue below) -- see
+    // readDirtyPaths' doc comment. Lazily read on first use, so a run that
+    // never actually needs a dirty check (every source is already stale or
+    // fresh by committed history alone) still pays nothing; never consulted
+    // at all when ctx.dirtyAsNow is falsy.
+    let dirtyPathsMemo: Set<string> | null | undefined;
+    const dirtyPaths = (): Set<string> | null => {
+      if (dirtyPathsMemo === undefined) {
+        dirtyPathsMemo = readDirtyPaths(git, repoRoot);
+      }
+      return dirtyPathsMemo;
+    };
+    // A dirty FILE source matches by exact path; a dirty DIRECTORY source
+    // matches if any reported dirty path lives under it. A failed status
+    // call (null) is treated as "nothing is dirty", the same conservative
+    // default every other git failure in this file falls back to.
+    const isDirtyFor = (relPath: string): boolean => {
+      const paths = dirtyPaths();
+      if (paths === null) return false;
+      if (paths.has(relPath)) return true;
+      const prefix = `${relPath}/`;
+      for (const p of paths) {
+        if (p.startsWith(prefix)) return true;
+      }
+      return false;
     };
     // Captured once per rule run, not per source: every dirty source in
     // this invocation is treated as committed at the SAME instant, so two
@@ -109,9 +125,11 @@ export const sourcesFreshRule: Rule = {
       // rules don't each spawn their own `git log` for the same doc in one
       // `check` run.
       //
-      // GIT PROCESS BUDGET, per doc, per `check` run: 1 (the shared
-      // `git log -1 --format=%ct` epoch lookup, always) + at most 4 more on
-      // the re-stamp path (`git log -1 --format=%H%n%P`, then `git diff-tree`,
+      // GIT PROCESS BUDGET, per doc, per `check` run, with `--dirty-as-now`
+      // OFF (this figure is measured with the flag off; see below for its
+      // extra cost with the flag on): 1 (the shared `git log -1
+      // --format=%ct` epoch lookup, always) + at most 4 more on the
+      // re-stamp path (`git log -1 --format=%H%n%P`, then `git diff-tree`,
       // then two `git show`s), i.e. AT MOST 5 -- regardless of how many
       // sources the doc declares, since both lookups are memoized per doc.
       // A doc created by its last commit (or by the repo's root commit)
@@ -122,6 +140,12 @@ export const sourcesFreshRule: Rule = {
       // --is-shallow-repository` for the ENTIRE run, not per doc (see
       // isShallowRepoShared below) -- only spent at all when some doc's
       // re-stamp lookup actually reaches a root commit.
+      //
+      // With `--dirty-as-now` ON, add: 1 `git status --porcelain` for the
+      // ENTIRE run (not per doc, not per source -- see readDirtyPaths),
+      // plus at most 1 `git show HEAD:<doc>` PER DOC, spent only when that
+      // doc is itself dirty AND some source of its reads stale (see
+      // isDocLocallyRestamped below).
       const repoRelDocPath = toRepoRelDocPath(repoRoot, ctx.bundleDir, doc);
       const docCommitEpochFor = (): number | null =>
         getDocCommitEpochShared(ctx, git, repoRoot, repoRelDocPath);
@@ -133,6 +157,20 @@ export const sourcesFreshRule: Rule = {
           repoRelDocPath,
           () => isShallowRepoShared(ctx, git, repoRoot),
         ));
+      // `--dirty-as-now` only: the working-tree analogue of restampFor
+      // above, for a doc that has itself been re-stamped locally but not
+      // yet committed. Lazy + memoized per doc, same discipline as
+      // restampMemo; never consulted when ctx.dirtyAsNow is falsy.
+      let docLocallyRestampedMemo: boolean | undefined;
+      const docLocallyRestampedFor = (): boolean =>
+        (docLocallyRestampedMemo ??=
+          isDirtyFor(repoRelDocPath) &&
+          isDocLocallyRestamped(
+            git,
+            repoRoot,
+            repoRelDocPath,
+            getTimestampIdentity(doc.frontmatter.parsed),
+          ));
       // At most one "not assessable" notice per doc, however many of its
       // sources hit the unanswerable re-stamp question.
       let notAssessableReported = false;
@@ -155,14 +193,26 @@ export const sourcesFreshRule: Rule = {
 
         let isStale = commitEpoch > timestampEpoch;
 
-        // Doc committed at/after the source, AND that commit actually
-        // re-stamped it: not stale (see comment above). A doc without git
-        // history (null epoch, e.g. uncommitted) keeps the frontmatter-only
-        // comparison. When git cannot answer the re-stamp question at all,
-        // the doc is reported as not assessable rather than being guessed
-        // either way: calling it STALE would turn a git hiccup into a red
-        // build, and calling it fresh would be a silent pass.
-        if (isStale) {
+        // `--dirty-as-now` only: a doc re-stamped LOCALLY (uncommitted)
+        // rescues a dirty source exactly like the co-commit rescue below
+        // rescues a source committed together with a real re-stamp -- see
+        // isDocLocallyRestamped's doc comment. Checked BEFORE the co-commit
+        // path: a doc that has not yet been committed with its new stamp
+        // has no docCommitEpoch that could satisfy that path's `>=
+        // commitEpoch` guard (its last COMMITTED epoch is necessarily
+        // older than "now"), so without this branch the rescue could never
+        // fire for the exact case it exists for.
+        if (isStale && ctx.dirtyAsNow && docLocallyRestampedFor()) {
+          isStale = false;
+        } else if (isStale) {
+          // Doc committed at/after the source, AND that commit actually
+          // re-stamped it: not stale (see comment above). A doc without git
+          // history (null epoch, e.g. uncommitted) keeps the
+          // frontmatter-only comparison. When git cannot answer the
+          // re-stamp question at all, the doc is reported as not assessable
+          // rather than being guessed either way: calling it STALE would
+          // turn a git hiccup into a red build, and calling it fresh would
+          // be a silent pass.
           const docCommitEpoch = docCommitEpochFor();
           if (docCommitEpoch !== null && docCommitEpoch >= commitEpoch) {
             const verdict = restampFor();
@@ -347,20 +397,130 @@ function getLastCommitEpoch(
 }
 
 /**
- * Whether `source` (repo-root relative) has an uncommitted change per `git
- * status --porcelain -- <source>` -- modified, staged, or untracked. Used
- * only behind `--dirty-as-now` (`ctx.dirtyAsNow`): a dirty source has no
- * "last commit" yet that reflects its current content, so `sources-fresh`
- * substitutes the current time instead of falling through to
- * `getLastCommitEpoch`'s answer (the LAST commit's time, which for a
- * locally-edited-but-uncommitted file is necessarily stale). A failed git
- * call (`out === null`) is treated as "not dirty", the same conservative
- * default as every other git failure in this file: it falls through to the
- * ordinary commit-epoch path rather than inventing a dirty verdict.
+ * The full SET of repo-root-relative paths `git status --porcelain`
+ * reports as dirty (modified, staged, or untracked) across the WHOLE work
+ * tree, read via a SINGLE git process for the entire `check` run -- not
+ * one process per unique `sources` path (the original, pre-review
+ * implementation), and not one per doc for the local-restamp rescue
+ * below. Used only behind `--dirty-as-now` (`ctx.dirtyAsNow`): a dirty
+ * path has no "last commit" yet that reflects its current content, so
+ * `sources-fresh` substitutes the current time for it instead of falling
+ * through to `getLastCommitEpoch`'s answer (the LAST commit's time, which
+ * for a locally-edited-but-uncommitted file is necessarily stale).
+ *
+ * `--no-optional-locks` skips git's opportunistic index refresh (which can
+ * otherwise rewrite the on-disk index file as a side effect of a plain
+ * `status`) -- unwanted here since this runs as a read-only check, often
+ * from a hook or CI step that should not perturb the index. Ignored files
+ * are deliberately NOT included (no `--ignored`): an ignored source keeps
+ * today's "untracked by git, staleness unknown" notice instead of being
+ * newly reported dirty by this option.
+ *
+ * Uses `--porcelain=v2 -z`, not the more familiar `--porcelain` (v1) line
+ * format, for one reason that is NOT about renames or quoting (`-z` alone
+ * would fix both): RunGit (src/git.ts) `.trim()`s every git invocation's
+ * output, and a v1 line for an unstaged-only change starts with a LITERAL
+ * SPACE (` M path`, index clean, worktree modified) -- an entirely common
+ * case. When that happens to be the FIRST line of the whole status output,
+ * `.trim()` strips that leading space as ordinary boundary whitespace,
+ * silently shifting every fixed-offset field in that one line and
+ * corrupting its path (verified against real git output: a lone `M
+ * source.ts` line, meant to be ` M source.ts`, parses to the wrong path
+ * with a fixed `line.slice(3)` cut). Every v2 record instead starts with a
+ * digit or letter (`1`, `2`, `u`, `?`) that is never whitespace, so the
+ * SAME `.trim()` can never eat a leading field byte. NUL (`-z`) delimits
+ * every record and untracked/rename path field can safely contain a space,
+ * tab, or non-ASCII byte, mirroring previousPathIn's `-z` rationale
+ * elsewhere in this file. Record shapes actually seen here (verified
+ * against real git output; XY, sub, mode and hash fields are read
+ * positionally, never re-split by content, since a path can itself
+ * legitimately contain a space): `? path` (untracked); `1 XY sub mH mI mW
+ * hH hI path` (ordinary; 8 fixed fields before path); `2 XY sub mH mI mW
+ * hH hI score path\0origPath` (rename/copy; 9 fixed fields before path,
+ * origPath is the FOLLOWING NUL-delimited token verbatim); `u XY sub m1 m2
+ * m3 mW h1 h2 h3 path` (unmerged; 10 fixed fields before path) -- both
+ * sides of a rename count as dirty. `!` (ignored) records are never
+ * produced since `--ignored` is not passed.
+ *
+ * A failed git call (`out === null`) is treated as "nothing is dirty", the
+ * same conservative default as every other git failure in this file: every
+ * path falls through to its ordinary commit-epoch path rather than this
+ * function inventing a dirty verdict.
  */
-function isSourceDirty(git: RunGit, repoRoot: string, source: string): boolean {
-  const out = git(["status", "--porcelain", "--", source], repoRoot);
-  return Boolean(out);
+function readDirtyPaths(git: RunGit, repoRoot: string): Set<string> | null {
+  const out = git(
+    ["--no-optional-locks", "status", "--porcelain=v2", "-z"],
+    repoRoot,
+  );
+  if (out === null) return null;
+  const paths = new Set<string>();
+  // `-z` NUL-terminates every record, including the last -- RunGit's
+  // `.trim()` does not strip NUL, so splitting always leaves one empty
+  // trailing token.
+  const tokens = out.split("\0").filter((t) => t !== "");
+  let i = 0;
+  while (i < tokens.length) {
+    const token = tokens[i];
+    const kind = token[0];
+    if (kind === "?") {
+      paths.add(token.slice(2));
+      i += 1;
+    } else if (kind === "1") {
+      paths.add(token.split(" ").slice(8).join(" "));
+      i += 1;
+    } else if (kind === "2") {
+      paths.add(token.split(" ").slice(9).join(" "));
+      const origPath = tokens[i + 1];
+      if (origPath !== undefined) paths.add(origPath);
+      i += 2;
+    } else if (kind === "u") {
+      paths.add(token.split(" ").slice(10).join(" "));
+      i += 1;
+    } else {
+      // An unrecognized record kind (should not occur without --ignored,
+      // which is never passed): skip rather than mis-parse it as a path.
+      i += 1;
+    }
+  }
+  return paths;
+}
+
+/**
+ * `--dirty-as-now` only: whether `doc` itself carries an uncommitted LOCAL
+ * re-stamp -- the working-tree analogue of `restampedByOwnLastCommit`'s
+ * co-commit rescue above. That rescue only fires once a source and its doc
+ * land in the SAME commit; without this counterpart, a doc re-stamped on
+ * disk but not yet committed, paired with a dirty source, reads STALE under
+ * `--dirty-as-now` even though committing both right now -- the very
+ * remedy the flag's README recipe recommends -- reports clean. Compares
+ * parsed frontmatter `timestamp` VALUES (via `getTimestampIdentity`,
+ * shared with restampedByOwnLastCommit), never diff text, for the same
+ * reasons documented there.
+ *
+ * `onDiskTimestamp` is the doc's CURRENT (working-tree) parsed timestamp
+ * identity, already read from disk by the caller (BundleDoc always
+ * reflects the working tree, dirty or not). It is compared against the
+ * value committed at HEAD for the same path. A doc with no committed blob
+ * at HEAD (`git show HEAD:<path>` fails -- untracked, never committed at
+ * all) counts as re-stamped too: there is no prior committed value to
+ * compare against, so its whole content, stamp included, is new.
+ *
+ * Only ever called when the doc is already known to be dirty (see
+ * docLocallyRestampedFor's `isDirtyFor` guard above), so this spends at
+ * most one `git show` per doc, and only on the stale path.
+ */
+function isDocLocallyRestamped(
+  git: RunGit,
+  repoRoot: string,
+  repoRelDocPath: string,
+  onDiskTimestamp: unknown,
+): boolean {
+  const committed = git(["show", `HEAD:${repoRelDocPath}`], repoRoot);
+  if (committed === null) return true;
+  const committedStamp = getTimestampIdentity(
+    parseFrontmatter(committed).frontmatter.parsed,
+  );
+  return committedStamp !== onDiskTimestamp;
 }
 
 function epochToIso(epochSeconds: number): string {
