@@ -180,17 +180,31 @@ agent-primitives verify -x lint='eslint . --format stylish' --fail-fast
   applied (`passRegex`), so a reader can tell an opt-in verdict from a
   plain exit-code one apart from the warning. A check with no
   `--pass-regex` entry is entirely unaffected: its verdict, and its
-  result shape, are byte-identical to before this option existed. Exit
-  `126`/`127`, a per-check timeout, and a check killed by an abort are
-  never reclassified by a predicate -- those shapes answer nothing about
-  pass/fail either way, predicate or not; naming a REQUESTED check that
-  nonetheless resolves to `skipped` (no matching `package.json` script
-  and no `-x` for it) is not an error, but a warning names the pattern
-  that was never consulted, since a predicate on a check that never runs
-  at all is otherwise a silent no-op. Naming a check here that is
-  neither requested (`-c`/the default list) nor `-x`-overridden at all is
+  result shape, are byte-identical to before this option existed. A
+  predicate-decided `pass` still reports the detector's own parsed
+  `summary`/`failures` as data (unlike a predicate-decided `fail`, which
+  gets no synthetic failure entry either): when that parse still shows a
+  nonzero `summary.failed` or a nonempty `failures` list -- a pattern
+  that matched a banner line ahead of a genuinely red summary is the
+  motivating shape -- a warning names the detector and how many failures
+  it parsed, since the verdict itself stays `pass` (the predicate, not
+  the detector, decides once configured) but a reader should know the
+  pattern may be too loose. Exit `126`/`127`, a per-check timeout, and a
+  check killed by an abort are never reclassified by a predicate -- those
+  shapes answer nothing about pass/fail either way, predicate or not --
+  and each now warns that the predicate was never consulted, the same as
+  a requested-but-`skipped` check already does, rather than dropping the
+  predicate silently; naming a REQUESTED check that nonetheless resolves
+  to `skipped` (no matching `package.json` script and no `-x` for it) is
+  not an error, but a warning names the pattern that was never
+  consulted, since a predicate on a check that never runs at all is
+  otherwise a silent no-op. Naming a check here that is neither
+  requested (`-c`/the default list) nor `-x`-overridden at all is
   `status: "usage_error"`, exit `2`, rather than a silent no-op: the
-  predicate would never be consulted. No config-file
+  predicate would never be consulted. An empty pattern (e.g. a stray
+  trailing `=` in `--pass-regex name=`) is rejected as a usage error too,
+  since `new RegExp("", "m")` matches any output and would silently turn
+  the check into an unconditional pass. No config-file
   (`.agent-primitives.json`) home for this predicate yet.
 
 Every resolved check name, from `-c` and from `-x` alike, is validated

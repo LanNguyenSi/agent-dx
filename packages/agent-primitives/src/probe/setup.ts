@@ -7,7 +7,7 @@ import {
   signalNumberFromExitCode,
   wasSignalKilled,
 } from "../exec.js";
-import { truncationNote } from "../pass-regex.js";
+import { truncationNote, nonZeroPassWarning } from "../pass-regex.js";
 import {
   acquireLock,
   markerFilePathFor,
@@ -1099,12 +1099,21 @@ export async function openRunSetup(
   // own accord, and `--pass-regex` means "ignore the exit code" by
   // construction), but a reader is told, since "the suite may have been
   // cut short" is a different thing to check than deprecation noise.
-  const baselineSignalCode = signalNumberFromExitCode(baselineTest.exitCode);
+  // Shared with `verify`'s own per-check warning through
+  // `nonZeroPassWarning` (`src/pass-regex.ts`) so the wording cannot
+  // drift between the two; this call passes the exact
+  // subject/exit-subject strings the pre-existing text above used, so
+  // the text this produces is byte-identical to before the lift.
   if (input.passRegex !== undefined && baselineTest.exitCode !== 0) {
     warnings.push(
-      baselineSignalCode !== undefined
-        ? `--pass-regex (${input.passRegex.source}) matched the baseline output but the baseline run exited with ${String(baselineTest.exitCode)}, the code a shell reports for a process killed by signal ${String(baselineSignalCode)}; the suite may have been cut short; see ${baselineTest.logPath}`
-        : `--pass-regex (${input.passRegex.source}) matched the baseline output despite a non-zero exit code (${String(baselineTest.exitCode)}); treated as a pass (e.g. deprecation-notice noise), not a failure; see ${baselineTest.logPath}`,
+      nonZeroPassWarning({
+        prefix: "",
+        outputSubject: "the baseline output",
+        exitSubject: "the baseline run",
+        pattern: input.passRegex.source,
+        exitCode: baselineTest.exitCode,
+        logPath: baselineTest.logPath,
+      }),
     );
   }
 

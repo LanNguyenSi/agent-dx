@@ -1047,6 +1047,12 @@ describe("parsePassRegexOverride", () => {
     expect(() => parsePassRegexOverride("noequals", {})).toThrow();
   });
 
+  it("rejects an empty pattern (e.g. a stray trailing `=`), which would otherwise match any output", () => {
+    expect(() => parsePassRegexOverride("unit=", {})).toThrow(
+      /--pass-regex: empty pattern for check "unit" would match any output/,
+    );
+  });
+
   it("rejects an unparseable pattern, naming both the check and the pattern", () => {
     expect(() => parsePassRegexOverride("mycheck=(", {})).toThrow(
       /--pass-regex must be a valid regular expression for check "mycheck".*got "\("/,

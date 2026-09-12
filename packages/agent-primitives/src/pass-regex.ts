@@ -1,3 +1,5 @@
+import { signalNumberFromExitCode } from "./exec.js";
+
 /**
  * Compiles a `--pass-regex` / `passWhen.regex` source string into the
  * `RegExp` both `cli.ts`'s `parsePassRegex` and `probe/plan.ts`'s
@@ -60,4 +62,36 @@ export function truncationNote(
   return truncatedSides.length > 0
     ? ` (the ${subject}'s captured ${truncatedSides.join(" and ")} tail was truncated; the pattern may have matched output outside the captured tail)`
     : "";
+}
+
+/**
+ * The warning a matched `--pass-regex`/`passWhen.regex` predicate emits
+ * when the run it just overruled still exited non-zero: shared by
+ * `verify/index.ts` (`prefix: "<name>: "`, `outputSubject: "the check's
+ * output"`, `exitSubject: "the check"`) and `probe/setup.ts`'s baseline
+ * verdict (`prefix: ""`, `outputSubject: "the baseline output"`,
+ * `exitSubject: "the baseline run"`), so the 128+N signal-band wording
+ * (what a shell reports for a child killed by signal N -- "the suite may
+ * have been cut short" rather than reading like deprecation noise, see
+ * `signalNumberFromExitCode`) is worded identically in both places
+ * rather than maintained as two copies that could drift apart. `probe`'s
+ * own call site passes the exact `prefix`/`outputSubject`/`exitSubject`
+ * strings its pre-existing text already used, so this lift is
+ * behaviour-preserving there; its warning text (and its tests) are
+ * unchanged.
+ */
+export function nonZeroPassWarning(params: {
+  prefix: string;
+  outputSubject: string;
+  exitSubject: string;
+  pattern: string;
+  exitCode: number | null;
+  logPath: string;
+}): string {
+  const { prefix, outputSubject, exitSubject, pattern, exitCode, logPath } =
+    params;
+  const signalCode = signalNumberFromExitCode(exitCode);
+  return signalCode !== undefined
+    ? `${prefix}--pass-regex (${pattern}) matched ${outputSubject} but ${exitSubject} exited with ${String(exitCode)}, the code a shell reports for a process killed by signal ${String(signalCode)}; the suite may have been cut short; see ${logPath}`
+    : `${prefix}--pass-regex (${pattern}) matched ${outputSubject} despite a non-zero exit code (${String(exitCode)}); treated as a pass (e.g. deprecation-notice noise), not a failure; see ${logPath}`;
 }

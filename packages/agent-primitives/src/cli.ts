@@ -280,6 +280,18 @@ export function parsePassRegexOverride(
       `--pass-regex: empty check name in "${value}"`,
     );
   }
+  if (source === "") {
+    // An empty pattern compiles fine (`new RegExp("", "m")` is `/(?:)/m`,
+    // matching literally any output including none), so it would silently
+    // turn this check's verdict into an unconditional pass -- worth
+    // rejecting the same way an empty check name already is, rather than
+    // letting a truncated `name=regex` (a stray trailing `=`, or a
+    // forgotten pattern) through as a usage error nobody sees until the
+    // check that never fails.
+    throw new InvalidArgumentError(
+      `--pass-regex: empty pattern for check "${name}" would match any output`,
+    );
+  }
   try {
     return { ...previous, [name]: compilePassRegex(source) };
   } catch (err) {

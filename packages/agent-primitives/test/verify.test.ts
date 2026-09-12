@@ -925,6 +925,38 @@ describe("verify: --pass-regex opt-in success predicate", () => {
     expect(result.status).toBe("fail");
   });
 
+  it("a predicate-decided pass with the detector's own parsed failures still reports pass, but warns the predicate may be too loose", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    // The real phpunit-fail.txt fixture: a genuine `FAILURES!` run
+    // (`Tests: 2, Assertions: 2, Failures: 1.`). A predicate matching
+    // its banner line ahead of the failure section is exactly the "too
+    // loose" shape this warning exists for.
+    const { fn } = makeStubExec({
+      "npm run test --silent": {
+        exitCode: 1,
+        stdoutTail: readCaptured("phpunit-fail"),
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      passRegexes: { test: compilePassRegex("^PHPUnit 9\\.6") },
+    });
+    const check = result.checks[0];
+    expect(check.status).toBe("pass");
+    expect(check.summary.failed).toBeGreaterThan(0);
+    expect(check.failures.length).toBeGreaterThan(0);
+    expect(result.warnings).toContainEqual(
+      expect.stringMatching(
+        /test: --pass-regex \(\^PHPUnit 9\\\.6\) matched, but the phpunit detector parsed 1 failure\(s\) of its own; the predicate may be too loose/,
+      ),
+    );
+  });
+
   it("a check with no predicate keeps the plain exit-code verdict, unaffected by a predicate on a different check", async () => {
     const cwd = makeTmpDir();
     writePackageJson(cwd, { build: "b", test: "te" });
@@ -974,6 +1006,11 @@ describe("verify: --pass-regex opt-in success predicate", () => {
     });
     expect(result.checks[0].status).toBe("error");
     expect("passRegex" in result.checks[0]).toBe(false);
+    expect(result.warnings).toContainEqual(
+      expect.stringMatching(
+        /test: --pass-regex \(\^OK \\\(\) was given but the check exited with code 127, so the predicate was never consulted/,
+      ),
+    );
   });
 
   it("a timed-out check stays error even with a predicate configured, whatever the output", async () => {
@@ -996,6 +1033,11 @@ describe("verify: --pass-regex opt-in success predicate", () => {
     });
     expect(result.checks[0].status).toBe("error");
     expect("passRegex" in result.checks[0]).toBe(false);
+    expect(result.warnings).toContainEqual(
+      expect.stringMatching(
+        /test: --pass-regex \(\^OK \\\(\) was given but the check timed out, so the predicate was never consulted/,
+      ),
+    );
   });
 
   it("an aborted check stays error even with a predicate configured, whatever the output", async () => {
@@ -1017,6 +1059,11 @@ describe("verify: --pass-regex opt-in success predicate", () => {
     });
     expect(result.checks[0].status).toBe("error");
     expect("passRegex" in result.checks[0]).toBe(false);
+    expect(result.warnings).toContainEqual(
+      expect.stringMatching(
+        /test: --pass-regex \(\^OK \\\(\) was given but the check was aborted before it could finish, so the predicate was never consulted/,
+      ),
+    );
   });
 
   it("rejects a --pass-regex naming a check that is neither requested nor -x-overridden (no silent no-op)", async () => {

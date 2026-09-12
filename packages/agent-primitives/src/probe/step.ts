@@ -7,6 +7,7 @@ import {
   signalNumberFromExitCode,
   wasSignalKilled,
 } from "../exec.js";
+import { truncationNote } from "../pass-regex.js";
 import {
   applyPatchForReal,
   computeMutant,
@@ -635,21 +636,14 @@ export async function runMutantAttempt(
         // own miss is on the baseline side, so a caller reading
         // `warnings` sees which pattern was checked and against what,
         // rather than only the bare `killed`/`survived` verdict.
-        const truncatedSides = [
-          testResult.stdoutTruncated ? "stdout" : undefined,
-          testResult.stderrTruncated ? "stderr" : undefined,
-        ].filter((side): side is string => side !== undefined);
         const ambiguousMiss =
-          truncatedSides.length > 0 ||
+          testResult.stdoutTruncated ||
+          testResult.stderrTruncated ||
           testResult.exitCode === 0 ||
           spec.expect === "pass";
         if (ambiguousMiss) {
-          const truncatedNote =
-            truncatedSides.length > 0
-              ? ` (the mutant run's captured ${truncatedSides.join(" and ")} tail was truncated; the pattern may have matched output outside the captured tail)`
-              : "";
           warnings.push(
-            `--pass-regex (${rt.passRegex.source}) did not match the mutant run's output${truncatedNote}; see ${testResult.logPath}`,
+            `--pass-regex (${rt.passRegex.source}) did not match the mutant run's output${truncationNote("mutant run", testResult.stdoutTruncated, testResult.stderrTruncated)}; see ${testResult.logPath}`,
           );
         }
       }

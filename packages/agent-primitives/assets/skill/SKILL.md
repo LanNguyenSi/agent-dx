@@ -148,17 +148,21 @@ subcommand.
 
 `verify` and `probe` are not JS-specific: a PHP repository using
 PHPUnit, PHPStan, or PHP_CodeSniffer works the same way, since both
-commands read the command's own exit code (`0` pass, non-zero fail),
-which all three tools already follow. `verify`'s default detectors
-parse PHPUnit/PHPStan/PHPCS output the same way they parse
-vitest/tsc/eslint output; `probe`'s zero-tests guard recognizes
-PHPUnit's `No tests executed!` and any run whose executed count (the
-stated total less Skipped, Incomplete and Warnings) is zero, the same
-way it recognizes vitest's and node's zero-count shapes. Watch the two
-PHPUnit shapes that exit `0` with nothing executed: an all-skipped run
-and a warnings-only run (`No tests found in class "X".`); the guard, not
-the exit code, is what catches those. A `--pass-regex`/`passWhen` pass
-predicate and a composer `vendor-dir`/`bin-dir` link rule are two more
-PHP-relevant additions on their own tasks (issue #225 parts 1 and 2),
-each documenting its own option in its own section. See the package
-README's "Non-JS test runners" section for the full detail.
+commands read the command's own exit code (`0` pass, non-zero fail) for
+a check with no predicate configured, which all three tools already
+follow. A `--pass-regex`/`passWhen.regex` pass predicate, where given,
+decides the verdict instead -- for `probe` and `verify` alike -- exactly
+for a runner whose exit code alone is not trustworthy (PHPUnit 9.6
+exiting non-zero on a green suite purely over deprecation notices is the
+motivating case); see each command's own section in the package README
+for the full option. `verify`'s default detectors parse
+PHPUnit/PHPStan/PHPCS output the same way they parse vitest/tsc/eslint
+output; `probe`'s zero-tests guard recognizes PHPUnit's `No tests
+executed!` and any run whose executed count (the stated total less
+Skipped, Incomplete and Warnings) is zero, the same way it recognizes
+vitest's and node's zero-count shapes. Watch the two PHPUnit shapes that
+exit `0` with nothing executed: an all-skipped run and a warnings-only
+run (`No tests found in class "X".`); the guard, not the exit code, is
+what catches those. A composer `vendor-dir`/`bin-dir` link rule remains
+its own pending task (issue #225 part 2). See the package README's
+"Non-JS test runners" section for the full detail.

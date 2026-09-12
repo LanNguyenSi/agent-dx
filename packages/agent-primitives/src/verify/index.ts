@@ -1,13 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import {
-  combinedOutput,
-  execCommand,
-  signalNumberFromExitCode,
-} from "../exec.js";
+import { combinedOutput, execCommand } from "../exec.js";
 import type { ExecResult } from "../exec.js";
-import { truncationNote } from "../pass-regex.js";
+import { truncationNote, nonZeroPassWarning } from "../pass-regex.js";
 import { UsageError } from "../envelope.js";
 import { genericDetector } from "./detectors/generic.js";
 import { vitestDetector } from "./detectors/vitest.js";
@@ -552,6 +548,17 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
       checks.push(abortedResult);
       fullChecks.push(abortedResult);
       warnings.push(`${name}: aborted before it could finish`);
+      // A `--pass-regex` configured for this check was never consulted
+      // either: the run was killed before it produced any output to test
+      // the predicate against. Said out loud, same shape as the
+      // skipped-check warning above, rather than left to look like the
+      // predicate was simply never given.
+      const abortedPassRegex = passRegexes[name];
+      if (abortedPassRegex !== undefined) {
+        warnings.push(
+          `${name}: --pass-regex (${abortedPassRegex.source}) was given but the check was aborted before it could finish, so the predicate was never consulted`,
+        );
+      }
       aborted = true;
       notStarted = names.slice(index + 1);
       break;
@@ -599,12 +606,19 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
           // runner exiting `137` of its own accord, and `--pass-regex`
           // means "ignore the exit code" by construction), but a reader
           // is told, since "the suite may have been cut short" is a
-          // different thing to check than deprecation noise.
-          const signalCode = signalNumberFromExitCode(execResult.exitCode);
+          // different thing to check than deprecation noise. Shared with
+          // `probe`'s own baseline warning through `nonZeroPassWarning`
+          // (`src/pass-regex.ts`) so the wording cannot drift between
+          // the two.
           warnings.push(
-            signalCode !== undefined
-              ? `${name}: --pass-regex (${passRegex.source}) matched the check's output but the check exited with ${String(execResult.exitCode)}, the code a shell reports for a process killed by signal ${String(signalCode)}; the suite may have been cut short; see ${execResult.logPath}`
-              : `${name}: --pass-regex (${passRegex.source}) matched the check's output despite a non-zero exit code (${String(execResult.exitCode)}); treated as a pass (e.g. deprecation-notice noise), not a failure; see ${execResult.logPath}`,
+            nonZeroPassWarning({
+              prefix: `${name}: `,
+              outputSubject: "the check's output",
+              exitSubject: "the check",
+              pattern: passRegex.source,
+              exitCode: execResult.exitCode,
+              logPath: execResult.logPath,
+            }),
           );
         }
       } else {
@@ -612,6 +626,20 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
           `${name}: --pass-regex (${passRegex.source}) did not match the check's output${truncationNote("check", execResult.stdoutTruncated, execResult.stderrTruncated)}; see ${execResult.logPath}`,
         );
       }
+    } else if (passRegex !== undefined) {
+      // `exitStatus === "error"` here: a timeout or exit 126/127 (an
+      // aborted run already returned above, before this line, with its
+      // own warning). The predicate answers nothing about a shape like
+      // that -- there is no completed run to test it against -- so it is
+      // never consulted; said out loud, same shape as the skipped-check
+      // warning above, rather than left to look like the predicate was
+      // silently dropped.
+      const errorReason = execResult.timedOut
+        ? "timed out"
+        : `exited with code ${String(execResult.exitCode)}`;
+      warnings.push(
+        `${name}: --pass-regex (${passRegex.source}) was given but the check ${errorReason}, so the predicate was never consulted`,
+      );
     }
     const selection = selectDetector(detectors, fallbackDetector, {
       output,
@@ -649,6 +677,29 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
         output,
         truncated,
         detector === eslintDetector,
+      );
+    }
+
+    // A predicate-decided `pass` overrules the exit code, never the
+    // detector's own parse: the detector can still have found real
+    // failures in the very output the predicate matched (a loose
+    // `--pass-regex` that matches a banner line ahead of a red summary
+    // is the motivating shape). Rather than discard that contrary
+    // evidence silently, it is said out loud -- the verdict itself is
+    // unchanged, `pass` stays `pass` (the predicate, not the detector,
+    // owns the verdict once configured), but a reader is warned the
+    // predicate may be too loose.
+    if (
+      status === "pass" &&
+      passRegex !== undefined &&
+      (parsed.summary.failed > 0 || parsed.failures.length > 0)
+    ) {
+      const parsedFailureCount =
+        parsed.failures.length > 0
+          ? parsed.failures.length
+          : parsed.summary.failed;
+      warnings.push(
+        `${name}: --pass-regex (${passRegex.source}) matched, but the ${detector.name} detector parsed ${parsedFailureCount} failure(s) of its own; the predicate may be too loose; see ${execResult.logPath}`,
       );
     }
 
