@@ -545,6 +545,12 @@ produced no commit, the implementer returns `commits: []` rather than
 omitting the field, so 'did not commit' is distinguishable from
 'forgot to report'.
 
+For a non-empty `commits` field, the implementer pastes `git log --format=%H
+<base>..HEAD`; it never types or hand-completes commit shas. Verification
+plans, probe plans, and repeat tallies run in the foreground, and the
+implementer reports their returns in the same turn as the last check. A
+background monitor is no substitute for those returns.
+
 ## Reviewer output contract
 
 The output shape remains the same for either selected contract. Compare the

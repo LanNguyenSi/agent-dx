@@ -108,6 +108,11 @@ Rules:
   when the task assignment asked for a commit is treated as a misfire, not
   evidence. When the task produced no commit, return `commits: []` rather
   than omitting the field.
+- Populate a non-empty `commits` field by pasting `git log --format=%H
+  <base>..HEAD`; never type or hand-complete commit shas.
+- Verification plans, probe plans, and repeat tallies run in the foreground,
+  and the implementer reports their returns in the same turn as the last
+  check. A background monitor is no substitute for those returns.
 - Only write a verification claim (for example "Verified by ...") in a code
   comment, commit message, or your report for a check you actually ran and
   measured yourself; never claim a run you did not execute.

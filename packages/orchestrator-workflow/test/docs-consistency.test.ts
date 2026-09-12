@@ -1218,6 +1218,42 @@ describe("commits field ships in the skill and the implementer prompt", () => {
     expect(skillMd).toContain(clause);
     expect(implementerMd).toContain(clause);
   });
+
+  it("each copy independently pins report derivation and foreground-return rules", () => {
+    const copies = [
+      {
+        name: "SKILL.md",
+        content: skillMd,
+        rules: [
+          "`git log --format=%H <base>..HEAD`",
+          "it never types or hand-completes commit shas",
+          "Verification plans, probe plans, and repeat tallies run in the foreground",
+          "reports their returns in the same turn as the last check",
+          "A background monitor is no substitute for those returns",
+        ],
+      },
+      {
+        name: "implementer.md",
+        content: implementerMd,
+        rules: [
+          "`git log --format=%H <base>..HEAD`",
+          "never type or hand-complete commit shas",
+          "Verification plans, probe plans, and repeat tallies run in the foreground",
+          "reports their returns in the same turn as the last check",
+          "A background monitor is no substitute for those returns",
+        ],
+      },
+    ];
+    for (const copy of copies) {
+      for (const rule of copy.rules) {
+        expect(copy.content, `${copy.name} missing ${rule}`).toContain(rule);
+        expect(
+          copy.content.replace(rule, ""),
+          `${copy.name} pin did not discriminate ${rule}`,
+        ).not.toContain(rule);
+      }
+    }
+  });
 });
 
 /**
