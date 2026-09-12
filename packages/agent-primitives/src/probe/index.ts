@@ -820,14 +820,16 @@ export interface PlanSummaryField {
   not_run: number;
   /** How many of `results` carry `mutation_probe.expectation: "met"` /
    * `"violated"` -- present alongside a real `killed`/`survived`
-   * verdict only, so `met + violated` can be less than `killed +
-   * survived` when a plan runs with no `--expect` given per mutant
-   * (never more). A plan-level `status: "survived"` is driven by
-   * `violated` being non-zero, not by raw `survived`, so this pair
-   * is what actually explains that verdict when it disagrees with the
-   * raw `killed`/`survived` counts above (an `expect: "pass"` mutant
-   * that `survived`, i.e. `met`, contributes to `survived` here but
-   * not to `violated`). */
+   * verdict only. Every attempted mutant runs under some expect (its
+   * own, else the plan's, else the CLI default `fail`), so `met +
+   * violated` always equals `killed + survived`; `inconclusive` and
+   * `not_run` results carry neither and account for the whole
+   * difference from `total`. A plan-level `status: "survived"` is
+   * driven by `violated` being non-zero, not by raw `survived`, so
+   * this pair is what actually explains that verdict when it disagrees
+   * with the raw `killed`/`survived` counts above (an `expect: "pass"`
+   * mutant that `survived`, i.e. `met`, contributes to `survived` here
+   * but not to `violated`). */
   met: number;
   violated: number;
 }

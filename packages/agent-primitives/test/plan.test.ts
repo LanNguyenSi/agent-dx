@@ -721,9 +721,10 @@ describe("probePlan(): a failing baseline applies no mutant at all", () => {
     expect(result.summary.not_run).toBe(2);
     // A mutant the plan never reached carries no `mutation_probe` at
     // all (never attempted, so no verdict to report an `expectation`
-    // about).
-    expect(result.results[0].mutation_probe?.expectation).toBeUndefined();
-    expect(result.results[1].mutation_probe?.expectation).toBeUndefined();
+    // about). This pins the envelope shape of a `not_run` entry, not
+    // the expectation logic in step.ts, which this path never reaches.
+    expect(result.results[0].mutation_probe).toBeUndefined();
+    expect(result.results[1].mutation_probe).toBeUndefined();
     // Nothing was even computed, let alone applied.
     expect(vi.mocked(computeMutant)).not.toHaveBeenCalled();
     expect(await sha256File(target)).toBe(beforeHash);

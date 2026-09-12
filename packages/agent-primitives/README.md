@@ -1630,8 +1630,8 @@ distinguishes from a real failure: a mutant run that crashes SILENTLY
 (a segfault, an uncaught exception before the runner's own reporter ever
 printed anything) produces no output at all on either stream, and
 `--pass-regex` cannot match empty output any more than a real failure's
-non-matching output -- both read as "failed", and (under the default
-`--expect fail`) as `killed`. The two are NOT the same finding, and the
+non-matching output -- both read as "failed", and as `killed`, whichever
+`--expect` was given. The two are NOT the same finding, and the
 envelope keeps a SILENT crash distinguishable: `test.exitCode` is never
 dropped from the result just because `--pass-regex` is in charge of the
 verdict (a crash's unusual exit code, e.g. `2`, differs from whatever
@@ -1646,7 +1646,7 @@ run that printed real (non-matching) output. This only ever catches a
 crash that produced no output at all: an uncaught exception that prints
 its own stack trace to stderr before the process exits (an ordinary
 `throw`, not a segfault) exits non-zero with real, non-empty output and
-is `killed` (under `--expect fail`) with an envelope indistinguishable
+is `killed`, whichever `--expect` was given, with an envelope indistinguishable
 from a real failure of that same command -- neither carries a miss
 warning, since neither miss is ambiguous; nothing in this package tells
 the two apart, and a caller who needs to must read the log itself.
@@ -2148,11 +2148,16 @@ paste into a `mutation_probes` report, `expectation` included) and
 `survived` counts are not what decides the plan's own exit code below
 when any mutant declares a non-default `expect`; `summary` also counts
 `met`/`violated`, mirroring `results[].mutation_probe.expectation`
-(present alongside a real `killed`/`survived` verdict only, so `met +
-violated` can fall short of `killed + survived` for a mutant run with
-no `--expect` given, never exceed it) -- this pair, not the raw
-`killed`/`survived` counts, is what actually explains a plan-level
-`status: "survived"` when it disagrees with them.
+(present alongside a real `killed`/`survived` verdict only; every
+attempted mutant runs under some expect, its own, else the plan's, else
+the CLI default `fail`, so `met + violated` always equals `killed +
+survived`, and `inconclusive`/`not_run` account for the whole difference
+from `total`) -- this pair, not the raw `killed`/`survived` counts, is
+what actually explains a plan-level `status: "survived"` when it
+disagrees with them. Note that the plan's own `status` word is an
+expectation aggregate (`killed` means every expectation was met,
+`survived` means at least one was violated), not the mutants' outcome
+vocabulary, which lives in `summary.killed`/`summary.survived`.
 
 A failing baseline is one difference from the single-mutant form worth
 naming explicitly: the single probe's CLI envelope remaps it to a

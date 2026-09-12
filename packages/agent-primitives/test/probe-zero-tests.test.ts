@@ -316,7 +316,10 @@ describe("probe(): baseline-stage no_tests_executed refusal", () => {
     expect(result.mutation_probe?.reason).toBe("no_tests_executed");
     expect(result.mutant).toBeDefined();
     // No real killed/survived verdict was reached, so there is nothing
-    // for `expectation` to report agreement or disagreement about.
+    // for `expectation` to report agreement or disagreement about. This
+    // baseline-side refusal builds its mutation_probe without touching
+    // step.ts's expectation guard, so it pins the envelope shape only;
+    // the mutant-side case further down is the one that discriminates.
     expect(result.mutation_probe?.expectation).toBeUndefined();
   });
 
