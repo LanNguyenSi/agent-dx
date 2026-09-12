@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `probe` now recognizes a complete Vitest 4 `--reporter=json` summary on
+  either captured stream. A JSON filter miss can report a nonzero
+  `numTotalTests` entirely as `numPendingTests`, so zero execution is now
+  determined by `numPassedTests + numFailedTests === 0`, not by the total.
+  Parsing is deliberately strict: all five nonnegative tally fields must be
+  present and reconcile, and partial, malformed, or JSON-looking log text is
+  left unknown. A valid JSON summary also suppresses the generic
+  byte-identical fallback. Node's `--test-name-pattern` miss remains a
+  documented limit because its `tests 1`/`pass 1` summary is indistinguishable
+  from a legitimate top-level assertion; `--require-baseline-evidence` is the
+  remedy.
+
 - `verify` accepts an opt-in per-check success predicate, `--pass-regex
   name=regex` (repeatable, parsed like `-x name=command`), compiled
   through the same shared `compilePassRegex` (`m` flag) `probe`'s own
