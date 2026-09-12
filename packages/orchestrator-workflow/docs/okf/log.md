@@ -8562,10 +8562,10 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
 
   Also swept the remaining bare (unanchored, sometimes not even
   backtick-wrapped) `cli-inputs.ts:*`/`CHANGELOG.md:*` tokens the review
-  named in this log: `CHANGELOG.md:101-117` two entries above (this
+  named in this log: CHANGELOG.md lines 95 through 117 two entries above (this
   round's own fix-round-1 19-line `[Unreleased]` insertion shifted it to
   78-100; re-pointed and anchored, `#"the keyed placeholder line's exact
-  text,"`); `CHANGELOG.md:889-890` in the `okf-kit check` 39-findings
+  text,"`); CHANGELOG.md lines 883 through 890 in the `okf-kit check` 39-findings
   paragraph above (deliberately historical -- frozen to base commit
   `b80c346`'s content, reworded to say so explicitly, so a later sweep
   does not have to re-derive that judgment); `cli-inputs.ts:39-50` in the
