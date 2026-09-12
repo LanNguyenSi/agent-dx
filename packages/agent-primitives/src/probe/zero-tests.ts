@@ -51,6 +51,71 @@ export interface ZeroTestsEvidence {
  */
 const NODE_TEST_SUMMARY_LINE = /^[ℹ#]\s*tests\s+(\d+)\s*$/m;
 
+/** A JSON reporter result must occupy one complete stream, never a fragment
+ * embedded in mixed runner output. These stable Vitest 4 tally fields and
+ * their arithmetic reject malformed, partial, and lookalike objects. */
+interface VitestJsonSummary {
+  numTotalTests: number;
+  numPassedTests: number;
+  numFailedTests: number;
+  numPendingTests: number;
+  numTodoTests: number;
+}
+
+const VITEST_JSON_COUNT_KEYS = [
+  "numTotalTests",
+  "numPassedTests",
+  "numFailedTests",
+  "numPendingTests",
+  "numTodoTests",
+] as const;
+
+function parseVitestJsonSummary(output: string): VitestJsonSummary | undefined {
+  const trimmed = output.trim();
+  if (trimmed.length === 0) return undefined;
+  let value: unknown;
+  try {
+    value = JSON.parse(trimmed);
+  } catch {
+    return undefined;
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const counts = {} as VitestJsonSummary;
+  for (const key of VITEST_JSON_COUNT_KEYS) {
+    const count = record[key];
+    if (
+      typeof count !== "number" ||
+      !Number.isSafeInteger(count) ||
+      count < 0
+    ) {
+      return undefined;
+    }
+    counts[key] = count;
+  }
+  if (
+    counts.numTotalTests !==
+    counts.numPassedTests +
+      counts.numFailedTests +
+      counts.numPendingTests +
+      counts.numTodoTests
+  ) {
+    return undefined;
+  }
+  return counts;
+}
+
+function findVitestJsonSummary(
+  stdoutTail: string,
+  stderrTail: string,
+): VitestJsonSummary | undefined {
+  return (
+    parseVitestJsonSummary(stdoutTail) ?? parseVitestJsonSummary(stderrTail)
+  );
+}
+
 /**
  * Whether `stdoutTail`/`stderrTail` shows a KNOWN test-runner summary
  * whose count is zero: vitest's "No test files found" (no matching
@@ -64,6 +129,13 @@ export function detectKnownZeroTestsEvidence(
   stderrTail: string,
 ): ZeroTestsEvidence {
   const combined = combinedOutput(stdoutTail, stderrTail);
+  const jsonSummary = findVitestJsonSummary(stdoutTail, stderrTail);
+  if (jsonSummary !== undefined) {
+    if (jsonSummary.numPassedTests + jsonSummary.numFailedTests === 0) {
+      return { detected: true, via: "vitest" };
+    }
+    return { detected: false };
+  }
   const input = { output: combined, command: "", exitCode: 0 };
   if (vitestDetector.matches(input)) {
     const parsed = vitestDetector.parse(input);
@@ -119,6 +191,9 @@ export function hasKnownTestSummary(
   stderrTail: string,
 ): boolean {
   const combined = combinedOutput(stdoutTail, stderrTail);
+  if (findVitestJsonSummary(stdoutTail, stderrTail) !== undefined) {
+    return true;
+  }
   const input = { output: combined, command: "", exitCode: 0 };
   if (vitestDetector.matches(input)) {
     return true;

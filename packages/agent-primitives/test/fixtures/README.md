@@ -31,6 +31,20 @@ capture:
   README's `verify` section for the Node floor this requires to develop
   against)
 
+`vitest-json-filter-match.txt` and `vitest-json-filter-miss.txt` are
+normalized captures from `vitest 4.1.11 --run --reporter=json` against the
+same 43-test file: a matching `-t` selected one test (`passed: 1`, `pending:
+42`), while a missing filter selected none (`passed: 0`, `pending: 43`). The
+volatile timestamps, per-test result list, suite counters, snapshot object,
+and final status were removed; the five stable top-level test totals are kept
+verbatim so the detector exercises JSON's real summary shape.
+
+`node-test-name-pattern-match.txt` and `node-test-name-pattern-miss.txt`
+are normalized Node 26.6.0 `node --test --test-reporter=spec` captures from
+one real top-level test. Both report `tests 1` and `pass 1`; Node counts the
+file for a name-pattern miss, so its result is indistinguishable from the
+matching assertion and deliberately remains outside the zero-tests heuristic.
+
 `tsc-vitest-concat.txt` is the one exception: not a raw capture, but two
 of the other captures (`tsc-errors.txt` and the vitest mixed-run capture)
 concatenated, so a single check's output can be made to carry both

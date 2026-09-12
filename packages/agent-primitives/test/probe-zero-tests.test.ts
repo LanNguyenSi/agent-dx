@@ -63,6 +63,40 @@ afterEach(() => {
 // real end-to-end pair). ---------------------------------------------
 
 describe("detectKnownZeroTestsEvidence()", () => {
+  it("vitest JSON: a captured filter miss has pending tests but zero executed", () => {
+    expect(
+      detectKnownZeroTestsEvidence(readCaptured("vitest-json-filter-miss"), ""),
+    ).toEqual({ detected: true, via: "vitest" });
+  });
+
+  it("vitest JSON: a captured matching filter is not flagged", () => {
+    expect(
+      detectKnownZeroTestsEvidence(
+        readCaptured("vitest-json-filter-match"),
+        "",
+      ),
+    ).toEqual({ detected: false });
+  });
+
+  it("vitest JSON: recognizes a complete result independently from stdout or stderr", () => {
+    expect(
+      detectKnownZeroTestsEvidence("", readCaptured("vitest-json-filter-miss")),
+    ).toEqual({ detected: true, via: "vitest" });
+  });
+
+  it("vitest JSON: rejects partial, malformed, and lookalike objects", () => {
+    for (const output of [
+      '{"numPassedTests":0,"numFailedTests":0}',
+      '{"numTotalTests":2,"numPassedTests":0,"numFailedTests":0,"numPendingTests":2',
+      'runner log {"numTotalTests":2,"numPassedTests":0,"numFailedTests":0,"numPendingTests":2,"numTodoTests":0}',
+      '{"numTotalTests":2,"numPassedTests":0,"numFailedTests":0,"numPendingTests":1,"numTodoTests":0}',
+    ]) {
+      expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
+        detected: false,
+      });
+    }
+  });
+
   it("vitest: 'No test files found' (no matching file at all)", () => {
     const evidence = detectKnownZeroTestsEvidence(
       "\n RUN  v4.1.11 /project\n\nNo test files found, exiting with code 1\n",
@@ -117,6 +151,18 @@ describe("detectKnownZeroTestsEvidence()", () => {
       "",
     );
     expect(evidence).toEqual({ detected: false });
+  });
+
+  it("node --test: captured name-pattern match and miss are intentionally indistinguishable", () => {
+    for (const fixture of [
+      "node-test-name-pattern-match",
+      "node-test-name-pattern-miss",
+    ]) {
+      expect(detectKnownZeroTestsEvidence(readCaptured(fixture), "")).toEqual({
+        detected: false,
+      });
+      expect(hasKnownTestSummary(readCaptured(fixture), "")).toBe(true);
+    }
   });
 
   it("an unrecognized runner's output is not flagged by either detector", () => {
@@ -214,6 +260,21 @@ describe("detectKnownZeroTestsEvidence()", () => {
 });
 
 describe("hasKnownTestSummary()", () => {
+  it("true for complete Vitest JSON summaries, including zero and nonzero runs", () => {
+    expect(
+      hasKnownTestSummary(readCaptured("vitest-json-filter-match"), ""),
+    ).toBe(true);
+    expect(
+      hasKnownTestSummary(readCaptured("vitest-json-filter-miss"), ""),
+    ).toBe(true);
+  });
+
+  it("does not treat a JSON lookalike as a known Vitest summary", () => {
+    expect(
+      hasKnownTestSummary('{"numPassedTests":0,"numFailedTests":0}', ""),
+    ).toBe(false);
+  });
+
   it("true for a vitest summary, zero-count or not", () => {
     expect(hasKnownTestSummary(" Tests  2 passed (2)\n", "")).toBe(true);
     expect(hasKnownTestSummary(" Tests  2 skipped (2)\n", "")).toBe(true);

@@ -1570,7 +1570,9 @@ past that, the mutant run itself are checked for known zero-tests
 evidence -- vitest's own "No test files found" (no matching file at all)
 or a `Tests` summary with nothing `passed` and nothing `failed` (an
 all-skipped/all-todo run, the shape a `-t`/name filter that matches no
-test inside files vitest still loaded produces), and node's built-in
+test inside files vitest still loaded produces), or a complete vitest
+`--reporter=json` result whose `numPassedTests + numFailedTests` is zero,
+and node's built-in
 `--test` runner's own zero-count summary line. Either hit is
 `status: "inconclusive"`, `reason: "no_tests_executed"`, exit `2`,
 `mutation_probe.result: "not_run"` -- never `"killed"`/`"survived"`, a
@@ -1834,19 +1836,18 @@ something to check. A runner that exits `137` of its own accord, nothing
 killed at all, gets the same warning, since the exit code cannot tell the
 two apart.
 
-Both detectors understand only each runner's DEFAULT text reporters:
-`node --test` with `--test-reporter=dot` (or any reporter besides the
-default `spec`/`tap` shapes), and vitest's own `--reporter=json` output,
-are invisible to them (neither carries the `tests <n>`/`Tests <n>
-passed` text either detector matches on) -- a `-t`/`--test-name-pattern`
-filter matching nothing under one of those reporters reads `survived`,
-not `no_tests_executed`. Node's `--test-name-pattern` matching no test
+Node's `--test` with `--test-reporter=dot` (or any reporter besides the
+default `spec`/`tap` shapes) remains invisible to the detectors. Vitest
+JSON is recognized only when one captured stream is a complete, internally
+consistent JSON summary; malformed, truncated, and JSON-looking log
+fragments are deliberately left unknown. Node's `--test-name-pattern` matching no test
 name is a second, reporter-independent gap: the file itself still counts
 as "a test" in node's own summary (`tests 1`), so the zero-count check
 never fires for a name-filter miss even under the default reporter.
-`--require-baseline-evidence` is the remedy for all three: vitest's
-`--reporter=json` `numTotalTests` is not recognized; use
-`--require-baseline-evidence` for a JSON-reporter run.
+No reporter-independent Node signal distinguishes that case from a
+legitimate top-level assertion, which has the same `tests 1`/`pass 1`
+summary. `--require-baseline-evidence` remains the remedy for the Node
+limitation and for any unrecognized custom reporter.
 
 With no `--timeout` given and a test command that looks like a whole test
 suite rather than one targeted file -- `npm test`, `npm run test`/`npm
