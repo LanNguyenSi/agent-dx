@@ -89,7 +89,7 @@ export interface BundleContext {
   /**
    * Opt-in for `sources-fresh` AND `sources-fresh-future` (see
    * `--dirty-as-now` in `src/cli.ts`): every uncommitted change (modified,
-   * staged, or untracked per `git status --porcelain`) is modeled as though
+   * staged, or untracked per `git status --porcelain --untracked-files=all`) is modeled as though
    * it landed in ONE virtual commit made right now, instead of at its last
    * real commit's time. That virtual-commit epoch is the SINGLE place both
    * rules read a dirty path's "commit time" from (see
