@@ -109,7 +109,25 @@
   `b19680bb`) whose tracked paragraph/citation lines this round's edits
   moved. `okf-kit check --json --require-anchors
   packages/orchestrator-workflow/docs/okf` on the committed tree: 0
-  errors, 0 warnings.
+  errors, 0 warnings. A second small commit (the missing bundle-doc-prose
+  pin above) touched `test/docs-consistency.test.ts` again after these
+  four docs' first re-stamp, so their `timestamp` was bumped a second
+  time to clear the freshness guard's `STALE` warning; no further prose
+  or citation changes accompanied that bump.
+
+  Five mutation probes, run against the committed tree and restored
+  after each: P1, renaming `anchor` to `anker` in `implementer.md`'s
+  `mutation_probes` block, killed by the exact-sub-field-order test; P2,
+  dropping the `(reason: ...)` qualifier from both `SKILL.md` occurrences
+  of the "can no longer be applied" regression sentence, killed by the
+  reason-string pin; P3, changing this file's "locks the ten" wording
+  back to "five" in `subagent-contracts-superset.md`, killed by the new
+  bundle-doc-prose pin above; P4, dropping the Expectation column from
+  the `04-implementation-summary.md` Mutation Probes table, killed by the
+  template-columns-vs-contract pin; P5, dropping the `expectation`
+  not_applicable scope clause from `implementer.md`, killed by the
+  expectation-scope pin. Each restore returned `git status` and the
+  relevant test to clean/green before the next probe.
 
 - 2026-09-12T05:32:21Z (mutation probe definition fields, agent-dx task
   06330af2): the `mutation_probes` output field carried a mutant only by a
