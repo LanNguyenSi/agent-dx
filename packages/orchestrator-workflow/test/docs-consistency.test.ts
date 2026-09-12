@@ -4837,6 +4837,34 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
     expect(subFieldNames(implementerBlock)).toEqual(expectedOrder);
   });
 
+  /**
+   * Review round 1 finding (HIGH): a re-stamp/re-point pass moved this
+   * bundle doc's citations onto the current SKILL.md/implementer.md text
+   * without updating the prose describing what that text says, so the
+   * doc kept citing the current ten-sub-field contract while its own
+   * sentence still said "five", and kept citing the current
+   * `expectation`-qualified regression rule while its own sentence still
+   * said "both copies say so" (true only of the pre-`expectation` rule).
+   * A re-pointed citation proves the line still exists; it proves nothing
+   * about the surrounding prose. This reads the bundle doc's own raw text
+   * (unlike the SKILL.md/implementer.md pins above) and pins the two
+   * sentences a future re-point pass could silently leave stale again.
+   */
+  it("the bundle doc's own prose states the current field count and regression-signal wording, not a superseded one", () => {
+    const bundleDoc = unwrap(
+      readDoc("docs/okf/subagent-contracts-superset.md"),
+    );
+    expect(bundleDoc).toContain(
+      "A further pin locks the ten `mutation_probes` sub-fields to their fixed order in both copies",
+    );
+    expect(bundleDoc).not.toContain(
+      "A further pin locks the five `mutation_probes` sub-fields",
+    );
+    expect(bundleDoc).toContain(
+      "today both copies instead key the regression signal off `expectation`",
+    );
+  });
+
   // The CHANGELOG's own prose description of the replay rule is a fourth
   // copy (after SKILL.md step 6, SKILL.md's output-contract paragraph, and
   // implementer.md) and was previously unpinned. Anchor on a phrase inside
