@@ -4228,7 +4228,17 @@ describe("probe --plan envelope: never over maxChars without a warning naming th
    * `keepWhole: ["plan.summary"]`), then runs the same
    * `reconcileEnvelopeDiffTruncation` pass `cli.ts` runs against it, at
    * `maxChars`. */
-  function buildPlanEnvelope(maxChars: number): Record<string, unknown> {
+  function buildPlanEnvelope(
+    maxChars: number,
+    planResults: readonly Record<string, unknown>[] = [
+      planResultEntry(0),
+      planResultEntry(1),
+    ],
+    originalMutants: readonly (typeof wideMutantField)[] = [
+      wideMutantField,
+      wideMutantField,
+    ],
+  ): Record<string, unknown> {
     const { envelope } = buildEnvelope({
       version: "test",
       command: "probe",
@@ -4239,7 +4249,7 @@ describe("probe --plan envelope: never over maxChars without a warning naming th
       logs: [],
       extra: {
         plan: {
-          results: [planResultEntry(0), planResultEntry(1)],
+          results: planResults,
           summary: {
             total: 2,
             killed: 2,
@@ -4256,7 +4266,7 @@ describe("probe --plan envelope: never over maxChars without a warning naming th
     reconcileEnvelopeDiffTruncation(
       envelope,
       {
-        planResults: [wideMutantField, wideMutantField].map((m) => ({
+        planResults: originalMutants.map((m) => ({
           mutant: m,
         })),
       },
@@ -4305,21 +4315,19 @@ describe("probe --plan envelope: never over maxChars without a warning naming th
     4300,
   ] as const;
 
-  /** Measure the lowest successful production envelope across the sweep.
-   * The test deliberately derives this floor from real buildEnvelope
-   * runs instead of preserving a hand-maintained budget table: adding a
-   * hunk to the fixture changes the measured threshold without editing
-   * expectations. */
+  /** Measure the retained plan shape with the exact production fixture
+   * factory, but no result entries. A weaker reduction cannot raise this
+   * floor, and fixture-field changes flow into calibration automatically. */
+  const fullyReducedSkeleton = buildPlanEnvelope(
+    Number.MAX_SAFE_INTEGER,
+    [],
+    [],
+  );
+  const skeletonFloor = JSON.stringify(fullyReducedSkeleton).length;
+  expect(fullyReducedSkeleton.warnings).toEqual([]);
   const envelopesByBudget = new Map(
     SWEEP_BUDGETS.map((budget) => [budget, buildPlanEnvelope(budget)]),
   );
-  const fittingLengths = SWEEP_BUDGETS.map((budget) => {
-    const envelope = envelopesByBudget.get(budget)!;
-    const finalLength = JSON.stringify(envelope).length;
-    return finalLength <= budget ? finalLength : undefined;
-  }).filter((length): length is number => length !== undefined);
-  expect(fittingLengths).not.toHaveLength(0);
-  const skeletonFloor = Math.min(...fittingLengths);
 
   it.each(SWEEP_BUDGETS)(
     "at maxChars=%i, honors the measured skeleton floor and reports the true final length below it",
