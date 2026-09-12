@@ -1103,11 +1103,21 @@ describe("mutation probe naming and not-applicable signal ship in step 6 and bot
     expect(implementerMd).toContain(clause);
   });
 
-  it("both copies pin the mutation_probes field block by its exact sub-field names, not just cross-copy equality", () => {
+  it("each copy pins the mutation_probes field block by its exact sub-field names and result enum, not just cross-copy equality", () => {
     const field =
-      'mutation_probes: - mutant: "" file: "" anchor: "" before: "" after: "" verified_applied_via: "" result: "" expectation: met | violated | not_applicable reason: "" restored_verified: "" replayed: false | true';
+      'mutation_probes: - mutant: "" file: "" anchor: "" before: "" after: "" verified_applied_via: "" result: killed | survived | not_applicable expectation: met | violated | not_applicable reason: "" restored_verified: "" replayed: false | true';
     expect(skillMd).toContain(field);
     expect(implementerMd).toContain(field);
+
+    // Exercise each pin separately. Cross-copy equality would still pass if
+    // both assets lost one enum value; each exact-name pin must reject that
+    // coordinated regression on its own.
+    const withoutNotApplicableResult = field.replace(
+      "result: killed | survived | not_applicable",
+      "result: killed | survived",
+    );
+    expect(skillMd).not.toContain(withoutNotApplicableResult);
+    expect(implementerMd).not.toContain(withoutNotApplicableResult);
   });
 
   it("both copies scope expectation's met/violated values to a measured result and reserve not_applicable otherwise", () => {
@@ -4898,7 +4908,8 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
    * still exists; it proves nothing about a same-doc prose pointer like
    * this one. This generically scans the doc for every "see <Name>
    * below" heading-style forward pointer and asserts <Name> is an
-   * actual heading in the file, so a future pointer added without its
+   * actual heading in the file, including a versioned parenthetical title,
+   * so a future pointer added without its
    * target heading fails here instead of silently resolving to nothing.
    * "see Motivation below" is a distinct, pre-existing convention (a
    * same-subsection paragraph lead-in repeated under many headings, not
@@ -4911,7 +4922,7 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
       [...bundleDocRaw.matchAll(/^#{1,6} (.+)$/gm)].map((m) => m[1].trim()),
     );
     const pointers = [
-      ...bundleDoc.matchAll(/see ([A-Z][A-Za-z0-9' -]*?) below\b/g),
+      ...bundleDoc.matchAll(/see ([A-Z][A-Za-z0-9.' ()-]*?) below\b/g),
     ]
       .map((m) => m[1].trim())
       .filter((name) => name !== "Motivation");
@@ -4922,6 +4933,12 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
         `no heading found for forward pointer "see ${name} below"`,
       ).toBe(true);
     }
+
+    // A live versioned title exercises the parenthesis branch. The negative
+    // control proves the same heading lookup rejects an invented title.
+    expect(pointers).toContain("Mutation probes requirement (0.16.0)");
+    expect(headings.has("Mutation probes requirement (0.16.0)")).toBe(true);
+    expect(headings.has("Nonexistent thing (9.9.9)")).toBe(false);
   });
 
   // The CHANGELOG's own prose description of the replay rule is a fourth
@@ -6690,10 +6707,10 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 542,
     end: 542,
     anchorKey: "47aedb12",
-    paragraphLine: 337,
-    secondCitationLine: 342,
+    paragraphLine: 339,
+    secondCitationLine: 344,
     claim:
-      "the paragraph opens by naming the test that pins the 0.11.0 misfire rule, then closes at line 342 (task 06330af2 review round 3 shifted this paragraph +1 by adding a sources entry above it) with an enumeration of that same test's clause-level pins (the section heading, both detection signals, the false-positive scoping language, the resume-or-respawn response paired with the non-evidence rule, and the `03-decisions.md` record requirement) whose last item is the review-gate consequence clause the opening citation already named; the enumeration is complete, so the line-342 repeat is the doc's closing-list convention, not a skipped sibling.",
+      "the paragraph opens by naming the test that pins the 0.11.0 misfire rule, then closes at line 344 (task 06330af2 review round 3 shifted this paragraph +1 by adding a sources entry above it) with an enumeration of that same test's clause-level pins (the section heading, both detection signals, the false-positive scoping language, the resume-or-respawn response paired with the non-evidence rule, and the `03-decisions.md` record requirement) whose last item is the review-gate consequence clause the opening citation already named; the enumeration is complete, so the line-344 repeat is the doc's closing-list convention, not a skipped sibling.",
   },
   {
     doc: "subagent-contracts-superset.md",
@@ -6702,22 +6719,22 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1063,
     end: 1063,
     anchorKey: "03317257",
-    paragraphLine: 424,
-    secondCitationLine: 428,
+    paragraphLine: 426,
+    secondCitationLine: 430,
     claim:
-      "same opening-citation-then-closing-enumeration convention as the 541 entry, here at :1063/line 428 (shifted +1 further by task 06330af2 review round 3's sources entry addition above this paragraph): the closing list walks :1038, :1046, :1051 and ends on the cross-copy equality check the :1063 opening sentence named, leaving no further assertion of that block uncited.",
+      "same opening-citation-then-closing-enumeration convention as the 541 entry, here at :1063/line 430 (shifted +1 further by task 06330af2 review round 3's sources entry addition above this paragraph): the closing list walks :1038, :1046, :1051 and ends on the cross-copy equality check the :1063 opening sentence named, leaving no further assertion of that block uncited.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "duplicate-citation",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1209,
-    end: 1209,
+    start: 1219,
+    end: 1219,
     anchorKey: "b19680bb",
-    paragraphLine: 628,
-    secondCitationLine: 634,
+    paragraphLine: 630,
+    secondCitationLine: 636,
     claim:
-      "same convention again, here at :1209/line 634 (task 06330af2 review round 3 re-pointed both the citation, from :1194, and this entry's tracked lines to match, after the new Mutation probe definition fields and expectation split section and a sources entry addition shifted this paragraph down): the closing list walks :1175, :1181, :1188, :1203 and ends on the not-applicable-clause pin the :1209 opening sentence named, leaving no further assertion of that block uncited.",
+      "same convention again, here at :1219/line 636 (task 06330af2 review round 3 re-pointed both the citation, from :1194, and this entry's tracked lines to match, after the new Mutation probe definition fields and expectation split section and a sources entry addition shifted this paragraph down): the closing list walks :1185, :1191, :1198, :1213 and ends on the not-applicable-clause pin the :1219 opening sentence named, leaving no further assertion of that block uncited.",
   },
   {
     doc: "install-fence-mechanics.md",

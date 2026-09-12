@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-12T07:36:00Z
+timestamp: 2026-09-12T10:01:44Z
 sources:
   - packages/orchestrator-workflow/assets/skill/SKILL.md
   - packages/orchestrator-workflow/assets/agents/explorer.md
@@ -76,6 +76,8 @@ v1 uses the shown nested fields; a recorded original string-list contract
 retains its strings and omits only the added baseline/evidence-index fields.
 Existing role output fields remain. Unknown provenance is resolved before
 dependent delegation; absent fields never select a version. Contract sites:
+for the original mutation-probe requirement, see Mutation probes requirement
+(0.16.0) below.
 
 The reviewer’s recommendation remains input to, rather than a substitute for,
 orchestrator acceptance. Its prompt states that neither that recommendation
@@ -148,13 +150,13 @@ but fails the exact-name pin. The explorer pair still has no dedicated
 automated drift guard today, protected only by direct read and review. The
 advisor pair started the same way — a 0.21.0
 `describe("advisor escalation policy ships in the AGENTS.md section and
-SKILL.md")` block (`test/docs-consistency.test.ts:2539#"explorer, task-slicer, implementer, reviewer, advisor"`) only pinned
+SKILL.md")` block (`test/docs-consistency.test.ts:2549#"explorer, task-slicer, implementer, reviewer, advisor"`) only pinned
 that `SKILL.md` carries an Advisor output contract block with the right
 top-level shape, a substring-presence pin, not byte-for-byte equality — but
 review round 1 (M2) closed that gap: a dedicated
 `describe("advisor output contract is byte-identical between SKILL.md and
 advisor.md (review round 1, M2)")` block
-(`test/docs-consistency.test.ts:2567#"expect(skillBlock).toBe(advisorBlock);"`) extracts the yaml block from
+(`test/docs-consistency.test.ts:2577#"expect(skillBlock).toBe(advisorBlock);"`) extracts the yaml block from
 both raw files and asserts equality, the same pattern the reviewer and
 implementer pairs use.
 
@@ -219,7 +221,7 @@ site outside the edit set. It uses the existing `relevant_files` and
 `packages/orchestrator-workflow/assets/agents/task-slicer.md:50#"will not edit."`).
 The focused regression pin checks each canonical asset for the changed-value
 categories, both existing fields, every reference site, and the annotation
-requirement (`packages/orchestrator-workflow/test/docs-consistency.test.ts:4612#"requires reference sites to be annotated in the existing task fields"`).
+requirement (`packages/orchestrator-workflow/test/docs-consistency.test.ts:4622#"requires reference sites to be annotated in the existing task fields"`).
 
 The scope-boundary wording is pinned independently
 (`packages/orchestrator-workflow/test/docs-consistency.test.ts:925#"not implementation instructions"`).
@@ -426,7 +428,7 @@ the original 0.16.0 shape: the installed prompt's instruction and field
 mention, packages/orchestrator-workflow/test/docs-consistency.test.ts:1038#"an output missing that field when probes were named is treated as a misfire, not evidence", the claim-only-what-was-measured rule, packages/orchestrator-workflow/test/docs-consistency.test.ts:1046#"never claim a run you did not execute", the
 misfire-rule sentence, packages/orchestrator-workflow/test/docs-consistency.test.ts:1051#"does not parse against its role's output contract, including an implementer return that omits the", and a byte-for-byte cross-copy equality
 check on the field block, packages/orchestrator-workflow/test/docs-consistency.test.ts:1063#"expect(skillBlock).toBe(implementerBlock);".
-`test/docs-consistency.test.ts:1134#"expect(implementerMd).toContain(enumeration);"` pins the R2 additions: step 6's
+`test/docs-consistency.test.ts:1144#"expect(implementerMd).toContain(enumeration);"` pins the R2 additions: step 6's
 sentence and its claim-only-what-was-measured reference, test/docs-consistency.test.ts:1092#"apply the mutant for real, observe the named test fail, restore, re-verify" (the `it` block that follows it pins the claim-only-what-was-measured reference; the rule name recurs too often in that file to anchor a citation on it), the
 not-applicable clause in both copies, test/docs-consistency.test.ts:1103#"expect(implementerMd).toContain(clause);", and two exact-string pins,
 test/docs-consistency.test.ts:1110#"expect(implementerMd).toContain(field);", that catch a rename applied identically to both copies -- a mutant
@@ -487,25 +489,25 @@ contract itself
 (`packages/orchestrator-workflow/assets/skill/SKILL.md:317#"reports as killed together with their"`);
 `assets/agents/reviewer.md` itself is untouched by this change.
 
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:4712#"On any round after the task's first, the briefing also names"` pins step 6's
-instruction, `test/docs-consistency.test.ts:4724#"or which can no longer be applied (reason:"`
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:4722#"On any round after the task's first, the briefing also names"` pins step 6's
+instruction, `test/docs-consistency.test.ts:4734#"or which can no longer be applied (reason:"`
 pins the regression-signal consequence, and the implementer prompt's
 matching rules
-(`test/docs-consistency.test.ts:4730#"On any round after the task's first, the assignment also names"`,
-`test/docs-consistency.test.ts:4742#"resolve it before the next reviewer spawn"`). A byte-for-byte
+(`test/docs-consistency.test.ts:4740#"On any round after the task's first, the assignment also names"`,
+`test/docs-consistency.test.ts:4752#"resolve it before the next reviewer spawn"`). A byte-for-byte
 cross-copy equality check on the `mutation_probes` block including the new
-sub-field (`test/docs-consistency.test.ts:4781#"replayed: false | true"`), the step 7 reviewer-briefing
-sentence (`test/docs-consistency.test.ts:4787#"the orchestrator's reviewer briefing names the replayed probes"`), and a
+sub-field (`test/docs-consistency.test.ts:4791#"replayed: false | true"`), the step 7 reviewer-briefing
+sentence (`test/docs-consistency.test.ts:4797#"the orchestrator's reviewer briefing names the replayed probes"`), and a
 negative pin scoped to `reviewer.md`'s output-contract yaml block, that it
 gains no `replayed` field, sliced from the output-contract heading rather
 than the first yaml fence in the file so an earlier decoy fence cannot be
 mistaken for it
-(`test/docs-consistency.test.ts:4828#"outputContractBlock).not.toContain"`). A further pin locks the eleven
+(`test/docs-consistency.test.ts:4838#"outputContractBlock).not.toContain"`). A further pin locks the eleven
 `mutation_probes` sub-fields to their fixed order in both copies (grown
 from five at this rule's own introduction to ten, then to eleven, under
 task 06330af2, see Mutation probe definition fields and expectation
 split below)
-(`test/docs-consistency.test.ts:4831#"both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order"`).
+(`test/docs-consistency.test.ts:4841#"both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order"`).
 
 Motivation: `lava-ice-logs/2026-09-05/ow-kit-effort-analysis.md` section
 7(ii) found fix-round regressions from a prior round's own fix that a
@@ -589,14 +591,14 @@ alone cannot be skipped by this rule either
 
 The pins that hold them: an exact sub-field-name pin independent of the
 byte-for-byte cross-copy equality check
-(`packages/orchestrator-workflow/test/docs-consistency.test.ts:1106#"both copies pin the mutation_probes field block by its exact sub-field names, not just cross-copy equality"`),
+(`packages/orchestrator-workflow/test/docs-consistency.test.ts:1106#"each copy pins the mutation_probes field block by its exact sub-field names and result enum, not just cross-copy equality"`),
 a pin on the field enumeration in prose
-(`test/docs-consistency.test.ts:1130#"both copies pin the field enumeration in prose"`),
+(`test/docs-consistency.test.ts:1140#"both copies pin the field enumeration in prose"`),
 a dedicated pin on the `reason` requiredness rule
-(`test/docs-consistency.test.ts:1145#"is required exactly when result is not_applicable, empty otherwise"`),
+(`test/docs-consistency.test.ts:1155#"is required exactly when result is not_applicable, empty otherwise"`),
 a fixed-order pin locking all eleven sub-fields to their exact order in
 both copies
-(`test/docs-consistency.test.ts:4831#"both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order"`),
+(`test/docs-consistency.test.ts:4841#"both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order"`),
 and a template agreement pin that derives the
 `04-implementation-summary.md` Mutation Probes table's columns and the
 `mutation_probes` contract's sub-field list programmatically and asserts
@@ -625,13 +627,13 @@ above), worded identically in both copies as "treated as a misfire, not
 evidence" (`SKILL.md:733#"task assignment asked for a commit. When a subagent returns"`
 and `implementer.md:108#"assignment asked for a commit is treated as a misfire, not"`).
 
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:1209#"expect(implementerMd).toContain(clause);"`
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:1219#"expect(implementerMd).toContain(clause);"`
 pins the field: the installed prompt's full-sha instruction and field
-mention, packages/orchestrator-workflow/test/docs-consistency.test.ts:1175#"an output missing that field when the task assignment asked for a commit is treated as a misfire, not evidence", the misfire-rule sentence, packages/orchestrator-workflow/test/docs-consistency.test.ts:1181#"field even though the task assignment asked for a commit", a dedicated pin
+mention, packages/orchestrator-workflow/test/docs-consistency.test.ts:1185#"an output missing that field when the task assignment asked for a commit is treated as a misfire, not evidence", the misfire-rule sentence, packages/orchestrator-workflow/test/docs-consistency.test.ts:1191#"field even though the task assignment asked for a commit", a dedicated pin
 on the "full sha" / "in order" semantics themselves (not only the
-surrounding clauses), packages/orchestrator-workflow/test/docs-consistency.test.ts:1188#"in the order produced", a byte-for-byte cross-copy equality check
-on the field block, packages/orchestrator-workflow/test/docs-consistency.test.ts:1203#"expect(skillBlock).toBe(implementerBlock);", and the not-applicable `commits: []` clause
-in both copies, packages/orchestrator-workflow/test/docs-consistency.test.ts:1209#"expect(implementerMd).toContain(clause);".
+surrounding clauses), packages/orchestrator-workflow/test/docs-consistency.test.ts:1198#"in the order produced", a byte-for-byte cross-copy equality check
+on the field block, packages/orchestrator-workflow/test/docs-consistency.test.ts:1213#"expect(skillBlock).toBe(implementerBlock);", and the not-applicable `commits: []` clause
+in both copies, packages/orchestrator-workflow/test/docs-consistency.test.ts:1219#"expect(implementerMd).toContain(clause);".
 
 Motivation, `packages/orchestrator-workflow/CHANGELOG.md:#[0.27.0]`
 (agent-tasks task 2355f144): the implementer output contract had no field
@@ -705,17 +707,17 @@ parsed by the grounding-mcp completeness reader yet" sentence stays the
 single source of the mechanical status, and this doc does not restate a
 stronger claim than that sentence carries.
 
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:1615#"both copies carry the method_applied field with the three-method enum"`
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:1625#"both copies carry the method_applied field with the three-method enum"`
 pins the field in both copies,
-`test/docs-consistency.test.ts:1621#"both copies carry the withdrawn field with its description/reason sub-fields"`
+`test/docs-consistency.test.ts:1631#"both copies carry the withdrawn field with its description/reason sub-fields"`
 pins the `withdrawn` sub-fields, a byte-for-byte cross-copy equality
 check on the combined block
-(`test/docs-consistency.test.ts:1627#"the method_applied/withdrawn block is byte-for-byte identical between SKILL.md and reviewer.md"`),
+(`test/docs-consistency.test.ts:1637#"the method_applied/withdrawn block is byte-for-byte identical between SKILL.md and reviewer.md"`),
 the reviewer.md unnamed-method default
-(`test/docs-consistency.test.ts:1639#"reviewer.md states rigorous as the default when the briefing names no method"`),
+(`test/docs-consistency.test.ts:1649#"reviewer.md states rigorous as the default when the briefing names no method"`),
 and the SKILL.md step 7 selection-rule sentence including the
 never-`adversarial`-on-`-medium` constraint
-(`test/docs-consistency.test.ts:1644#"SKILL.md step 7 states the review-method selection rule by risk class, including the never-adversarial-on-medium constraint"`).
+(`test/docs-consistency.test.ts:1654#"SKILL.md step 7 states the review-method selection rule by risk class, including the never-adversarial-on-medium constraint"`).
 
 Motivation and the anchoring dogfood evidence live in
 `CHANGELOG.md:#[0.32.0]#"A review-method axis, orthogonal to the effort tier"`,

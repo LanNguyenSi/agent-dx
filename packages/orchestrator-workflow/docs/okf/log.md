@@ -1,5 +1,15 @@
 # Bundle log
 
+- 2026-09-12T09:54:49Z (result enum and forward-pointer guard, agent-dx task
+  318a70ad): changed the implementer output-contract `result` placeholder in
+  both source copies to `killed | survived | not_applicable`. The exact-field
+  guard now independently rejects a missing enum value in either copy, in
+  addition to its cross-copy equality check. The bundle-doc forward-pointer
+  guard accepts the live `Mutation probes requirement (0.16.0)` heading and
+  rejects `Nonexistent thing (9.9.9)`. Re-wrapped the orphaned SKILL.md line,
+  re-stamped the affected bundle documents, and re-pointed their citations after
+  the test shift. Verification is recorded with this task's commit.
+
 - 2026-09-12T07:30:00Z (mutation probe definition fields, agent-dx task
   06330af2, review round 2 fixes): review round 2 found five gaps. (1)
   MEDIUM docs: `subagent-contracts-superset.md` carried four "see
@@ -70,8 +80,8 @@
   its current line, 329. Two further citations surfaced by the same
   ambiguity-clearing effect, both into `docs/okf/subagent-contracts-
   superset.md` itself
-  (`docs/okf/subagent-contracts-superset.md:369#"Actions shell replay named in step 6 is a second, explicitly"`
-  and `docs/okf/subagent-contracts-superset.md:487#"reports as killed together with their"`),
+  (`docs/okf/subagent-contracts-superset.md:371#"Actions shell replay named in step 6 is a second, explicitly"`
+  and `docs/okf/subagent-contracts-superset.md:489#"reports as killed together with their"`),
   were re-pointed to their current lines by the same anchor-text search
   as the rest of this round's re-pointing.
   A fifth, unrelated warning (not from the ambiguity-clearing effect: a
@@ -287,14 +297,14 @@
 
   Both output-contract copies now carry ten `mutation_probes` sub-fields
   in a fixed order, pinned byte-identical between the two copies
-  (`test/docs-consistency.test.ts:4831#"both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order"`).
+  (`test/docs-consistency.test.ts:4841#"both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order"`).
   The parity tests were extended, not only the field list itself: a
   scratch copy of `implementer.md` with the `file`/`anchor`/`before`/
   `after`/`expectation` fields deleted, or with the qualified regression
   sentence reverted to its pre-change wording, fails the exact-sub-field
   and regression-signal tests above; restored, the suite is green again.
   `CHANGELOG.md`'s own prose copy of this change is
-  (`CHANGELOG.md:19#"The implementer"`).
+  (`CHANGELOG.md:25#"The implementer"`).
 
   Verified on the committed tree: the full package suite (`npm test`),
   `typecheck`, `typecheck:test`, and `format:check`, all clean. Re-pointed
@@ -479,9 +489,9 @@
   found. A count appears only inside a test name the guard itself
   computes at collection time, read off a passing run. Such a name now
   exists on both sides, the unanchored-citation brake's
-  (`test/docs-consistency.test.ts:3483#"in-scope citations (sanity: the brake itself did not go blind"`)
+  (`test/docs-consistency.test.ts:3493#"in-scope citations (sanity: the brake itself did not go blind"`)
   and this round's new floor for the log.md guard
-  (`test/docs-consistency.test.ts:8033#"anchored full citations of docs/okf/log.md"`);
+  (`test/docs-consistency.test.ts:8050#"anchored full citations of docs/okf/log.md"`);
   run `npx vitest run test/docs-consistency.test.ts -t "did not go
   blind"` and read both figures off the passing tests' own names. The
   round-3 entry's and bullet's counts are struck, not corrected.
@@ -496,15 +506,15 @@
   a newline inside the anchor by construction, so the text has to be
   re-joined the way the wrap split it, first. Both scanners now consume
   one shared helper
-  (`test/docs-consistency.test.ts:5489#"function citationScanParagraphs("`)
+  (`test/docs-consistency.test.ts:5506#"function citationScanParagraphs("`)
   that joins each paragraph's lines with the single space a hard wrap
   replaced and maps every joined offset back to its physical line, so
   findings, allowlist geometry and failure messages still name real doc
   lines. Pinned both ways by their own fixtures: a wrapped full citation
   with a stale anchor
-  (`test/docs-consistency.test.ts:7881#"is still checked (a stale wrapped anchor fails)"`)
+  (`test/docs-consistency.test.ts:7898#"is still checked (a stale wrapped anchor fails)"`)
   and a wrapped continuation form
-  (`test/docs-consistency.test.ts:7897#"that wraps across a hard line break is still flagged"`),
+  (`test/docs-consistency.test.ts:7914#"that wraps across a hard line break is still flagged"`),
   both of which the round-3 per-line scan passed unseen. Checked rather
   than argued: with the round-2 tree's own `log.md` put in place (`git
   show 0cbded8:packages/orchestrator-workflow/docs/okf/log.md`), this
@@ -522,7 +532,7 @@
   excused every citation after it and the guard still reported clean. The
   shared helper above carries the single fence pass and the throw, so
   there is one copy now; an unbalanced-fence fixture
-  (`test/docs-consistency.test.ts:7918#"throws instead of silently excusing every citation"`)
+  (`test/docs-consistency.test.ts:7935#"throws instead of silently excusing every citation"`)
   pins the loud failure, and the computed floor named above pins
   non-vacuity on the real file.
 
@@ -532,12 +542,12 @@
   extractor call and drops resolved continuations afterwards still
   survived at the other two. Both now take their doc set and resolver as
   parameters, the way the string-anchor collector already did
-  (`test/docs-consistency.test.ts:3390#"function collectBrakeScan("`,
-  `test/docs-consistency.test.ts:3634#"function collectFullTestCitations("`),
+  (`test/docs-consistency.test.ts:3400#"function collectBrakeScan("`,
+  `test/docs-consistency.test.ts:3644#"function collectFullTestCitations("`),
   each with a synthetic-doc-set fixture that fails when a continuation is
   dropped. The brake's own count is pinned as an exact DELTA rather than
   by a floor a shrinking count could sink under
-  (`test/docs-consistency.test.ts:3443#"raises the brake's examined count by exactly one"`):
+  (`test/docs-consistency.test.ts:3453#"raises the brake's examined count by exactly one"`):
   adding one full citation raises it by one, adding one continuation to
   that same paragraph by one more.
 
@@ -546,15 +556,15 @@
   outside the repository and was read and anchor-checked against it; and
   its bespoke bare-name map bound a bare basename to this package's own
   file even where the repository root carries a file of that name. Now
-  (`test/docs-consistency.test.ts:7685#"function resolveLogCitationPath("`):
+  (`test/docs-consistency.test.ts:7702#"function resolveLogCitationPath("`):
   a cited path carrying a `..` segment is rejected before any lookup,
   containment under the repository root is asserted on the fallback
   anyway, and a bare name that collides with a root file is reported
   ambiguous with both candidates named, so the entry has to write the
   path out in full. The collision set is computed from the map and the
   disk, not hand-listed. Fixtures for both
-  (`test/docs-consistency.test.ts:7932#"escaping the repository with a"`,
-  `test/docs-consistency.test.ts:7977#"is reported ambiguous, not silently bound"`).
+  (`test/docs-consistency.test.ts:7949#"escaping the repository with a"`,
+  `test/docs-consistency.test.ts:7994#"is reported ambiguous, not silently bound"`).
   Residual, named rather than closed: the deeper repo-wide basename
   ambiguity okf-kit reports (a basename that exists in more than one
   package, `SKILL.md`) is still bound unconditionally by
@@ -562,7 +572,7 @@
   that binding rather than second-guessing it.
 
   The CHANGELOG bullet for this round is
-  `CHANGELOG.md:383#"Citation scanning is paragraph-joined"`. Verified on
+  `CHANGELOG.md:389#"Citation scanning is paragraph-joined"`. Verified on
   the committed tree: the full package suite, `docs-consistency.test.ts`
   on its own, `typecheck`, `typecheck:test` and `format:check`; the
   figures each guard measured are in its own computed test name, per the
@@ -609,19 +619,19 @@
   `extractSiblingGuardCitations` was itself unpinned: a line-count-
   preserving mutant narrowing `collectStringAnchoredCitations`'s own
   filter
-  (`test/docs-consistency.test.ts:3166#"function collectStringAnchoredCitations("`)
+  (`test/docs-consistency.test.ts:3176#"function collectStringAnchoredCitations("`)
   to also require the citation's own
   doc line to literally contain `c.citedPath` survived every assertion in this file, because
   it silently drops every resolved continuation (whose `citedPath` is
   inherited, never written on its own line) while every existing
   assertion stays green on the smaller set. Closed two ways: a
   source-span pin
-  (`test/docs-consistency.test.ts:7548#"resolution sites stay wired to extractSiblingGuardCitations"`)
+  (`test/docs-consistency.test.ts:7565#"resolution sites stay wired to extractSiblingGuardCitations"`)
   asserting each of the three sites'
   own source still calls `extractSiblingGuardCitations(` and carries no
   bare `matchAll(ANCHOR_CITATION_RE)` loop, and a synthetic-doc-set
   test next to the collector's own definition
-  (`test/docs-consistency.test.ts:3207#"a resolved continuation citation survives collectStringAnchoredCitations"`)
+  (`test/docs-consistency.test.ts:3217#"a resolved continuation citation survives collectStringAnchoredCitations"`)
   driving it against
   a fabricated paragraph carrying one full citation and one resolved
   continuation, both of which must survive intact -- this is the fixture
@@ -634,12 +644,12 @@
   excluded from `ANCHOR_OKF_DOCS`, from both guards above, and from
   okf-kit's own citation grammar, nothing reads it. Halt-rule redesign
   (D-037) rather than another rephrase: a third guard,
-  `test/docs-consistency.test.ts:7623#"log.md's own citations resolve, and it carries no path-less continuation citation form"`,
+  `test/docs-consistency.test.ts:7640#"log.md's own citations resolve, and it carries no path-less continuation citation form"`,
   checks `log.md` itself. Its resolver
   (`resolveLogCitationPath`) extends `anchorScopeResolve` with the
   package's own CHANGELOG/README/INSTALL-AGENT and its docs/okf siblings,
   plus a real-file-on-disk fallback. Its checker
-  (`test/docs-consistency.test.ts:7742#"function checkLogCitations("`)
+  (`test/docs-consistency.test.ts:7759#"function checkLogCitations("`)
   enforces two rules: every full, anchored citation must resolve (target
   exists, anchor text somewhere inside the cited range), and any anchored
   path-less continuation form is forbidden outright, since a log entry
@@ -794,10 +804,10 @@
   by the nearest preceding full `src/init.ts` (or bare `init.ts`)
   citation earlier in its own paragraph. Added
   `ANCHOR_CONTINUATION_CITATION_RE` in
-  `test/docs-consistency.test.ts:2959#"const ANCHOR_CONTINUATION_CITATION_RE ="`
+  `test/docs-consistency.test.ts:2969#"const ANCHOR_CONTINUATION_CITATION_RE ="`
   (anchor group required, so a bare digit range in ordinary prose is
   never mistaken for a continuation) and `governingPathByParagraph` in
-  `test/docs-consistency.test.ts:5556#"function extractSiblingGuardCitations("`,
+  `test/docs-consistency.test.ts:5573#"function extractSiblingGuardCitations("`,
   resolving a continuation against the nearest preceding full citation's
   own cited path in the same paragraph -- the same BINDING RULE okf-kit's
   own short-form/continuation citations use in `citations-resolve.ts`,
@@ -843,7 +853,7 @@
   time; no previously cited line number in either doc moved, since every
   added line sits after the highest existing citation into that file
   (subagent-contracts-superset.md's own
-  `test/docs-consistency.test.ts:4831#"both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order"`).
+  `test/docs-consistency.test.ts:4841#"both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order"`).
   The two new CHANGELOG bullets (38 lines, above `## [0.31.0]`) shifted
   every heading and line-numbered citation below them by +38, which this
   file's own two literal CHANGELOG.md line citations, both historical
@@ -1337,7 +1347,7 @@
   copy, comma-worded) for both the step 6 instruction and the
   implementer-prompt copy; the implementer copy is a separate,
   colon-worded assertion, then at line 4379, re-pointed to
-  `test/docs-consistency.test.ts:4742#"resolve it before the next reviewer spawn"`, a
+  `test/docs-consistency.test.ts:4752#"resolve it before the next reviewer spawn"`, a
   substring unique to that copy. Scoped the two whole-file `implementerMd`
   `toContain` checks (the foreground-run pin and the byte-ceiling pin) to
   a new `implementerRules` slice bounded "Rules:" through "For v1, return
@@ -1349,9 +1359,9 @@
   Restored a round-1-fix historical `log.md` sentence (the
   `citations-resolve` warning account for `okf-kit check docs/okf`'s
   initial run) to prose at both its mentions, dropping the live
-  `CHANGELOG.md:294` citation the entry carried inside an otherwise
+  `CHANGELOG.md:300` citation the entry carried inside an otherwise
   historical, append-only account ("a `CHANGELOG.md` citation, then at
-  line 186" in place of "then line 186, now `CHANGELOG.md:294`"), so the
+  line 186" in place of "then line 186, now `CHANGELOG.md:300`"), so the
   historical account carries no re-point obligation going forward.
   Replaced the round-2 entry's own suite totals ("passed all 281 tests",
   "passed all 763 tests") with delta verdicts ("green, including the
@@ -1365,7 +1375,7 @@
   by locating the anchor's exact quoted text at its new line rather than
   by uniform arithmetic, plus one further `log.md` self-citation (the
   round-2 entry's own pin of the foreground-run sentence's new invariant
-  text) shifted by five lines to `test/docs-consistency.test.ts:4280`.
+  text) shifted by five lines to `test/docs-consistency.test.ts:4290`.
   `npx vitest run test/docs-consistency.test.ts` is green, including the
   relocation probe's scoped pin; `npm test` is green; `npm run typecheck`
   and `npm run typecheck:test` were both
@@ -1400,7 +1410,7 @@
   outstanding, since the harness itself caps a single foreground call
   (`assets/agents/implementer.md:56-60`); updated the sentence's pin to
   the new invariant text
-  (`test/docs-consistency.test.ts:4427#"never end your turn with the run still outstanding"`).
+  (`test/docs-consistency.test.ts:4437#"never end your turn with the run still outstanding"`).
   Reflowed `SKILL.md` step 7, moving the
   Delegate-review opening back to the diff-and-tier instruction and
   relocating the mutation-probe worktree-isolation sentence beside the
@@ -1416,7 +1426,7 @@
   `toContain` would not have. Corrected the `log.md` historical entry
   describing the earlier `CHANGELOG.md` staleness warning at (then) line
   186: a round-1 blind find-and-replace had overwritten both historical
-  mentions to the live `CHANGELOG.md:330` value, misstating the past
+  mentions to the live `CHANGELOG.md:336` value, misstating the past
   measurement and self-contradicting the entry's own "moved to `175`"
   narration; restored the "then line 186, now `CHANGELOG.md:<n>`" form at
   both mentions in that same fix-round-2 account, further below in this
@@ -1443,8 +1453,8 @@
   "...reports as killed together with their...") were re-anchored to a
   shorter quote sitting wholly on the anchor's own last line instead of a
   two-line span, per this bundle's own single-line-anchor convention
-  (`docs/okf/subagent-contracts-superset.md:369#"Actions shell replay named in step 6 is a second, explicitly"`,
-  `docs/okf/subagent-contracts-superset.md:487#"reports as killed together with their"`).
+  (`docs/okf/subagent-contracts-superset.md:371#"Actions shell replay named in step 6 is a second, explicitly"`,
+  `docs/okf/subagent-contracts-superset.md:489#"reports as killed together with their"`).
   `okf-kit check --json packages/orchestrator-workflow/docs/okf` went from
   0 errors/0 warnings/23 notices at round-1 HEAD, to warnings introduced
   by this round's own edits (all resolved by the re-derivation pass
@@ -8544,10 +8554,10 @@ unchanged by this task and not run at all by `.github/workflows/ci.yml`
 
   Also swept the remaining bare (unanchored, sometimes not even
   backtick-wrapped) `cli-inputs.ts:*`/`CHANGELOG.md:*` tokens the review
-  named in this log: `CHANGELOG.md:95-117` two entries above (this
+  named in this log: `CHANGELOG.md:101-117` two entries above (this
   round's own fix-round-1 19-line `[Unreleased]` insertion shifted it to
   78-100; re-pointed and anchored, `#"the keyed placeholder line's exact
-  text,"`); `CHANGELOG.md:883-890` in the `okf-kit check` 39-findings
+  text,"`); `CHANGELOG.md:889-890` in the `okf-kit check` 39-findings
   paragraph above (deliberately historical -- frozen to base commit
   `b80c346`'s content, reworded to say so explicitly, so a later sweep
   does not have to re-derive that judgment); `cli-inputs.ts:39-50` in the

@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The implementer output contract now enumerates mutation-probe `result` as
+  `killed | survived | not_applicable` in both the installed prompt and the
+  SKILL.md reference. The docs-consistency guard separately pins each copy's
+  complete field block, including that enum, and now recognizes versioned
+  parenthesized headings in `see <name> below` forward pointers.
+
 - The implementer and reviewer prompts (`assets/agents/implementer.md`,
   `assets/agents/reviewer.md`, mirrored in SKILL.md) now say: cite a
   coverage gate's threshold and pass/fail counts, not a run-specific
