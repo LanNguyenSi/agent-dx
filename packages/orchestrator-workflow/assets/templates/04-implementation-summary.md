@@ -68,9 +68,9 @@ an optional row cannot stand in for a required criterion.
 
 ### Mutation Probes
 
-| Round | Mutant | Verified Applied Via | Result | Restored Verified | Replayed |
-|---|---|---|---|---|---|
-| <!-- round --> | <!-- mutant --> | <!-- verified_applied_via --> | <!-- result --> | <!-- restored_verified --> | <!-- replayed --> |
+| Round | Mutant | File | Anchor | Before | After | Verified Applied Via | Result | Expectation | Restored Verified | Replayed |
+|---|---|---|---|---|---|---|---|---|---|---|
+| <!-- round --> | <!-- mutant --> | <!-- file --> | <!-- anchor --> | <!-- before --> | <!-- after --> | <!-- verified_applied_via --> | <!-- result --> | <!-- expectation --> | <!-- restored_verified --> | <!-- replayed --> |
 
 ## Risks / Notes
 

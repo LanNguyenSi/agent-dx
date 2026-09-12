@@ -310,7 +310,7 @@ describe("04-implementation-summary.md Mutation Probes subsection", () => {
     expect(risksIndex).toBeGreaterThan(mutationProbesIndex);
   });
 
-  it("carries a header row with Round, Mutant, Verified Applied Via, Result, Restored Verified, and Replayed columns", () => {
+  it("carries a header row with Round, Mutant, File, Anchor, Before, After, Verified Applied Via, Result, Expectation, Restored Verified, and Replayed columns", () => {
     const mutationProbesIndex = implementationTemplate.indexOf(
       "### Mutation Probes",
     );
@@ -327,8 +327,13 @@ describe("04-implementation-summary.md Mutation Probes subsection", () => {
     expect(cells).toEqual([
       "round",
       "mutant",
+      "file",
+      "anchor",
+      "before",
+      "after",
       "verified applied via",
       "result",
+      "expectation",
       "restored verified",
       "replayed",
     ]);

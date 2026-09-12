@@ -129,8 +129,13 @@ function assertProducerShape(block: string): void {
   const probes = nested(block, "mutation_probes").replace(/^ {2}- /, "    ");
   expect(keys(probes, 4)).toEqual([
     "mutant",
+    "file",
+    "anchor",
+    "before",
+    "after",
     "verified_applied_via",
     "result",
+    "expectation",
     "restored_verified",
     "replayed",
   ]);

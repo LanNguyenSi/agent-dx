@@ -1105,14 +1105,14 @@ describe("mutation probe naming and not-applicable signal ship in step 6 and bot
 
   it("both copies pin the mutation_probes field block by its exact sub-field names, not just cross-copy equality", () => {
     const field =
-      'mutation_probes: - mutant: "" verified_applied_via: "" result: "" restored_verified: "" replayed: false | true';
+      'mutation_probes: - mutant: "" file: "" anchor: "" before: "" after: "" verified_applied_via: "" result: "" expectation: met | violated restored_verified: "" replayed: false | true';
     expect(skillMd).toContain(field);
     expect(implementerMd).toContain(field);
   });
 
   it("both copies pin the field enumeration in prose", () => {
     const enumeration =
-      "(mutant, verified_applied_via, result, restored_verified)";
+      "(mutant, file, anchor, before, after, verified_applied_via, result, expectation, restored_verified)";
     expect(skillMd).toContain(enumeration);
     expect(implementerMd).toContain(enumeration);
   });
@@ -4676,43 +4676,49 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
 
   it("step 6 instructs replaying every mutation probe named in an earlier round of this task", () => {
     expect(skillMd).toContain(
-      "On any round after the task's first, the briefing also names every mutation probe named in an earlier round of this task (on the task's first round there are none), drawn from the run's `04-implementation-summary.md`",
+      "On any round after the task's first, the briefing also names every mutation probe named in an earlier round of this task (on the task's first round there are none), drawn from the run's `04-implementation-summary.md`, naming each by its mutant definition (file, anchor, before, after), not merely by its id",
     );
     expect(skillMd).toContain(
-      "the implementer replays each one, not only the round's new probes, before the next reviewer spawn, and reports each in `mutation_probes` with the four evidence fields plus `replayed: true`",
+      "The implementer replays each one, not only the round's new probes, before the next reviewer spawn, and reports each in `mutation_probes` with the evidence fields plus `replayed: true`",
     );
   });
 
   it("step 6 treats a replayed probe that now survives or cannot be applied as a regression signal", () => {
     expect(skillMd).toContain(
-      "A replayed probe whose mutant now survives or can no longer be applied is a regression signal, reported as such (`result` `survived` or `not_applicable` with the reason) and resolved before the next reviewer spawn.",
+      "a probe recorded with only an id and no definition to reapply cannot be replayed and is `not_applicable`, not a regression.",
+    );
+    expect(skillMd).toContain(
+      "A replayed probe whose `expectation` is now `violated`, or which can no longer be applied, is the regression signal; `result` alone is not: reported as such (`result` `survived` or `not_applicable` with the reason) and resolved before the next reviewer spawn.",
     );
   });
 
   it("the installed implementer prompt carries the same replay rule", () => {
     expect(implementerMd).toContain(
-      "On any round after the task's first, the assignment also names every mutation probe named in an earlier round of this task (on the task's first round there are none), drawn from the run's `04-implementation-summary.md`",
+      "On any round after the task's first, the assignment also names every mutation probe named in an earlier round of this task (on the task's first round there are none), drawn from the run's `04-implementation-summary.md`, naming each by its mutant definition (file, anchor, before, after), not merely by its id",
     );
     expect(implementerMd).toContain(
-      "Replay each one, not only this round's new probes, before returning your report, and report each replayed probe in `mutation_probes` with the four evidence fields plus `replayed: true`",
+      "Replay each one, not only this round's new probes, before returning your report, and report each replayed probe in `mutation_probes` with the evidence fields plus `replayed: true`",
     );
   });
 
   it("the installed implementer prompt carries the same regression-signal consequence", () => {
     expect(implementerMd).toContain(
-      "A replayed probe whose mutant now survives or can no longer be applied is a regression signal: report it as such (`result` `survived` or `not_applicable` with the reason) and resolve it before the next reviewer spawn.",
+      "a probe recorded with only an id and no definition to reapply cannot be replayed and is `not_applicable`, not a regression.",
+    );
+    expect(implementerMd).toContain(
+      "A replayed probe whose `expectation` is now `violated`, or which can no longer be applied, is the regression signal; `result` alone is not: report it as such (`result` `survived` or `not_applicable` with the reason) and resolve it before the next reviewer spawn.",
     );
   });
 
   it("SKILL.md's output-contract prose paragraph (a third copy of the replay rule) also states the trigger", () => {
     expect(skillMd).toContain(
-      "On any round after the task's first, the implementer replays every probe named in an earlier round of this task (on the task's first round there are none), not only this round's new probes, before the next reviewer spawn, reporting each one in `mutation_probes` alongside the round's new probes.",
+      "On any round after the task's first, the implementer replays every probe named in an earlier round of this task (on the task's first round there are none), naming each by its mutant definition, not merely by its id, not only this round's new probes, before the next reviewer spawn, reporting each one in `mutation_probes` alongside the round's new probes.",
     );
   });
 
   it("SKILL.md's output-contract prose paragraph also states the regression-signal consequence", () => {
     expect(skillMd).toContain(
-      "A replayed probe whose mutant now survives or can no longer be applied is a regression signal, reported as such and resolved before the next reviewer spawn.",
+      "A replayed probe whose `expectation` is now `violated`, or which can no longer be applied, is the regression signal, reported as such and resolved before the next reviewer spawn; `result` alone is not a regression signal, and a probe recorded with only an id and no definition to reapply is `not_applicable`.",
     );
   });
 
@@ -4743,9 +4749,9 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
     expect(skillBlock).toBe(implementerBlock);
   });
 
-  it("step 7 tells the orchestrator to name the replayed-and-killed probes in the reviewer briefing so the reviewer may skip re-running them, without changing the reviewer contract", () => {
+  it("step 7 tells the orchestrator to name the replayed-and-killed probes in the reviewer briefing by mutant definition, not merely by id, without changing the reviewer contract", () => {
     expect(skillMd).toContain(
-      "the orchestrator's reviewer briefing names the replayed probes the implementer reports as killed together with their `mutant` and `verified_applied_via` values; the reviewer may then skip re-running those. The reviewer output contract itself is unchanged.",
+      "the orchestrator's reviewer briefing names the replayed probes the implementer reports as killed together with their mutant definition (`file`, `anchor`, `before`, `after`) and `verified_applied_via` value, not merely their id; a probe recorded with only an id and no definition cannot be skipped this way and is `not_applicable`. The reviewer may then skip re-running the ones named by definition. The reviewer output contract itself is unchanged.",
     );
   });
 
@@ -4789,7 +4795,7 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
     expect(outputContractBlock).not.toContain("replayed");
   });
 
-  it("both copies' mutation_probes block has exactly the five sub-fields in a fixed order", () => {
+  it("both copies' mutation_probes block has exactly the ten sub-fields in a fixed order", () => {
     const skillBlock = extractMutationProbesBlock(readAsset("skill/SKILL.md"));
     const implementerBlock = extractMutationProbesBlock(
       readAsset("agents/implementer.md"),
@@ -4799,8 +4805,13 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
     const expectedOrder = [
       "mutation_probes",
       "mutant",
+      "file",
+      "anchor",
+      "before",
+      "after",
       "verified_applied_via",
       "result",
+      "expectation",
       "restored_verified",
       "replayed",
     ];

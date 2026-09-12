@@ -16,6 +16,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   commit and the run count, since branch coverage varies between runs of
   the same commit. Anchored by pandora run
   `.ai/runs/2026-09-11-memory-sync-wipe`.
+- The implementer `mutation_probes` output field (`assets/agents/
+  implementer.md`, mirrored in SKILL.md, and the `04-implementation-
+  summary.md` template's Mutation Probes table) now carries the mutant's
+  definition, not only its label: `file`, `anchor` (a line number or a
+  unique string), `before`, and `after` alongside the existing
+  `verified_applied_via`, `result`, `restored_verified`, and `replayed`
+  fields, so a later round can mechanically reapply the same edit instead
+  of only reading a prose description. Added `expectation: met |
+  violated` beside `result`, reporting whether the probe's `result`
+  matched its `--expect` independently of `result` itself (a routine
+  negative-control probe now reports `result: survived, expectation:
+  met`, which is not a regression). The fix-round replay rule now names a
+  probe to replay by its definition, not merely by its id, and treats a
+  replayed probe whose `expectation` is now `violated` (or which can no
+  longer be applied) as the regression signal, not `result` alone.
+  Anchored by pandora run `.ai/runs/2026-09-11-memory-sync-wipe` and the
+  agent-primitives `probe` result/expectation split (0.3.0).
 
 ## [0.32.0] - 2026-09-11
 

@@ -36,22 +36,32 @@ Rules:
   percentage; cite a percentage only together with the exact commit and the
   run count, since branch coverage can vary between runs of the same commit.
 - When the task assignment names mutation probes to run, run each one and
-  report it in the `mutation_probes` field of your output (mutant,
-  verified_applied_via, result, restored_verified); an output missing that
-  field when probes were named is treated as a misfire, not evidence. When
+  report it in the `mutation_probes` field of your output (mutant, file,
+  anchor, before, after, verified_applied_via, result, expectation,
+  restored_verified); an output missing that field when probes were named
+  is treated as a misfire, not evidence. `file` and `anchor` (a line
+  number or a unique surrounding string) locate the mutant; `before` and
+  `after` are the exact text swapped there, so a later round can reapply
+  the same edit without guessing instead of only a prose description.
+  `expectation` records whether `result` matched the probe's `--expect`
+  (`met`) or not (`violated`); it is independent of `result` itself. When
   the assignment names no mutation probes, return `mutation_probes: []`
   rather than omitting the field. Each item also carries `replayed`:
   `false` for a probe newly introduced this round.
 - On any round after the task's first, the assignment also names every
   mutation probe named in an earlier round of this task (on the task's
   first round there are none), drawn from the run's
-  `04-implementation-summary.md`. Replay each one, not only this round's
-  new probes, before returning your report, and report each replayed
-  probe in `mutation_probes` with the four evidence fields plus
-  `replayed: true`. A replayed probe whose mutant now survives or can no
-  longer be applied is a regression signal: report it as such (`result`
-  `survived` or `not_applicable` with the reason) and resolve it before
-  the next reviewer spawn.
+  `04-implementation-summary.md`, naming each by its mutant definition
+  (file, anchor, before, after), not merely by its id; a probe recorded
+  with only an id and no definition to reapply cannot be replayed and is
+  `not_applicable`, not a regression. Replay each one, not only this
+  round's new probes, before returning your report, and report each
+  replayed probe in `mutation_probes` with the evidence fields plus
+  `replayed: true`. A replayed probe whose `expectation` is now
+  `violated`, or which can no longer be applied, is the regression
+  signal; `result` alone is not: report it as such (`result` `survived`
+  or `not_applicable` with the reason) and resolve it before the next
+  reviewer spawn.
 - When a verify runner is available, run it for the checks the acceptance
   criteria name and report its summary under `tests.executed`; when a
   mutation-probe runner is available, run the named probes through it and
@@ -134,8 +144,13 @@ tests:
   not_executed_reason: ""
 mutation_probes:
   - mutant: ""
+    file: ""
+    anchor: ""
+    before: ""
+    after: ""
     verified_applied_via: ""
     result: ""
+    expectation: met | violated
     restored_verified: ""
     replayed: false | true
 risks:
