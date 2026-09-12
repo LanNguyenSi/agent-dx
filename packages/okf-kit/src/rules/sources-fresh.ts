@@ -58,6 +58,25 @@ export const sourcesFreshRule: Rule = {
     const repoRoot = ctx.repoRoot;
     const git = ctx.runGit ?? defaultRunGit;
 
+    // `--dirty-as-now` asked for, but git could not tell us what is dirty
+    // (a `status` past RunGit's output cap, a `rev-parse` failure, git
+    // missing): every path below then falls through to committed history,
+    // which is the RIGHT fallback but the WRONG silence -- "the flag found
+    // nothing dirty" and "the flag never ran" produce the identical empty
+    // finding list. Say so once, bundle-level, in the same style as the
+    // "not inside a git work tree" notice above (and, like that one,
+    // emitted only here: `sources-fresh-future` shares the same degraded
+    // state and relies on this single notice instead of duplicating it).
+    if (ctx.dirtyAsNow && getDirtyStateShared(ctx, git, repoRoot) === null) {
+      findings.push({
+        ruleId: RULE_ID,
+        severity: "notice",
+        file: "",
+        message:
+          "`--dirty-as-now` not applied: git status could not be read, judging by committed history only",
+      });
+    }
+
     // One git call per unique source path across all docs, even though a
     // STALE/untracked finding is reported per (doc, path) below.
     const commitEpochCache = new Map<string, number | null>();
@@ -114,12 +133,13 @@ export const sourcesFreshRule: Rule = {
       // isShallowRepoShared below) -- only spent at all when some doc's
       // re-stamp lookup actually reaches a root commit.
       //
-      // With `--dirty-as-now` ON, add: 1 `git status --porcelain` for the
-      // ENTIRE run (not per doc, not per source -- see readDirtyPaths),
-      // plus at most 1 `git ls-tree HEAD -- <doc>` (and, only when the doc
-      // already existed at HEAD, one more `git show HEAD:<doc>`) PER DOC,
-      // spent only when that doc is itself dirty AND some source of its
-      // reads stale (see restampFor below).
+      // With `--dirty-as-now` ON, add 2 for the ENTIRE run (not per doc,
+      // not per source -- see readDirtyState): 1 `git status --porcelain`
+      // and 1 `git rev-parse --show-prefix`. Plus, PER DOC, at most 1 `git
+      // ls-tree HEAD -- <doc>` (and, only when the doc already existed at
+      // HEAD, one more `git show HEAD:<doc>`), spent only when that doc is
+      // itself dirty AND some source of its reads stale (see restampFor
+      // below).
       const repoRelDocPath = toRepoRelDocPath(repoRoot, ctx.bundleDir, doc);
       const docCommitEpochFor = (): number | null =>
         getDocCommitEpochShared(ctx, git, repoRoot, repoRelDocPath);
@@ -376,10 +396,30 @@ function getLastCommitEpoch(
 }
 
 /**
+ * The dirty state of the work tree as `--dirty-as-now` reads it: the full
+ * SET of repo-root-relative paths `git status` reports as dirty, plus the
+ * `prefix` that turns a path spelled relative to `ctx.repoRoot` into the
+ * repo-root-relative spelling those entries use (empty when the two
+ * coincide, which is the ordinary case). Both halves are read in ONE place
+ * so a caller can never match a path against the set having forgotten the
+ * prefix -- see `readDirtyState` and `isDirtyForShared`.
+ */
+interface DirtyState {
+  /**
+   * `git rev-parse --show-prefix` for `repoRoot`: `""` when `repoRoot` IS
+   * the repository's top level, otherwise that directory's path relative
+   * to the top level, with a trailing slash (`sub/`, `a/b/`).
+   */
+  prefix: string;
+  /** Repo-root-relative (never prefix-relative) dirty paths. */
+  paths: Set<string>;
+}
+
+/**
  * The full SET of repo-root-relative paths `git status --porcelain`
  * reports as dirty (modified, staged, or untracked) across the WHOLE work
- * tree, read via a SINGLE git process for the entire `check` run -- not
- * one process per unique `sources` path (the original, pre-review
+ * tree, read via a SINGLE `status` process for the entire `check` run --
+ * not one process per unique `sources` path (the original, pre-review
  * implementation), and not one per doc for the local-restamp rescue
  * below. Used only behind `--dirty-as-now` (`ctx.dirtyAsNow`): a dirty
  * path has no "last commit" yet that reflects its current content, so
@@ -394,6 +434,38 @@ function getLastCommitEpoch(
  * are deliberately NOT included (no `--ignored`): an ignored source keeps
  * today's "untracked by git, staleness unknown" notice instead of being
  * newly reported dirty by this option.
+ *
+ * `--untracked-files=all` (`-uall`) is NOT optional decoration. Under
+ * git's default untracked mode (`normal`), a brand-new directory is
+ * collapsed into ONE record for the directory itself (`? newdir/`) and the
+ * files inside it are never listed. The matcher below matches a queried
+ * path that IS a reported entry or is an ANCESTOR of one, so under that
+ * default a `sources` entry (or a doc) INSIDE a new untracked directory
+ * matched nothing at all and silently kept its committed-history verdict:
+ * `check --dirty-as-now` reported a brand-new source as merely `untracked
+ * by git, staleness unknown` (exit 0) while a plain `check` after
+ * committing it reported STALE (exit 1) -- the precise local/CI divergence
+ * this flag exists to remove. `-uall` makes git enumerate every untracked
+ * FILE as its own record, so the ordinary exact/descendant matching sees
+ * them. The cost is output size: `-uall` prints one record per untracked
+ * file rather than per untracked directory, which in a work tree carrying
+ * a large untracked build or dependency tree (anything not covered by
+ * `.gitignore` -- ignored paths are still excluded, see above) can run to
+ * many thousands of records. That output travels through RunGit's 16 MiB
+ * cap (`MAX_GIT_OUTPUT_BYTES` in src/git.ts), and a status that exceeds it
+ * resolves to null like any other git failure -- reported as the
+ * bundle-level "not applied" notice the rule emits, never as a silent
+ * "nothing is dirty".
+ *
+ * `git rev-parse --show-prefix` is the SECOND (and last) git process this
+ * costs per run. `git status` always reports paths relative to the
+ * repository's TOP LEVEL, while a `sources` entry is relative to
+ * `ctx.repoRoot` -- the same directory only when `--repo-root` names the
+ * top level. Pointed at a SUBDIRECTORY (`--repo-root packages/foo`), every
+ * status path carries a `packages/foo/` prefix the queried path does not,
+ * so nothing ever matched and the flag silently did nothing. Reading the
+ * prefix once and prepending it at match time makes that case work instead
+ * of quietly no-opping.
  *
  * Uses `--porcelain=v2 -z`, not the more familiar `--porcelain` (v1) line
  * format, for one reason that is NOT about renames or quoting (`-z` alone
@@ -421,14 +493,28 @@ function getLastCommitEpoch(
  * sides of a rename count as dirty. `!` (ignored) records are never
  * produced since `--ignored` is not passed.
  *
- * A failed git call (`out === null`) is treated as "nothing is dirty", the
- * same conservative default as every other git failure in this file: every
- * path falls through to its ordinary commit-epoch path rather than this
- * function inventing a dirty verdict.
+ * A failed git call (either one: `null`) makes the WHOLE state null, which
+ * every path then falls through on -- it keeps its ordinary commit-epoch
+ * verdict rather than this function inventing a dirty one. Unlike every
+ * other git failure in this file that is silent, this one is surfaced: the
+ * rule turns a null state into a single bundle-level "`--dirty-as-now` not
+ * applied" notice, because "the flag silently did nothing" and "nothing
+ * was dirty" are indistinguishable to a reader of an empty finding list.
  */
-function readDirtyPaths(git: RunGit, repoRoot: string): Set<string> | null {
+function readDirtyState(git: RunGit, repoRoot: string): DirtyState | null {
+  // `""` (this IS the top level) is a valid answer, so only an outright
+  // failure (`null`) disables the flag here.
+  const rawPrefix = git(["rev-parse", "--show-prefix"], repoRoot);
+  if (rawPrefix === null) return null;
+  const prefix = rawPrefix === "" ? "" : `${normalizeRelPath(rawPrefix)}/`;
   const out = git(
-    ["--no-optional-locks", "status", "--porcelain=v2", "-z"],
+    [
+      "--no-optional-locks",
+      "status",
+      "--porcelain=v2",
+      "-z",
+      "--untracked-files=all",
+    ],
     repoRoot,
   );
   if (out === null) return null;
@@ -461,7 +547,7 @@ function readDirtyPaths(git: RunGit, repoRoot: string): Set<string> | null {
       i += 1;
     }
   }
-  return paths;
+  return { prefix, paths };
 }
 
 /**
@@ -476,7 +562,13 @@ function readDirtyPaths(git: RunGit, repoRoot: string): Set<string> | null {
  * directory `srcdir` does, and MUST match the same dirty entries it does.
  * Applied on BOTH sides of every dirty-path comparison in this file (here,
  * at insertion into the dirty-paths Set, and in `isDirtyForShared` on the
- * queried path), so any spelling of the same path always matches.
+ * queried path already joined with the repo prefix), so any spelling of
+ * the same path always matches.
+ *
+ * `.`, `./` and the empty string all normalize to `.`, the root directory
+ * itself. That is a legal `sources` spelling but never a `git status`
+ * entry, so `isDirtyForShared` answers it by containment instead of by
+ * lookup -- see the `normalized === "."` branch there.
  *
  * A round-1-then-round-2 regression this closes: the per-run status
  * refactor introduced exact-path (`paths.has`) and prefix (`startsWith`)
@@ -495,34 +587,51 @@ function normalizeRelPath(relPath: string): string {
 
 /**
  * Per-run cache (keyed by `BundleContext`, same pattern as
- * `docCommitEpochCache` below) of `readDirtyPaths`' answer, so the WHOLE
+ * `docCommitEpochCache` below) of `readDirtyState`'s answer, so the WHOLE
  * `check` run -- both rules, every doc, every source -- spends at most one
- * `git status` process, not one per rule.
+ * `git status` (plus one `git rev-parse --show-prefix`) process, not one
+ * per rule. A cached `null` (the git read failed) is a real cached answer,
+ * hence the `.has` check rather than a truthiness test: a failed read is
+ * not retried per source.
  */
-const dirtyPathsCache = new WeakMap<BundleContext, Set<string> | null>();
+const dirtyStateCache = new WeakMap<BundleContext, DirtyState | null>();
 
-function getDirtyPathsShared(
+function getDirtyStateShared(
   ctx: BundleContext,
   git: RunGit,
   repoRoot: string,
-): Set<string> | null {
-  if (dirtyPathsCache.has(ctx)) return dirtyPathsCache.get(ctx) ?? null;
-  const paths = readDirtyPaths(git, repoRoot);
-  dirtyPathsCache.set(ctx, paths);
-  return paths;
+): DirtyState | null {
+  if (dirtyStateCache.has(ctx)) return dirtyStateCache.get(ctx) ?? null;
+  const state = readDirtyState(git, repoRoot);
+  dirtyStateCache.set(ctx, state);
+  return state;
 }
 
 /**
- * Whether `relPath` (a `sources` entry OR a doc's own repo-relative path,
- * in any spelling `normalizeRelPath` accepts) is dirty per `git status`. A
- * dirty FILE matches by exact (normalized) path; a dirty DIRECTORY source
- * matches if any reported dirty path lives under it (a `/`-terminated
- * prefix, so a sibling directory whose name merely starts with the same
- * characters -- `srcdir` vs `srcdirX/x.ts` -- never falsely matches). A
- * failed status call (`null`) is treated as "nothing is dirty", the same
- * conservative default every other git failure in this file falls back to:
- * every path then falls through to its ordinary (real) commit-epoch path
- * rather than this function inventing a dirty verdict either way.
+ * Whether `relPath` (a `sources` entry OR a doc's own path relative to
+ * `ctx.repoRoot`, in any spelling `normalizeRelPath` accepts) is dirty per
+ * `git status`. The queried path is first rebased onto the repository top
+ * level with `state.prefix` (a no-op in the ordinary case where
+ * `--repo-root` IS the top level), since that is the frame every reported
+ * dirty path is expressed in. A dirty FILE then matches by exact
+ * (normalized) path; a dirty DIRECTORY source matches if any reported
+ * dirty path lives under it (a `/`-terminated prefix, so a sibling
+ * directory whose name merely starts with the same characters -- `srcdir`
+ * vs `srcdirX/x.ts` -- never falsely matches).
+ *
+ * `.` (or `./`, or any spelling that normalizes to `.`) names the root
+ * directory itself, which `git status` never reports as an entry and which
+ * no `"./"`-prefix test can match either -- so it is matched explicitly as
+ * "any dirty path at all lives under this root", the same containment
+ * question the directory case asks, just with an empty prefix. Without
+ * that branch a bundle declaring `.` as its source silently lost dirty
+ * detection entirely.
+ *
+ * A failed state read (`null`) is treated as "nothing is dirty": every
+ * path falls through to its ordinary (real) commit-epoch path rather than
+ * this function inventing a dirty verdict either way. The rule reports
+ * that case once, bundle-level, rather than letting the flag no-op in
+ * silence (see `readDirtyState`).
  */
 function isDirtyForShared(
   ctx: BundleContext,
@@ -530,9 +639,11 @@ function isDirtyForShared(
   repoRoot: string,
   relPath: string,
 ): boolean {
-  const paths = getDirtyPathsShared(ctx, git, repoRoot);
-  if (paths === null) return false;
-  const normalized = normalizeRelPath(relPath);
+  const state = getDirtyStateShared(ctx, git, repoRoot);
+  if (state === null) return false;
+  const { paths } = state;
+  const normalized = normalizeRelPath(`${state.prefix}${relPath}`);
+  if (normalized === ".") return paths.size > 0;
   if (paths.has(normalized)) return true;
   const prefix = `${normalized}/`;
   for (const p of paths) {
@@ -548,6 +659,23 @@ function isDirtyForShared(
  * dirty path in one `check` invocation is treated as landing in the exact
  * same virtual commit, so two dirty sources (or a dirty source and a dirty
  * doc) never disagree with each other about what "now" was.
+ *
+ * THE CACHE IS THE GUARANTEE, not the order the callers happen to run in.
+ * The rescue gate above is an INEQUALITY on epochs (`docCommitEpoch >=
+ * commitEpoch`) whose two sides are BOTH this value when a dirty doc is
+ * paired with a dirty source. Reading the clock afresh on each side
+ * instead would leave the gate resting on call order: as the rule is
+ * written today the source's epoch is read before the doc's
+ * (`commitEpochFor`, then `docCommitEpochFor`), so a second-boundary
+ * crossing between them could only ever raise the DOC's side and the gate
+ * would survive by accident -- but read in the other order (a reordering
+ * nothing in the rule forbids) the doc's side would be the older one, and
+ * a run that straddled a whole second would flip to a silent,
+ * unreproducible STALE. The cache removes the ordering question entirely:
+ * every dirty path in one run reads the identical integer, so the gate
+ * holds with equality no matter who asks first. Any future caller wanting
+ * "now" here must therefore go through this accessor rather than reading
+ * the clock again.
  */
 const nowEpochCache = new WeakMap<BundleContext, number>();
 

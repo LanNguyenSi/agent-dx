@@ -53,11 +53,15 @@ export interface CheckOptions {
    */
   futureSkewMinutes?: number;
   /**
-   * `sources-fresh` opt-in: treat a `sources` path with an uncommitted
-   * change (modified, staged, or untracked) as committed right now, so a
-   * pre-commit run reports the same staleness CI will report after the
-   * commit lands. See `ctx.dirtyAsNow` in `src/types.ts` and the README's
-   * "Staleness (sources-fresh)" section.
+   * Opt-in for `sources-fresh` AND `sources-fresh-future`: model every
+   * uncommitted change (modified, staged, or untracked) as though it
+   * landed in ONE virtual commit made right now, instead of at its last
+   * real commit. Both a dirty `sources` path and a dirty DOC read their
+   * commit time from that same shared instant, so a pre-commit run reports
+   * the verdict CI will report once the commit lands -- for either rule.
+   * Stored on `ctx.dirtyAsNow`; see its jsdoc in `src/types.ts` (the
+   * canonical description of the model) and the README's "Uncommitted
+   * edits (`--dirty-as-now`)" section.
    */
   dirtyAsNow?: boolean;
   /** Test-only override for git access; production code shells out to the real `git` binary. */
@@ -163,9 +167,9 @@ program
   )
   .option(
     "--dirty-as-now",
-    "sources-fresh: treat a `sources` path with an uncommitted change (modified, staged, or " +
-      "untracked) as committed right now, so a pre-commit run matches what CI will report after " +
-      "the commit lands (opt-in, see README)",
+    "sources-fresh + sources-fresh-future: model every uncommitted change (modified, staged, or " +
+      "untracked) -- a `sources` path and the doc itself alike -- as one virtual commit made right " +
+      "now, so a pre-commit run matches what CI reports after the commit lands (opt-in, see README)",
   )
   .exitOverride()
   .action(
