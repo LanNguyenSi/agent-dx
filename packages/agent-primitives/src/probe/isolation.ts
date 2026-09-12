@@ -1840,6 +1840,10 @@ export interface RegisteredWorktrees {
    * "still registered". Absent for `nul`/`newline`, when `ok` is
    * false, and when the gitdir-files listing found no such entry. */
   goneTargets?: string[];
+  /** For an `ok` `gitdir-files` listing, the admin directory belonging
+   * to each gone target. `cleanupWorktree` uses this only to avoid a
+   * retry for an entry git explicitly keeps locked. */
+  goneTargetEntryDirs?: Map<string, string>;
   /** Why `ok` is false; for a `gitdir-files` listing, also names any
    * admin entry in `goneTargets` even when that leaves `ok` true (a
    * gone target is fully known, not an error). An admin entry whose
@@ -2033,6 +2037,7 @@ async function listRegisteredWorktreesViaGitdirFiles(
   }
   const paths: string[] = [];
   const goneTargets: string[] = [];
+  const goneTargetEntryDirs = new Map<string, string>();
   const odd: string[] = [];
   for (const id of ids) {
     const entryDir = path.join(admin.dir, id);
@@ -2060,6 +2065,7 @@ async function listRegisteredWorktreesViaGitdirFiles(
       paths.push(resolved);
     } else {
       goneTargets.push(resolved);
+      goneTargetEntryDirs.set(resolved, entryDir);
     }
   }
   const detailParts: string[] = [];
@@ -2089,7 +2095,9 @@ async function listRegisteredWorktreesViaGitdirFiles(
     ok,
     paths: ok ? paths : [],
     form: "gitdir-files",
-    ...(ok && goneTargets.length > 0 ? { goneTargets } : {}),
+    ...(ok && goneTargets.length > 0
+      ? { goneTargets, goneTargetEntryDirs }
+      : {}),
     ...(detailParts.length > 0 ? { detail: detailParts.join("; ") } : {}),
     logPath: admin.logPath,
     logPaths,
@@ -2484,16 +2492,33 @@ export async function cleanupWorktree(
     // A `gitdir-files` listing keeps a gone target apart from `paths`
     // (see `RegisteredWorktrees.goneTargets`), so `stillRegistered` is
     // false for it and `ok` above reads as a clean removal; but the
-    // ADMIN ENTRY itself is still on disk (git's own `remove`/`prune`
-    // could not clear it -- the very reason this fallback listing was
-    // needed at all), so the outcome, while correctly `ok`, is worth a
-    // `detail` naming that survivor rather than none at all: a future
-    // `git worktree prune` on this repository clears it once `git
-    // worktree list` works again.
-    const staleAdminEntry =
+    // ADMIN ENTRY itself can survive because the first, unconditional
+    // prune did not reach git. Retry exactly once only when this target's
+    // own entry is not locked: `prune` is repository-wide, so the retry
+    // may also clear another concurrent probe's stale admin entry. A
+    // locked entry retains the existing warning and creates no process.
+    let staleAdminEntry =
       ok &&
       after.form === "gitdir-files" &&
       (after.goneTargets?.includes(target) ?? false);
+    const staleEntryDir = after.goneTargetEntryDirs?.get(target);
+    if (
+      staleAdminEntry &&
+      staleEntryDir !== undefined &&
+      !fs.existsSync(path.join(staleEntryDir, "locked"))
+    ) {
+      const retryPrune = await trackGit(
+        track,
+        gitArgv(
+          ["worktree", "prune"],
+          logDir,
+          `worktree-prune-retry-${randomUUID()}.log`,
+          root,
+        ),
+      );
+      logPaths.push(retryPrune.logPath);
+      staleAdminEntry = fs.existsSync(staleEntryDir);
+    }
     const detail = ok
       ? staleAdminEntry
         ? `its admin entry under this repository's worktrees directory ` +

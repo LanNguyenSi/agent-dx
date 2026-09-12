@@ -30,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Worktree cleanup retries `git worktree prune` once when its own
+  gone-but-present admin entry is not `locked` after the first prune.
+  The retry is repository-wide, so it can also clear another concurrent
+  probe's stale admin entry; locked entries retain their existing warning
+  and do not spawn the retry.
+
 - Every git command `probe` owns now passes `-c maintenance.auto=false`
   and `-c gc.auto=0`, preventing a probe's checkout, apply, diff, or
   cleanup command from starting background git maintenance in the

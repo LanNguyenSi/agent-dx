@@ -5263,6 +5263,83 @@ describe("probe(): worktree isolation on a git that rejects -z (older than 2.36)
 });
 
 describe("probe(): worktree isolation when git worktree list cannot run in any form", () => {
+  it("retries prune once and clears an unlocked gone admin entry without an admin-entry warning", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const shimDir = makeTmpDir();
+    writeGitShim(shimDir, "no-worktree-list");
+    const actualRun = await vi.importActual<
+      typeof import("../src/probe/run.js")
+    >("../src/probe/run.js");
+    const mockRun = vi.mocked(runArgv);
+    let pruneCalls = 0;
+    mockRun.mockImplementation(async (file, args, options) => {
+      const worktreeIndex = args.indexOf("worktree");
+      if (
+        file === "git" &&
+        worktreeIndex !== -1 &&
+        args[worktreeIndex + 1] === "remove"
+      ) {
+        return {
+          exitCode: 128,
+          durationMs: 0,
+          stdout: "",
+          stderr: "shimmed: removal did not run",
+          logPath: path.join(options.logDir, "shimmed-remove.log"),
+          timedOut: false,
+          aborted: false,
+          outputTruncated: false,
+          logWriteFailed: false,
+          stdioClosed: true,
+        };
+      }
+      if (
+        file === "git" &&
+        worktreeIndex !== -1 &&
+        args[worktreeIndex + 1] === "prune"
+      ) {
+        pruneCalls += 1;
+        if (pruneCalls === 1) {
+          return {
+            exitCode: 128,
+            durationMs: 0,
+            stdout: "",
+            stderr: "shimmed: first prune did not run",
+            logPath: path.join(options.logDir, "shimmed-prune-1.log"),
+            timedOut: false,
+            aborted: false,
+            outputTruncated: false,
+            logWriteFailed: false,
+            stdioClosed: true,
+          };
+        }
+      }
+      return actualRun.runArgv(file, args, options);
+    });
+
+    try {
+      const result = await withPathPrepended(shimDir, () =>
+        probe(baseOptions(repo)),
+      );
+
+      expect(result.status).toBe("killed");
+      expect(pruneCalls).toBe(2);
+      expect(
+        result.warnings.some(
+          (warning) =>
+            warning.includes("admin entry") ||
+            warning.includes("worktree prune"),
+        ),
+      ).toBe(false);
+      expect(worktreeBlocks(repo)).toHaveLength(1);
+    } finally {
+      mockRun.mockImplementation((...args: Parameters<typeof runArgv>) =>
+        actualRun.runArgv(...args),
+      );
+      git(repo, ["worktree", "prune"]);
+    }
+  });
+
   it("warns with the surviving-admin-entry detail, never an 'unverified' one, when the probe's own worktree cleanup finds its target only in goneTargets: a clean, verified removal that git worktree prune has not cleared the registration for yet (probe/session.ts's own cleanupWtSession path)", async () => {
     useLockDir();
     const { repo } = initRepo();
@@ -5272,6 +5349,7 @@ describe("probe(): worktree isolation when git worktree list cannot run in any f
       typeof import("../src/probe/run.js")
     >("../src/probe/run.js");
     const mockRun = vi.mocked(runArgv);
+    let pruneCalls = 0;
     mockRun.mockImplementation(async (file, args, options) => {
       const worktreeIndex = args.indexOf("worktree");
       if (
@@ -5317,6 +5395,13 @@ describe("probe(): worktree isolation when git worktree list cannot run in any f
           stdioClosed: true,
         };
       }
+      if (
+        file === "git" &&
+        worktreeIndex !== -1 &&
+        args[worktreeIndex + 1] === "prune"
+      ) {
+        pruneCalls += 1;
+      }
       return actualRun.runArgv(file, args, options);
     });
 
@@ -5351,6 +5436,9 @@ describe("probe(): worktree isolation when git worktree list cannot run in any f
           !w.includes("but the target is gone, but"),
       );
       expect(match).toHaveLength(1);
+      // A locked target keeps its existing warning and never starts the
+      // retry process; only cleanup's unconditional first prune ran.
+      expect(pruneCalls).toBe(1);
       expect(fs.existsSync(worktreePath)).toBe(false);
     } finally {
       mockRun.mockImplementation((...args: Parameters<typeof runArgv>) =>
