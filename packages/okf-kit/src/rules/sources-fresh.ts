@@ -61,7 +61,24 @@ export const sourcesFreshRule: Rule = {
     // One git call per unique source path across all docs, even though a
     // STALE/untracked finding is reported per (doc, path) below.
     const commitEpochCache = new Map<string, number | null>();
+    // `--dirty-as-now` only: one `git status --porcelain` per unique source
+    // path, same memoization discipline as commitEpochCache. Never
+    // consulted when ctx.dirtyAsNow is falsy, so the default path pays
+    // nothing for it.
+    const dirtyCache = new Map<string, boolean>();
+    const isDirtyFor = (source: string): boolean => {
+      const cached = dirtyCache.get(source);
+      if (cached !== undefined) return cached;
+      const dirty = isSourceDirty(git, repoRoot, source);
+      dirtyCache.set(source, dirty);
+      return dirty;
+    };
+    // Captured once per rule run, not per source: every dirty source in
+    // this invocation is treated as committed at the SAME instant, so two
+    // dirty sources never disagree with each other about "now".
+    const nowEpoch = Math.floor(Date.now() / 1000);
     const commitEpochFor = (source: string): number | null => {
+      if (ctx.dirtyAsNow && isDirtyFor(source)) return nowEpoch;
       const cached = commitEpochCache.get(source);
       if (cached !== undefined) return cached;
       const epoch = getLastCommitEpoch(git, repoRoot, source);
@@ -327,6 +344,23 @@ function getLastCommitEpoch(
   if (!out) return null;
   const epoch = Number.parseInt(out, 10);
   return Number.isNaN(epoch) ? null : epoch;
+}
+
+/**
+ * Whether `source` (repo-root relative) has an uncommitted change per `git
+ * status --porcelain -- <source>` -- modified, staged, or untracked. Used
+ * only behind `--dirty-as-now` (`ctx.dirtyAsNow`): a dirty source has no
+ * "last commit" yet that reflects its current content, so `sources-fresh`
+ * substitutes the current time instead of falling through to
+ * `getLastCommitEpoch`'s answer (the LAST commit's time, which for a
+ * locally-edited-but-uncommitted file is necessarily stale). A failed git
+ * call (`out === null`) is treated as "not dirty", the same conservative
+ * default as every other git failure in this file: it falls through to the
+ * ordinary commit-epoch path rather than inventing a dirty verdict.
+ */
+function isSourceDirty(git: RunGit, repoRoot: string, source: string): boolean {
+  const out = git(["status", "--porcelain", "--", source], repoRoot);
+  return Boolean(out);
 }
 
 function epochToIso(epochSeconds: number): string {

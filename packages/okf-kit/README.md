@@ -34,6 +34,10 @@ okf-kit check path/to/bundle --strict
 
 # narrow sources-fresh-future's default 10-minute clock-skew allowance
 okf-kit check path/to/bundle --future-skew-minutes 2
+
+# pre-commit: treat an uncommitted source edit as happening now, so this run
+# reports the same staleness CI will report once you commit
+okf-kit check path/to/bundle --dirty-as-now
 ```
 
 ## Scaffold a bundle (`init`)
@@ -72,7 +76,7 @@ Every template doc except `benchmark-template.md` ships with `sources: [path/to/
 | `links-resolve` | error | Markdown links to other `.md` files in the bundle must resolve to a real file. Relative targets resolve against the containing file's directory; targets starting with `/` resolve against the bundle root. A relative target that climbs out of the bundle directory (`../outside.md`) and still resolves on disk is accepted; the rule checks resolution, not containment. |
 | `no-absolute-links` | warning | Link targets should not start with `/`. GitHub resolves a leading slash against the repository root, not the bundle root, so an absolute link 404s once the bundle is viewed outside its own repository. Use a same-directory relative link instead. |
 | `sources-shape` | error | Frontmatter `sources`, when present, must be a non-empty array of non-empty strings. With a repo root (explicit or auto-detected), each listed path (file or directory) must also exist under it. |
-| `sources-fresh` | warning / notice | For docs with a `sources` list and a repo root, flags a source path whose last git commit is newer than both the doc's `timestamp` and the doc file's own last re-stamping commit (re-stamp decided by comparing frontmatter `timestamp` values across that commit's first-parent boundary). See "Staleness (sources-fresh)" below. |
+| `sources-fresh` | warning / notice | For docs with a `sources` list and a repo root, flags a source path whose last git commit is newer than both the doc's `timestamp` and the doc file's own last re-stamping commit (re-stamp decided by comparing frontmatter `timestamp` values across that commit's first-parent boundary). With `--dirty-as-now`, a source with an uncommitted change is judged as of right now instead of its last commit. See "Staleness (sources-fresh)" below. |
 | `sources-fresh-future` | warning | For the same docs as `sources-fresh`, flags a `timestamp` later than the doc file's own last commit by more than a clock-skew allowance (default 10 minutes, `--future-skew-minutes`). Catches a local wall-clock time mistakenly written with a `Z`/UTC suffix. See "Staleness (sources-fresh)" below. |
 | `citations-resolve` | warning / notice | For docs with a repo root, flags a `` `path:N`/`path:N-M` `` citation (and its `` `:N` ``/`` -`M` ``/`` (`N`) `` continuations, and bare paragraph-bound short forms `:N-M`/`(N-M)`) whose target file is missing, whose range is inverted or exceeds the file, or whose start line is blank or (for a non-markdown target) only a closing brace. A full citation may also carry an optional `#anchor` (e.g. `` `CHANGELOG.md:50-144#0.24.0` ``), checked against the target's own structure/content instead of just its line numbers. A backtick-delimited `` `path:#heading` `` citation (`.md` targets only) resolves to a whole Markdown section instead of a line range, immune to every line-number shift above it; see "Heading-section citations" below. A short-form citation's range into a test file is also checked for a describe/it block boundary. `--require-anchors` opts into five additional checks; see "Anchor strictness (opt-in, `--require-anchors`)" below. See "Citation resolution (citations-resolve)" below. |
 | `prose-line-references` | (opt-in, `--prose-line-references`) warning / notice | Off by default. Flags a prose-embedded line reference outside `citations-resolve`'s own backtick grammar (`line N`, `lines N-M`, `lines N to M`) that is drifted, unresolvable, or ambiguous once bound to the nearest named file. `--prose-line-references-strict` additionally flags every such reference as a formatting policy violation. See "Prose line references (opt-in, `--prose-line-references`)" below. |
@@ -125,6 +129,18 @@ The one consequence that follows for a branch merging a trunk carrying a squash:
 **Recipe:** after merging a trunk that carries a squash into any branch whose bundle declares the sources that squash re-dated, re-verify each such doc against its current `sources` and bump its `timestamp` in one dedicated commit, whatever `sources-fresh` currently reports for it -- the same recipe as the Authoring guidance below, just triggered by the merge. Seen in practice on a long-lived second branch after a squash-merged re-stamp landed on the trunk; see the CHANGELOG for the concrete case.
 
 **Authoring guidance:** when you re-verify a doc against its sources, bump its frontmatter `timestamp` (and add a line to the bundle's `log.md`) so `sources-fresh` reflects that the doc is current again.
+
+### Uncommitted edits (`--dirty-as-now`)
+
+`sources-fresh` normally judges a `sources` path by its last GIT COMMIT time, so a source you have edited but not yet committed still reads by whatever it looked like at its last commit -- often still "fresh" relative to an already-stale doc `timestamp`. Once you commit, that same source gets a brand-new commit time, and CI's freshness guard (typically run in strict mode) can fail on a doc your local, pre-commit `check` run reported as clean. `--dirty-as-now` closes that gap: any `sources` path with an uncommitted change -- modified, staged, or untracked, i.e. anything `git status --porcelain` reports for it -- is judged as committed RIGHT NOW instead of at its last commit, so a pre-commit run reports the same staleness CI will report once the commit lands. It has no effect on a source with no uncommitted change (judged exactly as before), and it is entirely opt-in: omit it and `sources-fresh` is byte-for-byte unchanged.
+
+**Recommended pre-commit invocation**, matching the "re-verify, bump `timestamp`, then commit" discipline above -- run this on the working tree BEFORE committing an edit to any file a bundle lists as a `sources` entry, so a doc that needs re-stamping is caught before the commit that would otherwise make it stale in CI:
+
+```bash
+okf-kit check path/to/bundle --dirty-as-now --strict
+```
+
+If it reports a doc STALE, re-verify that doc against its current `sources` and bump its `timestamp` in the same commit as the source edit (or its own dedicated commit), THEN commit -- exactly the measure-after-commit discipline described above, just checked before the commit exists rather than after CI runs.
 
 ### Future-dated timestamps (`sources-fresh-future`)
 

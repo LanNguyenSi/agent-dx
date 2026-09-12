@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `check` gets `--dirty-as-now`: an opt-in flag under which a `sources-fresh`
+  source path with an uncommitted change (modified, staged, or untracked
+  per `git status --porcelain`) is judged as committed right now instead of
+  at its last commit. Closes a gap surfaced by the 2026-09-11 review-method
+  dogfood (agent-dx PR #236): a test file four OKF docs list as a source was
+  edited, a pre-commit `check` run reported 0 warnings because the source's
+  last commit still predated every doc's `timestamp`, and CI's strict
+  freshness guard then failed once the commit landed and gave the source a
+  new, later commit time. Omit the flag and `sources-fresh` is unchanged;
+  see the README's new "Uncommitted edits (`--dirty-as-now`)" section for
+  the recommended pre-commit invocation.
+
 ### Documented
 
 - Decision (task agent-dx 27c4f709): the anchored, path-less continuation

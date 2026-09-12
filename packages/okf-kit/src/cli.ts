@@ -52,6 +52,14 @@ export interface CheckOptions {
    * `ctx.freshnessFutureSkewSeconds`.
    */
   futureSkewMinutes?: number;
+  /**
+   * `sources-fresh` opt-in: treat a `sources` path with an uncommitted
+   * change (modified, staged, or untracked) as committed right now, so a
+   * pre-commit run reports the same staleness CI will report after the
+   * commit lands. See `ctx.dirtyAsNow` in `src/types.ts` and the README's
+   * "Staleness (sources-fresh)" section.
+   */
+  dirtyAsNow?: boolean;
   /** Test-only override for git access; production code shells out to the real `git` binary. */
   runGit?: RunGit;
 }
@@ -89,6 +97,9 @@ export function runCheck(
   }
   if (options.futureSkewMinutes !== undefined) {
     ctx.freshnessFutureSkewSeconds = Math.round(options.futureSkewMinutes * 60);
+  }
+  if (options.dirtyAsNow) {
+    ctx.dirtyAsNow = true;
   }
 
   const findings = allRules.flatMap((rule) => rule.run(ctx));
@@ -150,6 +161,12 @@ program
     "sources-fresh-future: clock-skew allowance in minutes before a doc `timestamp` later than " +
       "the doc's own last commit is flagged as future-dated (default 10)",
   )
+  .option(
+    "--dirty-as-now",
+    "sources-fresh: treat a `sources` path with an uncommitted change (modified, staged, or " +
+      "untracked) as committed right now, so a pre-commit run matches what CI will report after " +
+      "the commit lands (opt-in, see README)",
+  )
   .exitOverride()
   .action(
     (
@@ -163,6 +180,7 @@ program
         proseLineReferences?: boolean;
         proseLineReferencesStrict?: boolean;
         futureSkewMinutes?: string;
+        dirtyAsNow?: boolean;
       },
     ) => {
       try {
@@ -188,6 +206,7 @@ program
           proseLineReferences: opts.proseLineReferences,
           proseLineReferencesStrict: opts.proseLineReferencesStrict,
           futureSkewMinutes,
+          dirtyAsNow: opts.dirtyAsNow,
         });
         const output = opts.json
           ? renderJson(result.bundleDir, result.findings)

@@ -86,6 +86,18 @@ export interface BundleContext {
    * was not passed, in which case the rule applies its own default.
    */
   freshnessFutureSkewSeconds?: number;
+  /**
+   * Opt-in for `sources-fresh` (see `--dirty-as-now` in `src/cli.ts`): a
+   * `sources` path with an uncommitted change (modified, staged, or
+   * untracked per `git status --porcelain`) is treated as committed right
+   * now for staleness purposes, instead of at its last commit's time.
+   * Closes the gap between a pre-commit `check` run (which sees only
+   * committed history) and CI's post-commit run (which sees the new commit
+   * time) for a source edited but not yet committed. Undefined (the
+   * default) leaves `sources-fresh` looking only at committed history,
+   * byte-identical to behavior before this option existed.
+   */
+  dirtyAsNow?: boolean;
 }
 
 export interface Rule {
