@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `survived`, once any mutant carries `--expect pass`) is explained by
   a number in the same envelope instead of only by re-deriving it from
   `results[].mutation_probe.expectation`.
+- `probe -i worktree`'s cleanup retries `git worktree prune` once more when
+  its own admin entry survives only because that entry could not yet be
+  read as pruned (never one git holds genuinely `locked`), closing a rare
+  CI flake where the repository's `.git` carried one extra leftover entry
+  after a run.
 
 ## [0.2.0] - 2026-09-10
 

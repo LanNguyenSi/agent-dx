@@ -133,6 +133,96 @@ function hashTree(
   return out;
 }
 
+/** The set difference between two `hashTree` snapshots of the SAME root,
+ * taken before and after a run: paths present only `after` (`added`),
+ * present only `before` (`removed`), and present in both but with a
+ * different `symlink`/`hash` (`changed`). Never a size comparison: two
+ * trees can carry the same entry count while differing in which paths
+ * exist, which a `Map.size` check cannot tell apart from an unrelated
+ * entry appearing and a different one vanishing in the same run. */
+function diffTrees(
+  before: Map<string, { symlink: boolean; hash: string }>,
+  after: Map<string, { symlink: boolean; hash: string }>,
+): { added: string[]; removed: string[]; changed: string[] } {
+  const added: string[] = [];
+  const changed: string[] = [];
+  for (const [rel, afterEntry] of after) {
+    const beforeEntry = before.get(rel);
+    if (beforeEntry === undefined) {
+      added.push(rel);
+    } else if (
+      beforeEntry.symlink !== afterEntry.symlink ||
+      beforeEntry.hash !== afterEntry.hash
+    ) {
+      changed.push(rel);
+    }
+  }
+  const removed: string[] = [];
+  for (const rel of before.keys()) {
+    if (!after.has(rel)) removed.push(rel);
+  }
+  return {
+    added: added.sort(),
+    removed: removed.sort(),
+    changed: changed.sort(),
+  };
+}
+
+/** Asserts two `hashTree` snapshots of the same root are identical,
+ * naming every added, removed, and changed path in the failure message
+ * (see `diffTrees`) instead of `expect(after).toEqual(before)`'s two
+ * opaque `Map` sizes, which cannot say which entry appeared, only that
+ * the counts disagree. `label` identifies the tree in the message (for
+ * example the absolute path being hashed). */
+function assertTreeUnchanged(
+  before: Map<string, { symlink: boolean; hash: string }>,
+  after: Map<string, { symlink: boolean; hash: string }>,
+  label: string,
+): void {
+  const diff = diffTrees(before, after);
+  const hasDiff =
+    diff.added.length > 0 || diff.removed.length > 0 || diff.changed.length > 0;
+  if (!hasDiff) return;
+  const parts: string[] = [];
+  if (diff.added.length > 0) parts.push(`added [${diff.added.join(", ")}]`);
+  if (diff.removed.length > 0) {
+    parts.push(`removed [${diff.removed.join(", ")}]`);
+  }
+  if (diff.changed.length > 0) {
+    parts.push(`changed [${diff.changed.join(", ")}]`);
+  }
+  throw new Error(`${label} changed: ${parts.join("; ")}`);
+}
+
+describe("assertTreeUnchanged()", () => {
+  it("names a deliberate extra file by path, never just the two tree sizes, when a scratch fixture changes", () => {
+    const scratch = makeTmpDir();
+    fs.writeFileSync(path.join(scratch, "kept.txt"), "same\n");
+    const before = hashTree(scratch);
+    fs.writeFileSync(path.join(scratch, "EXTRA.txt"), "unexpected\n");
+    const after = hashTree(scratch);
+
+    expect(() => assertTreeUnchanged(before, after, scratch)).toThrow(
+      /EXTRA\.txt/,
+    );
+    // The message names the change kind too, not only the path: a
+    // reader must be able to tell "appeared" from "was removed" or
+    // "content changed" without re-deriving it from two Map dumps.
+    expect(() => assertTreeUnchanged(before, after, scratch)).toThrow(
+      /added \[EXTRA\.txt\]/,
+    );
+  });
+
+  it("passes silently when nothing changed", () => {
+    const scratch = makeTmpDir();
+    fs.writeFileSync(path.join(scratch, "kept.txt"), "same\n");
+    const before = hashTree(scratch);
+    const after = hashTree(scratch);
+
+    expect(() => assertTreeUnchanged(before, after, scratch)).not.toThrow();
+  });
+});
+
 const FIXTURE_JS = [
   "function isPositive(n) {",
   "  return n > 0;",
@@ -2860,7 +2950,7 @@ describe("probe(): worktree isolation, a link target that is TRACKED source", ()
     const result = await probe(baseOptions(repo, { preCommand: CLOBBER_PRE }));
     const gitAfter = hashTree(path.join(repo, ".git"));
 
-    expect(gitAfter).toEqual(gitBefore);
+    assertTreeUnchanged(gitBefore, gitAfter, path.join(repo, ".git"));
     expect(result.status).toBe("killed");
     expect(result.isolation.linked).toEqual([]);
     expect(
@@ -5062,6 +5152,103 @@ describe("probe(): worktree isolation when git worktree list cannot run in any f
       );
       expect(match).toHaveLength(1);
       expect(fs.existsSync(worktreePath)).toBe(false);
+    } finally {
+      mockRun.mockImplementation((...args: Parameters<typeof runArgv>) =>
+        actualRun.runArgv(...args),
+      );
+      git(repo, ["worktree", "prune"]);
+    }
+  });
+
+  it("clears a surviving admin entry outright, with no 'admin entry' warning at all, when the entry is only unpruned (never locked) and the retry prune this cleanup now runs actually reaches git", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const shimDir = makeTmpDir();
+    writeGitShim(shimDir, "no-worktree-list");
+    const actualRun = await vi.importActual<
+      typeof import("../src/probe/run.js")
+    >("../src/probe/run.js");
+    const mockRun = vi.mocked(runArgv);
+    let pruneCalls = 0;
+    mockRun.mockImplementation(async (file, args, options) => {
+      const worktreeIndex = args.indexOf("worktree");
+      if (
+        file === "git" &&
+        worktreeIndex !== -1 &&
+        args[worktreeIndex + 1] === "remove"
+      ) {
+        // Same technique as the sibling tests above: a real `remove`
+        // that reached git would already clear this (never-locked)
+        // entry on its own, which would leave nothing for the retry
+        // below to prove. Shimmed to fail, exactly as the sibling
+        // tests' own `--force --force` is, but with NO `locked` file
+        // ever written: this entry is only unpruned, never locked.
+        return {
+          exitCode: 128,
+          durationMs: 0,
+          stdout: "",
+          stderr: "shimmed: the removal did not run",
+          logPath: path.join(options.logDir, "shimmed-remove.log"),
+          timedOut: false,
+          aborted: false,
+          outputTruncated: false,
+          logWriteFailed: false,
+          stdioClosed: true,
+        };
+      }
+      if (
+        file === "git" &&
+        worktreeIndex !== -1 &&
+        args[worktreeIndex + 1] === "prune"
+      ) {
+        pruneCalls += 1;
+        if (pruneCalls === 1) {
+          // The transient hiccup this fix targets: the UNCONDITIONAL
+          // prune `cleanupWorktree` runs right after `remove` never
+          // reaches git at all (one subprocess spawn failing under
+          // load, not a `locked` entry -- that shape is the sibling
+          // test above), so the admin entry survives past it exactly as
+          // it would past a genuinely failed subprocess.
+          return {
+            exitCode: 128,
+            durationMs: 0,
+            stdout: "",
+            stderr: "shimmed: this prune attempt did not run",
+            logPath: path.join(options.logDir, "shimmed-prune-1.log"),
+            timedOut: false,
+            aborted: false,
+            outputTruncated: false,
+            logWriteFailed: false,
+            stdioClosed: true,
+          };
+        }
+        // Every later `prune` call -- the retry `cleanupWorktree` now
+        // runs once the gitdir-files fallback still finds this admin
+        // entry -- reaches the real git, and clears it since it was
+        // never locked.
+      }
+      return actualRun.runArgv(file, args, options);
+    });
+
+    try {
+      const result = await withPathPrepended(shimDir, () =>
+        probe(baseOptions(repo)),
+      );
+
+      expect(result.status).toBe("killed");
+      const worktreePath = result.isolation.path as string;
+      expect(worktreePath).toBeTruthy();
+      expect(pruneCalls).toBeGreaterThanOrEqual(2);
+      expect(
+        result.warnings.some(
+          (w) => w.includes("admin entry") || w.includes("worktree prune"),
+        ),
+      ).toBe(false);
+      expect(fs.existsSync(worktreePath)).toBe(false);
+      // Just the main worktree block remains: the retry cleared the
+      // linked worktree's own admin entry outright (see the sibling
+      // tests above, which pin this same length for a clean removal).
+      expect(worktreeBlocks(repo)).toHaveLength(1);
     } finally {
       mockRun.mockImplementation((...args: Parameters<typeof runArgv>) =>
         actualRun.runArgv(...args),

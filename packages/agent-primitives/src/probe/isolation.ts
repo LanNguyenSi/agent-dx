@@ -1839,6 +1839,14 @@ export interface RegisteredWorktrees {
    * "still registered". Absent for `nul`/`newline`, when `ok` is
    * false, and when the gitdir-files listing found no such entry. */
   goneTargets?: string[];
+  /** For `form: "gitdir-files"` when `ok` is true only: maps each
+   * `goneTargets` entry (its resolved worktree path) to the absolute
+   * admin directory (`<git-common-dir>/worktrees/<id>`) that named it,
+   * so a caller that has already confirmed a specific target is its own
+   * (`cleanupWorktree`'s gate above) can act on that exact entry alone,
+   * never on another `goneTargets` entry the same listing happened to
+   * find. Absent under the same conditions as `goneTargets`. */
+  goneTargetEntryDirs?: Map<string, string>;
   /** Why `ok` is false; for a `gitdir-files` listing, also names any
    * admin entry in `goneTargets` even when that leaves `ok` true (a
    * gone target is fully known, not an error). An admin entry whose
@@ -2032,6 +2040,7 @@ async function listRegisteredWorktreesViaGitdirFiles(
   }
   const paths: string[] = [];
   const goneTargets: string[] = [];
+  const goneTargetEntryDirs = new Map<string, string>();
   const odd: string[] = [];
   for (const id of ids) {
     const entryDir = path.join(admin.dir, id);
@@ -2059,6 +2068,7 @@ async function listRegisteredWorktreesViaGitdirFiles(
       paths.push(resolved);
     } else {
       goneTargets.push(resolved);
+      goneTargetEntryDirs.set(resolved, entryDir);
     }
   }
   const detailParts: string[] = [];
@@ -2088,7 +2098,9 @@ async function listRegisteredWorktreesViaGitdirFiles(
     ok,
     paths: ok ? paths : [],
     form: "gitdir-files",
-    ...(ok && goneTargets.length > 0 ? { goneTargets } : {}),
+    ...(ok && goneTargets.length > 0
+      ? { goneTargets, goneTargetEntryDirs }
+      : {}),
     ...(detailParts.length > 0 ? { detail: detailParts.join("; ") } : {}),
     logPath: admin.logPath,
     logPaths,
@@ -2483,16 +2495,41 @@ export async function cleanupWorktree(
     // A `gitdir-files` listing keeps a gone target apart from `paths`
     // (see `RegisteredWorktrees.goneTargets`), so `stillRegistered` is
     // false for it and `ok` above reads as a clean removal; but the
-    // ADMIN ENTRY itself is still on disk (git's own `remove`/`prune`
-    // could not clear it -- the very reason this fallback listing was
-    // needed at all), so the outcome, while correctly `ok`, is worth a
-    // `detail` naming that survivor rather than none at all: a future
-    // `git worktree prune` on this repository clears it once `git
-    // worktree list` works again.
-    const staleAdminEntry =
+    // ADMIN ENTRY itself can still be on disk here for two different
+    // reasons this source cannot tell apart on its own: it is genuinely
+    // `locked` (git's own `prune` always and correctly refuses to touch
+    // that, whatever runs it -- see the two `goneTargets` fixtures in
+    // probe-worktree.test.ts, which pin exactly this shape and expect
+    // the survivor to remain), or the EARLIER unconditional `prune`
+    // above (`pruneResult`) simply did not run to completion in the
+    // same transient way the `git worktree list` this fallback exists
+    // for did not either -- both are one `git` subprocess spawn away
+    // from the resource pressure that put this call on the
+    // `gitdir-files` path at all. One more `prune`, scoped to only the
+    // admin entry this call already gated `target` against, resolves
+    // the second case deterministically and leaves the first exactly as
+    // before: `prune` never clears a locked entry no matter how many
+    // times it runs.
+    let staleAdminEntry =
       ok &&
       after.form === "gitdir-files" &&
       (after.goneTargets?.includes(target) ?? false);
+    if (staleAdminEntry) {
+      const entryDir = after.goneTargetEntryDirs?.get(target);
+      const retryPrune = await trackGit(
+        track,
+        gitArgv(
+          ["worktree", "prune"],
+          logDir,
+          `worktree-prune-retry-${randomUUID()}.log`,
+          root,
+        ),
+      );
+      logPaths.push(retryPrune.logPath);
+      if (entryDir !== undefined && !fs.existsSync(entryDir)) {
+        staleAdminEntry = false;
+      }
+    }
     const detail = ok
       ? staleAdminEntry
         ? `its admin entry under this repository's worktrees directory ` +
