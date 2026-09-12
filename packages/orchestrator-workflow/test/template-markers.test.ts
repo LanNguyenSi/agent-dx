@@ -310,7 +310,7 @@ describe("04-implementation-summary.md Mutation Probes subsection", () => {
     expect(risksIndex).toBeGreaterThan(mutationProbesIndex);
   });
 
-  it("carries a header row with Round, Mutant, File, Anchor, Before, After, Verified Applied Via, Result, Expectation, Restored Verified, and Replayed columns", () => {
+  it("carries a header row with Round, Mutant, File, Anchor, Before, After, Verified Applied Via, Result, Expectation, Reason, Restored Verified, and Replayed columns", () => {
     const mutationProbesIndex = implementationTemplate.indexOf(
       "### Mutation Probes",
     );
@@ -334,6 +334,7 @@ describe("04-implementation-summary.md Mutation Probes subsection", () => {
       "verified applied via",
       "result",
       "expectation",
+      "reason",
       "restored verified",
       "replayed",
     ]);
@@ -393,5 +394,28 @@ describe("04-implementation-summary.md Mutation Probes subsection", () => {
       .filter((name) => name !== "round");
 
     expect(columnNames).toEqual(subFieldNames);
+  });
+
+  /**
+   * Review round 3 finding (LOW): SKILL.md step 6's Before/After
+   * single-line-excerpt sentence had no cross-copy pin, unlike the
+   * template's own copy of the same rule above. Both state the same
+   * rule (a single-line excerpt in the table cell, with the full text or
+   * a diff placed elsewhere for a multi-line, `|`-containing, or
+   * patch-form mutant); this pins the shared key phrases in both.
+   */
+  it("SKILL.md step 6 states the same Before/After single-line-excerpt rule as the template note", () => {
+    const skillMd = readAsset("skill/SKILL.md");
+    const sharedPhrases = [
+      "cells hold a single-line excerpt",
+      "multi-line",
+      "unescaped `|`",
+      "patch/diff",
+      "fenced block",
+    ];
+    for (const phrase of sharedPhrases) {
+      expect(skillMd).toContain(phrase);
+      expect(implementationTemplate).toContain(phrase);
+    }
   });
 });

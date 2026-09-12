@@ -481,6 +481,7 @@ mutation_probes:
     verified_applied_via: ""
     result: ""
     expectation: met | violated | not_applicable
+    reason: ""
     restored_verified: ""
     replayed: false | true
 risks:
@@ -507,15 +508,21 @@ standard, reasoned result, and baseline/criterion identities; it stays manual.
 
 When the task assignment names mutation probes to run, the implementer
 reports each one in the `mutation_probes` field (mutant, file, anchor,
-before, after, verified_applied_via, result, expectation,
+before, after, verified_applied_via, result, expectation, reason,
 restored_verified); `file` and `anchor` (a line number or a unique
 surrounding string) locate the mutant, `before` and `after` are the
 exact text swapped there, and `expectation` records whether `result`
 matched what the probe was expected to do (`met`) or not (`violated`),
 independent of `result` itself, only alongside a measured `killed` or
 `survived` `result`; it is `not_applicable` otherwise (for example when
-the mutant could not be applied and no `result` was measured). When the
-assignment names none, it returns `mutation_probes: []` rather than
+the mutant could not be applied and no `result` was measured). `reason`
+is free text, required when `result` is `not_applicable`, empty
+otherwise, carrying one of two canonical strings that distinguish a
+non-regression from a regression: `no definition recorded` (a
+prior-round probe recorded with only an id, no definition to reapply)
+and `target text no longer present` (a replayed probe whose mutant can
+no longer be applied). When the assignment names none, it returns
+`mutation_probes: []` rather than
 omitting the field, so 'none asked for' is distinguishable from 'asked
 for and not reported'. Each item also carries `replayed`: `false` for a
 probe newly introduced this round, `true` for a prior round's probe

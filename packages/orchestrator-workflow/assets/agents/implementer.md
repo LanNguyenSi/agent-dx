@@ -38,17 +38,23 @@ Rules:
 - When the task assignment names mutation probes to run, run each one and
   report it in the `mutation_probes` field of your output (mutant, file,
   anchor, before, after, verified_applied_via, result, expectation,
-  restored_verified); an output missing that field when probes were named
-  is treated as a misfire, not evidence. `file` and `anchor` (a line
-  number or a unique surrounding string) locate the mutant; `before` and
-  `after` are the exact text swapped there, so a later round can reapply
-  the same edit without guessing instead of only a prose description.
-  `expectation` records whether `result` matched what the probe was
-  expected to do (`met`) or not (`violated`), independent of `result`
-  itself, only alongside a measured `killed` or `survived` `result`; it is
-  `not_applicable` otherwise (for example when the mutant could not be
-  applied and no `result` was measured). When the assignment names no
-  mutation probes, return `mutation_probes: []` rather than omitting the field.
+  reason, restored_verified); an output missing that field when probes
+  were named is treated as a misfire, not evidence. `file` and `anchor`
+  (a line number or a unique surrounding string) locate the mutant;
+  `before` and `after` are the exact text swapped there, so a later round
+  can reapply the same edit without guessing instead of only a prose
+  description. `expectation` records whether `result` matched what the
+  probe was expected to do (`met`) or not (`violated`), independent of
+  `result` itself, only alongside a measured `killed` or `survived`
+  `result`; it is `not_applicable` otherwise (for example when the mutant
+  could not be applied and no `result` was measured). `reason` is free
+  text, required when `result` is `not_applicable`, empty otherwise,
+  carrying one of two canonical strings that distinguish a non-regression
+  from a regression: `no definition recorded` (a prior-round probe
+  recorded with only an id, no definition to reapply) and `target text no
+  longer present` (a replayed probe whose mutant can no longer be
+  applied). When the assignment names no mutation probes, return
+  `mutation_probes: []` rather than omitting the field.
   Each item also carries `replayed`: `false` for a probe newly
   introduced this round.
 - On any round after the task's first, the assignment also names every
@@ -72,8 +78,9 @@ Rules:
   copy its fields into `mutation_probes`; when the runner reports a
   probe's mutant record (`file`, `anchor`, `before`, `after`) separately
   from its result fields (`verified_applied_via`, `result`, `expectation`,
-  `restored_verified`), take the definition fields from that mutant record
-  so the copied report still carries all ten `mutation_probes` sub-fields.
+  `reason`, `restored_verified`), take the definition fields from that
+  mutant record so the copied report still carries all eleven
+  `mutation_probes` sub-fields.
 - Run every long test, build, or mutation-probe command in the foreground
   and wait for it to finish before returning. When one foreground call
   cannot hold it to completion, poll the backgrounded run to completion
@@ -159,6 +166,7 @@ mutation_probes:
     verified_applied_via: ""
     result: ""
     expectation: met | violated | not_applicable
+    reason: ""
     restored_verified: ""
     replayed: false | true
 risks:

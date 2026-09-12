@@ -74,9 +74,9 @@ is a patch/diff rather than a text swap, put the full text or diff in the
 implementer report or a fenced block directly under the table, and note
 where it lives in the row's own cell.
 
-| Round | Mutant | File | Anchor | Before | After | Verified Applied Via | Result | Expectation | Restored Verified | Replayed |
-|---|---|---|---|---|---|---|---|---|---|---|
-| <!-- round --> | <!-- mutant --> | <!-- file --> | <!-- anchor --> | <!-- before --> | <!-- after --> | <!-- verified_applied_via --> | <!-- result --> | <!-- expectation --> | <!-- restored_verified --> | <!-- replayed --> |
+| Round | Mutant | File | Anchor | Before | After | Verified Applied Via | Result | Expectation | Reason | Restored Verified | Replayed |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| <!-- round --> | <!-- mutant --> | <!-- file --> | <!-- anchor --> | <!-- before --> | <!-- after --> | <!-- verified_applied_via --> | <!-- result --> | <!-- expectation --> | <!-- reason --> | <!-- restored_verified --> | <!-- replayed --> |
 
 ## Risks / Notes
 

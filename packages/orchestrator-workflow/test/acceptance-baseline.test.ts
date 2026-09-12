@@ -136,6 +136,7 @@ function assertProducerShape(block: string): void {
     "verified_applied_via",
     "result",
     "expectation",
+    "reason",
     "restored_verified",
     "replayed",
   ]);
