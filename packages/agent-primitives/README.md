@@ -156,6 +156,42 @@ agent-primitives verify -x lint='eslint . --format stylish' --fail-fast
 - `--max-failures <n>`: caps each check's own `failures` list, a positive
   integer, default `20`; a cut sets `truncated: true` and writes the full,
   uncapped result to the log directory.
+- `--pass-regex <name=regex>`: opt-in per-check success predicate
+  (repeatable, parsed the same way as `-x name=command`: split on the
+  first `=` only, so a pattern containing `=` is preserved intact; a
+  later `--pass-regex` for the same check name replaces an earlier one,
+  the same last-wins rule `-x` itself already follows). Compiled through
+  the same shared `compilePassRegex` (always the `m` flag, so `^`/`$`
+  anchor to each line of the check's combined stdout+stderr, not only to
+  the buffer's first/last character) `probe`'s own `--pass-regex`/
+  `passWhen.regex` already use. Once a check's name has an entry here, a
+  match against that check's combined stdout+stderr decides `status:
+  "pass"`/`"fail"` in place of its exit code, whatever that exit code is
+  -- for a test runner whose exit code alone is not trustworthy (PHPUnit
+  9.6 exiting non-zero on a green suite purely over deprecation notices
+  is the motivating case): a match on a non-zero exit is a `pass`, with a
+  warning naming the exit code (a shell's own 128+N signal-kill band gets
+  its own wording -- "the suite may have been cut short" -- rather than
+  reading like deprecation noise); no match on exit `0` is a `fail`, with
+  a warning naming the pattern, and a truncated output tail on that miss
+  is called out too, since the pattern may simply have matched whatever
+  fell outside it. `exitCode` itself is still reported in the check's
+  result as data either way, and the result names the pattern that was
+  applied (`passRegex`), so a reader can tell an opt-in verdict from a
+  plain exit-code one apart from the warning. A check with no
+  `--pass-regex` entry is entirely unaffected: its verdict, and its
+  result shape, are byte-identical to before this option existed. Exit
+  `126`/`127`, a per-check timeout, and a check killed by an abort are
+  never reclassified by a predicate -- those shapes answer nothing about
+  pass/fail either way, predicate or not; naming a REQUESTED check that
+  nonetheless resolves to `skipped` (no matching `package.json` script
+  and no `-x` for it) is not an error, but a warning names the pattern
+  that was never consulted, since a predicate on a check that never runs
+  at all is otherwise a silent no-op. Naming a check here that is
+  neither requested (`-c`/the default list) nor `-x`-overridden at all is
+  `status: "usage_error"`, exit `2`, rather than a silent no-op: the
+  predicate would never be consulted. No config-file
+  (`.agent-primitives.json`) home for this predicate yet.
 
 Every resolved check name, from `-c` and from `-x` alike, is validated
 against a conservative pattern (letters, digits, `_`, `.`, `:`, `-`) before
@@ -257,7 +293,15 @@ Whatever the detector, a check that ends`fail`or`error`with zero
 parsed failures always gets one synthetic failure entry (naming`timedOut`, or the exit code, plus the output tail) instead of shipping an
 empty `failures`list, and an`error`check always reports at least one`summary.errors`; this synthetic entry is added on top of whatever count
 the detector already reported, never doubling a count the detector already
-got right. Truncation is read from exec.ts's own
+got right. This synthetic entry, and the invariant that produces it, are
+skipped entirely for a check whose `--pass-regex` predicate decided
+`pass`: its `summary` and `failures` come straight from the detector's
+own parse (e.g. PHPUnit's `OK (N tests, M assertions)` line gives
+`summary.passed = N`, `summary.failed = 0`, `failures = []`), never
+padded with a synthetic entry the predicate has already overruled. The
+entry is still added when the predicate decided `fail` and the detector
+itself parsed zero failures, the same as for a plain exit-code `fail`.
+Truncation is read from exec.ts's own
 `stdoutTruncated`/`stderrTruncated`flags (set when the command's real
 output, at either its own 60-line or 6000-character-per-stream bound,
 exceeded what the captured tail could keep), never recomputed from the
@@ -2520,6 +2564,12 @@ code, is what catches that shape. No wrapper is needed to make a
 the three commands as-is. The PHPUnit-specific corollary lives in
 `probe`'s zero-tests guard, below.
 
+`verify`'s own opt-in escape from this exit-code assumption, per check,
+is `--pass-regex name=regex` (see the `## verify` section above): a
+green PHPUnit 9.6 suite that exits non-zero purely over a deprecation
+notice is exactly the shape it exists for, mirroring the escape `probe`
+already had via its own `--pass-regex`/`passWhen.regex`.
+
 **The zero-tests guard now knows PHPUnit.** The same
 `no_tests_executed` refusal `probe` already applies to vitest's
 all-skipped/no-test-files shapes and node `--test`'s zero-count summary
@@ -2541,8 +2591,15 @@ above.
 relevant additions on their own tasks (issue #225 parts 1 and 2: a
 `--pass-regex`/`passWhen` pass predicate, and a composer
 `vendor-dir`/`bin-dir` link rule); each documents its own option in its
-own section. This section only names the exit-code assumption they, like
-every other check here, still inherit.
+own section (`probe`'s own under `## probe`; `verify`'s own is the
+paragraph right above naming `--pass-regex`, not this one). For every
+check without a predicate, `verify`'s status classification, and
+`probe`'s own baseline verdict, still read the plain exit code exactly
+as described above (the phpunit/phpstan/phpcs detectors parse output
+and never look at the exit code; only the `generic` fallback does);
+`--pass-regex`, on either command, is the opt-in way out of that
+reading for a check/baseline whose exit code is not trustworthy on its
+own.
 
 ## Output shape
 

@@ -33,3 +33,31 @@
 export function compilePassRegex(source: string): RegExp {
   return new RegExp(source, "m");
 }
+
+/**
+ * The `(the <subject>'s captured ... tail was truncated; the pattern may
+ * have matched output outside the captured tail)` suffix (or `""` when
+ * neither side was truncated) a `--pass-regex`/`--require-baseline-
+ * evidence` miss warning appends, wherever one is reported: `probe`'s own
+ * baseline-stage miss (`probe/setup.ts`, `subject: "baseline"`) and
+ * `verify`'s per-check miss (`verify/index.ts`, `subject: "check"`)
+ * alike, so the caveat is worded identically in both places rather than
+ * maintained as two copies that could drift apart. Lifted out of
+ * `probe/setup.ts` (where it used to be a private, baseline-only helper
+ * hardcoding "the baseline's") into this shared module for exactly that
+ * reason; `probe/setup.ts`'s own call sites pass `"baseline"` and are
+ * otherwise unchanged, so this move is behaviour-preserving there.
+ */
+export function truncationNote(
+  subject: string,
+  stdoutTruncated: boolean,
+  stderrTruncated: boolean,
+): string {
+  const truncatedSides = [
+    stdoutTruncated ? "stdout" : undefined,
+    stderrTruncated ? "stderr" : undefined,
+  ].filter((side): side is string => side !== undefined);
+  return truncatedSides.length > 0
+    ? ` (the ${subject}'s captured ${truncatedSides.join(" and ")} tail was truncated; the pattern may have matched output outside the captured tail)`
+    : "";
+}

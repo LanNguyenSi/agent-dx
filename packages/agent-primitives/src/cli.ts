@@ -252,6 +252,43 @@ function parsePassRegex(value: string): RegExp {
   }
 }
 
+/** `verify`'s own `--pass-regex name=regex`, accumulated across repeated
+ * flags into an object keyed by check name (a later `--pass-regex` for
+ * the same name overrides an earlier one) -- parsed the same way as `-x
+ * name=command` (`parseExecOverride`), splitting on the first `=` only,
+ * so a pattern containing `=` is preserved intact. Compiles the pattern
+ * through the same shared `compilePassRegex` (`m` flag) `probe`'s own
+ * `--pass-regex` and `probe/plan.ts`'s `validatePlan` use, so an
+ * unparseable pattern is a usage error here -- naming both the check and
+ * the pattern -- before it ever reaches `verify()`. Unlike probe's single
+ * un-keyed `--pass-regex <regex>`, this option is per-check, mirroring
+ * `-x`'s own name=value shape rather than probe's. */
+export function parsePassRegexOverride(
+  value: string,
+  previous: Record<string, RegExp>,
+): Record<string, RegExp> {
+  const idx = value.indexOf("=");
+  if (idx <= 0) {
+    throw new InvalidArgumentError(
+      `--pass-regex must be name=regex (got "${value}")`,
+    );
+  }
+  const name = value.slice(0, idx).trim();
+  const source = value.slice(idx + 1);
+  if (!name) {
+    throw new InvalidArgumentError(
+      `--pass-regex: empty check name in "${value}"`,
+    );
+  }
+  try {
+    return { ...previous, [name]: compilePassRegex(source) };
+  } catch (err) {
+    throw new InvalidArgumentError(
+      `--pass-regex must be a valid regular expression for check "${name}" (got "${source}"): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
 /** `--`-prefixed flags this matcher knows take a following argument, so
  * that argument is not itself mistaken for a targeted file/pattern:
  * `vitest run -t <name>` names one test by pattern, not a file, and
@@ -774,6 +811,7 @@ program
 interface VerifyCliOptions {
   checks?: string[];
   exec: Record<string, string>;
+  passRegex: Record<string, RegExp>;
   failFast?: boolean;
   timeout?: string;
   maxFailures?: string;
@@ -795,6 +833,12 @@ program
     parseExecOverride,
     {},
   )
+  .option(
+    "--pass-regex <name=regex>",
+    "opt-in per-check success predicate (repeatable): a match against that check's combined stdout+stderr is a pass, its absence a fail, in place of the exit code -- for a test runner whose exit code alone is not trustworthy (e.g. phpunit exiting non-zero on a green suite over deprecation notices); naming a check that is not requested/-x-overridden is a usage error",
+    parsePassRegexOverride,
+    {},
+  )
   .option("--fail-fast", "stop after the first non-pass check")
   .option("--timeout <s>", "per-check timeout in seconds", parseTimeoutSeconds)
   .option(
@@ -812,6 +856,7 @@ program
       runId: currentRunId(),
       checks: opts.checks,
       overrides: opts.exec,
+      passRegexes: opts.passRegex,
       failFast: Boolean(opts.failFast),
       signal: shutdownController.signal,
       // Not the default `execCommand`: the tracking wrapper, so the

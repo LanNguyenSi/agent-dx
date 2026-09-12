@@ -1,8 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { combinedOutput, execCommand } from "../exec.js";
+import {
+  combinedOutput,
+  execCommand,
+  signalNumberFromExitCode,
+} from "../exec.js";
 import type { ExecResult } from "../exec.js";
+import { truncationNote } from "../pass-regex.js";
 import { UsageError } from "../envelope.js";
 import { genericDetector } from "./detectors/generic.js";
 import { vitestDetector } from "./detectors/vitest.js";
@@ -220,6 +225,15 @@ function classifyStatus(
  * detector itself never touches that field. Implemented once here so
  * every detector, generic today and any added later, inherits it
  * automatically instead of each having to remember it.
+ *
+ * `predicateMiss`, when given, names the `--pass-regex` that actually
+ * decided this `fail` (only ever passed for `status: "fail"`, never
+ * `"error"`: a predicate cannot produce an `error` verdict): the
+ * synthetic entry's own label, and the free-text warning, both name the
+ * predicate instead of the exit code the predicate was told to ignore --
+ * `exit code 0: <tail>` would misreport a predicate-decided fail as the
+ * ordinary exit-code kind, and the exit code itself was never the reason
+ * this check failed.
  */
 function applyFailuresInvariant(
   parsed: DetectorParseResult,
@@ -228,19 +242,30 @@ function applyFailuresInvariant(
   timedOut: boolean,
   tail: string,
   status: "fail" | "error",
+  predicateMiss?: RegExp,
 ): DetectorParseResult {
   let summary = parsed.summary;
   let failures = parsed.failures;
   let warnings = parsed.warnings;
 
   if (failures.length === 0) {
-    const label = timedOut ? "timedOut" : `exit code ${exitCode}`;
+    const label =
+      predicateMiss !== undefined
+        ? `--pass-regex (${predicateMiss.source}) did not match`
+        : timedOut
+          ? "timedOut"
+          : `exit code ${exitCode}`;
     const synthetic: Failure = {
       name: checkName,
       message: `${label}: ${tail.length > 0 ? tail : "(no output)"}`,
     };
     failures = [synthetic];
-    warnings = [...warnings, "detector_matched_nothing"];
+    warnings = [
+      ...warnings,
+      predicateMiss !== undefined
+        ? "pass_regex_matched_nothing: the predicate decided fail and the detector itself parsed no failures of its own"
+        : "detector_matched_nothing",
+    ];
     // Only increments the field when the detector itself reported 0 for
     // it: a detector can parse an empty `failures` list while its own
     // `Tests`/totals line still states a nonzero count (e.g. a long diff
@@ -334,6 +359,7 @@ function dedupePreservingOrder(names: string[]): string[] {
 export async function verify(options: VerifyOptions): Promise<VerifyResult> {
   const start = Date.now();
   const overrides = options.overrides ?? {};
+  const passRegexes = options.passRegexes ?? {};
   const requestedNames = options.checks ?? DEFAULT_CHECKS;
   // A check name that only exists as an `-x` override (not in the
   // requested/default list) is still run: an override that is never used
@@ -351,6 +377,19 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
     if (!CHECK_NAME_PATTERN.test(name)) {
       throw new UsageError(
         `verify: invalid check name "${name}" (must match ${CHECK_NAME_PATTERN})`,
+      );
+    }
+  }
+
+  // `--pass-regex name=regex` naming a check that will never run (neither
+  // requested/defaulted nor `-x`-overridden into existence) would be a
+  // silent no-op -- the predicate would simply never be consulted -- which
+  // this package's stated principle rules out: refused up front, before
+  // any command is built, exactly like an invalid check name above.
+  for (const name of Object.keys(passRegexes)) {
+    if (!requestedAndOverrideNames.includes(name)) {
+      throw new UsageError(
+        `verify: --pass-regex names check "${name}", which is not requested (via -c/the default list) and not overridden via -x, so it would never run`,
       );
     }
   }
@@ -422,6 +461,20 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
       };
       checks.push(skippedResult);
       fullChecks.push(skippedResult);
+      // A `--pass-regex` naming a check that WAS requested/-x-overridden
+      // (so the validation above let it through) but resolved to
+      // `skipped` anyway (no matching `package.json` script and no `-x`
+      // for it after all) never runs a command at all, so the predicate
+      // is never consulted: said out loud here rather than silently
+      // dropped, the same "no silent no-op" principle the validation
+      // above already applies to a name that could never run in the
+      // first place.
+      const skippedPassRegex = passRegexes[name];
+      if (skippedPassRegex !== undefined) {
+        warnings.push(
+          `${name}: --pass-regex (${skippedPassRegex.source}) was given but the check resolved to skipped, so the predicate was never consulted`,
+        );
+      }
       // A skipped check is not a non-pass finding: --fail-fast falls
       // through it and continues to the next check, rather than stopping
       // a run just because one check name resolved to nothing.
@@ -515,8 +568,51 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
       );
     }
 
-    const status = classifyStatus(execResult.exitCode, execResult.timedOut);
     const output = combinedOutput(execResult.stdoutTail, execResult.stderrTail);
+    const exitStatus = classifyStatus(execResult.exitCode, execResult.timedOut);
+    const truncated = execResult.stdoutTruncated || execResult.stderrTruncated;
+    // `--pass-regex` for this check: once given, it is this check's own
+    // verdict in place of its exit code -- "passed" is the regex matching
+    // the check's combined stdout+stderr, "failed" is the regex absent,
+    // whatever the exit code says (mirrors `probe`'s own `--pass-regex`
+    // baseline verdict, `probe/setup.ts`). Never consulted when
+    // `exitStatus` is already `error`: a timeout, exit 126/127, or an
+    // aborted run (returned above, before this line) answered nothing
+    // about pass/fail either way, so a predicate cannot override it.
+    const passRegex = passRegexes[name];
+    let status: CheckStatus = exitStatus;
+    if (passRegex !== undefined && exitStatus !== "error") {
+      const matched = passRegex.test(output);
+      status = matched ? "pass" : "fail";
+      if (matched) {
+        if (execResult.exitCode !== 0) {
+          // One band of non-zero codes gets its own wording, the same
+          // distinction `probe`'s own `--pass-regex` baseline verdict
+          // makes (`probe/setup.ts`): 128 + N, what a shell reports for
+          // a child killed by signal N. A kill that lands on the check
+          // process while the `sh -c` wrapper around it SURVIVES it (an
+          // OOM killer picking the memory hog rather than the group
+          // leader is the everyday shape) still reads as an ordinary
+          // non-zero exit here, so a matching partial output printed
+          // before the kill still reads as a pass -- the verdict is not
+          // second-guessed (nothing here can tell that code apart from a
+          // runner exiting `137` of its own accord, and `--pass-regex`
+          // means "ignore the exit code" by construction), but a reader
+          // is told, since "the suite may have been cut short" is a
+          // different thing to check than deprecation noise.
+          const signalCode = signalNumberFromExitCode(execResult.exitCode);
+          warnings.push(
+            signalCode !== undefined
+              ? `${name}: --pass-regex (${passRegex.source}) matched the check's output but the check exited with ${String(execResult.exitCode)}, the code a shell reports for a process killed by signal ${String(signalCode)}; the suite may have been cut short; see ${execResult.logPath}`
+              : `${name}: --pass-regex (${passRegex.source}) matched the check's output despite a non-zero exit code (${String(execResult.exitCode)}); treated as a pass (e.g. deprecation-notice noise), not a failure; see ${execResult.logPath}`,
+          );
+        }
+      } else {
+        warnings.push(
+          `${name}: --pass-regex (${passRegex.source}) did not match the check's output${truncationNote("check", execResult.stdoutTruncated, execResult.stderrTruncated)}; see ${execResult.logPath}`,
+        );
+      }
+    }
     const selection = selectDetector(detectors, fallbackDetector, {
       output,
       command,
@@ -534,16 +630,29 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
       exitCode: execResult.exitCode,
     });
 
-    if (status === "fail" || status === "error") {
-      const truncated =
-        execResult.stdoutTruncated || execResult.stderrTruncated;
+    // The truncation adjustment runs whenever this check's own `status`
+    // already needed it (`fail`/`error`), and ADDITIONALLY whenever a
+    // predicate was actually consulted, `pass` included: a predicate can
+    // decide `pass` from a match sitting inside a truncated tail just as
+    // easily as it can decide `fail`, and either way the detector's own
+    // parsed counts may have undercounted a truncated run. A check with
+    // no predicate configured is entirely unaffected: this widens
+    // nothing for the plain exit-code path (`passRegex === undefined`
+    // never enters the second disjunct).
+    if (
+      status === "fail" ||
+      status === "error" ||
+      (passRegex !== undefined && exitStatus !== "error")
+    ) {
       parsed = adjustForTruncatedTail(
         parsed,
         output,
         truncated,
         detector === eslintDetector,
       );
+    }
 
+    if (status === "fail" || status === "error") {
       const tail = output.trim();
       parsed = applyFailuresInvariant(
         parsed,
@@ -552,6 +661,14 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
         execResult.timedOut,
         tail,
         status,
+        // A `fail` here is a predicate miss whenever a predicate was
+        // configured at all: the predicate branch above is the only way
+        // `status` becomes `fail` while `passRegex` is defined (a plain
+        // exit-code fail never has one). Labels the synthetic entry from
+        // the predicate that actually decided it, rather than the exit
+        // code the predicate was told to ignore (AC-004's second
+        // clause).
+        status === "fail" ? passRegex : undefined,
       );
     }
 
@@ -573,6 +690,9 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
       summary: parsed.summary,
       failures: parsed.failures,
       logPath: execResult.logPath,
+      ...(passRegex !== undefined && exitStatus !== "error"
+        ? { passRegex: passRegex.source }
+        : {}),
     };
     fullChecks.push(fullResult);
 

@@ -14,6 +14,7 @@ import {
   mapTopLevelError,
   writeAndExitTo,
   parseExecOverride,
+  parsePassRegexOverride,
   withOptionHint,
   writeFullVerifyResult,
   type ResolvedGlobal,
@@ -474,6 +475,106 @@ describe("cli verify", () => {
     expect(parsed.status).toBe("pass");
   });
 
+  it("--pass-regex mycheck=<pattern> overrides the exit-code verdict: a match on exit 1 is a pass, exit 0", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-x",
+      "mycheck=printf 'OK (11 tests, 17 assertions)\\n'; exit 1",
+      "--pass-regex",
+      "mycheck=^OK \\(",
+    ]);
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("pass");
+    const check = parsed.checks.find(
+      (c: { name: string }) => c.name === "mycheck",
+    );
+    expect(check.status).toBe("pass");
+    expect(check.exitCode).toBe(1);
+    expect(check.passRegex).toBe("^OK \\(");
+    expect(
+      parsed.warnings.some(
+        (w: string) =>
+          w.includes("mycheck: --pass-regex") &&
+          w.includes("non-zero exit code (1)"),
+      ),
+    ).toBe(true);
+  });
+
+  it("--pass-regex mycheck=<pattern> absent on exit 0 is a fail, naming the pattern in a warning", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-x",
+      "mycheck=printf 'something else entirely\\n'",
+      "--pass-regex",
+      "mycheck=^OK \\(",
+    ]);
+    expect(run.code).toBe(1);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("fail");
+    const check = parsed.checks.find(
+      (c: { name: string }) => c.name === "mycheck",
+    );
+    expect(check.status).toBe("fail");
+    expect(check.exitCode).toBe(0);
+    expect(
+      parsed.warnings.some(
+        (w: string) =>
+          w.includes("mycheck: --pass-regex") &&
+          w.includes("did not match the check's output"),
+      ),
+    ).toBe(true);
+  });
+
+  it("--pass-regex naming a check that is not requested/-x-overridden is a usage_error, exit 2", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "-c",
+      "test",
+      "--pass-regex",
+      "lint=^OK \\(",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+  });
+
+  it("--pass-regex with an unparseable pattern is a usage_error naming the check and the pattern", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "verify",
+      "--pass-regex",
+      "test=(",
+    ]);
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.message).toMatch(/test/);
+  });
+
   it("-x nope=nonexistent-binary-xyz is a check error, status error, exit 2", async () => {
     const cwd = makeTmpDir();
     const logDir = makeTmpDir();
@@ -920,6 +1021,48 @@ describe("parseExecOverride", () => {
 
   it("rejects a value with no `=` at all", () => {
     expect(() => parseExecOverride("noequals", {})).toThrow();
+  });
+});
+
+describe("parsePassRegexOverride", () => {
+  it("splits name=regex at the first `=` only, preserving an `=` inside the pattern", () => {
+    const result = parsePassRegexOverride("e=^OK\\(a=b\\)", {});
+    expect(Object.keys(result)).toEqual(["e"]);
+    expect(result.e.source).toBe("^OK\\(a=b\\)");
+  });
+
+  it("accumulates repeated --pass-regex flags into one object, keyed by name", () => {
+    const first = parsePassRegexOverride("a=^A$", {});
+    const second = parsePassRegexOverride("b=^B$", first);
+    expect(Object.keys(second)).toEqual(["a", "b"]);
+    expect(second.a.source).toBe("^A$");
+    expect(second.b.source).toBe("^B$");
+  });
+
+  it("rejects a value with an empty name (leading `=`)", () => {
+    expect(() => parsePassRegexOverride("=x", {})).toThrow();
+  });
+
+  it("rejects a value with no `=` at all", () => {
+    expect(() => parsePassRegexOverride("noequals", {})).toThrow();
+  });
+
+  it("rejects an unparseable pattern, naming both the check and the pattern", () => {
+    expect(() => parsePassRegexOverride("mycheck=(", {})).toThrow(
+      /--pass-regex must be a valid regular expression for check "mycheck".*got "\("/,
+    );
+  });
+
+  it("always compiles with the `m` flag, like the shared compilePassRegex", () => {
+    const result = parsePassRegexOverride("a=^OK", {});
+    expect(result.a.flags).toBe("m");
+  });
+
+  it("a repeated --pass-regex for the SAME check name replaces the earlier one, last-wins (F4)", () => {
+    const first = parsePassRegexOverride("a=^FIRST$", {});
+    const second = parsePassRegexOverride("a=^SECOND$", first);
+    expect(Object.keys(second)).toEqual(["a"]);
+    expect(second.a.source).toBe("^SECOND$");
   });
 });
 

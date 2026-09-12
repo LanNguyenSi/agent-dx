@@ -64,6 +64,13 @@ export interface CheckResult {
   summary: Summary;
   failures: Failure[];
   logPath?: string;
+  /** Present only when this check had a `--pass-regex` predicate AND that
+   * predicate was actually consulted to decide `status` (i.e. `status`
+   * would otherwise -- by exit code alone -- have been `pass` or `fail`,
+   * never `error`; see `VerifyOptions.passRegexes`): the predicate's own
+   * source, so a reader can tell an opt-in pass/fail from a plain
+   * exit-code one apart from the `warnings` entry that names it. */
+  passRegex?: string;
 }
 
 export type VerifyStatus = "pass" | "fail" | "error";
@@ -104,6 +111,25 @@ export interface VerifyOptions {
   checks?: string[];
   /** `-x name=command` overrides, keyed by check name. */
   overrides?: Record<string, string>;
+  /** Opt-in per-check success predicate, `--pass-regex name=regex` on the
+   * CLI (repeatable, keyed by check name; compiled through the shared
+   * `compilePassRegex`, the same `m`-flag compile `probe`'s own
+   * `--pass-regex`/`passWhen.regex` uses). Once a check's name has an
+   * entry here, a match against that check's combined stdout+stderr
+   * decides `status` (`pass`/`fail`) in place of its exit code -- for a
+   * test runner whose exit code alone is not trustworthy (e.g. phpunit
+   * exiting non-zero on a green suite over deprecation notices) -- while
+   * `exitCode` itself is kept in the `CheckResult` as data regardless. A
+   * check whose own classification is `error` before any predicate is
+   * consulted (a timeout, exit 126/127, or an aborted run) is never
+   * reclassified by a predicate: those shapes answer nothing about
+   * pass/fail either way. A check with no entry here is entirely
+   * unaffected: its `status` is the plain exit-code verdict, byte-
+   * identical to before this option existed. Naming a check here that is
+   * neither requested (`checks`/the default list) nor `-x`-overridden is
+   * a usage error (`verify()` never silently ignores a predicate that
+   * would never be consulted). */
+  passRegexes?: Record<string, RegExp>;
   failFast?: boolean;
   /** Per-check timeout in milliseconds. No timeout when omitted. */
   timeoutMs?: number;

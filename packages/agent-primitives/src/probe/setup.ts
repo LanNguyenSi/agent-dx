@@ -7,6 +7,7 @@ import {
   signalNumberFromExitCode,
   wasSignalKilled,
 } from "../exec.js";
+import { truncationNote } from "../pass-regex.js";
 import {
   acquireLock,
   markerFilePathFor,
@@ -327,28 +328,6 @@ export interface RunSetupInput {
 
 export type RunSetupOutcome =
   { ok: true; run: OpenedRun } | { ok: false; refusal: RunSetupRefusal };
-
-/**
- * The `(the baseline's captured ... tail was truncated; the pattern may
- * have matched output outside the captured tail)` suffix (or `""` when
- * neither side was truncated) every baseline-stage warning that names a
- * pattern miss appends -- `--require-baseline-evidence`'s own miss and
- * a `--pass-regex` miss alike -- so the caveat is worded identically
- * wherever it fires rather than maintained as separate copies that
- * could drift apart.
- */
-function truncationNote(
-  stdoutTruncated: boolean,
-  stderrTruncated: boolean,
-): string {
-  const truncatedSides = [
-    stdoutTruncated ? "stdout" : undefined,
-    stderrTruncated ? "stderr" : undefined,
-  ].filter((side): side is string => side !== undefined);
-  return truncatedSides.length > 0
-    ? ` (the baseline's captured ${truncatedSides.join(" and ")} tail was truncated; the pattern may have matched output outside the captured tail)`
-    : "";
-}
 
 /**
  * The setup both entry points run before their first mutant: isolation
@@ -1035,7 +1014,7 @@ export async function openRunSetup(
       await settleTargetsAfterNonMutatingBaseline("the failing baseline run");
       pushBaselineFailBandWarning("baseline_evidence_not_matched");
       warnings.push(
-        `--require-baseline-evidence (${input.requireBaselineEvidence.source}) did not match the baseline output${truncationNote(baselineTest.stdoutTruncated, baselineTest.stderrTruncated)}; see ${baselineTest.logPath}`,
+        `--require-baseline-evidence (${input.requireBaselineEvidence.source}) did not match the baseline output${truncationNote("baseline", baselineTest.stdoutTruncated, baselineTest.stderrTruncated)}; see ${baselineTest.logPath}`,
       );
       return refuse(
         "inconclusive",
@@ -1076,7 +1055,7 @@ export async function openRunSetup(
       !baselinePassRegexMatched
     ) {
       warnings.push(
-        `--pass-regex (${input.passRegex.source}) did not match the baseline output${truncationNote(baselineTest.stdoutTruncated, baselineTest.stderrTruncated)}; see ${baselineTest.logPath}`,
+        `--pass-regex (${input.passRegex.source}) did not match the baseline output${truncationNote("baseline", baselineTest.stdoutTruncated, baselineTest.stderrTruncated)}; see ${baselineTest.logPath}`,
       );
     }
     // An aborted baseline is not a red baseline: nothing about the test
@@ -1167,7 +1146,7 @@ export async function openRunSetup(
       // the warning says so, so a caller does not chase a pattern fix
       // for output truncation instead.
       warnings.push(
-        `--require-baseline-evidence (${input.requireBaselineEvidence.source}) did not match the baseline output${truncationNote(baselineTest.stdoutTruncated, baselineTest.stderrTruncated)}; see ${baselineTest.logPath}`,
+        `--require-baseline-evidence (${input.requireBaselineEvidence.source}) did not match the baseline output${truncationNote("baseline", baselineTest.stdoutTruncated, baselineTest.stderrTruncated)}; see ${baselineTest.logPath}`,
       );
       return refuse(
         "inconclusive",
