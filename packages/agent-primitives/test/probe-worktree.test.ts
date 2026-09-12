@@ -139,14 +139,21 @@ function hashTree(
  * different `symlink`/`hash` (`changed`). Never a size comparison: two
  * trees can carry the same entry count while differing in which paths
  * exist, which a `Map.size` check cannot tell apart from an unrelated
- * entry appearing and a different one vanishing in the same run. */
+ * entry appearing and a different one vanishing in the same run.
+ *
+ * `ignore`, when given, drops any relative path it returns true for from
+ * ALL THREE buckets before they are reported: see `assertTreeUnchanged`'s
+ * own doc comment for why a `.git` snapshot needs this and a plain
+ * source-tree snapshot never passes it. */
 function diffTrees(
   before: Map<string, { symlink: boolean; hash: string }>,
   after: Map<string, { symlink: boolean; hash: string }>,
+  ignore?: (rel: string) => boolean,
 ): { added: string[]; removed: string[]; changed: string[] } {
   const added: string[] = [];
   const changed: string[] = [];
   for (const [rel, afterEntry] of after) {
+    if (ignore?.(rel) === true) continue;
     const beforeEntry = before.get(rel);
     if (beforeEntry === undefined) {
       added.push(rel);
@@ -159,6 +166,7 @@ function diffTrees(
   }
   const removed: string[] = [];
   for (const rel of before.keys()) {
+    if (ignore?.(rel) === true) continue;
     if (!after.has(rel)) removed.push(rel);
   }
   return {
@@ -168,18 +176,44 @@ function diffTrees(
   };
 }
 
+/** A relative path (as `hashTree` keys its Map) that names one of git's
+ * OWN transient lock files rather than anything a probe run wrote: git
+ * takes a same-named `<name>.lock` next to the file or object it is
+ * about to update and removes it when that operation finishes, so one
+ * can legitimately exist at one snapshot instant and not the other with
+ * no relation to what the tool under test did. `objects/maintenance.lock`
+ * is the concrete instance CI run 34447150672 hit: `git maintenance run
+ * --auto`, which recent git auto-invokes from plumbing commands like
+ * `commit` and `worktree add`, took that lock for a background pass
+ * still running at the "before" snapshot and released it by "after",
+ * which the old `expect(gitAfter).toEqual(gitBefore)` reported only as
+ * "35 vs 36 entries". The fixture initialisers below also set
+ * `maintenance.auto false`/`gc.auto 0` so this should no longer fire in
+ * practice; this predicate is the second, independent guard for a git
+ * version, platform, or already-in-flight pass that ignores that config. */
+function isGitTransientLockPath(rel: string): boolean {
+  return rel.endsWith(".lock");
+}
+
 /** Asserts two `hashTree` snapshots of the same root are identical,
  * naming every added, removed, and changed path in the failure message
  * (see `diffTrees`) instead of `expect(after).toEqual(before)`'s two
  * opaque `Map` sizes, which cannot say which entry appeared, only that
  * the counts disagree. `label` identifies the tree in the message (for
- * example the absolute path being hashed). */
+ * example the absolute path being hashed).
+ *
+ * `ignore`, when given, is `diffTrees`'s own `ignore`: pass
+ * `isGitTransientLockPath` only when `before`/`after` are snapshots of a
+ * `.git` directory, never for a source-tree snapshot, where a `*.lock`
+ * path appearing or vanishing is exactly the kind of change this
+ * assertion exists to catch. */
 function assertTreeUnchanged(
   before: Map<string, { symlink: boolean; hash: string }>,
   after: Map<string, { symlink: boolean; hash: string }>,
   label: string,
+  ignore?: (rel: string) => boolean,
 ): void {
-  const diff = diffTrees(before, after);
+  const diff = diffTrees(before, after, ignore);
   const hasDiff =
     diff.added.length > 0 || diff.removed.length > 0 || diff.changed.length > 0;
   if (!hasDiff) return;
@@ -221,6 +255,89 @@ describe("assertTreeUnchanged()", () => {
 
     expect(() => assertTreeUnchanged(before, after, scratch)).not.toThrow();
   });
+
+  it("names a deleted file by path under 'removed', with no 'added' or 'changed' present", () => {
+    const scratch = makeTmpDir();
+    fs.writeFileSync(path.join(scratch, "kept.txt"), "same\n");
+    fs.writeFileSync(path.join(scratch, "GONE.txt"), "will vanish\n");
+    const before = hashTree(scratch);
+    fs.rmSync(path.join(scratch, "GONE.txt"));
+    const after = hashTree(scratch);
+
+    expect(() => assertTreeUnchanged(before, after, scratch)).toThrow(
+      /removed \[GONE\.txt\]/,
+    );
+    // Nothing was added or changed here: a diff that folded `removed`
+    // into `hasDiff` incorrectly (or dropped it) either never throws for
+    // this case or throws without naming the removal, so pin the whole
+    // message rather than only matching a substring.
+    expect(() => assertTreeUnchanged(before, after, scratch)).toThrow(
+      `${scratch} changed: removed [GONE.txt]`,
+    );
+  });
+
+  it("names a content change by path under 'changed', with no 'added' or 'removed' present", () => {
+    const scratch = makeTmpDir();
+    fs.writeFileSync(path.join(scratch, "kept.txt"), "same\n");
+    fs.writeFileSync(path.join(scratch, "MUTATED.txt"), "before\n");
+    const before = hashTree(scratch);
+    fs.writeFileSync(path.join(scratch, "MUTATED.txt"), "after\n");
+    const after = hashTree(scratch);
+
+    expect(() => assertTreeUnchanged(before, after, scratch)).toThrow(
+      `${scratch} changed: changed [MUTATED.txt]`,
+    );
+  });
+
+  it("reports a file turned into a symlink as 'changed' at the same path, not as one removed and a different one added", () => {
+    const scratch = makeTmpDir();
+    fs.writeFileSync(path.join(scratch, "kept.txt"), "same\n");
+    fs.writeFileSync(path.join(scratch, "SHAPESHIFT"), "a real file\n");
+    const before = hashTree(scratch);
+    fs.rmSync(path.join(scratch, "SHAPESHIFT"));
+    fs.symlinkSync("kept.txt", path.join(scratch, "SHAPESHIFT"));
+    const after = hashTree(scratch);
+
+    expect(() => assertTreeUnchanged(before, after, scratch)).toThrow(
+      `${scratch} changed: changed [SHAPESHIFT]`,
+    );
+  });
+
+  it("with isGitTransientLockPath as ignore, stays silent when a *.lock path present before is gone after (git's own transient maintenance lock, CI run 34447150672's exact shape)", () => {
+    const scratch = makeTmpDir();
+    fs.mkdirSync(path.join(scratch, "objects"));
+    fs.writeFileSync(path.join(scratch, "kept.txt"), "same\n");
+    fs.writeFileSync(path.join(scratch, "objects", "maintenance.lock"), "");
+    const before = hashTree(scratch);
+    fs.rmSync(path.join(scratch, "objects", "maintenance.lock"));
+    const after = hashTree(scratch);
+
+    expect(() =>
+      assertTreeUnchanged(before, after, scratch, isGitTransientLockPath),
+    ).not.toThrow();
+    // Negative control: without the ignore predicate this exact fixture
+    // still fails by name, proving the silence above comes from the
+    // exclusion and not from some other change to the assertion.
+    expect(() => assertTreeUnchanged(before, after, scratch)).toThrow(
+      `${scratch} changed: removed [objects/maintenance.lock]`,
+    );
+  });
+
+  it("negative control: with isGitTransientLockPath as ignore, a non-lock file appearing or disappearing still fails by name", () => {
+    const scratch = makeTmpDir();
+    fs.mkdirSync(path.join(scratch, "objects"));
+    fs.writeFileSync(path.join(scratch, "kept.txt"), "same\n");
+    const before = hashTree(scratch);
+    fs.writeFileSync(
+      path.join(scratch, "objects", "NOT-A-LOCK.txt"),
+      "unexpected\n",
+    );
+    const after = hashTree(scratch);
+
+    expect(() =>
+      assertTreeUnchanged(before, after, scratch, isGitTransientLockPath),
+    ).toThrow(`${scratch} changed: added [objects/NOT-A-LOCK.txt]`);
+  });
 });
 
 const FIXTURE_JS = [
@@ -252,6 +369,15 @@ function initRepo(): { repo: string } {
   git(repo, ["config", "diff.noprefix", "false"]);
   git(repo, ["config", "diff.mnemonicPrefix", "false"]);
   git(repo, ["config", "core.autocrlf", "false"]);
+  // Never let git's own background maintenance run against this
+  // fixture: `maintenance.auto`/`gc.auto` can otherwise fire from this
+  // repo's own `commit` below or from a later `worktree add` the probe
+  // under test runs, taking `.git/objects/maintenance.lock` for the
+  // duration and dropping it whenever that pass finishes -- which is
+  // what made CI run 34447150672 flake (see isGitTransientLockPath's
+  // doc comment for the exact shape).
+  git(repo, ["config", "maintenance.auto", "false"]);
+  git(repo, ["config", "gc.auto", "0"]);
   fs.writeFileSync(path.join(repo, "fixture.js"), FIXTURE_JS);
   fs.writeFileSync(path.join(repo, "fixture.test.js"), FIXTURE_TEST_JS);
   git(repo, ["add", "-A"]);
@@ -332,6 +458,11 @@ function initSrcRepo(
   git(repo, ["config", "user.email", "test@example.com"]);
   git(repo, ["config", "user.name", "test"]);
   git(repo, ["config", "core.autocrlf", "false"]);
+  // See initRepo()'s matching config for why: this repo's own commit
+  // below, or a later `worktree add`, can otherwise trigger background
+  // maintenance mid-run.
+  git(repo, ["config", "maintenance.auto", "false"]);
+  git(repo, ["config", "gc.auto", "0"]);
   fs.mkdirSync(path.join(repo, "src"), { recursive: true });
   fs.writeFileSync(path.join(repo, "src", "fixture.js"), SRC_FIXTURE_JS);
   fs.writeFileSync(
@@ -418,6 +549,10 @@ function initUpstreamLibRepo(): string {
   git(upstream, ["config", "user.email", "test@example.com"]);
   git(upstream, ["config", "user.name", "test"]);
   git(upstream, ["config", "core.autocrlf", "false"]);
+  // See initRepo()'s matching config for why: this repo's own commit
+  // below can otherwise trigger background maintenance mid-run.
+  git(upstream, ["config", "maintenance.auto", "false"]);
+  git(upstream, ["config", "gc.auto", "0"]);
   fs.mkdirSync(path.join(upstream, "lib"), { recursive: true });
   fs.writeFileSync(path.join(upstream, "lib", "file.txt"), "vendored\n");
   git(upstream, ["add", "-A"]);
@@ -2950,7 +3085,16 @@ describe("probe(): worktree isolation, a link target that is TRACKED source", ()
     const result = await probe(baseOptions(repo, { preCommand: CLOBBER_PRE }));
     const gitAfter = hashTree(path.join(repo, ".git"));
 
-    assertTreeUnchanged(gitBefore, gitAfter, path.join(repo, ".git"));
+    // isGitTransientLockPath: this snapshot is of `.git` itself, so a
+    // `*.lock` git takes and releases on its own (CI run 34447150672's
+    // `objects/maintenance.lock`, see that predicate's doc comment) must
+    // not be reported as a change the probe run caused.
+    assertTreeUnchanged(
+      gitBefore,
+      gitAfter,
+      path.join(repo, ".git"),
+      isGitTransientLockPath,
+    );
     expect(result.status).toBe("killed");
     expect(result.isolation.linked).toEqual([]);
     expect(

@@ -36,6 +36,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read as pruned (never one git holds genuinely `locked`), closing a rare
   CI flake where the repository's `.git` carried one extra leftover entry
   after a run.
+- Closed a CI flake in `probe-worktree.test.ts`'s ".git tree unchanged"
+  refusal test (CI run 34447150672): the fixture repos now disable
+  `maintenance.auto`/`gc.auto` so git never starts its own background
+  maintenance mid-test, the `.git` snapshot comparison now names every
+  added/removed/changed path instead of only two `Map` sizes, and that
+  comparison explicitly excludes git's own transient `*.lock` files
+  (`objects/maintenance.lock` was the exact entry the flake lost) so a
+  maintenance pass that still starts despite the new config cannot fail
+  the assertion either.
 
 ## [0.2.0] - 2026-09-10
 
