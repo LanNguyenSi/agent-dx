@@ -1485,8 +1485,16 @@ export async function beginWorktree(
  * creates the rest. A segment that does not resolve while something IS
  * there (a dangling symlink) is reported as blocking, because
  * `mkdirSync` cannot create through it either.
+ *
+ * Exported for its own direct unit tests: the two `return rel` branches
+ * (a file ancestor, a dangling-symlink ancestor) used to be exercised
+ * only through a defaults-file `link` naming such a path, but the
+ * existence check `probe/link-list.ts` added for issue #242 now refuses
+ * those sources before the worktree sync (and this function) is ever
+ * reached, so calling it directly is the only way left to reach either
+ * branch.
  */
-function nonDirectoryAncestor(
+export function nonDirectoryAncestor(
   base: string,
   relPath: string,
 ): string | undefined {
