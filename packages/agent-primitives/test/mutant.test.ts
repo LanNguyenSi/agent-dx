@@ -4228,7 +4228,17 @@ describe("probe --plan envelope: never over maxChars without a warning naming th
    * `keepWhole: ["plan.summary"]`), then runs the same
    * `reconcileEnvelopeDiffTruncation` pass `cli.ts` runs against it, at
    * `maxChars`. */
-  function buildPlanEnvelope(maxChars: number): Record<string, unknown> {
+  function buildPlanEnvelope(
+    maxChars: number,
+    planResults: readonly Record<string, unknown>[] = [
+      planResultEntry(0),
+      planResultEntry(1),
+    ],
+    originalMutants: readonly (typeof wideMutantField)[] = [
+      wideMutantField,
+      wideMutantField,
+    ],
+  ): Record<string, unknown> {
     const { envelope } = buildEnvelope({
       version: "test",
       command: "probe",
@@ -4239,7 +4249,7 @@ describe("probe --plan envelope: never over maxChars without a warning naming th
       logs: [],
       extra: {
         plan: {
-          results: [planResultEntry(0), planResultEntry(1)],
+          results: planResults,
           summary: {
             total: 2,
             killed: 2,
@@ -4256,7 +4266,7 @@ describe("probe --plan envelope: never over maxChars without a warning naming th
     reconcileEnvelopeDiffTruncation(
       envelope,
       {
-        planResults: [wideMutantField, wideMutantField].map((m) => ({
+        planResults: originalMutants.map((m) => ({
           mutant: m,
         })),
       },
@@ -4300,39 +4310,49 @@ describe("probe --plan envelope: never over maxChars without a warning naming th
     ).toContain(expected);
   }
 
-  // `mustFit` marks the budgets the real reduction is known to meet for
-  // this fixture (measured: every budget from 300 up fits; 50 to 250 sit
-  // below the fixed skeleton's floor and are honestly reported as over).
-  // A budget marked `mustFit` is asserted in bound outright, so a
-  // reduction that gives up and ships the whole payload with an honest
-  // warning still fails here: the contract has two halves, "never
-  // silently over" and "reduced to fit whenever the payload allows it".
-  it.each([
-    [50, false],
-    [100, false],
-    [150, false],
-    [200, false],
-    [250, false],
-    [300, true],
-    [400, true],
-    [500, true],
-    [700, true],
-    [1000, true],
-    [1500, true],
-    [2000, true],
-    [3000, true],
-    [3650, true],
-    [4300, true],
-  ] as const)(
-    "at maxChars=%i (mustFit=%s): never over the bound without a warning naming the true length, and in bound whenever the reduction can get there",
-    (maxChars, mustFit) => {
-      const envelope = buildPlanEnvelope(maxChars);
+  const SWEEP_BUDGETS = [
+    50, 100, 150, 200, 250, 300, 400, 500, 700, 1000, 1500, 2000, 3000, 3650,
+    4300,
+  ] as const;
+
+  /** Measure the retained plan shape with the exact production fixture
+   * factory, but no result entries. A weaker reduction cannot raise this
+   * floor, and fixture-field changes flow into calibration automatically. */
+  const fullyReducedSkeleton = buildPlanEnvelope(
+    Number.MAX_SAFE_INTEGER,
+    [],
+    [],
+  );
+  const skeletonFloor = JSON.stringify(fullyReducedSkeleton).length;
+  expect(fullyReducedSkeleton.warnings).toEqual([]);
+  const envelopesByBudget = new Map(
+    SWEEP_BUDGETS.map((budget) => [budget, buildPlanEnvelope(budget)]),
+  );
+
+  it.each(SWEEP_BUDGETS)(
+    "at maxChars=%i, honors the measured skeleton floor and reports the true final length below it",
+    (maxChars) => {
+      const envelope = envelopesByBudget.get(maxChars)!;
+      const finalLength = JSON.stringify(envelope).length;
+      const warnings = Array.isArray(envelope.warnings)
+        ? (envelope.warnings as unknown[])
+        : [];
       assertNeverOverWithoutHonestWarning(envelope, maxChars);
-      if (mustFit) {
+
+      if (maxChars >= skeletonFloor) {
+        expect(finalLength).toBeLessThanOrEqual(maxChars);
         expect(
-          JSON.stringify(envelope).length,
-          `the reduction is known to fit this fixture at maxChars=${String(maxChars)}, but the envelope shipped over the bound`,
-        ).toBeLessThanOrEqual(maxChars);
+          warnings.some(
+            (warning) =>
+              typeof warning === "string" &&
+              warning.includes("could not be met"),
+          ),
+        ).toBe(false);
+      } else {
+        expect(finalLength).toBeGreaterThan(maxChars);
+        expect(warnings).toContain(
+          `envelope is ${String(finalLength)} characters; requested max-chars ${String(maxChars)} could not be met`,
+        );
       }
     },
   );
