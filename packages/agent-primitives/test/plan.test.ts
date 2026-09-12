@@ -523,6 +523,8 @@ describe("probePlan(): one baseline, every mutant against it (I1)", () => {
       survived: 0,
       inconclusive: 0,
       not_run: 0,
+      met: 3,
+      violated: 0,
     });
     expect(result.results.map((r) => r.index)).toEqual([0, 1, 2]);
     for (const [i, entry] of result.results.entries()) {
@@ -717,6 +719,11 @@ describe("probePlan(): a failing baseline applies no mutant at all", () => {
     expect(result.baseline?.exitCode).toBe(1);
     expect(result.results.map((r) => r.status)).toEqual(["not_run", "not_run"]);
     expect(result.summary.not_run).toBe(2);
+    // A mutant the plan never reached carries no `mutation_probe` at
+    // all (never attempted, so no verdict to report an `expectation`
+    // about).
+    expect(result.results[0].mutation_probe?.expectation).toBeUndefined();
+    expect(result.results[1].mutation_probe?.expectation).toBeUndefined();
     // Nothing was even computed, let alone applied.
     expect(vi.mocked(computeMutant)).not.toHaveBeenCalled();
     expect(await sha256File(target)).toBe(beforeHash);
@@ -778,6 +785,8 @@ describe("probePlan(): a restore failure is terminal (I3)", () => {
       survived: 0,
       inconclusive: 1,
       not_run: 2,
+      met: 0,
+      violated: 0,
     });
     // The test command ran for the baseline and the first mutant only.
     expect(runsSeen(repo)).toHaveLength(2);
@@ -1223,6 +1232,8 @@ describe("probePlan(): an unexpected error while a mutant is applied", () => {
       survived: 0,
       inconclusive: 1,
       not_run: 1,
+      met: 1,
+      violated: 0,
     });
     // The baseline is still reported, and so is the log path of the
     // baseline run, which the emergency path used to drop.

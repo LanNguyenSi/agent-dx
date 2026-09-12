@@ -4253,6 +4253,18 @@ describe("probe(): the single-mutant result is what it was before the plan runne
   // runs has anything to put in. Adding a field is the change this
   // fixture is meant to SHOW rather than hide; what it still catches is
   // an unannounced change to any field that was already there.
+  //
+  // `mutation_probe.expectation` is the third such update (task
+  // `aef31231`): `killed`/`status` now always report the mutant's own
+  // actual outcome, independent of `--expect`, and `expectation`
+  // (`"met"`/`"violated"`) carries the separate "did that outcome match
+  // `--expect`" question the old, now-corrected `status` used to
+  // conflate. The fixture's `killed`/`survived` entries were updated to
+  // add it (all four fixtures ran under the default `--expect fail`, so
+  // `expectation` agrees with `status` in every case: `killed` ->
+  // `"met"`, `survived` -> `"violated"`); `inplaceBaselineFailed` gets
+  // none, since `expectation` is only ever present alongside a real
+  // `killed`/`survived` verdict.
   const RECORDED = JSON.parse(
     fs.readFileSync(
       path.join(

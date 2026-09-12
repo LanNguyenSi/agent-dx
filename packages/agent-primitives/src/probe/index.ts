@@ -818,6 +818,18 @@ export interface PlanSummaryField {
   survived: number;
   inconclusive: number;
   not_run: number;
+  /** How many of `results` carry `mutation_probe.expectation: "met"` /
+   * `"violated"` -- present alongside a real `killed`/`survived`
+   * verdict only, so `met + violated` can be less than `killed +
+   * survived` when a plan runs with no `--expect` given per mutant
+   * (never more). A plan-level `status: "survived"` is driven by
+   * `violated` being non-zero, not by raw `survived`, so this pair
+   * is what actually explains that verdict when it disagrees with the
+   * raw `killed`/`survived` counts above (an `expect: "pass"` mutant
+   * that `survived`, i.e. `met`, contributes to `survived` here but
+   * not to `violated`). */
+  met: number;
+  violated: number;
 }
 
 export interface ProbePlanResult {
@@ -838,12 +850,16 @@ export interface ProbePlanResult {
 function summarize(results: PlanMutantResult[]): PlanSummaryField {
   const count = (status: PlanMutantStatus): number =>
     results.filter((r) => r.status === status).length;
+  const countExpectation = (expectation: "met" | "violated"): number =>
+    results.filter((r) => r.mutation_probe?.expectation === expectation).length;
   return {
     total: results.length,
     killed: count("killed"),
     survived: count("survived"),
     inconclusive: count("inconclusive"),
     not_run: count("not_run"),
+    met: countExpectation("met"),
+    violated: countExpectation("violated"),
   };
 }
 

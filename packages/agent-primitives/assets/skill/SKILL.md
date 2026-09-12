@@ -43,9 +43,9 @@ hash. Copy its `mutation_probe` field (`mutant`, `verified_applied_via`,
 `result`, `restored_verified`) verbatim into a `mutation_probes` report.
 `result` is the mutant's actual outcome (`killed` when the test command
 failed with it applied, `survived` when it passed), independent of
-`--expect`; when `--expect` was given, also copy `mutation_probe.
-expectation` (`"met"`/`"violated"`), which says whether that outcome
-matched it -- `result` alone does not.
+`--expect`; when `--expect` was given, also copy
+`mutation_probe.expectation` (`"met"`/`"violated"`), which says whether
+that outcome matched it -- `result` alone does not.
 `inconclusive` is not a result: fix whatever it names (a failing baseline,
 a mutant that did not apply, a stale marker) and probe again. Pass `--pre`
 whenever the test under probe executes built output rather than the

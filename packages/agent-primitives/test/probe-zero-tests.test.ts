@@ -315,6 +315,9 @@ describe("probe(): baseline-stage no_tests_executed refusal", () => {
     expect(result.mutation_probe?.result).toBe("not_run");
     expect(result.mutation_probe?.reason).toBe("no_tests_executed");
     expect(result.mutant).toBeDefined();
+    // No real killed/survived verdict was reached, so there is nothing
+    // for `expectation` to report agreement or disagreement about.
+    expect(result.mutation_probe?.expectation).toBeUndefined();
   });
 
   it("a baseline that exits 1 with vitest's own 'No test files found' text is no_tests_executed, never baseline_failed", async () => {
@@ -472,6 +475,11 @@ describe("probe(): mutant-side zero-tests detector (step.ts)", () => {
     expect(result.status).toBe("inconclusive");
     expect(result.reason).toBe("no_tests_executed");
     expect(result.mutation_probe?.result).toBe("not_run");
+    // A mutant-side refusal reached through `step.ts`'s own classify
+    // step (unlike the baseline-side refusal above, which never reaches
+    // it): still no real killed/survived verdict, so still nothing for
+    // `expectation` to report.
+    expect(result.mutation_probe?.expectation).toBeUndefined();
     expect(
       result.warnings.some((w) =>
         /the mutant run's own output shows no test was actually executed/.test(

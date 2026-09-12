@@ -626,9 +626,11 @@ export async function runMutantAttempt(
         // this run never even captured; (2) the exit code itself reads
         // `0` despite the predicate reading "failed" -- the process and
         // the predicate disagree, worth a second look regardless of
-        // `--expect`; or (3) `--expect pass`, where a miss means the
-        // mutant SURVIVED rather than being killed -- not the routine
-        // "predicate agrees the mutant broke the suite" shape at all.
+        // `--expect`; or (3) `--expect pass`, where a miss still means
+        // the mutant was KILLED (the predicate reads FAILING, the same
+        // as under `--expect fail`) but that killed verdict VIOLATES
+        // the expectation -- not the routine "predicate agrees, the
+        // expectation is met" shape at all.
         // Named explicitly, the same as `--require-baseline-evidence`'s
         // own miss is on the baseline side, so a caller reading
         // `warnings` sees which pattern was checked and against what,
@@ -666,15 +668,15 @@ export async function runMutantAttempt(
     // predicate on THIS mutant's run reads as PASSING -- exit code `0`
     // by default, or `testPassed` itself (`--pass-regex`'s own match)
     // when that flag is given -- the exact silent-pass evidence this
-    // whole mechanism distrusts. Whichever direction `--expect` points,
-    // a mutant run whose predicate reads FAILING already carries a real
-    // signal -- the run itself disagreed with the baseline -- that this
-    // output-only heuristic has no business second-guessing; that holds
-    // for a `survived` verdict under `--expect fail` bound to a passing
-    // predicate exactly as it does for a `killed` verdict under
-    // `--expect pass` bound to a passing predicate, and it excludes a
-    // `survived` verdict under `--expect pass`, which is `survived`
-    // precisely because the predicate read FAILING.
+    // whole mechanism distrusts. That predicate direction is
+    // `--expect`-independent (see `status`'s own classify step: passing
+    // -> `survived`, failing -> `killed`), so this fallback is entered
+    // only when this run's own predicate reads PASSING, i.e. a
+    // `survived` verdict, whichever `--expect` was given. A mutant run
+    // whose predicate reads FAILING (`killed`, always, however
+    // `--expect` points) already carries a real signal -- the run
+    // itself disagreed with the baseline -- that this output-only
+    // heuristic has no business second-guessing.
     const restsOnPassingVerdict = testPassed;
     // Silence on both sides is common and legitimate (many hand-rolled
     // test scripts print nothing on a pass, relying on the exit code

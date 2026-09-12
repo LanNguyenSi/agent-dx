@@ -1483,10 +1483,11 @@ how that is surfaced.
 
 For a test runner neither built-in detector recognizes, a mutant run
 whose own verdict rests on a PASS -- exit code `0` by default, or
-`--pass-regex`'s own match when that flag is given (a `survived` verdict
-under the default `--expect fail`, or a `killed` one under `--expect
-pass`: the same silent-pass evidence, just certifying the opposite
-verdict) -- additionally falls back to comparing its own output
+`--pass-regex`'s own match when that flag is given (a `survived`
+verdict, whichever `--expect` was given -- the predicate direction is
+`--expect`-independent, so the same silent-pass evidence certifies
+`survived` under either `--expect`) -- additionally falls back to
+comparing its own output
 against the baseline's: byte-identical stdout/stderr on both sides, with
 no summary line either detector recognizes on either side either, is
 read as "this ran the same nothing twice" rather than a real verdict. A
@@ -1601,8 +1602,10 @@ the miss warning fires only for an AMBIGUOUS miss -- either side of
 that run's own captured tail was truncated (the pattern may have
 matched output the run never captured), the exit code reads `0` while
 the predicate reads "failed" (the process and the predicate disagree),
-or `--expect pass`, where a miss means the mutant SURVIVED
-rather than being killed. A textbook kill -- real non-matching output,
+or `--expect pass`, where a miss still means the mutant was
+KILLED (the predicate reads FAILING regardless of `--expect`) but that
+killed verdict VIOLATES the expectation. A textbook kill -- real
+non-matching output,
 a non-zero exit code, an untruncated tail, under `--expect fail` --
 carries no miss warning at all.
 
@@ -2143,7 +2146,13 @@ paste into a `mutation_probes` report, `expectation` included) and
 `test`. `summary` counts `total`/`killed`/`survived`/`inconclusive`/
 `not_run` by that same actual-outcome `status`, so its `killed`/
 `survived` counts are not what decides the plan's own exit code below
-when any mutant declares a non-default `expect`.
+when any mutant declares a non-default `expect`; `summary` also counts
+`met`/`violated`, mirroring `results[].mutation_probe.expectation`
+(present alongside a real `killed`/`survived` verdict only, so `met +
+violated` can fall short of `killed + survived` for a mutant run with
+no `--expect` given, never exceed it) -- this pair, not the raw
+`killed`/`survived` counts, is what actually explains a plan-level
+`status: "survived"` when it disagrees with them.
 
 A failing baseline is one difference from the single-mutant form worth
 naming explicitly: the single probe's CLI envelope remaps it to a

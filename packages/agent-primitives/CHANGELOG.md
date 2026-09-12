@@ -24,7 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   caller not passing `--expect`, since `expectation` and the old,
   now-corrected `status` always agree under the default `--expect
   fail`. README and the package's skill updated to describe
-  `killed`/`survived`/`expectation` under this contract.
+  `killed`/`survived`/`expectation` under this contract. A `--plan`
+  run's own `summary` gained `met`/`violated` counts alongside the
+  existing `killed`/`survived`/`inconclusive`/`not_run` ones, so a
+  plan-level `status: "survived"` (driven by `violated`, not by raw
+  `survived`, once any mutant carries `--expect pass`) is explained by
+  a number in the same envelope instead of only by re-deriving it from
+  `results[].mutation_probe.expectation`.
 
 ## [0.2.0] - 2026-09-10
 
