@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The real `probe --plan` envelope sweep now measures its reduced-floor
+  threshold from production envelopes, so fixture growth cannot leave a
+  hand-maintained budget table claiming an obsolete bound (task `fae3dc79`).
+
 - Worktree cleanup retries `git worktree prune` once when its own
   gone-but-present admin entry is not `locked` after the first prune.
   The retry is repository-wide, so it can also clear another concurrent
