@@ -176,23 +176,32 @@ function diffTrees(
   };
 }
 
-/** A relative path (as `hashTree` keys its Map) that names one of git's
- * OWN transient lock files rather than anything a probe run wrote: git
- * takes a same-named `<name>.lock` next to the file or object it is
- * about to update and removes it when that operation finishes, so one
- * can legitimately exist at one snapshot instant and not the other with
- * no relation to what the tool under test did. `objects/maintenance.lock`
- * is the concrete instance CI run 34447150672 hit: `git maintenance run
- * --auto`, which recent git auto-invokes from plumbing commands like
- * `commit` and `worktree add`, took that lock for a background pass
- * still running at the "before" snapshot and released it by "after",
- * which the old `expect(gitAfter).toEqual(gitBefore)` reported only as
- * "35 vs 36 entries". The fixture initialisers below also set
- * `maintenance.auto false`/`gc.auto 0` so this should no longer fire in
- * practice; this predicate is the second, independent guard for a git
- * version, platform, or already-in-flight pass that ignores that config. */
+/** A relative path (as `hashTree` keys its Map) that names git's OWN
+ * `objects/maintenance.lock`, the exact lock `git maintenance run --auto`
+ * takes for a background pass and releases when that pass finishes, so
+ * it can legitimately exist at one snapshot instant and not the other
+ * with no relation to what the tool under test did. This is the
+ * concrete instance CI run 34447150672 hit: measured with `GIT_TRACE`
+ * on git 2.54.0, `git commit` auto-invokes `git maintenance run --auto
+ * --quiet --detach` (porcelain), while `git worktree add` (plumbing)
+ * spawns nothing; the pass was still running at the "before" snapshot
+ * and released the lock by "after", which the old
+ * `expect(gitAfter).toEqual(gitBefore)` reported only as "35 vs 36
+ * entries". The fixture initialisers below also set `maintenance.auto
+ * false`/`gc.auto 0` so this should no longer fire in practice; this
+ * predicate is the second, independent guard for a git version,
+ * platform, or already-in-flight pass that ignores that config.
+ *
+ * Deliberately an EXACT match on this one path, not a `*.lock` class:
+ * a broad `endsWith(".lock")` also silently drops an injected
+ * `.git/index.lock` (or any other lock) from the diff, which is
+ * exactly the kind of pollution this assertion exists to catch (see
+ * the `index.lock` negative control below). Widen this only alongside
+ * new measured evidence for another specific lock path (for example
+ * `objects/maintenance.commit-graph.lock` or a `multi-pack-index.lock`
+ * from the same background pass), not to a generic suffix match. */
 function isGitTransientLockPath(rel: string): boolean {
-  return rel.endsWith(".lock");
+  return rel === path.join("objects", "maintenance.lock");
 }
 
 /** Asserts two `hashTree` snapshots of the same root are identical,
@@ -338,6 +347,18 @@ describe("assertTreeUnchanged()", () => {
       assertTreeUnchanged(before, after, scratch, isGitTransientLockPath),
     ).toThrow(`${scratch} changed: added [objects/NOT-A-LOCK.txt]`);
   });
+
+  it("negative control: with isGitTransientLockPath as ignore, a *.lock path OTHER than objects/maintenance.lock (an injected .git/index.lock, the residue a killed git process leaves) still fails by name", () => {
+    const scratch = makeTmpDir();
+    fs.writeFileSync(path.join(scratch, "kept.txt"), "same\n");
+    const before = hashTree(scratch);
+    fs.writeFileSync(path.join(scratch, "index.lock"), "");
+    const after = hashTree(scratch);
+
+    expect(() =>
+      assertTreeUnchanged(before, after, scratch, isGitTransientLockPath),
+    ).toThrow(`${scratch} changed: added [index.lock]`);
+  });
 });
 
 const FIXTURE_JS = [
@@ -371,11 +392,13 @@ function initRepo(): { repo: string } {
   git(repo, ["config", "core.autocrlf", "false"]);
   // Never let git's own background maintenance run against this
   // fixture: `maintenance.auto`/`gc.auto` can otherwise fire from this
-  // repo's own `commit` below or from a later `worktree add` the probe
-  // under test runs, taking `.git/objects/maintenance.lock` for the
-  // duration and dropping it whenever that pass finishes -- which is
-  // what made CI run 34447150672 flake (see isGitTransientLockPath's
-  // doc comment for the exact shape).
+  // repo's own `commit` below (measured with `GIT_TRACE` on git 2.54.0:
+  // `commit` auto-invokes `git maintenance run --auto --quiet --detach`;
+  // `worktree add` is plumbing and spawns nothing), taking
+  // `.git/objects/maintenance.lock` for the duration and dropping it
+  // whenever that pass finishes -- which is what made CI run 34447150672
+  // flake (see isGitTransientLockPath's doc comment for the exact
+  // shape).
   git(repo, ["config", "maintenance.auto", "false"]);
   git(repo, ["config", "gc.auto", "0"]);
   fs.writeFileSync(path.join(repo, "fixture.js"), FIXTURE_JS);
@@ -459,8 +482,7 @@ function initSrcRepo(
   git(repo, ["config", "user.name", "test"]);
   git(repo, ["config", "core.autocrlf", "false"]);
   // See initRepo()'s matching config for why: this repo's own commit
-  // below, or a later `worktree add`, can otherwise trigger background
-  // maintenance mid-run.
+  // below can otherwise trigger background maintenance mid-run.
   git(repo, ["config", "maintenance.auto", "false"]);
   git(repo, ["config", "gc.auto", "0"]);
   fs.mkdirSync(path.join(repo, "src"), { recursive: true });

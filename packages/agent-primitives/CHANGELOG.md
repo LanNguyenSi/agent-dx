@@ -37,14 +37,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   CI flake where the repository's `.git` carried one extra leftover entry
   after a run.
 - Closed a CI flake in `probe-worktree.test.ts`'s ".git tree unchanged"
-  refusal test (CI run 34447150672): the fixture repos now disable
-  `maintenance.auto`/`gc.auto` so git never starts its own background
-  maintenance mid-test, the `.git` snapshot comparison now names every
-  added/removed/changed path instead of only two `Map` sizes, and that
-  comparison explicitly excludes git's own transient `*.lock` files
-  (`objects/maintenance.lock` was the exact entry the flake lost) so a
-  maintenance pass that still starts despite the new config cannot fail
-  the assertion either.
+  refusal test (CI run 34447150672): the three fixture initialisers now
+  disable `maintenance.auto`/`gc.auto` so this class of background
+  maintenance should not start during those tests, the `.git` snapshot
+  comparison now names every added/removed/changed path instead of only
+  two `Map` sizes, and that comparison explicitly excludes git's own
+  transient `objects/maintenance.lock` (the exact entry the flake lost)
+  by exact path, not by a generic `*.lock` suffix, so a maintenance pass
+  that still starts despite the new config cannot fail the assertion
+  either -- this exclusion is the enforced guard.
 
 ## [0.2.0] - 2026-09-10
 
