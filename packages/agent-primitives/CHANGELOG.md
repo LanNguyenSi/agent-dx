@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- README's `probe` isolation section and "Non-JS repositories" now state
+  the realpath/linked-directory limitation of `-i worktree`: a linked
+  directory is shared with the source tree, and code inside it that
+  locates the project by resolving a real path (PHP `__DIR__`/
+  `__FILE__`, Node's `fs.realpathSync`, Python's `os.path.realpath`)
+  sees the operator's real tree, so a probe whose autoloader is
+  bootstrapped from a linked directory tests the unmutated code and
+  reports `survived` -- a silent false negative. Names `-i inplace` and
+  a repo-side test-bootstrap fix as the two ways out, with a Drupal
+  `core/tests/bootstrap.php` case as the worked example (issue #243).
+  `--copy <dirs>` and a survived-detection heuristic remain proposals in
+  that issue, not implemented here.
+
 ### Fixed
 
 - `probe`'s `result`/`status` (and a `--plan` mutant's own `status`) now

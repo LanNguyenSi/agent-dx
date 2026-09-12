@@ -1170,6 +1170,46 @@ not a supported
 platform for this package, and its own aliasing (8.3 short names, which
 are a second spelling no inode comparison resolves) is not addressed.
 
+A linked directory being SHARED rather than copied has a second
+consequence beyond a write reaching through it: code that locates its
+own project by resolving a real path -- PHP's `__DIR__`/`__FILE__`
+(PHP resolves symlinks when it sets them), Node's
+`fs.realpathSync`, Python's `os.path.realpath` -- sees the operator's
+real tree when it runs from inside a linked directory, never the copy,
+whatever `--cwd` or the mapped cwd says. When the code that does this
+is the one bootstrapping the test run's own autoloader, the mutation
+under test is silently never exercised: the test class itself loads
+from the copy (the test runner is handed that path directly), but the
+autoloader registers the class UNDER test from the real tree the
+realpath call resolved to, so the mutant in the copy is applied,
+verified, and never reached. `-t`/`--pre` then observe the unmutated
+code, the mutant is reported `survived`, and nothing in the envelope
+distinguishes that from a genuinely surviving mutant -- a silent false
+negative, not an error this package can detect from the outside.
+Measured on a Drupal repository: `core/tests/bootstrap.php`, reached
+through a `--link docroot/core` symlink, computes `$root =
+dirname(__DIR__, 2)` and registers every module namespace (including
+the one under test) from the REAL `docroot/modules`; the same mutant,
+same test, same `--pass-regex '^OK \('` reported `killed` (PHPUnit
+`Tests: 11, Assertions: 17, Failures: 2`) under `-i inplace` and
+`survived` (PHPUnit `OK (11 tests, 17 assertions)`) under `-i worktree`
+with `docroot/core` linked. This is not Drupal-specific: `node_modules`
+is this package's own default auto-link, so a JS repository whose test
+bootstrap lives inside a linked `node_modules` package and resolves
+paths by `fs.realpathSync` has the identical shape. Two ways out: run
+that probe under `-i inplace` instead, which mutates the real tree
+directly and so needs no link at all; or fix it at the repository side,
+by having the project's own test bootstrap register its own namespaces
+from itself (relative to the test tree it is actually running in, computed
+without resolving through a symlink) ahead of the framework's own
+registration, the way `core/tests/bootstrap.php` would need to register
+`docroot/modules` from a path relative to its own `__DIR__` rather than
+from a real path derived from it. A `--copy <dirs>` option copying such a
+directory into the isolation copy instead of linking it, and a
+survived-detection heuristic inspecting the test output for paths under
+the source tree, are proposals tracked in issue #243, not implemented by
+this package.
+
 The sync runs under the same abort machinery as `--pre`/`-t`: every git
 call it makes is killed on `SIGINT`/`SIGTERM` and waited for before
 anything removes the worktree underneath it, and the untracked-file copy
@@ -1380,6 +1420,14 @@ repository's gitignored build/dependency output needs (Drupal's
 into `--link`, a `--plan` file's own `link`, or -- so every invocation
 picks it up without repeating any of them -- the repository defaults
 file below.
+
+Linking `docroot/core` this way carries the realpath limitation
+described above: Drupal's own `core/tests/bootstrap.php` locates the
+real docroot by resolving `__DIR__` through the symlink, so a probe
+whose test bootstraps through a linked `docroot/core` reports
+`survived` on a mutant that never actually ran. Use `-i inplace` for
+such a probe, or fix the repository's test bootstrap to register its
+own namespaces relative to itself ahead of the framework's.
 
 #### Repo defaults file
 
