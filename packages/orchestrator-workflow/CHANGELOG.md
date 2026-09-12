@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Implementer reports now paste non-empty commit lists from `git log --reverse
+  --format=%H <base>..HEAD`, and foreground verification/probe plans and
+  repeat tallies return in the same turn as the last check; a background
+  monitor does not substitute. Anchored by pandora batch48 evidence.
+
 - The implementer output contract now enumerates mutation-probe `result` as
   `killed | survived | not_applicable` in both the installed prompt and the
   SKILL.md reference. The docs-consistency guard separately pins each copy's
