@@ -211,7 +211,11 @@ directory and the subagents.
    for real, observe the named test fail, restore, re-verify). Hold the
    implementer's report to the claim-only-what-was-measured rule too: treat any
    verification claim there that is not backed by a check it actually ran as
-   unverified. On any round after the task's first, the briefing also names
+   unverified. The installed `implementer.md` prompt has the implementer cite
+   a coverage gate's threshold and pass/fail counts, not a run-specific
+   coverage percentage, citing a percentage only together with the exact
+   commit and the run count, since branch coverage can vary between runs of
+   the same commit. On any round after the task's first, the briefing also names
    every mutation probe named in an earlier round of this task (on the
    task's first round there are none), drawn from the run's
    `04-implementation-summary.md`; the implementer replays each one, not
@@ -258,54 +262,57 @@ directory and the subagents.
    operator flags high-risk; `normal` only for docs, renames, or batch
    cosmetics; `rigorous` otherwise. The method is orthogonal to the tier and
    never substitutes for it: do not pair `adversarial` with the `-medium`
-   reviewer tier, a budget mismatch that names probes without the effort to
-   run them; tiers themselves are unchanged by this axis. When the
-   reviewer's environment cannot use version
-   control to see the diff (for example a policy-gated repository), supply the
-   diff as a pre-generated file in the briefing instead of expecting the
-   reviewer to derive it, and have the reviewer report explicitly if it could
-   only reconstruct the delta some other way, rather than silently reviewing
-   less than the full change. The reviewer checks spec compliance, architecture
-   consistency, edge cases, security, test adequacy (including whether new
-   tests would fail if the change were reverted), and maintainability. Findings
-   go to `05-review-findings.md`; transfer each finding from the reviewer
-   output contract into the table's columns as-is, keeping the Severity and
-   Decision headers unchanged, since those two are what the
-   orchestrator-workflow completeness reader verifies. Replace the shipped
-   placeholder/legend row with the transferred findings; for a genuine
-   zero-findings review, delete that row instead of leaving it in place, since
-   the completeness reader treats an untouched placeholder row with no finding
-   rows as the template never having been filled in. When acceptance rests on
-   empirical or probabilistic evidence (flake rates, benchmarks, "n runs
-   green", performance/timing numbers), the reviewer must independently
-   reproduce it — its own runs or measurements, not a re-read of the
-   implementer's log — and record the method, sample size, and result against
-   the implementer's claim in the reviewer output contract's `reproduction`
-   field. This does not apply to deterministic checks (a single test run,
-   `tsc`, lint): only claims that could vary run to run trigger it. The GitHub
-   Actions shell replay named in step 6 is a second, explicitly
+   reviewer tier, a budget mismatch that names probes without the effort to run
+   them; tiers themselves are unchanged by this axis. When the reviewer's
+   environment cannot use version control to see the diff (for example a
+   policy-gated repository), supply the diff as a pre-generated file in the
+   briefing instead of expecting the reviewer to derive it, and have the
+   reviewer report explicitly if it could only reconstruct the delta some other
+   way, rather than silently reviewing less than the full change. The reviewer
+   checks spec compliance, architecture consistency, edge cases, security, test
+   adequacy (including whether new tests would fail if the change were
+   reverted), and maintainability. Findings go to `05-review-findings.md`;
+   transfer each finding from the reviewer output contract into the table's
+   columns as-is, keeping the Severity and Decision headers unchanged, since
+   those two are what the orchestrator-workflow completeness reader verifies.
+   Replace the shipped placeholder/legend row with the transferred findings;
+   for a genuine zero-findings review, delete that row instead of leaving it in
+   place, since the completeness reader treats an untouched placeholder row
+   with no finding rows as the template never having been filled in. When
+   acceptance rests on empirical or probabilistic evidence (flake rates,
+   benchmarks, "n runs green", performance/timing numbers), the reviewer must
+   independently reproduce it — its own runs or measurements, not a re-read of
+   the implementer's log — and record the method, sample size, and result
+   against the implementer's claim in the reviewer output contract's
+   `reproduction` field. This does not apply to deterministic checks (a single
+   test run, `tsc`, lint): only claims that could vary run to run trigger it.
+   The GitHub Actions shell replay named in step 6 is a second, explicitly
    non-probabilistic trigger for the same field, with `sample_size:
    not_applicable` allowed when the replay itself has no meaningful sample
-   size. A change that deletes or renames an exported identifier, type, config
-   key, or file is also checked for identifier drift (docs or comments still
-   describing the old name as current), by the reviewer or by the orchestrator
-   itself when it reviews a trivial rename per Scaling delegation, using a
-   connected drift check when one exists. When this is not the task's first
-   review round, name the round number in the briefing; the reviewer marks each
-   finding's `recurrence` as `new` or `repeated` against the earlier rounds it
-   was told about, which is what lets the orchestrator detect the Review-round
-   escalation budget's trigger (see below) without re-deriving it by hand. When
-   the implementer's report replays a prior round's mutation probe, the
-   orchestrator's reviewer briefing names the replayed probes the implementer
-   reports as killed together with their `mutant` and `verified_applied_via`
-   values; the reviewer may then skip re-running those. The reviewer output
-   contract itself is unchanged. Never run mutation probes in place against a
-   worktree a reviewer subagent is concurrently reviewing; isolate the probe in
-   a separate worktree or wait until the reviewer has returned before probing
-   that tree again. For an explicitly adopted v1 run, ask the reviewer to
-   compare the frozen delegated criteria with the referenced evidence and judge
-   semantic adequacy, including whether a manual check is actually concrete and
-   reasoned.
+   size. When citing a coverage gate, the installed `reviewer.md` prompt has
+   the reviewer cite the threshold and pass/fail counts, not a run-specific
+   coverage percentage, citing a percentage only together with the exact commit
+   and the run count, since branch coverage can vary between runs of the same
+   commit. A change that deletes or renames an exported identifier, type,
+   config key, or file is also checked for identifier drift (docs or comments
+   still describing the old name as current), by the reviewer or by the
+   orchestrator itself when it reviews a trivial rename per Scaling delegation,
+   using a connected drift check when one exists. When this is not the task's
+   first review round, name the round number in the briefing; the reviewer
+   marks each finding's `recurrence` as `new` or `repeated` against the earlier
+   rounds it was told about, which is what lets the orchestrator detect the
+   Review-round escalation budget's trigger (see below) without re-deriving it
+   by hand. When the implementer's report replays a prior round's mutation
+   probe, the orchestrator's reviewer briefing names the replayed probes the
+   implementer reports as killed together with their `mutant` and
+   `verified_applied_via` values; the reviewer may then skip re-running those.
+   The reviewer output contract itself is unchanged. Never run mutation probes
+   in place against a worktree a reviewer subagent is concurrently reviewing;
+   isolate the probe in a separate worktree or wait until the reviewer has
+   returned before probing that tree again. For an explicitly adopted v1 run,
+   ask the reviewer to compare the frozen delegated criteria with the
+   referenced evidence and judge semantic adequacy, including whether a manual
+   check is actually concrete and reasoned.
 8. **Decide acceptance.** Accept, request fixes, defer, or escalate to the
    operator. High or critical findings block acceptance until fixed or
    explicitly waived: critical findings require operator sign-off; high

@@ -135,6 +135,10 @@ Rules:
   shell replay above is a second, explicitly non-probabilistic trigger for
   the same field: report it in `reproduction` too, with `sample_size:
   not_applicable` when the replay itself has no meaningful sample size.
+- When citing a coverage gate, cite the threshold and pass/fail counts, not
+  a run-specific coverage percentage; cite a percentage only together with
+  the exact commit and the run count, since branch coverage can vary
+  between runs of the same commit.
 - When a mutation-probe runner is available in the session, run probes
   through it instead of editing files by hand, and carry its result fields
   into your findings and `reproduction`; when a verify runner is available,

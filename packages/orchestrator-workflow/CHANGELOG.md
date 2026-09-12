@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The implementer and reviewer prompts (`assets/agents/implementer.md`,
+  `assets/agents/reviewer.md`, mirrored in SKILL.md) now say: cite a
+  coverage gate's threshold and pass/fail counts, not a run-specific
+  coverage percentage; cite a percentage only together with the exact
+  commit and the run count, since branch coverage varies between runs of
+  the same commit. Anchored by pandora run
+  `.ai/runs/2026-09-11-memory-sync-wipe`.
+
 ## [0.32.0] - 2026-09-11
 
 ### Added
