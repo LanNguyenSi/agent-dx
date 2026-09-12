@@ -818,6 +818,20 @@ export interface PlanSummaryField {
   survived: number;
   inconclusive: number;
   not_run: number;
+  /** How many of `results` carry `mutation_probe.expectation: "met"` /
+   * `"violated"` -- present alongside a real `killed`/`survived`
+   * verdict only. Every attempted mutant runs under some expect (its
+   * own, else the plan's, else the CLI default `fail`), so `met +
+   * violated` always equals `killed + survived`; `inconclusive` and
+   * `not_run` results carry neither and account for the whole
+   * difference from `total`. A plan-level `status: "survived"` is
+   * driven by `violated` being non-zero, not by raw `survived`, so
+   * this pair is what actually explains that verdict when it disagrees
+   * with the raw `killed`/`survived` counts above (an `expect: "pass"`
+   * mutant that `survived`, i.e. `met`, contributes to `survived` here
+   * but not to `violated`). */
+  met: number;
+  violated: number;
 }
 
 export interface ProbePlanResult {
@@ -838,12 +852,16 @@ export interface ProbePlanResult {
 function summarize(results: PlanMutantResult[]): PlanSummaryField {
   const count = (status: PlanMutantStatus): number =>
     results.filter((r) => r.status === status).length;
+  const countExpectation = (expectation: "met" | "violated"): number =>
+    results.filter((r) => r.mutation_probe?.expectation === expectation).length;
   return {
     total: results.length,
     killed: count("killed"),
     survived: count("survived"),
     inconclusive: count("inconclusive"),
     not_run: count("not_run"),
+    met: countExpectation("met"),
+    violated: countExpectation("violated"),
   };
 }
 
@@ -1261,12 +1279,22 @@ export async function probePlan(
       }
     }
 
-    // The exit-code contract, one step stricter than "any survived is a
-    // finding": exit 1 (`survived`) is reserved for a plan that
-    // CONCLUDED and found a survivor, so a plan that stopped early, or
-    // one carrying a mutant nothing could be learned from, is exit 2
-    // (`inconclusive`) even when a survivor is among its results.
+    // The exit-code contract, one step stricter than "any expectation
+    // violation is a finding": exit 1 (`survived`) is reserved for a
+    // plan that CONCLUDED and found an expectation VIOLATED (a mutant
+    // whose actual outcome disagreed with its own `expect`), so a plan
+    // that stopped early, or one carrying a mutant nothing could be
+    // learned from, is exit 2 (`inconclusive`) even when a violation is
+    // among its results. This is driven by `expectation`, not by
+    // `results[i].status` directly: `status` is each mutant's own
+    // actual, measured outcome (independent of `expect`, see `step.ts`),
+    // so counting raw `survived` here would make this plan's own verdict
+    // (and exit code) ignore `expect` for any mutant declared with
+    // `expect: "pass"`.
     const summary = summarize(results);
+    const violatedCount = results.filter(
+      (r) => r.mutation_probe?.expectation === "violated",
+    ).length;
     let status: ProbeStatus;
     let reason: string | undefined = terminal;
     if (terminal !== undefined) {
@@ -1274,7 +1302,7 @@ export async function probePlan(
     } else if (summary.inconclusive > 0 || summary.not_run > 0) {
       status = "inconclusive";
       reason = "mutant_inconclusive";
-    } else if (summary.survived > 0) {
+    } else if (violatedCount > 0) {
       status = "survived";
     } else {
       status = "killed";

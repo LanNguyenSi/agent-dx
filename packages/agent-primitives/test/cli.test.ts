@@ -2567,9 +2567,12 @@ describe("cli: probe", () => {
     // -- not a byte count that would sit inside the envelope's own
     // run-to-run noise (a timing digit, a temp-dir name).
     const parsed = JSON.parse(run.stdout);
-    // `-t 'true'` always leaves the test passing, and `--expect pass`
-    // reads that as the mutant behaving as expected: `killed`.
-    expect(parsed.status).toBe("killed");
+    // `-t 'true'` always leaves the test passing, so the actual outcome
+    // is `survived` regardless of `--expect`; `--expect pass` reads that
+    // as the mutant behaving as expected (`mutation_probe.expectation:
+    // "met"`), which is what keeps the exit code (asserted above) at 0.
+    expect(parsed.status).toBe("survived");
+    expect(parsed.mutation_probe.expectation).toBe("met");
     // The envelope's own top-level flag: something in the result really
     // was cut, not only the per-mutant `diff.truncated` checked below.
     expect(parsed.truncated).toBe(true);
@@ -2600,6 +2603,218 @@ describe("cli: probe", () => {
       clause,
     );
   }, 30000);
+
+  // The CLI's own exit-code branch (`expectation === "met" ? 0 : 1`) only
+  // differs from the pre-existing `status`-driven exit code
+  // (`statusExitCode`) in one shape: a `killed` verdict under `--expect
+  // pass`, where `status` alone (`killed` -> the ok class -> exit `0`)
+  // would say the opposite of what `expectation: "violated"` demands
+  // (exit `1`). Every other combination (`killed`+`fail`, `survived`+
+  // `fail`, `survived`+`pass`) already has `statusExitCode` agreeing
+  // with the `expectation`-driven exit code, so only this pair actually
+  // discriminates the branch -- these two tests exist specifically to
+  // cover it, run through the built CLI (`agent-primitives probe`
+  // mutation probe P3 targets this exact ternary).
+  it("--expect pass against a mutant the test catches: status killed, expectation violated, exit 1 (not statusExitCode's 0)", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      [
+        "const assert = require('node:assert');",
+        "const { isPositive } = require('./fixture.js');",
+        "assert.strictEqual(isPositive(5), true);",
+        "assert.strictEqual(isPositive(-5), false);",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repo);
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "-i",
+      "inplace",
+      "--file",
+      "fixture.js",
+      "-n",
+      "2",
+      "-r",
+      "  return false;",
+      "-t",
+      "node fixture.test.js",
+      "--expect",
+      "pass",
+    ]);
+
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("killed");
+    expect(parsed.mutation_probe.expectation).toBe("violated");
+    expect(run.code).toBe(1);
+  });
+
+  it("--expect pass against a mutant the test does not catch: status survived, expectation met, exit 0", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      [
+        "const assert = require('node:assert');",
+        "const { isPositive } = require('./fixture.js');",
+        "assert.strictEqual(isPositive(5), true);",
+        "assert.strictEqual(isPositive(-5), false);",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repo);
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "-i",
+      "inplace",
+      "--file",
+      "fixture.js",
+      "-n",
+      "4",
+      "-r",
+      "module.exports = { isPositive, extra: 1 };",
+      "-t",
+      "node fixture.test.js",
+      "--expect",
+      "pass",
+    ]);
+
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("survived");
+    expect(parsed.mutation_probe.expectation).toBe("met");
+    expect(run.code).toBe(0);
+  });
+
+  it("plan: the only violation comes from an --expect pass mutant that got killed -- plan status survived, exit 1", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      [
+        "const assert = require('node:assert');",
+        "const { isPositive } = require('./fixture.js');",
+        "assert.strictEqual(isPositive(5), true);",
+        "assert.strictEqual(isPositive(-5), false);",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repo);
+    const planPath = path.join(repo, "plan.json");
+    fs.writeFileSync(
+      planPath,
+      JSON.stringify({
+        test: "node fixture.test.js",
+        isolation: "inplace",
+        mutants: [
+          // Killed under the default expect ("fail"): met.
+          { file: "fixture.js", line: 2, replace: "  return false;" },
+          // Killed under expect "pass": violated -- this is the plan's
+          // only violation, and the raw `status` counts alone
+          // (`killed: 2, survived: 0`) do not show it.
+          {
+            file: "fixture.js",
+            line: 2,
+            replace: "  return n < 0;",
+            expect: "pass",
+          },
+        ],
+      }),
+    );
+
+    const run = await spawnCli(["-C", repo, "probe", "--plan", planPath]);
+
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("survived");
+    expect(parsed.plan.summary.violated).toBe(1);
+    expect(parsed.plan.summary.met).toBe(1);
+    expect(run.code).toBe(1);
+  });
+
+  it("plan: every mutant's expectation is met (mixed --expect) -- plan status killed, exit 0", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      [
+        "const assert = require('node:assert');",
+        "const { isPositive } = require('./fixture.js');",
+        "assert.strictEqual(isPositive(5), true);",
+        "assert.strictEqual(isPositive(-5), false);",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repo);
+    const planPath = path.join(repo, "plan.json");
+    fs.writeFileSync(
+      planPath,
+      JSON.stringify({
+        test: "node fixture.test.js",
+        isolation: "inplace",
+        mutants: [
+          // Killed under the default expect ("fail"): met.
+          { file: "fixture.js", line: 2, replace: "  return false;" },
+          // Survives, declared expect "pass": met.
+          {
+            file: "fixture.js",
+            line: 4,
+            replace: "module.exports = { isPositive, extra: 1 };",
+            expect: "pass",
+          },
+        ],
+      }),
+    );
+
+    const run = await spawnCli(["-C", repo, "probe", "--plan", planPath]);
+
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("killed");
+    expect(parsed.plan.summary).toMatchObject({ met: 2, violated: 0 });
+    expect(run.code).toBe(0);
+  });
 
   it("a -p patch touching two paths, no --file: usage_error/patch_file_ambiguous, exit 2, through the built CLI", async () => {
     const repo = initRepo();
@@ -3661,6 +3876,8 @@ describe("cli: probe --plan", () => {
       survived: 0,
       inconclusive: 0,
       not_run: 0,
+      met: 2,
+      violated: 0,
     });
     expect(parsed.plan.results).toHaveLength(2);
     for (const entry of parsed.plan.results) {
@@ -3952,6 +4169,8 @@ describe("cli: probe --plan", () => {
       survived: 0,
       inconclusive: 0,
       not_run: 0,
+      met: count,
+      violated: 0,
     });
     // The full result is on disk and named in `logs`, carrying every
     // mutant's four contract fields.
@@ -3994,6 +4213,8 @@ describe("cli: probe --plan", () => {
       survived: 0,
       inconclusive: 0,
       not_run: 0,
+      met: count,
+      violated: 0,
     });
     expect(parsed.plan.results.length).toBeLessThan(count);
     const fullPath = (parsed.logs as string[]).find((log) =>
@@ -4062,6 +4283,8 @@ describe("cli: probe --plan", () => {
       survived: 0,
       inconclusive: 0,
       not_run: 0,
+      met: count,
+      violated: 0,
     });
   }, 60000);
 

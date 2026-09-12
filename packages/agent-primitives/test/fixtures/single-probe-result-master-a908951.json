@@ -13,7 +13,8 @@
       "mutant": "<REPO>/fixture.js:2:   return n > 0; ->   return false;",
       "verified_applied_via": "<REPO>/fixture.js:2\n-   return n > 0;\n+   return false;",
       "result": "killed",
-      "restored_verified": true
+      "restored_verified": true,
+      "expectation": "met"
     },
     "baseline": {
       "exitCode": 0,
@@ -55,7 +56,8 @@
       "mutant": "<REPO>/fixture.js:2:   return n > 0; ->   return false;",
       "verified_applied_via": "<REPO>/fixture.js:2\n-   return n > 0;\n+   return false;",
       "result": "killed",
-      "restored_verified": true
+      "restored_verified": true,
+      "expectation": "met"
     },
     "baseline": {
       "exitCode": 0,
@@ -106,7 +108,8 @@
       "mutant": "<REPO>/fixture.js:4: module.exports = { isPositive }; -> module.exports = { isPositive, extra: 1 };",
       "verified_applied_via": "<REPO>/fixture.js:4\n- module.exports = { isPositive };\n+ module.exports = { isPositive, extra: 1 };",
       "result": "survived",
-      "restored_verified": true
+      "restored_verified": true,
+      "expectation": "violated"
     },
     "baseline": {
       "exitCode": 0,

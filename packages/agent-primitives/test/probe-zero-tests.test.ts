@@ -315,6 +315,12 @@ describe("probe(): baseline-stage no_tests_executed refusal", () => {
     expect(result.mutation_probe?.result).toBe("not_run");
     expect(result.mutation_probe?.reason).toBe("no_tests_executed");
     expect(result.mutant).toBeDefined();
+    // No real killed/survived verdict was reached, so there is nothing
+    // for `expectation` to report agreement or disagreement about. This
+    // baseline-side refusal builds its mutation_probe without touching
+    // step.ts's expectation guard, so it pins the envelope shape only;
+    // the mutant-side case further down is the one that discriminates.
+    expect(result.mutation_probe?.expectation).toBeUndefined();
   });
 
   it("a baseline that exits 1 with vitest's own 'No test files found' text is no_tests_executed, never baseline_failed", async () => {
@@ -472,6 +478,11 @@ describe("probe(): mutant-side zero-tests detector (step.ts)", () => {
     expect(result.status).toBe("inconclusive");
     expect(result.reason).toBe("no_tests_executed");
     expect(result.mutation_probe?.result).toBe("not_run");
+    // A mutant-side refusal reached through `step.ts`'s own classify
+    // step (unlike the baseline-side refusal above, which never reaches
+    // it): still no real killed/survived verdict, so still nothing for
+    // `expectation` to report.
+    expect(result.mutation_probe?.expectation).toBeUndefined();
     expect(
       result.warnings.some((w) =>
         /the mutant run's own output shows no test was actually executed/.test(
@@ -623,13 +634,15 @@ describe("probe(): --expect pass, which verdicts rest on the mutant run's own ex
   // real, executed vitest summary under --expect pass is unaffected):
   // it needs the real-vitest fixture defined further down this file.
 
-  it("a survived verdict under --expect pass whose mutant run exited NON-ZERO stands, even with byte-identical output on both sides", async () => {
+  it("a killed verdict under --expect pass whose mutant run exited NON-ZERO stands, even with byte-identical output on both sides", async () => {
     // The generic byte-identical fallback used to be entered by verdict shape
-    // alone (`survived`, or `killed` under `--expect pass`), which pulls in
-    // EVERY `--expect pass` `survived` verdict regardless of the mutant run's
-    // own exit code -- including this one, whose `survived`-ness rests on the
-    // mutant run exiting NON-ZERO, the opposite of the silent exit-0 evidence
-    // this mechanism exists to distrust. The fallback is now entered only when
+    // alone (`survived`, or `killed` under `--expect pass`, the old
+    // expectation-matched labels), which pulls in EVERY `--expect pass`
+    // verdict resting on a failing predicate regardless of the mutant run's
+    // own exit code -- including this one, whose `killed`-ness (the mutant
+    // run's actual outcome, independent of `--expect`) rests on the mutant
+    // run exiting NON-ZERO, the opposite of the silent exit-0 evidence this
+    // mechanism exists to distrust. The fallback is now entered only when
     // the mutant run's OWN predicate reads as passing (its exit code by
     // default, `--pass-regex`'s match when that is given), so this case never
     // enters it at all.
@@ -646,7 +659,8 @@ describe("probe(): --expect pass, which verdicts rest on the mutant run's own ex
           "node -e \"const { flag } = require('./fixture.js'); console.log('constant-output'); process.exit(flag ? 0 : 1);\"",
       }),
     );
-    expect(result.status).toBe("survived");
+    expect(result.status).toBe("killed");
+    expect(result.mutation_probe?.expectation).toBe("violated");
     expect(result.reason).toBeUndefined();
     expect(result.warnings).toEqual([]);
   });
@@ -750,7 +764,9 @@ describe("probe(): criterion 2 fixture pair, real vitest (task 273b3851)", () =>
     // under --expect pass: a real "Tests 2 passed (2)" summary on both
     // the baseline and the mutant run means neither the mutant-side
     // zero-tests detector nor the generic fallback has anything to catch
-    // here, whatever the exit code says.
+    // here, whatever the exit code says. The suite still passes, so the
+    // actual outcome is `survived` (independent of `--expect`); `--expect
+    // pass` wanted exactly that, so the expectation is met.
     const cwd = makeVitestFixture();
     const result: ProbeResult = await probe({
       file: FIXTURE_TEST_FILE,
@@ -763,7 +779,8 @@ describe("probe(): criterion 2 fixture pair, real vitest (task 273b3851)", () =>
       cwd,
       logDir: makeTmpDir(),
     });
-    expect(result.status).toBe("killed");
+    expect(result.status).toBe("survived");
+    expect(result.mutation_probe?.expectation).toBe("met");
     expect(result.reason).toBeUndefined();
   }, 20000);
 });

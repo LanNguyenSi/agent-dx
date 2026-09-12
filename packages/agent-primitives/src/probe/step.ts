@@ -529,8 +529,13 @@ export async function runMutantAttempt(
       rt.passRegex !== undefined
         ? rt.passRegex.test(testCombinedOutput)
         : testResult.exitCode === 0;
-    const killed = spec.expect === "fail" ? !testPassed : testPassed;
-    status = killed ? "killed" : "survived";
+    // The actual, observed outcome, independent of `--expect`: the test
+    // command failed with the mutant applied (`killed`) or it did not
+    // (`survived`). `expectation`, computed once this and every override
+    // below have had their say, is the only place `spec.expect` enters
+    // the verdict -- so a reader who does not know what `--expect` was
+    // given still reads `killed`/`survived` correctly.
+    status = testPassed ? "survived" : "killed";
     mutationProbeResult = status;
 
     // The 128 + N band (see `exec.ts`'s `signalNumberFromExitCode`):
@@ -621,9 +626,11 @@ export async function runMutantAttempt(
         // this run never even captured; (2) the exit code itself reads
         // `0` despite the predicate reading "failed" -- the process and
         // the predicate disagree, worth a second look regardless of
-        // `--expect`; or (3) `--expect pass`, where a miss means the
-        // mutant SURVIVED rather than being killed -- not the routine
-        // "predicate agrees the mutant broke the suite" shape at all.
+        // `--expect`; or (3) `--expect pass`, where a miss still means
+        // the mutant was KILLED (the predicate reads FAILING, the same
+        // as under `--expect fail`) but that killed verdict VIOLATES
+        // the expectation -- not the routine "predicate agrees, the
+        // expectation is met" shape at all.
         // Named explicitly, the same as `--require-baseline-evidence`'s
         // own miss is on the baseline side, so a caller reading
         // `warnings` sees which pattern was checked and against what,
@@ -661,15 +668,15 @@ export async function runMutantAttempt(
     // predicate on THIS mutant's run reads as PASSING -- exit code `0`
     // by default, or `testPassed` itself (`--pass-regex`'s own match)
     // when that flag is given -- the exact silent-pass evidence this
-    // whole mechanism distrusts. Whichever direction `--expect` points,
-    // a mutant run whose predicate reads FAILING already carries a real
-    // signal -- the run itself disagreed with the baseline -- that this
-    // output-only heuristic has no business second-guessing; that holds
-    // for a `survived` verdict under `--expect fail` bound to a passing
-    // predicate exactly as it does for a `killed` verdict under
-    // `--expect pass` bound to a passing predicate, and it excludes a
-    // `survived` verdict under `--expect pass`, which is `survived`
-    // precisely because the predicate read FAILING.
+    // whole mechanism distrusts. That predicate direction is
+    // `--expect`-independent (see `status`'s own classify step: passing
+    // -> `survived`, failing -> `killed`), so this fallback is entered
+    // only when this run's own predicate reads PASSING, i.e. a
+    // `survived` verdict, whichever `--expect` was given. A mutant run
+    // whose predicate reads FAILING (`killed`, always, however
+    // `--expect` points) already carries a real signal -- the run
+    // itself disagreed with the baseline -- that this output-only
+    // heuristic has no business second-guessing.
     const restsOnPassingVerdict = testPassed;
     // Silence on both sides is common and legitimate (many hand-rolled
     // test scripts print nothing on a pass, relying on the exit code
@@ -725,6 +732,19 @@ export async function runMutantAttempt(
     }
   }
 
+  // Whether the actual outcome (`status`, above -- computed independent
+  // of `--expect`, and possibly overridden to `inconclusive` by one of
+  // the branches above) matched what `spec.expect` called for. Only
+  // meaningful once a real verdict was reached: `aborted`, `timeout`,
+  // and `no_tests_executed` all leave `status` at `inconclusive`, which
+  // measured nothing to compare against an expectation.
+  const expectation: "met" | "violated" | undefined =
+    status === "killed" || status === "survived"
+      ? (spec.expect === "fail") === (status === "killed")
+        ? "met"
+        : "violated"
+      : undefined;
+
   return {
     status,
     reason,
@@ -735,6 +755,7 @@ export async function runMutantAttempt(
       result: mutationProbeResult,
       restored_verified: restoredVerified,
       ...(reason === "no_tests_executed" ? { reason } : {}),
+      ...(expectation !== undefined ? { expectation } : {}),
     },
     test: testField,
     logPaths,
