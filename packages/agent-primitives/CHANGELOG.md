@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Every git command `probe` owns now passes `-c maintenance.auto=false`
+  and `-c gc.auto=0`, preventing a probe's checkout, apply, diff, or
+  cleanup command from starting background git maintenance in the
+  repository or its scratch worktree (task `04fbf9ca`).
+
 - `probe`'s `result`/`status` (and a `--plan` mutant's own `status`) now
   always report the mutant's actual, measured outcome -- `killed` when
   the test command failed with the mutant applied, `survived` when it

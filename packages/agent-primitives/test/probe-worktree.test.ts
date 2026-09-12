@@ -764,7 +764,7 @@ describe("probe(): worktree isolation syncs the working tree, not just HEAD", ()
       // Simulate a disabled copy step: strip whatever `git ls-files
       // --others` reported, so beginWorktree's own copy loop has nothing
       // to iterate over.
-      if (args[0] === "ls-files" && args.includes("--others")) {
+      if (args.includes("ls-files") && args.includes("--others")) {
         return { ...result, stdout: "" };
       }
       return result;
@@ -3466,7 +3466,7 @@ describe("probe(): worktree isolation, sync failure", () => {
     const mockRun = vi.mocked(runArgv);
     mockRun.mockImplementation(async (file, args, options) => {
       const result = await actualRun.runArgv(file, args, options);
-      if (args[0] === "diff" && args.includes("--binary")) {
+      if (args.includes("diff") && args.includes("--binary")) {
         // `git diff HEAD --binary --output=<path>` writes the diff
         // straight to that file (never through this call's own stdout
         // capture); overwriting it here, after the real call already
@@ -3986,8 +3986,8 @@ describe("probe(): worktree isolation, cleanup after SIGTERM and stale-worktree 
     mockRun.mockImplementation(async (file, args, options) => {
       if (
         file === "git" &&
-        args[0] === "worktree" &&
-        (args[1] === "remove" || args[1] === "prune")
+        args.includes("worktree") &&
+        (args.includes("remove") || args.includes("prune"))
       ) {
         return {
           exitCode: 128,
@@ -4049,7 +4049,7 @@ describe("probe(): worktree isolation, the removal waits for a sync step that ou
     >("../src/probe/run.js");
     const mockRun = vi.mocked(runArgv);
     mockRun.mockImplementation(async (file, args, options) => {
-      if (file === "git" && args[0] === "ls-files") {
+      if (file === "git" && args.includes("ls-files")) {
         events.push("sync:ls-files:started");
         // The signal lands while this call is in flight, and the call
         // does not die with it: the abort signal is withheld from the
@@ -4068,11 +4068,11 @@ describe("probe(): worktree isolation, the removal waits for a sync step that ou
       // the calls after the sync's own call are the cleanup's.
       if (
         file === "git" &&
-        args[0] === "worktree" &&
-        args[1] !== "add" &&
+        args.includes("worktree") &&
+        !args.includes("add") &&
         events.includes("sync:ls-files:started")
       ) {
-        events.push(`cleanup:${args[1]}:started`);
+        events.push(`cleanup:${args.includes("remove") ? "remove" : "prune"}:started`);
       }
       return actualRun.runArgv(file, args, options);
     });
@@ -4951,7 +4951,7 @@ describe("probe(): worktree isolation, untracked entries by type", () => {
     const mockRun = vi.mocked(runArgv);
     mockRun.mockImplementation(async (file, args, options) => {
       const result = await actualRun.runArgv(file, args, options);
-      if (args[0] === "ls-files" && args.includes("--others")) {
+      if (args.includes("ls-files") && args.includes("--others")) {
         // Real `git ls-files --others --exclude-standard` never reports
         // a plain (non-repository) directory as its own entry: it lists
         // files, or a directory only at a nested `.git` boundary. The
@@ -5362,7 +5362,7 @@ describe("probe(): worktree isolation when git worktree list cannot run in any f
     >("../src/probe/run.js");
     const mockRun = vi.mocked(runArgv);
     mockRun.mockImplementation(async (file, args, options) => {
-      if (file === "git" && args[0] === "worktree" && args[1] === "remove") {
+      if (file === "git" && args.includes("worktree") && args.includes("remove")) {
         // Same technique as the sibling test above: double `--force`
         // on a real git would otherwise clear the locked entry itself.
         return {

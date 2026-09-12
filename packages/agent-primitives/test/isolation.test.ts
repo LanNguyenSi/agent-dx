@@ -67,6 +67,10 @@ function gitCalls(): Parameters<typeof runArgv>[] {
   >[];
 }
 
+function gitSubcommand(args: string[], command: string): boolean {
+  return args.includes(command);
+}
+
 const tmpDirs: string[] = [];
 function makeTmpDir(): string {
   const dir = fs.mkdtempSync(
@@ -607,7 +611,7 @@ describe("beginWorktree / cleanupWorktree", () => {
     expect(list).not.toContain(result.worktreePath);
   });
 
-  it("pins content-writing worktree add and tracked-diff apply against ambient autocrlf and whitespace settings", async () => {
+  it("pins every probe-owned worktree git argv against maintenance and content-writing calls against ambient settings", async () => {
     const repo = initRepo();
     const result = await beginWorktree({
       root: repo,
@@ -618,7 +622,17 @@ describe("beginWorktree / cleanupWorktree", () => {
     });
 
     expect(result.ok).toBe(true);
-    const contentWriteCalls = gitCalls()
+    const calls = gitCalls();
+    expect(calls).toHaveLength(5);
+    for (const [, args] of calls) {
+      expect(args.slice(0, 4)).toEqual([
+        "-c",
+        "maintenance.auto=false",
+        "-c",
+        "gc.auto=0",
+      ]);
+    }
+    const contentWriteCalls = calls
       .map((call) => call[1])
       .filter(
         (args) =>
@@ -627,7 +641,7 @@ describe("beginWorktree / cleanupWorktree", () => {
       );
     expect(contentWriteCalls).toHaveLength(2);
     for (const args of contentWriteCalls) {
-      expect(args.slice(0, 4)).toEqual([
+      expect(args.slice(4, 8)).toEqual([
         "-c",
         "core.autocrlf=false",
         "-c",
@@ -1204,7 +1218,7 @@ describe("cleanupWorktree: the removal is asserted, and every delete goes throug
     >("../src/probe/run.js");
     const mockRun = vi.mocked(runArgv);
     mockRun.mockImplementation(async (file, args, options) => {
-      if (file === "git" && args[0] === "worktree" && args[1] === "remove") {
+      if (file === "git" && args.includes("worktree") && args.includes("remove")) {
         return {
           exitCode: 128,
           durationMs: 0,

@@ -20,6 +20,7 @@ import {
   type MutantDiffField,
 } from "../src/probe/mutant.js";
 import { runArgv } from "../src/probe/run.js";
+import { PROBE_GIT_CONFIG_ARGS } from "../src/probe/git.js";
 import { prepareMutant } from "../src/probe/step.js";
 import { buildEnvelope } from "../src/envelope.js";
 
@@ -1945,7 +1946,10 @@ describe("git apply invocations", () => {
     );
     expect(computed.applicable).toBe(true);
     expect(runner.mock.calls.map((c) => [c[0], c[1]])).toEqual([
-      ["git", ["apply", "--numstat", "--", patchPath]],
+      [
+        "git",
+        [...PROBE_GIT_CONFIG_ARGS, "apply", "--numstat", "--", patchPath],
+      ],
       // The apply that actually writes the scratch file pins
       // `core.autocrlf=false` and `apply.whitespace=nowarn` (see the
       // comment at its call site in mutant.ts): the scratch directory
@@ -1954,6 +1958,7 @@ describe("git apply invocations", () => {
       [
         "git",
         [
+          ...PROBE_GIT_CONFIG_ARGS,
           "-c",
           "core.autocrlf=false",
           "-c",
@@ -1971,6 +1976,7 @@ describe("git apply invocations", () => {
       [
         "git",
         [
+          ...PROBE_GIT_CONFIG_ARGS,
           "-c",
           "core.autocrlf=false",
           "-c",
