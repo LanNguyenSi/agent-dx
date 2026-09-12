@@ -1,8 +1,12 @@
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, afterEach } from "vitest";
 import {
   linkEntryUsageError,
+  linkSourceMissingMessage,
   mergeLinkSources,
+  type MergedLink,
 } from "../src/probe/link-list.js";
 
 describe("linkEntryUsageError", () => {
@@ -166,5 +170,115 @@ describe("mergeLinkSources: precedence table (defaults, then plan, then CLI)", (
     ]);
 
     expect(merged[0].namedBy).toBe(`"src" named in ${DEFAULTS_NAMED_IN}`);
+  });
+
+  it("keeps the raw entry alongside the resolved path, for a `--link` group (no `namedIn`) too", () => {
+    const merged = mergeLinkSources([{ base: cwd, values: ["extra"] }]);
+    expect(merged[0].given).toBe("extra");
+    expect(merged[0].value).toBe(path.join(cwd, "extra"));
+    expect(merged[0].namedBy).toBeUndefined();
+  });
+});
+
+describe("linkSourceMissingMessage", () => {
+  const tmpDirs: string[] = [];
+  afterEach(() => {
+    for (const dir of tmpDirs.splice(0)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  function makeTmpDir(): string {
+    const dir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "agent-primitives-link-list-test-"),
+    );
+    tmpDirs.push(dir);
+    return dir;
+  }
+
+  it("is undefined for a source that exists and is a directory", () => {
+    const dir = makeTmpDir();
+    const link: MergedLink = { value: dir, given: "vendor" };
+    expect(
+      linkSourceMissingMessage(link, "the invocation cwd"),
+    ).toBeUndefined();
+  });
+
+  it("names the value as given, the resolved path, and the base for a source that does not exist", () => {
+    const root = makeTmpDir();
+    const missing = path.join(root, "does", "not", "exist");
+    const link: MergedLink = { value: missing, given: "does/not/exist" };
+    const message = linkSourceMissingMessage(link, "the invocation cwd");
+    expect(message).toContain('"does/not/exist"');
+    expect(message).toContain(missing);
+    expect(message).toContain("the invocation cwd");
+    expect(message).toContain("does not exist");
+  });
+
+  it("refuses a source that exists but is a plain FILE the same way, naming it distinctly from a missing path", () => {
+    const root = makeTmpDir();
+    const filePath = path.join(root, "not-a-dir");
+    fs.writeFileSync(filePath, "x");
+    const link: MergedLink = { value: filePath, given: "not-a-dir" };
+    const message = linkSourceMissingMessage(link, "the repository root");
+    expect(message).toContain("is not a directory");
+    expect(message).not.toContain("does not exist");
+  });
+
+  it("includes the provenance phrase (`namedBy`) when the value came from repository content", () => {
+    const root = makeTmpDir();
+    const missing = path.join(root, "gone");
+    const namedBy =
+      '"gone" named in the "link" list of /repo/.agent-primitives.json';
+    const link: MergedLink = { value: missing, given: "gone", namedBy };
+    const message = linkSourceMissingMessage(link, "the repository root");
+    expect(message).toContain(namedBy);
+  });
+
+  // Root bypasses directory permission bits entirely, so a `chmod 000`
+  // ancestor never produces EACCES for it; skipped there rather than
+  // giving a false pass.
+  const isRoot = typeof process.getuid === "function" && process.getuid() === 0;
+
+  it.skipIf(isRoot)(
+    "reports a stat failure that is NOT 'not there' (EACCES on a locked ancestor) with its own phrase naming the errno, never as 'does not exist'",
+    () => {
+      const root = makeTmpDir();
+      const locked = path.join(root, "locked");
+      fs.mkdirSync(locked);
+      const target = path.join(locked, "vendor");
+      fs.mkdirSync(target);
+      fs.chmodSync(locked, 0o000);
+      try {
+        const link: MergedLink = { value: target, given: "locked/vendor" };
+        const message = linkSourceMissingMessage(link, "the invocation cwd");
+        expect(message).toBeDefined();
+        expect(message).toContain("could not be checked");
+        expect(message).toContain("EACCES");
+        expect(message).not.toContain("does not exist");
+      } finally {
+        fs.chmodSync(locked, 0o755);
+      }
+    },
+  );
+
+  it("is undefined for a source that is a SYMLINK resolving to an existing directory: statSync follows it, the same as a plain directory", () => {
+    const root = makeTmpDir();
+    const realDir = path.join(root, "real");
+    fs.mkdirSync(realDir);
+    const linkPath = path.join(root, "alias");
+    fs.symlinkSync(realDir, linkPath);
+    const link: MergedLink = { value: linkPath, given: "alias" };
+    expect(
+      linkSourceMissingMessage(link, "the invocation cwd"),
+    ).toBeUndefined();
+  });
+
+  it("refuses a DANGLING symlink source (resolving to nothing) the same way as a plain missing path", () => {
+    const root = makeTmpDir();
+    const linkPath = path.join(root, "dangling");
+    fs.symlinkSync(path.join(root, "nowhere-at-all"), linkPath);
+    const link: MergedLink = { value: linkPath, given: "dangling" };
+    const message = linkSourceMissingMessage(link, "the invocation cwd");
+    expect(message).toContain("does not exist");
   });
 });

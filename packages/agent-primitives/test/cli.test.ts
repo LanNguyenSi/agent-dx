@@ -1419,6 +1419,67 @@ describe("cli: probe", () => {
     git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "x"]);
   }
 
+  it("--link naming a directory that does not exist is usage_error/link_source_not_found, exit 2, on the CLI (GitHub issue #242, AC-001's own exit code)", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(path.join(repo, "fixture.js"), "module.exports = {};\n");
+    commitAll(repo);
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "1",
+      "-r",
+      "x",
+      "-t",
+      "true",
+      "--link",
+      "does/not/exist",
+    ]);
+
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.reason).toBe("link_source_not_found");
+  });
+
+  it("refuses a missing --link source under -i inplace too: the check runs before any isolation decision, not only for -i worktree's default", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(path.join(repo, "fixture.js"), "module.exports = {};\n");
+    commitAll(repo);
+
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--file",
+      "fixture.js",
+      "-n",
+      "1",
+      "-r",
+      "x",
+      "-t",
+      "true",
+      "-i",
+      "inplace",
+      "--link",
+      "does/not/exist",
+    ]);
+
+    expect(run.code).toBe(2);
+    const parsed = JSON.parse(run.stdout);
+    expect(parsed.status).toBe("usage_error");
+    expect(parsed.reason).toBe("link_source_not_found");
+    // Nothing about -i inplace's own mutation ever started: the
+    // fixture is untouched.
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(
+      "module.exports = {};\n",
+    );
+  });
+
   it("defaults to -i worktree: killed, isolation.mode worktree, syncedTrackedFiles 0, node_modules listed in linked, and the working tree untouched (the acceptance-criterion CLI shape)", async () => {
     const repo = initRepo();
     fs.writeFileSync(

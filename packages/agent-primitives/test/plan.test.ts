@@ -963,6 +963,34 @@ describe("probePlan(): refusals before the lock, the marker or any worktree", ()
     // behind.
     expectNoIsolationLeftovers(repo, lockDir);
   });
+
+  it("refuses a --plan file's own `link` entry naming a directory that does not exist, naming it as given, the resolved path against the repository root, and the plan file, with nothing left behind (#242)", async () => {
+    const lockDir = useLockDir();
+    const { repo } = initRepo();
+    const planPath = writePlan({
+      test: "node fixture.test.js",
+      link: ["nope"],
+      mutants: [{ file: "fixture.js", line: 2, replace: "  return false;" }],
+    });
+    const parsed = parsePlanFile(planPath);
+    if (!parsed.ok) throw new Error("test setup: plan file failed to parse");
+
+    const result = await probePlan(
+      planOptions(repo, [replaceMutant(2, "  return false;")], {
+        planLinks: parsed.plan.link ?? [],
+        planPath,
+      }),
+    );
+
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("link_source_not_found");
+    const message = result.warnings.join(" ");
+    expect(message).toContain('"nope"');
+    expect(message).toContain(path.join(repo, "nope"));
+    expect(message).toContain("the repository root");
+    expect(message).toContain(`named in the "link" list of ${planPath}`);
+    expectNoIsolationLeftovers(repo, lockDir);
+  });
 });
 
 describe("probePlan(): several files in one plan", () => {

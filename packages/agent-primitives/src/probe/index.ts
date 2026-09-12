@@ -4,7 +4,11 @@ import { sha256File } from "../hash.js";
 import { removeMarkerFor } from "../lock.js";
 import { findGitRoot, resolveDeepestExisting } from "./containment.js";
 import { readDefaultsFile } from "./defaults-file.js";
-import { mergeLinkSources } from "./link-list.js";
+import {
+  linkSourceMissingMessage,
+  mergeLinkSources,
+  type MergedLink,
+} from "./link-list.js";
 import {
   DEFAULT_GIT_APPLY_TIMEOUT_MS,
   listPatchTouchedPaths,
@@ -178,6 +182,44 @@ export interface ProbeResult {
    * through the emergency-restore path. Distinct from `baseline`/`test`'s
    * own `durationMs`, which cover only their own command. */
   totalDurationMs: number;
+}
+
+/**
+ * The phrase a `link_source_not_found` refusal names for what a merged
+ * link value was resolved against: both call sites below (`probe()`,
+ * `probePlan()`) build their `mergeLinkSources` groups the same way --
+ * the repo defaults file's and a `--plan` file's own `link` entries are
+ * always the ones carrying a `namedIn` (so `namedBy` is set here), both
+ * resolved against the repository root; `--link` is the only group
+ * with no `namedIn`, resolved against the invocation cwd -- so
+ * `namedBy`'s presence already tells the two apart without a separate
+ * field threaded through `mergeLinkSources` for it. See the README's
+ * `--link` and "Non-JS repositories" sections for the same rule stated
+ * for a reader.
+ */
+function linkSourceBasePhrase(link: MergedLink): string {
+  return link.namedBy !== undefined
+    ? "the repository root"
+    : "the invocation cwd";
+}
+
+/**
+ * Refuses the first merged link whose source is not an existing
+ * directory, before the isolation copy is ever created (GitHub issue
+ * #242): only the three explicit `link` sources reach this (an
+ * auto-discovered candidate is never part of `mergedLinks`), so an
+ * auto-discovered composer `vendor-dir` that does not exist yet (the
+ * common case before `composer install`) is unaffected. `undefined`
+ * when every merged link's source exists.
+ */
+function firstMissingLinkSourceMessage(
+  mergedLinks: readonly MergedLink[],
+): string | undefined {
+  for (const link of mergedLinks) {
+    const message = linkSourceMissingMessage(link, linkSourceBasePhrase(link));
+    if (message !== undefined) return message;
+  }
+  return undefined;
 }
 
 function emptyIsolationField(mode: IsolationMode): IsolationField {
@@ -439,6 +481,22 @@ async function runProbePipeline(
     },
     { base: cwd, values: opts.links ?? [] },
   ]);
+  // Fails closed before anything about isolation is set up (GitHub
+  // issue #242): a `--link`/plan/defaults-file value whose source is
+  // not an existing directory would otherwise reach the worktree sync
+  // and either be linked as a dangling symlink or silently skipped,
+  // depending on the sync's own ordering, neither of which is what an
+  // explicitly named source failing to exist should do.
+  const missingLinkSource = firstMissingLinkSourceMessage(mergedLinks);
+  if (missingLinkSource !== undefined) {
+    return {
+      status: "usage_error",
+      reason: "link_source_not_found",
+      warnings: [...warnings, missingLinkSource],
+      isolation: isolationField,
+      dryRunLogPaths: derivationLogPaths,
+    };
+  }
 
   // Containment and the lock/marker key are resolved through realpath
   // (before either check), so an in-repo symlink pointing outside the
@@ -1036,6 +1094,15 @@ export async function probePlan(
     },
     { base: cwd, values: opts.links ?? [] },
   ]);
+  // Same fail-closed check as the single probe (`probe()` above),
+  // before the lock, the in-flight marker, the baseline or any
+  // worktree: a plan whose `link` (its own, the defaults file's, or
+  // `--link`'s) names a source that does not exist leaves nothing
+  // behind, the same as every other plan-validation refusal above.
+  const missingLinkSource = firstMissingLinkSourceMessage(mergedLinks);
+  if (missingLinkSource !== undefined) {
+    return refuse("usage_error", "link_source_not_found", missingLinkSource);
+  }
   const links = mergedLinks.map((link) => ({
     display: link.value,
     abs: resolveDeepestExisting(link.value),

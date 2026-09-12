@@ -88,6 +88,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cleanup command from starting background git maintenance in the
   repository or its scratch worktree (task `04fbf9ca`).
 
+- `probe` now refuses, before any isolation decision is made (so for
+  `-i inplace` as much as for the `-i worktree` default -- it is one
+  option-shape check ahead of both), a `--link` value, a `--plan` file's
+  own `link` entry, or the repo defaults file's `link` entry whose
+  resolved source is not an existing directory (a plain file counts
+  too): `status: "usage_error"`, `reason: "link_source_not_found"`,
+  exit `2`, naming the value as given, the absolute path it resolved to,
+  and which base it was resolved against (`--link` against the
+  invocation cwd, the other two against the repository root). It used
+  to be linked anyway -- silently dropped, or, for a repository-content
+  source, linked as a dangling symlink -- with no warning at all, so an
+  operator's typo in a `--link` value, or a stale entry in a
+  `.agent-primitives.json`/`--plan` file, never surfaced (this also
+  means a case-variant `--link`/`link` value that used to resolve on a
+  case-insensitive filesystem, macOS's default, is a `usage_error` on a
+  case-sensitive one, Linux's default and what CI runs on, since the
+  variant genuinely does not exist there). Unaffected: an
+  auto-discovered candidate (`node_modules`, a composer
+  `vendor-dir`/`bin-dir`) keeps its own documented skip-when-absent
+  behaviour, since a value nobody explicitly named is not a usage error
+  (GitHub issue #242).
+
 - `probe`'s `result`/`status` (and a `--plan` mutant's own `status`) now
   always report the mutant's actual, measured outcome -- `killed` when
   the test command failed with the mutant applied, `survived` when it

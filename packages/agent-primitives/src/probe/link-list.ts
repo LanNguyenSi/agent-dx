@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 
 /**
@@ -48,6 +49,13 @@ export interface LinkSourceGroup {
  * provenance phrase for a value repository content named. */
 export interface MergedLink {
   value: string;
+  /** The value exactly as its source gave it, before being resolved
+   * against that source's `base`: a refusal (`linkSourceMissingMessage`
+   * below) names both this and `value`, since "the value as given" and
+   * "the absolute path it resolved to" are two different things a
+   * reader needs, and the given form is what an operator (or a plan/
+   * defaults-file author) actually typed. */
+  given: string;
   namedBy?: string;
 }
 
@@ -78,6 +86,7 @@ export function mergeLinkSources(
       seen.add(abs);
       merged.push({
         value: abs,
+        given: value,
         ...(group.namedIn !== undefined
           ? { namedBy: `"${value}" named in ${group.namedIn}` }
           : {}),
@@ -85,4 +94,69 @@ export function mergeLinkSources(
     }
   }
   return merged;
+}
+
+/**
+ * Whether a merged `link` value's SOURCE exists as a directory, checked
+ * for the three EXPLICIT sources only (`--link`, a `--plan` file's own
+ * `link`, the repo defaults file's `link`) -- never for an
+ * auto-discovered candidate (`node_modules`, a composer `vendor-dir`/
+ * `bin-dir`), which keeps its own documented skip-when-absent behaviour,
+ * decided entirely elsewhere (`link-policy.ts`/`isolation.ts`). The
+ * caller (`index.ts`, `probe()` and `probePlan()` alike) runs this right
+ * after `mergeLinkSources`, before the isolation copy is created (before
+ * `openRunSetup`/`prepareWorktreeSession` ever runs): linking a source
+ * that is not there is not a candidate to skip, the way an
+ * auto-discovered one is -- it is a value an invocation, a `--plan`
+ * file, or the repository itself explicitly named and cannot have,
+ * which fails closed as a usage error instead of being linked anyway
+ * (dangling) or silently dropped (see GitHub issue #242).
+ *
+ * Returns `undefined` when `link.value` exists and is a directory, else
+ * the refusal message, which names all three parts a reader needs: the
+ * value AS GIVEN (`link.given`, before it was resolved), the absolute
+ * path it resolved to (`link.value`), and the phrase naming what it was
+ * resolved against -- `basePhrase`, supplied by the caller, since only
+ * the caller knows which base applies to this particular value
+ * (`"the invocation cwd"` for `--link`, `"the repository root"` for a
+ * `--plan` file's and the defaults file's entries; see the README's
+ * `--link` and "Non-JS repositories" sections). A source that exists
+ * but is a FILE, not a directory, is refused the same way, named
+ * accordingly. A `stat` that fails for a reason OTHER than "not there"
+ * (an ancestor directory locked against this process, `EACCES`; a
+ * symlink loop, `ELOOP`; ...) is never reported as "does not exist" --
+ * that would tell an operator to create a directory that may well
+ * already be sitting right there behind a permission this process
+ * cannot see through -- it is refused with its own phrase naming the
+ * errno instead, equally fail-closed (this function still returns a
+ * message, never `undefined`, so the source is never treated as fine
+ * merely because it could not be checked).
+ */
+export function linkSourceMissingMessage(
+  link: MergedLink,
+  basePhrase: string,
+): string | undefined {
+  let stat: fs.Stats | undefined;
+  let statErrorCode: string | undefined;
+  try {
+    stat = fs.statSync(link.value);
+  } catch (err) {
+    stat = undefined;
+    statErrorCode =
+      err instanceof Error && "code" in err && typeof err.code === "string"
+        ? err.code
+        : undefined;
+  }
+  if (stat !== undefined && stat.isDirectory()) return undefined;
+  const problem =
+    stat !== undefined
+      ? "is not a directory"
+      : statErrorCode === "ENOENT" || statErrorCode === "ENOTDIR"
+        ? "does not exist"
+        : `could not be checked (${statErrorCode ?? "unknown error"})`;
+  const provenance = link.namedBy !== undefined ? ` (${link.namedBy})` : "";
+  return (
+    `link "${link.given}" resolved to ${link.value} against ` +
+    `${basePhrase}, but that path ${problem}${provenance}`
+  );
 }

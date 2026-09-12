@@ -1288,13 +1288,26 @@ export async function beginWorktree(
       // is not a directory) as an existing ancestor segment: the
       // `mkdirSync` below cannot create a directory under it and throws
       // EEXIST/ENOTDIR, which the `catch` around this whole loop would
-      // turn into `worktree_sync_failed` for the entire run. Repository
-      // content naming `SRC/FILE.TXT/x` over a tracked `src/file.txt`
-      // reaches exactly that: the canonical destination is
-      // `src/file.txt/x`, which git does not track (nothing is tracked
-      // UNDER a file), so rule 3 has nothing to refuse. One candidate's
-      // impossible destination is a warning and a skipped link, the same
-      // as every other refusal in this loop -- never a failed run.
+      // turn into `worktree_sync_failed` for the entire run. One
+      // candidate's impossible destination is a warning and a skipped
+      // link instead, the same as every other refusal in this loop --
+      // never a failed run. Defensive rather than exercised as of
+      // issue #242's fix: every candidate that reaches this point (an
+      // auto-discovered one, which the walk only ever finds by already
+      // existing on disk; an explicit `--link`/`--plan` file's/defaults
+      // file's value, refused up front in `index.ts` when its own
+      // source is not an existing directory) now has a SOURCE that is
+      // itself an existing directory, and this loop's destination is
+      // the same relative path as that source, so the shape this guard
+      // existed for (repository content naming `SRC/FILE.TXT/x` over a
+      // tracked `src/file.txt`, whose source is `src/file.txt/x`, not a
+      // directory) can no longer reach here at all -- it is refused
+      // earlier, by that same existence check, before this loop ever
+      // runs. Kept for the same reason the `"same"` arm above is: a
+      // future link source that skips the earlier check (or one this
+      // loop reaches through some path not yet found) would otherwise
+      // corrupt the sync's own `mkdirSync`/`rmSync` sequence instead of
+      // being skipped with a warning.
       const blockingAncestor = nonDirectoryAncestor(worktreePath, relPath);
       if (blockingAncestor !== undefined) {
         syncWarnings.push(
