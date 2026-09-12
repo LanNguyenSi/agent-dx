@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `check` gets `--dirty-as-now`: an opt-in flag under which every
+  uncommitted change (modified, staged, or untracked per `git status
+  --porcelain --untracked-files=all`) is modeled as though it landed in
+  ONE virtual commit made
+  right now, applied at a single shared choke point
+  (`commitEpochWithDirtyAsNow` in `src/rules/sources-fresh.ts`) so both
+  `sources-fresh` (a dirty `sources` path's epoch) AND `sources-fresh-future`
+  (a dirty DOC's own epoch) read the identical virtual instant, rather than
+  each rule -- or each path kind -- getting its own patch. Closes a gap
+  surfaced by the 2026-09-11 review-method dogfood (agent-dx PR #236): a
+  test file four OKF docs list as a source was edited, a pre-commit `check`
+  run reported 0 warnings because the source's last commit still predated
+  every doc's `timestamp`, and CI's strict freshness guard then failed once
+  the commit landed and gave the source a new, later commit time. Omit the
+  flag and both rules are unchanged; see the README's "Uncommitted edits
+  (`--dirty-as-now`)" section for the recommended pre-commit invocation and
+  the exact parity matrix (six working-tree states, each reproduced
+  through the built CLI with `--strict` exit codes, including the one
+  shape inherent to the model where a clean local run does NOT imply a
+  clean CI run: a source edit committed alone while its doc re-stamp stays
+  uncommitted). Carries a working-tree
+  analogue of `sources-fresh`'s own co-commit re-stamp rescue, evaluated
+  against that same virtual commit: a doc re-stamped locally (uncommitted,
+  on-disk `timestamp` differing -- in EITHER direction -- from the value
+  committed at `HEAD`; an untracked doc counts as re-stamped too) rescues a
+  dirty source exactly like a real re-stamp landing in the same commit
+  does, so the README's recommended `--dirty-as-now --strict` pre-commit
+  gate can actually be made green by following its own remedy (re-stamp,
+  then commit) while the source stays uncommitted. Reads the work tree's
+  dirty paths once per `check` run (`git --no-optional-locks status
+  --porcelain=v2 -z --untracked-files=all`), not once per unique source
+  path, and normalizes a `./`-prefixed or `/`-suffixed path spelling
+  before matching it against that dirty-paths set, so any spelling of the
+  same source or doc path matches consistently. `--untracked-files=all` is
+  load-bearing, not decoration: git's default untracked mode collapses a
+  brand-new directory into a single `? newdir/` record and never names the
+  files inside it, so a source or doc inside one matched nothing and the
+  flag reported `untracked by git` (exit 0) for content a plain `check`
+  reported STALE (exit 1) the moment it was committed -- the exact
+  divergence the flag exists to close. A `sources` entry spelled `.`/`./`
+  (the repo root) is matched by containment rather than by lookup, since
+  `git status` never reports the root as an entry; a `--repo-root` naming
+  a SUBDIRECTORY of the repository is handled by rebasing the queried path
+  onto the repository top level (`git rev-parse --show-prefix`, the run's
+  second and last extra git process) instead of silently matching nothing.
+  When git cannot be read at all (`status` failing, its output past the
+  16 MiB `MAX_GIT_OUTPUT_BYTES` cap, git missing), the run emits one
+  bundle-level notice -- "`--dirty-as-now` not applied: git status could
+  not be read, judging by committed history only" -- rather than falling
+  back to committed history in a silence indistinguishable from a clean
+  tree. Distinguishes a genuinely untracked doc (no entry
+  for it at `HEAD` at all) from a real git failure reading an existing
+  `HEAD` blob when deciding whether a dirty doc's own re-stamp counts,
+  falling through to the ordinary not-assessable notice in the latter
+  case rather than guessing.
+
 ### Documented
 
 - Decision (task agent-dx 27c4f709): the anchored, path-less continuation

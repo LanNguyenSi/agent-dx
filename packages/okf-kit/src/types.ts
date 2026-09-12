@@ -86,6 +86,25 @@ export interface BundleContext {
    * was not passed, in which case the rule applies its own default.
    */
   freshnessFutureSkewSeconds?: number;
+  /**
+   * Opt-in for `sources-fresh` AND `sources-fresh-future` (see
+   * `--dirty-as-now` in `src/cli.ts`): every uncommitted change (modified,
+   * staged, or untracked per `git status --porcelain --untracked-files=all`) is modeled as though
+   * it landed in ONE virtual commit made right now, instead of at its last
+   * real commit's time. That virtual-commit epoch is the SINGLE place both
+   * rules read a dirty path's "commit time" from (see
+   * `getDocCommitEpochShared`/`commitEpochFor` in
+   * `src/rules/sources-fresh.ts`): a dirty `sources` path's epoch becomes
+   * now (`sources-fresh`'s base comparison), and a dirty DOC's own epoch
+   * becomes now too (both `sources-fresh`'s co-commit rescue and
+   * `sources-fresh-future`'s timestamp comparison read that same virtual
+   * epoch). Closes the gap between a pre-commit `check` run (which sees
+   * only committed history) and CI's post-commit run (which sees the new
+   * commit time) for content edited but not yet committed. Undefined (the
+   * default) leaves both rules looking only at committed history,
+   * byte-identical to behavior before this option existed.
+   */
+  dirtyAsNow?: boolean;
 }
 
 export interface Rule {

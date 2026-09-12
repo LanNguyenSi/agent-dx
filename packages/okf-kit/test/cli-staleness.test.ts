@@ -221,6 +221,260 @@ describe("okf-kit cli staleness (sources-fresh + repo-root auto-detection)", () 
     ).toBe(false);
   });
 
+  it("--dirty-as-now: a clean run is quiet, the flag surfaces a dirty-source STALE line, and --strict then exits 1", () => {
+    repo.commitFile(
+      "source.ts",
+      "export const a = 1;\n",
+      "2025-01-01T00:00:00Z",
+    );
+    // Doc committed and left clean: this test is about the CLI wiring of
+    // --dirty-as-now for a dirty SOURCE, not the doc's own dirty state.
+    repo.commitFile(
+      "bundle/doc.md",
+      "---\ntype: concept\ntimestamp: 2025-06-01T00:00:00Z\nsources:\n  - source.ts\n---\n\n# Doc\n",
+      "2025-06-01T00:00:00Z",
+    );
+    // Dirty the source on disk without committing.
+    fs.writeFileSync(path.join(repo.dir, "source.ts"), "export const a = 2;\n");
+
+    const withoutFlag = runCli([
+      "check",
+      path.join(repo.dir, "bundle"),
+      "--repo-root",
+      repo.dir,
+      "--json",
+    ]);
+    expect(withoutFlag.status).toBe(0);
+    const withoutFlagParsed = JSON.parse(withoutFlag.stdout) as JsonReport;
+    expect(
+      withoutFlagParsed.findings.some((f) => f.ruleId === "sources-fresh"),
+    ).toBe(false);
+
+    const withFlag = runCli([
+      "check",
+      path.join(repo.dir, "bundle"),
+      "--repo-root",
+      repo.dir,
+      "--dirty-as-now",
+      "--json",
+    ]);
+    expect(withFlag.status).toBe(0);
+    const withFlagParsed = JSON.parse(withFlag.stdout) as JsonReport;
+    expect(
+      withFlagParsed.findings.some(
+        (f) =>
+          f.ruleId === "sources-fresh" &&
+          f.severity === "warning" &&
+          f.message.includes("STALE") &&
+          f.message.includes("source.ts"),
+      ),
+    ).toBe(true);
+
+    const withFlagStrict = runCli([
+      "check",
+      path.join(repo.dir, "bundle"),
+      "--repo-root",
+      repo.dir,
+      "--dirty-as-now",
+      "--strict",
+    ]);
+    expect(withFlagStrict.status).toBe(1);
+  });
+
+  /**
+   * The recommended pre-commit recipe (README "Uncommitted edits
+   * (--dirty-as-now)"): `check --dirty-as-now --strict` pinned end-to-end
+   * through the BUILT CLI, exit codes only -- not the finding list, which
+   * the unit-level tests in sources-fresh-dirty-as-now.test.ts already
+   * cover. `source.ts` is committed 2025-01-01, `bundle/doc.md` is
+   * committed 2025-02-01 with a matching `timestamp`, in every case below.
+   *
+   * This is also the regression coverage for the round-2 review finding:
+   * `sources-fresh-future` used to compare a doc's `timestamp` against its
+   * REAL last-commit epoch even under `--dirty-as-now`, so re-stamping a
+   * doc to "now" on disk (exactly the flag's own recommended remedy) read
+   * FUTURE-DATED and still failed `--strict` in the one state CI reports
+   * clean for. Case (i) below pins that this no longer happens, for two
+   * different re-stamp/check lags (5s, 60s) simulated by backdating the
+   * on-disk timestamp instead of sleeping.
+   */
+  describe("--dirty-as-now virtual-commit parity matrix (recommended recipe, --strict)", () => {
+    function setupBaseline(repo: TmpGitRepo): void {
+      repo.commitFile(
+        "source.ts",
+        "export const a = 1;\n",
+        "2025-01-01T00:00:00Z",
+      );
+      repo.commitFile(
+        "bundle/doc.md",
+        "---\ntype: concept\ntimestamp: 2025-02-01T00:00:00.000Z\nsources:\n  - source.ts\n---\n\n# Doc\n",
+        "2025-02-01T00:00:00Z",
+      );
+    }
+
+    function dirtyDoc(repo: TmpGitRepo, timestampIso: string): void {
+      fs.writeFileSync(
+        path.join(repo.dir, "bundle/doc.md"),
+        `---\ntype: concept\ntimestamp: ${timestampIso}\nsources:\n  - source.ts\n---\n\n# Doc\n`,
+      );
+    }
+
+    for (const lagSeconds of [5, 60]) {
+      it(`(i) source dirty + doc re-stamped on disk to now (${lagSeconds}s lag): clean, exit 0`, () => {
+        const repo = createTmpGitRepo();
+        try {
+          setupBaseline(repo);
+          fs.writeFileSync(
+            path.join(repo.dir, "source.ts"),
+            "export const a = 2;\n",
+          );
+          const nowIso = new Date(Date.now() - lagSeconds * 1000).toISOString();
+          dirtyDoc(repo, nowIso);
+
+          const result = runCli([
+            "check",
+            path.join(repo.dir, "bundle"),
+            "--repo-root",
+            repo.dir,
+            "--dirty-as-now",
+            "--strict",
+            "--json",
+          ]);
+          const parsed = JSON.parse(result.stdout) as JsonReport;
+          expect(
+            parsed.findings.some((f) => f.ruleId === "sources-fresh"),
+          ).toBe(false);
+          expect(
+            parsed.findings.some((f) => f.ruleId === "sources-fresh-future"),
+          ).toBe(false);
+          expect(result.status).toBe(0);
+        } finally {
+          repo.cleanup();
+        }
+      });
+    }
+
+    it("(ii) source dirty + doc NOT re-stamped: STALE, exit 1", () => {
+      const repo = createTmpGitRepo();
+      try {
+        setupBaseline(repo);
+        fs.writeFileSync(
+          path.join(repo.dir, "source.ts"),
+          "export const a = 2;\n",
+        );
+
+        const result = runCli([
+          "check",
+          path.join(repo.dir, "bundle"),
+          "--repo-root",
+          repo.dir,
+          "--dirty-as-now",
+          "--strict",
+          "--json",
+        ]);
+        const parsed = JSON.parse(result.stdout) as JsonReport;
+        expect(
+          parsed.findings.some(
+            (f) => f.ruleId === "sources-fresh" && f.message.includes("STALE"),
+          ),
+        ).toBe(true);
+        expect(result.status).toBe(1);
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("(iii) control: source edit + doc re-stamp committed TOGETHER, flag OFF: clean, exit 0", () => {
+      const repo = createTmpGitRepo();
+      try {
+        setupBaseline(repo);
+        repo.commitFiles(
+          [
+            { relPath: "source.ts", content: "export const a = 2;\n" },
+            {
+              relPath: "bundle/doc.md",
+              content:
+                "---\ntype: concept\ntimestamp: 2025-09-01T00:00:00.000Z\nsources:\n  - source.ts\n---\n\n# Doc\n",
+            },
+          ],
+          "2025-09-01T00:00:00Z",
+        );
+
+        const result = runCli([
+          "check",
+          path.join(repo.dir, "bundle"),
+          "--repo-root",
+          repo.dir,
+          "--strict",
+        ]);
+        expect(result.status).toBe(0);
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("(iv) doc body-edited only (timestamp unchanged) + source dirty: STALE, exit 1", () => {
+      const repo = createTmpGitRepo();
+      try {
+        setupBaseline(repo);
+        fs.writeFileSync(
+          path.join(repo.dir, "source.ts"),
+          "export const a = 2;\n",
+        );
+        fs.writeFileSync(
+          path.join(repo.dir, "bundle/doc.md"),
+          "---\ntype: concept\ntimestamp: 2025-02-01T00:00:00.000Z\nsources:\n  - source.ts\n---\n\n# Doc\n\nA local note, not a re-stamp.\n",
+        );
+
+        const result = runCli([
+          "check",
+          path.join(repo.dir, "bundle"),
+          "--repo-root",
+          repo.dir,
+          "--dirty-as-now",
+          "--strict",
+          "--json",
+        ]);
+        const parsed = JSON.parse(result.stdout) as JsonReport;
+        expect(
+          parsed.findings.some(
+            (f) => f.ruleId === "sources-fresh" && f.message.includes("STALE"),
+          ),
+        ).toBe(true);
+        expect(result.status).toBe(1);
+      } finally {
+        repo.cleanup();
+      }
+    });
+
+    it("(v) backwards re-stamp (on-disk timestamp moved EARLIER than HEAD's) + source dirty: still a re-stamp, clean, exit 0 (documented)", () => {
+      const repo = createTmpGitRepo();
+      try {
+        setupBaseline(repo);
+        fs.writeFileSync(
+          path.join(repo.dir, "source.ts"),
+          "export const a = 2;\n",
+        );
+        // Moved BACKWARDS relative to the committed 2025-02-01 value --
+        // still counts as a re-stamp (a changed value in EITHER direction),
+        // documented in the README's "any CHANGE of value" wording.
+        dirtyDoc(repo, "2025-01-15T00:00:00.000Z");
+
+        const result = runCli([
+          "check",
+          path.join(repo.dir, "bundle"),
+          "--repo-root",
+          repo.dir,
+          "--dirty-as-now",
+          "--strict",
+        ]);
+        expect(result.status).toBe(0);
+      } finally {
+        repo.cleanup();
+      }
+    });
+  });
+
   it("skips staleness with a notice when the bundle is not inside a git work tree", () => {
     const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), "okf-kit-plain-"));
     try {

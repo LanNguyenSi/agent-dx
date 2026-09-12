@@ -52,6 +52,18 @@ export interface CheckOptions {
    * `ctx.freshnessFutureSkewSeconds`.
    */
   futureSkewMinutes?: number;
+  /**
+   * Opt-in for `sources-fresh` AND `sources-fresh-future`: model every
+   * uncommitted change (modified, staged, or untracked) as though it
+   * landed in ONE virtual commit made right now, instead of at its last
+   * real commit. Both a dirty `sources` path and a dirty DOC read their
+   * commit time from that same shared instant, so a pre-commit run reports
+   * the verdict CI will report once the commit lands -- for either rule.
+   * Stored on `ctx.dirtyAsNow`; see its jsdoc in `src/types.ts` (the
+   * canonical description of the model) and the README's "Uncommitted
+   * edits (`--dirty-as-now`)" section.
+   */
+  dirtyAsNow?: boolean;
   /** Test-only override for git access; production code shells out to the real `git` binary. */
   runGit?: RunGit;
 }
@@ -89,6 +101,9 @@ export function runCheck(
   }
   if (options.futureSkewMinutes !== undefined) {
     ctx.freshnessFutureSkewSeconds = Math.round(options.futureSkewMinutes * 60);
+  }
+  if (options.dirtyAsNow) {
+    ctx.dirtyAsNow = true;
   }
 
   const findings = allRules.flatMap((rule) => rule.run(ctx));
@@ -150,6 +165,12 @@ program
     "sources-fresh-future: clock-skew allowance in minutes before a doc `timestamp` later than " +
       "the doc's own last commit is flagged as future-dated (default 10)",
   )
+  .option(
+    "--dirty-as-now",
+    "sources-fresh + sources-fresh-future: model every uncommitted change (modified, staged, or " +
+      "untracked) -- a `sources` path and the doc itself alike -- as one virtual commit made right " +
+      "now, so a pre-commit run matches what CI reports after the commit lands (opt-in, see README)",
+  )
   .exitOverride()
   .action(
     (
@@ -163,6 +184,7 @@ program
         proseLineReferences?: boolean;
         proseLineReferencesStrict?: boolean;
         futureSkewMinutes?: string;
+        dirtyAsNow?: boolean;
       },
     ) => {
       try {
@@ -188,6 +210,7 @@ program
           proseLineReferences: opts.proseLineReferences,
           proseLineReferencesStrict: opts.proseLineReferencesStrict,
           futureSkewMinutes,
+          dirtyAsNow: opts.dirtyAsNow,
         });
         const output = opts.json
           ? renderJson(result.bundleDir, result.findings)
