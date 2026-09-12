@@ -1186,14 +1186,14 @@ verified, and never reached. `-t`/`--pre` then observe the unmutated
 code, the mutant is reported `survived`, and nothing in the envelope
 distinguishes that from a genuinely surviving mutant -- a silent false
 negative, not an error this package can detect from the outside.
-Measured on a Drupal repository: `core/tests/bootstrap.php`, reached
-through a `--link docroot/core` symlink, computes `$root =
+Measured on a real Drupal repository: `core/tests/bootstrap.php`,
+reached through a `--link docroot/core` symlink, computes `$root =
 dirname(__DIR__, 2)` and registers every module namespace (including
 the one under test) from the REAL `docroot/modules`; the same mutant,
-same test, same `--pass-regex '^OK \('` reported `killed` (PHPUnit
-`Tests: 11, Assertions: 17, Failures: 2`) under `-i inplace` and
-`survived` (PHPUnit `OK (11 tests, 17 assertions)`) under `-i worktree`
-with `docroot/core` linked. This is not Drupal-specific: `node_modules`
+same test, same `--pass-regex '^OK \('` reported opposite verdicts
+under `-i inplace` and `-i worktree` with `docroot/core` linked -- run
+detail (the two-mode PHPUnit output table) is in the CHANGELOG entry
+for this change and issue #243. This is not Drupal-specific: `node_modules`
 is this package's own default auto-link, so a JS repository whose test
 bootstrap lives inside a linked `node_modules` package and resolves
 paths by `fs.realpathSync` has the identical shape. Two ways out: run

@@ -20,7 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a repo-side test-bootstrap fix as the two ways out, with a Drupal
   `core/tests/bootstrap.php` case as the worked example (issue #243).
   `--copy <dirs>` and a survived-detection heuristic remain proposals in
-  that issue, not implemented here.
+  that issue, not implemented here. Measured on a real Drupal
+  repository, same mutant, same test, same `--pass-regex '^OK \('`:
+
+  | Isolation mode | PHPUnit result | Probe verdict |
+  | --- | --- | --- |
+  | `-i inplace` | `Tests: 11, Assertions: 17, Failures: 2` | `killed` |
+  | `-i worktree` (`docroot/core` linked) | `OK (11 tests, 17 assertions)` | `survived` |
 
 ### Fixed
 
