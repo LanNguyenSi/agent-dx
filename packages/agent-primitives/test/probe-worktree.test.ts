@@ -5,7 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, afterEach, vi } from "vitest";
-import { probe, type ProbeOptions } from "../src/probe/index.js";
+import {
+  probe,
+  firstLinkSourceRefusal,
+  type ProbeOptions,
+} from "../src/probe/index.js";
+import type { MergedLink } from "../src/probe/link-list.js";
 import {
   markerFilePathFor,
   readMarkerFor,
@@ -1871,6 +1876,71 @@ describe("probe(): worktree isolation, an in-repo symlink whose own target lies 
     expect(result.status).toBe("usage_error");
     expect(result.reason).toBe("link_source_not_found");
     expect(result.warnings.join(" ")).toContain("does not exist");
+  });
+
+  /**
+   * `firstLinkSourceRefusal` called directly, not through `probe()`: the
+   * later, deferred containment check in `setup.ts` independently
+   * refuses an out-of-root symlink source too, once its `abs` is
+   * resolved correctly (the chain-walking fix above), so an end-to-end
+   * `probe()` scenario reaches the SAME `file_outside_root` outcome
+   * whether or not THIS function's own early, symlink-specific branch
+   * fires at all -- measured: defeating `isSymlinkSource` so it always
+   * returns `false` leaves every `probe()`-level test in this describe
+   * block passing regardless. These two cases pin the branch's own
+   * decision directly, independent of that later check, so a defect
+   * here cannot hide behind it.
+   */
+  it("firstLinkSourceRefusal itself refuses an in-repo symlink to an out-of-root target under the default options, independent of any later, deferred containment check", () => {
+    const root = makeTmpDir();
+    const outside = makeTmpDir();
+    const target = path.join(outside, "target");
+    fs.mkdirSync(target);
+    const oracle = path.join(root, "oracle");
+    fs.symlinkSync(target, oracle);
+    const link: MergedLink = {
+      value: oracle,
+      given: "oracle",
+      basePhrase: "the invocation cwd",
+      remedy: "drop --link",
+    };
+
+    const refusal = firstLinkSourceRefusal(
+      [link],
+      root,
+      root,
+      /* checkOutsideRootExistence */ false,
+      /* allowOutside */ false,
+    );
+
+    expect(refusal).toBeDefined();
+    expect(refusal?.reason).toBe("file_outside_root");
+    expect(refusal?.message).toContain(oracle);
+  });
+
+  it("firstLinkSourceRefusal defers an in-repo symlink to an out-of-root target when checkOutsideRootExistence is true (--allow-outside -i inplace): no refusal from this function, the existence check further down decides instead", () => {
+    const root = makeTmpDir();
+    const outside = makeTmpDir();
+    const target = path.join(outside, "target");
+    fs.mkdirSync(target);
+    const oracle = path.join(root, "oracle");
+    fs.symlinkSync(target, oracle);
+    const link: MergedLink = {
+      value: oracle,
+      given: "oracle",
+      basePhrase: "the invocation cwd",
+      remedy: "drop --link",
+    };
+
+    const refusal = firstLinkSourceRefusal(
+      [link],
+      root,
+      root,
+      /* checkOutsideRootExistence */ true,
+      /* allowOutside */ true,
+    );
+
+    expect(refusal).toBeUndefined();
   });
 });
 

@@ -190,8 +190,17 @@ export interface ProbeResult {
 }
 
 /** What `firstLinkSourceRefusal` found: either shape it may return is a
- * refusal, the difference is only which reason and message apply. */
-interface LinkSourceRefusal {
+ * refusal, the difference is only which reason and message apply.
+ * Exported, with the function itself below, so its own branch decisions
+ * (the symlink case's `checkOutsideRootExistence`/`allowOutside` gating
+ * in particular) can be pinned directly against unit-constructed
+ * `MergedLink` values -- the same reason `linkSourceMissingMessage` in
+ * `link-list.ts` is exported and unit-tested on its own -- rather than
+ * relying only on `probe()`'s own end-to-end behaviour, which the
+ * LATER, deferred containment check in `setup.ts` can independently
+ * reproduce for several of this function's own branches once a value's
+ * `abs` is resolved correctly, masking a defect in this function alone. */
+export interface LinkSourceRefusal {
   reason: "file_outside_root" | "link_source_not_found";
   message: string;
 }
@@ -270,7 +279,7 @@ interface LinkSourceRefusal {
  * branch refuse immediately, since that is the one shape neither later
  * check can catch on its own.
  */
-function firstLinkSourceRefusal(
+export function firstLinkSourceRefusal(
   mergedLinks: readonly MergedLink[],
   root: string,
   realRoot: string,
