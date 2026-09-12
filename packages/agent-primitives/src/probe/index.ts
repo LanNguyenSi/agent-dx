@@ -207,19 +207,32 @@ interface LinkSourceRefusal {
  * link's source is fine.
  *
  * A link whose resolved value lies OUTSIDE `realRoot` is refused right
- * here, `file_outside_root`, when it got there through its OWN symlink:
- * an in-repo path (`<root>/oracle`) that is itself a symlink to
- * somewhere outside the root must never reach the existence check below,
- * whether that far end exists or not -- `linkSourceMissingMessage` stats
- * `link.value` directly, which follows the WHOLE chain, so running it
- * here would answer "does not exist" for a dangling out-of-root target
- * and nothing at all for an existing one, disclosing which of the two
- * sits at a path this repository never named directly (GitHub issue
+ * here, `file_outside_root`, when it got there through its OWN symlink
+ * (however many hops the chain carries, `resolveLinkSourceTarget` walks
+ * all of them): an in-repo path (`<root>/oracle`) that is itself a
+ * symlink to somewhere outside the root must never reach the existence
+ * check below, whether that far end exists or not -- `linkSourceMissingMessage`
+ * stats `link.value` directly, which follows the WHOLE chain, so running
+ * it here would answer "does not exist" for a dangling out-of-root
+ * target and nothing at all for an existing one, disclosing which of the
+ * two sits at a path this repository never named directly (GitHub issue
  * #242's containment finding, narrowed further). `resolveLinkSourceTarget`
  * is what makes this catch the dangling case too: plain
  * `resolveDeepestExisting` falls back to `link.value`'s own (in-root)
  * spelling when the symlink's target does not fully resolve, which is
  * exactly the blind spot this closes.
+ *
+ * `resolveLinkSourceTarget` returns `undefined` instead of a path when
+ * the chain does not resolve within its own hop cap (a genuine cycle, or
+ * something functionally equivalent): that case is refused here without
+ * ever asking `isPathContained` anything, since answering "contained" or
+ * "not" for a target this process could not even follow is the same
+ * disclosure this whole function exists to close. `linkSourceMissingMessage`
+ * is what actually reports it -- `fs.statSync(link.value)` there follows
+ * the identical chain natively and, resolving it whole, is the call that
+ * actually surfaces the OS's own `ELOOP`, landing on that function's
+ * errno branch (`linkSourceMissingMessage`'s own docblock) rather than on
+ * anything containment-shaped here.
  *
  * A link that resolves outside the root WITHOUT going through a symlink
  * of its own (an out-of-root value named directly, by any of the three
@@ -238,23 +251,51 @@ interface LinkSourceRefusal {
  * defaults file or a plan's own `link`) and from giving an operator's
  * own `--link /outside/missing` a "does not exist" pointing them at
  * creating a path this run would refuse anyway.
+ *
+ * The symlink branch mirrors that same `checkOutsideRootExistence` gate
+ * rather than refusing unconditionally: with `--allow-outside` in play
+ * (`allowOutside`), a symlink SOURCE that resolves outside the root is
+ * no longer disclosure-sensitive in the way the plain case above is --
+ * the operator asked for out-of-root targets to be visible -- so it
+ * takes the SAME two branches the non-symlink value already does. When
+ * `checkOutsideRootExistence` is `false` because the effective isolation
+ * is `worktree` (the one combination `--allow-outside` is refused
+ * outright for, `worktree_allow_outside_unsupported` in `setup.ts`), the
+ * symlink case defers exactly like the non-symlink one: that later,
+ * unrelated refusal fires regardless of what the symlink's own target
+ * is, so preempting it here with `file_outside_root` would report the
+ * wrong reason for the same run. Only when `checkOutsideRootExistence`
+ * is `false` AND `allowOutside` is itself `false` -- the plain default
+ * case this docblock's earlier paragraphs describe -- does the symlink
+ * branch refuse immediately, since that is the one shape neither later
+ * check can catch on its own.
  */
 function firstLinkSourceRefusal(
   mergedLinks: readonly MergedLink[],
   root: string,
   realRoot: string,
   checkOutsideRootExistence: boolean,
+  allowOutside: boolean,
 ): LinkSourceRefusal | undefined {
   for (const link of mergedLinks) {
     const target = resolveLinkSourceTarget(link.value);
-    if (!isPathContained(realRoot, target)) {
-      if (isSymlinkSource(link.value)) {
-        return {
-          reason: "file_outside_root",
-          message: `outside the containment root (${root}): ${link.value}`,
-        };
+    if (target === undefined) {
+      const message = linkSourceMissingMessage(link);
+      if (message !== undefined) {
+        return { reason: "link_source_not_found", message };
       }
-      if (!checkOutsideRootExistence) continue;
+      continue;
+    }
+    if (!isPathContained(realRoot, target)) {
+      if (!checkOutsideRootExistence) {
+        if (isSymlinkSource(link.value) && !allowOutside) {
+          return {
+            reason: "file_outside_root",
+            message: `outside the containment root (${root}): ${link.value}`,
+          };
+        }
+        continue;
+      }
     }
     const message = linkSourceMissingMessage(link);
     if (message !== undefined) {
@@ -582,6 +623,7 @@ async function runProbePipeline(
     root,
     realRoot,
     checkOutsideRootExistence,
+    opts.allowOutside === true,
   );
   if (linkSourceRefusal !== undefined) {
     return {
@@ -599,7 +641,13 @@ async function runProbePipeline(
   const absFile = resolveDeepestExisting(displayFile);
   const links = mergedLinks.map((link) => ({
     display: link.value,
-    abs: resolveLinkSourceTarget(link.value),
+    // `firstLinkSourceRefusal` above already refused any link whose
+    // chain does not resolve at all, so `resolveLinkSourceTarget` is
+    // never `undefined` for a link that reaches here; the fallback
+    // exists only to keep this typed as a plain path, not because it is
+    // expected to run.
+    abs:
+      resolveLinkSourceTarget(link.value) ?? resolveDeepestExisting(link.value),
     ...(link.namedBy !== undefined ? { namedBy: link.namedBy } : {}),
   }));
   // The `--log-dir` this run's worktree (if any) is created under,
@@ -1212,6 +1260,7 @@ export async function probePlan(
     root,
     realRoot,
     checkOutsideRootExistence,
+    opts.allowOutside === true,
   );
   if (linkSourceRefusal !== undefined) {
     return refuse(
@@ -1222,7 +1271,10 @@ export async function probePlan(
   }
   const links = mergedLinks.map((link) => ({
     display: link.value,
-    abs: resolveLinkSourceTarget(link.value),
+    // See the single-probe call site above: `firstLinkSourceRefusal`
+    // already refused any link whose chain does not resolve at all.
+    abs:
+      resolveLinkSourceTarget(link.value) ?? resolveDeepestExisting(link.value),
     ...(link.namedBy !== undefined ? { namedBy: link.namedBy } : {}),
   }));
   for (const item of planned) {

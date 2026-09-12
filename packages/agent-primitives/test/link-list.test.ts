@@ -334,6 +334,32 @@ describe("linkSourceMissingMessage", () => {
     },
   );
 
+  it("reports a self-referential symlink (ELOOP) with 'check what the path resolves to', never 'check its permissions'", () => {
+    const root = makeTmpDir();
+    const cyclic = path.join(root, "cyclic");
+    fs.symlinkSync(cyclic, cyclic);
+    const link: MergedLink = {
+      value: cyclic,
+      given: "cyclic",
+      basePhrase: "the invocation cwd",
+      remedy: "drop --link",
+    };
+    const message = linkSourceMissingMessage(link);
+    expect(message).toBeDefined();
+    expect(message).toContain("could not be checked");
+    expect(message).toContain("ELOOP");
+    expect(message).not.toContain("does not exist");
+    // A symlink cycle is not a permission problem: no permission grant
+    // fixes a path that resolves back into itself, so this errno shape
+    // is told to check what the path resolves to instead, distinctly
+    // from the EACCES/EPERM case above.
+    expect(message).toContain(
+      "check what the path resolves to, or drop --link",
+    );
+    expect(message).not.toContain("check its permissions");
+    expect(message).not.toContain("create it");
+  });
+
   it("is undefined for a source that is a SYMLINK resolving to an existing directory: statSync follows it, the same as a plain directory", () => {
     const root = makeTmpDir();
     const realDir = path.join(root, "real");

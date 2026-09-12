@@ -149,7 +149,7 @@ export function mergeLinkSources(
  * sections). A source that exists but is a FILE, not a directory, is
  * refused the same way, named accordingly. A `stat` that fails for a
  * reason OTHER than "not there" (an ancestor directory locked against
- * this process, `EACCES`; a symlink loop, `ELOOP`; ...) is never
+ * this process, `EACCES`/`EPERM`; a symlink loop, `ELOOP`; ...) is never
  * reported as "does not exist" -- that would tell an operator to create
  * a directory that may well already be sitting right there behind a
  * permission this process cannot see through -- it is refused with its
@@ -160,12 +160,17 @@ export function mergeLinkSources(
  * why only the "stop naming it" half lives there) matches the branch: a
  * path that does not exist is told to "create it", one that is a plain
  * file is told to "point it at a directory" (creating a NEW directory
- * there would still leave the file in the way), and one this process
- * could not even stat is told to "check its permissions" -- advising
- * "create it" for either of the last two would be wrong on its face,
- * the first because the path is already occupied by something that is
- * not a directory, the second because a permission this process cannot
- * see through may already have a directory sitting right there.
+ * there would still leave the file in the way). The two remaining errno
+ * shapes read differently by what a reader can actually act on: `EACCES`
+ * and `EPERM` name a permission this process itself lacks, so those two
+ * alone are told to "check its permissions" -- advising "create it"
+ * there would be wrong on its face, since a permission this process
+ * cannot see through may already have a directory sitting right there.
+ * Every other errno, `ELOOP` (a symlink cycle) included, names something
+ * a permission fix would not touch at all -- there is no permission to
+ * grant against a path that cycles back on itself -- so those are told
+ * instead to "check what the path resolves to", which is the actual
+ * question a symlink cycle (or any other unrecognized failure) raises.
  */
 export function linkSourceMissingMessage(link: MergedLink): string | undefined {
   let stat: fs.Stats | undefined;
@@ -191,7 +196,9 @@ export function linkSourceMissingMessage(link: MergedLink): string | undefined {
       ? "point it at a directory, or "
       : statErrorCode === "ENOENT" || statErrorCode === "ENOTDIR"
         ? "create it, or "
-        : "check its permissions, or ";
+        : statErrorCode === "EACCES" || statErrorCode === "EPERM"
+          ? "check its permissions, or "
+          : "check what the path resolves to, or ";
   const provenance = link.namedBy !== undefined ? ` (${link.namedBy})` : "";
   return (
     `link "${link.given}" resolved to ${link.value} against ` +

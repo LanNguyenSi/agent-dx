@@ -1501,9 +1501,11 @@ regardless of whether nothing, a file, or a directory happens to sit at
 that path, rather than leaking which of the three it is. This applies
 identically to an IN-repo path that is itself a symlink to somewhere
 outside the root (a defaults-file `link` of `oracle`, where `oracle ->
-/etc/hosts`): refused `file_outside_root` before the existence check
-ever runs, whether the far end exists or not, so it cannot be used to
-learn which of the two it is either.
+/etc/hosts`), the whole chain followed (up to 32 hops, so `oracle ->
+hop2 -> /etc/hosts` answers the same way): under the DEFAULT options
+this is refused `file_outside_root` before the existence check ever
+runs, whether the far end exists or not, so it cannot be used to learn
+which of the two it is either.
 
 `--allow-outside` disables that later containment check, and with it
 the ordering the previous paragraph describes -- for `-i worktree` the
@@ -1513,11 +1515,19 @@ combination is refused outright before either check runs
 path lies outside the root has nothing left downstream to catch it, so
 it is refused right here instead: `--allow-outside -i inplace --link
 /outside/missing` is `link_source_not_found`, not silently accepted --
-the flag disables the containment check, not this existence check. Only
-a value that resolves INSIDE the root, or reaches the existence check
-here for want of anything else to catch it under `--allow-outside -i
-inplace`, is checked for existence at all; every other out-of-root value
-is skipped here as described above. It runs once, when the invocation
+the flag disables the containment check, not this existence check. Under
+`--allow-outside -i inplace` a symlink source takes the SAME path as a
+value naming the directory directly, by operator choice: its resolved
+target is stat'ed here (existence and type visible) rather than refused
+`file_outside_root` outright, so `--allow-outside -i inplace --link
+oracle` (`oracle -> /outside/existing-dir`) is accepted exactly as
+`--allow-outside -i inplace --link /outside/existing-dir` already is,
+and one pointing at a missing path is `link_source_not_found` like any
+other. Only a value that resolves INSIDE the root, or reaches the
+existence check here for want of anything else to catch it under
+`--allow-outside -i inplace`, is checked for existence at all; every
+other out-of-root value is skipped here as described above. It runs
+once, when the invocation
 starts, checking that each such source exists at that moment; it is not
 re-checked immediately before the link is actually created. The check
 is also where the filesystem's case rules show: a case-variant spelling
