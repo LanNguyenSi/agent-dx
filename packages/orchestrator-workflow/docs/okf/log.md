@@ -8789,8 +8789,8 @@ closing delta's finding-set delta against base is zero.
   change in `reviewer.md`); mirrored the same "When citing a coverage
   gate," opening in the `SKILL.md` step 7 mirror (net zero line change,
   only the two lines carrying that clause reflowed).
-  (5) Re-wrapped step 7's whole paragraph (`SKILL.md:252-317`, one
-  continuous 66-line run with no blank lines) to the file's ~79-column
+  (5) Re-wrapped step 7's whole paragraph (then `SKILL.md` lines 252 to
+  317, one continuous 66-line run with no blank lines) to the ~79-column
   width, closing the ragged 19-character line 301 ("delegation, using a")
   the insertion had left behind; content is unchanged (diffed with
   whitespace collapsed) but the paragraph now fills to 64 lines, a net
