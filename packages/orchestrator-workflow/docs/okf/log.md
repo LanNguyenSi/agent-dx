@@ -1,5 +1,21 @@
 # Bundle log
 
+- 2026-09-12T13:05:00Z (release cut, agent-dx REL-1): cut the `[Unreleased]`
+  section under a new `[0.33.0] - 2026-09-12` heading, keeping an empty
+  `[Unreleased]` heading above it, and bumped `package.json`/
+  `package-lock.json` to 0.33.0. Re-pointed the two `log.md` self-citations
+  the two-line insertion shifted (`CHANGELOG.md:30` to `CHANGELOG.md:32`,
+  `CHANGELOG.md:394` to `CHANGELOG.md:396`); the three historical,
+  append-only `CHANGELOG.md:<n>` mentions further below carry no re-point
+  obligation, as recorded at their own entries. Re-stamped the three
+  bundle docs whose sources list `CHANGELOG.md`
+  (`review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`,
+  `subagent-contracts-superset.md`); `model-preselection.md` lists no
+  source touched by this cut, so it is unchanged. No live citation named
+  the `[Unreleased]` heading, so no heading re-point was needed. Cut the
+  paired okf-kit release (0.10.0 to 0.11.0) in the same commit per
+  CONTRIBUTING.md's "Releasing okf-kit" procedure.
+
 - 2026-09-12T10:21:32Z (implementer report derivation and foreground returns,
   agent-dx task 2c9279c2): both implementer-contract copies now require a
   non-empty `commits` field to be pasted from `git log --reverse --format=%H
@@ -82,8 +98,8 @@
   once the ambiguity cleared, four such masked spots became real
   findings (all pre-existing, none touched by this round's own source
   edits): two backtick-wrapped historical shorthand examples in this
-  file's own older entries narrating `model-preselection.md` (`` `:1187-1252` ``/`` `:1254-1312`
-  ``, `` `:1117-1174` ``/`` `:1151-1208` ``) were mistaken for live
+  file's own older entries narrating `model-preselection.md` (1187-1252/1254-1312,
+  1117-1174/1151-1208) were mistaken for live
   continuation citations onto `SKILL.md`, fixed by dropping their
   backticks so they read as plain narrated numbers instead (reserved
   files exempt bare short-form matches, not continuations); a bare
@@ -320,7 +336,7 @@
   sentence reverted to its pre-change wording, fails the exact-sub-field
   and regression-signal tests above; restored, the suite is green again.
   `CHANGELOG.md`'s own prose copy of this change is
-  (`CHANGELOG.md:30#"The implementer"`).
+  (`CHANGELOG.md:32#"The implementer"`).
 
   Verified on the committed tree: the full package suite (`npm test`),
   `typecheck`, `typecheck:test`, and `format:check`, all clean. Re-pointed
@@ -588,7 +604,7 @@
   that binding rather than second-guessing it.
 
   The CHANGELOG bullet for this round is
-  `CHANGELOG.md:394#"Citation scanning is paragraph-joined"`. Verified on
+  `CHANGELOG.md:396#"Citation scanning is paragraph-joined"`. Verified on
   the committed tree: the full package suite, `docs-consistency.test.ts`
   on its own, `typecheck`, `typecheck:test` and `format:check`; the
   figures each guard measured are in its own computed test name, per the
