@@ -539,8 +539,11 @@ composed envelope, or one handed in from a prior, harsher reduction
 pass. See the CHANGELOG for the measured shrink/grow numbers this
 closes against.
 
-The probe pins its own content-writing git commands with `-c
-core.autocrlf=false` and `-c apply.whitespace=nowarn`: the patch dry
+Every git command the probe owns pins `-c maintenance.auto=false` and
+`-c gc.auto=0`, so it cannot start background maintenance in the
+repository or scratch worktree while the probe is running. The probe also
+pins its own content-writing git commands with `-c core.autocrlf=false`
+and `-c apply.whitespace=nowarn`: the patch dry
 run, the real patch apply, the worktree checkout, and the tracked-diff
 apply. A machine's global `core.autocrlf` or `apply.whitespace` setting
 therefore cannot rewrite content while the probe is checking, applying,

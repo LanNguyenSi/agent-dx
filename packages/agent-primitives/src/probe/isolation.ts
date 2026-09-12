@@ -14,6 +14,7 @@ import {
   skippedLinkWarning,
   type LinkCandidate,
 } from "./link-policy.js";
+import { probeGitArgv } from "./git.js";
 import { GIT_CONTENT_WRITE_CONFIG_ARGS } from "./mutant.js";
 import { runArgv, type RunArgvResult } from "./run.js";
 
@@ -630,7 +631,7 @@ function gitArgv(
   cwd: string,
   signal?: AbortSignal,
 ): Promise<RunArgvResult> {
-  return runArgv("git", args, {
+  return runArgv("git", probeGitArgv(args), {
     cwd,
     logDir: runDir,
     logFileName,

@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { probeGitArgv } from "./git.js";
 import { createHash } from "node:crypto";
 import { runArgv } from "./run.js";
 
@@ -521,7 +522,7 @@ export async function listPatchTouchedPaths(
   const absPatchPath = path.resolve(patchPath);
   const numstatResult = await runArgv(
     "git",
-    ["apply", "--numstat", "--", absPatchPath],
+    probeGitArgv(["apply", "--numstat", "--", absPatchPath]),
     {
       cwd: scratchDir,
       logDir: scratchDir,
@@ -682,7 +683,7 @@ async function computeAppliedDiffExcerpt(
     fs.writeFileSync(path.join(afterDir, base), newContent);
     const diffResult = await runArgv(
       "git",
-      [
+      probeGitArgv([
         ...GIT_DIFF_READ_CONFIG_ARGS,
         "diff",
         "--no-ext-diff",
@@ -692,7 +693,7 @@ async function computeAppliedDiffExcerpt(
         "--",
         `before/${base}`,
         `after/${base}`,
-      ],
+      ]),
       { ...runOptions, cwd: diffDir, logDir: diffDir },
     );
     cleanupScratchContent();
@@ -1081,7 +1082,7 @@ async function computePatch(
   };
   const numstatResult = await runArgv(
     "git",
-    ["apply", "--numstat", "--", absPatchPath],
+    probeGitArgv(["apply", "--numstat", "--", absPatchPath]),
     { cwd: scratchDir, ...runOptions },
   );
   if (numstatResult.exitCode !== 0) {
@@ -1134,7 +1135,12 @@ async function computePatch(
   // back as "no content change" on that machine and not on another.
   const result = await runArgv(
     "git",
-    [...GIT_CONTENT_WRITE_CONFIG_ARGS, "apply", "--", absPatchPath],
+    probeGitArgv([
+      ...GIT_CONTENT_WRITE_CONFIG_ARGS,
+      "apply",
+      "--",
+      absPatchPath,
+    ]),
     { cwd: scratchDir, ...runOptions },
   );
   const logPaths = [numstatResult.logPath, result.logPath];
@@ -1343,7 +1349,12 @@ export function applyPatchForReal(
   const absPatchPath = path.resolve(patchPath);
   return runArgv(
     "git",
-    [...GIT_CONTENT_WRITE_CONFIG_ARGS, "apply", "--", absPatchPath],
+    probeGitArgv([
+      ...GIT_CONTENT_WRITE_CONFIG_ARGS,
+      "apply",
+      "--",
+      absPatchPath,
+    ]),
     {
       cwd: root,
       logDir,
