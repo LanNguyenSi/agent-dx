@@ -7,7 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-12
+
+Upgrade notes: a `probe` run under a non-default `--expect` now reports
+the mutant's actual, measured outcome in `result`/`status`
+(`killed`/`survived`) instead of whether that outcome matched
+`--expect`; read `mutation_probe.expectation` (`"met"`/`"violated"`) for
+the match a script previously read off `status` (a `killed` under
+`--expect pass` used to mean the expectation was violated, not that the
+mutant was actually killed). Separately, a `--link` value, a `--plan`
+file's own `link` entry, or the repository defaults file's `link` entry
+whose resolved source is not an existing directory is now a
+`usage_error` (`link_source_not_found`) instead of being linked
+silently or dropped with no warning; this also means a case-variant
+spelling that used to resolve on a case-insensitive filesystem (macOS)
+is refused on a case-sensitive one (Linux, and what CI runs on).
+
 ### Added
+
+- README gains a "Mapping a probe result into an implementer report"
+  section (issue #249): a table mapping `mutation_probe`'s sibling
+  `mutant` record (`file`, `line` to `anchor`, `before`, `after`) and
+  `mutation_probe` itself (`verified_applied_via`, `result`,
+  `expectation`, `reason`, `restored_verified`) onto the eleven fields
+  an orchestrator implementer's `mutation_probes` entry needs, plus
+  `replayed`, with `not_applicable`/an empty string standing in for an
+  absent `expectation`/`reason` and an explicit instruction never to
+  invent a missing sibling record; the same mapping applies to a
+  `--plan` run's `plan.results[]` entries. The package's skill
+  (`assets/skill/SKILL.md`) was updated to point at it in place of its
+  old four-field "copy verbatim" instruction.
 
 - `probe` now recognizes a complete Vitest 4 `--reporter=json` summary on
   either captured stream. A JSON filter miss can report a nonzero
@@ -208,11 +237,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `survived`, once any mutant carries `--expect pass`) is explained by
   a number in the same envelope instead of only by re-deriving it from
   `results[].mutation_probe.expectation`.
-- `probe -i worktree`'s cleanup retries `git worktree prune` once more when
-  its own admin entry survives only because that entry could not yet be
-  read as pruned (never one git holds genuinely `locked`), closing a rare
-  CI flake where the repository's `.git` carried one extra leftover entry
-  after a run.
 - Closed a CI flake in `probe-worktree.test.ts`'s ".git tree unchanged"
   refusal test (CI run 34447150672): the three fixture initialisers now
   disable `maintenance.auto`/`gc.auto` so this class of background
