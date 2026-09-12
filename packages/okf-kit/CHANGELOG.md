@@ -9,29 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `check` gets `--dirty-as-now`: an opt-in flag under which a `sources-fresh`
-  source path with an uncommitted change (modified, staged, or untracked
-  per `git status --porcelain`) is judged as committed right now instead of
-  at its last commit. Closes a gap surfaced by the 2026-09-11 review-method
-  dogfood (agent-dx PR #236): a test file four OKF docs list as a source was
-  edited, a pre-commit `check` run reported 0 warnings because the source's
-  last commit still predated every doc's `timestamp`, and CI's strict
-  freshness guard then failed once the commit landed and gave the source a
-  new, later commit time. Omit the flag and `sources-fresh` is unchanged;
-  see the README's new "Uncommitted edits (`--dirty-as-now`)" section for
-  the recommended pre-commit invocation. Carries a working-tree analogue of
-  the rule's own co-commit re-stamp rescue: a doc re-stamped locally
-  (uncommitted, on-disk `timestamp` differing from the value committed at
-  `HEAD`; an untracked doc counts as re-stamped too) rescues a dirty source
-  exactly like a real re-stamp landing in the same commit does, so the
-  README's recommended `--dirty-as-now --strict` pre-commit gate can
-  actually be made green by following its own remedy (re-stamp, then
-  commit) while the source stays uncommitted -- without this, the flag's
-  own substitution of "now" for the dirty source raced against the
-  doc's on-disk timestamp value (frozen at the instant it was written) and
-  reported STALE by however many seconds had elapsed since. Reads the
-  work tree's dirty paths once per run (`git --no-optional-locks status
-  --porcelain=v2 -z`), not once per unique source path.
+- `check` gets `--dirty-as-now`: an opt-in flag under which every
+  uncommitted change (modified, staged, or untracked per `git status
+  --porcelain`) is modeled as though it landed in ONE virtual commit made
+  right now, applied at a single shared choke point
+  (`commitEpochWithDirtyAsNow` in `src/rules/sources-fresh.ts`) so both
+  `sources-fresh` (a dirty `sources` path's epoch) AND `sources-fresh-future`
+  (a dirty DOC's own epoch) read the identical virtual instant, rather than
+  each rule -- or each path kind -- getting its own patch. Closes a gap
+  surfaced by the 2026-09-11 review-method dogfood (agent-dx PR #236): a
+  test file four OKF docs list as a source was edited, a pre-commit `check`
+  run reported 0 warnings because the source's last commit still predated
+  every doc's `timestamp`, and CI's strict freshness guard then failed once
+  the commit landed and gave the source a new, later commit time. Omit the
+  flag and both rules are unchanged; see the README's "Uncommitted edits
+  (`--dirty-as-now`)" section for the recommended pre-commit invocation and
+  the exact parity matrix (five working-tree states, each reproduced
+  through the built CLI with `--strict` exit codes). Carries a working-tree
+  analogue of `sources-fresh`'s own co-commit re-stamp rescue, evaluated
+  against that same virtual commit: a doc re-stamped locally (uncommitted,
+  on-disk `timestamp` differing -- in EITHER direction -- from the value
+  committed at `HEAD`; an untracked doc counts as re-stamped too) rescues a
+  dirty source exactly like a real re-stamp landing in the same commit
+  does, so the README's recommended `--dirty-as-now --strict` pre-commit
+  gate can actually be made green by following its own remedy (re-stamp,
+  then commit) while the source stays uncommitted. Reads the work tree's
+  dirty paths once per `check` run (`git --no-optional-locks status
+  --porcelain=v2 -z`), not once per unique source path, and normalizes a
+  `./`-prefixed or `/`-suffixed path spelling before matching it against
+  that dirty-paths set, so any spelling of the same source or doc path
+  matches consistently. Distinguishes a genuinely untracked doc (no entry
+  for it at `HEAD` at all) from a real git failure reading an existing
+  `HEAD` blob when deciding whether a dirty doc's own re-stamp counts,
+  falling through to the ordinary not-assessable notice in the latter
+  case rather than guessing.
 
 ### Documented
 
