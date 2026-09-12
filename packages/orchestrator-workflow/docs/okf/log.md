@@ -55,13 +55,13 @@
   citations chained after it were silently skipped rather than checked;
   once the ambiguity cleared, four such masked spots became real
   findings (all pre-existing, none touched by this round's own source
-  edits): two backtick-wrapped historical shorthand examples in
-  `model-preselection.md`'s narration (`` `:1187-1252` ``/`` `:1254-1312`
+  edits): two backtick-wrapped historical shorthand examples in this
+  file's own older entries narrating `model-preselection.md` (`` `:1187-1252` ``/`` `:1254-1312`
   ``, `` `:1117-1174` ``/`` `:1151-1208` ``) were mistaken for live
   continuation citations onto `SKILL.md`, fixed by dropping their
   backticks so they read as plain narrated numbers instead (reserved
   files exempt bare short-form matches, not continuations); a bare
-  citation to `SKILL.md` line 79 illustrating a past wrong citation
+  citation to `SKILL.md` line 79 in this file's own older entry, illustrating a past wrong citation
   ("actually line 82") was similarly de-citation-ized by rewording to
   "SKILL.md line 79" (dropping backticks alone was not enough, since a
   full citation does not require them); a bare subagent-contracts-superset.md line 259
