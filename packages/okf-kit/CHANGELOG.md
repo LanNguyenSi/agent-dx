@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-12
+
 ### Added
 
 - `check` gets `--dirty-as-now`: an opt-in flag under which every
@@ -108,6 +110,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   workspace) recorded the resolution as decision D-015, exactly the
   re-verify-and-re-stamp commit this README section now generalizes as
   the recipe.
+
+### Security
+
+- devDependencies: vitest and @vitest/mocker 4.1.6 -> 4.1.11
+  (GHSA-82fw-gwwq-j7x9), lockfile only, no runtime dependency changed
+  (CVE sweep 2026-09-11, agent-dx PR #235).
 
 ## [0.10.0] - 2026-09-06
 

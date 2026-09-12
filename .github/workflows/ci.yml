@@ -96,7 +96,7 @@ jobs:
         # anchor-not-unique-in-range, and test-range-straddles-block (see
         # the "Anchor-citation guard" step further down). Sequencing/
         # coordination evidence: see docs/okf/log.md.
-        run: npm install -g okf-kit@0.10.0 --no-audit --no-fund
+        run: npm install -g okf-kit@0.11.0 --no-audit --no-fund
 
       - name: Assert CLI is alive (output, not exit code)
         shell: bash

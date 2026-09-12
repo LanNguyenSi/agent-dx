@@ -320,7 +320,7 @@ This is advisory: don't fail the build on warnings unless you pass `--strict`. U
   with:
     fetch-depth: 0
 - name: OKF bundle check
-  run: npx okf-kit@0.10.0 check path/to/bundle
+  run: npx okf-kit@0.11.0 check path/to/bundle
 ```
 
 Pin the version: an unpinned `npx okf-kit` picks up new rules on their release day, which turns an unrelated PR red.
