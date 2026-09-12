@@ -659,6 +659,8 @@ describe("probe(): worktree isolation, killed and survived on a clean tree", () 
     const { repo } = initRepo();
     const tracePath = path.join(makeTmpDir(), "git-trace.log");
     const savedTrace = process.env.GIT_TRACE;
+    const runner = vi.mocked(runArgv);
+    runner.mockClear();
     process.env.GIT_TRACE = tracePath;
     try {
       const result = await probe(baseOptions(repo));
@@ -670,6 +672,18 @@ describe("probe(): worktree isolation, killed and survived on a clean tree", () 
 
     const trace = fs.readFileSync(tracePath, "utf8");
     expect(trace).not.toMatch(/maintenance run/);
+    const probeGitArgs = runner.mock.calls
+      .filter(([file]) => file === "git")
+      .map(([, args]) => args);
+    expect(probeGitArgs).not.toHaveLength(0);
+    for (const args of probeGitArgs) {
+      expect(args.slice(0, 4)).toEqual([
+        "-c",
+        "maintenance.auto=false",
+        "-c",
+        "gc.auto=0",
+      ]);
+    }
   });
 
   it("reports survived when the mutant does not affect the test outcome", async () => {
