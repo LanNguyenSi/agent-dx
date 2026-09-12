@@ -1471,7 +1471,7 @@ program
       result.status === "inconclusive" && result.reason === "baseline_failed"
         ? "baseline_failed"
         : result.status;
-    const { envelope, exitCode } = buildEnvelope({
+    const { envelope, exitCode: statusExitCode } = buildEnvelope({
       version: VERSION,
       command: "probe",
       status: envelopeStatus,
@@ -1498,6 +1498,26 @@ program
       maxChars: global.maxChars,
       logDir: global.logDir,
     });
+    // `status` above is `result`'s own actual outcome, independent of
+    // `--expect` (see `step.ts`'s classify step) -- so the exit code it
+    // implies via `STATUS_CLASS` (killed -> ok, survived -> finding) is
+    // only right for the default `--expect fail`. `--expect` itself
+    // still decides the exit code (unchanged contract): once a real
+    // killed/survived verdict was reached, `mutation_probe.expectation`
+    // says whether that outcome matched `--expect`, and the exit code
+    // follows THAT instead -- `0` for `"met"`, `1` for `"violated"`,
+    // exactly the pre-existing exit code for the default `--expect
+    // fail`, where `expectation` and `status` always agree. Every other
+    // status (`inconclusive`, `usage_error`, `baseline_failed`) has no
+    // `expectation` at all and keeps the exit code `buildEnvelope`
+    // already computed from `status` itself.
+    const expectation = result.mutation_probe?.expectation;
+    const exitCode =
+      expectation === undefined
+        ? statusExitCode
+        : expectation === "met"
+          ? 0
+          : 1;
     // See the plan command's own call to this: a large excerpt can
     // still get cut further by the envelope's own generic string cap,
     // which knows nothing about hunks, and this corrects that case

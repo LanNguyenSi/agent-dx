@@ -41,6 +41,11 @@ the file by hand: it confirms the unmutated test passes first, applies
 exactly one mutant, reruns the test, and restores the file, verified by
 hash. Copy its `mutation_probe` field (`mutant`, `verified_applied_via`,
 `result`, `restored_verified`) verbatim into a `mutation_probes` report.
+`result` is the mutant's actual outcome (`killed` when the test command
+failed with it applied, `survived` when it passed), independent of
+`--expect`; when `--expect` was given, also copy `mutation_probe.
+expectation` (`"met"`/`"violated"`), which says whether that outcome
+matched it -- `result` alone does not.
 `inconclusive` is not a result: fix whatever it names (a failing baseline,
 a mutant that did not apply, a stale marker) and probe again. Pass `--pre`
 whenever the test under probe executes built output rather than the
@@ -101,8 +106,9 @@ invocation cwd:
 `-t` or `--pre` (the plan supplies those); `-i`, `--expect` and
 `--timeout` override the plan's own value when given, and `--link` and
 `--allow-outside`, which a plan file cannot set at all, are command-line
-only. Exit `0` only when every mutant was killed, `1` when the plan
-concluded with a survivor, `2` when it could not conclude -- a failing
+only. Exit `0` only when every mutant's expectation was met, `1` when the
+plan concluded with an expectation violated, `2` when it could not
+conclude -- a failing
 baseline, a restore that could not be verified (nothing further is
 applied and the remaining mutants are reported `not_run`), or a wrong
 invocation. Past about eight mutants the envelope no longer fits the

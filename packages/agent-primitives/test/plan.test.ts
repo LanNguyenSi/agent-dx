@@ -577,8 +577,9 @@ describe("probePlan(): one baseline, every mutant against it (I1)", () => {
 
     const result = await probePlan(
       planOptions(repo, [
-        // A mutant the suite does NOT catch, declared as one that must
-        // leave the test passing: killed under `expect: "pass"`.
+        // A mutant the suite does NOT catch (actual outcome: survived),
+        // declared as one that must leave the test passing: the
+        // expectation is met under `expect: "pass"`.
         {
           ...replaceMutant(
             7,
@@ -591,9 +592,14 @@ describe("probePlan(): one baseline, every mutant against it (I1)", () => {
     );
 
     expect(result.results[0].expect).toBe("pass");
-    expect(result.results[0].status).toBe("killed");
+    expect(result.results[0].status).toBe("survived");
+    expect(result.results[0].mutation_probe?.expectation).toBe("met");
     expect(result.results[1].expect).toBe("fail");
     expect(result.results[1].status).toBe("killed");
+    expect(result.results[1].mutation_probe?.expectation).toBe("met");
+    // Neither mutant's own expectation was violated, so the plan
+    // concludes `killed` even though one of its mutants' actual outcome
+    // is `survived`.
     expect(result.status).toBe("killed");
   }, 30000);
 });
@@ -1300,11 +1306,18 @@ describe("probePlan(): a target that was never synced into the worktree", () => 
  * `killed`/`survived` combination `expect` can produce, not just the one
  * this file's other tests already exercise.
  *
- * Every case below ran green on this branch: single and plan agree in
- * all four. See this package's own CHANGELOG (Unreleased > Fixed) for
- * the investigation this suite came out of; nothing here reproduces the
- * reported flip, so the suite stands as a standing parity guard rather
- * than a fix.
+ * A first investigation (see this package's own CHANGELOG, 0.2.0)
+ * found no divergence between `probe()` and `probePlan()`: both already
+ * agreed in all four combinations below. The report recurred anyway
+ * (see the CHANGELOG's current Unreleased entry): `killed`/`survived`
+ * used to report whether the mutant's outcome MATCHED `--expect`, not
+ * the outcome itself, so a reader who did not already know `--expect`
+ * misread a `killed` `expect: "pass"` mutant as one the suite caught.
+ * `killed`/`survived` now always report the actual, measured outcome
+ * (independent of `--expect`) and a new `mutation_probe.expectation`
+ * (`"met"`/`"violated"`) carries the match; the combinations below are
+ * updated for that, and this suite's job -- single and plan agree -- is
+ * unchanged.
  */
 describe("probe() and probePlan(): the same mutant and expectation produce the same verdict (parity)", () => {
   const CAUGHT_LINE = 2;
@@ -1349,7 +1362,7 @@ describe("probe() and probePlan(): the same mutant and expectation produce the s
     );
   }
 
-  it("expect: fail, mutant the suite catches -- killed in both", async () => {
+  it("expect: fail, mutant the suite catches -- killed in both, expectation met", async () => {
     useLockDir();
     const single = await runSingle(
       initRepo().repo,
@@ -1364,11 +1377,13 @@ describe("probe() and probePlan(): the same mutant and expectation produce the s
       "fail",
     );
     expect(single.status).toBe("killed");
+    expect(single.mutation_probe?.expectation).toBe("met");
     expect(plan.results[0].status).toBe("killed");
+    expect(plan.results[0].mutation_probe?.expectation).toBe("met");
     expect(plan.results[0].status).toBe(single.status);
   }, 30000);
 
-  it("expect: fail, mutant the suite does not catch -- survived in both", async () => {
+  it("expect: fail, mutant the suite does not catch -- survived in both, expectation violated", async () => {
     useLockDir();
     const single = await runSingle(
       initRepo().repo,
@@ -1383,11 +1398,13 @@ describe("probe() and probePlan(): the same mutant and expectation produce the s
       "fail",
     );
     expect(single.status).toBe("survived");
+    expect(single.mutation_probe?.expectation).toBe("violated");
     expect(plan.results[0].status).toBe("survived");
+    expect(plan.results[0].mutation_probe?.expectation).toBe("violated");
     expect(plan.results[0].status).toBe(single.status);
   }, 30000);
 
-  it("expect: pass, mutant the suite does not catch (matches the expectation) -- killed in both -- the exact shape the reviewer reported disagreeing", async () => {
+  it("expect: pass, mutant the suite does not catch (matches the expectation) -- survived in both, expectation met -- the exact shape the reviewer reported disagreeing", async () => {
     useLockDir();
     const single = await runSingle(
       initRepo().repo,
@@ -1401,27 +1418,38 @@ describe("probe() and probePlan(): the same mutant and expectation produce the s
       UNCAUGHT_REPLACEMENT,
       "pass",
     );
+    // The suite does not catch this mutant, so its actual outcome is
+    // `survived` regardless of `--expect` -- what used to come back
+    // `killed` (the old, expectation-matched label) is exactly the
+    // report a reader misread.
+    expect(single.status).toBe("survived");
+    expect(single.mutation_probe?.expectation).toBe("met");
+    expect(plan.results[0].status).toBe("survived");
+    expect(plan.results[0].mutation_probe?.expectation).toBe("met");
+    expect(plan.results[0].status).toBe(single.status);
+  }, 30000);
+
+  it("expect: pass, mutant the suite catches (breaks the expectation) -- killed in both, expectation violated", async () => {
+    useLockDir();
+    const single = await runSingle(
+      initRepo().repo,
+      CAUGHT_LINE,
+      CAUGHT_REPLACEMENT,
+      "pass",
+    );
+    const plan = await runPlan(
+      initRepo().repo,
+      CAUGHT_LINE,
+      CAUGHT_REPLACEMENT,
+      "pass",
+    );
+    // The suite catches this mutant, so its actual outcome is `killed`
+    // regardless of `--expect` -- `--expect pass` wanted the opposite,
+    // so the expectation is violated.
     expect(single.status).toBe("killed");
+    expect(single.mutation_probe?.expectation).toBe("violated");
     expect(plan.results[0].status).toBe("killed");
-    expect(plan.results[0].status).toBe(single.status);
-  }, 30000);
-
-  it("expect: pass, mutant the suite catches (breaks the expectation) -- survived in both", async () => {
-    useLockDir();
-    const single = await runSingle(
-      initRepo().repo,
-      CAUGHT_LINE,
-      CAUGHT_REPLACEMENT,
-      "pass",
-    );
-    const plan = await runPlan(
-      initRepo().repo,
-      CAUGHT_LINE,
-      CAUGHT_REPLACEMENT,
-      "pass",
-    );
-    expect(single.status).toBe("survived");
-    expect(plan.results[0].status).toBe("survived");
+    expect(plan.results[0].mutation_probe?.expectation).toBe("violated");
     expect(plan.results[0].status).toBe(single.status);
   }, 30000);
 
@@ -1445,8 +1473,10 @@ describe("probe() and probePlan(): the same mutant and expectation produce the s
         { expect: "fail" },
       ),
     );
-    expect(single.status).toBe("killed");
-    expect(plan.results[0].status).toBe("killed");
+    expect(single.status).toBe("survived");
+    expect(single.mutation_probe?.expectation).toBe("met");
+    expect(plan.results[0].status).toBe("survived");
+    expect(plan.results[0].mutation_probe?.expectation).toBe("met");
     expect(plan.results[0].status).toBe(single.status);
   }, 30000);
 

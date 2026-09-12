@@ -306,23 +306,33 @@ because a probe whose test was never shown to pass unmutated is not a
 probe), run the test against the mutant, restore the file, and classify
 the result.
 
-`--expect` names what the mutant SHOULD do to the test, and `killed`
-always means "the mutated test's outcome matched `--expect`", `survived`
-always means it did not, whichever direction `--expect` names -- neither
-word means "the test passed" or "the test failed" on its own, only
-relative to what was expected. Under the default `--expect fail` (a real
-mutation-testing probe: the mutant should break a suite that actually
-covers the mutated code) `killed` means the mutated run's test exited
-non-zero and `survived` means it still exited `0`, the usual mutation-
-testing sense. Under `--expect pass` (a negative-control probe: this
-mutant must NOT break the suite, because it targets dead code, an
-equivalent rewrite, or anything else the suite is not supposed to react
-to) the two flip: `killed` means the mutated run's test still exited `0`
-(the suite tolerated the mutant, as expected) and `survived` means it
-exited non-zero (the suite reacted to something it was not supposed to
-react to). A `--plan` mutant's own `expect` (or the plan's, or
-`--expect` on the command line; see below) decides which of the two
-readings its `killed`/`survived` uses, mutant by mutant.
+`killed`/`survived` always report the mutated run's ACTUAL, measured
+outcome, independent of `--expect`: `killed` means the mutated run's
+test exited non-zero (or, under `--pass-regex`, failed the pattern),
+`survived` means it exited `0` (or matched the pattern), the usual
+mutation-testing sense, whichever `--expect` was given -- a mutant that
+broke the suite is `killed` whether or not that was wanted, so a reader
+never has to already know `--expect` to read the word correctly.
+`--expect` names what the mutant SHOULD do to the test, and a separate
+field, `mutation_probe.expectation` (`"met"` or `"violated"`), reports
+whether the actual outcome agreed: under the default `--expect fail` (a
+real mutation-testing probe: the mutant should break a suite that
+actually covers the mutated code) the expectation is met by a `killed`
+verdict and violated by a `survived` one. Under `--expect pass` (a
+negative-control probe: this mutant must NOT break the suite, because it
+targets dead code, an equivalent rewrite, or anything else the suite is
+not supposed to react to) it is the other way round: met by `survived`
+(the suite tolerated the mutant, as expected), violated by `killed` (the
+suite reacted to something it was not supposed to react to).
+`mutation_probe.expectation` is present only alongside a real
+`killed`/`survived` verdict -- `inconclusive`/`not_run` measured nothing
+to compare against an expectation. `--expect` still decides the exit
+code (`0` for a met expectation, `1` for a violated one; see below), the
+same exit code it always decided -- only the human-readable
+`killed`/`survived` label no longer flips meaning under it. A `--plan`
+mutant's own `expect` (or the plan's, or `--expect` on the command line;
+see below) decides which expectation its own `killed`/`survived` is
+measured against, mutant by mutant.
 
 ```bash
 agent-primitives probe --file src/foo.js -n 12 -r 'return false;' \
@@ -1930,11 +1940,11 @@ exactly which `reason` is which).
 
 | Field | Type | Present | Notes |
 | --- | --- | --- | --- |
-| `status` | string | always | `"killed"`, `"survived"`, `"inconclusive"`, `"usage_error"`, or `"baseline_failed"`. The last is the CLI envelope's own literal status for a failing baseline (the library's `probe()` itself still returns `status: "inconclusive"`, `reason: "baseline_failed"`; the CLI remaps it so a consumer does not also have to read `reason` to tell a failing baseline apart from every other inconclusive outcome). Same exit-code class either way (`cannot-conclude`, exit `2`), so a caller gating on the exit code alone sees no difference. |
+| `status` | string | always | `"killed"`, `"survived"`, `"inconclusive"`, `"usage_error"`, or `"baseline_failed"`. The last is the CLI envelope's own literal status for a failing baseline (the library's `probe()` itself still returns `status: "inconclusive"`, `reason: "baseline_failed"`; the CLI remaps it so a consumer does not also have to read `reason` to tell a failing baseline apart from every other inconclusive outcome). Same exit-code class either way (`cannot-conclude`, exit `2`), so a caller gating on the exit code alone sees no difference. `"killed"`/`"survived"` are always this mutant's actual, measured outcome (see the `--expect` paragraph above) -- under a non-default `--expect`, the exit code follows `mutation_probe.expectation` instead of this field's own word (`0` for `"met"`, `1` for `"violated"`), so a caller gating on the exit code alone still sees `--expect` honored even though `status` itself no longer flips. |
 | `reason` | string | whenever `status` is not a clean verdict | machine-readable cause, e.g. `"baseline_failed"`, `"pre_failed"`, `"restore_failed"`, `"aborted"`, `"target_changed_during_baseline"`, `"mutant_not_applicable"` |
 | `message` | string | top-level usage error only (see above) | the human-readable message commander (or this CLI's own pre-`probe()` check) produced; `reason` is still present alongside it, so a consumer can key off `reason` without also reading `message` |
 | `mutant` | `{ file, line, before, after, form, diff? }` | once the mutant has been computed AND this refusal reports it | present for `killed`, `survived`, and every mutant-phase inconclusive reason (`apply_hash_mismatch`, mutant-phase `pre_failed`/`aborted`, `restore_failed`, `worktree_original_tree_modified`, `timeout`); for a refusal from before any mutant run (reported before or during the run's own setup), see the [refusal reason shape](#refusal-reason-shape) table below -- it is present for exactly six of those reasons (`aborted`, `pre_failed`, `baseline_failed`, `target_changed_during_baseline`, `no_tests_executed`, `baseline_evidence_not_matched`, all past the dry run that computes the one mutant this run would apply) and absent for every other one. `diff` only for a `-p/--patch` mutant whose change is not fully shown by `before`/`after` alone (see above). A `mutation_probe.result` of `"not_run"` also reaches a `survived`-shaped mutant run whose classify step itself found zero-tests evidence (mutant-side, or the generic byte-identical fallback): there `mutant`/`mutation_probe` are present as usual for a mutant-phase outcome, `status`/`reason` are `"inconclusive"`/`"no_tests_executed"` in place of `"survived"`, and `mutation_probe.result` is forced to `"not_run"` even though the commands did run -- see the zero-tests paragraph above. |
-| `mutation_probe` | `{ mutant, verified_applied_via, result, restored_verified, reason? }` | once the mutant has been computed | present for every reason `mutant` covers above (the same six setup-phase refusals, plus every mutant-phase outcome): `result` is always a string once this object is present, so a consumer reading `mutation_probe.result` does not have to shape-sniff `status` first; `"not_run"` for the six setup-phase refusals (`aborted`, `pre_failed`, `baseline_failed`, `target_changed_during_baseline`, `no_tests_executed`, `baseline_evidence_not_matched`), `reason` naming which, and for the mutant-phase zero-tests override described just above. ABSENT for every other setup-phase refusal (see the table below), none of which ever computed a mutant. Paste straight into an implementer's `mutation_probes` output field. |
+| `mutation_probe` | `{ mutant, verified_applied_via, result, restored_verified, reason?, expectation? }` | once the mutant has been computed | present for every reason `mutant` covers above (the same six setup-phase refusals, plus every mutant-phase outcome): `result` is always a string once this object is present, so a consumer reading `mutation_probe.result` does not have to shape-sniff `status` first; `"not_run"` for the six setup-phase refusals (`aborted`, `pre_failed`, `baseline_failed`, `target_changed_during_baseline`, `no_tests_executed`, `baseline_evidence_not_matched`), `reason` naming which, and for the mutant-phase zero-tests override described just above. `expectation` (`"met"`/`"violated"`) is present only alongside a `result` of `"killed"` or `"survived"`: whether that actual outcome matched the `--expect` this mutant ran under (see the `--expect` paragraph above); absent for `"not_run"`/`"inconclusive"`, which measured nothing to compare against an expectation. ABSENT (both `result` and `expectation`) for every other setup-phase refusal (see the table below), none of which ever computed a mutant. Paste straight into an implementer's `mutation_probes` output field. |
 | `baseline` | `{ exitCode, durationMs, logPath, timedOut }` | once the baseline has run | absent for `mutant_not_applicable` and any earlier refusal, and for the baseline-phase `pre_failed`/`aborted` (the baseline itself never ran: the `--pre` ahead of it did); `exitCode` is unchanged by `--pass-regex` -- it is always the baseline's real exit code, kept as data even once the regex, not this field, decides `status`/`reason` (see `--pass-regex` above) |
 | `test` | `{ command, exitCode, durationMs, timedOut, stdoutTail, stderrTail, logPath, env? }` | once the mutant run has happened | `env` only when at least one `--env NAME=VALUE` was given: the overrides this run applied, redacted (see `env` below); `exitCode` is likewise unchanged by `--pass-regex` -- the field that distinguishes a mutant run that crashed (no output on either stream) from a genuine test failure once the regex is what decides `killed`/`survived` |
 | `env` | `Record<string, string>` | whenever at least one `--env NAME=VALUE` was given | echoed once at the run level, independent of which phase actually ran: present on every status including `baseline_failed` and the other baseline-phase refusals, none of which reach a `test` phase to carry their own `test.env`. Both `env` and `test.env` redact a value whose NAME carries `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`/`CREDENTIALS`, or `KEY` as its own `_`-delimited segment (case-insensitive; the segment must sit at the start or end of the name, or between two underscores), replacing it with the literal string `"<redacted>"` and keeping the name visible: `API_TOKEN`, `TOKEN`, `MY_SECRET_VALUE` redact, but `TOKENIZER_MODEL` and `KEYBOARD` do not (the recognized word is a substring of a longer segment, not a segment of its own). Every other value is echoed verbatim (never the whole merged environment). This redaction covers only these two echoes (`env` and `test.env`); it does not, and cannot, redact a secret the test command itself prints -- that value appears verbatim wherever the command's own output does (`test.stdoutTail`/`test.stderrTail` above, and the exec log `test.logPath` links to), the same as it would running that command directly. `--env` is not wired into `--plan` (combining the two is a usage error). |
@@ -2125,11 +2135,15 @@ instead of the single probe's top-level `mutant`/`mutation_probe`/`test`.
 `baseline` is the one baseline phase every mutant was measured against.
 `results` has one entry per plan mutant, in plan order, carrying `index`,
 `file`, `expect`, `status` (`killed`, `survived`, `inconclusive` or
-`not_run`), `reason` (when there is one), that mutant's own `warnings`
-and `logs`, and -- for a mutant that was actually applied -- `mutant`,
-`mutation_probe` (the same four fields to paste into a
-`mutation_probes` report) and `test`. `summary` counts
-`total`/`killed`/`survived`/`inconclusive`/`not_run`.
+`not_run` -- this mutant's own actual, measured outcome, independent of
+`expect`; see the `--expect` paragraph above), `reason` (when there is
+one), that mutant's own `warnings` and `logs`, and -- for a mutant that
+was actually applied -- `mutant`, `mutation_probe` (the same fields to
+paste into a `mutation_probes` report, `expectation` included) and
+`test`. `summary` counts `total`/`killed`/`survived`/`inconclusive`/
+`not_run` by that same actual-outcome `status`, so its `killed`/
+`survived` counts are not what decides the plan's own exit code below
+when any mutant declares a non-default `expect`.
 
 A failing baseline is one difference from the single-mutant form worth
 naming explicitly: the single probe's CLI envelope remaps it to a
@@ -2153,12 +2167,13 @@ plus a warning naming that outcome), which drops `summary` along with
 everything else rather than showing it past the bound.
 
 Exit codes stay `0` ok, `1` a finding, `2` could not conclude, read one
-step stricter than for a single probe: `0` only when EVERY mutant was
-killed per its `expect`; `1` when the plan concluded and at least one
-mutant survived; `2` for a wrong invocation, and for a plan that could
-not conclude -- a failing baseline, a mutant that could not be applied, a
-restore that could not be verified, or a signal -- even when a survivor
-is among its results. A survivor found before a terminal failure is still
+step stricter than for a single probe: `0` only when EVERY mutant's
+expectation was met (its actual outcome agreed with its own `expect`);
+`1` when the plan concluded and at least one mutant's expectation was
+violated; `2` for a wrong invocation, and for a plan that could not
+conclude -- a failing baseline, a mutant that could not be applied, a
+restore that could not be verified, or a signal -- even when a violation
+is among its results. A violation found before a terminal failure is still
 reported in `results`; the plan-level `reason` names what stopped it.
 
 Terminal for a plan means exactly that: after a restore that could not be

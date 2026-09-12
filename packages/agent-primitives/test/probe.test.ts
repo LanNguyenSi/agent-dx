@@ -327,6 +327,7 @@ describe("probe(): killed and survived", () => {
 
     expect(result.status).toBe("killed");
     expect(result.mutation_probe?.result).toBe("killed");
+    expect(result.mutation_probe?.expectation).toBe("met");
     expect(result.mutation_probe?.restored_verified).toBe(true);
     expect(result.mutant).toEqual({
       file: path.join(repo, "fixture.js"),
@@ -364,19 +365,43 @@ describe("probe(): killed and survived", () => {
 
     expect(result.status).toBe("survived");
     expect(result.mutation_probe?.result).toBe("survived");
+    expect(result.mutation_probe?.expectation).toBe("violated");
     expect(result.test?.exitCode).toBe(0);
 
     const after = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
     expect(after).toBe(before);
   });
 
-  it("--expect pass inverts the verdict", async () => {
+  it("--expect pass reports the actual outcome, with expectation violated", async () => {
     useLockDir();
     const { repo } = initRepo();
-    // Same mutant as the "killed" case (breaks the test), but with
-    // --expect pass the verdict inverts: a broken test is now "survived".
+    // Same mutant as the "killed" case (breaks the test): `result`/
+    // `status` report the same actual outcome, `killed`, regardless of
+    // `--expect` -- only `mutation_probe.expectation` reflects that this
+    // mutant was declared `--expect pass` and broke the test anyway.
     const result = await probe(baseOptions(repo, { expect: "pass" }));
+    expect(result.status).toBe("killed");
+    expect(result.mutation_probe?.result).toBe("killed");
+    expect(result.mutation_probe?.expectation).toBe("violated");
+  });
+
+  it("--expect pass, mutant the suite does not catch: survived, expectation met", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    // Same mutant as the "survived" case above (does not break the
+    // test): `result`/`status` still report the actual outcome,
+    // `survived`; `--expect pass` wanted exactly that, so the
+    // expectation is met.
+    const result = await probe(
+      baseOptions(repo, {
+        line: 5,
+        replaceText: "  return n * 3;",
+        expect: "pass",
+      }),
+    );
     expect(result.status).toBe("survived");
+    expect(result.mutation_probe?.result).toBe("survived");
+    expect(result.mutation_probe?.expectation).toBe("met");
   });
 });
 
@@ -4523,7 +4548,7 @@ describe("probe(): --pass-regex", () => {
     ).toBe(true);
   });
 
-  it("--expect pass inverts the --pass-regex verdict too, the same as it does for the exit-code default", async () => {
+  it("--expect pass reports the same --pass-regex outcome, with expectation violated", async () => {
     useLockDir();
     const { repo } = initRunnerRepo();
 
@@ -4532,9 +4557,12 @@ describe("probe(): --pass-regex", () => {
     );
 
     // The mutant's own output ("FAILURES!") does not match the regex,
-    // so it "failed" the predicate; under --expect pass that is
-    // "survived", not "killed".
-    expect(result.status).toBe("survived");
+    // so it "failed" the predicate: `killed`, the same actual outcome
+    // as the default `--expect fail` run above, regardless of
+    // `--expect`. `--expect pass` wanted the opposite, so the
+    // expectation is violated.
+    expect(result.status).toBe("killed");
+    expect(result.mutation_probe?.expectation).toBe("violated");
   });
 
   it("a mutant whose run crashes (no output, exit 2) is reported killed, the crash named in a warning, distinguishable from a real test failure via test.exitCode and the empty test.stdoutTail/stderrTail", async () => {
@@ -5555,7 +5583,7 @@ describe("probe(): --pass-regex mutant-path miss warning is gated to ambiguous m
     expect(result.warnings.some((w) => MISS_WARNING.test(w))).toBe(true);
   });
 
-  it("ambiguous case 3/3 -- a miss under --expect pass (the mutant SURVIVED): warns", async () => {
+  it("ambiguous case 3/3 -- a miss under --expect pass (the expectation is VIOLATED): warns", async () => {
     useLockDir();
     const RUNNER_JS = [
       'const text = "OK (3 tests, 5 assertions)";',
@@ -5578,7 +5606,8 @@ describe("probe(): --pass-regex mutant-path miss warning is gated to ambiguous m
       passRegex: /^OK \(/,
     });
 
-    expect(result.status).toBe("survived");
+    expect(result.status).toBe("killed");
+    expect(result.mutation_probe?.expectation).toBe("violated");
     expect(result.test?.exitCode).toBe(1);
     expect(result.warnings.length).toBeGreaterThan(0);
     expect(result.warnings.some((w) => MISS_WARNING.test(w))).toBe(true);

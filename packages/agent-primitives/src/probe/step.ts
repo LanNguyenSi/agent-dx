@@ -529,8 +529,13 @@ export async function runMutantAttempt(
       rt.passRegex !== undefined
         ? rt.passRegex.test(testCombinedOutput)
         : testResult.exitCode === 0;
-    const killed = spec.expect === "fail" ? !testPassed : testPassed;
-    status = killed ? "killed" : "survived";
+    // The actual, observed outcome, independent of `--expect`: the test
+    // command failed with the mutant applied (`killed`) or it did not
+    // (`survived`). `expectation`, computed once this and every override
+    // below have had their say, is the only place `spec.expect` enters
+    // the verdict -- so a reader who does not know what `--expect` was
+    // given still reads `killed`/`survived` correctly.
+    status = testPassed ? "survived" : "killed";
     mutationProbeResult = status;
 
     // The 128 + N band (see `exec.ts`'s `signalNumberFromExitCode`):
@@ -725,6 +730,19 @@ export async function runMutantAttempt(
     }
   }
 
+  // Whether the actual outcome (`status`, above -- computed independent
+  // of `--expect`, and possibly overridden to `inconclusive` by one of
+  // the branches above) matched what `spec.expect` called for. Only
+  // meaningful once a real verdict was reached: `aborted`, `timeout`,
+  // and `no_tests_executed` all leave `status` at `inconclusive`, which
+  // measured nothing to compare against an expectation.
+  const expectation: "met" | "violated" | undefined =
+    status === "killed" || status === "survived"
+      ? (spec.expect === "fail") === (status === "killed")
+        ? "met"
+        : "violated"
+      : undefined;
+
   return {
     status,
     reason,
@@ -735,6 +753,7 @@ export async function runMutantAttempt(
       result: mutationProbeResult,
       restored_verified: restoredVerified,
       ...(reason === "no_tests_executed" ? { reason } : {}),
+      ...(expectation !== undefined ? { expectation } : {}),
     },
     test: testField,
     logPaths,

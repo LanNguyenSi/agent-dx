@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `probe`'s `result`/`status` (and a `--plan` mutant's own `status`) now
+  always report the mutant's actual, measured outcome -- `killed` when
+  the test command failed with the mutant applied, `survived` when it
+  passed -- independent of `--expect` (task `aef31231`). They used to
+  report whether that outcome MATCHED `--expect` instead, so a mutant
+  declared `--expect pass` that genuinely survived (the routine,
+  expected case) came back `killed`, and a reader who did not already
+  know `--expect` misread it as caught. A new field,
+  `mutation_probe.expectation` (`"met"`/`"violated"`), carries that
+  match separately, present only alongside a real `killed`/`survived`
+  verdict. `--expect` still decides the exit code exactly as before (`0`
+  for a met expectation, `1` for a violated one) -- unchanged for a
+  caller not passing `--expect`, since `expectation` and the old,
+  now-corrected `status` always agree under the default `--expect
+  fail`. README and the package's skill updated to describe
+  `killed`/`survived`/`expectation` under this contract.
+
 ## [0.2.0] - 2026-09-10
 
 ### Added

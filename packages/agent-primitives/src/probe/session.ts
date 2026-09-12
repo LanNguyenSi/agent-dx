@@ -71,6 +71,16 @@ export interface MutationProbeField {
    * applied): a machine-readable cause, the same string a `ProbeResult`
    * would otherwise carry only as its own top-level `reason`. */
   reason?: string;
+  /** Whether this mutant's own `result` matched the `--expect` it ran
+   * under: `"met"` when it did, `"violated"` when it did not. `result`
+   * itself is always the mutant's actual, measured outcome (`killed`
+   * when the test command failed with the mutant applied, `survived`
+   * when it passed) independent of `--expect` -- this field is the only
+   * place the expectation comparison is reported, so a reader does not
+   * have to already know `--expect` to read `result` correctly. Present
+   * only alongside a real `killed`/`survived` `result`: `"inconclusive"`
+   * or `"not_run"` measured nothing to compare against an expectation. */
+  expectation?: "met" | "violated";
 }
 
 export interface ExecPhaseField {

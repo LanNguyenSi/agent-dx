@@ -2567,9 +2567,12 @@ describe("cli: probe", () => {
     // -- not a byte count that would sit inside the envelope's own
     // run-to-run noise (a timing digit, a temp-dir name).
     const parsed = JSON.parse(run.stdout);
-    // `-t 'true'` always leaves the test passing, and `--expect pass`
-    // reads that as the mutant behaving as expected: `killed`.
-    expect(parsed.status).toBe("killed");
+    // `-t 'true'` always leaves the test passing, so the actual outcome
+    // is `survived` regardless of `--expect`; `--expect pass` reads that
+    // as the mutant behaving as expected (`mutation_probe.expectation:
+    // "met"`), which is what keeps the exit code (asserted above) at 0.
+    expect(parsed.status).toBe("survived");
+    expect(parsed.mutation_probe.expectation).toBe("met");
     // The envelope's own top-level flag: something in the result really
     // was cut, not only the per-mutant `diff.truncated` checked below.
     expect(parsed.truncated).toBe(true);
