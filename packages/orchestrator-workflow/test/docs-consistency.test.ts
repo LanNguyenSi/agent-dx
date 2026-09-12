@@ -7891,3 +7891,42 @@ describe("review-method obligation rows keep their direction word (R2 of the rev
     expect(reviewerMd).not.toContain("as already required above");
   });
 });
+
+describe("implementer and reviewer cite coverage gate thresholds, not run-specific percentages", () => {
+  const implementerMd = unwrap(readAsset("agents/implementer.md"));
+  const reviewerMd = unwrap(readAsset("agents/reviewer.md"));
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+
+  const rule =
+    "cite the threshold and pass/fail counts, not a run-specific coverage percentage, citing a percentage only together with the exact commit and the run count, since branch coverage can vary between runs of the same commit";
+  const normalize = (text: string) => text.replace(/\s+/g, " ");
+
+  it("assets/agents/implementer.md tests-rule bullet carries the coverage-citation sentence", () => {
+    expect(normalize(implementerMd)).toContain(
+      normalize(
+        "Cite a coverage gate's threshold and pass/fail counts, not a run-specific coverage percentage; cite a percentage only together with the exact commit and the run count, since branch coverage can vary between runs of the same commit.",
+      ),
+    );
+  });
+
+  it("assets/agents/reviewer.md reproduction-rule bullet carries the coverage-citation sentence", () => {
+    expect(normalize(reviewerMd)).toContain(
+      normalize(
+        "For a coverage gate, cite the threshold and pass/fail counts, not a run-specific coverage percentage; cite a percentage only together with the exact commit and the run count, since branch coverage can vary between runs of the same commit.",
+      ),
+    );
+  });
+
+  it("SKILL.md mirrors the coverage-citation rule for the implementer", () => {
+    expect(normalize(skillMd)).toContain(normalize(rule));
+    expect(skillMd).toContain(
+      "The installed `implementer.md` prompt has the implementer cite",
+    );
+  });
+
+  it("SKILL.md mirrors the coverage-citation rule for the reviewer", () => {
+    expect(normalize(skillMd)).toContain(
+      normalize("the installed `reviewer.md` prompt has the reviewer cite"),
+    );
+  });
+});

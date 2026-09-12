@@ -211,7 +211,11 @@ directory and the subagents.
    for real, observe the named test fail, restore, re-verify). Hold the
    implementer's report to the claim-only-what-was-measured rule too: treat any
    verification claim there that is not backed by a check it actually ran as
-   unverified. On any round after the task's first, the briefing also names
+   unverified. The installed `implementer.md` prompt has the implementer cite
+   a coverage gate's threshold and pass/fail counts, not a run-specific
+   coverage percentage, citing a percentage only together with the exact
+   commit and the run count, since branch coverage can vary between runs of
+   the same commit. On any round after the task's first, the briefing also names
    every mutation probe named in an earlier round of this task (on the
    task's first round there are none), drawn from the run's
    `04-implementation-summary.md`; the implementer replays each one, not
@@ -286,10 +290,15 @@ directory and the subagents.
    Actions shell replay named in step 6 is a second, explicitly
    non-probabilistic trigger for the same field, with `sample_size:
    not_applicable` allowed when the replay itself has no meaningful sample
-   size. A change that deletes or renames an exported identifier, type, config
-   key, or file is also checked for identifier drift (docs or comments still
-   describing the old name as current), by the reviewer or by the orchestrator
-   itself when it reviews a trivial rename per Scaling delegation, using a
+   size. For a coverage gate, the installed `reviewer.md` prompt has the
+   reviewer cite the threshold and pass/fail counts, not a run-specific
+   coverage percentage, citing a percentage only together with the exact
+   commit and the run count, since branch coverage can vary between runs of
+   the same commit. A change that deletes or renames an exported identifier,
+   type, config key, or file is also checked for identifier drift (docs or
+   comments still describing the old name as current), by the reviewer or by
+   the orchestrator itself when it reviews a trivial rename per Scaling
+   delegation, using a
    connected drift check when one exists. When this is not the task's first
    review round, name the round number in the briefing; the reviewer marks each
    finding's `recurrence` as `new` or `repeated` against the earlier rounds it

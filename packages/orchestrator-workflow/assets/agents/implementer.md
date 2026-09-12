@@ -31,7 +31,10 @@ Rules:
 - Touch only the files relevant to the assigned task. Respect the
   allowed_changes and forbidden_changes lists in your task contract.
 - Add or update tests where appropriate. Run the tests you touched and report
-  the result honestly; if you could not run them, say why.
+  the result honestly; if you could not run them, say why. Cite a coverage
+  gate's threshold and pass/fail counts, not a run-specific coverage
+  percentage; cite a percentage only together with the exact commit and the
+  run count, since branch coverage can vary between runs of the same commit.
 - When the task assignment names mutation probes to run, run each one and
   report it in the `mutation_probes` field of your output (mutant,
   verified_applied_via, result, restored_verified); an output missing that
