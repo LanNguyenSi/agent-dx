@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `verify` accepts an opt-in per-check success predicate, `--pass-regex
+  name=regex` (repeatable, parsed like `-x name=command`), compiled
+  through the same shared `compilePassRegex` (`m` flag) `probe`'s own
+  `--pass-regex`/`passWhen.regex` already use (GitHub issue #241). A
+  green PHPUnit 9.6 suite can exit non-zero over deprecation notices
+  alone; `verify` decided every check's status from the exit code alone,
+  so a check like that reported `fail` -- with a synthetic failure entry
+  and the `detector_matched_nothing` warning -- even though the phpunit
+  detector had parsed a clean `OK (N tests, M assertions)`. Once a
+  check's name has a `--pass-regex` entry, a match against that check's
+  combined stdout+stderr decides `pass`/`fail` in place of its exit code
+  (a warning names the non-zero exit when the match still won on a
+  non-zero code, or the pattern when it did not match on exit 0); a
+  check's `exitCode` is kept in the result as data either way. A check
+  with no predicate is entirely unaffected: its exit-code verdict, and
+  its envelope shape, are byte-identical to before this option existed.
+  Naming a check that is neither requested (`-c`/the default list) nor
+  `-x`-overridden is a usage error rather than a silent no-op. An empty
+  pattern (e.g. a stray trailing `=` in `name=`) is a usage error too,
+  since it would otherwise match any output unconditionally. A check a
+  predicate decided `pass` reports the detector's own parsed summary,
+  with no synthetic failure entry added -- but when that parse still
+  shows a nonzero `summary.failed` or a nonempty `failures` list, a
+  warning names the detector and the count, since the verdict stays
+  `pass` (the predicate decides once configured) while the pattern may
+  be too loose. Exit 126/127, a timeout, and an aborted check are never
+  reclassified by a predicate, and each now warns that the predicate was
+  never consulted, rather than dropping it silently. Edges said out loud
+  rather than left silent: a predicate on a requested check that
+  resolves to `skipped` (no script, no `-x`) adds a warning that the
+  predicate was never consulted; a predicate-decided `fail` labels its
+  synthetic failure entry from the pattern
+  (`--pass-regex (...) did not match: ...`, warning
+  `pass_regex_matched_nothing`) rather than from an exit code that was
+  `0`; and the warnings carry `probe`'s own refinements, the 128+N
+  signal band ("the suite may have been cut short") and the
+  truncated-tail caveat, through `nonZeroPassWarning`/`truncationNote`
+  helpers now shared from `src/pass-regex.ts` (a behaviour-preserving
+  move out of `probe`'s setup, byte-identical text there). A repeated
+  `--pass-regex` for one check is last-wins. No config-file
+  (`.agent-primitives.json`) home for the predicate yet -- recorded as a
+  follow-up on #241. The package's skill (`assets/skill/SKILL.md`) was
+  updated to match; consumers should re-run `agent-primitives init`
+  after this update to pick that up.
+
 ### Changed
 
 - README's `probe` isolation section and "Non-JS repositories" now state

@@ -23,6 +23,7 @@ import type {
 } from "../src/verify/types.js";
 import { execCommand } from "../src/exec.js";
 import type { ExecResult } from "../src/exec.js";
+import { compilePassRegex } from "../src/pass-regex.js";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -834,6 +835,26 @@ describe("verify: exec rejection is a per-check error, not a thrown promise", ()
     expect(result.checks[1].status).toBe("pass");
     expect(result.status).toBe("error");
   });
+
+  it("a --pass-regex configured for a check whose execFn rejects warns that the predicate was never consulted", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { broken: "x" });
+    const logDir = makeTmpDir();
+    const failingExec: ExecLike = async () => {
+      throw new Error("simulated exec failure: ENOSPC");
+    };
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["broken"],
+      execFn: failingExec,
+      passRegexes: { broken: /ok/ },
+    });
+    expect(result.checks[0].status).toBe("error");
+    expect(result.warnings).toContain(
+      "broken: --pass-regex (ok) was given but the check failed to run (exec failed), so the predicate was never consulted",
+    );
+  });
 });
 
 describe("verify: detector warnings merge", () => {
@@ -859,6 +880,545 @@ describe("verify: detector warnings merge", () => {
       detectors: [warningDetector],
     });
     expect(result.warnings).toContain("test: a deprecation notice");
+  });
+});
+
+describe("verify: --pass-regex opt-in success predicate", () => {
+  it("regex matched + exit 1 -> pass, with a warning naming the non-zero exit code (AC-003)", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run test --silent": {
+        exitCode: 1,
+        stdoutTail: "OK (11 tests, 17 assertions)\n",
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      passRegexes: { test: compilePassRegex("^OK \\(") },
+    });
+    const check = result.checks[0];
+    expect(check.status).toBe("pass");
+    expect(check.exitCode).toBe(1);
+    expect(check.passRegex).toBe("^OK \\(");
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("test: --pass-regex (^OK \\() matched") &&
+          w.includes("non-zero exit code (1)"),
+      ),
+    ).toBe(true);
+    expect(result.status).toBe("pass");
+  });
+
+  it("regex absent + exit 0 -> fail, with a warning naming the pattern (AC-003)", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run test --silent": {
+        exitCode: 0,
+        stdoutTail: "something else entirely\n",
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      passRegexes: { test: compilePassRegex("^OK \\(") },
+    });
+    const check = result.checks[0];
+    expect(check.status).toBe("fail");
+    expect(check.exitCode).toBe(0);
+    expect(
+      result.warnings.some((w) =>
+        w.includes(
+          "test: --pass-regex (^OK \\() did not match the check's output",
+        ),
+      ),
+    ).toBe(true);
+    expect(result.status).toBe("fail");
+  });
+
+  it("a predicate-decided pass with the detector's own parsed failures still reports pass, but warns the predicate may be too loose", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    // The real phpunit-fail.txt fixture: a genuine `FAILURES!` run
+    // (`Tests: 2, Assertions: 2, Failures: 1.`). A predicate matching
+    // its banner line ahead of the failure section is exactly the "too
+    // loose" shape this warning exists for.
+    const { fn } = makeStubExec({
+      "npm run test --silent": {
+        exitCode: 1,
+        stdoutTail: readCaptured("phpunit-fail"),
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      passRegexes: { test: compilePassRegex("^PHPUnit 9\\.6") },
+    });
+    const check = result.checks[0];
+    expect(check.status).toBe("pass");
+    expect(check.summary.failed).toBeGreaterThan(0);
+    expect(check.failures.length).toBeGreaterThan(0);
+    expect(result.warnings).toContainEqual(
+      expect.stringMatching(
+        /test: --pass-regex \(\^PHPUnit 9\\\.6\) matched, but the phpunit detector parsed 1 failure\(s\) of its own; the predicate may be too loose/,
+      ),
+    );
+  });
+
+  it("a check with no predicate keeps the plain exit-code verdict, unaffected by a predicate on a different check", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { build: "b", test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run build --silent": { exitCode: 1, stdoutTail: "boom" },
+      "npm run test --silent": {
+        exitCode: 1,
+        stdoutTail: "OK (1 test, 1 assertion)",
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["build", "test"],
+      execFn: fn,
+      passRegexes: { test: compilePassRegex("^OK \\(") },
+    });
+    const build = result.checks.find((c) => c.name === "build")!;
+    const test = result.checks.find((c) => c.name === "test")!;
+    expect(build.status).toBe("fail");
+    // `"passRegex" in build` (not `.toBeUndefined()`): pins the KEY's
+    // absence, not merely an undefined value at a key that might still
+    // be present (e.g. explicitly set to `undefined` by a future change),
+    // matching how a real JSON-serialized envelope would drop the key.
+    expect("passRegex" in build).toBe(false);
+    expect(test.status).toBe("pass");
+    expect(test.passRegex).toBe("^OK \\(");
+  });
+
+  it("exit 126/127 stays error even with a predicate configured, whatever the output", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run test --silent": {
+        exitCode: 127,
+        stdoutTail: "OK (1 test, 1 assertion)",
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      passRegexes: { test: compilePassRegex("^OK \\(") },
+    });
+    expect(result.checks[0].status).toBe("error");
+    expect("passRegex" in result.checks[0]).toBe(false);
+    expect(result.warnings).toContainEqual(
+      expect.stringMatching(
+        /test: --pass-regex \(\^OK \\\(\) was given but the check exited with code 127, so the predicate was never consulted/,
+      ),
+    );
+  });
+
+  it("a timed-out check stays error even with a predicate configured, whatever the output", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run test --silent": {
+        exitCode: 1,
+        timedOut: true,
+        stdoutTail: "OK (1 test, 1 assertion)",
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      passRegexes: { test: compilePassRegex("^OK \\(") },
+    });
+    expect(result.checks[0].status).toBe("error");
+    expect("passRegex" in result.checks[0]).toBe(false);
+    expect(result.warnings).toContainEqual(
+      expect.stringMatching(
+        /test: --pass-regex \(\^OK \\\(\) was given but the check timed out, so the predicate was never consulted/,
+      ),
+    );
+  });
+
+  it("an aborted check stays error even with a predicate configured, whatever the output", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run test --silent": {
+        aborted: true,
+        stdoutTail: "OK (1 test, 1 assertion)",
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      passRegexes: { test: compilePassRegex("^OK \\(") },
+    });
+    expect(result.checks[0].status).toBe("error");
+    expect("passRegex" in result.checks[0]).toBe(false);
+    expect(result.warnings).toContainEqual(
+      expect.stringMatching(
+        /test: --pass-regex \(\^OK \\\(\) was given but the check was aborted before it could finish, so the predicate was never consulted/,
+      ),
+    );
+  });
+
+  it("rejects a --pass-regex naming a check that is neither requested nor -x-overridden (no silent no-op)", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    await expect(
+      verify({
+        cwd,
+        logDir,
+        checks: ["test"],
+        execFn: fn,
+        passRegexes: { lint: compilePassRegex("^OK \\(") },
+      }),
+    ).rejects.toThrow(UsageError);
+    expect(calls).toEqual([]);
+  });
+
+  it("accepts a --pass-regex naming a check that only exists via -x override", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, {});
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "irrelevant-command": {
+        exitCode: 1,
+        stdoutTail: "OK (1 test, 1 assertion)",
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: [],
+      overrides: { mycheck: "irrelevant-command" },
+      execFn: fn,
+      passRegexes: { mycheck: compilePassRegex("^OK \\(") },
+    });
+    expect(result.checks[0].status).toBe("pass");
+  });
+
+  it("a requested check with a predicate that resolves to skipped (no script, no -x) warns the predicate was never consulted (F1)", async () => {
+    const cwd = makeTmpDir();
+    // Only `build` has a script; `test` is requested and carries a
+    // predicate, but has neither a package.json script nor an -x
+    // override, so it resolves to skipped -- a multi-check run so the
+    // overall result is not itself `nothing_verified` (which would mask
+    // the per-check warning this test is actually about).
+    writePackageJson(cwd, { build: "b" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run build --silent": { exitCode: 0 },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["build", "test"],
+      execFn: fn,
+      passRegexes: { test: compilePassRegex("^OK \\(") },
+    });
+    const test = result.checks.find((c) => c.name === "test")!;
+    expect(test.status).toBe("skipped");
+    expect("passRegex" in test).toBe(false);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w ===
+          `test: --pass-regex (^OK \\() was given but the check resolved to skipped, so the predicate was never consulted`,
+      ),
+    ).toBe(true);
+    // The overall run is not itself affected: a skipped check is still
+    // not a non-pass finding.
+    expect(result.status).toBe("pass");
+  });
+});
+
+describe("verify: --pass-regex with a real detector, summary comes from the detector (AC-004)", () => {
+  it("a passing predicate keeps the detector's own parsed summary; no synthetic failure entry is added", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run test --silent": {
+        exitCode: 1,
+        stdoutTail: readCaptured("phpunit-deprecation-notice"),
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: [phpunitDetector],
+      passRegexes: { test: compilePassRegex("^OK \\(") },
+    });
+    const check = result.checks[0];
+    expect(check.status).toBe("pass");
+    expect(check.summary.passed).toBe(1);
+    expect(check.summary.failed).toBe(0);
+    expect(check.failures).toEqual([]);
+    expect(
+      result.warnings.some((w) => w.includes("detector_matched_nothing")),
+    ).toBe(false);
+  });
+
+  it("the same fixture without a predicate keeps today's (buggy) exit-code verdict: fail with a synthetic failure", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run test --silent": {
+        exitCode: 1,
+        stdoutTail: readCaptured("phpunit-deprecation-notice"),
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: [phpunitDetector],
+    });
+    const check = result.checks[0];
+    expect(check.status).toBe("fail");
+    expect(check.failures).toHaveLength(1);
+    expect(
+      result.warnings.some((w) => w.includes("detector_matched_nothing")),
+    ).toBe(true);
+  });
+
+  it("a predicate-decided fail with zero parsed failures gets exactly one synthetic entry labeled from the predicate, not the exit code (F2)", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      // Exit 0 (a green-looking exit) but the phpunit detector parses
+      // zero failures out of this output either way (it does not match
+      // any phpunit shape at all) -- the predicate is what decides
+      // `fail` here, not the detector and not the exit code.
+      "npm run test --silent": {
+        exitCode: 0,
+        stdoutTail: "totally unrelated output, no OK line here\n",
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: [phpunitDetector],
+      passRegexes: { test: compilePassRegex("^OK \\(") },
+    });
+    const check = result.checks[0];
+    expect(check.status).toBe("fail");
+    expect(check.failures).toHaveLength(1);
+    expect(check.failures[0].message).toMatch(
+      /^--pass-regex \(\^OK \\\(\) did not match: /,
+    );
+    expect(check.failures[0].message).not.toMatch(/^exit code/);
+    // The generic `detector_matched_nothing` wording is reworded on this
+    // path: a reader should see the predicate named as the reason, not a
+    // bare "the detector found nothing" that reads as if no predicate
+    // were involved at all.
+    expect(
+      result.warnings.some((w) => w.includes("detector_matched_nothing")),
+    ).toBe(false);
+    expect(
+      result.warnings.some((w) => w.includes("pass_regex_matched_nothing")),
+    ).toBe(true);
+  });
+});
+
+describe("verify: --pass-regex map lookup guards inherited Object.prototype names", () => {
+  it("a check named 'constructor' with no predicate configured runs normally (does not crash on the inherited Object.prototype.constructor)", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      'printf "hi\\n"': {
+        exitCode: 0,
+        stdoutTail: "hi\n",
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["constructor"],
+      overrides: { constructor: 'printf "hi\\n"' },
+      execFn: fn,
+    });
+    expect(result.checks[0].name).toBe("constructor");
+    expect(result.checks[0].status).toBe("pass");
+    expect(result.status).toBe("pass");
+  });
+
+  it("a check named 'constructor' still runs normally while a predicate is configured for another check", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      'printf "hi\\n"': {
+        exitCode: 0,
+        stdoutTail: "hi\n",
+      },
+      'printf "other\\n"': {
+        exitCode: 0,
+        stdoutTail: "other\n",
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["constructor", "other"],
+      overrides: {
+        constructor: 'printf "hi\\n"',
+        other: 'printf "other\\n"',
+      },
+      passRegexes: { other: /other/ },
+      execFn: fn,
+    });
+    expect(result.checks[0].name).toBe("constructor");
+    expect(result.checks[0].status).toBe("pass");
+    expect(result.checks[1].name).toBe("other");
+    expect(result.checks[1].status).toBe("pass");
+    expect(result.status).toBe("pass");
+  });
+});
+
+describe("verify: --pass-regex signal-band wording and truncated-tail caveats (F3)", () => {
+  it("a match despite exit 137 (SIGKILL's 128+N band) gets the signal wording, not plain deprecation-notice wording", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run test --silent": {
+        exitCode: 137,
+        stdoutTail: "OK (1 test, 1 assertion)",
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      passRegexes: { test: compilePassRegex("^OK \\(") },
+    });
+    expect(result.checks[0].status).toBe("pass");
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("test: --pass-regex (^OK \\() matched") &&
+          w.includes(
+            "exited with 137, the code a shell reports for a process killed by signal 9",
+          ) &&
+          w.includes("the suite may have been cut short"),
+      ),
+    ).toBe(true);
+    expect(
+      result.warnings.some((w) => w.includes("deprecation-notice noise")),
+    ).toBe(false);
+  });
+
+  it("a truncated tail on a --pass-regex miss appends the truncation caveat to the warning", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run test --silent": {
+        exitCode: 0,
+        stdoutTail: "no match here",
+        stdoutTruncated: true,
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      passRegexes: { test: compilePassRegex("^OK \\(") },
+    });
+    expect(result.checks[0].status).toBe("fail");
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("test: --pass-regex (^OK \\() did not match") &&
+          w.includes("captured stdout tail was truncated") &&
+          w.includes(
+            "the pattern may have matched output outside the captured tail",
+          ),
+      ),
+    ).toBe(true);
+  });
+
+  it("a truncated tail on a --pass-regex PASS still runs the truncation adjustment (output_tail_truncated warning present)", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run test --silent": {
+        exitCode: 1,
+        stdoutTail: "OK (1 test, 1 assertion)",
+        stdoutTruncated: true,
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      passRegexes: { test: compilePassRegex("^OK \\(") },
+    });
+    expect(result.checks[0].status).toBe("pass");
+    expect(
+      result.warnings.some((w) => w.includes("output_tail_truncated")),
+    ).toBe(true);
+  });
+
+  it("a truncated tail on a check with NO predicate is unaffected on a pass (no output_tail_truncated warning)", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run test --silent": {
+        exitCode: 0,
+        stdoutTail: "all good",
+        stdoutTruncated: true,
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+    });
+    expect(result.checks[0].status).toBe("pass");
+    expect(
+      result.warnings.some((w) => w.includes("output_tail_truncated")),
+    ).toBe(false);
   });
 });
 

@@ -4558,6 +4558,18 @@ describe("probe(): --pass-regex", () => {
           w.includes("exit code (1)"),
       ),
     ).toBe(true);
+    // Exact-string pin on the generic (non-signal-band) branch of the
+    // shared `nonZeroPassWarning` helper (`src/pass-regex.ts`): a subject-
+    // string drift there (e.g. "the baseline output" losing its article,
+    // or "treated as a pass" being reworded) fails this assertion instead
+    // of slipping past the loose `.includes` checks above.
+    expect(
+      result.warnings.some((w) =>
+        w.startsWith(
+          "--pass-regex (^OK \\() matched the baseline output despite a non-zero exit code (1); treated as a pass (e.g. deprecation-notice noise), not a failure; see ",
+        ),
+      ),
+    ).toBe(true);
   });
 
   it("--expect pass reports the same --pass-regex outcome, with expectation violated", async () => {
@@ -5173,6 +5185,17 @@ describe("probe(): --pass-regex", () => {
       expect(
         result.warnings.some((w) => SIGNAL_EXIT_CODE_WARNING.test(w)),
       ).toBe(true);
+      // Exact-string pin on the 128 + N signal-band branch of the shared
+      // `nonZeroPassWarning` helper (`src/pass-regex.ts`): a subject-
+      // string drift there fails this assertion instead of slipping past
+      // the loose regex check above.
+      expect(
+        result.warnings.some((w) =>
+          w.startsWith(
+            "--pass-regex (^OK \\() matched the baseline output but the baseline run exited with 137, the code a shell reports for a process killed by signal 9; the suite may have been cut short; see ",
+          ),
+        ),
+      ).toBe(true);
       // The band gets its own wording INSTEAD of the generic one, not
       // alongside it.
       expect(
@@ -5559,7 +5582,10 @@ describe("probe(): --pass-regex mutant-path miss warning is gated to ambiguous m
     // shape specifically, not one of the other two ambiguous shapes.
     expect(
       result.warnings.some(
-        (w) => MISS_WARNING.test(w) && w.includes("truncated"),
+        (w) =>
+          MISS_WARNING.test(w) &&
+          w.includes("truncated") &&
+          w.includes("the mutant run's captured"),
       ),
     ).toBe(true);
   });
