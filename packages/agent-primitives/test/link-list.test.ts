@@ -147,9 +147,27 @@ describe("mergeLinkSources: precedence table (defaults, then plan, then CLI)", (
   for (const row of rows) {
     it(row.name, () => {
       const merged = mergeLinkSources([
-        { base: root, values: row.defaults, namedIn: DEFAULTS_NAMED_IN },
-        { base: root, values: row.plan, namedIn: PLAN_NAMED_IN },
-        { base: cwd, values: row.cli },
+        {
+          base: root,
+          basePhrase: "the repository root",
+          values: row.defaults,
+          namedIn: DEFAULTS_NAMED_IN,
+          remedy:
+            "create it, or remove the entry from /repo/.agent-primitives.json",
+        },
+        {
+          base: root,
+          basePhrase: "the repository root",
+          values: row.plan,
+          namedIn: PLAN_NAMED_IN,
+          remedy: "create it, or remove the entry from /repo/plan.json",
+        },
+        {
+          base: cwd,
+          basePhrase: "the invocation cwd",
+          values: row.cli,
+          remedy: "create it, or drop --link",
+        },
       ]);
       expect(merged.map((link) => link.value)).toEqual(row.expected);
       expect(
@@ -166,14 +184,28 @@ describe("mergeLinkSources: precedence table (defaults, then plan, then CLI)", (
 
   it("a file source's provenance phrase names the raw entry and the file, which is what a refusal warning has to carry", () => {
     const merged = mergeLinkSources([
-      { base: root, values: ["src"], namedIn: DEFAULTS_NAMED_IN },
+      {
+        base: root,
+        basePhrase: "the repository root",
+        values: ["src"],
+        namedIn: DEFAULTS_NAMED_IN,
+        remedy:
+          "create it, or remove the entry from /repo/.agent-primitives.json",
+      },
     ]);
 
     expect(merged[0].namedBy).toBe(`"src" named in ${DEFAULTS_NAMED_IN}`);
   });
 
   it("keeps the raw entry alongside the resolved path, for a `--link` group (no `namedIn`) too", () => {
-    const merged = mergeLinkSources([{ base: cwd, values: ["extra"] }]);
+    const merged = mergeLinkSources([
+      {
+        base: cwd,
+        basePhrase: "the invocation cwd",
+        values: ["extra"],
+        remedy: "create it, or drop --link",
+      },
+    ]);
     expect(merged[0].given).toBe("extra");
     expect(merged[0].value).toBe(path.join(cwd, "extra"));
     expect(merged[0].namedBy).toBeUndefined();
@@ -197,17 +229,25 @@ describe("linkSourceMissingMessage", () => {
 
   it("is undefined for a source that exists and is a directory", () => {
     const dir = makeTmpDir();
-    const link: MergedLink = { value: dir, given: "vendor" };
-    expect(
-      linkSourceMissingMessage(link, "the invocation cwd"),
-    ).toBeUndefined();
+    const link: MergedLink = {
+      value: dir,
+      given: "vendor",
+      basePhrase: "the invocation cwd",
+      remedy: "create it, or drop --link",
+    };
+    expect(linkSourceMissingMessage(link)).toBeUndefined();
   });
 
   it("names the value as given, the resolved path, and the base for a source that does not exist", () => {
     const root = makeTmpDir();
     const missing = path.join(root, "does", "not", "exist");
-    const link: MergedLink = { value: missing, given: "does/not/exist" };
-    const message = linkSourceMissingMessage(link, "the invocation cwd");
+    const link: MergedLink = {
+      value: missing,
+      given: "does/not/exist",
+      basePhrase: "the invocation cwd",
+      remedy: "create it, or drop --link",
+    };
+    const message = linkSourceMissingMessage(link);
     expect(message).toContain('"does/not/exist"');
     expect(message).toContain(missing);
     expect(message).toContain("the invocation cwd");
@@ -218,8 +258,14 @@ describe("linkSourceMissingMessage", () => {
     const root = makeTmpDir();
     const filePath = path.join(root, "not-a-dir");
     fs.writeFileSync(filePath, "x");
-    const link: MergedLink = { value: filePath, given: "not-a-dir" };
-    const message = linkSourceMissingMessage(link, "the repository root");
+    const link: MergedLink = {
+      value: filePath,
+      given: "not-a-dir",
+      basePhrase: "the repository root",
+      remedy:
+        "create it, or remove the entry from /repo/.agent-primitives.json",
+    };
+    const message = linkSourceMissingMessage(link);
     expect(message).toContain("is not a directory");
     expect(message).not.toContain("does not exist");
   });
@@ -229,8 +275,15 @@ describe("linkSourceMissingMessage", () => {
     const missing = path.join(root, "gone");
     const namedBy =
       '"gone" named in the "link" list of /repo/.agent-primitives.json';
-    const link: MergedLink = { value: missing, given: "gone", namedBy };
-    const message = linkSourceMissingMessage(link, "the repository root");
+    const link: MergedLink = {
+      value: missing,
+      given: "gone",
+      basePhrase: "the repository root",
+      remedy:
+        "create it, or remove the entry from /repo/.agent-primitives.json",
+      namedBy,
+    };
+    const message = linkSourceMissingMessage(link);
     expect(message).toContain(namedBy);
   });
 
@@ -249,8 +302,13 @@ describe("linkSourceMissingMessage", () => {
       fs.mkdirSync(target);
       fs.chmodSync(locked, 0o000);
       try {
-        const link: MergedLink = { value: target, given: "locked/vendor" };
-        const message = linkSourceMissingMessage(link, "the invocation cwd");
+        const link: MergedLink = {
+          value: target,
+          given: "locked/vendor",
+          basePhrase: "the invocation cwd",
+          remedy: "create it, or drop --link",
+        };
+        const message = linkSourceMissingMessage(link);
         expect(message).toBeDefined();
         expect(message).toContain("could not be checked");
         expect(message).toContain("EACCES");
@@ -267,18 +325,26 @@ describe("linkSourceMissingMessage", () => {
     fs.mkdirSync(realDir);
     const linkPath = path.join(root, "alias");
     fs.symlinkSync(realDir, linkPath);
-    const link: MergedLink = { value: linkPath, given: "alias" };
-    expect(
-      linkSourceMissingMessage(link, "the invocation cwd"),
-    ).toBeUndefined();
+    const link: MergedLink = {
+      value: linkPath,
+      given: "alias",
+      basePhrase: "the invocation cwd",
+      remedy: "create it, or drop --link",
+    };
+    expect(linkSourceMissingMessage(link)).toBeUndefined();
   });
 
   it("refuses a DANGLING symlink source (resolving to nothing) the same way as a plain missing path", () => {
     const root = makeTmpDir();
     const linkPath = path.join(root, "dangling");
     fs.symlinkSync(path.join(root, "nowhere-at-all"), linkPath);
-    const link: MergedLink = { value: linkPath, given: "dangling" };
-    const message = linkSourceMissingMessage(link, "the invocation cwd");
+    const link: MergedLink = {
+      value: linkPath,
+      given: "dangling",
+      basePhrase: "the invocation cwd",
+      remedy: "create it, or drop --link",
+    };
+    const message = linkSourceMissingMessage(link);
     expect(message).toContain("does not exist");
   });
 });

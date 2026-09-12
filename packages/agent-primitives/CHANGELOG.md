@@ -95,17 +95,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolved source is not an existing directory (a plain file counts
   too): `status: "usage_error"`, `reason: "link_source_not_found"`,
   exit `2`, naming the value as given, the absolute path it resolved to,
-  and which base it was resolved against (`--link` against the
-  invocation cwd, the other two against the repository root). It used
-  to be linked anyway -- silently dropped, or, for a repository-content
-  source, linked as a dangling symlink -- with no warning at all, so an
-  operator's typo in a `--link` value, or a stale entry in a
-  `.agent-primitives.json`/`--plan` file, never surfaced (this also
-  means a case-variant `--link`/`link` value that used to resolve on a
-  case-insensitive filesystem, macOS's default, is a `usage_error` on a
-  case-sensitive one, Linux's default and what CI runs on, since the
-  variant genuinely does not exist there). Unaffected: an
-  auto-discovered candidate (`node_modules`, a composer
+  which base it was resolved against (`--link` against the invocation
+  cwd, the other two against the repository root), and a remedy --
+  create the missing directory, or drop the entry (from `--link`
+  itself, or from the file naming it). A link whose resolved value lies
+  OUTSIDE the containment root skips this existence check entirely and
+  is refused by the existing `file_outside_root` check instead, the
+  same as an out-of-root link that exists: an out-of-root value's
+  existence is never even checked, so a missing, a plain-file, and a
+  directory out-of-root value all get the one uniform refusal rather
+  than the existence check leaking which of the three sits there for a
+  path outside the repository -- a repository shipping a defaults-file
+  `link` for a not-yet-installed directory now refuses every probe
+  until that directory exists, so long as the value resolves inside the
+  repository. It used to be linked anyway -- silently dropped, or, for a
+  repository-content source, linked as a dangling symlink -- with no
+  warning at all, so an operator's typo in a `--link` value, or a stale
+  entry in a `.agent-primitives.json`/`--plan` file, never surfaced
+  (this also means a case-variant `--link`/`link` value that used to
+  resolve on a case-insensitive filesystem, macOS's default, is a
+  `usage_error` on a case-sensitive one, Linux's default and what CI
+  runs on, since the variant genuinely does not exist there).
+  Unaffected: an auto-discovered candidate (`node_modules`, a composer
   `vendor-dir`/`bin-dir`) keeps its own documented skip-when-absent
   behaviour, since a value nobody explicitly named is not a usage error
   (GitHub issue #242).

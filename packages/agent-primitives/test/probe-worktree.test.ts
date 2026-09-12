@@ -1532,6 +1532,66 @@ describe("probe(): worktree isolation, a link source that does not exist (#242)"
     );
   });
 
+  it("an out-of-root MISSING --link reports file_outside_root, not link_source_not_found: the containment check runs first for a value outside the root, before the existence check ever stats it", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const outside = makeTmpDir();
+    const missing = path.join(outside, "does-not-exist");
+
+    const result = await probe(baseOptions(repo, { links: [missing] }));
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("file_outside_root");
+    expect(result.warnings.join(" ")).not.toContain("link_source_not_found");
+    expect(result.warnings.join(" ")).toContain(missing);
+  });
+
+  it("an out-of-root --link that IS an existing plain FILE reports file_outside_root too, identically to an out-of-root existing directory: existence never distinguishes an out-of-root value", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const outside = makeTmpDir();
+    const outsideFile = path.join(outside, "not-a-dir");
+    fs.writeFileSync(outsideFile, "x");
+
+    const result = await probe(baseOptions(repo, { links: [outsideFile] }));
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("file_outside_root");
+    expect(result.warnings.join(" ")).toContain(outsideFile);
+  });
+
+  it("an out-of-root MISSING repo defaults-file `link` entry reports file_outside_root too, the same as --link: the ordering fix covers all three explicit sources, not just --link", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const outside = makeTmpDir();
+    const missing = path.join(outside, "gone");
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: [missing] }),
+    );
+
+    const result = await probe(baseOptions(repo));
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("file_outside_root");
+    expect(result.warnings.join(" ")).not.toContain("link_source_not_found");
+  });
+
+  it("an IN-root missing --link still reports link_source_not_found (unaffected by the containment-first ordering above)", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+
+    const result = await probe(
+      baseOptions(repo, { links: ["still/inside/missing"] }),
+    );
+
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("link_source_not_found");
+    expect(result.warnings.join(" ")).toContain(
+      path.join(repo, "still", "inside", "missing"),
+    );
+  });
+
   it("negative control: a composer vendor-dir naming a directory that does not exist yet is not a candidate at all, and the run proceeds unaffected", async () => {
     useLockDir();
     const { repo } = initRepo();

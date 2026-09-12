@@ -35,6 +35,12 @@ export interface LinkSourceGroup {
    * `--plan` file's and the repo defaults file's entries, the
    * invocation cwd for `--link`. */
   base: string;
+  /** The phrase naming `base` for a reader (`"the repository root"`,
+   * `"the invocation cwd"`), carried onto every `MergedLink` this group
+   * contributes so a caller building a `link_source_not_found` message
+   * never has to re-derive which base applied to which value from
+   * `namedBy`'s mere presence or absence. */
+  basePhrase: string;
   values: readonly string[];
   /** Set for a source that is a FILE in the repository, to the phrase
    * naming it (`the "link" list of /r/.agent-primitives.json`): each
@@ -43,6 +49,13 @@ export interface LinkSourceGroup {
    * the value as repository content rather than something an operator
    * typed (see `link-policy.ts`). Absent for `--link`. */
   namedIn?: string;
+  /** The remedy clause a `link_source_not_found` refusal appends,
+   * naming what a reader can actually do about it: create the missing
+   * directory, or stop naming it -- "remove the entry from <file>" for
+   * a repository-content source, "drop --link" for the CLI flag,
+   * carried onto every `MergedLink` this group contributes the same
+   * way `basePhrase` is. */
+  remedy: string;
 }
 
 /** One merged `link` value: the resolved absolute path, plus the
@@ -56,7 +69,12 @@ export interface MergedLink {
    * reader needs, and the given form is what an operator (or a plan/
    * defaults-file author) actually typed. */
   given: string;
+  /** The owning group's own `basePhrase`, copied here rather than
+   * re-derived from `namedBy`. */
+  basePhrase: string;
   namedBy?: string;
+  /** The owning group's own `remedy`, copied here the same way. */
+  remedy: string;
 }
 
 /**
@@ -87,6 +105,8 @@ export function mergeLinkSources(
       merged.push({
         value: abs,
         given: value,
+        basePhrase: group.basePhrase,
+        remedy: group.remedy,
         ...(group.namedIn !== undefined
           ? { namedBy: `"${value}" named in ${group.namedIn}` }
           : {}),
@@ -116,26 +136,22 @@ export function mergeLinkSources(
  * the refusal message, which names all three parts a reader needs: the
  * value AS GIVEN (`link.given`, before it was resolved), the absolute
  * path it resolved to (`link.value`), and the phrase naming what it was
- * resolved against -- `basePhrase`, supplied by the caller, since only
- * the caller knows which base applies to this particular value
- * (`"the invocation cwd"` for `--link`, `"the repository root"` for a
- * `--plan` file's and the defaults file's entries; see the README's
- * `--link` and "Non-JS repositories" sections). A source that exists
- * but is a FILE, not a directory, is refused the same way, named
- * accordingly. A `stat` that fails for a reason OTHER than "not there"
- * (an ancestor directory locked against this process, `EACCES`; a
- * symlink loop, `ELOOP`; ...) is never reported as "does not exist" --
- * that would tell an operator to create a directory that may well
- * already be sitting right there behind a permission this process
- * cannot see through -- it is refused with its own phrase naming the
- * errno instead, equally fail-closed (this function still returns a
- * message, never `undefined`, so the source is never treated as fine
- * merely because it could not be checked).
+ * resolved against -- `link.basePhrase`, carried by `mergeLinkSources`
+ * from the owning group (`"the invocation cwd"` for `--link`, `"the
+ * repository root"` for a `--plan` file's and the defaults file's
+ * entries; see the README's `--link` and "Non-JS repositories"
+ * sections). A source that exists but is a FILE, not a directory, is
+ * refused the same way, named accordingly. A `stat` that fails for a
+ * reason OTHER than "not there" (an ancestor directory locked against
+ * this process, `EACCES`; a symlink loop, `ELOOP`; ...) is never
+ * reported as "does not exist" -- that would tell an operator to create
+ * a directory that may well already be sitting right there behind a
+ * permission this process cannot see through -- it is refused with its
+ * own phrase naming the errno instead, equally fail-closed (this
+ * function still returns a message, never `undefined`, so the source is
+ * never treated as fine merely because it could not be checked).
  */
-export function linkSourceMissingMessage(
-  link: MergedLink,
-  basePhrase: string,
-): string | undefined {
+export function linkSourceMissingMessage(link: MergedLink): string | undefined {
   let stat: fs.Stats | undefined;
   let statErrorCode: string | undefined;
   try {
@@ -157,6 +173,7 @@ export function linkSourceMissingMessage(
   const provenance = link.namedBy !== undefined ? ` (${link.namedBy})` : "";
   return (
     `link "${link.given}" resolved to ${link.value} against ` +
-    `${basePhrase}, but that path ${problem}${provenance}`
+    `${link.basePhrase}, but that path ${problem}${provenance}. ` +
+    `${link.remedy}`
   );
 }

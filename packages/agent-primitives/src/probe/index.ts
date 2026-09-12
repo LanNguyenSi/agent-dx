@@ -2,7 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { sha256File } from "../hash.js";
 import { removeMarkerFor } from "../lock.js";
-import { findGitRoot, resolveDeepestExisting } from "./containment.js";
+import {
+  findGitRoot,
+  isPathContained,
+  resolveDeepestExisting,
+} from "./containment.js";
 import { readDefaultsFile } from "./defaults-file.js";
 import {
   linkSourceMissingMessage,
@@ -185,25 +189,6 @@ export interface ProbeResult {
 }
 
 /**
- * The phrase a `link_source_not_found` refusal names for what a merged
- * link value was resolved against: both call sites below (`probe()`,
- * `probePlan()`) build their `mergeLinkSources` groups the same way --
- * the repo defaults file's and a `--plan` file's own `link` entries are
- * always the ones carrying a `namedIn` (so `namedBy` is set here), both
- * resolved against the repository root; `--link` is the only group
- * with no `namedIn`, resolved against the invocation cwd -- so
- * `namedBy`'s presence already tells the two apart without a separate
- * field threaded through `mergeLinkSources` for it. See the README's
- * `--link` and "Non-JS repositories" sections for the same rule stated
- * for a reader.
- */
-function linkSourceBasePhrase(link: MergedLink): string {
-  return link.namedBy !== undefined
-    ? "the repository root"
-    : "the invocation cwd";
-}
-
-/**
  * Refuses the first merged link whose source is not an existing
  * directory, before the isolation copy is ever created (GitHub issue
  * #242): only the three explicit `link` sources reach this (an
@@ -211,12 +196,30 @@ function linkSourceBasePhrase(link: MergedLink): string {
  * auto-discovered composer `vendor-dir` that does not exist yet (the
  * common case before `composer install`) is unaffected. `undefined`
  * when every merged link's source exists.
+ *
+ * A link whose resolved value lies OUTSIDE `realRoot` is skipped here
+ * entirely, existing or not: the later, root-wide containment check
+ * (`file_outside_root`, `setup.ts`) already refuses every out-of-root
+ * target and link uniformly, and this existence check must not get
+ * there first and answer differently depending on what happens to sit
+ * at that outside path (a directory, a file, or nothing) -- that would
+ * leak filesystem information about paths outside the repository to
+ * the untrusted, file-sourced lanes (a defaults file or a plan's own
+ * `link`) and give an operator's own `--link /outside/missing` a
+ * "does not exist" pointing them at creating a path this run would
+ * refuse anyway. `realRoot` and each link's resolved path are both
+ * already realpath'd (`resolveDeepestExisting`), matching every other
+ * containment comparison in this module.
  */
 function firstMissingLinkSourceMessage(
   mergedLinks: readonly MergedLink[],
+  realRoot: string,
 ): string | undefined {
   for (const link of mergedLinks) {
-    const message = linkSourceMissingMessage(link, linkSourceBasePhrase(link));
+    if (!isPathContained(realRoot, resolveDeepestExisting(link.value))) {
+      continue;
+    }
+    const message = linkSourceMissingMessage(link);
     if (message !== undefined) return message;
   }
   return undefined;
@@ -476,28 +479,18 @@ async function runProbePipeline(
   const mergedLinks = mergeLinkSources([
     {
       base: root,
+      basePhrase: "the repository root",
       values: defaultsFile.links,
       namedIn: `the "link" list of ${defaultsFile.path}`,
+      remedy: `create it, or remove the entry from ${defaultsFile.path}`,
     },
-    { base: cwd, values: opts.links ?? [] },
+    {
+      base: cwd,
+      basePhrase: "the invocation cwd",
+      values: opts.links ?? [],
+      remedy: "create it, or drop --link",
+    },
   ]);
-  // Fails closed before anything about isolation is set up (GitHub
-  // issue #242): a `--link`/plan/defaults-file value whose source is
-  // not an existing directory would otherwise reach the worktree sync
-  // and either be linked as a dangling symlink or silently skipped,
-  // depending on the sync's own ordering, neither of which is what an
-  // explicitly named source failing to exist should do.
-  const missingLinkSource = firstMissingLinkSourceMessage(mergedLinks);
-  if (missingLinkSource !== undefined) {
-    return {
-      status: "usage_error",
-      reason: "link_source_not_found",
-      warnings: [...warnings, missingLinkSource],
-      isolation: isolationField,
-      dryRunLogPaths: derivationLogPaths,
-    };
-  }
-
   // Containment and the lock/marker key are resolved through realpath
   // (before either check), so an in-repo symlink pointing outside the
   // root cannot be used to mutate a file the containment check would
@@ -508,6 +501,30 @@ async function runProbePipeline(
   // can differ even with no symlink involved, e.g. macOS's `/var` ->
   // `/private/var`) is what "display the user path" means here.
   const realRoot = resolveDeepestExisting(root);
+  // Fails closed before anything about isolation is set up (GitHub
+  // issue #242): a `--link`/plan/defaults-file value whose source is
+  // not an existing directory would otherwise reach the worktree sync
+  // and either be linked as a dangling symlink or silently skipped,
+  // depending on the sync's own ordering, neither of which is what an
+  // explicitly named source failing to exist should do. Computed
+  // AFTER `realRoot` and skipped for a link outside it: an out-of-root
+  // value is refused by the containment check below instead, uniformly
+  // for missing, file, and directory alike (see
+  // `firstMissingLinkSourceMessage`'s own docblock).
+  const missingLinkSource = firstMissingLinkSourceMessage(
+    mergedLinks,
+    realRoot,
+  );
+  if (missingLinkSource !== undefined) {
+    return {
+      status: "usage_error",
+      reason: "link_source_not_found",
+      warnings: [...warnings, missingLinkSource],
+      isolation: isolationField,
+      dryRunLogPaths: derivationLogPaths,
+    };
+  }
+
   const absFile = resolveDeepestExisting(displayFile);
   const links = mergedLinks.map((link) => ({
     display: link.value,
@@ -1084,22 +1101,34 @@ export async function probePlan(
   const mergedLinks = mergeLinkSources([
     {
       base: root,
+      basePhrase: "the repository root",
       values: defaultsFile.links,
       namedIn: `the "link" list of ${defaultsFile.path}`,
+      remedy: `create it, or remove the entry from ${defaultsFile.path}`,
     },
     {
       base: root,
+      basePhrase: "the repository root",
       values: opts.planLinks ?? [],
       namedIn: `the "link" list of ${opts.planPath ?? "the --plan file"}`,
+      remedy: `create it, or remove the entry from ${opts.planPath ?? "the --plan file"}`,
     },
-    { base: cwd, values: opts.links ?? [] },
+    {
+      base: cwd,
+      basePhrase: "the invocation cwd",
+      values: opts.links ?? [],
+      remedy: "create it, or drop --link",
+    },
   ]);
   // Same fail-closed check as the single probe (`probe()` above),
   // before the lock, the in-flight marker, the baseline or any
   // worktree: a plan whose `link` (its own, the defaults file's, or
   // `--link`'s) names a source that does not exist leaves nothing
   // behind, the same as every other plan-validation refusal above.
-  const missingLinkSource = firstMissingLinkSourceMessage(mergedLinks);
+  const missingLinkSource = firstMissingLinkSourceMessage(
+    mergedLinks,
+    realRoot,
+  );
   if (missingLinkSource !== undefined) {
     return refuse("usage_error", "link_source_not_found", missingLinkSource);
   }

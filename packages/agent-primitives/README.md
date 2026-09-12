@@ -1479,24 +1479,31 @@ regardless of which subdirectory `--cwd` names. Whichever base applies,
 each resolved source must already exist as a directory: one that does
 not exist, or exists but is a plain file, is refused, `status:
 "usage_error"`, `reason: "link_source_not_found"`, exit `2`, naming the
-value as given, the absolute path it resolved to, and which of the two
-bases it was resolved against (GitHub issue #242) -- unlike an
-auto-discovered candidate (`node_modules`, a composer
-`vendor-dir`/`bin-dir`), which keeps its own documented skip-when-absent
-behaviour below, an explicitly named source that is not there is a
-usage error, not something to skip past. This runs in `probe()`'s own
-option-shape checks, ahead of any isolation decision, so it fires the
-same way whether the run goes on to `-i worktree`'s isolation copy or
-`-i inplace`'s in-place mutation, and it runs BEFORE the containment
-check just above: a value that is both outside the containment root and
-missing is `link_source_not_found`, not `file_outside_root`. It runs
-once, when the invocation starts, checking that each source exists at
-that moment; it is not re-checked immediately before the link is
-actually created. The check is also where the filesystem's case rules
-show: a case-variant spelling (`SRC` for a directory named `src`)
-resolves on a case-insensitive filesystem (macOS's default) and reaches
-the link policy below, but does not exist on a case-sensitive one
-(Linux's default, and what CI runs on), where the same value is
+value as given, the absolute path it resolved to, which of the two
+bases it was resolved against, and a remedy (create the missing
+directory, or drop the entry -- from `--link` itself, or from the
+naming file) (GitHub issue #242) -- unlike an auto-discovered candidate
+(`node_modules`, a composer `vendor-dir`/`bin-dir`), which keeps its own
+documented skip-when-absent behaviour below, an explicitly named source
+that is not there is a usage error, not something to skip past. This
+runs in `probe()`'s own option-shape checks, ahead of any isolation
+decision, so it fires the same way whether the run goes on to `-i
+worktree`'s isolation copy or `-i inplace`'s in-place mutation, but it
+runs AFTER the containment check just above for a value OUTSIDE the
+containment root: a value that is both outside the root and missing is
+`file_outside_root`, not `link_source_not_found` -- existence is never
+even checked for an out-of-root value, so a `--link`/plan/defaults-file
+entry pointing outside the repository gets the one uniform refusal
+regardless of whether nothing, a file, or a directory happens to sit at
+that path, rather than leaking which of the three it is. Only a value
+that resolves INSIDE the root reaches the existence check at all. It
+runs once, when the invocation starts, checking that each in-root
+source exists at that moment; it is not re-checked immediately before
+the link is actually created. The check is also where the filesystem's
+case rules show: a case-variant spelling (`SRC` for a directory named
+`src`) resolves on a case-insensitive filesystem (macOS's default) and
+reaches the link policy below, but does not exist on a case-sensitive
+one (Linux's default, and what CI runs on), where the same value is
 `link_source_not_found` rather than a skipped or refused link.
 
 #### Non-JS repositories
