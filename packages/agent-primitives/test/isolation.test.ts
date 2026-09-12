@@ -15,6 +15,7 @@ import {
   isScratchWorktreePath,
   listRegisteredWorktrees,
   liveForeignOwner,
+  nonDirectoryAncestor,
   parseWorktreeListLines,
   parseWorktreeListZ,
   readScratchOwner,
@@ -2424,5 +2425,52 @@ describe("the scratch owner record", () => {
     expect(admitted.verified).toBe(true);
     expect(fs.existsSync(wt)).toBe(false);
     expect(registeredPaths(repo)).toEqual([resolveDeepestExisting(repo)]);
+  });
+});
+
+/**
+ * Direct unit tests for the two `return rel` branches: a non-directory
+ * ancestor (a file where a directory is expected) and an ancestor that
+ * IS there but resolves nowhere (a dangling symlink). Both used to be
+ * reached only through a defaults-file `link` naming such a path, but
+ * the existence check `probe/link-list.ts` added for issue #242 now
+ * refuses that kind of source before the worktree sync ever runs
+ * `nonDirectoryAncestor`, leaving these two branches unexercised by any
+ * end-to-end `probe()` test -- see PR #248's review. Exercised here
+ * directly against the function instead.
+ */
+describe("nonDirectoryAncestor", () => {
+  it("returns undefined when every existing segment is a directory (the ordinary case, nothing yet at the destination)", () => {
+    const base = makeTmpDir();
+    fs.mkdirSync(path.join(base, "a"));
+    expect(
+      nonDirectoryAncestor(base, path.join("a", "b", "c")),
+    ).toBeUndefined();
+  });
+
+  it("returns undefined when nothing exists at all under base", () => {
+    const base = makeTmpDir();
+    expect(
+      nonDirectoryAncestor(base, path.join("a", "b", "c")),
+    ).toBeUndefined();
+  });
+
+  it("returns the relative path of a FILE standing where a parent directory has to be", () => {
+    const base = makeTmpDir();
+    fs.writeFileSync(path.join(base, "a"), "x");
+    expect(nonDirectoryAncestor(base, path.join("a", "b", "c"))).toBe("a");
+  });
+
+  it("returns the relative path of a dangling SYMLINK ancestor: something is there but resolves nowhere, which mkdirSync cannot create through either", () => {
+    const base = makeTmpDir();
+    fs.symlinkSync("nowhere-at-all", path.join(base, "a"));
+    expect(nonDirectoryAncestor(base, path.join("a", "b", "c"))).toBe("a");
+  });
+
+  it("does not examine the destination's own last segment: a file AT the destination (not an ancestor of it) is not reported", () => {
+    const base = makeTmpDir();
+    fs.mkdirSync(path.join(base, "a"));
+    fs.writeFileSync(path.join(base, "a", "b"), "x");
+    expect(nonDirectoryAncestor(base, path.join("a", "b"))).toBeUndefined();
   });
 });

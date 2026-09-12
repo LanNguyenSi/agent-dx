@@ -1440,9 +1440,11 @@ program
   )
   .option(
     "--link <dirs>",
-    "comma-separated extra directories checked for containment; merged " +
-      "and deduplicated with a --plan file's own link and with " +
-      ".agent-primitives.json at the repo root (no $(...) or backtick)",
+    "comma-separated extra directories, each relative to the invocation " +
+      "cwd, checked for containment and for existing as a directory " +
+      "(refused otherwise); merged and deduplicated with a --plan file's " +
+      "own link and with .agent-primitives.json at the repo root, both " +
+      "relative to the repository root instead (no $(...) or backtick)",
     parseLinkList,
   )
   .option(

@@ -60,6 +60,120 @@ export function resolveDeepestExisting(p: string): string {
 }
 
 /**
+ * Where a link SOURCE's own containment is judged: `resolveDeepestExisting(p)`,
+ * except when `p` ITSELF is a symlink whose chain does not fully resolve
+ * (a dangling target, or one this process cannot stat). `fs.realpathSync`
+ * throws for that case with no partial information, so
+ * `resolveDeepestExisting`'s own fallback walks up from `p`'s OWN parent
+ * -- exactly right for an ordinary missing path, but wrong here: it
+ * silently reports `p` itself (still inside the repository, since `p` is
+ * one of the three explicit `link` sources, already resolved against
+ * their own base) rather than the directory the symlink actually names,
+ * which may sit anywhere. Two link sources that both point outside the
+ * repository then read differently by nothing but accident: one whose
+ * target happens to exist resolves through `fs.realpathSync` to that
+ * real, out-of-root path and is caught by the ordinary containment
+ * check; one whose target is missing (or unreadable) falls back to `p`'s
+ * own in-root spelling and reaches the existence check instead, which
+ * then discloses -- via `link_source_not_found` vs. the containment
+ * check's own `file_outside_root` -- whether something happens to sit at
+ * an arbitrary path outside the repository (GitHub issue #242's
+ * containment finding).
+ *
+ * This resolves the gap by walking the symlink chain itself, one
+ * `readlinkSync` hop at a time (each relative target resolved against
+ * ITS OWN directory, since a relative target's meaning depends on where
+ * the link that carries it sits, not on where the chain started), until
+ * a hop is not itself a symlink -- at which point `resolveDeepestExisting`
+ * runs on THAT final hop, so the deepest existing ancestor reported is
+ * always an ancestor of where the chain actually ends, dangling or not,
+ * however many links sit in between. A single hop that merely forwards
+ * to another in-root symlink (`oracle` -> `<root>/hop2` -> an outside,
+ * missing target) previously lost the outside destination entirely: only
+ * the FIRST hop's target (`<root>/hop2`, itself still in-root) was ever
+ * run through `resolveDeepestExisting`, whose own fallback then walked up
+ * from `hop2`'s in-root parent rather than from the outside target `hop2`
+ * itself names, silently reporting an in-root path for a chain that in
+ * fact dangles outside the repository -- the same disclosure this
+ * function exists to close, just one hop further down (GitHub issue
+ * #242, narrowed again). Walking the chain by hand rather than leaning on
+ * `fs.realpathSync` for anything past the first hop is what fixes this:
+ * every hop's target becomes the NEXT hop's own starting point, so the
+ * final `resolveDeepestExisting` call always sees the chain's true end.
+ *
+ * The walk is capped at 32 hops. A cycle among the hops (`a` -> `b` ->
+ * `a`) never terminates on its own, and neither `lstatSync` nor
+ * `readlinkSync` -- unlike `fs.realpathSync` or `fs.statSync`, both of
+ * which fully resolve a path and so surface the OS's own `ELOOP` for a
+ * genuine cycle -- ever traverses far enough to hit that error by
+ * itself, since each reads only its OWN argument without following it.
+ * Hitting the cap (or an `ELOOP` raised while resolving an ancestor
+ * DIRECTORY component of some hop along the way, which `lstatSync` and
+ * `readlinkSync` still resolve as normal path lookup) returns `undefined`
+ * rather than a best-effort path: the caller must refuse the link
+ * without ever running the containment check on a half-resolved chain,
+ * since disclosing "contained" vs. "not" for an unresolvable target would
+ * itself be a return of the same disclosure this function exists to
+ * close (see `firstLinkSourceRefusal` in `index.ts`, which falls back to
+ * `linkSourceMissingMessage`'s own errno branch there instead -- the
+ * SAME chain, statted whole via `fs.statSync(link.value)`, hits the
+ * identical `ELOOP`/cap situation and is reported through that shared,
+ * non-disclosing wording rather than through containment).
+ *
+ * `p` itself when it is not a symlink at all (or cannot be lstat'ed,
+ * i.e. does not exist under any spelling): the ordinary resolution
+ * already answers correctly there, since there is no separate "target"
+ * to lose track of.
+ *
+ * Deliberately narrow rather than folded into `resolveDeepestExisting`
+ * itself: that function has other callers (a `--file` target, a link's
+ * eventual on-disk destination inside `link-policy.ts`) whose own
+ * fallback behaviour -- reporting the path unresolved when it does not
+ * fully exist -- is exactly what they need, and widening it here would
+ * change what every one of them sees for a plain missing path, not only
+ * for a link source's own containment check.
+ */
+const MAX_LINK_SOURCE_HOPS = 32;
+
+/** True when `err` is a Node errno exception carrying `ELOOP`: a genuine
+ * symlink cycle encountered while the OS resolves an ancestor directory
+ * component of the path handed to `lstatSync`/`readlinkSync`. */
+function isELOOP(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    "code" in err &&
+    (err as NodeJS.ErrnoException).code === "ELOOP"
+  );
+}
+
+export function resolveLinkSourceTarget(p: string): string | undefined {
+  let current = p;
+  for (let hop = 0; hop < MAX_LINK_SOURCE_HOPS; hop++) {
+    let lst: fs.Stats;
+    try {
+      lst = fs.lstatSync(current);
+    } catch (err) {
+      if (isELOOP(err)) return undefined;
+      return resolveDeepestExisting(current);
+    }
+    if (!lst.isSymbolicLink()) return resolveDeepestExisting(current);
+    let rawTarget: string;
+    try {
+      rawTarget = fs.readlinkSync(current);
+    } catch (err) {
+      if (isELOOP(err)) return undefined;
+      return resolveDeepestExisting(current);
+    }
+    current = path.isAbsolute(rawTarget)
+      ? rawTarget
+      : path.resolve(path.dirname(current), rawTarget);
+  }
+  // The hop cap was reached without the chain ending: functionally the
+  // same as a genuine `ELOOP`, and refused the same non-disclosing way.
+  return undefined;
+}
+
+/**
  * Every spelling of `p` the isolation-escape scan (`escapingRootMentions`
  * below) recognizes as "the same path": `p` itself resolved
  * (`path.resolve`), its realpath (`resolveDeepestExisting`, in case `p`

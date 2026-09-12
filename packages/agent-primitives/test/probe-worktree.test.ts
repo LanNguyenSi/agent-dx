@@ -5,7 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, afterEach, vi } from "vitest";
-import { probe, type ProbeOptions } from "../src/probe/index.js";
+import {
+  probe,
+  firstLinkSourceRefusal,
+  type ProbeOptions,
+} from "../src/probe/index.js";
+import type { MergedLink } from "../src/probe/link-list.js";
 import {
   markerFilePathFor,
   readMarkerFor,
@@ -1472,6 +1477,474 @@ describe("probe(): worktree isolation, the link policy", () => {
 });
 
 /**
+ * GitHub issue #242: a `--link`/`--plan` file's own `link`/the repo
+ * defaults file's `link` naming a source that does not exist used to be
+ * linked silently (or as a dangling symlink) rather than refused. Every
+ * test here asserts the refusal fires BEFORE any isolation copy exists:
+ * no worktree is created, nothing is locked, nothing is marked, the
+ * same "leaves nothing behind" contract every other pre-lock usage
+ * error in this suite already has.
+ */
+describe("probe(): worktree isolation, a link source that does not exist (#242)", () => {
+  it("refuses --link naming a directory that does not exist, naming the value as given, the resolved path, and the invocation cwd base", async () => {
+    const lockDir = useLockDir();
+    const { repo } = initRepo();
+
+    const result = await probe(
+      baseOptions(repo, { links: ["does/not/exist"] }),
+    );
+
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("link_source_not_found");
+    const message = result.warnings.join(" ");
+    expect(message).toContain('"does/not/exist"');
+    expect(message).toContain(path.join(repo, "does", "not", "exist"));
+    expect(message).toContain("the invocation cwd");
+    // The remedy end to end: a missing --link source is told to create
+    // it, or drop the flag naming it -- a mutant deleting the remedy
+    // clause, or one that always advises "create it" regardless of
+    // branch, both fail this.
+    expect(message).toContain("create it, or drop --link");
+    // Nothing left behind: no worktree registered, no lock file.
+    expect(worktreeList(repo)).not.toContain("does/not/exist");
+    expect(fs.readdirSync(lockDir)).toEqual([]);
+  });
+
+  it("refuses --link naming a path that exists but is a plain FILE, the same way", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.writeFileSync(path.join(repo, "not-a-dir"), "x");
+
+    const result = await probe(baseOptions(repo, { links: ["not-a-dir"] }));
+
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("link_source_not_found");
+    const message = result.warnings.join(" ");
+    expect(message).toContain("is not a directory");
+    // A plain FILE source is told to point the entry at a directory,
+    // never "create it": a directory cannot be created where a file
+    // already sits.
+    expect(message).toContain("point it at a directory, or drop --link");
+    expect(message).not.toContain("create it");
+  });
+
+  it("refuses a repo defaults-file `link` entry naming a directory that does not exist, naming the defaults file and the repository-root base", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const defaultsPath = path.join(repo, ".agent-primitives.json");
+    fs.writeFileSync(
+      defaultsPath,
+      JSON.stringify({ link: ["still-not-there"] }),
+    );
+
+    const result = await probe(baseOptions(repo));
+
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("link_source_not_found");
+    const message = result.warnings.join(" ");
+    expect(message).toContain('"still-not-there"');
+    expect(message).toContain("the repository root");
+    expect(message).toContain(
+      `named in the "link" list of ${path.join(repo, ".agent-primitives.json")}`,
+    );
+    // The remedy end to end: create it, or remove the entry from the
+    // defaults file that named it.
+    expect(message).toContain(
+      `create it, or remove the entry from ${defaultsPath}`,
+    );
+  });
+
+  it("an out-of-root MISSING --link reports file_outside_root, not link_source_not_found: the containment check runs first for a value outside the root, before the existence check ever stats it", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const outside = makeTmpDir();
+    const missing = path.join(outside, "does-not-exist");
+
+    const result = await probe(baseOptions(repo, { links: [missing] }));
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("file_outside_root");
+    expect(result.warnings.join(" ")).not.toContain("does not exist");
+    expect(result.warnings.join(" ")).not.toContain("is not a directory");
+    expect(result.warnings.join(" ")).toContain(missing);
+  });
+
+  it("an out-of-root --link that IS an existing plain FILE reports file_outside_root too, identically to an out-of-root existing directory: existence never distinguishes an out-of-root value", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const outside = makeTmpDir();
+    const outsideFile = path.join(outside, "not-a-dir");
+    fs.writeFileSync(outsideFile, "x");
+
+    const result = await probe(baseOptions(repo, { links: [outsideFile] }));
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("file_outside_root");
+    expect(result.warnings.join(" ")).toContain(outsideFile);
+  });
+
+  it("an out-of-root MISSING repo defaults-file `link` entry reports file_outside_root too, the same as --link: the ordering fix covers all three explicit sources, not just --link", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const outside = makeTmpDir();
+    const missing = path.join(outside, "gone");
+    fs.writeFileSync(
+      path.join(repo, ".agent-primitives.json"),
+      JSON.stringify({ link: [missing] }),
+    );
+
+    const result = await probe(baseOptions(repo));
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("file_outside_root");
+    expect(result.warnings.join(" ")).not.toContain("does not exist");
+    expect(result.warnings.join(" ")).not.toContain("is not a directory");
+  });
+
+  it("an IN-root missing --link still reports link_source_not_found (unaffected by the containment-first ordering above)", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+
+    const result = await probe(
+      baseOptions(repo, { links: ["still/inside/missing"] }),
+    );
+
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("link_source_not_found");
+    expect(result.warnings.join(" ")).toContain(
+      path.join(repo, "still", "inside", "missing"),
+    );
+  });
+
+  it("negative control: a composer vendor-dir naming a directory that does not exist yet is not a candidate at all, and the run proceeds unaffected", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "composer.json"),
+      JSON.stringify({
+        name: "acme/widget",
+        config: { "vendor-dir": "vendor" },
+      }),
+    );
+    git(repo, ["add", "composer.json"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "composer"]);
+    // vendor/ is never created: composer install has not run yet.
+
+    const result = await probe(baseOptions(repo));
+
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).not.toContain(path.join(repo, "vendor"));
+    expect(result.warnings.join(" ")).not.toContain("does not exist");
+    expect(result.warnings.join(" ")).not.toContain("is not a directory");
+  });
+});
+
+/**
+ * GitHub issue #242's containment finding, narrowed further: an IN-REPO
+ * path (`<root>/oracle`) that is itself a SYMLINK to somewhere outside
+ * the root must never reach the existence check at all, whether the far
+ * end exists or not. `linkSourceMissingMessage` stats `link.value`
+ * directly, which follows the WHOLE symlink chain, so running it here
+ * would answer "does not exist" for a dangling out-of-root target and
+ * nothing at all for an existing one -- an oracle for whether an
+ * arbitrary path outside the repository exists, reachable from a
+ * defaults file or a plan's own `link` as much as from `--link` itself.
+ *
+ * The first case below runs under the DEFAULT options: `setup.ts`'s own
+ * later containment check already refuses an out-of-root target
+ * uniformly (using the same `resolveLinkSourceTarget`-resolved
+ * `link.abs`), so a plain out-of-root symlink target is caught there
+ * regardless of whether `firstLinkSourceRefusal`'s own early check
+ * exists at all -- asserting only `file_outside_root` under default
+ * options would pass even with that early check deleted (measured: it
+ * does). `--allow-outside` disables that later check for the effective
+ * isolation modes it actually runs under (`worktree` is refused
+ * outright, `worktree_allow_outside_unsupported`, regardless of any
+ * link, so the containment guard is never reached for it at all), which
+ * leaves `-i inplace` as the one mode where the symlink guard's own
+ * gating (`checkOutsideRootExistence`, mirroring the non-symlink case)
+ * decides the outcome by itself: an EXISTING out-of-root target is then
+ * accepted, exactly as naming the same directory directly already is,
+ * and a MISSING one is refused `link_source_not_found` -- existence
+ * disclosure through `--allow-outside -i inplace` is the operator's own
+ * choice there, for a symlink source exactly as for a plain one. The
+ * following cases assert the unaffected, in-root shape under the
+ * ordinary default options, since an in-root target never reaches this
+ * guard at all (the outer `!isPathContained` is false before
+ * `isSymlinkSource` is ever asked).
+ */
+describe("probe(): worktree isolation, an in-repo symlink whose own target lies outside the root (#242)", () => {
+  it("an in-repo --link symlink to an out-of-root directory is file_outside_root under the DEFAULT options, whether the far end exists or not", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const outside = makeTmpDir();
+    const outsideTarget = path.join(outside, "target");
+    fs.mkdirSync(outsideTarget);
+    const oracle = path.join(repo, "oracle");
+    fs.symlinkSync(outsideTarget, oracle);
+
+    const result = await probe(baseOptions(repo, { links: ["oracle"] }));
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("file_outside_root");
+    expect(result.warnings.join(" ")).toContain(oracle);
+  });
+
+  it("--allow-outside -i worktree with an in-repo symlink to an existing out-of-root directory is worktree_allow_outside_unsupported, not file_outside_root: the unrelated worktree/allow-outside refusal wins regardless of the symlink's own target", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const outside = makeTmpDir();
+    const outsideTarget = path.join(outside, "target");
+    fs.mkdirSync(outsideTarget);
+    const oracle = path.join(repo, "oracle");
+    fs.symlinkSync(outsideTarget, oracle);
+
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "worktree",
+        allowOutside: true,
+        links: ["oracle"],
+      }),
+    );
+
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("worktree_allow_outside_unsupported");
+  });
+
+  it("--allow-outside -i inplace with an in-repo symlink to an EXISTING out-of-root directory is accepted, the same as naming that directory directly", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const outside = makeTmpDir();
+    const outsideTarget = path.join(outside, "target");
+    fs.mkdirSync(outsideTarget);
+    const oracle = path.join(repo, "oracle");
+    fs.symlinkSync(outsideTarget, oracle);
+
+    const viaSymlink = await probe(
+      baseOptions(repo, {
+        isolation: "inplace",
+        allowOutside: true,
+        links: ["oracle"],
+      }),
+    );
+    const viaDirect = await probe(
+      baseOptions(repo, {
+        isolation: "inplace",
+        allowOutside: true,
+        links: [outsideTarget],
+      }),
+    );
+
+    expect(viaSymlink.reason).toBeUndefined();
+    expect(viaSymlink.warnings.join(" ")).not.toContain("file_outside_root");
+    expect(viaSymlink.status).toBe(viaDirect.status);
+  });
+
+  it("--allow-outside -i inplace with an in-repo symlink to a MISSING out-of-root path is link_source_not_found, existence disclosed under the operator's own --allow-outside choice", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const outside = makeTmpDir();
+    const missingOutsideTarget = path.join(outside, "does-not-exist");
+    const oracle = path.join(repo, "oracle");
+    fs.symlinkSync(missingOutsideTarget, oracle);
+
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "inplace",
+        allowOutside: true,
+        links: ["oracle"],
+      }),
+    );
+
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("link_source_not_found");
+    expect(result.warnings.join(" ")).toContain("does not exist");
+  });
+
+  it("a two-hop in-repo symlink chain to an out-of-root directory answers file_outside_root under the DEFAULT options for both an EXISTING and a MISSING far end -- the intermediate hop must not mask the chain's true destination", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const outside = makeTmpDir();
+    const existingTarget = path.join(outside, "target");
+    fs.mkdirSync(existingTarget);
+    const hop2Existing = path.join(repo, "hop2-existing");
+    fs.symlinkSync(existingTarget, hop2Existing);
+    const oracleExisting = path.join(repo, "oracle-existing");
+    fs.symlinkSync(hop2Existing, oracleExisting);
+
+    const missingTarget = path.join(outside, "does-not-exist");
+    const hop2Missing = path.join(repo, "hop2-missing");
+    fs.symlinkSync(missingTarget, hop2Missing);
+    const oracleMissing = path.join(repo, "oracle-missing");
+    fs.symlinkSync(hop2Missing, oracleMissing);
+
+    const existingResult = await probe(
+      baseOptions(repo, { links: ["oracle-existing"] }),
+    );
+    const missingResult = await probe(
+      baseOptions(repo, { links: ["oracle-missing"] }),
+    );
+
+    expect(existingResult.status).toBe("inconclusive");
+    expect(existingResult.reason).toBe("file_outside_root");
+    expect(existingResult.warnings.join(" ")).not.toContain("does not exist");
+    expect(existingResult.warnings.join(" ")).not.toContain(
+      "is not a directory",
+    );
+
+    expect(missingResult.status).toBe("inconclusive");
+    expect(missingResult.reason).toBe("file_outside_root");
+    expect(missingResult.warnings.join(" ")).not.toContain("does not exist");
+    expect(missingResult.warnings.join(" ")).not.toContain(
+      "is not a directory",
+    );
+  });
+
+  it("a three-hop in-repo symlink chain to an out-of-root directory answers file_outside_root under the DEFAULT options for both an EXISTING and a MISSING far end", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const outside = makeTmpDir();
+
+    const existingTarget = path.join(outside, "target");
+    fs.mkdirSync(existingTarget);
+    const hop3Existing = path.join(repo, "hop3-existing");
+    fs.symlinkSync(existingTarget, hop3Existing);
+    const hop2Existing = path.join(repo, "hop2-existing");
+    fs.symlinkSync(hop3Existing, hop2Existing);
+    const oracleExisting = path.join(repo, "oracle-existing");
+    fs.symlinkSync(hop2Existing, oracleExisting);
+
+    const missingTarget = path.join(outside, "does-not-exist");
+    const hop3Missing = path.join(repo, "hop3-missing");
+    fs.symlinkSync(missingTarget, hop3Missing);
+    const hop2Missing = path.join(repo, "hop2-missing");
+    fs.symlinkSync(hop3Missing, hop2Missing);
+    const oracleMissing = path.join(repo, "oracle-missing");
+    fs.symlinkSync(hop2Missing, oracleMissing);
+
+    const existingResult = await probe(
+      baseOptions(repo, { links: ["oracle-existing"] }),
+    );
+    const missingResult = await probe(
+      baseOptions(repo, { links: ["oracle-missing"] }),
+    );
+
+    expect(existingResult.status).toBe("inconclusive");
+    expect(existingResult.reason).toBe("file_outside_root");
+    expect(missingResult.status).toBe("inconclusive");
+    expect(missingResult.reason).toBe("file_outside_root");
+    expect(missingResult.warnings.join(" ")).not.toContain("does not exist");
+  });
+
+  it("a symlink chain that ends back IN-ROOT behaves like a plain in-root value, unaffected by the chain-walking fix", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const realDir = path.join(repo, "real-vendor");
+    fs.mkdirSync(realDir);
+    const hop2 = path.join(repo, "hop2");
+    fs.symlinkSync(realDir, hop2);
+    const oracle = path.join(repo, "oracle");
+    fs.symlinkSync(hop2, oracle);
+
+    const result = await probe(baseOptions(repo, { links: ["oracle"] }));
+
+    expect(result.reason).toBeUndefined();
+  });
+
+  it("an in-repo --link symlink to an IN-ROOT directory still links normally, unaffected", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const realDir = path.join(repo, "real-vendor");
+    fs.mkdirSync(realDir);
+    const oracle = path.join(repo, "oracle");
+    fs.symlinkSync(realDir, oracle);
+
+    const result = await probe(baseOptions(repo, { links: ["oracle"] }));
+
+    expect(result.status).toBe("killed");
+    expect(result.isolation.linked).toContain(resolveDeepestExisting(realDir));
+  });
+
+  it("an in-repo DANGLING symlink to an IN-ROOT missing path still reports link_source_not_found, unaffected by the containment fix above", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const oracle = path.join(repo, "oracle");
+    fs.symlinkSync(path.join(repo, "still-not-there"), oracle);
+
+    const result = await probe(baseOptions(repo, { links: ["oracle"] }));
+
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("link_source_not_found");
+    expect(result.warnings.join(" ")).toContain("does not exist");
+  });
+
+  /**
+   * `firstLinkSourceRefusal` called directly, not through `probe()`: the
+   * later, deferred containment check in `setup.ts` independently
+   * refuses an out-of-root symlink source too, once its `abs` is
+   * resolved correctly (the chain-walking fix above), so an end-to-end
+   * `probe()` scenario reaches the SAME `file_outside_root` outcome
+   * whether or not THIS function's own early, symlink-specific branch
+   * fires at all -- measured: defeating `isSymlinkSource` so it always
+   * returns `false` leaves every `probe()`-level test in this describe
+   * block passing regardless. These two cases pin the branch's own
+   * decision directly, independent of that later check, so a defect
+   * here cannot hide behind it.
+   */
+  it("firstLinkSourceRefusal itself refuses an in-repo symlink to an out-of-root target under the default options, independent of any later, deferred containment check", () => {
+    const root = makeTmpDir();
+    const outside = makeTmpDir();
+    const target = path.join(outside, "target");
+    fs.mkdirSync(target);
+    const oracle = path.join(root, "oracle");
+    fs.symlinkSync(target, oracle);
+    const link: MergedLink = {
+      value: oracle,
+      given: "oracle",
+      basePhrase: "the invocation cwd",
+      remedy: "drop --link",
+    };
+
+    const refusal = firstLinkSourceRefusal(
+      [link],
+      root,
+      root,
+      /* checkOutsideRootExistence */ false,
+      /* allowOutside */ false,
+    );
+
+    expect(refusal).toBeDefined();
+    expect(refusal?.reason).toBe("file_outside_root");
+    expect(refusal?.message).toContain(oracle);
+  });
+
+  it("firstLinkSourceRefusal defers an in-repo symlink to an out-of-root target when checkOutsideRootExistence is true (--allow-outside -i inplace): no refusal from this function, the existence check further down decides instead", () => {
+    const root = makeTmpDir();
+    const outside = makeTmpDir();
+    const target = path.join(outside, "target");
+    fs.mkdirSync(target);
+    const oracle = path.join(root, "oracle");
+    fs.symlinkSync(target, oracle);
+    const link: MergedLink = {
+      value: oracle,
+      given: "oracle",
+      basePhrase: "the invocation cwd",
+      remedy: "drop --link",
+    };
+
+    const refusal = firstLinkSourceRefusal(
+      [link],
+      root,
+      root,
+      /* checkOutsideRootExistence */ true,
+      /* allowOutside */ true,
+    );
+
+    expect(refusal).toBeUndefined();
+  });
+});
+
+/**
  * The isolation copy's own FILESYSTEM, not the path strings the link
  * policy compares. `mkdirSync`, `rmSync` and `symlinkSync` resolve
  * symlinks in the path they are given, and on a case-insensitive
@@ -1575,8 +2048,8 @@ describe("probe(): worktree isolation, a destination the copy spells differently
     expect(
       fs.readFileSync(path.join(repo, "cache", "inner", "marker.txt"), "utf8"),
     ).toBe("present\n");
-    expect(result.status).toBe("killed");
     if (caseInsensitive) {
+      expect(result.status).toBe("killed");
       expect(result.isolation.linked).toEqual([
         resolveDeepestExisting(path.join(repo, "cache")),
       ]);
@@ -1589,24 +2062,28 @@ describe("probe(): worktree isolation, a destination the copy spells differently
         ),
       ).toBe(true);
     } else {
-      // On a case-sensitive volume `CACHE/inner` is simply a second,
-      // untracked (and absent) directory: linked as a dangling link in
-      // the copy, nothing created in the source tree (the hash above).
-      expect(result.isolation.linked).toEqual([
-        resolveDeepestExisting(path.join(repo, "cache")),
-        path.join(repo, "CACHE", "inner"),
-      ]);
+      // On a case-sensitive volume `CACHE/inner` genuinely does not
+      // exist (only `cache/inner` does): the existence check added for
+      // issue #242 refuses it up front, before `cache` (checked and
+      // linked fine, in order) ever reaches the isolation copy -- it no
+      // longer reaches the "linked as a dangling link" shape this test
+      // used to characterize on this volume.
+      expect(result.status).toBe("usage_error");
+      expect(result.reason).toBe("link_source_not_found");
+      expect(result.warnings.join(" ")).toContain(path.join("CACHE", "inner"));
     }
   });
 
-  it("a defaults-file link naming a path that does NOT exist under a linked directory's case variant: nothing is created in the operator's real vendor, which is what the check before the mkdir buys", async () => {
+  it("a defaults-file link naming a path that does NOT exist under a linked directory's case variant is refused up front (#242), never reaching the mkdir this test used to characterize", async () => {
     useLockDir();
     // Two sources in one run, for the two halves of the mkdir shape:
     // composer's own `bin-dir` naming a path that is not there is
     // dropped at DISCOVERY (a value that is not a directory on disk is
-    // never a candidate), so the only way to reach the loop with a
-    // missing destination is a link source that has no such filter --
-    // the defaults file, `--plan`, or `--link`.
+    // never a candidate); a defaults-file/`--plan`/`--link` value naming
+    // one used to have no such filter and reach the sync's own mkdir
+    // instead (this test's own history, before issue #242's fix) --
+    // it is now refused at the same point every other explicit missing
+    // link source is, before any of that runs.
     const repo = initVendorRepo({
       "vendor-dir": "vendor",
       "bin-dir": path.join("VENDOR", "deep", "nested"),
@@ -1619,36 +2096,18 @@ describe("probe(): worktree isolation, a destination the copy spells differently
       path.join(repo, ".agent-primitives.json"),
       JSON.stringify({ link: [path.join("VENDOR", "deep", "nested")] }),
     );
-    const caseInsensitive = caseInsensitiveVolume(repo);
 
     const before = hashTree(repo);
     const result = await probe(baseOptions(repo));
     const after = hashTree(repo);
 
     expect(after).toEqual(before);
-    // The measured shape: with `vendor` linked, a recursive mkdir of
-    // `<copy>/VENDOR/deep` creates the directory in the operator's real
-    // `vendor/`.
     expect(fs.existsSync(path.join(repo, "vendor", "deep"))).toBe(false);
-    expect(result.status).toBe("killed");
-    if (caseInsensitive) {
-      expect(result.isolation.linked).toEqual([path.join(repo, "vendor")]);
-      expect(
-        result.warnings.some(
-          (w) =>
-            w.includes(path.join(repo, "VENDOR", "deep", "nested")) &&
-            w.includes("outside the copy"),
-        ),
-      ).toBe(true);
-    } else {
-      // On a case-sensitive volume `VENDOR/deep/nested` is a distinct,
-      // absent, untracked path: linked as a dangling link in the copy,
-      // and the real `vendor/` gains nothing (asserted above).
-      expect(result.isolation.linked).toEqual([
-        path.join(repo, "vendor"),
-        path.join(repo, "VENDOR", "deep", "nested"),
-      ]);
-    }
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("link_source_not_found");
+    expect(result.warnings.join(" ")).toContain(
+      path.join("VENDOR", "deep", "nested"),
+    );
   });
 
   it("a composer vendor-dir of 'SRC' with the mutant in src/: rules 2 and 3 see the copy's own spelling, so the link is refused and the operator's src is untouched", async () => {
@@ -1707,9 +2166,9 @@ describe("probe(): worktree isolation, a destination the copy spells differently
     expect(fs.readFileSync(path.join(repo, "src", "fixture.js"), "utf8")).toBe(
       SRC_FIXTURE_JS,
     );
-    expect(result.status).toBe("killed");
-    expect(result.baseline?.exitCode).toBe(0);
     if (caseInsensitive) {
+      expect(result.status).toBe("killed");
+      expect(result.baseline?.exitCode).toBe(0);
       expect(result.isolation.linked).toEqual([]);
       expect(
         result.warnings.some(
@@ -1719,6 +2178,15 @@ describe("probe(): worktree isolation, a destination the copy spells differently
             w.includes("must stay a real directory in the copy"),
         ),
       ).toBe(true);
+    } else {
+      // On a case-sensitive volume `SRC` genuinely does not exist (only
+      // `src` does): the existence check added for issue #242 refuses
+      // it up front, before rule 2's own "must stay a real directory"
+      // refusal (this test's previous subject on this volume) is ever
+      // reached.
+      expect(result.status).toBe("usage_error");
+      expect(result.reason).toBe("link_source_not_found");
+      expect(result.warnings.join(" ")).toContain('"SRC"');
     }
   });
 
@@ -1741,9 +2209,9 @@ describe("probe(): worktree isolation, a destination the copy spells differently
     expect(fs.readFileSync(path.join(repo, "src", "fixture.js"), "utf8")).toBe(
       SRC_FIXTURE_JS,
     );
-    expect(result.status).toBe("killed");
-    expect(result.baseline?.exitCode).toBe(0);
     if (caseInsensitive) {
+      expect(result.status).toBe("killed");
+      expect(result.baseline?.exitCode).toBe(0);
       expect(result.isolation.linked).toEqual([]);
       expect(
         result.warnings.some(
@@ -1752,6 +2220,13 @@ describe("probe(): worktree isolation, a destination the copy spells differently
             w.includes("must stay a real directory in the copy"),
         ),
       ).toBe(true);
+    } else {
+      // Same reasoning as the defaults-file case just above: `SRC` does
+      // not exist on a case-sensitive volume, so `--link SRC` is now
+      // refused before rule 2 ever runs.
+      expect(result.status).toBe("usage_error");
+      expect(result.reason).toBe("link_source_not_found");
+      expect(result.warnings.join(" ")).toContain('"SRC"');
     }
   });
 
@@ -1801,15 +2276,14 @@ describe("probe(): worktree isolation, a destination the copy spells differently
     const caseInsensitive = caseInsensitiveVolume(repo);
     // On a case-insensitive volume the link resolves to the real
     // `cache/`, so the copy can read the marker through it; on a
-    // case-sensitive one `CACHE` is simply a directory that is not
-    // there and the link is created dangling, which the baseline must
-    // not depend on.
+    // case-sensitive one `CACHE` is simply not there at all, which the
+    // existence check added for issue #242 now refuses up front (it
+    // used to be linked dangling instead, this test's previous subject
+    // on this volume).
     const readsMarker = [
       "const assert = require('node:assert');",
       "const fs = require('node:fs');",
-      caseInsensitive
-        ? "assert.strictEqual(fs.readFileSync('CACHE/marker.txt', 'utf8'), 'present\\n');"
-        : "assert.ok(fs.lstatSync('CACHE').isSymbolicLink());",
+      "assert.strictEqual(fs.readFileSync('CACHE/marker.txt', 'utf8'), 'present\\n');",
       "const { isPositive } = require('./fixture.js');",
       "assert.strictEqual(isPositive(5), true);",
       "",
@@ -1820,14 +2294,20 @@ describe("probe(): worktree isolation, a destination the copy spells differently
       baseOptions(repo, { testCommand: "node cache-check.test.js" }),
     );
 
-    expect(result.status).toBe("killed");
-    expect(result.baseline?.exitCode).toBe(0);
-    expect(result.isolation.linked).toEqual([
-      resolveDeepestExisting(path.join(repo, "CACHE")),
-    ]);
-    expect(result.warnings.some((w) => w.includes("skipped linking"))).toBe(
-      false,
-    );
+    if (caseInsensitive) {
+      expect(result.status).toBe("killed");
+      expect(result.baseline?.exitCode).toBe(0);
+      expect(result.isolation.linked).toEqual([
+        resolveDeepestExisting(path.join(repo, "CACHE")),
+      ]);
+      expect(result.warnings.some((w) => w.includes("skipped linking"))).toBe(
+        false,
+      );
+    } else {
+      expect(result.status).toBe("usage_error");
+      expect(result.reason).toBe("link_source_not_found");
+      expect(result.warnings.join(" ")).toContain('"CACHE"');
+    }
   });
 
   it("links a sibling whose name merely starts with an earlier link's name: 'vendor' does not cover 'vendor-bin'", async () => {
@@ -2078,10 +2558,10 @@ describe("probe(): worktree isolation, a destination the copy spells differently
     expect(
       fs.readFileSync(path.join(repo, "src", "sub", "fixture.js"), "utf8"),
     ).toBe(SRC_FIXTURE_JS);
-    // Either way the run reaches a verdict: one link is skipped, never
-    // the whole run.
-    expect(result.status).toBe("killed");
     if (caseInsensitive) {
+      // Either way the run reaches a verdict: one link is skipped, never
+      // the whole run.
+      expect(result.status).toBe("killed");
       expect(result.isolation.linked).toEqual([]);
       expect(
         result.warnings.some(
@@ -2093,9 +2573,13 @@ describe("probe(): worktree isolation, a destination the copy spells differently
       ).toBe(true);
     } else {
       // A case-sensitive volume has no alias: `SRC/sub` is a directory
-      // that is not there, and the link is created dangling next to the
-      // copy's own `src`.
-      expect(result.isolation.linked).toEqual([path.join(repo, "SRC", "sub")]);
+      // that is not there at all, so the existence check added for
+      // issue #242 refuses the whole run up front, before rule 2 (this
+      // test's previous subject on this volume, where the link used to
+      // be created dangling next to the copy's own `src`) ever runs.
+      expect(result.status).toBe("usage_error");
+      expect(result.reason).toBe("link_source_not_found");
+      expect(result.warnings.join(" ")).toContain(path.join("SRC", "sub"));
     }
   });
 
@@ -2197,8 +2681,8 @@ describe("probe(): worktree isolation, a destination the copy spells differently
     expect(
       fs.readFileSync(path.join(repo, "src", "sub", "important.js"), "utf8"),
     ).toBe(IMPORTANT_JS);
-    expect(result.status).toBe("killed");
     if (caseInsensitive) {
+      expect(result.status).toBe("killed");
       expect(result.isolation.linked).toEqual([]);
       expect(
         result.warnings.some(
@@ -2210,11 +2694,14 @@ describe("probe(): worktree isolation, a destination the copy spells differently
       ).toBe(true);
     } else {
       // A case-sensitive volume has no alias: `SRC/sub` is a directory
-      // that is not there, and the link is created next to the copy's
-      // own `src`, pointing at nothing.
-      expect(result.isolation.linked).toEqual([
-        path.join(resolveDeepestExisting(repo), "SRC", "sub"),
-      ]);
+      // that is not there at all, so the existence check added for
+      // issue #242 refuses it up front, before rule 3 (this test's
+      // previous subject on this volume, where the link used to be
+      // created next to the copy's own `src`, pointing at nothing) ever
+      // runs.
+      expect(result.status).toBe("usage_error");
+      expect(result.reason).toBe("link_source_not_found");
+      expect(result.warnings.join(" ")).toContain(path.join("SRC", "sub"));
     }
   });
 
@@ -3164,7 +3651,7 @@ describe("probe(): worktree isolation, a link target that is TRACKED source", ()
 });
 
 describe("probe(): worktree isolation, a destination whose ancestor in the copy is a file", () => {
-  it("skips a defaults-file link naming a path under a TRACKED FILE ('SRC/FILE.TXT/x' over 'src/file.txt') with a warning, and the run completes instead of failing the whole sync", async () => {
+  it("refuses a defaults-file link naming a path under a TRACKED FILE ('SRC/FILE.TXT/x' over 'src/file.txt') up front (#242): its own source is not an existing directory, whatever rule 3 would otherwise say about it", async () => {
     useLockDir();
     const { repo } = initRepo();
     fs.mkdirSync(path.join(repo, "src"));
@@ -3172,7 +3659,11 @@ describe("probe(): worktree isolation, a destination whose ancestor in the copy 
     // Repository content naming a path UNDER a tracked file. It passes
     // rule 3 honestly: git tracks `src/file.txt`, but nothing is tracked
     // under it, so `src/file.txt/x` is untracked and the rule has
-    // nothing to refuse.
+    // nothing to refuse -- but its resolved source is not a directory
+    // either way (a path under a FILE can never be one), so the
+    // existence check added for issue #242 refuses it before rule 3 (or
+    // the sync's own mkdir, this test's previous subject) is ever
+    // reached.
     fs.writeFileSync(
       path.join(repo, ".agent-primitives.json"),
       JSON.stringify({ link: [path.join("SRC", "FILE.TXT", "x")] }),
@@ -3186,12 +3677,6 @@ describe("probe(): worktree isolation, a destination whose ancestor in the copy 
       "-m",
       "tracked file",
     ]);
-    if (!caseInsensitiveVolume(repo)) {
-      // `SRC/FILE.TXT` is free space in the copy on this volume: the
-      // recursive mkdir creates it, the link is made, and the shape this
-      // test is about has nothing to act on.
-      return;
-    }
 
     const before = hashTree(repo);
     const result = await probe(baseOptions(repo));
@@ -3201,33 +3686,20 @@ describe("probe(): worktree isolation, a destination whose ancestor in the copy 
     expect(fs.readFileSync(path.join(repo, "src", "file.txt"), "utf8")).toBe(
       "tracked\n",
     );
-    // The run completed: one impossible destination is a skipped link,
-    // never a failed sync for everything else in the run.
-    expect(result.status).toBe("killed");
-    expect(result.reason).toBeUndefined();
-    expect(result.isolation.linked).toEqual([]);
-    expect(
-      result.warnings.some(
-        (w) =>
-          w.includes(path.join("SRC", "FILE.TXT", "x")) &&
-          w.includes(path.join("SRC", "FILE.TXT")) &&
-          w.includes("is not a directory in the copy"),
-      ),
-    ).toBe(true);
-    expect(
-      result.warnings.some((w) => w.includes("worktree_sync_failed")),
-    ).toBe(false);
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("link_source_not_found");
+    expect(result.warnings.join(" ")).toContain(
+      path.join("SRC", "FILE.TXT", "x"),
+    );
   });
 
-  it("skips a defaults-file link under a DANGLING symlink ('dang -> nowhere-at-all', the entry naming 'dang/x') with the same warning, on any volume: something IS there, so the recursive mkdir cannot create through it either", async () => {
+  it("refuses a defaults-file link under a DANGLING symlink ('dang -> nowhere-at-all', the entry naming 'dang/x') up front (#242): the target resolves to no directory at all", async () => {
     useLockDir();
     const { repo } = initRepo();
-    // A committed symlink resolving nowhere. It reaches the copy as the
-    // same dangling link, and the destination `dang/x` is a path the
-    // rules above have nothing to say about: git tracks `dang` itself
-    // but nothing under it, and the target resolves to no directory at
-    // all. Needs no case-insensitive volume: the entry names the
-    // ancestor in its own spelling.
+    // A committed symlink resolving nowhere. `dang/x`'s resolved source
+    // is not an existing directory (its own parent does not resolve to
+    // one), so it is refused by the existence check before rule 3 or
+    // the sync's own mkdir (this test's previous subject) ever run.
     fs.symlinkSync("nowhere-at-all", path.join(repo, "dang"));
     fs.writeFileSync(
       path.join(repo, ".agent-primitives.json"),
@@ -3248,23 +3720,9 @@ describe("probe(): worktree isolation, a destination whose ancestor in the copy 
     const after = hashTree(repo);
 
     expect(after).toEqual(before);
-    // One impossible destination is a skipped link, never a failed sync
-    // for the whole run: the branch that reports a dangling ancestor as
-    // blocking is what keeps the recursive mkdir from throwing EEXIST
-    // into the sync's own catch.
-    expect(result.status).toBe("killed");
-    expect(result.reason).toBeUndefined();
-    expect(result.isolation.linked).toEqual([]);
-    expect(
-      result.warnings.some(
-        (w) =>
-          w.includes(path.join("dang", "x")) &&
-          w.includes("sits under dang, which is not a directory in the copy"),
-      ),
-    ).toBe(true);
-    expect(
-      result.warnings.some((w) => w.includes("worktree_sync_failed")),
-    ).toBe(false);
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("link_source_not_found");
+    expect(result.warnings.join(" ")).toContain(path.join("dang", "x"));
   });
 });
 
@@ -5062,6 +5520,26 @@ describe("probe(): worktree isolation, --allow-outside is rejected as a usage er
 
     expect(result.status).toBe("usage_error");
     expect(result.reason).toBe("worktree_allow_outside_unsupported");
+  });
+
+  it("--allow-outside with -i inplace and a MISSING out-of-root --link is refused link_source_not_found: --allow-outside disables the later containment check, not this existence check", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const outside = makeTmpDir();
+    const missing = path.join(outside, "does-not-exist");
+
+    const result = await probe(
+      baseOptions(repo, {
+        isolation: "inplace",
+        allowOutside: true,
+        links: [missing],
+      }),
+    );
+
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("link_source_not_found");
+    expect(result.warnings.join(" ")).toContain(missing);
+    expect(result.warnings.join(" ")).toContain("does not exist");
   });
 });
 

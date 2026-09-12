@@ -1471,6 +1471,72 @@ the two file-sourced ones are merely "checked" -- see `link-list.ts`'s
 own docblock for why the check exists at all given none of the three
 ever reaches a shell.
 
+`--link <dirs>` is a comma-separated list resolved against the
+**invocation cwd**, one directory per entry; a `--plan` file's own
+`link` and the repository defaults file's `link` (below) are resolved
+against the **repository root** instead, so either reads the same
+regardless of which subdirectory `--cwd` names. Whichever base applies,
+each resolved source must already exist as a directory: one that does
+not exist, or exists but is a plain file, is refused, `status:
+"usage_error"`, `reason: "link_source_not_found"`, exit `2`, naming the
+value as given, the absolute path it resolved to, which of the two
+bases it was resolved against, and a remedy naming what to do about the
+source itself -- create it when nothing is there, point the entry at a
+directory when a plain file sits there instead, or check its
+permissions when the source could not even be stat'ed -- followed by
+dropping the entry (from `--link` itself, or from the naming file)
+(GitHub issue #242) -- unlike an auto-discovered candidate
+(`node_modules`, a composer `vendor-dir`/`bin-dir`), which keeps its own
+documented skip-when-absent behaviour below, an explicitly named source
+that is not there is a usage error, not something to skip past. This
+runs in `probe()`'s own option-shape checks, ahead of any isolation
+decision -- for `-i inplace` as much as for `-i worktree` -- but it
+runs AFTER the containment check just above for a value WHOSE RESOLVED
+PATH lies outside the containment root: a value that is both outside
+the root and missing is `file_outside_root`, not
+`link_source_not_found` -- existence is never checked for a value whose
+resolved path lies outside the root, so a `--link`/plan/defaults-file
+entry pointing outside the repository gets the one uniform refusal
+regardless of whether nothing, a file, or a directory happens to sit at
+that path, rather than leaking which of the three it is. This applies
+identically to an IN-repo path that is itself a symlink to somewhere
+outside the root (a defaults-file `link` of `oracle`, where `oracle ->
+/etc/hosts`), the whole chain followed (up to 32 hops, so `oracle ->
+hop2 -> /etc/hosts` answers the same way): under the DEFAULT options
+this is refused `file_outside_root` before the existence check ever
+runs, whether the far end exists or not, so it cannot be used to learn
+which of the two it is either.
+
+`--allow-outside` disables that later containment check, and with it
+the ordering the previous paragraph describes -- for `-i worktree` the
+combination is refused outright before either check runs
+(`worktree_allow_outside_unsupported`, see below), but for `-i inplace`
+(where `--allow-outside` is otherwise accepted) a value whose resolved
+path lies outside the root has nothing left downstream to catch it, so
+it is refused right here instead: `--allow-outside -i inplace --link
+/outside/missing` is `link_source_not_found`, not silently accepted --
+the flag disables the containment check, not this existence check. Under
+`--allow-outside -i inplace` a symlink source takes the SAME path as a
+value naming the directory directly, by operator choice: its resolved
+target is stat'ed here (existence and type visible) rather than refused
+`file_outside_root` outright, so `--allow-outside -i inplace --link
+oracle` (`oracle -> /outside/existing-dir`) is accepted exactly as
+`--allow-outside -i inplace --link /outside/existing-dir` already is,
+and one pointing at a missing path is `link_source_not_found` like any
+other. Only a value that resolves INSIDE the root, or reaches the
+existence check here for want of anything else to catch it under
+`--allow-outside -i inplace`, is checked for existence at all; every
+other out-of-root value is skipped here as described above. It runs
+once, when the invocation
+starts, checking that each such source exists at that moment; it is not
+re-checked immediately before the link is actually created. The check
+is also where the filesystem's case rules show: a case-variant spelling
+(`SRC` for a directory named `src`) resolves on a case-insensitive
+filesystem (macOS's default) and reaches the link policy below, but
+does not exist on a case-sensitive one (Linux's default, and what CI
+runs on), where the same value is `link_source_not_found` rather than a
+skipped or refused link.
+
 #### Non-JS repositories
 
 `node_modules` and a composer project's `vendor-dir`/`bin-dir` are the
@@ -1478,9 +1544,14 @@ two auto-link rules probe ships with; anything else a non-JS
 repository's gitignored build/dependency output needs (Drupal's
 `docroot/core`, `docroot/modules/contrib`, `docroot/themes/contrib`,
 `docroot/libraries`, or an ecosystem with no auto-link rule at all) goes
-into `--link`, a `--plan` file's own `link`, or -- so every invocation
+into `--link` (relative to the invocation cwd), a `--plan` file's own
+`link` (relative to the repository root), or -- so every invocation
 picks it up without repeating any of them -- the repository defaults
-file below.
+file below (its `link` is repository-root-relative too). Each of the
+Drupal paths above must exist as a directory once linked this way, the
+same as any other explicit `link` source (see the `--link` paragraph
+just above): pointing one at a path that has not been created yet is a
+usage error, not a silently skipped candidate.
 
 Linking `docroot/core` this way carries the realpath limitation
 described above: Drupal's own `core/tests/bootstrap.php` locates the
@@ -2061,7 +2132,7 @@ exactly which `reason` is which).
 | `baseline` | `{ exitCode, durationMs, logPath, timedOut }` | once the baseline has run | absent for `mutant_not_applicable` and any earlier refusal, and for the baseline-phase `pre_failed`/`aborted` (the baseline itself never ran: the `--pre` ahead of it did); `exitCode` is unchanged by `--pass-regex` -- it is always the baseline's real exit code, kept as data even once the regex, not this field, decides `status`/`reason` (see `--pass-regex` above) |
 | `test` | `{ command, exitCode, durationMs, timedOut, stdoutTail, stderrTail, logPath, env? }` | once the mutant run has happened | `env` only when at least one `--env NAME=VALUE` was given: the overrides this run applied, redacted (see `env` below); `exitCode` is likewise unchanged by `--pass-regex` -- the field that distinguishes a mutant run that crashed (no output on either stream) from a genuine test failure once the regex is what decides `killed`/`survived` |
 | `env` | `Record<string, string>` | whenever at least one `--env NAME=VALUE` was given | echoed once at the run level, independent of which phase actually ran: present on every status including `baseline_failed` and the other baseline-phase refusals, none of which reach a `test` phase to carry their own `test.env`. Both `env` and `test.env` redact a value whose NAME carries `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`/`CREDENTIALS`, or `KEY` as its own `_`-delimited segment (case-insensitive; the segment must sit at the start or end of the name, or between two underscores), replacing it with the literal string `"<redacted>"` and keeping the name visible: `API_TOKEN`, `TOKEN`, `MY_SECRET_VALUE` redact, but `TOKENIZER_MODEL` and `KEYBOARD` do not (the recognized word is a substring of a longer segment, not a segment of its own). Every other value is echoed verbatim (never the whole merged environment). This redaction covers only these two echoes (`env` and `test.env`); it does not, and cannot, redact a secret the test command itself prints -- that value appears verbatim wherever the command's own output does (`test.stdoutTail`/`test.stderrTail` above, and the exec log `test.logPath` links to), the same as it would running that command directly. `--env` is not wired into `--plan` (combining the two is a usage error). |
-| `isolation` | `{ mode, path, linked, linkedNamedBy, syncedTrackedFiles, syncedUntrackedFiles }` | always, for this envelope (see the top-level-usage-error carve-out above, which has no `isolation` at all) | `path` is the worktree directory for `worktree`, `null` for `inplace`; `linked` lists the absolute source-tree paths the copy resolves through a symlink (every link this run created, plus a destination the untracked-file copy had already recreated as the very same symlink, which the link step leaves as synced), and a listed path may be a DANGLING link when the target it names does not exist -- a defaults-file entry naming a path that is simply not there is linked as given rather than dropped, since a link is created by the name it points at, not by what is behind it; `linkedNamedBy` is one `{ path, namedBy }` entry per link REPOSITORY CONTENT asked for (a composer `config` value, a `--plan` file's `link`, the defaults file's `link`), carrying the same phrase a refusal of that candidate would have carried, and empty for a copy whose links all came from `--link` or from the auto-discovery walk; every `path` in it appears in `linked` too; `syncedTrackedFiles`/`syncedUntrackedFiles` are counts, `0` for both on a clean tree and for every `inplace` run |
+| `isolation` | `{ mode, path, linked, linkedNamedBy, syncedTrackedFiles, syncedUntrackedFiles }` | always, for this envelope (see the top-level-usage-error carve-out above, which has no `isolation` at all) | `path` is the worktree directory for `worktree`, `null` for `inplace`; `linked` lists the absolute source-tree paths the copy resolves through a symlink (every link this run created, plus a destination the untracked-file copy had already recreated as the very same symlink, which the link step leaves as synced) -- every entry in it names a source that was checked to exist as a directory when the run started (an auto-discovered candidate is only ever a candidate once it already exists, and `--link`/a `--plan` file's/the defaults file's `link` are refused up front, `reason: "link_source_not_found"`, when their source does not, see "Non-JS repositories" above); that check runs once, so a source removed between it and the link actually being created is not re-checked and can still end up a dangling link -- `linkedNamedBy` is one `{ path, namedBy }` entry per link REPOSITORY CONTENT asked for (a composer `config` value, a `--plan` file's `link`, the defaults file's `link`), carrying the same phrase a refusal of that candidate would have carried, and empty for a copy whose links all came from `--link` or from the auto-discovery walk; every `path` in it appears in `linked` too; `syncedTrackedFiles`/`syncedUntrackedFiles` are counts, `0` for both on a clean tree and for every `inplace` run |
 | `totalDurationMs` | number | always, for this envelope (see the top-level-usage-error carve-out above, and `--plan`, whose own envelope carries no `totalDurationMs` at all) | wall-clock time of the whole `probe()` call, every branch (a normal return, a refusal before any mutant ran, or the emergency-restore path); the same field name and meaning `verify`'s own result carries |
 
 ### Mapping a probe result into an implementer report
@@ -2102,14 +2173,17 @@ fails to compile); `test/probe-refusal-contract.test.ts` provokes every
 row below through `probe()` itself and asserts the presence matches
 exactly, in both directions, so this table cannot drift from what
 `REFUSAL_RESULT_SHAPE` itself declares, and every reason below is
-provoked at the table-named site the row below describes. Five more
+provoked at the table-named site the row below describes. Six more
 `usage_error` reasons fire earlier, in `probe()`'s own option-shape
 checks (`src/probe/index.ts`), before `openRunSetup` is ever called:
 `--patch` combined with `--allow-outside` outside its supported shape
 (`patch_allow_outside_unsupported`), an unreadable `--patch` file
 (`patch_not_readable`), a `--patch` whose touched paths cannot pick a
 single `--file` for it (`patch_file_ambiguous`), a missing `--file`
-(`file_required`), and a missing `-n`/`--line` (`line_required`). They
+(`file_required`), a missing `-n`/`--line` (`line_required`), and a
+`--link`/`--plan` file's/defaults file's `link` value whose source is
+not an existing directory (`link_source_not_found`, see "Non-JS
+repositories" above). They
 sit outside this table entirely, reporting neither `mutant` nor
 `mutation_probe`, the same as the top-level usage error carve-out
 above.

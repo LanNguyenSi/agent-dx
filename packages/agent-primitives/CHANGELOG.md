@@ -104,6 +104,88 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cleanup command from starting background git maintenance in the
   repository or its scratch worktree (task `04fbf9ca`).
 
+- `probe` now refuses, before any isolation decision is made (so for
+  `-i inplace` as much as for the `-i worktree` default -- it is one
+  option-shape check ahead of both), a `--link` value, a `--plan` file's
+  own `link` entry, or the repo defaults file's `link` entry whose
+  resolved source is not an existing directory (a plain file counts
+  too): `status: "usage_error"`, `reason: "link_source_not_found"`,
+  exit `2`, naming the value as given, the absolute path it resolved to,
+  which base it was resolved against (`--link` against the invocation
+  cwd, the other two against the repository root), and a remedy naming
+  what to do about the source itself -- create it when nothing is
+  there, point the entry at a directory when a plain file sits there
+  instead, or check its permissions when the source could not even be
+  stat'ed -- followed by dropping the entry (from `--link` itself, or
+  from the file naming it). A link whose resolved path lies OUTSIDE the
+  containment root skips this existence check entirely and is refused
+  by the existing `file_outside_root` check instead, the same as an
+  out-of-root link that exists: existence is never checked for a value
+  whose resolved path lies outside the root, so a missing, a plain-file,
+  and a directory out-of-root value all get the one uniform refusal
+  rather than the existence check leaking which of the three sits there
+  for a path outside the repository -- a repository shipping a
+  defaults-file `link` for a not-yet-installed directory now refuses
+  every probe until that directory exists, so long as the value resolves
+  inside the repository. This applies identically to an IN-repo path
+  that is itself a SYMLINK to somewhere outside the root, the whole
+  chain of symlinks followed (up to 32 hops, each hop's own relative
+  target resolved against its own directory) rather than only the
+  first: a dangling out-of-root chain and an existing one both get the
+  one `file_outside_root` refusal rather than the existence check
+  disclosing which of the two it is (containment finding, closed in the
+  same change as the ordering fix above; narrowed twice more since --
+  `resolveDeepestExisting`'s own fallback, when a symlink's target does
+  not fully resolve, otherwise reports the symlink's own in-root path
+  rather than where it points, which read as `link_source_not_found`
+  for a dangling target and `file_outside_root` for an existing one; and
+  the same gap one hop further down a chain, where only the FIRST hop's
+  own target was ever resolved this way, silently reporting an in-root
+  path for a chain that in fact ends outside the repository). A chain
+  that does not resolve within the hop cap (a genuine symlink cycle, or
+  something functionally equivalent) is refused without ever running
+  the containment check on it at all -- `linkSourceMissingMessage`
+  reports it instead, through the same errno branch a real cyclic
+  `ELOOP` from `fs.statSync` already lands on. `--allow-outside`
+  disables that later containment check outright, so for `-i inplace`
+  (the only isolation mode it is accepted for; `-i worktree` combined
+  with it is its own usage error, below) an out-of-root value has
+  nothing else downstream to catch it and is checked for existence here
+  instead: `--allow-outside -i inplace --link /outside/missing` is
+  `link_source_not_found`, not silently accepted. This now applies
+  identically whether the out-of-root value is named directly or
+  reached through an in-repo symlink: with `--allow-outside` in play, a
+  symlink source is stat'ed and reported the same way a directly-named
+  out-of-root value already is, rather than always refused
+  `file_outside_root` outright regardless of the flag -- an earlier
+  version of this fix refused the symlink case unconditionally, which
+  both disclosed less than intended under `--allow-outside -i inplace`
+  (an existing out-of-root symlink target used to be usable there,
+  named directly; now it is again) and reported the wrong reason under
+  `--allow-outside -i worktree` (`file_outside_root` instead of the
+  `worktree_allow_outside_unsupported` refusal below, which must win
+  there regardless of any link). It used to be linked anyway --
+  silently dropped, or, for a repository-content source, linked as a
+  dangling symlink -- with no warning at all, so an operator's typo in
+  a `--link` value, or a stale entry in a `.agent-primitives.json`/
+  `--plan` file, never surfaced (this also means a case-variant
+  `--link`/`link` value that used to resolve on a case-insensitive
+  filesystem, macOS's default, is a `usage_error` on a case-sensitive
+  one, Linux's default and what CI runs on, since the variant genuinely
+  does not exist there). Unaffected: an auto-discovered candidate
+  (`node_modules`, a composer `vendor-dir`/`bin-dir`) keeps its own
+  documented skip-when-absent behaviour, since a value nobody explicitly
+  named is not a usage error (GitHub issue #242).
+
+- `linkSourceMissingMessage`'s errno branch (the `link_source_not_found`
+  refusal above, for a source that could not even be stat'ed) now tells
+  `EACCES`/`EPERM` apart from every other errno, `ELOOP` (a symlink
+  cycle) included: only the permission pair is still told to "check its
+  permissions", since that is the one shape a permission grant could
+  actually fix; everything else, `ELOOP` foremost, is told to "check
+  what the path resolves to" instead, which is what a symlink cycle
+  actually calls for (GitHub issue #242).
+
 - `probe`'s `result`/`status` (and a `--plan` mutant's own `status`) now
   always report the mutant's actual, measured outcome -- `killed` when
   the test command failed with the mutant applied, `survived` when it
