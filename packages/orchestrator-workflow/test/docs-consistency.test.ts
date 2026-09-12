@@ -7897,36 +7897,35 @@ describe("implementer and reviewer cite coverage gate thresholds, not run-specif
   const reviewerMd = unwrap(readAsset("agents/reviewer.md"));
   const skillMd = unwrap(readAsset("skill/SKILL.md"));
 
-  const rule =
-    "cite the threshold and pass/fail counts, not a run-specific coverage percentage, citing a percentage only together with the exact commit and the run count, since branch coverage can vary between runs of the same commit";
   const normalize = (text: string) => text.replace(/\s+/g, " ");
 
+  // Four distinct verbatim sentences, one per location, each with its own
+  // lead-in wording so a test targeting one location cannot be satisfied by
+  // a different location's paragraph (R2 fix: the shared `rule` fragment
+  // used to match the reviewer's wording even when the implementer mirror's
+  // own body was gutted).
+  const IMPLEMENTER_SENTENCE =
+    "Cite a coverage gate's threshold and pass/fail counts, not a run-specific coverage percentage; cite a percentage only together with the exact commit and the run count, since branch coverage can vary between runs of the same commit.";
+  const REVIEWER_SENTENCE =
+    "When citing a coverage gate, cite the threshold and pass/fail counts, not a run-specific coverage percentage; cite a percentage only together with the exact commit and the run count, since branch coverage can vary between runs of the same commit.";
+  const SKILL_IMPLEMENTER_MIRROR =
+    "The installed `implementer.md` prompt has the implementer cite a coverage gate's threshold and pass/fail counts, not a run-specific coverage percentage, citing a percentage only together with the exact commit and the run count, since branch coverage can vary between runs of the same commit.";
+  const SKILL_REVIEWER_MIRROR =
+    "When citing a coverage gate, the installed `reviewer.md` prompt has the reviewer cite the threshold and pass/fail counts, not a run-specific coverage percentage, citing a percentage only together with the exact commit and the run count, since branch coverage can vary between runs of the same commit.";
+
   it("assets/agents/implementer.md tests-rule bullet carries the coverage-citation sentence", () => {
-    expect(normalize(implementerMd)).toContain(
-      normalize(
-        "Cite a coverage gate's threshold and pass/fail counts, not a run-specific coverage percentage; cite a percentage only together with the exact commit and the run count, since branch coverage can vary between runs of the same commit.",
-      ),
-    );
+    expect(normalize(implementerMd)).toContain(normalize(IMPLEMENTER_SENTENCE));
   });
 
-  it("assets/agents/reviewer.md reproduction-rule bullet carries the coverage-citation sentence", () => {
-    expect(normalize(reviewerMd)).toContain(
-      normalize(
-        "For a coverage gate, cite the threshold and pass/fail counts, not a run-specific coverage percentage; cite a percentage only together with the exact commit and the run count, since branch coverage can vary between runs of the same commit.",
-      ),
-    );
+  it("assets/agents/reviewer.md carries its own coverage-citation bullet, scoped separately from the reproduction bullet", () => {
+    expect(normalize(reviewerMd)).toContain(normalize(REVIEWER_SENTENCE));
   });
 
   it("SKILL.md mirrors the coverage-citation rule for the implementer", () => {
-    expect(normalize(skillMd)).toContain(normalize(rule));
-    expect(skillMd).toContain(
-      "The installed `implementer.md` prompt has the implementer cite",
-    );
+    expect(normalize(skillMd)).toContain(normalize(SKILL_IMPLEMENTER_MIRROR));
   });
 
   it("SKILL.md mirrors the coverage-citation rule for the reviewer", () => {
-    expect(normalize(skillMd)).toContain(
-      normalize("the installed `reviewer.md` prompt has the reviewer cite"),
-    );
+    expect(normalize(skillMd)).toContain(normalize(SKILL_REVIEWER_MIRROR));
   });
 });

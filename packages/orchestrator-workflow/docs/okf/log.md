@@ -999,7 +999,7 @@
   applies unchanged" citations named the opencode bullet (then at line
   644 of `SKILL.md`) twice and never cited the OpenAI Codex bullet;
   corrected the third citation to
-  `assets/skill/SKILL.md:690#"pointer rule from Run state applies unchanged."`.
+  `assets/skill/SKILL.md:688#"pointer rule from Run state applies unchanged."`.
   `subagent-contracts-superset.md` cited `test/docs-consistency.test.ts`,
   then at line 4364 ("...is a regression signal", the SKILL.md step 6
   copy, comma-worded) for both the step 6 instruction and the
@@ -8503,7 +8503,7 @@ this class recurred on (line 295, `,274-275` for "Repos without a bundle
 are unaffected", which at this round's head sits at
 `packages/orchestrator-workflow/assets/skill/SKILL.md:304`,
 re-anchored to its own
-`packages/orchestrator-workflow/assets/skill/SKILL.md:355#"without a bundle are unaffected"`).
+`packages/orchestrator-workflow/assets/skill/SKILL.md:353#"without a bundle are unaffected"`).
 This closes the class: every bare continuation
 in this bundle's non-reserved docs now has its own anchor via a full
 citation (`index.md` and `log.md` are append-only journals and keep their
@@ -8751,3 +8751,74 @@ closing delta's finding-set delta against base is zero.
   round-1 entry above already names. Re-stamped both in a second commit;
   re-run measured 0 errors, 0 warnings, 17 notices again, unchanged from
   the first commit's own measurement.
+- 2026-09-12 (task 0085ea91, round 1 + round 2 fix round, coverage-citation
+  sentence): round 1 (`8373e59`) inserted a coverage-citation sentence into
+  `implementer.md`'s tests-rule bullet, `reviewer.md`'s reproduction-rule
+  bullet, and both mirrors in `SKILL.md` step 6
+  (`assets/skill/SKILL.md:213#"not backed by a check it actually ran as"`,
+  a retargeted anchor: `subagent-contracts-superset.md:400` had cited the
+  old wording at that spot,
+  `SKILL.md:214#"unverified. On any round after the task's first"`, which
+  the insertion pushed one paragraph later, so the fix re-pointed it to the
+  claim-only-what-was-measured sentence that now sits where the old anchor
+  text used to be) and step 7 (net +4 lines in step 6, then +5 more in
+  step 7, +9 cumulative from that point on), then re-stamped 83 citations
+  across `log.md`, `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md`
+  against the shifted `SKILL.md` line numbers, but never logged the pass or
+  re-verified `model-preselection.md` (which also lists
+  `test/docs-consistency.test.ts` under `sources:`) against the new
+  describe block, leaving that doc's `sources-fresh` check STALE at head
+  (0 warnings at the round-1 base commit, 1 at round-1's head) and leaving
+  this entry unwritten.
+
+  Round 2 (review round 1, five findings) fixed: (1) the new
+  `docs-consistency.test.ts` describe block's shared `rule` constant
+  matched the reviewer's wording even when the implementer mirror's own
+  paragraph was gutted (probe C survived); replaced it with four verbatim,
+  location-specific constants (`IMPLEMENTER_SENTENCE`, `REVIEWER_SENTENCE`,
+  `SKILL_IMPLEMENTER_MIRROR`, `SKILL_REVIEWER_MIRROR`), one assertion each.
+  (2) Re-verified `model-preselection.md`'s claims against
+  `test/docs-consistency.test.ts` (its cited lines, 57-2415, sit well
+  before the new describe block at the file's end and are unaffected) and
+  bumped its `timestamp`. (3) This entry. (4) Split `reviewer.md`'s
+  coverage-citation sentence into its own bullet, opened "When citing a
+  coverage gate, ..." right after the reproduction bullet, so it no longer
+  reads as extending that bullet's reproduction obligation (net zero line
+  change in `reviewer.md`); mirrored the same "When citing a coverage
+  gate," opening in the `SKILL.md` step 7 mirror (net zero line change,
+  only the two lines carrying that clause reflowed).
+  (5) Re-wrapped step 7's whole paragraph (`SKILL.md:252-317`, one
+  continuous 66-line run with no blank lines) to the file's ~79-column
+  width, closing the ragged 19-character line 301 ("delegation, using a")
+  the insertion had left behind; content is unchanged (diffed with
+  whitespace collapsed) but the paragraph now fills to 64 lines, a net
+  `-2` shift for every citation at `SKILL.md:318` or later, plus
+  location-specific remaps for six citations that fell inside the
+  rewrapped range itself: `278 -> 277`, `282 -> 281`, `289 -> 288`,
+  `290 -> 289`, `309 -> 307`, and `306`, which used to sit on one line and
+  now spans two ("Review-round escalation budget's trigger (see below)
+  without re-deriving it" / "by hand."), re-anchored to just the first
+  line's text (`304#"trigger (see below) without re-deriving it"`) since
+  okf-kit's and this file's own `anchor-not-on-last-line` rule requires a
+  multi-line-range anchor's full quoted text to sit on the range's own
+  last physical line, which "by hand." alone does not satisfy for the
+  original quote. Re-pointed all 70 affected citations across
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and
+  `subagent-contracts-superset.md`, plus two full citations inside this
+  log's own live-citation-resolution scope that the `-2` shift also broke
+  (`log.md:1002#"pointer rule from Run state applies unchanged."` at
+  `SKILL.md:690 -> 688`; `log.md:8506#"without a bundle are unaffected"`
+  at `SKILL.md:355 -> 353`), and bumped `timestamp` on all four re-touched
+  module docs (`model-preselection.md`,
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`,
+  `subagent-contracts-superset.md`) in the same commit as these edits.
+  Verdicts observed as deltas against the round-1 head commit (`8373e59`):
+  the citation-resolution and anchor-load-bearing describe blocks in
+  `test/docs-consistency.test.ts` went from 3 failing assertions (the two
+  `304-305` anchor checks and the `log.md` live-citation-resolution check)
+  to 0; the new coverage-citation describe block's four assertions stayed
+  green throughout, since the fix only replaced the shared constant, not
+  the sentences themselves; `npm run format:check`, `npm run typecheck`
+  and `npm run typecheck:test` were clean both before and after this
+  round's edits.
