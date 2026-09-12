@@ -43,29 +43,37 @@ Rules:
   number or a unique surrounding string) locate the mutant; `before` and
   `after` are the exact text swapped there, so a later round can reapply
   the same edit without guessing instead of only a prose description.
-  `expectation` records whether `result` matched the probe's `--expect`
-  (`met`) or not (`violated`); it is independent of `result` itself. When
-  the assignment names no mutation probes, return `mutation_probes: []`
-  rather than omitting the field. Each item also carries `replayed`:
-  `false` for a probe newly introduced this round.
+  `expectation` records whether `result` matched what the probe was
+  expected to do (`met`) or not (`violated`), independent of `result`
+  itself, only alongside a measured `killed` or `survived` `result`; it is
+  `not_applicable` otherwise (for example when the mutant could not be
+  applied and no `result` was measured). When the assignment names no
+  mutation probes, return `mutation_probes: []` rather than omitting the field.
+  Each item also carries `replayed`: `false` for a probe newly
+  introduced this round.
 - On any round after the task's first, the assignment also names every
   mutation probe named in an earlier round of this task (on the task's
   first round there are none), drawn from the run's
   `04-implementation-summary.md`, naming each by its mutant definition
   (file, anchor, before, after), not merely by its id; a probe recorded
   with only an id and no definition to reapply cannot be replayed and is
-  `not_applicable`, not a regression. Replay each one, not only this
-  round's new probes, before returning your report, and report each
-  replayed probe in `mutation_probes` with the evidence fields plus
-  `replayed: true`. A replayed probe whose `expectation` is now
-  `violated`, or which can no longer be applied, is the regression
-  signal; `result` alone is not: report it as such (`result` `survived`
-  or `not_applicable` with the reason) and resolve it before the next
+  `not_applicable` (reason: `no definition recorded`), not a regression.
+  Replay each one, not only this round's new probes, before returning your
+  report, and report each replayed probe in `mutation_probes` with the
+  evidence fields plus `replayed: true`. A replayed probe whose
+  `expectation` is now `violated`, or which can no longer be applied
+  (reason: `target text no longer present`), is the regression signal;
+  `result` alone is not: report it as such (`result` `survived` or
+  `not_applicable` with the reason) and resolve it before the next
   reviewer spawn.
 - When a verify runner is available, run it for the checks the acceptance
   criteria name and report its summary under `tests.executed`; when a
   mutation-probe runner is available, run the named probes through it and
-  copy its fields into `mutation_probes`.
+  copy its fields into `mutation_probes`; when the runner reports a
+  probe's mutant record (`file`, `anchor`, `before`, `after`) separately
+  from its result fields (`verified_applied_via`, `result`, `expectation`,
+  `restored_verified`), take the definition fields from that mutant record
+  so the copied report still carries all ten `mutation_probes` sub-fields.
 - Run every long test, build, or mutation-probe command in the foreground
   and wait for it to finish before returning. When one foreground call
   cannot hold it to completion, poll the backgrounded run to completion
@@ -150,7 +158,7 @@ mutation_probes:
     after: ""
     verified_applied_via: ""
     result: ""
-    expectation: met | violated
+    expectation: met | violated | not_applicable
     restored_verified: ""
     replayed: false | true
 risks:

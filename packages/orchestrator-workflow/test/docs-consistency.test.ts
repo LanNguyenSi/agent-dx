@@ -1105,9 +1105,26 @@ describe("mutation probe naming and not-applicable signal ship in step 6 and bot
 
   it("both copies pin the mutation_probes field block by its exact sub-field names, not just cross-copy equality", () => {
     const field =
-      'mutation_probes: - mutant: "" file: "" anchor: "" before: "" after: "" verified_applied_via: "" result: "" expectation: met | violated restored_verified: "" replayed: false | true';
+      'mutation_probes: - mutant: "" file: "" anchor: "" before: "" after: "" verified_applied_via: "" result: "" expectation: met | violated | not_applicable restored_verified: "" replayed: false | true';
     expect(skillMd).toContain(field);
     expect(implementerMd).toContain(field);
+  });
+
+  it("both copies scope expectation's met/violated values to a measured result and reserve not_applicable otherwise", () => {
+    const expectationScopeClause =
+      "only alongside a measured `killed` or `survived` `result`; it is `not_applicable` otherwise";
+    expect(skillMd).toContain(expectationScopeClause);
+    expect(implementerMd).toContain(expectationScopeClause);
+  });
+
+  it("both copies distinguish the two not_applicable verdicts by a named reason string (no-definition vs no-longer-applied)", () => {
+    const noDefinition = "`not_applicable` (reason: `no definition recorded`)";
+    const noLongerPresent =
+      "can no longer be applied (reason: `target text no longer present`)";
+    expect(skillMd).toContain(noDefinition);
+    expect(skillMd).toContain(noLongerPresent);
+    expect(implementerMd).toContain(noDefinition);
+    expect(implementerMd).toContain(noLongerPresent);
   });
 
   it("both copies pin the field enumeration in prose", () => {
@@ -4365,6 +4382,7 @@ describe("roles prefer connected structural search, verify, and mutation-probe r
         "ast-grep",
         "codebase-oracle",
         "ripgrep",
+        "--expect",
       ]) {
         expect(doc).not.toContain(name);
       }
@@ -4685,10 +4703,10 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
 
   it("step 6 treats a replayed probe that now survives or cannot be applied as a regression signal", () => {
     expect(skillMd).toContain(
-      "a probe recorded with only an id and no definition to reapply cannot be replayed and is `not_applicable`, not a regression.",
+      "a probe recorded with only an id and no definition to reapply cannot be replayed and is `not_applicable` (reason: `no definition recorded`), not a regression.",
     );
     expect(skillMd).toContain(
-      "A replayed probe whose `expectation` is now `violated`, or which can no longer be applied, is the regression signal; `result` alone is not: reported as such (`result` `survived` or `not_applicable` with the reason) and resolved before the next reviewer spawn.",
+      "A replayed probe whose `expectation` is now `violated`, or which can no longer be applied (reason: `target text no longer present`), is the regression signal; `result` alone is not: reported as such (`result` `survived` or `not_applicable` with the reason) and resolved before the next reviewer spawn.",
     );
   });
 
@@ -4703,10 +4721,10 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
 
   it("the installed implementer prompt carries the same regression-signal consequence", () => {
     expect(implementerMd).toContain(
-      "a probe recorded with only an id and no definition to reapply cannot be replayed and is `not_applicable`, not a regression.",
+      "a probe recorded with only an id and no definition to reapply cannot be replayed and is `not_applicable` (reason: `no definition recorded`), not a regression.",
     );
     expect(implementerMd).toContain(
-      "A replayed probe whose `expectation` is now `violated`, or which can no longer be applied, is the regression signal; `result` alone is not: report it as such (`result` `survived` or `not_applicable` with the reason) and resolve it before the next reviewer spawn.",
+      "A replayed probe whose `expectation` is now `violated`, or which can no longer be applied (reason: `target text no longer present`), is the regression signal; `result` alone is not: report it as such (`result` `survived` or `not_applicable` with the reason) and resolve it before the next reviewer spawn.",
     );
   });
 
@@ -4718,7 +4736,7 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
 
   it("SKILL.md's output-contract prose paragraph also states the regression-signal consequence", () => {
     expect(skillMd).toContain(
-      "A replayed probe whose `expectation` is now `violated`, or which can no longer be applied, is the regression signal, reported as such and resolved before the next reviewer spawn; `result` alone is not a regression signal, and a probe recorded with only an id and no definition to reapply is `not_applicable`.",
+      "A replayed probe whose `expectation` is now `violated`, or which can no longer be applied (reason: `target text no longer present`), is the regression signal, reported as such and resolved before the next reviewer spawn; `result` alone is not a regression signal, and a probe recorded with only an id and no definition to reapply is `not_applicable` (reason: `no definition recorded`).",
     );
   });
 
@@ -6544,22 +6562,22 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1063,
     end: 1063,
     anchorKey: "03317257",
-    paragraphLine: 421,
-    secondCitationLine: 425,
+    paragraphLine: 423,
+    secondCitationLine: 427,
     claim:
-      "same opening-citation-then-closing-enumeration convention as the 541 entry, here at :1062/line 425: the closing list walks :1037, :1045, :1050 and ends on the cross-copy equality check the :1062 opening sentence named, leaving no further assertion of that block uncited.",
+      "same opening-citation-then-closing-enumeration convention as the 541 entry, here at :1063/line 427 (both shifted +2 by task 06330af2's forward-pointer note above this paragraph): the closing list walks :1038, :1046, :1051 and ends on the cross-copy equality check the :1063 opening sentence named, leaving no further assertion of that block uncited.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "duplicate-citation",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1177,
-    end: 1177,
+    start: 1194,
+    end: 1194,
     anchorKey: "b19680bb",
-    paragraphLine: 549,
-    secondCitationLine: 555,
+    paragraphLine: 562,
+    secondCitationLine: 568,
     claim:
-      "same convention again, here at :1176/line 555: the closing list walks :1142, :1148, :1155, :1170 and ends on the not-applicable-clause pin the :1176 opening sentence named, leaving no further assertion of that block uncited.",
+      "same convention again, here at :1194/line 568 (task 06330af2 re-pointed both the citation, from :1177, and this entry's tracked lines to match): the closing list walks :1160, :1166, :1173, :1188 and ends on the not-applicable-clause pin the :1194 opening sentence named, leaving no further assertion of that block uncited.",
   },
   {
     doc: "install-fence-mechanics.md",

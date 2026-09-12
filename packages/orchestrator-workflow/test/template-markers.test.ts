@@ -338,4 +338,60 @@ describe("04-implementation-summary.md Mutation Probes subsection", () => {
       "replayed",
     ]);
   });
+
+  it("states Before/After cells hold a single-line excerpt, with the full text or diff elsewhere for multi-line or patch-form mutants", () => {
+    const mutationProbesIndex = implementationTemplate.indexOf(
+      "### Mutation Probes",
+    );
+    expect(mutationProbesIndex).toBeGreaterThanOrEqual(0);
+    const sectionText = implementationTemplate
+      .slice(mutationProbesIndex)
+      .replace(/\s+/g, " ");
+    expect(sectionText).toContain(
+      "Before/After cells hold a single-line excerpt",
+    );
+    expect(sectionText).toContain(
+      "the full text or diff in the implementer report or a fenced block directly under the table",
+    );
+  });
+
+  /**
+   * Reviewer round-2 finding: nothing tied the template's Mutation Probes
+   * columns to the implementer output contract's `mutation_probes`
+   * sub-field list, so the two could drift independently (a column
+   * renamed or dropped in one without the other) with no test to catch
+   * it. This derives both lists programmatically -- the template's header
+   * row (dropping the "round" column, which is about which round a probe
+   * was named in, not a `mutation_probes` sub-field) and implementer.md's
+   * YAML sub-field order (dropping the `mutation_probes` array key itself)
+   * -- and asserts they agree.
+   */
+  it("the template's Mutation Probes columns and the mutation_probes contract's sub-field list agree", () => {
+    const implementerMd = readAsset("agents/implementer.md");
+    const match = implementerMd.match(/^mutation_probes:\n(?: {2}.+\n)*/m);
+    expect(
+      match,
+      "mutation_probes block not found in implementer.md",
+    ).toBeTruthy();
+    const subFieldNames = [
+      ...(match as RegExpMatchArray)[0].matchAll(/^\s*(?:- )?(\w+):/gm),
+    ]
+      .map((m) => m[1])
+      .filter((name) => name !== "mutation_probes");
+
+    const mutationProbesIndex = implementationTemplate.indexOf(
+      "### Mutation Probes",
+    );
+    const tableText = implementationTemplate.slice(mutationProbesIndex);
+    const headerRow = tableText
+      .split(/\r?\n/)
+      .find((line) => line.trim().startsWith("|") && /round/i.test(line));
+    const columnNames = (headerRow ?? "")
+      .split("|")
+      .slice(1, -1)
+      .map((cell) => cell.trim().toLowerCase().replace(/ /g, "_"))
+      .filter((name) => name !== "round");
+
+    expect(columnNames).toEqual(subFieldNames);
+  });
 });
