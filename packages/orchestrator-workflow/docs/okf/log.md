@@ -8757,9 +8757,10 @@ closing delta's finding-set delta against base is zero.
   bullet, and both mirrors in `SKILL.md` step 6
   (`assets/skill/SKILL.md:213#"not backed by a check it actually ran as"`,
   a retargeted anchor: `subagent-contracts-superset.md:400` had cited the
-  old wording at that spot,
-  `SKILL.md:214#"unverified. On any round after the task's first"`, which
-  the insertion pushed one paragraph later, so the fix re-pointed it to the
+  old wording at that spot, `SKILL.md` old line 214, anchored on
+  "unverified. On any round after the task's first" (historical, not a
+  live pointer -- the insertion pushed it one paragraph later), so the
+  fix re-pointed it to the
   claim-only-what-was-measured sentence that now sits where the old anchor
   text used to be) and step 7 (net +4 lines in step 6, then +5 more in
   step 7, +9 cumulative from that point on), then re-stamped 83 citations
@@ -8807,9 +8808,10 @@ closing delta's finding-set delta against base is zero.
   `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and
   `subagent-contracts-superset.md`, plus two full citations inside this
   log's own live-citation-resolution scope that the `-2` shift also broke
-  (`log.md:1002#"pointer rule from Run state applies unchanged."` at
-  `SKILL.md:690 -> 688`; `log.md:8506#"without a bundle are unaffected"`
-  at `SKILL.md:355 -> 353`), and bumped `timestamp` on all four re-touched
+  (this file's own line 1002, the "pointer rule from Run state applies
+  unchanged." citation, `SKILL.md:690 -> 688`; and this file's own line
+  8506, the "without a bundle are unaffected" citation, `SKILL.md:355 ->
+  353`), and bumped `timestamp` on all four re-touched
   module docs (`model-preselection.md`,
   `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`,
   `subagent-contracts-superset.md`) in the same commit as these edits.
