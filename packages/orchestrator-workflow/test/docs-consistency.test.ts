@@ -1225,7 +1225,7 @@ describe("commits field ships in the skill and the implementer prompt", () => {
         name: "SKILL.md",
         content: skillMd,
         rules: [
-          "`git log --format=%H <base>..HEAD`",
+          "`git log --reverse --format=%H <base>..HEAD`",
           "it never types or hand-completes commit shas",
           "Verification plans, probe plans, and repeat tallies run in the foreground",
           "reports their returns in the same turn as the last check",
@@ -1236,7 +1236,7 @@ describe("commits field ships in the skill and the implementer prompt", () => {
         name: "implementer.md",
         content: implementerMd,
         rules: [
-          "`git log --format=%H <base>..HEAD`",
+          "`git log --reverse --format=%H <base>..HEAD`",
           "never type or hand-complete commit shas",
           "Verification plans, probe plans, and repeat tallies run in the foreground",
           "reports their returns in the same turn as the last check",
@@ -8167,5 +8167,41 @@ describe("implementer and reviewer cite coverage gate thresholds, not run-specif
 
   it("SKILL.md mirrors the coverage-citation rule for the reviewer", () => {
     expect(normalize(skillMd)).toContain(normalize(SKILL_REVIEWER_MIRROR));
+  });
+});
+
+describe("commit-report command order", () => {
+  it("uses a real two-commit range to preserve production order", async () => {
+    const [{ execFileSync }, { mkdtempSync }, { tmpdir }] = await Promise.all([
+      import("node:child_process"),
+      import("node:fs"),
+      import("node:os"),
+    ]);
+    const repository = mkdtempSync(`${tmpdir()}/ow-commit-order-`);
+    const git = (...args: string[]) =>
+      execFileSync("git", args, { cwd: repository, encoding: "utf8" }).trim();
+
+    try {
+      git("init", "--quiet");
+      git("config", "user.email", "test@example.com");
+      git("config", "user.name", "Test User");
+      writeFileSync(`${repository}/report.txt`, "base\n");
+      git("add", "report.txt");
+      git("commit", "--quiet", "-m", "base");
+      const base = git("rev-parse", "HEAD");
+
+      writeFileSync(`${repository}/report.txt`, "first\n");
+      git("commit", "--quiet", "-am", "first produced");
+      const first = git("rev-parse", "HEAD");
+      writeFileSync(`${repository}/report.txt`, "second\n");
+      git("commit", "--quiet", "-am", "second produced");
+      const second = git("rev-parse", "HEAD");
+
+      expect(
+        git("log", "--reverse", "--format=%H", `${base}..HEAD`).split("\n"),
+      ).toEqual([first, second]);
+    } finally {
+      rmSync(repository, { recursive: true, force: true });
+    }
   });
 });

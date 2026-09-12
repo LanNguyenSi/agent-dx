@@ -2,7 +2,7 @@
 
 - 2026-09-12T10:21:32Z (implementer report derivation and foreground returns,
   agent-dx task 2c9279c2): both implementer-contract copies now require a
-  non-empty `commits` field to be pasted from `git log --format=%H
+  non-empty `commits` field to be pasted from `git log --reverse --format=%H
   <base>..HEAD`, never hand-completed. Verification/probe plans and repeat
   tallies run in the foreground and report in the same turn as the last check;
   a background monitor is no substitute. Each copy's pin was mutated once,
@@ -9167,7 +9167,8 @@ closing delta's finding-set delta against base is zero.
   `subagent-contracts-superset.md`, plus two full citations inside this
   log's own live-citation-resolution scope that the `-2` shift also broke
   (this file's own line 1002, the "pointer rule from Run state applies
-  unchanged." citation, `SKILL.md:696 -> 688`; and this file's own line
+  unchanged." citation, whose historical SKILL.md source line 690 was
+  remapped to 688; and this file's own line
   8506, the "without a bundle are unaffected" citation, `SKILL.md:355 ->
   353`), and bumped `timestamp` on all four re-touched
   module docs (`model-preselection.md`,
