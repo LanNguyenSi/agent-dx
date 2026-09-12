@@ -654,6 +654,24 @@ describe("probe(): worktree isolation, killed and survived on a clean tree", () 
     expect(fs.existsSync(result.isolation.path as string)).toBe(false);
   });
 
+  it("does not spawn git maintenance during a complete probe", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const tracePath = path.join(makeTmpDir(), "git-trace.log");
+    const savedTrace = process.env.GIT_TRACE;
+    process.env.GIT_TRACE = tracePath;
+    try {
+      const result = await probe(baseOptions(repo));
+      expect(result.status).toBe("killed");
+    } finally {
+      if (savedTrace === undefined) delete process.env.GIT_TRACE;
+      else process.env.GIT_TRACE = savedTrace;
+    }
+
+    const trace = fs.readFileSync(tracePath, "utf8");
+    expect(trace).not.toMatch(/maintenance run/);
+  });
+
   it("reports survived when the mutant does not affect the test outcome", async () => {
     useLockDir();
     const { repo } = initRepo();
