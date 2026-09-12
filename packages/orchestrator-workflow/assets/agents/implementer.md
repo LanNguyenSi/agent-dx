@@ -164,7 +164,7 @@ mutation_probes:
     before: ""
     after: ""
     verified_applied_via: ""
-    result: ""
+    result: killed | survived | not_applicable
     expectation: met | violated | not_applicable
     reason: ""
     restored_verified: ""
