@@ -1529,8 +1529,9 @@ where the OS takes it, so it receives the same uniform refusal rather than
 being read as an in-root path that happens not to exist, linked through
 into the isolation copy, and written through by the test command. A `..`
 is only ever applied to a prefix the filesystem resolved: when the
-component before it cannot be resolved (a dangling link, a directory this
-process cannot search, a file where a directory was expected), the chain
+component before it cannot be resolved (a path component that does not
+exist, a dangling link, a directory this process cannot search, a file
+where a directory was expected), the chain
 is refused with that same uniform wording rather than collapsed lexically,
 so the answer never depends on whether an out-of-root path that component
 names happens to exist. The whole symlink chain is followed for that

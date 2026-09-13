@@ -25,11 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolves at most 32 links in one lookup, Linux 40, Windows 63 reparse
   points, so the walk's own decision, not the OS's, is what answers for
   any chain the OS can still follow), and the caller fails closed: a
-  chain the walk cannot resolve is refused outright, through
-  `linkSourceMissingMessage`'s errno branch when the OS reports `ELOOP`
-  for it (which, with the cap above the OS limit, is every such chain
-  on the platforms tested) and as `file_outside_root` naming only the
-  in-root value otherwise, never skipped to the later checks. An
+  chain the walk cannot place is refused outright as
+  `file_outside_root` naming only the in-root value, without the
+  existence check being consulted at all, never skipped to the later
+  checks. An
   operator's own `--link` is unchanged: it is judged on where it sits,
   and its target keeps the link policy's sibling latitude at every
   length. The same walk now places every hop physically rather than
