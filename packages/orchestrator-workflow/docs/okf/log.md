@@ -1,13 +1,14 @@
 # Bundle log
 
-- 2026-09-13T13:05:00Z (release cut, agent-dx REL-001): cut the `[Unreleased]`
+- 2026-09-13T13:19:16Z (release cut, agent-dx REL-001): cut the `[Unreleased]`
   section under a new `[0.34.0] - 2026-09-13` heading, keeping an empty
   `[Unreleased]` heading above it, and bumped `package.json`/
   `package-lock.json` to 0.34.0. Re-pointed the two `log.md` self-citations
-  the two-line insertion shifted (`CHANGELOG.md:33` to `CHANGELOG.md:35`,
-  `CHANGELOG.md:404` to `CHANGELOG.md:406`); the historical, append-only
-  `CHANGELOG.md:<n>` mentions further below carry no re-point obligation,
-  as recorded at their own entries. Re-stamped the three bundle docs whose
+  the two-line insertion shifted (from line 33 to line 35 and from line 404
+  to line 406 of the CHANGELOG; the live citations sit at their own entries
+  below); historical line numbers in this log are written as prose, not
+  citation syntax, so they carry no re-point obligation and never resolve
+  to unrelated content as the CHANGELOG grows. Re-stamped the three bundle docs whose
   sources list `CHANGELOG.md` (`review-gate-and-waivers.md`,
   `run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`);
   `model-preselection.md` lists no source touched by this cut, so it is
@@ -32,8 +33,9 @@
   section under a new `[0.33.0] - 2026-09-12` heading, keeping an empty
   `[Unreleased]` heading above it, and bumped `package.json`/
   `package-lock.json` to 0.33.0. Re-pointed the two `log.md` self-citations
-  the two-line insertion shifted (`CHANGELOG.md:30` to `CHANGELOG.md:32`,
-  `CHANGELOG.md:394` to `CHANGELOG.md:396`); the three historical,
+  the two-line insertion shifted (from line 30 to line 32 and from line 394
+  to line 396 of the CHANGELOG, spelled as prose here since the 2026-09-13
+  release cut); the three historical,
   append-only `CHANGELOG.md:<n>` mentions further below carry no re-point
   obligation, as recorded at their own entries. Re-stamped the three
   bundle docs whose sources list `CHANGELOG.md`
