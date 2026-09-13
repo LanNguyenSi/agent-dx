@@ -739,7 +739,7 @@ describe("probePlan(): the final rebuild after the last mutant is restored", () 
     return `node ${JSON.stringify(scriptPath)}`;
   }
 
-  it("F1: a two-target plan whose first mutant's own test command rewrites the second target names the stale-build clause on the target_not_restored warning, without touching top-level warnings", async () => {
+  it("a two-target plan whose first mutant's own test command rewrites the second target names the stale-build clause on the target_not_restored warning, without touching top-level warnings", async () => {
     useLockDir();
     const { repo } = initRepo();
     const secondPath = path.join(repo, "second.js");
@@ -796,7 +796,7 @@ describe("probePlan(): the final rebuild after the last mutant is restored", () 
     expect(result.warnings).toEqual([]);
   }, 30000);
 
-  it("F2a: runs --pre baseline+N+1 times with exactly one success notice, leaving a build marker matching the restored source", async () => {
+  it("runs --pre baseline+N+1 times with exactly one success notice, leaving a build marker matching the restored source", async () => {
     useLockDir();
     const { repo } = initRepo();
     const markerPath = path.join(repo, "dist-marker.js");
@@ -826,7 +826,7 @@ describe("probePlan(): the final rebuild after the last mutant is restored", () 
     );
     expect(successNotices).toHaveLength(1);
     expect(fs.readFileSync(markerPath, "utf8")).toBe(FIXTURE_JS);
-    // F2: the rebuild's own log path is folded into the envelope's
+    // The rebuild's own log path is folded into the envelope's
     // `dryRunLogPaths` -- for a plan that runs clean to completion (no
     // setup refusal seeding it), this array holds exactly the rebuild's
     // log and nothing else, so it is distinct from the baseline's own
@@ -843,7 +843,7 @@ describe("probePlan(): the final rebuild after the last mutant is restored", () 
     expect(fs.existsSync(rebuildLogPath)).toBe(true);
   }, 30000);
 
-  it("F2b: a --pre that fails only on its last (rebuild) invocation leaves the plan's own status/summary unchanged and warns of the stale risk with a log path", async () => {
+  it("a --pre that fails only on its last (rebuild) invocation leaves the plan's own status/summary unchanged and warns of the stale risk with a log path", async () => {
     useLockDir();
     const { repo } = initRepo();
     const counterFile = path.join(makeTmpDir(), "counter.txt");
@@ -885,7 +885,7 @@ describe("probePlan(): the final rebuild after the last mutant is restored", () 
           ) && w.includes("may still be stale, see"),
       ),
     ).toBe(true);
-    // F2: the rebuild's own log path is folded into `dryRunLogPaths`
+    // The rebuild's own log path is folded into `dryRunLogPaths`
     // even when that rebuild itself failed -- `runFinalRebuild` returns
     // `{ logPath }` on both branches, and the warning above already
     // names the same path, so this asserts the envelope carries it too.
@@ -900,7 +900,7 @@ describe("probePlan(): the final rebuild after the last mutant is restored", () 
     expect(result.warnings.some((w) => w.includes(rebuildLogPath))).toBe(true);
   }, 30000);
 
-  it("F2 negative: under -i worktree, no rebuild notice is printed and the original tree's build output is never touched", async () => {
+  it("under -i worktree, no rebuild notice is printed and the original tree's build output is never touched", async () => {
     useLockDir();
     const { repo } = initRepo();
     const markerPath = path.join(repo, "dist-marker.js");
@@ -927,7 +927,7 @@ describe("probePlan(): the final rebuild after the last mutant is restored", () 
     expect(fs.existsSync(markerPath)).toBe(false);
   }, 30000);
 
-  it("F5: a mutant_not_applicable outcome runs --pre once (the baseline only) and emits no rebuild notice", async () => {
+  it("a mutant_not_applicable outcome runs --pre once (the baseline only) and emits no rebuild notice", async () => {
     useLockDir();
     const { repo } = initRepo();
     const counterFile = path.join(makeTmpDir(), "counter.txt");
@@ -956,7 +956,7 @@ describe("probePlan(): the final rebuild after the last mutant is restored", () 
     ).toBe(false);
   }, 30000);
 
-  it("F5: a real git-apply failure (exit code, not timeout/abort) is also mutant_not_applicable and does not trigger the rebuild", async () => {
+  it("a real git-apply failure (exit code, not timeout/abort) is also mutant_not_applicable and does not trigger the rebuild", async () => {
     useLockDir();
     const { repo } = initRepo();
     const counterFile = path.join(makeTmpDir(), "counter.txt");
@@ -1012,8 +1012,8 @@ describe("probePlan(): the final rebuild after the last mutant is restored", () 
           replaceMutant(2, "  return false;"),
           // Line 99 does not exist: the dry run refuses before this
           // mutant's own `--pre`/test phase ever runs (same shape as
-          // the F5 test above), so `anyMutantApplied` must come from
-          // the FIRST mutant alone.
+          // the mutant_not_applicable-outcome test above), so
+          // `anyMutantApplied` must come from the FIRST mutant alone.
           replaceMutant(99, "  return false;"),
         ],
         { preCommand: counterScript(counterFile) },

@@ -1937,7 +1937,7 @@ describe("probe(): -p integration through probe(), and --pre in both phases", ()
         w.includes("--pre was re-run after the last mutant was restored"),
       ),
     ).toBe(true);
-    // F2: the rebuild's own log path is folded into `dryRunLogPaths` --
+    // The rebuild's own log path is folded into `dryRunLogPaths` --
     // for a clean run (no earlier refusal seeding it), this holds
     // exactly the rebuild's own log and nothing else, distinct from the
     // baseline's and the mutant test's own logs, and it exists on disk.
