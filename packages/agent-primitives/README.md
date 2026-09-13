@@ -1608,7 +1608,38 @@ executes built output (`dist/`) rather than the source file being
 mutated, otherwise the mutant never reaches the test and the probe
 reports a false `survived`. A non-zero `--pre` exit in either run is
 `status: "inconclusive"`, `reason: "pre_failed"`, exit `2`, never a
-verdict. `--timeout <seconds>` bounds every `--pre`/`-t` invocation (both
+verdict.
+
+Under `-i inplace` (the default), the build output `--pre` produced from
+the LAST mutant would otherwise sit on disk until the next rebuild: once
+every mutant a run applies has been restored, `--pre` runs once more
+against that now-restored source, so a command run after the probe
+returns never sees a mutant's build output. This costs one extra
+`--pre` run per invocation (a `--plan` run pays it once for the whole
+plan, not once per mutant) and leaves exactly one `warnings` entry
+saying `--pre` was re-run after the last mutant was restored and exited
+0; a `--pre` that fails or cannot be confirmed on that extra run says
+the build output may still be stale rather than staying silent about
+it. Under `-i worktree`, this is a no-op: that mode's
+`--pre` always ran against the worktree's own copy, never the original
+tree, and the worktree is discarded once the run ends either way -- there
+is nothing to rebuild in the tree the operator's own shell sees, and no
+notice is printed for it.
+
+A run interrupted by SIGINT/SIGTERM still restores the target (the
+signal handler's own restore-then-exit) but skips this extra `--pre`,
+for one of two distinct reasons depending on who called `probe`/`probePlan`:
+the CLI (`--exitOnSignal`/`exitOnSignal: true`) exits the process from
+inside the signal handler itself, before this rebuild step is ever
+reached, so nothing about it can be reported -- rebuild by hand after an
+interrupted CLI run before trusting the build output. A library caller
+(`exitOnSignal: false`, the default `probe()`/`probePlan()` use) instead
+returns normally and DOES reach this step, which then deliberately skips
+the rebuild itself (an already-aborted run's own exec environment would
+just get the attempt SIGKILLed) but leaves one `warnings` entry naming
+the same stale-build risk, exactly as if the extra `--pre` had failed --
+so a library caller reading `warnings` is told, even though no rebuild
+ran. `--timeout <seconds>` bounds every `--pre`/`-t` invocation (both
 the baseline and the mutant run); a run that hits it is killed and
 reported as `timedOut: true` on that run's own phase (`baseline` or
 `test`), so a killed baseline is distinguishable from one that genuinely

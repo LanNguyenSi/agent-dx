@@ -558,6 +558,44 @@ describe("probe(): inconclusive branches, hash unchanged afterward", () => {
   }, 15000);
 });
 
+/**
+ * A repo whose own test command replaces the target with a directory
+ * once it observes the mutation, so the baseline run (unmutated) is a
+ * no-op and only the restore step (which tries to copy the backup back
+ * into that now-directory path) fails. The same fixture the
+ * `restore_failed` test above this describe block builds inline;
+ * factored out here so the two `restoreFailedRebuildClause` tests below
+ * can reuse it without touching that existing test's own body.
+ */
+function makeRestoreFailedRepo(): { repo: string } {
+  const { repo } = initRepo();
+  fs.writeFileSync(
+    path.join(repo, "fixture.test.js"),
+    [
+      "const fs = require('node:fs');",
+      "const content = fs.readFileSync('fixture.js', 'utf8');",
+      "if (content.includes('CORRUPT_MARKER')) {",
+      "  fs.rmSync('fixture.js', { force: true });",
+      "  fs.mkdirSync('fixture.js');",
+      "} else {",
+      "  const { isPositive } = require('./fixture.js');",
+      "  if (isPositive(5) !== true) process.exit(1);",
+      "}",
+      "",
+    ].join("\n"),
+  );
+  git(repo, ["add", "-A"]);
+  git(repo, [
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-q",
+    "-m",
+    "corrupting test",
+  ]);
+  return { repo };
+}
+
 describe("probe(): restore failure is terminal", () => {
   it("restore_failed when the target cannot be restored, exit-class cannot-conclude, warning names the backup path, marker persists", async () => {
     const lockDir = useLockDir();
@@ -629,6 +667,59 @@ describe("probe(): restore failure is terminal", () => {
     // force+recursive already handles a directory fine, so nothing extra
     // is required here. Referencing lockDir keeps the variable used.
     expect(fs.existsSync(lockDir)).toBe(true);
+  });
+
+  it("restore_failed under inplace with --pre appends the rebuild-may-be-stale clause", async () => {
+    useLockDir();
+    const { repo } = makeRestoreFailedRepo();
+
+    const result = await probe(
+      baseOptions(repo, {
+        replaceText: "  return false; // CORRUPT_MARKER",
+        preCommand: "true",
+      }),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("restore_failed");
+    const backupWarning = result.warnings.find((w) =>
+      w.includes("backup path"),
+    );
+    expect(backupWarning).toBeDefined();
+    // The backup path itself is still cleanly extractable: the clause
+    // starts with a space, so `\S+` stops exactly where it always did.
+    const backupPathMatch = backupWarning?.match(/backup path (\S+)/);
+    expect(backupPathMatch).toBeTruthy();
+    if (backupPathMatch) {
+      expect(fs.existsSync(backupPathMatch[1])).toBe(true);
+    }
+    expect(backupWarning).toContain(
+      "The working tree's build output may still be built from the mutant",
+    );
+    expect(backupWarning).toContain("rebuild it by hand before trusting it");
+  });
+
+  it("restore_failed with no --pre carries no rebuild-may-be-stale clause", async () => {
+    useLockDir();
+    const { repo } = makeRestoreFailedRepo();
+
+    const result = await probe(
+      baseOptions(repo, { replaceText: "  return false; // CORRUPT_MARKER" }),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("restore_failed");
+    const backupWarning = result.warnings.find((w) =>
+      w.includes("backup path"),
+    );
+    expect(backupWarning).toBeDefined();
+    const backupPathMatch = backupWarning?.match(/backup path (\S+)/);
+    expect(backupPathMatch).toBeTruthy();
+    // Byte-identical to what this warning read before the clause
+    // existed: no --pre means nothing this package built to warn about.
+    expect(backupWarning).toBe(
+      `restore failed; the original content is preserved at backup path ${backupPathMatch?.[1]}`,
+    );
   });
 
   it("patch-apply-failure site: marker survives when the real git apply fails and the emergency restore also fails", async () => {
@@ -1788,7 +1879,7 @@ describe("probe(): -p integration through probe(), and --pre in both phases", ()
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   });
 
-  it("runs --pre in both the baseline and mutant phases", async () => {
+  it("runs --pre in both the baseline and mutant phases, and once more after the restore (inplace)", async () => {
     useLockDir();
     const { repo } = initRepo();
     const counterFile = path.join(makeTmpDir(), "counter.txt");
@@ -1809,7 +1900,55 @@ describe("probe(): -p integration through probe(), and --pre in both phases", ()
     );
 
     expect(result.status).toBe("killed");
-    expect(fs.readFileSync(counterFile, "utf8")).toBe("2");
+    // Baseline, mutant, and the final rebuild `runFinalRebuild` runs
+    // once the one mutant this pipeline applied is restored (inplace
+    // only): three `--pre` runs, not two.
+    expect(fs.readFileSync(counterFile, "utf8")).toBe("3");
+  });
+
+  it("the final rebuild leaves a --pre-produced artifact matching the restored source, not the mutant it was mid-way through (inplace)", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const markerPath = path.join(repo, "dist-marker.js");
+
+    // Stands in for a real build step: copies the CURRENT target
+    // content to a "build output" file, exactly like a bundler that
+    // reads the source and writes `dist/`.
+    const result = await probe(
+      baseOptions(repo, { preCommand: "cp fixture.js dist-marker.js" }),
+    );
+
+    expect(result.status).toBe("killed");
+    const restoredSource = fs.readFileSync(
+      path.join(repo, "fixture.js"),
+      "utf8",
+    );
+    expect(restoredSource).toBe(FIXTURE_JS);
+    // Without the final rebuild this closes, `dist-marker.js` would
+    // still carry whatever the mutant's own `--pre` last wrote (the
+    // mutated "return false;" body): the marker was never restored by
+    // the probe itself, only `fixture.js` was, so the marker is exactly
+    // what proves the working tree's build output is now consistent
+    // with the restored source rather than stuck on the mutant.
+    expect(fs.readFileSync(markerPath, "utf8")).toBe(FIXTURE_JS);
+    expect(fs.readFileSync(markerPath, "utf8")).not.toContain("return false");
+    expect(
+      result.warnings.some((w) =>
+        w.includes("--pre was re-run after the last mutant was restored"),
+      ),
+    ).toBe(true);
+    // The rebuild's own log path is folded into `dryRunLogPaths` --
+    // for a clean run (no earlier refusal seeding it), this holds
+    // exactly the rebuild's own log and nothing else, distinct from the
+    // baseline's and the mutant test's own logs, and it exists on disk.
+    // Dropping the `capturedLogPaths.push(rebuildLogPath)` call this
+    // asserts leaves `dryRunLogPaths` undefined here instead.
+    expect(result.dryRunLogPaths).toBeDefined();
+    expect(result.dryRunLogPaths).toHaveLength(1);
+    const rebuildLogPath = (result.dryRunLogPaths ?? [])[0];
+    expect(rebuildLogPath).not.toBe(result.baseline?.logPath);
+    expect(rebuildLogPath).not.toBe(result.test?.logPath);
+    expect(fs.existsSync(rebuildLogPath)).toBe(true);
   });
 });
 
@@ -3001,6 +3140,129 @@ describe("probe(): a signal while a library-mode probe is running", () => {
     expect(fs.readdirSync(lockDir).filter((f) => f.endsWith(".lock"))).toEqual(
       [],
     );
+  }, 60000);
+
+  it("with --pre, an aborted library-mode run warns the build output may be stale instead of rebuilding or staying silent", async () => {
+    const lockDir = useLockDir();
+    const { repo } = initRepo();
+    const absFile = path.join(repo, "fixture.js");
+    const before = fs.readFileSync(absFile, "utf8");
+    const logDir = makeTmpDir();
+    const ready = path.join(repo, "ready.txt");
+    const markerPath = path.join(repo, "dist-marker.js");
+
+    // Same shape as the test above: only the mutant-phase test (its
+    // content carries SLOW_MARKER) signals readiness and then hangs
+    // until interrupted.
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      [
+        "const fs = require('node:fs');",
+        "const content = fs.readFileSync('fixture.js', 'utf8');",
+        "if (content.includes('SLOW_MARKER')) {",
+        "  fs.writeFileSync('ready.txt', 'go');",
+        "  setTimeout(() => { process.exit(0); }, 10000);",
+        "} else { process.exit(0); }",
+        "",
+      ].join("\n"),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-m",
+      "slow test",
+    ]);
+
+    // A library caller with `--pre`: stands in for a rebuild step, same
+    // as the other rebuild tests in this file (`cp fixture.js
+    // dist-marker.js`). Its own last run, before the mutant's test hung
+    // and was interrupted, wrote `dist-marker.js` from the MUTATED
+    // source -- exactly the stale build output the aborted-path warning
+    // this test targets exists to name.
+    const scriptPath = path.join(makeTmpDir(), "library-probe-pre.mjs");
+    fs.writeFileSync(
+      scriptPath,
+      [
+        `import { probe } from ${JSON.stringify(pathToFileURL(DIST_INDEX).href)};`,
+        "const result = await probe({",
+        '  file: "fixture.js",',
+        "  line: 2,",
+        '  form: "replace",',
+        '  replaceText: "  return false; // SLOW_MARKER",',
+        '  testCommand: "node fixture.test.js",',
+        '  preCommand: "cp fixture.js dist-marker.js",',
+        '  isolation: "inplace",',
+        '  expect: "fail",',
+        `  cwd: ${JSON.stringify(repo)},`,
+        `  logDir: ${JSON.stringify(logDir)},`,
+        "});",
+        "process.stdout.write(JSON.stringify(result));",
+        "",
+      ].join("\n"),
+    );
+
+    const child = spawn(process.execPath, [scriptPath], {
+      cwd: repo,
+      env: { ...process.env, AGENT_PRIMITIVES_LOCK_DIR: lockDir },
+      stdio: ["ignore", "pipe", "inherit"],
+    });
+    let stdout = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+
+    const deadline = Date.now() + 20000;
+    while (!fs.existsSync(ready)) {
+      if (Date.now() > deadline) {
+        throw new Error("the mutant-phase test never signalled readiness");
+      }
+      await sleep(50);
+    }
+    // The mutant's own `--pre` already ran (before its test started and
+    // hung) by the time `ready.txt` exists: the marker now carries the
+    // mutated source, not the original.
+    const markerAtSignalTime = fs.readFileSync(markerPath, "utf8");
+    expect(markerAtSignalTime).toContain("SLOW_MARKER");
+
+    child.kill("SIGTERM");
+    const [code, signal] = await new Promise<
+      [number | null, NodeJS.Signals | null]
+    >((resolve) => {
+      child.on("close", (c, sig) => resolve([c, sig]));
+    });
+
+    expect(signal).toBeNull();
+    expect(code).toBe(0);
+
+    const result = JSON.parse(stdout) as ProbeResult;
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("aborted");
+    // The target itself IS restored (this run's normal restore-on-abort
+    // path), but the rebuild the signal check skips never ran, so this
+    // must warn rather than either (a) claiming success it never
+    // measured, or (b) staying silent about a build artifact that still
+    // holds the mutant.
+    expect(fs.readFileSync(absFile, "utf8")).toBe(before);
+    expect(
+      result.warnings.some((w) =>
+        w.includes("--pre was re-run after the last mutant was restored"),
+      ),
+    ).toBe(false);
+    expect(
+      result.warnings.some((w) =>
+        w.includes(
+          "The working tree's build output may still be built from the mutant",
+        ),
+      ),
+    ).toBe(true);
+    // The build artifact was never touched by a rebuild: it still holds
+    // exactly what the mutant's own `--pre` last wrote.
+    expect(fs.readFileSync(markerPath, "utf8")).toBe(markerAtSignalTime);
+    expect(fs.readFileSync(markerPath, "utf8")).toContain("SLOW_MARKER");
   }, 60000);
 });
 

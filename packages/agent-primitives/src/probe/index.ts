@@ -25,10 +25,13 @@ import type { PlanMutantSpec } from "./plan.js";
 import {
   type ExecPhaseField,
   type ExpectVerdict,
+  type FinalRebuildRuntime,
   type IsolationField,
   type IsolationMode,
   redactEnvOverrides,
   REFUSAL_RESULT_SHAPE,
+  finalRebuildOrWarn,
+  restoreFailedRebuildClause,
   type MutantField,
   type MutationProbeField,
   type ProbeStatus,
@@ -703,6 +706,38 @@ async function runProbePipeline(
   // moment they exist: from then on this function's own `finally` owns
   // the teardown, however the setup ends.
   let context: RunSetupContext | undefined;
+  // Captured the moment `openRunSetup` returns successfully (the same
+  // point the mutant is applied from), so `finally`'s final rebuild can
+  // read `effectiveIsolation`/`preCommand`/`execEnv`/`track` even though
+  // `rt` itself is a `const` scoped to the `try` block below. Stays
+  // `undefined` on every path where the target was never mutated (a
+  // refusal before or during setup), which is exactly when there is
+  // nothing for the rebuild to do.
+  let capturedRt: FinalRebuildRuntime | undefined;
+  // Mirrors `runMutantAttempt`'s own `outcome.restoreFailed` for the one
+  // mutant this pipeline applies: read by `finally` to seed
+  // `restoreConfirmed`, since a restore that failed on the NORMAL path
+  // (through `target.restoreOnce`, inside the `try`) always clears the
+  // handler's restore-state slot regardless of whether the restore
+  // itself verified -- `finally`'s own `getRestoreState()` check alone
+  // cannot see this case, only the true-crash one where the slot was
+  // never cleared at all.
+  let mutantRestoreFailed = false;
+  // Whether the one mutant this pipeline applies ever got as far as
+  // running its own `--pre`/test against genuinely mutated content: see
+  // `MutantAttemptOutcome.applied`'s own docblock. Stays `false` when the
+  // mutant never ran (a refusal before `runMutantAttempt`, `setup.ok`
+  // false, capturedRt never even set) or when `runMutantAttempt` itself
+  // reports `applied: false` -- both mean the rebuild below has nothing
+  // to fix.
+  let mutantApplied = false;
+  // The array reference the normal-path return hands out as
+  // `dryRunLogPaths`, captured so `finally`'s rebuild can fold its own
+  // log path into the delivered result instead of leaving it named only
+  // in `warnings`. `undefined` on every path that never reached that
+  // return statement (a refusal, a thrown error) -- exactly the paths
+  // that build no envelope for a log path to join.
+  let capturedLogPaths: string[] | undefined;
   // Set by the `catch` below and read by `finally`'s emergency-restore
   // path, so its warning can name what actually triggered the restore
   // instead of just "an unexpected error".
@@ -819,6 +854,7 @@ async function runProbePipeline(
       };
     }
     const { rt, targets, logPaths: stepLogPaths } = setup.run;
+    capturedRt = rt;
     baseline = setup.run.baseline;
     const baselineOutput = setup.run.baselineOutput;
     if (prepared === undefined) {
@@ -848,6 +884,14 @@ async function runProbePipeline(
       warnings,
       baselineOutput,
     );
+    mutantRestoreFailed = outcome.restoreFailed;
+    mutantApplied = outcome.applied !== false;
+    // The exact array reference the return statement below hands out as
+    // `dryRunLogPaths`: `finally`'s own rebuild can push this run's log
+    // path into it (after the object literal below is already built)
+    // and have it show up in the delivered result, since both point at
+    // the same array instance.
+    capturedLogPaths = outcome.logPaths;
     return {
       status: outcome.status,
       reason: outcome.reason,
@@ -870,6 +914,15 @@ async function runProbePipeline(
     // lock: nothing was opened, nothing is in flight, and there is
     // nothing to tear down.
     const inFlightRestore = context?.controller.getRestoreState();
+    // Whether the target is actually confirmed back at its original
+    // content by the time the rebuild below runs: false when the one
+    // mutant's own restore (on the normal path, inside `try`) already
+    // reported `restoreFailed`, and further overridden below when an
+    // in-flight restore reached only through this `finally` block could
+    // not be verified either (source state then unknown either way,
+    // see `runFinalRebuild`'s own docblock for why both skip the
+    // rebuild).
+    let restoreConfirmed = !mutantRestoreFailed;
     if (context !== undefined && inFlightRestore) {
       // Reached only when something unwound the stack (a thrown error)
       // while a mutation was still in flight and never went through one
@@ -891,8 +944,14 @@ async function runProbePipeline(
         const hash = await sha256File(state.targetPath).catch(() => undefined);
         verified = hash === state.preHash;
       }
+      restoreConfirmed = verified;
       if (verified) {
         removeMarkerFor(state.markerKey);
+        // Reached only when a mutation was genuinely in flight (the
+        // handler's restore-state slot was armed): whatever interrupted
+        // this run, the target really was mutated, so the same rebuild
+        // gate that applies to a clean finish applies here too.
+        mutantApplied = true;
       } else {
         const causeMessage =
           caughtError instanceof Error
@@ -907,7 +966,19 @@ async function runProbePipeline(
             ...warnings,
             `restore failed after an unexpected error${
               causeMessage ? ` (${causeMessage})` : ""
-            }; the original content is preserved at backup path ${state.backupPath}`,
+            }; the original content is preserved at backup path ${state.backupPath}` +
+              // `capturedRt` is set by this point whenever a mutation was
+              // genuinely armed for restore (both require `rt` from
+              // `openRunSetup`); the object literal fallback exists only
+              // for the type checker, not a path this reaches in
+              // practice, so every real caller reads the same runtime
+              // object rather than a hand-built duplicate of its fields.
+              restoreFailedRebuildClause(
+                capturedRt ?? {
+                  preCommand: opts.preCommand,
+                  effectiveIsolation: isolationField.mode,
+                },
+              ),
           ],
           ...(mutantField ? { mutant: mutantField } : {}),
           ...(mutantSummary && verifiedAppliedVia
@@ -923,6 +994,39 @@ async function runProbePipeline(
           ...(baseline ? { baseline } : {}),
           isolation: isolationField,
         };
+      }
+    }
+    // The final rebuild (inplace only, only when `--pre` was given):
+    // runs once the target's restore is confirmed, before the worktree
+    // cleanup and lock release below, so a concurrent probe on the same
+    // repository never observes the lock as free while this run's
+    // build output might still reflect the last mutant. `restoreConfirmed`
+    // is false only through the `!verified` branch above, which already
+    // set `emergencyResult` with its own snapshot of `warnings` -- the
+    // two are mutually exclusive, so there is no snapshot to patch here.
+    // `mutantApplied` gates out a run whose one mutant never got past a
+    // never-applied reason (`mutant_not_applicable`, `git_apply_timeout`,
+    // an aborted real `git apply`): there is no stale build output to
+    // fix. `finalRebuildOrWarn` itself skips the rebuild attempt (it
+    // would just be SIGKILLed against an already-aborted run) and pushes
+    // the library-caller-only warning instead when the run's own signal
+    // is already aborted -- the CLI's own signal handler (`exitOnSignal:
+    // true`) calls `process.exit` before this `finally` block is ever
+    // reached, so it never gets here to warn (see the README/SKILL note
+    // on the two distinct reasons a rebuild is skipped).
+    {
+      const { logPath: rebuildLogPath } = await finalRebuildOrWarn(
+        capturedRt,
+        warnings,
+        { restoreConfirmed, mutantApplied },
+      );
+      // Folds this run's own log into the already-built envelope's
+      // `dryRunLogPaths`, via the shared array reference `capturedLogPaths`
+      // captured above: the object literal that names this array as
+      // `dryRunLogPaths` was already returned by this point on the
+      // normal path, but pushing into the SAME array still reaches it.
+      if (rebuildLogPath !== undefined && capturedLogPaths !== undefined) {
+        capturedLogPaths.push(rebuildLogPath);
       }
     }
     // Runs on every exit path (a normal return, a thrown error, or the
@@ -1351,6 +1455,25 @@ export async function probePlan(
   // moment they exist: from then on this function's own `finally` owns
   // the teardown, however the setup ends.
   let context: RunSetupContext | undefined;
+  // Same purpose as the single probe's own `capturedRt`: captured once
+  // `openRunSetup` succeeds so `finally`'s final rebuild can read it
+  // after the plan's mutant loop (and `rt` itself) has gone out of
+  // scope. One rebuild for the whole plan, not one per mutant.
+  let capturedRt: FinalRebuildRuntime | undefined;
+  // Mirrors the loop's own `terminal` (declared inside `try`, so not
+  // otherwise visible to `finally`): `"restore_failed"` and
+  // `"target_not_restored"` both mean the source was left in an
+  // unconfirmed state on the NORMAL path, same reason the single
+  // probe's `mutantRestoreFailed` exists.
+  let capturedTerminal: string | undefined;
+  // Whether ANY mutant this plan applied ever got as far as running its
+  // own `--pre`/test against genuinely mutated content: see the single
+  // probe's own `mutantApplied` and `MutantAttemptOutcome.applied`'s
+  // docblock. A plan whose mutants all stopped at a never-applied reason
+  // (a mutant never even reached `runMutantAttempt`, or reported
+  // `applied: false` from inside it) leaves this `false`, and the final
+  // rebuild has nothing to fix.
+  let anyMutantApplied = false;
   let caughtError: unknown;
 
   try {
@@ -1416,6 +1539,7 @@ export async function probePlan(
       };
     }
     const { rt } = setup.run;
+    capturedRt = rt;
     baseline = setup.run.baseline;
     const baselineOutput = setup.run.baselineOutput;
     setupLogPaths = setup.run.logPaths;
@@ -1469,7 +1593,8 @@ export async function probePlan(
           status: "inconclusive",
           reason: "target_not_restored",
           warnings: [
-            `${target.displayFile} was not at its pre-mutation content when this mutant was about to be applied; nothing further was applied, and the original content is preserved at backup path ${target.session.backupPath}`,
+            `${target.displayFile} was not at its pre-mutation content when this mutant was about to be applied; nothing further was applied, and the original content is preserved at backup path ${target.session.backupPath}` +
+              restoreFailedRebuildClause(rt),
           ],
           logs: [],
         });
@@ -1539,6 +1664,7 @@ export async function probePlan(
         logs: outcome.logPaths,
       });
       inFlight = undefined;
+      if (outcome.applied !== false) anyMutantApplied = true;
       // I3: a restore that could not be verified is terminal for the
       // plan. I5: so is a signal, whether this mutant's own phase
       // reported the abort or the handler is only just acting on it --
@@ -1548,6 +1674,7 @@ export async function probePlan(
         terminal = "aborted";
       }
     }
+    capturedTerminal = terminal;
 
     // The exit-code contract, one step stricter than "any expectation
     // violation is a finding": exit 1 (`survived`) is reserved for a
@@ -1596,6 +1723,15 @@ export async function probePlan(
     // lock: nothing was opened, nothing is in flight, and there is
     // nothing to tear down.
     const inFlightRestore = context?.controller.getRestoreState();
+    // See the single probe's own `restoreConfirmed`: false already when
+    // the loop's own `terminal` (captured above the loop as
+    // `capturedTerminal`, since `terminal` itself is scoped to `try`)
+    // ended on an unconfirmed restore, further overridden below when an
+    // in-flight restore reached only through this `finally` block could
+    // not be verified either.
+    let restoreConfirmed =
+      capturedTerminal !== "restore_failed" &&
+      capturedTerminal !== "target_not_restored";
     if (context !== undefined && inFlightRestore) {
       // Reached only when something unwound the stack (a thrown error)
       // while a mutation was still in flight and never went through one
@@ -1615,8 +1751,14 @@ export async function probePlan(
         const hash = await sha256File(state.targetPath).catch(() => undefined);
         verified = hash === state.preHash;
       }
+      restoreConfirmed = verified;
       if (verified) {
         removeMarkerFor(state.markerKey);
+        // Same reasoning as the single probe's own emergency-restore
+        // path: a mutation genuinely in flight when this fired means the
+        // plan's rebuild gate applies regardless of what earlier mutants
+        // in the loop did.
+        anyMutantApplied = true;
       } else {
         const causeMessage =
           caughtError instanceof Error
@@ -1662,7 +1804,16 @@ export async function probePlan(
             ...warnings,
             `restore failed after an unexpected error${
               causeMessage ? ` (${causeMessage})` : ""
-            }; the original content is preserved at backup path ${state.backupPath}`,
+            }; the original content is preserved at backup path ${state.backupPath}` +
+              // See the single probe's own identical comment above this
+              // same call: `capturedRt` is set by this point in practice,
+              // the fallback exists only for the type checker.
+              restoreFailedRebuildClause(
+                capturedRt ?? {
+                  preCommand: opts.preCommand,
+                  effectiveIsolation: isolationField.mode,
+                },
+              ),
           ],
           ...(baseline ? { baseline } : {}),
           results: entries,
@@ -1672,6 +1823,32 @@ export async function probePlan(
             ? { dryRunLogPaths: setupLogPaths }
             : {}),
         };
+      }
+    }
+    // The final rebuild: once per plan (I4, never once per mutant),
+    // after every mutant the loop applied has been restored and before
+    // the worktree cleanup and lock release below. See the single
+    // probe's own comment above its `finalRebuildOrWarn` call for why
+    // `emergencyResult`'s own `warnings` snapshot needs no patching
+    // here: the two are mutually exclusive. `anyMutantApplied` mirrors
+    // the single probe's own `mutantApplied` gate: a plan whose mutants
+    // never got past a never-applied reason has no stale build output
+    // to fix. `finalRebuildOrWarn` itself skips the rebuild attempt and
+    // pushes the library-caller-only warning instead when the run's own
+    // signal is already aborted, same as the single probe's call.
+    {
+      const { logPath: rebuildLogPath } = await finalRebuildOrWarn(
+        capturedRt,
+        warnings,
+        { restoreConfirmed, mutantApplied: anyMutantApplied },
+      );
+      // `setupLogPaths` is the exact array the normal-completion return
+      // above names as `dryRunLogPaths` (set once from `setup.run.logPaths`
+      // and never reassigned again on this path): pushing here still
+      // reaches the delivered result, the same trick the single probe's
+      // own `capturedLogPaths` uses.
+      if (rebuildLogPath !== undefined) {
+        setupLogPaths.push(rebuildLogPath);
       }
     }
     // Once per plan (I4), before the locks are released, so a concurrent

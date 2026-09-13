@@ -664,6 +664,175 @@ export async function runPreThenTest(
   return { ok: true, test };
 }
 
+/** The fields `runFinalRebuild` needs off a `MutantRuntime`: kept as its
+ * own small type (like `PreAndTestCommand` above) rather than the whole
+ * runtime, since a caller building this from pieces captured across a
+ * `try`/`finally` boundary (`index.ts`'s two pipelines) should not have
+ * to fake the rest of `MutantRuntime` to call it. */
+export interface FinalRebuildRuntime {
+  effectiveIsolation: IsolationMode;
+  preCommand?: string;
+  execEnv: {
+    cwd: string;
+    logDir: string;
+    timeoutMs?: number;
+    signal: AbortSignal;
+    env?: NodeJS.ProcessEnv;
+  };
+  track: TrackFn;
+}
+
+/**
+ * Closes the gap `--pre` (inplace only) otherwise leaves open: after the
+ * LAST mutant of a run is restored, the working tree's build output
+ * still reflects that mutant until something rebuilds it, so a command
+ * run after the probe returns (a test run by hand, a follow-up CI step)
+ * can silently exercise mutated code even though the source is back to
+ * original. Re-running `--pre` once more, now that the source is
+ * restored, closes that window.
+ *
+ * A no-op for `-i worktree`: that mode's `--pre` never ran against the
+ * original tree's build output in the first place (see
+ * `MutantRuntime.applyRoot`'s own docblock -- the worktree copy is what
+ * `--pre` builds there), and the worktree copy is discarded by
+ * `cleanupWtSession` regardless of whether this ran. It is likewise a
+ * no-op when no `--pre` was given: there is no build output this
+ * package produced for the run to leave stale.
+ *
+ * Called exactly once per probe/plan invocation, from `index.ts`'s one
+ * `finally` block (never per mutant, and never for a plan whose loop
+ * applied several), and only once the target is confirmed back at its
+ * original content -- the normal exit path (every mutant's own
+ * `restoreOnce` already succeeded) and the `finally` block's own
+ * emergency-restore path both qualify; an emergency restore that could
+ * NOT be verified does not, since rebuilding against source in an
+ * unknown state would not close this window and could misreport a
+ * possibly-still-mutated tree as fresh. Runs on every exit path that
+ * does qualify, including one where a mutant's own `--pre`/test phase
+ * aborted mid-run: a stale build left behind by that abort is exactly
+ * the failure this closes, so the abort path gets the same rebuild
+ * attempt as a clean finish. Always leaves exactly one one-line note in
+ * `warnings` when it actually ran `--pre`, saying whether the rebuild
+ * itself succeeded; when it could not be confirmed, the note says the
+ * build output may still be stale rather than staying silent about it.
+ *
+ * Returns `{}` on a no-op (neither branch above), and `{ logPath }` once
+ * `--pre` actually ran (success or failure alike), so a caller can fold
+ * this run's own log into the envelope's other reported log paths
+ * instead of leaving it named only inside the `warnings` sentence above.
+ */
+export async function runFinalRebuild(
+  rt: FinalRebuildRuntime,
+  warnings: string[],
+): Promise<{ logPath?: string }> {
+  if (rt.effectiveIsolation !== "inplace" || rt.preCommand === undefined) {
+    return {};
+  }
+  const started = startExecTracked(rt.preCommand, rt.execEnv);
+  const result = await rt.track(started.result, started.closed);
+  if (result.exitCode === 0) {
+    // What was actually observed is only that this re-run exited 0, not
+    // that its output now matches the restored source: a `--pre` that
+    // no-ops against a cache (nothing to rebuild, or a build system that
+    // treats the restored file as unchanged) also exits 0 without
+    // touching anything. State only the observation, not the inferred
+    // outcome.
+    warnings.push(
+      "--pre was re-run after the last mutant was restored and exited 0",
+    );
+    return { logPath: result.logPath };
+  }
+  const cause = result.aborted
+    ? "was aborted"
+    : result.timedOut
+      ? "timed out"
+      : result.exitCode === null
+        ? "was terminated by a signal"
+        : `exited ${String(result.exitCode)}`;
+  warnings.push(
+    `--pre was re-run after the last mutant was restored but ${cause}; ` +
+      `the working tree's build output may still be stale, see ${result.logPath}`,
+  );
+  return { logPath: result.logPath };
+}
+
+/**
+ * The one shared sentence appended to a restore-failed-adjacent warning
+ * when `runFinalRebuild` above was skipped BECAUSE of that same
+ * failure: without it, a warning that only says "the original content
+ * is preserved at backup path X" reads as though nothing else needs
+ * attention, when the working tree's build output may still reflect the
+ * mutant `--pre` last built. Returns `""` (never appended) unless both
+ * `--pre` was given AND the run is `-i inplace`, so every existing
+ * warning that names neither stays byte-identical to what it read
+ * before this existed -- `-i worktree`'s `--pre` never touched the
+ * original tree's build output at all, and no `--pre` means no build
+ * output this package produced to warn about.
+ *
+ * Starts with a space, never a period or comma, so a caller's own
+ * `/backup path (\S+)/`-style extraction of the backup path immediately
+ * before this in the same warning stops at that space exactly where it
+ * always did, rather than swallowing this sentence's own leading
+ * punctuation into the captured path.
+ *
+ * Reused verbatim at both call sites that report a restore skipped
+ * `runFinalRebuild` (`step.ts`'s `restoreFailedOutcome`, shared by the
+ * single probe and every plan mutant, and `index.ts`'s own `finally`
+ * emergency-restore path, present once in each of `probe`'s and
+ * `probePlan`'s pipelines) rather than left as two hand-written
+ * variants that could drift apart.
+ */
+export function restoreFailedRebuildClause(rt: {
+  preCommand?: string;
+  effectiveIsolation: IsolationMode;
+}): string {
+  if (rt.effectiveIsolation !== "inplace" || rt.preCommand === undefined) {
+    return "";
+  }
+  return (
+    " The working tree's build output may still be built from the " +
+    "mutant; rebuild it by hand before trusting it."
+  );
+}
+
+/**
+ * The one call both of `index.ts`'s `finally` blocks (single probe and
+ * plan) make to close the final-rebuild gap, replacing what used to be
+ * two independently maintained `if`/`else if` pairs at each call site.
+ * Folds together the gate both pipelines applied inline
+ * (`capturedRt` defined, `restoreConfirmed`, `mutantApplied` --
+ * `mutantApplied` renamed `anyMutantApplied` in the plan pipeline but
+ * meaning the same thing there -- and the run's own signal not yet
+ * aborted), the `runFinalRebuild` call itself, and the aborted-path
+ * warning push each pipeline duplicated verbatim.
+ *
+ * `rt` is `undefined` exactly when the pipeline never captured a
+ * `FinalRebuildRuntime` (no mutation ever ran): a no-op, same as when
+ * the gate flags are false. When the gate passes but the run's own
+ * signal is already aborted, this pushes the same
+ * `restoreFailedRebuildClause` sentence the two pipelines used to push
+ * by hand and returns `{}` (there is no rebuild to attempt against an
+ * aborted exec environment). Otherwise it runs `runFinalRebuild` and
+ * returns whatever log path that produced.
+ */
+export async function finalRebuildOrWarn(
+  rt: FinalRebuildRuntime | undefined,
+  warnings: string[],
+  gate: { restoreConfirmed: boolean; mutantApplied: boolean },
+): Promise<{ logPath?: string }> {
+  if (rt === undefined || !gate.restoreConfirmed || !gate.mutantApplied) {
+    return {};
+  }
+  if (rt.execEnv.signal.aborted) {
+    const clause = restoreFailedRebuildClause(rt).trimStart();
+    if (clause !== "") {
+      warnings.push(clause);
+    }
+    return {};
+  }
+  return runFinalRebuild(rt, warnings);
+}
+
 /** Registers a started run (and when its stdio truly closes) as the
  * probe's one in-flight child; see `TrackedRun` and `probe`'s own
  * `track`. */

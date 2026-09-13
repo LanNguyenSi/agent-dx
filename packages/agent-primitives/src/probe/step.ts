@@ -22,6 +22,7 @@ import {
   noteIncompleteOutput,
   redactEnvOverrides,
   restoreAndVerify,
+  restoreFailedRebuildClause,
   runPreThenTest,
   startRunArgvTracked,
   type BaselineOutput,
@@ -196,6 +197,19 @@ export interface MutantAttemptOutcome {
   logPaths: string[];
   restoreFailed: boolean;
   aborted: boolean;
+  /** Whether the mutant's own `--pre`/test phase ever ran against a
+   * genuinely mutated tree, i.e. whether a rebuild after this outcome
+   * has anything to fix. `false` only for the one early exit where the
+   * real (non-dry-run) apply itself never went through (`mutant_not_applicable`,
+   * `git_apply_timeout`, or an `aborted` real `git apply` -- `step.ts`'s
+   * own real-apply branch above the hash check): the mutant's `--pre`
+   * never ran in that branch, so the working tree's build output cannot
+   * have gone stale. `true` (the default, omitted everywhere else) once
+   * the real apply's hash is verified: from there on the mutant's own
+   * `--pre`/test did run against mutated content, including every later
+   * abort (`runFinalRebuild`'s whole point is to still rebuild after
+   * those). */
+  applied?: boolean;
 }
 
 /**
@@ -242,7 +256,8 @@ export async function runMutantAttempt(
     test?: TestPhaseField,
   ): MutantAttemptOutcome => {
     warnings.push(
-      `restore failed; the original content is preserved at backup path ${target.session.backupPath}`,
+      `restore failed; the original content is preserved at backup path ${target.session.backupPath}` +
+        restoreFailedRebuildClause(rt),
     );
     return {
       status: "inconclusive",
@@ -330,6 +345,7 @@ export async function runMutantAttempt(
         logPaths: [...logPaths, applyResult.logPath],
         restoreFailed: false,
         aborted: applyResult.aborted,
+        applied: false,
       };
     }
   } else {
