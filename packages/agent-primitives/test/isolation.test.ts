@@ -620,7 +620,11 @@ describe("beginWorktree / cleanupWorktree", () => {
 
     expect(result.ok).toBe(true);
     const calls = gitCalls();
-    expect(calls).toHaveLength(5);
+    expect(calls).toHaveLength(7);
+    expect(calls.slice(-2).map((call) => call[1].slice(4))).toEqual([
+      ["rev-parse", "--git-dir"],
+      ["rev-parse", "--git-common-dir"],
+    ]);
     for (const [, args] of calls) {
       expect(args.slice(0, 4)).toEqual([
         "-c",
@@ -837,9 +841,10 @@ describe("beginWorktree / cleanupWorktree", () => {
 
       expect(result.ok).toBe(true);
       // worktree add, the tracked diff, the numstat count, the apply,
-      // and the untracked listing: every one of them under the signal.
+      // the untracked listing, and both metadata directory lookups:
+      // every one of them under the signal.
       const calls = gitCalls();
-      expect(calls.length).toBe(5);
+      expect(calls.length).toBe(7);
       for (const call of calls) {
         expect(call[2].signal).toBe(controller.signal);
       }

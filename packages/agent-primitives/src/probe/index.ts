@@ -462,6 +462,10 @@ async function runProbePipeline(
   }
 
   const cwd = path.resolve(opts.cwd);
+  // Resolve once at the entry boundary. Every downstream writer,
+  // worktree cleanup and marker then uses the same absolute scratch root
+  // even when the invocation cwd changes between setup phases.
+  const logDir = path.resolve(cwd, opts.logDir);
   // The git work-tree root when there is one, else `cwd`: the same value
   // `containmentRoot` computes, kept in two variables because the lock
   // `setup.ts`'s `openRunSetup` takes has to tell "in a repository" from
@@ -533,11 +537,9 @@ async function runProbePipeline(
   if (opts.file !== undefined) {
     displayFile = path.resolve(cwd, opts.file);
   } else if (opts.form === "patch") {
-    const listing = await listPatchTouchedPaths(
-      opts.patchPath ?? "",
-      opts.logDir,
-      { timeoutMs: gitApplyTimeoutMs },
-    );
+    const listing = await listPatchTouchedPaths(opts.patchPath ?? "", logDir, {
+      timeoutMs: gitApplyTimeoutMs,
+    });
     derivationLogPaths = [listing.logPath];
     if (!listing.ok) {
       return {
@@ -686,7 +688,7 @@ async function runProbePipeline(
   // registered worktree is only ever deleted when it sits under here.
   // Never the log dir a marker recorded: a marker that supplied both
   // the path and the root to check it against would certify itself.
-  const wtScratchRoot = path.resolve(opts.logDir);
+  const wtScratchRoot = logDir;
 
   // Populated by the shared setup's `beforeBaseline` hook below as soon
   // as each becomes known, so the `finally` block's emergency-restore
@@ -721,7 +723,7 @@ async function runProbePipeline(
       root,
       gitRoot,
       realRoot,
-      logDir: opts.logDir,
+      logDir,
       wtScratchRoot,
       isolation: opts.isolation,
       allowOutside: opts.allowOutside ?? false,
@@ -1129,11 +1131,14 @@ export async function probePlan(
   const warnings: string[] = [];
   const isolationField = emptyIsolationField(opts.isolation);
   const cwd = path.resolve(opts.cwd);
+  // Keep plan runs identical to single probes: resolve the caller's
+  // relative log directory exactly once before any setup work begins.
+  const logDir = path.resolve(cwd, opts.logDir);
   const gitRoot = findGitRoot(cwd);
   const root = gitRoot ?? path.resolve(cwd);
   const realRoot = resolveDeepestExisting(root);
   const gitApplyTimeoutMs = opts.timeoutMs ?? DEFAULT_GIT_APPLY_TIMEOUT_MS;
-  const wtScratchRoot = path.resolve(opts.logDir);
+  const wtScratchRoot = logDir;
 
   /** One entry of the plan, resolved: every path in a plan file (`file`,
    * `patch`) is resolved against the invocation cwd, so one plan means
@@ -1354,7 +1359,7 @@ export async function probePlan(
       root,
       gitRoot,
       realRoot,
-      logDir: opts.logDir,
+      logDir,
       wtScratchRoot,
       isolation: opts.isolation,
       allowOutside: opts.allowOutside ?? false,

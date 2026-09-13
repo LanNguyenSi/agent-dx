@@ -112,6 +112,9 @@ export interface LinkPolicyContext {
    * content it never got the chance to look for.
    */
   trackedUnknown: boolean;
+  /** Resolved git administrative roots for this repository. These are
+   * `--git-dir` and `--git-common-dir`, which differ in a linked worktree. */
+  gitMetadataRoots?: readonly string[];
   /**
    * The isolation copy's own root, already resolved through realpath,
    * when one exists yet (`beginWorktree` calls `planLinks` after
@@ -431,11 +434,22 @@ export function nestedRepoBoundaryRelPath(
   let rel = "";
   for (const segment of segments) {
     rel = rel === "" ? segment : path.join(rel, segment);
-    if (fs.existsSync(path.join(rootReal, rel, ".git"))) {
-      return rel;
-    }
+    // Presence is the boundary, even when the entry is a dangling
+    // symlink. Following it with existsSync would turn a broken nested
+    // checkout into ordinary source and let a link write through it.
+    if (gitEntryPresent(path.join(rootReal, rel, ".git"))) return rel;
   }
   return undefined;
+}
+
+/** Entry presence, deliberately without following a dangling symlink. */
+function gitEntryPresent(entry: string): boolean {
+  try {
+    fs.lstatSync(entry);
+  } catch {
+    return false;
+  }
+  return true;
 }
 
 /** `ino`/`dev` of what `p` resolves to -- symlinks followed, the same
@@ -681,6 +695,19 @@ export function planLinks(
     // which DIRECTORY OF THE COPY a candidate names, and a string that
     // merely differs in case names the same one.
     const canonicalRel = ctx.canonicalRelPath(relPath);
+    // A linked worktree's `.git` is a file pointing at the main
+    // repository's administrative directory. Replacing it with any
+    // candidate (including an operator's own --link) would either break
+    // the copy's metadata or make later writes reach the live repository.
+    if (relContains(".git", canonicalRel)) {
+      warnings.push(
+        skippedLinkWarning(
+          candidate,
+          "it would replace the isolation copy's own git metadata",
+        ),
+      );
+      continue;
+    }
     const protectedRel = ctx.protectedRelPaths.find((p) =>
       relContains(canonicalRel, p),
     );
@@ -733,35 +760,41 @@ export function planLinks(
     // repository's, reads as untracked to `isTrackedPath` (only the
     // submodule's gitlink is an entry of the outer index, never its
     // content), so a path below it is refused by the boundary alone.
-    if (!hasOperatorLatitude(candidate)) {
-      // A target at or under the repository's OWN `.git` directory is
-      // refused outright for every candidate but an operator's own
-      // `--link` (this whole block sits under the latitude check
-      // above), before either question below is even asked:
-      // `.git` is not a tracked path (git's own index never lists it,
-      // so `isTrackedPath` answers "untracked") and it is not a nested
-      // repository's boundary either (`nestedRepoBoundaryRelPath` would
-      // look for `<root>/.git/.git`, which a plain `.git` directory
-      // does not have), so a candidate pointing straight at it (an
-      // auto-discovered `node_modules -> .git`, gitignored like any
-      // other untracked directory) reaches neither check below with a
-      // reason to refuse it. A write through such a link lands in the
-      // repository's own live git state directly, which every other
-      // guarantee this run makes assumes stays untouched.
-      const gitDirReal = resolveDeepestExisting(
-        path.join(ctx.rootReal, ".git"),
+    // A target overlapping the repository's own Git metadata is
+    // refused for every candidate, including an operator's own --link,
+    // before either question below is even asked:
+    // `.git` is not a tracked path (git's own index never lists it,
+    // so `isTrackedPath` answers "untracked") and it is not a nested
+    // repository's boundary either (`nestedRepoBoundaryRelPath` would
+    // look for `<root>/.git/.git`, which a plain `.git` directory
+    // does not have), so a candidate pointing straight at it (an
+    // auto-discovered `node_modules -> .git`, gitignored like any
+    // other untracked directory) reaches neither check below with a
+    // reason to refuse it. A write through such a link lands in the
+    // repository's own live git state directly, which every other
+    // guarantee this run makes assumes stays untouched. Overlap is
+    // symmetric: a linked worktree's main checkout contains its common
+    // Git directory, so linking that checkout exposes the metadata too.
+    const gitMetadataRoots = ctx.gitMetadataRoots ?? [
+      resolveDeepestExisting(path.join(ctx.rootReal, ".git")),
+    ];
+    const gitMetadataRoot = gitMetadataRoots.find(
+      (metadataRoot) =>
+        entryRelationTo(metadataRoot, resolved) !== undefined ||
+        entryRelationTo(resolved, metadataRoot) !== undefined,
+    );
+    if (gitMetadataRoot !== undefined) {
+      warnings.push(
+        skippedLinkWarning(
+          candidate,
+          `its target ${resolved} ${entryRelationTo(gitMetadataRoot, resolved) !== undefined ? "sits at or under" : "contains"} the repository's own git metadata (${gitMetadataRoot}); ` +
+            "a write through such a link would reach the tree's real " +
+            "git state directly",
+        ),
       );
-      if (isPathContained(gitDirReal, resolved)) {
-        warnings.push(
-          skippedLinkWarning(
-            candidate,
-            `its target ${resolved} sits at or under the repository's own git directory; ` +
-              "a write through such a link would reach the tree's real " +
-              "git state directly",
-          ),
-        );
-        continue;
-      }
+      continue;
+    }
+    if (!hasOperatorLatitude(candidate)) {
       const targetRel = linkTargetRelPath(resolved, ctx.rootReal);
       if (targetRel !== undefined && targetRel !== "") {
         const targetTracked = ctx.isTrackedPath(

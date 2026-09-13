@@ -81,7 +81,8 @@ those fixed fields)`, not `-m` unconditionally; when even that cannot be
   length, and below the marker's own size the marker itself is cut short.
 - `-l, --log-dir <dir>`: directory for logs and full (untruncated)
   results (defaults to `$AGENT_PRIMITIVES_LOG_DIR`, or a fresh directory
-  under the OS temp dir otherwise).
+  under the OS temp dir otherwise). Relative values are supported and are
+  resolved once against the invocation cwd, including `./` and `../`.
 - `--json`: a no-op alias for `-f json` (already the default), for the
   common instinct to ask for JSON explicitly. Combined with an explicit
   `-f text` it is `status: "usage_error"`, `reason: "format_conflict"`,
@@ -950,9 +951,12 @@ Every untracked, non-ignored path (`git ls-files --others
 --exclude-standard`) is synced by its own type: a regular file is
 copied; a symlink (including a dangling one) is recreated as a symlink
 pointing at the same target, never followed; a directory that is itself
-a git repository (the only shape `git ls-files` reports a directory
-path in at all) is skipped, named in a warning, rather than pulling in
-an unrelated checkout; any other entry is skipped, named in a warning
+a git repository is skipped, named in a warning, rather than pulling in
+an unrelated checkout. Every listed entry's ancestor directories below
+the source root are checked for a `.git` entry too: a dangling `.git`
+symlink remains a boundary even when Git lists the files beneath it
+individually. Presence, not target reachability, defines that boundary.
+Any other entry is skipped, named in a warning
 of its own. A path inside `--log-dir` itself (this probe's own scratch
 space, including the worktree just created) is never treated as a
 source to sync; that is decided by where the entry itself sits, so an
@@ -960,11 +964,12 @@ untracked symlink that merely points into `--log-dir` is recreated
 like any other symlink. The copy therefore carries the SAME symlink the
 source tree does: an absolute target, or a relative one resolving out
 of the copy through `..`, still reaches the real tree, so a `--pre`/`-t`
-writing through it is not isolated for that path; the sync warns when a
-recreated untracked symlink resolves outside the copy, naming the
-symlink and where it resolves. `isolation.syncedUntrackedFiles` counts the
+writing through it is not isolated for that path; after the complete
+untracked sync the copy rechecks every recreated symlink, so every hop
+of an escaping chain is warned. `isolation.syncedUntrackedFiles` counts the
 `ls-files` entries this sync acted on, not the number of files that
-ended up on disk -- a skipped entry still counts as one. A gitignored
+ended up on disk -- entries excluded by the scratch or ancestor-boundary
+filter do not count; an entry skipped by its own type still counts as one. A gitignored
 `--file` is therefore never synced either way (not tracked, and
 excluded by `--exclude-standard`); probing one under `-i worktree`
 fails fast with `reason: "target_not_synced"` rather than a raw file-not-
@@ -1095,16 +1100,24 @@ The four rules, in this order:
    resolves INTO the root while spelling a path outside it, and a target
    really named `SRC` is the tracked `src` the repository carries, which
    git's case-sensitive index would otherwise report as untracked. A
-   refusal names the target and that git tracks it. A target at or under
-   the repository's OWN `.git` directory is refused outright for every
-   candidate but an operator's own `--link`, whatever either question
-   above would otherwise answer: `.git` is not itself a
+   refusal names the target and that git tracks it. A target overlapping
+   the repository's own Git administrative or common directory is refused
+   outright for every candidate, including an operator's own `--link`,
+   whatever either question above would otherwise answer. Both directories
+   are resolved through Git, so a linked worktree's `.git` file protects
+   its real administrative directory and the main checkout's shared
+   metadata too. Overlap is symmetric and uses filesystem identity: the
+   target may neither sit inside a metadata directory nor contain one.
+   This also refuses a link from a linked worktree to its main checkout,
+   whose `.git` would otherwise become writable through that link.
+   `.git` is not itself a
    tracked path (git's own index never lists it) and it is not a nested
    repository's boundary either (that check looks for a `.git` entry
    BELOW the target, which a plain `.git` directory does not have), so
    an auto-discovered `node_modules -> .git` reaches neither question
    with a reason to refuse it; the refusal names the target and that it
-   sits at or under the repository's own git directory. A target sitting inside a
+   sits at or under, or contains, the repository's own Git metadata.
+   A target sitting inside a
    nested repository's own boundary -- a submodule's root, or a nested
    plain checkout's -- is refused the same way even though the OUTER
    index never lists its content, only the submodule's own gitlink (the
@@ -1117,7 +1130,10 @@ The four rules, in this order:
    target treated as tracked, and either refusal says the listing could
    not check rather than claiming git answered.
    `--link`, typed by the person running the probe, keeps its latitude
-   for BOTH halves; rules 1, 2 and 4 apply to it the same as to
+   for the tracked destination and target halves; the live repository's
+   administrative and common directories and the copy's own `.git`
+   metadata remain non-linkable.
+   Rules 1, 2 and 4 apply to it the same as to
    everything else. That latitude has a price worth naming: a `--link`
    that names a tracked directory, or points at one, SHARES it with the
    source tree, so a `--pre` or a `-t` that writes there writes into the

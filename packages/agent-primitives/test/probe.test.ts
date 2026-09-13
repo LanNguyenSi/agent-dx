@@ -4265,6 +4265,8 @@ describe("probe(): the single-mutant result is what it was before the plan runne
   // `"met"`, `survived` -> `"violated"`); `inplaceBaselineFailed` gets
   // none, since `expectation` is only ever present alongside a real
   // `killed`/`survived` verdict.
+  // Worktree isolation also reports both Git metadata lookup logs. Those
+  // are part of the observed worktree result, retained in the fixture.
   const RECORDED = JSON.parse(
     fs.readFileSync(
       path.join(

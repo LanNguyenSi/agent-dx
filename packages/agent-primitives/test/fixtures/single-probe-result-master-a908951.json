@@ -89,6 +89,8 @@
       "<LOGS>/wt-<id>/tracked-diff-numstat.log",
       "<LOGS>/wt-<id>/worktree-apply.log",
       "<LOGS>/wt-<id>/untracked-files.log",
+      "<LOGS>/wt-<id>/git-metadata--git-dir.log",
+      "<LOGS>/wt-<id>/git-metadata--git-common-dir.log",
       "<LOGS>/mutant-dry-run-<id>/argv-<id>.log",
       "<LOGS>/mutant-dry-run-<id>/argv-<id>.log"
     ],
