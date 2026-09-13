@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-12T13:05:00Z
+timestamp: 2026-09-13T05:32:42Z
 sources:
   - packages/orchestrator-workflow/assets/skill/SKILL.md
   - packages/orchestrator-workflow/assets/agents/explorer.md
@@ -99,7 +99,7 @@ trivial change.
   Both copies also gained a `commits` field; see
   [Commits field](#commits-field) below.
 - Reviewer: `packages/orchestrator-workflow/assets/skill/SKILL.md:554#"## Reviewer output contract"`
-  vs. `packages/orchestrator-workflow/assets/agents/reviewer.md:151#"role: reviewer"`. Both
+  vs. `packages/orchestrator-workflow/assets/agents/reviewer.md:150#"role: reviewer"`. Both
   copies gained a `reproduction` field in 0.14.0; see
   [Reproduction requirement](#reproduction-requirement-0140) below. Both
   also gained a per-finding `recurrence` field; see
@@ -221,7 +221,7 @@ site outside the edit set. It uses the existing `relevant_files` and
 `packages/orchestrator-workflow/assets/agents/task-slicer.md:50#"will not edit."`).
 The focused regression pin checks each canonical asset for the changed-value
 categories, both existing fields, every reference site, and the annotation
-requirement (`packages/orchestrator-workflow/test/docs-consistency.test.ts:4658#"requires reference sites to be annotated in the existing task fields"`).
+requirement (`packages/orchestrator-workflow/test/docs-consistency.test.ts:4663#"requires reference sites to be annotated in the existing task fields"`).
 
 The scope-boundary wording is pinned independently
 (`packages/orchestrator-workflow/test/docs-consistency.test.ts:925#"not implementation instructions"`).
@@ -240,7 +240,7 @@ fails instead. Supporting checks in the same suite: both slicer-output copies
 the newer fields (`test/docs-consistency.test.ts:856#"cursor = idx;"`); `02-tasks.md`'s
 sections retain the existing scope fields, with a v1 contract block and a
 non-normative criterion-ID checklist
-(`test/docs-consistency.test.ts:865-882#"cursor = idx;"`;
+(`test/docs-consistency.test.ts:882#"cursor = idx;"`;
 `test/acceptance-baseline.test.ts:256-263#"else assertCriteriaShape(block);"`;
 `test/acceptance-baseline.test.ts:387-393#"original contract, keep the original checklist semantics"`); and `task-slicer.md` must frame
 `allowed_changes`/`forbidden_changes` as scope boundaries for the
@@ -489,25 +489,25 @@ contract itself
 (`packages/orchestrator-workflow/assets/skill/SKILL.md:317#"reports as killed together with their"`);
 `assets/agents/reviewer.md` itself is untouched by this change.
 
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:4758#"On any round after the task's first, the briefing also names"` pins step 6's
-instruction, `test/docs-consistency.test.ts:4770#"or which can no longer be applied (reason:"`
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:4763#"On any round after the task's first, the briefing also names"` pins step 6's
+instruction, `test/docs-consistency.test.ts:4775#"or which can no longer be applied (reason:"`
 pins the regression-signal consequence, and the implementer prompt's
 matching rules
-(`test/docs-consistency.test.ts:4776#"On any round after the task's first, the assignment also names"`,
-`test/docs-consistency.test.ts:4788#"resolve it before the next reviewer spawn"`). A byte-for-byte
+(`test/docs-consistency.test.ts:4781#"On any round after the task's first, the assignment also names"`,
+`test/docs-consistency.test.ts:4793#"resolve it before the next reviewer spawn"`). A byte-for-byte
 cross-copy equality check on the `mutation_probes` block including the new
-sub-field (`test/docs-consistency.test.ts:4827#"replayed: false | true"`), the step 7 reviewer-briefing
-sentence (`test/docs-consistency.test.ts:4833#"the orchestrator's reviewer briefing names the replayed probes"`), and a
+sub-field (`test/docs-consistency.test.ts:4832#"replayed: false | true"`), the step 7 reviewer-briefing
+sentence (`test/docs-consistency.test.ts:4838#"the orchestrator's reviewer briefing names the replayed probes"`), and a
 negative pin scoped to `reviewer.md`'s output-contract yaml block, that it
 gains no `replayed` field, sliced from the output-contract heading rather
 than the first yaml fence in the file so an earlier decoy fence cannot be
 mistaken for it
-(`test/docs-consistency.test.ts:4874#"outputContractBlock).not.toContain"`). A further pin locks the eleven
+(`test/docs-consistency.test.ts:4879#"outputContractBlock).not.toContain"`). A further pin locks the eleven
 `mutation_probes` sub-fields to their fixed order in both copies (grown
 from five at this rule's own introduction to ten, then to eleven, under
 task 06330af2, see Mutation probe definition fields and expectation
 split below)
-(`test/docs-consistency.test.ts:4877#"both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order"`).
+(`test/docs-consistency.test.ts:4882#"both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order"`).
 
 Motivation: `lava-ice-logs/2026-09-05/ow-kit-effort-analysis.md` section
 7(ii) found fix-round regressions from a prior round's own fix that a
@@ -520,13 +520,13 @@ round on it; see `packages/orchestrator-workflow/CHANGELOG.md`'s
 
 The reviewer output contract gained a per-finding `recurrence: new |
 repeated` field, added to both copies identically
-(`packages/orchestrator-workflow/assets/skill/SKILL.md:571#"recurrence: new | repeated"` and
-`packages/orchestrator-workflow/assets/agents/reviewer.md:160#"recurrence: new | repeated"`, same field, same
+(`packages/orchestrator-workflow/assets/skill/SKILL.md:570#"recurrence: new | repeated"` and
+`packages/orchestrator-workflow/assets/agents/reviewer.md:159#"recurrence: new | repeated"`, same field, same
 line-relative position inside the findings item in both). It classifies
 each finding against earlier review rounds on the same task: `new` for a
 defect class not previously found there, `repeated` for one that already
 appeared; on a task's first round every finding is `new` by definition
-(`SKILL.md:596#"Review-round escalation budget's trigger."`). The
+(`SKILL.md:595#"Review-round escalation budget's trigger."`). The
 installed `reviewer.md:73#"classify each finding as"`
 prompt instructs the classification directly, gated on the orchestrator
 having named the review round number in the briefing (a step 7 addition,
@@ -598,12 +598,12 @@ a dedicated pin on the `reason` requiredness rule
 (`test/docs-consistency.test.ts:1155#"is required exactly when result is not_applicable, empty otherwise"`),
 a fixed-order pin locking all eleven sub-fields to their exact order in
 both copies
-(`test/docs-consistency.test.ts:4877#"both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order"`),
+(`test/docs-consistency.test.ts:4882#"both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order"`),
 and a template agreement pin that derives the
 `04-implementation-summary.md` Mutation Probes table's columns and the
 `mutation_probes` contract's sub-field list programmatically and asserts
 they agree, so the new `reason` column and sub-field cannot drift apart
-(`packages/orchestrator-workflow/test/template-markers.test.ts:370#"the template's Mutation Probes columns and the mutation_probes contract's sub-field list agree"`).
+(`packages/orchestrator-workflow/test/template-markers.test.ts:384#"the template's Mutation Probes columns and the mutation_probes contract's sub-field list agree"`).
 
 ## Commits field
 

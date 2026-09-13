@@ -312,7 +312,7 @@ directory and the subagents.
    marks each finding's `recurrence` as `new` or `repeated` against the earlier
    rounds it was told about, which is what lets the orchestrator detect the
    Review-round escalation budget's trigger (see below) without re-deriving it
-   by hand. When the implementer's report replays a prior round's mutation
+   by hand. The reviewer classifies every finding with the `introduced_by_delta` field (`yes`, `no`, or `unknown`); it sets `no` only after naming a base build and replaying the same reproduction in `reproduction`, and transfers it through the ordinary gate (not bounded-round guidance, which considers only `yes`/`unknown`). When the implementer's report replays a prior round's mutation
    probe, the orchestrator's reviewer briefing names the replayed probes the
    implementer reports as killed together with their mutant definition
    (`file`, `anchor`, `before`, `after`) and `verified_applied_via` value,
@@ -556,7 +556,6 @@ background monitor is no substitute for those returns.
 The output shape remains the same for either selected contract. Compare the
 delegated versioned records and producer evidence under Contract selection
 above; a recommendation does not replace orchestrator acceptance.
-
 ```yaml
 status: reviewed
 role: reviewer
@@ -569,6 +568,7 @@ findings:
     description: ""
     suggested_fix: ""
     recurrence: new | repeated
+    introduced_by_delta: yes | no | unknown
 acceptance_recommendation: accept | accept_with_notes | fix_required | reject
 missing_tests:
   - ""
@@ -584,7 +584,6 @@ withdrawn:
   - description: ""
     reason: ""
 ```
-
 `acceptance_recommendation` is mandatory: every reviewer return must set it.
 When it is missing, the orchestrator asks the reviewer to resupply it
 instead of inferring one from the findings list.
@@ -594,6 +593,7 @@ task: `new` for a defect class not previously found here, `repeated` for
 one that already appeared in an earlier round. On a task's first review
 round every finding is `new` by definition. This is what feeds the
 Review-round escalation budget's trigger.
+`introduced_by_delta` records whether a finding is attributable to the reviewed delta: `no` requires a named base build and replay in `reproduction`, is transferred to `05-review-findings.md` without renaming `Severity`/`Decision`, and follows the ordinary gate; only `yes`/`unknown` participate in bounded-round rules.
 
 `method_applied` echoes the `review_method` named in the briefing (see step
 7); `withdrawn` lists each finding the reviewer proposed and then retracted
@@ -765,7 +765,7 @@ review and never satisfies the review gate, since review is never skipped.
 The signal: a review round finds a new defect of the same class a previous
 round's fix already addressed, so the class has recurred once after being
 fixed, and the next fix would again be case-by-case enumeration (boundary
-tokens, spellings, and similar one-off patches). Stop the first time this
+tokens, spellings, and similar one-off patches). Apply this signal only to `introduced_by_delta: yes`/`unknown`; `no` continues through the ordinary finding gate. Stop the first time this
 signal fires: the recurrence is already the class's second occurrence, so
 do not wait for a third one before stopping. Name the structural cause in
 one sentence, and decide to split or redesign rather than keep accreting
@@ -786,7 +786,7 @@ first, choose one of three escalations instead of running another round
 the same way. A counted round is a completed reviewer return whose
 `acceptance_recommendation` is `fix_required` or `reject`; a misfired
 review is not a round (see Subagent misfire rule); the escalation is
-chosen once the third such round has returned, before the next attempt
+chosen once the third such round arising from a `yes` or `unknown` finding has returned; a `no` finding is handled by the ordinary gate before the next attempt
 starts. The escalation is chosen in addition to the halt rule's
 split-or-redesign response, not instead of it.
 

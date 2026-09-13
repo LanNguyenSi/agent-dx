@@ -2659,7 +2659,12 @@ describe("cli-inputs.ts's --profile prompt labels are derived from rolesForProfi
 describe("no output-contract field in SKILL.md uses a bare yes/no enum (review round 1, M4)", () => {
   it("scans SKILL.md for any field using a bare yes | no enum", () => {
     const skillMd = readAsset("skill/SKILL.md");
-    expect(skillMd).not.toMatch(/:\s*yes\s*\|\s*no\b/);
+    const enums = [
+      ...skillMd.matchAll(/([a-z_]+):\s*yes\s*\|\s*no(?:\s*\|\s*unknown)?\b/g),
+    ];
+    expect(enums.map((match) => match[0])).toEqual([
+      "introduced_by_delta: yes | no | unknown",
+    ]);
   });
 });
 

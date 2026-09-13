@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-09-12T13:05:00Z
+timestamp: 2026-09-13T05:32:42Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/skill/SKILL.md
@@ -34,6 +34,17 @@ every change; only the size of the apparatus changes."
 ## Severity ladder and what blocks
 
 ## Decision authority is separate from a review recommendation
+
+## Delta attribution and bounded review rounds
+
+Every reviewer finding records `introduced_by_delta: yes | no | unknown`.
+A `no` attribution needs a named base build and a replay of the same
+reproduction. It remains a finding under the ordinary gate and is written in
+the `Introduced by Delta` column without renaming the load-bearing `Severity`
+or `Decision` headers (packages/orchestrator-workflow/assets/templates/05-review-findings.md:16#"| Severity | Category | Description | Suggested Fix | Decision | Introduced by Delta |").
+Only `yes` and `unknown` findings feed the bounded round-2 halt and escalation
+rules; this prevents a reproduced pre-existing issue from consuming the
+delta's bounded-review budget.
 
 A reviewer supplies findings and `acceptance_recommendation`; the
 orchestrator decides acceptance after applying the review gate. The new
@@ -71,7 +82,7 @@ them. Unknown provenance is resolved before dependent delegation; missing
 fields never choose the contract.
 
 Reviewer findings carry `severity: low | medium | high | critical`
-(`SKILL.md:567#"severity: low | medium | high | critical"`, reviewer output contract). Only high and critical block
+(`SKILL.md:566#"severity: low | medium | high | critical"`, reviewer output contract). Only high and critical block
 acceptance: "High or critical reviewer findings block final acceptance until
 fixed or explicitly waived... the gate applies to every review pass,
 including the orchestrator's own review of a trivial change"
@@ -84,7 +95,7 @@ per-finding `Decision` column (below) and the whole-review
 `acceptance_recommendation: accept | accept_with_notes | fix_required |
 reject` (`SKILL.md:572#"acceptance_recommendation: accept | accept_with_notes |"`; mirrored in the findings template's Acceptance
 Recommendation section,
-`packages/orchestrator-workflow/assets/templates/05-review-findings.md:31#"accept | accept_with_notes | fix_required | reject"`).
+`packages/orchestrator-workflow/assets/templates/05-review-findings.md:32#"accept | accept_with_notes | fix_required | reject"`).
 A review can recommend `fix_required` overall while individual low findings
 carry Decision `accepted`; the gate only inspects Decision on high/critical
 rows. Since 0.16.0 the field is hard-mandatory, not just conventionally
@@ -142,10 +153,10 @@ rules above.
 For an eligible closure, record the concrete verification in a
 `05-review-findings.md` row without changing its Severity or Decision headers,
 and set the row's Decision to `accepted`
-(`SKILL.md:346#"unchanged and setting Decision to"`; `05-review-findings.md:14-16#"| Severity | Category | Description | Suggested Fix | Decision |"`).
+(`SKILL.md:346#"unchanged and setting Decision to"`; `05-review-findings.md:16#"| Severity | Category | Description | Suggested Fix | Decision |"`).
 No reader or template schema changes: the existing Decision legend and all
 high/critical waiver and escalation rules continue to apply. The policy is
-pinned in `test/docs-consistency.test.ts:4683#"docs-only closing deltas stay narrowly bounded"`.
+pinned in `test/docs-consistency.test.ts:4688#"docs-only closing deltas stay narrowly bounded"`.
 
 ## The Decision legend in 05-review-findings.md
 
@@ -188,11 +199,11 @@ already-correct-header statement within that entry).
 
 Two machine-readable markers sit next to the prose gate: `<!--
 solution-acceptance: acceptance-recommendation = TODO -->`
-(`05-review-findings.md:33#"<!-- solution-acceptance: acceptance-recommendation = TODO -->"`) and `<!-- solution-acceptance: final-status =
+(`05-review-findings.md:34#"<!-- solution-acceptance: acceptance-recommendation = TODO -->"`) and `<!-- solution-acceptance: final-status =
 TODO -->` (`06-handoff.md:43#"<!-- solution-acceptance: final-status = TODO -->"`). SKILL.md instructs replacing `TODO` with the
 chosen enum value when finalizing each file (`SKILL.md:377#"non-accepting (fail-closed)."`). Left as
 `TODO`, the harness solution-acceptance gate reads the run as non-accepting.
-`packages/orchestrator-workflow/test/template-markers.test.ts:11-41#"<!-- solution-acceptance: run-base = TODO -->"` pins
+`packages/orchestrator-workflow/test/template-markers.test.ts:41#"<!-- solution-acceptance: run-base = TODO -->"` pins
 exactly one marker per template, each defaulting to `TODO`. This is a
 different fail-closed design than the run-base marker, which fails open; see
 [run-state-lifecycle-and-markers.md](run-state-lifecycle-and-markers.md).
@@ -210,7 +221,7 @@ Accepted Waivers` heading and its `Finding | Severity | Rationale` header
 (test lines 132-135). A negative pin (test lines 137-141) guards against a
 superseded softer wording, "addressed or consciously accepted by the
 orchestrator", reappearing in `agents-md-section.md`. A second suite,
-`test/template-markers.test.ts:197-249#"expect(reviewTemplate).toMatch(/arms? the"`, independently pins the
+`test/template-markers.test.ts:250#"expect(reviewTemplate).toMatch(/arms? the"`, independently pins the
 findings-table header convention and the Decision-legend vocabulary above.
 
 ## Misfire rule's review-gate consequence (0.11.0)
@@ -266,7 +277,7 @@ live, the misfire rule) are out of scope here; see
 previously forced a reviewer return to set `acceptance_recommendation` at
 all, so the orchestrator could be left inferring a verdict from the findings
 list alone. The field is now hard-mandatory in both output-contract copies:
-`SKILL.md:590#"instead of inferring one from the findings list."` states it and adds the orchestrator's response when it is
+`SKILL.md:589#"instead of inferring one from the findings list."` states it and adds the orchestrator's response when it is
 missing — ask the reviewer to resupply it, rather than infer one from the
 findings, and the installed `reviewer.md:109#"never leave it blank or omit it."` prompt carries the mirrored
 second-person rule ("always set it in your output; never leave it blank or

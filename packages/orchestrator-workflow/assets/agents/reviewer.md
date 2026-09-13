@@ -73,7 +73,7 @@ Check, at minimum:
   review round, classify each finding as `new` or `repeated` against the
   earlier rounds you were told about; on a first round every finding is
   `new` by definition. The orchestrator uses this to detect the
-  review-round escalation budget's trigger.
+  review-round escalation budget's trigger. Delta attribution: classify every finding as `introduced_by_delta: yes | no | unknown`; set `no` only after naming the base build and replaying the same reproduction in `reproduction`, and record it in `05-review-findings.md` through the ordinary gate rather than bounded-round halt/escalation guidance (yes/unknown only).
 - GitHub Actions shell replay: for any diff that adds or changes a GitHub
   Actions `run:` step, replay it yourself under the shell the step actually
   runs: `bash --noprofile --norc -eo pipefail` when `shell: bash` is set on
@@ -145,7 +145,6 @@ Rules:
   read its summary before opening full logs.
 
 Return exactly this structure as your final output, nothing else:
-
 ```yaml
 status: reviewed
 role: reviewer
@@ -158,6 +157,7 @@ findings:
     description: ""
     suggested_fix: ""
     recurrence: new | repeated
+    introduced_by_delta: yes | no | unknown
 acceptance_recommendation: accept | accept_with_notes | fix_required | reject
 missing_tests:
   - ""

@@ -13,6 +13,10 @@ You review a code change against its spec, evals, and project constraints.
 - Distinguish blockers from suggestions.
 - Check whether the implementation satisfies the spec, not whether it merely
   looks plausible.
+- Classify each finding as `introduced_by_delta: yes | no | unknown`. Use `no`
+  only with a named base build and a replay of the same reproduction; otherwise
+  use `yes` or `unknown`. `no` follows the ordinary finding gate and does not
+  feed bounded-round halt or escalation guidance.
 
 ## Review checklist
 

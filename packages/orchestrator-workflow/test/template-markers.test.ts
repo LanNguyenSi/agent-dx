@@ -208,6 +208,7 @@ describe("05-review-findings.md findings-table header convention", () => {
       .map((cell) => cell.trim().toLowerCase());
     expect(cells).toContain("severity");
     expect(cells).toContain("decision");
+    expect(cells).toContain("introduced by delta");
   });
 
   it("documents the header as load-bearing above the table", () => {
@@ -231,7 +232,7 @@ describe("05-review-findings.md findings-table header convention", () => {
       .split("|")
       .slice(1, -1)
       .map((cell) => cell.trim());
-    const decisionCell = cells[cells.length - 1];
+    const decisionCell = cells[cells.indexOf("accepted/defer")];
     const tokens = decisionCell
       .split("/")
       .map((token) => token.trim())
@@ -269,7 +270,7 @@ describe("05-review-findings.md placeholder-row fail-closed convention", () => {
     // Mutation-check: editing any cell of this row (including the HTML-comment
     // placeholders) fails this assertion.
     expect(reviewTemplate).toContain(
-      "| low/medium/high/critical | correctness/architecture/security/tests/maintainability/performance/docs | <!-- finding --> | <!-- fix --> | accepted/defer |",
+      "| low/medium/high/critical | correctness/architecture/security/tests/maintainability/performance/docs | <!-- finding --> | <!-- fix --> | accepted/defer | yes/no/unknown |",
     );
   });
 
@@ -278,6 +279,19 @@ describe("05-review-findings.md placeholder-row fail-closed convention", () => {
     // when transferring findings, delete it for a genuine zero-findings review.
     expect(reviewTemplate).toMatch(/replace this row/i);
     expect(reviewTemplate).toMatch(/zero-findings review, delete this row/i);
+  });
+});
+
+describe("05-review-findings.md preserves per-finding delta attribution", () => {
+  const reviewTemplate = readAsset("templates/05-review-findings.md");
+
+  it("records the reviewer contract's three attribution values without changing the load-bearing headers", () => {
+    expect(reviewTemplate).toContain(
+      "| Severity | Category | Description | Suggested Fix | Decision | Introduced by Delta |",
+    );
+    expect(reviewTemplate).toContain("| yes/no/unknown |");
+    expect(reviewTemplate).toContain("named base build and replay");
+    expect(reviewTemplate).toContain("ordinary finding gate");
   });
 });
 
