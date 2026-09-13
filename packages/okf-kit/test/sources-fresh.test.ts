@@ -1274,6 +1274,64 @@ describe("sources-fresh", () => {
       expect(calls).toHaveLength(sources.length + 5 + 1);
     });
 
+    it("reads the top-level path frame (`git rev-parse --show-prefix`) once per RUN, not once per doc", () => {
+      // Two docs, each with its own sources and each driven down the
+      // longest re-stamp path (touched last without a re-stamp), so a
+      // per-doc read of the show prefix would show up as 2 while the
+      // per-doc budget of 5 holds for each; a one-doc fixture cannot tell
+      // the two apart.
+      const calls: string[][] = [];
+      const countingGit: RunGit = (args, cwd) => {
+        calls.push(args);
+        return runGit(args, cwd);
+      };
+      const docs = [
+        { relPath: "bundle/one.md", source: "one.ts" },
+        { relPath: "bundle/two.md", source: "two.ts" },
+      ];
+      const docText = (source: string, body: string): string =>
+        `---\ntype: concept\ntimestamp: ${STAMP}\nsources:\n  - ${source}\n---\n\n# Doc\n${body}`;
+      repo.commitFiles(
+        docs.flatMap(({ relPath, source }) => [
+          { relPath, content: docText(source, "") },
+          { relPath: source, content: "export const v = 1;\n" },
+        ]),
+        "2026-01-01T00:00:00Z",
+      );
+      repo.commitFiles(
+        docs.map(({ source }) => ({
+          relPath: source,
+          content: "export const v = 2;\n",
+        })),
+        "2026-02-01T00:00:00Z",
+      );
+      repo.commitFiles(
+        docs.map(({ relPath, source }) => ({
+          relPath,
+          content: docText(source, "\nprose\n"),
+        })),
+        "2026-03-01T00:00:00Z",
+      );
+
+      const ctx = loadBundle(
+        path.join(repo.dir, "bundle"),
+        repo.dir,
+        countingGit,
+      );
+      const findings = sourcesFreshRule.run(ctx);
+      expect(findings).toHaveLength(docs.length);
+
+      const perRunCalls = calls.filter(
+        (args) => args[0] === "rev-parse" && args[1] === "--show-prefix",
+      );
+      const perSourceCalls = calls.filter((args) =>
+        docs.some(({ source }) => args[args.length - 1] === source),
+      );
+      expect(perRunCalls).toHaveLength(1);
+      expect(perSourceCalls).toHaveLength(docs.length);
+      expect(calls).toHaveLength(docs.length + docs.length * 5 + 1);
+    });
+
     it("a failed rev-parse on a parentless doc commit -> not assessable, never a silent pass", () => {
       // Pins the "a failed git call ... is treated as shallow" branch in
       // isShallowRepoShared (`out === null ? true : ...`): stubs ONLY the
