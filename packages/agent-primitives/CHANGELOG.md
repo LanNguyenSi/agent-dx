@@ -32,24 +32,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in-root value otherwise, never skipped to the later checks. An
   operator's own `--link` is unchanged: it is judged on where it sits,
   and its target keeps the link policy's sibling latitude at every
-  length. The same walk now places a relative hop physically rather
-  than lexically: a target that climbs with `..` through a symlinked
+  length. The same walk now places every hop physically rather than
+  lexically, through one resolver (`resolvePhysicalLocation`) with one
+  rule: a `..` is only ever applied to a prefix that resolved
+  physically. A target that climbs with `..` through a symlinked
   component (`oracle -> sub/../name`, `sub` itself a link to a directory
   outside the root) was collapsed by `path.resolve` to the in-root
   `<root>/name` before the filesystem was consulted, so the link read as
   contained, was existence-checked on its real chain (disclosing
   directory, file, or nothing at the far end) and, for a directory,
   linked through into the isolation copy where the test command wrote
-  through it outside the root; it is now judged where the OS takes it
-  and receives the same uniform refusal (`resolveLinkHop`, on
-  `fs.realpathSync.native`, since the JavaScript `fs.realpathSync`
-  normalises its argument lexically first). The worktree sync's own
-  escape warning for a copied untracked symlink resolves the same way.
-  The suite now runs an existing/missing parity check over chain lengths
-  1, 2, 3, 32, 63, 64 and 65 in all three lanes, and the `sub/../name`
-  shape with a directory, a file and nothing at the far end in the
-  repository-content lanes, asserting that no link is created and the
-  test command never runs.
+  through it outside the root; the same shape spelled absolutely
+  (`oracle -> <root>/sub/../name`) was handed back verbatim and
+  collapsed the same way by the JavaScript `fs.realpathSync` at the
+  chain's end; and a `..` after a component the filesystem could not
+  resolve (`oracle -> dang/../x`, `dang` a dangling link to an
+  out-of-root path) was re-joined lexically onto the deepest existing
+  prefix, so the answer differed by whether that out-of-root path
+  existed. Every such chain is now judged where the OS takes it, or
+  refused when it cannot be placed, with the same uniform
+  `file_outside_root` wording naming only the in-root value; a chain
+  longer than the cap, or a cycle, receives that same refusal rather
+  than the OS's `ELOOP` errno, since the existence check is no longer
+  consulted for a chain the walk could not place. Nothing on a
+  readlink-derived path goes through `path.resolve`, `path.join` or
+  `fs.realpathSync` any more. The worktree sync's own escape warning
+  for a copied untracked symlink resolves through the same walk and,
+  for a link it cannot place, now says so instead of judging a lexical
+  stand-in as contained. The suite now runs an existing/missing parity
+  check over chain lengths 1, 2, 3, 32, 63, 64 and 65 in all three
+  lanes; the `sub/../name` shape, relative and absolute, with a
+  directory, a file and nothing at the far end in the repository-content
+  lanes, asserting that no link is created and the test command never
+  runs; the `dang/../x` shape once with and once without the named
+  out-of-root path, asserting the identical envelope; and the resolver's
+  own rule on a dangling, an unsearchable and a file component before a
+  `..`.
 
 - `probe`/`--plan` with `--pre` and `-i inplace` (the default) now
   re-run `--pre` once more after the last mutant is restored, so a

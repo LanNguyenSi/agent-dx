@@ -1520,20 +1520,27 @@ install; its target follows the shared link policy instead. Repository-content
 plan/defaults entries remain target-strict, so an in-root symlink they name
 that resolves outside the root still receives the uniform refusal regardless
 of whether nothing, a file, or a directory happens to sit at that target.
-A relative hop is placed the way the filesystem follows it, not the way a
-lexical path normalisation spells it: a target that climbs with `..` through
-a symlinked component (`oracle -> sub/../name` with `sub` itself a link to a
+A hop, relative or absolute, is placed the way the filesystem follows it,
+not the way a lexical path normalisation spells it: a target that climbs
+with `..` through a symlinked component (`oracle -> sub/../name`, or the
+same shape spelled `<root>/sub/../name`, with `sub` itself a link to a
 directory outside the root) is judged at `<that directory's parent>/name`,
 where the OS takes it, so it receives the same uniform refusal rather than
 being read as an in-root path that happens not to exist, linked through
-into the isolation copy, and written through by the test command.
-The whole symlink chain is followed for that decision, up to 64 links, and
-a chain of exactly 64 links is decided on its far end; a longer chain, or a
-cycle, is refused without the containment question ever being asked (the OS
+into the isolation copy, and written through by the test command. A `..`
+is only ever applied to a prefix the filesystem resolved: when the
+component before it cannot be resolved (a dangling link, a directory this
+process cannot search, a file where a directory was expected), the chain
+is refused with that same uniform wording rather than collapsed lexically,
+so the answer never depends on whether an out-of-root path that component
+names happens to exist. The whole symlink chain is followed for that
+decision, up to 64 links, and a chain of exactly 64 links is decided on its
+far end; a longer chain, or a cycle, is refused the same way, without the
+containment question or the existence check ever being asked (the OS
 itself stops following a chain earlier than that, at 32 links on macOS and
-40 on Linux, and reports `ELOOP`, which is refused the same non-disclosing
-way). The bound sits above every OS's own limit so that the chain walk's
-decision, not the OS's, always answers for a chain the OS can still follow.
+40 on Linux). The bound sits above every OS's own limit so that the chain
+walk's decision, not the OS's, always answers for a chain the OS can still
+follow.
 
 `--allow-outside` disables that later containment check, and with it
 the ordering the previous paragraph describes -- for `-i worktree` the

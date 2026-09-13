@@ -23,6 +23,7 @@ import {
   resolveDeepestExisting,
   resolveLinkHop,
   resolveLinkSourceTarget,
+  resolvePhysicalLocation,
 } from "../src/probe/containment.js";
 import {
   beginWorktree,
@@ -2067,31 +2068,23 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
       it.each(CHAIN_LENGTHS)("chain of %i links", async (length) => {
         const { existing, missing, outside } = await chainPair(lane, length);
 
-        // Up to the cap the walk itself decides, and the answer is the
-        // containment refusal. One link past it the walk gives up and
-        // the OS (whose own limit is lower still) reports `ELOOP` for
-        // the whole chain, so both sides get the identical errno
-        // refusal instead; what matters is that the two never differ.
-        const expectedReason =
-          length > MAX_LINK_SOURCE_HOPS
-            ? "link_source_not_found"
-            : "file_outside_root";
-        expect(existing.reason).toBe(expectedReason);
-        expect(missing.reason).toBe(expectedReason);
+        // Up to the cap the walk itself decides where the chain ends;
+        // one link past it the walk gives up and the link is refused
+        // without the existence check ever being consulted (the OS's
+        // own `ELOOP` for the whole chain is never surfaced, since an
+        // errno that differs by what sits at the far end would be the
+        // same disclosure). Either way the answer is the containment
+        // refusal, and the two sides never differ.
+        expect(existing.reason).toBe("file_outside_root");
+        expect(missing.reason).toBe("file_outside_root");
         expect(missing.status).toBe(existing.status);
         for (const warning of [...existing.warnings, ...missing.warnings]) {
           expect(warning).not.toContain("does not exist");
           expect(warning).not.toContain("is not a directory");
-          if (length <= MAX_LINK_SOURCE_HOPS) {
-            expect(warning).not.toContain("could not be checked");
-          }
+          expect(warning).not.toContain("could not be checked");
           // The refusal names the in-root value only, never where the
           // chain ends.
           expect(warning).not.toContain(outside);
-        }
-        if (length > MAX_LINK_SOURCE_HOPS) {
-          expect(existing.warnings.join(" ")).toContain("could not be checked");
-          expect(missing.warnings.join(" ")).toContain("could not be checked");
         }
       });
     },
@@ -2245,13 +2238,25 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
   type FarEnd = "directory" | "file" | "missing";
   const FAR_ENDS: readonly FarEnd[] = ["directory", "file", "missing"];
 
+  /** How the `oracle` link spells its target: `sub/../far-end` relative
+   * to its own directory, or `<repo>/sub/../far-end` absolutely. Both
+   * carry the same `..` through the same symlinked component, and an
+   * absolute target handed back verbatim to a lexical resolver collapses
+   * exactly like a relative one spliced with `path.resolve`. */
+  type Spelling = "relative" | "absolute";
+  const SPELLINGS: readonly Spelling[] = ["relative", "absolute"];
+
   /** A repository whose tracked `sub` links to a directory OUTSIDE the
    * root and whose untracked `oracle` climbs from where `sub` points:
-   * `oracle -> sub/../far-end`. To the OS that is `<outside>/far-end`;
-   * a lexical `path.resolve` spells it `<repo>/far-end`, in-root and
-   * nonexistent. Returns the out-of-root directory and the marker path
-   * a test command writing through `oracle` would create there. */
-  function dotDotRepo(farEnd: FarEnd): {
+   * `oracle -> sub/../far-end` (or the same shape spelled absolutely).
+   * To the OS that is `<outside>/far-end`; a lexical `path.resolve`
+   * spells it `<repo>/far-end`, in-root and nonexistent. Returns the
+   * out-of-root directory and the marker path a test command writing
+   * through `oracle` would create there. */
+  function dotDotRepo(
+    farEnd: FarEnd,
+    spelling: Spelling = "relative",
+  ): {
     repo: string;
     outside: string;
     marker: string;
@@ -2268,8 +2273,11 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
     git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "sub"]);
     // Joined on `path.sep` on purpose: `path.join` would collapse the
     // `..` lexically and the link would not carry the shape under test.
+    const relativeTarget = ["sub", "..", "far-end"].join(path.sep);
     fs.symlinkSync(
-      ["sub", "..", "far-end"].join(path.sep),
+      spelling === "relative"
+        ? relativeTarget
+        : `${repo}${path.sep}${relativeTarget}`,
       path.join(repo, "oracle"),
     );
     return { repo, outside, marker: path.join(target, "ESCAPED") };
@@ -2281,13 +2289,19 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
   const MARKER_TEST_COMMAND =
     "node fixture.test.js && node -e \"require('fs').writeFileSync('oracle/ESCAPED', '')\"";
 
-  describe.each(CHAIN_LANES.filter((lane) => lane !== "--link"))(
-    "repository-content lane %s: a link that climbs with .. through an out-of-root symlinked component is judged where the OS takes it, never on its lexical in-root spelling",
-    (lane) => {
+  const LANE_SPELLINGS: readonly [ChainLane, Spelling][] = CHAIN_LANES.filter(
+    (lane) => lane !== "--link",
+  ).flatMap((lane) =>
+    SPELLINGS.map((spelling): [ChainLane, Spelling] => [lane, spelling]),
+  );
+
+  describe.each(LANE_SPELLINGS)(
+    "repository-content lane %s, %s target: a link that climbs with .. through an out-of-root symlinked component is judged where the OS takes it, never on its lexical in-root spelling",
+    (lane, spelling) => {
       it.each(FAR_ENDS)(
         "oracle -> sub/../far-end with a %s at the far end answers file_outside_root, links nothing and never runs the test command",
         async (farEnd) => {
-          const { repo, outside, marker } = dotDotRepo(farEnd);
+          const { repo, outside, marker } = dotDotRepo(farEnd, spelling);
 
           const answer = await probeChainLane(
             lane,
@@ -2316,7 +2330,7 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
       it("the three far ends get the identical answer", async () => {
         const answers = await Promise.all(
           FAR_ENDS.map(async (farEnd) => {
-            const { repo } = dotDotRepo(farEnd);
+            const { repo } = dotDotRepo(farEnd, spelling);
             const answer = await probeChainLane(lane, repo, "oracle");
             // The only thing that legitimately differs is the repo path.
             return {
@@ -2352,10 +2366,18 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
     expect(
       resolveLinkHop(oracle, ["sub", "..", "no-dir", "missing"].join(path.sep)),
     ).toBe(path.join(outside, "no-dir", "missing"));
-    // An absolute target is handed back untouched: the OS resolves it.
+    // An absolute target goes through the same physical placement: the
+    // same `..` through the same symlinked component climbs from where
+    // `sub` points, not from `sub`'s lexical parent.
     expect(resolveLinkHop(oracle, path.join(outside, "far-end"))).toBe(
       path.join(outside, "far-end"),
     );
+    expect(
+      resolveLinkHop(oracle, [root, "sub", "..", "far-end"].join(path.sep)),
+    ).toBe(path.join(outside, "far-end"));
+    expect(
+      resolveLinkHop(oracle, [root, "sub", "..", "missing"].join(path.sep)),
+    ).toBe(path.join(outside, "missing"));
     // The lexical spelling this replaces, for contrast.
     expect(path.resolve(root, "sub", "..", "far-end")).toBe(
       path.join(root, "far-end"),
@@ -2383,6 +2405,154 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
     expect(resolveLinkSourceTarget(path.join(root, "missing"))).toBe(
       path.join(outside, "missing"),
     );
+  });
+
+  /** Whether the out-of-root path the symlinked component names exists. */
+  type Named = "exists" | "missing";
+  const NAMED: readonly Named[] = ["exists", "missing"];
+
+  /** A repository whose tracked `dang` links to `<outside>/gone` and
+   * whose untracked `oracle` climbs from there: `oracle -> dang/../x`.
+   * With `gone` present the OS takes that to `<outside>/x`; with `gone`
+   * absent the lookup fails at `dang`, and a resolver that walked up
+   * past the failure and re-joined `../x` lexically would spell it
+   * `<repo>/x`, in-root, nonexistent, and existence-checked: the two
+   * repositories then answer differently by nothing but whether an
+   * out-of-root path exists. */
+  function danglingComponentRepo(named: Named): {
+    repo: string;
+    outside: string;
+  } {
+    useLockDir();
+    const outside = fs.realpathSync(makeTmpDir());
+    if (named === "exists") fs.mkdirSync(path.join(outside, "gone"));
+    const repo = initRealpathRepo();
+    fs.symlinkSync(path.join(outside, "gone"), path.join(repo, "dang"));
+    git(repo, ["add", "dang"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "dang"]);
+    fs.symlinkSync(
+      ["dang", "..", "x"].join(path.sep),
+      path.join(repo, "oracle"),
+    );
+    return { repo, outside };
+  }
+
+  describe.each(CHAIN_LANES.filter((lane) => lane !== "--link"))(
+    "repository-content lane %s: a .. after a symlinked component that cannot be resolved fails closed, identically whether the out-of-root path that component names exists or not",
+    (lane) => {
+      it("oracle -> dang/../x with dang -> <outside>/gone: the two repositories get the identical envelope", async () => {
+        const answers = await Promise.all(
+          NAMED.map(async (named) => {
+            const { repo, outside } = danglingComponentRepo(named);
+            const answer = await probeChainLane(lane, repo, "oracle");
+            for (const warning of answer.warnings) {
+              expect(warning).not.toContain(outside);
+              expect(warning).not.toContain("does not exist");
+              expect(warning).not.toContain("could not be checked");
+            }
+            return {
+              status: answer.status,
+              reason: answer.reason,
+              linked: answer.linked,
+              warnings: answer.warnings.map((w) =>
+                w.replaceAll(repo, "<repo>"),
+              ),
+            };
+          }),
+        );
+        expect(answers[0].reason).toBe("file_outside_root");
+        expect(answers[0].linked).toBe(0);
+        expect(answers[1]).toEqual(answers[0]);
+      });
+    },
+  );
+
+  describe("resolvePhysicalLocation: a .. is only ever applied to a prefix that resolved physically", () => {
+    // A locked (mode 000) directory never produces EACCES for root, so
+    // that one case is skipped there rather than asserted on a
+    // non-discriminating fixture.
+    const isRoot =
+      typeof process.getuid === "function" && process.getuid() === 0;
+
+    it("climbs from where a symlinked component points, and appends a dangling tail verbatim when no .. follows it", () => {
+      const outside = fs.realpathSync(makeTmpDir());
+      fs.mkdirSync(path.join(outside, "inner"));
+      const root = fs.realpathSync(makeTmpDir());
+      fs.symlinkSync(path.join(outside, "inner"), path.join(root, "sub"));
+
+      expect(
+        resolvePhysicalLocation([root, "sub", "..", "far-end"].join(path.sep)),
+      ).toBe(path.join(outside, "far-end"));
+      expect(
+        resolvePhysicalLocation([root, "no-dir", "deeper", "x"].join(path.sep)),
+      ).toBe(path.join(root, "no-dir", "deeper", "x"));
+      // The last component is re-appended verbatim, never followed.
+      expect(resolvePhysicalLocation(path.join(root, "sub"))).toBe(
+        path.join(root, "sub"),
+      );
+    });
+
+    it("is undefined for a .. after a DANGLING symlinked component (ENOENT), whether the .. sits right after it or deeper", () => {
+      const outside = fs.realpathSync(makeTmpDir());
+      const root = fs.realpathSync(makeTmpDir());
+      fs.symlinkSync(path.join(outside, "gone"), path.join(root, "dang"));
+
+      expect(
+        resolvePhysicalLocation([root, "dang", "..", "x"].join(path.sep)),
+      ).toBeUndefined();
+      expect(
+        resolvePhysicalLocation(
+          [root, "dang", "deeper", "..", "x"].join(path.sep),
+        ),
+      ).toBeUndefined();
+      // The lexical collapse this refuses to produce, for contrast.
+      expect(path.resolve(root, "dang", "..", "x")).toBe(path.join(root, "x"));
+      // And the same shape once the named path exists: placed physically.
+      fs.mkdirSync(path.join(outside, "gone"));
+      expect(
+        resolvePhysicalLocation([root, "dang", "..", "x"].join(path.sep)),
+      ).toBe(path.join(outside, "x"));
+    });
+
+    it("is undefined for a .. after a component under a FILE (ENOTDIR)", () => {
+      const root = fs.realpathSync(makeTmpDir());
+      fs.writeFileSync(path.join(root, "plain"), "");
+
+      expect(
+        resolvePhysicalLocation(
+          [root, "plain", "inner", "..", "x"].join(path.sep),
+        ),
+      ).toBeUndefined();
+    });
+
+    it.skipIf(isRoot)(
+      "is undefined for a .. after a component inside a directory this process cannot search (EACCES)",
+      () => {
+        const outside = fs.realpathSync(makeTmpDir());
+        const locked = path.join(outside, "locked");
+        fs.mkdirSync(path.join(locked, "inner"), { recursive: true });
+        fs.chmodSync(locked, 0o000);
+        const root = fs.realpathSync(makeTmpDir());
+        fs.symlinkSync(path.join(locked, "inner"), path.join(root, "dang"));
+        try {
+          expect(
+            resolvePhysicalLocation([root, "dang", "..", "x"].join(path.sep)),
+          ).toBeUndefined();
+        } finally {
+          fs.chmodSync(locked, 0o755);
+        }
+      },
+    );
+
+    it("is undefined for a cycle among the symlinked components", () => {
+      const root = fs.realpathSync(makeTmpDir());
+      fs.symlinkSync("cyc2", path.join(root, "cyc"));
+      fs.symlinkSync("cyc", path.join(root, "cyc2"));
+
+      expect(
+        resolvePhysicalLocation([root, "cyc", "x"].join(path.sep)),
+      ).toBeUndefined();
+    });
   });
 
   it("an in-repo --link symlink to an IN-ROOT directory still links normally, unaffected", async () => {
@@ -6049,6 +6219,25 @@ describe("probe(): worktree isolation, untracked entries by type", () => {
           w.includes("docs") &&
           w.includes(`resolves to ${path.join(outside, "far-end")}`) &&
           w.includes("outside the isolation copy"),
+      ),
+    ).toBe(true);
+  });
+
+  it("an untracked symlink whose target climbs through a cycle among its own ancestor components warns that it could not be resolved, rather than being judged contained on a lexical stand-in", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.symlinkSync("cyc2", path.join(repo, "cyc"));
+    fs.symlinkSync("cyc", path.join(repo, "cyc2"));
+    fs.symlinkSync(["cyc", "..", "x"].join(path.sep), path.join(repo, "docs"));
+
+    const result = await probe(baseOptions(repo));
+
+    expect(result.status).toBe("killed");
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("untracked symlink docs could not be resolved") &&
+          w.includes("a write through it is not isolated"),
       ),
     ).toBe(true);
   });
