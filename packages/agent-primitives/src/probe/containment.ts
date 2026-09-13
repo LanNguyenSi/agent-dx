@@ -60,80 +60,15 @@ export function resolveDeepestExisting(p: string): string {
 }
 
 /**
- * Where a link SOURCE's own containment is judged: `resolveDeepestExisting(p)`,
- * except when `p` ITSELF is a symlink whose chain does not fully resolve
- * (a dangling target, or one this process cannot stat). `fs.realpathSync`
- * throws for that case with no partial information, so
- * `resolveDeepestExisting`'s own fallback walks up from `p`'s OWN parent
- * -- exactly right for an ordinary missing path, but wrong here: it
- * silently reports `p` itself (still inside the repository, since `p` is
- * one of the three explicit `link` sources, already resolved against
- * their own base) rather than the directory the symlink actually names,
- * which may sit anywhere. Two link sources that both point outside the
- * repository then read differently by nothing but accident: one whose
- * target happens to exist resolves through `fs.realpathSync` to that
- * real, out-of-root path and is caught by the ordinary containment
- * check; one whose target is missing (or unreadable) falls back to `p`'s
- * own in-root spelling and reaches the existence check instead, which
- * then discloses -- via `link_source_not_found` vs. the containment
- * check's own `file_outside_root` -- whether something happens to sit at
- * an arbitrary path outside the repository (GitHub issue #242's
- * containment finding).
- *
- * This resolves the gap by walking the symlink chain itself, one
- * `readlinkSync` hop at a time (each relative target resolved against
- * ITS OWN directory, since a relative target's meaning depends on where
- * the link that carries it sits, not on where the chain started), until
- * a hop is not itself a symlink -- at which point `resolveDeepestExisting`
- * runs on THAT final hop, so the deepest existing ancestor reported is
- * always an ancestor of where the chain actually ends, dangling or not,
- * however many links sit in between. A single hop that merely forwards
- * to another in-root symlink (`oracle` -> `<root>/hop2` -> an outside,
- * missing target) previously lost the outside destination entirely: only
- * the FIRST hop's target (`<root>/hop2`, itself still in-root) was ever
- * run through `resolveDeepestExisting`, whose own fallback then walked up
- * from `hop2`'s in-root parent rather than from the outside target `hop2`
- * itself names, silently reporting an in-root path for a chain that in
- * fact dangles outside the repository -- the same disclosure this
- * function exists to close, just one hop further down (GitHub issue
- * #242, narrowed again). Walking the chain by hand rather than leaning on
- * `fs.realpathSync` for anything past the first hop is what fixes this:
- * every hop's target becomes the NEXT hop's own starting point, so the
- * final `resolveDeepestExisting` call always sees the chain's true end.
- *
- * The walk is capped at 32 hops. A cycle among the hops (`a` -> `b` ->
- * `a`) never terminates on its own, and neither `lstatSync` nor
- * `readlinkSync` -- unlike `fs.realpathSync` or `fs.statSync`, both of
- * which fully resolve a path and so surface the OS's own `ELOOP` for a
- * genuine cycle -- ever traverses far enough to hit that error by
- * itself, since each reads only its OWN argument without following it.
- * Hitting the cap (or an `ELOOP` raised while resolving an ancestor
- * DIRECTORY component of some hop along the way, which `lstatSync` and
- * `readlinkSync` still resolve as normal path lookup) returns `undefined`
- * rather than a best-effort path: the caller must refuse the link
- * without ever running the containment check on a half-resolved chain,
- * since disclosing "contained" vs. "not" for an unresolvable target would
- * itself be a return of the same disclosure this function exists to
- * close (see `firstLinkSourceRefusal` in `index.ts`, which falls back to
- * `linkSourceMissingMessage`'s own errno branch there instead -- the
- * SAME chain, statted whole via `fs.statSync(link.value)`, hits the
- * identical `ELOOP`/cap situation and is reported through that shared,
- * non-disclosing wording rather than through containment).
- *
- * `p` itself when it is not a symlink at all (or cannot be lstat'ed,
- * i.e. does not exist under any spelling): the ordinary resolution
- * already answers correctly there, since there is no separate "target"
- * to lose track of.
- *
- * Deliberately narrow rather than folded into `resolveDeepestExisting`
- * itself: that function has other callers (a `--file` target, a link's
- * eventual on-disk destination inside `link-policy.ts`) whose own
- * fallback behaviour -- reporting the path unresolved when it does not
- * fully exist -- is exactly what they need, and widening it here would
- * change what every one of them sees for a plain missing path, not only
- * for a link source's own containment check.
+ * Hop cap for `resolveLinkSourceTarget` below (its docblock has the
+ * rationale). Above every OS's own symlink-resolution limit, so the
+ * walk's decision, not the OS's, is what always answers for a chain the
+ * OS itself can still follow: macOS resolves at most 32 links in one
+ * lookup (`MAXSYMLINKS`), Linux 40, Windows 63 reparse points. A chain
+ * the OS cannot follow is refused by the caller either way, so the cap
+ * only has to keep the walk from running forever on a cycle.
  */
-const MAX_LINK_SOURCE_HOPS = 32;
+export const MAX_LINK_SOURCE_HOPS = 64;
 
 /** True when `err` is a Node errno exception carrying `ELOOP`: a genuine
  * symlink cycle encountered while the OS resolves an ancestor directory
@@ -146,31 +81,316 @@ function isELOOP(err: unknown): boolean {
   );
 }
 
+/**
+ * Where a link SOURCE's own containment is judged: the far end of `p`'s
+ * own symlink chain, placed physically, or `undefined` when the chain
+ * cannot be placed at all.
+ *
+ * `resolveDeepestExisting(p)` (JavaScript `fs.realpathSync`) is the
+ * wrong tool for a link source, for two separate reasons. It throws with
+ * no partial information when `p` ITSELF is a symlink whose chain does
+ * not fully resolve (a dangling target, or one this process cannot
+ * stat), so its fallback walks up from `p`'s OWN parent: right for an
+ * ordinary missing path, but here it silently reports `p` itself (still
+ * inside the repository, since `p` is one of the three explicit `link`
+ * sources, already resolved against their own base) rather than the
+ * directory the symlink actually names, which may sit anywhere. Two link
+ * sources that both point outside the repository then read differently
+ * by nothing but accident: one whose target happens to exist resolves
+ * to that real, out-of-root path and is caught by the ordinary
+ * containment check; one whose target is missing (or unreadable) falls
+ * back to `p`'s own in-root spelling and reaches the existence check
+ * instead, which then discloses -- via `link_source_not_found` vs. the
+ * containment check's own `file_outside_root` -- whether something
+ * happens to sit at an arbitrary path outside the repository (GitHub
+ * issue #242's containment finding). And it is lexical about `..`: the
+ * JavaScript `fs.realpathSync` normalises its argument with
+ * `path.resolve` before looking anything up and splices every link
+ * target it follows with `path.resolve` too, so `sub/../name` with `sub`
+ * a link to somewhere outside the root collapses to `<root>/name`
+ * before the filesystem is ever consulted (measured on Node 26: it and
+ * libc `realpath(3)` differ on exactly that shape).
+ *
+ * This walks the chain itself, one `readlinkSync` hop at a time, and
+ * places every hop -- and `p` itself, before the first hop -- with
+ * `resolvePhysicalLocation` below, the ONE physical resolver every
+ * readlink-derived path in this package goes through: a hop's directory
+ * part is resolved component by component against the filesystem (a
+ * `..` only ever climbs from a prefix that resolved physically, never
+ * from one that could not be placed), and its last component is
+ * re-appended verbatim, never followed, so this walk still sees every
+ * link of the chain one hop at a time and its cap keeps counting links,
+ * not lookups. A hop that is not itself a symlink ends the chain, and
+ * because every hop is already placed physically the far end reported
+ * is where the chain actually ends, dangling or not, however many links
+ * sit in between and whether each target is spelled relative or
+ * absolute. Nothing on this path ever goes through `resolveDeepestExisting`
+ * or any other lexical normalisation: an earlier version handed an
+ * absolute target back verbatim and ran the final hop through
+ * `resolveDeepestExisting`, so `oracle -> <root>/sub/../name` (the same
+ * shape as the relative one, spelled absolutely) was collapsed to
+ * `<root>/name`, read as contained, and linked through; and its walk-up
+ * on a failed lookup re-joined the popped components onto the deepest
+ * existing prefix with `path.join`, so a `..` after a component that
+ * could not be placed (a dangling link, an unreadable directory) was
+ * collapsed lexically and the answer again differed by whether the
+ * out-of-root path that component named happened to exist.
+ *
+ * The walk is capped at `MAX_LINK_SOURCE_HOPS` links, and the cap is
+ * decided on the far side of the last link it follows: a chain of
+ * exactly that many links is walked to its end and judged there, one
+ * link more is refused. An earlier version followed the cap's worth of
+ * links but never looked at where the last one landed, so a chain of
+ * exactly cap length came back `undefined` while both its neighbours
+ * resolved, and the caller's fallback for that one length re-opened the
+ * existence disclosure this function closes. A cycle among the hops
+ * (`a` -> `b` -> `a`) never terminates on its own, and neither
+ * `lstatSync` nor `readlinkSync` -- unlike `fs.realpathSync` or
+ * `fs.statSync`, both of which fully resolve a path and so surface the
+ * OS's own `ELOOP` for a genuine cycle -- ever traverses far enough to
+ * hit that error by itself, since each reads only its OWN argument
+ * without following it. Hitting the cap, or a hop whose directory part
+ * cannot be placed (`resolvePhysicalLocation` returns `undefined`),
+ * returns `undefined` rather than a best-effort path: the caller must
+ * refuse the link without ever running the containment check on a
+ * half-resolved chain, since disclosing "contained" vs. "not" for an
+ * unresolvable target would itself be a return of the same disclosure
+ * this function exists to close (see `firstLinkSourceRefusal` in
+ * `index.ts`, which refuses such a link outright, with the containment
+ * refusal's own non-disclosing wording and without consulting the
+ * existence check first).
+ *
+ * `p` itself, placed physically, when it is not a symlink at all (or
+ * cannot be lstat'ed, i.e. does not exist under any spelling): there is
+ * no separate "target" to lose track of, and the physical placement
+ * only differs from `resolveDeepestExisting` on shapes a `link` value
+ * (resolved against its own base, so carrying no `..` of its own) never
+ * has.
+ *
+ * Deliberately narrow rather than folded into `resolveDeepestExisting`
+ * itself: that function has other callers (a `--file` target, a link's
+ * eventual on-disk destination inside `link-policy.ts`) whose own
+ * fallback behaviour -- reporting the path unresolved when it does not
+ * fully exist -- is exactly what they need, and none of them is ever
+ * handed a readlink-derived path.
+ */
 export function resolveLinkSourceTarget(p: string): string | undefined {
-  let current = p;
-  for (let hop = 0; hop < MAX_LINK_SOURCE_HOPS; hop++) {
+  let current = resolvePhysicalLocation(p);
+  if (current === undefined) return undefined;
+  // `hop` counts the links followed so far. Every iteration first
+  // decides `current` itself (not a symlink: the chain ends here, and
+  // the cap has nothing to say about it), so the cap is only ever
+  // applied to a link that would be one more than `MAX_LINK_SOURCE_HOPS`
+  // deep: a chain of exactly that many links is decided on its far end.
+  for (let hop = 0; ; hop++) {
     let lst: fs.Stats;
     try {
       lst = fs.lstatSync(current);
     } catch (err) {
       if (isELOOP(err)) return undefined;
-      return resolveDeepestExisting(current);
+      return current;
     }
-    if (!lst.isSymbolicLink()) return resolveDeepestExisting(current);
+    if (!lst.isSymbolicLink()) return current;
+    // The hop cap was reached without the chain ending: functionally
+    // the same as a genuine `ELOOP`, and refused the same non-disclosing
+    // way.
+    if (hop >= MAX_LINK_SOURCE_HOPS) return undefined;
     let rawTarget: string;
     try {
       rawTarget = fs.readlinkSync(current);
     } catch (err) {
       if (isELOOP(err)) return undefined;
-      return resolveDeepestExisting(current);
+      return current;
     }
-    current = path.isAbsolute(rawTarget)
-      ? rawTarget
-      : path.resolve(path.dirname(current), rawTarget);
+    const next = resolveLinkHop(current, rawTarget);
+    if (next === undefined) return undefined;
+    current = next;
   }
-  // The hop cap was reached without the chain ending: functionally the
-  // same as a genuine `ELOOP`, and refused the same non-disclosing way.
-  return undefined;
+}
+
+/**
+ * Where one symlink hop lands: `rawTarget` (what `readlinkSync` returned
+ * for the link at `linkPath`) placed the way the filesystem itself would
+ * follow it, rather than the way a lexical `path.resolve` would spell it.
+ * The two differ exactly when the target's own path crosses a symlinked
+ * directory component with `..`: `sub/../name` with `sub` -> `/outside/dir`
+ * is `/outside/name` to the OS (`..` climbs from where `sub` POINTS), but
+ * `path.resolve` collapses it to `<root>/name` before anything is ever
+ * looked up, so a link naming an out-of-root target through that shape
+ * was judged on an in-root spelling that does not exist: contained, and
+ * then existence-checked on the real chain, which is the disclosure and
+ * the containment escape the walk above exists to close. A relative
+ * target is spliced onto the link's own directory as a plain string
+ * (never through `path.join`/`path.resolve`, both of which collapse
+ * `..` lexically first) and an absolute target is taken as it is; both
+ * then go through the one physical resolver, `resolvePhysicalLocation`,
+ * which places the directory part component by component and
+ * re-appends the last component verbatim, so the walk above still sees
+ * every link of the chain one hop at a time. An absolute target is NOT
+ * exempt: `<root>/sub/../name` carries the same `..` through the same
+ * symlinked component, and handing it back verbatim (as an earlier
+ * version did) left the final placement to a lexical resolver.
+ *
+ * `undefined` when the directory part cannot be placed: a `..` that
+ * would climb from a component the filesystem could not resolve, or a
+ * cycle among the ancestor components (`resolvePhysicalLocation`'s
+ * docblock has the rule). That is the same unresolvable-chain answer
+ * the walk gives for a cycle among the hops themselves, so the caller
+ * refuses without ever running a containment check on a half-resolved
+ * path.
+ */
+export function resolveLinkHop(
+  linkPath: string,
+  rawTarget: string,
+): string | undefined {
+  return resolvePhysicalLocation(
+    path.isAbsolute(rawTarget)
+      ? rawTarget
+      : `${path.dirname(linkPath)}${path.sep}${rawTarget}`,
+  );
+}
+
+/**
+ * The one physical resolver for any path that came out of `readlinkSync`
+ * (or was spliced from one): where the filesystem itself would take `p`,
+ * with `p`'s last component re-appended verbatim and never followed.
+ * `undefined` when `p` cannot be placed under the one rule this
+ * function exists to enforce:
+ *
+ *   a `..` is only ever applied to a prefix that resolved physically.
+ *
+ * The directory part is walked component by component from the
+ * filesystem root. A name is looked up with `lstatSync` under the
+ * physical prefix so far; a symlink found there is read and its target
+ * placed by this same walk (relative to the prefix it sits in, or from
+ * the root when absolute), and the walk continues from wherever that
+ * target ended up, exactly as the OS follows a symlinked directory
+ * component. A `..` climbs one level from the physical prefix. A
+ * component that cannot be looked up (`ENOENT`, `ENOTDIR`, `EACCES`,
+ * anything else) marks the rest of the path as unplaced: the remaining
+ * names are appended verbatim, so a dangling directory part still
+ * reports where it would sit (`/outside/no-dir/missing` for a target
+ * whose `no-dir` does not exist), but a `..` anywhere after that point
+ * makes the whole placement `undefined`, since climbing from a
+ * component the filesystem could not resolve would be exactly the
+ * lexical collapse (`dang/../x` with `dang` a dangling link to
+ * `/outside/gone`: `<root>/x` if collapsed, `/outside/x` to the OS once
+ * `gone` exists) that lets the answer differ by whether an out-of-root
+ * path happens to exist. A cycle among the symlinked components (more
+ * than `MAX_LINK_SOURCE_HOPS` links followed inside one placement, or
+ * the OS's own `ELOOP`) is `undefined` for the same reason.
+ *
+ * Never `path.join`, `path.resolve`, or the JavaScript `fs.realpathSync`
+ * (which normalises with `path.resolve` first and splices link targets
+ * with it too): each of those collapses a `..` lexically before the
+ * filesystem is consulted, which is the one thing this function exists
+ * not to do. `fs.realpathSync.native` (libc `realpath(3)`) walks
+ * physically but throws with no partial answer, so a dangling directory
+ * part would have to be walked up from `p`'s own spelling anyway; this
+ * walk simply does the whole placement itself with the same primitives
+ * (`lstat`, `readlink`) the OS's own lookup uses.
+ *
+ * A relative `p` is walked from the process's current directory, whose
+ * own components are placed by the same walk; every caller in this
+ * package passes an absolute path.
+ */
+export function resolvePhysicalLocation(p: string): string | undefined {
+  const { root, components } = splitPath(
+    path.isAbsolute(p) ? p : `${process.cwd()}${path.sep}${p}`,
+  );
+  if (components.length === 0) return root;
+  const last = components[components.length - 1];
+  const budget = { links: 0 };
+  if (last === "..") {
+    return placeComponents(root, components, budget)?.location;
+  }
+  const placed = placeComponents(root, components.slice(0, -1), budget);
+  if (placed === undefined) return undefined;
+  return appendComponent(placed.location, last);
+}
+
+/** `p` split into its filesystem root and its components, with empty
+ * components and `.` dropped and nothing else touched: `..` stays a
+ * component, since only the physical walk may decide what it climbs
+ * from. */
+function splitPath(p: string): { root: string; components: string[] } {
+  const root = path.parse(p).root;
+  return { root, components: splitComponents(p.slice(root.length)) };
+}
+
+/** The components of a rootless path string, empty ones and `.` dropped
+ * and nothing else touched. */
+function splitComponents(p: string): string[] {
+  return p
+    .split(path.sep)
+    .filter((component) => component !== "" && component !== ".");
+}
+
+/** `name` appended under `dir` as a plain string: `dir` is a physical
+ * location and `name` a single component that is never `..` or `.`, so
+ * there is nothing for a lexical join to collapse and none is used. */
+function appendComponent(dir: string, name: string): string {
+  return dir.endsWith(path.sep) ? `${dir}${name}` : `${dir}${path.sep}${name}`;
+}
+
+/** Where `components` land when walked from the physical directory
+ * `start` (the rule is on `resolvePhysicalLocation`): `location` is the
+ * placement, `placed` whether every component resolved physically
+ * (`false` once a component could not be looked up, after which the
+ * rest was appended verbatim). `budget` counts the symlinks followed
+ * across the whole placement, recursion included, so a cycle among the
+ * components cannot recurse forever. */
+function placeComponents(
+  start: string,
+  components: readonly string[],
+  budget: { links: number },
+): { location: string; placed: boolean } | undefined {
+  let current = start;
+  let placed = true;
+  for (const component of components) {
+    if (component === "..") {
+      // The rule: never climb from a prefix that did not resolve.
+      if (!placed) return undefined;
+      current = path.dirname(current);
+      continue;
+    }
+    if (!placed) {
+      current = appendComponent(current, component);
+      continue;
+    }
+    const candidate = appendComponent(current, component);
+    let lst: fs.Stats;
+    try {
+      lst = fs.lstatSync(candidate);
+    } catch (err) {
+      if (isELOOP(err)) return undefined;
+      placed = false;
+      current = candidate;
+      continue;
+    }
+    if (!lst.isSymbolicLink()) {
+      current = candidate;
+      continue;
+    }
+    if (++budget.links > MAX_LINK_SOURCE_HOPS) return undefined;
+    let rawTarget: string;
+    try {
+      rawTarget = fs.readlinkSync(candidate);
+    } catch (err) {
+      if (isELOOP(err)) return undefined;
+      placed = false;
+      current = candidate;
+      continue;
+    }
+    const target = path.isAbsolute(rawTarget)
+      ? splitPath(rawTarget)
+      : { root: current, components: splitComponents(rawTarget) };
+    const landed = placeComponents(target.root, target.components, budget);
+    if (landed === undefined) return undefined;
+    current = landed.location;
+    placed = landed.placed;
+  }
+  return { location: current, placed };
 }
 
 /**

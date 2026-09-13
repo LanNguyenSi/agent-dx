@@ -2,7 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { isPidAlive } from "../lock.js";
-import { isPathContained, resolveDeepestExisting } from "./containment.js";
+import {
+  isPathContained,
+  resolveDeepestExisting,
+  resolveLinkSourceTarget,
+} from "./containment.js";
 import {
   canonicalDestRelPath,
   entryRelationTo,
@@ -522,17 +526,15 @@ function copyRegularFile(src: string, dest: string): void {
  * escapes through `..`, resolves outside the copy exactly as it did in
  * the source tree, so a `--pre`/`-t` writing through it reaches the
  * real tree rather than the isolated one. The check runs on the link's
- * OWN target -- `linkTarget` resolved against the link's own directory
- * the same way the filesystem would follow it, then through
- * `resolveDeepestExisting` -- rather than on the recreated link at
- * `dest` itself: `dest` always sits inside the copy (that is where this
- * function just created it), so realpathing `dest` for a DANGLING
- * target throws, falls back to `dest`'s own contained path, and reads
- * back as trivially contained no matter where the target actually
- * points. Resolving the target's own spelling first still walks up to
- * the deepest existing ancestor when the target itself does not exist,
- * which is exactly what surfaces a dangling target that would land
- * outside the copy. `warnings` names the symlink and where it resolves
+ * OWN chain -- `resolveLinkSourceTarget` on the recreated link, which
+ * follows every hop the same way the filesystem would (a `..` through a
+ * symlinked component climbs from where that component points) and
+ * places a dangling far end under its real parent -- rather than on a
+ * realpath of `dest` itself: `dest` always sits inside the copy (that
+ * is where this function just created it), so realpathing `dest` for a
+ * DANGLING target throws, falls back to `dest`'s own contained path,
+ * and reads back as trivially contained no matter where the target
+ * actually points. `warnings` names the symlink and where it resolves
  * rather than refusing the sync outright, since a copy that carries
  * every symlink the source tree has is the isolation this function
  * promises, and a symlink escaping the copy is a property of the SOURCE
@@ -558,11 +560,30 @@ function warnIfCopiedSymlinkEscapes(
   worktreeRootReal: string,
   warnings: string[],
 ): void {
-  const linkTarget = fs.readlinkSync(copied.dest);
-  const resolvedLinkTarget = path.isAbsolute(linkTarget)
-    ? linkTarget
-    : path.resolve(path.dirname(copied.dest), linkTarget);
-  const resolved = resolveDeepestExisting(resolvedLinkTarget);
+  // Placed physically, by the same chain walk the link refusal uses
+  // (`resolveLinkSourceTarget`: every hop through `resolvePhysicalLocation`,
+  // never a lexical `path.resolve` or the JavaScript `fs.realpathSync`),
+  // so a target that climbs with `..` through a symlinked component of
+  // its own (`sub/../name`, `sub` itself a link to somewhere outside the
+  // copy) is reported where the OS would take it, which a lexical
+  // collapse spells as an in-copy path that does not exist and so reads
+  // back as contained.
+  const resolved = resolveLinkSourceTarget(copied.dest);
+  if (resolved === undefined) {
+    // A chain that cannot be placed (a cycle among its hops or ancestor
+    // components, or a `..` climbing from a component the filesystem
+    // could not resolve) is warned about unconditionally rather than
+    // judged on a lexical stand-in, which for exactly these shapes is
+    // what would read back as contained.
+    warnings.push(
+      `untracked symlink ${copied.displayRelPath} could not be resolved (its ` +
+        "target climbs through a component the filesystem cannot follow), " +
+        "so whether it escapes the isolation copy is unknown: the copy " +
+        "carries the same symlink the source tree does, so a write through " +
+        "it is not isolated",
+    );
+    return;
+  }
   if (!isPathContained(worktreeRootReal, resolved)) {
     warnings.push(
       `untracked symlink ${copied.displayRelPath} resolves to ${resolved}, outside ` +

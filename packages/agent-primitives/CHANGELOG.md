@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- A `--plan` or defaults-file `link` value that is an in-repo symlink
+  chain to an out-of-root target now answers `file_outside_root`
+  identically whether the far end exists or not, at EVERY chain length
+  (tracker task `709622ab`). The chain walk behind that refusal
+  (`resolveLinkSourceTarget`) followed its cap's worth of links but
+  never decided where the last one landed, so a chain of exactly the
+  cap's length came back unresolved while both its neighbours resolved;
+  the caller then skipped such a link to the later, deferred containment
+  check, which judged it on a fallback spelling (the link's own in-root
+  path for a dangling chain, the real out-of-root target for an existing
+  one) and reported `link_source_not_found` for the one and
+  `file_outside_root` for the other. The 0.3.0 entry below claims the
+  chain is followed "up to 32 hops"; that held up to 31. The walk now
+  decides the far end of the last link it follows, the cap is raised
+  from 32 to 64 links (above every OS's own lookup limit: macOS
+  resolves at most 32 links in one lookup, Linux 40, Windows 63 reparse
+  points, so the walk's own decision, not the OS's, is what answers for
+  any chain the OS can still follow), and the caller fails closed: a
+  chain the walk cannot place is refused outright as
+  `file_outside_root` naming only the in-root value, without the
+  existence check being consulted at all, never skipped to the later
+  checks. An
+  operator's own `--link` is unchanged: it is judged on where it sits,
+  and its target keeps the link policy's sibling latitude at every
+  length. The same walk now places every hop physically rather than
+  lexically, through one resolver (`resolvePhysicalLocation`) with one
+  rule: a `..` is only ever applied to a prefix that resolved
+  physically. A target that climbs with `..` through a symlinked
+  component (`oracle -> sub/../name`, `sub` itself a link to a directory
+  outside the root) was collapsed by `path.resolve` to the in-root
+  `<root>/name` before the filesystem was consulted, so the link read as
+  contained, was existence-checked on its real chain (disclosing
+  directory, file, or nothing at the far end) and, for a directory,
+  linked through into the isolation copy where the test command wrote
+  through it outside the root; the same shape spelled absolutely
+  (`oracle -> <root>/sub/../name`) was handed back verbatim and
+  collapsed the same way by the JavaScript `fs.realpathSync` at the
+  chain's end; and a `..` after a component the filesystem could not
+  resolve (`oracle -> dang/../x`, `dang` a dangling link to an
+  out-of-root path) was re-joined lexically onto the deepest existing
+  prefix, so the answer differed by whether that out-of-root path
+  existed. Every such chain is now judged where the OS takes it, or
+  refused when it cannot be placed, with the same uniform
+  `file_outside_root` wording naming only the in-root value; a chain
+  longer than the cap, or a cycle, receives that same refusal rather
+  than the OS's `ELOOP` errno, since the existence check is no longer
+  consulted for a chain the walk could not place. Nothing on a
+  readlink-derived path goes through `path.resolve`, `path.join` or
+  `fs.realpathSync` any more. The worktree sync's own escape warning
+  for a copied untracked symlink resolves through the same walk and,
+  for a link it cannot place, now says so instead of judging a lexical
+  stand-in as contained. The suite now runs an existing/missing parity
+  check over chain lengths 1, 2, 3, 32, 63, 64 and 65 in all three
+  lanes; the `sub/../name` shape, relative and absolute, with a
+  directory, a file and nothing at the far end in the repository-content
+  lanes, asserting that no link is created and the test command never
+  runs; the `dang/../x` shape once with and once without the named
+  out-of-root path, asserting the identical envelope; and the resolver's
+  own rule on a dangling, an unsearchable and a file component before a
+  `..`.
+
 - `probe`/`--plan` with `--pre` and `-i inplace` (the default) now
   re-run `--pre` once more after the last mutant is restored, so a
   command run after the probe returns never exercises a mutant's

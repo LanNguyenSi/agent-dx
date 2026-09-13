@@ -236,16 +236,30 @@ export interface LinkSourceRefusal {
  * exactly the blind spot this closes.
  *
  * `resolveLinkSourceTarget` returns `undefined` instead of a path when
- * the chain does not resolve within its own hop cap (a genuine cycle, or
- * something functionally equivalent): that case is refused here without
- * ever asking `isPathContained` anything, since answering "contained" or
- * "not" for a target this process could not even follow is the same
- * disclosure this whole function exists to close. `linkSourceMissingMessage`
- * is what actually reports it -- `fs.statSync(link.value)` there follows
- * the identical chain natively and, resolving it whole, is the call that
- * actually surfaces the OS's own `ELOOP`, landing on that function's
- * errno branch (`linkSourceMissingMessage`'s own docblock) rather than on
- * anything containment-shaped here.
+ * the chain cannot be placed: it does not resolve within the walk's own
+ * hop cap (a genuine cycle, or something functionally equivalent), or
+ * some hop climbs with `..` from a component the filesystem could not
+ * resolve (`oracle -> dang/../x` with `dang` a dangling or unreadable
+ * link; `resolvePhysicalLocation`'s docblock in `containment.ts` has the
+ * rule). That case is refused here as `file_outside_root` with the
+ * containment refusal's own wording, which names only the in-root value,
+ * without ever asking `isPathContained` anything and without consulting
+ * `linkSourceMissingMessage` first: answering "contained" or "not" for a
+ * target this process could not even follow is the same disclosure this
+ * whole function exists to close, and so is the existence check's own
+ * answer, since `fs.statSync(link.value)` there follows the identical
+ * chain natively and reports "does not exist" for `dang/../x` while
+ * `dang` dangles and nothing at all once the path `dang` names exists
+ * (at which point the walk places the chain outside the root and this
+ * same refusal fires from the containment branch below: the two
+ * repositories get the identical envelope). It is never skipped: an
+ * earlier version skipped it here, and the later, deferred containment
+ * check then judged the link on `resolveDeepestExisting`'s fallback
+ * spelling, which for a dangling chain is the link's own in-root path
+ * and for an existing one its out-of-root target, reopening the
+ * disclosure for a chain of exactly the walk's old cap length; a later
+ * one consulted the existence check first, which reopened it for the
+ * dangling-component shape.
  *
  * A link that resolves outside the root WITHOUT going through a symlink
  * of its own (an out-of-root value named directly, by any of the three
@@ -312,11 +326,18 @@ export function firstLinkSourceRefusal(
     }
     const target = resolveLinkSourceTarget(link.value);
     if (target === undefined) {
-      const message = linkSourceMissingMessage(link);
-      if (message !== undefined) {
-        return { reason: "link_source_not_found", message };
-      }
-      continue;
+      // Fail closed, and without consulting the existence check first:
+      // a chain this walk could not place is refused with the
+      // containment refusal's own non-disclosing wording, never let
+      // through to the later checks (which would judge it on a
+      // fallback spelling) and never handed to `linkSourceMissingMessage`
+      // (whose `fs.statSync` follows the whole chain natively and would
+      // answer "does not exist" for a dangling far end and something
+      // else for an existing one; see the docblock above).
+      return {
+        reason: "file_outside_root",
+        message: `outside the containment root (${root}): ${link.value}`,
+      };
     }
     if (!isPathContained(realRoot, target)) {
       if (!checkOutsideRootExistence) {
@@ -675,11 +696,12 @@ async function runProbePipeline(
   const absFile = resolveDeepestExisting(displayFile);
   const links = mergedLinks.map((link) => ({
     display: link.value,
-    // `firstLinkSourceRefusal` above already refused any link whose
-    // chain does not resolve at all, so `resolveLinkSourceTarget` is
-    // never `undefined` for a link that reaches here; the fallback
-    // exists only to keep this typed as a plain path, not because it is
-    // expected to run.
+    // `firstLinkSourceRefusal` above already refused any repository-content
+    // link whose chain cannot be placed, so `resolveLinkSourceTarget` is
+    // never `undefined` for one of those here. An operator's own `--link`
+    // is not walked there (it keeps its documented latitude), so the
+    // fallback is reachable for it alone and is handed the operator's own
+    // value, never a readlink-derived path.
     abs:
       resolveLinkSourceTarget(link.value) ?? resolveDeepestExisting(link.value),
     ...(link.namedBy !== undefined ? { namedBy: link.namedBy } : {}),
@@ -1409,8 +1431,9 @@ export async function probePlan(
   }
   const links = mergedLinks.map((link) => ({
     display: link.value,
-    // See the single-probe call site above: `firstLinkSourceRefusal`
-    // already refused any link whose chain does not resolve at all.
+    // See the single-probe call site above: the fallback is reachable
+    // for an operator's own `--link` alone, never for a readlink-derived
+    // path.
     abs:
       resolveLinkSourceTarget(link.value) ?? resolveDeepestExisting(link.value),
     ...(link.namedBy !== undefined ? { namedBy: link.namedBy } : {}),
