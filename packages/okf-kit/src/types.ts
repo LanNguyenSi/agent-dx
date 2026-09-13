@@ -105,6 +105,14 @@ export interface BundleContext {
    * byte-identical to behavior before this option existed.
    */
   dirtyAsNow?: boolean;
+  /**
+   * Clock for `--dirty-as-now`'s virtual-commit instant, in milliseconds
+   * since the epoch like `Date.now` (the default when undefined). Read
+   * exactly ONCE per `check` run (`getNowEpochShared` in
+   * `src/rules/sources-fresh.ts`); injectable so a test can pin that count
+   * and the shared value rather than racing the wall clock.
+   */
+  now?: () => number;
 }
 
 export interface Rule {

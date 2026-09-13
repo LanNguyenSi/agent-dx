@@ -246,6 +246,140 @@ describe("sources-fresh", () => {
     expect(sourcesFreshRule.run(ctx)).toEqual([]);
   });
 
+  /**
+   * The committed co-commit rescue under a `--repo-root` naming a
+   * SUBDIRECTORY of the repository. Everything the rescue reads from git
+   * past the doc's own `git log` is in the TOP-LEVEL path frame: the
+   * `diff-tree --name-status` entries it matches the doc against, and the
+   * `<rev>:<path>` spelling both `git show` blob reads take (git resolves
+   * a bare `<rev>:<path>` against the top level, never the cwd). The rule's
+   * own doc path is relative to the passed root, so spelled bare under a
+   * subdirectory root the blob reads failed (every rescue collapsed to a
+   * not-assessable notice) or, with a same-named doc at the top level,
+   * read that doc's stamps instead. The rule respells the path via `git
+   * rev-parse --show-prefix`, read once per run; these pin each shape.
+   */
+  describe("with --repo-root naming a subdirectory of the repository", () => {
+    const subDoc = (timestamp: string): string =>
+      docContent({ type: "concept", timestamp, sources: ["source.ts"] });
+
+    function runSub(): ReturnType<typeof sourcesFreshRule.run> {
+      const subRoot = path.join(repo.dir, "sub");
+      return sourcesFreshRule.run(
+        loadBundle(path.join(subRoot, "bundle"), subRoot),
+      );
+    }
+
+    it("a source edit co-committed with a doc re-stamp reads clean, exactly as under the top-level root", () => {
+      repo.commitFile(
+        "sub/source.ts",
+        "export const a = 1;\n",
+        "2025-01-01T00:00:00Z",
+      );
+      repo.commitFile(
+        "sub/bundle/doc.md",
+        subDoc("2025-02-01T00:00:00Z"),
+        "2025-02-01T00:00:00Z",
+      );
+      repo.commitFiles(
+        [
+          { relPath: "sub/source.ts", content: "export const a = 2;\n" },
+          {
+            relPath: "sub/bundle/doc.md",
+            content: subDoc("2025-09-01T00:00:00Z"),
+          },
+        ],
+        "2025-10-01T00:00:00Z",
+      );
+
+      expect(runSub()).toEqual([]);
+    });
+
+    it("a source edit co-committed with a doc edit that did NOT re-stamp it stays STALE, never a not-assessable notice", () => {
+      repo.commitFile(
+        "sub/source.ts",
+        "export const a = 1;\n",
+        "2025-01-01T00:00:00Z",
+      );
+      const committedDoc = subDoc("2025-02-01T00:00:00Z");
+      repo.commitFile(
+        "sub/bundle/doc.md",
+        committedDoc,
+        "2025-02-01T00:00:00Z",
+      );
+      repo.commitFiles(
+        [
+          { relPath: "sub/source.ts", content: "export const a = 2;\n" },
+          {
+            relPath: "sub/bundle/doc.md",
+            content: committedDoc.replace("# Doc\n", "# Doc\n\nprose\n"),
+          },
+        ],
+        "2025-10-01T00:00:00Z",
+      );
+
+      const findings = runSub();
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe("warning");
+      expect(findings[0].message).toContain("STALE");
+    });
+
+    it("a doc CREATED by the commit that also changed its source reads clean (the diff-tree entry is matched in the top-level frame)", () => {
+      repo.commitFile(
+        "sub/source.ts",
+        "export const a = 1;\n",
+        "2025-01-01T00:00:00Z",
+      );
+      repo.commitFiles(
+        [
+          { relPath: "sub/source.ts", content: "export const a = 2;\n" },
+          {
+            relPath: "sub/bundle/doc.md",
+            content: subDoc("2025-09-01T00:00:00Z"),
+          },
+        ],
+        "2025-10-01T00:00:00Z",
+      );
+
+      expect(runSub()).toEqual([]);
+    });
+
+    it("a same-named doc at the TOP LEVEL re-stamped in that same commit does not shadow the subdirectory doc, which stays STALE", () => {
+      repo.commitFile(
+        "sub/source.ts",
+        "export const a = 1;\n",
+        "2025-01-01T00:00:00Z",
+      );
+      const committedDoc = subDoc("2025-02-01T00:00:00Z");
+      repo.commitFile(
+        "sub/bundle/doc.md",
+        committedDoc,
+        "2025-02-01T00:00:00Z",
+      );
+      repo.commitFile("bundle/doc.md", committedDoc, "2025-02-01T00:00:00Z");
+      // One commit: the source changes, the top-level doc IS re-stamped,
+      // the subdirectory doc gets a body-only edit. A bare `<rev>:bundle/doc.md`
+      // read would compare the top-level doc's two stamps and rescue the
+      // wrong doc.
+      repo.commitFiles(
+        [
+          { relPath: "sub/source.ts", content: "export const a = 2;\n" },
+          { relPath: "bundle/doc.md", content: subDoc("2025-09-01T00:00:00Z") },
+          {
+            relPath: "sub/bundle/doc.md",
+            content: committedDoc.replace("# Doc\n", "# Doc\n\nprose\n"),
+          },
+        ],
+        "2025-10-01T00:00:00Z",
+      );
+
+      const findings = runSub();
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe("warning");
+      expect(findings[0].message).toContain("STALE");
+    });
+  });
+
   it("suppresses only sources at/before the doc's last commit, newer ones stay STALE", () => {
     // Pins the accepted >= semantics for multi-source docs: committing the
     // doc silences drift for every source older than that commit (documented
@@ -1118,10 +1252,17 @@ describe("sources-fresh", () => {
       const perSourceCalls = calls.filter((args) =>
         sources.some((s) => args[args.length - 1] === s),
       );
+      // Per RUN, not per doc: the top-level path frame (`git rev-parse
+      // --show-prefix`) is read once and cached on the context, so it is
+      // counted separately from the per-doc budget.
+      const perRunCalls = calls.filter(
+        (args) => args[0] === "rev-parse" && args[1] === "--show-prefix",
+      );
       const perDocCalls = calls.filter(
-        (args) => !perSourceCalls.includes(args),
+        (args) => !perSourceCalls.includes(args) && !perRunCalls.includes(args),
       );
       expect(perSourceCalls).toHaveLength(sources.length);
+      expect(perRunCalls).toHaveLength(1);
       expect(perDocCalls).toHaveLength(5);
       expect(perDocCalls.map((args) => args[0])).toEqual([
         "log",
@@ -1130,7 +1271,7 @@ describe("sources-fresh", () => {
         "show",
         "show",
       ]);
-      expect(calls).toHaveLength(sources.length + 5);
+      expect(calls).toHaveLength(sources.length + 5 + 1);
     });
 
     it("a failed rev-parse on a parentless doc commit -> not assessable, never a silent pass", () => {
