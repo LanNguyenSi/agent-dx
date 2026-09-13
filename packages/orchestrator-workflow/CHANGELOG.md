@@ -11,8 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A `no` attribution requires a named base build and replay in `reproduction`;
   it remains in the ordinary finding gate and Findings table, while only `yes`
   and `unknown` participate in bounded halt and escalation rules. The legacy
-  five-cell placeholder row remains byte-compatible with the completeness
-  reader; concrete rows carry the sixth attribution value.
+  five-cell table and placeholder row remain byte-compatible with the
+  completeness reader; concrete rows record attribution parenthetically in
+  their Description field.
 
 ## [0.33.0] - 2026-09-12
 

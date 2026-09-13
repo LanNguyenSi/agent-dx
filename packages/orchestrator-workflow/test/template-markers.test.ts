@@ -208,7 +208,7 @@ describe("05-review-findings.md findings-table header convention", () => {
       .map((cell) => cell.trim().toLowerCase());
     expect(cells).toContain("severity");
     expect(cells).toContain("decision");
-    expect(cells).toContain("introduced by delta");
+    expect(cells).toHaveLength(5);
   });
 
   it("documents the header as load-bearing above the table", () => {
@@ -265,63 +265,30 @@ describe("05-review-findings.md findings-table header convention", () => {
  */
 describe("05-review-findings.md placeholder-row fail-closed convention", () => {
   const reviewTemplate = readAsset("templates/05-review-findings.md");
+  const legacyTableHeader =
+    "| Severity | Category | Description | Suggested Fix | Decision |";
+  const legacyTableSeparator = "|---|---|---|---|---|";
   const legacyPlaceholder =
     "| low/medium/high/critical | correctness/architecture/security/tests/maintainability/performance/docs | <!-- finding --> | <!-- fix --> | accepted/defer |";
 
   it("carries the exact placeholder row grounding-mcp's completeness reader matches literally", () => {
     // Mutation-check: editing any cell of this row (including the HTML-comment
     // placeholders) fails this assertion.
-    expect(reviewTemplate).toContain(legacyPlaceholder);
+    expect(reviewTemplate).toContain(
+      [legacyTableHeader, legacyTableSeparator, legacyPlaceholder].join("\n"),
+    );
   });
 
-  it("keeps the consumer's five-cell placeholder distinct from empty, unresolved, and resolved concrete-table states", () => {
-    const cells = legacyPlaceholder
-      .split("|")
-      .slice(1, -1)
-      .map((cell) => cell.trim());
-    expect(cells).toHaveLength(5);
-
-    const state = (table: string): string => {
-      if (table.includes(legacyPlaceholder)) return "placeholder";
-      const concreteRows = table
-        .split(/\r?\n/)
-        .map((line) =>
-          line
-            .split("|")
-            .slice(1, -1)
-            .map((cell) => cell.trim()),
-        )
-        .filter((row) =>
-          ["low", "medium", "high", "critical"].includes(row[0]),
-        );
-      if (concreteRows.length === 0) return "empty";
-      return concreteRows.some(
-        (row) =>
-          ["high", "critical"].includes(row[0]) &&
-          !["accepted", "defer"].includes(row[4]),
-      )
-        ? "unresolved"
-        : "resolved";
-    };
-
-    expect(state(reviewTemplate)).toBe("placeholder");
-    expect(state(reviewTemplate.replace(legacyPlaceholder, ""))).toBe("empty");
-    expect(
-      state(
-        reviewTemplate.replace(
-          legacyPlaceholder,
-          "| high | correctness | finding | fix | fix | yes |",
-        ),
-      ),
-    ).toBe("unresolved");
-    expect(
-      state(
-        reviewTemplate.replace(
-          legacyPlaceholder,
-          "| high | correctness | finding | fix | accepted | no |",
-        ),
-      ),
-    ).toBe("resolved");
+  it("keeps the entire legacy five-cell table schema byte- and cell-stable", () => {
+    const tableRows = [
+      legacyTableHeader,
+      legacyTableSeparator,
+      legacyPlaceholder,
+    ];
+    for (const row of tableRows) {
+      expect(reviewTemplate.split(/\r?\n/)).toContain(row);
+      expect(row.split("|").slice(1, -1)).toHaveLength(5);
+    }
   });
 
   it("documents the placeholder row's fail-closed semantics next to the row", () => {
@@ -335,12 +302,12 @@ describe("05-review-findings.md placeholder-row fail-closed convention", () => {
 describe("05-review-findings.md preserves per-finding delta attribution", () => {
   const reviewTemplate = readAsset("templates/05-review-findings.md");
 
-  it("records the reviewer contract's three attribution values without changing the load-bearing headers", () => {
+  it("records the reviewer contract's three attribution values in Description without changing the legacy table schema", () => {
     expect(reviewTemplate).toContain(
-      "| Severity | Category | Description | Suggested Fix | Decision | Introduced by Delta |",
+      "| Severity | Category | Description | Suggested Fix | Decision |",
     );
     expect(reviewTemplate).toContain(
-      "including the `Introduced by Delta` value in the sixth column",
+      "Description field as `(introduced_by_delta: yes|no|unknown)`",
     );
     expect(reviewTemplate).toContain("named base build and replay");
     expect(reviewTemplate).toContain("ordinary finding gate");

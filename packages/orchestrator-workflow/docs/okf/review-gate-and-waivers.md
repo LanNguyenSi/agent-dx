@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-09-13T05:42:55Z
+timestamp: 2026-09-13T05:56:32Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/skill/SKILL.md
@@ -39,9 +39,9 @@ every change; only the size of the apparatus changes."
 
 Every reviewer finding records `introduced_by_delta: yes | no | unknown`.
 A `no` attribution needs a named base build and a replay of the same
-reproduction. It remains a finding under the ordinary gate and is written in
-the `Introduced by Delta` column without renaming the load-bearing `Severity`
-or `Decision` headers (packages/orchestrator-workflow/assets/templates/05-review-findings.md:16#"| Severity | Category | Description | Suggested Fix | Decision | Introduced by Delta |").
+reproduction. It remains a finding under the ordinary gate and is recorded
+parenthetically in the `Description` field without renaming the load-bearing
+`Severity` or `Decision` headers (packages/orchestrator-workflow/assets/templates/05-review-findings.md:16#"| Severity | Category | Description | Suggested Fix | Decision |").
 Only `yes` and `unknown` findings feed the bounded round-2 halt and escalation
 rules; this prevents a reproduced pre-existing issue from consuming the
 delta's bounded-review budget.
@@ -156,7 +156,7 @@ and set the row's Decision to `accepted`
 (`SKILL.md:346#"unchanged and setting Decision to"`; `05-review-findings.md:16#"| Severity | Category | Description | Suggested Fix | Decision |"`).
 No reader or template schema changes: the existing Decision legend and all
 high/critical waiver and escalation rules continue to apply. The policy is
-pinned in `test/docs-consistency.test.ts:4698#"docs-only closing deltas stay narrowly bounded"`.
+pinned in `test/docs-consistency.test.ts:4700#"docs-only closing deltas stay narrowly bounded"`.
 
 ## The Decision legend in 05-review-findings.md
 
@@ -305,16 +305,15 @@ rule's split-or-redesign response, not instead of it:
 round-2 halt signal on the same task, or by the third `fix_required`
 review round on the same task, whichever comes first", at which point the
 orchestrator picks one of three named escalations
-(`SKILL.md:793#"**Tier or model escalation**"`,
-`SKILL.md:799#"**Advisor spawn**"`, `SKILL.md:802#"**Merge-hold**"`: raise
+(`SKILL.md:791#"**Tier or model escalation**"`,
+`SKILL.md:797#"**Advisor spawn**"`, `SKILL.md:800#"**Merge-hold**"`: raise
 the implementer to at least `-xhigh` where installed or to the strongest
 available model, an advisor spawn asked "redesign, split, or hold?", or an
-operator merge-hold). A counted round is a completed reviewer return whose
-`acceptance_recommendation` is `fix_required` or `reject`; a misfired
-review is not a round. Which of the three is picked is judgment; that one
+operator merge-hold). A negative round has an `acceptance_recommendation` of
+`fix_required` or `reject`; a misfired review is not a round. A negative round counts only with at least one introduced_by_delta yes/unknown finding; no stays ordinary gate. Which of the three is picked is judgment; that one
 is picked and recorded is not
-(`SKILL.md:805#"Judgment governs which of the three to pick; only that one is chosen and"`).
-`agents-md-section.md:138#"rule's split-or-redesign response, not instead of it."`
+(`SKILL.md:803#"Judgment governs which of the three to pick; only that one is chosen and"`).
+`agents-md-section.md:136#"rule's split-or-redesign response, not instead of it."`
 carries the same rule in short form for repos without the full skill text
 loaded.
 

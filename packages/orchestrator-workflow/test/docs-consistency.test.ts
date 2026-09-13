@@ -1516,22 +1516,22 @@ describe("review-round escalation budget ships in the skill and the AGENTS.md se
     );
   });
 
-  it("SKILL.md and agents-md-section.md both define what counts as a round (a misfired review is not one)", () => {
-    expect(skillMd).toContain(
-      "A counted round is a completed reviewer return whose `acceptance_recommendation` is `fix_required` or `reject` and which has at least one `introduced_by_delta: yes` or `unknown` finding; a misfired review is not a round",
-    );
-    expect(agentsMdSection).toContain(
-      "A counted round is a completed reviewer return recommending `fix_required` or `reject` and carrying at least one `introduced_by_delta: yes` or `unknown` finding; a misfired review is not a round.",
-    );
-  });
+  it("keeps negative-round attribution parity across policy, decision template, and OKF mirrors", () => {
+    const negativeRoundRule =
+      "A negative round counts only with at least one introduced_by_delta yes/unknown finding; no stays ordinary gate.";
+    const mirrors = [
+      ["SKILL.md", skillMd],
+      ["agents-md-section.md", agentsMdSection],
+      ["03-decisions.md", decisionsTemplate],
+      [
+        "review-gate-and-waivers.md",
+        readDoc("docs/okf/review-gate-and-waivers.md"),
+      ],
+    ] as const;
 
-  it("keeps the AGENTS.md summary and decision-template trigger scoped to yes/unknown findings", () => {
-    expect(agentsMdSection).toContain(
-      "A `no` finding stays in the ordinary finding gate.",
-    );
-    expect(decisionsTemplate).toContain(
-      "the third fix_required/reject round that carries at least one introduced_by_delta yes/unknown finding",
-    );
+    for (const [name, text] of mirrors) {
+      expect(text, name).toContain(negativeRoundRule);
+    }
   });
 
   it("SKILL.md and agents-md-section.md both state the escalation is additional to, not a substitute for, the halt rule's response", () => {
@@ -2670,9 +2670,11 @@ describe("no output-contract field in SKILL.md uses a bare yes/no enum (review r
   it("scans SKILL.md for any field using a bare yes | no enum", () => {
     const skillMd = readAsset("skill/SKILL.md");
     const enums = [
-      ...skillMd.matchAll(/([a-z_]+):\s*yes\s*\|\s*no(?:\s*\|\s*unknown)?\b/g),
+      ...skillMd.matchAll(
+        /^ {4}([a-z_]+):\s*yes\s*\|\s*no(?:\s*\|\s*unknown)?\b/gm,
+      ),
     ];
-    expect(enums.map((match) => match[0])).toEqual([
+    expect(enums.map((match) => match[0].trim())).toEqual([
       "introduced_by_delta: yes | no | unknown",
     ]);
   });

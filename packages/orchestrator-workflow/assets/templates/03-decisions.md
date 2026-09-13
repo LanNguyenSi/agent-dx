@@ -13,7 +13,7 @@ critical waivers remain distinct. -->
 
 ## Review-round escalation
 
-<!-- One row per task that triggers the Review-round escalation budget in SKILL.md: the second round-2 halt signal or the third fix_required/reject round that carries at least one introduced_by_delta yes/unknown finding on that task. A run carries multiple tasks, so this table can carry multiple rows. Leave the single placeholder row as n/a when no task in this run has triggered the budget. -->
+<!-- One row per task that triggers the Review-round escalation budget in SKILL.md: the second round-2 halt signal or the third negative round on that task. A negative round counts only with at least one introduced_by_delta yes/unknown finding; no stays ordinary gate. A run carries multiple tasks, so this table can carry multiple rows. Leave the single placeholder row as n/a when no task in this run has triggered the budget. -->
 
 | Task | Choice | Reason |
 |---|---|---|

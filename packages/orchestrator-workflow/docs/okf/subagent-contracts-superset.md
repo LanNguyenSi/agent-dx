@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-13T05:42:55Z
+timestamp: 2026-09-13T05:56:32Z
 sources:
   - packages/orchestrator-workflow/assets/skill/SKILL.md
   - packages/orchestrator-workflow/assets/agents/explorer.md
@@ -221,7 +221,7 @@ site outside the edit set. It uses the existing `relevant_files` and
 `packages/orchestrator-workflow/assets/agents/task-slicer.md:50#"will not edit."`).
 The focused regression pin checks each canonical asset for the changed-value
 categories, both existing fields, every reference site, and the annotation
-requirement (`packages/orchestrator-workflow/test/docs-consistency.test.ts:4673#"requires reference sites to be annotated in the existing task fields"`).
+requirement (`packages/orchestrator-workflow/test/docs-consistency.test.ts:4675#"requires reference sites to be annotated in the existing task fields"`).
 
 The scope-boundary wording is pinned independently
 (`packages/orchestrator-workflow/test/docs-consistency.test.ts:925#"not implementation instructions"`).
@@ -489,25 +489,25 @@ contract itself
 (`packages/orchestrator-workflow/assets/skill/SKILL.md:317#"reports as killed together with their"`);
 `assets/agents/reviewer.md` itself is untouched by this change.
 
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:4773#"On any round after the task's first, the briefing also names"` pins step 6's
-instruction, `test/docs-consistency.test.ts:4785#"or which can no longer be applied (reason:"`
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:4775#"On any round after the task's first, the briefing also names"` pins step 6's
+instruction, `test/docs-consistency.test.ts:4787#"or which can no longer be applied (reason:"`
 pins the regression-signal consequence, and the implementer prompt's
 matching rules
-(`test/docs-consistency.test.ts:4791#"On any round after the task's first, the assignment also names"`,
-`test/docs-consistency.test.ts:4803#"resolve it before the next reviewer spawn"`). A byte-for-byte
+(`test/docs-consistency.test.ts:4793#"On any round after the task's first, the assignment also names"`,
+`test/docs-consistency.test.ts:4805#"resolve it before the next reviewer spawn"`). A byte-for-byte
 cross-copy equality check on the `mutation_probes` block including the new
-sub-field (`test/docs-consistency.test.ts:4842#"replayed: false | true"`), the step 7 reviewer-briefing
-sentence (`test/docs-consistency.test.ts:4848#"the orchestrator's reviewer briefing names the replayed probes"`), and a
+sub-field (`test/docs-consistency.test.ts:4844#"replayed: false | true"`), the step 7 reviewer-briefing
+sentence (`test/docs-consistency.test.ts:4850#"the orchestrator's reviewer briefing names the replayed probes"`), and a
 negative pin scoped to `reviewer.md`'s output-contract yaml block, that it
 gains no `replayed` field, sliced from the output-contract heading rather
 than the first yaml fence in the file so an earlier decoy fence cannot be
 mistaken for it
-(`test/docs-consistency.test.ts:4889#"outputContractBlock).not.toContain"`). A further pin locks the eleven
+(`test/docs-consistency.test.ts:4891#"outputContractBlock).not.toContain"`). A further pin locks the eleven
 `mutation_probes` sub-fields to their fixed order in both copies (grown
 from five at this rule's own introduction to ten, then to eleven, under
 task 06330af2, see Mutation probe definition fields and expectation
 split below)
-(`test/docs-consistency.test.ts:4892#"both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order"`).
+(`test/docs-consistency.test.ts:4894#"both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order"`).
 
 Motivation: `lava-ice-logs/2026-09-05/ow-kit-effort-analysis.md` section
 7(ii) found fix-round regressions from a prior round's own fix that a
@@ -598,12 +598,12 @@ a dedicated pin on the `reason` requiredness rule
 (`test/docs-consistency.test.ts:1155#"is required exactly when result is not_applicable, empty otherwise"`),
 a fixed-order pin locking all eleven sub-fields to their exact order in
 both copies
-(`test/docs-consistency.test.ts:4892#"both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order"`),
+(`test/docs-consistency.test.ts:4894#"both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order"`),
 and a template agreement pin that derives the
 `04-implementation-summary.md` Mutation Probes table's columns and the
 `mutation_probes` contract's sub-field list programmatically and asserts
 they agree, so the new `reason` column and sub-field cannot drift apart
-(`packages/orchestrator-workflow/test/template-markers.test.ts:436#"the template's Mutation Probes columns and the mutation_probes contract's sub-field list agree"`).
+(`packages/orchestrator-workflow/test/template-markers.test.ts:403#"the template's Mutation Probes columns and the mutation_probes contract's sub-field list agree"`).
 
 ## Commits field
 
