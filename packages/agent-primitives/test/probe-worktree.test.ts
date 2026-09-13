@@ -138,6 +138,34 @@ function hashTree(
   return out;
 }
 
+/** Metadata snapshot including empty directories and entry modes. Unlike
+ * a source-tree snapshot, no `.git` entry is excluded. Timestamps are not
+ * content: Git may read or refresh them while registering a scratch copy. */
+function hashGitMetadata(root: string): ReturnType<typeof hashTree> {
+  const out: ReturnType<typeof hashTree> = new Map();
+  function walk(abs: string): void {
+    const stat = fs.lstatSync(abs);
+    const content = stat.isSymbolicLink()
+      ? fs.readlinkSync(abs)
+      : stat.isDirectory()
+        ? "directory"
+        : fs.readFileSync(abs);
+    out.set(path.relative(root, abs), {
+      symlink: stat.isSymbolicLink(),
+      hash: createHash("sha256")
+        .update(String(stat.mode))
+        .update("\0")
+        .update(content)
+        .digest("hex"),
+    });
+    if (stat.isDirectory()) {
+      for (const entry of fs.readdirSync(abs)) walk(path.join(abs, entry));
+    }
+  }
+  walk(root);
+  return out;
+}
+
 /** The set difference between two `hashTree` snapshots of the SAME root,
  * taken before and after a run: paths present only `after` (`added`),
  * present only `before` (`removed`), and present in both but with a
@@ -387,8 +415,7 @@ const FIXTURE_TEST_JS = [
 
 /** A fresh git repo (mkdtemp + git init, never the checkout itself) with
  * a committed fixture.js and fixture.test.js. */
-function initRepo(): { repo: string } {
-  const repo = makeTmpDir();
+function initRepo(repo = makeTmpDir()): { repo: string } {
   git(repo, ["init", "-q"]);
   git(repo, ["config", "user.email", "test@example.com"]);
   git(repo, ["config", "user.name", "test"]);
@@ -3659,11 +3686,95 @@ describe("probe(): worktree isolation, a link target that is TRACKED source", ()
         (w) =>
           w.startsWith("skipped linking ") &&
           w.includes("node_modules") &&
-          w.includes("sits at or under the repository's own git directory"),
+          w.includes("sits at or under the repository's own git metadata"),
       ),
     ).toBe(true);
     expect(fs.existsSync(path.join(repo, "src", "CLOBBER.txt"))).toBe(false);
   });
+
+  it.each([
+    ["plain", "common", "auto"],
+    ["plain", "common", "operator"],
+    ["linked", "common", "auto"],
+    ["linked", "common", "operator"],
+    ["linked", "admin", "auto"],
+    ["linked", "admin", "operator"],
+  ])(
+    "protects %s worktree %s git metadata from a real %s link and pre write",
+    async (kind, targetKind, origin) => {
+      useLockDir();
+      const container = makeTmpDir();
+      // Spaces, including a trailing space, are part of the actual path.
+      const main = path.join(container, "main checkout ");
+      fs.mkdirSync(main);
+      initRepo(main);
+      const alias = origin === "auto" ? "node_modules" : "operator-metadata";
+      fs.writeFileSync(path.join(main, ".gitignore"), `${alias}\n`);
+      fs.writeFileSync(
+        path.join(main, "metadata-pre.js"),
+        [
+          "const fs = require('node:fs');",
+          `fs.mkdirSync(${JSON.stringify(alias)}, { recursive: true });`,
+          `fs.writeFileSync(${JSON.stringify(`${alias}/METADATA-SENTINEL`)}, 'attempted');`,
+          "fs.writeFileSync('pre-ran', 'yes');",
+        ].join("\n"),
+      );
+      commitAll(main, "metadata fixture");
+      const repo =
+        kind === "linked" ? path.join(container, "linked checkout ") : main;
+      if (kind === "linked")
+        git(main, ["worktree", "add", "--detach", repo, "HEAD"]);
+      const common = fs.realpathSync(path.join(main, ".git"));
+      const admin = fs.realpathSync(
+        path.resolve(
+          repo,
+          execFileSync("git", ["rev-parse", "--git-dir"], {
+            cwd: repo,
+            encoding: "utf8",
+          }).replace(/\n$/, ""),
+        ),
+      );
+      const target = targetKind === "admin" ? admin : common;
+      fs.symlinkSync(target, path.join(repo, alias), "dir");
+      const commonBefore = hashGitMetadata(common);
+      const adminBefore = hashGitMetadata(admin);
+      const sourceBefore = hashTree(repo);
+      const result = await probe(
+        baseOptions(repo, {
+          ...(origin === "operator" ? { links: [alias] } : {}),
+          preCommand: "node metadata-pre.js",
+          testCommand:
+            "node -e \"require('node:assert').equal(require('node:fs').readFileSync('pre-ran','utf8'),'yes')\" && node fixture.test.js",
+        }),
+      );
+
+      assertTreeUnchanged(
+        commonBefore,
+        hashGitMetadata(common),
+        common,
+        isGitTransientLockPath,
+      );
+      assertTreeUnchanged(
+        adminBefore,
+        hashGitMetadata(admin),
+        admin,
+        admin === common ? isGitTransientLockPath : undefined,
+      );
+      assertTreeUnchanged(sourceBefore, hashTree(repo), repo);
+      expect(fs.existsSync(path.join(target, "METADATA-SENTINEL"))).toBe(false);
+      expect(result.status).toBe("killed");
+      expect(result.baseline?.exitCode).toBe(0);
+      expect(result.isolation.linked).toEqual([]);
+      expect(
+        result.warnings.some(
+          (warning) =>
+            warning.startsWith("skipped linking ") &&
+            warning.includes(alias) &&
+            warning.includes("repository's own git metadata"),
+        ),
+      ).toBe(true);
+    },
+  );
 });
 
 describe("probe(): worktree isolation, a destination whose ancestor in the copy is a file", () => {
@@ -5334,63 +5445,77 @@ describe("probe(): worktree isolation, untracked entries by type", () => {
     useLockDir();
     const { repo } = initRepo();
     const broken = path.join(repo, "broken-nested");
-    fs.mkdirSync(broken, { recursive: true });
+    fs.mkdirSync(path.join(broken, "lib"), { recursive: true });
     fs.symlinkSync("missing-gitdir", path.join(broken, ".git"));
-
-    const actualRun = await vi.importActual<
-      typeof import("../src/probe/run.js")
-    >("../src/probe/run.js");
-    const mockRun = vi.mocked(runArgv);
-    mockRun.mockImplementation(async (file, args, options) => {
-      const result = await actualRun.runArgv(file, args, options);
-      if (args.includes("ls-files") && args.includes("--others")) {
-        return { ...result, stdout: result.stdout + "broken-nested\0" };
-      }
-      return result;
-    });
-    try {
-      const result = await probe(baseOptions(repo));
-      expect(result.status).toBe("killed");
-      expect(
-        result.warnings.some(
-          (w) =>
-            w.includes("skipped a nested repository directory") &&
-            w.includes("broken-nested"),
-        ),
-      ).toBe(true);
-    } finally {
-      mockRun.mockImplementation((...args: Parameters<typeof runArgv>) =>
-        actualRun.runArgv(...args),
-      );
-    }
-  });
-
-  it("rechecks every copied symlink after sync, so both hops of an escaping chain warn", async () => {
-    useLockDir();
-    const { repo } = initRepo();
-    const logDir = path.join(repo, "probe-logs");
-    fs.mkdirSync(logDir, { recursive: true });
-    fs.writeFileSync(path.join(repo, "source-only.txt"), "source\n");
-    fs.symlinkSync("chain-second", path.join(repo, "chain-first"));
-    // From <repo>/probe-logs/wt-<uuid>/wt this climbs to <repo>, not the
-    // copy: the first hop only becomes observably escaping after this
-    // second hop has also been recreated.
-    fs.symlinkSync(
-      path.join("..", "..", "..", "source-only.txt"),
-      path.join(repo, "chain-second"),
+    fs.writeFileSync(
+      path.join(broken, "lib", "value"),
+      "private nested content",
+    );
+    const listing = execFileSync(
+      "git",
+      ["ls-files", "--others", "--exclude-standard", "-z"],
+      { cwd: repo, encoding: "utf8" },
+    ).split("\0");
+    expect(listing).toContain("broken-nested/lib/value");
+    expect(listing).not.toContain("broken-nested");
+    fs.writeFileSync(
+      path.join(repo, "boundary-check.js"),
+      [
+        "const fs = require('node:fs');",
+        "const assert = require('node:assert');",
+        "assert.equal(fs.existsSync('broken-nested/lib/value'), false, 'nested descendant must not be copied');",
+        "assert.equal(fs.readdirSync('.').includes('broken-nested'), false, 'nested boundary must not be recreated');",
+        "require('./fixture.test.js');",
+      ].join("\n"),
     );
 
-    const result = await probe(baseOptions(repo, { logDir }));
-
+    const result = await probe(
+      baseOptions(repo, { testCommand: "node boundary-check.js" }),
+    );
     expect(result.status).toBe("killed");
-    for (const hop of ["chain-first", "chain-second"]) {
-      expect(
-        result.warnings.some(
-          (w) => w.includes(hop) && w.includes("outside the isolation copy"),
-        ),
-      ).toBe(true);
-    }
+    expect(result.baseline?.exitCode).toBe(0);
+    expect(
+      result.warnings.some(
+        (warning) =>
+          warning.includes("nested repository boundary") &&
+          warning.includes("broken-nested/lib/value") &&
+          warning.includes("boundary: broken-nested"),
+      ),
+    ).toBe(true);
   });
+
+  it.each([
+    ["chain-first", "chain-second"],
+    ["chain-second", "chain-first"],
+  ])(
+    "rechecks every copied symlink after sync, so both hops %s -> %s warn",
+    async (first, second) => {
+      useLockDir();
+      const { repo } = initRepo();
+      const logDir = path.join(repo, "probe-logs");
+      fs.mkdirSync(logDir, { recursive: true });
+      fs.writeFileSync(path.join(repo, "source-only.txt"), "source\n");
+      fs.symlinkSync(second, path.join(repo, first));
+      // From <repo>/probe-logs/wt-<uuid>/wt this climbs to <repo>, not the
+      // copy: the first hop only becomes observably escaping after this
+      // second hop has also been recreated.
+      fs.symlinkSync(
+        path.join("..", "..", "..", "source-only.txt"),
+        path.join(repo, second),
+      );
+
+      const result = await probe(baseOptions(repo, { logDir }));
+
+      expect(result.status).toBe("killed");
+      for (const hop of ["chain-first", "chain-second"]) {
+        expect(
+          result.warnings.some(
+            (w) => w.includes(hop) && w.includes("outside the isolation copy"),
+          ),
+        ).toBe(true);
+      }
+    },
+  );
 
   it("a valid untracked symlink and a dangling one are both recreated as symlinks (not copied as files), neither aborting the sync", async () => {
     useLockDir();

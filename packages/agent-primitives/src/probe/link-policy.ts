@@ -776,8 +776,8 @@ export function planLinks(
     const gitMetadataRoots = ctx.gitMetadataRoots ?? [
       resolveDeepestExisting(path.join(ctx.rootReal, ".git")),
     ];
-    const gitMetadataRoot = gitMetadataRoots.find((metadataRoot) =>
-      isPathContained(metadataRoot, resolved),
+    const gitMetadataRoot = gitMetadataRoots.find(
+      (metadataRoot) => entryRelationTo(metadataRoot, resolved) !== undefined,
     );
     if (gitMetadataRoot !== undefined) {
       warnings.push(

@@ -649,7 +649,7 @@ function untrackedNestedBoundary(
   root: string,
   relPath: string,
 ): string | undefined {
-  const segments = relPath.split(path.sep).filter(Boolean);
+  const segments = relPath.split("/").filter(Boolean);
   let current = root;
   let rel = "";
   for (const segment of segments.slice(0, -1)) {
@@ -1039,27 +1039,44 @@ export async function beginWorktree(
   // (macOS's `/tmp` -> `/private/tmp`, or any symlinked checkout path),
   // silently dropping perfectly valid links.
   const rootReal = resolveDeepestExisting(path.resolve(root));
-  const metadataResult = await runGit(
-    ["rev-parse", "--git-dir", "--git-common-dir"],
-    "git-metadata-dirs.log",
-    root,
-  );
-  logPaths.push(metadataResult.logPath);
-  if (metadataResult.aborted) return abortedResult("the git metadata lookup");
-  if (metadataResult.exitCode !== 0) {
-    return {
-      ok: false,
-      reason: "worktree_sync_failed",
-      detail: `git rev-parse could not resolve git metadata; see ${metadataResult.logPath}`,
-      logPaths,
-      worktreePath,
-    };
+  const gitMetadataRoots: string[] = [];
+  // Query separately: each result is one pathname plus Git's final LF,
+  // not a list to split or trim (a pathname may itself contain whitespace).
+  // Resolve relative output against the same cwd that Git used, including
+  // when `.git` is a linked worktree's file rather than a directory.
+  for (const flag of ["--git-dir", "--git-common-dir"]) {
+    const metadataResult = await runGit(
+      ["rev-parse", flag],
+      `git-metadata${flag}.log`,
+      root,
+    );
+    logPaths.push(metadataResult.logPath);
+    if (metadataResult.aborted) return abortedResult("the git metadata lookup");
+    const metadataPath = metadataResult.stdout.replace(/\n$/, "");
+    let metadataRoot: string | undefined;
+    if (
+      metadataResult.exitCode === 0 &&
+      !metadataResult.outputTruncated &&
+      metadataPath.length > 0
+    ) {
+      try {
+        const resolved = fs.realpathSync(path.resolve(root, metadataPath));
+        if (fs.statSync(resolved).isDirectory()) metadataRoot = resolved;
+      } catch {
+        // Missing or unreadable metadata cannot establish a safe link policy.
+      }
+    }
+    if (metadataRoot === undefined) {
+      return {
+        ok: false,
+        reason: "worktree_sync_failed",
+        detail: `git rev-parse could not resolve git metadata; see ${metadataResult.logPath}`,
+        logPaths,
+        worktreePath,
+      };
+    }
+    gitMetadataRoots.push(metadataRoot);
   }
-  const gitMetadataRoots = metadataResult.stdout
-    .split("\n")
-    .map((value) => value.trim())
-    .filter((value) => value.length > 0)
-    .map((value) => resolveDeepestExisting(path.resolve(root, value)));
   // The copy's own root, resolved once: every containment judgement
   // below (the policy's canonical spelling, each syscall's own check,
   // and the postcondition) compares against THIS spelling, for the same
