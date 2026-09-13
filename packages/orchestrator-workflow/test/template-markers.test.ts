@@ -208,6 +208,7 @@ describe("05-review-findings.md findings-table header convention", () => {
       .map((cell) => cell.trim().toLowerCase());
     expect(cells).toContain("severity");
     expect(cells).toContain("decision");
+    expect(cells).toHaveLength(5);
   });
 
   it("documents the header as load-bearing above the table", () => {
@@ -231,7 +232,7 @@ describe("05-review-findings.md findings-table header convention", () => {
       .split("|")
       .slice(1, -1)
       .map((cell) => cell.trim());
-    const decisionCell = cells[cells.length - 1];
+    const decisionCell = cells[cells.indexOf("accepted/defer")];
     const tokens = decisionCell
       .split("/")
       .map((token) => token.trim())
@@ -264,13 +265,30 @@ describe("05-review-findings.md findings-table header convention", () => {
  */
 describe("05-review-findings.md placeholder-row fail-closed convention", () => {
   const reviewTemplate = readAsset("templates/05-review-findings.md");
+  const legacyTableHeader =
+    "| Severity | Category | Description | Suggested Fix | Decision |";
+  const legacyTableSeparator = "|---|---|---|---|---|";
+  const legacyPlaceholder =
+    "| low/medium/high/critical | correctness/architecture/security/tests/maintainability/performance/docs | <!-- finding --> | <!-- fix --> | accepted/defer |";
 
   it("carries the exact placeholder row grounding-mcp's completeness reader matches literally", () => {
     // Mutation-check: editing any cell of this row (including the HTML-comment
     // placeholders) fails this assertion.
     expect(reviewTemplate).toContain(
-      "| low/medium/high/critical | correctness/architecture/security/tests/maintainability/performance/docs | <!-- finding --> | <!-- fix --> | accepted/defer |",
+      [legacyTableHeader, legacyTableSeparator, legacyPlaceholder].join("\n"),
     );
+  });
+
+  it("keeps the entire legacy five-cell table schema byte- and cell-stable", () => {
+    const tableRows = [
+      legacyTableHeader,
+      legacyTableSeparator,
+      legacyPlaceholder,
+    ];
+    for (const row of tableRows) {
+      expect(reviewTemplate.split(/\r?\n/)).toContain(row);
+      expect(row.split("|").slice(1, -1)).toHaveLength(5);
+    }
   });
 
   it("documents the placeholder row's fail-closed semantics next to the row", () => {
@@ -278,6 +296,21 @@ describe("05-review-findings.md placeholder-row fail-closed convention", () => {
     // when transferring findings, delete it for a genuine zero-findings review.
     expect(reviewTemplate).toMatch(/replace this row/i);
     expect(reviewTemplate).toMatch(/zero-findings review, delete this row/i);
+  });
+});
+
+describe("05-review-findings.md preserves per-finding delta attribution", () => {
+  const reviewTemplate = readAsset("templates/05-review-findings.md");
+
+  it("records the reviewer contract's three attribution values in Description without changing the legacy table schema", () => {
+    expect(reviewTemplate).toContain(
+      "| Severity | Category | Description | Suggested Fix | Decision |",
+    );
+    expect(reviewTemplate).toContain(
+      "Description field as `(introduced_by_delta: yes|no|unknown)`",
+    );
+    expect(reviewTemplate).toContain("named base build and replay");
+    expect(reviewTemplate).toContain("ordinary finding gate");
   });
 });
 

@@ -16,7 +16,8 @@ by the grounding-mcp completeness reader yet).
 | Severity | Category | Description | Suggested Fix | Decision |
 |---|---|---|---|---|
 | low/medium/high/critical | correctness/architecture/security/tests/maintainability/performance/docs | <!-- finding --> | <!-- fix --> | accepted/defer |
-<!-- This row is the shipped template placeholder, not a finding: the orchestrator-workflow completeness reader fails the completeness gate closed when this exact row survives untouched and no concrete finding row has been added, the same way a `TODO` marker does. During findings transfer (step 7), replace this row with each reviewer finding. For a genuine zero-findings review, delete this row instead — a header row with no data rows is a valid, complete table; leaving this row next to real finding rows is also fine. This mirrors grounding-mcp's placeholder-row detection; keep the two in sync. -->
+<!-- This legacy five-cell table and placeholder row are the shipped template, not a finding: the orchestrator-workflow completeness reader matches the row byte-for-byte and fails the completeness gate closed when it survives untouched with no concrete finding row, the same way a `TODO` marker does. During findings transfer (step 7), replace this row with each reviewer finding and record its attribution parenthetically in the Description field as `(introduced_by_delta: yes|no|unknown)`. For a genuine zero-findings review, delete this row instead — a header row with no data rows is a valid, complete table; leaving this row next to real finding rows is also fine. This mirrors grounding-mcp's placeholder-row detection; keep the two in sync. -->
+<!-- A `no` classification requires the named base build and replay recorded in the reviewer's `reproduction`; it follows the ordinary finding gate, while only `yes`/`unknown` feed bounded-round halt and escalation guidance. The load-bearing Severity and Decision headers remain unchanged. -->
 
 ## Missing Tests
 
@@ -35,4 +36,3 @@ accept | accept_with_notes | fix_required | reject
 <!-- Reproduction note: when a finding rests on empirical or probabilistic evidence (flake rates, benchmarks, "n runs green", performance/timing numbers), record the reviewer's independent reproduction (method, sample size, result vs. the implementer's claim) in the reviewer output contract's `reproduction` field (SKILL.md step 7). Deterministic checks (a single test run, tsc, lint) do not require it. -->
 
 <!-- Recurrence note: each finding in the reviewer output contract also carries a `recurrence` field (new or repeated), letting the orchestrator read the Review-round escalation budget's trigger (SKILL.md, Review-round escalation budget) off the reviewer's own return instead of reconstructing it by hand. A repeated finding here is what feeds that budget's round count. -->
-

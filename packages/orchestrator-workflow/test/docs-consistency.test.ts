@@ -1438,6 +1438,7 @@ describe("round-2 halt rule ships in the skill", () => {
 describe("review-round escalation budget ships in the skill and the AGENTS.md section", () => {
   const skillMd = unwrap(readAsset("skill/SKILL.md"));
   const agentsMdSection = unwrap(readAsset("agents-md-section.md"));
+  const decisionsTemplate = readAsset("templates/03-decisions.md");
 
   it("SKILL.md carries the section heading and step 8's trigger reference", () => {
     expect(skillMd).toContain("## Review-round escalation budget");
@@ -1515,13 +1516,22 @@ describe("review-round escalation budget ships in the skill and the AGENTS.md se
     );
   });
 
-  it("SKILL.md and agents-md-section.md both define what counts as a round (a misfired review is not one)", () => {
-    expect(skillMd).toContain(
-      "A counted round is a completed reviewer return whose `acceptance_recommendation` is `fix_required` or `reject`; a misfired review is not a round",
-    );
-    expect(agentsMdSection).toContain(
-      "A counted round is a completed reviewer return recommending `fix_required` or `reject`; a misfired review is not a round.",
-    );
+  it("keeps negative-round attribution parity across policy, decision template, and OKF mirrors", () => {
+    const negativeRoundRule =
+      "A negative round counts only with at least one introduced_by_delta yes/unknown finding; no stays ordinary gate.";
+    const mirrors = [
+      ["SKILL.md", skillMd],
+      ["agents-md-section.md", agentsMdSection],
+      ["03-decisions.md", decisionsTemplate],
+      [
+        "review-gate-and-waivers.md",
+        readDoc("docs/okf/review-gate-and-waivers.md"),
+      ],
+    ] as const;
+
+    for (const [name, text] of mirrors) {
+      expect(text, name).toContain(negativeRoundRule);
+    }
   });
 
   it("SKILL.md and agents-md-section.md both state the escalation is additional to, not a substitute for, the halt rule's response", () => {
@@ -2659,7 +2669,14 @@ describe("cli-inputs.ts's --profile prompt labels are derived from rolesForProfi
 describe("no output-contract field in SKILL.md uses a bare yes/no enum (review round 1, M4)", () => {
   it("scans SKILL.md for any field using a bare yes | no enum", () => {
     const skillMd = readAsset("skill/SKILL.md");
-    expect(skillMd).not.toMatch(/:\s*yes\s*\|\s*no\b/);
+    const enums = [
+      ...skillMd.matchAll(
+        /^ {4}([a-z_]+):\s*yes\s*\|\s*no(?:\s*\|\s*unknown)?\b/gm,
+      ),
+    ];
+    expect(enums.map((match) => match[0].trim())).toEqual([
+      "introduced_by_delta: yes | no | unknown",
+    ]);
   });
 });
 

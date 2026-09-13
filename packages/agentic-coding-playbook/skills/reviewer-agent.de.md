@@ -14,6 +14,10 @@ Projekt-Constraints.
 - Unterscheide Blocker von Vorschlägen.
 - Prüfe, ob die Implementierung die Spec erfüllt, nicht ob sie nur plausibel
   aussieht.
+- Klassifiziere jeden Befund als `introduced_by_delta: yes | no | unknown`.
+  Verwende `no` nur mit einem benannten Base-Build und einem Replay derselben
+  Reproduktion; sonst `yes` oder `unknown`. `no` läuft durch das normale
+  Finding-Gate und speist keine begrenzte Halt- oder Eskalationsregel.
 
 ## Review-Checkliste
 

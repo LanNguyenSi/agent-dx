@@ -128,9 +128,9 @@ trivial change.
   the exhausted tier path falls straight to the merge-hold), or an
   operator merge-hold, and adds a row (task, choice, reason) to
   `03-decisions.md`'s Review-round escalation table, then sets the
-  `review-round-escalation` marker to the most recent choice. A counted
-  round is a completed reviewer return recommending `fix_required` or
-  `reject`; a misfired review is not a round. Which of the three is
+  `review-round-escalation` marker to the most recent choice. A negative round
+  has an `acceptance_recommendation` of `fix_required` or `reject`; a misfired
+  review is not a round. A negative round counts only with at least one introduced_by_delta yes/unknown finding; no stays ordinary gate. Which of the three is
   picked is judgment; that one is picked and recorded is not. Escalating
   never substitutes for a review round and comes in addition to the halt
   rule's split-or-redesign response, not instead of it.

@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-09-12T13:05:00Z
+timestamp: 2026-09-13T05:56:32Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -210,9 +210,9 @@ docs-consistency.test.ts:489-495#"expectPointerMention(section)").
 `05-review-findings.md` and `06-handoff.md` each carry one verdict marker,
 opposite in posture to run-base:
 
-- `05-review-findings.md:33#"<!-- solution-acceptance: acceptance-recommendation = TODO -->"`: `<!-- solution-acceptance: acceptance-recommendation = TODO -->`,
+- `05-review-findings.md:34#"<!-- solution-acceptance: acceptance-recommendation = TODO -->"`: `<!-- solution-acceptance: acceptance-recommendation = TODO -->`,
   filled from the Acceptance Recommendation enum `accept | accept_with_notes
-  | fix_required | reject` (packages/orchestrator-workflow/assets/templates/05-review-findings.md:29-31#"accept | accept_with_notes | fix_required | reject").
+  | fix_required | reject` (packages/orchestrator-workflow/assets/templates/05-review-findings.md:32#"accept | accept_with_notes | fix_required | reject").
 - `06-handoff.md:43#"<!-- solution-acceptance: final-status = TODO -->"`: `<!-- solution-acceptance: final-status = TODO -->`,
   filled from the Final Status enum `accepted | accepted_with_notes |
   needs_followup | blocked` (packages/orchestrator-workflow/assets/templates/06-handoff.md:39-41#"accepted | accepted_with_notes | needs_followup | blocked").
@@ -260,9 +260,9 @@ the completeness gate (05-review-findings.md:15#"<!-- Decision legend: a high/cr
 was deliberately narrowed to `accepted/defer` only (0.7.4,
 `CHANGELOG.md:#[0.7.4]`) so the template itself never invites `fix`/`reject`
 as if they were resolutions. Pinned by template-markers.test.ts:200-210#"decision"
-(header row carries both `severity` and `decision` cells), template-markers.test.ts:213-214#"expect(reviewTemplate).toMatch(/<!--[^>]*load-bearing[^>]*-->/i);" (the
-load-bearing comment exists), template-markers.test.ts:217-240#"expect(tokens).toEqual([" (example row's Decision cell is
-exactly `accepted/defer`, mutation-checked), and template-markers.test.ts:243-249#"expect(reviewTemplate).toMatch(/arms? the (?:completeness )?gate/i);" (the
+(header row carries both `severity` and `decision` cells), template-markers.test.ts:215#"expect(reviewTemplate).toMatch(/<!--[^>]*load-bearing[^>]*-->/i);" (the
+load-bearing comment exists), template-markers.test.ts:241#"expect(tokens).toEqual([" (example row's Decision cell is
+exactly `accepted/defer`, mutation-checked), and template-markers.test.ts:250#"expect(reviewTemplate).toMatch(/arms? the (?:completeness )?gate/i);" (the
 `RESOLVED_DECISIONS = {accepted, defer}` string and "arms the ... gate"
 wording are both present verbatim).
 
@@ -279,7 +279,8 @@ a finding — a run that fills the acceptance-recommendation marker with
 `complete: true` with zero findings, indistinguishable from a genuine
 zero-findings review (the "mixed-state bypass"). 0.13.0 documents the fix's
 contract half in this repo: a comment directly below the placeholder row
-(05-review-findings.md:19#"marker does. During findings transfer (step 7), replace this row with each reviewer finding. For a genuine zero-findings review, delete this row instead — a header row with no data rows is a valid, complete table; leaving this row next to real finding rows is also fine. This mirrors grounding-mcp's placeholder-row detection; keep the two in sync. -->") states the rule the orchestrator must follow:
+(05-review-findings.md:19#"This legacy five-cell table and placeholder row are the shipped template") preserves the
+consumer-recognized literal and states the rule the orchestrator must follow:
 replace the row when transferring findings, or delete it outright for a
 genuine zero-findings review (a header row with no data rows is valid;
 leaving the legend row next to real finding rows is also fine) — and
