@@ -987,7 +987,7 @@ describe("planLinks: rule 3's tracked-TARGET half", () => {
 
     expect(plan.links).toEqual([]);
     expect(plan.warnings[0]).toContain(
-      `its target ${path.join(root, ".git")} sits at or under the repository's own git directory`,
+      `its target ${path.join(root, ".git")} sits at or under the repository's own git metadata`,
     );
   });
 
@@ -1003,7 +1003,7 @@ describe("planLinks: rule 3's tracked-TARGET half", () => {
 
     expect(plan.links).toEqual([]);
     expect(plan.warnings[0]).toContain(
-      `its target ${path.join(root, ".git")} sits at or under the repository's own git directory`,
+      `its target ${path.join(root, ".git")} sits at or under the repository's own git metadata`,
     );
   });
 

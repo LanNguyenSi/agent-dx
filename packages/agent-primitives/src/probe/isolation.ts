@@ -642,6 +642,24 @@ function hasGitBoundary(dir: string): boolean {
   return true;
 }
 
+/** The first ancestor below root carrying any `.git` directory entry.
+ * Git lists descendant files of a dangling boundary, so checking only the
+ * listed entry itself is fail-open. */
+function untrackedNestedBoundary(
+  root: string,
+  relPath: string,
+): string | undefined {
+  const segments = relPath.split(path.sep).filter(Boolean);
+  let current = root;
+  let rel = "";
+  for (const segment of segments.slice(0, -1)) {
+    current = path.join(current, segment);
+    rel = rel === "" ? segment : path.join(rel, segment);
+    if (hasGitBoundary(current)) return rel;
+  }
+  return undefined;
+}
+
 /** Runs `git argv...` in `cwd`, logging into `runDir` under
  * `logFileName`, under `signal` when one is given. */
 function gitArgv(
@@ -950,8 +968,8 @@ export async function beginWorktree(
     .split("\0")
     .filter((p) => p.length > 0);
 
-  const logDirReal = resolveDeepestExisting(path.resolve(logDir));
   const syncWarnings: string[] = [];
+  const logDirReal = resolveDeepestExisting(path.resolve(logDir));
   const copiedSymlinks: { dest: string; displayRelPath: string }[] = [];
   // The copy's own root, resolved once here rather than per symlink:
   // `git worktree add` has already created `worktreePath` by this
@@ -968,7 +986,15 @@ export async function beginWorktree(
     // target resolves inside `logDir` is still a link that lives in the
     // source tree, and `copyUntrackedEntry` recreates it as a link
     // (never following it) the same as any other symlink.
-    return !isPathContained(logDirReal, entryOwnPath(root, relPath));
+    if (isPathContained(logDirReal, entryOwnPath(root, relPath))) return false;
+    const boundary = untrackedNestedBoundary(root, relPath);
+    if (boundary !== undefined) {
+      syncWarnings.push(
+        `skipped an untracked entry below a nested repository boundary in the untracked sync: ${relPath} (boundary: ${boundary})`,
+      );
+      return false;
+    }
+    return true;
   });
   try {
     for (let i = 0; i < syncableRelPaths.length; i += 1) {
@@ -1013,6 +1039,27 @@ export async function beginWorktree(
   // (macOS's `/tmp` -> `/private/tmp`, or any symlinked checkout path),
   // silently dropping perfectly valid links.
   const rootReal = resolveDeepestExisting(path.resolve(root));
+  const metadataResult = await runGit(
+    ["rev-parse", "--git-dir", "--git-common-dir"],
+    "git-metadata-dirs.log",
+    root,
+  );
+  logPaths.push(metadataResult.logPath);
+  if (metadataResult.aborted) return abortedResult("the git metadata lookup");
+  if (metadataResult.exitCode !== 0) {
+    return {
+      ok: false,
+      reason: "worktree_sync_failed",
+      detail: `git rev-parse could not resolve git metadata; see ${metadataResult.logPath}`,
+      logPaths,
+      worktreePath,
+    };
+  }
+  const gitMetadataRoots = metadataResult.stdout
+    .split("\n")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0)
+    .map((value) => resolveDeepestExisting(path.resolve(root, value)));
   // The copy's own root, resolved once: every containment judgement
   // below (the policy's canonical spelling, each syscall's own check,
   // and the postcondition) compares against THIS spelling, for the same
@@ -1151,6 +1198,7 @@ export async function beginWorktree(
     protectedRelPaths,
     isTrackedPath,
     trackedUnknown,
+    gitMetadataRoots,
     copyRootReal: wtReal,
     canonicalRootRelPath,
     canonicalRelPath,

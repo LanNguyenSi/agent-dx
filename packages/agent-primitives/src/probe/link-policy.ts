@@ -112,6 +112,9 @@ export interface LinkPolicyContext {
    * content it never got the chance to look for.
    */
   trackedUnknown: boolean;
+  /** Resolved git administrative roots for this repository. These are
+   * `--git-dir` and `--git-common-dir`, which differ in a linked worktree. */
+  gitMetadataRoots?: readonly string[];
   /**
    * The isolation copy's own root, already resolved through realpath,
    * when one exists yet (`beginWorktree` calls `planLinks` after
@@ -770,12 +773,17 @@ export function planLinks(
     // reason to refuse it. A write through such a link lands in the
     // repository's own live git state directly, which every other
     // guarantee this run makes assumes stays untouched.
-    const gitDirReal = resolveDeepestExisting(path.join(ctx.rootReal, ".git"));
-    if (isPathContained(gitDirReal, resolved)) {
+    const gitMetadataRoots = ctx.gitMetadataRoots ?? [
+      resolveDeepestExisting(path.join(ctx.rootReal, ".git")),
+    ];
+    const gitMetadataRoot = gitMetadataRoots.find((metadataRoot) =>
+      isPathContained(metadataRoot, resolved),
+    );
+    if (gitMetadataRoot !== undefined) {
       warnings.push(
         skippedLinkWarning(
           candidate,
-          `its target ${resolved} sits at or under the repository's own git directory; ` +
+          `its target ${resolved} sits at or under the repository's own git metadata (${gitMetadataRoot}); ` +
             "a write through such a link would reach the tree's real " +
             "git state directly",
         ),
