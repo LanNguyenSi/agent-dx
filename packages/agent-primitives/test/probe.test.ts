@@ -3142,7 +3142,7 @@ describe("probe(): a signal while a library-mode probe is running", () => {
     );
   }, 60000);
 
-  it("F1/F3: with --pre, an aborted library-mode run warns the build output may be stale instead of rebuilding or staying silent", async () => {
+  it("with --pre, an aborted library-mode run warns the build output may be stale instead of rebuilding or staying silent", async () => {
     const lockDir = useLockDir();
     const { repo } = initRepo();
     const absFile = path.join(repo, "fixture.js");

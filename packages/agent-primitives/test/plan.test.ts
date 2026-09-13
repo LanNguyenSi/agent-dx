@@ -999,7 +999,7 @@ describe("probePlan(): the final rebuild after the last mutant is restored", () 
     ).toBe(false);
   }, 30000);
 
-  it("F2/F5 crossover: a plan whose first mutant applies and whose second is mutant_not_applicable still runs the rebuild exactly once", async () => {
+  it("a plan whose first mutant applies and whose second is mutant_not_applicable still runs the rebuild exactly once", async () => {
     useLockDir();
     const { repo } = initRepo();
     const counterFile = path.join(makeTmpDir(), "counter.txt");
