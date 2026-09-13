@@ -715,13 +715,18 @@ export interface FinalRebuildRuntime {
  * `warnings` when it actually ran `--pre`, saying whether the rebuild
  * itself succeeded; when it could not be confirmed, the note says the
  * build output may still be stale rather than staying silent about it.
+ *
+ * Returns `{}` on a no-op (neither branch above), and `{ logPath }` once
+ * `--pre` actually ran (success or failure alike), so a caller can fold
+ * this run's own log into the envelope's other reported log paths
+ * instead of leaving it named only inside the `warnings` sentence above.
  */
 export async function runFinalRebuild(
   rt: FinalRebuildRuntime,
   warnings: string[],
-): Promise<void> {
+): Promise<{ logPath?: string }> {
   if (rt.effectiveIsolation !== "inplace" || rt.preCommand === undefined) {
-    return;
+    return {};
   }
   const started = startExecTracked(rt.preCommand, rt.execEnv);
   const result = await rt.track(started.result, started.closed);
@@ -730,7 +735,7 @@ export async function runFinalRebuild(
       "--pre was re-run after the last mutant was restored, so the " +
         "working tree's build output matches the restored source",
     );
-    return;
+    return { logPath: result.logPath };
   }
   const cause = result.aborted
     ? "was aborted"
@@ -743,6 +748,7 @@ export async function runFinalRebuild(
     `--pre was re-run after the last mutant was restored but ${cause}; ` +
       `the working tree's build output may still be stale, see ${result.logPath}`,
   );
+  return { logPath: result.logPath };
 }
 
 /**

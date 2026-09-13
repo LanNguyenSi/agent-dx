@@ -69,7 +69,10 @@ other untrusted input.
 Under `-i inplace`, `--pre` runs once more after the last mutant is
 restored, so a command run after the probe returns never exercises a
 mutant's build output; this is a no-op under `-i worktree` (that mode's
-`--pre` never touched the original tree's build output at all). See the
+`--pre` never touched the original tree's build output at all). A run
+interrupted by SIGINT/SIGTERM restores the target but does not get this
+extra `--pre` (the signal handler exits the process before this step
+would run): rebuild by hand after an interrupted `-i inplace` run. See the
 README's `--pre` section for the exact rule and the `warnings` notice it
 leaves behind.
 
@@ -114,7 +117,12 @@ invocation cwd:
   "pre": "<optional rebuild command>",
   "mutants": [
     { "file": "<path>", "line": 12, "replace": "<line replacement>" },
-    { "file": "<path>", "line": 20, "match": "<substring>", "with": "<replacement>" },
+    {
+      "file": "<path>",
+      "line": 20,
+      "match": "<substring>",
+      "with": "<replacement>"
+    },
     { "file": "<path>", "patch": "<path to a unified diff>" }
   ]
 }

@@ -20,7 +20,7 @@ import { initNodeTestDotRepo } from "./helpers/node-test-dot-repo.js";
 import { expectNoIsolationLeftovers } from "./helpers/no-leftovers.js";
 import { sha256File } from "../src/hash.js";
 import { execCommand } from "../src/exec.js";
-import { computeMutant } from "../src/probe/mutant.js";
+import { applyPatchForReal, computeMutant } from "../src/probe/mutant.js";
 import {
   beginInplace,
   beginWorktree,
@@ -40,7 +40,11 @@ vi.mock("../src/exec.js", async (importOriginal) => {
 vi.mock("../src/probe/mutant.js", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../src/probe/mutant.js")>();
-  return { ...actual, computeMutant: vi.fn(actual.computeMutant) };
+  return {
+    ...actual,
+    computeMutant: vi.fn(actual.computeMutant),
+    applyPatchForReal: vi.fn(actual.applyPatchForReal),
+  };
 });
 vi.mock("../src/probe/isolation.js", async (importOriginal) => {
   const actual =
@@ -714,6 +718,255 @@ describe("probePlan(): the target is restored between mutants (I2)", () => {
     expect(runsSeen(repo)).toHaveLength(2);
 
     fs.writeFileSync(target, originalContent);
+  }, 30000);
+});
+
+describe("probePlan(): the final rebuild after the last mutant is restored", () => {
+  /** A counter script (same shape `probe.test.ts` uses for the single
+   * probe's own rebuild tests): appends one line per invocation, so a
+   * test can assert exactly how many times `--pre` ran. */
+  function counterScript(counterFile: string): string {
+    const scriptPath = path.join(makeTmpDir(), "count.js");
+    fs.writeFileSync(
+      scriptPath,
+      [
+        "const fs = require('fs');",
+        `const n = Number(fs.readFileSync(${JSON.stringify(counterFile)}, 'utf8')) + 1;`,
+        `fs.writeFileSync(${JSON.stringify(counterFile)}, String(n));`,
+        "",
+      ].join("\n"),
+    );
+    return `node ${JSON.stringify(scriptPath)}`;
+  }
+
+  it("F1: a two-target plan whose first mutant's own test command rewrites the second target names the stale-build clause on the target_not_restored warning, without touching top-level warnings", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const secondPath = path.join(repo, "second.js");
+    fs.writeFileSync(
+      secondPath,
+      "function triple(n) {\n  return n * 3;\n}\nmodule.exports = { triple };\n",
+    );
+    // Stands in for a test suite whose side effect happens to touch a
+    // second file: once the mutant on `fixture.js` is live, this write
+    // lands on `second.js` DURING the first mutant's own test phase,
+    // before that mutant is even restored -- exactly the ordering the
+    // between-mutants hash check (I2) exists to catch.
+    const testScript = path.join(makeTmpDir(), "test.js");
+    fs.writeFileSync(
+      testScript,
+      [
+        "const fs = require('node:fs');",
+        "const content = fs.readFileSync('fixture.js', 'utf8');",
+        "if (content.includes('MUTATED_A')) {",
+        "  fs.writeFileSync('second.js', 'CORRUPTED\\n');",
+        "}",
+        "const { isPositive } = require(process.cwd() + '/fixture.js');",
+        "process.exit(isPositive(5) === true ? 0 : 1);",
+        "",
+      ].join("\n"),
+    );
+
+    const result = await probePlan(
+      planOptions(
+        repo,
+        [
+          replaceMutant(2, "  return false; // MUTATED_A"),
+          replaceMutant(2, "  return n * 9;", "second.js"),
+        ],
+        {
+          testCommand: `node ${JSON.stringify(testScript)}`,
+          preCommand: "true",
+        },
+      ),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("target_not_restored");
+    expect(result.results[0].status).toBe("killed");
+    expect(result.results[1].reason).toBe("target_not_restored");
+    // The shared clause `restoreFailedRebuildClause` appends, naming the
+    // stale-build risk: present on the per-mutant warning this fix
+    // targets.
+    expect(result.results[1].warnings.join(" ")).toContain(
+      "rebuild it by hand before trusting it",
+    );
+    // The fix only appends to the per-mutant warning above; top-level
+    // `warnings` stays exactly as it was before this fix (empty here).
+    expect(result.warnings).toEqual([]);
+  }, 30000);
+
+  it("F2a: runs --pre baseline+N+1 times with exactly one success notice, leaving a build marker matching the restored source", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const markerPath = path.join(repo, "dist-marker.js");
+    const counterFile = path.join(makeTmpDir(), "counter.txt");
+    fs.writeFileSync(counterFile, "0");
+    const preCommand = `cp fixture.js dist-marker.js && ${counterScript(counterFile)}`;
+
+    const result = await probePlan(
+      planOptions(
+        repo,
+        [
+          replaceMutant(2, "  return false;"),
+          replaceMutant(5, "  return true;"),
+        ],
+        { preCommand },
+      ),
+    );
+
+    expect(result.status).toBe("killed");
+    expect(result.summary.killed).toBe(2);
+    // baseline (1) + 2 mutants (1 each) + the final rebuild (1) = 4.
+    expect(fs.readFileSync(counterFile, "utf8")).toBe("4");
+    const successNotices = result.warnings.filter((w) =>
+      w.includes("--pre was re-run after the last mutant was restored, so"),
+    );
+    expect(successNotices).toHaveLength(1);
+    expect(fs.readFileSync(markerPath, "utf8")).toBe(FIXTURE_JS);
+  }, 30000);
+
+  it("F2b: a --pre that fails only on its last (rebuild) invocation leaves the plan's own status/summary unchanged and warns of the stale risk with a log path", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const counterFile = path.join(makeTmpDir(), "counter.txt");
+    fs.writeFileSync(counterFile, "0");
+    const failScript = path.join(makeTmpDir(), "fail-last.js");
+    fs.writeFileSync(
+      failScript,
+      [
+        "const fs = require('fs');",
+        `const counterFile = ${JSON.stringify(counterFile)};`,
+        "const n = Number(fs.readFileSync(counterFile, 'utf8')) + 1;",
+        "fs.writeFileSync(counterFile, String(n));",
+        // baseline (1) + 2 mutants = invocations 1-3 succeed; the 4th
+        // (the final rebuild) is the only one that fails.
+        "if (n >= 4) process.exit(1);",
+        "",
+      ].join("\n"),
+    );
+
+    const result = await probePlan(
+      planOptions(
+        repo,
+        [
+          replaceMutant(2, "  return false;"),
+          replaceMutant(5, "  return true;"),
+        ],
+        { preCommand: `node ${JSON.stringify(failScript)}` },
+      ),
+    );
+
+    expect(result.status).toBe("killed");
+    expect(result.summary.killed).toBe(2);
+    expect(fs.readFileSync(counterFile, "utf8")).toBe("4");
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(
+            "--pre was re-run after the last mutant was restored but",
+          ) && w.includes("may still be stale, see"),
+      ),
+    ).toBe(true);
+  }, 30000);
+
+  it("F2 negative: under -i worktree, no rebuild notice is printed and the original tree's build output is never touched", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const markerPath = path.join(repo, "dist-marker.js");
+
+    const result = await probePlan(
+      planOptions(
+        repo,
+        [
+          replaceMutant(2, "  return false;"),
+          replaceMutant(5, "  return true;"),
+        ],
+        { isolation: "worktree", preCommand: "cp fixture.js dist-marker.js" },
+      ),
+    );
+
+    expect(result.status).toBe("killed");
+    expect(
+      result.warnings.some((w) =>
+        w.includes("--pre was re-run after the last mutant was restored"),
+      ),
+    ).toBe(false);
+    // `-i worktree`'s `--pre` only ever ran against the worktree's own
+    // copy: the original tree never gets this file at all.
+    expect(fs.existsSync(markerPath)).toBe(false);
+  }, 30000);
+
+  it("F5: a mutant_not_applicable outcome runs --pre once (the baseline only) and emits no rebuild notice", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const counterFile = path.join(makeTmpDir(), "counter.txt");
+    fs.writeFileSync(counterFile, "0");
+
+    const result = await probePlan(
+      planOptions(
+        repo,
+        // Line 99 does not exist: the dry run fails before anything is
+        // ever applied to the tree (`prepareMutant`'s own validation,
+        // never `runMutantAttempt`).
+        [replaceMutant(99, "  return false;")],
+        { preCommand: counterScript(counterFile) },
+      ),
+    );
+
+    expect(result.results[0].reason).toBe("mutant_not_applicable");
+    // Only the shared baseline ever invoked `--pre`: nothing this plan
+    // applied ever reached the tree, so there is no stale build output
+    // for the final rebuild to fix, and it does not run.
+    expect(fs.readFileSync(counterFile, "utf8")).toBe("1");
+    expect(
+      result.warnings.some((w) =>
+        w.includes("--pre was re-run after the last mutant was restored"),
+      ),
+    ).toBe(false);
+  }, 30000);
+
+  it("F5: a real git-apply failure (exit code, not timeout/abort) is also mutant_not_applicable and does not trigger the rebuild", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const counterFile = path.join(makeTmpDir(), "counter.txt");
+    fs.writeFileSync(counterFile, "0");
+    const patchPath = realDiffPatch(
+      repo,
+      "fixture.js",
+      FIXTURE_JS.replace("  return n > 0;", "  return n >= 0;"),
+    );
+    vi.mocked(applyPatchForReal).mockImplementationOnce(
+      async (_p, _r, logDir) => ({
+        exitCode: 1,
+        durationMs: 5,
+        stdout: "",
+        stderr: "error: patch does not apply",
+        logPath: path.join(logDir, "apply.log"),
+        timedOut: false,
+        aborted: false,
+        outputTruncated: false,
+        logWriteFailed: false,
+        stdioClosed: true,
+      }),
+    );
+
+    const result = await probePlan(
+      planOptions(repo, [{ file: "fixture.js", form: "patch", patchPath }], {
+        preCommand: counterScript(counterFile),
+      }),
+    );
+
+    expect(result.results[0].reason).toBe("mutant_not_applicable");
+    // The real apply itself was attempted (and failed) after the dry
+    // run succeeded, but the mutant's own `--pre`/test phase never ran:
+    // only the baseline's one call happened.
+    expect(fs.readFileSync(counterFile, "utf8")).toBe("1");
+    expect(
+      result.warnings.some((w) =>
+        w.includes("--pre was re-run after the last mutant was restored"),
+      ),
+    ).toBe(false);
   }, 30000);
 });
 

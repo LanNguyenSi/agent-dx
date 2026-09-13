@@ -723,6 +723,21 @@ async function runProbePipeline(
   // cannot see this case, only the true-crash one where the slot was
   // never cleared at all.
   let mutantRestoreFailed = false;
+  // Whether the one mutant this pipeline applies ever got as far as
+  // running its own `--pre`/test against genuinely mutated content: see
+  // `MutantAttemptOutcome.applied`'s own docblock. Stays `false` when the
+  // mutant never ran (a refusal before `runMutantAttempt`, `setup.ok`
+  // false, capturedRt never even set) or when `runMutantAttempt` itself
+  // reports `applied: false` -- both mean the rebuild below has nothing
+  // to fix.
+  let mutantApplied = false;
+  // The array reference the normal-path return hands out as
+  // `dryRunLogPaths`, captured so `finally`'s rebuild can fold its own
+  // log path into the delivered result instead of leaving it named only
+  // in `warnings`. `undefined` on every path that never reached that
+  // return statement (a refusal, a thrown error) -- exactly the paths
+  // that build no envelope for a log path to join.
+  let capturedLogPaths: string[] | undefined;
   // Set by the `catch` below and read by `finally`'s emergency-restore
   // path, so its warning can name what actually triggered the restore
   // instead of just "an unexpected error".
@@ -870,6 +885,13 @@ async function runProbePipeline(
       baselineOutput,
     );
     mutantRestoreFailed = outcome.restoreFailed;
+    mutantApplied = outcome.applied !== false;
+    // The exact array reference the return statement below hands out as
+    // `dryRunLogPaths`: `finally`'s own rebuild can push this run's log
+    // path into it (after the object literal below is already built)
+    // and have it show up in the delivered result, since both point at
+    // the same array instance.
+    capturedLogPaths = outcome.logPaths;
     return {
       status: outcome.status,
       reason: outcome.reason,
@@ -925,6 +947,11 @@ async function runProbePipeline(
       restoreConfirmed = verified;
       if (verified) {
         removeMarkerFor(state.markerKey);
+        // Reached only when a mutation was genuinely in flight (the
+        // handler's restore-state slot was armed): whatever interrupted
+        // this run, the target really was mutated, so the same rebuild
+        // gate that applies to a clean finish applies here too.
+        mutantApplied = true;
       } else {
         const causeMessage =
           caughtError instanceof Error
@@ -940,10 +967,18 @@ async function runProbePipeline(
             `restore failed after an unexpected error${
               causeMessage ? ` (${causeMessage})` : ""
             }; the original content is preserved at backup path ${state.backupPath}` +
-              restoreFailedRebuildClause({
-                preCommand: opts.preCommand,
-                effectiveIsolation: isolationField.mode,
-              }),
+              // `capturedRt` is set by this point whenever a mutation was
+              // genuinely armed for restore (both require `rt` from
+              // `openRunSetup`); the object literal fallback exists only
+              // for the type checker, not a path this reaches in
+              // practice, so every real caller reads the same runtime
+              // object rather than a hand-built duplicate of its fields.
+              restoreFailedRebuildClause(
+                capturedRt ?? {
+                  preCommand: opts.preCommand,
+                  effectiveIsolation: isolationField.mode,
+                },
+              ),
           ],
           ...(mutantField ? { mutant: mutantField } : {}),
           ...(mutantSummary && verifiedAppliedVia
@@ -969,8 +1004,30 @@ async function runProbePipeline(
     // is false only through the `!verified` branch above, which already
     // set `emergencyResult` with its own snapshot of `warnings` -- the
     // two are mutually exclusive, so there is no snapshot to patch here.
-    if (capturedRt !== undefined && restoreConfirmed) {
-      await runFinalRebuild(capturedRt, warnings);
+    // `mutantApplied` gates out a run whose one mutant never got past a
+    // never-applied reason (`mutant_not_applicable`, `git_apply_timeout`,
+    // an aborted real `git apply`): there is no stale build output to
+    // fix. The signal check skips a rebuild attempt that would just be
+    // SIGKILLed against an already-aborted run, which would otherwise
+    // add a noise warning for nothing.
+    if (
+      capturedRt !== undefined &&
+      restoreConfirmed &&
+      mutantApplied &&
+      !capturedRt.execEnv.signal.aborted
+    ) {
+      const { logPath: rebuildLogPath } = await runFinalRebuild(
+        capturedRt,
+        warnings,
+      );
+      // Folds this run's own log into the already-built envelope's
+      // `dryRunLogPaths`, via the shared array reference `capturedLogPaths`
+      // captured above: the object literal that names this array as
+      // `dryRunLogPaths` was already returned by this point on the
+      // normal path, but pushing into the SAME array still reaches it.
+      if (rebuildLogPath !== undefined && capturedLogPaths !== undefined) {
+        capturedLogPaths.push(rebuildLogPath);
+      }
     }
     // Runs on every exit path (a normal return, a thrown error, or the
     // emergency-restore path above) and is idempotent: a signal handler
@@ -1409,6 +1466,14 @@ export async function probePlan(
   // unconfirmed state on the NORMAL path, same reason the single
   // probe's `mutantRestoreFailed` exists.
   let capturedTerminal: string | undefined;
+  // Whether ANY mutant this plan applied ever got as far as running its
+  // own `--pre`/test against genuinely mutated content: see the single
+  // probe's own `mutantApplied` and `MutantAttemptOutcome.applied`'s
+  // docblock. A plan whose mutants all stopped at a never-applied reason
+  // (a mutant never even reached `runMutantAttempt`, or reported
+  // `applied: false` from inside it) leaves this `false`, and the final
+  // rebuild has nothing to fix.
+  let anyMutantApplied = false;
   let caughtError: unknown;
 
   try {
@@ -1528,7 +1593,8 @@ export async function probePlan(
           status: "inconclusive",
           reason: "target_not_restored",
           warnings: [
-            `${target.displayFile} was not at its pre-mutation content when this mutant was about to be applied; nothing further was applied, and the original content is preserved at backup path ${target.session.backupPath}`,
+            `${target.displayFile} was not at its pre-mutation content when this mutant was about to be applied; nothing further was applied, and the original content is preserved at backup path ${target.session.backupPath}` +
+              restoreFailedRebuildClause(rt),
           ],
           logs: [],
         });
@@ -1598,6 +1664,7 @@ export async function probePlan(
         logs: outcome.logPaths,
       });
       inFlight = undefined;
+      if (outcome.applied !== false) anyMutantApplied = true;
       // I3: a restore that could not be verified is terminal for the
       // plan. I5: so is a signal, whether this mutant's own phase
       // reported the abort or the handler is only just acting on it --
@@ -1687,6 +1754,11 @@ export async function probePlan(
       restoreConfirmed = verified;
       if (verified) {
         removeMarkerFor(state.markerKey);
+        // Same reasoning as the single probe's own emergency-restore
+        // path: a mutation genuinely in flight when this fired means the
+        // plan's rebuild gate applies regardless of what earlier mutants
+        // in the loop did.
+        anyMutantApplied = true;
       } else {
         const causeMessage =
           caughtError instanceof Error
@@ -1733,10 +1805,15 @@ export async function probePlan(
             `restore failed after an unexpected error${
               causeMessage ? ` (${causeMessage})` : ""
             }; the original content is preserved at backup path ${state.backupPath}` +
-              restoreFailedRebuildClause({
-                preCommand: opts.preCommand,
-                effectiveIsolation: isolationField.mode,
-              }),
+              // See the single probe's own identical comment above this
+              // same call: `capturedRt` is set by this point in practice,
+              // the fallback exists only for the type checker.
+              restoreFailedRebuildClause(
+                capturedRt ?? {
+                  preCommand: opts.preCommand,
+                  effectiveIsolation: isolationField.mode,
+                },
+              ),
           ],
           ...(baseline ? { baseline } : {}),
           results: entries,
@@ -1753,9 +1830,29 @@ export async function probePlan(
     // the worktree cleanup and lock release below. See the single
     // probe's own comment above `runFinalRebuild`'s call for why
     // `emergencyResult`'s own `warnings` snapshot needs no patching
-    // here: the two are mutually exclusive.
-    if (capturedRt !== undefined && restoreConfirmed) {
-      await runFinalRebuild(capturedRt, warnings);
+    // here: the two are mutually exclusive. `anyMutantApplied` and the
+    // signal check mirror the single probe's own gate: a plan whose
+    // mutants never got past a never-applied reason has no stale build
+    // output to fix, and an already-aborted run would just SIGKILL this
+    // attempt for a noise warning.
+    if (
+      capturedRt !== undefined &&
+      restoreConfirmed &&
+      anyMutantApplied &&
+      !capturedRt.execEnv.signal.aborted
+    ) {
+      const { logPath: rebuildLogPath } = await runFinalRebuild(
+        capturedRt,
+        warnings,
+      );
+      // `setupLogPaths` is the exact array the normal-completion return
+      // above names as `dryRunLogPaths` (set once from `setup.run.logPaths`
+      // and never reassigned again on this path): pushing here still
+      // reaches the delivered result, the same trick the single probe's
+      // own `capturedLogPaths` uses.
+      if (rebuildLogPath !== undefined) {
+        setupLogPaths.push(rebuildLogPath);
+      }
     }
     // Once per plan (I4), before the locks are released, so a concurrent
     // probe never observes the lock as free while this run's worktree

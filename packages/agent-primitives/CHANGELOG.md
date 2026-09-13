@@ -12,7 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   command run after the probe returns never exercises a mutant's
   build output; a `warnings` entry says whether that rebuild
   succeeded. No-op under `-i worktree`, whose `--pre` never touched
-  the original tree's build output in the first place
+  the original tree's build output in the first place. The stale-build
+  clause is now also named on a plan's `target_not_restored` warning
+  (previously only on `restore_failed`); the rebuild itself is now
+  skipped both when no mutant this run applied ever reached the tree
+  (`mutant_not_applicable`, `git_apply_timeout`, an aborted real `git
+  apply`) and when the run's own signal was already aborted, and its
+  own log path is folded into the result's other reported log paths.
+  A run interrupted by SIGINT/SIGTERM restores the target but does not
+  get this extra rebuild, documented in the README and the package
+  skill
   (Refs: 813d9d34-b0a4-4a8e-a1a0-3a06d1b0a9e2).
 - Worktree isolation now keeps the live repository's Git administrative
   and common directories (also for linked worktrees) and the copy's own
