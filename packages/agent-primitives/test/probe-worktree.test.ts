@@ -1168,6 +1168,13 @@ describe("probe(): worktree isolation, node_modules and --pre", () => {
     // Untouched by the whole run: the worktree's own dist/ absorbed the
     // rebuild, never the original tree's.
     expect(fs.readFileSync(path.join(repo, "dist", "lib.js"), "utf8")).toBe("");
+    // `runFinalRebuild` is a no-op for `-i worktree` (see its own
+    // docblock): the worktree copy `--pre` built against is discarded
+    // by `cleanupWtSession` regardless, so there is nothing left to
+    // rebuild in the original tree and no notice to print about it.
+    expect(
+      result.warnings.some((w) => w.includes("re-run after the last mutant")),
+    ).toBe(false);
   });
 });
 

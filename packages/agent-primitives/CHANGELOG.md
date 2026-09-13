@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `probe`/`--plan` with `--pre` and `-i inplace` (the default) now
+  re-run `--pre` once more after the last mutant is restored, so a
+  command run after the probe returns never exercises a mutant's
+  build output; a `warnings` entry says whether that rebuild
+  succeeded. No-op under `-i worktree`, whose `--pre` never touched
+  the original tree's build output in the first place
+  (Refs: 813d9d34-b0a4-4a8e-a1a0-3a06d1b0a9e2).
 - Worktree isolation now keeps the live repository's Git administrative
   and common directories (also for linked worktrees) and the copy's own
   `.git` metadata out of every link source, including explicit `--link`.

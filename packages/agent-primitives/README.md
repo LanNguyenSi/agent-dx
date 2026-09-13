@@ -1608,7 +1608,22 @@ executes built output (`dist/`) rather than the source file being
 mutated, otherwise the mutant never reaches the test and the probe
 reports a false `survived`. A non-zero `--pre` exit in either run is
 `status: "inconclusive"`, `reason: "pre_failed"`, exit `2`, never a
-verdict. `--timeout <seconds>` bounds every `--pre`/`-t` invocation (both
+verdict.
+
+Under `-i inplace` (the default), the build output `--pre` produced from
+the LAST mutant would otherwise sit on disk until the next rebuild: once
+every mutant a run applies has been restored, `--pre` runs once more
+against that now-restored source, so a command run after the probe
+returns never sees a mutant's build output. This costs one extra
+`--pre` run per invocation (a `--plan` run pays it once for the whole
+plan, not once per mutant) and leaves exactly one `warnings` entry
+saying whether it succeeded; a `--pre` that fails or cannot be confirmed
+on that extra run says the build output may still be stale rather than
+staying silent about it. Under `-i worktree`, this is a no-op: that
+mode's `--pre` always ran against the worktree's own copy, never the
+original tree, and the worktree is discarded once the run ends either
+way -- there is nothing to rebuild in the tree the operator's own shell
+sees, and no notice is printed for it. `--timeout <seconds>` bounds every `--pre`/`-t` invocation (both
 the baseline and the mutant run); a run that hits it is killed and
 reported as `timedOut: true` on that run's own phase (`baseline` or
 `test`), so a killed baseline is distinguishable from one that genuinely

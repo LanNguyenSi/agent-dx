@@ -664,6 +664,87 @@ export async function runPreThenTest(
   return { ok: true, test };
 }
 
+/** The fields `runFinalRebuild` needs off a `MutantRuntime`: kept as its
+ * own small type (like `PreAndTestCommand` above) rather than the whole
+ * runtime, since a caller building this from pieces captured across a
+ * `try`/`finally` boundary (`index.ts`'s two pipelines) should not have
+ * to fake the rest of `MutantRuntime` to call it. */
+export interface FinalRebuildRuntime {
+  effectiveIsolation: IsolationMode;
+  preCommand?: string;
+  execEnv: {
+    cwd: string;
+    logDir: string;
+    timeoutMs?: number;
+    signal: AbortSignal;
+    env?: NodeJS.ProcessEnv;
+  };
+  track: TrackFn;
+}
+
+/**
+ * Closes the gap `--pre` (inplace only) otherwise leaves open: after the
+ * LAST mutant of a run is restored, the working tree's build output
+ * still reflects that mutant until something rebuilds it, so a command
+ * run after the probe returns (a test run by hand, a follow-up CI step)
+ * can silently exercise mutated code even though the source is back to
+ * original. Re-running `--pre` once more, now that the source is
+ * restored, closes that window.
+ *
+ * A no-op for `-i worktree`: that mode's `--pre` never ran against the
+ * original tree's build output in the first place (see
+ * `MutantRuntime.applyRoot`'s own docblock -- the worktree copy is what
+ * `--pre` builds there), and the worktree copy is discarded by
+ * `cleanupWtSession` regardless of whether this ran. It is likewise a
+ * no-op when no `--pre` was given: there is no build output this
+ * package produced for the run to leave stale.
+ *
+ * Called exactly once per probe/plan invocation, from `index.ts`'s one
+ * `finally` block (never per mutant, and never for a plan whose loop
+ * applied several), and only once the target is confirmed back at its
+ * original content -- the normal exit path (every mutant's own
+ * `restoreOnce` already succeeded) and the `finally` block's own
+ * emergency-restore path both qualify; an emergency restore that could
+ * NOT be verified does not, since rebuilding against source in an
+ * unknown state would not close this window and could misreport a
+ * possibly-still-mutated tree as fresh. Runs on every exit path that
+ * does qualify, including one where a mutant's own `--pre`/test phase
+ * aborted mid-run: a stale build left behind by that abort is exactly
+ * the failure this closes, so the abort path gets the same rebuild
+ * attempt as a clean finish. Always leaves exactly one one-line note in
+ * `warnings` when it actually ran `--pre`, saying whether the rebuild
+ * itself succeeded; when it could not be confirmed, the note says the
+ * build output may still be stale rather than staying silent about it.
+ */
+export async function runFinalRebuild(
+  rt: FinalRebuildRuntime,
+  warnings: string[],
+): Promise<void> {
+  if (rt.effectiveIsolation !== "inplace" || rt.preCommand === undefined) {
+    return;
+  }
+  const started = startExecTracked(rt.preCommand, rt.execEnv);
+  const result = await rt.track(started.result, started.closed);
+  if (result.exitCode === 0) {
+    warnings.push(
+      "--pre was re-run after the last mutant was restored, so the " +
+        "working tree's build output matches the restored source",
+    );
+    return;
+  }
+  const cause = result.aborted
+    ? "was aborted"
+    : result.timedOut
+      ? "timed out"
+      : result.exitCode === null
+        ? "was terminated by a signal"
+        : `exited ${String(result.exitCode)}`;
+  warnings.push(
+    `--pre was re-run after the last mutant was restored but ${cause}; ` +
+      `the working tree's build output may still be stale, see ${result.logPath}`,
+  );
+}
+
 /** Registers a started run (and when its stdio truly closes) as the
  * probe's one in-flight child; see `TrackedRun` and `probe`'s own
  * `track`. */

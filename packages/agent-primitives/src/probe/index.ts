@@ -25,10 +25,12 @@ import type { PlanMutantSpec } from "./plan.js";
 import {
   type ExecPhaseField,
   type ExpectVerdict,
+  type FinalRebuildRuntime,
   type IsolationField,
   type IsolationMode,
   redactEnvOverrides,
   REFUSAL_RESULT_SHAPE,
+  runFinalRebuild,
   type MutantField,
   type MutationProbeField,
   type ProbeStatus,
@@ -703,6 +705,23 @@ async function runProbePipeline(
   // moment they exist: from then on this function's own `finally` owns
   // the teardown, however the setup ends.
   let context: RunSetupContext | undefined;
+  // Captured the moment `openRunSetup` returns successfully (the same
+  // point the mutant is applied from), so `finally`'s final rebuild can
+  // read `effectiveIsolation`/`preCommand`/`execEnv`/`track` even though
+  // `rt` itself is a `const` scoped to the `try` block below. Stays
+  // `undefined` on every path where the target was never mutated (a
+  // refusal before or during setup), which is exactly when there is
+  // nothing for the rebuild to do.
+  let capturedRt: FinalRebuildRuntime | undefined;
+  // Mirrors `runMutantAttempt`'s own `outcome.restoreFailed` for the one
+  // mutant this pipeline applies: read by `finally` to seed
+  // `restoreConfirmed`, since a restore that failed on the NORMAL path
+  // (through `target.restoreOnce`, inside the `try`) always clears the
+  // handler's restore-state slot regardless of whether the restore
+  // itself verified -- `finally`'s own `getRestoreState()` check alone
+  // cannot see this case, only the true-crash one where the slot was
+  // never cleared at all.
+  let mutantRestoreFailed = false;
   // Set by the `catch` below and read by `finally`'s emergency-restore
   // path, so its warning can name what actually triggered the restore
   // instead of just "an unexpected error".
@@ -819,6 +838,7 @@ async function runProbePipeline(
       };
     }
     const { rt, targets, logPaths: stepLogPaths } = setup.run;
+    capturedRt = rt;
     baseline = setup.run.baseline;
     const baselineOutput = setup.run.baselineOutput;
     if (prepared === undefined) {
@@ -848,6 +868,7 @@ async function runProbePipeline(
       warnings,
       baselineOutput,
     );
+    mutantRestoreFailed = outcome.restoreFailed;
     return {
       status: outcome.status,
       reason: outcome.reason,
@@ -870,6 +891,15 @@ async function runProbePipeline(
     // lock: nothing was opened, nothing is in flight, and there is
     // nothing to tear down.
     const inFlightRestore = context?.controller.getRestoreState();
+    // Whether the target is actually confirmed back at its original
+    // content by the time the rebuild below runs: false when the one
+    // mutant's own restore (on the normal path, inside `try`) already
+    // reported `restoreFailed`, and further overridden below when an
+    // in-flight restore reached only through this `finally` block could
+    // not be verified either (source state then unknown either way,
+    // see `runFinalRebuild`'s own docblock for why both skip the
+    // rebuild).
+    let restoreConfirmed = !mutantRestoreFailed;
     if (context !== undefined && inFlightRestore) {
       // Reached only when something unwound the stack (a thrown error)
       // while a mutation was still in flight and never went through one
@@ -891,6 +921,7 @@ async function runProbePipeline(
         const hash = await sha256File(state.targetPath).catch(() => undefined);
         verified = hash === state.preHash;
       }
+      restoreConfirmed = verified;
       if (verified) {
         removeMarkerFor(state.markerKey);
       } else {
@@ -924,6 +955,17 @@ async function runProbePipeline(
           isolation: isolationField,
         };
       }
+    }
+    // The final rebuild (inplace only, only when `--pre` was given):
+    // runs once the target's restore is confirmed, before the worktree
+    // cleanup and lock release below, so a concurrent probe on the same
+    // repository never observes the lock as free while this run's
+    // build output might still reflect the last mutant. `restoreConfirmed`
+    // is false only through the `!verified` branch above, which already
+    // set `emergencyResult` with its own snapshot of `warnings` -- the
+    // two are mutually exclusive, so there is no snapshot to patch here.
+    if (capturedRt !== undefined && restoreConfirmed) {
+      await runFinalRebuild(capturedRt, warnings);
     }
     // Runs on every exit path (a normal return, a thrown error, or the
     // emergency-restore path above) and is idempotent: a signal handler
@@ -1351,6 +1393,17 @@ export async function probePlan(
   // moment they exist: from then on this function's own `finally` owns
   // the teardown, however the setup ends.
   let context: RunSetupContext | undefined;
+  // Same purpose as the single probe's own `capturedRt`: captured once
+  // `openRunSetup` succeeds so `finally`'s final rebuild can read it
+  // after the plan's mutant loop (and `rt` itself) has gone out of
+  // scope. One rebuild for the whole plan, not one per mutant.
+  let capturedRt: FinalRebuildRuntime | undefined;
+  // Mirrors the loop's own `terminal` (declared inside `try`, so not
+  // otherwise visible to `finally`): `"restore_failed"` and
+  // `"target_not_restored"` both mean the source was left in an
+  // unconfirmed state on the NORMAL path, same reason the single
+  // probe's `mutantRestoreFailed` exists.
+  let capturedTerminal: string | undefined;
   let caughtError: unknown;
 
   try {
@@ -1416,6 +1469,7 @@ export async function probePlan(
       };
     }
     const { rt } = setup.run;
+    capturedRt = rt;
     baseline = setup.run.baseline;
     const baselineOutput = setup.run.baselineOutput;
     setupLogPaths = setup.run.logPaths;
@@ -1548,6 +1602,7 @@ export async function probePlan(
         terminal = "aborted";
       }
     }
+    capturedTerminal = terminal;
 
     // The exit-code contract, one step stricter than "any expectation
     // violation is a finding": exit 1 (`survived`) is reserved for a
@@ -1596,6 +1651,15 @@ export async function probePlan(
     // lock: nothing was opened, nothing is in flight, and there is
     // nothing to tear down.
     const inFlightRestore = context?.controller.getRestoreState();
+    // See the single probe's own `restoreConfirmed`: false already when
+    // the loop's own `terminal` (captured above the loop as
+    // `capturedTerminal`, since `terminal` itself is scoped to `try`)
+    // ended on an unconfirmed restore, further overridden below when an
+    // in-flight restore reached only through this `finally` block could
+    // not be verified either.
+    let restoreConfirmed =
+      capturedTerminal !== "restore_failed" &&
+      capturedTerminal !== "target_not_restored";
     if (context !== undefined && inFlightRestore) {
       // Reached only when something unwound the stack (a thrown error)
       // while a mutation was still in flight and never went through one
@@ -1615,6 +1679,7 @@ export async function probePlan(
         const hash = await sha256File(state.targetPath).catch(() => undefined);
         verified = hash === state.preHash;
       }
+      restoreConfirmed = verified;
       if (verified) {
         removeMarkerFor(state.markerKey);
       } else {
@@ -1673,6 +1738,15 @@ export async function probePlan(
             : {}),
         };
       }
+    }
+    // The final rebuild: once per plan (I4, never once per mutant),
+    // after every mutant the loop applied has been restored and before
+    // the worktree cleanup and lock release below. See the single
+    // probe's own comment above `runFinalRebuild`'s call for why
+    // `emergencyResult`'s own `warnings` snapshot needs no patching
+    // here: the two are mutually exclusive.
+    if (capturedRt !== undefined && restoreConfirmed) {
+      await runFinalRebuild(capturedRt, warnings);
     }
     // Once per plan (I4), before the locks are released, so a concurrent
     // probe never observes the lock as free while this run's worktree

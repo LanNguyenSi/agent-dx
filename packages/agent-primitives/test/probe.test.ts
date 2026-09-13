@@ -1788,7 +1788,7 @@ describe("probe(): -p integration through probe(), and --pre in both phases", ()
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   });
 
-  it("runs --pre in both the baseline and mutant phases", async () => {
+  it("runs --pre in both the baseline and mutant phases, and once more after the restore (inplace)", async () => {
     useLockDir();
     const { repo } = initRepo();
     const counterFile = path.join(makeTmpDir(), "counter.txt");
@@ -1809,7 +1809,43 @@ describe("probe(): -p integration through probe(), and --pre in both phases", ()
     );
 
     expect(result.status).toBe("killed");
-    expect(fs.readFileSync(counterFile, "utf8")).toBe("2");
+    // Baseline, mutant, and the final rebuild `runFinalRebuild` runs
+    // once the one mutant this pipeline applied is restored (inplace
+    // only): three `--pre` runs, not two.
+    expect(fs.readFileSync(counterFile, "utf8")).toBe("3");
+  });
+
+  it("the final rebuild leaves a --pre-produced artifact matching the restored source, not the mutant it was mid-way through (inplace)", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const markerPath = path.join(repo, "dist-marker.js");
+
+    // Stands in for a real build step: copies the CURRENT target
+    // content to a "build output" file, exactly like a bundler that
+    // reads the source and writes `dist/`.
+    const result = await probe(
+      baseOptions(repo, { preCommand: "cp fixture.js dist-marker.js" }),
+    );
+
+    expect(result.status).toBe("killed");
+    const restoredSource = fs.readFileSync(
+      path.join(repo, "fixture.js"),
+      "utf8",
+    );
+    expect(restoredSource).toBe(FIXTURE_JS);
+    // Without the final rebuild this closes, `dist-marker.js` would
+    // still carry whatever the mutant's own `--pre` last wrote (the
+    // mutated "return false;" body): the marker was never restored by
+    // the probe itself, only `fixture.js` was, so the marker is exactly
+    // what proves the working tree's build output is now consistent
+    // with the restored source rather than stuck on the mutant.
+    expect(fs.readFileSync(markerPath, "utf8")).toBe(FIXTURE_JS);
+    expect(fs.readFileSync(markerPath, "utf8")).not.toContain("return false");
+    expect(
+      result.warnings.some((w) =>
+        w.includes("--pre was re-run after the last mutant was restored"),
+      ),
+    ).toBe(true);
   });
 });
 
