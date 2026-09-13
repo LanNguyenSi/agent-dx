@@ -1520,6 +1520,13 @@ install; its target follows the shared link policy instead. Repository-content
 plan/defaults entries remain target-strict, so an in-root symlink they name
 that resolves outside the root still receives the uniform refusal regardless
 of whether nothing, a file, or a directory happens to sit at that target.
+The whole symlink chain is followed for that decision, up to 64 links, and
+a chain of exactly 64 links is decided on its far end; a longer chain, or a
+cycle, is refused without the containment question ever being asked (the OS
+itself stops following a chain earlier than that, at 32 links on macOS and
+40 on Linux, and reports `ELOOP`, which is refused the same non-disclosing
+way). The bound sits above every OS's own limit so that the chain walk's
+decision, not the OS's, always answers for a chain the OS can still follow.
 
 `--allow-outside` disables that later containment check, and with it
 the ordering the previous paragraph describes -- for `-i worktree` the

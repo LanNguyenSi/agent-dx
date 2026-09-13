@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- A `--plan` or defaults-file `link` value that is an in-repo symlink
+  chain to an out-of-root target now answers `file_outside_root`
+  identically whether the far end exists or not, at EVERY chain length
+  (tracker task `709622ab`). The chain walk behind that refusal
+  (`resolveLinkSourceTarget`) followed its cap's worth of links but
+  never decided where the last one landed, so a chain of exactly the
+  cap's length came back unresolved while both its neighbours resolved;
+  the caller then skipped such a link to the later, deferred containment
+  check, which judged it on a fallback spelling (the link's own in-root
+  path for a dangling chain, the real out-of-root target for an existing
+  one) and reported `link_source_not_found` for the one and
+  `file_outside_root` for the other. The 0.3.0 entry below claims the
+  chain is followed "up to 32 hops"; that held up to 31. The walk now
+  decides the far end of the last link it follows, the cap is raised
+  from 32 to 64 links (above every OS's own lookup limit: macOS
+  resolves at most 32 links in one lookup, Linux 40, Windows 63 reparse
+  points, so the walk's own decision, not the OS's, is what answers for
+  any chain the OS can still follow), and the caller fails closed: a
+  chain the walk cannot resolve is refused outright, through
+  `linkSourceMissingMessage`'s errno branch when the OS reports `ELOOP`
+  for it (which, with the cap above the OS limit, is every such chain
+  on the platforms tested) and as `file_outside_root` naming only the
+  in-root value otherwise, never skipped to the later checks. An
+  operator's own `--link` is unchanged: it is judged on where it sits,
+  and its target keeps the link policy's sibling latitude at every
+  length. The suite now runs an existing/missing parity check over
+  chain lengths 1, 2, 3, 63, 64 and 65 in all three lanes.
+
 - `probe`/`--plan` with `--pre` and `-i inplace` (the default) now
   re-run `--pre` once more after the last mutant is restored, so a
   command run after the probe returns never exercises a mutant's

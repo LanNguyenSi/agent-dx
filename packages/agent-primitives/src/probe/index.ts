@@ -241,11 +241,21 @@ export interface LinkSourceRefusal {
  * ever asking `isPathContained` anything, since answering "contained" or
  * "not" for a target this process could not even follow is the same
  * disclosure this whole function exists to close. `linkSourceMissingMessage`
- * is what actually reports it -- `fs.statSync(link.value)` there follows
+ * is normally what reports it -- `fs.statSync(link.value)` there follows
  * the identical chain natively and, resolving it whole, is the call that
  * actually surfaces the OS's own `ELOOP`, landing on that function's
  * errno branch (`linkSourceMissingMessage`'s own docblock) rather than on
- * anything containment-shaped here.
+ * anything containment-shaped here. When it has nothing to report (the
+ * OS followed the whole chain to a directory that this walk gave up on;
+ * the walk's cap sits above every known OS limit precisely so this stays
+ * a safety net rather than a path taken), the link is still refused, as
+ * `file_outside_root` with the containment refusal's own wording, which
+ * names only the in-root value. It is never skipped: an earlier version
+ * skipped it here, and the later, deferred containment check then judged
+ * the link on `resolveDeepestExisting`'s fallback spelling, which for a
+ * dangling chain is the link's own in-root path and for an existing one
+ * its out-of-root target, reopening the disclosure for a chain of
+ * exactly the walk's old cap length (tracker task `709622ab`).
  *
  * A link that resolves outside the root WITHOUT going through a symlink
  * of its own (an out-of-root value named directly, by any of the three
@@ -316,7 +326,13 @@ export function firstLinkSourceRefusal(
       if (message !== undefined) {
         return { reason: "link_source_not_found", message };
       }
-      continue;
+      // Fail closed: a chain this walk could not resolve is never let
+      // through to the later checks, which would judge it on a fallback
+      // spelling (see the docblock above).
+      return {
+        reason: "file_outside_root",
+        message: `outside the containment root (${root}): ${link.value}`,
+      };
     }
     if (!isPathContained(realRoot, target)) {
       if (!checkOutsideRootExistence) {

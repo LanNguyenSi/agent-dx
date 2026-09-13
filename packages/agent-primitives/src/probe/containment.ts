@@ -60,6 +60,28 @@ export function resolveDeepestExisting(p: string): string {
 }
 
 /**
+ * Hop cap for `resolveLinkSourceTarget` below (its docblock has the
+ * rationale). Above every OS's own symlink-resolution limit, so the
+ * walk's decision, not the OS's, is what always answers for a chain the
+ * OS itself can still follow: macOS resolves at most 32 links in one
+ * lookup (`MAXSYMLINKS`), Linux 40, Windows 63 reparse points. A chain
+ * the OS cannot follow is refused by the caller either way, so the cap
+ * only has to keep the walk from running forever on a cycle.
+ */
+export const MAX_LINK_SOURCE_HOPS = 64;
+
+/** True when `err` is a Node errno exception carrying `ELOOP`: a genuine
+ * symlink cycle encountered while the OS resolves an ancestor directory
+ * component of the path handed to `lstatSync`/`readlinkSync`. */
+function isELOOP(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    "code" in err &&
+    (err as NodeJS.ErrnoException).code === "ELOOP"
+  );
+}
+
+/**
  * Where a link SOURCE's own containment is judged: `resolveDeepestExisting(p)`,
  * except when `p` ITSELF is a symlink whose chain does not fully resolve
  * (a dangling target, or one this process cannot stat). `fs.realpathSync`
@@ -101,24 +123,32 @@ export function resolveDeepestExisting(p: string): string {
  * every hop's target becomes the NEXT hop's own starting point, so the
  * final `resolveDeepestExisting` call always sees the chain's true end.
  *
- * The walk is capped at 32 hops. A cycle among the hops (`a` -> `b` ->
- * `a`) never terminates on its own, and neither `lstatSync` nor
- * `readlinkSync` -- unlike `fs.realpathSync` or `fs.statSync`, both of
- * which fully resolve a path and so surface the OS's own `ELOOP` for a
- * genuine cycle -- ever traverses far enough to hit that error by
- * itself, since each reads only its OWN argument without following it.
- * Hitting the cap (or an `ELOOP` raised while resolving an ancestor
- * DIRECTORY component of some hop along the way, which `lstatSync` and
- * `readlinkSync` still resolve as normal path lookup) returns `undefined`
- * rather than a best-effort path: the caller must refuse the link
- * without ever running the containment check on a half-resolved chain,
- * since disclosing "contained" vs. "not" for an unresolvable target would
- * itself be a return of the same disclosure this function exists to
- * close (see `firstLinkSourceRefusal` in `index.ts`, which falls back to
- * `linkSourceMissingMessage`'s own errno branch there instead -- the
- * SAME chain, statted whole via `fs.statSync(link.value)`, hits the
- * identical `ELOOP`/cap situation and is reported through that shared,
- * non-disclosing wording rather than through containment).
+ * The walk is capped at `MAX_LINK_SOURCE_HOPS` links, and the cap is
+ * decided on the far side of the last link it follows: a chain of
+ * exactly that many links is walked to its end and judged there, one
+ * link more is refused. An earlier version followed the cap's worth of
+ * links but never looked at where the last one landed, so a chain of
+ * exactly cap length came back `undefined` while both its neighbours
+ * resolved, and the caller's fallback for that one length re-opened
+ * the existence disclosure this function closes (the tracker task
+ * `709622ab`). A cycle among the hops (`a` -> `b` -> `a`) never
+ * terminates on its own, and neither `lstatSync` nor `readlinkSync` --
+ * unlike `fs.realpathSync` or `fs.statSync`, both of which fully
+ * resolve a path and so surface the OS's own `ELOOP` for a genuine
+ * cycle -- ever traverses far enough to hit that error by itself, since
+ * each reads only its OWN argument without following it. Hitting the
+ * cap (or an `ELOOP` raised while resolving an ancestor DIRECTORY
+ * component of some hop along the way, which `lstatSync` and
+ * `readlinkSync` still resolve as normal path lookup) returns
+ * `undefined` rather than a best-effort path: the caller must refuse
+ * the link without ever running the containment check on a
+ * half-resolved chain, since disclosing "contained" vs. "not" for an
+ * unresolvable target would itself be a return of the same disclosure
+ * this function exists to close (see `firstLinkSourceRefusal` in
+ * `index.ts`, which refuses such a link outright, through
+ * `linkSourceMissingMessage`'s own errno branch when `fs.statSync` on
+ * the same chain reports the OS's `ELOOP`, and with the containment
+ * refusal's own non-disclosing wording otherwise).
  *
  * `p` itself when it is not a symlink at all (or cannot be lstat'ed,
  * i.e. does not exist under any spelling): the ordinary resolution
@@ -133,22 +163,14 @@ export function resolveDeepestExisting(p: string): string {
  * change what every one of them sees for a plain missing path, not only
  * for a link source's own containment check.
  */
-const MAX_LINK_SOURCE_HOPS = 32;
-
-/** True when `err` is a Node errno exception carrying `ELOOP`: a genuine
- * symlink cycle encountered while the OS resolves an ancestor directory
- * component of the path handed to `lstatSync`/`readlinkSync`. */
-function isELOOP(err: unknown): boolean {
-  return (
-    err instanceof Error &&
-    "code" in err &&
-    (err as NodeJS.ErrnoException).code === "ELOOP"
-  );
-}
-
 export function resolveLinkSourceTarget(p: string): string | undefined {
   let current = p;
-  for (let hop = 0; hop < MAX_LINK_SOURCE_HOPS; hop++) {
+  // `hop` counts the links followed so far. Every iteration first
+  // decides `current` itself (not a symlink: the chain ends here, and
+  // the cap has nothing to say about it), so the cap is only ever
+  // applied to a link that would be one more than `MAX_LINK_SOURCE_HOPS`
+  // deep: a chain of exactly that many links is decided on its far end.
+  for (let hop = 0; ; hop++) {
     let lst: fs.Stats;
     try {
       lst = fs.lstatSync(current);
@@ -157,6 +179,10 @@ export function resolveLinkSourceTarget(p: string): string | undefined {
       return resolveDeepestExisting(current);
     }
     if (!lst.isSymbolicLink()) return resolveDeepestExisting(current);
+    // The hop cap was reached without the chain ending: functionally
+    // the same as a genuine `ELOOP`, and refused the same non-disclosing
+    // way.
+    if (hop >= MAX_LINK_SOURCE_HOPS) return undefined;
     let rawTarget: string;
     try {
       rawTarget = fs.readlinkSync(current);
@@ -168,9 +194,6 @@ export function resolveLinkSourceTarget(p: string): string | undefined {
       ? rawTarget
       : path.resolve(path.dirname(current), rawTarget);
   }
-  // The hop cap was reached without the chain ending: functionally the
-  // same as a genuine `ELOOP`, and refused the same non-disclosing way.
-  return undefined;
 }
 
 /**

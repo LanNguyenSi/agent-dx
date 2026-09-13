@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it, afterEach, vi } from "vitest";
 import {
   probe,
+  probePlan,
   firstLinkSourceRefusal,
   type ProbeOptions,
 } from "../src/probe/index.js";
@@ -17,7 +18,11 @@ import {
   removeMarkerFor,
   writeMarker,
 } from "../src/lock.js";
-import { resolveDeepestExisting } from "../src/probe/containment.js";
+import {
+  MAX_LINK_SOURCE_HOPS,
+  resolveDeepestExisting,
+  resolveLinkSourceTarget,
+} from "../src/probe/containment.js";
 import {
   beginWorktree,
   isScratchWorktreePath,
@@ -1914,6 +1919,317 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
     const result = await probe(baseOptions(repo, { links: ["oracle"] }));
 
     expect(result.reason).toBeUndefined();
+  });
+
+  /**
+   * `hop1 -> hop2 -> ... -> hop<length> -> farEnd`, every hop an absolute
+   * symlink inside `repo`, named `<prefix>1..<prefix><length>`. Returns
+   * the first hop's basename, which is what a `link` value names.
+   */
+  function symlinkChain(
+    repo: string,
+    length: number,
+    farEnd: string,
+    prefix = "hop",
+  ): string {
+    let next = farEnd;
+    for (let i = length; i >= 1; i--) {
+      const hop = path.join(repo, `${prefix}${i}`);
+      fs.symlinkSync(next, hop);
+      next = hop;
+    }
+    return `${prefix}1`;
+  }
+
+  /** A repository whose own path carries no symlinked ancestor: the OS
+   * counts every symlink it crosses in one lookup (`os.tmpdir()` on
+   * macOS sits under `/var -> /private/var`, which is one of them), so
+   * a chain length only means the same thing everywhere when the chain
+   * is the ONLY symlink in the path. */
+  function initRealpathRepo(): string {
+    return initRepo(fs.realpathSync(makeTmpDir())).repo;
+  }
+
+  type ChainLane = "defaults-file" | "plan" | "--link";
+  const CHAIN_LANES: readonly ChainLane[] = ["defaults-file", "plan", "--link"];
+
+  interface ChainAnswer {
+    status: string;
+    reason?: string;
+    warnings: string[];
+    linked: number;
+  }
+
+  /** Runs one probe under DEFAULT options with `given` as the one link
+   * value of `lane`, and returns the parts of the envelope a parity
+   * check compares. */
+  async function probeChainLane(
+    lane: ChainLane,
+    repo: string,
+    given: string,
+  ): Promise<ChainAnswer> {
+    if (lane === "defaults-file") {
+      fs.writeFileSync(
+        path.join(repo, ".agent-primitives.json"),
+        JSON.stringify({ link: [given] }),
+      );
+      const result = await probe(baseOptions(repo));
+      return {
+        status: result.status,
+        reason: result.reason,
+        warnings: result.warnings,
+        linked: result.isolation.linked.length,
+      };
+    }
+    if (lane === "plan") {
+      const result = await probePlan({
+        mutants: [
+          {
+            file: "fixture.js",
+            line: 2,
+            form: "replace",
+            replaceText: "  return false;",
+          },
+        ],
+        testCommand: "node fixture.test.js",
+        isolation: "worktree",
+        expect: "fail",
+        cwd: repo,
+        logDir: makeTmpDir(),
+        planLinks: [given],
+        planPath: path.join(repo, "plan.json"),
+      });
+      return {
+        status: result.status,
+        reason: result.reason,
+        warnings: result.warnings,
+        linked: result.isolation.linked.length,
+      };
+    }
+    const result = await probe(baseOptions(repo, { links: [given] }));
+    return {
+      status: result.status,
+      reason: result.reason,
+      warnings: result.warnings,
+      linked: result.isolation.linked.length,
+    };
+  }
+
+  /** The chain lengths every parity case runs: the short lengths the
+   * earlier two- and three-hop cases pinned by hand, plus both sides
+   * of the walk's own cap. */
+  const CHAIN_LENGTHS: readonly number[] = [
+    1,
+    2,
+    3,
+    MAX_LINK_SOURCE_HOPS - 1,
+    MAX_LINK_SOURCE_HOPS,
+    MAX_LINK_SOURCE_HOPS + 1,
+  ];
+
+  /** Both answers for one lane and one length: the same chain shape
+   * once to an EXISTING out-of-root directory and once to a MISSING
+   * out-of-root path, each in its own repository. */
+  async function chainPair(
+    lane: ChainLane,
+    length: number,
+  ): Promise<{ existing: ChainAnswer; missing: ChainAnswer; outside: string }> {
+    useLockDir();
+    const outside = fs.realpathSync(makeTmpDir());
+    const existingTarget = path.join(outside, "target");
+    fs.mkdirSync(existingTarget);
+    const missingTarget = path.join(outside, "does-not-exist");
+    const existingRepo = initRealpathRepo();
+    const missingRepo = initRealpathRepo();
+    const existing = await probeChainLane(
+      lane,
+      existingRepo,
+      symlinkChain(existingRepo, length, existingTarget),
+    );
+    const missing = await probeChainLane(
+      lane,
+      missingRepo,
+      symlinkChain(missingRepo, length, missingTarget),
+    );
+    return { existing, missing, outside };
+  }
+
+  describe.each(CHAIN_LANES.filter((lane) => lane !== "--link"))(
+    "repository-content lane %s: a symlink chain to an out-of-root target answers file_outside_root whether the far end exists or not",
+    (lane) => {
+      it.each(CHAIN_LENGTHS)("chain of %i links", async (length) => {
+        const { existing, missing, outside } = await chainPair(lane, length);
+
+        // Up to the cap the walk itself decides, and the answer is the
+        // containment refusal. One link past it the walk gives up and
+        // the OS (whose own limit is lower still) reports `ELOOP` for
+        // the whole chain, so both sides get the identical errno
+        // refusal instead; what matters is that the two never differ.
+        const expectedReason =
+          length > MAX_LINK_SOURCE_HOPS
+            ? "link_source_not_found"
+            : "file_outside_root";
+        expect(existing.reason).toBe(expectedReason);
+        expect(missing.reason).toBe(expectedReason);
+        expect(missing.status).toBe(existing.status);
+        for (const warning of [...existing.warnings, ...missing.warnings]) {
+          expect(warning).not.toContain("does not exist");
+          expect(warning).not.toContain("is not a directory");
+          if (length <= MAX_LINK_SOURCE_HOPS) {
+            expect(warning).not.toContain("could not be checked");
+          }
+          // The refusal names the in-root value only, never where the
+          // chain ends.
+          expect(warning).not.toContain(outside);
+        }
+        if (length > MAX_LINK_SOURCE_HOPS) {
+          expect(existing.warnings.join(" ")).toContain("could not be checked");
+          expect(missing.warnings.join(" ")).toContain("could not be checked");
+        }
+      });
+    },
+  );
+
+  describe("operator --link lane: a symlink chain keeps the operator's own latitude at every length, and the chain walk never refuses it", () => {
+    it.each(CHAIN_LENGTHS)("chain of %i links", async (length) => {
+      const { existing, missing } = await chainPair("--link", length);
+
+      // Rule 1 of the link policy: an operator's own `--link` is judged
+      // on where it SITS, and its target keeps the sibling latitude, so
+      // this lane never sees the containment refusal.
+      expect(existing.reason).not.toBe("file_outside_root");
+      expect(missing.reason).not.toBe("file_outside_root");
+      if (existing.status === "killed") {
+        // The OS could follow the chain: the documented latitude pair
+        // (the same shape the two- and three-hop cases above pin).
+        expect(existing.linked).toBe(1);
+        expect(missing.status).toBe("usage_error");
+        expect(missing.reason).toBe("link_source_not_found");
+        expect(missing.warnings.join(" ")).toContain("does not exist");
+      } else {
+        // Longer than the OS's own lookup limit (32 on macOS, 40 on
+        // Linux): `fs.statSync` reports `ELOOP` for both, so the two
+        // answers are identical and neither discloses the far end.
+        expect(existing.status).toBe("usage_error");
+        expect(existing.reason).toBe("link_source_not_found");
+        expect(existing.warnings.join(" ")).toContain("could not be checked");
+        expect(missing.status).toBe(existing.status);
+        expect(missing.reason).toBe(existing.reason);
+        expect(missing.warnings.join(" ")).toContain("could not be checked");
+        expect(missing.warnings.join(" ")).not.toContain("does not exist");
+      }
+    });
+  });
+
+  it("resolveLinkSourceTarget decides a chain of exactly MAX_LINK_SOURCE_HOPS links on its far end (an existing in-root directory resolves to itself) and refuses one link more", () => {
+    const root = fs.realpathSync(makeTmpDir());
+    const realDir = path.join(root, "real-vendor");
+    fs.mkdirSync(realDir);
+
+    const below = symlinkChain(
+      root,
+      MAX_LINK_SOURCE_HOPS - 1,
+      realDir,
+      "below",
+    );
+    const exact = symlinkChain(root, MAX_LINK_SOURCE_HOPS, realDir, "exact");
+    const over = symlinkChain(root, MAX_LINK_SOURCE_HOPS + 1, realDir, "over");
+
+    expect(resolveLinkSourceTarget(path.join(root, below))).toBe(realDir);
+    expect(resolveLinkSourceTarget(path.join(root, exact))).toBe(realDir);
+    expect(resolveLinkSourceTarget(path.join(root, over))).toBeUndefined();
+  });
+
+  it("the chain walk's cap sits above every OS's own symlink-resolution limit, so the walk's decision is what answers for any chain the OS can still follow", () => {
+    // macOS MAXSYMLINKS 32, Linux 40, Windows 63 reparse points.
+    expect(MAX_LINK_SOURCE_HOPS).toBeGreaterThanOrEqual(64);
+  });
+
+  /** `fs.statSync` answering "a directory" for exactly `p` and the real
+   * thing for everything else: what an OS whose own lookup limit lies
+   * above the walk's cap would report for a chain of that length. The
+   * OSes the suite runs on stop short of the cap, so the branch this
+   * models is otherwise unreachable here. */
+  function withStatSyncDirectoryFor<T>(
+    p: string,
+    dir: string,
+    body: () => T,
+  ): T {
+    const realStatSync = fs.statSync;
+    const spy = vi.spyOn(fs, "statSync").mockImplementation(((
+      target: fs.PathLike,
+      opts?: unknown,
+    ) => {
+      if (target === p) return fs.lstatSync(dir);
+      return (realStatSync as (target: fs.PathLike, opts?: unknown) => unknown)(
+        target,
+        opts,
+      );
+    }) as typeof fs.statSync);
+    try {
+      return body();
+    } finally {
+      spy.mockRestore();
+    }
+  }
+
+  it("firstLinkSourceRefusal accepts a repository-content chain of exactly MAX_LINK_SOURCE_HOPS links ending at an existing in-root directory", () => {
+    const root = fs.realpathSync(makeTmpDir());
+    const realDir = path.join(root, "real-vendor");
+    fs.mkdirSync(realDir);
+    const given = symlinkChain(root, MAX_LINK_SOURCE_HOPS, realDir);
+    const oracle = path.join(root, given);
+    const link: MergedLink = {
+      value: oracle,
+      given,
+      basePhrase: "the repository root",
+      namedBy: `"${given}" named in the "link" list of ${path.join(root, ".agent-primitives.json")}`,
+      remedy: "remove the entry",
+    };
+
+    const refusal = withStatSyncDirectoryFor(oracle, realDir, () =>
+      firstLinkSourceRefusal(
+        [link],
+        root,
+        root,
+        /* checkOutsideRootExistence */ false,
+        /* allowOutside */ false,
+      ),
+    );
+
+    expect(refusal).toBeUndefined();
+  });
+
+  it("firstLinkSourceRefusal fails closed on a chain the walk cannot resolve: when nothing else refuses it, the link is file_outside_root naming only the in-root value, never skipped to the later checks", () => {
+    const root = fs.realpathSync(makeTmpDir());
+    const outside = fs.realpathSync(makeTmpDir());
+    const target = path.join(outside, "target");
+    fs.mkdirSync(target);
+    const given = symlinkChain(root, MAX_LINK_SOURCE_HOPS + 1, target);
+    const oracle = path.join(root, given);
+    const link: MergedLink = {
+      value: oracle,
+      given,
+      basePhrase: "the repository root",
+      namedBy: `"${given}" named in the "link" list of ${path.join(root, ".agent-primitives.json")}`,
+      remedy: "remove the entry",
+    };
+
+    const refusal = withStatSyncDirectoryFor(oracle, target, () =>
+      firstLinkSourceRefusal(
+        [link],
+        root,
+        root,
+        /* checkOutsideRootExistence */ false,
+        /* allowOutside */ false,
+      ),
+    );
+
+    expect(refusal).toEqual({
+      reason: "file_outside_root",
+      message: `outside the containment root (${root}): ${oracle}`,
+    });
+    expect(refusal?.message).not.toContain(outside);
   });
 
   it("an in-repo --link symlink to an IN-ROOT directory still links normally, unaffected", async () => {
