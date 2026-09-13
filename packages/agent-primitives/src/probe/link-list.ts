@@ -107,6 +107,22 @@ function canonicalEntryName(parent: string, name: string): string | undefined {
   return name;
 }
 
+/** `realpath` removes ancestor symlinks, but may retain case aliases from
+ * their targets. Normalize those already-resolved components without calling
+ * `realpath` again: this bounded spelling-only walk cannot recurse through a
+ * symlink cycle. */
+function canonicalResolvedSpelling(resolved: string): string {
+  const root = path.parse(resolved).root;
+  let canonical = root;
+  for (const segment of path.relative(root, resolved).split(path.sep)) {
+    canonical = path.join(
+      canonical,
+      canonicalEntryName(canonical, segment) ?? segment,
+    );
+  }
+  return canonical;
+}
+
 /** Canonical spelling of a link DESTINATION, without following its final
  * entry. Every existing ancestor is canonicalized by its directory-entry
  * identity and then resolved before the next component, so case aliases (and
@@ -129,7 +145,8 @@ export function canonicalDestinationSpelling(destination: string): string {
       return entry;
     }
     try {
-      parent = fs.realpathSync(entry);
+      const resolved = fs.realpathSync(entry);
+      parent = resolved === entry ? entry : canonicalResolvedSpelling(resolved);
     } catch {
       return path.join(entry, ...segments.slice(index + 1));
     }

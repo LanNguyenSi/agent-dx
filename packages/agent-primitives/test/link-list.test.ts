@@ -301,6 +301,59 @@ describe("mergeLinkSources: precedence table (defaults, then plan, then CLI)", (
     }
   });
 
+  it("deduplicates symlinked ancestors whose targets introduce case aliases at every depth, preserving first provenance", (t) => {
+    const dir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "agent-primitives-links-target-case-"),
+    );
+    try {
+      t.skip(!caseInsensitiveVolume(dir), "not on a case-insensitive volume");
+      const cases = [
+        { alias: "alias", target: "PARENT", canonical: "parent" },
+        {
+          alias: "deep-alias",
+          target: "GRAND/PARENT",
+          canonical: "grand/parent",
+        },
+      ];
+      for (const entry of cases) {
+        fs.mkdirSync(path.join(dir, entry.canonical, "vendor"), {
+          recursive: true,
+        });
+        fs.symlinkSync(entry.target, path.join(dir, entry.alias));
+      }
+
+      const given = cases.map((entry) => `${entry.alias}/vendor`);
+      const merged = mergeLinkSources([
+        {
+          base: dir,
+          basePhrase: "the repository root",
+          values: given,
+          namedIn: DEFAULTS_NAMED_IN,
+          remedy: "remove the entry from /repo/.agent-primitives.json",
+        },
+        {
+          base: dir,
+          basePhrase: "the invocation cwd",
+          values: cases.map((entry) => `${entry.canonical}/vendor`),
+          remedy: "drop --link",
+        },
+      ]);
+
+      expect(merged).toHaveLength(cases.length);
+      expect(merged.map((link) => link.given)).toEqual(given);
+      expect(merged.map((link) => link.namedBy)).toEqual(
+        given.map((value) => `"${value}" named in ${DEFAULTS_NAMED_IN}`),
+      );
+      for (const entry of cases) {
+        expect(
+          canonicalDestinationSpelling(path.join(dir, entry.alias, "vendor")),
+        ).toBe(path.join(fs.realpathSync(dir), entry.canonical, "vendor"));
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("keeps distinct final symlink locations even when they share one target", () => {
     const dir = fs.mkdtempSync(
       path.join(os.tmpdir(), "agent-primitives-links-"),
