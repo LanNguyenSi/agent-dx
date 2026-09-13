@@ -1586,6 +1586,30 @@ describe("probe(): worktree isolation, a link source that does not exist (#242)"
     expect(result.warnings.join(" ")).toContain(missing);
   });
 
+  it("refuses an outside --link LOCATION even when its target is inside the repository, before setup can run the baseline", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const outside = makeTmpDir();
+    const insideTarget = path.join(repo, "inside-link-target");
+    const outsideLink = path.join(outside, "link-into-repository");
+    fs.mkdirSync(insideTarget);
+    fs.symlinkSync(insideTarget, outsideLink);
+
+    const result = await probe(
+      baseOptions(repo, {
+        links: [outsideLink],
+        // This would fail if a baseline were reached; the envelope's absent
+        // baseline below proves the refusal happened before setup ran it.
+        testCommand: 'node -e "process.exit(99)"',
+      }),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("file_outside_root");
+    expect(result.warnings.join(" ")).toContain(outsideLink);
+    expect(result.baseline).toBeUndefined();
+  });
+
   it("an out-of-root --link that IS an existing plain FILE reports file_outside_root too, identically to an out-of-root existing directory: existence never distinguishes an out-of-root value", async () => {
     useLockDir();
     const { repo } = initRepo();

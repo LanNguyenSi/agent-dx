@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, afterEach } from "vitest";
+import { caseInsensitiveVolume } from "./helpers/case-fs.js";
 import {
   linkEntryUsageError,
   linkSourceMissingMessage,
@@ -239,28 +240,73 @@ describe("mergeLinkSources: precedence table (defaults, then plan, then CLI)", (
     });
   });
 
+  it("uses the production canonicalizer to deduplicate case aliases on a measured case-insensitive volume, preserving first provenance", (t) => {
+    const dir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "agent-primitives-links-case-"),
+    );
+    try {
+      // Do not infer this from the platform: APFS may be configured either
+      // way, and CI can mount either variant too.
+      t.skip(!caseInsensitiveVolume(dir), "not on a case-insensitive volume");
+      fs.mkdirSync(path.join(dir, "vendor"));
+
+      const merged = mergeLinkSources([
+        {
+          base: dir,
+          basePhrase: "the repository root",
+          values: ["VENDOR"],
+          namedIn: DEFAULTS_NAMED_IN,
+          remedy: "remove the entry from /repo/.agent-primitives.json",
+        },
+        {
+          base: dir,
+          basePhrase: "the invocation cwd",
+          values: ["vendor"],
+          remedy: "drop --link",
+        },
+      ]);
+
+      expect(merged).toHaveLength(1);
+      expect(merged[0]).toMatchObject({
+        value: path.join(dir, "VENDOR"),
+        namedBy: `"VENDOR" named in ${DEFAULTS_NAMED_IN}`,
+      });
+      // This pins the production helper, rather than only an injected
+      // canonicalizer seam: the spelling belongs to the actual directory
+      // entry and the final destination was not resolved to a target.
+      expect(canonicalDestinationSpelling(path.join(dir, "VENDOR"))).toBe(
+        path.join(fs.realpathSync(dir), "vendor"),
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("keeps distinct final symlink locations even when they share one target", () => {
     const dir = fs.mkdtempSync(
       path.join(os.tmpdir(), "agent-primitives-links-"),
     );
-    const target = path.join(dir, "target");
-    fs.mkdirSync(target);
-    fs.symlinkSync("target", path.join(dir, "one"));
-    fs.symlinkSync("target", path.join(dir, "two"));
-    expect(canonicalDestinationSpelling(path.join(dir, "one"))).not.toBe(
-      canonicalDestinationSpelling(path.join(dir, "two")),
-    );
-    expect(
-      mergeLinkSources([
-        {
-          base: dir,
-          basePhrase: "root",
-          values: ["one", "two"],
-          remedy: "drop --link",
-        },
-      ]),
-    ).toHaveLength(2);
-    fs.rmSync(dir, { recursive: true, force: true });
+    try {
+      const target = path.join(dir, "target");
+      fs.mkdirSync(target);
+      fs.symlinkSync("target", path.join(dir, "one"));
+      fs.symlinkSync("target", path.join(dir, "two"));
+      expect(canonicalDestinationSpelling(path.join(dir, "one"))).not.toBe(
+        canonicalDestinationSpelling(path.join(dir, "two")),
+      );
+      expect(
+        mergeLinkSources([
+          {
+            base: dir,
+            basePhrase: "root",
+            values: ["one", "two"],
+            remedy: "drop --link",
+          },
+        ]),
+      ).toHaveLength(2);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

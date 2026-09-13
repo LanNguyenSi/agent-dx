@@ -122,8 +122,9 @@ export function canonicalDestinationSpelling(destination: string): string {
  * is dropped, never the other way around, so "later sources add, none
  * removes": every distinct resolved path from every group survives,
  * each exactly once, in first-seen order. Comparison uses the destination's
- * canonical filesystem spelling (`fs.realpathSync`), so case or symlink
- * aliases that lead to the same directory do not create a second candidate.
+ * canonical filesystem spelling, so case aliases for the same final entry do
+ * not create a second candidate without resolving two distinct final symlink
+ * locations through their shared target.
  * A path several sources name
  * therefore keeps the FIRST source's provenance, which is the
  * conservative direction: the defaults file and the plan are checked
