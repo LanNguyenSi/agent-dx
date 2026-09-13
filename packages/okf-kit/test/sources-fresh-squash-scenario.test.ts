@@ -51,15 +51,35 @@ function mergeMain(repo: TmpGitRepo, at: string): void {
   repo.gitAt(["merge", "--no-ff", "--no-commit", "main"], at);
 }
 
-function expectedStale(repo: TmpGitRepo): string[] {
-  return sourcesFreshRule
-    .run(loadBundle(path.join(repo.dir, "bundle"), repo.dir))
-    .filter((finding) => finding.severity === "warning")
-    .map(
-      (finding) => finding.message.match(/STALE: `?([^`\s]+)`? changed/)?.[1],
-    )
-    .filter((source): source is string => source !== undefined)
-    .sort();
+function assertFindings(repo: TmpGitRepo, name: string, stale: string[]): void {
+  const findings = sourcesFreshRule.run(
+    loadBundle(path.join(repo.dir, "bundle"), repo.dir),
+  );
+  if (stale.length === 0) {
+    expect(findings, name).toEqual([]);
+    return;
+  }
+
+  expect(findings, name).toHaveLength(stale.length);
+  expect(
+    findings.every(
+      (finding) =>
+        finding.ruleId === "sources-fresh" &&
+        finding.severity === "warning" &&
+        finding.file === "doc.md" &&
+        finding.message.startsWith("STALE:"),
+    ),
+    name,
+  ).toBe(true);
+  expect(
+    findings
+      .map(
+        (finding) => finding.message.match(/STALE: `?([^`\s]+)`? changed/)?.[1],
+      )
+      .filter((source): source is string => source !== undefined)
+      .sort(),
+    name,
+  ).toEqual(stale);
 }
 
 describe("sources-fresh: documented two-branch squash scenario", () => {
@@ -83,11 +103,12 @@ describe("sources-fresh: documented two-branch squash scenario", () => {
         scenarios.push({ name: "B1", repo, docCommit: squash, stale: [] });
       }
 
-      // B2 and B2late retain B's own stamp across the merge. The latter's
-      // doc commit is after S, so it reaches the value-level re-stamp check.
+      // B2 and B2late retain B's own stamp across the merge. B2late's doc
+      // commit is after S but its stamp is before S, so only the epoch-gated
+      // value-level re-stamp exception can make it clean.
       for (const [name, editAt, stamp, stale] of [
         ["B2", "2026-02-01T00:00:00Z", "2026-01-15T00:00:00Z", ["src/one.ts"]],
-        ["B2late", "2026-04-01T00:00:00Z", "2026-03-15T00:00:00Z", []],
+        ["B2late", "2026-04-01T00:00:00Z", "2026-01-15T00:00:00Z", []],
       ] as const) {
         const { repo } = squashFixture();
         repo.gitAt(["checkout", "--quiet", "b"], BASE);
@@ -216,9 +237,7 @@ describe("sources-fresh: documented two-branch squash scenario", () => {
           scenario.repo.git(["log", "-1", "--format=%H", "--", DOC]),
           scenario.name,
         ).toBe(scenario.docCommit);
-        expect(expectedStale(scenario.repo), scenario.name).toEqual(
-          scenario.stale,
-        );
+        assertFindings(scenario.repo, scenario.name, scenario.stale);
 
         if (scenario.stale.length > 0) {
           scenario.repo.commitFile(
@@ -231,14 +250,11 @@ describe("sources-fresh: documented two-branch squash scenario", () => {
             scenario.repo.git(["log", "-1", "--format=%H", "--", DOC]),
             `${scenario.name} rescue`,
           ).toBe(rescuedDocCommit);
-          expect(
-            expectedStale(scenario.repo),
-            `${scenario.name} rescue`,
-          ).toEqual([]);
+          assertFindings(scenario.repo, `${scenario.name} rescue`, []);
         }
       }
     } finally {
       for (const scenario of scenarios) scenario.repo.cleanup();
     }
-  });
+  }, 15_000);
 });
