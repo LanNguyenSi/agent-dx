@@ -1,5 +1,21 @@
 # Bundle log
 
+- 2026-09-13T13:05:00Z (release cut, agent-dx REL-001): cut the `[Unreleased]`
+  section under a new `[0.34.0] - 2026-09-13` heading, keeping an empty
+  `[Unreleased]` heading above it, and bumped `package.json`/
+  `package-lock.json` to 0.34.0. Re-pointed the two `log.md` self-citations
+  the two-line insertion shifted (`CHANGELOG.md:33` to `CHANGELOG.md:35`,
+  `CHANGELOG.md:404` to `CHANGELOG.md:406`); the historical, append-only
+  `CHANGELOG.md:<n>` mentions further below carry no re-point obligation,
+  as recorded at their own entries. Re-stamped the three bundle docs whose
+  sources list `CHANGELOG.md` (`review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`);
+  `model-preselection.md` lists no source touched by this cut, so it is
+  unchanged. No live citation named the `[Unreleased]` heading, so no
+  heading re-point was needed. Cut the paired okf-kit (0.11.0 to 0.12.0)
+  and agent-primitives (0.3.0 to 0.4.0) releases in the same commit per
+  CONTRIBUTING.md's "Releasing okf-kit" procedure.
+
 - 2026-09-13T05:42:55Z (reviewer delta attribution, agent-dx task
   590db24f): added per-finding `introduced_by_delta` provenance to the
   reviewer contract and findings template. A `no` attribution requires a
@@ -348,7 +364,7 @@
   sentence reverted to its pre-change wording, fails the exact-sub-field
   and regression-signal tests above; restored, the suite is green again.
   `CHANGELOG.md`'s own prose copy of this change is
-  (`CHANGELOG.md:33#"The implementer"`).
+  (`CHANGELOG.md:35#"The implementer"`).
 
   Verified on the committed tree: the full package suite (`npm test`),
   `typecheck`, `typecheck:test`, and `format:check`, all clean. Re-pointed
@@ -616,7 +632,7 @@
   that binding rather than second-guessing it.
 
   The CHANGELOG bullet for this round is
-  `CHANGELOG.md:404#"Citation scanning is paragraph-joined"`. Verified on
+  `CHANGELOG.md:406#"Citation scanning is paragraph-joined"`. Verified on
   the committed tree: the full package suite, `docs-consistency.test.ts`
   on its own, `typecheck`, `typecheck:test` and `format:check`; the
   figures each guard measured are in its own computed test name, per the
