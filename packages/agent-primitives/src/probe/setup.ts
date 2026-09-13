@@ -506,29 +506,29 @@ export async function openRunSetup(
   // being discovered halfway through, with earlier mutants already run.
   if (!allowOutside) {
     const outside = [
-      ...input.targets.map((target) => ({
-        display: target.displayFile,
-        real: target.absFile,
-      })),
-      ...links.map((link) => ({
-        display: link.display,
-        // Operator-provided --link uses the same location semantics as
-        // auto-discovery; repository-content sources keep target semantics.
-        real:
+      ...input.targets
+        .filter((target) => !isPathContained(realRoot, target.absFile))
+        .map((target) => target.displayFile),
+      ...links
+        .filter((link) =>
           link.namedBy === undefined
-            ? linkRelPath(link.display, realRoot) === undefined
-              ? link.display
-              : realRoot
-            : link.abs,
-      })),
-    ].filter((p) => !isPathContained(realRoot, p.real));
+            ? // --link controls a location in the copy. Its parent chain is
+              // resolved by linkRelPath, but the final link entry is not.
+              // Do not turn an outside result into a lexical path and run a
+              // second containment check: undefined is the refusal itself.
+              linkRelPath(link.display, realRoot) === undefined
+            : // Repository-content sources retain their target semantics.
+              !isPathContained(realRoot, link.abs),
+        )
+        .map((link) => link.display),
+    ];
     if (outside.length > 0) {
       return refuse(
         input.outsideRootStatus,
         "file_outside_root",
-        `outside the containment root (${root}): ${[
-          ...new Set(outside.map((p) => p.display)),
-        ].join(", ")}`,
+        `outside the containment root (${root}): ${[...new Set(outside)].join(
+          ", ",
+        )}`,
         // Carries a `-p`-derived `--file`'s own numstat log path through,
         // same as every other early return the caller makes; empty for an
         // explicit `--file`, which never runs that listing.

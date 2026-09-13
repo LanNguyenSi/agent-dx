@@ -83,32 +83,58 @@ export interface MergedLink {
   remedy: string;
 }
 
-/** Canonical spelling of a link DESTINATION, without following its final
- * entry. This deliberately uses lstat: two locations that are symlinks to
- * one target remain distinct, while aliases for one final directory entry
- * (including case aliases on a case-insensitive volume) share its spelling. */
-export function canonicalDestinationSpelling(destination: string): string {
-  const parent = path.dirname(destination);
-  let canonicalParent: string;
+/** The entry spelling that `parent` gives `name`, identified without
+ * resolving that entry's target. `undefined` means the entry does not exist;
+ * an unreadable directory conservatively keeps the spelling that did resolve. */
+function canonicalEntryName(parent: string, name: string): string | undefined {
+  let entry: fs.Stats;
   try {
-    canonicalParent = fs.realpathSync(parent);
+    entry = fs.lstatSync(path.join(parent, name));
   } catch {
-    return destination;
+    return undefined;
   }
   try {
-    const entry = fs.lstatSync(destination);
-    const name = fs.readdirSync(canonicalParent).find((candidate) => {
-      try {
-        const sibling = fs.lstatSync(path.join(canonicalParent, candidate));
-        return sibling.dev === entry.dev && sibling.ino === entry.ino;
-      } catch {
-        return false;
+    for (const sibling of fs.readdirSync(parent, { withFileTypes: true })) {
+      const candidate = fs.lstatSync(path.join(parent, sibling.name));
+      if (candidate.dev === entry.dev && candidate.ino === entry.ino) {
+        return sibling.name;
       }
-    });
-    return path.join(canonicalParent, name ?? path.basename(destination));
+    }
   } catch {
-    return path.join(canonicalParent, path.basename(destination));
+    // The provided spelling reached an entry even though its parent cannot be
+    // listed, so it remains the only safe spelling available to this walk.
   }
+  return name;
+}
+
+/** Canonical spelling of a link DESTINATION, without following its final
+ * entry. Every existing ancestor is canonicalized by its directory-entry
+ * identity and then resolved before the next component, so case aliases (and
+ * symlinked ancestors) cannot leave a parent spelling behind. The final entry
+ * is only lstat'ed: two final symlink locations sharing a target stay distinct
+ * destinations, while aliases for one final entry share its spelling. */
+export function canonicalDestinationSpelling(destination: string): string {
+  const absolute = path.resolve(destination);
+  const root = path.parse(absolute).root;
+  const segments = path.relative(root, absolute).split(path.sep);
+  let parent = root;
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    const name = canonicalEntryName(parent, segment);
+    if (name === undefined) {
+      return path.join(parent, ...segments.slice(index));
+    }
+    const entry = path.join(parent, name);
+    if (index === segments.length - 1) {
+      return entry;
+    }
+    try {
+      parent = fs.realpathSync(entry);
+    } catch {
+      return path.join(entry, ...segments.slice(index + 1));
+    }
+  }
+  return absolute;
 }
 
 /**

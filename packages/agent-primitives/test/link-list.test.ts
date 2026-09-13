@@ -240,7 +240,7 @@ describe("mergeLinkSources: precedence table (defaults, then plan, then CLI)", (
     });
   });
 
-  it("uses the production canonicalizer to deduplicate case aliases on a measured case-insensitive volume, preserving first provenance", (t) => {
+  it("uses the production canonicalizer for final, parent, and grandparent case aliases on a measured case-insensitive volume, preserving first provenance", (t) => {
     const dir = fs.mkdtempSync(
       path.join(os.tmpdir(), "agent-primitives-links-case-"),
     );
@@ -248,35 +248,54 @@ describe("mergeLinkSources: precedence table (defaults, then plan, then CLI)", (
       // Do not infer this from the platform: APFS may be configured either
       // way, and CI can mount either variant too.
       t.skip(!caseInsensitiveVolume(dir), "not on a case-insensitive volume");
-      fs.mkdirSync(path.join(dir, "vendor"));
+      const cases = [
+        { given: "VENDOR", canonical: "vendor" },
+        { given: "PARENT/vendor", canonical: "parent/vendor" },
+        {
+          given: "parent/GRAND/vendor",
+          canonical: "parent/grand/vendor",
+        },
+        {
+          given: "GREAT/parent/grand/vendor",
+          canonical: "great/parent/grand/vendor",
+        },
+      ];
+      for (const entry of cases) {
+        fs.mkdirSync(path.join(dir, entry.canonical), { recursive: true });
+      }
 
       const merged = mergeLinkSources([
         {
           base: dir,
           basePhrase: "the repository root",
-          values: ["VENDOR"],
+          values: cases.map((entry) => entry.given),
           namedIn: DEFAULTS_NAMED_IN,
           remedy: "remove the entry from /repo/.agent-primitives.json",
         },
         {
           base: dir,
           basePhrase: "the invocation cwd",
-          values: ["vendor"],
+          values: cases.map((entry) => entry.canonical),
           remedy: "drop --link",
         },
       ]);
 
-      expect(merged).toHaveLength(1);
-      expect(merged[0]).toMatchObject({
-        value: path.join(dir, "VENDOR"),
-        namedBy: `"VENDOR" named in ${DEFAULTS_NAMED_IN}`,
-      });
-      // This pins the production helper, rather than only an injected
-      // canonicalizer seam: the spelling belongs to the actual directory
-      // entry and the final destination was not resolved to a target.
-      expect(canonicalDestinationSpelling(path.join(dir, "VENDOR"))).toBe(
-        path.join(fs.realpathSync(dir), "vendor"),
+      expect(merged).toHaveLength(cases.length);
+      expect(merged.map((link) => link.given)).toEqual(
+        cases.map((entry) => entry.given),
       );
+      expect(merged.map((link) => link.namedBy)).toEqual(
+        cases.map((entry) => `"${entry.given}" named in ${DEFAULTS_NAMED_IN}`),
+      );
+      // This pins the production helper, rather than only an injected
+      // canonicalizer seam: every existing component receives the spelling
+      // the filesystem directory entry carries; the final entry is not
+      // resolved through a target.
+      for (const entry of cases) {
+        expect(canonicalDestinationSpelling(path.join(dir, entry.given))).toBe(
+          path.join(fs.realpathSync(dir), entry.canonical),
+        );
+      }
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

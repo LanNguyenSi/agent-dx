@@ -1610,6 +1610,33 @@ describe("probe(): worktree isolation, a link source that does not exist (#242)"
     expect(result.baseline).toBeUndefined();
   });
 
+  it("refuses portal/cache when portal is an in-repo symlink to an external directory, before setup can run the baseline", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const external = makeTmpDir();
+    const portal = path.join(repo, "portal");
+    fs.mkdirSync(path.join(external, "cache"));
+    fs.symlinkSync(external, portal);
+
+    const result = await probe(
+      baseOptions(repo, {
+        // Use the root's resolved spelling so a lexical fallback really sees
+        // portal/cache as in-root; only location-aware containment catches
+        // its symlinked parent leaving the repository.
+        cwd: fs.realpathSync(repo),
+        links: ["portal/cache"],
+        // A baseline that starts would fail. Its absence proves containment
+        // refused the source location before setup reaches execution.
+        testCommand: 'node -e "process.exit(99)"',
+      }),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("file_outside_root");
+    expect(result.warnings.join(" ")).toContain(path.join(portal, "cache"));
+    expect(result.baseline).toBeUndefined();
+  });
+
   it("an out-of-root --link that IS an existing plain FILE reports file_outside_root too, identically to an out-of-root existing directory: existence never distinguishes an out-of-root value", async () => {
     useLockDir();
     const { repo } = initRepo();
