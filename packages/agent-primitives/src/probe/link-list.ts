@@ -93,21 +93,31 @@ export interface MergedLink {
  * group's value that resolves to a path an earlier group already added
  * is dropped, never the other way around, so "later sources add, none
  * removes": every distinct resolved path from every group survives,
- * each exactly once, in first-seen order. A path several sources name
+ * each exactly once, in first-seen order. Comparison uses the destination's
+ * canonical filesystem spelling (`fs.realpathSync`), so case or symlink
+ * aliases that lead to the same directory do not create a second candidate.
+ * A path several sources name
  * therefore keeps the FIRST source's provenance, which is the
  * conservative direction: the defaults file and the plan are checked
  * as repository content even when `--link` names the same path too.
  */
 export function mergeLinkSources(
   groups: readonly LinkSourceGroup[],
+  _canonicalizeDestination: (destination: string) => string = (destination) =>
+    fs.existsSync(destination) ? fs.realpathSync(destination) : destination,
 ): MergedLink[] {
   const seen = new Set<string>();
   const merged: MergedLink[] = [];
   for (const group of groups) {
     for (const value of group.values) {
       const abs = path.resolve(group.base, value);
-      if (seen.has(abs)) continue;
-      seen.add(abs);
+      // The exported merger is also called before the explicit-source
+      // existence refusal. Keep a missing source lexical so that refusal can
+      // still report its exact spelling, but canonicalize destinations that
+      // exist before deduplicating them.
+      const canonicalDestination = _canonicalizeDestination(abs);
+      if (seen.has(canonicalDestination)) continue;
+      seen.add(canonicalDestination);
       merged.push({
         value: abs,
         given: value,

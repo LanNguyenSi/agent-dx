@@ -208,6 +208,35 @@ describe("mergeLinkSources: precedence table (defaults, then plan, then CLI)", (
     expect(merged[0].value).toBe(path.join(cwd, "extra"));
     expect(merged[0].namedBy).toBeUndefined();
   });
+
+  it("deduplicates case-variant destination spellings by the canonical destination and keeps the first source's provenance", () => {
+    const canonical = path.join(root, "vendor");
+    const merged = mergeLinkSources(
+      [
+        {
+          base: root,
+          basePhrase: "the repository root",
+          values: ["VENDOR"],
+          namedIn: DEFAULTS_NAMED_IN,
+          remedy: "remove the entry from /repo/.agent-primitives.json",
+        },
+        {
+          base: cwd,
+          basePhrase: "the invocation cwd",
+          values: ["../vendor"],
+          remedy: "drop --link",
+        },
+      ],
+      (destination) =>
+        destination === path.join(root, "VENDOR") ? canonical : destination,
+    );
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      value: path.join(root, "VENDOR"),
+      namedBy: `"VENDOR" named in ${DEFAULTS_NAMED_IN}`,
+    });
+  });
 });
 
 describe("linkSourceMissingMessage", () => {

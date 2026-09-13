@@ -20,9 +20,10 @@ import {
   ISOLATION_ESCAPE_CHANNEL_LABEL,
   ISOLATION_ESCAPE_FIX_HINT,
   ISOLATION_ESCAPE_ENV_FIX_HINT,
+  resolveDeepestExisting,
 } from "./containment.js";
 import type { WorktreeSyncSuccess } from "./isolation.js";
-import type { LinkCandidate } from "./link-policy.js";
+import { linkRelPath, type LinkCandidate } from "./link-policy.js";
 import { detectKnownZeroTestsEvidence } from "./zero-tests.js";
 import {
   createRunController,
@@ -509,7 +510,17 @@ export async function openRunSetup(
         display: target.displayFile,
         real: target.absFile,
       })),
-      ...links.map((link) => ({ display: link.display, real: link.abs })),
+      ...links.map((link) => ({
+        display: link.display,
+        // Operator-provided --link uses the same location semantics as
+        // auto-discovery; repository-content sources keep target semantics.
+        real:
+          link.namedBy === undefined
+            ? linkRelPath(link.display, realRoot) === undefined
+              ? link.abs
+              : realRoot
+            : link.abs,
+      })),
     ].filter((p) => !isPathContained(realRoot, p.real));
     if (outside.length > 0) {
       return refuse(
@@ -625,7 +636,16 @@ export async function openRunSetup(
       logDir,
       wtScratchRoot,
       linkCandidates: links.map((link): LinkCandidate => ({
-        absDir: link.abs,
+        // Link policy derives the copy destination from this location and
+        // resolves its target itself. Passing link.abs here made --link
+        // target-based while auto-discovery was location-based.
+        absDir:
+          link.namedBy === undefined
+            ? path.join(
+                resolveDeepestExisting(path.dirname(link.display)),
+                path.basename(link.display),
+              )
+            : link.abs,
         ...(link.namedBy !== undefined ? { namedBy: link.namedBy } : {}),
       })),
       // Every distinct target of this run, so the link policy can

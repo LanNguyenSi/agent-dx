@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `--link` now follows the same location-based containment rule as
+  auto-discovered links: an in-repository `node_modules` symlink may point
+  at a sibling checkout's install, while repository-content link entries stay
+  target-strict. Link-source merging now deduplicates canonical destinations
+  and retains first-source provenance, including case-variant aliases
+  (Refs: 69b381f1-0855-40b3-8a52-01542647d676).
 - Containment coverage now measures a constructed `FOO`/`foo` fixture on
   the volume under test and pins the injected case-folding branch separately,
   including the original miscased text reported by an isolation-escape match
