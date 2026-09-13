@@ -30,6 +30,7 @@ import {
   type IsolationMode,
   redactEnvOverrides,
   REFUSAL_RESULT_SHAPE,
+  restoreFailedRebuildClause,
   runFinalRebuild,
   type MutantField,
   type MutationProbeField,
@@ -938,7 +939,11 @@ async function runProbePipeline(
             ...warnings,
             `restore failed after an unexpected error${
               causeMessage ? ` (${causeMessage})` : ""
-            }; the original content is preserved at backup path ${state.backupPath}`,
+            }; the original content is preserved at backup path ${state.backupPath}` +
+              restoreFailedRebuildClause({
+                preCommand: opts.preCommand,
+                effectiveIsolation: isolationField.mode,
+              }),
           ],
           ...(mutantField ? { mutant: mutantField } : {}),
           ...(mutantSummary && verifiedAppliedVia
@@ -1727,7 +1732,11 @@ export async function probePlan(
             ...warnings,
             `restore failed after an unexpected error${
               causeMessage ? ` (${causeMessage})` : ""
-            }; the original content is preserved at backup path ${state.backupPath}`,
+            }; the original content is preserved at backup path ${state.backupPath}` +
+              restoreFailedRebuildClause({
+                preCommand: opts.preCommand,
+                effectiveIsolation: isolationField.mode,
+              }),
           ],
           ...(baseline ? { baseline } : {}),
           results: entries,

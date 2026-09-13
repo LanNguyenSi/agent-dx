@@ -558,6 +558,44 @@ describe("probe(): inconclusive branches, hash unchanged afterward", () => {
   }, 15000);
 });
 
+/**
+ * A repo whose own test command replaces the target with a directory
+ * once it observes the mutation, so the baseline run (unmutated) is a
+ * no-op and only the restore step (which tries to copy the backup back
+ * into that now-directory path) fails. The same fixture the
+ * `restore_failed` test above this describe block builds inline;
+ * factored out here so the two `restoreFailedRebuildClause` tests below
+ * can reuse it without touching that existing test's own body.
+ */
+function makeRestoreFailedRepo(): { repo: string } {
+  const { repo } = initRepo();
+  fs.writeFileSync(
+    path.join(repo, "fixture.test.js"),
+    [
+      "const fs = require('node:fs');",
+      "const content = fs.readFileSync('fixture.js', 'utf8');",
+      "if (content.includes('CORRUPT_MARKER')) {",
+      "  fs.rmSync('fixture.js', { force: true });",
+      "  fs.mkdirSync('fixture.js');",
+      "} else {",
+      "  const { isPositive } = require('./fixture.js');",
+      "  if (isPositive(5) !== true) process.exit(1);",
+      "}",
+      "",
+    ].join("\n"),
+  );
+  git(repo, ["add", "-A"]);
+  git(repo, [
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-q",
+    "-m",
+    "corrupting test",
+  ]);
+  return { repo };
+}
+
 describe("probe(): restore failure is terminal", () => {
   it("restore_failed when the target cannot be restored, exit-class cannot-conclude, warning names the backup path, marker persists", async () => {
     const lockDir = useLockDir();
@@ -629,6 +667,59 @@ describe("probe(): restore failure is terminal", () => {
     // force+recursive already handles a directory fine, so nothing extra
     // is required here. Referencing lockDir keeps the variable used.
     expect(fs.existsSync(lockDir)).toBe(true);
+  });
+
+  it("restore_failed under inplace with --pre appends the rebuild-may-be-stale clause", async () => {
+    useLockDir();
+    const { repo } = makeRestoreFailedRepo();
+
+    const result = await probe(
+      baseOptions(repo, {
+        replaceText: "  return false; // CORRUPT_MARKER",
+        preCommand: "true",
+      }),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("restore_failed");
+    const backupWarning = result.warnings.find((w) =>
+      w.includes("backup path"),
+    );
+    expect(backupWarning).toBeDefined();
+    // The backup path itself is still cleanly extractable: the clause
+    // starts with a space, so `\S+` stops exactly where it always did.
+    const backupPathMatch = backupWarning?.match(/backup path (\S+)/);
+    expect(backupPathMatch).toBeTruthy();
+    if (backupPathMatch) {
+      expect(fs.existsSync(backupPathMatch[1])).toBe(true);
+    }
+    expect(backupWarning).toContain(
+      "The working tree's build output may still be built from the mutant",
+    );
+    expect(backupWarning).toContain("rebuild it by hand before trusting it");
+  });
+
+  it("restore_failed with no --pre carries no rebuild-may-be-stale clause", async () => {
+    useLockDir();
+    const { repo } = makeRestoreFailedRepo();
+
+    const result = await probe(
+      baseOptions(repo, { replaceText: "  return false; // CORRUPT_MARKER" }),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("restore_failed");
+    const backupWarning = result.warnings.find((w) =>
+      w.includes("backup path"),
+    );
+    expect(backupWarning).toBeDefined();
+    const backupPathMatch = backupWarning?.match(/backup path (\S+)/);
+    expect(backupPathMatch).toBeTruthy();
+    // Byte-identical to what this warning read before the clause
+    // existed: no --pre means nothing this package built to warn about.
+    expect(backupWarning).toBe(
+      `restore failed; the original content is preserved at backup path ${backupPathMatch?.[1]}`,
+    );
   });
 
   it("patch-apply-failure site: marker survives when the real git apply fails and the emergency restore also fails", async () => {

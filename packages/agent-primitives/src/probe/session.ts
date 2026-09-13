@@ -745,6 +745,45 @@ export async function runFinalRebuild(
   );
 }
 
+/**
+ * The one shared sentence appended to a restore-failed-adjacent warning
+ * when `runFinalRebuild` above was skipped BECAUSE of that same
+ * failure: without it, a warning that only says "the original content
+ * is preserved at backup path X" reads as though nothing else needs
+ * attention, when the working tree's build output may still reflect the
+ * mutant `--pre` last built. Returns `""` (never appended) unless both
+ * `--pre` was given AND the run is `-i inplace`, so every existing
+ * warning that names neither stays byte-identical to what it read
+ * before this existed -- `-i worktree`'s `--pre` never touched the
+ * original tree's build output at all, and no `--pre` means no build
+ * output this package produced to warn about.
+ *
+ * Starts with a space, never a period or comma, so a caller's own
+ * `/backup path (\S+)/`-style extraction of the backup path immediately
+ * before this in the same warning stops at that space exactly where it
+ * always did, rather than swallowing this sentence's own leading
+ * punctuation into the captured path.
+ *
+ * Reused verbatim at both call sites that report a restore skipped
+ * `runFinalRebuild` (`step.ts`'s `restoreFailedOutcome`, shared by the
+ * single probe and every plan mutant, and `index.ts`'s own `finally`
+ * emergency-restore path, present once in each of `probe`'s and
+ * `probePlan`'s pipelines) rather than left as two hand-written
+ * variants that could drift apart.
+ */
+export function restoreFailedRebuildClause(rt: {
+  preCommand?: string;
+  effectiveIsolation: IsolationMode;
+}): string {
+  if (rt.effectiveIsolation !== "inplace" || rt.preCommand === undefined) {
+    return "";
+  }
+  return (
+    " The working tree's build output may still be built from the " +
+    "mutant; rebuild it by hand before trusting it."
+  );
+}
+
 /** Registers a started run (and when its stdio truly closes) as the
  * probe's one in-flight child; see `TrackedRun` and `probe`'s own
  * `track`. */

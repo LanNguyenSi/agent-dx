@@ -22,6 +22,7 @@ import {
   noteIncompleteOutput,
   redactEnvOverrides,
   restoreAndVerify,
+  restoreFailedRebuildClause,
   runPreThenTest,
   startRunArgvTracked,
   type BaselineOutput,
@@ -242,7 +243,8 @@ export async function runMutantAttempt(
     test?: TestPhaseField,
   ): MutantAttemptOutcome => {
     warnings.push(
-      `restore failed; the original content is preserved at backup path ${target.session.backupPath}`,
+      `restore failed; the original content is preserved at backup path ${target.session.backupPath}` +
+        restoreFailedRebuildClause(rt),
     );
     return {
       status: "inconclusive",
