@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-09-13
+
 - Reviewer findings now carry `introduced_by_delta: yes | no | unknown`.
   A `no` attribution requires a named base build and replay in `reproduction`;
   it remains in the ordinary finding gate and Findings table, while only `yes`
