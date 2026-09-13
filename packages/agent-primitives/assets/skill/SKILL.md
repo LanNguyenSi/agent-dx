@@ -70,11 +70,13 @@ Under `-i inplace`, `--pre` runs once more after the last mutant is
 restored, so a command run after the probe returns never exercises a
 mutant's build output; this is a no-op under `-i worktree` (that mode's
 `--pre` never touched the original tree's build output at all). A run
-interrupted by SIGINT/SIGTERM restores the target but does not get this
-extra `--pre` (the signal handler exits the process before this step
-would run): rebuild by hand after an interrupted `-i inplace` run. See the
-README's `--pre` section for the exact rule and the `warnings` notice it
-leaves behind.
+interrupted by SIGINT/SIGTERM restores the target but skips this extra
+`--pre`, for one of two reasons: the CLI exits inside the signal handler
+before this step would run (rebuild by hand); a library caller
+(`exitOnSignal: false`) reaches the step and skips it because the run
+was aborted, but leaves a `warnings` entry naming the same stale-build
+risk instead of staying silent. See the README's `--pre` section for the
+exact rule and the `warnings` notice it leaves behind.
 
 ## 4. Doctor
 

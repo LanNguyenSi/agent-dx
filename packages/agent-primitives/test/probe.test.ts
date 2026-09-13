@@ -1937,6 +1937,18 @@ describe("probe(): -p integration through probe(), and --pre in both phases", ()
         w.includes("--pre was re-run after the last mutant was restored"),
       ),
     ).toBe(true);
+    // F2: the rebuild's own log path is folded into `dryRunLogPaths` --
+    // for a clean run (no earlier refusal seeding it), this holds
+    // exactly the rebuild's own log and nothing else, distinct from the
+    // baseline's and the mutant test's own logs, and it exists on disk.
+    // Dropping the `capturedLogPaths.push(rebuildLogPath)` call this
+    // asserts leaves `dryRunLogPaths` undefined here instead.
+    expect(result.dryRunLogPaths).toBeDefined();
+    expect(result.dryRunLogPaths).toHaveLength(1);
+    const rebuildLogPath = (result.dryRunLogPaths ?? [])[0];
+    expect(rebuildLogPath).not.toBe(result.baseline?.logPath);
+    expect(rebuildLogPath).not.toBe(result.test?.logPath);
+    expect(fs.existsSync(rebuildLogPath)).toBe(true);
   });
 });
 
@@ -3128,6 +3140,129 @@ describe("probe(): a signal while a library-mode probe is running", () => {
     expect(fs.readdirSync(lockDir).filter((f) => f.endsWith(".lock"))).toEqual(
       [],
     );
+  }, 60000);
+
+  it("F1/F3: with --pre, an aborted library-mode run warns the build output may be stale instead of rebuilding or staying silent", async () => {
+    const lockDir = useLockDir();
+    const { repo } = initRepo();
+    const absFile = path.join(repo, "fixture.js");
+    const before = fs.readFileSync(absFile, "utf8");
+    const logDir = makeTmpDir();
+    const ready = path.join(repo, "ready.txt");
+    const markerPath = path.join(repo, "dist-marker.js");
+
+    // Same shape as the test above: only the mutant-phase test (its
+    // content carries SLOW_MARKER) signals readiness and then hangs
+    // until interrupted.
+    fs.writeFileSync(
+      path.join(repo, "fixture.test.js"),
+      [
+        "const fs = require('node:fs');",
+        "const content = fs.readFileSync('fixture.js', 'utf8');",
+        "if (content.includes('SLOW_MARKER')) {",
+        "  fs.writeFileSync('ready.txt', 'go');",
+        "  setTimeout(() => { process.exit(0); }, 10000);",
+        "} else { process.exit(0); }",
+        "",
+      ].join("\n"),
+    );
+    git(repo, ["add", "-A"]);
+    git(repo, [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-m",
+      "slow test",
+    ]);
+
+    // A library caller with `--pre`: stands in for a rebuild step, same
+    // as the other rebuild tests in this file (`cp fixture.js
+    // dist-marker.js`). Its own last run, before the mutant's test hung
+    // and was interrupted, wrote `dist-marker.js` from the MUTATED
+    // source -- exactly the stale build output the aborted-path warning
+    // this test targets exists to name.
+    const scriptPath = path.join(makeTmpDir(), "library-probe-pre.mjs");
+    fs.writeFileSync(
+      scriptPath,
+      [
+        `import { probe } from ${JSON.stringify(pathToFileURL(DIST_INDEX).href)};`,
+        "const result = await probe({",
+        '  file: "fixture.js",',
+        "  line: 2,",
+        '  form: "replace",',
+        '  replaceText: "  return false; // SLOW_MARKER",',
+        '  testCommand: "node fixture.test.js",',
+        '  preCommand: "cp fixture.js dist-marker.js",',
+        '  isolation: "inplace",',
+        '  expect: "fail",',
+        `  cwd: ${JSON.stringify(repo)},`,
+        `  logDir: ${JSON.stringify(logDir)},`,
+        "});",
+        "process.stdout.write(JSON.stringify(result));",
+        "",
+      ].join("\n"),
+    );
+
+    const child = spawn(process.execPath, [scriptPath], {
+      cwd: repo,
+      env: { ...process.env, AGENT_PRIMITIVES_LOCK_DIR: lockDir },
+      stdio: ["ignore", "pipe", "inherit"],
+    });
+    let stdout = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => {
+      stdout += chunk;
+    });
+
+    const deadline = Date.now() + 20000;
+    while (!fs.existsSync(ready)) {
+      if (Date.now() > deadline) {
+        throw new Error("the mutant-phase test never signalled readiness");
+      }
+      await sleep(50);
+    }
+    // The mutant's own `--pre` already ran (before its test started and
+    // hung) by the time `ready.txt` exists: the marker now carries the
+    // mutated source, not the original.
+    const markerAtSignalTime = fs.readFileSync(markerPath, "utf8");
+    expect(markerAtSignalTime).toContain("SLOW_MARKER");
+
+    child.kill("SIGTERM");
+    const [code, signal] = await new Promise<
+      [number | null, NodeJS.Signals | null]
+    >((resolve) => {
+      child.on("close", (c, sig) => resolve([c, sig]));
+    });
+
+    expect(signal).toBeNull();
+    expect(code).toBe(0);
+
+    const result = JSON.parse(stdout) as ProbeResult;
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("aborted");
+    // The target itself IS restored (this run's normal restore-on-abort
+    // path), but the rebuild the signal check skips never ran, so this
+    // must warn rather than either (a) claiming success it never
+    // measured, or (b) staying silent about a build artifact that still
+    // holds the mutant.
+    expect(fs.readFileSync(absFile, "utf8")).toBe(before);
+    expect(
+      result.warnings.some((w) =>
+        w.includes("--pre was re-run after the last mutant was restored"),
+      ),
+    ).toBe(false);
+    expect(
+      result.warnings.some((w) =>
+        w.includes(
+          "The working tree's build output may still be built from the mutant",
+        ),
+      ),
+    ).toBe(true);
+    // The build artifact was never touched by a rebuild: it still holds
+    // exactly what the mutant's own `--pre` last wrote.
+    expect(fs.readFileSync(markerPath, "utf8")).toBe(markerAtSignalTime);
+    expect(fs.readFileSync(markerPath, "utf8")).toContain("SLOW_MARKER");
   }, 60000);
 });
 

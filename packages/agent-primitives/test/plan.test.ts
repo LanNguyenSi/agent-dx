@@ -820,10 +820,27 @@ describe("probePlan(): the final rebuild after the last mutant is restored", () 
     // baseline (1) + 2 mutants (1 each) + the final rebuild (1) = 4.
     expect(fs.readFileSync(counterFile, "utf8")).toBe("4");
     const successNotices = result.warnings.filter((w) =>
-      w.includes("--pre was re-run after the last mutant was restored, so"),
+      w.includes(
+        "--pre was re-run after the last mutant was restored (exit 0), so",
+      ),
     );
     expect(successNotices).toHaveLength(1);
     expect(fs.readFileSync(markerPath, "utf8")).toBe(FIXTURE_JS);
+    // F2: the rebuild's own log path is folded into the envelope's
+    // `dryRunLogPaths` -- for a plan that runs clean to completion (no
+    // setup refusal seeding it), this array holds exactly the rebuild's
+    // log and nothing else, so it is distinct from the baseline's own
+    // log and from every mutant's own `test.logPath`, and it exists on
+    // disk. Dropping the `setupLogPaths.push(rebuildLogPath)` call this
+    // asserts leaves `dryRunLogPaths` undefined here instead.
+    expect(result.dryRunLogPaths).toBeDefined();
+    expect(result.dryRunLogPaths).toHaveLength(1);
+    const rebuildLogPath = (result.dryRunLogPaths ?? [])[0];
+    expect(rebuildLogPath).not.toBe(result.baseline?.logPath);
+    for (const r of result.results) {
+      expect(rebuildLogPath).not.toBe(r.test?.logPath);
+    }
+    expect(fs.existsSync(rebuildLogPath)).toBe(true);
   }, 30000);
 
   it("F2b: a --pre that fails only on its last (rebuild) invocation leaves the plan's own status/summary unchanged and warns of the stale risk with a log path", async () => {
@@ -868,6 +885,19 @@ describe("probePlan(): the final rebuild after the last mutant is restored", () 
           ) && w.includes("may still be stale, see"),
       ),
     ).toBe(true);
+    // F2: the rebuild's own log path is folded into `dryRunLogPaths`
+    // even when that rebuild itself failed -- `runFinalRebuild` returns
+    // `{ logPath }` on both branches, and the warning above already
+    // names the same path, so this asserts the envelope carries it too.
+    expect(result.dryRunLogPaths).toBeDefined();
+    expect(result.dryRunLogPaths).toHaveLength(1);
+    const rebuildLogPath = (result.dryRunLogPaths ?? [])[0];
+    expect(rebuildLogPath).not.toBe(result.baseline?.logPath);
+    for (const r of result.results) {
+      expect(rebuildLogPath).not.toBe(r.test?.logPath);
+    }
+    expect(fs.existsSync(rebuildLogPath)).toBe(true);
+    expect(result.warnings.some((w) => w.includes(rebuildLogPath))).toBe(true);
   }, 30000);
 
   it("F2 negative: under -i worktree, no rebuild notice is printed and the original tree's build output is never touched", async () => {
@@ -967,6 +997,42 @@ describe("probePlan(): the final rebuild after the last mutant is restored", () 
         w.includes("--pre was re-run after the last mutant was restored"),
       ),
     ).toBe(false);
+  }, 30000);
+
+  it("F2/F5 crossover: a plan whose first mutant applies and whose second is mutant_not_applicable still runs the rebuild exactly once", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const counterFile = path.join(makeTmpDir(), "counter.txt");
+    fs.writeFileSync(counterFile, "0");
+
+    const result = await probePlan(
+      planOptions(
+        repo,
+        [
+          replaceMutant(2, "  return false;"),
+          // Line 99 does not exist: the dry run refuses before this
+          // mutant's own `--pre`/test phase ever runs (same shape as
+          // the F5 test above), so `anyMutantApplied` must come from
+          // the FIRST mutant alone.
+          replaceMutant(99, "  return false;"),
+        ],
+        { preCommand: counterScript(counterFile) },
+      ),
+    );
+
+    expect(result.results[0].status).toBe("killed");
+    expect(result.results[1].reason).toBe("mutant_not_applicable");
+    // baseline (1) + mutant 1's own --pre (1) + the final rebuild (1) =
+    // 3; mutant 2 never calls --pre at all (its dry run refuses first).
+    expect(fs.readFileSync(counterFile, "utf8")).toBe("3");
+    const successNotices = result.warnings.filter((w) =>
+      w.includes(
+        "--pre was re-run after the last mutant was restored (exit 0), so",
+      ),
+    );
+    expect(successNotices).toHaveLength(1);
+    expect(result.dryRunLogPaths).toBeDefined();
+    expect(result.dryRunLogPaths).toHaveLength(1);
   }, 30000);
 });
 

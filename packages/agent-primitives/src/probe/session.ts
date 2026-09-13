@@ -731,9 +731,15 @@ export async function runFinalRebuild(
   const started = startExecTracked(rt.preCommand, rt.execEnv);
   const result = await rt.track(started.result, started.closed);
   if (result.exitCode === 0) {
+    // What was actually observed is only that this re-run exited 0, not
+    // that its output now matches the restored source: a `--pre` that
+    // no-ops against a cache (nothing to rebuild, or a build system that
+    // treats the restored file as unchanged) also exits 0 without
+    // touching anything. State only the observation, not the inferred
+    // outcome.
     warnings.push(
-      "--pre was re-run after the last mutant was restored, so the " +
-        "working tree's build output matches the restored source",
+      "--pre was re-run after the last mutant was restored (exit 0), so " +
+        "the build output was rebuilt from the restored source",
     );
     return { logPath: result.logPath };
   }
