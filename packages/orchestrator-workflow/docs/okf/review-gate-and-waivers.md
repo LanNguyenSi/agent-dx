@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-09-13T05:32:42Z
+timestamp: 2026-09-13T05:42:55Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/skill/SKILL.md
@@ -156,7 +156,7 @@ and set the row's Decision to `accepted`
 (`SKILL.md:346#"unchanged and setting Decision to"`; `05-review-findings.md:16#"| Severity | Category | Description | Suggested Fix | Decision |"`).
 No reader or template schema changes: the existing Decision legend and all
 high/critical waiver and escalation rules continue to apply. The policy is
-pinned in `test/docs-consistency.test.ts:4688#"docs-only closing deltas stay narrowly bounded"`.
+pinned in `test/docs-consistency.test.ts:4698#"docs-only closing deltas stay narrowly bounded"`.
 
 ## The Decision legend in 05-review-findings.md
 
@@ -314,7 +314,7 @@ operator merge-hold). A counted round is a completed reviewer return whose
 review is not a round. Which of the three is picked is judgment; that one
 is picked and recorded is not
 (`SKILL.md:805#"Judgment governs which of the three to pick; only that one is chosen and"`).
-`agents-md-section.md:136#"rule's split-or-redesign response, not instead of it."`
+`agents-md-section.md:138#"rule's split-or-redesign response, not instead of it."`
 carries the same rule in short form for repos without the full skill text
 loaded.
 

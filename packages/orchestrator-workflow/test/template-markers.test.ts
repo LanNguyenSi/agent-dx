@@ -265,13 +265,63 @@ describe("05-review-findings.md findings-table header convention", () => {
  */
 describe("05-review-findings.md placeholder-row fail-closed convention", () => {
   const reviewTemplate = readAsset("templates/05-review-findings.md");
+  const legacyPlaceholder =
+    "| low/medium/high/critical | correctness/architecture/security/tests/maintainability/performance/docs | <!-- finding --> | <!-- fix --> | accepted/defer |";
 
   it("carries the exact placeholder row grounding-mcp's completeness reader matches literally", () => {
     // Mutation-check: editing any cell of this row (including the HTML-comment
     // placeholders) fails this assertion.
-    expect(reviewTemplate).toContain(
-      "| low/medium/high/critical | correctness/architecture/security/tests/maintainability/performance/docs | <!-- finding --> | <!-- fix --> | accepted/defer | yes/no/unknown |",
-    );
+    expect(reviewTemplate).toContain(legacyPlaceholder);
+  });
+
+  it("keeps the consumer's five-cell placeholder distinct from empty, unresolved, and resolved concrete-table states", () => {
+    const cells = legacyPlaceholder
+      .split("|")
+      .slice(1, -1)
+      .map((cell) => cell.trim());
+    expect(cells).toHaveLength(5);
+
+    const state = (table: string): string => {
+      if (table.includes(legacyPlaceholder)) return "placeholder";
+      const concreteRows = table
+        .split(/\r?\n/)
+        .map((line) =>
+          line
+            .split("|")
+            .slice(1, -1)
+            .map((cell) => cell.trim()),
+        )
+        .filter((row) =>
+          ["low", "medium", "high", "critical"].includes(row[0]),
+        );
+      if (concreteRows.length === 0) return "empty";
+      return concreteRows.some(
+        (row) =>
+          ["high", "critical"].includes(row[0]) &&
+          !["accepted", "defer"].includes(row[4]),
+      )
+        ? "unresolved"
+        : "resolved";
+    };
+
+    expect(state(reviewTemplate)).toBe("placeholder");
+    expect(state(reviewTemplate.replace(legacyPlaceholder, ""))).toBe("empty");
+    expect(
+      state(
+        reviewTemplate.replace(
+          legacyPlaceholder,
+          "| high | correctness | finding | fix | fix | yes |",
+        ),
+      ),
+    ).toBe("unresolved");
+    expect(
+      state(
+        reviewTemplate.replace(
+          legacyPlaceholder,
+          "| high | correctness | finding | fix | accepted | no |",
+        ),
+      ),
+    ).toBe("resolved");
   });
 
   it("documents the placeholder row's fail-closed semantics next to the row", () => {
@@ -289,7 +339,9 @@ describe("05-review-findings.md preserves per-finding delta attribution", () => 
     expect(reviewTemplate).toContain(
       "| Severity | Category | Description | Suggested Fix | Decision | Introduced by Delta |",
     );
-    expect(reviewTemplate).toContain("| yes/no/unknown |");
+    expect(reviewTemplate).toContain(
+      "including the `Introduced by Delta` value in the sixth column",
+    );
     expect(reviewTemplate).toContain("named base build and replay");
     expect(reviewTemplate).toContain("ordinary finding gate");
   });

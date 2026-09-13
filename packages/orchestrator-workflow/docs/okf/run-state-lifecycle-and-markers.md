@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-09-13T05:32:42Z
+timestamp: 2026-09-13T05:42:55Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -130,7 +130,7 @@ SKILL.md:716#"pointer rule from Run state applies unchanged."; SKILL.md:731#"poi
 The policy section installed into `AGENTS.md` carries the same two facts in
 one bullet: every touched worktree gets the pointer, and `00-goal.md` gets
 one keyed `run-base[<repo-basename>]` marker per repository for a multi-repo
-run (packages/orchestrator-workflow/assets/agents-md-section.md:178#"marker per repository for multi-repo runs").
+run (packages/orchestrator-workflow/assets/agents-md-section.md:180#"marker per repository for multi-repo runs").
 
 For a run that touches more than one repository, the orchestrator records
 one keyed marker per repository on its own line beside the unkeyed one,
@@ -279,7 +279,8 @@ a finding — a run that fills the acceptance-recommendation marker with
 `complete: true` with zero findings, indistinguishable from a genuine
 zero-findings review (the "mixed-state bypass"). 0.13.0 documents the fix's
 contract half in this repo: a comment directly below the placeholder row
-(05-review-findings.md:19#"marker does. During findings transfer (step 7), replace this row with each reviewer finding. For a genuine zero-findings review, delete this row instead — a header row with no data rows is a valid, complete table; leaving this row next to real finding rows is also fine. This mirrors grounding-mcp's placeholder-row detection; keep the two in sync. -->") states the rule the orchestrator must follow:
+(05-review-findings.md:19#"legacy five-cell row is the shipped template placeholder") preserves the
+consumer-recognized literal and states the rule the orchestrator must follow:
 replace the row when transferring findings, or delete it outright for a
 genuine zero-findings review (a header row with no data rows is valid;
 leaving the legend row next to real finding rows is also fine) — and

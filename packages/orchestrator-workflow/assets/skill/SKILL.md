@@ -784,10 +784,10 @@ unaided: by the second round-2 halt signal on the same task, or by the
 third `fix_required` review round on the same task, whichever comes
 first, choose one of three escalations instead of running another round
 the same way. A counted round is a completed reviewer return whose
-`acceptance_recommendation` is `fix_required` or `reject`; a misfired
-review is not a round (see Subagent misfire rule); the escalation is
-chosen once the third such round arising from a `yes` or `unknown` finding has returned; a `no` finding is handled by the ordinary gate before the next attempt
-starts. The escalation is chosen in addition to the halt rule's
+`acceptance_recommendation` is `fix_required` or `reject` and which has at
+least one `introduced_by_delta: yes` or `unknown` finding; a misfired review
+is not a round (see Subagent misfire rule). A `no` finding is handled by the
+ordinary gate before the next attempt starts. The escalation is chosen in addition to the halt rule's
 split-or-redesign response, not instead of it.
 
 - **Tier or model escalation**: raise the implementer to at least

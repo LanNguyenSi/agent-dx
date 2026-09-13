@@ -1438,6 +1438,7 @@ describe("round-2 halt rule ships in the skill", () => {
 describe("review-round escalation budget ships in the skill and the AGENTS.md section", () => {
   const skillMd = unwrap(readAsset("skill/SKILL.md"));
   const agentsMdSection = unwrap(readAsset("agents-md-section.md"));
+  const decisionsTemplate = readAsset("templates/03-decisions.md");
 
   it("SKILL.md carries the section heading and step 8's trigger reference", () => {
     expect(skillMd).toContain("## Review-round escalation budget");
@@ -1517,10 +1518,19 @@ describe("review-round escalation budget ships in the skill and the AGENTS.md se
 
   it("SKILL.md and agents-md-section.md both define what counts as a round (a misfired review is not one)", () => {
     expect(skillMd).toContain(
-      "A counted round is a completed reviewer return whose `acceptance_recommendation` is `fix_required` or `reject`; a misfired review is not a round",
+      "A counted round is a completed reviewer return whose `acceptance_recommendation` is `fix_required` or `reject` and which has at least one `introduced_by_delta: yes` or `unknown` finding; a misfired review is not a round",
     );
     expect(agentsMdSection).toContain(
-      "A counted round is a completed reviewer return recommending `fix_required` or `reject`; a misfired review is not a round.",
+      "A counted round is a completed reviewer return recommending `fix_required` or `reject` and carrying at least one `introduced_by_delta: yes` or `unknown` finding; a misfired review is not a round.",
+    );
+  });
+
+  it("keeps the AGENTS.md summary and decision-template trigger scoped to yes/unknown findings", () => {
+    expect(agentsMdSection).toContain(
+      "A `no` finding stays in the ordinary finding gate.",
+    );
+    expect(decisionsTemplate).toContain(
+      "the third fix_required/reject round that carries at least one introduced_by_delta yes/unknown finding",
     );
   });
 
