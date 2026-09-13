@@ -517,7 +517,7 @@ export async function openRunSetup(
         real:
           link.namedBy === undefined
             ? linkRelPath(link.display, realRoot) === undefined
-              ? link.abs
+              ? link.display
               : realRoot
             : link.abs,
       })),

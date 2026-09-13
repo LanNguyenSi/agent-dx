@@ -83,6 +83,34 @@ export interface MergedLink {
   remedy: string;
 }
 
+/** Canonical spelling of a link DESTINATION, without following its final
+ * entry. This deliberately uses lstat: two locations that are symlinks to
+ * one target remain distinct, while aliases for one final directory entry
+ * (including case aliases on a case-insensitive volume) share its spelling. */
+export function canonicalDestinationSpelling(destination: string): string {
+  const parent = path.dirname(destination);
+  let canonicalParent: string;
+  try {
+    canonicalParent = fs.realpathSync(parent);
+  } catch {
+    return destination;
+  }
+  try {
+    const entry = fs.lstatSync(destination);
+    const name = fs.readdirSync(canonicalParent).find((candidate) => {
+      try {
+        const sibling = fs.lstatSync(path.join(canonicalParent, candidate));
+        return sibling.dev === entry.dev && sibling.ino === entry.ino;
+      } catch {
+        return false;
+      }
+    });
+    return path.join(canonicalParent, name ?? path.basename(destination));
+  } catch {
+    return path.join(canonicalParent, path.basename(destination));
+  }
+}
+
 /**
  * Merges `link` values from several sources into one deduplicated list,
  * each source's own `values` resolved against its own `base` before
@@ -103,8 +131,9 @@ export interface MergedLink {
  */
 export function mergeLinkSources(
   groups: readonly LinkSourceGroup[],
-  _canonicalizeDestination: (destination: string) => string = (destination) =>
-    fs.existsSync(destination) ? fs.realpathSync(destination) : destination,
+  _canonicalizeDestination: (
+    destination: string,
+  ) => string = canonicalDestinationSpelling,
 ): MergedLink[] {
   const seen = new Set<string>();
   const merged: MergedLink[] = [];

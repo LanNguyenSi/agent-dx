@@ -6,6 +6,7 @@ import {
   linkEntryUsageError,
   linkSourceMissingMessage,
   mergeLinkSources,
+  canonicalDestinationSpelling,
   type MergedLink,
 } from "../src/probe/link-list.js";
 
@@ -236,6 +237,30 @@ describe("mergeLinkSources: precedence table (defaults, then plan, then CLI)", (
       value: path.join(root, "VENDOR"),
       namedBy: `"VENDOR" named in ${DEFAULTS_NAMED_IN}`,
     });
+  });
+
+  it("keeps distinct final symlink locations even when they share one target", () => {
+    const dir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "agent-primitives-links-"),
+    );
+    const target = path.join(dir, "target");
+    fs.mkdirSync(target);
+    fs.symlinkSync("target", path.join(dir, "one"));
+    fs.symlinkSync("target", path.join(dir, "two"));
+    expect(canonicalDestinationSpelling(path.join(dir, "one"))).not.toBe(
+      canonicalDestinationSpelling(path.join(dir, "two")),
+    );
+    expect(
+      mergeLinkSources([
+        {
+          base: dir,
+          basePhrase: "root",
+          values: ["one", "two"],
+          remedy: "drop --link",
+        },
+      ]),
+    ).toHaveLength(2);
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 });
 
