@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Adds a pinned fixture-repository regression test for the documented
+  two-branch squash-merge decision procedure, including every stale branch
+  state's re-verify-and-re-stamp rescue.
+
 ## [0.11.0] - 2026-09-12
 
 ### Added
