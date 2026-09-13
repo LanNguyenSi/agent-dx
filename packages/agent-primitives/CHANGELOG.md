@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Worktree isolation now keeps the live repository's Git administrative
   and common directories (also for linked worktrees) and the copy's own
   `.git` metadata out of every link source, including explicit `--link`.
+  Targets that contain a protected metadata directory are refused too,
+  using symmetric filesystem overlap, so linking the main checkout from
+  a linked worktree cannot expose its `.git` indirectly.
   Untracked symlinks are rechecked after the complete
   sync so every escaping hop is warned; dangling `.git` entries remain
   nested-repository boundaries even for individually listed descendants;

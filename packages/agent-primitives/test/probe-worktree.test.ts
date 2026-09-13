@@ -3699,6 +3699,8 @@ describe("probe(): worktree isolation, a link target that is TRACKED source", ()
     ["linked", "common", "operator"],
     ["linked", "admin", "auto"],
     ["linked", "admin", "operator"],
+    ["linked", "enclosing", "auto"],
+    ["linked", "enclosing", "operator"],
   ])(
     "protects %s worktree %s git metadata from a real %s link and pre write",
     async (kind, targetKind, origin) => {
@@ -3709,13 +3711,14 @@ describe("probe(): worktree isolation, a link target that is TRACKED source", ()
       fs.mkdirSync(main);
       initRepo(main);
       const alias = origin === "auto" ? "node_modules" : "operator-metadata";
+      const writeDir = targetKind === "enclosing" ? `${alias}/.git` : alias;
       fs.writeFileSync(path.join(main, ".gitignore"), `${alias}\n`);
       fs.writeFileSync(
         path.join(main, "metadata-pre.js"),
         [
           "const fs = require('node:fs');",
-          `fs.mkdirSync(${JSON.stringify(alias)}, { recursive: true });`,
-          `fs.writeFileSync(${JSON.stringify(`${alias}/METADATA-SENTINEL`)}, 'attempted');`,
+          `fs.mkdirSync(${JSON.stringify(writeDir)}, { recursive: true });`,
+          `fs.writeFileSync(${JSON.stringify(`${writeDir}/METADATA-SENTINEL`)}, 'attempted');`,
           "fs.writeFileSync('pre-ran', 'yes');",
         ].join("\n"),
       );
@@ -3734,8 +3737,19 @@ describe("probe(): worktree isolation, a link target that is TRACKED source", ()
           }).replace(/\n$/, ""),
         ),
       );
-      const target = targetKind === "admin" ? admin : common;
+      const target =
+        targetKind === "enclosing"
+          ? main
+          : targetKind === "admin"
+            ? admin
+            : common;
       fs.symlinkSync(target, path.join(repo, alias), "dir");
+      expect(
+        execFileSync("git", ["check-ignore", alias], {
+          cwd: repo,
+          encoding: "utf8",
+        }).trim(),
+      ).toBe(alias);
       const commonBefore = hashGitMetadata(common);
       const adminBefore = hashGitMetadata(admin);
       const sourceBefore = hashTree(repo);
@@ -3761,10 +3775,26 @@ describe("probe(): worktree isolation, a link target that is TRACKED source", ()
         admin === common ? isGitTransientLockPath : undefined,
       );
       assertTreeUnchanged(sourceBefore, hashTree(repo), repo);
-      expect(fs.existsSync(path.join(target, "METADATA-SENTINEL"))).toBe(false);
+      expect(
+        fs.existsSync(
+          path.join(
+            targetKind === "enclosing" ? common : target,
+            "METADATA-SENTINEL",
+          ),
+        ),
+      ).toBe(false);
       expect(result.status).toBe("killed");
       expect(result.baseline?.exitCode).toBe(0);
       expect(result.isolation.linked).toEqual([]);
+      if (targetKind === "enclosing") {
+        expect(
+          result.warnings.some(
+            (warning) =>
+              warning.includes(alias) &&
+              warning.includes("contains the repository's own git metadata"),
+          ),
+        ).toBe(true);
+      }
       expect(
         result.warnings.some(
           (warning) =>

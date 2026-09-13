@@ -760,7 +760,7 @@ export function planLinks(
     // repository's, reads as untracked to `isTrackedPath` (only the
     // submodule's gitlink is an entry of the outer index, never its
     // content), so a path below it is refused by the boundary alone.
-    // A target at or under the repository's OWN `.git` directory is
+    // A target overlapping the repository's own Git metadata is
     // refused for every candidate, including an operator's own --link,
     // before either question below is even asked:
     // `.git` is not a tracked path (git's own index never lists it,
@@ -772,18 +772,22 @@ export function planLinks(
     // other untracked directory) reaches neither check below with a
     // reason to refuse it. A write through such a link lands in the
     // repository's own live git state directly, which every other
-    // guarantee this run makes assumes stays untouched.
+    // guarantee this run makes assumes stays untouched. Overlap is
+    // symmetric: a linked worktree's main checkout contains its common
+    // Git directory, so linking that checkout exposes the metadata too.
     const gitMetadataRoots = ctx.gitMetadataRoots ?? [
       resolveDeepestExisting(path.join(ctx.rootReal, ".git")),
     ];
     const gitMetadataRoot = gitMetadataRoots.find(
-      (metadataRoot) => entryRelationTo(metadataRoot, resolved) !== undefined,
+      (metadataRoot) =>
+        entryRelationTo(metadataRoot, resolved) !== undefined ||
+        entryRelationTo(resolved, metadataRoot) !== undefined,
     );
     if (gitMetadataRoot !== undefined) {
       warnings.push(
         skippedLinkWarning(
           candidate,
-          `its target ${resolved} sits at or under the repository's own git metadata (${gitMetadataRoot}); ` +
+          `its target ${resolved} ${entryRelationTo(gitMetadataRoot, resolved) !== undefined ? "sits at or under" : "contains"} the repository's own git metadata (${gitMetadataRoot}); ` +
             "a write through such a link would reach the tree's real " +
             "git state directly",
         ),
