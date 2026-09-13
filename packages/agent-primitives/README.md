@@ -167,7 +167,7 @@ agent-primitives verify -x lint='eslint . --format stylish' --fail-fast
   the buffer's first/last character) `probe`'s own `--pass-regex`/
   `passWhen.regex` already use. Once a check's name has an entry here, a
   match against that check's combined stdout+stderr decides `status:
-"pass"`/`"fail"` in place of its exit code, whatever that exit code is
+  "pass"`/`"fail"` in place of its exit code, whatever that exit code is
   -- for a test runner whose exit code alone is not trustworthy (PHPUnit
   9.6 exiting non-zero on a green suite purely over deprecation notices
   is the motivating case): a match on a non-zero exit is a `pass`, with a
@@ -309,11 +309,13 @@ parsed failures always gets one synthetic failure entry (naming`timedOut`, or th
 empty `failures`list, and an`error`check always reports at least one`summary.errors`; this synthetic entry is added on top of whatever count
 the detector already reported, never doubling a count the detector already
 got right. This synthetic entry, and the invariant that produces it, are
-skipped entirely for a check whose `--pass-regex`predicate decided`pass`: its `summary`and`failures`come straight from the detector's
-own parse (e.g. PHPUnit's`OK (N tests, M assertions)`line gives`summary.passed = N`, `summary.failed = 0`, `failures = []`), never
+skipped entirely for a check whose `--pass-regex` predicate decided
+`pass`: its `summary` and `failures` come straight from the detector's
+own parse (e.g. PHPUnit's `OK (N tests, M assertions)` line gives
+`summary.passed = N`, `summary.failed = 0`, `failures = []`), never
 padded with a synthetic entry the predicate has already overruled. The
-entry is still added when the predicate decided `fail`and the detector
-itself parsed zero failures, the same as for a plain exit-code`fail`.
+entry is still added when the predicate decided `fail` and the detector
+itself parsed zero failures, the same as for a plain exit-code `fail`.
 Truncation is read from exec.ts's own
 `stdoutTruncated`/`stderrTruncated`flags (set when the command's real
 output, at either its own 60-line or 6000-character-per-stream bound,
@@ -766,7 +768,7 @@ the match:
   -- not only at the ANSI-C sub-rule -- since ending the `--log-dir`
   match validates an EXCLUSION rather than a refusal, and the exclusion
   exists for exactly one shape: the isolation copy at `<log-dir>/wt-
-<uuid>/wt`, which always continues with a FURTHER path component.
+  <uuid>/wt`, which always continues with a FURTHER path component.
   Only FOUR terminators end the `--log-dir` match: `/`; a
   backslash-escaped `/`; a backslash-newline pair followed by one of
   those two; or the end of the text. This is deliberately not a claim
@@ -779,7 +781,7 @@ the match:
   any of those characters as ending the `--log-dir` match excluded the
   sibling -- and the root mention underneath it -- along with the log
   dir itself: `-l <root>/l` beside a test command naming `node
-"<root>/l 2/y.js"` used to run against the real tree unrefused. No
+  "<root>/l 2/y.js"` used to run against the real tree unrefused. No
   enumerable set of "hard" word enders closes this, since a quote makes
   every shell separator character a legal filename character somewhere;
   restricting the accepted terminators to a spelling that is never
@@ -1046,7 +1048,7 @@ The four rules, in this order:
    root -- are decided by filesystem identity (inode and device), not by
    comparing the two resolved path strings: `realpath` resolves symlinks
    and normalises neither case nor Unicode form, so a `node_modules ->
-../REPO` for a directory really named `repo`, an absolute target
+   ../REPO` for a directory really named `repo`, an absolute target
    spelling an ANCESTOR segment in another case, and an NFD target for
    an NFC directory name each resolve to the root while spelling a path
    outside it. The root's own ancestors are walked up to the filesystem
@@ -1140,7 +1142,7 @@ The four rules, in this order:
    own cwd or the file a mutant is written into sits inside it, which is
    the case that would corrupt this run's own measurement; everything
    else is the operator's call. Whichever half is asked, one `git
-ls-files` listing answers both for the whole run, and a listing that
+   ls-files` listing answers both for the whole run, and a listing that
    cannot run leaves every candidate but an operator's own `--link`
    treated as tracked, so none of them is linked.
 4. A candidate at or underneath a path this run already linked is
@@ -1615,10 +1617,10 @@ against that now-restored source, so a command run after the probe
 returns never sees a mutant's build output. This costs one extra
 `--pre` run per invocation (a `--plan` run pays it once for the whole
 plan, not once per mutant) and leaves exactly one `warnings` entry
-saying it was re-run and exited 0, so the build output was rebuilt from
-the restored source; a `--pre` that fails or cannot be confirmed on that
-extra run says the build output may still be stale rather than staying
-silent about it. Under `-i worktree`, this is a no-op: that mode's
+saying `--pre` was re-run after the last mutant was restored and exited
+0; a `--pre` that fails or cannot be confirmed on that extra run says
+the build output may still be stale rather than staying silent about
+it. Under `-i worktree`, this is a no-op: that mode's
 `--pre` always ran against the worktree's own copy, never the original
 tree, and the worktree is discarded once the run ends either way -- there
 is nothing to rebuild in the tree the operator's own shell sees, and no

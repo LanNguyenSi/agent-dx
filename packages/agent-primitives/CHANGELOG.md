@@ -26,14 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   confirmed restored now leaves one `warnings` entry naming the same
   stale-build risk instead of staying silent; the CLI's own signal
   handler still exits the process before this step is ever reached, so
-  it is unaffected. The one-time success notice ("--pre was re-run
-  after the last mutant was restored ... exit 0, so the build output was
-  rebuilt from the restored source") now states only what was observed
-  (the rebuild command exited 0), not the inferred claim that the build
-  output matches the restored source, since a `--pre` that no-ops
-  against a cache also exits 0. Known residual, no code change: the
-  rebuild also runs once, harmlessly, on the setup-phase
-  `apply_hash_mismatch` refusal
+  it is unaffected. The one-time success notice states only what was
+  observed ("--pre was re-run after the last mutant was restored and
+  exited 0"), not the inferred claim that the build output matches the
+  restored source, since a `--pre` that no-ops against a cache also
+  exits 0. Known residual, no code change: the rebuild also runs once,
+  harmlessly, on the mutant-phase `apply_hash_mismatch` outcome
   (Refs: 813d9d34-b0a4-4a8e-a1a0-3a06d1b0a9e2).
 - Worktree isolation now keeps the live repository's Git administrative
   and common directories (also for linked worktrees) and the copy's own
