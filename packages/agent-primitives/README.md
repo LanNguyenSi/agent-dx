@@ -2325,12 +2325,7 @@ is a placeholder, not a real one, and the file is not runnable as-is.
   "passWhen": { "regex": "^OK \\(" },
   "mutants": [
     { "file": "src/example.ts", "line": 42, "replace": "  return true;" },
-    {
-      "file": "src/example-two.ts",
-      "line": 44,
-      "match": "n > 0",
-      "with": "n >= 0"
-    },
+    { "file": "src/example-two.ts", "line": 44, "match": "n > 0", "with": "n >= 0" },
     {
       "file": "src/example-three.ts",
       "patch": "mutants/example-three.patch",
