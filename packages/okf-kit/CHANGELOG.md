@@ -7,9 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
 - Adds a pinned fixture-repository regression test for the documented
   two-branch squash-merge decision procedure, including every stale branch
   state's re-verify-and-re-stamp rescue.
+
+### Fixed
+
+- `sources-fresh` under a `--repo-root` naming a SUBDIRECTORY of the
+  repository: both re-stamp rescues read the doc's committed value with
+  `git show <rev>:<path>`, and git resolves that path against the
+  repository's top level, never the cwd, while the rule's own doc path is
+  relative to the passed root. Spelled bare, the read failed (every rescue
+  collapsed to a `staleness not assessable` notice: a locally re-stamped
+  doc, or a doc re-stamped in the same commit as its source, no longer read
+  clean) or, with a same-named doc at the top level, read THAT doc's stamp
+  in the subdirectory doc's place (a dirty-but-not-re-stamped doc could
+  read clean, a false green). The same frame mismatch made the committed
+  rescue's rename-aware `git diff-tree` lookup never match the doc, so a
+  doc created in the co-commit read `not assessable` instead of clean. All
+  three sites now go through one helper that respells the path in the
+  top-level frame via `git rev-parse --show-prefix` (read at most once per
+  run and shared with `--dirty-as-now`'s dirty-path matching, which
+  already used it), so a subdirectory root now judges exactly as the top
+  level does. Cost with the flag off: one extra `git rev-parse` per run on
+  the re-stamp path, none per doc; a top-level `--repo-root` is otherwise
+  byte-identical to before. The README's "prefer the top level" limitation
+  paragraph is gone. (task agent-dx 266d64d3)
+- `--dirty-as-now`'s shared virtual-commit instant is now pinned: the clock
+  is read exactly once per `check` run through an injectable `ctx.now`
+  (default `Date.now`), and a test asserts both the read count and that
+  every dirty path in both rules cites the identical instant, so a
+  per-call re-read can no longer slip in unnoticed. Also adds an
+  ignored-only new-directory control for the `--untracked-files=all`
+  status read, and trims `src/rules/sources-fresh.ts`'s comments to the
+  invariants and their reasons.
 
 ## [0.11.0] - 2026-09-12
 

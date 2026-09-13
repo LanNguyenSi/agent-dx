@@ -30,7 +30,7 @@ import {
  * (unless a test is specifically about the doc's own dirty state), so a
  * source-only dirty edit is never accidentally rescued by the working-tree
  * re-stamp parity covered in the "doc re-stamped locally" describe block --
- * an UNTRACKED doc counts as re-stamped too (see isDocLocallyRestamped's
+ * an UNTRACKED doc counts as re-stamped too (see dirtyDocRestampVerdict's
  * doc comment in src/rules/sources-fresh.ts), which a never-committed doc
  * fixture would trigger unconditionally.
  */
@@ -723,5 +723,235 @@ describe("sources-fresh: --dirty-as-now", () => {
       // Flag deliberately omitted: this is the committed-history control.
       expect(sourcesFreshRule.run(ctx)).toEqual([]);
     });
+  });
+
+  /**
+   * The same working-tree rescue under a `--repo-root` naming a
+   * SUBDIRECTORY of the repository. The doc's committed value is read with
+   * `git show HEAD:<path>`, and git resolves a bare `<rev>:<path>` against
+   * the repository's TOP LEVEL, never the cwd, while the rule's own doc
+   * path is relative to the passed root. Spelled bare, the read either
+   * fails (the rescue collapses to a not-assessable notice: a locally
+   * re-stamped doc no longer reads clean) or, when a same-named doc
+   * happens to exist at the top level, reads THAT doc's stamp in place of
+   * this one's (a dirty-but-not-re-stamped doc can read clean, a false
+   * green). The rule respells the path in the top-level frame via `git
+   * rev-parse --show-prefix` before every blob read; these tests pin each
+   * direction, including both shadowing directions against a same-named
+   * top-level doc.
+   */
+  describe("--repo-root naming a subdirectory: doc re-stamp rescue", () => {
+    const subDoc = (timestamp: string): Record<string, unknown> => ({
+      type: "concept",
+      timestamp,
+      sources: ["source.ts"],
+    });
+
+    /** `sub/source.ts` committed, then `sub/bundle/doc.md` committed stamped `stamp`; returns the committed doc text. */
+    function commitSubFixture(stamp = "2025-02-01T00:00:00Z"): string {
+      repo.commitFile(
+        "sub/source.ts",
+        "export const a = 1;\n",
+        "2025-01-01T00:00:00Z",
+      );
+      const committedDoc = docContent(subDoc(stamp));
+      repo.commitFile("sub/bundle/doc.md", committedDoc, stamp);
+      return committedDoc;
+    }
+
+    function subCtx(): ReturnType<typeof loadBundle> {
+      const subRoot = path.join(repo.dir, "sub");
+      const ctx = loadBundle(path.join(subRoot, "bundle"), subRoot);
+      ctx.dirtyAsNow = true;
+      return ctx;
+    }
+
+    it("a dirty source paired with a doc re-stamped locally reads clean, exactly as under the top-level root", () => {
+      commitSubFixture();
+      fs.writeFileSync(
+        path.join(repo.dir, "sub/source.ts"),
+        "export const a = 2;\n",
+      );
+      writeDoc(repo.dir, "sub/bundle/doc.md", subDoc("2025-09-01T00:00:00Z"));
+
+      expect(sourcesFreshRule.run(subCtx())).toEqual([]);
+    });
+
+    it("a dirty source paired with a doc that is dirty but NOT re-stamped reads STALE, never a not-assessable notice", () => {
+      const committedDoc = commitSubFixture();
+      fs.writeFileSync(
+        path.join(repo.dir, "sub/source.ts"),
+        "export const a = 2;\n",
+      );
+      fs.writeFileSync(
+        path.join(repo.dir, "sub/bundle/doc.md"),
+        committedDoc.replace("# Doc\n", "# Doc\n\nA local note.\n"),
+      );
+
+      const findings = sourcesFreshRule.run(subCtx());
+
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        ruleId: "sources-fresh",
+        severity: "warning",
+        file: "doc.md",
+      });
+      expect(findings[0].message).toContain("STALE");
+    });
+
+    it("a same-named doc at the TOP LEVEL does not shadow the subdirectory doc: dirty-but-not-re-stamped stays STALE even though the top-level doc's stamp differs", () => {
+      const committedDoc = commitSubFixture();
+      // Same bundle-relative path, one level up, carrying a DIFFERENT
+      // stamp: a bare `HEAD:bundle/doc.md` read returns this doc, whose
+      // stamp differs from the subdirectory doc's on-disk value, i.e. a
+      // false "re-stamped".
+      repo.commitFile(
+        "bundle/doc.md",
+        docContent(subDoc("2025-09-01T00:00:00Z")),
+        "2025-02-01T00:00:00Z",
+      );
+      fs.writeFileSync(
+        path.join(repo.dir, "sub/source.ts"),
+        "export const a = 2;\n",
+      );
+      fs.writeFileSync(
+        path.join(repo.dir, "sub/bundle/doc.md"),
+        committedDoc.replace("# Doc\n", "# Doc\n\nA local note.\n"),
+      );
+
+      const findings = sourcesFreshRule.run(subCtx());
+
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe("warning");
+      expect(findings[0].message).toContain("STALE");
+    });
+
+    it("a same-named doc at the TOP LEVEL does not shadow the subdirectory doc: a local re-stamp still rescues even though the top-level doc already carries that exact stamp", () => {
+      commitSubFixture();
+      // The top-level doc is committed with the very stamp the subdirectory
+      // doc is about to be re-stamped to: a bare read would compare equal
+      // and report "not re-stamped", a false STALE.
+      repo.commitFile(
+        "bundle/doc.md",
+        docContent(subDoc("2025-09-01T00:00:00Z")),
+        "2025-02-01T00:00:00Z",
+      );
+      fs.writeFileSync(
+        path.join(repo.dir, "sub/source.ts"),
+        "export const a = 2;\n",
+      );
+      writeDoc(repo.dir, "sub/bundle/doc.md", subDoc("2025-09-01T00:00:00Z"));
+
+      expect(sourcesFreshRule.run(subCtx())).toEqual([]);
+    });
+  });
+
+  /**
+   * The virtual-commit instant is read from the clock exactly ONCE per
+   * `check` run and shared by every dirty path in BOTH rules. The rescue
+   * gate is an inequality between two "now" reads, so re-reading the clock
+   * per call would make its verdict depend on which side was read first
+   * and on whether a second boundary fell between the reads. An injected
+   * clock (`ctx.now`) that jumps an hour on every call makes any re-read
+   * visible in the epochs the findings cite, and in the call count.
+   */
+  it("with the flag: reads the injected clock exactly once per run, and every dirty path in both rules cites that same instant", () => {
+    const t0Ms = 1_800_000_000_000; // whole seconds, so the cited ISO is exact
+    const t0Iso = new Date(t0Ms).toISOString();
+    repo.commitFile(
+      "source.ts",
+      "export const a = 1;\n",
+      "2025-01-01T00:00:00Z",
+    );
+    // Doc A: committed, then body-dirtied (not re-stamped), its source
+    // dirtied: sources-fresh reports STALE citing the source's virtual epoch.
+    const committedA = docContent({
+      type: "concept",
+      timestamp: "2025-06-01T00:00:00Z",
+      sources: ["source.ts"],
+    });
+    repo.commitFile("bundle/a.md", committedA, "2025-06-01T00:00:00Z");
+    fs.writeFileSync(
+      path.join(repo.dir, "bundle/a.md"),
+      committedA.replace("# Doc\n", "# Doc\n\nA local note.\n"),
+    );
+    fs.writeFileSync(path.join(repo.dir, "source.ts"), "export const a = 2;\n");
+    // Doc B: untracked and stamped two hours past t0: sources-fresh-future
+    // reports FUTURE-DATED citing the doc's own virtual epoch.
+    writeDoc(repo.dir, "bundle/b.md", {
+      type: "concept",
+      timestamp: new Date(t0Ms + 2 * 3_600_000).toISOString(),
+      sources: ["source.ts"],
+    });
+
+    const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+    ctx.dirtyAsNow = true;
+    let clockReads = 0;
+    ctx.now = () => {
+      clockReads += 1;
+      return t0Ms + (clockReads - 1) * 3_600_000;
+    };
+
+    const findings = [
+      ...sourcesFreshRule.run(ctx),
+      ...sourcesFreshFutureRule.run(ctx),
+    ];
+
+    expect(clockReads).toBe(1);
+    const stale = findings.filter((f) => f.message.includes("STALE"));
+    expect(stale).toHaveLength(1);
+    expect(stale[0].file).toBe("a.md");
+    expect(stale[0].message).toContain(`changed ${t0Iso}`);
+    const future = findings.filter((f) => f.message.includes("FUTURE-DATED"));
+    expect(future).toHaveLength(1);
+    expect(future[0].file).toBe("b.md");
+    expect(future[0].message).toContain(`own last commit ${t0Iso}`);
+  });
+
+  /**
+   * Control for `--untracked-files=all`: a brand-new directory whose ONLY
+   * content is ignored must not become dirty just because the status read
+   * enumerates untracked files. `--ignored` is never passed, so such a
+   * source keeps the ordinary "untracked by git" notice rather than
+   * reading STALE.
+   */
+  it("with the flag: a source inside a brand-new directory holding only IGNORED files keeps the `untracked by git` notice", () => {
+    repo.commitFile(
+      ".gitignore",
+      "newdir/*.generated.ts\n",
+      "2025-01-01T00:00:00Z",
+    );
+    repo.commitFile(
+      "bundle/doc.md",
+      docContent({
+        type: "concept",
+        timestamp: "2025-06-01T00:00:00Z",
+        sources: ["newdir/a.generated.ts"],
+      }),
+      "2025-06-01T00:00:00Z",
+    );
+    fs.mkdirSync(path.join(repo.dir, "newdir"));
+    fs.writeFileSync(
+      path.join(repo.dir, "newdir/a.generated.ts"),
+      "export const a = 1;\n",
+    );
+    // Precondition: with every untracked file enumerated, git still reports
+    // nothing under the ignored-only directory.
+    expect(
+      repo.git(["status", "--porcelain=v2", "--untracked-files=all"]),
+    ).not.toContain("newdir");
+
+    const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+    ctx.dirtyAsNow = true;
+    const findings = sourcesFreshRule.run(ctx);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      ruleId: "sources-fresh",
+      severity: "notice",
+      file: "doc.md",
+    });
+    expect(findings[0].message).toContain("untracked by git");
+    expect(findings[0].message).not.toContain("STALE");
   });
 });
