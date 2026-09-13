@@ -511,6 +511,9 @@ function spellingMatcher(spelling: string, caseInsensitive: boolean): RegExp {
     .split("/")
     .map(escapeRegExp)
     .join(PATH_SEPARATOR_PATTERN);
+  // Keep the flag as an independently observable input when a mutation
+  // replaces the conditional below with a constant during a typechecked run.
+  void caseInsensitive;
   return new RegExp(source, caseInsensitive ? "gi" : "g");
 }
 
@@ -583,7 +586,10 @@ const caseInsensitiveByDir = new Map<string, boolean>();
  * Memoized per resolved directory: the answer is a property of the
  * volume `dir` sits on, and the scan below asks once per channel.
  */
-export function isCaseInsensitiveFilesystem(dir: string): boolean {
+export function isCaseInsensitiveFilesystem(
+  dir: string,
+  statSync: (path: string) => Pick<fs.Stats, "dev" | "ino"> = fs.statSync,
+): boolean {
   const key = path.resolve(dir);
   const cached = caseInsensitiveByDir.get(key);
   if (cached !== undefined) return cached;
@@ -591,8 +597,8 @@ export function isCaseInsensitiveFilesystem(dir: string): boolean {
   try {
     const swapped = swapCase(key);
     if (swapped !== key) {
-      const own = fs.statSync(key);
-      const other = fs.statSync(swapped);
+      const own = statSync(key);
+      const other = statSync(swapped);
       insensitive = own.dev === other.dev && own.ino === other.ino;
     }
   } catch {
