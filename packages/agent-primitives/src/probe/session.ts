@@ -738,8 +738,7 @@ export async function runFinalRebuild(
     // touching anything. State only the observation, not the inferred
     // outcome.
     warnings.push(
-      "--pre was re-run after the last mutant was restored (exit 0), so " +
-        "the build output was rebuilt from the restored source",
+      "--pre was re-run after the last mutant was restored and exited 0",
     );
     return { logPath: result.logPath };
   }
@@ -794,6 +793,44 @@ export function restoreFailedRebuildClause(rt: {
     " The working tree's build output may still be built from the " +
     "mutant; rebuild it by hand before trusting it."
   );
+}
+
+/**
+ * The one call both of `index.ts`'s `finally` blocks (single probe and
+ * plan) make to close the final-rebuild gap, replacing what used to be
+ * two independently maintained `if`/`else if` pairs at each call site.
+ * Folds together the gate both pipelines applied inline
+ * (`capturedRt` defined, `restoreConfirmed`, `mutantApplied` --
+ * `mutantApplied` renamed `anyMutantApplied` in the plan pipeline but
+ * meaning the same thing there -- and the run's own signal not yet
+ * aborted), the `runFinalRebuild` call itself, and the aborted-path
+ * warning push each pipeline duplicated verbatim.
+ *
+ * `rt` is `undefined` exactly when the pipeline never captured a
+ * `FinalRebuildRuntime` (no mutation ever ran): a no-op, same as when
+ * the gate flags are false. When the gate passes but the run's own
+ * signal is already aborted, this pushes the same
+ * `restoreFailedRebuildClause` sentence the two pipelines used to push
+ * by hand and returns `{}` (there is no rebuild to attempt against an
+ * aborted exec environment). Otherwise it runs `runFinalRebuild` and
+ * returns whatever log path that produced.
+ */
+export async function finalRebuildOrWarn(
+  rt: FinalRebuildRuntime | undefined,
+  warnings: string[],
+  gate: { restoreConfirmed: boolean; mutantApplied: boolean },
+): Promise<{ logPath?: string }> {
+  if (rt === undefined || !gate.restoreConfirmed || !gate.mutantApplied) {
+    return {};
+  }
+  if (rt.execEnv.signal.aborted) {
+    const clause = restoreFailedRebuildClause(rt).trimStart();
+    if (clause !== "") {
+      warnings.push(clause);
+    }
+    return {};
+  }
+  return runFinalRebuild(rt, warnings);
 }
 
 /** Registers a started run (and when its stdio truly closes) as the

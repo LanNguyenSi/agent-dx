@@ -30,8 +30,8 @@ import {
   type IsolationMode,
   redactEnvOverrides,
   REFUSAL_RESULT_SHAPE,
+  finalRebuildOrWarn,
   restoreFailedRebuildClause,
-  runFinalRebuild,
   type MutantField,
   type MutationProbeField,
   type ProbeStatus,
@@ -1007,17 +1007,18 @@ async function runProbePipeline(
     // `mutantApplied` gates out a run whose one mutant never got past a
     // never-applied reason (`mutant_not_applicable`, `git_apply_timeout`,
     // an aborted real `git apply`): there is no stale build output to
-    // fix. The signal check skips a rebuild attempt that would just be
-    // SIGKILLed against an already-aborted run.
-    if (
-      capturedRt !== undefined &&
-      restoreConfirmed &&
-      mutantApplied &&
-      !capturedRt.execEnv.signal.aborted
-    ) {
-      const { logPath: rebuildLogPath } = await runFinalRebuild(
+    // fix. `finalRebuildOrWarn` itself skips the rebuild attempt (it
+    // would just be SIGKILLed against an already-aborted run) and pushes
+    // the library-caller-only warning instead when the run's own signal
+    // is already aborted -- the CLI's own signal handler (`exitOnSignal:
+    // true`) calls `process.exit` before this `finally` block is ever
+    // reached, so it never gets here to warn (see the README/SKILL note
+    // on the two distinct reasons a rebuild is skipped).
+    {
+      const { logPath: rebuildLogPath } = await finalRebuildOrWarn(
         capturedRt,
         warnings,
+        { restoreConfirmed, mutantApplied },
       );
       // Folds this run's own log into the already-built envelope's
       // `dryRunLogPaths`, via the shared array reference `capturedLogPaths`
@@ -1026,31 +1027,6 @@ async function runProbePipeline(
       // normal path, but pushing into the SAME array still reaches it.
       if (rebuildLogPath !== undefined && capturedLogPaths !== undefined) {
         capturedLogPaths.push(rebuildLogPath);
-      }
-    } else if (
-      capturedRt !== undefined &&
-      restoreConfirmed &&
-      mutantApplied &&
-      capturedRt.execEnv.signal.aborted
-    ) {
-      // The signal check above skipped the rebuild attempt (it would
-      // just be SIGKILLed against an already-aborted run's exec
-      // environment), but the mutant DID reach the tree and the source
-      // IS confirmed restored: the build output this run's own `--pre`
-      // last produced still reflects the mutant, exactly the gap
-      // `runFinalRebuild` otherwise closes. This is the library-caller
-      // shape only (`exitOnSignal: false`): the CLI's own signal handler
-      // (`exitOnSignal: true`) calls `process.exit` before this `finally`
-      // block is ever reached, so it never gets here to warn (see the
-      // README/SKILL note on the two distinct reasons a rebuild is
-      // skipped). Reuses `restoreFailedRebuildClause`'s own no-op check
-      // (worktree, or no `--pre`) via its empty-string return, so this
-      // never fires where there is no build output to warn about, and
-      // trims its leading space to stand alone as a sentence, since
-      // nothing precedes it here.
-      const clause = restoreFailedRebuildClause(capturedRt).trimStart();
-      if (clause !== "") {
-        warnings.push(clause);
       }
     }
     // Runs on every exit path (a normal return, a thrown error, or the
@@ -1852,22 +1828,19 @@ export async function probePlan(
     // The final rebuild: once per plan (I4, never once per mutant),
     // after every mutant the loop applied has been restored and before
     // the worktree cleanup and lock release below. See the single
-    // probe's own comment above `runFinalRebuild`'s call for why
+    // probe's own comment above its `finalRebuildOrWarn` call for why
     // `emergencyResult`'s own `warnings` snapshot needs no patching
-    // here: the two are mutually exclusive. `anyMutantApplied` and the
-    // signal check mirror the single probe's own gate: a plan whose
-    // mutants never got past a never-applied reason has no stale build
-    // output to fix, and an already-aborted run would just SIGKILL this
-    // attempt.
-    if (
-      capturedRt !== undefined &&
-      restoreConfirmed &&
-      anyMutantApplied &&
-      !capturedRt.execEnv.signal.aborted
-    ) {
-      const { logPath: rebuildLogPath } = await runFinalRebuild(
+    // here: the two are mutually exclusive. `anyMutantApplied` mirrors
+    // the single probe's own `mutantApplied` gate: a plan whose mutants
+    // never got past a never-applied reason has no stale build output
+    // to fix. `finalRebuildOrWarn` itself skips the rebuild attempt and
+    // pushes the library-caller-only warning instead when the run's own
+    // signal is already aborted, same as the single probe's call.
+    {
+      const { logPath: rebuildLogPath } = await finalRebuildOrWarn(
         capturedRt,
         warnings,
+        { restoreConfirmed, mutantApplied: anyMutantApplied },
       );
       // `setupLogPaths` is the exact array the normal-completion return
       // above names as `dryRunLogPaths` (set once from `setup.run.logPaths`
@@ -1876,22 +1849,6 @@ export async function probePlan(
       // own `capturedLogPaths` uses.
       if (rebuildLogPath !== undefined) {
         setupLogPaths.push(rebuildLogPath);
-      }
-    } else if (
-      capturedRt !== undefined &&
-      restoreConfirmed &&
-      anyMutantApplied &&
-      capturedRt.execEnv.signal.aborted
-    ) {
-      // See the single probe's own identical branch above: the signal
-      // check skipped the rebuild attempt, but at least one mutant this
-      // plan applied did reach the tree and the source is confirmed
-      // restored, so the build output may still hold that mutant. The
-      // library-caller-only shape (`exitOnSignal: false`); the CLI exits
-      // inside the signal handler before this `finally` block runs.
-      const clause = restoreFailedRebuildClause(capturedRt).trimStart();
-      if (clause !== "") {
-        warnings.push(clause);
       }
     }
     // Once per plan (I4), before the locks are released, so a concurrent
