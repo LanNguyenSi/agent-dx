@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Containment coverage now measures a constructed `FOO`/`foo` fixture on
+  the volume under test and pins the injected case-folding branch separately,
+  including the original miscased text reported by an isolation-escape match
+  (Refs: a3e61ce1-af36-4f10-bea7-6cc0a20c34fb).
+
 ## [0.3.0] - 2026-09-12
 
 Upgrade notes: a `probe` run under a non-default `--expect` now reports

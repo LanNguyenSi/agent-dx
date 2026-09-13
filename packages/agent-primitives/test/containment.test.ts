@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, vi } from "vitest";
 import {
   escapingRootMentions,
   isCaseInsensitiveFilesystem,
@@ -247,53 +247,54 @@ describe("escapingRootMentions()", () => {
     ]);
   });
 
-  it("case-folds both sides only when told the filesystem is case-insensitive", () => {
-    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
-    const miscased = root.toUpperCase();
-    expect(miscased).not.toBe(root);
+  it("refuses the original miscased-root region only under an injected caseInsensitive flag", () => {
+    const parent = makeTmpDir();
+    const root = path.join(parent, "FOO");
+    fs.mkdirSync(root);
+    const miscased = path.join(parent, "foo");
+    const text = `cd '${miscased}/pkg' && node t.js`;
     // Injected flag rather than the ambient filesystem, so both branches
-    // are exercised on every runner (the probe-level test in
-    // probe-refusal-contract.test.ts covers the measured path).
-    expect(
-      escapingRootMentions(
-        `cd '${miscased}/pkg' && node t.js`,
-        root,
-        undefined,
-        true,
-      ),
-    ).toEqual([`${miscased}/pkg`]);
-    expect(
-      escapingRootMentions(
-        `cd '${miscased}/pkg' && node t.js`,
-        root,
-        undefined,
-        false,
-      ),
-    ).toEqual([]);
+    // are exercised on every runner. The returned region must retain the
+    // command's `foo` spelling, not substitute the `FOO` root spelling.
+    expect(escapingRootMentions(text, root, undefined, true)).toEqual([
+      `${miscased}/pkg`,
+    ]);
+    expect(escapingRootMentions(text, root, undefined, false)).toEqual([]);
     // An exactly-spelled mention is reported either way.
     expect(
       escapingRootMentions(`cd '${root}' && node t.js`, root, undefined, false),
     ).toEqual([root]);
   });
 
-  it("the case-insensitivity measurement answers for the filesystem the root sits on", () => {
-    const root = resolveDeepestExisting(path.resolve(makeTmpDir()));
+  it("measures the FOO/foo fixture on the volume where the root sits", () => {
+    const parent = makeTmpDir();
+    const root = path.join(parent, "FOO");
+    const folded = path.join(parent, "foo");
+    fs.mkdirSync(root);
     const insensitive = isCaseInsensitiveFilesystem(root);
-    // Whatever this filesystem answers, the answer must be consistent
-    // with what the flipped-case spelling actually resolves to.
+    // Whatever this volume answers, it must agree with whether its FOO
+    // directory can actually be reached as foo and resolves to the same
+    // directory identity.
     let flippedResolves = false;
     try {
       const own = fs.statSync(root);
-      const other = fs.statSync(
-        root.replace(/[A-Za-z]/g, (c) =>
-          c === c.toLowerCase() ? c.toUpperCase() : c.toLowerCase(),
-        ),
-      );
+      const other = fs.statSync(folded);
       flippedResolves = own.dev === other.dev && own.ino === other.ino;
     } catch {
       flippedResolves = false;
     }
     expect(insensitive).toBe(flippedResolves);
+
+    // The actual FOO/foo assertion above describes this volume. Injecting
+    // the stat operation separately gives the measurement's true branch a
+    // portable pin: a case-sensitive runner cannot otherwise distinguish a
+    // correct measured `false` from a disabled measurement returning false.
+    const injectedRoot = path.join(parent, "BAR");
+    fs.mkdirSync(injectedRoot);
+    const identity = fs.statSync(injectedRoot);
+    const statSync = vi.fn(() => identity);
+    expect(isCaseInsensitiveFilesystem(injectedRoot, statSync)).toBe(true);
+    expect(statSync).toHaveBeenCalledTimes(2);
   });
 
   it("an --env value carrying the root is reported the same as a bare command mention", () => {
