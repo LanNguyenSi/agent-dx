@@ -991,6 +991,34 @@ describe("planLinks: rule 3's tracked-TARGET half", () => {
     );
   });
 
+  it("refuses an operator --link whose target is the live repository git directory too", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, ".git"));
+    fs.symlinkSync(".git", path.join(root, "operator-link"), "dir");
+
+    const plan = planLinks(
+      [{ absDir: path.join(root, "operator-link") }],
+      ctx(root),
+    );
+
+    expect(plan.links).toEqual([]);
+    expect(plan.warnings[0]).toContain(
+      `its target ${path.join(root, ".git")} sits at or under the repository's own git directory`,
+    );
+  });
+
+  it("refuses a candidate at the copy's .git destination before it can replace worktree metadata", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, ".git"));
+
+    const plan = planLinks([{ absDir: path.join(root, ".git") }], ctx(root));
+
+    expect(plan.links).toEqual([]);
+    expect(plan.warnings[0]).toContain(
+      "it would replace the isolation copy's own git metadata",
+    );
+  });
+
   it("still links a gitignored sibling whose name merely starts with '.git' (containment, not a string prefix)", () => {
     const root = makeTmpDir();
     fs.mkdirSync(path.join(root, ".git"));
@@ -1170,6 +1198,16 @@ describe("nestedRepoBoundaryRelPath: a target inside a nested repository's own b
 
     expect(nestedRepoBoundaryRelPath(path.join("sub", "lib"), root)).toBe(
       "sub",
+    );
+  });
+
+  it("treats a dangling '.git' symlink as a boundary without following it", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, "broken", "lib"), { recursive: true });
+    fs.symlinkSync("missing-gitdir", path.join(root, "broken", ".git"));
+
+    expect(nestedRepoBoundaryRelPath(path.join("broken", "lib"), root)).toBe(
+      "broken",
     );
   });
 

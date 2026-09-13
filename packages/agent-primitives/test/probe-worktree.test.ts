@@ -5209,6 +5209,39 @@ describe("probe(): worktree isolation, a reused --log-dir never replays a previo
 });
 
 describe("probe(): worktree isolation, argv-only git calls (no shell injection)", () => {
+  it("resolves a relative --log-dir once against the invocation cwd before creating the worktree", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+
+    const result = await probe(
+      baseOptions(repo, { logDir: path.join(".", "relative-probe-logs") }),
+    );
+
+    expect(result.status).toBe("killed");
+    expect(path.dirname(path.dirname(result.isolation.path as string))).toBe(
+      path.join(repo, "relative-probe-logs"),
+    );
+  });
+
+  it("resolves ../ in --log-dir against the invocation cwd before creating the worktree", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const logName = `relative-parent-logs-${randomUUID()}`;
+    const expectedRoot = path.resolve(repo, "..", logName);
+    try {
+      const result = await probe(
+        baseOptions(repo, { logDir: path.join("..", logName) }),
+      );
+
+      expect(result.status).toBe("killed");
+      expect(path.dirname(path.dirname(result.isolation.path as string))).toBe(
+        expectedRoot,
+      );
+    } finally {
+      fs.rmSync(expectedRoot, { recursive: true, force: true });
+    }
+  });
+
   it("a --log-dir containing shell metacharacters is passed to git as an opaque argv element, never executed", async () => {
     useLockDir();
     const { repo } = initRepo();
@@ -5295,6 +5328,68 @@ describe("probe(): worktree isolation, untracked entries by type", () => {
           w.includes(path.join("vendor", "nested-repo")),
       ),
     ).toBe(true);
+  });
+
+  it("a dangling .git entry is still a nested-repository boundary and is skipped", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const broken = path.join(repo, "broken-nested");
+    fs.mkdirSync(broken, { recursive: true });
+    fs.symlinkSync("missing-gitdir", path.join(broken, ".git"));
+
+    const actualRun = await vi.importActual<
+      typeof import("../src/probe/run.js")
+    >("../src/probe/run.js");
+    const mockRun = vi.mocked(runArgv);
+    mockRun.mockImplementation(async (file, args, options) => {
+      const result = await actualRun.runArgv(file, args, options);
+      if (args.includes("ls-files") && args.includes("--others")) {
+        return { ...result, stdout: result.stdout + "broken-nested\0" };
+      }
+      return result;
+    });
+    try {
+      const result = await probe(baseOptions(repo));
+      expect(result.status).toBe("killed");
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes("skipped a nested repository directory") &&
+            w.includes("broken-nested"),
+        ),
+      ).toBe(true);
+    } finally {
+      mockRun.mockImplementation((...args: Parameters<typeof runArgv>) =>
+        actualRun.runArgv(...args),
+      );
+    }
+  });
+
+  it("rechecks every copied symlink after sync, so both hops of an escaping chain warn", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const logDir = path.join(repo, "probe-logs");
+    fs.mkdirSync(logDir, { recursive: true });
+    fs.writeFileSync(path.join(repo, "source-only.txt"), "source\n");
+    fs.symlinkSync("chain-second", path.join(repo, "chain-first"));
+    // From <repo>/probe-logs/wt-<uuid>/wt this climbs to <repo>, not the
+    // copy: the first hop only becomes observably escaping after this
+    // second hop has also been recreated.
+    fs.symlinkSync(
+      path.join("..", "..", "..", "source-only.txt"),
+      path.join(repo, "chain-second"),
+    );
+
+    const result = await probe(baseOptions(repo, { logDir }));
+
+    expect(result.status).toBe("killed");
+    for (const hop of ["chain-first", "chain-second"]) {
+      expect(
+        result.warnings.some(
+          (w) => w.includes(hop) && w.includes("outside the isolation copy"),
+        ),
+      ).toBe(true);
+    }
   });
 
   it("a valid untracked symlink and a dangling one are both recreated as symlinks (not copied as files), neither aborting the sync", async () => {

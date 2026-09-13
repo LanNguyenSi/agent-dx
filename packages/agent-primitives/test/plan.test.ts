@@ -490,6 +490,28 @@ describe("plan file validation (before the lock, the marker or any run)", () => 
 });
 
 describe("probePlan(): one baseline, every mutant against it (I1)", () => {
+  it("resolves a parent-relative log directory once against the plan invocation cwd", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const logName = `plan-relative-parent-${Date.now()}-${Math.random()}`;
+    const expectedRoot = path.resolve(repo, "..", logName);
+    try {
+      const result = await probePlan(
+        planOptions(repo, [replaceMutant(2, "  return false;")], {
+          isolation: "worktree",
+          logDir: path.join("..", logName),
+        }),
+      );
+
+      expect(result.status).toBe("killed");
+      expect(path.dirname(path.dirname(result.isolation.path as string))).toBe(
+        expectedRoot,
+      );
+    } finally {
+      fs.rmSync(expectedRoot, { recursive: true, force: true });
+    }
+  });
+
   it("runs the baseline exactly once and the test once per mutant, with one contract field set per mutant", async () => {
     useLockDir();
     const { repo } = initRepo();

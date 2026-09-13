@@ -542,20 +542,30 @@ function copySymlink(
   src: string,
   dest: string,
   displayRelPath: string,
-  worktreeRootReal: string,
-  warnings: string[],
-): void {
+): { dest: string; displayRelPath: string } {
   const linkTarget = fs.readlinkSync(src);
   fs.mkdirSync(path.dirname(dest), { recursive: true });
   fs.rmSync(dest, { force: true });
   fs.symlinkSync(linkTarget, dest);
+  return { dest, displayRelPath };
+}
+
+/** Check a recreated symlink only after the full untracked sync has
+ * completed: a first hop can look contained until a later copied hop is
+ * recreated as the escaping link. */
+function warnIfCopiedSymlinkEscapes(
+  copied: { dest: string; displayRelPath: string },
+  worktreeRootReal: string,
+  warnings: string[],
+): void {
+  const linkTarget = fs.readlinkSync(copied.dest);
   const resolvedLinkTarget = path.isAbsolute(linkTarget)
     ? linkTarget
-    : path.resolve(path.dirname(dest), linkTarget);
+    : path.resolve(path.dirname(copied.dest), linkTarget);
   const resolved = resolveDeepestExisting(resolvedLinkTarget);
   if (!isPathContained(worktreeRootReal, resolved)) {
     warnings.push(
-      `untracked symlink ${displayRelPath} resolves to ${resolved}, outside ` +
+      `untracked symlink ${copied.displayRelPath} resolves to ${resolved}, outside ` +
         "the isolation copy: the copy carries the same symlink the source " +
         "tree does, so a write through it is not isolated",
     );
@@ -594,32 +604,42 @@ function copyUntrackedEntry(
   srcAbs: string,
   destAbs: string,
   displayRelPath: string,
-  worktreeRootReal: string,
   warnings: string[],
-): void {
+): { dest: string; displayRelPath: string } | undefined {
   let st: fs.Stats;
   try {
     st = fs.lstatSync(srcAbs);
   } catch {
-    return;
+    return undefined;
   }
   if (st.isSymbolicLink()) {
-    copySymlink(srcAbs, destAbs, displayRelPath, worktreeRootReal, warnings);
-    return;
+    return copySymlink(srcAbs, destAbs, displayRelPath);
   }
-  if (st.isDirectory() && fs.existsSync(path.join(srcAbs, ".git"))) {
+  if (st.isDirectory() && hasGitBoundary(srcAbs)) {
     warnings.push(
       `skipped a nested repository directory in the untracked sync: ${displayRelPath}`,
     );
-    return;
+    return undefined;
   }
   if (!st.isFile()) {
     warnings.push(
       `skipped an untracked entry that is neither a regular file, a symlink, nor a nested repository: ${displayRelPath}`,
     );
-    return;
+    return undefined;
   }
   copyRegularFile(srcAbs, destAbs);
+  return undefined;
+}
+
+/** A nested repository boundary is an entry named `.git`, including a
+ * dangling file or symlink. lstat deliberately does not follow it. */
+function hasGitBoundary(dir: string): boolean {
+  try {
+    fs.lstatSync(path.join(dir, ".git"));
+  } catch {
+    return false;
+  }
+  return true;
 }
 
 /** Runs `git argv...` in `cwd`, logging into `runDir` under
@@ -932,6 +952,7 @@ export async function beginWorktree(
 
   const logDirReal = resolveDeepestExisting(path.resolve(logDir));
   const syncWarnings: string[] = [];
+  const copiedSymlinks: { dest: string; displayRelPath: string }[] = [];
   // The copy's own root, resolved once here rather than per symlink:
   // `git worktree add` has already created `worktreePath` by this
   // point, and `copySymlink` needs it to tell an untracked symlink that
@@ -961,13 +982,16 @@ export async function beginWorktree(
         if (signal?.aborted) return abortedResult("the untracked-file copy");
       }
       const relPath = syncableRelPaths[i];
-      copyUntrackedEntry(
+      const copiedSymlink = copyUntrackedEntry(
         path.join(root, relPath),
         path.join(worktreePath, relPath),
         relPath,
-        worktreeRootReal,
         syncWarnings,
       );
+      if (copiedSymlink !== undefined) copiedSymlinks.push(copiedSymlink);
+    }
+    for (const copiedSymlink of copiedSymlinks) {
+      warnIfCopiedSymlinkEscapes(copiedSymlink, worktreeRootReal, syncWarnings);
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
