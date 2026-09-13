@@ -14,6 +14,7 @@ import {
   mergeLinkSources,
   type MergedLink,
 } from "./link-list.js";
+import { linkRelPath } from "./link-policy.js";
 import {
   DEFAULT_GIT_APPLY_TIMEOUT_MS,
   listPatchTouchedPaths,
@@ -287,6 +288,25 @@ export function firstLinkSourceRefusal(
   allowOutside: boolean,
 ): LinkSourceRefusal | undefined {
   for (const link of mergedLinks) {
+    // --link controls a destination in the isolation copy. Like an
+    // auto-discovered node_modules entry, containment is about where that
+    // named location sits; planLinks() centrally judges the target under the
+    // documented operator-latitude rule. Repository-content sources retain
+    // their stricter resolved-target check below.
+    if (link.namedBy === undefined) {
+      if (linkRelPath(link.value, realRoot) !== undefined) {
+        const message = linkSourceMissingMessage(link);
+        if (message !== undefined) {
+          return { reason: "link_source_not_found", message };
+        }
+      } else if (checkOutsideRootExistence) {
+        const message = linkSourceMissingMessage(link);
+        if (message !== undefined) {
+          return { reason: "link_source_not_found", message };
+        }
+      }
+      continue;
+    }
     const target = resolveLinkSourceTarget(link.value);
     if (target === undefined) {
       const message = linkSourceMissingMessage(link);

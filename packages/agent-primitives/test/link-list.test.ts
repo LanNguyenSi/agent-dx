@@ -2,10 +2,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, afterEach } from "vitest";
+import { caseInsensitiveVolume } from "./helpers/case-fs.js";
 import {
   linkEntryUsageError,
   linkSourceMissingMessage,
   mergeLinkSources,
+  canonicalDestinationSpelling,
   type MergedLink,
 } from "../src/probe/link-list.js";
 
@@ -207,6 +209,176 @@ describe("mergeLinkSources: precedence table (defaults, then plan, then CLI)", (
     expect(merged[0].given).toBe("extra");
     expect(merged[0].value).toBe(path.join(cwd, "extra"));
     expect(merged[0].namedBy).toBeUndefined();
+  });
+
+  it("deduplicates case-variant destination spellings by the canonical destination and keeps the first source's provenance", () => {
+    const canonical = path.join(root, "vendor");
+    const merged = mergeLinkSources(
+      [
+        {
+          base: root,
+          basePhrase: "the repository root",
+          values: ["VENDOR"],
+          namedIn: DEFAULTS_NAMED_IN,
+          remedy: "remove the entry from /repo/.agent-primitives.json",
+        },
+        {
+          base: cwd,
+          basePhrase: "the invocation cwd",
+          values: ["../vendor"],
+          remedy: "drop --link",
+        },
+      ],
+      (destination) =>
+        destination === path.join(root, "VENDOR") ? canonical : destination,
+    );
+
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toMatchObject({
+      value: path.join(root, "VENDOR"),
+      namedBy: `"VENDOR" named in ${DEFAULTS_NAMED_IN}`,
+    });
+  });
+
+  it("uses the production canonicalizer for final, parent, and grandparent case aliases on a measured case-insensitive volume, preserving first provenance", (t) => {
+    const dir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "agent-primitives-links-case-"),
+    );
+    try {
+      // Do not infer this from the platform: APFS may be configured either
+      // way, and CI can mount either variant too.
+      t.skip(!caseInsensitiveVolume(dir), "not on a case-insensitive volume");
+      const cases = [
+        { given: "VENDOR", canonical: "vendor" },
+        { given: "PARENT/vendor", canonical: "parent/vendor" },
+        {
+          given: "parent/GRAND/vendor",
+          canonical: "parent/grand/vendor",
+        },
+        {
+          given: "GREAT/parent/grand/vendor",
+          canonical: "great/parent/grand/vendor",
+        },
+      ];
+      for (const entry of cases) {
+        fs.mkdirSync(path.join(dir, entry.canonical), { recursive: true });
+      }
+
+      const merged = mergeLinkSources([
+        {
+          base: dir,
+          basePhrase: "the repository root",
+          values: cases.map((entry) => entry.given),
+          namedIn: DEFAULTS_NAMED_IN,
+          remedy: "remove the entry from /repo/.agent-primitives.json",
+        },
+        {
+          base: dir,
+          basePhrase: "the invocation cwd",
+          values: cases.map((entry) => entry.canonical),
+          remedy: "drop --link",
+        },
+      ]);
+
+      expect(merged).toHaveLength(cases.length);
+      expect(merged.map((link) => link.given)).toEqual(
+        cases.map((entry) => entry.given),
+      );
+      expect(merged.map((link) => link.namedBy)).toEqual(
+        cases.map((entry) => `"${entry.given}" named in ${DEFAULTS_NAMED_IN}`),
+      );
+      // This pins the production helper, rather than only an injected
+      // canonicalizer seam: every existing component receives the spelling
+      // the filesystem directory entry carries; the final entry is not
+      // resolved through a target.
+      for (const entry of cases) {
+        expect(canonicalDestinationSpelling(path.join(dir, entry.given))).toBe(
+          path.join(fs.realpathSync(dir), entry.canonical),
+        );
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("deduplicates symlinked ancestors whose targets introduce case aliases at every depth, preserving first provenance", (t) => {
+    const dir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "agent-primitives-links-target-case-"),
+    );
+    try {
+      t.skip(!caseInsensitiveVolume(dir), "not on a case-insensitive volume");
+      const cases = [
+        { alias: "alias", target: "PARENT", canonical: "parent" },
+        {
+          alias: "deep-alias",
+          target: "GRAND/PARENT",
+          canonical: "grand/parent",
+        },
+      ];
+      for (const entry of cases) {
+        fs.mkdirSync(path.join(dir, entry.canonical, "vendor"), {
+          recursive: true,
+        });
+        fs.symlinkSync(entry.target, path.join(dir, entry.alias));
+      }
+
+      const given = cases.map((entry) => `${entry.alias}/vendor`);
+      const merged = mergeLinkSources([
+        {
+          base: dir,
+          basePhrase: "the repository root",
+          values: given,
+          namedIn: DEFAULTS_NAMED_IN,
+          remedy: "remove the entry from /repo/.agent-primitives.json",
+        },
+        {
+          base: dir,
+          basePhrase: "the invocation cwd",
+          values: cases.map((entry) => `${entry.canonical}/vendor`),
+          remedy: "drop --link",
+        },
+      ]);
+
+      expect(merged).toHaveLength(cases.length);
+      expect(merged.map((link) => link.given)).toEqual(given);
+      expect(merged.map((link) => link.namedBy)).toEqual(
+        given.map((value) => `"${value}" named in ${DEFAULTS_NAMED_IN}`),
+      );
+      for (const entry of cases) {
+        expect(
+          canonicalDestinationSpelling(path.join(dir, entry.alias, "vendor")),
+        ).toBe(path.join(fs.realpathSync(dir), entry.canonical, "vendor"));
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps distinct final symlink locations even when they share one target", () => {
+    const dir = fs.mkdtempSync(
+      path.join(os.tmpdir(), "agent-primitives-links-"),
+    );
+    try {
+      const target = path.join(dir, "target");
+      fs.mkdirSync(target);
+      fs.symlinkSync("target", path.join(dir, "one"));
+      fs.symlinkSync("target", path.join(dir, "two"));
+      expect(canonicalDestinationSpelling(path.join(dir, "one"))).not.toBe(
+        canonicalDestinationSpelling(path.join(dir, "two")),
+      );
+      expect(
+        mergeLinkSources([
+          {
+            base: dir,
+            basePhrase: "root",
+            values: ["one", "two"],
+            remedy: "drop --link",
+          },
+        ]),
+      ).toHaveLength(2);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

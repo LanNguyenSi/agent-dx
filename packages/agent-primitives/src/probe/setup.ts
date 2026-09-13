@@ -20,9 +20,10 @@ import {
   ISOLATION_ESCAPE_CHANNEL_LABEL,
   ISOLATION_ESCAPE_FIX_HINT,
   ISOLATION_ESCAPE_ENV_FIX_HINT,
+  resolveDeepestExisting,
 } from "./containment.js";
 import type { WorktreeSyncSuccess } from "./isolation.js";
-import type { LinkCandidate } from "./link-policy.js";
+import { linkRelPath, type LinkCandidate } from "./link-policy.js";
 import { detectKnownZeroTestsEvidence } from "./zero-tests.js";
 import {
   createRunController,
@@ -505,19 +506,29 @@ export async function openRunSetup(
   // being discovered halfway through, with earlier mutants already run.
   if (!allowOutside) {
     const outside = [
-      ...input.targets.map((target) => ({
-        display: target.displayFile,
-        real: target.absFile,
-      })),
-      ...links.map((link) => ({ display: link.display, real: link.abs })),
-    ].filter((p) => !isPathContained(realRoot, p.real));
+      ...input.targets
+        .filter((target) => !isPathContained(realRoot, target.absFile))
+        .map((target) => target.displayFile),
+      ...links
+        .filter((link) =>
+          link.namedBy === undefined
+            ? // --link controls a location in the copy. Its parent chain is
+              // resolved by linkRelPath, but the final link entry is not.
+              // Do not turn an outside result into a lexical path and run a
+              // second containment check: undefined is the refusal itself.
+              linkRelPath(link.display, realRoot) === undefined
+            : // Repository-content sources retain their target semantics.
+              !isPathContained(realRoot, link.abs),
+        )
+        .map((link) => link.display),
+    ];
     if (outside.length > 0) {
       return refuse(
         input.outsideRootStatus,
         "file_outside_root",
-        `outside the containment root (${root}): ${[
-          ...new Set(outside.map((p) => p.display)),
-        ].join(", ")}`,
+        `outside the containment root (${root}): ${[...new Set(outside)].join(
+          ", ",
+        )}`,
         // Carries a `-p`-derived `--file`'s own numstat log path through,
         // same as every other early return the caller makes; empty for an
         // explicit `--file`, which never runs that listing.
@@ -625,7 +636,16 @@ export async function openRunSetup(
       logDir,
       wtScratchRoot,
       linkCandidates: links.map((link): LinkCandidate => ({
-        absDir: link.abs,
+        // Link policy derives the copy destination from this location and
+        // resolves its target itself. Passing link.abs here made --link
+        // target-based while auto-discovery was location-based.
+        absDir:
+          link.namedBy === undefined
+            ? path.join(
+                resolveDeepestExisting(path.dirname(link.display)),
+                path.basename(link.display),
+              )
+            : link.abs,
         ...(link.namedBy !== undefined ? { namedBy: link.namedBy } : {}),
       })),
       // Every distinct target of this run, so the link policy can

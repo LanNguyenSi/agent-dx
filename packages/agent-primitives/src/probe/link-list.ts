@@ -83,6 +83,77 @@ export interface MergedLink {
   remedy: string;
 }
 
+/** The entry spelling that `parent` gives `name`, identified without
+ * resolving that entry's target. `undefined` means the entry does not exist;
+ * an unreadable directory conservatively keeps the spelling that did resolve. */
+function canonicalEntryName(parent: string, name: string): string | undefined {
+  let entry: fs.Stats;
+  try {
+    entry = fs.lstatSync(path.join(parent, name));
+  } catch {
+    return undefined;
+  }
+  try {
+    for (const sibling of fs.readdirSync(parent, { withFileTypes: true })) {
+      const candidate = fs.lstatSync(path.join(parent, sibling.name));
+      if (candidate.dev === entry.dev && candidate.ino === entry.ino) {
+        return sibling.name;
+      }
+    }
+  } catch {
+    // The provided spelling reached an entry even though its parent cannot be
+    // listed, so it remains the only safe spelling available to this walk.
+  }
+  return name;
+}
+
+/** `realpath` removes ancestor symlinks, but may retain case aliases from
+ * their targets. Normalize those already-resolved components without calling
+ * `realpath` again: this bounded spelling-only walk cannot recurse through a
+ * symlink cycle. */
+function canonicalResolvedSpelling(resolved: string): string {
+  const root = path.parse(resolved).root;
+  let canonical = root;
+  for (const segment of path.relative(root, resolved).split(path.sep)) {
+    canonical = path.join(
+      canonical,
+      canonicalEntryName(canonical, segment) ?? segment,
+    );
+  }
+  return canonical;
+}
+
+/** Canonical spelling of a link DESTINATION, without following its final
+ * entry. Every existing ancestor is canonicalized by its directory-entry
+ * identity and then resolved before the next component, so case aliases (and
+ * symlinked ancestors) cannot leave a parent spelling behind. The final entry
+ * is only lstat'ed: two final symlink locations sharing a target stay distinct
+ * destinations, while aliases for one final entry share its spelling. */
+export function canonicalDestinationSpelling(destination: string): string {
+  const absolute = path.resolve(destination);
+  const root = path.parse(absolute).root;
+  const segments = path.relative(root, absolute).split(path.sep);
+  let parent = root;
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    const name = canonicalEntryName(parent, segment);
+    if (name === undefined) {
+      return path.join(parent, ...segments.slice(index));
+    }
+    const entry = path.join(parent, name);
+    if (index === segments.length - 1) {
+      return entry;
+    }
+    try {
+      const resolved = fs.realpathSync(entry);
+      parent = resolved === entry ? entry : canonicalResolvedSpelling(resolved);
+    } catch {
+      return path.join(entry, ...segments.slice(index + 1));
+    }
+  }
+  return absolute;
+}
+
 /**
  * Merges `link` values from several sources into one deduplicated list,
  * each source's own `values` resolved against its own `base` before
@@ -93,21 +164,33 @@ export interface MergedLink {
  * group's value that resolves to a path an earlier group already added
  * is dropped, never the other way around, so "later sources add, none
  * removes": every distinct resolved path from every group survives,
- * each exactly once, in first-seen order. A path several sources name
+ * each exactly once, in first-seen order. Comparison uses the destination's
+ * canonical filesystem spelling, so case aliases for the same final entry do
+ * not create a second candidate without resolving two distinct final symlink
+ * locations through their shared target.
+ * A path several sources name
  * therefore keeps the FIRST source's provenance, which is the
  * conservative direction: the defaults file and the plan are checked
  * as repository content even when `--link` names the same path too.
  */
 export function mergeLinkSources(
   groups: readonly LinkSourceGroup[],
+  _canonicalizeDestination: (
+    destination: string,
+  ) => string = canonicalDestinationSpelling,
 ): MergedLink[] {
   const seen = new Set<string>();
   const merged: MergedLink[] = [];
   for (const group of groups) {
     for (const value of group.values) {
       const abs = path.resolve(group.base, value);
-      if (seen.has(abs)) continue;
-      seen.add(abs);
+      // The exported merger is also called before the explicit-source
+      // existence refusal. Keep a missing source lexical so that refusal can
+      // still report its exact spelling, but canonicalize destinations that
+      // exist before deduplicating them.
+      const canonicalDestination = _canonicalizeDestination(abs);
+      if (seen.has(canonicalDestination)) continue;
+      seen.add(canonicalDestination);
       merged.push({
         value: abs,
         given: value,

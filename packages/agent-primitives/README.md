@@ -1048,10 +1048,14 @@ The four rules, in this order:
    an NFC directory name each resolve to the root while spelling a path
    outside it. The root's own ancestors are walked up to the filesystem
    root and compared the same way, so an alias of a grandparent is seen
-   as readily as one of the parent. A `--link`, a `--plan` file's `link`, or a
-   defaults-file `link` whose value resolves outside the root never
-   reaches this rule: it refuses the whole run up front (`reason:
-   "file_outside_root"`), before the policy sees any candidate, since a
+   as readily as one of the parent. An explicit operator `--link` follows
+   this LOCATION rule too: its named directory must sit inside the root,
+   while its target is then judged by the shared policy (so an in-repo
+   `node_modules` symlink to a sibling checkout's install works exactly as
+   auto-discovery does). A `--plan` file's `link` or defaults-file `link`
+   whose value resolves outside the root never reaches this rule: it refuses
+   the whole run up front (`reason: "file_outside_root"`), before the policy
+   sees any candidate, since a
    path an invocation explicitly asked for and cannot have is a usage
    error rather than something to skip past. Only an auto-discovered
    candidate is skipped with a warning and the run carried on.
@@ -1457,9 +1461,9 @@ handed to `git apply` as one element of an argv array with no shell
 involved, so a path containing `$(...)` or a backtick is a path and
 nothing else.
 
-`--file` and every `--link` entry must resolve inside the git work-tree
-root (or inside the cwd when not in a repo), unless `--allow-outside` is
-passed; otherwise the result is `status: "inconclusive"`,
+`--file` and every explicit link LOCATION must resolve inside the git
+work-tree root (or inside the cwd when not in a repo), unless
+`--allow-outside` is passed; otherwise the result is `status: "inconclusive"`,
 `reason: "file_outside_root"`, exit `2`. A `--link` value carrying a
 `$(...)` command substitution or a backtick is refused outright
 (`InvalidArgumentError`, before anything runs) rather than merely being
@@ -1491,21 +1495,15 @@ documented skip-when-absent behaviour below, an explicitly named source
 that is not there is a usage error, not something to skip past. This
 runs in `probe()`'s own option-shape checks, ahead of any isolation
 decision -- for `-i inplace` as much as for `-i worktree` -- but it
-runs AFTER the containment check just above for a value WHOSE RESOLVED
-PATH lies outside the containment root: a value that is both outside
+runs AFTER the containment check just above for a LOCATION whose resolved
+path lies outside the containment root: a location that is both outside
 the root and missing is `file_outside_root`, not
-`link_source_not_found` -- existence is never checked for a value whose
-resolved path lies outside the root, so a `--link`/plan/defaults-file
-entry pointing outside the repository gets the one uniform refusal
-regardless of whether nothing, a file, or a directory happens to sit at
-that path, rather than leaking which of the three it is. This applies
-identically to an IN-repo path that is itself a symlink to somewhere
-outside the root (a defaults-file `link` of `oracle`, where `oracle ->
-/etc/hosts`), the whole chain followed (up to 32 hops, so `oracle ->
-hop2 -> /etc/hosts` answers the same way): under the DEFAULT options
-this is refused `file_outside_root` before the existence check ever
-runs, whether the far end exists or not, so it cannot be used to learn
-which of the two it is either.
+`link_source_not_found` -- existence is never checked for an outside
+location. An in-root operator `--link` may point to a sibling checkout's
+install; its target follows the shared link policy instead. Repository-content
+plan/defaults entries remain target-strict, so an in-root symlink they name
+that resolves outside the root still receives the uniform refusal regardless
+of whether nothing, a file, or a directory happens to sit at that target.
 
 `--allow-outside` disables that later containment check, and with it
 the ordering the previous paragraph describes -- for `-i worktree` the
@@ -1580,9 +1578,11 @@ a composer `config` value, may only name a directory git does not track
 
 Precedence across all three `link` sources is additive, not an
 override: the defaults file's own entries, then the plan's, then
-`--link`'s, are merged and deduplicated (each distinct resolved path
-kept once, in that order) -- a later source can only ADD a path, never
-remove one an earlier source already named.
+`--link`'s, are merged and deduplicated by canonical destination (each
+distinct destination is kept once, in that order) -- a later source can only
+ADD a path, never remove one an earlier source already named. The first
+source's provenance is retained when case or symlink aliases name the same
+destination.
 
 `--pre <command>` runs (e.g. a rebuild) before each test invocation, in
 both the baseline and mutant runs, and in the invocation cwd (not the
