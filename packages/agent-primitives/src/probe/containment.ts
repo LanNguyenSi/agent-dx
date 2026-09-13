@@ -104,8 +104,9 @@ function isELOOP(err: unknown): boolean {
  *
  * This resolves the gap by walking the symlink chain itself, one
  * `readlinkSync` hop at a time (each relative target resolved against
- * ITS OWN directory, since a relative target's meaning depends on where
- * the link that carries it sits, not on where the chain started), until
+ * ITS OWN directory, physically, by `resolveLinkHop` below, since a
+ * relative target's meaning depends on where the link that carries it
+ * sits, not on where the chain started), until
  * a hop is not itself a symlink -- at which point `resolveDeepestExisting`
  * runs on THAT final hop, so the deepest existing ancestor reported is
  * always an ancestor of where the chain actually ends, dangling or not,
@@ -130,8 +131,7 @@ function isELOOP(err: unknown): boolean {
  * links but never looked at where the last one landed, so a chain of
  * exactly cap length came back `undefined` while both its neighbours
  * resolved, and the caller's fallback for that one length re-opened
- * the existence disclosure this function closes (the tracker task
- * `709622ab`). A cycle among the hops (`a` -> `b` -> `a`) never
+ * the existence disclosure this function closes. A cycle among the hops (`a` -> `b` -> `a`) never
  * terminates on its own, and neither `lstatSync` nor `readlinkSync` --
  * unlike `fs.realpathSync` or `fs.statSync`, both of which fully
  * resolve a path and so surface the OS's own `ELOOP` for a genuine
@@ -190,9 +190,79 @@ export function resolveLinkSourceTarget(p: string): string | undefined {
       if (isELOOP(err)) return undefined;
       return resolveDeepestExisting(current);
     }
-    current = path.isAbsolute(rawTarget)
-      ? rawTarget
-      : path.resolve(path.dirname(current), rawTarget);
+    const next = resolveLinkHop(current, rawTarget);
+    if (next === undefined) return undefined;
+    current = next;
+  }
+}
+
+/**
+ * Where one symlink hop lands: `rawTarget` (what `readlinkSync` returned
+ * for the link at `linkPath`) placed the way the filesystem itself would
+ * follow it, rather than the way a lexical `path.resolve` would spell it.
+ * The two differ exactly when the target's own path crosses a symlinked
+ * directory component with `..`: `sub/../name` with `sub` -> `/outside/dir`
+ * is `/outside/name` to the OS (`..` climbs from where `sub` POINTS), but
+ * `path.resolve` collapses it to `<root>/name` before anything is ever
+ * looked up, so a link naming an out-of-root target through that shape
+ * was judged on an in-root spelling that does not exist: contained, and
+ * then existence-checked on the real chain, which is the disclosure and
+ * the containment escape the walk above exists to close. Only the
+ * DIRECTORY part of the target goes through the physical resolution
+ * (`physicalDeepestExisting`, so a directory part that does not fully
+ * exist still resolves as far as it physically can); the final component
+ * is re-appended verbatim and never followed here, so the walk above
+ * still sees every link of the chain one hop at a time and its cap keeps
+ * counting links, not lookups. An absolute target needs none of this: it
+ * is handed to `lstatSync` as-is, and the OS resolves any `..` in it
+ * physically on its own.
+ *
+ * `undefined` when resolving the directory part hits the OS's own `ELOOP`
+ * (a cycle among the ancestor components of the hop): the same
+ * unresolvable-chain answer the walk gives for a cycle among the hops
+ * themselves, so the caller refuses without ever running a containment
+ * check on a half-resolved path.
+ */
+export function resolveLinkHop(
+  linkPath: string,
+  rawTarget: string,
+): string | undefined {
+  if (path.isAbsolute(rawTarget)) return rawTarget;
+  // Spliced as a plain string, never through `path.join`/`path.resolve`:
+  // both collapse `..` lexically before the filesystem is consulted,
+  // which is exactly the spelling this function exists not to produce.
+  const parent = `${path.dirname(linkPath)}${path.sep}${path.dirname(rawTarget)}`;
+  const parentReal = physicalDeepestExisting(parent);
+  if (parentReal === undefined) return undefined;
+  return path.join(parentReal, path.basename(rawTarget));
+}
+
+/**
+ * `resolveDeepestExisting` for a path that may still carry a `..`
+ * through a symlinked component: `fs.realpathSync.native` (libc
+ * `realpath(3)`, which walks the path as the OS does) rather than the
+ * JavaScript `fs.realpathSync`, which normalizes its argument with
+ * `path.resolve` FIRST and so collapses `sub/..` to `sub`'s own parent
+ * whether or not `sub` is a symlink, the same lexical answer this exists
+ * to avoid (measured on Node 26: the two differ on exactly that shape).
+ * The walk-up on failure pops the raw string's own trailing components
+ * (`path.dirname`/`path.basename` never collapse anything) until a
+ * prefix resolves physically, then re-appends the popped components with
+ * `path.join` onto that physical prefix, where collapsing a `..` is
+ * correct because the base is already real. `undefined` on `ELOOP`
+ * anywhere up the chain, so a cycle among the ancestor components is
+ * reported as unresolvable rather than answered with a half-real path.
+ */
+function physicalDeepestExisting(p: string): string | undefined {
+  try {
+    return fs.realpathSync.native(p);
+  } catch (err) {
+    if (isELOOP(err)) return undefined;
+    const parent = path.dirname(p);
+    if (parent === p) return p; // filesystem root
+    const parentReal = physicalDeepestExisting(parent);
+    if (parentReal === undefined) return undefined;
+    return path.join(parentReal, path.basename(p));
   }
 }
 

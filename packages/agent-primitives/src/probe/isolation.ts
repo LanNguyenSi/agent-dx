@@ -2,7 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { isPidAlive } from "../lock.js";
-import { isPathContained, resolveDeepestExisting } from "./containment.js";
+import {
+  isPathContained,
+  resolveDeepestExisting,
+  resolveLinkHop,
+} from "./containment.js";
 import {
   canonicalDestRelPath,
   entryRelationTo,
@@ -523,9 +527,10 @@ function copyRegularFile(src: string, dest: string): void {
  * the source tree, so a `--pre`/`-t` writing through it reaches the
  * real tree rather than the isolated one. The check runs on the link's
  * OWN target -- `linkTarget` resolved against the link's own directory
- * the same way the filesystem would follow it, then through
- * `resolveDeepestExisting` -- rather than on the recreated link at
- * `dest` itself: `dest` always sits inside the copy (that is where this
+ * the same way the filesystem would follow it (`resolveLinkHop`, so a
+ * `..` through a symlinked component climbs from where that component
+ * points), then through `resolveDeepestExisting` -- rather than on the
+ * recreated link at `dest` itself: `dest` always sits inside the copy (that is where this
  * function just created it), so realpathing `dest` for a DANGLING
  * target throws, falls back to `dest`'s own contained path, and reads
  * back as trivially contained no matter where the target actually
@@ -559,9 +564,18 @@ function warnIfCopiedSymlinkEscapes(
   warnings: string[],
 ): void {
   const linkTarget = fs.readlinkSync(copied.dest);
-  const resolvedLinkTarget = path.isAbsolute(linkTarget)
-    ? linkTarget
-    : path.resolve(path.dirname(copied.dest), linkTarget);
+  // Placed physically (`resolveLinkHop`), not lexically: a relative
+  // target that climbs with `..` through a symlinked component of its
+  // own (`sub/../name`, `sub` itself a link to somewhere outside the
+  // copy) lands where the OS would take it, which a lexical collapse
+  // spells as an in-copy path that does not exist and so reads back as
+  // contained. Only a cycle among the target's ancestor components
+  // leaves the hop unresolved; the lexical spelling then stands in, as
+  // it did before, since this is a warning about where the copied link
+  // resolves, not a gate.
+  const resolvedLinkTarget =
+    resolveLinkHop(copied.dest, linkTarget) ??
+    path.resolve(path.dirname(copied.dest), linkTarget);
   const resolved = resolveDeepestExisting(resolvedLinkTarget);
   if (!isPathContained(worktreeRootReal, resolved)) {
     warnings.push(

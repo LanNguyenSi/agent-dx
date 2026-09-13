@@ -21,6 +21,7 @@ import {
 import {
   MAX_LINK_SOURCE_HOPS,
   resolveDeepestExisting,
+  resolveLinkHop,
   resolveLinkSourceTarget,
 } from "../src/probe/containment.js";
 import {
@@ -1967,13 +1968,14 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
     lane: ChainLane,
     repo: string,
     given: string,
+    testCommand = "node fixture.test.js",
   ): Promise<ChainAnswer> {
     if (lane === "defaults-file") {
       fs.writeFileSync(
         path.join(repo, ".agent-primitives.json"),
         JSON.stringify({ link: [given] }),
       );
-      const result = await probe(baseOptions(repo));
+      const result = await probe(baseOptions(repo, { testCommand }));
       return {
         status: result.status,
         reason: result.reason,
@@ -1991,7 +1993,7 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
             replaceText: "  return false;",
           },
         ],
-        testCommand: "node fixture.test.js",
+        testCommand,
         isolation: "worktree",
         expect: "fail",
         cwd: repo,
@@ -2006,7 +2008,9 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
         linked: result.isolation.linked.length,
       };
     }
-    const result = await probe(baseOptions(repo, { links: [given] }));
+    const result = await probe(
+      baseOptions(repo, { links: [given], testCommand }),
+    );
     return {
       status: result.status,
       reason: result.reason,
@@ -2016,12 +2020,15 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
   }
 
   /** The chain lengths every parity case runs: the short lengths the
-   * earlier two- and three-hop cases pinned by hand, plus both sides
-   * of the walk's own cap. */
+   * earlier two- and three-hop cases pinned by hand, the walk's
+   * previous cap of 32 (also macOS's own per-lookup limit, and the one
+   * length at which the split between the two answers used to show),
+   * plus both sides of the walk's current cap. */
   const CHAIN_LENGTHS: readonly number[] = [
     1,
     2,
     3,
+    32,
     MAX_LINK_SOURCE_HOPS - 1,
     MAX_LINK_SOURCE_HOPS,
     MAX_LINK_SOURCE_HOPS + 1,
@@ -2230,6 +2237,152 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
       message: `outside the containment root (${root}): ${oracle}`,
     });
     expect(refusal?.message).not.toContain(outside);
+  });
+
+  /** What sits at the far end of a `sub/../<name>` link: a directory
+   * (the shape that, judged lexically, linked and ran), a plain file, or
+   * nothing at all. */
+  type FarEnd = "directory" | "file" | "missing";
+  const FAR_ENDS: readonly FarEnd[] = ["directory", "file", "missing"];
+
+  /** A repository whose tracked `sub` links to a directory OUTSIDE the
+   * root and whose untracked `oracle` climbs from where `sub` points:
+   * `oracle -> sub/../far-end`. To the OS that is `<outside>/far-end`;
+   * a lexical `path.resolve` spells it `<repo>/far-end`, in-root and
+   * nonexistent. Returns the out-of-root directory and the marker path
+   * a test command writing through `oracle` would create there. */
+  function dotDotRepo(farEnd: FarEnd): {
+    repo: string;
+    outside: string;
+    marker: string;
+  } {
+    useLockDir();
+    const outside = fs.realpathSync(makeTmpDir());
+    fs.mkdirSync(path.join(outside, "inner"));
+    const target = path.join(outside, "far-end");
+    if (farEnd === "directory") fs.mkdirSync(target);
+    if (farEnd === "file") fs.writeFileSync(target, "");
+    const repo = initRealpathRepo();
+    fs.symlinkSync(path.join(outside, "inner"), path.join(repo, "sub"));
+    git(repo, ["add", "sub"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "sub"]);
+    // Joined on `path.sep` on purpose: `path.join` would collapse the
+    // `..` lexically and the link would not carry the shape under test.
+    fs.symlinkSync(
+      ["sub", "..", "far-end"].join(path.sep),
+      path.join(repo, "oracle"),
+    );
+    return { repo, outside, marker: path.join(target, "ESCAPED") };
+  }
+
+  /** A test command that passes at the baseline and, on its way, writes
+   * a marker through the link: if the probe ever runs it, the marker
+   * shows where the link really pointed. */
+  const MARKER_TEST_COMMAND =
+    "node fixture.test.js && node -e \"require('fs').writeFileSync('oracle/ESCAPED', '')\"";
+
+  describe.each(CHAIN_LANES.filter((lane) => lane !== "--link"))(
+    "repository-content lane %s: a link that climbs with .. through an out-of-root symlinked component is judged where the OS takes it, never on its lexical in-root spelling",
+    (lane) => {
+      it.each(FAR_ENDS)(
+        "oracle -> sub/../far-end with a %s at the far end answers file_outside_root, links nothing and never runs the test command",
+        async (farEnd) => {
+          const { repo, outside, marker } = dotDotRepo(farEnd);
+
+          const answer = await probeChainLane(
+            lane,
+            repo,
+            "oracle",
+            MARKER_TEST_COMMAND,
+          );
+
+          expect(answer.reason).toBe("file_outside_root");
+          expect(answer.linked).toBe(0);
+          expect(answer.warnings).toEqual([
+            `outside the containment root (${repo}): ${path.join(repo, "oracle")}`,
+          ]);
+          for (const warning of answer.warnings) {
+            expect(warning).not.toContain(outside);
+            expect(warning).not.toContain("does not exist");
+            expect(warning).not.toContain("is not a directory");
+          }
+          // The one shape that used to link and run: the marker the test
+          // command would have written through the link is not there.
+          expect(fs.existsSync(marker)).toBe(false);
+          expect(fs.existsSync(path.join(repo, "ESCAPED"))).toBe(false);
+        },
+      );
+
+      it("the three far ends get the identical answer", async () => {
+        const answers = await Promise.all(
+          FAR_ENDS.map(async (farEnd) => {
+            const { repo } = dotDotRepo(farEnd);
+            const answer = await probeChainLane(lane, repo, "oracle");
+            // The only thing that legitimately differs is the repo path.
+            return {
+              status: answer.status,
+              reason: answer.reason,
+              linked: answer.linked,
+              warnings: answer.warnings.map((w) =>
+                w.replaceAll(repo, "<repo>"),
+              ),
+            };
+          }),
+        );
+        expect(answers[1]).toEqual(answers[0]);
+        expect(answers[2]).toEqual(answers[0]);
+      });
+    },
+  );
+
+  it("resolveLinkHop places a relative hop physically: `..` climbs from where a symlinked component points, and a missing far end resolves under that same real parent", () => {
+    const outside = fs.realpathSync(makeTmpDir());
+    fs.mkdirSync(path.join(outside, "inner"));
+    fs.mkdirSync(path.join(outside, "far-end"));
+    const root = fs.realpathSync(makeTmpDir());
+    fs.symlinkSync(path.join(outside, "inner"), path.join(root, "sub"));
+    const oracle = path.join(root, "oracle");
+
+    expect(
+      resolveLinkHop(oracle, ["sub", "..", "far-end"].join(path.sep)),
+    ).toBe(path.join(outside, "far-end"));
+    expect(
+      resolveLinkHop(oracle, ["sub", "..", "missing"].join(path.sep)),
+    ).toBe(path.join(outside, "missing"));
+    expect(
+      resolveLinkHop(oracle, ["sub", "..", "no-dir", "missing"].join(path.sep)),
+    ).toBe(path.join(outside, "no-dir", "missing"));
+    // An absolute target is handed back untouched: the OS resolves it.
+    expect(resolveLinkHop(oracle, path.join(outside, "far-end"))).toBe(
+      path.join(outside, "far-end"),
+    );
+    // The lexical spelling this replaces, for contrast.
+    expect(path.resolve(root, "sub", "..", "far-end")).toBe(
+      path.join(root, "far-end"),
+    );
+  });
+
+  it("resolveLinkSourceTarget follows a sub/../far-end hop to the out-of-root far end whether it exists or not", () => {
+    const outside = fs.realpathSync(makeTmpDir());
+    fs.mkdirSync(path.join(outside, "inner"));
+    fs.mkdirSync(path.join(outside, "far-end"));
+    const root = fs.realpathSync(makeTmpDir());
+    fs.symlinkSync(path.join(outside, "inner"), path.join(root, "sub"));
+    fs.symlinkSync(
+      ["sub", "..", "far-end"].join(path.sep),
+      path.join(root, "existing"),
+    );
+    fs.symlinkSync(
+      ["sub", "..", "missing"].join(path.sep),
+      path.join(root, "missing"),
+    );
+
+    expect(resolveLinkSourceTarget(path.join(root, "existing"))).toBe(
+      path.join(outside, "far-end"),
+    );
+    expect(resolveLinkSourceTarget(path.join(root, "missing"))).toBe(
+      path.join(outside, "missing"),
+    );
   });
 
   it("an in-repo --link symlink to an IN-ROOT directory still links normally, unaffected", async () => {
@@ -5869,6 +6022,36 @@ describe("probe(): worktree isolation, untracked entries by type", () => {
       }
     },
   );
+
+  it("an untracked symlink that climbs with .. through a tracked symlinked component warns with where the OS takes it, not its lexical in-copy spelling", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const outside = fs.realpathSync(makeTmpDir());
+    fs.mkdirSync(path.join(outside, "inner"));
+    fs.mkdirSync(path.join(outside, "far-end"));
+    fs.symlinkSync(path.join(outside, "inner"), path.join(repo, "sub"));
+    git(repo, ["add", "sub"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "sub"]);
+    // Not a `link` entry, so no refusal fires: the copy simply carries
+    // the same symlink, and the sync's own escape warning is what names
+    // where it resolves.
+    fs.symlinkSync(
+      ["sub", "..", "far-end"].join(path.sep),
+      path.join(repo, "docs"),
+    );
+
+    const result = await probe(baseOptions(repo));
+
+    expect(result.status).toBe("killed");
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("docs") &&
+          w.includes(`resolves to ${path.join(outside, "far-end")}`) &&
+          w.includes("outside the isolation copy"),
+      ),
+    ).toBe(true);
+  });
 
   it("a valid untracked symlink and a dangling one are both recreated as symlinks (not copied as files), neither aborting the sync", async () => {
     useLockDir();

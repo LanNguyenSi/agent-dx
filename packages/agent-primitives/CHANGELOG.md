@@ -32,8 +32,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in-root value otherwise, never skipped to the later checks. An
   operator's own `--link` is unchanged: it is judged on where it sits,
   and its target keeps the link policy's sibling latitude at every
-  length. The suite now runs an existing/missing parity check over
-  chain lengths 1, 2, 3, 63, 64 and 65 in all three lanes.
+  length. The same walk now places a relative hop physically rather
+  than lexically: a target that climbs with `..` through a symlinked
+  component (`oracle -> sub/../name`, `sub` itself a link to a directory
+  outside the root) was collapsed by `path.resolve` to the in-root
+  `<root>/name` before the filesystem was consulted, so the link read as
+  contained, was existence-checked on its real chain (disclosing
+  directory, file, or nothing at the far end) and, for a directory,
+  linked through into the isolation copy where the test command wrote
+  through it outside the root; it is now judged where the OS takes it
+  and receives the same uniform refusal (`resolveLinkHop`, on
+  `fs.realpathSync.native`, since the JavaScript `fs.realpathSync`
+  normalises its argument lexically first). The worktree sync's own
+  escape warning for a copied untracked symlink resolves the same way.
+  The suite now runs an existing/missing parity check over chain lengths
+  1, 2, 3, 32, 63, 64 and 65 in all three lanes, and the `sub/../name`
+  shape with a directory, a file and nothing at the far end in the
+  repository-content lanes, asserting that no link is created and the
+  test command never runs.
 
 - `probe`/`--plan` with `--pre` and `-i inplace` (the default) now
   re-run `--pre` once more after the last mutant is restored, so a

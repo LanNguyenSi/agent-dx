@@ -1520,6 +1520,13 @@ install; its target follows the shared link policy instead. Repository-content
 plan/defaults entries remain target-strict, so an in-root symlink they name
 that resolves outside the root still receives the uniform refusal regardless
 of whether nothing, a file, or a directory happens to sit at that target.
+A relative hop is placed the way the filesystem follows it, not the way a
+lexical path normalisation spells it: a target that climbs with `..` through
+a symlinked component (`oracle -> sub/../name` with `sub` itself a link to a
+directory outside the root) is judged at `<that directory's parent>/name`,
+where the OS takes it, so it receives the same uniform refusal rather than
+being read as an in-root path that happens not to exist, linked through
+into the isolation copy, and written through by the test command.
 The whole symlink chain is followed for that decision, up to 64 links, and
 a chain of exactly 64 links is decided on its far end; a longer chain, or a
 cycle, is refused without the containment question ever being asked (the OS

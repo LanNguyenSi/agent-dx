@@ -255,7 +255,7 @@ export interface LinkSourceRefusal {
  * the link on `resolveDeepestExisting`'s fallback spelling, which for a
  * dangling chain is the link's own in-root path and for an existing one
  * its out-of-root target, reopening the disclosure for a chain of
- * exactly the walk's old cap length (tracker task `709622ab`).
+ * exactly the walk's old cap length.
  *
  * A link that resolves outside the root WITHOUT going through a symlink
  * of its own (an out-of-root value named directly, by any of the three
