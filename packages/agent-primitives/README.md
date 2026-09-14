@@ -1779,12 +1779,15 @@ would otherwise read as a plain, unexplained miss. The pattern is a bare
 JS `RegExp` source with no flags syntax (fold `i`/`m`/`s` into the
 pattern itself, e.g. `(?i)` is not supported); an unparseable one is a
 usage error before the run ever starts. Unlike `--pass-regex`, this
-option's compiled pattern stays flagless (no `m`): `^`/`$` anchor to the
-WHOLE combined stdout+stderr buffer, not to each line, so a pattern
-copied from a `--pass-regex` recipe (`^OK \(` matching a summary line
-that is not the buffer's very first line) silently misses here and
-reads as a plain `baseline_evidence_not_matched` -- prefer an unanchored
-pattern (drop the leading `^`) for this option instead. Available under `--plan`: a plan
+option's compiled pattern deliberately stays flagless (no `m`) for
+compatibility: `^`/`$` anchor to the WHOLE combined stdout+stderr buffer,
+not to each line. A pattern copied from a `--pass-regex` recipe
+(`^OK \(` matching a summary line that is not the buffer's very first
+line) therefore silently misses and reads as a plain
+`baseline_evidence_not_matched`. Prefer an unanchored pattern (drop the
+leading `^`), or use the explicit line-start workaround `(?:^|\n)OK \(`
+when the summary must begin a line. For example:
+`--require-baseline-evidence '(?:^|\n)OK \('`. Available under `--plan`: a plan
 runs every mutant against ONE shared baseline, so there is no
 two-sources conflict for this flag to referee (unlike `--env`, which
 stays refused there); like `--link` and `--allow-outside` there is no

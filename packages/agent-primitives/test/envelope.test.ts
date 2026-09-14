@@ -474,10 +474,14 @@ describe("buildEnvelope: depth-search tuning constants (round-6 pin)", () => {
     // Ten long-keyed children at the surviving fallback level only fit
     // three of them under the narrow MIN_SCALE breadth cap; at scale 1
     // (unbounded relative to this tiny width) all ten would fit instead,
-    // so the kept top-level key count is the discriminator.
+    // so the kept top-level key count is the discriminator. The old
+    // depth-6 shape built 111,111 records even though this assertion only
+    // observes the root breadth cap. A three-level tree exercises the same
+    // fallback decision without making the suite's result depend on host
+    // load or garbage-collection pressure.
     const logDir = makeTmpDir();
     const tree = nestedTree({
-      depth: 6,
+      depth: 3,
       arity: 10,
       key: (i) => "k".repeat(250) + "-" + i,
     });
