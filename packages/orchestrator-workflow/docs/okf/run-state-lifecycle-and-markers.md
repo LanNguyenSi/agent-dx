@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-09-14T10:40:31Z
+timestamp: 2026-09-14T13:02:33Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -27,7 +27,7 @@ sources:
 One unit of work lives in `.ai/runs/YYYY-MM-DD-<slug>/`, seven files
 `00-goal.md` through `06-handoff.md` (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:76#"  05-review-findings.md").
 The orchestrator creates it by copying `.ai/workflow/templates/`
-(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:80-81#"the files as the run progresses. The newest run"; packages/orchestrator-workflow/README.md:166#"one directory per unit of work, newest = active";
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:80-81#"the files as the run progresses. The newest run"; packages/orchestrator-workflow/README.md:216#"one directory per unit of work, newest = active";
 packages/orchestrator-workflow/INSTALL-AGENT.md:67-68#"(new files)."; packages/orchestrator-workflow/INSTALL-AGENT.md:179-184#"instead: it sources its defaults from the operator"). The newest run
 directory is the active one unless a `.ai/run` pointer names one
 (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:81-82#"pointer names one (see below);", see the pointer section below); older
@@ -159,7 +159,7 @@ read as-is and the verdict layer blocks it, since `<sha>` is not a commit
 sha. Unlike the pointer, this marker line is written into a
 tracked run file, not gitignored: the README and the manual-install doc both
 note the pointer is machine-local and add it to `.gitignore`
-(packages/orchestrator-workflow/README.md:172#"it to the repository's";
+(packages/orchestrator-workflow/README.md:222#"it to the repository's";
 packages/orchestrator-workflow/INSTALL-AGENT.md:68-71#"repository's";
 packages/orchestrator-workflow/INSTALL-AGENT.md:209-211#"repository's").
 
