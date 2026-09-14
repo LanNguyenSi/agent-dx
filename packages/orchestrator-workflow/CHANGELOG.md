@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Reduced the contracts reference's duplicate implementer prose to an explicit
+  route to workflow step 6 and the installed implementer role prompt. The
+  unchanged YAML contract remains the schema surface; conformance tests pin
+  the route, target workflow heading, and role-local verification/commit
+  obligations.
+
 - Verification sets combine trusted preflight execution with ordered repository
   extras through one named, immutable reference. Both roles replay the complete
   set and preserve every child result, limitation, and non-pass outcome; repos

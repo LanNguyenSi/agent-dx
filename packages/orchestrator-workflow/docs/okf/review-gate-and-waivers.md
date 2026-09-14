@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-09-14T13:02:33Z
+timestamp: 2026-09-14T13:57:21Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/agents/reviewer.md
@@ -85,7 +85,7 @@ them. Unknown provenance is resolved before dependent delegation; missing
 fields never choose the contract.
 
 Reviewer findings carry `severity: low | medium | high | critical`
-(`packages/orchestrator-workflow/assets/skill/references/contracts.md:195#"severity: low | medium | high | critical"`, reviewer output contract). Only high and critical block
+(`packages/orchestrator-workflow/assets/skill/references/contracts.md:143#"severity: low | medium | high | critical"`, reviewer output contract). Only high and critical block
 acceptance: "High or critical reviewer findings block final acceptance until
 fixed or explicitly waived... the gate applies to every review pass,
 including the orchestrator's own review of a trivial change"
@@ -96,7 +96,7 @@ waiver bookkeeping applies to them.
 Do not conflate two distinct vocabularies attached to the same review: the
 per-finding `Decision` column (below) and the whole-review
 `acceptance_recommendation: accept | accept_with_notes | fix_required |
-reject` (`packages/orchestrator-workflow/assets/skill/references/contracts.md:201#"acceptance_recommendation: accept | accept_with_notes |"`; mirrored in the findings template's Acceptance
+reject` (`packages/orchestrator-workflow/assets/skill/references/contracts.md:149#"acceptance_recommendation: accept | accept_with_notes |"`; mirrored in the findings template's Acceptance
 Recommendation section,
 `packages/orchestrator-workflow/assets/templates/05-review-findings.md:32#"accept | accept_with_notes | fix_required | reject"`).
 A review can recommend `fix_required` overall while individual low findings
@@ -159,7 +159,7 @@ and set the row's Decision to `accepted`
 (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:225#"unchanged and setting Decision to"`; `05-review-findings.md:16#"| Severity | Category | Description | Suggested Fix | Decision |"`).
 No reader or template schema changes: the existing Decision legend and all
 high/critical waiver and escalation rules continue to apply. The policy is
-pinned in `test/docs-consistency.test.ts:4719#"docs-only closing deltas stay narrowly bounded"`.
+pinned in `test/docs-consistency.test.ts:4701#"docs-only closing deltas stay narrowly bounded"`.
 
 ## The Decision legend in 05-review-findings.md
 
@@ -258,7 +258,7 @@ implementer's claim; a single deterministic check (one test run, `tsc`,
 lint) does not trigger it. The installed `reviewer.md` prompt carries the
 same rule (`reviewer.md:149#"lint) do not trigger this."`), and both output contracts gained a matching
 `reproduction: {method, sample_size, result, matches_implementer_claim}`
-field (`packages/orchestrator-workflow/assets/skill/references/contracts.md:210#"matches_implementer_claim: matched | mismatched |"`, `reviewer.md:185#"residual_risks:"`); `matches_implementer_claim`
+field (`packages/orchestrator-workflow/assets/skill/references/contracts.md:158#"matches_implementer_claim: matched | mismatched |"`, `reviewer.md:185#"residual_risks:"`); `matches_implementer_claim`
 accepts `not_applicable` so a review that never hits the narrow trigger is
 not forced to fabricate a reproduction record.
 
@@ -280,7 +280,7 @@ live, the misfire rule) are out of scope here; see
 previously forced a reviewer return to set `acceptance_recommendation` at
 all, so the orchestrator could be left inferring a verdict from the findings
 list alone. The field is now hard-mandatory in both output-contract copies:
-`packages/orchestrator-workflow/assets/skill/references/contracts.md:218#"instead of inferring one from the findings list."` states it and adds the orchestrator's response when it is
+`packages/orchestrator-workflow/assets/skill/references/contracts.md:166#"instead of inferring one from the findings list."` states it and adds the orchestrator's response when it is
 missing — ask the reviewer to resupply it, rather than infer one from the
 findings, and the installed `reviewer.md:124#"never leave it blank or omit it."` prompt carries the mirrored
 second-person rule ("always set it in your output; never leave it blank or
@@ -293,7 +293,7 @@ Motivated by the same 16-round dogfood as the mutation-probes hardening in
 [subagent-contracts-superset.md](subagent-contracts-superset.md#mutation-probes-requirement-0160)
 (`CHANGELOG.md:#[0.16.0]#"as a hard-mandatory"`, agent-tasks task 16637a96): one reviewer round in
 that dogfood omitted `acceptance_recommendation` entirely.
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:1301#"the orchestrator asks the reviewer to resupply it"` pins
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:1283#"the orchestrator asks the reviewer to resupply it"` pins
 the rule in both the installed prompt and `SKILL.md`'s reference copy.
 
 ## Review-round escalation budget
