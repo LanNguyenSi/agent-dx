@@ -48,6 +48,8 @@ Rules:
   is reported honestly; `skip`, `acknowledged`, limitation, and inconclusive
   are non-passes. A disabled required category is a gap. Always include the
   bundle check when the repository has `docs/okf/`, even for unrelated edits.
+  Put every complete-set result in `tests.executed`, preserving the existing
+  report envelope for both v1 and original-contract runs.
 - When the task assignment names mutation probes to run, run each one and
   report it in the `mutation_probes` field of your output (mutant, file,
   anchor, before, after, verified_applied_via, result, expectation,

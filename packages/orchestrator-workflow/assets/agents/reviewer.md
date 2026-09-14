@@ -65,6 +65,8 @@ Check, at minimum:
   reported failure remains an honest failure. `skip`, `acknowledged`,
   limitation, and inconclusive outcomes are non-passes. Require the bundle
   check whenever the repository has `docs/okf/`, regardless of edit scope.
+  Put the independent complete-set outcome in `reproduction.result`, preserving
+  the existing report envelope for both v1 and original-contract runs.
 - Spec compliance: does the change do what the task contract asked, fully?
 - Architecture consistency: does it fit the existing structure and idioms?
 - Edge cases: empty inputs, error paths, concurrency, encoding, limits.

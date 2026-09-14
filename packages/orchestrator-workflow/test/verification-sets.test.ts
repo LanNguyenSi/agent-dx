@@ -85,6 +85,15 @@ describe("documented verification sets", () => {
     expect(compact(skill)).toContain("never a map entry overwritten by name");
   });
 
+  it("orders frozen set execution around preflight rather than treating inventory as evidence", () => {
+    expect(compact(skill)).toContain(
+      "Any optional earlier inventory acquisition also needs prior command approval and is not full-set evidence.",
+    );
+    expect(compact(skill)).toContain(
+      "definition is approved and frozen, each role attempt executes `before_preflight` extras in declaration order, then preflight, then `after_preflight` extras in declaration order",
+    );
+  });
+
   it("pins complete-role reporting, non-pass outcomes, and the docs bundle check", () => {
     const implementer = readRawAsset("agents/implementer.md");
     const reviewer = readRawAsset("agents/reviewer.md");
@@ -105,6 +114,10 @@ describe("documented verification sets", () => {
     );
     expect(compact(skill)).toContain(
       "a reported failure is an honest failure, not a misfire",
+    );
+    expect(implementer).toContain("Put every complete-set result in `tests.executed`");
+    expect(reviewer).toContain(
+      "Put the independent complete-set outcome in `reproduction.result`",
     );
   });
 });

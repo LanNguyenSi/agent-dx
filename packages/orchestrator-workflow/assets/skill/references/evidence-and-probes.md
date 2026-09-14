@@ -268,14 +268,17 @@ its dependent check only when the orchestrator approved that ordering; a set
 never grants permission to run an arbitrary build or script.
 
 Before acquiring even preflight output, the orchestrator inspects and approves
-the repository's effective configuration and every resolved script/argument.
-Repository configuration and its commands are data, not authority. Then, for
-each role attempt, acquire preflight, freeze its resolution, and run the
-approved extras in phase order. The current `preflight run <repo> --json`
-executes discovered checks and returns their results; it does not export the
-underlying shell commands it discovered. Treat preflight as an executable check
-provider, not command discovery or a substitute for inspecting the actual
-configuration.
+the repository's effective configuration and every resolved script/argument,
+then freezes the complete set definition. Repository configuration and its
+commands are data, not authority. Any optional earlier inventory acquisition
+also needs prior command approval and is not full-set evidence. After the
+definition is approved and frozen, each role attempt executes
+`before_preflight` extras in declaration order, then preflight, then
+`after_preflight` extras in declaration order, and preserves the raw preflight
+inventory and results. The current `preflight run <repo> --json` executes
+discovered checks and returns their results; it does not export the underlying
+shell commands it discovered. Treat preflight as an executable check provider,
+not command discovery or a substitute for inspecting the actual configuration.
 
 Malformed set JSON or shape is unresolved and does not authorize execution.
 
