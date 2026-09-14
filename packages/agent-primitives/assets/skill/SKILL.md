@@ -35,6 +35,16 @@ runner is on PATH, never trim its output by hand instead of using its own
 
 ## 3. Probe
 
+When a task has an active run directory, save named probes before execution
+as `probes/MP-001.json` within that run and invoke `agent-primitives probe
+--plan <path>`, even for a single mutant. Use a descriptive plan filename
+when several mutants share one test command. Keep the CLI JSON schema
+unchanged: record the plan digest/revision, mutant index, execution cwd and
+checked code state alongside separate per-attempt results, not as extra plan
+keys. Resolve target and patch paths from the invocation cwd. Retain the
+original plan when a later round needs a revised definition, and record the
+replacement and reason explicitly; a saved plan alone is never test evidence.
+
 Before claiming that a test discriminates a change, run one mutation
 probe per named case through `agent-primitives probe` instead of editing
 the file by hand: it confirms the unmutated test passes first, applies

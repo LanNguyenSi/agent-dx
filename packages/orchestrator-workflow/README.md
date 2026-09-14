@@ -99,6 +99,12 @@ automatic upgrade. [INSTALL-AGENT.md](INSTALL-AGENT.md) makes the write surface
 and fallback behavior auditable. The link tracks `master`; pin it to a commit
 SHA for a stable audit.
 
+The compact skill entrypoint and its routed references form one installed
+bundle. On a reinstall, the installer checks the core and every required
+reference for local conflicts before activating a new core; it leaves the
+current coherent bundle intact unless an explicitly authorized `--force` run
+replaces the affected files.
+
 ### Manual and advanced CLI installation
 
 ```bash
@@ -167,11 +173,16 @@ it to the repository's `.gitignore`.
 
 Per selected harness:
 
+Each installed skill includes the compact `SKILL.md` entrypoint and every
+regular Markdown file from its adjacent `references/` directory. The entrypoint
+routes run-state/harness, contracts, evidence/probes, and review/recovery work
+to those files; references are part of the installed skill, not optional docs.
+
 | Harness | Files | Notes |
 |---|---|---|
-| Claude Code | `.claude/skills/orchestrator-workflow/SKILL.md`, `.claude/agents/{explorer,task-slicer,implementer,reviewer,advisor}.md`, `CLAUDE.md` | Claude Code reads `CLAUDE.md`, not `AGENTS.md`; the installer adds an additive `@AGENTS.md` import. Subagent models go into the `model:` frontmatter; the read-only explorer, reviewer, and advisor also get `disallowedTools: Edit, Write, NotebookEdit`. |
-| OpenAI Codex | `.agents/skills/orchestrator-workflow/SKILL.md`, `.codex/agents/{explorer,task-slicer,implementer,reviewer,advisor}.toml` | Codex reads `AGENTS.md` natively. Native custom-agent files carry the canonical role instructions plus `model` and `model_reasoning_effort`. Explorer and advisor request a read-only sandbox; reviewer inherits the caller's sandbox so it can run temporary/build checks, while its prompt prohibits source edits. |
-| opencode | `.opencode/skills/orchestrator-workflow/SKILL.md`, `.opencode/agents/{explorer,task-slicer,implementer,reviewer,advisor}.md` | opencode reads `AGENTS.md` natively. Subagents get `mode: subagent`; the read-only explorer, reviewer, and advisor also get `permission: edit: deny`. Model resolution is described below. |
+| Claude Code | `.claude/skills/orchestrator-workflow/{SKILL.md,references/*.md}`, `.claude/agents/{explorer,task-slicer,implementer,reviewer,advisor}.md`, `CLAUDE.md` | Claude Code reads `CLAUDE.md`, not `AGENTS.md`; the installer adds an additive `@AGENTS.md` import. Subagent models go into the `model:` frontmatter; the read-only explorer, reviewer, and advisor also get `disallowedTools: Edit, Write, NotebookEdit`. |
+| OpenAI Codex | `.agents/skills/orchestrator-workflow/{SKILL.md,references/*.md}`, `.codex/agents/{explorer,task-slicer,implementer,reviewer,advisor}.toml` | Codex reads `AGENTS.md` natively. Native custom-agent files carry the canonical role instructions plus `model` and `model_reasoning_effort`. Explorer and advisor request a read-only sandbox; reviewer inherits the caller's sandbox so it can run temporary/build checks, while its prompt prohibits source edits. |
+| opencode | `.opencode/skills/orchestrator-workflow/{SKILL.md,references/*.md}`, `.opencode/agents/{explorer,task-slicer,implementer,reviewer,advisor}.md` | opencode reads `AGENTS.md` natively. Subagents get `mode: subagent`; the read-only explorer, reviewer, and advisor also get `permission: edit: deny`. Model resolution is described below. |
 
 **Read-only posture, honestly stated.** Claude Code disables file-mutation
 tools for explorer, reviewer, and advisor; opencode denies edits for those

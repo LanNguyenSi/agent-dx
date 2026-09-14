@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { parse } from "@iarna/toml";
 import { describe, expect, it } from "vitest";
 
-import { readAsset } from "../src/assets.js";
+import { readAsset as readRawAsset } from "../src/assets.js";
 import { composeCodexAgent } from "../src/codex.js";
 import { runInit } from "../src/init.js";
 import { DEFAULT_MODELS, DEFAULT_TIER, ROLE_TIERS } from "../src/models.js";
@@ -15,6 +15,21 @@ const PACKAGE_DIR = fileURLToPath(new URL("..", import.meta.url));
 const FIXTURE = join(PACKAGE_DIR, "test/fixtures/decision-authority");
 const authorityPin =
   "A reviewer recommendation is not orchestrator acceptance and cannot authorize a critical waiver; only the operator may authorize a critical waiver.";
+const workflowReferences = [
+  "run-state-and-harness.md",
+  "evidence-and-probes.md",
+  "contracts.md",
+  "review-and-recovery.md",
+];
+const readAsset = (path: string) =>
+  path === "skill/SKILL.md"
+    ? [
+        readRawAsset(path),
+        ...workflowReferences.map((name) =>
+          readRawAsset(`skill/references/${name}`),
+        ),
+      ].join("\n\n")
+    : readRawAsset(path);
 
 function rows(document: string): string[][] {
   return document

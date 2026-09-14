@@ -3,7 +3,7 @@ type: module
 title: Operator install and target registry
 description: The operator-level home, manifest schema, locked write API, target registry, and the setup/apply/doctor/adopt commands built on top of it.
 tags: [operator, manifest, registry, lock, doctor, adopt, pin, cli]
-timestamp: 2026-09-05T05:57:53Z
+timestamp: 2026-09-14T10:40:31Z
 sources:
   - packages/orchestrator-workflow/src/operator-manifest.ts
   - packages/orchestrator-workflow/src/routing.ts
@@ -160,14 +160,14 @@ below).
 ## `setup`: operator-level defaults
 
 `setup` writes or refreshes only `<home>/manifest.json`'s `defaults`; it
-touches no repository (cli.ts:312-314#"touches no repository",
+touches no repository (cli.ts:311-313#"touches no repository",
 cli.ts:452#"const result = updateOperatorManifest(home, (current, state) => {",
 the action's only write call, targeting the operator manifest rather than
 any repository). A plain re-run that resolves to the same
 `harnesses`/`profile`/`tiers`/`models`/`routing`
 values as already stored is a no-op write, decided by an
 order/completeness-insensitive comparison, `defaultsEqual`
-(cli.ts:139-152#"return normalize(a) === normalize(b);"); the newly-resolved
+(cli.ts:138-151#"return normalize(a) === normalize(b);"); the newly-resolved
 values are otherwise assembled into `defaults` verbatim
 (cli.ts:426#"const newDefaults: OperatorManifestDefaults = {") and passed
 through `updateOperatorManifest`.
@@ -187,7 +187,7 @@ harnesses/profile/tiers/models/routing precedence is layered:
 2. Absent an explicit `--harness`, harnesses fall back to the target's own
    recorded harnesses, else the operator defaults, else detection
    (cli.ts:705-707#"else the operator defaults, else detected",
-   cli.ts:619-631#"return detected.length > 0 ? detected :").
+   cli.ts:618-630#"return detected.length > 0 ? detected :").
 3. Absent an explicit flag, `profile`/`tiers`/`models`/`routing` fall back to the
    target's own recorded manifest, UNLESS `--sync` is passed, in which case
    the operator defaults override the target's recording instead
@@ -225,7 +225,7 @@ CLI layer, a usage error rather than an implicit precedence rule
 resolves the final stored pin the same way for both `init` and `apply`: a
 `string` sets it, `null` clears it, `undefined` (the default, no flag passed)
 carries the previous manifest's pin forward unchanged
-(init.ts:560-567#"normalizedPin === null ? undefined : (normalizedPin ?? previous?.pin);").
+(init.ts:561-568#"normalizedPin === null ? undefined : (normalizedPin ?? previous?.pin);").
 
 Registration happens even when local edits left some files `conflicted` (the
 apply itself still ran). The pin gate returns before the install is ever
@@ -361,13 +361,13 @@ not-a-directory check land on exit code 1, while `apply`'s own
 ## The pin rule
 
 A repo manifest's optional `pin` field
-(init.ts:120-140#"pin?: string;") records a kit-version an operator wants that
+(init.ts:121-141#"pin?: string;") records a kit-version an operator wants that
 repo to stay at, independent of `version` (the actually-installed kit
 version); `InitOptions.pin` is how a caller sets it: a `string` to set, `null`
 to clear, `undefined` to carry the previous value forward unchanged
-(init.ts:104-112#"pin?: string | null;"). A stored pin that is empty or
+(init.ts:105-113#"pin?: string | null;"). A stored pin that is empty or
 whitespace-only is treated as no pin at all, both on write and on read back
-(init.ts:278-282#"? { pin: candidate.pin.trim() }"). `doctor`'s `versionLag`
+(init.ts:279-283#"? { pin: candidate.pin.trim() }"). `doctor`'s `versionLag`
 computation applies the pin rule precisely: a recorded pin suppresses
 `version-lag` only when the pin equals the repo's own *installed* version;
 that is the expected, deliberate-stay state. When the pin and the installed
@@ -382,7 +382,7 @@ installed version against the running kit version instead
 `runUninstall` takes only a target directory and a force flag; it has no
 operator-home parameter, takes no lock, and never reads or writes the
 operator manifest at all
-(uninstall.ts:119-122#"}): UninstallReport {"). A target that is uninstalled
+(uninstall.ts:122-125#"}): UninstallReport {"). A target that is uninstalled
 therefore stays registered until a `doctor` run reclassifies it: once its
 `.ai/workflow/manifest.json` is gone, `inspectTarget` reports it
 `no-manifest`, and only `doctor --prune` actually removes that row from the

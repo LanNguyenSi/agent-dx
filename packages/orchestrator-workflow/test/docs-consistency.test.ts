@@ -20,7 +20,23 @@ import {
   TIER_DEFS,
 } from "../src/models.js";
 import type { Role, Tier } from "../src/models.js";
-import { readAsset } from "../src/assets.js";
+import { readAsset as readRawAsset } from "../src/assets.js";
+
+const workflowReferences = [
+  "run-state-and-harness.md",
+  "evidence-and-probes.md",
+  "contracts.md",
+  "review-and-recovery.md",
+];
+const readAsset = (path: string) =>
+  path === "skill/SKILL.md"
+    ? [
+        readRawAsset(path),
+        ...workflowReferences.map((name) =>
+          readRawAsset(`skill/references/${name}`),
+        ),
+      ].join("\n\n")
+    : readRawAsset(path);
 
 const PACKAGE_DIR = fileURLToPath(new URL("..", import.meta.url));
 
@@ -1697,7 +1713,7 @@ describe("review-method axis ships method_applied/withdrawn identically in both 
     expect(reviewerMd).toContain("`rigorous` (default)");
   });
 
-  it("SKILL.md step 7 states the review-method selection rule by risk class, including the never-adversarial-on-medium constraint", () => {
+  it("detailed workflow reference states the review-method selection rule by risk class, including the never-adversarial-on-medium constraint", () => {
     expect(skillMd).toContain(
       "Pick it by risk class: `adversarial` at minimum for security judgment, install/deploy scripts, hand-edited lockfiles, cross-major overrides, or anything the operator flags high-risk; `normal` only for docs, renames, or batch cosmetics; `rigorous` otherwise.",
     );
@@ -2064,7 +2080,7 @@ describe("tier-selection policy ships in the AGENTS.md section and both SKILL.md
 
   it('SKILL.md step 8 "Decide acceptance" carries the discretionary advisor-tier rule', () => {
     const start = skillMd.indexOf("**Decide acceptance.**");
-    const handOffIdx = skillMd.indexOf("**Hand off.**");
+    const handOffIdx = skillMd.indexOf("**Hand off.**", start);
     expect(start).toBeGreaterThanOrEqual(0);
     expect(handOffIdx).toBeGreaterThan(start);
     const step = skillMd.slice(start, handOffIdx);
@@ -2578,7 +2594,7 @@ describe("advisor escalation policy ships in the AGENTS.md section and SKILL.md"
 
   it("step 8 (Decide acceptance) names the advisor triggers and that the orchestrator may spawn it before deciding", () => {
     const start = skillMd.indexOf("**Decide acceptance.**");
-    const handOffIdx = skillMd.indexOf("**Hand off.**");
+    const handOffIdx = skillMd.indexOf("**Hand off.**", start);
     expect(start).toBeGreaterThanOrEqual(0);
     expect(handOffIdx).toBeGreaterThan(start);
     const step = skillMd.slice(start, handOffIdx);
@@ -6763,68 +6779,68 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "run-state-lifecycle-and-markers.md",
     kind: "duplicate-citation",
     real: "packages/orchestrator-workflow/test/template-markers.test.ts",
-    start: 39,
-    end: 41,
+    start: 55,
+    end: 57,
     anchorKey: "f3227b28",
-    paragraphLine: 67,
-    secondCitationLine: 89,
+    paragraphLine: 70,
+    secondCitationLine: 92,
     claim:
-      "the first citation attaches the byte-exact pin to the shipped marker literal; line 89 repeats it as the last item of the paragraph's closing enumeration of all three run-base pins in that file (:19, :33, :39-41), which leaves no fourth sibling test for the repeat to have named.",
+      "the first citation attaches the byte-exact pin to the shipped marker literal; line 92 repeats it as the last item of the paragraph's closing enumeration of all three run-base pins in that file (:35, :49, :55-57), which leaves no fourth sibling test for the repeat to have named.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "duplicate-citation",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 542,
-    end: 542,
+    start: 558,
+    end: 558,
     anchorKey: "47aedb12",
-    paragraphLine: 339,
-    secondCitationLine: 344,
+    paragraphLine: 342,
+    secondCitationLine: 347,
     claim:
-      "the paragraph opens by naming the test that pins the 0.11.0 misfire rule, then closes at line 344 (task 06330af2 review round 3 shifted this paragraph +1 by adding a sources entry above it) with an enumeration of that same test's clause-level pins (the section heading, both detection signals, the false-positive scoping language, the resume-or-respawn response paired with the non-evidence rule, and the `03-decisions.md` record requirement) whose last item is the review-gate consequence clause the opening citation already named; the enumeration is complete, so the line-344 repeat is the doc's closing-list convention, not a skipped sibling.",
+      "the paragraph opens by naming the test that pins the 0.11.0 misfire rule, then closes at line 347 with an enumeration of that same test's clause-level pins (the section heading, both detection signals, the false-positive scoping language, the resume-or-respawn response paired with the non-evidence rule, and the `03-decisions.md` record requirement) whose last item is the review-gate consequence clause the opening citation already named; the enumeration is complete, so the line-347 repeat is the doc's closing-list convention, not a skipped sibling.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "duplicate-citation",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1063,
-    end: 1063,
+    start: 1079,
+    end: 1079,
     anchorKey: "03317257",
-    paragraphLine: 426,
-    secondCitationLine: 430,
+    paragraphLine: 429,
+    secondCitationLine: 433,
     claim:
-      "same opening-citation-then-closing-enumeration convention as the 541 entry, here at :1063/line 430 (shifted +1 further by task 06330af2 review round 3's sources entry addition above this paragraph): the closing list walks :1038, :1046, :1051 and ends on the cross-copy equality check the :1063 opening sentence named, leaving no further assertion of that block uncited.",
+      "same opening-citation-then-closing-enumeration convention as the 558 entry, here at :1079/line 433: the closing list walks :1054, :1062, :1067 and ends on the cross-copy equality check the :1079 opening sentence named, leaving no further assertion of that block uncited.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "duplicate-citation",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1219,
-    end: 1219,
+    start: 1235,
+    end: 1235,
     anchorKey: "b19680bb",
-    paragraphLine: 630,
-    secondCitationLine: 636,
+    paragraphLine: 633,
+    secondCitationLine: 639,
     claim:
-      "same convention again, here at :1219/line 636 (task 06330af2 review round 3 re-pointed both the citation, from :1194, and this entry's tracked lines to match, after the new Mutation probe definition fields and expectation split section and a sources entry addition shifted this paragraph down): the closing list walks :1185, :1191, :1198, :1213 and ends on the not-applicable-clause pin the :1219 opening sentence named, leaving no further assertion of that block uncited.",
+      "same convention again, here at :1235/line 639: the closing list walks :1201, :1207, :1214, :1229 and ends on the not-applicable-clause pin the :1235 opening sentence named, leaving no further assertion of that block uncited.",
   },
   {
     doc: "install-fence-mechanics.md",
     kind: "wrong-sibling-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 766,
-    end: 766,
+    start: 767,
+    end: 767,
     anchorKey: "3a4a026f",
     paragraphLine: 37,
-    uncitedLines: [786],
+    uncitedLines: [787],
     claim:
-      "the sentence describes the per-template asset read driven by `listTemplateNames()`; line 766 is the read of a templates-directory asset, while uncited 786 reads the skill asset for a different install step the sentence never mentions.",
+      "the sentence describes the per-template asset read driven by `listTemplateNames()`; line 767 is the read of a templates-directory asset, while uncited 787 reads the skill asset for a different install step the sentence never mentions.",
   },
   {
     doc: "install-fence-mechanics.md",
     kind: "wrong-sibling-anchor",
     real: "packages/orchestrator-workflow/test/init.test.ts",
     start: 197,
-    end: 204,
+    end: 203,
     anchorKey: "67834189",
     paragraphLine: 291,
     uncitedLines: [195],
@@ -6835,13 +6851,13 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "install-fence-mechanics.md",
     kind: "wrong-sibling-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 747,
-    end: 752,
+    start: 748,
+    end: 753,
     anchorKey: "33e8e25a",
     paragraphLine: 334,
-    uncitedLines: [760],
+    uncitedLines: [761],
     claim:
-      "the sentence is explicitly about the path-exists-and-unedited branch; line 752 records the hash inside that branch's own `if`, while uncited 760 is the path-does-not-exist branch's record, which the sentence's own wording excludes.",
+      "the sentence is explicitly about the path-exists-and-unedited branch; line 753 records the hash inside that branch's own `if`, while uncited 761 is the path-does-not-exist branch's record, which the sentence's own wording excludes.",
   },
   {
     doc: "install-fence-mechanics.md",
@@ -6859,25 +6875,25 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "install-fence-mechanics.md",
     kind: "wrong-sibling-anchor",
     real: "packages/orchestrator-workflow/src/uninstall.ts",
-    start: 138,
-    end: 147,
+    start: 141,
+    end: 150,
     anchorKey: "0bf37874",
     paragraphLine: 343,
-    uncitedLines: [152, 157],
+    uncitedLines: [155, 160],
     claim:
-      "the sentence names the containment re-check made before the unlink; line 147 is that guard's own loop exit, while uncited 152 and 157 exit the same loop for a missing file and a non-regular file, two guards this sentence does not describe (the anchor is a bare loop keyword, so it is the cited RANGE, not the anchor, that identifies the branch here).",
+      "the sentence names the containment re-check made before the unlink; line 150 is that guard's own loop exit, while uncited 155 and 160 exit the same loop for a missing file and a non-regular file, two guards this sentence does not describe (the anchor is a bare loop keyword, so it is the cited RANGE, not the anchor, that identifies the branch here).",
   },
   {
     doc: "model-preselection.md",
     kind: "wrong-sibling-anchor",
     real: "packages/orchestrator-workflow/src/init.ts",
-    start: 862,
-    end: 866,
+    start: 924,
+    end: 928,
     anchorKey: "8cd81eb8",
     paragraphLine: 156,
-    uncitedLines: [869],
+    uncitedLines: [932],
     claim:
-      "the :156 sentence names the effort-line computation call and the model argument it is computed from; line 865 is that argument, while uncited 869 passes the computed local into the agent-composition call that only the (now separately cited, at init.ts:867-869) :423 sentence describes.",
+      "the :156 sentence names the effort-line computation call and the model argument it is computed from; line 928 is that argument, while uncited 932 passes the computed local into the agent-composition call that the separately cited `init.ts:930-932` sentence describes.",
   },
   {
     doc: "model-preselection.md",

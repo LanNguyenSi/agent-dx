@@ -72,6 +72,14 @@ Rules:
   `result` alone is not: report it as such (`result` `survived` or
   `not_applicable` with the reason) and resolve it before the next
   reviewer spawn.
+- A persisted probe-plan reference may stand in for a repeated inline mutant
+  definition when it resolves to a path plus immutable revision or hash and the
+  mutant locator/index. Resolve it before running; a missing, stale, or
+  unresolvable reference is `not_applicable` evidence that blocks the relevant
+  proof, not a skipped probe. Keep the legacy inline report fields unchanged:
+  the result still records the applied definition and restoration outcome.
+  Never rewrite a prior plan for new code; record intentional supersession and
+  rationale in run state before using a replacement.
 - When a verify runner is available, run it for the checks the acceptance
   criteria name and report its summary under `tests.executed`; when a
   mutation-probe runner is available, run the named probes through it and

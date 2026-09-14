@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- The skill saves named mutation probes as run-local executable plans before
+  execution, with separate per-attempt evidence and explicit plan revision
+  identity. Single-mutant plans use the existing `--plan` interface; the CLI
+  schema and verdict semantics are unchanged.
+
 - Envelope coverage now uses a small, deterministic 1,111-record fixture for
   the depth-only fallback's root-breadth decision instead of constructing an
   unnecessary 111,111-record tree, so parallel suite load cannot change that

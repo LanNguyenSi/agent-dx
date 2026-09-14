@@ -15,7 +15,7 @@ import { parse } from "@iarna/toml";
 import { describe, expect, it } from "vitest";
 
 import { composeCodexAgent } from "../src/codex.js";
-import { readAsset } from "../src/assets.js";
+import { readAsset as readRawAsset } from "../src/assets.js";
 import { runInit } from "../src/init.js";
 import { DEFAULT_MODELS, DEFAULT_TIER, ROLE_TIERS } from "../src/models.js";
 
@@ -51,6 +51,21 @@ const selectionRule =
   "For a recorded original string-list contract, retain the original `acceptance_criteria` strings and omit only the introduced `acceptance_baseline` and `criterion_evidence` fields; keep all existing role output fields.";
 const unwrap = (text: string) => text.replace(/\s+/g, " ");
 const readFixture = (name: string) => readFileSync(join(FIXTURE, name), "utf8");
+const workflowReferences = [
+  "run-state-and-harness.md",
+  "evidence-and-probes.md",
+  "contracts.md",
+  "review-and-recovery.md",
+];
+const readAsset = (path: string) =>
+  path === "skill/SKILL.md"
+    ? [
+        readRawAsset(path),
+        ...workflowReferences.map((name) =>
+          readRawAsset(`skill/references/${name}`),
+        ),
+      ].join("\n\n")
+    : readRawAsset(path);
 
 // Bounded contract assertions for these Markdown fixtures, not a YAML parser
 // or an acceptance engine. Each inventory entry selects its actual fence.
