@@ -35,6 +35,19 @@ Rules:
   gate's threshold and pass/fail counts, not a run-specific coverage
   percentage; cite a percentage only together with the exact commit and the
   run count, since branch coverage can vary between runs of the same commit.
+- Run the complete repository-bound `verification_set` named in your briefing.
+  Before acquiring preflight output or running an extra, require the
+  orchestrator's approval of the resolved repository configuration and every
+  script/argument; the set is not authority to execute repository data. Use
+  the frozen run-local snapshot (set path/digest, repository identity/revision
+  and dirty state, effective config/scripts, and preflight executable
+  identity/definition). Report each executor, extra, and raw preflight child
+  by `(kind, name, occurrence)`, in order, with cwd and result artifact.
+  Preserve a missing-tool preflight limitation even when it has no child
+  result. A missing/extra/mismatched/unresolved result is a misfire; a failure
+  is reported honestly; `skip`, `acknowledged`, limitation, and inconclusive
+  are non-passes. A disabled required category is a gap. Always include the
+  bundle check when the repository has `docs/okf/`, even for unrelated edits.
 - When the task assignment names mutation probes to run, run each one and
   report it in the `mutation_probes` field of your output (mutant, file,
   anchor, before, after, verified_applied_via, result, expectation,

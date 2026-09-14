@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+- Verification sets combine trusted preflight execution with ordered repository
+  extras through one named, immutable reference. Both roles replay the complete
+  set and preserve every child result, limitation, and non-pass outcome; repos
+  with `docs/okf/` always include bundle validation. The README carries a
+  parseable checked-in-list example; no execution engine or preflight checks
+  are added. Evidence: Pandora batch 51, D-024/D-025—four briefs omitted the
+  bundle check, and CI caught drift that required one additional repair round.
 - The installed skill now has a compact orchestrator entrypoint with explicit
   routed references for contracts, evidence/probes, review/recovery, and
   run-state/harness behavior. Persisted probe plans are optional

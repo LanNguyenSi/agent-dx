@@ -58,6 +58,8 @@ acceptance_criteria:
 context:
   relevant_files: []
   relevant_docs: []
+verification_set:
+  reference: ""
 constraints:
   - ""
 allowed_changes:
@@ -67,6 +69,11 @@ forbidden_changes:
 expected_output:
   format: structured
 ```
+
+`verification_set.reference` identifies the checked-in set selected for this
+repository. The briefing also carries its repository identity and run-local
+frozen snapshot; those resolved values are evidence metadata, not a new
+authority to execute repository configuration or scripts.
 
 ## Implementer output contract
 
@@ -262,6 +269,8 @@ tasks:
       - ""
     dependencies:
       - ""
+    verification_set:
+      reference: ""
     risk: low | medium | high
 recommended_order:
   - T-001
@@ -307,4 +316,3 @@ The advisor first checks whether the escalation was actually necessary
 it was given, it says so plainly instead of manufacturing options to fill
 out the shape. The advisor recommends; it does not decide, and a critical
 risk still goes to the operator.
-

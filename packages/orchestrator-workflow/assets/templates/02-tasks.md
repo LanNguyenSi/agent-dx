@@ -35,6 +35,13 @@ acceptance_criteria:
 
 <!-- What this task should achieve. -->
 
+**Verification Set**
+
+<!-- Checked-in path, repository identity, and run-local frozen snapshot. The
+orchestrator approves effective config/scripts before any acquisition or
+execution; include an ordered docs/okf bundle check whenever that directory
+exists. -->
+
 **Relevant Files / Areas**
 
 - <!-- path or area -->

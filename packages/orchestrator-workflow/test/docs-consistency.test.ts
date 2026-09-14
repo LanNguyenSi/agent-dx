@@ -782,6 +782,7 @@ describe("task slicer output schema is a superset of the implementer input contr
       "goal",
       "acceptance_baseline",
       "acceptance_criteria",
+      "verification_set",
       "constraints",
       "allowed_changes",
       "forbidden_changes",
@@ -814,6 +815,7 @@ describe("task slicer output schema is a superset of the implementer input contr
       "acceptance_criteria",
       "relevant_files",
       "relevant_docs",
+      "verification_set",
       "constraints",
       "allowed_changes",
       "forbidden_changes",
@@ -860,6 +862,7 @@ describe("task slicer output schema is a superset of the implementer input contr
       "allowed_changes:",
       "forbidden_changes:",
       "dependencies:",
+      "verification_set:",
       "risk:",
     ];
     let cursor = -1;

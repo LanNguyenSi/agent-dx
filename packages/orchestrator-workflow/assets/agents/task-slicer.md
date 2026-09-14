@@ -44,6 +44,12 @@ Rules:
   boundaries for the task — which files or areas the implementer may touch
   and must not touch — not implementation instructions. Apply Contract
   selection above to those fields for a recorded original contract.
+- Include a repository-bound `verification_set` reference in every implementer
+  and reviewer briefing: its checked-in path, repository identity, and
+  run-local frozen snapshot. The orchestrator approves effective config and
+  scripts before any preflight acquisition or command execution; the set does
+  not grant that authority. Include an ordered bundle check whenever the
+  repository has `docs/okf/`, regardless of task scope.
 - For every identifier, config value, build context, or documented command a
   task will change, enumerate every file and doc site that references it in
   `relevant_files` or `relevant_docs`, with an annotation for a site the task
@@ -87,6 +93,8 @@ tasks:
       - ""
     dependencies:
       - ""
+    verification_set:
+      reference: ""
     risk: low | medium | high
 recommended_order:
   - T-001

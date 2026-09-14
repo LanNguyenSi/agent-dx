@@ -52,6 +52,19 @@ Check, at minimum:
   green label; implementers cannot revise their own baseline. Compare the
   returned `criterion_evidence` references to every assigned frozen criterion;
   required empty references remain unresolved and block acceptance.
+- Verification set: independently run the complete repository-bound
+  `verification_set` named in the briefing. Before acquisition or execution,
+  confirm the orchestrator approved the resolved effective configuration and
+  scripts; a repository set is not execution authority. Compare the frozen
+  snapshot's set path/digest, repository identity/revision/dirty state,
+  effective config/scripts, and preflight executable identity/definition.
+  Report every ordered `(kind, name, occurrence)` executor, extra, and raw
+  preflight child with cwd and result artifact. A missing tool may be a
+  limitation with no child, never a pass; disabled required categories are
+  gaps. Missing/extra/mismatched/unresolved results are misfires, while a
+  reported failure remains an honest failure. `skip`, `acknowledged`,
+  limitation, and inconclusive outcomes are non-passes. Require the bundle
+  check whenever the repository has `docs/okf/`, regardless of edit scope.
 - Spec compliance: does the change do what the task contract asked, fully?
 - Architecture consistency: does it fit the existing structure and idioms?
 - Edge cases: empty inputs, error paths, concurrency, encoding, limits.
