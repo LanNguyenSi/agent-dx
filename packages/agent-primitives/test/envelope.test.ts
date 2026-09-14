@@ -476,12 +476,15 @@ describe("buildEnvelope: depth-search tuning constants (round-6 pin)", () => {
     // (unbounded relative to this tiny width) all ten would fit instead,
     // so the kept top-level key count is the discriminator. The old
     // depth-6 shape built 111,111 records even though this assertion only
-    // observes the root breadth cap. A three-level tree exercises the same
+    // observes the root breadth cap. A four-level tree exercises the same
     // fallback decision without making the suite's result depend on host
-    // load or garbage-collection pressure.
+    // load or garbage-collection pressure. Four levels (1,111 records) are
+    // the smallest compact shape that still reaches the depth-only fallback;
+    // three levels let the scale search fit first and would not discriminate
+    // the fallback's narrowest-breadth choice.
     const logDir = makeTmpDir();
     const tree = nestedTree({
-      depth: 3,
+      depth: 4,
       arity: 10,
       key: (i) => "k".repeat(250) + "-" + i,
     });

@@ -7,10 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- Envelope coverage now uses a small, deterministic fixture for the
-  depth-only fallback's root-breadth decision instead of constructing an
-  unnecessary 111,111-record tree, so parallel suite load cannot change
-  that test's resource profile. `--require-baseline-evidence` remains
+- Envelope coverage now uses a small, deterministic 1,111-record fixture for
+  the depth-only fallback's root-breadth decision instead of constructing an
+  unnecessary 111,111-record tree, so parallel suite load cannot change that
+  test's resource profile. `--require-baseline-evidence` remains
   deliberately flagless for compatibility; its documentation now gives
   `(?:^|\n)` as the explicit line-start workaround where per-line matching
   is needed, without changing its gate or verdict semantics.
