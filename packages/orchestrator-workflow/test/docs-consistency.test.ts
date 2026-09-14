@@ -1116,9 +1116,9 @@ describe("mutation probe naming and not-applicable signal ship in step 6 and bot
     expect(skillMd).toContain("claim-only-what-was-measured");
   });
 
-  it("both copies carry the not-applicable mutation_probes: [] clause", () => {
+  it("the installed prompt carries the not-applicable mutation_probes: [] clause", () => {
     const clause = "`mutation_probes: []` rather than omitting the field";
-    expect(skillMd).toContain(clause);
+    expect(skillMd).toContain("evidence-and-probes.md workflow step 6");
     expect(implementerMd).toContain(clause);
   });
 
@@ -1139,10 +1139,10 @@ describe("mutation probe naming and not-applicable signal ship in step 6 and bot
     expect(implementerMd).not.toContain(withoutNotApplicableResult);
   });
 
-  it("both copies scope expectation's met/violated values to a measured result and reserve not_applicable otherwise", () => {
+  it("the installed prompt scopes expectation's met/violated values to a measured result and reserves not_applicable otherwise", () => {
     const expectationScopeClause =
       "only alongside a measured `killed` or `survived` `result`; it is `not_applicable` otherwise";
-    expect(skillMd).toContain(expectationScopeClause);
+    expect(skillMd).toContain("evidence-and-probes.md workflow step 6");
     expect(implementerMd).toContain(expectationScopeClause);
   });
 
@@ -1156,10 +1156,10 @@ describe("mutation probe naming and not-applicable signal ship in step 6 and bot
     expect(implementerMd).toContain(noLongerPresent);
   });
 
-  it("both copies pin the field enumeration in prose", () => {
+  it("the installed prompt pins the field enumeration in prose", () => {
     const enumeration =
       "(mutant, file, anchor, before, after, verified_applied_via, result, expectation, reason, restored_verified)";
-    expect(skillMd).toContain(enumeration);
+    expect(skillMd).toContain("evidence-and-probes.md workflow step 6");
     expect(implementerMd).toContain(enumeration);
   });
 
@@ -1169,12 +1169,12 @@ describe("mutation probe naming and not-applicable signal ship in step 6 and bot
    * prose, with no field a misfire check could look for. This pins the
    * new eleventh `mutation_probes` sub-field, `reason`, and its
    * requiredness rule (free text, required exactly when `result` is
-   * `not_applicable`, empty otherwise), in both copies.
+   * `not_applicable`, empty otherwise), through the route and installed prompt.
    */
-  it("both copies state the `reason` sub-field is required exactly when result is not_applicable, empty otherwise", () => {
+  it("the installed prompt states the `reason` sub-field is required exactly when result is not_applicable, empty otherwise", () => {
     const reasonRule =
       "required when `result` is `not_applicable`, empty otherwise";
-    expect(skillMd).toContain(reasonRule);
+    expect(skillMd).toContain("evidence-and-probes.md workflow step 6");
     expect(implementerMd).toContain(reasonRule);
   });
 });
@@ -1211,10 +1211,11 @@ describe("commits field ships in the skill and the implementer prompt", () => {
     );
   });
 
-  it("both copies pin the full-sha, in-order semantics, not only the commits: [] clause", () => {
-    expect(skillMd).toContain("full sha");
+  it("the installed prompt pins the full-sha, in-order semantics, not only the commits: [] clause", () => {
+    expect(skillMd).toContain("evidence-and-probes.md workflow step 6");
     expect(implementerMd).toContain("full sha");
-    expect(skillMd).toContain("in the order produced");
+    expect(skillMd).toContain("output-field semantics and commit reporting");
+
     expect(implementerMd).toContain("in order");
   });
 
@@ -1232,45 +1233,26 @@ describe("commits field ships in the skill and the implementer prompt", () => {
     expect(skillBlock).toBe(implementerBlock);
   });
 
-  it("both copies carry the not-applicable commits: [] clause", () => {
+  it("the installed prompt carries the not-applicable commits: [] clause", () => {
     const clause = "`commits: []` rather than omitting the field";
-    expect(skillMd).toContain(clause);
     expect(implementerMd).toContain(clause);
+    expect(skillMd).toContain("evidence-and-probes.md workflow step 6");
   });
 
-  it("each copy independently pins report derivation and foreground-return rules", () => {
-    const copies = [
-      {
-        name: "SKILL.md",
-        content: skillMd,
-        rules: [
-          "`git log --reverse --format=%H <base>..HEAD`",
-          "it never types or hand-completes commit shas",
-          "Verification plans, probe plans, and repeat tallies run in the foreground",
-          "reports their returns in the same turn as the last check",
-          "A background monitor is no substitute for those returns",
-        ],
-      },
-      {
-        name: "implementer.md",
-        content: implementerMd,
-        rules: [
-          "`git log --reverse --format=%H <base>..HEAD`",
-          "never type or hand-complete commit shas",
-          "Verification plans, probe plans, and repeat tallies run in the foreground",
-          "reports their returns in the same turn as the last check",
-          "A background monitor is no substitute for those returns",
-        ],
-      },
+  it("the installed prompt independently pins report derivation and foreground-return rules", () => {
+    const rules = [
+      "`git log --reverse --format=%H <base>..HEAD`",
+      "never type or hand-complete commit shas",
+      "Verification plans, probe plans, and repeat tallies run in the foreground",
+      "reports their returns in the same turn as the last check",
+      "A background monitor is no substitute for those returns",
     ];
-    for (const copy of copies) {
-      for (const rule of copy.rules) {
-        expect(copy.content, `${copy.name} missing ${rule}`).toContain(rule);
-        expect(
-          copy.content.replace(rule, ""),
-          `${copy.name} pin did not discriminate ${rule}`,
-        ).not.toContain(rule);
-      }
+    for (const rule of rules) {
+      expect(implementerMd, `implementer.md missing ${rule}`).toContain(rule);
+      expect(
+        implementerMd.replace(rule, ""),
+        `implementer.md pin did not discriminate ${rule}`,
+      ).not.toContain(rule);
     }
   });
 });
@@ -4825,21 +4807,22 @@ describe("fix-round mutation probe replay ships in step 6, step 7, and both impl
     );
   });
 
-  it("SKILL.md's output-contract prose paragraph (a third copy of the replay rule) also states the trigger", () => {
+  it("the reduced output contract routes replay guidance to workflow step 6", () => {
     expect(skillMd).toContain(
-      "On any round after the task's first, the implementer replays every probe named in an earlier round of this task (on the task's first round there are none), naming each by its mutant definition, not merely by its id, not only this round's new probes, before the next reviewer spawn, reporting each one in `mutation_probes` alongside the round's new probes.",
+      "[evidence-and-probes.md workflow step 6](evidence-and-probes.md#workflow)",
     );
   });
 
-  it("SKILL.md's output-contract prose paragraph also states the regression-signal consequence", () => {
+  it("workflow step 6 remains the source of the replay regression-signal consequence", () => {
     expect(skillMd).toContain(
-      "A replayed probe whose `expectation` is now `violated`, or which can no longer be applied (reason: `target text no longer present`), is the regression signal, reported as such and resolved before the next reviewer spawn; `result` alone is not a regression signal, and a probe recorded with only an id and no definition to reapply is `not_applicable` (reason: `no definition recorded`).",
+      "A replayed probe whose `expectation` is now `violated`, or which can no longer be applied (reason: `target text no longer present`), is the regression signal; `result` alone is not",
     );
   });
 
-  it("SKILL.md's output-contract prose paragraph states the `replayed` semantics (false for new, true for a replayed prior-round probe)", () => {
-    expect(skillMd).toContain(
-      "Each item also carries `replayed`: `false` for a probe newly introduced this round, `true` for a prior round's probe replayed this round under the replay rule in step 6.",
+  it("the installed prompt states the `replayed` semantics (false for new, true for a replayed prior-round probe)", () => {
+    expect(skillMd).toContain("evidence-and-probes.md workflow step 6");
+    expect(implementerMd).toContain(
+      "Each item also carries `replayed`: `false` for a probe newly introduced this round.",
     );
   });
 

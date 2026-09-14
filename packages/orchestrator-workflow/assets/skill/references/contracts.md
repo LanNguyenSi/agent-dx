@@ -123,62 +123,10 @@ commits:
   - ""
 ```
 
-For v1, return the delegated baseline identity and one `criterion_evidence`
-entry for every assigned criterion. Each `evidence_refs` string resolves
-relative to the directory containing the owning `04-implementation-summary.md`
-and includes a precise artifact or fragment locator when needed. Empty
-`evidence_refs: []` means unresolved; explain why in `risks` or `open_questions`.
-These fields index producer artifacts, without copying their result metadata.
-An automated artifact identifies its attempt, repository, checked revision
-including relevant dirty-state identity, cwd, applied check definition, status,
-exit or abort information, and baseline/criterion identities. A manual artifact
-identifies the reviewed artifact and revision, reviewer, method, pass/fail
-standard, reasoned result, and baseline/criterion identities; it stays manual.
-
-When the task assignment names mutation probes to run, the implementer
-reports each one in the `mutation_probes` field (mutant, file, anchor,
-before, after, verified_applied_via, result, expectation, reason,
-restored_verified); `file` and `anchor` (a line number or a unique
-surrounding string) locate the mutant, `before` and `after` are the
-exact text swapped there, and `expectation` records whether `result`
-matched what the probe was expected to do (`met`) or not (`violated`),
-independent of `result` itself, only alongside a measured `killed` or
-`survived` `result`; it is `not_applicable` otherwise (for example when
-the mutant could not be applied and no `result` was measured). `reason`
-is free text, required when `result` is `not_applicable`, empty
-otherwise, carrying one of two canonical strings that distinguish a
-non-regression from a regression: `no definition recorded` (a
-prior-round probe recorded with only an id, no definition to reapply)
-and `target text no longer present` (a replayed probe whose mutant can
-no longer be applied). When the assignment names none, it returns
-`mutation_probes: []` rather than
-omitting the field, so 'none asked for' is distinguishable from 'asked
-for and not reported'. Each item also carries `replayed`: `false` for a
-probe newly introduced this round, `true` for a prior round's probe
-replayed this round under the replay rule in step 6. On any round after
-the task's first, the implementer replays every probe named in an
-earlier round of this task (on the task's first round there are none),
-naming each by its mutant definition, not merely by its id, not only
-this round's new probes, before the next reviewer spawn, reporting each
-one in `mutation_probes` alongside the round's new probes. A replayed
-probe whose `expectation` is now `violated`, or which can no longer be
-applied (reason: `target text no longer present`), is the regression
-signal, reported as such and resolved before the next reviewer spawn;
-`result` alone is not a regression signal, and a probe recorded with
-only an id and no definition to reapply is `not_applicable` (reason:
-`no definition recorded`).
-
-The `commits` field lists the full sha of every commit the implementer
-produced on the task branch, in the order produced; when the task
-produced no commit, the implementer returns `commits: []` rather than
-omitting the field, so 'did not commit' is distinguishable from
-'forgot to report'.
-
-For a non-empty `commits` field, the implementer pastes `git log
---reverse --format=%H <base>..HEAD`; it never types or hand-completes commit
-shas. Verification plans, probe plans, and repeat tallies run in the foreground, and the
-implementer reports their returns in the same turn as the last check. A
-background monitor is no substitute for those returns.
+Follow [evidence-and-probes.md workflow step 6](evidence-and-probes.md#workflow)
+for implementation evidence, verification, mutation probes, and replay. For
+output-field semantics and commit reporting, follow the installed
+implementer role prompt. Return the selected contract's YAML envelope.
 
 ## Reviewer output contract
 
