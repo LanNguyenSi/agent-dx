@@ -34,8 +34,9 @@ role definitions where available rather than improvising prompts.
 - **Select a contract; slice/delegate a task; validate a role return:** read
   [contracts](references/contracts.md).
 - **Plan, implement, review, decide acceptance, hand off, or assign/assess
-  verification evidence or mutation probes:** read [detailed workflow and
-  probe evidence](references/evidence-and-probes.md). For recovery, invalid
+  verification evidence, verification sets, or mutation probes:** read
+  [detailed workflow and probe evidence](references/evidence-and-probes.md).
+  For recovery, invalid
   returns, inconclusive probes, interrupted, blocked, or partial runs,
   repeated findings, misfires, halts, and escalation, also read
   [review and recovery](references/review-and-recovery.md).
@@ -54,7 +55,8 @@ role definitions where available rather than improvising prompts.
    ordered, testable tasks and their allowed/forbidden changes. Read
    [contracts](references/contracts.md).
 4. **Implement and prove.** Read the detailed workflow before delegating each
-   implementer one narrow task,
+   implementer one narrow task and resolve its repository-bound verification
+   set before authorizing commands,
    preserving independent task dependencies and the selected contract; collect
    required result artifacts. Read
    [evidence and probes](references/evidence-and-probes.md).

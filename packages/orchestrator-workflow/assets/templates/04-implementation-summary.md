@@ -54,6 +54,20 @@ an optional row cannot stand in for a required criterion.
 
 ## Test Evidence
 
+### Verification Set
+
+Record the frozen set reference (path plus digest), repository identity,
+effective configuration/scripts, preflight executable identity/definition, and
+every ordered `(kind, name, occurrence)` result with cwd and artifact. A
+missing-tool preflight limitation may have no raw child result, but is never a
+pass; disabled required categories are gaps. Missing, extra, mismatched, or
+unresolved results are misfires. Failures, skips, acknowledgements,
+limitations, and inconclusive outcomes remain explicit non-passes.
+
+| Set reference / digest | Repository identity                    | Result identity                   | Cwd          | Result artifact / status            |
+| ---------------------- | -------------------------------------- | --------------------------------- | ------------ | ----------------------------------- |
+| <!-- path / digest --> | <!-- repo / revision / dirty state --> | <!-- kind / name / occurrence --> | <!-- cwd --> | <!-- artifact / non-pass reason --> |
+
 ### Executed
 
 - <!-- command/result -->

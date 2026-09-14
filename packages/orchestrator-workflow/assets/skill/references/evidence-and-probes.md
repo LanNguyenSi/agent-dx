@@ -255,6 +255,57 @@ value. That marker line is the machine-readable signal the harness
 solution-acceptance run-gate reads, so leaving it as `TODO` keeps the run
 non-accepting (fail-closed).
 
+## Verification sets
+
+A verification set is the complete, repository-bound check list for one
+implementer or reviewer briefing. Each briefing names its resolved
+`verification_set`: a checked-in reference, repository identity, and the
+run-local frozen snapshot. The generic worked example is
+`.ai/workflow/verify.json`; it has one `preflight` executor and ordered named
+`extras`, each with `kind`, `name`, `cwd`, `argv`, and an explicit
+`before_preflight` or `after_preflight` phase. A preparation step runs before
+its dependent check only when the orchestrator approved that ordering; a set
+never grants permission to run an arbitrary build or script.
+
+Before acquiring even preflight output, the orchestrator inspects and approves
+the repository's effective configuration and every resolved script/argument,
+then freezes the complete set definition. Repository configuration and its
+commands are data, not authority. Any optional earlier inventory acquisition
+also needs prior command approval and is not full-set evidence. After the
+definition is approved and frozen, each role attempt executes
+`before_preflight` extras in declaration order, then preflight, then
+`after_preflight` extras in declaration order, and preserves the raw preflight
+inventory and results. The current `preflight run <repo> --json` executes
+discovered checks and returns their results; it does not export the underlying
+shell commands it discovered. Treat preflight as an executable check provider,
+not command discovery or a substitute for inspecting the actual configuration.
+
+Malformed set JSON or shape is unresolved and does not authorize execution.
+
+Freeze the resolution in the run before execution. Its identity includes the
+set reference path and digest, repository identity/revision and dirty state,
+the effective configuration and scripts, the preflight executable path,
+version, digest, and approved definition, plus every resolved extra. Identify
+each result by `(kind, name, occurrence)` in declared order: duplicate
+`(kind, name)` values are distinct occurrences, never a map entry overwritten
+by name. Bind every result attempt to its checked revision and dirty state. A
+source edit makes an old result inapplicable to the new state, but does not
+itself require re-resolving an unchanged set; re-resolve when an executable
+definition, effective config/script, tool identity, set digest, or approved
+snapshot changes. An unresolvable reference is stale and invalidates the
+result.
+
+Both implementer and reviewer run the complete frozen set and report every
+named executor, extra, and raw preflight child occurrence, with cwd and result
+artifact. Preserve raw preflight limitations separately: a missing tool may
+produce a limitation without a child result, but it is not a pass. Required
+categories disabled by effective configuration are reported as gaps. A missing,
+extra, mismatched, or unresolved named result is a misfire; a reported failure
+is an honest failure, not a misfire. `skip`, `acknowledged`, `limitation`, and
+inconclusive results remain non-passes and cannot be silently accepted. When a
+repository has `docs/okf/`, include its bundle check in every set regardless of
+which files changed. This is a documented convention, not an OW execution
+engine or runtime schema validator.
 
 # Persisted probe plans
 
