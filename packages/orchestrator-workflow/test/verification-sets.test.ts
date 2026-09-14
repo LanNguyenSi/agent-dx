@@ -115,7 +115,9 @@ describe("documented verification sets", () => {
     expect(compact(skill)).toContain(
       "a reported failure is an honest failure, not a misfire",
     );
-    expect(implementer).toContain("Put every complete-set result in `tests.executed`");
+    expect(implementer).toContain(
+      "Put every complete-set result in `tests.executed`",
+    );
     expect(reviewer).toContain(
       "Put the independent complete-set outcome in `reproduction.result`",
     );
