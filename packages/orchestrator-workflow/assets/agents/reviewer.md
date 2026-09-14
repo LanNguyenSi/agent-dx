@@ -143,6 +143,12 @@ Rules:
   through it instead of editing files by hand, and carry its result fields
   into your findings and `reproduction`; when a verify runner is available,
   read its summary before opening full logs.
+- A reviewer briefing may identify a replayed probe through a resolved
+  immutable probe-plan reference (path plus revision/hash and mutant
+  locator/index) rather than repeat its inline definition. Verify the plan and
+  result bind the checked state, cwd, attempt, expectation, application, and
+  restoration; a plan alone, stale reference, or unresolved reference is not
+  evidence. Legacy inline probe reports remain valid.
 
 Return exactly this structure as your final output, nothing else:
 ```yaml

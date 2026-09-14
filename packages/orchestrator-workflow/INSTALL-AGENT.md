@@ -33,7 +33,10 @@ which is mutable. For a stable audit, pin the URL to a commit SHA instead
    If the installer reports conflicts with locally edited files, inspect the
    concrete files and reuse any overwrite authority already granted for that
    scope. Ask before a `--force` re-run only when authority or conflict scope
-   remains unresolved. **The operator
+   remains unresolved. The compact skill core and its required `references/`
+   files are one coherent bundle: the installer checks every destination for
+   conflicts before it activates a new core, and keeps the current bundle
+   unless an authorized `--force` replaces the affected files. **The operator
    path**: when an operator has already run `orchestrator-workflow setup`
    on this machine (an operator manifest exists at
    `<operator home>/manifest.json`, where the operator home is
@@ -168,6 +171,9 @@ steps in the repository you were asked to install into.
    on a re-run. If the command reports conflicts, inspect the concrete files,
    reuse prior overwrite authority for the same scope, and ask before
    `--force` only when authority or scope remains unresolved.
+   The conflict check covers the compact core and the complete required
+   `references/` set before replacing either, so a non-forced re-run preserves
+   the current coherent bundle.
 
    **Operator path**: before running `init`, check whether an operator
    manifest already exists on this machine, at
@@ -193,6 +199,11 @@ steps in the repository you were asked to install into.
    must run inline and sequentially until the automated CLI can generate
    `.codex/agents/*.toml`.
 
+   Before writing any skill core manually, check its destination and every
+   required `references/*.md` destination for local conflicts. If any conflict
+   exists, preserve the current core/reference bundle; write replacements only
+   with the same explicit overwrite authority required by the automated path.
+
    - `.ai/workflow/templates/00-goal.md` through `06-handoff.md` from
      `assets/templates/`, unchanged.
    - `.ai/runs/.gitkeep`, empty. The orchestrator later writes a
@@ -205,7 +216,8 @@ steps in the repository you were asked to install into.
      `<!-- orchestrator-workflow:begin -->` / `<!-- orchestrator-workflow:end -->`
      markers.
    - Claude Code: `.claude/skills/orchestrator-workflow/SKILL.md` from
-     `assets/skill/SKILL.md`. For each role in the chosen profile (all five
+     `assets/skill/SKILL.md`, plus every regular Markdown file in
+     `assets/skill/references/` at the matching `references/` path. For each role in the chosen profile (all five
      for `full`; only `implementer` and `reviewer` for `minimal`),
      `.claude/agents/<role>.md` from
      `assets/agents/<role>.md` with `model: <operator's choice>` added as a
@@ -219,11 +231,12 @@ steps in the repository you were asked to install into.
      `disallowedTools: Edit, Write, NotebookEdit` goes on a new line
      directly after the `effort:` line. Ensure `CLAUDE.md` exists and
      contains a line `@AGENTS.md`.
-   - Codex: `.agents/skills/orchestrator-workflow/SKILL.md`, same skill file.
+   - Codex: `.agents/skills/orchestrator-workflow/SKILL.md` and the same
+     `references/*.md` files.
      Do not hand-author `.codex/agents/*.toml`; report the native-agent
      limitation above and use the inline/sequential role fallback.
    - opencode: `.opencode/skills/orchestrator-workflow/SKILL.md` from
-     `assets/skill/SKILL.md`, unchanged.
+     `assets/skill/SKILL.md`, plus matching `references/*.md`, unchanged.
      For each role in the chosen profile (same set as Claude Code above),
      `.opencode/agents/<role>.md` from `assets/agents/<role>.md`, with the
      frontmatter rewritten to this order: `description:` (unchanged), then

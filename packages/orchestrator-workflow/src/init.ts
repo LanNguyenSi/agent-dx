@@ -4,6 +4,7 @@ import { isAbsolute, join, normalize, sep } from "node:path";
 
 import {
   PACKAGE_VERSION,
+  listSkillReferenceNames,
   listTemplateNames,
   readAgentAsset,
   readAsset,
@@ -784,9 +785,67 @@ export function runInit(options: InitOptions): Report {
   }
 
   const skill = readAsset(join("skill", "SKILL.md"));
+  const skillReferences = listSkillReferenceNames().map((name) => ({
+    name,
+    content: readAsset(join("skill", "references", name)),
+  }));
+  const installSkillBundle = (skillDir: string): boolean => {
+    const files = [
+      { relativePath: join(skillDir, "SKILL.md"), content: skill },
+      ...skillReferences.map((reference) => ({
+        relativePath: join(skillDir, "references", reference.name),
+        content: reference.content,
+      })),
+    ];
+    const conflicts = files.filter(({ relativePath, content }) => {
+      const path = join(targetDir, relativePath);
+      if (!existsSync(path) || force) return false;
+      const recorded = previous?.files[relativePath];
+      const existing = readFileSync(path, "utf8");
+      return (
+        existing !== content &&
+        (recorded === undefined || sha256(existing) !== recorded)
+      );
+    });
+    if (conflicts.length > 0) {
+      for (const { relativePath } of conflicts) {
+        report.conflicted.push(join(targetDir, relativePath));
+      }
+      // Keep the prior coherent bundle ledger intact: the next run must still
+      // recognize its old core and any previously tracked references as
+      // safely replaceable once the conflicting local file is resolved.
+      for (const { relativePath } of files) {
+        const recorded = previous?.files[relativePath];
+        if (recorded !== undefined) installedFiles[relativePath] = recorded;
+      }
+      return false;
+    }
+    for (const { relativePath, content } of files) {
+      installKitFile(relativePath, content);
+    }
+    return true;
+  };
+  const noteRetiredSkillReferences = (skillDir: string): void => {
+    const referencesDir = join(skillDir, "references");
+    const current = new Set(
+      skillReferences.map((reference) => join(referencesDir, reference.name)),
+    );
+    for (const relativePath of Object.keys(previous?.files ?? {})) {
+      if (
+        relativePath.startsWith(`${referencesDir}${sep}`) &&
+        !current.has(relativePath)
+      ) {
+        report.notes.push(
+          `${relativePath}: now untracked because this packaged skill reference is no longer shipped; run \`orchestrator-workflow uninstall\` first next time, or remove it by hand.`,
+        );
+      }
+    }
+  };
 
   if (options.harnesses.includes("claude")) {
-    installKitFile(join(".claude", "skills", SKILL_NAME, "SKILL.md"), skill);
+    const skillDir = join(".claude", "skills", SKILL_NAME);
+    noteRetiredSkillReferences(skillDir);
+    installSkillBundle(skillDir);
     for (const role of rolesForProfile(profile)) {
       installKitFile(
         join(".claude", "agents", `${role}.md`),
@@ -814,7 +873,9 @@ export function runInit(options: InitOptions): Report {
   }
 
   if (options.harnesses.includes("codex")) {
-    installKitFile(join(".agents", "skills", SKILL_NAME, "SKILL.md"), skill);
+    const skillDir = join(".agents", "skills", SKILL_NAME);
+    noteRetiredSkillReferences(skillDir);
+    installSkillBundle(skillDir);
     for (const role of rolesForProfile(profile)) {
       const defaultSelection = routingSelection(
         routing,
@@ -851,7 +912,9 @@ export function runInit(options: InitOptions): Report {
   }
 
   if (options.harnesses.includes("opencode")) {
-    installKitFile(join(".opencode", "skills", SKILL_NAME, "SKILL.md"), skill);
+    const skillDir = join(".opencode", "skills", SKILL_NAME);
+    noteRetiredSkillReferences(skillDir);
+    installSkillBundle(skillDir);
     for (const role of rolesForProfile(profile)) {
       const modelValue =
         routingSelection(routing, "opencode", role, DEFAULT_TIER[role])

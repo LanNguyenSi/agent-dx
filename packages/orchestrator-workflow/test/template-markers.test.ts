@@ -1,6 +1,22 @@
 import { describe, expect, it } from "vitest";
 
-import { readAsset } from "../src/assets.js";
+import { readAsset as readRawAsset } from "../src/assets.js";
+
+const workflowReferences = [
+  "run-state-and-harness.md",
+  "evidence-and-probes.md",
+  "contracts.md",
+  "review-and-recovery.md",
+];
+const readAsset = (path: string) =>
+  path === "skill/SKILL.md"
+    ? [
+        readRawAsset(path),
+        ...workflowReferences.map((name) =>
+          readRawAsset(`skill/references/${name}`),
+        ),
+      ].join("\n\n")
+    : readRawAsset(path);
 
 /**
  * The run templates carry a machine-readable solution-acceptance marker that a

@@ -6,7 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-- The review template now records each reviewer's returned method in the machine-readable `method-applied[<round>]` marker directly below its `review-method` declaration. The marker is read by grounding-mcp's completeness reader; the accompanying `Method:` line remains its constrained prose fallback. SKILL.md step 7 requires the orchestrator to write every returned value and resupply an omission or mismatch before acceptance. See agent-grounding #235.
+- The installed skill now has a compact orchestrator entrypoint with explicit
+  routed references for contracts, evidence/probes, review/recovery, and
+  run-state/harness behavior. Persisted probe plans are optional
+  runner-supported artifacts: immutable plan identity and mutant locator may
+  be delegated by reference, but only a checked-state result is evidence.
+  Missing/stale references block proof; intentional supersession is recorded,
+  never silently rewritten. Recovery records a cursor in existing run state
+  for invalid returns, incomplete probes, interrupted work, and bounded
+  repeated findings without changing waiver authority or requiring a CLI
+  schema.
+- The review template now records each reviewer's returned method in the machine-readable `method-applied[<round>]` marker directly below its `review-method` declaration. The marker is read by grounding-mcp's completeness reader; the accompanying `Method:` line remains its constrained prose fallback. The detailed workflow reference requires the orchestrator to write every returned value and resupply an omission or mismatch before acceptance. See agent-grounding #235.
 ## [0.34.0] - 2026-09-13
 
 - Reviewer findings now carry `introduced_by_delta: yes | no | unknown`.

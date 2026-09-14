@@ -78,6 +78,21 @@ where it lives in the row's own cell.
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | <!-- round --> | <!-- mutant --> | <!-- file --> | <!-- anchor --> | <!-- before --> | <!-- after --> | <!-- verified_applied_via --> | <!-- result --> | <!-- expectation --> | <!-- reason --> | <!-- restored_verified --> | <!-- replayed --> |
 
+### Optional Probe Plan and Result Index
+
+An optional runner-supported probe plan may be referenced here by relative
+path, immutable revision/hash, and mutant locator/index. It helps later
+assignments locate an unchanged definition but is never evidence by itself.
+Each result reference binds that plan to checked state, cwd, attempt,
+expectation, applied mutant, and restoration. Missing, stale, or unresolved
+references block the relevant proof rather than count as skipped. Preserve the
+legacy table above; when a source move requires a replacement plan, record its
+intentional supersession and rationale in `03-decisions.md`.
+
+| Plan reference | Immutable revision/hash | Mutant locator/index | Result reference |
+|---|---|---|---|
+| <!-- relative plan path --> | <!-- immutable id --> | <!-- locator --> | <!-- relative result artifact --> |
+
 ## Risks / Notes
 
 - <!-- note -->
