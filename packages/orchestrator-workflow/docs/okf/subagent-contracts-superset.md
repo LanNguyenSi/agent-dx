@@ -70,8 +70,6 @@ default models (`DEFAULT_MODELS`,
 `packages/orchestrator-workflow/src/models.ts:80-85#"advisor:"`) are out of this doc's
 lane; see [model-preselection.md](model-preselection.md).
 
-## Where each contract lives, and what keeps the copies equal
-
 ## Repository-bound verification sets
 
 Every implementer and reviewer briefing names one repository-bound
@@ -82,6 +80,8 @@ is a misfire, not a pass; skipped, waived, or inconclusive results remain
 non-passing evidence. The README's worked `.ai/workflow/verify.json` example
 defines ordered extras around a truthful preflight JSON acquisition: that JSON
 reports results, never discovered shell commands.
+
+## Where each contract lives, and what keeps the copies equal
 
 Every role's output contract is written twice: once in `SKILL.md`'s own
 fenced yaml block (the orchestrator's reference copy), once in the role's
@@ -104,7 +104,7 @@ reviewer tier. The rule preserves the existing requirement that every change
 receives review judgment, including the orchestrator's self-review of a
 trivial change.
 
-- Explorer: `packages/orchestrator-workflow/assets/skill/references/contracts.md:304#"risk: low | medium | high"`
+- Explorer: `packages/orchestrator-workflow/assets/skill/references/contracts.md:1#"## Explorer output contract"`
   (`## Explorer output contract`) vs.
   `packages/orchestrator-workflow/assets/agents/explorer.md:48-70#"recommendation:"`.
 - Implementer: `packages/orchestrator-workflow/assets/skill/references/contracts.md:78#"## Implementer output contract"`
@@ -211,10 +211,10 @@ Current v1 per-task slicer shape
 (`packages/orchestrator-workflow/assets/skill/references/contracts.md:236#"## Task slicer output contract"`): `id, title,
 goal, acceptance_baseline, acceptance_criteria, relevant_files, relevant_docs,
 constraints, suggested_tests, allowed_changes, forbidden_changes, dependencies,
-risk`, in that order. The v1 subagent input contract
+verification_set, risk`, in that order. The v1 subagent input contract
 (`packages/orchestrator-workflow/assets/skill/references/contracts.md:40#"## Subagent input contract"`) requires
 `role, task_id, goal, acceptance_baseline, acceptance_criteria,
-context.relevant_files, context.relevant_docs, constraints, allowed_changes,
+context.relevant_files, context.relevant_docs, verification_set, constraints, allowed_changes,
 forbidden_changes, expected_output.format`. The slicer also supplies planning
 fields such as title, suggested tests, dependencies and risk. Under the copy
 rule at `packages/orchestrator-workflow/assets/skill/references/contracts.md:284#"rather than inventing new field"`, the
