@@ -1713,7 +1713,7 @@ describe("review-method axis ships method_applied/withdrawn identically in both 
     expect(reviewerMd).toContain("`rigorous` (default)");
   });
 
-  it("SKILL.md step 7 states the review-method selection rule by risk class, including the never-adversarial-on-medium constraint", () => {
+  it("detailed workflow reference states the review-method selection rule by risk class, including the never-adversarial-on-medium constraint", () => {
     expect(skillMd).toContain(
       "Pick it by risk class: `adversarial` at minimum for security judgment, install/deploy scripts, hand-edited lockfiles, cross-major overrides, or anything the operator flags high-risk; `normal` only for docs, renames, or batch cosmetics; `rigorous` otherwise.",
     );
@@ -6839,7 +6839,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "install-fence-mechanics.md",
     kind: "wrong-sibling-anchor",
     real: "packages/orchestrator-workflow/test/init.test.ts",
-    start: 196,
+    start: 197,
     end: 203,
     anchorKey: "67834189",
     paragraphLine: 291,
