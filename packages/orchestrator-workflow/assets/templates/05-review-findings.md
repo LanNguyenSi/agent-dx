@@ -5,12 +5,12 @@
 <!-- Short summary. -->
 
 <!-- review-method[<round>] = normal|rigorous|adversarial -->
+<!-- method-applied[<round>] = normal|rigorous|adversarial -->
 Method: normal | rigorous | adversarial (the `review_method` named in this
-round's briefing and the `method_applied` the reviewer returned; not parsed
-by the grounding-mcp completeness reader yet).
-
+round's briefing and the `method_applied` the reviewer returned). Write one
+declaration per line. A filled `Method:` value may be followed only by
+end-of-sentence punctuation or one balanced, non-nested parenthetical aside.
 ## Findings
-
 <!-- The Severity and Decision column headers below are load-bearing: the orchestrator-workflow completeness reader locates this table by its header row and verifies unresolved findings from those two columns. Do not rename or drop them. -->
 <!-- Decision legend: a high/critical finding counts as RESOLVED (the completeness gate passes) only when its Decision is `accepted` (finding addressed or consciously accepted) or `defer` (recorded as a tracked follow-up). Every other value (`fix`, `reject`, blank, `open`, `TODO`) leaves the finding unresolved and ARMS the gate until you change the Decision to `accepted`/`defer` or drop the finding. This mirrors grounding-mcp's RESOLVED_DECISIONS = {accepted, defer}; keep the two in sync. -->
 | Severity | Category | Description | Suggested Fix | Decision |

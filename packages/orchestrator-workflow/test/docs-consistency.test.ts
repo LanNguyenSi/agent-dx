@@ -8222,3 +8222,15 @@ describe("commit-report command order", () => {
     }
   });
 });
+
+describe("review-method recording requirement", () => {
+  it("SKILL.md step 7 records every returned method_applied and resupplies omissions or mismatches before acceptance", () => {
+    const skillMd = unwrap(readAsset("skill/SKILL.md"));
+    expect(skillMd).toContain(
+      "for every reviewer return, write its `method_applied` into the matching `<!-- method-applied[<round>] = <value> -->` marker",
+    );
+    expect(skillMd).toContain(
+      "before acceptance, resupply a missing or mismatched `method_applied`, do not infer it from findings or accept the round without a matching returned value.",
+    );
+  });
+});

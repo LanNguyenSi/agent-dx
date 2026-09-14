@@ -163,7 +163,7 @@ pinned in `test/docs-consistency.test.ts:4700#"docs-only closing deltas stay nar
 SKILL.md step 7 is the transfer instruction: "transfer each finding from the
 reviewer output contract into the table's columns as-is, keeping the
 Severity and Decision headers unchanged, since those two are what the
-orchestrator-workflow completeness reader verifies" (`SKILL.md:287#"orchestrator-workflow completeness reader verifies."`).
+orchestrator-workflow completeness reader verifies" (`SKILL.md:287#"those two are what the orchestrator-workflow completeness reader verifies; for every"`).
 Immediately after that quote, SKILL.md step 7 also carries a 0.13.0 addition
 on the same table's placeholder/legend row (`SKILL.md:291#"rows as the template never having been filled in. When"`): replace it
 when transferring findings, delete it outright for a genuine zero-findings
