@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
-
+- The review template now records each reviewer's returned method in the machine-readable `method-applied[<round>]` marker directly below its `review-method` declaration. The marker is read by grounding-mcp's completeness reader; the accompanying `Method:` line remains its constrained prose fallback. SKILL.md step 7 requires the orchestrator to write every returned value and resupply an omission or mismatch before acceptance. See agent-grounding #235.
 ## [0.34.0] - 2026-09-13
 
 - Reviewer findings now carry `introduced_by_delta: yes | no | unknown`.

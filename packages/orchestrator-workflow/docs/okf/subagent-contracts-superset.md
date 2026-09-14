@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-13T13:19:16Z
+timestamp: 2026-09-14T07:33:55Z
 sources:
   - packages/orchestrator-workflow/assets/skill/SKILL.md
   - packages/orchestrator-workflow/assets/agents/explorer.md
@@ -689,23 +689,22 @@ not-omitted-vs-empty distinction already applied to `mutation_probes`
 and `commits` above
 (`packages/orchestrator-workflow/assets/agents/reviewer.md:41#"when nothing was withdrawn. Report the method you actually"`
 and
-`packages/orchestrator-workflow/assets/skill/SKILL.md:601#"when nothing was withdrawn. Until a"`).
+`packages/orchestrator-workflow/assets/skill/SKILL.md:605#"when nothing was withdrawn."`).
 
-Machine enforcement is deliberately partial. No reader parses the
-per-round `Method` line `assets/templates/05-review-findings.md` carries
-outside the pinned Findings table yet; until the grounding-mcp reader
-parses that marker (tracked as agent-grounding follow-up 5df7b809), the
-orchestrator checks by hand that a reviewer's returned `method_applied`
-matches the briefing's named `review_method`, resupplying a mismatch or
-omission rather than accepting it, worded identically in substance in
-both copies
-(`packages/orchestrator-workflow/assets/skill/SKILL.md:604#"matches the briefing's"`).
-This corrects an earlier draft of this rule that read as a completeness
-gate with no enforcing reader (review round 1, pandora task 226c532c,
-finding class fixed by D-004 in that run); the template's own "not
-parsed by the grounding-mcp completeness reader yet" sentence stays the
-single source of the mechanical status, and this doc does not restate a
-stronger claim than that sentence carries.
+The grounding-mcp completeness reader enforces the per-round pairing in
+`assets/templates/05-review-findings.md`: a declared `review-method` must
+have an equal-or-stronger matching `method-applied` value. The explicit
+marker is preferred; the immediately following `Method:` line is a
+constrained fallback only when it names one declaration per line, rather
+than sharing a summary across multiple declarations. A value on that
+fallback line is followed solely by end-of-sentence punctuation or by one
+balanced, non-nested parenthetical aside; another clause or a nested aside
+is malformed. The orchestrator writes every returned `method_applied` into
+the matching marker and resupplies an omission or mismatch before
+acceptance, as required by SKILL.md step 7; reader enforcement does not
+authorize inference from findings or from a findings-table decision; the
+check is per round and does not infer a return from a finding's free prose.
+A missing return remains a blocker until the reviewer resupplies it.
 
 `packages/orchestrator-workflow/test/docs-consistency.test.ts:1671#"both copies carry the method_applied field with the three-method enum"`
 pins the field in both copies,

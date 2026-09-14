@@ -133,10 +133,10 @@ describe("solution-acceptance markers in run templates", () => {
  * per-round `review_method`/`method_applied` note to 05-review-findings.md,
  * deliberately outside the pinned Findings table (whose Severity/Decision
  * header row the completeness reader locates the table by, per the tests
- * above). The reader does not parse this note yet (D-002, run
- * 2026-09-11-review-method-axis); a follow-up task adds that. This pins the
- * marker's shape and its position above the Findings heading, so a future
- * edit cannot silently move it inside the guarded table or drop it.
+ * above). The grounding-mcp reader parses both markers; these tests pin their
+ * shapes and position above the Findings heading, so a future edit cannot
+ * silently move either one inside the guarded table or drop it. The explicit
+ * method-applied marker has a lockstep pin below.
  */
 describe("05-review-findings.md carries a review-method note per round, outside the Findings table", () => {
   const reviewTemplate = readAsset("templates/05-review-findings.md");
@@ -168,9 +168,9 @@ describe("05-review-findings.md carries a review-method note per round, outside 
     expect(methodParagraph).toContain("method_applied");
   });
 
-  it("states the grounding-mcp completeness reader does not parse this note yet", () => {
+  it("states the reader-backed method-applied grammar", () => {
     expect(reviewTemplate).toContain(
-      "not parsed\nby the grounding-mcp completeness reader yet",
+      "<!-- method-applied[<round>] = normal|rigorous|adversarial -->",
     );
   });
 
@@ -450,5 +450,29 @@ describe("04-implementation-summary.md Mutation Probes subsection", () => {
       expect(skillMd).toContain(phrase);
       expect(implementationTemplate).toContain(phrase);
     }
+  });
+});
+
+describe("05-review-findings.md method-applied reader grammar", () => {
+  const reviewTemplate = readAsset("templates/05-review-findings.md");
+
+  it("carries method-applied directly below review-method, byte-exactly", () => {
+    // Lockstep with grounding-mcp's OW_REVIEW_METHOD_PLACEHOLDER_MARKER and
+    // its sibling method-applied grammar in ow-run-completeness.ts.
+    const lines = reviewTemplate.split(/\r?\n/);
+    const reviewMethodIndex = lines.indexOf(
+      "<!-- review-method[<round>] = normal|rigorous|adversarial -->",
+    );
+    expect(reviewMethodIndex).toBeGreaterThanOrEqual(0);
+    expect(lines[reviewMethodIndex + 1]).toBe(
+      "<!-- method-applied[<round>] = normal|rigorous|adversarial -->",
+    );
+  });
+
+  it("states the one-line declaration and constrained Method fallback grammar", () => {
+    expect(reviewTemplate).toContain("Write one\ndeclaration per line.");
+    expect(reviewTemplate).toContain(
+      "only by\nend-of-sentence punctuation or one balanced, non-nested parenthetical aside.",
+    );
   });
 });

@@ -284,7 +284,7 @@ directory and the subagents.
    reverted), and maintainability. Findings go to `05-review-findings.md`;
    transfer each finding from the reviewer output contract into the table's
    columns as-is, keeping the Severity and Decision headers unchanged, since
-   those two are what the orchestrator-workflow completeness reader verifies.
+   those two are what the orchestrator-workflow completeness reader verifies; for every reviewer return, write its `method_applied` into the matching `<!-- method-applied[<round>] = <value> -->` marker in `05-review-findings.md`, using the same round key as the briefing's `review-method` marker and one declaration per line; before acceptance, resupply a missing or mismatched `method_applied`, do not infer it from findings or accept the round without a matching returned value.
    Replace the shipped placeholder/legend row with the transferred findings;
    for a genuine zero-findings review, delete that row instead of leaving it in
    place, since the completeness reader treats an untouched placeholder row
@@ -596,13 +596,13 @@ Review-round escalation budget's trigger.
 `introduced_by_delta` records whether a finding is attributable to the reviewed delta: `no` requires a named base build and replay in `reproduction`, is transferred parenthetically in the `Description` field of `05-review-findings.md` without renaming `Severity`/`Decision`, and follows the ordinary gate; only `yes`/`unknown` participate in bounded-round rules.
 
 `method_applied` echoes the `review_method` named in the briefing (see step
-7); `withdrawn` lists each finding the reviewer proposed and then retracted
-under the withdrawal rule (`rigorous` and `adversarial` only), with its
-reason; emit `withdrawn: []` when nothing was withdrawn. Until a
-grounding-mcp reader parses the marker (tracked as a cross-repo
-follow-up), the orchestrator checks by hand that the return's
-`method_applied` matches the briefing's `review_method`; a mismatch or
-omission is resupplied, not accepted.
+7); grounding-mcp parses the matching `method-applied[<round>]` marker.
+The orchestrator records every returned value before acceptance, writes it
+in the matching marker, and resupplies a mismatch or omission rather than
+accepting it. `withdrawn`
+lists each finding the reviewer proposed and then retracted under the
+withdrawal rule (`rigorous` and `adversarial` only), with its reason;
+emit `withdrawn: []` when nothing was withdrawn.
 
 ## Task slicer output contract
 
