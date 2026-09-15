@@ -17,6 +17,7 @@ const PackIdSchema = z.enum([
   "code-slop",
   "ui-slop",
   "placement-slop",
+  "workflow-slop",
 ]);
 
 const RuleOverrideSchema = z.object({
@@ -91,6 +92,23 @@ const PlacementConfigSchema = z.object({
   allow: z.array(RegexPatternSchema).optional(),
 });
 
+// `workflow.allowExpressions` entries are the bare expression body only
+// (e.g. "matrix.node"), matched against the trimmed text already stripped
+// of its `${{`/`}}` wrapper (see `isAllowedExpression` in
+// packs/workflow-slop.ts) — an entry that still carries the wrapper can
+// never match anything, which would otherwise fail silently exactly like
+// the other misconfigurations this file rejects at load time.
+const AllowExpressionSchema = z.string().refine(
+  (e) => !e.includes("${{") && !e.includes("}}"),
+  (e) => ({
+    message: `workflow.allowExpressions entries are the bare expression body only (e.g. "matrix.node"), not the "\${{ ... }}" wrapper, remove the "\${{"/"}}" from "${e}"`,
+  }),
+);
+
+const WorkflowConfigSchema = z.object({
+  allowExpressions: z.array(AllowExpressionSchema).optional(),
+});
+
 // A pattern written as `./foo/**/*.md` means the same thing as `foo/**/*.md`
 // once it's matched against an already-relativized path (`path.relative`
 // never produces a leading "./"), but users naturally type the "./" prefix.
@@ -109,6 +127,7 @@ const ConfigFileSchema = z.object({
   corpus: z.boolean().optional(),
   entrypointGlobs: z.array(EntrypointGlobSchema).optional(),
   placement: PlacementConfigSchema.optional(),
+  workflow: WorkflowConfigSchema.optional(),
 });
 
 export type ConfigFile = z.infer<typeof ConfigFileSchema>;
@@ -120,6 +139,7 @@ const DEFAULT_PACKS: Record<PackId, boolean> = {
   "code-slop": false,
   "ui-slop": false,
   "placement-slop": false,
+  "workflow-slop": false,
 };
 
 const DEFAULT_IGNORES = [
@@ -159,6 +179,7 @@ export function defaultConfig(): ResolvedConfig {
     treatAsCode: [],
     entrypointGlobs: [],
     placement: { markers: [], instructionGlobs: [], allow: [] },
+    workflow: { allowExpressions: [] },
   };
 }
 
@@ -183,6 +204,9 @@ export function mergeConfig(file: ConfigFile): ResolvedConfig {
         stripLeadingDotSlash,
       ),
       allow: file.placement?.allow ?? [],
+    },
+    workflow: {
+      allowExpressions: file.workflow?.allowExpressions ?? [],
     },
   };
 }

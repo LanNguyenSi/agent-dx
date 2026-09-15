@@ -58,8 +58,9 @@ Each pack groups related rules. Enable or disable per repo via `slop.config.yml`
 | `code-slop` (9 rules)      | off, opt in via `--pack`                | try/catch around code that cannot throw, defaults on required-typed params, empty / rethrow catches, `async` without `await`, backcompat shims for unreleased APIs, phantom imports of undeclared packages, stub function bodies, unused exports, single-callsite helpers  |
 | `ui-slop` (6 rules)        | off, opt in via `--pack ui-slop`        | Gradient text, purple+cyan AI palettes, animated layout properties, skipped heading levels, plus opt-in monospace-everywhere and flat type hierarchy (info-level). Scans CSS / SCSS / LESS / HTML / JSX.                                                                   |
 | `placement-slop` (5 rules) | off, opt in via `--pack placement-slop` | Org-, machine-, and point-in-time-bound evidence leaking into reusable instruction files (`SKILL.md`, `AGENTS.md`, `CLAUDE.md`, agent/skill prompt files): home paths, dated evidence, tally phrases (`n=8`, `p=0.016`, `so far`), opaque ids, and configured org markers. <!-- slop-detector:disable-line=placement-slop --> |
+| `workflow-slop` (2 rules)  | off, opt in via `--pack workflow-slop`  | GitHub Actions workflow injection: a `${{ ... }}` expression interpolated directly into a `run:` shell script, unless it is one of the documented non-attacker-controllable contexts, plus a fail-closed check that a scanned workflow file actually parsed as YAML. Scans `.github/workflows/*.yml`/`*.yaml`. |
 
-The four opt-in packs (`comment-slop`, `code-slop`, `ui-slop`, `placement-slop`) are off by default because their false-positive surface in mixed codebases is wider; opt in with `--pack <id>` or set `packs.<id>: true` in `slop.config.yml`.
+The five opt-in packs (`comment-slop`, `code-slop`, `ui-slop`, `placement-slop`, `workflow-slop`) are off by default because their false-positive surface in mixed codebases is wider; opt in with `--pack <id>` or set `packs.<id>: true` in `slop.config.yml`.
 
 Run `slop-detector list-rules` for the full rule catalogue with severities and rationales.
 
@@ -173,6 +174,87 @@ With that config, `install from https://github.com/example-org/kit` does not fir
 
 An `allow` match only excuses the span it actually matched, across every rule in the pack, including `block`-severity ones like `home-path` and `org-marker`: it is not a whole-line escape hatch. A home path, a date, or a tally phrase elsewhere on the same line as an allowed URL still fires, since it falls outside the span the `allow` pattern matched. An `allow` span also never crosses a line break, so a phrase wrapped across one (e.g. a tally phrase split by a line wrap) cannot be excused by `allow`; use a per-line disable comment for that case instead. To silence a single rule (or a single occurrence) instead, use a per-line disable comment: `<!-- slop-detector:disable-line=placement-slop/home-path -->` or `<!-- slop-detector:disable-next-line=placement-slop -->` (see [Per-line opt-out](#per-line-opt-out)).
 
+### `workflow-slop` by example
+
+Opt in with `--pack workflow-slop`. The main rule, `run-expression`, only
+looks at `run:` scalars inside `.github/workflows/*.yml`/`*.yaml` (a
+`${{ ... }}` in `name:`, `if:` or `env:` is never a finding, and neither is
+a `run` key inside a `uses:` step's `with:` input block; a `with:` mapping
+that is not a `uses:` step's input block is still scanned, fail-closed). GitHub substitutes `${{ ... }}`
+expressions into the workflow's YAML text *before* the shell ever sees
+`run:`, so an expression whose value an attacker can influence — a step
+output computed from a PR title, a branch or tag name, an issue body —
+becomes program text in that shell, not a string argument. This pack
+exists because of a real incident: an agent-tasks release workflow
+interpolated `${{ steps.target.outputs.expected }}` (derived from a
+pushed tag) straight into a `run:` body; a tag like
+`mcp-server-v0.0.0";id;"` passes `git check-ref-format`, and the job
+(holding `id-token: write` and publish rights) executed the injected
+command. The fix is always the same shape: assign the value to an
+`env:` variable and reference it as `$NAME`, where the shell treats it
+as inert data.
+
+```yaml
+# BLOCKED by workflow-slop/run-expression
+- id: target
+  run: echo "expected=$TAG" >> "$GITHUB_OUTPUT"
+- run: npm publish --tag ${{ steps.target.outputs.expected }}
+```
+
+```yaml
+# fixed: routed through env:
+- id: target
+  run: echo "expected=$TAG" >> "$GITHUB_OUTPUT"
+- env:
+    EXPECTED: ${{ steps.target.outputs.expected }}
+  run: npm publish --tag "$EXPECTED"
+```
+
+The rule is YAML-structure-aware (it parses the file and locates the
+actual `run:` value node, not a text-shaped guess), so it finds every
+`${{ ... }}` inside a `run:` scalar regardless of style: plain,
+single- or double-quoted, or a block scalar (`|`/`>`) spanning many
+lines.
+
+**Allowlist.** An expression is only excused when the *entire*
+`${{ ... }}` body (whitespace-trimmed) is one of the following — this
+rule does not parse the GitHub Actions expression grammar, so a
+compound expression (a function call, a comparison, a concatenation)
+built out of only-safe pieces is still flagged rather than risk
+misjudging a mixed expression as safe:
+
+| Allowed | Why |
+| --- | --- |
+| `github.workspace`, `github.action_path`, `github.run_id`, `github.run_number`, `github.run_attempt`, `github.sha`, `github.job`, `github.repository`, `github.repository_owner`, `github.actor`, `github.event_name`, `github.workflow`, `github.server_url`, `github.api_url`, `github.token`, `runner.temp`, `runner.os`, `runner.arch`, `runner.tool_cache` | Runtime-assigned metadata, not free text an external contributor supplies. Verified against GitHub's [contexts reference](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts): each is documented as an identifier, a URL, a path, a count, or a fixed enum — for example `github.actor` is "the username of the user that triggered the initial workflow run" (a username, not free text), `github.run_id` is "a unique number for each workflow run." |
+| `secrets.<NAME>` (any name) | The *value* of a secret is never attacker-supplied; only the workflow author chooses which secret names exist. |
+| `steps.<id>.outcome`, `steps.<id>.conclusion` (any step id) | Not step *outputs*. GitHub's contexts reference documents both as exactly one of `success`, `failure`, `cancelled`, or `skipped`, assigned by the runner itself — never attacker-influenced text, unlike `steps.<id>.outputs.<name>` (a value the step's own script chose to emit), which stays flagged. |
+
+**Not allowed** (verified against GitHub's [security hardening guide](https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions), which walks through exactly this `run:`-injection shape using `github.event.pull_request.title` as its example of untrusted input, and the contexts reference, which documents `github.head_ref` as "the `head_ref` or source branch of the pull request" — a value a forked contributor names themselves): `github.ref`, `github.ref_name`, `github.head_ref`, `github.base_ref`, `github.event.*`, `steps.*.outputs.*`, `needs.*.outputs.*`, `inputs.*`, `env.*`, `vars.*`. The documented fix for every one of these is the same `env:`-routing pattern shown above.
+
+**`matrix.*` is deliberately not in the default allowlist**, even though a matrix built entirely from literals in the workflow is safe: this rule inspects one `run:` scalar in isolation and has no way to confirm, from that scalar alone, that every value the matrix can take is a literal (as opposed to one sourced from `steps.*.outputs`, `needs.*`, or an untrusted `include`/`exclude`). A repo that has verified its own matrix is literal-only can allowlist it explicitly:
+
+```yaml
+# slop.config.yml
+packs:
+  workflow-slop: true
+
+workflow:
+  allowExpressions:
+    - "matrix.node"
+```
+
+`workflow.allowExpressions` is additive (on top of the built-in allowlist above) and matches by exact, whitespace-trimmed expression text — same shape as `placement.allow`'s per-pack config surface, just without the regex/span matching (each entry is a literal expression body, not a pattern). An entry that matched no `${{ ... }}` expression across the scanned workflow files (a typo, or leftover from a workflow that changed) is surfaced in `CheckSummary.warnings`, the same mechanism an unmatched `placement.instructionGlobs` pattern uses. Write the bare expression body only (`matrix.node`), not the `${{ ... }}` wrapper; a config entry that still carries `${{`/`}}` is rejected at config-load time.
+
+**`unparseable-workflow`: a broken workflow file is never scored clean.** `run-expression` walks the YAML tree `yaml`'s parser produced, but that parser does not throw on most syntax errors, it records them and still returns whatever partial tree it managed to build. A workflow file broken partway through (an unterminated quoted scalar, an unbalanced flow collection) can silently drop everything after the break, including a `${{ ... }}` expression this pack exists to catch. The `unparseable-workflow` rule reports one `block`-severity finding whenever a scanned workflow file has a YAML syntax error, naming the file and the first parse error, so a broken file always produces at least one workflow-slop finding instead of a false-clean result.
+
+**Wiring pattern for other repos.** This repo's own `.github/workflows/ci.yml` runs the check in a dedicated `workflow-guard` job (separate from `placement-guard`, since this is a security control, not a doc-hygiene lint): install and build `slop-detector`, then
+
+```bash
+node packages/slop-detector/dist/cli.js check . --pack workflow-slop --config slop.config.yml
+```
+
+from the repo root. Any repo that vendors (or npm-installs) `slop-detector` can copy that one step into an existing CI job; no other wiring is needed since the pack is off by default until named with `--pack` or `packs.workflow-slop: true`.
+
 ## What a run looks like
 
 ```
@@ -216,6 +298,7 @@ flowchart LR
         I["code-slop.ts<br/>off by default"]
         J["ui-slop.ts<br/>off by default"]
         P["placement-slop.ts<br/>off by default"]
+        W["workflow-slop.ts<br/>off by default"]
     end
 
     K["engine.ts<br/>checkPath / checkFiles / checkText"]
@@ -237,6 +320,7 @@ flowchart LR
     I --> E
     J --> E
     P --> E
+    W --> E
     E --> K
     K --> L
     L --> M
@@ -296,15 +380,21 @@ placement:
     - "**/PLAYBOOK.md"
   allow:
     - "github\\.com/example-org/"
+
+workflow:
+  allowExpressions:
+    - "matrix.node"
 ```
 
-Defaults applied even without a config: `agent-tics` and `prose-slop` packs on; `comment-slop`, `code-slop`, `ui-slop`, `placement-slop` off; ignores cover `node_modules`, `dist`, `build`, `coverage`, `.git`, lockfiles; `placement.markers`, `placement.instructionGlobs`, and `placement.allow` default to `[]`.
+Defaults applied even without a config: `agent-tics` and `prose-slop` packs on; `comment-slop`, `code-slop`, `ui-slop`, `placement-slop`, `workflow-slop` off; ignores cover `node_modules`, `dist`, `build`, `coverage`, `.git`, lockfiles; `placement.markers`, `placement.instructionGlobs`, `placement.allow`, and `workflow.allowExpressions` default to `[]`.
 
 The `placement` block only matters once `placement-slop` is enabled (see [`placement-slop` by example](#placement-slop-by-example)):
 
 - `markers`: regex patterns (compiled as given, no implicit `i` flag) naming this org's own handles, products, or paths: each match is a `placement-slop/org-marker` violation. Empty by default, so the rule never fires until you configure it. A pattern that would match the empty string (e.g. `"a*"`) is rejected at config-load time, and matching runs per line with a 50-violations-per-file cap, so a runaway or pathological pattern can't blow up the output. These are repo-authored regexes, evaluated by the linter itself, not by an external process.
 - `instructionGlobs`: additive glob patterns, on top of the pack's built-in instruction-file globs (`SKILL.md`, `AGENTS.md`, `CLAUDE.md`, `.claude/agents/**`, `.opencode/agents/**`, `.claude/skills/**`); this only ever widens the built-in set, it can't narrow it. Matched against each scanned file's path relative to the scan root (the same root `entrypointGlobs` uses — see [Marking a src barrel as an entrypoint](#marking-a-src-barrel-as-an-entrypoint)). `check packages/foo`, `check ./packages/foo`, and `check /abs/path/packages/foo` are three spellings of the _same_ directory and resolve a given pattern identically; a single-file target (`check packages/foo/SKILL.md`) resolves the scan root to that file's own parent directory, so it also shares patterns with `check packages/foo`: a pattern is tied to _what directory you're scanning_, not to whether the target was a file or a directory. The consequence: changing the scan target to a genuinely different root (e.g. `check .` from the repo root instead of `check packages/foo`) means every pattern has to be rewritten relative to the new root too. A pattern must not start with `/`, same restriction as `entrypointGlobs`, and a leading `./` is normalized away. A pattern that matches zero scanned files is surfaced in `CheckSummary.warnings`, same mechanism as an unmatched `entrypointGlobs` pattern. For CI, the simplest invariant is `check .` from the repo root paired with a config file: one fixed scan root, so the patterns never need to change with the invocation.
 - `allow`: regex patterns (also rejected at config-load time if they'd match the empty string), matched per line, and only the matched span is excused across every rule in the pack, including `block`-severity ones (the escape hatch for something like a legitimate install URL that carries an org handle). The exclusion is scoped to the matched span, not the whole line: a home path, a date, or a tally phrase elsewhere on the same line as an allowed match still fires. For narrower, single-rule suppression use a per-line disable comment instead (see [Per-line opt-out](#per-line-opt-out)).
+
+The `workflow` block only matters once `workflow-slop` is enabled (see [`workflow-slop` by example](#workflow-slop-by-example)): `allowExpressions` is an additive list of exact, whitespace-trimmed `${{ ... }}` expression bodies treated as safe on top of the pack's built-in allowlist. Empty by default, so it never widens what the rule accepts until you configure it.
 
 ## Cross-file rules (experimental)
 

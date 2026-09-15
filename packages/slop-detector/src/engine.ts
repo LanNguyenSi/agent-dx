@@ -7,6 +7,7 @@ import type {
   CorpusExportEntry,
   FileTarget,
   PackDefinition,
+  PackId,
   ResolvedConfig,
   Rule,
   RuleContext,
@@ -14,6 +15,10 @@ import type {
 } from "./types.js";
 import { effectiveSeverity, isRuleEnabled } from "./config.js";
 import { detectFileKind, globToRegex } from "./util/file-kind.js";
+import {
+  findUnmatchedAllowExpressions,
+  isWorkflowFile,
+} from "./packs/workflow-slop.js";
 import { buildDisableMap } from "./util/disable-comments.js";
 import {
   extractDeclaredNames,
@@ -113,6 +118,25 @@ function _checkTextWithCorpus(
   return violations;
 }
 
+/**
+ * True when `packId` would actually run for this `CheckOptions`: either
+ * named explicitly via `--pack`/`packFilter` (the opt-in path for a pack
+ * that is off by default, e.g. `workflow-slop`) or enabled through
+ * `config.packs[packId]` when no filter is given. Mirrors the predicate
+ * `_checkTextWithCorpus`'s pack loop uses to decide whether to skip a
+ * pack (a non-empty filter excludes every pack it does not name), so a warning that only makes sense when a specific pack actually
+ * ran (e.g. the `workflow.allowExpressions` unmatched-entry warning
+ * below) doesn't fire for a scan that never selected that pack.
+ */
+function isPackSelected(packId: PackId, options: CheckOptions): boolean {
+  // A non-empty packFilter is exclusive: a pack it does not name never runs,
+  // even when config.packs enables it (the pack loop skips it the same way).
+  if (options.packFilter && options.packFilter.length > 0) {
+    return options.packFilter.includes(packId);
+  }
+  return Boolean(options.config.packs[packId]);
+}
+
 function runRule(rule: Rule, ctx: RuleContext): Violation[] {
   try {
     return rule.check(ctx);
@@ -155,9 +179,16 @@ export function checkFiles(
     : undefined;
 
   const violations: Violation[] = [];
+  // Kept only for files matching the `workflow-slop` file pattern, so a
+  // large non-workflow file scanned in the same run isn't held in memory
+  // a second time just for the `allowExpressions` usage check below.
+  const workflowFiles: Array<{ path: string; text: string }> = [];
   let scanned = 0;
   for (const filePath of files) {
     const text = fs.readFileSync(filePath, "utf8");
+    if (isWorkflowFile({ path: filePath })) {
+      workflowFiles.push({ path: filePath, text });
+    }
     violations.push(
       ..._checkTextWithCorpus(
         text,
@@ -191,6 +222,19 @@ export function checkFiles(
       ...unmatched.map(
         (glob) =>
           `placement.instructionGlobs pattern "${glob}" matched no scanned files — check for a typo, or that it's relative to the scan root (or nearest package.json) rather than to something else`,
+      ),
+    );
+  }
+  const allowExpressions = options.config.workflow?.allowExpressions ?? [];
+  if (allowExpressions.length > 0 && isPackSelected("workflow-slop", options)) {
+    const unmatched = findUnmatchedAllowExpressions(
+      workflowFiles,
+      options.config,
+    );
+    warnings.push(
+      ...unmatched.map(
+        (expr) =>
+          `workflow.allowExpressions entry "${expr}" matched no scanned run: expression, check for a typo, extra whitespace, or that the file is actually under .github/workflows/`,
       ),
     );
   }
