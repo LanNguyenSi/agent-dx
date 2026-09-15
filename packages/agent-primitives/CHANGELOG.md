@@ -15,6 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the class, span-aware across fenced blocks and soft-wrapped spans, so a
   future reflow cannot reintroduce it unnoticed.
 
+- The link-chain parity tests now pin three shapes the 0.4.0 chain-walk fix
+  was verified against by hand but no test named: a repository checked out
+  under a symlinked parent with the hop target spelled through it, a hop
+  target with a trailing slash, and a middle hop spelled absolutely through
+  a `..`; a new literal-length cap oracle (a 40-link chain) also fails if
+  `MAX_LINK_SOURCE_HOPS` is ever lowered below it, independent of the
+  constant's own value. Each shape now also asserts its own physical
+  placement (not only the shared refusal envelope), and a dedicated case
+  pins root canonicalisation itself: an in-root link reached only through
+  a symlinked repository ancestor.
+
 - The skill saves named mutation probes as run-local executable plans before
   execution, with separate per-attempt evidence and explicit plan revision
   identity. Single-mutant plans use the existing `--plan` interface; the CLI

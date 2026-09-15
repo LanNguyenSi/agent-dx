@@ -2145,6 +2145,24 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
     expect(MAX_LINK_SOURCE_HOPS).toBeGreaterThanOrEqual(64);
   });
 
+  /** The literal chain length itself, rather than `MAX_LINK_SOURCE_HOPS`,
+   * is what this test's expectation is written against: the assertion
+   * above (`MAX_LINK_SOURCE_HOPS` >= 64) already fails the moment the
+   * constant drops below 64, but a mutant that lowers the constant AND
+   * deletes that one assertion would slip through unnoticed if every
+   * other chain-length test still measured itself against the (now
+   * lowered) constant too. Hardcoding 40 here, Linux's own MAXSYMLINKS
+   * and the tallest length `CHAIN_LENGTHS` names in its own docblock,
+   * gives a second, independent failure for the same regression. */
+  it("resolves a chain of 40 links (Linux's own MAXSYMLINKS) without referring to MAX_LINK_SOURCE_HOPS", () => {
+    const root = fs.realpathSync(makeTmpDir());
+    const realDir = path.join(root, "real-vendor");
+    fs.mkdirSync(realDir);
+    const given = symlinkChain(root, 40, realDir, "lit");
+
+    expect(resolveLinkSourceTarget(path.join(root, given))).toBe(realDir);
+  });
+
   /** `fs.statSync` answering "a directory" for exactly `p` and the real
    * thing for everything else: what an OS whose own lookup limit lies
    * above the walk's cap would report for a chain of that length. The
@@ -2238,21 +2256,63 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
   type FarEnd = "directory" | "file" | "missing";
   const FAR_ENDS: readonly FarEnd[] = ["directory", "file", "missing"];
 
-  /** How the `oracle` link spells its target: `sub/../far-end` relative
-   * to its own directory, or `<repo>/sub/../far-end` absolutely. Both
-   * carry the same `..` through the same symlinked component, and an
-   * absolute target handed back verbatim to a lexical resolver collapses
-   * exactly like a relative one spliced with `path.resolve`. */
-  type Spelling = "relative" | "absolute";
-  const SPELLINGS: readonly Spelling[] = ["relative", "absolute"];
+  /** How the `oracle` link spells its target, or how the fixture around
+   * it is built: `sub/../far-end` relative to its own directory (the
+   * default), or `<repo>/sub/../far-end` absolutely, or one of four
+   * shapes PR #265's review verified by hand without a pinning test:
+   * - `symlinked-parent`: the repository root itself sits under a
+   *   deliberate symlinked ancestor (the real-world `/tmp` ->
+   *   `/private/tmp` case), on top of the `sub` symlink every shape
+   *   here introduces. Within THIS out-of-root matrix the far end lands
+   *   outside the root either way a root is spelled, so this shape
+   *   alone does not pin root canonicalisation; the dedicated in-root
+   *   test below (`symlinkedParentInRootRepo`) is the one an unresolved
+   *   root comparison would fail.
+   * - `symlinked-parent-absolute`: the same symlinked-ancestor root,
+   *   crossed with the `absolute` spelling below: `oracle` itself is
+   *   spelled absolutely through the still-unresolved repo prefix: the one
+   *   fixture-shape and spelling combination the flat enum could not
+   *   generate before (its kills overlap the plain `absolute` spelling).
+   * - `trailing-slash`: `sub`'s own target (not `oracle`'s) carries a
+   *   trailing separator, which a resolver that treats the target as
+   *   an opaque string (rather than a path) could fail to place; pinned
+   *   below by asserting `sub`'s OWN placement, not only `oracle`'s,
+   *   since `path.dirname` strips a trailing separator on its own once
+   *   `oracle`'s `..` is applied on top of it, which would otherwise
+   *   mask exactly this shape's own defect.
+   * - `absolute-dotdot-hop`: `sub`'s own target is itself an absolute
+   *   path containing `..` that climbs through a THIRD symlink (not
+   *   `sub` and not `oracle`), so the same physical-vs-lexical
+   *   divergence the `absolute` spelling exercises at `oracle` is
+   *   exercised one hop earlier too.
+   * All four still resolve, physically, to the same `<outside>/inner`
+   * every other spelling uses, so `oracle -> sub/../far-end` still
+   * lands on the same out-of-root far end and the shared assertions
+   * below apply unchanged; only the `relative`/`absolute` values still
+   * change how `oracle` itself is spelled. */
+  type Spelling =
+    | "relative"
+    | "absolute"
+    | "symlinked-parent"
+    | "symlinked-parent-absolute"
+    | "trailing-slash"
+    | "absolute-dotdot-hop";
+  const SPELLINGS: readonly Spelling[] = [
+    "relative",
+    "absolute",
+    "symlinked-parent",
+    "symlinked-parent-absolute",
+    "trailing-slash",
+    "absolute-dotdot-hop",
+  ];
 
   /** A repository whose tracked `sub` links to a directory OUTSIDE the
    * root and whose untracked `oracle` climbs from where `sub` points:
-   * `oracle -> sub/../far-end` (or the same shape spelled absolutely).
-   * To the OS that is `<outside>/far-end`; a lexical `path.resolve`
-   * spells it `<repo>/far-end`, in-root and nonexistent. Returns the
-   * out-of-root directory and the marker path a test command writing
-   * through `oracle` would create there. */
+   * `oracle -> sub/../far-end` (or one of the `Spelling` variants
+   * above). To the OS that is `<outside>/far-end`; a lexical
+   * `path.resolve` spells it `<repo>/far-end`, in-root and
+   * nonexistent. Returns the out-of-root directory and the marker path
+   * a test command writing through `oracle` would create there. */
   function dotDotRepo(
     farEnd: FarEnd,
     spelling: Spelling = "relative",
@@ -2267,17 +2327,57 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
     const target = path.join(outside, "far-end");
     if (farEnd === "directory") fs.mkdirSync(target);
     if (farEnd === "file") fs.writeFileSync(target, "");
-    const repo = initRealpathRepo();
-    fs.symlinkSync(path.join(outside, "inner"), path.join(repo, "sub"));
+
+    let repo: string;
+    if (
+      spelling === "symlinked-parent" ||
+      spelling === "symlinked-parent-absolute"
+    ) {
+      // A deliberate symlinked ancestor ABOVE the repository root,
+      // distinct from the `sub` symlink below: the `/tmp` ->
+      // `/private/tmp` shape, reproduced portably instead of relying
+      // on the host's own `/tmp`.
+      const realParent = fs.realpathSync(makeTmpDir());
+      const parentLink = path.join(
+        fs.realpathSync(makeTmpDir()),
+        "parent-link",
+      );
+      fs.symlinkSync(realParent, parentLink);
+      repo = path.join(parentLink, "repo");
+      fs.mkdirSync(repo);
+      initRepo(repo);
+    } else {
+      repo = initRealpathRepo();
+    }
+
+    let subTarget: string;
+    if (spelling === "trailing-slash") {
+      subTarget = path.join(outside, "inner") + path.sep;
+    } else if (spelling === "absolute-dotdot-hop") {
+      // `hopLink` sits in a tmp dir OTHER than `outside` and points at
+      // `outside/nested`: lexically, `hopLink/../inner` stays beside
+      // `hopLink` (wrong, in-root of neither repo nor outside);
+      // physically, it climbs from `hopLink`'s real target back up to
+      // `outside`, landing on the same `outside/inner` every other
+      // spelling resolves to.
+      fs.mkdirSync(path.join(outside, "nested"));
+      const linkParent = fs.realpathSync(makeTmpDir());
+      const hopLink = path.join(linkParent, "hop-link");
+      fs.symlinkSync(path.join(outside, "nested"), hopLink);
+      subTarget = [hopLink, "..", "inner"].join(path.sep);
+    } else {
+      subTarget = path.join(outside, "inner");
+    }
+    fs.symlinkSync(subTarget, path.join(repo, "sub"));
     git(repo, ["add", "sub"]);
     git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "sub"]);
     // Joined on `path.sep` on purpose: `path.join` would collapse the
     // `..` lexically and the link would not carry the shape under test.
     const relativeTarget = ["sub", "..", "far-end"].join(path.sep);
     fs.symlinkSync(
-      spelling === "relative"
-        ? relativeTarget
-        : `${repo}${path.sep}${relativeTarget}`,
+      spelling === "absolute" || spelling === "symlinked-parent-absolute"
+        ? `${repo}${path.sep}${relativeTarget}`
+        : relativeTarget,
       path.join(repo, "oracle"),
     );
     return { repo, outside, marker: path.join(target, "ESCAPED") };
@@ -2302,6 +2402,29 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
         "oracle -> sub/../far-end with a %s at the far end answers file_outside_root, links nothing and never runs the test command",
         async (farEnd) => {
           const { repo, outside, marker } = dotDotRepo(farEnd, spelling);
+
+          // Where the chain actually places `oracle` physically, for
+          // whichever spelling or repo-ancestor shape built it: pins the
+          // placement itself, not only the refusal envelope every
+          // spelling already shares below, so a placement bug specific
+          // to one shape (a mis-split trailing separator, a
+          // lexically-collapsed absolute middle hop) fails here even
+          // when the envelope still happens to read "outside the root"
+          // for the wrong reason.
+          expect(resolveLinkSourceTarget(path.join(repo, "oracle"))).toBe(
+            path.join(outside, "far-end"),
+          );
+          if (spelling === "trailing-slash") {
+            // `sub`'s OWN placement, isolated from `oracle`'s `..`:
+            // `path.dirname` strips a trailing separator on its own, so
+            // asserting only `oracle`'s full placement above would not
+            // show a resolver that mis-splits the separator into an
+            // extra empty path component (it still climbs to the right
+            // place once `..` is applied on top of it).
+            expect(resolveLinkSourceTarget(path.join(repo, "sub"))).toBe(
+              path.join(outside, "inner"),
+            );
+          }
 
           const answer = await probeChainLane(
             lane,
@@ -2348,6 +2471,50 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
       });
     },
   );
+
+  /** A repository-content link reached only by canonicalising a
+   * deliberately symlinked repository ancestor (the same `/tmp` ->
+   * `/private/tmp` shape `symlinked-parent` above builds), with no `..`
+   * hop at all: `oracle` links straight to an existing directory INSIDE
+   * the same repository. `resolveLinkSourceTarget` places `oracle`
+   * physically (through the symlinked ancestor) regardless of how the
+   * containment root itself is spelled, so this reads as in-root only
+   * when the root the comparison uses is ALSO canonicalised the same
+   * way: a root compared unresolved (spelled through the symlinked
+   * ancestor, never through its real parent) reads this genuinely
+   * in-root target as escaping, since the root's own spelling is then
+   * not a prefix of the target at all. Returns the marker path a test command
+   * writing through `oracle` would create. */
+  function symlinkedParentInRootRepo(): { repo: string; marker: string } {
+    useLockDir();
+    const realParent = fs.realpathSync(makeTmpDir());
+    const parentLink = path.join(fs.realpathSync(makeTmpDir()), "parent-link");
+    fs.symlinkSync(realParent, parentLink);
+    const repo = path.join(parentLink, "repo");
+    fs.mkdirSync(repo);
+    initRepo(repo);
+    fs.mkdirSync(path.join(repo, "vendor"));
+    fs.symlinkSync("vendor", path.join(repo, "oracle"));
+    return { repo, marker: path.join(repo, "vendor", "ESCAPED") };
+  }
+
+  it("repository-content lane defaults-file accepts an in-root link reached only by canonicalising a symlinked repository ancestor: root canonicalisation, not the .. shape above, is what this pins", async () => {
+    const { repo, marker } = symlinkedParentInRootRepo();
+
+    const answer = await probeChainLane(
+      "defaults-file",
+      repo,
+      "oracle",
+      MARKER_TEST_COMMAND,
+    );
+
+    expect(answer.reason).not.toBe("file_outside_root");
+    expect(answer.warnings.join(" ")).not.toContain(
+      "outside the containment root",
+    );
+    expect(answer.linked).toBe(1);
+    expect(fs.existsSync(marker)).toBe(true);
+  });
 
   it("resolveLinkHop places a relative hop physically: `..` climbs from where a symlinked component points, and a missing far end resolves under that same real parent", () => {
     const outside = fs.realpathSync(makeTmpDir());
