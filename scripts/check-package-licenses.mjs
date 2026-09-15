@@ -4,7 +4,7 @@
  * LICENSE file whose content is byte-equal to the repo root LICENSE, and
  * that file must actually land in the package's npm tarball.
  *
- * Why this exists (task 8b9507bb): LICENSE only lived at the repo root;
+ * Why this exists: LICENSE only lived at the repo root;
  * no package directory had one, and packing a package produced a
  * tarball with "license": "MIT" in its package.json but no LICENSE text
  * inside it.
@@ -13,9 +13,13 @@
  * `"private": true`, this script:
  *   1. reads packages/<name>/LICENSE and compares it byte-for-byte
  *      against the root LICENSE;
- *   2. runs `npm pack --dry-run --json` inside the package directory
- *      (no install needed) and asserts the resulting file list includes
- *      an entry named "LICENSE".
+ *   2. runs `npm pack --dry-run --ignore-scripts --json` inside the
+ *      package directory (no install needed, and no lifecycle script may
+ *      run: the guard only needs the file list, never a build) and asserts
+ *      the resulting file list includes an entry named "LICENSE".
+ *      npm force-includes a top-level LICENSE file, so today this second
+ *      assertion is a tripwire for that npm behaviour changing rather than
+ *      an independently reachable failure; check 1 is the load-bearing one.
  *
  * Exits 0 when every non-private package passes both checks, 1 with a
  * report otherwise.
@@ -83,15 +87,20 @@ for (const name of candidates) {
   if (!existsSync(licensePath)) {
     problems.push(`${name}: missing packages/${name}/LICENSE`);
   } else {
-    const packageLicense = readFileSync(licensePath);
-    if (!packageLicense.equals(rootLicense)) {
+    let packageLicense;
+    try {
+      packageLicense = readFileSync(licensePath);
+    } catch (err) {
+      problems.push(`${name}: could not read packages/${name}/LICENSE (${err.message})`);
+    }
+    if (packageLicense && !packageLicense.equals(rootLicense)) {
       problems.push(`${name}: packages/${name}/LICENSE does not match the root LICENSE byte-for-byte`);
     }
   }
 
   let packOutput;
   try {
-    packOutput = execFileSync("npm", ["pack", "--dry-run", "--json"], {
+    packOutput = execFileSync("npm", ["pack", "--dry-run", "--ignore-scripts", "--json"], {
       cwd: pkgDir,
       encoding: "utf8",
     });
