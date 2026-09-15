@@ -1,5 +1,17 @@
 # Bundle log
 
+- 2026-09-15T05:09:30Z (packaged LICENSE, agent-dx task 8b9507bb): the
+  three-line `[Unreleased]` CHANGELOG insertion (entry plus blank line) for the LICENSE file now shipped in
+  every published package tarball shifted the CHANGELOG by three lines.
+  Re-pointed the two live `log.md` self-citations it moved (from line 53 to
+  line 56 and from line 430 to line 433 of the CHANGELOG; the live citations
+  sit at their own entries below) after re-reading both anchors at their new
+  lines, and re-stamped the three bundle docs whose sources list
+  `CHANGELOG.md` (`review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`)
+  after re-verifying that none of their own citations point into the shifted
+  range. No other source changed.
+
 - 2026-09-13T13:19:16Z (release cut, agent-dx REL-001): cut the `[Unreleased]`
   section under a new `[0.34.0] - 2026-09-13` heading, keeping an empty
   `[Unreleased]` heading above it, and bumped `package.json`/
@@ -366,7 +378,7 @@
   sentence reverted to its pre-change wording, fails the exact-sub-field
   and regression-signal tests above; restored, the suite is green again.
   `CHANGELOG.md`'s own prose copy of this change is
-  (`CHANGELOG.md:53#"The implementer"`).
+  (`CHANGELOG.md:56#"The implementer"`).
 
   Verified on the committed tree: the full package suite (`npm test`),
   `typecheck`, `typecheck:test`, and `format:check`, all clean. Re-pointed
@@ -634,7 +646,7 @@
   that binding rather than second-guessing it.
 
   The CHANGELOG bullet for this round is
-  `CHANGELOG.md:430#"Citation scanning is paragraph-joined"`. Verified on
+  `CHANGELOG.md:433#"Citation scanning is paragraph-joined"`. Verified on
   the committed tree: the full package suite, `docs-consistency.test.ts`
   on its own, `typecheck`, `typecheck:test` and `format:check`; the
   figures each guard measured are in its own computed test name, per the
