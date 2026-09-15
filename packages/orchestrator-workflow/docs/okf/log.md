@@ -1,5 +1,31 @@
 # Bundle log
 
+- 2026-09-15T05:17:04Z (release-changelog guard hardening, agent-dx task
+  e077bcd8, review round 2): hardened `check-release-changelogs.mjs`'s
+  rule 2 direction check, its `--base` resolution and error handling,
+  added the `empty-release-section` and `checked-package-scope` rules, a
+  `--root` test option, and a fixture-based test suite (see
+  `packages/orchestrator-workflow/CHANGELOG.md`'s corresponding
+  `[Unreleased]` bullet for the full list). Review round 1 on this same
+  task had already inserted 13 lines into that same `[Unreleased]`
+  section, shifting those two self-citations from line 53 to line 66 and
+  from line 430 to line 443 (re-pointed in that commit; it added no
+  bundle-log entry of its own). That round-2 bullet's own 16-line
+  insertion shifted the two live self-citations further below in this
+  log from line 66 to line 82 and from line 443 to line 459 of the
+  CHANGELOG; both are re-pointed at their own entries, spelled as prose
+  here rather than citation syntax per this log's own convention.
+  Re-verified the three bundle docs whose sources list `CHANGELOG.md`
+  (`review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`,
+  `subagent-contracts-superset.md`): every `CHANGELOG.md` citation in
+  them already carries a heading or text anchor rather than a bare line
+  number, so none needed a re-point; re-stamped their timestamps. Rebased
+  onto the packaged-LICENSE entry below before merging: its three-line
+  insertion sits above both bullets, so the two live self-citations moved
+  once more, from line 82 to line 85 and from line 459 to line 462, and
+  were re-pointed after re-reading both anchors; the three docs were
+  re-stamped again after the rebase.
+
 - 2026-09-15T05:09:30Z (packaged LICENSE, agent-dx task 8b9507bb): the
   three-line `[Unreleased]` CHANGELOG insertion (entry plus blank line) for the LICENSE file now shipped in
   every published package tarball shifted the CHANGELOG by three lines.
@@ -378,7 +404,7 @@
   sentence reverted to its pre-change wording, fails the exact-sub-field
   and regression-signal tests above; restored, the suite is green again.
   `CHANGELOG.md`'s own prose copy of this change is
-  (`CHANGELOG.md:56#"The implementer"`).
+  (`CHANGELOG.md:85#"The implementer"`).
 
   Verified on the committed tree: the full package suite (`npm test`),
   `typecheck`, `typecheck:test`, and `format:check`, all clean. Re-pointed
@@ -646,7 +672,7 @@
   that binding rather than second-guessing it.
 
   The CHANGELOG bullet for this round is
-  `CHANGELOG.md:433#"Citation scanning is paragraph-joined"`. Verified on
+  `CHANGELOG.md:462#"Citation scanning is paragraph-joined"`. Verified on
   the committed tree: the full package suite, `docs-consistency.test.ts`
   on its own, `typecheck`, `typecheck:test` and `format:check`; the
   figures each guard measured are in its own computed test name, per the
