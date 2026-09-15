@@ -302,11 +302,11 @@ escape sequences). eslint 10
 (a devDependency, used only for this package's own lint check and for the
 `eslint` detector's fixtures) requires Node `^20.19.0 || ^22.13.0 ||
 
-> =24`, narrower than the `>=20`this package itself requires; that floor
+> =24`, narrower than the `>=20` this package itself requires; that floor
 applies to developing this package, not to a caller running the built CLI.
-Whatever the detector, a check that ends`fail`or`error`with zero
-parsed failures always gets one synthetic failure entry (naming`timedOut`, or the exit code, plus the output tail) instead of shipping an
-empty `failures`list, and an`error`check always reports at least one`summary.errors`; this synthetic entry is added on top of whatever count
+Whatever the detector, a check that ends `fail` or `error` with zero
+parsed failures always gets one synthetic failure entry (naming `timedOut`, or the exit code, plus the output tail) instead of shipping an
+empty `failures` list, and an `error` check always reports at least one `summary.errors`; this synthetic entry is added on top of whatever count
 the detector already reported, never doubling a count the detector already
 got right. This synthetic entry, and the invariant that produces it, are
 skipped entirely for a check whose `--pass-regex` predicate decided
@@ -317,7 +317,7 @@ padded with a synthetic entry the predicate has already overruled. The
 entry is still added when the predicate decided `fail` and the detector
 itself parsed zero failures, the same as for a plain exit-code `fail`.
 Truncation is read from exec.ts's own
-`stdoutTruncated`/`stderrTruncated`flags (set when the command's real
+`stdoutTruncated`/`stderrTruncated` flags (set when the command's real
 output, at either its own 60-line or 6000-character-per-stream bound,
 exceeded what the captured tail could keep), never recomputed from the
 tail text itself: a captured tail that happens to end with a trailing
@@ -327,12 +327,12 @@ after splitting on it is not a real line. When either flag is set, a
 detector's own issue-row count can undercount the real total; the eslint
 detector's own reported total is preferred, when the eslint detector was
 the one selected for this check, where one can still be found in the tail
-(eslint's`✖ N problems (N errors, M warnings)`line, which survives most
+(eslint's `✖ N problems (N errors, M warnings)` line, which survives most
 truncation since it is the last thing eslint prints); either way a warning
-names the truncation, since the`failures`list itself can still be
+names the truncation, since the `failures` list itself can still be
 missing entries even when the total is trustworthy. A detector's own
 warnings, and a log file the run could not write to, are reported in the
-top-level`warnings`, each prefixed with the check name.
+top-level `warnings`, each prefixed with the check name.
 
 Overall `status` is `error` if any check errored, else `fail` if any check
 failed, else `pass`; `error` wins over `fail`. Exit code follows `status`
@@ -898,7 +898,7 @@ quote INSIDE a path component is not. A spelling that differs from the
 root's only in unicode normalisation (a decomposed form of a composed
 root, or the reverse, which macOS in particular may resolve to the same
 directory) is not matched for the same reason. A wrapper script that
-itself `cd`s using a path not spelled out in the scanned string is
+itself runs `cd` using a path not spelled out in the scanned string is
 shell-level indirection like the first group; a path reaching the root
 only through a THIRD, unrelated symlink alias (one that is neither the
 root's own as-given spelling nor its realpath) is not recognized, since
@@ -2709,7 +2709,7 @@ three things worth naming explicitly.
 
 **The exit-code assumption.** `verify`'s `classifyStatus` reads
 `pass`/`fail` from the command's own exit code (`0` is `pass`,
-`126`/`127` are infra `error`s, anything else non-zero is `fail`), and
+`126`/`127` are infra `error` exit codes, anything else non-zero is `fail`), and
 `probe`'s `survived`/`killed` verdict is built on the same exit code
 too. PHPUnit and PHPStan follow this convention directly (PHPUnit exits
 non-zero on any failure or error; PHPStan exits `1` when it finds

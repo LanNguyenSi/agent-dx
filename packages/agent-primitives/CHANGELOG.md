@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The npm tarball now ships a `LICENSE` file matching the repo root LICENSE
   (MIT), asserted by the monorepo's `lint-package-licenses` CI job.
 
+- Fixed inline-code run-togethers in README.md (a code span glued to an
+  adjacent word with no space) and added a test that scans the file for
+  the class, span-aware across fenced blocks and soft-wrapped spans, so a
+  future reflow cannot reintroduce it unnoticed.
+
 - The skill saves named mutation probes as run-local executable plans before
   execution, with separate per-attempt evidence and explicit plan revision
   identity. Single-mutant plans use the existing `--plan` interface; the CLI
