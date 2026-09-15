@@ -177,4 +177,25 @@ describe("config", () => {
     });
     expect(cfg.placement?.instructionGlobs).toEqual(["sub/**/*.md"]);
   });
+
+  it("loadConfig rejects a workflow.allowExpressions entry that still carries the \\${{ }} wrapper", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      file,
+      `workflow:\n  allowExpressions:\n    - "\${{ matrix.node }}"\n`,
+    );
+    expect(() => loadConfig(file)).toThrow(/bare expression body only/);
+  });
+
+  it("loadConfig accepts a bare workflow.allowExpressions entry", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      file,
+      `workflow:\n  allowExpressions:\n    - "matrix.node"\n`,
+    );
+    const cfg = loadConfig(file);
+    expect(cfg.workflow?.allowExpressions).toEqual(["matrix.node"]);
+  });
 });

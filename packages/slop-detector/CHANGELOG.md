@@ -10,6 +10,140 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The npm tarball now ships a `LICENSE` file matching the repo root LICENSE
   (MIT), asserted by the monorepo's `lint-package-licenses` CI job.
 
+### Added
+
+- New pack `workflow-slop` (off by default, opt in via `--pack
+  workflow-slop` or `packs.workflow-slop: true`), rule
+  `workflow-slop/run-expression`: flags any `${{ ... }}` expression
+  interpolated directly into a `run:` scalar under
+  `.github/workflows/*.yml`/`*.yaml`, unless the expression is one of a
+  documented allowlist of non-attacker-controllable contexts. Anchored on
+  a real incident: an agent-tasks release workflow interpolated
+  `${{ steps.target.outputs.expected }}` (a tag-derived value) straight
+  into a `run:` body; a tag such as `mcp-server-v0.0.0";id;"` passes
+  `git check-ref-format`, GitHub substitutes the expression before bash
+  parses it, and the job (holding `id-token: write` and publish rights)
+  executed the payload, skipping the version gate (fixed in agent-tasks
+  by routing through `env:`), but nothing in the fleet prevented the class
+  from recurring in the next workflow edit.
+  - **New pack, not a rule inside an existing one.** `placement-slop`'s
+    domain is org-/machine-/time-bound evidence leaking into reusable
+    Markdown instruction files (prose-kind); `code-slop`'s is
+    source-level anti-patterns in TypeScript/JavaScript via its AST
+    corpus. Neither fits a YAML-structural, security-severity check over
+    `.github/workflows/*.yml`, and folding it into either would mean
+    either pack's default-severity/config surface (`placement.*`,
+    `corpus`) governing an unrelated concern. A new pack keeps its own
+    `workflow.allowExpressions` config surface (mirroring
+    `placement.allow`'s per-pack shape) and its own CI status check
+    (`workflow-guard`, separate from `placement-guard`'s doc-hygiene
+    lint), the same reasoning `placement-slop` itself was split out for.
+  - **Detection is YAML-structure-aware**, not text/regex-shaped: the
+    rule parses each candidate file with the `yaml` package (already a
+    dependency) and walks the parsed tree for `Pair`s whose key is `run`
+    and whose value is a scalar node, then scans that scalar's *raw
+    source slice* (via the node's byte range) for `${{ ... }}`: this
+    finds every `run:` style (plain, single- or double-quoted, and
+    multi-line block scalars `|`/`>`) and never fires on a `${{ }}` in
+    `name:`, `if:`, `with:`, or `env:`, since those are different keys
+    entirely rather than a coincidentally-similar text pattern.
+  - **Allowlist, verified against GitHub's own docs** (both fetched
+    during this task, no local paraphrase assumed correct): the
+    [contexts reference](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts)
+    documents `github.workspace`, `github.action_path`, `github.run_id`,
+    `github.run_number`, `github.run_attempt`, `github.sha`,
+    `github.job`, `github.repository`, `github.repository_owner`,
+    `github.actor`, `github.event_name`, `github.workflow`,
+    `github.server_url`, `github.api_url`, `github.token`,
+    `runner.temp`, `runner.os`, `runner.arch`, and `runner.tool_cache` as
+    runtime-assigned metadata (ids, counts, usernames, paths), never
+    attacker-supplied free text, so allowed. `secrets.<NAME>` (any name) is
+    allowed structurally: the secret's value is never attacker-supplied.
+    The [security hardening guide](https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions)
+    walks through exactly this `run:`-injection shape using
+    `github.event.pull_request.title` as its example of untrusted input
+    and recommends the same `env:`-routing fix this rule's message
+    points at; the contexts reference documents `github.head_ref` as
+    "the `head_ref` or source branch of the pull request" (named by a
+    forked contributor) and `github.ref`/`github.ref_name` as the
+    triggering ref (attacker-controlled for a `push`-on-tag trigger,
+    which is the exact incident shape above): all four
+    (`github.ref`, `github.ref_name`, `github.head_ref`,
+    `github.base_ref`), plus `github.event.*`, `steps.*.outputs.*`,
+    `needs.*.outputs.*`, `inputs.*`, `env.*`, and `vars.*`, are NOT
+    allowed, matching the task brief's list exactly.
+  - **`matrix.*` deliberately excluded from the default allowlist**: it
+    is only safe when every value the matrix can take is a literal
+    written in the workflow, and a single `run:` scalar's text gives no
+    way to confirm that (the matrix could be built from `steps.*.outputs`
+    or an untrusted `include`/`exclude`). A repo that has verified its
+    own matrix is literal-only can allowlist a specific field via the new
+    `workflow.allowExpressions` config array (exact-match, additive).
+  - **Found and fixed one refinement during fleet validation, not in the
+    task brief**: `steps.<id>.outcome` and `steps.<id>.conclusion` are
+    NOT step outputs (the contexts reference documents both as exactly
+    one of `success`/`failure`/`cancelled`/`skipped`, assigned by the
+    runner itself, never attacker-influenced), but the rule as first
+    written flagged them anyway (`steps.` was entirely unallowlisted).
+    Running the guard over this repo's own workflows surfaced two
+    concrete instances (`npm-deprecate.yml`, `npm-dist-tag.yml`, both
+    echoing `${{ steps.<id>.outcome }}` into a log line). Added a
+    structural allowlist entry for `steps.<id>.(outcome|conclusion)`
+    rather than routing those two lines through `env:` for no security
+    benefit; `steps.<id>.outputs.*` stays unallowlisted and still fires.
+  - **Fleet scan** (every git repo directly under the workspace root with
+    `.github/workflows` on its resolved default branch, archived from
+    `origin/<default>` without touching any repo's working tree): 39
+    repos checked, 32 carry `.github/workflows`, 15 clean, 17 with
+    findings totalling 54 occurrences. The dominant shape by far is a
+    tag/version value computed into a step output and interpolated
+    unrouted into `release.yml`'s `run:` (the same class as the
+    motivating incident, just not yet exploited elsewhere); the remainder
+    is unallowlisted `matrix.*`. Fixing those is explicitly out of scope
+    for this change (each becomes its own task, or falls under the held
+    fleet-wide guard-rollout task); see the run's fleet-scan table for
+    the full per-repo breakdown. This repo's own `.github/workflows`
+    scanned clean once the `steps.*.outcome`/`.conclusion` refinement
+    above was in place.
+  - Wired into this repo's own CI as a new `workflow-guard` job in
+    `.github/workflows/ci.yml` (sibling to `placement-guard`, not folded
+    into it): `node packages/slop-detector/dist/cli.js check . --pack
+    workflow-slop --config slop.config.yml`. Wiring pattern for other
+    repos documented in `README.md` ("workflow-slop by example").
+  - **Follow-up review round, four fixes**:
+    - New rule `workflow-slop/unparseable-workflow`: `yaml`'s parser
+      does not throw on most syntax errors, it records them on
+      `doc.errors` and still returns whatever partial tree it managed to
+      build, which `run-expression` then walked without knowing it was
+      incomplete. A workflow file broken partway through (an
+      unterminated quoted scalar, an unbalanced flow collection) could
+      silently drop everything after the break, including an unsafe
+      `${{ ... }}` expression, and report clean. The new rule reports one
+      `block`-severity finding whenever a scanned workflow file has a
+      YAML syntax error, naming the file and the first parse error, so a
+      broken file always produces at least one workflow-slop finding.
+    - `run-expression` no longer treats a `run:` key nested under a
+      step's `with:` block as a shell script: a custom action's own
+      input can be named `run` (an arbitrary action parameter, not
+      something GitHub executes), and the walk previously matched on the
+      key name at any depth regardless of parent; the gate is now keyed
+      on schema position (a `with:` pair's own containing mapping must
+      also carry a `uses:` key), not on a mapping key literally spelled
+      `with` anywhere, since the earlier name-only gate let a mapping
+      merely named `with` (a job, for instance) silence every `run:` in
+      its whole subtree.
+    - `workflow.allowExpressions` entries are now validated at
+      config-load time (the bare expression body only, not the
+      `${{ ... }}` wrapper) and an entry that matched no scanned `${{ ...
+      }}` expression is surfaced in `CheckSummary.warnings`, the same
+      mechanism `placement.instructionGlobs` already uses for a
+      zero-match pattern.
+    - Corrected the fleet-scan totals above and the CHANGELOG entry that
+      first shipped them: the agent-dx row was stale against the shipped
+      `steps.<id>.outcome`/`.conclusion` allowlist entry, so the correct
+      totals are 15 clean / 17 with findings / 54 occurrences, not the
+      14/18/56 first reported.
+
 ## [0.3.1] - 2026-08-26
 
 ### Changed

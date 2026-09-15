@@ -46,6 +46,37 @@ jobs:
       - name: Check for org-, machine-, or point-in-time-bound evidence in instruction files
         run: node packages/slop-detector/dist/cli.js check . --pack placement-slop --config slop.config.yml
 
+  # Separate job from placement-guard above (same slop-detector CLI, a
+  # different pack): this one is a security control (GitHub Actions
+  # `run:` expression injection, `workflow-slop`), not a doc-hygiene
+  # lint, so it gets its own status check name rather than riding on
+  # placement-guard's. See packages/slop-detector/README.md
+  # "workflow-slop by example" for the rule, the allowlist, and the
+  # sources behind it, and packages/slop-detector/CHANGELOG.md for why
+  # this is a new pack rather than a rule inside an existing one.
+  workflow-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/slop-detector/package-lock.json
+
+      - name: Install slop-detector
+        working-directory: packages/slop-detector
+        run: npm ci --no-audit --no-fund
+
+      - name: Build slop-detector
+        working-directory: packages/slop-detector
+        run: npm run build
+
+      - name: "Check .github/workflows/*.yml for run: expression injection"
+        run: node packages/slop-detector/dist/cli.js check . --pack workflow-slop --config slop.config.yml
+
   # Fails the build (not just a warning) on anchor-check drift in
   # packages/orchestrator-workflow/docs/okf -- the warn-only
   # okf-staleness.yml drift watch never blocks (see its own header

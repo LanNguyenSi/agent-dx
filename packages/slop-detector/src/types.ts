@@ -6,7 +6,8 @@ export type PackId =
   | "comment-slop"
   | "code-slop"
   | "ui-slop"
-  | "placement-slop";
+  | "placement-slop"
+  | "workflow-slop";
 
 export interface FileTarget {
   path: string;
@@ -159,6 +160,23 @@ export interface ResolvedConfig {
     instructionGlobs: string[];
     /** Regex patterns; a line matching any of these is skipped by every rule in the pack. */
     allow: string[];
+  };
+  /**
+   * Config surface for the `workflow-slop` pack: GitHub Actions `run:`
+   * expression-injection detection. Defaults to `[]` in
+   * `defaultConfig`/`mergeConfig`, so a hand-built `ResolvedConfig` that
+   * omits `workflow` entirely still works: the rule reads through
+   * `config.workflow?.allowExpressions ?? []`.
+   */
+  workflow?: {
+    /**
+     * Additional exact-match expression bodies (as written between
+     * `${{` and `}}`, whitespace-trimmed) treated as safe on top of the
+     * pack's built-in allowlist — for example a repo-verified-literal
+     * `matrix.<field>` reference, which the pack deliberately excludes
+     * by default (see `workflow-slop.ts` for why).
+     */
+    allowExpressions: string[];
   };
 }
 

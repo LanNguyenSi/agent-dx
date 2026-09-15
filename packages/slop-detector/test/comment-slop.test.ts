@@ -14,6 +14,7 @@ const config: ResolvedConfig = {
     "code-slop": false,
     "ui-slop": false,
     "placement-slop": false,
+    "workflow-slop": false,
   },
   ruleOverrides: {},
   ignorePaths: [],
