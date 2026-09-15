@@ -53,18 +53,27 @@ interface Span {
 function stripFencedBlocks(text: string): string {
   const lines = text.split("\n");
   let fenceChar: string | null = null;
+  let fenceLength = 0;
   const out = lines.map((line) => {
     const trimmed = line.trim();
     const fenceOpen = /^(`{3,}|~{3,})/.exec(trimmed);
     if (fenceChar === null) {
       if (fenceOpen) {
         fenceChar = fenceOpen[1][0];
+        fenceLength = fenceOpen[1].length;
         return "";
       }
       return line;
     }
-    if (trimmed.startsWith(fenceChar.repeat(3))) {
+    // CommonMark: a closing fence uses the same character and is at least
+    // as long as the opening fence.
+    if (
+      fenceOpen &&
+      fenceOpen[1][0] === fenceChar &&
+      fenceOpen[1].length >= fenceLength
+    ) {
       fenceChar = null;
+      fenceLength = 0;
     }
     return "";
   });
@@ -161,9 +170,20 @@ describe("findRunTogethers()", () => {
   });
 
   it("flags a word glued after a code span", () => {
-    const findings = findRunTogethers("naming`timedOut`, or the exit code");
+    const findings = findRunTogethers("see `timedOut`or the exit code");
     expect(findings).toHaveLength(1);
-    expect(findings[0]?.side).toBe("before");
+    expect(findings[0]?.side).toBe("after");
+  });
+
+  it("keeps a longer fence open across a shorter fence-like line", () => {
+    const text = [
+      "````md",
+      "```",
+      "still`inside`the block",
+      "````",
+      "outside `ok` here",
+    ].join("\n");
+    expect(findRunTogethers(text)).toHaveLength(0);
   });
 
   it("does not flag two separate code spans that merely share a line", () => {
