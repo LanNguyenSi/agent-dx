@@ -10,6 +10,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The npm tarball now ships a `LICENSE` file matching the repo root LICENSE
   (MIT), asserted by the monorepo's `lint-package-licenses` CI job.
 
+- A repo-level `lint-release-changelogs` CI job (`scripts/check-release-changelogs.mjs`
+  at the agent-dx root, named in `CONTRIBUTING.md`'s "Releasing okf-kit" steps)
+  fails a release commit whose package.json version bump has no matching top
+  `## [x.y.z]` CHANGELOG heading, whose fresh heading (checked against a
+  `--base <ref>`, the PR base sha or the previous push commit in CI) still
+  leaves `[Unreleased]` non-empty, or whose `docs/okf/log.md` entry carries a
+  `CHANGELOG.md:<n>` mention with no okf-kit anchor. Motivated by agent-tasks
+  task e077bcd8: a prior release commit (#266) bumped a version without
+  cutting its CHANGELOG unnoticed by CI, and two log.md entries had written
+  a live, unanchored `CHANGELOG.md:<n>` citation that silently resolved to
+  unrelated content after the next cut. Does not change okf-kit's own
+  citation rules or any historical CHANGELOG content.
+
+- Hardened `lint-release-changelogs` (review round 2 on the same task):
+  rule 2 now fires only when the head version is a strictly greater
+  semver release than `--base` (a head older than base, or a version
+  neither side parses as strict semver, no longer misfires); an invalid
+  `--base` (an unresolvable ref, or a flag-shaped value) is now a usage
+  error instead of a silently skipped comparison. Added an
+  `empty-release-section` rule for a cut heading with no body before the
+  next heading, and a `checked-package-scope` rule pinning the four
+  packages this repo already checks so one silently losing its
+  CHANGELOG.md is a hard failure instead of a shrinking count; packages
+  skipped for carrying no CHANGELOG.md are now printed by name. Added a
+  `--root <dir>` option (a disposable fixture tree instead of this repo)
+  backing a new fixture-based test suite, and `CONTRIBUTING.md`'s step 6
+  now names `--base origin/master` explicitly instead of implying the
+  `[Unreleased]` check runs without it.
+
 - Reduced the contracts reference's duplicate implementer prose to an explicit
   route to workflow step 6 and the installed implementer role prompt. The
   unchanged YAML contract remains the schema surface; conformance tests pin

@@ -11,7 +11,7 @@ Thanks for your interest. This is a TypeScript monorepo of small, independent to
 
 1. Fork, branch off `master` (e.g. `feat/slop-detector-rule-x`, `fix/okf-kit-bug`).
 2. Keep changes scoped to one package where possible. Cross-package refactors should be split.
-3. Run whatever checks the changed package defines (commonly `npm run build`, `npm test`, plus `npm run format:check` / `npm run typecheck` where present). The `ci` job's Typecheck, Build, and Lint steps use `--if-present` so a missing script there is not a blocker, and its Test step falls back to `npm test --if-present` when `test:ci` is absent; but three checks fail closed instead: the Format check step fails the build if a package ships TypeScript sources under `src/` without a `format:check` script, the `lint-format-matrix` job fails if a `packages/*/package.json` directory is missing from the `ci` job's `matrix.package` list, and the `lint-package-licenses` job fails if a non-private package is missing a LICENSE matching the repo root LICENSE or does not pack it into its tarball.
+3. Run whatever checks the changed package defines (commonly `npm run build`, `npm test`, plus `npm run format:check` / `npm run typecheck` where present). The `ci` job's Typecheck, Build, and Lint steps use `--if-present` so a missing script there is not a blocker, and its Test step falls back to `npm test --if-present` when `test:ci` is absent; but four checks fail closed instead: the Format check step fails the build if a package ships TypeScript sources under `src/` without a `format:check` script, the `lint-format-matrix` job fails if a `packages/*/package.json` directory is missing from the `ci` job's `matrix.package` list, and the `lint-package-licenses` job fails if a non-private package is missing a LICENSE matching the repo root LICENSE or does not pack it into its tarball, and the `lint-release-changelogs` job fails a release commit that bumps a package's version without cutting its CHANGELOG (see "Releasing okf-kit" below).
 4. Open the PR with a clear summary, motivation, and test plan.
 
 ## Dev Setup
@@ -82,12 +82,26 @@ the same release commit, in this order:
 5. `npx vitest run test/docs-consistency.test.ts` in
    `packages/orchestrator-workflow` and confirm it is green with the new
    pins before opening the PR.
-6. Open the PR, squash merge, then push an annotated tag
+6. `node scripts/check-release-changelogs.mjs --base origin/master` from
+   the repo root and confirm it exits 0: it fails a release commit that
+   bumps `packages/okf-kit/package.json`'s version without step 2's
+   CHANGELOG cut. The `--base` comparison is what catches a cut heading
+   that still leaves `[Unreleased]` non-empty; without it that check is
+   skipped (the CI job's own `lint-release-changelogs` step resolves the
+   exact base itself, from the PR's base sha or the previous push
+   commit). The script also fails, with no `--base` needed, on a
+   `CHANGELOG.md:<n>` mention with no okf-kit anchor inside
+   `packages/orchestrator-workflow/docs/okf/log.md`; if this release cut
+   adds a log.md entry that cites a CHANGELOG.md line, write it as prose
+   or with an anchor, never a bare line number.
+7. Open the PR, squash merge, then push an annotated tag
    `okf-kit/v<new-version>` to trigger `publish-npm.yml`.
 
 Releasing orchestrator-workflow follows the same shape (`npm version`,
 CHANGELOG cut, tag `orchestrator-workflow/v<new-version>`) but has no pin
-of its own to bump.
+of its own to bump; run `node scripts/check-release-changelogs.mjs --base
+origin/master` here too before opening the PR, for the same CHANGELOG-cut
+and log.md-mention reasons as step 6 above.
 
 ## Style
 

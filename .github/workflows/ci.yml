@@ -522,6 +522,32 @@ jobs:
       - name: Check every non-private package ships a matching LICENSE
         run: node scripts/check-package-licenses.mjs
 
+  lint-release-changelogs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # scripts/check-release-changelogs.mjs' rule 2 (fresh-unreleased)
+          # reads a package's package.json version at a base commit via
+          # `git show`; a shallow checkout would not have that commit.
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Check release CHANGELOG hygiene and log.md anchor mentions
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          zero="0000000000000000000000000000000000000000"
+          if [ -z "${BASE_SHA}" ] || [ "${BASE_SHA}" = "${zero}" ]; then
+            node scripts/check-release-changelogs.mjs
+          else
+            node scripts/check-release-changelogs.mjs --base "${BASE_SHA}"
+          fi
+
+
   ci:
     runs-on: ubuntu-latest
     timeout-minutes: 10
