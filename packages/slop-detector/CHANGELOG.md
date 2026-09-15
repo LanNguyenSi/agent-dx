@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- The npm tarball now ships a `LICENSE` file matching the repo root LICENSE
+  (MIT), asserted by the monorepo's `lint-package-licenses` CI job.
+
 ## [0.3.1] - 2026-08-26
 
 ### Changed

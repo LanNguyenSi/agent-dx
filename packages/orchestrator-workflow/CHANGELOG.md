@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- The npm tarball now ships a `LICENSE` file matching the repo root LICENSE
+  (MIT), asserted by the monorepo's `lint-package-licenses` CI job.
+
 - Reduced the contracts reference's duplicate implementer prose to an explicit
   route to workflow step 6 and the installed implementer role prompt. The
   unchanged YAML contract remains the schema surface; conformance tests pin
