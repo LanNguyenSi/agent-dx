@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- The npm tarball now ships a `LICENSE` file matching the repo root LICENSE
+  (MIT), asserted by the monorepo's `lint-package-licenses` CI job.
+
 - The skill saves named mutation probes as run-local executable plans before
   execution, with separate per-attempt evidence and explicit plan revision
   identity. Single-mutant plans use the existing `--plan` interface; the CLI

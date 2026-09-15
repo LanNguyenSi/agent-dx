@@ -511,6 +511,17 @@ jobs:
       - name: Check ci job matrix.package covers every packages/*/package.json
         run: node scripts/check-format-check-matrix.mjs
 
+  lint-package-licenses:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Check every non-private package ships a matching LICENSE
+        run: node scripts/check-package-licenses.mjs
+
   ci:
     runs-on: ubuntu-latest
     timeout-minutes: 10
