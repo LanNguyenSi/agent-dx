@@ -1,5 +1,28 @@
 # Bundle log
 
+- 2026-09-15T06:24:15Z (release cut, pandora run 2026-09-15-releases-batch54,
+  REL-001): cut the `[Unreleased]` section under a new `[0.35.0] -
+  2026-09-15` heading, keeping an empty `[Unreleased]` heading above it,
+  and bumped `package.json`/`package-lock.json` to 0.35.0. The two-line
+  insertion (the empty `[Unreleased]` heading plus the new `[0.35.0]`
+  heading line) shifted the two live `log.md` self-citations from line 85
+  to line 87 and from line 462 to line 464 of the CHANGELOG; both were
+  re-pointed after re-reading their anchors at the new lines. Re-stamped
+  the three bundle docs whose sources list `CHANGELOG.md`
+  (`review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`,
+  `subagent-contracts-superset.md`) after confirming none of their own
+  citations resolve into the shifted range; no other bundle doc lists
+  `package.json` or okf-kit's `README.md` as a source, so none else
+  needed re-stamping. Cut the paired okf-kit (0.12.0 to 0.12.1) and
+  agent-primitives (0.4.0 to 0.5.0) releases in the same commit per
+  CONTRIBUTING.md's "Releasing okf-kit" procedure: okf-kit's own
+  `README.md` CI example and the two `.github/workflows/` pins
+  (`ci.yml`, `okf-staleness.yml`) were bumped to `okf-kit@0.12.1` via
+  `scripts/bump-okf-kit-pin.mjs`. `slop-detector` was left unreleased
+  (its `[Unreleased]` section is untouched): the `slop-detector` name on
+  npm is owned by an unrelated third party, so this package is never
+  published under that name.
+
 - 2026-09-15T05:17:04Z (release-changelog guard hardening, agent-dx task
   e077bcd8, review round 2): hardened `check-release-changelogs.mjs`'s
   rule 2 direction check, its `--base` resolution and error handling,
@@ -404,7 +427,7 @@
   sentence reverted to its pre-change wording, fails the exact-sub-field
   and regression-signal tests above; restored, the suite is green again.
   `CHANGELOG.md`'s own prose copy of this change is
-  (`CHANGELOG.md:85#"The implementer"`).
+  (`CHANGELOG.md:87#"The implementer"`).
 
   Verified on the committed tree: the full package suite (`npm test`),
   `typecheck`, `typecheck:test`, and `format:check`, all clean. Re-pointed
@@ -672,7 +695,7 @@
   that binding rather than second-guessing it.
 
   The CHANGELOG bullet for this round is
-  `CHANGELOG.md:462#"Citation scanning is paragraph-joined"`. Verified on
+  `CHANGELOG.md:464#"Citation scanning is paragraph-joined"`. Verified on
   the committed tree: the full package suite, `docs-consistency.test.ts`
   on its own, `typecheck`, `typecheck:test` and `format:check`; the
   figures each guard measured are in its own computed test name, per the
