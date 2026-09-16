@@ -215,7 +215,11 @@ describe("validateReviewReport: edge-case inputs behave sanely", () => {
  *   so a checker that also fires at another path fails as well.
  *
  * What it does not pin: semantic adequacy or any cross-field rule, which
- * this validator deliberately never judges.
+ * this validator deliberately never judges; and a rule added INSIDE an
+ * existing checker without a new FieldKind (a length bound on a string,
+ * say) is generated for by nothing here and needs its own kind or its
+ * own named test to be pinned. Element types of the plain `array` kind
+ * are likewise not checked (see the FieldKind doc comment).
  *
  * Where a new field or kind must be declared: a new contract field goes
  * into its constant, into the matching dispatch table, and into
@@ -803,6 +807,27 @@ describe("CLI: orchestrator-workflow validate-review-report", () => {
     expect(result.status).toBe(2);
     expect(result.stderr).toContain("Could not read");
     expect(result.stderr).toContain(STRUCTURAL_ONLY_NOTE);
+  });
+
+  it("exits 2 for an unreadable file with --format json, emitting the JSON envelope on stdout (the documented exception to plain-text usage errors)", () => {
+    const result = run([
+      join(FIXTURES_DIR, "does-not-exist.yaml"),
+      "--format",
+      "json",
+    ]);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toBe("");
+    const parsed = JSON.parse(result.stdout) as {
+      valid: boolean;
+      diagnostics: Array<{ path: string; expected: string; got: string }>;
+      note: string;
+    };
+    expect(parsed.valid).toBe(false);
+    expect(parsed.diagnostics).toHaveLength(1);
+    expect(parsed.diagnostics[0].path).toBe("<file>");
+    expect(parsed.diagnostics[0].expected).toBe("a readable file");
+    expect(parsed.diagnostics[0].got).toContain("does-not-exist.yaml");
+    expect(parsed.note).toBe(STRUCTURAL_ONLY_NOTE);
   });
 
   it("exits 2 for an unknown --format value, printing the note too (fix-round, review finding L5)", () => {

@@ -714,18 +714,18 @@ exits `0` when the return is structurally valid, `1` when it is
 structurally invalid (a required field is missing or its value falls
 outside its enum, or the input is unparsable, empty, or not a mapping),
 and `2` for a usage error (an unreadable file, an unrecognized `--format`
-value, a missing `<file>` argument, or an excess positional argument).
+value, a missing `<file>` argument, an unknown option, or an excess
+positional argument).
 `--format json` governs the validation verdict only: a commander parsing
 error (missing argument, unknown option, excess arguments) or an
 unrecognized `--format` value itself still prints plain text to stderr
 with nothing on stdout, regardless of `--format`; the one exception is an
 unreadable file, which does emit the JSON envelope on stdout. This check
 is structural only: it never judges semantic adequacy, cannot waive a
-finding, and passing it is never orchestrator acceptance -- the
-required-field set it checks is
-hand-maintained in `src/review-report.ts` and pinned against the contract
-block itself by `test/docs-consistency.test.ts`, so a contract edit
-without a matching schema edit fails the suite instead of drifting
-silently; every field listed there is dispatched to its own checker, so
-an entry added to the list without a checker fails to typecheck rather
-than passing unchecked.
+finding, and passing it is never orchestrator acceptance. The
+required-field set it checks is hand-maintained in `src/review-report.ts`
+and pinned against the contract block itself by
+`test/docs-consistency.test.ts`, so a contract edit without a matching
+schema edit fails the suite instead of drifting silently; every field
+listed there is dispatched to its own checker, so an entry added to the
+list without a checker fails to typecheck rather than passing unchecked.

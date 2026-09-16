@@ -180,11 +180,15 @@ function checkScalarField(
 ): void {
   const value = record[key];
   if (value === undefined) {
-    diagnostics.push({ path, expected: "string", got: "missing" });
+    diagnostics.push({ path, expected: "string or number", got: "missing" });
     return;
   }
   if (typeof value !== "string" && typeof value !== "number") {
-    diagnostics.push({ path, expected: "string", got: describeValue(value) });
+    diagnostics.push({
+      path,
+      expected: "string or number",
+      got: describeValue(value),
+    });
   }
 }
 
@@ -483,7 +487,7 @@ export type FieldKind =
   | "string"
   | "non-empty-string"
   | "scalar"
-  | "array"
+  | "array" // container only; element types are not checked (deliberate for the three plain lists)
   | "mapping-list"
   | "mapping";
 
@@ -534,7 +538,7 @@ export const FIELD_KINDS = {
 const KIND_EXPECTED: Record<Exclude<FieldKind, "enum">, string> = {
   string: "string",
   "non-empty-string": "non-empty string",
-  scalar: "string",
+  scalar: "string or number",
   array: "array",
   "mapping-list": "array",
   mapping: "mapping",
@@ -598,7 +602,9 @@ interface ExtractedYaml {
  */
 export function extractYamlSource(raw: string): ExtractedYaml {
   const warnings: string[] = [];
-  const withoutBom = raw.replace(/^﻿/, "");
+  // No BOM handling: the yaml parser accepts a leading U+FEFF and the
+  // fenced path trims it away with the surrounding prose.
+  const withoutBom = raw;
   const fenceMatch = withoutBom.match(/```[A-Za-z]*\r?\n([\s\S]*?)\r?\n?^```/m);
   if (fenceMatch) {
     const start = fenceMatch.index ?? 0;
