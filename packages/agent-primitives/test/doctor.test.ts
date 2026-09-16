@@ -37,8 +37,12 @@ function sha256(text: string): string {
 /** Whether python3 is on this test process's own real PATH: the
  * `python-bytecode-cache` check's real-resolution branch needs a real
  * CPython to resolve against, so tests exercising it are skipped
- * (rather than silently exercising only the fallback) where none is
- * present, the same idiom `probe-pycache.test.ts` already uses. */
+ * through `it.skipIf` (rather than silently exercising only the
+ * fallback, or returning early into a pass that asserted nothing)
+ * where none is present, the same idiom `probe-pycache.test.ts`
+ * already uses. A skip is visible in the run's own output; the cases
+ * that only need SOME `python3` on PATH, rather than a real CPython's
+ * own answers, use `writePython3Stub` below and never skip. */
 const HAS_PYTHON3 = (() => {
   try {
     execFileSync("python3", ["--version"], { stdio: "ignore" });
@@ -55,6 +59,35 @@ const HAS_PYTHON3 = (() => {
  * check resolves internally, computed independently here so a test can
  * plant a fixture cache file at the one path the check will actually
  * look for. */
+/** A `python3` stand-in written into `binDir`, for the cases that turn
+ * on WHETHER doctor spawns its cache-path resolution and on what it does
+ * with an answer it does not get, rather than on a real CPython's own
+ * resolution: doctor looks `python3` up on the `pathEnv` it is handed
+ * and runs a plain `python3 -c ...`, so a stub pins both on any host,
+ * one with no CPython included. Every call appends a line to `callLog`
+ * (a path outside `binDir`), so a test can assert the spawn did not
+ * happen at all; `printsPath`, when given, is echoed as the resolved
+ * cache path the way the real resolver's one line of stdout is. */
+function writePython3Stub(
+  binDir: string,
+  callLog: string,
+  opts: { exitStatus: number; printsPath?: string },
+): void {
+  const script = [
+    "#!/bin/sh",
+    "# Test stub; see writePython3Stub in doctor.test.ts.",
+    `printf '%s\\n' 'called' >> '${callLog}'`,
+    ...(opts.printsPath !== undefined
+      ? [`printf '%s\\n' '${opts.printsPath}'`]
+      : []),
+    `exit ${String(opts.exitStatus)}`,
+    "",
+  ].join("\n");
+  const stubPath = path.join(binDir, "python3");
+  fs.writeFileSync(stubPath, script);
+  fs.chmodSync(stubPath, 0o755);
+}
+
 function resolveCachePathViaPython3(cwd: string, target: string): string {
   const result = spawnSync(
     "python3",
@@ -389,49 +422,22 @@ describe("doctor: checks, in both states", () => {
     expect(check?.detail).toContain("fixture.py");
   });
 
-  it("python-bytecode-cache: ok, names the target's real resolved cache path when python3 is on PATH and a cache exists there", async () => {
-    if (!HAS_PYTHON3) return;
-    const dir = makeTmpDir();
-    fs.writeFileSync(path.join(dir, "fixture.py"), "");
-    // The exact path THIS host's python3 would use for fixture.py,
-    // resolved the same way doctor's own check does
-    // (`importlib.util.cache_from_source`), never assumed to be a
-    // co-located `__pycache__`: this host's own python3 may redirect it
-    // elsewhere by default (macOS's system python3 does).
-    const cachePath = resolveCachePathViaPython3(dir, "fixture.py");
-    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
-    fs.writeFileSync(cachePath, "");
-    // No `pathEnv` override: the real PATH is what makes doctor's own
-    // `findOnPath(["python3"], dirs)` find the same python3 this test
-    // just resolved the path with.
-    const result = await doctor({
-      required: [],
-      optional: [],
-      cwd: dir,
-      targets: ["fixture.py"],
-    });
-    const check = result.checks.find((c) => c.name === "python-bytecode-cache");
-    expect(check?.ok).toBe(true);
-    expect(check?.detail).toContain("fixture.py");
-    expect(check?.detail).toContain(cachePath);
-    expect(check?.detail).toContain("PYTHONPYCACHEPREFIX");
-  });
-
-  it("python-bytecode-cache: ok, still finds a cache that PYTHONPYCACHEPREFIX redirects elsewhere", async () => {
-    if (!HAS_PYTHON3) return;
-    const dir = makeTmpDir();
-    const redirectDir = makeTmpDir();
-    fs.writeFileSync(path.join(dir, "fixture.py"), "");
-    const before = process.env.PYTHONPYCACHEPREFIX;
-    process.env.PYTHONPYCACHEPREFIX = redirectDir;
-    try {
-      // Resolved WITH the same redirect this process now carries, so
-      // this matches whatever doctor's own child `python3` invocation
-      // (which inherits `process.env`) resolves to.
+  it.skipIf(!HAS_PYTHON3)(
+    "python-bytecode-cache: ok, names the target's real resolved cache path when python3 is on PATH and a cache exists there",
+    async () => {
+      const dir = makeTmpDir();
+      fs.writeFileSync(path.join(dir, "fixture.py"), "");
+      // The exact path THIS host's python3 would use for fixture.py,
+      // resolved the same way doctor's own check does
+      // (`importlib.util.cache_from_source`), never assumed to be a
+      // co-located `__pycache__`: this host's own python3 may redirect it
+      // elsewhere by default (macOS's system python3 does).
       const cachePath = resolveCachePathViaPython3(dir, "fixture.py");
-      expect(cachePath.startsWith(redirectDir)).toBe(true);
       fs.mkdirSync(path.dirname(cachePath), { recursive: true });
       fs.writeFileSync(cachePath, "");
+      // No `pathEnv` override: the real PATH is what makes doctor's own
+      // `findOnPath(["python3"], dirs)` find the same python3 this test
+      // just resolved the path with.
       const result = await doctor({
         required: [],
         optional: [],
@@ -442,12 +448,45 @@ describe("doctor: checks, in both states", () => {
         (c) => c.name === "python-bytecode-cache",
       );
       expect(check?.ok).toBe(true);
+      expect(check?.detail).toContain("fixture.py");
       expect(check?.detail).toContain(cachePath);
-    } finally {
-      if (before === undefined) delete process.env.PYTHONPYCACHEPREFIX;
-      else process.env.PYTHONPYCACHEPREFIX = before;
-    }
-  });
+      expect(check?.detail).toContain("PYTHONPYCACHEPREFIX");
+    },
+  );
+
+  it.skipIf(!HAS_PYTHON3)(
+    "python-bytecode-cache: ok, still finds a cache that PYTHONPYCACHEPREFIX redirects elsewhere",
+    async () => {
+      const dir = makeTmpDir();
+      const redirectDir = makeTmpDir();
+      fs.writeFileSync(path.join(dir, "fixture.py"), "");
+      const before = process.env.PYTHONPYCACHEPREFIX;
+      process.env.PYTHONPYCACHEPREFIX = redirectDir;
+      try {
+        // Resolved WITH the same redirect this process now carries, so
+        // this matches whatever doctor's own child `python3` invocation
+        // (which inherits `process.env`) resolves to.
+        const cachePath = resolveCachePathViaPython3(dir, "fixture.py");
+        expect(cachePath.startsWith(redirectDir)).toBe(true);
+        fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+        fs.writeFileSync(cachePath, "");
+        const result = await doctor({
+          required: [],
+          optional: [],
+          cwd: dir,
+          targets: ["fixture.py"],
+        });
+        const check = result.checks.find(
+          (c) => c.name === "python-bytecode-cache",
+        );
+        expect(check?.ok).toBe(true);
+        expect(check?.detail).toContain(cachePath);
+      } finally {
+        if (before === undefined) delete process.env.PYTHONPYCACHEPREFIX;
+        else process.env.PYTHONPYCACHEPREFIX = before;
+      }
+    },
+  );
 
   it("python-bytecode-cache: ok, falls back to a co-located __pycache__ and says so when python3 is not on PATH", async () => {
     const dir = makeTmpDir();
@@ -465,6 +504,77 @@ describe("doctor: checks, in both states", () => {
     expect(check?.ok).toBe(true);
     expect(check?.detail).toContain("fixture.py");
     expect(check?.detail).toContain("python3 not found on PATH");
+  });
+
+  it("python-bytecode-cache: ok, names the target it fell back for when python3 IS on PATH but resolves no cache path for it", async () => {
+    // The third way into the co-located guess, distinct from the
+    // python3-absent case above and from the deadline case below: a
+    // `python3` that was asked and did not come back with a path (a
+    // non-zero exit, no output, its own timeout). The detail must say
+    // which targets that happened for, rather than reporting the
+    // guess's answer as though python3 had given it.
+    const dir = makeTmpDir();
+    const binDir = makeTmpDir();
+    const callLog = path.join(makeTmpDir(), "python3-calls.txt");
+    fs.writeFileSync(path.join(dir, "fixture.py"), "");
+    fs.mkdirSync(path.join(dir, "__pycache__"));
+    writePython3Stub(binDir, callLog, { exitStatus: 3 });
+    const result = await doctor({
+      required: [],
+      optional: [],
+      cwd: dir,
+      targets: ["fixture.py"],
+      pathEnv: binDir,
+    });
+    const check = result.checks.find((c) => c.name === "python-bytecode-cache");
+    expect(check?.ok).toBe(true);
+    // python3 really was asked: this is the resolution-failed path, not
+    // the python3-absent one.
+    expect(fs.existsSync(callLog)).toBe(true);
+    expect(check?.detail).toContain(
+      "python3 did not resolve a cache path for fixture.py",
+    );
+    expect(check?.detail).not.toContain("python3 not found on PATH");
+    // The guess was actually used, not merely announced.
+    expect(check?.detail).toContain(path.join(dir, "__pycache__"));
+  });
+
+  it("python-bytecode-cache: spawns no python3 at all once doctor's aggregate deadline is spent, names the deadline, and falls back to the co-located guess", async () => {
+    // The resolution is a spawn per target, so a `--target` list of any
+    // length is bound by the same aggregate deadline the `--version`
+    // captures are, not only by its own per-target timeout. Pinned
+    // through the stub's call log rather than by timing: with the
+    // deadline already spent, the stub must never run, even though it
+    // would resolve successfully (to a path nothing exists at, so a
+    // spawn that did happen would replace the co-located hit below with
+    // "no cache found").
+    const dir = makeTmpDir();
+    const binDir = makeTmpDir();
+    const callLog = path.join(makeTmpDir(), "python3-calls.txt");
+    fs.writeFileSync(path.join(dir, "first.py"), "");
+    fs.writeFileSync(path.join(dir, "second.py"), "");
+    fs.mkdirSync(path.join(dir, "__pycache__"));
+    writePython3Stub(binDir, callLog, {
+      exitStatus: 0,
+      printsPath: path.join(dir, "no-such-cache", "fixture.pyc"),
+    });
+    const result = await doctor({
+      required: [],
+      optional: [],
+      cwd: dir,
+      targets: ["first.py", "second.py"],
+      pathEnv: binDir,
+      versionDeadlineMs: 0,
+    });
+    const check = result.checks.find((c) => c.name === "python-bytecode-cache");
+    expect(check?.ok).toBe(true);
+    expect(fs.existsSync(callLog)).toBe(false);
+    expect(check?.detail).toContain(
+      "the aggregate --version deadline (0ms) was already spent",
+    );
+    expect(check?.detail).toContain("first.py");
+    expect(check?.detail).toContain("second.py");
+    expect(check?.detail).toContain(path.join(dir, "__pycache__"));
   });
 
   it("python-bytecode-cache: resolves a --target relative to an absolute cwd, not the process cwd, in the co-located fallback", async () => {

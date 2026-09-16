@@ -52,7 +52,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (accurate on a host whose `python3` redirects `sys.pycache_prefix`
   elsewhere, such as macOS's own system `python3`), and falls back to a
   co-located `__pycache__` guess, named as a fallback in its own detail,
-  when `python3` is absent. `-i inplace`'s post-restore rebuild
+  when `python3` is absent, when `python3` resolves no path for one
+  target, or when the targets' turn comes after `doctor`'s aggregate
+  spawn deadline is spent: the resolution is one `python3` spawn per
+  target, so it is bound by the same aggregate deadline the `--version`
+  captures are (an unbounded `--target` list can no longer multiply the
+  per-target timeout past it), and the detail names which targets fell
+  back and for which of the three reasons. `doctor --target` accumulates
+  across occurrences, so it is repeatable as well as comma-separated, as
+  it is documented to be; it previously kept only the last occurrence's
+  value. `-i inplace`'s post-restore rebuild
   (`--pre` re-run after the last mutant) is isolated the same way every
   other invocation of a Python-target run is. Two new
   regression tests (`test/probe-pycache.test.ts`) reproduce both

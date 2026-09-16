@@ -32,7 +32,7 @@ import path from "node:path";
  * mutants of the same plan): reusing one directory across invocations
  * would just relocate the hazard rather than close it, since the second
  * invocation could then collide with the first invocation's own entry
- * exactly the way the co-located default does today.
+ * exactly the way the ambient default location does today.
  *
  * This is the "isolated cache location" mechanism (not cache
  * invalidation, and not a refusal): see the README's "Python bytecode
@@ -81,7 +81,7 @@ export type PyCacheIsolationResult =
  * The only failure mode is `fs.mkdtempSync` itself throwing (an
  * unwritable or full `logDir`): reported as `ok: false` rather than
  * silently continuing un-isolated, since a caller that fell back to the
- * ambient (co-located) cache would reintroduce the exact hazard this
+ * ambient cache would reintroduce the exact hazard this
  * exists to close. A caller that gets `ok: false` refuses the run
  * instead (this package's exit-2 "cannot guarantee a verdict" path),
  * restoring any mutation already applied first.

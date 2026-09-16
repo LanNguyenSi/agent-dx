@@ -105,7 +105,13 @@ need a rebuild step first). Version captures share one aggregate deadline
 (default 3000ms) across every tool combined; once it is spent, remaining
 tools are still checked for presence on `PATH`, but their `--version`
 capture is skipped rather than each paying its own timeout, and one
-warning names how many were skipped. A `git-version` check reads the
+warning names how many were skipped. That one deadline is the bound on
+every spawn a `doctor` run makes, not on the `--version` captures alone:
+the `python-bytecode-cache` check below asks `python3` for one target's
+cache path at a time, so a long `--target` list spends the same budget,
+and a target reached after it is spent falls back to the co-located
+`__pycache__` guess (a filesystem stat, no spawn) with the deadline
+named in that check's own detail. A `git-version` check reads the
 installed git against what `probe -i worktree` relies on: it is ok from
 git 2.36 on, and below that a warning names what the probe does on that
 git (below 2.35 the worktree sync cannot run at all; between 2.35 and
@@ -3059,7 +3065,12 @@ host whose `python3` redirects `sys.pycache_prefix` elsewhere by default
 (macOS's own system `python3` does) is still checked accurately, rather
 than assumed to be a co-located `__pycache__`; when `python3` is not on
 `PATH`, the check falls back to that co-located guess and names the
-fallback in its own detail. Either way it names the RESOLUTION (that
+fallback in its own detail. It falls back the same way, and names the
+targets it fell back for, in the two narrower cases: a `python3` that
+was asked and did not come back with a path for one target (a non-zero
+exit, no output, its own timeout), and a target whose turn came after
+`doctor`'s aggregate spawn deadline was already spent, where `python3`
+is never asked at all. Either way it names the RESOLUTION (that
 `probe` isolates its own runs against exactly this target automatically)
 rather than telling the operator to act -- it exists so the condition is
 visible up front, and so an operator running the target's own test

@@ -743,8 +743,11 @@ export interface FinalRebuildRuntime {
    * is itself a `--pre` invocation of the run (see this function's own
    * docblock), so it must get the same fresh `PYTHONPYCACHEPREFIX`
    * treatment every other invocation of a Python-target run gets --
-   * otherwise this one `--pre` run would write the ambient, co-located
-   * cache while every other invocation of the same run never does,
+   * otherwise this one `--pre` run would write the ambient cache
+   * (wherever this host's own python3 puts it: a co-located
+   * `__pycache__` on most, a redirected directory on a host whose
+   * python3 sets `sys.pycache_prefix`) while every other invocation of
+   * the same run never does,
    * leaving exactly the shadowing hazard `pycache.ts` exists to close,
    * just moved to the one invocation nothing else isolates. */
   pyCacheIsolation: boolean;

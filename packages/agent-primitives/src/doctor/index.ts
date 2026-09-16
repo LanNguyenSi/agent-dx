@@ -56,26 +56,36 @@ export interface DoctorOptions {
   cwd?: string;
   /** Test seam: overrides process.env.PATH. */
   pathEnv?: string;
-  /** Timeout (ms) for each `<bin> --version` capture. */
+  /** Timeout (ms) for each `<bin> --version` capture, and for each
+   * `python-bytecode-cache` cache-path resolution (the only other
+   * per-item spawn doctor makes). */
   versionTimeoutMs?: number;
-  /** Aggregate deadline (ms), across ALL `--version` captures combined,
-   * measured from the start of doctor's tool loop. Once spent, remaining
-   * tools skip their own capture (`versionCheck: "skipped_deadline"`)
-   * instead of each paying its own per-tool timeout; findOnPath itself
-   * (a filesystem stat, not a spawn) is never skipped by this deadline.
-   * Defaults to 3000. */
+  /** Aggregate deadline (ms) across every spawn doctor makes combined
+   * (the `--version` captures and the `python-bytecode-cache` check's
+   * own per-target `python3` resolutions), measured from the start of
+   * doctor's tool loop. Once spent, remaining tools skip their own
+   * capture (`versionCheck: "skipped_deadline"`) and remaining targets
+   * skip their own resolution (falling back to the co-located guess,
+   * with the deadline named in that check's detail) instead of each
+   * paying its own per-item timeout; findOnPath and the cache-path
+   * `existsSync` (filesystem stats, not spawns) are never skipped by
+   * this deadline. Defaults to 3000. */
   versionDeadlineMs?: number;
   /** Test seam: overrides the probe lock/marker directory (defaults to
    * `lock.ts`'s own `$AGENT_PRIMITIVES_LOCK_DIR` / tmpdir resolution). */
   lockDir?: string;
-  /** Probe target file(s) to check for a co-located CPython bytecode
+  /** Probe target file(s) to check for an existing CPython bytecode
    * cache (relative to `cwd` or absolute), the same `--file`/`-p`
    * targets an operator would hand `probe`. Only `.py` paths among
    * these produce the `python-bytecode-cache` check below; every other
    * extension is silently ignored (CPython's own cache never applies to
-   * it). Omitted or empty: the check is skipped entirely rather than
-   * reported as passing, since "no target named" is not the same claim
-   * as "no cache found next to the target". */
+   * it). Each such target's cache path is the one `python3` itself
+   * resolves (`importlib.util.cache_from_source`) when a `python3` is on
+   * `PATH`, and a co-located `__pycache__` only as the fallback when
+   * none is (or when that resolution did not come back), which the
+   * check's own detail names. Omitted or empty: the check is skipped
+   * entirely rather than reported as passing, since "no target named" is
+   * not the same claim as "no cache found for the target". */
   targets?: string[];
 }
 
@@ -687,13 +697,41 @@ export async function doctor(
     // (an unrelated leftover `__pycache__` nothing currently reads).
     // Absent, or when resolution itself fails for one target, this
     // falls back to that co-located guess.
+    //
+    // Each resolution is a `python3` spawn, so it is bound the same two
+    // ways every `--version` capture above is: its own
+    // `versionTimeoutMs`, and the run's ONE aggregate deadline. A
+    // caller's `--target` list is unbounded in length, so without the
+    // aggregate bound a long list would multiply the per-target timeout
+    // into a doctor run far past the budget the deadline exists to keep
+    // (the `--version` captures' own reason for having it). A target
+    // reached after the deadline is spent falls back to the co-located
+    // guess -- a filesystem stat, never a spawn -- and the detail names
+    // the bound that put it there, so the fallback is never silent.
     const python3 = findOnPath(["python3"], dirs);
     const hits: string[] = [];
+    /** Targets checked by the co-located guess because `python3` was
+     * asked and did not come back with a path. */
+    const unresolved: string[] = [];
+    /** Targets checked by the co-located guess because the aggregate
+     * deadline was already spent when their turn came, so `python3` was
+     * never asked at all. */
+    const deadlineSkipped: string[] = [];
     for (const target of pyTargets) {
-      const resolved =
-        python3 !== undefined
-          ? resolvePyCacheTarget(python3.path, cwd, target, versionTimeoutMs)
-          : undefined;
+      let resolved: string | undefined;
+      if (python3 !== undefined) {
+        if (Date.now() >= aggregateDeadline) {
+          deadlineSkipped.push(target);
+        } else {
+          resolved = resolvePyCacheTarget(
+            python3.path,
+            cwd,
+            target,
+            versionTimeoutMs,
+          );
+          if (resolved === undefined) unresolved.push(target);
+        }
+      }
       if (resolved !== undefined) {
         if (fs.existsSync(resolved)) hits.push(`${target} (${resolved})`);
         continue;
@@ -706,10 +744,29 @@ export async function doctor(
     // from python3's own real resolution or from the co-located guess,
     // since the guess can be wrong in either direction on a host whose
     // python3 redirects its cache elsewhere (see the comment above).
+    // Every target that fell back is named in exactly one clause, with
+    // the reason it fell back.
+    const fallbackNotes: string[] = [];
+    if (python3 === undefined) {
+      fallbackNotes.push(
+        "python3 not found on PATH; checked only for a co-located __pycache__",
+      );
+    } else if (unresolved.length > 0) {
+      fallbackNotes.push(
+        `python3 did not resolve a cache path for ${unresolved.join(", ")}; ` +
+          `checked only for a co-located __pycache__ there`,
+      );
+    }
+    if (deadlineSkipped.length > 0) {
+      fallbackNotes.push(
+        `the aggregate --version deadline (${versionDeadlineMs}ms) was ` +
+          `already spent, so the python3 cache-path resolution was skipped ` +
+          `for ${deadlineSkipped.join(", ")}; checked only for a co-located ` +
+          `__pycache__ there`,
+      );
+    }
     const fallbackNote =
-      python3 === undefined
-        ? " (python3 not found on PATH; checked only for a co-located __pycache__)"
-        : "";
+      fallbackNotes.length > 0 ? ` (${fallbackNotes.join("; ")})` : "";
     checks.push({
       name: "python-bytecode-cache",
       ok: true,
