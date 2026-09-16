@@ -1,5 +1,95 @@
 # Bundle log
 
+- 2026-09-16T07:15:50Z (reviewer-report validator, round 4, agent-dx task
+  8ab22cb0, pandora run 2026-09-16-open-pool-batch55, T-003): review
+  round 3 (rigorous) returned `fix_required` on the same test-adequacy
+  class for the third time, and the review-round escalation budget
+  raised the task a tier. Rounds 1, 2 and 3 each pinned one kind of
+  check on this validator by hand (a deletion table per constant, then
+  a predicate table, then nothing at all for the wrong-type branches),
+  and each round the next kind turned out to be unpinned: every
+  rejection branch for a wrong JS type or a wrong container shape
+  survived the whole suite, in `checkStringField`, `checkArrayField`,
+  and the four container guards in `checkFindings`,
+  `checkReproduction` and `checkWithdrawn`, while the round-3 comment claimed presence and type
+  were both already covered by the tables above it.
+
+  This round replaces the enumeration with a derivation.
+  `src/review-report.ts` declares a structural kind per contract field
+  in `FIELD_KINDS`, next to the dispatch tables and `satisfies
+  Record<SchemaFieldName, FieldKind>` against the same four constants,
+  so a field added to a constant without a kind fails to compile the way
+  it already failed without a checker (both errors were read from `tsc`
+  on a field pasted into `TOP_LEVEL_FIELDS`: TS2741 for the missing
+  checker, TS1360 for the missing kind); `expectedTextFor` declares the
+  `expected` text each field's diagnostics carry, with the one wording
+  override the contract's own `withdrawn` sentence asks for.
+  `test/review-report.test.ts` builds one case list from those
+  declarations and from per-kind input-class tables keyed by `FieldKind`
+  itself, so a new kind with no input classes is also a compile error.
+  Per field of every constant the generated cases now assert the single
+  full diagnostic (path, expected, got) for a deleted key, for every JS
+  type that kind rejects, for an out-of-enum string, for the empty and
+  blank string where the kind is `non-empty-string`, and for a
+  container's non-array and non-mapping-element shapes, plus zero
+  diagnostics for every in-enum spelling, for the empty string where the
+  kind is `string`, for the number a `scalar` tolerates, and for an empty
+  list. Three self-checks pin that every constant entry gets at least a
+  missing and a wrong-type case, that the enum kinds and `ENUM_VALUES`
+  name the same fields, and the case count per constant array, so a case
+  list that was emptied or shortened fails rather than passing quietly.
+  The three hand-enumerated tables are folded into that list.
+  `test/docs-consistency.test.ts` gains one more pin in its appended
+  schema block: each declared kind must be one the contract fence's own
+  written shape for that field allows (an alternation is an enum, a
+  `- ""` list an array, a `- key:` list a list of mappings, an indented
+  key block a mapping), which leaves only the three scalar kinds
+  undistinguishable from the fence, and those are what the generated
+  cases separate.
+
+  Correctness, same round: a fenced return now ends at the first closing
+  fence that starts at column 0 (`^` under the `m` flag), so a
+  triple-backtick sequence inside a value cannot close the block early.
+  A reviewer quoting a fenced snippet in a `description` block scalar,
+  which YAML necessarily indents, previously had the return truncated
+  mid-value and got diagnostics about fields it actually carried;
+  `test/fixtures/review-report/valid-inner-fence.yaml` is that return,
+  and the prose-before and prose-after fixtures stay green beside it.
+  Two behaviours that were already true are now pinned so a change to
+  either has to be deliberate: an unknown extra top-level key is
+  accepted (the contract's fields are required, additions are not
+  forbidden), and `introduced_by_delta: true` is rejected with a
+  diagnostic naming the three spellings, since `yes`/`no` are strings in
+  this contract and not YAML booleans.
+
+  Docs, same round: the `contracts.md` invocation paragraph named the
+  argument-parsing library rather than what a reader of that reference
+  sees, and now names the cases themselves (a missing `<file>` argument,
+  an unknown option, an excess positional argument); it was rewrapped in
+  place to the same seventeen lines from the same start line, so no
+  citation into it moved, and `README.md` keeps the library name in its
+  own maintainer-facing section. This log's own top entry below mixed two
+  baselines for one pair of citations, quoting pre-rebase numbers in one
+  clause and master's in the next; the pre-rebase numbers are dropped and
+  the rebase note states its baseline, so only one set of numbers
+  remains. The CHANGELOG clause for the closing-fence change grew
+  `[Unreleased]` by four lines, which moved this log's two live
+  self-citations into `CHANGELOG.md` from line 113 to line 117 and from
+  line 490 to line 494; both re-pointed after re-reading their anchors.
+  The `README.md` section and the `docs-consistency.test.ts` block both
+  grew below every citation into those files, and `src/review-report.ts`
+  and `test/review-report.test.ts` are still not `sources:` entries in
+  any bundle doc. Re-stamped the five docs whose `sources:` list
+  `README.md`, `CHANGELOG.md`, `contracts.md`, or
+  `test/docs-consistency.test.ts` (`install-fence-mechanics.md`,
+  `model-preselection.md`, `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md`,
+  `subagent-contracts-superset.md`); `operator-install-and-registry.md`
+  lists only `src/cli.ts` among the files this round touched, which it
+  did not, so it keeps its stamp. Verified `okf-kit check docs/okf
+  --require-anchors` at zero findings after the source commit and again
+  after this re-stamp/log commit.
+
 - 2026-09-16T06:31:46Z (reviewer-report validator fix round, agent-dx
   task 8ab22cb0, pandora run 2026-09-16-open-pool-batch55, T-003, round
   3): review round 2 (rigorous) returned `fix_required` with one medium
@@ -50,9 +140,12 @@
   190/200/202/202/250/274); re-pointed after re-reading each anchor at
   its new line. Editing the CHANGELOG `[Unreleased]` entry (added the
   excess-arguments behavior-change clause) grew it by two lines, which
-  shifted this same log's own two citations into `CHANGELOG.md`
-  (98/475 became 100/477); re-pointed both. `src/review-report.ts` is
-  still not itself listed as a `sources:` entry in any bundle doc.
+  shifted this same log's own two citations into `CHANGELOG.md`; both
+  were re-pointed, and then re-pointed once more by the rebase noted
+  below, whose numbers are the only ones this entry quotes, so no
+  reader has to reconcile two baselines for the same two citations.
+  `src/review-report.ts` is still not itself listed as a `sources:`
+  entry in any bundle doc.
   Re-stamped the six docs whose `sources:` list `cli.ts`, `README.md`,
   `contracts.md`, or `docs-consistency.test.ts` (`install-fence-mechanics.md`,
   `model-preselection.md`, `operator-install-and-registry.md`,
@@ -64,9 +157,10 @@
   landed on master, this branch was squashed and rebased; the
   `[Unreleased]` section now lists this validator bullet above the
   docs-cleanup bullet, which moved the two live self-citations below
-  from line 101 to line 113 and from line 478 to line 490 of the
-  CHANGELOG (both re-pointed after re-reading their anchors), and the
-  four docs re-stamped by both branches keep the newer stamp.
+  by the length of that bullet, from master's line 101 to line 113 and
+  from master's line 478 to line 490 of the CHANGELOG (both re-pointed
+  after re-reading their anchors), and the four docs re-stamped by both
+  branches keep the newer stamp.
 
 - 2026-09-16T06:28:05Z (okf-kit install step, review round 3 on the pin-probe change):
   the registry-error branch now prints npm's captured stderr with a
@@ -772,7 +866,7 @@
   sentence reverted to its pre-change wording, fails the exact-sub-field
   and regression-signal tests above; restored, the suite is green again.
   `CHANGELOG.md`'s own prose copy of this change is
-  (`CHANGELOG.md:113#"The implementer"`).
+  (`CHANGELOG.md:117#"The implementer"`).
 
   Verified on the committed tree: the full package suite (`npm test`),
   `typecheck`, `typecheck:test`, and `format:check`, all clean. Re-pointed
@@ -1040,7 +1134,7 @@
   that binding rather than second-guessing it.
 
   The CHANGELOG bullet for this round is
-  `CHANGELOG.md:490#"Citation scanning is paragraph-joined"`. Verified on
+  `CHANGELOG.md:494#"Citation scanning is paragraph-joined"`. Verified on
   the committed tree: the full package suite, `docs-consistency.test.ts`
   on its own, `typecheck`, `typecheck:test` and `format:check`; the
   figures each guard measured are in its own computed test name, per the
