@@ -90,6 +90,30 @@ const FIXTURE_TEST_PY = [
   "",
 ].join("\n");
 
+// Same assertion `FIXTURE_TEST_PY` makes, plus one line appending
+// whatever `PYTHONPYCACHEPREFIX` THIS invocation actually saw (or an
+// empty line when unset) to a log file first: lets a test tell separate
+// invocations of the same run apart by the directory each one actually
+// got, not merely by pass/fail.
+const LOGGING_TEST_PY = [
+  "import os",
+  "with open('pycache_env_log.txt', 'a') as f:",
+  "    f.write((os.environ.get('PYTHONPYCACHEPREFIX') or '') + chr(10))",
+  "from fixture import check",
+  "assert check('?') is True",
+  "",
+].join("\n");
+
+/** Writes and commits `LOGGING_TEST_PY` as `test_logging.py` in `repo`
+ * (already an `initPyRepo()` repo), and returns the log file it
+ * appends to. */
+function addLoggingTest(repo: string): string {
+  fs.writeFileSync(path.join(repo, "test_logging.py"), LOGGING_TEST_PY);
+  git(repo, ["add", "-A"]);
+  git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "add logger"]);
+  return path.join(repo, "pycache_env_log.txt");
+}
+
 function initPyRepo(): { repo: string } {
   const repo = makeTmpDir();
   git(repo, ["init", "-q"]);
@@ -271,25 +295,7 @@ describe("probe(): CPython bytecode-cache isolation", () => {
     async () => {
       useLockDir();
       const { repo } = initPyRepo();
-      // Logs the `PYTHONPYCACHEPREFIX` this invocation actually saw (or
-      // an empty line when unset) before importing `fixture`, so this
-      // test can tell the baseline's own invocation and each mutant's
-      // own invocation apart by directory, not merely by pass/fail.
-      const loggingTest = [
-        "import os",
-        "with open('pycache_env_log.txt', 'a') as f:",
-        "    f.write((os.environ.get('PYTHONPYCACHEPREFIX') or '') + chr(10))",
-        "from fixture import check",
-        "assert check('?') is True",
-        "",
-      ].join("\n");
-      fs.writeFileSync(path.join(repo, "test_logging.py"), loggingTest);
-      execFileSync("git", ["add", "-A"], { cwd: repo });
-      execFileSync(
-        "git",
-        ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "add logger"],
-        { cwd: repo },
-      );
+      const logPath = addLoggingTest(repo);
 
       const result = await probePlan({
         mutants: [
@@ -316,7 +322,6 @@ describe("probe(): CPython bytecode-cache isolation", () => {
       expect(result.results[0]?.status).toBe("killed");
       expect(result.results[1]?.status).toBe("killed");
 
-      const logPath = path.join(repo, "pycache_env_log.txt");
       const lines = fs
         .readFileSync(logPath, "utf8")
         .split("\n")
@@ -330,6 +335,122 @@ describe("probe(): CPython bytecode-cache isolation", () => {
       // No two invocations, including the two mutants that share the
       // same file, ever shared a directory.
       expect(new Set(lines).size).toBe(3);
+    },
+  );
+
+  it.skipIf(!HAS_PYTHON3)(
+    "the caller's own --env PYTHONPYCACHEPREFIX is honoured: this run's own isolation is skipped entirely and the caller's value reaches every invocation, with a named warning",
+    async () => {
+      useLockDir();
+      const { repo } = initPyRepo();
+      const logPath = addLoggingTest(repo);
+      const callerDir = makeTmpDir();
+
+      const result = await probe(
+        baseOptions(repo, {
+          testCommand: "python3 test_logging.py",
+          env: { PYTHONPYCACHEPREFIX: callerDir },
+          // A DIFFERENT-length mutant, deliberately, not the
+          // same-length `MUTATED_LINE` `baseOptions` defaults to:
+          // isolation is genuinely skipped for this whole run (that is
+          // what this test proves), so a same-length mutant here would
+          // hit the very `(mtime, size)` hazard this package's own
+          // isolation exists to close, making THIS test's own verdict
+          // unreliable rather than proving the env plumbing this test
+          // actually targets.
+          replaceText: "    return False",
+        }),
+      );
+
+      expect(result.status).toBe("killed");
+      // Both the baseline's own invocation and the mutant's own
+      // invocation saw the SAME caller-named directory: isolation was
+      // skipped for the whole run, not merely for one phase.
+      const lines = fs
+        .readFileSync(logPath, "utf8")
+        .split("\n")
+        .filter((line) => line.length > 0);
+      expect(lines).toEqual([callerDir, callerDir]);
+      // The envelope echoes the caller's own `--env` value back,
+      // truthfully -- this is what actually reached the child, not a
+      // value this package silently overrode.
+      expect(result.test?.env?.PYTHONPYCACHEPREFIX).toBe(callerDir);
+      // The hazard is named, and the caller's own value is named in it.
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes("PYTHONPYCACHEPREFIX") &&
+            w.includes(callerDir) &&
+            w.includes("skipped"),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it.skipIf(!HAS_PYTHON3)(
+    "without a caller override, isolation still applies as usual and the warning names the variable generically (no caller value to name)",
+    async () => {
+      useLockDir();
+      const { repo } = initPyRepo();
+      const logPath = addLoggingTest(repo);
+
+      const result = await probe(
+        baseOptions(repo, { testCommand: "python3 test_logging.py" }),
+      );
+
+      expect(result.status).toBe("killed");
+      const lines = fs
+        .readFileSync(logPath, "utf8")
+        .split("\n")
+        .filter((line) => line.length > 0);
+      // Baseline + mutant: two invocations, neither empty, and never
+      // sharing a directory -- isolation applied both times.
+      expect(lines).toHaveLength(2);
+      for (const line of lines) expect(line.length).toBeGreaterThan(0);
+      expect(lines[0]).not.toBe(lines[1]);
+      // No `--env` was given, so the envelope carries no `test.env` at
+      // all (see `TestPhaseField.env`'s own docblock).
+      expect(result.test?.env).toBeUndefined();
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes("PYTHONPYCACHEPREFIX") && w.includes("baseline_failed"),
+        ),
+      ).toBe(true);
+      expect(result.warnings.some((w) => w.includes("skipped"))).toBe(false);
+    },
+  );
+
+  it.skipIf(!HAS_PYTHON3)(
+    "the post-restore --pre rebuild under -i inplace is isolated too, leaving the ambient cache untouched",
+    async () => {
+      useLockDir();
+      const { repo } = initPyRepo();
+      const pycPath = ambientPycPath(repo);
+      // No pre-warm here: the ambient cache does not exist before this
+      // run at all, so "untouched" below means "still does not exist"
+      // -- a `--pre` that escaped isolation on its post-restore re-run
+      // would create it.
+      expect(fs.existsSync(pycPath)).toBe(false);
+
+      const result = await probe(
+        baseOptions(repo, {
+          preCommand: 'python3 -c "import fixture"',
+        }),
+      );
+
+      expect(result.status).toBe("killed");
+      // Confirms the post-restore rebuild actually ran (a no-op outside
+      // `-i inplace` with `--pre` given, per `runFinalRebuild`'s own
+      // docblock).
+      expect(
+        result.warnings.some((w) =>
+          w.includes("--pre was re-run after the last mutant was restored"),
+        ),
+      ).toBe(true);
+      // The one path an unisolated post-restore `--pre` would have
+      // written: still absent.
+      expect(fs.existsSync(pycPath)).toBe(false);
     },
   );
 });
