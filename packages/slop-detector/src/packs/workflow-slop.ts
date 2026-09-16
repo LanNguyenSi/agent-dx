@@ -1569,8 +1569,21 @@ const NONZERO_LITERAL_EXIT_RE = /^exit\s+[1-9]\d*$/;
 /** `exit 0` (also `exit 00`), the verdict that makes a gate pointless. */
 const ZERO_EXIT_RE = /^exit\s+0+$/;
 
-/** Statements permitted before the `set +e` window opens. */
+/** Any `exit`, with or without an operand. */
+const EXIT_STATEMENT_RE = /^exit\b/;
+
+/**
+ * Statements permitted before the `set +e` window opens. A `trap` is
+ * among them (the canonical classification block cleans up a temp file
+ * on `EXIT`), but only one that does not itself call `exit`: an `EXIT`
+ * trap leaves the script's exit status alone unless its own body exits,
+ * and `trap 'exit 0' EXIT` would make every later verdict irrelevant.
+ * Matched case-sensitively, so the `EXIT` signal name is not mistaken
+ * for the `exit` builtin.
+ */
 const PRE_WINDOW_COMMAND_RE = /^(?:trap|mkdir|mktemp|cd|echo|printf)\b/;
+const TRAP_RE = /^trap\b/;
+const EXIT_WORD_RE = /\bexit\b/;
 const ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 /** Statements permitted after the `set -e` restore. */
@@ -1786,7 +1799,11 @@ function tryClassifyShape(
     const permitted =
       (set.isSet && set.onlyEnables) ||
       ASSIGNMENT_RE.test(statement.trimmed) ||
-      PRE_WINDOW_COMMAND_RE.test(statement.trimmed);
+      (PRE_WINDOW_COMMAND_RE.test(statement.trimmed) &&
+        !(
+          TRAP_RE.test(statement.trimmed) &&
+          EXIT_WORD_RE.test(statement.trimmed)
+        ));
     const separatorOk =
       statement.separatorBefore === "start" ||
       statement.separatorBefore === "newline" ||
@@ -1810,16 +1827,29 @@ function tryClassifyShape(
         reason: `a statement this rule does not model runs after the \`set -e\` restore (${quoteStatement(statement.trimmed)})`,
       };
     }
-  }
-  const zeroExit = after.find((statement) =>
-    ZERO_EXIT_RE.test(statement.trimmed),
-  );
-  if (zeroExit) {
-    return {
-      ok: false,
-      reason:
-        "an `exit 0` statement runs after the `set -e` restore, so the step can report success on a failing gate",
-    };
+    // Every `exit` after the restore must be one of the two verdicts the
+    // shape is about. A bare `exit` exits with the status of whatever ran
+    // last (post-restore that is an `echo`, so zero), and `exit $OTHER`
+    // or `exit ${VAR:-0}` hands over a value the shape knows nothing
+    // about; both would let a recognised block report success on a
+    // failing gate, so neither may ride along inside one.
+    if (!EXIT_STATEMENT_RE.test(statement.trimmed)) continue;
+    if (ZERO_EXIT_RE.test(statement.trimmed)) {
+      return {
+        ok: false,
+        reason:
+          "an `exit 0` statement runs after the `set -e` restore, so the step can report success on a failing gate",
+      };
+    }
+    if (
+      !NONZERO_LITERAL_EXIT_RE.test(statement.trimmed) &&
+      !isExitOfVariable(statement.trimmed, captured)
+    ) {
+      return {
+        ok: false,
+        reason: `an \`exit\` after the \`set -e\` restore exits neither a non-zero literal nor the captured status (${quoteStatement(statement.trimmed)})`,
+      };
+    }
   }
   if (
     !after.some((statement) => NONZERO_LITERAL_EXIT_RE.test(statement.trimmed))

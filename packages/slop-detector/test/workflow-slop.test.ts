@@ -1389,6 +1389,79 @@ describe("workflow-slop/audit-gate-shape: R-classify", () => {
     );
   });
 
+  it("a bare `exit` after the restore is reported (it exits the last command's status, not the gate's)", () => {
+    const body = [
+      "set +e",
+      "npm audit --audit-level=high",
+      "STATUS=$?",
+      "set -e",
+      'echo "audit done"',
+      "exit",
+      "exit 1",
+      "exit $STATUS",
+    ];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "an `exit` after the `set -e` restore exits neither a non-zero literal nor the captured status (`exit`)",
+      ),
+    );
+  });
+
+  it("an `exit` of a variable other than the captured status is reported", () => {
+    const body = [
+      "set +e",
+      "npm audit --audit-level=high",
+      "STATUS=$?",
+      "set -e",
+      "exit $OTHER",
+      "exit 1",
+      "exit $STATUS",
+    ];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "an `exit` after the `set -e` restore exits neither a non-zero literal nor the captured status (`exit $OTHER`)",
+      ),
+    );
+  });
+
+  it("an `exit ${STATUS:-0}` default-expansion verdict is reported, not read as the captured status", () => {
+    const body = [
+      "set +e",
+      "npm audit --audit-level=high",
+      "STATUS=$?",
+      "set -e",
+      "exit 1",
+      "exit ${STATUS:-0}",
+    ];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "an `exit` after the `set -e` restore exits neither a non-zero literal nor the captured status (`exit ${STATUS:-0}`)",
+      ),
+    );
+  });
+
+  it("a pre-window `trap` that calls `exit` is reported (an EXIT trap can override every verdict)", () => {
+    const body = ["trap 'exit 0' EXIT", ...CLASSIFY_BODY];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "a statement this rule does not model runs before the `set +e` (`trap 'exit 0' EXIT`)",
+      ),
+    );
+  });
+
+  it("negative control: a pre-window cleanup `trap` naming the EXIT signal is permitted", () => {
+    const body = ["trap 'rm -f \"$LOG\"' EXIT", ...CLASSIFY_BODY];
+    expect(shapeViolations(auditYml(gateStep(body)))).toHaveLength(0);
+  });
+
   it("reassigning the captured status after the restore is reported", () => {
     const body = [
       "set +e",

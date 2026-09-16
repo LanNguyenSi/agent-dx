@@ -81,12 +81,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     gate strictly inside the window, at most one `VAR=$?` capture after
     the gate, the gate optionally piped only into `tee` and only with
     `set -o pipefail` set earlier, exactly one `set -e` restore, then
-    `if`/`then`/`else`/`elif`/`fi`/`echo`/`printf`/`exit` statements
-    including an `exit` of a non-zero literal and an `exit` of the
-    captured status, with no `exit 0` and no reassignment of the
+    `if`/`then`/`else`/`elif`/`fi`/`echo`/`printf` statements plus
+    `exit` statements that each exit either a non-zero literal or the
+    captured status, including at least one of each, with no `exit 0`,
+    no bare `exit`, no other `exit` operand and no reassignment of the
     captured variable; before the window only assignments,
-    option-enabling `set -` statements, `trap`, `mkdir`, `mktemp`, `cd`,
-    `echo` and `printf`). Every spelling bash accepts for those `set`
+    option-enabling `set -` statements, `mkdir`, `mktemp`, `cd`, `echo`,
+    `printf`, and a `trap` whose own body does not call `exit`). Every spelling bash accepts for those `set`
     calls is parsed rather than pattern-matched, so `set +eu` and
     `set +o errexit` open the window and `set -eo pipefail` and
     `set -euo pipefail` restore it. A `continue-on-error` on the gate

@@ -309,7 +309,8 @@ A local `./path` action and a `docker://image` reference are never flagged (neit
 
   ```bash
   # permitted before the window: assignments, option-enabling `set -`,
-  # trap, mkdir, mktemp, cd, echo, printf
+  # trap (only one that does not itself call `exit`), mkdir, mktemp, cd,
+  # echo, printf
   set -o pipefail
   set +e                                    # exactly one, any spelling that
                                             # disables errexit: +e, +eu,
@@ -321,16 +322,16 @@ A local `./path` action and a `docker://image` reference are never flagged (neit
   set -e                                    # exactly one restore: -e, -eo
                                             # pipefail, -euo pipefail,
                                             # -o errexit
-  # permitted after the restore: if/then/else/elif/fi, echo, printf, exit
+  # permitted after the restore: if/then/else/elif/fi, echo, printf, and
+  # an `exit` of either a non-zero literal or the captured status
   if [ "$STATUS" -ne 0 ]; then
     exit 1                                  # required: an exit of a non-zero
   fi                                        # literal
   exit $STATUS                              # required: an exit of the captured
-                                            # status. No `exit 0` may appear
-                                            # after the restore.
+                                            # status
   ```
 
-  Everything is positional and exhaustive: a statement the shape does not name makes the block unrecognised, so a construct this rule never heard of cannot ride along inside a recognised block. That is also why a `STATUS=0` reassignment after the restore is reported, and why the window admits the capture and nothing else (an `echo` between `set +e` and the gate is reported).
+  Everything is positional and exhaustive: a statement the shape does not name makes the block unrecognised, so a construct this rule never heard of cannot ride along inside a recognised block. That is why the window admits the capture and nothing else (an `echo` between `set +e` and the gate is reported), why a `STATUS=0` reassignment after the restore is reported, and why *every* `exit` after the restore has to be one of the two verdicts: a bare `exit` exits with the status of whatever ran last (post-restore, an `echo`, so zero), and `exit $OTHER` or `exit ${STATUS:-0}` hands over a value the shape knows nothing about. A pre-window `trap` is permitted only when its own body does not call `exit`, since an `EXIT` trap leaves the script's status alone unless it exits itself, and `trap 'exit 0' EXIT` would make every later verdict irrelevant (the `EXIT` signal name is matched case-sensitively, so a cleanup `trap 'rm -f "$LOG"' EXIT` is fine).
 
 - **A registered template** -- see "Registering a gate template" below.
 
@@ -370,7 +371,7 @@ The package ships **no** template of its own: a canonical gate block is org cont
 **The honest limits.** These are shape checks over one run block, not an evaluation of the script:
 
 - **The rules are bound to the file name.** Only `.github/workflows/audit.yml` and `audit.yaml` are scanned (`appliesTo`), so an npm-audit gate that lives in `ci.yml`, `security.yml`, or any other workflow file is outside both rules entirely, whatever shape it has.
-- **`exit $VAR` is accepted without proving `$VAR` is non-zero at runtime.** `R-classify` requires that the captured status is handed to `exit`, and that no `exit 0` and no reassignment of that variable follows the restore, which is as far as the text goes. It does not evaluate the branch conditions that decide which `exit` is reached.
+- **`exit $VAR` is accepted without proving `$VAR` is non-zero at runtime.** `R-classify` requires that the captured status is handed to `exit`, and that no `exit 0`, no other `exit` operand and no reassignment of that variable follows the restore, which is as far as the text goes. It does not evaluate the branch conditions that decide which `exit` is reached.
 - **A registered template is trusted as is.** Its digest match suppresses every shape check for that block, so the review that justified registering it is the only thing standing behind it.
 
 **Scope: `npm audit` only.** The gate-command match (`isGateCommand`) requires literal `npm audit` in the statement; `pnpm audit --audit-level=high`, `pip-audit`, `cargo audit`, and a reusable-workflow-call `audit.yml` (`uses: org/repo/.github/workflows/audit.yml@vN`, no `run:` step to inspect) are all out of these rules' reach and are reported by `audit-gate-missing` (the same finding a truly-missing gate produces) rather than silently skipped. A repo whose `audit.yml` legitimately uses one of those does not need to live with that finding: disable either rule on its own while keeping the rest of `workflow-slop` (including `node20-action-major`) via
