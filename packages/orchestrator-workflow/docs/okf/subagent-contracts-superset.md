@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-16T07:43:37Z
+timestamp: 2026-09-16T09:14:56Z
 sources:
   - packages/orchestrator-workflow/assets/agents/explorer.md
   - packages/orchestrator-workflow/assets/agents/task-slicer.md
@@ -108,7 +108,7 @@ trivial change.
   (`## Explorer output contract`) vs.
   `packages/orchestrator-workflow/assets/agents/explorer.md:48-70#"recommendation:"`.
 - Implementer: `packages/orchestrator-workflow/assets/skill/references/contracts.md:78#"## Implementer output contract"`
-  vs. `packages/orchestrator-workflow/assets/agents/implementer.md:168#"role: implementer"`.
+  vs. `packages/orchestrator-workflow/assets/agents/implementer.md:181#"role: implementer"`.
   Both copies gained a `mutation_probes` field in 0.16.0; see
   [Mutation probes requirement](#mutation-probes-requirement-0160) below.
   Both copies also gained a `commits` field; see
@@ -423,7 +423,7 @@ rule's prose, mirroring the gap the 0.14.0 reproduction trigger closed for
 step 7 in the log entry above, but left open here until this pass.
 
 Both output-contract copies carry the field (`mutant, verified_applied_via,
-result, restored_verified`, `packages/orchestrator-workflow/assets/skill/references/contracts.md:114#"restored_verified:"` and `implementer.md:198#"restored_verified:"`)
+result, restored_verified`, `packages/orchestrator-workflow/assets/skill/references/contracts.md:114#"restored_verified:"` and `implementer.md:211#"restored_verified:"`)
 at 0.16.0 (later grown to eleven sub-fields; see Mutation probe definition
 fields and expectation split below).
 The installed prompt's matching bullet
@@ -486,7 +486,7 @@ Both output-contract copies gained a fifth `mutation_probes` sub-field,
 replayed this round: `true`), added identically
 (`packages/orchestrator-workflow/assets/skill/references/contracts.md:115#"replayed: false | true"`
 and
-`packages/orchestrator-workflow/assets/agents/implementer.md:199#"replayed: false | true"`),
+`packages/orchestrator-workflow/assets/agents/implementer.md:212#"replayed: false | true"`),
 the same byte-for-byte-block rigor already applied to the `mutation_probes`
 and `commits` fields above. Step 7 no longer grants the reviewer a
 skip permission directly (the reviewer never reads SKILL.md, so that
@@ -618,7 +618,7 @@ they agree, so the new `reason` column and sub-field cannot drift apart
 
 The implementer output contract gained a `commits` field, added to both
 copies identically (`packages/orchestrator-workflow/assets/skill/references/contracts.md:122#"commits:"`
-and `packages/orchestrator-workflow/assets/agents/implementer.md:168#"role: implementer"`,
+and `packages/orchestrator-workflow/assets/agents/implementer.md:181#"role: implementer"`,
 byte-identical block, the same rigor already applied to `mutation_probes`
 above). It lists the full sha of every commit the implementer produced on
 the task branch, in order (worded in substance in the installed prompt's rule bullet,
@@ -651,6 +651,20 @@ for the commit sha produced; briefs asked for it in prose and implementers
 omitted it (twice in one session), forcing the orchestrator to re-derive it
 from git. Unlike a prose ask, a contract field is checked by the misfire
 rule.
+
+The installed prompt also gained a rule bullet next to the commit-reporting
+ones above: before committing, run `slop-detector`'s `review-slop` pack
+over every changed file and the commit message and fix every block-level
+finding first
+(`packages/orchestrator-workflow/assets/agents/implementer.md:136#"Before committing, when slop-detector is available run"`),
+worded the same "misfire, not evidence" way as the `commits` field rule
+just above it (see [Subagent misfire rule](#subagent-misfire-rule-0110-evidence-relocated-0240)).
+Reworded at T-006 round 2 to name a `check` invocation that takes
+one-or-more paths (`<changed file> [<changed file> ...]`) rather than a
+single `<changed files>` placeholder the CLI's own `check [path]` command
+silently only scanned the first of, and to spell the commit-message
+invocation as the `git log -1 --format=%B | ... check --stdin-path
+COMMIT_MSG` pipe it actually is.
 
 ## Review-method axis: method_applied and withdrawn
 

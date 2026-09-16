@@ -1,5 +1,128 @@
 # Bundle log
 
+- 2026-09-16T09:14:56Z (agent-dx tracker task a378ecca, pandora run
+  2026-09-16-open-pool-batch55, T-006, round-2 fix): the pre-return rule
+  bullet added below (2026-09-16T08:09:25Z entry) was rigorous-review
+  fix_required (H1: the prescribed `check <changed files> --pack
+  review-slop` command silently scanned only the first path, since `check
+  [path]` took a single optional positional; H2: the round-reference rule
+  block-flagged the kit's own digitless "review round" vocabulary). Both
+  are fixed at the source: `packages/slop-detector/src/cli.ts`'s `check`
+  command now takes `[paths...]` (one-or-more positionals, scanned and
+  summed into one `CheckSummary`) and `--pack` is now a repeatable
+  single-value option rather than a variadic one, so `--pack review-slop
+  fileA fileB` no longer swallows the paths as pack names; a path given
+  together with `--stdin-path` is now a usage error (exit 2), and reading
+  stdin with nothing piped in (a TTY) is now a usage error too, instead of
+  a silent green no-op. `packages/slop-detector/src/packs/review-slop.ts`'s
+  round-reference rule no longer matches a digitless `review round` at
+  any severity, and both it and `finding-id` gained precision fixes
+  (single-digit `F`-ids only, plus a same-sentence review-context
+  requirement for `round N`/bare `RN` tokens) and a fix for the `.each`
+  tagged-template test-title form. The installed prompt's bullet, at
+  `implementer.md` line 136 ("Before committing, when slop-detector is
+  available run"; spelled as prose here rather than citation syntax, per
+  this log's own convention, since a `path:line#"..."` citation this
+  close above the "docs cleanup" entry's own bare-line-number
+  continuation citations below would be picked up by those instead of
+  their intended `test/docs-consistency.test.ts` target), is reworded to
+  name a `check` invocation over one-or-more changed files and the
+  actual `git log -1 --format=%B | ... check --stdin-path COMMIT_MSG`
+  pipe, instead of a single `<changed files>` placeholder the old CLI
+  silently only scanned the first of. The insertion point and line count
+  of the bullet are unchanged (still starts at line 136), but the bullet
+  itself grew from 7 to 13 lines (a 6-line net insertion), shifting every
+  citation into `implementer.md` at or after old line 143 down by 6; re-pointed in
+  `subagent-contracts-superset.md` (`role: implementer` 175->181 x2,
+  `restored_verified:` 205->211, `replayed: false | true` 206->212) and in
+  this file's own citation (`expectation: met | violated | not_applicable`
+  203->209, further below). The CHANGELOG.md bullet documenting this rule
+  was also reworded to match (a net +14-line insertion), shifting this
+  file's own two `CHANGELOG.md` self-citations from line 135 to 149 and
+  from 512 to 526 (both re-pointed further below). Re-verified over
+  agent-dx commits 8d46ca09 and
+  494f1a32 (see this run's evidence): the changed-files-only scan (not the
+  whole checked-out tree) now reports 7 and 16 block findings respectively
+  (down from the first cut's 21 and 29), while still reporting the test-title
+  and comment tokens (`F1:`, `F2a:`, `F2/F5 crossover:` at line 1002's
+  `F2`/`F5` pair) and the commit-body ids (`F1, F5, F4, F6, F3, F2, R1`
+  and `F2a, F2b, R3`) the acceptance criterion's verification names. The
+  whole-repo `--pack review-slop` scan dropped from the first cut's 465
+  findings in 30 files to 342 findings in 22 files (after a further
+  dogfood-found fix to the paragraph-scoping of the same-paragraph
+  context check, below); the remainder is either this pack's own dogfood
+  fixtures (its rationale strings, its own test file) or pre-existing kit
+  content out of this task's scope (e.g.
+  `doctor.ts`'s digit-ful `review round 2, M1`-style source comments,
+  which are genuine round-plus-finding-id citations, not false
+  positives, and are not touched here since `doctor.ts` is not in this
+  task's `allowed_changes`).
+
+  **Dogfood-found fix (M1's "same-sentence" filter, above).** Running
+  `review-slop` over this task's own changed files (per the reworded
+  bullet's own rule) flagged `round 1` in this entry's own prose, one
+  wrapped line below its context word ("findings"). The context-window
+  helper originally treated every `\n` as a sentence boundary, which
+  collapses to just the current physical line inside a hand-wrapped
+  Markdown paragraph (every prose file in this repo wraps around 72-80
+  columns), wrongly missing a context word one line above or below the
+  match. Fixed to bound the window on an actual sentence terminator
+  (`.`/`!`/`?`) or a real paragraph break (a blank line, i.e. two
+  adjacent newlines) instead, leaving a single soft-wrap newline as part
+  of the same window. This is a strictly more permissive fix (it can only
+  add matches the stricter version missed, never remove one the stricter
+  version kept), so no existing fixture needed to change; two new ones
+  were added (the wrapped-context positive and a blank-line-paragraph
+  negative). The three remaining findings in this entry's own prose
+  after that fix (`round-2`/`round-1`/`the first cut's` in the paragraph
+  above) are dodged by wording, not by a config allowlist: `docs/okf/`
+  is not in review.allowPaths, and this task's `allowed_changes` does
+  not cover the root `slop.config.yml` that default lives in, so adding
+  it there is left as an open question for the orchestrator rather than
+  done here.
+
+  Verified: the slop-detector package's own `npm run build`, `typecheck`,
+  `typecheck:test`, `format:check`, and `npm test` (368 tests, up from
+  348) all clean; the orchestrator-workflow package's `npm run build`,
+  `typecheck`, `typecheck:test`, `format:check`, and full `npm test`
+  (1162 tests) all clean.
+
+- 2026-09-16T08:09:25Z (agent-dx tracker task a378ecca, pandora run
+  2026-09-16-open-pool-batch55, T-006): `assets/agents/implementer.md`
+  gained a pre-return rule bullet, inserted right after the two
+  commit-reporting bullets (a 7-line insertion): before committing, run
+  `slop-detector`'s new `review-slop` pack over every changed file and the
+  commit message and fix every block-level finding first, worded
+  "misfire, not evidence" the same way the `commits` field rule already
+  is. Pinned verbatim by three new tests appended to the end of
+  `test/docs-consistency.test.ts` (append-only, no existing test's line
+  position moved). The insertion shifted every citation into
+  `implementer.md`'s byte-identical YAML contract block (which only
+  moved, never changed) and everything below it in the file; re-pointed
+  all of those, in `subagent-contracts-superset.md` and in this file's own
+  citations further below. Added one new sentence to
+  `subagent-contracts-superset.md`'s "Commits field" section (right
+  before "## Review-method axis") describing the new rule, with a fresh
+  anchored citation into the installed prompt's new bullet itself
+  (spelled as prose here, not citation syntax, per this log's own
+  convention: a bare early citation into a short file can wrongly become
+  the governing target for an unrelated, far-later bare continuation that
+  otherwise has none).
+  `CHANGELOG.md` gained a matching `[Unreleased]` bullet (an 18-line
+  insertion after the doc's prior last `[Unreleased]` bullet, before
+  `## [0.35.0]`), which shifted this file's own two live self-citations
+  into it the same way; both are re-pointed further below in this file,
+  still resolving to the same prose. Bumped `timestamp` on the four
+  source-bearing module docs whose `sources` list names `implementer.md`,
+  `test/docs-consistency.test.ts`, or `CHANGELOG.md`
+  (`model-preselection.md`, `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`)
+  in the same commit as these edits. Verified: the slop-detector package's
+  own `npm run build`, `typecheck`, `typecheck:test`, `format:check`, and
+  `npm test` (348 tests) all clean with the new `review-slop` pack added;
+  the orchestrator-workflow package's `npm run build`, `typecheck`,
+  `typecheck:test`, `format:check`, and full `npm test` all clean.
+
 - 2026-09-16T07:43:37Z (reviewer-report validator, review round 4 delta): the
   `--format json` envelope for an unreadable file is now pinned by a CLI
   test, the unreachable BOM strip in `extractYamlSource` is gone, the
@@ -709,7 +832,7 @@
   violated | not_applicable` now, not just `met | violated`, since a
   `not_applicable` probe (the mutant could not be applied, so no `result`
   was measured) has nothing for `met`/`violated` to report
-  (`implementer.md:196#"expectation: met | violated | not_applicable"`,
+  (`implementer.md:209#"expectation: met | violated | not_applicable"`,
   `packages/orchestrator-workflow/assets/skill/references/contracts.md:112#"expectation: met | violated | not_applicable"`).
   The two `not_applicable` verdicts that used to share one bare label
   (a probe with no reapplicable definition, not a regression, versus a
@@ -873,7 +996,7 @@
   sentence reverted to its pre-change wording, fails the exact-sub-field
   and regression-signal tests above; restored, the suite is green again.
   `CHANGELOG.md`'s own prose copy of this change is
-  (`CHANGELOG.md:117#"The implementer"`).
+  (`CHANGELOG.md:149#"The implementer"`).
 
   Verified on the committed tree: the full package suite (`npm test`),
   `typecheck`, `typecheck:test`, and `format:check`, all clean. Re-pointed
@@ -1141,7 +1264,7 @@
   that binding rather than second-guessing it.
 
   The CHANGELOG bullet for this round is
-  `CHANGELOG.md:494#"Citation scanning is paragraph-joined"`. Verified on
+  `CHANGELOG.md:526#"Citation scanning is paragraph-joined"`. Verified on
   the committed tree: the full package suite, `docs-consistency.test.ts`
   on its own, `typecheck`, `typecheck:test` and `format:check`; the
   figures each guard measured are in its own computed test name, per the

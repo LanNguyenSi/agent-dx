@@ -37,6 +37,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Docs-only: no YAML contract, role prompt, guard matcher, or exemption
   geometry changed. Anchored by agent-dx tracker task 8a55e082.
 
+- `assets/agents/implementer.md` gains a pre-return rule bullet next to
+  the commit-reporting ones: before committing, when slop-detector is
+  available run `node packages/slop-detector/dist/cli.js check <changed
+  file> [<changed file> ...] --pack review-slop` (or the PATH-installed
+  `slop-detector check <changed file> [<changed file> ...] --pack
+  review-slop`) over every changed file, and `git log -1 --format=%B |
+  node packages/slop-detector/dist/cli.js check --stdin-path COMMIT_MSG
+  --pack review-slop` (or the PATH-installed equivalent) over the commit
+  message, fixing every block-level finding before returning (or adding a
+  legitimate match to `review.allow`); a returned report that skipped the
+  check on a diff with block-level findings is a misfire, not evidence.
+  Pinned by `test/docs-consistency.test.ts`;
+  `docs/okf/subagent-contracts-superset.md` gained a matching sentence
+  describing the rule.
+  - Anchored by pandora batch 51 (`.ai/runs/2026-09-13-quickwins-batch51`):
+    four review rounds (or post-merge cleanup commits) across five repos
+    were spent catching run-local review tokens (finding ids, round
+    references, workspace-handoff phrases) that nothing mechanical
+    flagged before `slop-detector`'s new `review-slop` pack existed; see
+    that package's own CHANGELOG.md for the pack itself and the
+    pre-cleanup PR the fixtures were drawn from.
+  - The bullet's first cut (above) named a single `<changed files>`
+    placeholder against a `check [path]` CLI command that silently
+    scanned only the first path; a rigorous review round caught this
+    (plus a digitless `review round` block-flagging the kit's own
+    vocabulary, and several precision false positives in the pack's
+    round-reference and finding-id regexes) and both are fixed at the
+    source. See `packages/slop-detector`'s own CHANGELOG.md for the CLI
+    and pack fixes; the bullet text and the three
+    `test/docs-consistency.test.ts` pins above already reflect the fixed
+    wording, not the original one.
+
 ## [0.35.0] - 2026-09-15
 
 - The npm tarball now ships a `LICENSE` file matching the repo root LICENSE

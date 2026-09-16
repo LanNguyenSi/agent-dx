@@ -133,6 +133,19 @@ Rules:
   than omitting the field.
 - Populate a non-empty `commits` field by pasting `git log --reverse
   --format=%H <base>..HEAD`; never type or hand-complete commit shas.
+- Before committing, when slop-detector is available run `node
+  packages/slop-detector/dist/cli.js check <changed file> [<changed file>
+  ...] --pack review-slop` (or the PATH-installed `slop-detector check
+  <changed file> [<changed file> ...] --pack review-slop`) over every
+  changed file, and `git log -1 --format=%B | node
+  packages/slop-detector/dist/cli.js check --stdin-path COMMIT_MSG --pack
+  review-slop` (or the PATH-installed `git log -1 --format=%B |
+  slop-detector check --stdin-path COMMIT_MSG --pack review-slop`) over
+  the commit message. Fix every block-level finding before returning, or
+  add a legitimate match to `review.allow` in the repository's
+  slop.config.yml rather than deleting correct text. A returned report
+  that skipped this check on a diff with block-level findings is a
+  misfire, not evidence.
 - Verification plans, probe plans, and repeat tallies run in the foreground,
   and the implementer reports their returns in the same turn as the last
   check. A background monitor is no substitute for those returns.

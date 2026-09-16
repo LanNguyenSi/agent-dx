@@ -8966,3 +8966,47 @@ describe("review-report validator schema matches the reviewer output contract ex
     expect(enumSpellings(block)).toEqual(REVIEW_REPORT_ENUM_VALUES);
   });
 });
+
+describe("implementer pre-return review-slop check names the exact command", () => {
+  const implementerMd = unwrap(readAsset("agents/implementer.md"));
+
+  // Worded tool-agnostically ("when slop-detector is available") per
+  // agent-dx task a378ecca: the installed prompt cannot assume the CLI is
+  // on PATH, so it names both the always-available `node
+  // packages/slop-detector/dist/cli.js check ...` form and the shorter
+  // `slop-detector check ...` form a caller may have on PATH. Reworded at
+  // the tracker task's fix pass: `check` takes one-or-more paths (`<changed file>
+  // [<changed file> ...]`), not a single `<changed files>` placeholder
+  // the old CLI silently only scanned the first of; the commit-message
+  // invocation is spelled with its `git log -1 --format=%B | ... check
+  // --stdin-path COMMIT_MSG` pipe so the sentence names something that
+  // actually runs, not just the flag in isolation.
+  const PRE_RETURN_SENTENCE =
+    "Before committing, when slop-detector is available run `node packages/slop-detector/dist/cli.js check <changed file> [<changed file> ...] --pack review-slop` (or the PATH-installed `slop-detector check <changed file> [<changed file> ...] --pack review-slop`) over every changed file, and `git log -1 --format=%B | node packages/slop-detector/dist/cli.js check --stdin-path COMMIT_MSG --pack review-slop` (or the PATH-installed `git log -1 --format=%B | slop-detector check --stdin-path COMMIT_MSG --pack review-slop`) over the commit message. Fix every block-level finding before returning, or add a legitimate match to `review.allow` in the repository's slop.config.yml rather than deleting correct text. A returned report that skipped this check on a diff with block-level findings is a misfire, not evidence.";
+
+  it("assets/agents/implementer.md carries the pre-return review-slop check sentence verbatim", () => {
+    expect(implementerMd).toContain(PRE_RETURN_SENTENCE);
+  });
+
+  it("the sentence names --pack review-slop and both the node-path and PATH-installed command forms, over every changed file and over a piped commit message", () => {
+    expect(implementerMd).toContain(
+      "node packages/slop-detector/dist/cli.js check <changed file> [<changed file> ...] --pack review-slop",
+    );
+    expect(implementerMd).toContain(
+      "slop-detector check <changed file> [<changed file> ...] --pack review-slop",
+    );
+    expect(implementerMd).toContain(
+      "git log -1 --format=%B | node packages/slop-detector/dist/cli.js check --stdin-path COMMIT_MSG --pack review-slop",
+    );
+    expect(implementerMd).toContain(
+      "git log -1 --format=%B | slop-detector check --stdin-path COMMIT_MSG --pack review-slop",
+    );
+    expect(implementerMd).toContain("when slop-detector is available");
+  });
+
+  it("the sentence states that skipping the check on a diff with block-level findings is a misfire, not evidence", () => {
+    expect(implementerMd).toContain(
+      "skipped this check on a diff with block-level findings is a misfire, not evidence",
+    );
+  });
+});

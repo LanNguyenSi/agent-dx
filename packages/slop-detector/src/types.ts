@@ -7,7 +7,8 @@ export type PackId =
   | "code-slop"
   | "ui-slop"
   | "placement-slop"
-  | "workflow-slop";
+  | "workflow-slop"
+  | "review-slop";
 
 export interface FileTarget {
   path: string;
@@ -200,6 +201,25 @@ export interface ResolvedConfig {
      * of its own.
      */
     auditGateTemplates: AuditGateTemplate[];
+  };
+  /**
+   * Config surface for the `review-slop` pack: run-local review tokens
+   * (finding ids, round references, workspace-handoff phrases) leaking
+   * into Markdown, TS/JS source comments, test titles, and a
+   * commit-message file. `allow` defaults to `[]` (same per-span regex
+   * semantics as `placement.allow`); `allowPaths` defaults to a
+   * single-entry glob matching any nested `CHANGELOG.md` (a repo's
+   * changelog convention narrates rounds and finding ids by design, so
+   * it is excused at the file level rather than per match) in
+   * `defaultConfig`/`mergeConfig`, so a hand-built
+   * `ResolvedConfig` that omits `review` entirely still works: every rule
+   * reads through `config.review?.<field> ?? <same default>`.
+   */
+  review?: {
+    /** Regex patterns; a matched span is excused across every rule in the pack. */
+    allow: string[];
+    /** Glob patterns (matched relative to the scan root); a whole matching file is skipped by every rule in the pack. */
+    allowPaths: string[];
   };
 }
 

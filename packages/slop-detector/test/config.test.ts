@@ -178,6 +178,20 @@ describe("config", () => {
     expect(cfg.placement?.instructionGlobs).toEqual(["sub/**/*.md"]);
   });
 
+  it("loadConfig rejects a review.allowPaths pattern with a leading slash", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(file, `review:\n  allowPaths:\n    - "/CHANGELOG.md"\n`);
+    expect(() => loadConfig(file)).toThrow(/allowPaths/);
+  });
+
+  it("mergeConfig normalizes a leading './' in review.allowPaths", () => {
+    const cfg = mergeConfig({
+      review: { allowPaths: ["./sub/CHANGELOG.md"] },
+    });
+    expect(cfg.review?.allowPaths).toEqual(["sub/CHANGELOG.md"]);
+  });
+
   it("loadConfig rejects a workflow.allowExpressions entry that still carries the \\${{ }} wrapper", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
     const file = path.join(tmp, "slop.config.yml");

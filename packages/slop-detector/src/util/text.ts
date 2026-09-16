@@ -37,7 +37,12 @@ export function findAllRegex(
 }
 
 export function stripFencedCode(text: string): string {
-  return text.replace(/```[\s\S]*?```/g, (block) => " ".repeat(block.length));
+  // Backtick and tilde fences are the two fence styles Markdown (CommonMark
+  // / GFM) recognizes; an indented (four-space) code block is deliberately
+  // NOT stripped here -- see review-slop's README section for why.
+  return text
+    .replace(/```[\s\S]*?```/g, (block) => " ".repeat(block.length))
+    .replace(/~~~[\s\S]*?~~~/g, (block) => " ".repeat(block.length));
 }
 
 export function stripInlineCode(text: string): string {

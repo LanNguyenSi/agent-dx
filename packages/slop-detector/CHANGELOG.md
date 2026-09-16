@@ -276,6 +276,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       totals are 15 clean / 17 with findings / 54 occurrences, not the
       14/18/56 first reported.
 
+- New pack `review-slop` (off by default, opt in via `--pack review-slop`
+  or `packs.review-slop: true`): three rules, `review-slop/finding-id`
+  and `review-slop/round-reference` (block), `review-slop/handoff-phrase`
+  (warn), flag run-local review tokens (finding ids like `F1`/`F2a`,
+  round references like `round 2`/`R3`/`review round 1 fixes`, and
+  workspace-handoff phrases like `per the <workspace> handoffs`) leaking
+  into Markdown files, TypeScript/JavaScript source comments, test titles
+  (the first string-literal argument of `it`/`test`/`describe`, including
+  `.only`/`.skip`/`.each`), and a commit-message file (`check --stdin-path
+  COMMIT_MSG`, or a path ending `COMMIT_EDITMSG`/`.commitmsg`). Config
+  surface: `review.allow` (regex allowlist, same per-span semantics as
+  `placement.allow`) and `review.allowPaths` (glob allowlist, default
+  `["**/CHANGELOG.md"]`, since a repo's changelog convention narrating
+  rounds and finding ids by design is a config-level allow rather than a
+  violation). Positive/negative fixtures: a tracker id (`e904f25a`),
+  `round-trip`, a version number (`v1.2.3`), a bare plural `rounds`
+  without a digit or `review` prefix, and an `R1`/`F1` code-block label
+  all stay clean; fenced and inline code spans are stripped from Markdown
+  before either block rule runs.
+  - Anchored on pandora batch 51
+    (`.ai/runs/2026-09-13-quickwins-batch51`): four review rounds (or
+    post-merge cleanup commits) across five repos were spent on exactly
+    this token class, caught only by grep, nothing mechanical. agent-dx
+    PR #263 (commits `8d46ca09`, `494f1a32`) carried finding-id test
+    titles (`F1:`, `F2a:`, `F2/F5 crossover:`) and round/handoff-phrase
+    comments (`review round 2 finding F5`, `(F1, review R1)`, `per the
+    pandora handoffs`) before a follow-up cleanup commit removed them by
+    hand.
+  - `packages/orchestrator-workflow`'s `assets/agents/implementer.md`
+    gains a matching pre-return rule naming this pack's exact check
+    command; see that package's own CHANGELOG.md.
+  - **Fix round (rigorous review, fix_required):** the first cut of both
+    the pack and the prescribed CLI command had correctness bugs. `check`
+    only took a single optional path (`check [path]`), so the prompt's
+    own `check <changed files> --pack review-slop` example silently
+    scanned just the first file; `--pack` was a variadic option, so
+    `check --pack review-slop fileA fileB` swallowed `fileA`/`fileB` as
+    pack names instead of paths; `--stdin-path` with nothing piped in
+    exited `0` with a clean report. `check` now takes `[paths...]`
+    (one-or-more, merged into one result), `--pack` is a repeatable
+    single-value option (`-p a -p b`, still comma-splittable), a real
+    path together with `--stdin-path` is a usage error (exit `2`), and
+    stdin with no input piped in (a TTY) is a usage error too.
+    `review-slop/round-reference` block-flagged the kit's own digitless
+    `review round` vocabulary (no fix ships for that phrase without a
+    digit at any severity now); both it and `finding-id` had precision
+    gaps (`F16`/`F22`/`F1-2026`-shaped tokens, a bare `R2`/`R3` next to
+    ordinary prose) fixed by narrowing `finding-id` to a single digit and
+    gating `round-reference`'s `round N`/bare `RN` matches on a
+    review-process word in the same paragraph. The `.each` tagged-template
+    test-title form (`it.each(table)("title", fn)`) is now detected.
+    `review.allowPaths` now normalizes a leading `./`, matching
+    `placement.instructionGlobs`; `review.allow` spans are now computed
+    over the whole scanned text (not per line), so an allow pattern can
+    excuse a match that itself spans a line break; `stripFencedCode` now
+    also strips `~~~`-delimited fences, not only backtick ones. See
+    `packages/orchestrator-workflow`'s own CHANGELOG.md for the matching
+    prompt-bullet reword.
+
 ## [0.3.1] - 2026-08-26
 
 ### Changed
