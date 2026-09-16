@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- CI: the agent-dx `okf-anchor-guard` job (`.github/workflows/ci.yml`) and
+  `okf-staleness` job (`.github/workflows/okf-staleness.yml`)'s "Install
+  okf-kit" step now probes the pinned version with `npm view
+  okf-kit@<pin> version`, confirms a failed probe with a second,
+  package-level `npm view okf-kit versions --json` probe before deciding
+  anything, then installs the published pin, builds
+  `packages/okf-kit` from the PR tree when the pin is confirmed
+  unpublished and equal to `packages/okf-kit/package.json`'s version, or
+  fails loudly otherwise. Previously the step installed the pinned
+  version unconditionally with no fallback. See
+  `packages/orchestrator-workflow/docs/okf/log.md` for the full behavior
+  and the design considered and rejected along the way.
+
 ## [0.12.1] - 2026-09-15
 
 - The npm tarball now ships a `LICENSE` file matching the repo root LICENSE

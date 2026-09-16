@@ -28,6 +28,9 @@ placement:
     # mechanical freshness guard. See packages/slop-detector/CHANGELOG.md
     # for the rationale and the corpus measurements behind both decisions.
     - "packages/*/README.md"
+    # Repo-root procedure doc: reusable across contributors, same leak
+    # risk as a README.
+    - "CONTRIBUTING.md"
   markers:
     - "LanNguyenSi"
     # Lowercase form: marker matching has no implicit "i" flag, and this
