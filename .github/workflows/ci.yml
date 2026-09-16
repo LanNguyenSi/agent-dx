@@ -117,7 +117,7 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install okf-kit (exact pin)
+      - name: Install okf-kit (exact pin, unpublished-pin fallback)
         # Keep this pin identical to okf-staleness.yml's; both are pinned
         # against packages/okf-kit/package.json's version by
         # test/docs-consistency.test.ts (globs every .github/workflows/
@@ -125,9 +125,114 @@ jobs:
         # --require-anchors flag used below turns on citations-resolve's
         # four opt-in rules: anchor-required, anchor-not-on-last-line,
         # anchor-not-unique-in-range, and test-range-straddles-block (see
-        # the "Anchor-citation guard" step further down). Sequencing/
-        # coordination evidence: see docs/okf/log.md.
-        run: npm install -g okf-kit@0.12.1 --no-audit --no-fund
+        # the "Anchor-citation guard" step further down).
+        #
+        # Probe the pin with `npm view okf-kit@<pin> version` first:
+        # published, install exactly as before, no drift. If that probe
+        # fails, confirm with a package-level probe (`npm view okf-kit
+        # versions --json`) before deciding anything: if the pin turns up
+        # in that list after all, install it exactly like a published pin;
+        # if the probe confirms the pin is genuinely absent, build
+        # packages/okf-kit from the PR tree and install that build when
+        # the pin equals packages/okf-kit/package.json's version in this
+        # tree (a release PR in flight, see CONTRIBUTING.md "Releasing
+        # okf-kit"), or fail loudly when it does not (a stale bump, a
+        # typo). Any failure of the package-level probe itself is a
+        # registry/network error, never "unpublished": fail loudly rather
+        # than guess. Each path prints one line naming which branch ran.
+        # This fallback branch is agent-dx-specific: only this repo builds
+        # okf-kit from its own tree (see okf-staleness.yml's header
+        # comment, which is the pattern other repos with a docs/okf bundle
+        # copy).
+        #
+        # Evidence: see packages/orchestrator-workflow/docs/okf/log.md.
+        shell: bash
+        run: |
+          install_cmd=(npm install -g okf-kit@0.12.1 --no-audit --no-fund)
+          pin="${install_cmd[3]#*okf-kit@}"
+
+          view_out="$(mktemp)"
+          view_err="$(mktemp)"
+          set +e
+          npm view "okf-kit@${pin}" version >"${view_out}" 2>"${view_err}"
+          view_exit=$?
+          set -e
+          view_stdout="$(cat "${view_out}")"
+          view_stderr="$(cat "${view_err}")"
+          rm -f "${view_out}" "${view_err}"
+
+          if [ "${view_exit}" -eq 0 ] && [ -n "${view_stdout}" ]; then
+            echo "okf-kit install path: published-pin (okf-kit@${pin})"
+            "${install_cmd[@]}"
+            exit 0
+          fi
+
+          hint="no E404/ETARGET code seen (informational only, not decisive)"
+          case "${view_stderr}" in
+            *'code E404'*) hint="stderr showed code E404 (informational only, not decisive)" ;;
+            *'code ETARGET'*) hint="stderr showed code ETARGET (informational only, not decisive)" ;;
+          esac
+
+          versions_out="$(mktemp)"
+          versions_err="$(mktemp)"
+          set +e
+          npm view okf-kit versions --json >"${versions_out}" 2>"${versions_err}"
+          versions_exit=$?
+          set -e
+          versions_stdout="$(cat "${versions_out}")"
+          versions_stderr="$(cat "${versions_err}")"
+          rm -f "${versions_out}" "${versions_err}"
+
+          versions_json_valid=0
+          if [ "${versions_exit}" -eq 0 ] && [ -n "${versions_stdout}" ]; then
+            if node -e 'const v = JSON.parse(process.argv[1]); if (!Array.isArray(v)) process.exit(1);' "${versions_stdout}" >/dev/null 2>&1; then
+              versions_json_valid=1
+            fi
+          fi
+
+          if [ "${versions_json_valid}" -ne 1 ]; then
+            echo "okf-kit install path: registry-error (fail)"
+            single_line_view_stderr="${view_stderr//$'\n'/ }"
+            echo "::error title=okf-kit install::npm view okf-kit@${pin} version failed (exit ${view_exit}, ${hint}) and npm view okf-kit versions --json could not confirm it is unpublished (exit ${versions_exit}); refusing to guess: ${single_line_view_stderr}" >&2
+            echo "npm view okf-kit@${pin} version stderr:"
+            printf '%s\n' "${view_stderr}" | sed 's/^/  /'
+            echo "npm view okf-kit versions --json stderr:"
+            printf '%s\n' "${versions_stderr}" | sed 's/^/  /'
+            if [ "${versions_exit}" -eq 0 ]; then
+              exit 1
+            fi
+            exit "${versions_exit}"
+          fi
+
+          pin_in_versions=0
+          if node -e 'const v = JSON.parse(process.argv[1]); process.exit(v.includes(process.argv[2]) ? 0 : 1);' "${versions_stdout}" "${pin}" >/dev/null 2>&1; then
+            pin_in_versions=1
+          fi
+
+          if [ "${pin_in_versions}" -eq 1 ]; then
+            echo "okf-kit install path: published-pin (okf-kit@${pin}, confirmed via okf-kit versions probe; ${hint})"
+            "${install_cmd[@]}"
+            exit 0
+          fi
+
+          pkg_version="$(node -p "require('./packages/okf-kit/package.json').version" 2>/dev/null)" || {
+            echo "::error title=okf-kit install::cannot read packages/okf-kit/package.json" >&2
+            exit 1
+          }
+          if [ -z "${pkg_version}" ]; then
+            echo "::error title=okf-kit install::cannot read packages/okf-kit/package.json" >&2
+            exit 1
+          fi
+
+          if [ "${pin}" = "${pkg_version}" ]; then
+            echo "okf-kit install path: unpublished-pin-build-from-tree (okf-kit@${pin} == packages/okf-kit/package.json)"
+            (cd packages/okf-kit && npm ci --no-audit --no-fund && npm run build)
+            npm install -g ./packages/okf-kit --no-audit --no-fund
+          else
+            echo "okf-kit install path: unpublished-pin-mismatch (fail)"
+            echo "::error title=okf-kit install::pin okf-kit@${pin} is confirmed unpublished (via npm view okf-kit versions --json) and does not equal packages/okf-kit/package.json's version (${pkg_version}); refusing to install" >&2
+            exit 1
+          fi
 
       - name: Assert CLI is alive (output, not exit code)
         shell: bash

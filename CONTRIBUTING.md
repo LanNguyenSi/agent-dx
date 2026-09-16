@@ -97,6 +97,24 @@ the same release commit, in this order:
 7. Open the PR, squash merge, then push an annotated tag
    `okf-kit/v<new-version>` to trigger `publish-npm.yml`.
 
+Between step 1/4 and step 7, this PR's own commit names a pin (step 4)
+that is not on npm yet (the tag that publishes it is pushed only in
+step 7). `.github/workflows/ci.yml`'s `okf-anchor-guard` job and
+`.github/workflows/okf-staleness.yml`'s `okf-staleness` job each probe
+that pin with `npm view` before installing, then confirm with a second,
+package-level probe before deciding anything: when the pin is
+unpublished and equal to
+`packages/okf-kit/package.json`'s version in the PR tree (the normal
+state of this PR), each job builds `packages/okf-kit` from the PR tree
+instead and installs that build, so both jobs stay green on this PR
+without waiting for the tag (see
+`packages/orchestrator-workflow/docs/okf/log.md` for the cases that
+motivated this). A red job at this point now means a real problem, not
+an expected release artifact: an unpublished pin that does NOT equal
+`packages/okf-kit/package.json`'s version (a stale bump, a typo) fails
+the job loudly instead of guessing, and so does a genuine registry/
+network error while probing the pin.
+
 Releasing orchestrator-workflow follows the same shape (`npm version`,
 CHANGELOG cut, tag `orchestrator-workflow/v<new-version>`) but has no pin
 of its own to bump; run `node scripts/check-release-changelogs.mjs --base

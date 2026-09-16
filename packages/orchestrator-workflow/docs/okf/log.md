@@ -1,5 +1,139 @@
 # Bundle log
 
+- 2026-09-16T06:28:05Z (okf-kit install step, review round 3 on the pin-probe change):
+  the registry-error branch now prints npm's captured stderr with a
+  two-space prefix instead of echoing it verbatim, so a registry or proxy
+  line starting with two colons cannot be read by the runner as a
+  workflow command; the replay block in `test/docs-consistency.test.ts`
+  drops its `it.runIf(hasBash)` guard (evaluated at collection time,
+  never false) and lets the bash probe throw inside `beforeAll`. Both
+  `run:` bodies stay byte-identical; the four docs listing the test file
+  as a source are re-stamped.
+
+- 2026-09-16T06:07:25Z (CI okf-kit install hardening, pandora run
+  2026-09-16-open-pool-batch55, tracker a47de183, review round 2 fixes):
+  review round 2 found two survivors and one gap in the install-hardening
+  work documented in the entry below, plus a docs-framing issue in that
+  entry and in `packages/okf-kit/CHANGELOG.md`, and a test-file
+  maintainability issue.
+
+  (1) Deleting `if (!Array.isArray(v)) process.exit(1);` from the
+  versions-probe validity check in both `.github/workflows/ci.yml` and
+  `.github/workflows/okf-staleness.yml` survived every existing test:
+  every stubbed `NPM_STUB_VIEW_VERSIONS_STDOUT` fixture was already a
+  JSON array, so nothing exercised the non-array branch, and without the
+  check a syntactically valid non-array response is accepted as
+  "confirmed unpublished" and can fall through to a from-tree build (or,
+  for a bare JSON string that happens to contain the pin, straight to an
+  install) it should have refused. Three new stubbed-npm cases in
+  `test/docs-consistency.test.ts` cover a non-array JSON object (npm's
+  own `{"error":{"code":"E404"}}` shape), a bare JSON string equal to
+  the pin, and truncated JSON, each asserting the `registry-error
+  (fail)` line, a non-zero exit, and no recorded `ci `/`install` call.
+
+  (2) The vitest replay's `execFileSync` call inherited the stubbed
+  script's stderr into the test runner's own (the previous default,
+  unset `stdio`), so a green `npm test` run printed the script's
+  `::error title=okf-kit install::...` lines verbatim; the same
+  annotation syntax in a real CI job's test output would render as
+  workflow annotations on an unrelated job. Fixed by passing `stdio:
+  ["ignore", "pipe", "pipe"]` explicitly and capturing the child's
+  stderr on the catch path; the unpublished-pin-mismatch and
+  registry-error (network-failure) cases now assert the captured
+  `::error` text, which also pins the annotation message content that
+  nothing asserted before.
+
+  (3) `extractStepRunBody` ran at describe-collection time (module
+  evaluation, synchronous), so a step rename or restructure would throw
+  during collection and fail this whole 8500+-line test file's
+  collection, not just this describe block. Moved the extraction into a
+  `beforeAll`, and added a test asserting the step name occurs exactly
+  once in each workflow file (the scanner takes the first exact match).
+  The behavior cases now run against both `ci.yml`'s and
+  `okf-staleness.yml`'s bodies via `describe.each`, not only `ci.yml`'s
+  as before.
+
+  (4) Added the missing test case named by the review: an unpublished
+  pin with `packages/okf-kit/package.json` missing or unreadable asserts
+  the `cannot read packages/okf-kit/package.json` annotation and a
+  non-zero exit, for both workflow files' bodies.
+
+  (5) `CONTRIBUTING.md`'s "Releasing okf-kit" section still named this
+  tracker id inline (a round-1 review finding, not actually fixed in
+  round 1's own re-stamp commit); dropped it, kept the pointer to this
+  file. Added `CONTRIBUTING.md` to `slop.config.yml`'s
+  `placement.instructionGlobs`: a repo-root procedure doc carries the
+  same leak risk as a package README, and the pack's existing globs did
+  not cover it, which is why the pack missed the tracker id in the first
+  place. A `placement-slop` run against the new glob found no other
+  findings in the file, so no structural follow-up is needed.
+
+  (6) This entry (in its round-1 form) and `packages/okf-kit/
+  CHANGELOG.md`'s `[Unreleased]` line both described the shipped
+  hardening as a change away from "trusting a single `npm view` ...
+  failure's stderr pattern", but that single-probe design only ever
+  existed inside this branch's own first commit (`b5093020`) and was
+  replaced before this PR's second commit; `master`'s actual prior state
+  (before this PR) was a plain, unconditional `npm install -g
+  okf-kit@<pin>` with no fallback logic at all. Reworded the entry below
+  and the CHANGELOG line to describe the shipped probe/confirm/build-or-
+  fail behavior as introduced against that prior state, and kept the
+  single-stderr-probe design as a design considered and rejected within
+  this branch, labelled as such rather than presented as a previously
+  shipped behavior.
+
+- 2026-09-16T05:36:32Z (CI okf-kit install hardening, pandora run
+  2026-09-16-open-pool-batch55, tracker a47de183, review round 1): the
+  "Install okf-kit (exact pin, unpublished-pin fallback)" step in both
+  `.github/workflows/ci.yml`'s `okf-anchor-guard` job and
+  `.github/workflows/okf-staleness.yml`'s `okf-staleness` job replaces
+  the previous unconditional `npm install -g okf-kit@<pin>` (no
+  fallback) with: probe the pin (`npm view okf-kit@<pin> version`); if
+  that fails, confirm with a second, package-level probe (`npm view
+  okf-kit versions --json`) before deciding anything; treat the pin as
+  published if it turns up in that list after all; otherwise, when the
+  package-level probe itself succeeds (valid JSON array) and the pin is
+  absent from the list, build `packages/okf-kit` from the PR tree and
+  install that build when the pin equals `packages/okf-kit/
+  package.json`'s version, or fail loudly when it does not; any failure
+  of the package-level probe itself is a genuine registry/network error
+  and fails the job loudly instead of guessing.
+
+  Design considered and rejected within this branch before it shipped
+  (this branch's own first commit, `b5093020`; never present on
+  `master`): treat any `npm view okf-kit@<pin> version` failure whose
+  stderr matched `code (E404|ETARGET)` as proof the pin was unpublished,
+  with no confirming probe. Since the pin equals the package version on
+  every ordinary PR, a non-decisive 404 (a registry proxy hiccup, an
+  auth or propagation failure) could also match that pattern and
+  silently take the from-tree fallback instead of failing; the
+  package-level probe closes that gap, which is why it shipped instead.
+  Observed on the 0.10.0 release (#205) and the 0.11.0 release (#257):
+  before any fallback existed, both jobs went red between the pin bump
+  and the tag push.
+
+  Also folds in the review's remaining findings: `eval "${install_cmd}"`
+  replaced with an array invocation (`"${install_cmd[@]}"`); the
+  multi-line `npm view` stderr collapsed to one line inside the
+  `::error ...::` annotation with the full text printed separately as an
+  ordinary log block; `packages/okf-kit/package.json`'s version is now
+  read only on the branch that needs it, wrapped so a missing or
+  unparsable file fails with a named `::error::` instead of a raw stack
+  trace; a bare `npm view` success with empty stdout now always falls
+  through to the same registry-error handling (forced non-zero) rather
+  than being able to exit 0. Added a vitest block
+  (`packages/orchestrator-workflow/test/docs-consistency.test.ts`,
+  appended at the end) that extracts both steps' actual `run:` body text
+  from the committed YAML, asserts the two are string-identical, and
+  replays the text under `bash --noprofile --norc -eo pipefail` against
+  a stubbed `npm` for six inputs (published, unpublished-equal,
+  unpublished-mismatch, network error on both probes, pin present in the
+  package-level probe's list, and a `npm view` exit 0 with empty
+  stdout). Trimmed both workflow comments to the rule plus a pointer to
+  this entry; this file now carries the dated evidence per the bundle's
+  placement convention. `CONTRIBUTING.md`'s "Releasing okf-kit" section
+  keeps the procedure but no longer names the release-PR numbers inline,
+  pointing here instead.
 - 2026-09-16T05:18:16Z (docs cleanup, agent-dx tracker task 8a55e082, review
   findings on the contract-reduction change base 227bbe4f to head e8c7cee4):
   removed a mid-sentence paragraph split (a stray blank line inside the

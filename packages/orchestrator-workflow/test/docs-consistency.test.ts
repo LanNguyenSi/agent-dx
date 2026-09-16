@@ -8236,3 +8236,508 @@ describe("review-method recording requirement", () => {
     );
   });
 });
+
+/**
+ * agent-dx tracker a47de183 review round 1 (MEDIUM 2, MEDIUM 3): the
+ * "Install okf-kit (exact pin, unpublished-pin fallback)" step in both
+ * ci.yml's okf-anchor-guard job and okf-staleness.yml's okf-staleness job
+ * embeds a bash script inline in YAML, which nothing here executed: two
+ * mutants that dropped its network-error/pin-equality discrimination
+ * survived the whole verification set. This extracts each step's actual
+ * `run:` body text (not a hand-copied paraphrase) from the committed YAML
+ * and replays it under `bash --noprofile --norc -eo pipefail` (the shell
+ * Actions runs a `shell: bash` step under) against a stubbed `npm` on
+ * PATH, for every input the install logic branches on. Also asserts the
+ * two files' step bodies are string-identical: they are meant to stay in
+ * lockstep and nothing else guarded that.
+ *
+ * `beforeAll`/`afterAll` and the Node built-ins below are pulled in via
+ * dynamic `import()` rather than the static import list at the top of
+ * this file: other bundle docs cite specific line numbers into this
+ * file (e.g. subagent-contracts-superset.md's
+ * `test/docs-consistency.test.ts:1129#"..."`), so nothing above this
+ * point may shift; this whole block is append-only at the end of the
+ * file, mirroring the "commit-report command order" describe block
+ * above, which does the same for its own child_process/fs/os imports.
+ */
+const { beforeAll, afterAll } = await import("vitest");
+
+describe("Install okf-kit step: run: body identity and behavior under a stubbed npm", () => {
+  const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+  const readRepoFile = (relPath: string): string =>
+    readFileSync(`${repoRoot}/${relPath}`, "utf8");
+
+  const STEP_NAME = "Install okf-kit (exact pin, unpublished-pin fallback)";
+
+  // Extracts a `- name: <stepName>` step's `run: |` body from a workflow
+  // file's raw text and dedents it, the same text shape the runner's
+  // shell executes. A small hand-rolled scanner, not a YAML parser: this
+  // package carries no YAML dependency (only friction-log, okf-kit, and
+  // slop-detector do), and the existing "every okf-kit@<version> pin"
+  // describe block above already reads these same workflow files as raw
+  // text rather than parsing them.
+  function extractStepRunBody(workflowText: string, stepName: string): string {
+    const lines = workflowText.split("\n");
+    const nameLine = `- name: ${stepName}`;
+    const stepIndex = lines.findIndex((l) => l.trim() === nameLine);
+    if (stepIndex === -1) {
+      throw new Error(`step not found: ${stepName}`);
+    }
+    let runIndex = -1;
+    for (let i = stepIndex + 1; i < lines.length; i += 1) {
+      if (lines[i].trim() === "run: |") {
+        runIndex = i;
+        break;
+      }
+      if (/^\s*- name: /.test(lines[i])) {
+        break;
+      }
+    }
+    if (runIndex === -1) {
+      throw new Error(`run: | not found for step: ${stepName}`);
+    }
+    const runIndent = lines[runIndex].match(/^(\s*)/)?.[1].length ?? 0;
+    const bodyLines: string[] = [];
+    let contentIndent: number | null = null;
+    for (let i = runIndex + 1; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (line.trim() === "") {
+        bodyLines.push("");
+        continue;
+      }
+      const indent = line.match(/^(\s*)/)?.[1].length ?? 0;
+      if (indent <= runIndent) {
+        break;
+      }
+      if (contentIndent === null) {
+        contentIndent = indent;
+      }
+      bodyLines.push(line.slice(contentIndent));
+    }
+    while (bodyLines.length > 0 && bodyLines[bodyLines.length - 1] === "") {
+      bodyLines.pop();
+    }
+    return bodyLines.join("\n");
+  }
+
+  // Counts how many `- name: <stepName>` lines a workflow file's raw text
+  // carries. extractStepRunBody's scanner takes the first exact match; if
+  // the step name were ever duplicated (a copy-paste step, a second job
+  // reusing the same name) the scanner would silently read the wrong
+  // step's body without ever raising an error. This guards that
+  // assumption directly rather than only exercising its output.
+  function countStepNameOccurrences(
+    workflowText: string,
+    stepName: string,
+  ): number {
+    const nameLine = `- name: ${stepName}`;
+    return workflowText.split("\n").filter((l) => l.trim() === nameLine).length;
+  }
+
+  // ciBody/stalenessBody are populated in beforeAll rather than at
+  // describe-collection time: extractStepRunBody throws when the step is
+  // renamed or restructured, and a throw during collection (module-level
+  // describe-body evaluation, which vitest runs synchronously to
+  // register child its/describes) fails this whole test file's
+  // collection, not just this block, taking every other describe block
+  // in this file down with it. Computing them in beforeAll means a
+  // rename failure surfaces as a failing test scoped to this describe
+  // block only.
+  let ciBody = "";
+  let stalenessBody = "";
+
+  beforeAll(() => {
+    ciBody = extractStepRunBody(
+      readRepoFile(".github/workflows/ci.yml"),
+      STEP_NAME,
+    );
+    stalenessBody = extractStepRunBody(
+      readRepoFile(".github/workflows/okf-staleness.yml"),
+      STEP_NAME,
+    );
+  });
+
+  it("the step name occurs exactly once in each workflow file (guards the scanner's first-match assumption)", () => {
+    expect(
+      countStepNameOccurrences(
+        readRepoFile(".github/workflows/ci.yml"),
+        STEP_NAME,
+      ),
+    ).toBe(1);
+    expect(
+      countStepNameOccurrences(
+        readRepoFile(".github/workflows/okf-staleness.yml"),
+        STEP_NAME,
+      ),
+    ).toBe(1);
+  });
+
+  it("found a non-empty run: body in both workflow files (sanity: not vacuously true)", () => {
+    expect(ciBody.length).toBeGreaterThan(0);
+    expect(stalenessBody.length).toBeGreaterThan(0);
+  });
+
+  it("ci.yml's and okf-staleness.yml's Install okf-kit run: bodies are string-identical", () => {
+    expect(ciBody).toEqual(stalenessBody);
+  });
+
+  describe("behavior under a stubbed npm", () => {
+    let workDir = "";
+    let binDir = "";
+    let repoDir = "";
+    let npmLogPath = "";
+    let execFileSync: typeof import("node:child_process").execFileSync;
+
+    beforeAll(async () => {
+      const [
+        { execFileSync: execFileSyncImpl },
+        { mkdtempSync, chmodSync },
+        { tmpdir },
+      ] = await Promise.all([
+        import("node:child_process"),
+        import("node:fs"),
+        import("node:os"),
+      ]);
+      execFileSync = execFileSyncImpl;
+
+      // bash is required to replay the run: body; if it is missing this
+      // throws and the whole block fails loudly (an it.runIf guard here
+      // would be evaluated at collection time, before beforeAll runs).
+      execFileSync("bash", ["--version"], { stdio: "ignore" });
+
+      workDir = mkdtempSync(`${tmpdir()}/ow-okf-install-`);
+      binDir = `${workDir}/bin`;
+      mkdirSync(binDir, { recursive: true });
+      repoDir = `${workDir}/repo`;
+      mkdirSync(`${repoDir}/packages/okf-kit`, { recursive: true });
+      npmLogPath = `${workDir}/npmlog`;
+
+      const npmStub = [
+        "#!/usr/bin/env bash",
+        'echo "$*" >> "${NPM_STUB_LOG}"',
+        'if [ "$1" = "view" ] && [ "$2" = "okf-kit@${NPM_STUB_PIN}" ] && [ "$3" = "version" ]; then',
+        "  printf '%s' \"${NPM_STUB_VIEW_PIN_STDOUT}\"",
+        "  printf '%s' \"${NPM_STUB_VIEW_PIN_STDERR}\" >&2",
+        '  exit "${NPM_STUB_VIEW_PIN_EXIT}"',
+        "fi",
+        'if [ "$1" = "view" ] && [ "$2" = "okf-kit" ] && [ "$3" = "versions" ] && [ "$4" = "--json" ]; then',
+        "  printf '%s' \"${NPM_STUB_VIEW_VERSIONS_STDOUT}\"",
+        "  printf '%s' \"${NPM_STUB_VIEW_VERSIONS_STDERR}\" >&2",
+        '  exit "${NPM_STUB_VIEW_VERSIONS_EXIT}"',
+        "fi",
+        "exit 0",
+        "",
+      ].join("\n");
+      writeFileSync(`${binDir}/npm`, npmStub);
+      chmodSync(`${binDir}/npm`, 0o755);
+    });
+
+    afterAll(() => {
+      if (workDir) {
+        rmSync(workDir, { recursive: true, force: true });
+      }
+    });
+
+    function writePkgVersion(version: string) {
+      writeFileSync(
+        `${repoDir}/packages/okf-kit/package.json`,
+        JSON.stringify({ version }),
+      );
+    }
+
+    // Runs `body` (one of ciBody/stalenessBody) under bash with the given
+    // npm-stub env. stdio is explicit rather than left to execFileSync's
+    // default (which inherits the child's stderr into this process's
+    // own): the script under test writes `::error title=...` GitHub
+    // Actions annotation lines to stderr on its failure paths, and an
+    // inherited stderr would print those literal annotation lines every
+    // time `npm test` runs this file, even on a fully green run. Piping
+    // stderr instead keeps it out of the test runner's own output and
+    // lets the registry-error/mismatch cases assert its exact content.
+    function runInstall(body: string, env: Record<string, string>) {
+      try {
+        rmSync(npmLogPath, { force: true });
+      } catch {
+        // no-op: nothing to remove before the first case
+      }
+      const scriptPath = `${workDir}/script-${Math.random().toString(36).slice(2)}.sh`;
+      writeFileSync(scriptPath, body);
+      let status = 0;
+      let stdout = "";
+      let stderr = "";
+      try {
+        stdout = execFileSync(
+          "bash",
+          ["--noprofile", "--norc", "-eo", "pipefail", scriptPath],
+          {
+            cwd: repoDir,
+            env: {
+              ...process.env,
+              PATH: `${binDir}:${process.env.PATH}`,
+              NPM_STUB_LOG: npmLogPath,
+              ...env,
+            },
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "pipe"],
+          },
+        );
+      } catch (err) {
+        const e = err as {
+          status: number | null;
+          stdout?: string;
+          stderr?: string;
+        };
+        status = e.status ?? 1;
+        stdout = e.stdout ?? "";
+        stderr = e.stderr ?? "";
+      }
+      const calls = existsSync(npmLogPath)
+        ? readFileSync(npmLogPath, "utf8")
+            .split("\n")
+            .filter((l) => l.length > 0)
+        : [];
+      return { status, stdout, stderr, calls };
+    }
+
+    it("bash is present on PATH (required to replay the Install okf-kit run: body; the beforeAll above throws otherwise)", () => {
+      expect(typeof execFileSync).toBe("function");
+    });
+
+    // Every case below runs against both files' run: bodies. The two are
+    // asserted string-identical above, but that assertion and this
+    // behavior suite are separate tests: without running the behavior
+    // cases against both bodies too, a future edit that breaks the
+    // identity assertion (deliberately or not) would still leave
+    // okf-staleness.yml's copy behaviorally unexercised.
+    const bodies: Array<[string, () => string]> = [
+      ["ci.yml", () => ciBody],
+      ["okf-staleness.yml", () => stalenessBody],
+    ];
+
+    describe.each(bodies)("%s's run: body", (_label, getBody) => {
+      it("published: npm view prints the version -> published-pin, exit 0, installs the pin", () => {
+        writePkgVersion("0.12.1");
+        const { status, stdout, calls } = runInstall(getBody(), {
+          NPM_STUB_PIN: "0.12.1",
+          NPM_STUB_VIEW_PIN_EXIT: "0",
+          NPM_STUB_VIEW_PIN_STDOUT: "0.12.1\n",
+          NPM_STUB_VIEW_PIN_STDERR: "",
+          NPM_STUB_VIEW_VERSIONS_EXIT: "0",
+          NPM_STUB_VIEW_VERSIONS_STDOUT: "",
+          NPM_STUB_VIEW_VERSIONS_STDERR: "",
+        });
+        expect(stdout).toContain(
+          "okf-kit install path: published-pin (okf-kit@0.12.1)",
+        );
+        expect(status).toBe(0);
+        expect(calls).toContain(
+          "install -g okf-kit@0.12.1 --no-audit --no-fund",
+        );
+        expect(calls.some((c) => c.startsWith("ci "))).toBe(false);
+      });
+
+      it("unpublished, pin equals package.json's version: build-from-tree, exit 0, ci/build/install-from-tree ran", () => {
+        writePkgVersion("0.12.1");
+        const { status, stdout, calls } = runInstall(getBody(), {
+          NPM_STUB_PIN: "0.12.1",
+          NPM_STUB_VIEW_PIN_EXIT: "1",
+          NPM_STUB_VIEW_PIN_STDOUT: "",
+          NPM_STUB_VIEW_PIN_STDERR: "npm error code E404\n",
+          NPM_STUB_VIEW_VERSIONS_EXIT: "0",
+          NPM_STUB_VIEW_VERSIONS_STDOUT: JSON.stringify(["1.0.0", "1.1.0"]),
+          NPM_STUB_VIEW_VERSIONS_STDERR: "",
+        });
+        expect(stdout).toContain(
+          "okf-kit install path: unpublished-pin-build-from-tree (okf-kit@0.12.1 == packages/okf-kit/package.json)",
+        );
+        expect(status).toBe(0);
+        expect(calls).toContain("ci --no-audit --no-fund");
+        expect(calls).toContain("run build");
+        expect(calls).toContain(
+          "install -g ./packages/okf-kit --no-audit --no-fund",
+        );
+        expect(
+          calls.some(
+            (c) => c === "install -g okf-kit@0.12.1 --no-audit --no-fund",
+          ),
+        ).toBe(false);
+      });
+
+      it("unpublished, pin does not equal package.json's version: fails loudly", () => {
+        writePkgVersion("9.9.9");
+        const { status, stdout, stderr } = runInstall(getBody(), {
+          NPM_STUB_PIN: "0.12.1",
+          NPM_STUB_VIEW_PIN_EXIT: "1",
+          NPM_STUB_VIEW_PIN_STDOUT: "",
+          NPM_STUB_VIEW_PIN_STDERR: "npm error code E404\n",
+          NPM_STUB_VIEW_VERSIONS_EXIT: "0",
+          NPM_STUB_VIEW_VERSIONS_STDOUT: JSON.stringify(["1.0.0"]),
+          NPM_STUB_VIEW_VERSIONS_STDERR: "",
+        });
+        expect(stdout).toContain(
+          "okf-kit install path: unpublished-pin-mismatch (fail)",
+        );
+        expect(status).not.toBe(0);
+        expect(stderr).toContain(
+          "::error title=okf-kit install::pin okf-kit@0.12.1 is confirmed unpublished",
+        );
+        expect(stderr).toContain(
+          "does not equal packages/okf-kit/package.json's version (9.9.9); refusing to install",
+        );
+      });
+
+      it("network error on both probes: fails loudly, never falls back", () => {
+        writePkgVersion("0.12.1");
+        const { status, stdout, stderr, calls } = runInstall(getBody(), {
+          NPM_STUB_PIN: "0.12.1",
+          NPM_STUB_VIEW_PIN_EXIT: "1",
+          NPM_STUB_VIEW_PIN_STDOUT: "",
+          NPM_STUB_VIEW_PIN_STDERR: "npm error network request failed\n",
+          NPM_STUB_VIEW_VERSIONS_EXIT: "1",
+          NPM_STUB_VIEW_VERSIONS_STDOUT: "",
+          NPM_STUB_VIEW_VERSIONS_STDERR: "npm error network request failed\n",
+        });
+        expect(stdout).toContain("okf-kit install path: registry-error (fail)");
+        expect(status).not.toBe(0);
+        expect(
+          calls.some((c) => c.startsWith("ci ") || c.startsWith("install")),
+        ).toBe(false);
+        expect(stderr).toContain(
+          "::error title=okf-kit install::npm view okf-kit@0.12.1 version failed",
+        );
+        expect(stderr).toContain(
+          "refusing to guess: npm error network request failed",
+        );
+      });
+
+      it("package-level probe succeeds and the pin IS in the list: treated as published, installs the pin", () => {
+        writePkgVersion("0.12.1");
+        const { status, stdout, calls } = runInstall(getBody(), {
+          NPM_STUB_PIN: "0.12.1",
+          NPM_STUB_VIEW_PIN_EXIT: "1",
+          NPM_STUB_VIEW_PIN_STDOUT: "",
+          NPM_STUB_VIEW_PIN_STDERR: "npm error code E404\n",
+          NPM_STUB_VIEW_VERSIONS_EXIT: "0",
+          NPM_STUB_VIEW_VERSIONS_STDOUT: JSON.stringify(["0.12.1", "1.1.0"]),
+          NPM_STUB_VIEW_VERSIONS_STDERR: "",
+        });
+        expect(stdout).toContain(
+          "okf-kit install path: published-pin (okf-kit@0.12.1, confirmed via okf-kit versions probe",
+        );
+        expect(status).toBe(0);
+        expect(calls).toContain(
+          "install -g okf-kit@0.12.1 --no-audit --no-fund",
+        );
+        expect(calls.some((c) => c.startsWith("ci "))).toBe(false);
+      });
+
+      it("npm view exits 0 with empty stdout: fails loudly, never exits 0", () => {
+        writePkgVersion("0.12.1");
+        const { status, stdout } = runInstall(getBody(), {
+          NPM_STUB_PIN: "0.12.1",
+          NPM_STUB_VIEW_PIN_EXIT: "0",
+          NPM_STUB_VIEW_PIN_STDOUT: "",
+          NPM_STUB_VIEW_PIN_STDERR: "",
+          NPM_STUB_VIEW_VERSIONS_EXIT: "0",
+          NPM_STUB_VIEW_VERSIONS_STDOUT: "",
+          NPM_STUB_VIEW_VERSIONS_STDERR: "",
+        });
+        expect(stdout).toContain("okf-kit install path: registry-error (fail)");
+        expect(status).not.toBe(0);
+      });
+
+      // M1 (review round 2): a mutant that deletes the
+      // `if (!Array.isArray(v)) process.exit(1);` validity check on the
+      // versions probe's parsed JSON survived the suite above: every
+      // NPM_STUB_VIEW_VERSIONS_STDOUT fixture used there was already a
+      // JSON array, so the check never had anything to reject. Without
+      // it, a syntactically valid but non-array response is accepted as
+      // "confirmed unpublished" and the step can fall through to a
+      // from-tree build (or, for a bare string that happens to contain
+      // the pin, straight to installing it) instead of refusing.
+      it("versions probe returns a non-array JSON object (npm's own error shape): registry-error, never falls back", () => {
+        writePkgVersion("0.12.1");
+        const { status, stdout, calls } = runInstall(getBody(), {
+          NPM_STUB_PIN: "0.12.1",
+          NPM_STUB_VIEW_PIN_EXIT: "1",
+          NPM_STUB_VIEW_PIN_STDOUT: "",
+          NPM_STUB_VIEW_PIN_STDERR: "npm error code E404\n",
+          NPM_STUB_VIEW_VERSIONS_EXIT: "0",
+          NPM_STUB_VIEW_VERSIONS_STDOUT: JSON.stringify({
+            error: { code: "E404", summary: "Not found" },
+          }),
+          NPM_STUB_VIEW_VERSIONS_STDERR: "",
+        });
+        expect(stdout).toContain("okf-kit install path: registry-error (fail)");
+        expect(status).not.toBe(0);
+        expect(
+          calls.some((c) => c.startsWith("ci ") || c.startsWith("install")),
+        ).toBe(false);
+      });
+
+      it("versions probe returns a bare JSON string equal to the pin: registry-error, never falls back", () => {
+        writePkgVersion("0.12.1");
+        const { status, stdout, calls } = runInstall(getBody(), {
+          NPM_STUB_PIN: "0.12.1",
+          NPM_STUB_VIEW_PIN_EXIT: "1",
+          NPM_STUB_VIEW_PIN_STDOUT: "",
+          NPM_STUB_VIEW_PIN_STDERR: "npm error code E404\n",
+          NPM_STUB_VIEW_VERSIONS_EXIT: "0",
+          NPM_STUB_VIEW_VERSIONS_STDOUT: JSON.stringify("0.12.1"),
+          NPM_STUB_VIEW_VERSIONS_STDERR: "",
+        });
+        expect(stdout).toContain("okf-kit install path: registry-error (fail)");
+        expect(status).not.toBe(0);
+        expect(
+          calls.some((c) => c.startsWith("ci ") || c.startsWith("install")),
+        ).toBe(false);
+      });
+
+      it("versions probe returns truncated JSON: registry-error, never falls back", () => {
+        writePkgVersion("0.12.1");
+        const { status, stdout, calls } = runInstall(getBody(), {
+          NPM_STUB_PIN: "0.12.1",
+          NPM_STUB_VIEW_PIN_EXIT: "1",
+          NPM_STUB_VIEW_PIN_STDOUT: "",
+          NPM_STUB_VIEW_PIN_STDERR: "npm error code E404\n",
+          NPM_STUB_VIEW_VERSIONS_EXIT: "0",
+          NPM_STUB_VIEW_VERSIONS_STDOUT: '["0.11.0","0.12.',
+          NPM_STUB_VIEW_VERSIONS_STDERR: "",
+        });
+        expect(stdout).toContain("okf-kit install path: registry-error (fail)");
+        expect(status).not.toBe(0);
+        expect(
+          calls.some((c) => c.startsWith("ci ") || c.startsWith("install")),
+        ).toBe(false);
+      });
+
+      // Missing test (review round 2): the step reads
+      // packages/okf-kit/package.json only after both probes agree the
+      // pin is genuinely unpublished. If that file is missing or
+      // unreadable at that point, the step must fail loudly and name the
+      // file rather than treat it as any other branch.
+      it("unpublished pin, packages/okf-kit/package.json missing: fails loudly, names the file", () => {
+        rmSync(`${repoDir}/packages/okf-kit/package.json`, {
+          force: true,
+        });
+        try {
+          const { status, stderr } = runInstall(getBody(), {
+            NPM_STUB_PIN: "0.12.1",
+            NPM_STUB_VIEW_PIN_EXIT: "1",
+            NPM_STUB_VIEW_PIN_STDOUT: "",
+            NPM_STUB_VIEW_PIN_STDERR: "npm error code E404\n",
+            NPM_STUB_VIEW_VERSIONS_EXIT: "0",
+            NPM_STUB_VIEW_VERSIONS_STDOUT: JSON.stringify(["1.0.0"]),
+            NPM_STUB_VIEW_VERSIONS_STDERR: "",
+          });
+          expect(status).not.toBe(0);
+          expect(stderr).toContain(
+            "::error title=okf-kit install::cannot read packages/okf-kit/package.json",
+          );
+        } finally {
+          writePkgVersion("0.12.1");
+        }
+      });
+    });
+  });
+});
