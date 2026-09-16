@@ -292,6 +292,17 @@ commands exited `0`.
   (even though an intervening ordinary line, not a blank one, immediately
   precedes it), misreading `abc:99` as the locator and discarding the
   real one (`tests/MessageResetTest.php:9`) as a dropped extra frame.
+- `phpunit-indented-message-line.txt`: an uncaught `RuntimeException`
+  whose own message embeds a genuinely blank (zero-length) line directly
+  followed by a two-space-indented `file:42` line
+  (`tests/IndentedMessageTest.php`, `testIndentedLine`). Exit `2`. Unlike
+  `phpunit-diff-indented-locator.txt`'s blank row (one space, not zero
+  characters, so the blank check alone already keeps it out), this line
+  is preceded by a REAL blank line, isolating the locator regex's own
+  raw-vs-trimmed behavior: `ENTRY_FILE_LINE` still never matches it,
+  because it requires a non-whitespace first character on the raw line,
+  so the real locator (`tests/IndentedMessageTest.php:9`) is still found
+  further down.
 
 ## `vitest-project/`, `tsc-project/`, `eslint-project/`
 

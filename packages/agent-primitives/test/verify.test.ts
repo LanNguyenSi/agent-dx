@@ -2921,11 +2921,12 @@ describe("phpunitDetector: captured real output", () => {
     }
   });
 
-  it("matches a diff-with-blank-row, a nested-throw-frames, and a message-reset run", () => {
+  it("matches a diff-with-blank-row, a nested-throw-frames, a message-reset, and an indented-message-line run", () => {
     for (const [name, exitCode] of [
       ["phpunit-diff-indented-locator", 1],
       ["phpunit-nested-throw-frames", 2],
       ["phpunit-message-reset", 2],
+      ["phpunit-indented-message-line", 2],
     ] as const) {
       expect(
         phpunitDetector.matches({
@@ -2976,6 +2977,7 @@ describe("phpunitDetector: captured real output", () => {
       "phpunit-diff-indented-locator",
       "phpunit-nested-throw-frames",
       "phpunit-message-reset",
+      "phpunit-indented-message-line",
     ]) {
       const output = readCaptured(name);
       expect(vitestDetector.matches({ output, command: "", exitCode: 0 })).toBe(
@@ -3334,6 +3336,28 @@ describe("phpunitDetector: captured real output", () => {
     expect(parsed.failures[0].line).toBe(9);
   });
 
+  it("parses a message with a genuinely blank line followed by an INDENTED locator-shaped line: the indented line is never matched, even preceded by a real blank line", () => {
+    const parsed = phpunitDetector.parse({
+      output: readCaptured("phpunit-indented-message-line"),
+      command: "vendor/bin/phpunit",
+      exitCode: 2,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].name).toBe(
+      "IndentedMessageTest::testIndentedLine",
+    );
+    // "  file:42" is preceded by a genuinely blank (zero-length) line,
+    // not merely a diff-shaped single-space one, isolating the locator
+    // regex's own raw-vs-trimmed behavior from the blank-line check: it
+    // is still never read as the locator, because `ENTRY_FILE_LINE`
+    // requires a non-whitespace first character on the RAW line.
+    expect(parsed.failures[0].message).toBe(
+      "RuntimeException: Header file:42 Trailer",
+    );
+    expect(parsed.failures[0].file).toBe("tests/IndentedMessageTest.php");
+    expect(parsed.failures[0].line).toBe(9);
+  });
+
   it("failures invariant: summary.failed + summary.errors is never less than the parsed failures list, across every red/error fixture", () => {
     for (const [name, exitCode] of [
       ["phpunit-fail", 1],
@@ -3345,6 +3369,7 @@ describe("phpunitDetector: captured real output", () => {
       ["phpunit-diff-indented-locator", 1],
       ["phpunit-nested-throw-frames", 2],
       ["phpunit-message-reset", 2],
+      ["phpunit-indented-message-line", 2],
     ] as const) {
       const parsed = phpunitDetector.parse({
         output: readCaptured(name),
@@ -3381,6 +3406,7 @@ describe("phpunitDetector: captured real output", () => {
     "phpunit-diff-indented-locator",
     "phpunit-nested-throw-frames",
     "phpunit-message-reset",
+    "phpunit-indented-message-line",
   ] as const;
 
   /** The run's own stated total: the tally line's `Tests: N`, or a green

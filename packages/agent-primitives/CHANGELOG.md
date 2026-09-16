@@ -23,11 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `precededByBlank` flag resets after every ordinary message line, not only
   after a consumed locator/frame line, so a message line that just happens
   to end `word:digits` is never mistaken for the locator merely because an
-  earlier, non-adjacent blank line came before it. Three new real captures
+  earlier, non-adjacent blank line came before it. Four new real captures
   (`phpunit-diff-indented-locator.txt`, `phpunit-nested-throw-frames.txt`,
-  `phpunit-message-reset.txt`) pin the three shapes; the existing
-  `phpunit-error-message-with-port.txt` fixture's pinned `file`/`line`/
-  `message` are unchanged.
+  `phpunit-message-reset.txt`, `phpunit-indented-message-line.txt`) pin
+  these shapes; the existing `phpunit-error-message-with-port.txt`
+  fixture's pinned `file`/`line`/`message` are unchanged.
 
 ## [0.5.0] - 2026-09-15
 
