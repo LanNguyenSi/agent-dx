@@ -1,7 +1,7 @@
 import { vitestDetector } from "../verify/detectors/vitest.js";
 import {
   phpunitDetector,
-  phpunitZeroTestsExecuted,
+  phpunitZeroTestsVerdict,
 } from "../verify/detectors/phpunit.js";
 import { combinedOutput } from "../exec.js";
 
@@ -25,14 +25,47 @@ import { combinedOutput } from "../exec.js";
  * here turns into a refusal or a verdict override.
  *
  * A third shape, PHPUnit's, reuses `phpunitDetector.matches` (to decide
- * whether the output is PHPUnit's at all) and `phpunitZeroTestsExecuted`
- * (the actual zero-tests verdict, built on PHPUnit's own STATED total
- * less every category that did not execute -- Skipped, Incomplete and
- * Warnings, per the tally-category table in
- * `verify/detectors/phpunit.ts` -- rather than on
- * `passed`/`failed`/`errors`, since a run with both a real failure and a
- * real skip parses those three to `0` too) from that same module, so
- * this module never re-implements PHPUnit's own regexes.
+ * whether the output is PHPUnit's at all) and `phpunitZeroTestsVerdict`
+ * (the actual zero-tests reading, built on PHPUnit's own STATED total
+ * less every category that did not execute -- Skipped and Incomplete
+ * always, a plain `Warnings` count under PHPUnit 9, per the
+ * version-aware tally-category table in `verify/detectors/phpunit.ts` --
+ * rather than on `passed`/`failed`/`errors`, since a run with both a
+ * real failure and a real skip parses those three to `0` too) from that
+ * same module, so this module never re-implements PHPUnit's own
+ * regexes.
+ *
+ * That reading is three-valued, and this module deliberately collapses
+ * it in the FAIL-SAFE direction: an `"ambiguous"` output is reported as
+ * detected here, exactly like a `"zero"` one, so the caller refuses the
+ * run rather than scoring it. Both of that verdict's causes are
+ * collapsed the same way: a tally whose version-dependent count decides
+ * the question with no version banner left to read it against, and an
+ * output carrying PHPUnit's banner but no result report at all (a
+ * mid-suite `exit()`/`die()` -- see `phpunitZeroTestsVerdict`). A
+ * refusal on such a run costs a probe result; the other collapse
+ * would buy a verdict with a false one, since a mutant run whose tally
+ * cannot be read as executing anything would otherwise be compared
+ * against the baseline as if it had run and passed, and reported
+ * `survived`. A run whose result report is merely SUPPRESSED rather
+ * than missing (PHPUnit 10+ `--no-results`, which still prints its
+ * progress counter and post-run `Time:` line) reads `"not_zero"` and is
+ * scored normally: refusing those would refuse every baseline of a
+ * project that runs PHPUnit that way.
+ *
+ * The refusal's own reason (`no_tests_executed`, see `session.ts`) is
+ * the nearest of the existing reasons and OVERSTATES what is known for
+ * either ambiguous cause: the run may in fact have executed every one
+ * of its tests under a PHPUnit 10+ reading, and an unreadable-result
+ * run may well have executed and passed a test before it was killed
+ * (the captured `exit()` fixture's own single progress dot is exactly
+ * that). That overstatement is an accepted, recorded limit of this
+ * release rather than an oversight -- a dedicated refusal reason for
+ * "cannot be read" is a follow-up, since `RefusalReason` is part of
+ * `probe`'s published result contract -- and it is the only thing kept
+ * imprecise here: the verdict itself, and every text `verify` prints,
+ * name the absence for what it is. `verify` keeps the two apart, since
+ * it warns rather than refuses and can afford the distinction.
  */
 
 export type ZeroTestsDetectorName = "vitest" | "node_test" | "phpunit";
@@ -149,13 +182,16 @@ export function detectKnownZeroTestsEvidence(
     return { detected: false };
   }
   if (phpunitDetector.matches(input)) {
-    // Built on PHPUnit's own STATED total (via `phpunitZeroTestsExecuted`),
+    // Built on PHPUnit's own STATED total (via `phpunitZeroTestsVerdict`),
     // never on `passed`/`failed`/`errors` alone: those three parse to `0`
     // for a run that had a real failure alongside a real skip too, and a
     // warnings-only run (`Tests: 1, Assertions: 0, Warnings: 1.`, exit
     // `0`) reads as `passed: 1` on any derivation that counts a synthetic
     // PHPUnit warning as an executed test (see that function's docblock).
-    if (phpunitZeroTestsExecuted(combined)) {
+    // Anything but a clean `"not_zero"` is reported as detected: an
+    // `"ambiguous"` reading is refused rather than scored, the fail-safe
+    // collapse for a probe (see this module's own docblock).
+    if (phpunitZeroTestsVerdict(combined).verdict !== "not_zero") {
       return { detected: true, via: "phpunit" };
     }
     return { detected: false };

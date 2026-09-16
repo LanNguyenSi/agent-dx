@@ -1,0 +1,18 @@
+PHPUnit 11.5.56 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.3.33
+
+.                                                                   1 / 1 (100%)
+
+Time: [elided]
+
+There was 1 PHPUnit error:
+
+1) DataProviderThrowsTest::testSomething
+The data provider specified for DataProviderThrowsTest::testSomething is invalid
+provider exploded
+
+tests/DataProviderThrowsTest.php:20
+
+ERRORS!
+Tests: 1, Assertions: 1, Errors: 1, PHPUnit Deprecations: 1.

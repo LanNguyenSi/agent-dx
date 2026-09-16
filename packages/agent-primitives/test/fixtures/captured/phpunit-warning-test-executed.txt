@@ -1,0 +1,10 @@
+PHPUnit 11.5.56 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.3.33
+
+W                                                                   1 / 1 (100%)
+
+Time: [elided]
+
+OK, but there were issues!
+Tests: 1, Assertions: 1, Warnings: 1.

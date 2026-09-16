@@ -30,6 +30,135 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `phpunit-error-message-with-port.txt` fixture's pinned
   `file`/`line`/`message` are unchanged.
 
+- The `phpunit` detector parses PHPUnit 11's own output shapes alongside the
+  PHPUnit 9.6 shapes it was first captured against (tracker 3a0c5242).
+  `There was 1 PHPUnit error:` -- PHPUnit 11's defect-section kind for a
+  suite-level failure such as an invalid `@dataProvider`, distinct from an
+  ordinary `error` section on a test that ran and threw -- is collected into
+  `failures` alongside `error`/`failure`, matching that PHPUnit's own tally
+  counts it under `Errors:`. `TALLY_LINE`/`NAMED_COUNT` accept a two-word
+  `PHPUnit <Name>: N` tally token (`PHPUnit Deprecations`, `PHPUnit
+  Warnings`, `PHPUnit Notices`); that token and the plain single-word
+  `Deprecations`/`Notices` tokens are read and left unassigned to any tally
+  category, since such a count is raised inside a test that genuinely ran
+  (captured real: `phpunit-two-word-deprecation-tally.txt`'s `Tests: 2,
+  Assertions: 2, PHPUnit Deprecations: 1.`, where both tests ran and
+  passed). PHPUnit's version banner is one pattern with the major version
+  captured from it, prerelease tails included (`PHPUnit 11.0.0-RC1`,
+  `PHPUnit 12.0.0-alpha.1`), and it selects this detector only as a whole
+  line of its own: neither an indented nor an otherwise-prefixed copy
+  (`[ci] PHPUnit 11.5.56 by ...`) nor the bare credit line without the
+  version prefix does.
+
+- A plain `Warnings: N` tally token is read against the PHPUnit major
+  version the output states about itself (tracker 3a0c5242). PHPUnit 9
+  counts a synthetic per-class "no tests found" warning there, which never
+  ran a body; PHPUnit 10 and up count N tests that DID run and raised a
+  PHP-level warning, so for major 10 and up the token is treated the way
+  `Risky` already is (`executed: true`, `reportsAs: "passed"`). Captured
+  real, PHPUnit 11.5.56: a single `E_USER_WARNING`-raising test, `Tests: 1,
+  Assertions: 1, Warnings: 1.`, exit `0`
+  (`phpunit-warning-test-executed.txt`), and a three-test run additionally
+  raising a deprecation and a notice, `Tests: 3, Assertions: 3, Warnings: 1,
+  Deprecations: 1, Notices: 1.`, all three passing
+  (`phpunit-warnings-deprecations-notices-executed.txt`). Major 9 and below,
+  and any output with no banner to read, take the PHPUnit 9 reading as the
+  fail-safe default, under which every PHPUnit 9 capture in this suite
+  derives a byte-identical summary either way.
+  The rows that change by major version are a table of their own, from which
+  the version-aware reading, the ambiguity check below and the moved-count
+  warning below are all derived, so a future version-dependent category
+  joins all three by adding one row. A check whose tally reports a nonzero
+  count in such a row under a version that reads it as executed carries a
+  `phpunit_warnings:` detector warning naming that count with PHPUnit's own
+  token (`Warnings: 1`), since the version-aware reading folds those tests
+  into `summary.passed` and leaves `summary.warnings` at `0`;
+  `Summary.warnings`'s own docblock records that version dependence, so
+  `warnings: 0` is not misread as "the tool reported no warning".
+
+- The `phpunit` zero-tests reading is three-valued
+  (`phpunitZeroTestsVerdict`: `"zero"`, `"not_zero"`, `"ambiguous"`), so
+  neither `verify` nor `probe` asserts a zero-tests verdict an output does
+  not state (tracker 3a0c5242). `"zero"` is taken only from something
+  PHPUnit itself stated: its own `No tests executed!` line, or a tally whose
+  executed count derives to zero without depending on a version the output
+  does not state. `"ambiguous"` covers the two cases where the question
+  cannot be answered from the output: a tally carrying a version-dependent
+  count with no version banner in the output to read it against (`exec.ts`
+  keeps a bounded tail and drops lines off the FRONT, so a long run can lose
+  PHPUnit's first line while keeping its last: `Tests: 15, Assertions: 15,
+  Warnings: 15.` executed nothing read as a 9 and ran and passed all 15 read
+  as a 10+), and an output carrying PHPUnit's banner but no result report at
+  all. Where two candidate readings of a version-dependent count agree, the
+  verdict is that agreed value: the count is unreadable, the zero-tests
+  question is not. `verify` claims `no_tests_executed:` only for `"zero"`
+  and emits a distinct `zero_tests_ambiguous:` warning for `"ambiguous"`,
+  each carrying the reading's own reason (for the missing-version case: the
+  unreadable count, both readings' executed totals, and which of the two the
+  summary beside it carries); the check's `status` is untouched either way
+  (`pass` stays `pass`). `probe` collapses the same reading the other way
+  and refuses on anything but `"not_zero"`, since it cannot warn and carry
+  on the way `verify` can: scoring such a run would compare a mutant whose
+  executed count cannot be read against the baseline as if it had run and
+  passed, and report `survived`. That refusal reports the `no_tests_executed`
+  reason, which overstates what is known for either ambiguous case; the
+  overstatement is an accepted limit of this release, with a dedicated
+  refusal reason left to a follow-up, since `RefusalReason` is part of
+  `probe`'s published result contract.
+
+- An `exit()`/`die()` call inside test code kills the PHP process before
+  PHPUnit prints any result report, and that shape is read as an UNREADABLE
+  result rather than as zero tests executed (tracker 3a0c5242).
+  `phpunitDetector.matches()` recognizes PHPUnit's own version banner, so
+  the shape reaches this detector instead of the `generic` fallback, and
+  `phpunitZeroTestsVerdict` reports `"ambiguous"` for it: nothing in such an
+  output says how many tests ran, and the captured fixtures' own single
+  progress dot is one test that ran and passed before the kill. Captured
+  real on both majors, exit `0`: `phpunit-exit-mid-suite.txt` (PHPUnit
+  11.5.56) and `phpunit-exit-mid-suite-9.txt` (9.6.36), each a three-test
+  class whose second test's body is `exit(0)`. The reading requires
+  PHPUnit's progress counter (`N / M (P%)`) and its post-run `Time: <t>,
+  Memory: <m>` line to be absent as well, which is what keeps a COMPLETED
+  run whose result report is merely suppressed out of it: PHPUnit 10 and up
+  accept `--no-results`, and a green two-test suite run that way prints
+  banner, counter and `Time:` line, exit `0`
+  (`phpunit-no-results-green.txt`), while the same flag on a red suite
+  prints the identical counter with `.F` progress characters, exit `1`
+  (`phpunit-no-results-red.txt`) -- so the counter is read as evidence of
+  completion and never as a count. PHPUnit 9.6.36 rejects `--no-results`
+  (`Unknown option`, exit `1`), so the suppressed-report shape is a 10+
+  shape only. A suppressed-report run whose `--filter` matches nothing
+  (`phpunit-no-results-filter-miss.txt`, exit `0`) and a `--list-tests`
+  listing (`phpunit-list-tests.txt`, exit `0`) carry no completion evidence
+  either and are reported as unreadable too, the second as documented
+  over-caution. Three limits: the counter pattern is anchored at the end of
+  a line only, so any line merely ending in the `N / M (P%)` shape (a
+  completed progress row, but also a failure message shaped that way) is
+  read as completion evidence and the reading falls silent (`"not_zero"`),
+  a tightening to progress rows being unpinned either way; a banner-only
+  output (`phpunit --version`) selects the detector and reads `"ambiguous"`,
+  and with two banners the first wins the version read; and a suite large
+  enough to push
+  the banner itself out of `exec.ts`'s kept tail (60 lines / 6000 chars)
+  before the kill falls to `generic`, where only `probe`'s byte-identical
+  generic fallback can catch a MUTANT that changes such a run's shape, never
+  a baseline that already had it.
+
+- `verify` pushes a `no_tests_executed:` detector warning onto any `phpunit`
+  check whose own status is `pass` while PHPUnit's output states that it
+  executed no test (an empty or filtered suite, an all-skipped run, or a
+  PHPUnit 9 warnings-only run such as `Tests: 1, Assertions: 0, Warnings:
+  1.`), reusing `phpunitZeroTestsVerdict` rather than re-deriving the tally
+  (tracker 3a0c5242, AC of PR #227's residual (a)). The check's own `status`
+  is unchanged -- `pass` stays `pass`, the status is the verdict and the
+  warning is the signal -- and the wording names that status rather than an
+  exit code, since `--pass-regex` can decide `pass` on a non-zero exit. The
+  warning carries the reading's own reason clause, so its text says which of
+  the two origins the zero came from instead of naming a tally line that the
+  explicit-statement case does not have. Only a `phpunit`-selected check
+  gets it: another detector's selection never does, however its own output
+  reads.
+
 ## [0.5.0] - 2026-09-15
 
 - The npm tarball now ships a `LICENSE` file matching the repo root LICENSE

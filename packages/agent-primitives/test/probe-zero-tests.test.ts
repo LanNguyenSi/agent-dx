@@ -13,6 +13,7 @@ import {
   detectKnownZeroTestsEvidence,
   hasKnownTestSummary,
 } from "../src/probe/zero-tests.js";
+import { phpunitZeroTestsVerdict } from "../src/verify/detectors/phpunit.js";
 import { initNodeTestDotRepo } from "./helpers/node-test-dot-repo.js";
 
 /**
@@ -226,7 +227,7 @@ describe("detectKnownZeroTestsEvidence()", () => {
     expect(evidence).toEqual({ detected: false });
   });
 
-  it("phpunit: a warnings-only run IS flagged (round-2 review finding: this shape exits 0 with nothing executed and was read as a green passed: 1)", () => {
+  it("phpunit: a PHPUnit 9 warnings-only run IS flagged (it exits 0 with nothing executed, and reads as a green passed: 1 to any derivation that counts a synthetic warning as a test)", () => {
     const evidence = detectKnownZeroTestsEvidence(
       readCaptured("phpunit-warnings"),
       "",
@@ -256,6 +257,125 @@ describe("detectKnownZeroTestsEvidence()", () => {
       "",
     );
     expect(evidence).toEqual({ detected: false });
+  });
+
+  it("phpunit 11: a PHPUnit-error (invalid data provider) run alongside a real Errors:1 count is NOT flagged (a real test genuinely ran)", () => {
+    const evidence = detectKnownZeroTestsEvidence(
+      readCaptured("phpunit-error-data-provider"),
+      "",
+    );
+    expect(evidence).toEqual({ detected: false });
+  });
+
+  it("phpunit 11: a two-word 'PHPUnit Deprecations: N' tally token is NOT flagged (both tests genuinely ran and passed, tracker 3a0c5242)", () => {
+    const evidence = detectKnownZeroTestsEvidence(
+      readCaptured("phpunit-two-word-deprecation-tally"),
+      "",
+    );
+    expect(evidence).toEqual({ detected: false });
+  });
+
+  it("phpunit 11: an exit()/die() mid-suite run IS flagged, via the ambiguous (unreadable-result) collapse rather than a zero-tests claim (tracker 3a0c5242, residual (c))", () => {
+    // The reading itself says only that the result cannot be read from
+    // this output (banner present, no summary line, no progress
+    // counter, no post-run `Time:` line -- the capture's own single
+    // progress dot is in fact one test that ran and passed before the
+    // kill). `probe` collapses that to "refuse", the fail-safe
+    // direction here, while `verify` keeps the distinction and warns
+    // `zero_tests_ambiguous` instead of claiming `no_tests_executed`.
+    const output = readCaptured("phpunit-exit-mid-suite");
+    expect(phpunitZeroTestsVerdict(output).verdict).toBe("ambiguous");
+    expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
+      detected: true,
+      via: "phpunit",
+    });
+  });
+
+  it("phpunit 9: the 9.6.36 exit()/die() capture is flagged the same way (the unreadable-result reading is not version-specific)", () => {
+    const output = readCaptured("phpunit-exit-mid-suite-9");
+    expect(phpunitZeroTestsVerdict(output).verdict).toBe("ambiguous");
+    expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
+      detected: true,
+      via: "phpunit",
+    });
+  });
+
+  it("phpunit 11: a COMPLETED green `--no-results` run is NOT flagged, so such a baseline is scored instead of refused (round-3 counterexample)", () => {
+    // Captured real (PHPUnit 11.5.56, exit 0, two tests that both ran
+    // and passed): `--no-results` suppresses the result REPORT, not the
+    // run, and the progress counter plus the post-run Time/Memory line
+    // are still there. Read as a killed run, this refused every probe
+    // baseline of a project that runs PHPUnit this way.
+    const output = readCaptured("phpunit-no-results-green");
+    expect(phpunitZeroTestsVerdict(output).verdict).toBe("not_zero");
+    expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
+      detected: false,
+    });
+    // Still recognized as a known test summary, so the generic
+    // byte-identical fallback stays out of the way of this shape.
+    expect(hasKnownTestSummary(output, "")).toBe(true);
+  });
+
+  it("phpunit 11: a suppressed-report run whose --filter matched nothing IS flagged (fail-closed: nothing in that output says whether anything ran)", () => {
+    const output = readCaptured("phpunit-no-results-filter-miss");
+    expect(phpunitZeroTestsVerdict(output).verdict).toBe("ambiguous");
+    expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
+      detected: true,
+      via: "phpunit",
+    });
+  });
+
+  it("phpunit 11: a `--list-tests` listing IS flagged too, the documented over-caution of the same collapse", () => {
+    const output = readCaptured("phpunit-list-tests");
+    expect(phpunitZeroTestsVerdict(output).verdict).toBe("ambiguous");
+    expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
+      detected: true,
+      via: "phpunit",
+    });
+  });
+
+  it("phpunit: a banner-less green PHPUnit-11-shaped tally IS flagged here, the documented fail-safe collapse of the ambiguous reading", () => {
+    // The same shape `verify` reports as `zero_tests_ambiguous` (no
+    // version banner survived truncation, and the tally's plain
+    // `Warnings: 15` count is what decides whether anything ran: read
+    // as a 9 nothing did, read as a 10+ all 15 did and passed).
+    // `probe` cannot warn and carry on the way `verify` can -- its
+    // alternatives are to refuse the run or to score it -- so it
+    // refuses: scoring it would compare a run whose executed count
+    // cannot be read against the baseline as if it had run and passed,
+    // and report `survived`. The refusal costs a probe result; the
+    // other collapse would buy a verdict with a false one. Documented
+    // in `probe/zero-tests.ts`'s own docblock and in the README.
+    const output = [
+      "WWWWWWWWWWWWWWW                    15 / 15 (100%)",
+      "",
+      "Time: 00:00.412, Memory: 10.00 MB",
+      "",
+      "OK, but there were issues!",
+      "Tests: 15, Assertions: 15, Warnings: 15.",
+      "",
+    ].join("\n");
+    expect(phpunitZeroTestsVerdict(output).verdict).toBe("ambiguous");
+    expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
+      detected: true,
+      via: "phpunit",
+    });
+  });
+
+  it("phpunit: the same banner-less tally WITH its version banner is not flagged at all (the ambiguity is the missing banner, not the Warnings token)", () => {
+    const output = [
+      "PHPUnit 11.5.56 by Sebastian Bergmann and contributors.",
+      "",
+      "WWWWWWWWWWWWWWW                    15 / 15 (100%)",
+      "",
+      "OK, but there were issues!",
+      "Tests: 15, Assertions: 15, Warnings: 15.",
+      "",
+    ].join("\n");
+    expect(phpunitZeroTestsVerdict(output).verdict).toBe("not_zero");
+    expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
+      detected: false,
+    });
   });
 });
 
@@ -301,6 +421,12 @@ describe("hasKnownTestSummary()", () => {
   it("false for output neither detector recognizes", () => {
     expect(hasKnownTestSummary("ok\n", "")).toBe(false);
     expect(hasKnownTestSummary("", "")).toBe(false);
+  });
+
+  it("true for the exit()/die() mid-suite capture (PHPUnit's own banner alone, no completion marker at all; tracker 3a0c5242)", () => {
+    expect(
+      hasKnownTestSummary(readCaptured("phpunit-exit-mid-suite"), ""),
+    ).toBe(true);
   });
 });
 
