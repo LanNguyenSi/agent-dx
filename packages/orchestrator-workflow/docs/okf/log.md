@@ -1,5 +1,122 @@
 # Bundle log
 
+- 2026-09-16T11:03:00Z (agent-dx tracker task 2e7680f6, pandora run
+  2026-09-16-open-pool-batch55): independent line-by-line audit of every
+  file:line citation in this bundle, read against the current sources
+  rather than trusted from `okf-kit check`'s clean report alone.
+  Mechanically enumerated every full `path:N[-M]#anchor` citation (630),
+  every heading-section citation into `CHANGELOG.md` (the `#[x.y.z]`
+  form: 19 in review-gate-and-waivers.md,
+  run-state-lifecycle-and-markers.md and subagent-contracts-superset.md,
+  plus 2 in index.md; this file's own historical entries carry 8 more,
+  exempt as history), this bundle's own path-less anchored
+  continuation form (4, all in model-preselection.md, invisible to
+  okf-kit's grammar per the Maintenance section below), and this file's
+  own two live self-citations into `CHANGELOG.md` (see that same section
+  for why only these two of this file's citations are re-checked rather
+  than its historical prose generally). For every full citation, read
+  the resolved target and independently confirmed the anchor text
+  occurs, uniquely, on the cited range's own last content line (the
+  same fact `okf-kit check --require-anchors` already reports, re-derived
+  by a scripted second implementation of those checks rather than taken
+  on trust); the target text itself was read against the sentence's
+  claim for the tracker leads, the continuations, the heading-section
+  citations, every short anchor and a risk-weighted sample, not for
+  every one of the 630 full citations; for every heading-section
+  citation, confirmed the named `CHANGELOG.md` release heading exists
+  exactly once and, where a content anchor was also given, resolves
+  uniquely inside that section; the six path-less/live-self-citation
+  forms above were read by hand line for line, since no okf-kit rule
+  checks them at all. Per doc, N checked / M corrected:
+  install-fence-mechanics.md 135/0, model-preselection.md 118/2,
+  operator-install-and-registry.md 94/0, review-gate-and-waivers.md
+  65/0, run-state-lifecycle-and-markers.md 84/0,
+  subagent-contracts-superset.md 157/0, index.md 2/0, this file (its
+  two live self-citations only) 2/0 -- 657/2 overall. The two
+  corrections, found by the independent review of this audit, are
+  range-scope misses rather than wrong sites: model-preselection.md's
+  sentence about the tier a variant is never rendered for names a
+  `continue` guard that sat one line above each cited range into
+  `src/init.ts` (lines 861 to 863 and 937 to 938); both ranges now
+  start on the guard line (860 to 863 and 936 to 938), anchors
+  unchanged.
+
+  Also explicitly re-checked the specific leads the tracker task
+  carried forward from an earlier pass over this bundle: the opencode
+  and marker-fence bullets plus a short-form range into `init.ts` in
+  install-fence-mechanics.md; a stderr-hint citation into
+  `test/init.test.ts` in model-preselection.md; the two path-less
+  continuations in model-preselection.md's Rendering paragraph, once
+  suspected of resolving against `init.ts` instead of `cli.ts`; two
+  STALE marks into `INSTALL-AGENT.md` and `test/docs-consistency.test.ts`
+  in run-state-lifecycle-and-markers.md; and the long compound
+  `test/init.test.ts` citation list in install-fence-mechanics.md's
+  fresh-install-shape paragraph, including its "uninstall coverage"
+  range. None of the line numbers those leads originally named still
+  appear anywhere in the bundle, every topic they describe now cites a
+  current, anchor-verified range, and no "STALE" mark remains in
+  run-state-lifecycle-and-markers.md. For example, the "uninstall
+  coverage" range now opens exactly on
+  `it("uninstall removes the tier-variant files it installed ...")`'s
+  own block head and closes on the assertion its anchor names -- a real
+  block boundary, not merely a range the tool happens to pass. All of
+  these were already corrected by earlier work on this bundle; this
+  pass is independent re-verification, not a new fix, and found nothing
+  left to correct.
+
+  Anchor-robustness decision: this bundle's target policy is already
+  stated below, in the Maintenance section -- prefer a string anchor
+  over a bare line range; cite `CHANGELOG.md` by heading, never by
+  line, since it grows by insertion at the top and a line citation into
+  it drifts under every entry added above it; leave this file's own
+  historical citations unrepointed except its two live self-citations
+  into `CHANGELOG.md`. This audit found that policy already fully
+  applied, with nothing left to widen it for: across the seven non-log
+  docs, zero bare (unanchored) full citations and zero bare-line
+  `CHANGELOG.md:N` citations, and the citation-sibling-drift guard's own
+  bundle-wide tests green on the committed tree (see Verified below).
+  This file is the stated exception: its historical entries keep five
+  unanchored full citations as written at the time, and its two live
+  self-citations into `CHANGELOG.md` are anchored line citations that
+  re-point on every release inserted above them; the log-citation guard
+  in `test/docs-consistency.test.ts` checks those two, okf-kit does not
+  scan this file at all. The decision
+  is to keep the existing scope -- string anchors as the default,
+  heading-section anchors reserved for insert-at-top targets like
+  `CHANGELOG.md` -- rather than introduce a third anchor class, for
+  every citation class this audit could directly verify.
+
+  One gap this pass found rather than closed, measured by deliberate
+  re-points in scratch copies (never committed): the unguarded class is
+  site correctness whenever a citation's anchor text also occurs in the
+  target file farther than the sibling guard's window (20 lines,
+  `SIBLING_GUARD_WINDOW` in `test/docs-consistency.test.ts`) from the
+  cited range. Re-pointing such a citation to the other occurrence,
+  anchor text unchanged, passes both `okf-kit check` and the full
+  `test/docs-consistency.test.ts` suite; only reading the target catches
+  it. That class covers 82 of the 630 full citations and all four
+  path-less continuations in model-preselection.md. The continuation
+  form is not otherwise unguarded: okf-kit's grammar cannot see it (see
+  its README's "Anchored path-less continuation form" section), but a
+  continuation whose anchor text is absent from its cited range fails
+  the sibling-drift guard, as the same scratch mutation showed. A
+  guard on the wider class (a uniqueness rule per anchor text and
+  target, or a widened window) is a candidate for a follow-up, not
+  attempted here (out of this task's own scope, which is the audit
+  itself, not a guard change).
+
+  Re-stamped install-fence-mechanics.md, model-preselection.md,
+  operator-install-and-registry.md, review-gate-and-waivers.md,
+  run-state-lifecycle-and-markers.md and subagent-contracts-superset.md
+  after this re-verification, and model-preselection.md again after
+  its two range corrections; no source edit accompanies this entry.
+  Verified on the committed tree: `okf-kit check
+  packages/orchestrator-workflow/docs/okf --require-anchors --json`
+  zero findings; the orchestrator-workflow package's `npm run build`,
+  `typecheck`, `typecheck:test`, `format:check`, and full `npm test`
+  (including the citation-sibling-drift guard's bundle-wide describe
+  blocks) all clean.
+
 - 2026-09-16T10:12:00Z (agent-dx tracker task a378ecca, pandora run
   2026-09-16-open-pool-batch55): the pre-return rule bullet added below
   (the 2026-09-16T08:09:25Z entry) and the `review-slop` pack it names
