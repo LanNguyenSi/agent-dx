@@ -783,9 +783,15 @@ program
     parseList,
     DEFAULT_OPTIONAL,
   )
+  .option(
+    "--target <list>",
+    "comma-separated probe target path(s) (relative to cwd or absolute); a .py path among these is checked for a co-located __pycache__",
+    parseList,
+    [] as string[],
+  )
   .action(
     async (
-      opts: { required: string[]; optional: string[] },
+      opts: { required: string[]; optional: string[]; target: string[] },
       command: Command,
     ) => {
       const start = Date.now();
@@ -794,6 +800,7 @@ program
         required: opts.required,
         optional: opts.optional,
         cwd: global.cwd,
+        targets: opts.target,
       });
       const { envelope, exitCode } = buildEnvelope({
         version: VERSION,

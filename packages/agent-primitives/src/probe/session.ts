@@ -26,6 +26,7 @@ import {
 } from "./isolation.js";
 import type { LinkCandidate } from "./link-policy.js";
 import type { MutantDiffField, MutantForm } from "./mutant.js";
+import { beginPyCacheIsolation, type PyCacheIsolation } from "./pycache.js";
 
 /**
  * The run-controller layer of the probe pipeline: the SIGINT/SIGTERM
@@ -202,7 +203,18 @@ export type ProbeStatus =
  * node's built-in `--test`) executed nothing (see `zero-tests.ts`), the
  * second when an opt-in `--require-baseline-evidence <regex>` was given
  * and did not match the baseline output. Both `true`, the same as the
- * other baseline-phase reasons. */
+ * other baseline-phase reasons.
+ *
+ * `"pycache_isolation_failed"` is `runPreThenTest` (`session.ts` itself)
+ * refusing to run ANY `--pre`/test-command invocation of a run with at
+ * least one Python target because it could not create the fresh,
+ * isolated `PYTHONPYCACHEPREFIX` directory that invocation's own cache
+ * safety depends on (see `pycache.ts`). It can fire from the baseline
+ * (this table's entry, mutant already dry-run-computed by then, same as
+ * `baseline_failed`) or from a mutant's own run (`step.ts`'s
+ * `runMutantAttempt`, which restores the target itself before returning
+ * -- that path does not consult this table, the same as every other
+ * mutant-phase reason the paragraph above already covers). */
 export type RefusalReason =
   | "worktree_allow_outside_unsupported"
   | "test_command_escapes_isolation"
@@ -222,7 +234,8 @@ export type RefusalReason =
   | "baseline_failed"
   | "target_changed_during_baseline"
   | "no_tests_executed"
-  | "baseline_evidence_not_matched";
+  | "baseline_evidence_not_matched"
+  | "pycache_isolation_failed";
 
 /**
  * The single source of truth for which fields a single-mutant `probe()`
@@ -279,6 +292,7 @@ export const REFUSAL_RESULT_SHAPE: Record<
   target_changed_during_baseline: { mutant: true, mutationProbe: true },
   no_tests_executed: { mutant: true, mutationProbe: true },
   baseline_evidence_not_matched: { mutant: true, mutationProbe: true },
+  pycache_isolation_failed: { mutant: true, mutationProbe: true },
 };
 
 /** Restores `session` and verifies the restore by hash. A restore whose
@@ -582,7 +596,15 @@ export interface PreAndTestCommand {
 }
 
 export type RunPhaseResult =
-  { ok: true; test: ExecResult } | { ok: false; pre: ExecResult };
+  | { ok: true; test: ExecResult }
+  | { ok: false; pre: ExecResult }
+  /** `pyCacheIsolation` was requested and `beginPyCacheIsolation` could
+   * not create this invocation's isolation directory: neither `--pre`
+   * nor the test command ran at all. Distinct from `{ ok: false; pre }`
+   * (an exclusive `isolationError` key, never both) so a caller can
+   * tell "the isolation setup itself failed" apart from "`--pre` ran
+   * and failed" without inspecting `pre.exitCode` for a sentinel. */
+  | { ok: false; isolationError: string };
 
 /** A started run together with `closed`: a promise that resolves once
  * that run's stdio has TRULY closed, which can be later than the run's
@@ -632,7 +654,20 @@ export function startRunArgvTracked<T>(started: Promise<T>): TrackedRun<T> {
 /** Runs `--pre` (if given) then the test command, both against `env`.
  * A non-zero `--pre` exit short-circuits before the test ever runs, so
  * the caller can classify it as `pre_failed` instead of quietly letting
- * a stale build (or any other `--pre` failure) produce a false verdict. */
+ * a stale build (or any other `--pre` failure) produce a false verdict.
+ *
+ * `pyCacheIsolation`, when true, gives THIS ONE invocation (this call
+ * alone, never shared with any other call to this function) its own
+ * fresh `PYTHONPYCACHEPREFIX` directory before `--pre`/the test command
+ * run, and removes it once both have settled -- see `pycache.ts` for
+ * why a fresh directory per invocation is what closes the CPython
+ * bytecode-cache hazard regardless of clock resolution. A caller passes
+ * `true` only for a run with at least one Python target
+ * (`hasPythonTarget`, computed once per probe run); every other run's
+ * `env` is untouched, so this parameter changes nothing for a run whose
+ * targets are not Python. `PYTHONPYCACHEPREFIX` is merged on top of
+ * `env.env` (or `process.env` when `env.env` is undefined) rather than
+ * replacing it, so an operator's own `--env` overrides are preserved. */
 export async function runPreThenTest(
   opts: PreAndTestCommand,
   env: {
@@ -653,15 +688,31 @@ export async function runPreThenTest(
    * the probe's one in-flight child, so the signal handler can wait for
    * it to settle before restoring. */
   track: <T>(started: Promise<T>, closed: Promise<void>) => Promise<T>,
+  pyCacheIsolation = false,
 ): Promise<RunPhaseResult> {
-  if (opts.preCommand) {
-    const started = startExecTracked(opts.preCommand, env);
-    const pre = await track(started.result, started.closed);
-    if (pre.exitCode !== 0) return { ok: false, pre };
+  let isolation: PyCacheIsolation | undefined;
+  let runEnv = env;
+  if (pyCacheIsolation) {
+    const prepared = beginPyCacheIsolation(env.logDir);
+    if (!prepared.ok) return { ok: false, isolationError: prepared.message };
+    isolation = prepared.isolation;
+    runEnv = {
+      ...env,
+      env: { ...(env.env ?? process.env), ...isolation.env },
+    };
   }
-  const started = startExecTracked(opts.testCommand, env);
-  const test = await track(started.result, started.closed);
-  return { ok: true, test };
+  try {
+    if (opts.preCommand) {
+      const started = startExecTracked(opts.preCommand, runEnv);
+      const pre = await track(started.result, started.closed);
+      if (pre.exitCode !== 0) return { ok: false, pre };
+    }
+    const started = startExecTracked(opts.testCommand, runEnv);
+    const test = await track(started.result, started.closed);
+    return { ok: true, test };
+  } finally {
+    isolation?.cleanup();
+  }
 }
 
 /** The fields `runFinalRebuild` needs off a `MutantRuntime`: kept as its
@@ -1077,6 +1128,15 @@ export interface MutantRuntime {
   effectiveIsolation: IsolationMode;
   testCommand: string;
   preCommand?: string;
+  /** True when this run has at least one Python (`.py`) target
+   * (`hasPythonTarget`, computed once in `openRunSetup` from the run's
+   * own distinct target files): both `runPreThenTest` call sites (the
+   * baseline in `setup.ts`, every mutant's own run in `step.ts`) pass
+   * this straight through as that function's `pyCacheIsolation`
+   * argument, so the baseline and every mutant of the same run agree on
+   * whether cache isolation applies without each recomputing it. See
+   * `pycache.ts`. */
+  pyCacheIsolation: boolean;
   /** Opt-in `--pass-regex <regex>` (or a plan's own `passWhen.regex`):
    * when given, replaces the exit code as the verdict for BOTH the
    * baseline (`setup.ts`, read from `input.passRegex` directly) and

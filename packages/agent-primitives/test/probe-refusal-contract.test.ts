@@ -16,6 +16,7 @@ import { writeMarker } from "../src/lock.js";
 import { execCommand } from "../src/exec.js";
 import { computeMutant } from "../src/probe/mutant.js";
 import { beginInplace } from "../src/probe/isolation.js";
+import { beginPyCacheIsolation } from "../src/probe/pycache.js";
 import {
   ISOLATION_ESCAPE_CHANNEL_LABEL,
   ISOLATION_ESCAPE_ENV_FIX_HINT,
@@ -62,6 +63,14 @@ vi.mock("../src/probe/isolation.js", async (importOriginal) => {
 vi.mock("../src/probe/run.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/probe/run.js")>();
   return { ...actual, runArgv: vi.fn(actual.runArgv) };
+});
+vi.mock("../src/probe/pycache.js", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../src/probe/pycache.js")>();
+  return {
+    ...actual,
+    beginPyCacheIsolation: vi.fn(actual.beginPyCacheIsolation),
+  };
 });
 
 function sleep(ms: number): Promise<void> {
@@ -498,6 +507,46 @@ async function provokeAbortedBaselineTest(): Promise<ProbeResult> {
   return probeWithAbortedCall(1, {});
 }
 
+/** A `.py` target (so `hasPythonTarget` makes this run request cache
+ * isolation at all) whose `beginPyCacheIsolation` call is stubbed to
+ * fail on this run's first (baseline) invocation: the mocked failure
+ * short-circuits `runPreThenTest` before it ever starts `--pre`/the
+ * test command, so the fixture's `testCommand` genuinely never runs and
+ * needs no real Python on PATH. */
+async function provokePycacheIsolationFailed(): Promise<ProbeResult> {
+  useLockDir();
+  const { repo } = initRepo();
+  fs.writeFileSync(
+    path.join(repo, "fixture.py"),
+    ["def positive(n):", "    return n > 0", ""].join("\n"),
+  );
+  git(repo, ["add", "-A"]);
+  git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "add .py"]);
+  const actualPycache = await vi.importActual<
+    typeof import("../src/probe/pycache.js")
+  >("../src/probe/pycache.js");
+  const mockBegin = vi.mocked(beginPyCacheIsolation);
+  mockBegin.mockImplementationOnce(() => ({
+    ok: false,
+    message: "synthetic isolation failure for the refusal contract test",
+  }));
+  try {
+    return await probe(
+      baseOptions(repo, {
+        file: "fixture.py",
+        line: 2,
+        replaceText: "    return n < 0",
+        testCommand: "true",
+      }),
+    );
+  } finally {
+    mockBegin.mockImplementation(
+      (...args: Parameters<typeof beginPyCacheIsolation>) =>
+        actualPycache.beginPyCacheIsolation(...args),
+    );
+  }
+}
+
 type Provocation = () => Promise<ProbeResult>;
 
 const provocations: Record<RefusalReason, Provocation> = {
@@ -520,6 +569,7 @@ const provocations: Record<RefusalReason, Provocation> = {
   target_changed_during_baseline: provokeTargetChangedDuringBaseline,
   no_tests_executed: provokeNoTestsExecuted,
   baseline_evidence_not_matched: provokeBaselineEvidenceNotMatched,
+  pycache_isolation_failed: provokePycacheIsolationFailed,
 };
 
 /**
@@ -560,6 +610,7 @@ const EXPECTED_SHAPE: Record<
   target_changed_during_baseline: { mutant: true, mutationProbe: true },
   no_tests_executed: { mutant: true, mutationProbe: true },
   baseline_evidence_not_matched: { mutant: true, mutationProbe: true },
+  pycache_isolation_failed: { mutant: true, mutationProbe: true },
 };
 
 /** Asserts a provoked `ProbeResult` matches the hardcoded

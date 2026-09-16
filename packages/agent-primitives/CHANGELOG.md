@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `probe` isolates a Python target's `--pre`/test-command runs from
+  CPython's own bytecode cache (tracker 5bf3da5c). CPython trusts a
+  `__pycache__/*.pyc` whenever its header's stored `(mtime, size)`
+  matches the source file's own, without ever comparing content; `probe`
+  writes both a mutant's apply and its restore with a fresh timestamp
+  (restore is a plain `fs.copyFileSync`, which does not preserve the
+  source's mtime -- confirmed directly by copying a file with a
+  synthetic old mtime and reading the copy's own mtime back, not
+  inferred), and CPython's stored mtime is whole seconds, so an apply,
+  its test run, and a restore landing inside the same wall-clock second
+  (the ordinary case for a fast suite) can leave a same-length mutant's
+  replacement content behind an unchanged `(mtime, size)` pair.
+  Reproduced both directions on the unpatched build first (`python3
+  3.9.6`, a `'?'` -> `'x'` same-length mutant, pyc header read: magic,
+  flags, mtime, size), then closed by giving every `--pre`/test-command
+  invocation of a run with a `.py` target its own fresh,
+  previously-unused `PYTHONPYCACHEPREFIX` directory (never reused
+  between the baseline and a mutant's own run), set automatically with
+  nothing for the caller to pass. Cache-entry invalidation after apply
+  and after restore was rejected: it would need enumerating every cache
+  entry a change could affect (package-relative caches, a `sys.path`
+  this process does not control) and staying correct as CPython's own
+  cache layout evolves, where isolating the location sidesteps the
+  enumeration question entirely. An unconditional exit-2 refusal for any
+  Python target was rejected too: isolation actually guarantees
+  correctness in the ordinary case, so refusing unconditionally would
+  trade a working fix for a weaker one. `exit 2`/`reason:
+  "pycache_isolation_failed"` is still the fallback for the one genuine
+  failure the isolation setup itself has (its directory could not be
+  created), the one new named reason this adds to the refusal contract;
+  the JSON envelope's field set, the default isolation mode, and every
+  other exit code are unchanged. `doctor --target <path>` reports a new
+  `python-bytecode-cache` check naming a co-located `__pycache__` next
+  to a given `.py` target, informational (`probe` already isolates
+  against it), so the condition is visible before a probe run. Two new
+  regression tests (`test/probe-pycache.test.ts`) reproduce both
+  directions against the real fix through `probe()` itself and are
+  skipped, visibly, where no `python3` is on PATH.
+
 - Fixed the `phpunit` detector's entry loop misfilling `failures[].file`,
   `line`, and `message` on live-captured PHPUnit 9.6 shapes (tracker
   ed353582). The blank-line test and the `file:line` locator match now both

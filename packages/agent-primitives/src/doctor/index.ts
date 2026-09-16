@@ -68,6 +68,15 @@ export interface DoctorOptions {
   /** Test seam: overrides the probe lock/marker directory (defaults to
    * `lock.ts`'s own `$AGENT_PRIMITIVES_LOCK_DIR` / tmpdir resolution). */
   lockDir?: string;
+  /** Probe target file(s) to check for a co-located CPython bytecode
+   * cache (relative to `cwd` or absolute), the same `--file`/`-p`
+   * targets an operator would hand `probe`. Only `.py` paths among
+   * these produce the `python-bytecode-cache` check below; every other
+   * extension is silently ignored (CPython's own cache never applies to
+   * it). Omitted or empty: the check is skipped entirely rather than
+   * reported as passing, since "no target named" is not the same claim
+   * as "no cache found next to the target". */
+  targets?: string[];
 }
 
 export const DEFAULT_REQUIRED = ["git", "node", "npm", "rg"];
@@ -605,6 +614,40 @@ export async function doctor(
         ? "no stale worktree marker or leftover registered worktree for this repository"
         : worktreeProblems.join(" "),
   });
+
+  // CPython validates a `__pycache__/*.pyc` by `(mtime, size)` alone, so
+  // a same-length mutant probe applies can leave that pair unchanged and
+  // reuse stale bytecode (see `pycache.ts`); `probe` itself now isolates
+  // every `--pre`/test-command run of a Python target under a fresh
+  // `PYTHONPYCACHEPREFIX` automatically (the README's "Python bytecode
+  // cache" section), so this check is informational (the RESOLUTION,
+  // not a hazard the operator must act on): it names a co-located cache
+  // that exists next to a given target so its presence is visible
+  // before a probe run rather than only inferable after one, and so an
+  // operator running the target's OWN test command directly (outside
+  // `probe`) knows that co-located cache still applies to THAT run.
+  const pyTargets = (options.targets ?? []).filter((t) =>
+    t.toLowerCase().endsWith(".py"),
+  );
+  if (pyTargets.length > 0) {
+    const pycacheHits = pyTargets.filter((target) => {
+      const resolved = path.resolve(cwd, target);
+      return fs.existsSync(path.join(path.dirname(resolved), "__pycache__"));
+    });
+    checks.push({
+      name: "python-bytecode-cache",
+      ok: pycacheHits.length === 0,
+      detail:
+        pycacheHits.length === 0
+          ? `no co-located __pycache__ next to the given Python target(s): ${pyTargets.join(", ")}`
+          : `__pycache__ present next to ${pycacheHits.join(", ")}; ` +
+            `\`agent-primitives probe\` isolates every --pre/test-command ` +
+            `run of a Python target under a fresh PYTHONPYCACHEPREFIX ` +
+            `automatically, so this existing cache is never read or ` +
+            `written by probe itself; it still applies to any OTHER ` +
+            `command run against these files outside of probe`,
+    });
+  }
 
   const hints: string[] = [];
   for (const tool of missingRequired) {

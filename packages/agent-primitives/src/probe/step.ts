@@ -389,7 +389,27 @@ export async function runMutantAttempt(
     { preCommand: rt.preCommand, testCommand: rt.testCommand },
     rt.execEnv,
     rt.track,
+    rt.pyCacheIsolation,
   );
+  if (!mutantRun.ok && "isolationError" in mutantRun) {
+    // The mutant is already on disk at this point (the hash checks
+    // above passed): restored the same way every other mutant-phase
+    // no-verdict outcome is, before reporting anything.
+    const { ok, verified } = await target.restoreOnce(false);
+    if (!ok || !verified) return restoreFailedOutcome();
+    warnings.push(
+      `${mutantRun.isolationError}; the mutant was restored and the restore verified`,
+    );
+    return {
+      status: "inconclusive",
+      reason: "pycache_isolation_failed",
+      mutant,
+      mutation_probe: inconclusiveProbe(verified),
+      logPaths,
+      restoreFailed: false,
+      aborted: false,
+    };
+  }
   if (!mutantRun.ok) {
     noteIncompleteOutput(warnings, "mutant --pre", mutantRun.pre);
     const { ok, verified } = await target.restoreOnce(mutantRun.pre.aborted);

@@ -2325,6 +2325,7 @@ above.
 | `target_changed_during_baseline` | present | present | the baseline run rewrote the target (a formatter, a codegen step) before any mutation |
 | `no_tests_executed` | present | present | the baseline's own output shows a known test runner (vitest, node's built-in `--test`, phpunit) executed nothing, whatever its exit code -- and, for phpunit only, also where that output cannot be read either way (an unreadable result, or a tally whose reading needs a version banner the output does not carry), which this one reason overstates as "executed nothing"; see the zero-tests paragraphs above |
 | `baseline_evidence_not_matched` | present | present | `--require-baseline-evidence <regex>` was given and did not match the baseline's own output |
+| `pycache_isolation_failed` | present | present | this run has at least one Python (`.py`) target and creating its isolated `PYTHONPYCACHEPREFIX` directory failed (an unwritable or full log directory); see "Python bytecode cache" above |
 
 The six `present` rows are exactly the refusals that fire past the dry
 run: `openRunSetup` computes the one mutant this run would apply (the
@@ -2939,6 +2940,85 @@ and never look at the exit code; only the `generic` fallback does);
 `--pass-regex`, on either command, is the opt-in way out of that
 reading for a check/baseline whose exit code is not trustworthy on its
 own.
+
+**Python bytecode cache.** CPython trusts a `__pycache__/*.pyc` without
+recompiling whenever its stored header's `(mtime, size)` matches the
+source file's own `(mtime, size)` -- nothing about the source's actual
+content is ever compared. `probe` writes both a mutant's apply and its
+restore with a fresh timestamp (there is no code path that deliberately
+preserves the original mtime; a restore is a plain `fs.copyFileSync`,
+and Node's `copyFileSync` does not copy the source's mtime onto the
+destination -- verified directly, not inferred, by writing a file with a
+synthetic old mtime, copying it, and reading the copy's own mtime back:
+it lands at the time of the copy, not the time the backup was taken).
+Restore is therefore "touch on restore", not "preserve the original
+mtime": a deliberate simplicity choice (a plain copy is easy to reason
+about and to mutation-probe on its own, see the restore-guarantee
+invariant documented on `InplaceSession.restore` in `isolation.ts`), not
+one made for cache correctness. Its consequence for cache validation is
+that a restored file's own mtime is never guaranteed to differ from (or
+agree with) any cache entry already sitting next to it; CPython's stored
+mtime is whole SECONDS besides, so an apply, its test run, and a restore
+that all land inside the same wall-clock second (the ordinary case for a
+fast suite) can leave a same-length mutant's replacement content behind
+an unchanged `(mtime, size)` pair regardless of what the restore's own
+mtime policy is. Two directions follow: a mutant run can execute STALE
+(pre-mutation) bytecode still cached from before the mutant was applied,
+reporting `survived` for a mutant the source really would fail; and once
+restored, a bystander run (the regression suite itself, a follow-up CI
+step, a developer re-running the suite by hand) can execute MUTANT
+bytecode a probe's own mutant run left behind, reporting a
+genuinely-passing restored file as red.
+
+`probe` closes both directions by ONE mechanism: every `--pre`/test-command
+invocation of a run with at least one Python (`.py`) target gets its own
+brand-new, previously-unused cache directory via `PYTHONPYCACHEPREFIX`,
+set automatically (never left to the caller to remember) and never
+reused across invocations -- not between the baseline and a mutant's own
+run, and not between two mutants of the same plan. A fresh, empty
+directory has nothing cached in it yet, so CPython recompiles
+unconditionally every time, regardless of what mtime/size coincidence
+would otherwise apply; this also means an existing co-located
+`__pycache__` (from a developer's own prior run, or CI's) is never read
+OR written by `probe` itself, so it is never at risk of being shadowed
+by mutant bytecode in the first place. The two mechanisms not chosen,
+and why: (a) invalidating the affected `__pycache__` entries after apply
+and after restore was rejected because it requires enumerating every
+cache entry a change could affect (package-relative caches, a
+`sys.path` this process does not control, a `PYTHONPYCACHEPREFIX` the
+caller may already have set) and staying correct as CPython's own cache
+layout evolves, where isolating the location sidesteps the enumeration
+question entirely; (c) refusing with exit 2 whenever a Python target is
+involved was rejected because the isolation mechanism can actually
+guarantee correctness in the ordinary case (unlike, say, a
+signal-interrupted restore, which genuinely cannot always be verified),
+so refusing unconditionally would trade a real, working fix for a
+weaker one out of unnecessary caution. `(c)` is still what `probe`
+falls back to on the one genuine failure mode isolation itself has:
+if creating this run's isolation directory fails (an unwritable or full
+log directory), `probe` refuses rather than silently falling back to
+the ambient, potentially-stale cache -- reported as `reason:
+"pycache_isolation_failed"`, `exit 2`, the one new named reason this
+change adds to the refusal contract; the JSON envelope's field set, the
+default isolation mode, and every other exit code are unchanged.
+`PYTHONPYCACHEPREFIX` is merged on top of any `--env` override the
+caller already gave, never replacing it. Applies to CPython only: any
+other language's own compile/bytecode cache (Ruby's YJIT, a JVM
+language's class cache, and so on) is a known, named limit of this
+release, not addressed here.
+
+`doctor` surfaces the same condition before a probe run, rather than
+only after a wrong verdict: `agent-primitives doctor --target
+<path>[,<path>...]` reports a `python-bytecode-cache` check for every
+`.py` path among the given targets that has a co-located `__pycache__`
+sitting next to it. The check is informational, naming the RESOLUTION
+(that `probe` isolates its own runs against exactly this target
+automatically) rather than telling the operator to act -- it exists so
+the condition is visible up front, and so an operator running the
+target's own test command directly (outside `probe`) knows that
+co-located cache still applies to that separate run. The check is
+omitted entirely (not reported as passing) when no `--target` is given,
+or when none of the given targets are `.py` files.
 
 ## Output shape
 

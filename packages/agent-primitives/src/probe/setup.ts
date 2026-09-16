@@ -24,6 +24,7 @@ import {
 } from "./containment.js";
 import type { WorktreeSyncSuccess } from "./isolation.js";
 import { linkRelPath, type LinkCandidate } from "./link-policy.js";
+import { hasPythonTarget } from "./pycache.js";
 import { detectKnownZeroTestsEvidence } from "./zero-tests.js";
 import {
   createRunController,
@@ -704,6 +705,12 @@ export async function openRunSetup(
   // the run was invoked from.
   const hasEnvOverrides =
     input.env !== undefined && Object.keys(input.env).length > 0;
+  // Computed once for the whole run (baseline and every mutant share
+  // it): whether ANY distinct target is a Python file, per
+  // `hasPythonTarget`'s own docblock.
+  const pyCacheIsolation = hasPythonTarget(
+    distinct.map((named) => named.displayFile),
+  );
   const rt: MutantRuntime = {
     root,
     logDir,
@@ -720,6 +727,7 @@ export async function openRunSetup(
     effectiveIsolation,
     testCommand: input.testCommand,
     preCommand: input.preCommand,
+    pyCacheIsolation,
     ...(input.passRegex !== undefined ? { passRegex: input.passRegex } : {}),
     signal: controller.execController.signal,
     track: controller.track,
@@ -829,7 +837,20 @@ export async function openRunSetup(
     { testCommand: input.testCommand, preCommand: input.preCommand },
     rt.execEnv,
     controller.track,
+    rt.pyCacheIsolation,
   );
+  if (!baselineRun.ok && "isolationError" in baselineRun) {
+    // Neither `--pre` nor the test command ran: nothing has mutated any
+    // target yet (this fires before any mutant is applied), so there is
+    // nothing to restore, only the backups already taken to discard.
+    discardOpened();
+    return refuse(
+      "inconclusive",
+      "pycache_isolation_failed",
+      baselineRun.isolationError,
+      { logPaths: stepLogPaths },
+    );
+  }
   if (!baselineRun.ok) {
     noteIncompleteOutput(warnings, "baseline --pre", baselineRun.pre);
     // An aborted `--pre` (this run was signalled, or its caller aborted

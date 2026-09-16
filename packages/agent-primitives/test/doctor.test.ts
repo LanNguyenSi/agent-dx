@@ -311,6 +311,75 @@ describe("doctor: checks, in both states", () => {
     const check = result.checks.find((c) => c.name === "dist-next-to-src");
     expect(check?.ok).toBe(true);
   });
+
+  it("python-bytecode-cache: absent from checks entirely when no --target is given", async () => {
+    const dir = makeTmpDir();
+    const result = await doctor({ required: [], optional: [], cwd: dir });
+    expect(
+      result.checks.find((c) => c.name === "python-bytecode-cache"),
+    ).toBeUndefined();
+  });
+
+  it("python-bytecode-cache: absent when the only --target given is not a .py file", async () => {
+    const dir = makeTmpDir();
+    fs.writeFileSync(path.join(dir, "fixture.js"), "");
+    const result = await doctor({
+      required: [],
+      optional: [],
+      cwd: dir,
+      targets: ["fixture.js"],
+    });
+    expect(
+      result.checks.find((c) => c.name === "python-bytecode-cache"),
+    ).toBeUndefined();
+  });
+
+  it("python-bytecode-cache: ok, no __pycache__ found, when a .py target has no co-located cache", async () => {
+    const dir = makeTmpDir();
+    fs.writeFileSync(path.join(dir, "fixture.py"), "");
+    const result = await doctor({
+      required: [],
+      optional: [],
+      cwd: dir,
+      targets: ["fixture.py"],
+    });
+    const check = result.checks.find((c) => c.name === "python-bytecode-cache");
+    expect(check?.ok).toBe(true);
+    expect(check?.detail).toContain("no co-located __pycache__");
+    expect(check?.detail).toContain("fixture.py");
+  });
+
+  it("python-bytecode-cache: not ok and names the target when a co-located __pycache__ exists next to a .py target", async () => {
+    const dir = makeTmpDir();
+    fs.writeFileSync(path.join(dir, "fixture.py"), "");
+    fs.mkdirSync(path.join(dir, "__pycache__"));
+    const result = await doctor({
+      required: [],
+      optional: [],
+      cwd: dir,
+      targets: ["fixture.py"],
+    });
+    const check = result.checks.find((c) => c.name === "python-bytecode-cache");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("fixture.py");
+    expect(check?.detail).toContain("PYTHONPYCACHEPREFIX");
+  });
+
+  it("python-bytecode-cache: resolves a --target relative to an absolute cwd, not the process cwd", async () => {
+    const dir = makeTmpDir();
+    const sub = path.join(dir, "sub");
+    fs.mkdirSync(sub);
+    fs.writeFileSync(path.join(sub, "fixture.py"), "");
+    fs.mkdirSync(path.join(sub, "__pycache__"));
+    const result = await doctor({
+      required: [],
+      optional: [],
+      cwd: sub,
+      targets: ["fixture.py"],
+    });
+    const check = result.checks.find((c) => c.name === "python-bytecode-cache");
+    expect(check?.ok).toBe(false);
+  });
 });
 
 describe("doctor: hints", () => {
