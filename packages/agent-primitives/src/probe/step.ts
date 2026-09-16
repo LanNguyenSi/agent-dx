@@ -394,8 +394,26 @@ export async function runMutantAttempt(
   if (!mutantRun.ok && "isolationError" in mutantRun) {
     // The mutant is already on disk at this point (the hash checks
     // above passed): restored the same way every other mutant-phase
-    // no-verdict outcome is, before reporting anything.
-    const { ok, verified } = await target.restoreOnce(false);
+    // no-verdict outcome is, before reporting anything. The restore
+    // reads the run's own abort state rather than a hardcoded `false`,
+    // for the same reason the three sibling restore sites pass their
+    // phase's `aborted` flag (the real apply's above, the mutant
+    // `--pre`'s and the mutant test's below): all four read the SAME
+    // `AbortSignal` (`rt.signal` is `rt.execEnv.signal`, which is what
+    // `run.ts`/`exec.ts` set their own `aborted` from), and a restore
+    // that runs while the signal handler is handling must defer to the
+    // handler instead of racing it with a second write
+    // (`restoreOnce`/`deferToHandlerIfActive`). Nothing here has an
+    // `aborted` field of its own to read: this branch is reached
+    // because the isolation SETUP failed, before the invocation's own
+    // child was spawned, so there is no child result and no in-flight
+    // child a signal could have interrupted -- only the signal's own
+    // state, which is what this passes. The OUTCOME's own `aborted`
+    // field below stays `false` regardless: this reason is about the
+    // isolation setup, not about a signal, and a plan that must stop
+    // because one arrived stops either way (its terminal check reads
+    // `crashHandlers.isHandling()` alongside `outcome.aborted`).
+    const { ok, verified } = await target.restoreOnce(rt.signal.aborted);
     if (!ok || !verified) return restoreFailedOutcome();
     warnings.push(
       `${mutantRun.isolationError}; the mutant was restored and the restore verified`,

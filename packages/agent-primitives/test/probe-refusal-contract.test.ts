@@ -693,10 +693,11 @@ describe("probe(): REFUSAL_RESULT_SHAPE contract, every RefusalReason provoked f
     // `provokePycacheIsolationFailed` above only ever fails the FIRST
     // `beginPyCacheIsolation` call (the baseline's own), so the mutant
     // never gets far enough to reach `step.ts`'s own isolation-failure
-    // branch (394-412) at all: this test fails the SECOND call instead
-    // (the mutant's own run), with the first call left to run for real,
-    // so the mutant genuinely gets applied to disk before isolation
-    // fails on it.
+    // branch (the one that restores and then returns
+    // `pycache_isolation_failed`) at all: this test fails the SECOND
+    // call instead (the mutant's own run), with the first call left to
+    // run for real, so the mutant genuinely gets applied to disk before
+    // isolation fails on it.
     useLockDir();
     const { repo } = initRepo();
     fs.writeFileSync(
@@ -748,24 +749,20 @@ describe("probe(): REFUSAL_RESULT_SHAPE contract, every RefusalReason provoked f
       // content, not left holding `    return n < 0`, and the restore
       // this branch reports is verified.
       //
-      // NOTE (equivalence): this assertion pair does NOT, by itself,
-      // discriminate a mutant that deletes `step.ts`'s own
-      // `target.restoreOnce(false)` call on this branch:
-      // `index.ts`'s `finally`-block backstop (`runMutantAttempt`'s
-      // caller) restores any mutation still armed for restore when
-      // `probe()` returns, REGARDLESS of why it was left armed, using
-      // the SAME underlying `session.restore` function
-      // `target.restoreOnce` would have called -- so the file still
-      // reads as correctly restored, and `restored_verified` still
-      // reads `true`, whether `step.ts`'s own call ran or was deleted.
-      // Measured directly: this same assertion pair passed against
-      // `agent-primitives probe --file src/probe/step.ts -n 398 -r
-      // '    const { ok, verified } = { ok: true, verified: true };'`
-      // (that mutant SURVIVED here). No black-box assertion through
-      // `probe()`'s own envelope or the target's own content was found
-      // that tells the two restore paths apart, since both call the
-      // identical restore primitive and leave identical observable
-      // state; see the implementation summary's own note on this.
+      // NOTE (scope of these two assertions): where the restore
+      // SUCCEEDS, as it does here, they do not by themselves
+      // discriminate a mutant that deletes this branch's own
+      // `target.restoreOnce(...)` call. `index.ts`'s `finally`-block
+      // backstop (`runMutantAttempt`'s caller) restores any mutation
+      // still armed for restore when `probe()` returns, regardless of
+      // why it was left armed, through the SAME underlying
+      // `session.restore` function `target.restoreOnce` uses -- so on
+      // this success sub-path the file reads as correctly restored and
+      // `restored_verified` reads `true` either way. What DOES
+      // discriminate the branch's own call is the restore-FAILURE
+      // sub-path, where the backstop reports the failure in its own
+      // words and the branch's optimistic warning has already been
+      // pushed; the next test provokes exactly that and pins it.
       expect(fs.readFileSync(path.join(repo, "fixture.py"), "utf8")).toBe(
         ["def positive(n):", "    return n > 0", ""].join("\n"),
       );
@@ -774,6 +771,113 @@ describe("probe(): REFUSAL_RESULT_SHAPE contract, every RefusalReason provoked f
       mockBegin.mockImplementation(
         (...args: Parameters<typeof beginPyCacheIsolation>) =>
           actualPycache.beginPyCacheIsolation(...args),
+      );
+    }
+  }, 30000);
+
+  it("pycache_isolation_failed: when the restore this branch runs itself FAILS, the run reports restore_failed in the branch's own words and never claims the mutant was restored", async () => {
+    // The restore-failure sub-path of the same branch as the test
+    // above, and the one that actually pins the branch's own
+    // `target.restoreOnce(...)` call: isolation fails on the mutant's
+    // own invocation (the second `beginPyCacheIsolation` call, exactly
+    // as above) AND the restore that follows cannot write.
+    //
+    // With the call in place, the branch sees `ok: false`, reports
+    // `restore_failed` with `step.ts`'s own
+    // "restore failed; the original content is preserved at backup
+    // path ..." warning, and never pushes the isolation branch's
+    // "restored and the restore verified" line at all. Delete the call
+    // (replace it with a literal `{ ok: true, verified: true }`) and
+    // the same run pushes that "restored and the restore verified"
+    // claim while the target still holds the mutant, with the failure
+    // reported afterwards by `index.ts`'s `finally` backstop in the
+    // backstop's own words ("restore failed after an unexpected
+    // error") rather than this branch's. Both warning assertions below
+    // therefore discriminate the deletion; the reason alone does not
+    // (the backstop reports `restore_failed` too).
+    //
+    // The restore is broken through `beginInplace`, the seam this file
+    // already partial-mocks, rather than by chmod-ing the log dir:
+    // permission bits mean nothing to root (see `isRoot` above), so a
+    // filesystem-permission recipe would pass vacuously in a root
+    // container. The session still takes and writes its real backup
+    // (the call-through below), so the run's own pre-mutation backup
+    // hash check passes and the mutant really is applied; only the
+    // restore itself is made to fail, the way a backup deleted or made
+    // unreadable under a running probe would.
+    useLockDir();
+    const { repo } = initRepo();
+    const original = ["def positive(n):", "    return n > 0", ""].join("\n");
+    fs.writeFileSync(path.join(repo, "fixture.py"), original);
+    git(repo, ["add", "-A"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "add .py"]);
+    const actualPycache = await vi.importActual<
+      typeof import("../src/probe/pycache.js")
+    >("../src/probe/pycache.js");
+    const actualIsolation = await vi.importActual<
+      typeof import("../src/probe/isolation.js")
+    >("../src/probe/isolation.js");
+    const mockBegin = vi.mocked(beginPyCacheIsolation);
+    let callCount = 0;
+    mockBegin.mockImplementation(
+      (...args: Parameters<typeof beginPyCacheIsolation>) => {
+        callCount += 1;
+        if (callCount === 1)
+          return actualPycache.beginPyCacheIsolation(...args);
+        return {
+          ok: false,
+          message:
+            "synthetic isolation failure for the mutant-phase refusal contract test",
+        };
+      },
+    );
+    const mockBeginInplace = vi.mocked(beginInplace);
+    mockBeginInplace.mockImplementationOnce((targetPath, logDir) => {
+      const session = actualIsolation.beginInplace(targetPath, logDir);
+      return { ...session, restore: () => false };
+    });
+    try {
+      const result = await probe(
+        baseOptions(repo, {
+          file: "fixture.py",
+          line: 2,
+          replaceText: "    return n < 0",
+          testCommand: "true",
+        }),
+      );
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("restore_failed");
+      // The branch's own words, naming the backup that still holds the
+      // original: not the backstop's "restore failed after an
+      // unexpected error", which is what reports the same failure when
+      // this branch never ran its own restore at all.
+      expect(
+        result.warnings.some((w) =>
+          w.includes(
+            "restore failed; the original content is preserved at backup path",
+          ),
+        ),
+      ).toBe(true);
+      // The claim that must NOT be on a run whose restore failed.
+      expect(
+        result.warnings.some((w) =>
+          w.includes("the mutant was restored and the restore verified"),
+        ),
+      ).toBe(false);
+      expect(result.mutation_probe?.restored_verified).toBe(false);
+      // The mutant is genuinely still on disk: this is a real failed
+      // restore, not a reported one.
+      expect(fs.readFileSync(path.join(repo, "fixture.py"), "utf8")).toBe(
+        ["def positive(n):", "    return n < 0", ""].join("\n"),
+      );
+    } finally {
+      mockBegin.mockImplementation(
+        (...args: Parameters<typeof beginPyCacheIsolation>) =>
+          actualPycache.beginPyCacheIsolation(...args),
+      );
+      mockBeginInplace.mockImplementation(
+        (...args: Parameters<typeof beginInplace>) =>
+          actualIsolation.beginInplace(...args),
       );
     }
   }, 30000);
