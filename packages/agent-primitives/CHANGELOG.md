@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-16
+
 - `probe` isolates a Python target's `--pre`/test-command runs from
   CPython's own bytecode cache (tracker 5bf3da5c). CPython trusts a
   `__pycache__/*.pyc` whenever its header's stored `(mtime, size)`
