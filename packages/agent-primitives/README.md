@@ -3072,7 +3072,12 @@ targets it fell back for, in the two narrower cases: a `python3` that
 was asked and did not come back with a path for one target (a non-zero
 exit, no output, its own timeout), and a target whose turn came after
 `doctor`'s aggregate spawn deadline was already spent, where `python3`
-is never asked at all. Either way it names the RESOLUTION (that
+is never asked at all. Both paths through the check report one spelling
+of the directory the targets sit in, the real one with every symlink
+resolved: it is the directory the interpreter's own imports of those
+files use (a relative source path resolves against `os.getcwd()`, which
+is always real), so a `-C` (or a library caller's `cwd`) that reaches
+the targets through a symlink is still checked accurately. Either way it names the RESOLUTION (that
 `probe` isolates its own runs against exactly this target automatically)
 rather than telling the operator to act -- it exists so the condition is
 visible up front, and so an operator running the target's own test

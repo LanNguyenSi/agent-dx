@@ -27,6 +27,18 @@ function makeTmpDir(): string {
   return dir;
 }
 
+/** A directory symlink pointing at `target`, removed in `afterEach`
+ * before the directories are, and by `unlink` (never a recursive
+ * remove), so the cleanup can never reach through the link into what it
+ * points at. */
+const tmpLinks: string[] = [];
+function makeTmpLink(target: string, name: string): string {
+  const link = path.join(makeTmpDir(), name);
+  fs.symlinkSync(target, link, "dir");
+  tmpLinks.push(link);
+  return link;
+}
+
 /** The same digest probe records in a marker, so a fixture marker can
  * describe a state doctor's recovery check actually accepts instead of
  * placeholder hashes that match nothing. */
@@ -119,6 +131,13 @@ function resolveCachePathViaPython3(cwd: string, target: string): string {
 }
 
 afterEach(() => {
+  for (const link of tmpLinks.splice(0)) {
+    try {
+      fs.unlinkSync(link);
+    } catch {
+      // Already gone with its parent fixture directory.
+    }
+  }
   for (const dir of tmpDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -517,6 +536,78 @@ describe("doctor: checks, in both states", () => {
     expect(check?.detail).toContain("python3 not found on PATH");
   });
 
+  it.skipIf(!HAS_PYTHON3)(
+    "python-bytecode-cache: names the cache path the interpreter ITSELF uses when the given cwd is a symlink",
+    async () => {
+      // The end-to-end form of the same resolution, against the one
+      // authority on where a cache file goes: the interpreter's own
+      // `__cached__` after it really imported the module. This one
+      // discriminates wherever a symlink is involved rather than only
+      // where the host's temp directory happens to be one, since it
+      // creates the link itself, and it holds under both cache shapes
+      // (a redirected `sys.pycache_prefix` and none), because the
+      // interpreter resolves the cwd to its real path either way.
+      const real = makeTmpDir();
+      const link = makeTmpLink(real, "link-to-fixture-dir");
+      fs.writeFileSync(
+        path.join(real, "fixture.py"),
+        ["def positive(n):", "    return n > 0", ""].join("\n"),
+      );
+      const imported = spawnSync(
+        "python3",
+        ["-c", "import fixture; print(fixture.__cached__)"],
+        { cwd: link, encoding: "utf8" },
+      );
+      expect(imported.status).toBe(0);
+      const cachedPath = imported.stdout.trim();
+      // The import really wrote it, so this is the live file, not a
+      // string the test made up.
+      expect(fs.existsSync(cachedPath)).toBe(true);
+      const result = await doctor({
+        required: [],
+        optional: [],
+        cwd: link,
+        targets: ["fixture.py"],
+      });
+      const check = result.checks.find(
+        (c) => c.name === "python-bytecode-cache",
+      );
+      expect(check?.ok).toBe(true);
+      expect(check?.detail).toContain(cachedPath);
+    },
+  );
+
+  it("python-bytecode-cache: a cwd that does not exist resolves nothing and is reported as a fallback, not as a cache", async () => {
+    // The `realDirOf` catch: a directory that cannot be resolved is
+    // used as given rather than swapped for some other directory, so
+    // the resolution fails for that target and the detail says so. A
+    // fallback to any EXISTING directory would instead resolve happily
+    // and report that directory's cache situation as the target's.
+    const binDir = makeTmpDir();
+    const callLog = path.join(makeTmpDir(), "python3-calls.txt");
+    // A stub rather than the real PATH: only so the check reaches its
+    // resolution at all on a host with no CPython (`python3` absent
+    // reports its own fallback clause instead). The spawn never runs,
+    // since its cwd does not exist.
+    writePython3Stub(binDir, callLog, {
+      exitStatus: 0,
+      printsPath: path.join(binDir, "unrelated.pyc"),
+    });
+    const result = await doctor({
+      required: [],
+      optional: [],
+      cwd: path.join(os.tmpdir(), `agent-primitives-absent-${randomUUID()}`),
+      targets: ["fixture.py"],
+      pathEnv: binDir,
+    });
+    const check = result.checks.find((c) => c.name === "python-bytecode-cache");
+    expect(check?.ok).toBe(true);
+    expect(check?.detail).toContain(
+      "python3 did not resolve a cache path for fixture.py",
+    );
+    expect(check?.detail).not.toContain("python3 not found on PATH");
+  });
+
   it("python-bytecode-cache: asks python3 about the target's real absolute path, not the spelling the caller used", async () => {
     // The other half of the same resolution: `cache_from_source` joins
     // the prefix with the SOURCE's own directory, and for a relative
@@ -620,8 +711,13 @@ describe("doctor: checks, in both states", () => {
       "python3 did not resolve a cache path for fixture.py",
     );
     expect(check?.detail).not.toContain("python3 not found on PATH");
-    // The guess was actually used, not merely announced.
-    expect(check?.detail).toContain(path.join(dir, "__pycache__"));
+    // The guess was actually used, not merely announced, and is spelled
+    // with the real directory, the same one the resolved branch
+    // reports: one detail line never mixes two spellings of one
+    // directory.
+    expect(check?.detail).toContain(
+      path.join(fs.realpathSync(dir), "__pycache__"),
+    );
   });
 
   it("python-bytecode-cache: spawns no python3 at all once doctor's aggregate deadline is spent, names the deadline, and falls back to the co-located guess", async () => {
@@ -659,7 +755,9 @@ describe("doctor: checks, in both states", () => {
     );
     expect(check?.detail).toContain("first.py");
     expect(check?.detail).toContain("second.py");
-    expect(check?.detail).toContain(path.join(dir, "__pycache__"));
+    expect(check?.detail).toContain(
+      path.join(fs.realpathSync(dir), "__pycache__"),
+    );
   });
 
   it("python-bytecode-cache: resolves a --target relative to an absolute cwd, not the process cwd, in the co-located fallback", async () => {
@@ -678,7 +776,9 @@ describe("doctor: checks, in both states", () => {
     });
     const check = result.checks.find((c) => c.name === "python-bytecode-cache");
     expect(check?.ok).toBe(true);
-    expect(check?.detail).toContain(path.join(sub, "__pycache__"));
+    expect(check?.detail).toContain(
+      path.join(fs.realpathSync(sub), "__pycache__"),
+    );
   });
 });
 

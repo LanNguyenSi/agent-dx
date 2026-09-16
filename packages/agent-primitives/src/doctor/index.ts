@@ -180,22 +180,18 @@ function findOnPath(
  *   shape every `mkdtemp` path has there) answers a directory under the
  *   prefix that the interpreter's own imports never write to.
  *
- * `realpathSync` failing (a `cwd` that does not exist, which the CLI
- * rejects up front but a library caller could still pass) falls back to
- * the path as given: the resolution may then be wrong in the second
- * shape above, which is no worse than not resolving at all. */
+ * The real directory is resolved ONCE by the check itself
+ * (`realDirOf`) and handed in, not worked out here: the co-located
+ * guess this falls back to needs the same directory, and a detail line
+ * that named one branch's answer under `/private/var` and the other's
+ * under `/var` would be reporting two spellings of one directory as if
+ * they were different places. */
 function resolvePyCacheTarget(
   python3Path: string,
-  cwd: string,
+  realCwd: string,
   target: string,
   timeoutMs: number,
 ): string | undefined {
-  let realCwd: string;
-  try {
-    realCwd = fs.realpathSync(cwd);
-  } catch {
-    realCwd = cwd;
-  }
   let result;
   try {
     result = spawnSync(
@@ -218,9 +214,33 @@ function resolvePyCacheTarget(
 /** The co-located guess `python-bytecode-cache` falls back to when
  * `python3` is not on PATH, or failed to resolve one specific target: a
  * plain `__pycache__` directory next to the target, the same check this
- * package shipped before real resolution existed. */
-function coLocatedPycacheDir(cwd: string, target: string): string {
-  return path.join(path.dirname(path.resolve(cwd, target)), "__pycache__");
+ * package shipped before real resolution existed. Takes the same real
+ * directory `resolvePyCacheTarget` is given, so both branches of the
+ * check report one spelling of it. */
+function coLocatedPycacheDir(realCwd: string, target: string): string {
+  return path.join(path.dirname(path.resolve(realCwd, target)), "__pycache__");
+}
+
+/** `dir` with every symlink resolved, or `dir` itself when it cannot be
+ * resolved (a directory that does not exist: the CLI rejects that up
+ * front for `-C`, but a library caller can still pass one, and a
+ * check's own detail is not the place to raise it).
+ *
+ * The one place the `python-bytecode-cache` check turns a caller's
+ * directory into a real one. `cache_from_source` joins the cache prefix
+ * with the source's own directory, and for a relative source that
+ * directory is `os.getcwd()`, which is always real, so asking about an
+ * unresolved spelling of a directory reached through a symlink
+ * (`/var -> /private/var` on macOS, the shape every `mkdtemp` path has
+ * there) names a cache file the interpreter's own imports never write.
+ * The co-located guess is resolved the same way for the reason on
+ * `coLocatedPycacheDir`. */
+function realDirOf(dir: string): string {
+  try {
+    return fs.realpathSync(dir);
+  } catch {
+    return dir;
+  }
 }
 
 interface VersionCapture {
@@ -743,6 +763,9 @@ export async function doctor(
     // guess -- a filesystem stat, never a spawn -- and the detail names
     // the bound that put it there, so the fallback is never silent.
     const python3 = findOnPath(["python3"], dirs);
+    // One spelling of the caller's directory for every target and both
+    // branches below: see `realDirOf`.
+    const realCwd = realDirOf(cwd);
     const hits: string[] = [];
     /** Targets checked by the co-located guess because `python3` was
      * asked and did not come back with a path. */
@@ -759,7 +782,7 @@ export async function doctor(
         } else {
           resolved = resolvePyCacheTarget(
             python3.path,
-            cwd,
+            realCwd,
             target,
             versionTimeoutMs,
           );
@@ -770,7 +793,7 @@ export async function doctor(
         if (fs.existsSync(resolved)) hits.push(`${target} (${resolved})`);
         continue;
       }
-      const coLocated = coLocatedPycacheDir(cwd, target);
+      const coLocated = coLocatedPycacheDir(realCwd, target);
       if (fs.existsSync(coLocated)) hits.push(`${target} (${coLocated})`);
     }
     // Named regardless of whether a cache was found: an operator reading
