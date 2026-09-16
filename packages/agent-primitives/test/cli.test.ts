@@ -199,6 +199,80 @@ describe("cli", () => {
     expect(JSON.parse(run.stdout).status).toBe("ok");
   });
 
+  /** The `python-bytecode-cache` check's detail for a run over `dir`,
+   * whose `--target` list is whatever `targetArgs` spells. The spawned
+   * CLI's PATH is the fixed four binaries only (no `python3`), so every
+   * target here takes the co-located fallback: what these three cases
+   * turn on is WHICH targets reached the check at all, which is the
+   * `--target` option's own accumulation, not the resolution. */
+  async function pycacheDetailFor(
+    dir: string,
+    targetArgs: string[],
+  ): Promise<string> {
+    const run = await spawnCli([
+      "-C",
+      dir,
+      "doctor",
+      "-r",
+      "",
+      "-o",
+      "",
+      ...targetArgs,
+    ]);
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout);
+    const check = parsed.checks.find(
+      (c: { name: string }) => c.name === "python-bytecode-cache",
+    );
+    expect(check).toBeDefined();
+    return String((check as { detail: string }).detail);
+  }
+
+  /** Two `.py` files, so a dropped `--target` occurrence shows up as a
+   * missing name in the check's own detail. */
+  function twoPyTargets(): string {
+    const dir = makeTmpDir();
+    fs.writeFileSync(path.join(dir, "first.py"), "");
+    fs.writeFileSync(path.join(dir, "second.py"), "");
+    return dir;
+  }
+
+  it("doctor --target is repeatable: two occurrences both reach the check, the earlier one is not dropped", async () => {
+    const dir = twoPyTargets();
+    const detail = await pycacheDetailFor(dir, [
+      "--target",
+      "first.py",
+      "--target",
+      "second.py",
+    ]);
+    expect(detail).toContain("first.py");
+    expect(detail).toContain("second.py");
+  });
+
+  it("doctor --target stays comma-separated: one occurrence naming both reaches the check as both", async () => {
+    const dir = twoPyTargets();
+    const detail = await pycacheDetailFor(dir, [
+      "--target",
+      "first.py,second.py",
+    ]);
+    expect(detail).toContain("first.py");
+    expect(detail).toContain("second.py");
+  });
+
+  it("doctor --target mixes the two spellings: a repeated flag whose own value is a comma list keeps every name", async () => {
+    const dir = twoPyTargets();
+    fs.writeFileSync(path.join(dir, "third.py"), "");
+    const detail = await pycacheDetailFor(dir, [
+      "--target",
+      "first.py",
+      "--target",
+      "second.py,third.py",
+    ]);
+    expect(detail).toContain("first.py");
+    expect(detail).toContain("second.py");
+    expect(detail).toContain("third.py");
+  });
+
   it("probe is no longer a stub: missing required flags is a normal commander usage_error", async () => {
     const run = await spawnCli(["probe"]);
     expect(run.code).toBe(2);

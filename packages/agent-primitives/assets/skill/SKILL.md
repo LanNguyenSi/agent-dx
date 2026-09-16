@@ -88,11 +88,40 @@ was aborted, but leaves a `warnings` entry naming the same stale-build
 risk instead of staying silent. See the README's `--pre` section for the
 exact rule and the `warnings` notice it leaves behind.
 
+A Python (`.py`) target's own `--pre`/test-command run is isolated from
+CPython's bytecode cache automatically: `probe` gives every such
+invocation its own fresh `PYTHONPYCACHEPREFIX` directory, never reused
+across the baseline and a mutant's own run, since CPython validates a
+`.pyc` by `(mtime, size)` alone and a same-length mutant can otherwise
+leave that pair unchanged, reusing stale bytecode in either direction.
+Nothing to configure; the one failure mode (the isolation directory
+itself could not be created) refuses with `reason:
+"pycache_isolation_failed"`, `exit 2`, rather than risk a wrong verdict.
+This has one cost: a test command that itself asserts on `__pycache__`
+placement or reads `sys.pycache_prefix`/`PYTHONPYCACHEPREFIX` behaves
+differently under `probe` than standalone, which surfaces as a RED
+BASELINE (`reason: "baseline_failed"`), never a wrong verdict --
+`warnings` names the injected variable on every such run so a red
+baseline is diagnosable. Requires CPython 3.8+ for
+`PYTHONPYCACHEPREFIX` itself; on an older interpreter the variable is
+silently ignored. See the README's "Python bytecode cache" section for
+the trade-off against the mechanisms not chosen.
+
 ## 4. Doctor
 
 Run `agent-primitives doctor` once, when a binary the workflow expects
 seems to be missing or is behaving oddly. Report a missing required tool
 as a risk in the output rather than silently working around its absence.
+Pass `--target <path>` (a probe target, repeatable/comma-separated) to
+also surface, before a probe run, whether a `.py` target already has a
+CPython bytecode cache: the path `python3` itself resolves for that file
+when `python3` can be asked (accurate on a host that redirects its
+cache elsewhere, as macOS's own system `python3` does), and a co-located
+`__pycache__` as the named fallback whenever it cannot be asked or does
+not answer (absent from `PATH`, resolving nothing, or doctor's aggregate
+spawn deadline already spent).
+The check is informational (`probe` isolates against that cache
+automatically either way).
 
 ## 5. Output conventions
 

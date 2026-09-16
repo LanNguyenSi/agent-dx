@@ -1412,6 +1412,7 @@ describe("computeMutant: patch form multi-hunk diff excerpt", () => {
         gitApplyTimeoutMs: DEFAULT_GIT_APPLY_TIMEOUT_MS,
         effectiveIsolation: "inplace",
         testCommand: "true",
+        pyCacheIsolation: false,
         signal: abortController.signal,
         track: async (started) => started,
         crashHandlers: {

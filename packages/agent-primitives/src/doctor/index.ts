@@ -56,18 +56,37 @@ export interface DoctorOptions {
   cwd?: string;
   /** Test seam: overrides process.env.PATH. */
   pathEnv?: string;
-  /** Timeout (ms) for each `<bin> --version` capture. */
+  /** Timeout (ms) for each `<bin> --version` capture, and for each
+   * `python-bytecode-cache` cache-path resolution (the only other
+   * per-item spawn doctor makes). */
   versionTimeoutMs?: number;
-  /** Aggregate deadline (ms), across ALL `--version` captures combined,
-   * measured from the start of doctor's tool loop. Once spent, remaining
-   * tools skip their own capture (`versionCheck: "skipped_deadline"`)
-   * instead of each paying its own per-tool timeout; findOnPath itself
-   * (a filesystem stat, not a spawn) is never skipped by this deadline.
-   * Defaults to 3000. */
+  /** Aggregate deadline (ms) across every spawn doctor makes combined
+   * (the `--version` captures and the `python-bytecode-cache` check's
+   * own per-target `python3` resolutions), measured from the start of
+   * doctor's tool loop. Once spent, remaining tools skip their own
+   * capture (`versionCheck: "skipped_deadline"`) and remaining targets
+   * skip their own resolution (falling back to the co-located guess,
+   * with the deadline named in that check's detail) instead of each
+   * paying its own per-item timeout; findOnPath and the cache-path
+   * `existsSync` (filesystem stats, not spawns) are never skipped by
+   * this deadline. Defaults to 3000. */
   versionDeadlineMs?: number;
   /** Test seam: overrides the probe lock/marker directory (defaults to
    * `lock.ts`'s own `$AGENT_PRIMITIVES_LOCK_DIR` / tmpdir resolution). */
   lockDir?: string;
+  /** Probe target file(s) to check for an existing CPython bytecode
+   * cache (relative to `cwd` or absolute), the same `--file`/`-p`
+   * targets an operator would hand `probe`. Only `.py` paths among
+   * these produce the `python-bytecode-cache` check below; every other
+   * extension is silently ignored (CPython's own cache never applies to
+   * it). Each such target's cache path is the one `python3` itself
+   * resolves (`importlib.util.cache_from_source`) when a `python3` is on
+   * `PATH`, and a co-located `__pycache__` only as the fallback when
+   * none is (or when that resolution did not come back), which the
+   * check's own detail names. Omitted or empty: the check is skipped
+   * entirely rather than reported as passing, since "no target named" is
+   * not the same claim as "no cache found for the target". */
+  targets?: string[];
 }
 
 export const DEFAULT_REQUIRED = ["git", "node", "npm", "rg"];
@@ -125,6 +144,103 @@ function findOnPath(
     }
   }
   return undefined;
+}
+
+/** Resolves `target`'s own CPython bytecode-cache path by asking
+ * `python3` itself (`importlib.util.cache_from_source`), rather than
+ * assuming a co-located `__pycache__`: a host whose `python3` redirects
+ * `sys.pycache_prefix` elsewhere by default (macOS's own system
+ * `python3`, or any host with `PYTHONPYCACHEPREFIX` already set) still
+ * resolves to the SAME path that host's own unoverridden invocations
+ * actually use. Returns `undefined` on any failure (a non-zero exit, no
+ * stdout, or the spawn itself throwing/timing out) so the caller can
+ * fall back to the co-located guess for that one target instead of
+ * reporting "no cache" on a resolver failure.
+ *
+ * The answer is always absolute, and always about the directory the
+ * caller named: the target is resolved against the REAL `cwd` before
+ * `python3` is asked, and the reply is resolved against that same real
+ * directory. `cache_from_source` is a pure string transform on the path
+ * handed to it, and it has two shapes, each of which needs one half of
+ * that:
+ *
+ * - With no cache prefix set (the ordinary case everywhere but a host
+ *   like macOS's system `python3`, which redirects `sys.pycache_prefix`
+ *   by default), a relative `pkg/mod.py` comes back as the equally
+ *   relative `pkg/__pycache__/mod.cpython-3X.pyc`. Checked with
+ *   `fs.existsSync`, that would be read against THIS process's own cwd
+ *   rather than the `cwd` the caller named (`-C`, or a library caller's
+ *   `cwd` option): a cache reported that is not the target's, or none
+ *   reported where the target has one.
+ * - With a prefix set, the answer is absolute either way, but the
+ *   prefix is joined with the source's own directory, which for a
+ *   relative source is `os.getcwd()` and therefore always the REAL
+ *   path. Asking about an unresolved absolute spelling of a directory
+ *   reached through a symlink (`/var -> /private/var` on macOS, the
+ *   shape every `mkdtemp` path has there) answers a directory under the
+ *   prefix that the interpreter's own imports never write to.
+ *
+ * The real directory is resolved ONCE by the check itself
+ * (`realDirOf`) and handed in, not worked out here: the co-located
+ * guess this falls back to needs the same directory, and a detail line
+ * that named one branch's answer under `/private/var` and the other's
+ * under `/var` would be reporting two spellings of one directory as if
+ * they were different places. */
+function resolvePyCacheTarget(
+  python3Path: string,
+  realCwd: string,
+  target: string,
+  timeoutMs: number,
+): string | undefined {
+  let result;
+  try {
+    result = spawnSync(
+      python3Path,
+      [
+        "-c",
+        "import importlib.util, sys; print(importlib.util.cache_from_source(sys.argv[1]))",
+        path.resolve(realCwd, target),
+      ],
+      { cwd: realCwd, timeout: timeoutMs, encoding: "utf8" },
+    );
+  } catch {
+    return undefined;
+  }
+  if (result.status !== 0) return undefined;
+  const resolved = result.stdout?.trim();
+  return resolved ? path.resolve(realCwd, resolved) : undefined;
+}
+
+/** The co-located guess `python-bytecode-cache` falls back to when
+ * `python3` is not on PATH, or failed to resolve one specific target: a
+ * plain `__pycache__` directory next to the target, the same check this
+ * package shipped before real resolution existed. Takes the same real
+ * directory `resolvePyCacheTarget` is given, so both branches of the
+ * check report one spelling of it. */
+function coLocatedPycacheDir(realCwd: string, target: string): string {
+  return path.join(path.dirname(path.resolve(realCwd, target)), "__pycache__");
+}
+
+/** `dir` with every symlink resolved, or `dir` itself when it cannot be
+ * resolved (a directory that does not exist: the CLI rejects that up
+ * front for `-C`, but a library caller can still pass one, and a
+ * check's own detail is not the place to raise it).
+ *
+ * The one place the `python-bytecode-cache` check turns a caller's
+ * directory into a real one. `cache_from_source` joins the cache prefix
+ * with the source's own directory, and for a relative source that
+ * directory is `os.getcwd()`, which is always real, so asking about an
+ * unresolved spelling of a directory reached through a symlink
+ * (`/var -> /private/var` on macOS, the shape every `mkdtemp` path has
+ * there) names a cache file the interpreter's own imports never write.
+ * The co-located guess is resolved the same way for the reason on
+ * `coLocatedPycacheDir`. */
+function realDirOf(dir: string): string {
+  try {
+    return fs.realpathSync(dir);
+  } catch {
+    return dir;
+  }
 }
 
 interface VersionCapture {
@@ -605,6 +721,123 @@ export async function doctor(
         ? "no stale worktree marker or leftover registered worktree for this repository"
         : worktreeProblems.join(" "),
   });
+
+  // CPython validates a `__pycache__/*.pyc` by `(mtime, size)` alone, so
+  // a same-length mutant probe applies can leave that pair unchanged and
+  // reuse stale bytecode (see `pycache.ts`); `probe` itself now isolates
+  // every `--pre`/test-command run of a Python target under a fresh
+  // `PYTHONPYCACHEPREFIX` automatically (the README's "Python bytecode
+  // cache" section), so this check is purely informational (the
+  // RESOLUTION, not a hazard the operator must act on) and always
+  // reports `ok: true`: it names whatever cache already exists for a
+  // given target so its presence is visible before a probe run rather
+  // than only inferable after one, and so an operator running the
+  // target's OWN test command directly (outside `probe`) knows that
+  // cache still applies to THAT run.
+  const pyTargets = (options.targets ?? []).filter((t) =>
+    t.toLowerCase().endsWith(".py"),
+  );
+  if (pyTargets.length > 0) {
+    // Looked up here directly (not through the `-o/-r` tool loop above,
+    // which only checks names an operator explicitly asked for): this
+    // check needs to know whether a real CPython is on PATH regardless
+    // of whatever tools the caller named. When it is, every target's
+    // cache path is resolved the way CPython's own import machinery
+    // would (`importlib.util.cache_from_source`), since a host whose
+    // `python3` redirects `sys.pycache_prefix` elsewhere (macOS's own
+    // system `python3`, by default) makes a co-located `__pycache__`
+    // guess wrong in both directions: a false negative (the real,
+    // redirected cache the guess never looks at) and a false positive
+    // (an unrelated leftover `__pycache__` nothing currently reads).
+    // Absent, or when resolution itself fails for one target, this
+    // falls back to that co-located guess.
+    //
+    // Each resolution is a `python3` spawn, so it is bound the same two
+    // ways every `--version` capture above is: its own
+    // `versionTimeoutMs`, and the run's ONE aggregate deadline. A
+    // caller's `--target` list is unbounded in length, so without the
+    // aggregate bound a long list would multiply the per-target timeout
+    // into a doctor run far past the budget the deadline exists to keep
+    // (the `--version` captures' own reason for having it). A target
+    // reached after the deadline is spent falls back to the co-located
+    // guess -- a filesystem stat, never a spawn -- and the detail names
+    // the bound that put it there, so the fallback is never silent.
+    const python3 = findOnPath(["python3"], dirs);
+    // One spelling of the caller's directory for every target and both
+    // branches below: see `realDirOf`.
+    const realCwd = realDirOf(cwd);
+    const hits: string[] = [];
+    /** Targets checked by the co-located guess because `python3` was
+     * asked and did not come back with a path. */
+    const unresolved: string[] = [];
+    /** Targets checked by the co-located guess because the aggregate
+     * deadline was already spent when their turn came, so `python3` was
+     * never asked at all. */
+    const deadlineSkipped: string[] = [];
+    for (const target of pyTargets) {
+      let resolved: string | undefined;
+      if (python3 !== undefined) {
+        if (Date.now() >= aggregateDeadline) {
+          deadlineSkipped.push(target);
+        } else {
+          resolved = resolvePyCacheTarget(
+            python3.path,
+            realCwd,
+            target,
+            versionTimeoutMs,
+          );
+          if (resolved === undefined) unresolved.push(target);
+        }
+      }
+      if (resolved !== undefined) {
+        if (fs.existsSync(resolved)) hits.push(`${target} (${resolved})`);
+        continue;
+      }
+      const coLocated = coLocatedPycacheDir(realCwd, target);
+      if (fs.existsSync(coLocated)) hits.push(`${target} (${coLocated})`);
+    }
+    // Named regardless of whether a cache was found: an operator reading
+    // "no cache" (or a found path) should also know whether that came
+    // from python3's own real resolution or from the co-located guess,
+    // since the guess can be wrong in either direction on a host whose
+    // python3 redirects its cache elsewhere (see the comment above).
+    // Every target that fell back is named in exactly one clause, with
+    // the reason it fell back.
+    const fallbackNotes: string[] = [];
+    if (python3 === undefined) {
+      fallbackNotes.push(
+        "python3 not found on PATH; checked only for a co-located __pycache__",
+      );
+    } else if (unresolved.length > 0) {
+      fallbackNotes.push(
+        `python3 did not resolve a cache path for ${unresolved.join(", ")}; ` +
+          `checked only for a co-located __pycache__ there`,
+      );
+    }
+    if (deadlineSkipped.length > 0) {
+      fallbackNotes.push(
+        `doctor's aggregate spawn deadline (${versionDeadlineMs}ms) was ` +
+          `already spent, so the python3 cache-path resolution was skipped ` +
+          `for ${deadlineSkipped.join(", ")}; checked only for a co-located ` +
+          `__pycache__ there`,
+      );
+    }
+    const fallbackNote =
+      fallbackNotes.length > 0 ? ` (${fallbackNotes.join("; ")})` : "";
+    checks.push({
+      name: "python-bytecode-cache",
+      ok: true,
+      detail:
+        (hits.length === 0
+          ? `no Python bytecode cache found for the given target(s): ${pyTargets.join(", ")}`
+          : `Python bytecode cache present for ${hits.join(", ")}; ` +
+            `\`agent-primitives probe\` isolates every --pre/test-command ` +
+            `run of a Python target under a fresh PYTHONPYCACHEPREFIX ` +
+            `automatically, so this existing cache is never read or ` +
+            `written by probe itself; it still applies to any OTHER ` +
+            `command run against these files outside of probe`) + fallbackNote,
+    });
+  }
 
   const hints: string[] = [];
   for (const tool of missingRequired) {

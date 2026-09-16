@@ -103,6 +103,20 @@ function parseList(value: string): string[] {
     .filter((s) => s.length > 0);
 }
 
+/** `parseList` for an option documented as REPEATABLE as well as
+ * comma-separated: commander calls a coercion function once per
+ * occurrence of the flag and hands it what the previous occurrence
+ * returned, so a coercion that ignores `previous` (as `parseList` does,
+ * by design, for the last-value-wins options) silently drops every
+ * earlier occurrence's values. Accumulating instead makes both spellings
+ * work, and mixable: `--target a.py --target b.py`, `--target a.py,b.py`,
+ * and `--target a.py --target b.py,c.py` all reach the command as the
+ * list they read as. `previous` is the option's own default (`[]`) on the
+ * first occurrence, which is why it is still guarded. */
+function collectList(value: string, previous: string[] | undefined): string[] {
+  return [...(previous ?? []), ...parseList(value)];
+}
+
 /** `--link`'s own comma-separated parse, plus `linkEntryUsageError`
  * (shared with a `--plan` file's own `link` field and the repo defaults
  * file), so all three `link` sources genuinely share one rule -- see
@@ -783,9 +797,15 @@ program
     parseList,
     DEFAULT_OPTIONAL,
   )
+  .option(
+    "--target <list>",
+    "probe target path(s) (relative to cwd or absolute), repeatable and comma-separated; for a .py path among these, the CPython bytecode cache python3 itself resolves for that file is reported, and a co-located __pycache__ is the named fallback whenever python3 cannot be asked or does not answer (absent from PATH, resolving nothing, or doctor's aggregate spawn deadline already spent)",
+    collectList,
+    [] as string[],
+  )
   .action(
     async (
-      opts: { required: string[]; optional: string[] },
+      opts: { required: string[]; optional: string[]; target: string[] },
       command: Command,
     ) => {
       const start = Date.now();
@@ -794,6 +814,7 @@ program
         required: opts.required,
         optional: opts.optional,
         cwd: global.cwd,
+        targets: opts.target,
       });
       const { envelope, exitCode } = buildEnvelope({
         version: VERSION,
