@@ -1,5 +1,39 @@
 # Bundle log
 
+- 2026-09-16T05:18:16Z (docs cleanup, agent-dx tracker task 8a55e082, review
+  findings on the contract-reduction change base 227bbe4f to head e8c7cee4):
+  removed a mid-sentence paragraph split (a stray blank line inside the
+  sentence "states the not-applicable signal added in the R2 pass") and a
+  run of seven consecutive blank lines (after the "target text no longer
+  present" paragraph) from `subagent-contracts-superset.md`, and corrected
+  its Commits field section, which still claimed the not-applicable
+  `commits: []` clause is pinned "in both copies" after the 0.35.0
+  contract-reduction refactor (`CHANGELOG.md:#[0.35.0]`) left the clause in
+  the installed implementer prompt alone. The 8-line removal shifted every
+  same-file citation below it: this log's own two citations into
+  `subagent-contracts-superset.md` moved from line 504 to line 503 (both
+  occurrences, line 386 was unaffected); the `SIBLING_GUARD_BUNDLE_ALLOWLIST`
+  entry in `test/docs-consistency.test.ts` for the doc's `:1082` paragraph
+  moved `paragraphLine`/`secondCitationLine` from 441/445 to 440/444, and
+  the entry for its `:1238` paragraph moved from 645/651 to 638/646 (the new
+  Commits field prose added two lines, so this entry's shift is not the
+  flat 8-line delta the other two carry); that same entry's `claim` text was
+  also corrected -- it still described the paragraph's closing citation list
+  as walking `:1204, :1210, :1217, :1232`, coordinates the paragraph no
+  longer carries (the current closing list is `:1204, :1210, :1233`), a
+  drift that predates this pass's own line-shift and was independent of it.
+  Added a matching `[Unreleased]` `CHANGELOG.md` bullet and re-stamped this
+  doc plus `review-gate-and-waivers.md` and `run-state-lifecycle-and-markers.md`
+  (both list `CHANGELOG.md` as a source; their own citations into it use the
+  heading-anchor `#[x.y.z]` form, immune to the `CHANGELOG.md` line shift the
+  new bullet caused, so only the timestamp needed bumping). The new bullet's
+  14-line insertion into `[Unreleased]` also shifted this log's own two
+  self-citations into `CHANGELOG.md` from line 87 to line 101 and from line
+  464 to line 478; both re-pointed after re-reading their anchors. Docs-only:
+  no YAML contract, role prompt, guard matcher, or exemption geometry
+  changed; `npx vitest run test/docs-consistency.test.ts` green (353/353)
+  after the re-point.
+
 - 2026-09-15T06:24:15Z (release cut, pandora run 2026-09-15-releases-batch54,
   REL-001): cut the `[Unreleased]` section under a new `[0.35.0] -
   2026-09-15` heading, keeping an empty `[Unreleased]` heading above it,
@@ -204,7 +238,7 @@
   ambiguity-clearing effect, both into `docs/okf/subagent-contracts-
   superset.md` itself
   (`docs/okf/subagent-contracts-superset.md:386#"Actions shell replay named in step 6 is a second, explicitly"`
-  and `docs/okf/subagent-contracts-superset.md:504#"reports as killed together with their"`),
+  and `docs/okf/subagent-contracts-superset.md:503#"reports as killed together with their"`),
   were re-pointed to their current lines by the same anchor-text search
   as the rest of this round's re-pointing.
   A fifth, unrelated warning (not from the ambiguity-clearing effect: a
@@ -427,7 +461,7 @@
   sentence reverted to its pre-change wording, fails the exact-sub-field
   and regression-signal tests above; restored, the suite is green again.
   `CHANGELOG.md`'s own prose copy of this change is
-  (`CHANGELOG.md:87#"The implementer"`).
+  (`CHANGELOG.md:101#"The implementer"`).
 
   Verified on the committed tree: the full package suite (`npm test`),
   `typecheck`, `typecheck:test`, and `format:check`, all clean. Re-pointed
@@ -695,7 +729,7 @@
   that binding rather than second-guessing it.
 
   The CHANGELOG bullet for this round is
-  `CHANGELOG.md:464#"Citation scanning is paragraph-joined"`. Verified on
+  `CHANGELOG.md:478#"Citation scanning is paragraph-joined"`. Verified on
   the committed tree: the full package suite, `docs-consistency.test.ts`
   on its own, `typecheck`, `typecheck:test` and `format:check`; the
   figures each guard measured are in its own computed test name, per the
@@ -1577,7 +1611,7 @@
   shorter quote sitting wholly on the anchor's own last line instead of a
   two-line span, per this bundle's own single-line-anchor convention
   (`docs/okf/subagent-contracts-superset.md:386#"Actions shell replay named in step 6 is a second, explicitly"`,
-  `docs/okf/subagent-contracts-superset.md:504#"reports as killed together with their"`).
+  `docs/okf/subagent-contracts-superset.md:503#"reports as killed together with their"`).
   `okf-kit check --json packages/orchestrator-workflow/docs/okf` went from
   0 errors/0 warnings/23 notices at round-1 HEAD, to warnings introduced
   by this round's own edits (all resolved by the re-derivation pass

@@ -6792,10 +6792,10 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1082,
     end: 1082,
     anchorKey: "03317257",
-    paragraphLine: 441,
-    secondCitationLine: 445,
+    paragraphLine: 440,
+    secondCitationLine: 444,
     claim:
-      "same opening-citation-then-closing-enumeration convention as the 558 entry, here at :1082/line 445: the closing list walks :1057, :1065, :1070 and ends on the cross-copy equality check the :1082 opening sentence named, leaving no further assertion of that block uncited.",
+      "same opening-citation-then-closing-enumeration convention as the 558 entry, here at :1082/line 444: the closing list walks :1057, :1065, :1070 and ends on the cross-copy equality check the :1082 opening sentence named, leaving no further assertion of that block uncited.",
   },
   {
     doc: "subagent-contracts-superset.md",
@@ -6804,10 +6804,10 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1238,
     end: 1238,
     anchorKey: "b19680bb",
-    paragraphLine: 645,
-    secondCitationLine: 651,
+    paragraphLine: 638,
+    secondCitationLine: 646,
     claim:
-      "same convention again, here at :1238/line 651: the closing list walks :1204, :1210, :1217, :1232 and ends on the not-applicable-clause pin the :1238 opening sentence named, leaving no further assertion of that block uncited.",
+      "same convention again, here at :1238/line 646: the closing list walks :1204, :1210, :1233 and ends on the not-applicable-clause pin the :1238 opening sentence named, leaving no further assertion of that block uncited.",
   },
   {
     doc: "install-fence-mechanics.md",
