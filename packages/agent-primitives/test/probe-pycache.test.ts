@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, afterEach } from "vitest";
-import { probe, type ProbeOptions } from "../src/probe/index.js";
+import { probe, probePlan, type ProbeOptions } from "../src/probe/index.js";
 
 /**
  * Regression coverage for CPython's own bytecode-cache validation:
@@ -70,7 +70,7 @@ const HAS_PYTHON3 = (() => {
   }
 })();
 
-// Both lines are exactly the same length (18 characters): a same-length
+// Both lines are exactly the same length (19 characters): a same-length
 // mutant, the shape CPython's `(mtime, size)` validation cannot tell
 // apart from the unmutated file by size alone.
 const FIXTURE_PY = ["def check(x):", "    return x == '?'", ""].join("\n");
@@ -107,9 +107,9 @@ function initPyRepo(): { repo: string } {
  * `fixture.py`, resolved by asking python3 itself
  * (`importlib.util.cache_from_source`) rather than assumed to be
  * co-located `__pycache__`: a host whose python3 redirects its cache
- * elsewhere by default (observed during this task's own reproduction --
- * macOS's system python3 redirects to a per-user Caches directory
- * unless `PYTHONPYCACHEPREFIX`/`-X pycache_prefix` overrides it) still
+ * elsewhere by default (macOS's own system python3 redirects to a
+ * per-user Caches directory unless `PYTHONPYCACHEPREFIX`/
+ * `-X pycache_prefix` overrides it) still
  * resolves to the SAME path this file's own ambient (unoverridden)
  * invocations actually use, so the pre-warm and the post-restore
  * bystander run below are provably looking at the one location that
@@ -143,8 +143,9 @@ function ambientPycPath(repo: string): string {
  * and the post-restore verification run -- never for the string handed
  * to `probe()` as `-t` (`baseOptions` below), which is likewise
  * ordinary, so both this file's bystander runs and an UNISOLATED
- * baseline/mutant run (the shape the mutation probes named in this
- * task's briefing apply) consult the very same location this resolves.
+ * baseline/mutant run (the shape a mutation probe that disables this
+ * package's own cache isolation reproduces) consult the very same
+ * location this resolves.
  */
 function runFixtureTest(repo: string): { status: number | null } {
   const result = spawnSync("python3", ["test_fixture.py"], {
@@ -262,6 +263,73 @@ describe("probe(): CPython bytecode-cache isolation", () => {
       // pre-warmed ambient cache still sitting there, must pass.
       const after = runFixtureTest(repo);
       expect(after.status).toBe(0);
+    },
+  );
+
+  it.skipIf(!HAS_PYTHON3)(
+    "a plan's two mutants over the same Python target each get their own, distinct isolation directory",
+    async () => {
+      useLockDir();
+      const { repo } = initPyRepo();
+      // Logs the `PYTHONPYCACHEPREFIX` this invocation actually saw (or
+      // an empty line when unset) before importing `fixture`, so this
+      // test can tell the baseline's own invocation and each mutant's
+      // own invocation apart by directory, not merely by pass/fail.
+      const loggingTest = [
+        "import os",
+        "with open('pycache_env_log.txt', 'a') as f:",
+        "    f.write((os.environ.get('PYTHONPYCACHEPREFIX') or '') + chr(10))",
+        "from fixture import check",
+        "assert check('?') is True",
+        "",
+      ].join("\n");
+      fs.writeFileSync(path.join(repo, "test_logging.py"), loggingTest);
+      execFileSync("git", ["add", "-A"], { cwd: repo });
+      execFileSync(
+        "git",
+        ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "add logger"],
+        { cwd: repo },
+      );
+
+      const result = await probePlan({
+        mutants: [
+          {
+            file: "fixture.py",
+            line: 2,
+            form: "replace",
+            replaceText: MUTATED_LINE,
+          },
+          {
+            file: "fixture.py",
+            line: 2,
+            form: "replace",
+            replaceText: MUTATED_LINE,
+          },
+        ],
+        testCommand: "python3 test_logging.py",
+        isolation: "inplace",
+        expect: "fail",
+        cwd: repo,
+        logDir: makeTmpDir(),
+      });
+
+      expect(result.results[0]?.status).toBe("killed");
+      expect(result.results[1]?.status).toBe("killed");
+
+      const logPath = path.join(repo, "pycache_env_log.txt");
+      const lines = fs
+        .readFileSync(logPath, "utf8")
+        .split("\n")
+        .filter((line) => line.length > 0);
+      // Baseline (1) + two mutants (2) = 3 invocations of this run's own
+      // test command, each isolated.
+      expect(lines).toHaveLength(3);
+      // Every invocation actually got a `PYTHONPYCACHEPREFIX` (never
+      // empty: isolation applied every time, not merely sometimes).
+      for (const line of lines) expect(line.length).toBeGreaterThan(0);
+      // No two invocations, including the two mutants that share the
+      // same file, ever shared a directory.
+      expect(new Set(lines).size).toBe(3);
     },
   );
 });

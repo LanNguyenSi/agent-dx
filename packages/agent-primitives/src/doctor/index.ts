@@ -136,6 +136,49 @@ function findOnPath(
   return undefined;
 }
 
+/** Resolves `target`'s own CPython bytecode-cache path by asking
+ * `python3` itself (`importlib.util.cache_from_source`), rather than
+ * assuming a co-located `__pycache__`: a host whose `python3` redirects
+ * `sys.pycache_prefix` elsewhere by default (macOS's own system
+ * `python3`, or any host with `PYTHONPYCACHEPREFIX` already set) still
+ * resolves to the SAME path that host's own unoverridden invocations
+ * actually use. Returns `undefined` on any failure (a non-zero exit, no
+ * stdout, or the spawn itself throwing/timing out) so the caller can
+ * fall back to the co-located guess for that one target instead of
+ * reporting "no cache" on a resolver failure. */
+function resolvePyCacheTarget(
+  python3Path: string,
+  cwd: string,
+  target: string,
+  timeoutMs: number,
+): string | undefined {
+  let result;
+  try {
+    result = spawnSync(
+      python3Path,
+      [
+        "-c",
+        "import importlib.util, sys; print(importlib.util.cache_from_source(sys.argv[1]))",
+        target,
+      ],
+      { cwd, timeout: timeoutMs, encoding: "utf8" },
+    );
+  } catch {
+    return undefined;
+  }
+  if (result.status !== 0) return undefined;
+  const resolved = result.stdout?.trim();
+  return resolved ? resolved : undefined;
+}
+
+/** The co-located guess `python-bytecode-cache` falls back to when
+ * `python3` is not on PATH, or failed to resolve one specific target: a
+ * plain `__pycache__` directory next to the target, the same check this
+ * package shipped before real resolution existed. */
+function coLocatedPycacheDir(cwd: string, target: string): string {
+  return path.join(path.dirname(path.resolve(cwd, target)), "__pycache__");
+}
+
 interface VersionCapture {
   version?: string;
   timedOut: boolean;
@@ -620,32 +663,65 @@ export async function doctor(
   // reuse stale bytecode (see `pycache.ts`); `probe` itself now isolates
   // every `--pre`/test-command run of a Python target under a fresh
   // `PYTHONPYCACHEPREFIX` automatically (the README's "Python bytecode
-  // cache" section), so this check is informational (the RESOLUTION,
-  // not a hazard the operator must act on): it names a co-located cache
-  // that exists next to a given target so its presence is visible
-  // before a probe run rather than only inferable after one, and so an
-  // operator running the target's OWN test command directly (outside
-  // `probe`) knows that co-located cache still applies to THAT run.
+  // cache" section), so this check is purely informational (the
+  // RESOLUTION, not a hazard the operator must act on) and always
+  // reports `ok: true`: it names whatever cache already exists for a
+  // given target so its presence is visible before a probe run rather
+  // than only inferable after one, and so an operator running the
+  // target's OWN test command directly (outside `probe`) knows that
+  // cache still applies to THAT run.
   const pyTargets = (options.targets ?? []).filter((t) =>
     t.toLowerCase().endsWith(".py"),
   );
   if (pyTargets.length > 0) {
-    const pycacheHits = pyTargets.filter((target) => {
-      const resolved = path.resolve(cwd, target);
-      return fs.existsSync(path.join(path.dirname(resolved), "__pycache__"));
-    });
+    // Looked up here directly (not through the `-o/-r` tool loop above,
+    // which only checks names an operator explicitly asked for): this
+    // check needs to know whether a real CPython is on PATH regardless
+    // of whatever tools the caller named. When it is, every target's
+    // cache path is resolved the way CPython's own import machinery
+    // would (`importlib.util.cache_from_source`), since a host whose
+    // `python3` redirects `sys.pycache_prefix` elsewhere (macOS's own
+    // system `python3`, by default) makes a co-located `__pycache__`
+    // guess wrong in both directions: a false negative (the real,
+    // redirected cache the guess never looks at) and a false positive
+    // (an unrelated leftover `__pycache__` nothing currently reads).
+    // Absent, or when resolution itself fails for one target, this
+    // falls back to that co-located guess.
+    const python3 = findOnPath(["python3"], dirs);
+    const hits: string[] = [];
+    for (const target of pyTargets) {
+      const resolved =
+        python3 !== undefined
+          ? resolvePyCacheTarget(python3.path, cwd, target, versionTimeoutMs)
+          : undefined;
+      if (resolved !== undefined) {
+        if (fs.existsSync(resolved)) hits.push(`${target} (${resolved})`);
+        continue;
+      }
+      const coLocated = coLocatedPycacheDir(cwd, target);
+      if (fs.existsSync(coLocated)) hits.push(`${target} (${coLocated})`);
+    }
+    // Named regardless of whether a cache was found: an operator reading
+    // "no cache" (or a found path) should also know whether that came
+    // from python3's own real resolution or from the co-located guess,
+    // since the guess can be wrong in either direction on a host whose
+    // python3 redirects its cache elsewhere (see the comment above).
+    const fallbackNote =
+      python3 === undefined
+        ? " (python3 not found on PATH; checked only for a co-located __pycache__)"
+        : "";
     checks.push({
       name: "python-bytecode-cache",
-      ok: pycacheHits.length === 0,
+      ok: true,
       detail:
-        pycacheHits.length === 0
-          ? `no co-located __pycache__ next to the given Python target(s): ${pyTargets.join(", ")}`
-          : `__pycache__ present next to ${pycacheHits.join(", ")}; ` +
+        (hits.length === 0
+          ? `no Python bytecode cache found for the given target(s): ${pyTargets.join(", ")}`
+          : `Python bytecode cache present for ${hits.join(", ")}; ` +
             `\`agent-primitives probe\` isolates every --pre/test-command ` +
             `run of a Python target under a fresh PYTHONPYCACHEPREFIX ` +
             `automatically, so this existing cache is never read or ` +
             `written by probe itself; it still applies to any OTHER ` +
-            `command run against these files outside of probe`,
+            `command run against these files outside of probe`) + fallbackNote,
     });
   }
 

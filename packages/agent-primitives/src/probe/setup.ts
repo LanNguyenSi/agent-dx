@@ -705,12 +705,38 @@ export async function openRunSetup(
   // the run was invoked from.
   const hasEnvOverrides =
     input.env !== undefined && Object.keys(input.env).length > 0;
-  // Computed once for the whole run (baseline and every mutant share
-  // it): whether ANY distinct target is a Python file, per
-  // `hasPythonTarget`'s own docblock.
-  const pyCacheIsolation = hasPythonTarget(
+  // Whether THIS run's own `.py` targets exist at all, per
+  // `hasPythonTarget`'s own docblock, before deciding whether isolation
+  // actually applies below.
+  const hasPyTarget = hasPythonTarget(
     distinct.map((named) => named.displayFile),
   );
+  // A caller-supplied `--env PYTHONPYCACHEPREFIX=...` names a specific,
+  // shared cache location the caller controls; merging this package's
+  // own per-invocation directory on top of it (as `runPreThenTest` would
+  // otherwise do) would silently discard that value, contradicting
+  // every other `--env` override's own "the operator's value wins"
+  // contract, and would also misreport it: the envelope's `test.env`
+  // echoes `--env` verbatim, so a discarded override would claim a
+  // value that was never actually used. Skipping this run's own
+  // isolation instead keeps both true, at the cost of reintroducing the
+  // same `(mtime, size)` hazard unless the caller clears or manages
+  // that shared directory themselves between runs.
+  const callerPycachePrefix = input.env?.PYTHONPYCACHEPREFIX;
+  // Computed once for the whole run (baseline and every mutant share
+  // it, via `rt.pyCacheIsolation` below): isolation applies only when
+  // there is a Python target AND the caller left `PYTHONPYCACHEPREFIX`
+  // unset.
+  const pyCacheIsolation = hasPyTarget && callerPycachePrefix === undefined;
+  if (hasPyTarget && callerPycachePrefix !== undefined) {
+    warnings.push(
+      `--env PYTHONPYCACHEPREFIX=${callerPycachePrefix} was given, so this run's own per-invocation Python bytecode cache isolation is skipped for every --pre/test-command run; every invocation shares that one directory instead, which reintroduces the (mtime, size) shadowing hazard the isolation mechanism otherwise closes unless the caller manages that shared directory themselves (see the README's "Python bytecode cache" section)`,
+    );
+  } else if (hasPyTarget) {
+    warnings.push(
+      `this run has a Python (.py) target: every --pre/test-command invocation gets its own fresh PYTHONPYCACHEPREFIX directory (see the README's "Python bytecode cache" section); a test command that itself asserts on __pycache__ placement or sys.pycache_prefix runs differently under probe than it would standalone, which surfaces as a red baseline (reason: "baseline_failed"), never a wrong verdict`,
+    );
+  }
   const rt: MutantRuntime = {
     root,
     logDir,

@@ -38,10 +38,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failure the isolation setup itself has (its directory could not be
   created), the one new named reason this adds to the refusal contract;
   the JSON envelope's field set, the default isolation mode, and every
-  other exit code are unchanged. `doctor --target <path>` reports a new
-  `python-bytecode-cache` check naming a co-located `__pycache__` next
-  to a given `.py` target, informational (`probe` already isolates
-  against it), so the condition is visible before a probe run. Two new
+  other exit code are unchanged. A caller's own `--env
+  PYTHONPYCACHEPREFIX=...` is honoured: this run's own isolation is
+  skipped instead of silently overridden, with a `warnings` entry naming
+  the hazard and the caller's value, so the envelope's `test.env` never
+  misreports what the child actually saw. Every run with a Python target
+  also gets one `warnings` entry naming the injected variable up front,
+  so a test suite that itself asserts on cache placement and fails its
+  baseline as a result is diagnosable from the envelope alone. `doctor
+  --target <path>` reports a new `python-bytecode-cache` check, always
+  informational (`ok: true`): when `python3` is on `PATH` it resolves
+  each target's real cache path via `importlib.util.cache_from_source`
+  (accurate on a host whose `python3` redirects `sys.pycache_prefix`
+  elsewhere, such as macOS's own system `python3`), and falls back to a
+  co-located `__pycache__` guess, named as a fallback in its own detail,
+  when `python3` is absent. `-i inplace`'s post-restore rebuild
+  (`--pre` re-run after the last mutant) is isolated the same way every
+  other invocation of a Python-target run is. Two new
   regression tests (`test/probe-pycache.test.ts`) reproduce both
   directions against the real fix through `probe()` itself and are
   skipped, visibly, where no `python3` is on PATH.

@@ -666,8 +666,16 @@ export function startRunArgvTracked<T>(started: Promise<T>): TrackedRun<T> {
  * (`hasPythonTarget`, computed once per probe run); every other run's
  * `env` is untouched, so this parameter changes nothing for a run whose
  * targets are not Python. `PYTHONPYCACHEPREFIX` is merged on top of
- * `env.env` (or `process.env` when `env.env` is undefined) rather than
- * replacing it, so an operator's own `--env` overrides are preserved. */
+ * `env.env` (or `process.env` when `env.env` is undefined), so every
+ * OTHER `--env` override the operator gave still reaches the child
+ * unchanged. This is safe to do unconditionally here because
+ * `setup.ts` never passes `pyCacheIsolation: true` for a run whose own
+ * `--env` already named `PYTHONPYCACHEPREFIX`: a caller-supplied
+ * `PYTHONPYCACHEPREFIX` makes `setup.ts` pass `false` instead (skipping
+ * this function's own isolation for the whole run, with a warning
+ * naming the caller's value), rather than let this merge silently
+ * overwrite the one variable the caller was actually trying to
+ * control. */
 export async function runPreThenTest(
   opts: PreAndTestCommand,
   env: {
@@ -731,6 +739,15 @@ export interface FinalRebuildRuntime {
     env?: NodeJS.ProcessEnv;
   };
   track: TrackFn;
+  /** Same flag `runPreThenTest` reads off `MutantRuntime`: this rebuild
+   * is itself a `--pre` invocation of the run (see this function's own
+   * docblock), so it must get the same fresh `PYTHONPYCACHEPREFIX`
+   * treatment every other invocation of a Python-target run gets --
+   * otherwise this one `--pre` run would write the ambient, co-located
+   * cache while every other invocation of the same run never does,
+   * leaving exactly the shadowing hazard `pycache.ts` exists to close,
+   * just moved to the one invocation nothing else isolates. */
+  pyCacheIsolation: boolean;
 }
 
 /**
@@ -779,32 +796,61 @@ export async function runFinalRebuild(
   if (rt.effectiveIsolation !== "inplace" || rt.preCommand === undefined) {
     return {};
   }
-  const started = startExecTracked(rt.preCommand, rt.execEnv);
-  const result = await rt.track(started.result, started.closed);
-  if (result.exitCode === 0) {
-    // What was actually observed is only that this re-run exited 0, not
-    // that its output now matches the restored source: a `--pre` that
-    // no-ops against a cache (nothing to rebuild, or a build system that
-    // treats the restored file as unchanged) also exits 0 without
-    // touching anything. State only the observation, not the inferred
-    // outcome.
+  let isolation: PyCacheIsolation | undefined;
+  let execEnv = rt.execEnv;
+  if (rt.pyCacheIsolation) {
+    const prepared = beginPyCacheIsolation(rt.execEnv.logDir);
+    if (!prepared.ok) {
+      // No separate reason code exists for this (this rebuild is not a
+      // refusal path; the mutant is already restored and the run's own
+      // verdict already decided), so this reuses the SAME warning shape
+      // the exit-code branch below already uses for "the rebuild could
+      // not be trusted, the build output may still be stale" rather
+      // than inventing a second one: from a caller's point of view, an
+      // isolation directory that could not be created and a `--pre`
+      // that could not be trusted both mean the same thing here -- this
+      // one `--pre` re-run did not confirm the tree is freshly built.
+      warnings.push(
+        `${prepared.message}; the working tree's build output may still be stale`,
+      );
+      return {};
+    }
+    isolation = prepared.isolation;
+    execEnv = {
+      ...rt.execEnv,
+      env: { ...(rt.execEnv.env ?? process.env), ...isolation.env },
+    };
+  }
+  try {
+    const started = startExecTracked(rt.preCommand, execEnv);
+    const result = await rt.track(started.result, started.closed);
+    if (result.exitCode === 0) {
+      // What was actually observed is only that this re-run exited 0, not
+      // that its output now matches the restored source: a `--pre` that
+      // no-ops against a cache (nothing to rebuild, or a build system that
+      // treats the restored file as unchanged) also exits 0 without
+      // touching anything. State only the observation, not the inferred
+      // outcome.
+      warnings.push(
+        "--pre was re-run after the last mutant was restored and exited 0",
+      );
+      return { logPath: result.logPath };
+    }
+    const cause = result.aborted
+      ? "was aborted"
+      : result.timedOut
+        ? "timed out"
+        : result.exitCode === null
+          ? "was terminated by a signal"
+          : `exited ${String(result.exitCode)}`;
     warnings.push(
-      "--pre was re-run after the last mutant was restored and exited 0",
+      `--pre was re-run after the last mutant was restored but ${cause}; ` +
+        `the working tree's build output may still be stale, see ${result.logPath}`,
     );
     return { logPath: result.logPath };
+  } finally {
+    isolation?.cleanup();
   }
-  const cause = result.aborted
-    ? "was aborted"
-    : result.timedOut
-      ? "timed out"
-      : result.exitCode === null
-        ? "was terminated by a signal"
-        : `exited ${String(result.exitCode)}`;
-  warnings.push(
-    `--pre was re-run after the last mutant was restored but ${cause}; ` +
-      `the working tree's build output may still be stale, see ${result.logPath}`,
-  );
-  return { logPath: result.logPath };
 }
 
 /**

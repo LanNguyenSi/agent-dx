@@ -121,11 +121,17 @@ bound the worktree is reported as a leftover with the manual command.
 The bound cuts both ways: a probe whose own run outlives it, or a clock
 that moves by more than it, can have its worktree removed by a
 concurrent probe under another lock directory, and that run then ends
-with `baseline_failed` rather than a verdict.
+with `baseline_failed` rather than a verdict. Pass `--target
+<path>[,<path>...]` (a probe target, repeatable or comma-separated) to
+also report a `python-bytecode-cache` check for every `.py` path among
+them, naming whatever CPython bytecode cache already exists for that
+target; see the `probe` section's own "Python bytecode cache" entry
+above for what the check reports and why it is informational.
 
 ```bash
 agent-primitives doctor
 agent-primitives doctor -r git,node,npm,rg -o ast-grep,jq,yq,fd
+agent-primitives doctor --target path/to/module.py
 ```
 
 Exits `1` when a required binary is missing.
@@ -2243,8 +2249,8 @@ exactly which `reason` is which).
 | `status` | string | always | `"killed"`, `"survived"`, `"inconclusive"`, `"usage_error"`, or `"baseline_failed"`. The last is the CLI envelope's own literal status for a failing baseline (the library's `probe()` itself still returns `status: "inconclusive"`, `reason: "baseline_failed"`; the CLI remaps it so a consumer does not also have to read `reason` to tell a failing baseline apart from every other inconclusive outcome). Same exit-code class either way (`cannot-conclude`, exit `2`), so a caller gating on the exit code alone sees no difference. `"killed"`/`"survived"` are always this mutant's actual, measured outcome (see the `--expect` paragraph above) -- under a non-default `--expect`, the exit code follows `mutation_probe.expectation` instead of this field's own word (`0` for `"met"`, `1` for `"violated"`), so a caller gating on the exit code alone still sees `--expect` honored even though `status` itself no longer flips. |
 | `reason` | string | whenever `status` is not a clean verdict | machine-readable cause, e.g. `"baseline_failed"`, `"pre_failed"`, `"restore_failed"`, `"aborted"`, `"target_changed_during_baseline"`, `"mutant_not_applicable"` |
 | `message` | string | top-level usage error only (see above) | the human-readable message commander (or this CLI's own pre-`probe()` check) produced; `reason` is still present alongside it, so a consumer can key off `reason` without also reading `message` |
-| `mutant` | `{ file, line, before, after, form, diff? }` | once the mutant has been computed AND this refusal reports it | present for `killed`, `survived`, and every mutant-phase inconclusive reason (`apply_hash_mismatch`, mutant-phase `pre_failed`/`aborted`, `restore_failed`, `worktree_original_tree_modified`, `timeout`); for a refusal from before any mutant run (reported before or during the run's own setup), see the [refusal reason shape](#refusal-reason-shape) table below -- it is present for exactly six of those reasons (`aborted`, `pre_failed`, `baseline_failed`, `target_changed_during_baseline`, `no_tests_executed`, `baseline_evidence_not_matched`, all past the dry run that computes the one mutant this run would apply) and absent for every other one. `diff` only for a `-p/--patch` mutant whose change is not fully shown by `before`/`after` alone (see above). A `mutation_probe.result` of `"not_run"` also reaches a `survived`-shaped mutant run whose classify step itself found zero-tests evidence (mutant-side, or the generic byte-identical fallback): there `mutant`/`mutation_probe` are present as usual for a mutant-phase outcome, `status`/`reason` are `"inconclusive"`/`"no_tests_executed"` in place of `"survived"`, and `mutation_probe.result` is forced to `"not_run"` even though the commands did run -- see the zero-tests paragraph above. |
-| `mutation_probe` | `{ mutant, verified_applied_via, result, restored_verified, reason?, expectation? }` | once the mutant has been computed | present for every reason `mutant` covers above (the same six setup-phase refusals, plus every mutant-phase outcome): `result` is always a string once this object is present, so a consumer reading `mutation_probe.result` does not have to shape-sniff `status` first; `"not_run"` for the six setup-phase refusals (`aborted`, `pre_failed`, `baseline_failed`, `target_changed_during_baseline`, `no_tests_executed`, `baseline_evidence_not_matched`), `reason` naming which, and for the mutant-phase zero-tests override described just above. `expectation` (`"met"`/`"violated"`) is present only alongside a `result` of `"killed"` or `"survived"`: whether that actual outcome matched the `--expect` this mutant ran under (see the `--expect` paragraph above); absent for `"not_run"`/`"inconclusive"`, which measured nothing to compare against an expectation. ABSENT (both `result` and `expectation`) for every other setup-phase refusal (see the table below), none of which ever computed a mutant. See the mapping below for an implementer report. |
+| `mutant` | `{ file, line, before, after, form, diff? }` | once the mutant has been computed AND this refusal reports it | present for `killed`, `survived`, and every mutant-phase inconclusive reason (`apply_hash_mismatch`, mutant-phase `pre_failed`/`aborted`, `restore_failed`, `worktree_original_tree_modified`, `timeout`); for a refusal from before any mutant run (reported before or during the run's own setup), see the [refusal reason shape](#refusal-reason-shape) table below -- it is present for exactly seven of those reasons (`aborted`, `pre_failed`, `baseline_failed`, `target_changed_during_baseline`, `no_tests_executed`, `baseline_evidence_not_matched`, `pycache_isolation_failed`, all past the dry run that computes the one mutant this run would apply) and absent for every other one. `diff` only for a `-p/--patch` mutant whose change is not fully shown by `before`/`after` alone (see above). A `mutation_probe.result` of `"not_run"` also reaches a `survived`-shaped mutant run whose classify step itself found zero-tests evidence (mutant-side, or the generic byte-identical fallback): there `mutant`/`mutation_probe` are present as usual for a mutant-phase outcome, `status`/`reason` are `"inconclusive"`/`"no_tests_executed"` in place of `"survived"`, and `mutation_probe.result` is forced to `"not_run"` even though the commands did run -- see the zero-tests paragraph above. |
+| `mutation_probe` | `{ mutant, verified_applied_via, result, restored_verified, reason?, expectation? }` | once the mutant has been computed | present for every reason `mutant` covers above (the same seven setup-phase refusals, plus every mutant-phase outcome): `result` is always a string once this object is present, so a consumer reading `mutation_probe.result` does not have to shape-sniff `status` first; `"not_run"` for the seven setup-phase refusals (`aborted`, `pre_failed`, `baseline_failed`, `target_changed_during_baseline`, `no_tests_executed`, `baseline_evidence_not_matched`, `pycache_isolation_failed`), `reason` naming which, and for the mutant-phase zero-tests override described just above. `expectation` (`"met"`/`"violated"`) is present only alongside a `result` of `"killed"` or `"survived"`: whether that actual outcome matched the `--expect` this mutant ran under (see the `--expect` paragraph above); absent for `"not_run"`/`"inconclusive"`, which measured nothing to compare against an expectation. ABSENT (both `result` and `expectation`) for every other setup-phase refusal (see the table below), none of which ever computed a mutant. See the mapping below for an implementer report. |
 | `baseline` | `{ exitCode, durationMs, logPath, timedOut }` | once the baseline has run | absent for `mutant_not_applicable` and any earlier refusal, and for the baseline-phase `pre_failed`/`aborted` (the baseline itself never ran: the `--pre` ahead of it did); `exitCode` is unchanged by `--pass-regex` -- it is always the baseline's real exit code, kept as data even once the regex, not this field, decides `status`/`reason` (see `--pass-regex` above) |
 | `test` | `{ command, exitCode, durationMs, timedOut, stdoutTail, stderrTail, logPath, env? }` | once the mutant run has happened | `env` only when at least one `--env NAME=VALUE` was given: the overrides this run applied, redacted (see `env` below); `exitCode` is likewise unchanged by `--pass-regex` -- the field that distinguishes a mutant run that crashed (no output on either stream) from a genuine test failure once the regex is what decides `killed`/`survived` |
 | `env` | `Record<string, string>` | whenever at least one `--env NAME=VALUE` was given | echoed once at the run level, independent of which phase actually ran: present on every status including `baseline_failed` and the other baseline-phase refusals, none of which reach a `test` phase to carry their own `test.env`. Both `env` and `test.env` redact a value whose NAME carries `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`/`CREDENTIALS`, or `KEY` as its own `_`-delimited segment (case-insensitive; the segment must sit at the start or end of the name, or between two underscores), replacing it with the literal string `"<redacted>"` and keeping the name visible: `API_TOKEN`, `TOKEN`, `MY_SECRET_VALUE` redact, but `TOKENIZER_MODEL` and `KEYBOARD` do not (the recognized word is a substring of a longer segment, not a segment of its own). Every other value is echoed verbatim (never the whole merged environment). This redaction covers only these two echoes (`env` and `test.env`); it does not, and cannot, redact a secret the test command itself prints -- that value appears verbatim wherever the command's own output does (`test.stdoutTail`/`test.stderrTail` above, and the exec log `test.logPath` links to), the same as it would running that command directly. `--env` is not wired into `--plan` (combining the two is a usage error). |
@@ -2327,7 +2333,7 @@ above.
 | `baseline_evidence_not_matched` | present | present | `--require-baseline-evidence <regex>` was given and did not match the baseline's own output |
 | `pycache_isolation_failed` | present | present | this run has at least one Python (`.py`) target and creating its isolated `PYTHONPYCACHEPREFIX` directory failed (an unwritable or full log directory); see "Python bytecode cache" above |
 
-The six `present` rows are exactly the refusals that fire past the dry
+The seven `present` rows are exactly the refusals that fire past the dry
 run: `openRunSetup` computes the one mutant this run would apply (the
 `beforeBaseline` hook) BEFORE the baseline runs, so every refusal from
 that point on already has it to report; every `absent` row above fires
@@ -3000,25 +3006,67 @@ log directory), `probe` refuses rather than silently falling back to
 the ambient, potentially-stale cache -- reported as `reason:
 "pycache_isolation_failed"`, `exit 2`, the one new named reason this
 change adds to the refusal contract; the JSON envelope's field set, the
-default isolation mode, and every other exit code are unchanged.
-`PYTHONPYCACHEPREFIX` is merged on top of any `--env` override the
-caller already gave, never replacing it. Applies to CPython only: any
-other language's own compile/bytecode cache (Ruby's YJIT, a JVM
-language's class cache, and so on) is a known, named limit of this
-release, not addressed here.
+default isolation mode, and every other exit code are unchanged. Applies
+to CPython only: any other language's own compile/bytecode cache
+(Ruby's YJIT, a JVM language's class cache, and so on) is a known,
+named limit of this release, not addressed here. `PYTHONPYCACHEPREFIX`
+itself requires CPython 3.8 or newer; on an older interpreter the
+variable is silently ignored (not detected, not refused), so the
+isolation mechanism this section describes has no effect there -- a
+known, named limit alongside the other-languages one above, not
+otherwise mitigated.
+
+The chosen mechanism has one cost of its own, not shared by (a) or (c):
+the test command's own process runs under a bytecode-cache location it
+would never see outside `probe`. A test suite that itself asserts on
+`__pycache__`'s placement, or reads `sys.pycache_prefix`/
+`PYTHONPYCACHEPREFIX` and expects a particular value or absence, behaves
+differently under `probe` than it would standalone -- and the one
+failure mode that follows is a RED BASELINE (`reason:
+"baseline_failed"`, no verdict at all), never a wrong verdict: the
+mechanism does not silently mis-report `killed`/`survived`, it makes the
+baseline itself fail before any mutant is even applied. Because that
+failure can otherwise look like an unrelated test bug, every run with a
+Python target pushes one `warnings` entry naming the injected
+`PYTHONPYCACHEPREFIX` variable up front (see "Output shape" above for
+where `warnings` lands in the envelope), so a red baseline on such a run
+is diagnosable from the envelope alone.
+
+A caller's own `--env PYTHONPYCACHEPREFIX=...` names a specific, shared
+cache location the caller controls (to inspect what got compiled,
+say), rather than an ordinary override this mechanism should just fold
+in: merging this package's own per-invocation directory on top of it, as
+every other `--env` override normally would be, would silently discard
+the caller's value and make the envelope's `test.env` (which echoes
+`--env` verbatim) misreport what the child process actually saw.
+`probe` instead honours it: a `--env PYTHONPYCACHEPREFIX=...` given by
+the caller SKIPS this run's own per-invocation isolation entirely (the
+baseline and every mutant's own run all share that one caller-named
+directory instead), with a `warnings` entry naming the hazard and the
+caller's own value -- reintroducing the same `(mtime, size)` shadowing
+hazard this mechanism otherwise closes, unless the caller manages that
+shared directory themselves (clearing it between runs, for instance).
+Every other `--env` override reaches the child unaffected either way.
 
 `doctor` surfaces the same condition before a probe run, rather than
 only after a wrong verdict: `agent-primitives doctor --target
-<path>[,<path>...]` reports a `python-bytecode-cache` check for every
-`.py` path among the given targets that has a co-located `__pycache__`
-sitting next to it. The check is informational, naming the RESOLUTION
-(that `probe` isolates its own runs against exactly this target
-automatically) rather than telling the operator to act -- it exists so
-the condition is visible up front, and so an operator running the
-target's own test command directly (outside `probe`) knows that
-co-located cache still applies to that separate run. The check is
-omitted entirely (not reported as passing) when no `--target` is given,
-or when none of the given targets are `.py` files.
+<path>[,<path>...]` reports a `python-bytecode-cache` check, always
+`ok: true` (informational, never a hazard the operator must act on), for
+every `.py` path among the given targets. When `python3` is on `PATH`,
+the check resolves each target's REAL cache path the same way CPython's
+own import machinery would (`importlib.util.cache_from_source`), so a
+host whose `python3` redirects `sys.pycache_prefix` elsewhere by default
+(macOS's own system `python3` does) is still checked accurately, rather
+than assumed to be a co-located `__pycache__`; when `python3` is not on
+`PATH`, the check falls back to that co-located guess and names the
+fallback in its own detail. Either way it names the RESOLUTION (that
+`probe` isolates its own runs against exactly this target automatically)
+rather than telling the operator to act -- it exists so the condition is
+visible up front, and so an operator running the target's own test
+command directly (outside `probe`) knows that cache still applies to
+that separate run. The check is omitted entirely (not reported at all)
+when no `--target` is given, or when none of the given targets are `.py`
+files.
 
 ## Output shape
 

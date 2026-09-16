@@ -97,8 +97,15 @@ leave that pair unchanged, reusing stale bytecode in either direction.
 Nothing to configure; the one failure mode (the isolation directory
 itself could not be created) refuses with `reason:
 "pycache_isolation_failed"`, `exit 2`, rather than risk a wrong verdict.
-See the README's "Python bytecode cache" section for the trade-off
-against the mechanisms not chosen.
+This has one cost: a test command that itself asserts on `__pycache__`
+placement or reads `sys.pycache_prefix`/`PYTHONPYCACHEPREFIX` behaves
+differently under `probe` than standalone, which surfaces as a RED
+BASELINE (`reason: "baseline_failed"`), never a wrong verdict --
+`warnings` names the injected variable on every such run so a red
+baseline is diagnosable. Requires CPython 3.8+ for
+`PYTHONPYCACHEPREFIX` itself; on an older interpreter the variable is
+silently ignored. See the README's "Python bytecode cache" section for
+the trade-off against the mechanisms not chosen.
 
 ## 4. Doctor
 
