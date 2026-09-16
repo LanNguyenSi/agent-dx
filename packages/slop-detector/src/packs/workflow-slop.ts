@@ -738,44 +738,306 @@ function isGateCommand(raw: string): boolean {
   return /\bnpm\s+audit\b/.test(raw) && AUDIT_GATE_RE.test(raw);
 }
 
-interface LogicalLine {
+// ─────────────────────── run-block normalisation ───────────────────────
+//
+// One normalisation step stands between a gate step's raw `run:` source
+// slice and every check in this rule: `normalizeRunBlock` below. No check
+// reads the raw block text any more. Before it existed the analysis was
+// comment-blind and quote-blind, and each of those was a bypass: a
+// `#`-commented `exit $STATUS` satisfied the non-zero-verdict
+// requirement, a comment merely naming `--audit-level=high` moved the
+// gate boundary so the `set +e` half never ran at all, a gate command
+// written only inside a comment counted as a present gate, and a
+// `set +e` inside an `echo "..."` string was flagged as a real one.
+
+/**
+ * One logical line of a `run:` block after normalisation: physical lines
+ * joined across backslash continuations, then the trailing shell comment
+ * stripped. `offsets[i]` is the absolute file offset of `text[i]`,
+ * tracked per character rather than as a single line-start offset
+ * because joining a continuation drops the backslash and the newline, so
+ * a character index past a join no longer differs from its file offset
+ * by a constant.
+ */
+interface NormalizedLine {
   text: string;
-  startOffset: number;
+  offsets: number[];
+  /** 0-based position of this logical line inside its run block. */
+  lineIndex: number;
 }
 
 /**
- * `raw` (a `run:` scalar's raw source slice) split into logical lines: a
- * physical line ending in a backslash is joined onto the next physical
- * line (the trailing backslash itself is dropped, nothing else is
- * inserted, matching bash's own backslash-newline removal), so a gate
- * command's `||`/`;` tail written on a continuation line is inspected as
- * part of the same logical line it actually runs on. `baseOffset` is
- * `raw`'s own start offset in the full file text, so each logical line's
- * `startOffset` is an absolute file offset usable for violation locations.
+ * One shell statement cut out of a normalized logical line at an
+ * unquoted `;`, `&&`, `||` or `|` boundary. `line` is the logical line it
+ * came from, kept because the `||` and `; true`/`; :` tail checks are
+ * defined over the gate's whole logical line rather than one statement;
+ * `indexInLine` is this statement's first character inside `line.text`.
  */
-function buildLogicalLines(raw: string, baseOffset: number): LogicalLine[] {
-  const physicalLines = raw.split("\n");
-  const lines: LogicalLine[] = [];
+interface NormalizedStatement {
+  text: string;
+  line: NormalizedLine;
+  indexInLine: number;
+}
+
+/** The absolute file offset of `line.text[index]`. */
+function lineOffsetAt(line: NormalizedLine, index: number): number {
+  return line.offsets[index] ?? line.offsets[line.offsets.length - 1] ?? 0;
+}
+
+/** The absolute file offset of `statement.text[index]`. */
+function statementOffsetAt(
+  statement: NormalizedStatement,
+  index: number,
+): number {
+  return lineOffsetAt(statement.line, statement.indexInLine + index);
+}
+
+type QuoteContext = "bare" | "single" | "double";
+
+/**
+ * The quoting context of every character in `text`, from the same
+ * parity-and-escape scan `stripTrailingComment` uses (a backslash inside
+ * a double-quoted span escapes the next character; nothing is special
+ * inside single quotes). A quote delimiter is reported as part of the
+ * span it opens or closes, so a match starting on the opening quote
+ * counts as quoted.
+ */
+function quoteContexts(text: string): QuoteContext[] {
+  const contexts: QuoteContext[] = new Array<QuoteContext>(text.length).fill(
+    "bare",
+  );
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inDouble && ch === "\\") {
+      contexts[i] = "double";
+      if (i + 1 < text.length) contexts[i + 1] = "double";
+      i++;
+      continue;
+    }
+    if (ch === "'" && !inDouble) {
+      contexts[i] = "single";
+      inSingle = !inSingle;
+      continue;
+    }
+    if (ch === '"' && !inSingle) {
+      contexts[i] = "double";
+      inDouble = !inDouble;
+      continue;
+    }
+    contexts[i] = inSingle ? "single" : inDouble ? "double" : "bare";
+  }
+  return contexts;
+}
+
+/**
+ * Which quoting contexts a match may start in. Rather than blanking every
+ * quoted span for every search, this follows the shell:
+ *
+ * - `"command"` requires a bare start. A command word written inside
+ *   quotes is data, not program text, so `echo "set +e"` is not a
+ *   `set +e` and `echo "exit 1"` is not an exit verdict.
+ * - `"expansion"` also accepts a double-quoted start, because `$?` and
+ *   `$VAR` still expand inside double quotes: `STATUS="$?"` is a real
+ *   status capture and `exit "$STATUS"` a real verdict, while a
+ *   single-quoted `'$?'` is inert.
+ */
+type MatchKind = "command" | "expansion";
+
+function allowedContext(ctx: QuoteContext, kind: MatchKind): boolean {
+  if (ctx === "bare") return true;
+  return kind === "expansion" && ctx === "double";
+}
+
+interface UnquotedMatch {
+  index: number;
+  match: string;
+}
+
+/**
+ * Every match of `re` in `text` at or after `from` whose start sits in a
+ * quoting context the match can take effect in (see `MatchKind`), in
+ * order. `re` need not be global; a non-global pattern is recompiled with
+ * the flag rather than mutated.
+ */
+function unquotedMatches(
+  text: string,
+  re: RegExp,
+  kind: MatchKind,
+  from = 0,
+): UnquotedMatch[] {
+  const contexts = quoteContexts(text);
+  const global = re.global ? re : new RegExp(re.source, `${re.flags}g`);
+  return findAllRegex(text, global)
+    .filter(
+      (m) =>
+        m.index >= from && allowedContext(contexts[m.index] ?? "bare", kind),
+    )
+    .map((m) => ({ index: m.index, match: m.match }));
+}
+
+function firstUnquoted(
+  text: string,
+  re: RegExp,
+  kind: MatchKind,
+  from = 0,
+): UnquotedMatch | undefined {
+  return unquotedMatches(text, re, kind, from)[0];
+}
+
+/**
+ * `raw` (a `run:` scalar's raw source slice) as comment-free logical
+ * lines: a physical line ending in a backslash is joined onto the next
+ * one (the trailing backslash itself is dropped, nothing else inserted,
+ * matching bash's own backslash-newline removal), so a gate command's
+ * `||`/`;` tail written on a continuation line is inspected as part of
+ * the logical line it actually runs on; then the joined line's trailing
+ * shell comment is stripped. `baseOffset` is `raw`'s own start offset in
+ * the full file text, so every recorded offset is an absolute file offset
+ * usable for a violation location.
+ */
+function normalizeLogicalLines(
+  raw: string,
+  baseOffset: number,
+): NormalizedLine[] {
+  const lines: NormalizedLine[] = [];
+  const pushLine = (joined: string, joinedOffsets: number[]) => {
+    const commentFree = stripTrailingComment(joined);
+    lines.push({
+      text: commentFree,
+      offsets: joinedOffsets.slice(0, commentFree.length),
+      lineIndex: lines.length,
+    });
+  };
   let offset = baseOffset;
-  let currentText = "";
-  let currentStart = offset;
-  let building = false;
-  for (const physical of physicalLines) {
+  let joined = "";
+  let joinedOffsets: number[] = [];
+  let continuing = false;
+  for (const physical of raw.split("\n")) {
     const stripped = physical.endsWith("\r") ? physical.slice(0, -1) : physical;
-    if (!building) currentStart = offset;
-    if (stripped.endsWith("\\")) {
-      currentText += stripped.slice(0, -1);
-      building = true;
+    const continues = stripped.endsWith("\\");
+    const keep = continues ? stripped.length - 1 : stripped.length;
+    for (let i = 0; i < keep; i++) {
+      joined += stripped[i];
+      joinedOffsets.push(offset + i);
+    }
+    if (continues) {
+      continuing = true;
     } else {
-      currentText += stripped;
-      lines.push({ text: currentText, startOffset: currentStart });
-      currentText = "";
-      building = false;
+      pushLine(joined, joinedOffsets);
+      joined = "";
+      joinedOffsets = [];
+      continuing = false;
     }
     offset += physical.length + 1;
   }
-  if (building) lines.push({ text: currentText, startOffset: currentStart });
+  if (continuing) pushLine(joined, joinedOffsets);
   return lines;
+}
+
+/**
+ * `line` cut into statements at every unquoted `;`, `&&`, `||` or `|`
+ * boundary, so "before the gate command" and "after the gate command"
+ * are decided on real command boundaries instead of raw character
+ * distance. Whitespace-only pieces are dropped (a comment-only line
+ * strips to one), so a statement list only ever holds real commands.
+ */
+function splitStatements(line: NormalizedLine): NormalizedStatement[] {
+  const contexts = quoteContexts(line.text);
+  const pieces: Array<{ start: number; end: number }> = [];
+  let start = 0;
+  let i = 0;
+  while (i < line.text.length) {
+    if (contexts[i] !== "bare") {
+      i++;
+      continue;
+    }
+    const pair = line.text.slice(i, i + 2);
+    const separatorLength =
+      pair === "&&" || pair === "||"
+        ? 2
+        : line.text[i] === ";" || line.text[i] === "|"
+          ? 1
+          : 0;
+    if (separatorLength === 0) {
+      i++;
+      continue;
+    }
+    pieces.push({ start, end: i });
+    i += separatorLength;
+    start = i;
+  }
+  pieces.push({ start, end: line.text.length });
+  return pieces
+    .map((piece) => ({
+      text: line.text.slice(piece.start, piece.end),
+      line,
+      indexInLine: piece.start,
+    }))
+    .filter((statement) => statement.text.trim().length > 0);
+}
+
+/**
+ * The single input every `audit-gate-shape` check consumes: one `run:`
+ * block's raw source slice turned into comment-free shell statements
+ * (see the section header above for what each bypass looked like before
+ * this existed).
+ */
+function normalizeRunBlock(
+  raw: string,
+  baseOffset: number,
+): NormalizedStatement[] {
+  const statements: NormalizedStatement[] = [];
+  for (const line of normalizeLogicalLines(raw, baseOffset)) {
+    statements.push(...splitStatements(line));
+  }
+  return statements;
+}
+
+/**
+ * True when `statement` runs before (respectively after) `gate` in the
+ * same normalized block: an earlier (later) logical line, or an earlier
+ * (later) statement on the gate's own logical line. Ordered by
+ * `lineIndex`/`indexInLine` rather than by position in the statement
+ * array, so the comparison says what it means independently of how the
+ * array was assembled.
+ */
+function runsBeforeGate(
+  statement: NormalizedStatement,
+  gate: NormalizedStatement,
+): boolean {
+  if (statement.line.lineIndex !== gate.line.lineIndex) {
+    return statement.line.lineIndex < gate.line.lineIndex;
+  }
+  return statement.indexInLine < gate.indexInLine;
+}
+
+function runsAfterGate(
+  statement: NormalizedStatement,
+  gate: NormalizedStatement,
+): boolean {
+  if (statement.line.lineIndex !== gate.line.lineIndex) {
+    return statement.line.lineIndex > gate.line.lineIndex;
+  }
+  return statement.indexInLine > gate.indexInLine;
+}
+
+/**
+ * The first comment-free statement in a normalized block that actually
+ * invokes the npm-audit gate command. This, not a search over the raw
+ * block text, is what decides whether a step is a gate step at all: a
+ * `# TODO: restore npm audit --audit-level=high` line is a comment, not
+ * a gate.
+ */
+function findGateStatement(
+  statements: NormalizedStatement[],
+): NormalizedStatement | undefined {
+  return statements.find((statement) => isGateCommand(statement.text));
+}
+
+function blockHasGateCommand(statements: NormalizedStatement[]): boolean {
+  return findGateStatement(statements) !== undefined;
 }
 
 /**
@@ -830,47 +1092,79 @@ interface AuditFinding {
 const NONZERO_EXIT_VERDICT_RE =
   /\bexit\s+(?:[1-9]\d*\b|"?\$\{?(?:STATUS|[A-Za-z_][A-Za-z0-9_]*|\?)\}?"?)/;
 
+const SET_PLUS_E_RE = /\bset\s+\+e\b/;
+const SET_MINUS_E_RE = /\bset\s+-e\b/;
+const STATUS_CAPTURE_RE = /\$\?/;
+const OR_OPERATOR_RE = /\|\|/g;
+// Not end-anchored (`; true ; echo done` is still caught mid-line), only
+// boundary-checked so it does not fire inside a longer token (`; truest`).
+const TAIL_NOOP_RE = /;\s*(true|:)(?=[\s;]|$)/;
+
 /**
- * Every neutralisation signal found in one gate step's `run:` block
- * (`raw`, the step's raw source slice, `baseOffset`-anchored). `raw` is
- * already confirmed by the caller to contain the `npm audit
- * --audit-level=(low|moderate|high|critical)` gate command
- * (`isGateCommand`).
+ * Every neutralisation signal found in one gate step's `run:` block,
+ * given that block's normalized statements (`normalizeRunBlock`): every
+ * check below reads comment-free, quote-aware text, never the raw block.
+ * The caller has already confirmed the block carries the `npm audit
+ * --audit-level=(low|moderate|high|critical)` gate command in a real
+ * statement (`blockHasGateCommand`).
  *
- * `set +e` is only flagged when it precedes the gate command AND the rest
- * of the block (after the gate command) does *not* all three of: capture
- * the gate's exit status (`$?`), restore `set -e` afterward, AND convert
- * that captured status into a non-zero step exit (`NONZERO_EXIT_VERDICT_RE`
- * above) — the shape a legitimate "classify the gate's own exit code" step
- * uses (see the canonical audit.yml fixture in this pack's tests/README):
+ * `set +e` is only flagged when it precedes the gate command AND the
+ * statements after the gate command do *not* all three of: capture the
+ * gate's exit status (`$?`), restore `set -e`, AND convert that captured
+ * status into a non-zero step exit (`NONZERO_EXIT_VERDICT_RE` above) —
+ * the shape a legitimate "classify the gate's own exit code" step uses
+ * (see the canonical audit.yml fixture in this pack's tests/README):
  * `set +e`, run the gate command, `STATUS=$?`, `set -e`, then
  * `exit $STATUS` (or an equivalent nonzero exit) on a failing status.
  * Capturing and restoring alone is not enough: `set +e; ...; STATUS=$?;
  * set -e; exit 0` (or an echo-only branch that never exits nonzero) still
- * surfaces nothing, and both scanned clean before this check was added
- * (a real finding from `audit-gate-shape` review round 1). A bare `set +e`
- * with no capture-and-restore-and-verdict afterward is the actual
- * neutralisation this half of the rule exists to catch.
+ * surfaces nothing. A bare `set +e` with no
+ * capture-and-restore-and-verdict afterward is the actual neutralisation
+ * this half of the rule exists to catch.
+ *
+ * The `||` and `; true`/`; :` checks run on the part of the gate's own
+ * logical line that comes *after* the gate command, so text before it
+ * (`cd api; true && npm audit --audit-level=high`) is never read as a
+ * tail on the gate.
  */
 function checkGateNeutralization(
-  raw: string,
-  baseOffset: number,
+  statements: NormalizedStatement[],
 ): AuditFinding[] {
   const findings: AuditFinding[] = [];
-  const gateMatch = raw.match(AUDIT_GATE_RE);
-  const gateEndInRaw = gateMatch
-    ? (gateMatch.index ?? 0) + gateMatch[0].length
-    : 0;
+  const gate = findGateStatement(statements);
+  if (!gate) return findings;
+  const gateFlag = gate.text.match(AUDIT_GATE_RE);
+  const gateEndInStatement = gateFlag
+    ? (gateFlag.index ?? 0) + gateFlag[0].length
+    : gate.text.length;
 
-  const setPlusEIndex = raw.search(/\bset\s+\+e\b/);
-  if (setPlusEIndex !== -1 && setPlusEIndex < gateEndInRaw) {
-    const after = raw.slice(gateEndInRaw);
-    const capturesStatus = /\$\?/.test(after);
-    const restoresStrict = /\bset\s+-e\b/.test(after);
-    const convertsToNonzeroExit = NONZERO_EXIT_VERDICT_RE.test(after);
+  const setPlusE = (() => {
+    for (const statement of statements) {
+      if (!runsBeforeGate(statement, gate)) continue;
+      const hit = firstUnquoted(statement.text, SET_PLUS_E_RE, "command");
+      if (hit) return { statement, index: hit.index };
+    }
+    return undefined;
+  })();
+  if (setPlusE) {
+    const after = [
+      gate.text.slice(gateEndInStatement),
+      ...statements
+        .filter((statement) => runsAfterGate(statement, gate))
+        .map((statement) => statement.text),
+    ];
+    const capturesStatus = after.some((text) =>
+      firstUnquoted(text, STATUS_CAPTURE_RE, "expansion"),
+    );
+    const restoresStrict = after.some((text) =>
+      firstUnquoted(text, SET_MINUS_E_RE, "command"),
+    );
+    const convertsToNonzeroExit = after.some((text) =>
+      firstUnquoted(text, NONZERO_EXIT_VERDICT_RE, "command"),
+    );
     if (!capturesStatus || !restoresStrict || !convertsToNonzeroExit) {
       findings.push({
-        offset: baseOffset + setPlusEIndex,
+        offset: statementOffsetAt(setPlusE.statement, setPlusE.index),
         matched: "set +e",
         message:
           !capturesStatus || !restoresStrict
@@ -880,44 +1174,40 @@ function checkGateNeutralization(
     }
   }
 
-  const logicalLines = buildLogicalLines(raw, baseOffset);
-  const gateLineMatch = logicalLines.find((l) => isGateCommand(l.text));
-  if (gateLineMatch) {
-    const stripped = stripTrailingComment(gateLineMatch.text);
-    const strippedGateMatch = stripped.match(AUDIT_GATE_RE);
-    const afterGateIdx = strippedGateMatch
-      ? (strippedGateMatch.index ?? 0) + strippedGateMatch[0].length
-      : 0;
-    const tail = stripped.slice(afterGateIdx);
+  const gateLine = gate.line;
+  const tailStart = gate.indexInLine + gateEndInStatement;
 
-    let badOrOffset: number | undefined;
-    for (const m of findAllRegex(tail, /\|\|/g)) {
-      const rest = tail.slice(m.index + 2).trimStart();
-      if (!/^(exit|false|return)\b/.test(rest)) {
-        badOrOffset = m.index;
-        break;
-      }
-    }
-    if (badOrOffset !== undefined) {
+  for (const m of unquotedMatches(
+    gateLine.text,
+    OR_OPERATOR_RE,
+    "command",
+    tailStart,
+  )) {
+    const rest = gateLine.text.slice(m.index + 2).trimStart();
+    if (!/^(exit|false|return)\b/.test(rest)) {
       findings.push({
-        offset: gateLineMatch.startOffset + afterGateIdx + badOrOffset,
-        matched: tail.slice(badOrOffset, badOrOffset + 12).trimEnd(),
+        offset: lineOffsetAt(gateLine, m.index),
+        matched: gateLine.text.slice(m.index, m.index + 12).trimEnd(),
         message:
           "`||` appears after the `npm audit --audit-level=...` gate command on its logical line, and the right-hand side is not `exit`/`false`/`return`: a failing gate no longer fails the step.",
       });
+      break;
     }
+  }
 
-    // Not end-anchored (`; true ; echo done` is still caught mid-line), only
-    // boundary-checked so it does not fire inside a longer token (`; truest`).
-    const tailMatch = stripped.match(/;\s*(true|:)(?=[\s;]|$)/);
-    if (tailMatch && tailMatch.index !== undefined) {
-      findings.push({
-        offset: gateLineMatch.startOffset + tailMatch.index,
-        matched: tailMatch[0].trim(),
-        message:
-          "The gate line contains `; true` or `; :` after the `npm audit --audit-level=...` gate command: a neutralisation attempt that is ineffective under the runner's `bash -e` today (the step still fails on a nonzero gate exit), but becomes effective the moment a `set +e` is added earlier in this run block.",
-      });
-    }
+  const tailNoop = firstUnquoted(
+    gateLine.text,
+    TAIL_NOOP_RE,
+    "command",
+    tailStart,
+  );
+  if (tailNoop) {
+    findings.push({
+      offset: lineOffsetAt(gateLine, tailNoop.index),
+      matched: tailNoop.match.trim(),
+      message:
+        "The gate line contains `; true` or `; :` after the `npm audit --audit-level=...` gate command: a neutralisation attempt that is ineffective under the runner's `bash -e` today (the step still fails on a nonzero gate exit), but becomes effective the moment a `set +e` is added earlier in this run block.",
+    });
   }
 
   return findings;
@@ -994,8 +1284,18 @@ const auditGateShape: Rule = {
     }
     const steps: StepRunInfo[] = [];
     collectStepRuns(doc, steps);
-    const gateSteps = steps.filter((step) =>
-      isGateCommand(file.text.slice(step.runRange[0], step.runRange[1])),
+    // Every step's run block goes through the one normalisation step
+    // (`normalizeRunBlock`) before any check, including the check that
+    // decides whether the step is a gate step at all.
+    const stepBlocks = steps.map((step) => ({
+      step,
+      statements: normalizeRunBlock(
+        file.text.slice(step.runRange[0], step.runRange[1]),
+        step.runRange[0],
+      ),
+    }));
+    const gateSteps = stepBlocks.filter((entry) =>
+      blockHasGateCommand(entry.statements),
     );
 
     if (gateSteps.length === 0) {
@@ -1011,9 +1311,8 @@ const auditGateShape: Rule = {
     }
 
     const violations: Violation[] = [];
-    for (const step of gateSteps) {
-      const raw = file.text.slice(step.runRange[0], step.runRange[1]);
-      for (const finding of checkGateNeutralization(raw, step.runRange[0])) {
+    for (const { step, statements } of gateSteps) {
+      for (const finding of checkGateNeutralization(statements)) {
         violations.push(
           makeAuditViolation(
             auditGateShape,

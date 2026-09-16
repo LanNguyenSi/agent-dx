@@ -37,10 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `actions/cache@v4`, `actions/download-artifact@v4`,
     `actions/setup-go@v5`, `actions/configure-pages@v5`,
     `actions/deploy-pages@v4`, `peter-evans/create-pull-request@v6`, and
-    `pnpm/action-setup@v4` are all `node20` at those tags (the last eight
-    added in review round 2 after a fleet rescan turned up live majors
-    the original list missed, see the round-2 fleet-scan summary in this
-    task's run record). `softprops/action-gh-release@v1` was checked and
+    `pnpm/action-setup@v4` are all `node20` at those tags. Every entry was
+    reached the same way: scan a corpus of real workflow files for live
+    `uses:` majors, then fetch each candidate's own `action.yml` and read
+    `runs.using`. `softprops/action-gh-release@v1` was checked and
     deliberately excluded: its `action.yml` reports `runs.using: node16`,
     not `node20`, at that tag (its `@v2` major is `node20` and is
     listed). The `docker/*`-owned actions above are JS actions
@@ -59,50 +59,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     audit` specifically (a `pnpm audit` or non-npm audit command is
     reported as a missing gate rather than evaluated; disable this one
     rule per repo via `rules: { "workflow-slop/audit-gate-shape": {
-    enabled: false } }` while keeping the rest of the pack). A prior
-    sweep added a two-step `audit.yml` (a non-blocking report step, then
-    a `npm audit --audit-level=high` gate step) to seven repos across the
-    workspace; nothing then stopped a later edit from quietly removing
-    the protection while keeping the job green. This rule flags (a) no
-    `run:` step anywhere in the file invoking `npm audit` with a
+    enabled: false } }` while keeping the rest of the pack). A repo's
+    `audit.yml` commonly pairs a non-blocking report step with a
+    dedicated `npm audit --audit-level=high` gate step that fails the job
+    on a matching advisory; nothing stops a later edit from quietly
+    removing that protection while keeping the job green. This rule flags
+    (a) no `run:` step anywhere in the file invoking `npm audit` with a
     recognised `--audit-level` (`low`/`moderate`/`high`/`critical` --
     `moderate`/`low` are stronger gates than `high`/`critical` and also
-    satisfy it) (missing gate), and (b) a gate command that is present
-    but neutralised: a `||` after the gate command on its logical line
-    (backslash continuations joined first, a trailing comment stripped
-    via a quote-parity scan with escaped-double-quote handling) whose
-    right-hand side is not `exit`/`false`/`return`; `set +e` before the
-    gate command whose rest of the block does not all three of capture
-    the exit status (`$?`), restore `set -e`, AND actually exit non-zero
-    on that captured status (`exit $STATUS`/`exit <nonzero>`, not just
-    `exit 0` or an echo) afterward; `continue-on-error` set on the gate
-    step or its enclosing job to anything not provably `false` (a literal
-    `true`, the string `"true"`, or an unresolved `${{ }}` expression all
-    count); or a gate line containing `; true`/`; :` after the gate
-    command (no longer required to be the line's very last token). The
-    `set +e` check is shaped around a real, legitimate pattern found in
-    the fleet's own `audit.yml` (`set +e`, run the gate, `STATUS=$?`,
-    `set -e`, `exit $STATUS`) so that shape is the negative-control
-    fixture, not a false positive; a bare `set +e` with no
-    capture-restore-and-verdict afterward is what the check actually
-    catches. Deliberately conservative (a legitimate `|| echo "logged"`
-    directly on the gate line still flags); a prior attempt at this same
-    rule failed review repeatedly on shell-boundary false negatives from
-    a tail-anchored `|| true$`-style pattern, which is why this version
-    joins continuations and strips comments before matching instead.
-    **Round-2 review fix:** round 1's `set +e` check accepted a captured
-    `$?` restored under `set -e` as sufficient even when nothing
-    afterward turned it into a non-zero exit; `set +e; npm audit
-    --audit-level=high; STATUS=$?; set -e; exit 0` (and the equivalent
-    with only an `echo` of `$STATUS`) scanned clean, which is the same
-    shape a `set +e`-based neutralisation of a real fleet `audit.yml`
-    (its `exit 1` flipped to `exit 0`) would also produce. The check now
-    additionally requires a non-zero-exit verdict in the post-gate
-    remainder of the run block. All ten of the fleet's real `audit.yml`
-    gate steps already carry that verdict (`exit [1-9]` after the
-    capture-and-restore), confirmed by rescanning them with the fixed
-    rule, so this tightening produced no new findings against the fleet
-    itself.
+    satisfy it), and (b) a gate command that is present but neutralised:
+    a `||` after the gate command on the gate's own logical line whose
+    right-hand side is not `exit`/`false`/`return`; `set +e` in a
+    statement before the gate command when the statements after it do
+    not all three of capture the exit status (`$?`), restore `set -e`,
+    AND exit non-zero on that captured status (`exit $STATUS`/`exit
+    <nonzero>`, not just `exit 0` or an echo); `continue-on-error` set on
+    the gate step or its enclosing job to anything not provably `false`
+    (a literal `true`, the string `"true"`, or an unresolved `${{ }}`
+    expression all count); or `; true`/`; :` after the gate command on
+    its logical line.
+  - Every `audit-gate-shape` check consumes one normalised view of the
+    run block instead of its raw text, and there is no second path:
+    physical lines joined across backslash continuations, each logical
+    line's trailing shell comment stripped by a quote-parity scan with
+    escaped-double-quote handling, each line then cut into statements at
+    unquoted `;`/`&&`/`||`/`|` boundaries, and each match honoured only
+    where the shell would honour it (a command word such as `set +e` or
+    `exit 1` must start outside any quoted span, so `echo "set +e"` is
+    data; an expansion such as `$?` also counts inside double quotes, so
+    `STATUS="$?"` is a real capture). That view is what decides which
+    statement is the gate command, so a `# TODO: restore npm audit
+    --audit-level=high` line is a comment rather than a present gate, a
+    `# exit $STATUS` is not an exit verdict, and a `; true` sitting
+    before the gate command (`cd api; true && npm audit
+    --audit-level=high`) is not a tail on it. Each of those inputs has
+    its own fixture asserting the exact finding message, and each was
+    measured against a raw-text analysis of the same block first, where
+    the three neutralisations scanned clean and the quoted-span cases
+    were false positives.
+  - The `set +e` half is shaped around a legitimate pattern rather than
+    being a blanket ban: a step that classifies the gate's own exit code
+    runs `set +e`, runs the gate, captures `STATUS=$?`, restores
+    `set -e`, then exits non-zero on a failing status, and that shape is
+    a negative-control fixture (including one copied verbatim from a real
+    multi-branch gate step). Three gaps remain by construction and are
+    documented in the README: the verdict requirement is satisfied by any
+    single non-zero exit anywhere after the gate command, so a
+    multi-branch classifier that loses only its findings-branch exit
+    while keeping other non-zero branches still scans clean (pinned as a
+    limit by a fixture, not claimed as covered); `exit $VAR` is accepted
+    without proving `$VAR` is non-zero; and the rule only ever looks at
+    files named `audit.yml`/`audit.yaml`, so a gate living in another
+    workflow file is outside it. Deliberately conservative otherwise: a
+    legitimate `|| echo "logged"` directly on the gate line still flags.
 
 - New pack `workflow-slop` (off by default, opt in via `--pack
   workflow-slop` or `packs.workflow-slop: true`), rule

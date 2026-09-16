@@ -1284,4 +1284,156 @@ describe("workflow-slop/audit-gate-shape", () => {
       "No recognised npm-audit gate command was found",
     );
   });
+
+  // ── run-block normalisation ──
+  // Every check in this rule consumes `normalizeRunBlock`'s output
+  // (logical lines joined, trailing comments stripped per line,
+  // statements cut at unquoted `;`/`&&`/`||`/`|`, quoted spans respected
+  // per match kind) instead of the raw `run:` text. Each of the three
+  // positives below scanned CLEAN against the raw-text analysis these
+  // tests replaced, and the two negative controls below were false
+  // positives under it.
+
+  const NO_VERDICT_MESSAGE =
+    "nothing afterward turns that captured status back into a non-zero step exit";
+  const NO_CAPTURE_MESSAGE =
+    "without both capturing its exit status (`$?`) and restoring `set -e` afterward";
+  const MISSING_GATE_MESSAGE = "No recognised npm-audit gate command was found";
+  const TAIL_NOOP_MESSAGE = "; true` or `; :`";
+
+  it("flags the canonical gate shape with its exit verdict commented out (a `#`-commented `exit $STATUS` is not a verdict)", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    steps:",
+      "      - run: |",
+      "          set +e",
+      "          npm audit --audit-level=high",
+      "          STATUS=$?",
+      "          set -e",
+      "          # exit $STATUS",
+      '          echo "status=$STATUS"',
+    ].join("\n");
+    const v = ruleViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].matched).toBe("set +e");
+    expect(v[0].message).toContain(NO_VERDICT_MESSAGE);
+  });
+
+  it("flags a `set +e` gate whose gate boundary a comment naming --audit-level=high above it used to move", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    steps:",
+      "      - run: |",
+      "          # we gate at --audit-level=high",
+      "          set +e",
+      "          npm audit --audit-level=high",
+      "          echo done",
+    ].join("\n");
+    const v = ruleViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].matched).toBe("set +e");
+    expect(v[0].message).toContain(NO_CAPTURE_MESSAGE);
+  });
+
+  it("flags a gate command that exists only inside a comment as a MISSING gate, not a present one", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    steps:",
+      "      - run: |",
+      "          # TODO: restore npm audit --audit-level=high",
+      '          echo "audit reported"',
+    ].join("\n");
+    const v = ruleViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain(MISSING_GATE_MESSAGE);
+  });
+
+  it("negative control: `set +e` written only inside a quoted echo string is data, not a `set +e`", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    steps:",
+      "      - run: |",
+      '          echo "set +e"',
+      "          npm audit --audit-level=high",
+    ].join("\n");
+    expect(ruleViolations(text)).toHaveLength(0);
+  });
+
+  it("negative control: a `; true` BEFORE the gate command (cd api; true && npm audit ...) is not a tail on the gate", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    steps:",
+      "      - run: |",
+      "          cd api; true && npm audit --audit-level=high",
+    ].join("\n");
+    expect(ruleViolations(text)).toHaveLength(0);
+  });
+
+  it("negative control: a `||` inside the gate command's own quoted argument is not a neutralisation", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    steps:",
+      "      - run: |",
+      '          npm audit --audit-level=high --note="a || b"',
+    ].join("\n");
+    expect(ruleViolations(text)).toHaveLength(0);
+  });
+
+  it("comment stripping decides which logical line IS the gate line: a commented-out reference to the gate above the real, `; true`-tailed gate line", () => {
+    // Positive-direction pin on the stripper: with comments left in, the
+    // FIRST line matching the gate command is the comment, whose own
+    // post-gate tail is empty, so the real `; true` below it is never
+    // examined and the block scans clean. The `;` inside the comment sits
+    // BEFORE the gate command there, which is what makes this case
+    // discriminate (a comment whose `;` sits after the gate command would
+    // flag either way).
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    steps:",
+      "      - run: |",
+      "          # never append `; true` to npm audit --audit-level=high",
+      "          npm audit --audit-level=high ; true",
+    ].join("\n");
+    const v = ruleViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain(TAIL_NOOP_MESSAGE);
+    expect(v[0].matched).toBe("; true");
+  });
+
+  // ── real fleet shape, and the reach of the verdict requirement ──
+
+  const REAL_FLEET_AUDIT_YML = fs.readFileSync(
+    path.join(import.meta.dirname, "fixtures", "fleet-audit-real-shape.yml"),
+    "utf8",
+  );
+
+  it("negative control: the real fleet audit.yml shape (comment-heavy gate step: `|| true` in prose, four exit codes, a quoted `;`) is not flagged", () => {
+    expect(ruleViolations(REAL_FLEET_AUDIT_YML)).toHaveLength(0);
+  });
+
+  it("documented limit: flipping only the findings-branch `exit 1` to `exit 0` in the real fleet shape still scans clean, because ANY non-zero exit after the gate satisfies the verdict requirement (its `exit 2`/`exit 3` outage branches remain)", () => {
+    const neutralised = REAL_FLEET_AUDIT_YML.replace(
+      'read the report step above"\n            exit 1',
+      'read the report step above"\n            exit 0',
+    );
+    // Guard the flip itself: a fixture refresh that moves this line must
+    // fail here rather than silently turn the pin into a re-run of the
+    // negative control above.
+    expect(neutralised).not.toBe(REAL_FLEET_AUDIT_YML);
+    expect(ruleViolations(neutralised)).toHaveLength(0);
+  });
 });
