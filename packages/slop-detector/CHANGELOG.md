@@ -12,6 +12,138 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `workflow-slop` gains three rules closing the gap between a fleet
+  sweep fixing something by hand and nothing then guarding against it
+  recurring:
+  - `workflow-slop/node20-action-major`: flags any `uses:` value
+    (job-level or step-level, not inside a step's own `with:` input
+    block) whose `owner/repo@major` is on a data-driven Node-20 GitHub
+    Actions list, matched case-insensitively and tolerant of a trailing
+    prerelease-ish ref suffix (`@v4-beta` still resolves to major `v4`).
+    A prior fleet-wide sweep across the workspace's repos replaced every
+    Node-20-runtime action major (`actions/checkout@v4`,
+    `actions/setup-node@v4`, and others) with a newer major, but nothing
+    stopped a later workflow edit from reintroducing one (a copy-pasted
+    step from an old example, an unreviewed dependency bump). The list
+    lives in `src/data/node20-actions.ts` (not hardcoded rule logic):
+    each entry was verified by fetching that action's `action.yml` at
+    the moving major tag and reading `runs.using`, confirming
+    `actions/checkout@v4`, `actions/setup-node@v4`,
+    `softprops/action-gh-release@v2`, `actions/github-script@v7`,
+    `docker/build-push-action@v5`/`@v6`, `docker/login-action@v3`,
+    `docker/metadata-action@v5`, `docker/setup-buildx-action@v3`,
+    `astral-sh/setup-uv@v4`/`v5`/`v6`, `actions/setup-python@v5`,
+    `codecov/codecov-action@v4`, `actions/upload-artifact@v4`,
+    `actions/cache@v4`, `actions/download-artifact@v4`,
+    `actions/setup-go@v5`, `actions/configure-pages@v5`,
+    `actions/deploy-pages@v4`, `peter-evans/create-pull-request@v6`, and
+    `pnpm/action-setup@v4` are all `node20` at those tags. Every entry was
+    reached the same way: scan a corpus of real workflow files for live
+    `uses:` majors, then fetch each candidate's own `action.yml` and read
+    `runs.using`. `softprops/action-gh-release@v1` was checked and
+    deliberately excluded: its `action.yml` reports `runs.using: node16`,
+    not `node20`, at that tag (its `@v2` major is `node20` and is
+    listed). The `docker/*`-owned actions above are JS actions
+    (`runs.using: node20`, `main: dist/index.js`), not container actions,
+    despite the `docker/` org prefix; a genuinely `runs.using: docker`
+    action or a composite action is never Node-20 by itself and is
+    intentionally never on this list. The list is extendable per repo via
+    `workflow.node20Majors` (additive) and `workflow.node20MajorsIgnore`
+    (subtractive, applied after `node20Majors`) in `slop.config.yml`, so
+    a newly discovered or newly fixed major doesn't need a package
+    release. A `uses:` pinned to a full commit sha is only checked when
+    the same line also carries a trailing `# vN` comment; a bare sha pin
+    is a documented limitation, not a finding.
+  - `workflow-slop/audit-gate-missing`: reports an `audit.yml` in which
+    no step's normalised shell statements invoke `npm audit` with a
+    recognised `--audit-level` (`low`/`moderate`/`high`/`critical`;
+    `moderate`/`low` are stronger gates than `high`/`critical` and also
+    satisfy it). A gate command that exists only in a shell comment,
+    only inside a here-doc body, or only in a `run:` scalar style this
+    pack does not analyse as shell text (a folded `>` block, a
+    multi-line or quoted scalar) is not a present gate. Scoped to files
+    literally named `audit.yml`/`audit.yaml` under `.github/workflows/`,
+    and to `npm audit` specifically: a `pnpm audit`, a non-npm audit
+    command, or a reusable-workflow-call `audit.yml` with no `run:` step
+    reports as missing rather than being silently skipped.
+  - `workflow-slop/audit-gate-shape`: reports a gate step unless its
+    normalised run block matches a recognised SHAPE or an exact template
+    the consuming repo registered. This is an allowlist, not a
+    blocklist of neutralisation patterns: an enumeration of the ways a
+    gate can be defused leaks in the false-clean direction (the next
+    bash construct nobody listed scans green), while an allowlist leaks
+    into false positives, which are visible and fixable. For a
+    `block`-severity security gate that is the only acceptable leak
+    direction. The two recognised shapes are `R-bare` (exactly one
+    statement, first in the block, an optional `timeout <arg>` prefix,
+    any `npm audit` flags, and no operator, redirection or substitution)
+    and `R-classify` (exactly one statement disabling `errexit`, the
+    gate strictly inside the window, at most one `VAR=$?` capture after
+    the gate, the gate optionally piped only into `tee` and only with
+    `set -o pipefail` set earlier, exactly one `set -e` restore, then
+    `if`/`then`/`else`/`elif`/`fi`/`echo`/`printf` statements plus
+    `exit` statements that each exit either a non-zero literal or the
+    captured status, including at least one of each, with no `exit 0`,
+    no bare `exit`, no other `exit` operand and no reassignment of the
+    captured variable; before the window only assignments,
+    option-enabling `set -` statements, `mkdir`, `mktemp`, `cd`, `echo`,
+    `printf`, and a `trap` whose own body does not call `exit`). Every spelling bash accepts for those `set`
+    calls is parsed rather than pattern-matched, so `set +eu` and
+    `set +o errexit` open the window and `set -eo pipefail` and
+    `set -euo pipefail` restore it. A `continue-on-error` on the gate
+    step or its enclosing job that cannot be proven `false` (a literal
+    `true`, the string `"true"`, or an unresolved `${{ }}` expression)
+    is reported too.
+  - Both rules consume one normalised view of the run block instead of
+    its raw text, and there is no second path: here-doc bodies dropped
+    (the redirection statement itself kept), physical lines joined
+    across backslash continuations, each logical line's trailing shell
+    comment stripped by a quote-parity scan with escaped-double-quote
+    handling, each line cut into statements at unquoted
+    `;`/`&&`/`||`/`|` boundaries outside any command substitution, and
+    each match honoured only where the shell would honour it (a command
+    word such as `set +e` must start outside any quoted span, so
+    `echo "set +e"` is data; an expansion such as `$?` also counts
+    inside double quotes, so `STATUS="$?"` is a real capture).
+  - The normaliser refuses to certify a block carrying a construct it
+    does not model and reports the reason instead: a `run:` value that
+    is not a literal block scalar (`|`) or a single-line plain scalar, a
+    here-doc redirection (or one whose terminator cannot be located), a
+    shell function definition, an `eval`, a backgrounding `&` (a
+    `2>&1`/`&>log`/`>&2` redirection is not one), an unbalanced quote on
+    a logical line, or a command substitution spanning a statement
+    separator. A construct that slips past that list still has to match
+    a recognised shape, and no shape permits a statement it does not
+    name, so a miss there is a false positive rather than a false clean
+    from an unnamed statement; which branch a named `exit` sits in is not
+    evaluated (a documented limit).
+  - New config knob `workflow.auditGateTemplates`, a list of
+    `{ name, sha256 }` or `{ name, statements }` entries; an entry
+    carrying neither or both is rejected at config-load time. A block
+    whose normalised statements (each trimmed, prefixed with the `;`,
+    `&&`, `||` or `|` boundary it followed, joined by newlines) hash
+    to a registered digest is recognised, which is how a legitimate but
+    unmodelled gate block (helper functions, a custom exit-code
+    mapping) is accepted without rewriting it. A matched template is
+    trusted as is: no shape analysis runs on it. The package ships no
+    template of its own, since a canonical gate block is org content,
+    not package content; `test/fixtures/fleet-audit-real-shape.yml` is
+    the test fixture for the mechanism and the README shows how to
+    register one. The operating cost is the flip side of the same
+    property: a deliberate change to a registered block, including a
+    harmless one, changes its digest and is reported until the operator
+    updates the entry in that repo's `slop.config.yml`. Comments,
+    indentation, blank lines and line-ending style are normalised away,
+    so a pure reformat does not move the digest.
+  - Documented limits, each with a fixture: the rules are bound to the
+    file name (`audit.yml`/`audit.yaml`), so a gate living in another
+    workflow file is outside both; `R-classify` requires that the
+    captured status is handed to `exit` without proving that value is
+    non-zero at runtime, and does not evaluate the branch conditions
+    deciding which `exit` is reached; and a registered template is
+    trusted as is, so the review that justified registering it is the
+    only thing standing behind that block.
+
 - New pack `workflow-slop` (off by default, opt in via `--pack
   workflow-slop` or `packs.workflow-slop: true`), rule
   `workflow-slop/run-expression`: flags any `${{ ... }}` expression

@@ -177,7 +177,55 @@ export interface ResolvedConfig {
      * by default (see `workflow-slop.ts` for why).
      */
     allowExpressions: string[];
+    /**
+     * Additional `owner/repo@vN` entries treated as a Node-20 GitHub
+     * Actions major by `workflow-slop/node20-action-major`, on top of the
+     * pack's built-in default list (`src/data/node20-actions.ts`). Lets a
+     * repo extend the list (a newly discovered Node-20 major, or a
+     * locally vendored action) without waiting on a slop-detector release.
+     */
+    node20Majors: string[];
+    /**
+     * `owner/repo@vN` entries removed from the effective Node-20 list
+     * before `workflow-slop/node20-action-major` runs (applied after
+     * `node20Majors`, so it can also drop a config-added entry). Use this
+     * once an action's moving major tag has migrated off Node 20.
+     */
+    node20MajorsIgnore: string[];
+    /**
+     * Exact npm-audit gate blocks this repo has reviewed and vouched
+     * for, recognised by `workflow-slop/audit-gate-shape` on top of its
+     * built-in shapes. Ships empty: a canonical gate block is org
+     * content, not package content, so the package carries no template
+     * of its own.
+     */
+    auditGateTemplates: AuditGateTemplate[];
   };
+}
+
+/**
+ * One registered npm-audit gate template. `sha256` is the digest of the
+ * gate block's normalised statements (each statement trimmed, prefixed
+ * with the `;`, `&&`, `||` or `|` boundary it followed, joined by
+ * newlines); `statements` is a newline-separated block written out, from
+ * which the digest is computed without separator prefixes, so a block
+ * that carries an in-line boundary needs the `sha256` form. Exactly one
+ * of the two is given.
+ *
+ * A matched template is trusted as is: `audit-gate-shape` runs no shape
+ * analysis on a block whose digest matches, because registering the
+ * digest is the operator's statement that they reviewed this exact
+ * script. The cost is the flip side of that: any later edit to a
+ * registered block changes its digest and is reported until the
+ * operator registers the new one.
+ */
+export interface AuditGateTemplate {
+  /** Name used in messages and in the config file, for the operator. */
+  name: string;
+  /** Lowercase hex sha256 of the trimmed, separator-prefixed statements joined by newlines. */
+  sha256?: string;
+  /** The statements of a newline-separated block, hashed without separator prefixes. */
+  statements?: string[];
 }
 
 export interface CheckSummary {

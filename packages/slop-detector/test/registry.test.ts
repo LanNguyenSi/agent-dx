@@ -13,7 +13,7 @@ const expectedRuleCounts: Record<string, number> = {
   "code-slop": 9,
   "ui-slop": 6,
   "placement-slop": 5,
-  "workflow-slop": 2,
+  "workflow-slop": 5,
 };
 
 describe("rule registry counts (doc-drift guard)", () => {
@@ -24,9 +24,9 @@ describe("rule registry counts (doc-drift guard)", () => {
     expect(actual).toEqual(expectedRuleCounts);
   });
 
-  it("the seven packs total 41 rules", () => {
+  it("the seven packs total 44 rules", () => {
     const total = allPacks.reduce((sum, p) => sum + p.rules.length, 0);
-    expect(total).toBe(41);
+    expect(total).toBe(44);
   });
 
   it("registers placement-slop and lists its five rule ids", () => {
@@ -44,11 +44,14 @@ describe("rule registry counts (doc-drift guard)", () => {
     expect(pack!.rules.every((r) => r.pack === "placement-slop")).toBe(true);
   });
 
-  it("registers workflow-slop and lists its two rule ids", () => {
+  it("registers workflow-slop and lists its five rule ids", () => {
     const pack = allPacks.find((p) => p.id === "workflow-slop");
     expect(pack).toBeDefined();
     expect(pack!.rules.map((r) => r.id).sort()).toEqual(
       [
+        "workflow-slop/audit-gate-missing",
+        "workflow-slop/audit-gate-shape",
+        "workflow-slop/node20-action-major",
         "workflow-slop/run-expression",
         "workflow-slop/unparseable-workflow",
       ].sort(),

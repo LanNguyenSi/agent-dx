@@ -198,4 +198,52 @@ describe("config", () => {
     const cfg = loadConfig(file);
     expect(cfg.workflow?.allowExpressions).toEqual(["matrix.node"]);
   });
+
+  it("workflow.auditGateTemplates defaults to [] (the package ships no org template)", () => {
+    expect(defaultConfig().workflow?.auditGateTemplates).toEqual([]);
+    expect(mergeConfig({}).workflow?.auditGateTemplates).toEqual([]);
+  });
+
+  it("loadConfig accepts a workflow.auditGateTemplates entry with a sha256", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    const sha = "a".repeat(64);
+    fs.writeFileSync(
+      file,
+      `workflow:\n  auditGateTemplates:\n    - name: canonical\n      sha256: ${sha}\n`,
+    );
+    expect(loadConfig(file).workflow?.auditGateTemplates).toEqual([
+      { name: "canonical", sha256: sha },
+    ]);
+  });
+
+  it("loadConfig rejects a workflow.auditGateTemplates entry with neither sha256 nor statements", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      file,
+      `workflow:\n  auditGateTemplates:\n    - name: canonical\n`,
+    );
+    expect(() => loadConfig(file)).toThrow(/entries carry exactly one of/);
+  });
+
+  it("loadConfig rejects a workflow.auditGateTemplates entry carrying both", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      file,
+      `workflow:\n  auditGateTemplates:\n    - name: canonical\n      sha256: ${"b".repeat(64)}\n      statements: ["set +e"]\n`,
+    );
+    expect(() => loadConfig(file)).toThrow(/entries carry exactly one of/);
+  });
+
+  it("loadConfig rejects a workflow.auditGateTemplates sha256 that is not a 64-char hex digest", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      file,
+      `workflow:\n  auditGateTemplates:\n    - name: canonical\n      sha256: deadbeef\n`,
+    );
+    expect(() => loadConfig(file)).toThrow(/64-character hex sha256 digest/);
+  });
 });

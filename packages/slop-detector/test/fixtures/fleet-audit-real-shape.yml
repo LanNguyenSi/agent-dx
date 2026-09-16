@@ -1,0 +1,164 @@
+name: Audit
+
+# npm-audit regression gate. Deliberately a SEPARATE workflow from ci.yml
+# (which release.yml may reuse via workflow_call) so a freshly published
+# advisory cannot turn a release or an unrelated PR red with zero code
+# change.
+#
+# Threshold: HIGH and CRITICAL advisories fail the gate step; moderate
+# and low are report-only (first step, never red). npm audit reads
+# package-lock.json directly; no npm ci needed, zero added install time.
+#
+# This repo has two independent lockfile trees (root and mcp/); the
+# matrix below covers both by name.
+#
+# If a HIGH/CRITICAL has no upstream fix, resolution is an operator
+# decision (documented override or allowlist), never a silent threshold
+# bump in this file.
+#
+# Registering this job as a required status check in branch protection
+# is a separate operator action, out of scope here.
+#
+# Gate step outcomes (incident 2026-09-04: the registry's advisories/bulk
+# endpoint stopped answering for hours; npm's own client applies no
+# timeout to that call and just hangs). The gate step below has four
+# distinct outcomes, never conflated:
+#   - exit 0, CLEAN: the endpoint answered, no HIGH or CRITICAL advisory.
+#   - exit 1, FINDINGS: the endpoint answered and returned a HIGH or
+#     CRITICAL advisory. Requires a vulnerability summary line, for
+#     example "1 high severity vulnerability" or npm's mixed-severity
+#     form "3 vulnerabilities (2 high, 1 critical)". A summary line
+#     wins over any outage-like text also present in the same log, so a
+#     real finding can never be misread as an outage.
+#   - exit 2, OUTAGE: no vulnerability summary, but an outage marker is
+#     present (registry error text, a DNS/connection failure, or the
+#     local timeout below firing). This is NOT an advisory finding; do
+#     not silence it with `|| true`, the fix is to retry the job later
+#     once the endpoint is back.
+#   - exit 3, UNCLASSIFIED: npm audit failed but the log has neither a
+#     summary line nor an outage marker (for example a missing
+#     lockfile, or a wrong working-directory). Treated as a real
+#     failure, not silenced; read the log.
+# The report step below is bounded the same way (a step timeout plus an
+# internal `timeout`) so a hanging endpoint cannot eat the job's
+# timeout-minutes budget before this gate step, which does the actual
+# classification, ever gets to run.
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Audit (${{ matrix.tree }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        tree: [root, mcp]
+        include:
+          - tree: root
+            working-directory: .
+          - tree: mcp
+            working-directory: mcp
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+      - name: npm audit (full report, non-blocking)
+        working-directory: ${{ matrix.working-directory }}
+        # Bounded (step timeout plus an internal `timeout`) so a hanging
+        # endpoint cannot consume the job's timeout-minutes budget
+        # before the gate step below, which does the actual
+        # classification, gets a chance to run; still non-blocking via
+        # `|| true` either way.
+        timeout-minutes: 2
+        run: timeout 60s npm audit --no-fund || true
+      - name: npm audit gate (high/critical fail)
+        working-directory: ${{ matrix.working-directory }}
+        # Per-step bound so a hanging endpoint cannot eat the whole job's
+        # timeout-minutes budget; kept well under it.
+        timeout-minutes: 5
+        run: |
+          set -o pipefail
+
+          # Bound on the audit call itself: npm's implicit HTTP client
+          # applies no timeout of its own to the advisories/bulk request
+          # (observed: it hangs indefinitely against a black-holed
+          # endpoint, with zero output). This local bound lets the gate
+          # notice that case at all instead of running out the step budget.
+          AUDIT_TIMEOUT_SECS=60
+
+          has_summary() {
+            # $1: path to captured npm audit output (stdout+stderr).
+            # A vulnerability summary line means the endpoint answered
+            # and returned a real report, for example "1 high severity
+            # vulnerability" or npm's mixed-severity form "3
+            # vulnerabilities (2 high, 1 critical)". Checked before any
+            # outage marker, so a real finding can never be misread as
+            # an outage, even if the log also happens to contain an
+            # outage-like word (e.g. a package literally named
+            # "network"). The count must be non-zero: a log that carries
+            # "found 0 vulnerabilities" next to some other error is not
+            # a finding. This parses npm's human-readable summary (same
+            # wording in npm 9, 10 and 11); if npm ever rewords it, the
+            # wording-independent alternative is `npm audit --json` and
+            # its .metadata.vulnerabilities counts.
+            grep -qE '[1-9][0-9]* vulnerabilit|[1-9][0-9]* (low|moderate|high|critical) severity' "$1"
+          }
+
+          has_outage_marker() {
+            # $1: path to captured npm audit output (stdout+stderr).
+            # Transient registry-side and network failures only. HTTP 4xx
+            # codes other than 429 (E401/E403/E404: credentials, scope,
+            # wrong registry URL) are deliberately NOT here; they fall
+            # through to the UNCLASSIFIED branch below, because "retry
+            # later" is the wrong advice for a configuration error.
+            grep -qE 'audit endpoint returned an error|Invalid package tree|ENOTFOUND|ETIMEDOUT|ECONNREFUSED|ECONNRESET|EAI_AGAIN|socket hang up|ERR_SOCKET_TIMEOUT|network|E5[0-9]{2}|E429' "$1"
+          }
+
+          LOG="$(mktemp)"
+          trap 'rm -f "$LOG"' EXIT
+
+          # GitHub Actions runs `run:` steps as `bash -eo pipefail`;
+          # without this guard, `set -e` would kill the script right at
+          # this pipeline on any non-zero exit (findings, outage, or a
+          # timeout alike), before the classification below ever runs.
+          set +e
+          timeout "${AUDIT_TIMEOUT_SECS}s" npm audit --audit-level=high --no-fund 2>&1 | tee "$LOG"
+          STATUS=$?
+          set -e
+
+          if [ "$STATUS" -eq 0 ]; then
+            echo "npm audit gate: endpoint answered, no HIGH or CRITICAL advisories."
+            exit 0
+          fi
+
+          if [ "$STATUS" -eq 124 ]; then
+            # A hang produces zero output (npm never gets a chance to
+            # print anything before the local timeout kills it), so
+            # has_outage_marker would see an empty log; feed it an
+            # equivalent marker of our own so the classification below
+            # decides every non-zero path the same way.
+            echo "ERR_SOCKET_TIMEOUT: npm audit did not return within ${AUDIT_TIMEOUT_SECS}s" >> "$LOG"
+          fi
+
+          if has_summary "$LOG"; then
+            echo "::error::npm audit gate: HIGH or CRITICAL advisories reported (endpoint answered); read the report step above"
+            exit 1
+          fi
+
+          if has_outage_marker "$LOG"; then
+            echo "::error::npm audit gate: the audit endpoint did not answer (registry outage), this is NOT an advisory finding; retry the job later"
+            exit 2
+          fi
+
+          echo "::error::npm audit gate: npm audit failed with status ${STATUS} and produced neither a vulnerability summary nor an outage marker; check the log and the working-directory"
+          exit 3

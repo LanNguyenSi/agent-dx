@@ -58,7 +58,7 @@ Each pack groups related rules. Enable or disable per repo via `slop.config.yml`
 | `code-slop` (9 rules)      | off, opt in via `--pack`                | try/catch around code that cannot throw, defaults on required-typed params, empty / rethrow catches, `async` without `await`, backcompat shims for unreleased APIs, phantom imports of undeclared packages, stub function bodies, unused exports, single-callsite helpers  |
 | `ui-slop` (6 rules)        | off, opt in via `--pack ui-slop`        | Gradient text, purple+cyan AI palettes, animated layout properties, skipped heading levels, plus opt-in monospace-everywhere and flat type hierarchy (info-level). Scans CSS / SCSS / LESS / HTML / JSX.                                                                   |
 | `placement-slop` (5 rules) | off, opt in via `--pack placement-slop` | Org-, machine-, and point-in-time-bound evidence leaking into reusable instruction files (`SKILL.md`, `AGENTS.md`, `CLAUDE.md`, agent/skill prompt files): home paths, dated evidence, tally phrases (`n=8`, `p=0.016`, `so far`), opaque ids, and configured org markers. <!-- slop-detector:disable-line=placement-slop --> |
-| `workflow-slop` (2 rules)  | off, opt in via `--pack workflow-slop`  | GitHub Actions workflow injection: a `${{ ... }}` expression interpolated directly into a `run:` shell script, unless it is one of the documented non-attacker-controllable contexts, plus a fail-closed check that a scanned workflow file actually parsed as YAML. Scans `.github/workflows/*.yml`/`*.yaml`. |
+| `workflow-slop` (5 rules)  | off, opt in via `--pack workflow-slop`  | GitHub Actions workflow injection and CI-guard regressions: a `${{ ... }}` expression interpolated directly into a `run:` shell script (unless it is one of the documented non-attacker-controllable contexts); a fail-closed check that a scanned workflow file actually parsed as YAML; a reintroduced Node-20 GitHub Actions major; an `audit.yml` with no certifiable `npm audit --audit-level=...` gate; and an npm-audit gate step whose shape is not one the pack recognises. Scans `.github/workflows/*.yml`/`*.yaml`. |
 
 The five opt-in packs (`comment-slop`, `code-slop`, `ui-slop`, `placement-slop`, `workflow-slop`) are off by default because their false-positive surface in mixed codebases is wider; opt in with `--pack <id>` or set `packs.<id>: true` in `slop.config.yml`.
 
@@ -247,6 +247,160 @@ workflow:
 
 **`unparseable-workflow`: a broken workflow file is never scored clean.** `run-expression` walks the YAML tree `yaml`'s parser produced, but that parser does not throw on most syntax errors, it records them and still returns whatever partial tree it managed to build. A workflow file broken partway through (an unterminated quoted scalar, an unbalanced flow collection) can silently drop everything after the break, including a `${{ ... }}` expression this pack exists to catch. The `unparseable-workflow` rule reports one `block`-severity finding whenever a scanned workflow file has a YAML syntax error, naming the file and the first parse error, so a broken file always produces at least one workflow-slop finding instead of a false-clean result.
 
+**`node20-action-major`: a reintroduced Node-20 GitHub Actions major.** A fleet sweep can move every workflow off the actions/runtimes still pinned to a deprecated Node-20 major, but nothing then stops a later edit (a copy-pasted step, an unreviewed dependency bump) from reintroducing one. This rule flags any `uses:` value (job-level or step-level) whose `owner/repo@major` is on a Node-20 list:
+
+```yaml
+# BLOCKED by workflow-slop/node20-action-major
+- uses: actions/checkout@v4
+```
+
+```yaml
+# fixed: bump past the flagged major
+- uses: actions/checkout@v5
+```
+
+The list is data, not hardcoded logic: `src/data/node20-actions.ts` ships a default list, each entry verified by fetching that action's `action.yml` at the moving major tag and reading `runs.using`. Extend it per repo without waiting on a package release:
+
+```yaml
+# slop.config.yml
+packs:
+  workflow-slop: true
+
+workflow:
+  node20Majors:
+    - "acme/custom-action@v1"
+  node20MajorsIgnore:
+    - "actions/checkout@v4"
+```
+
+`node20Majors` adds entries on top of the default list; `node20MajorsIgnore` is applied after, so it can drop a default-list entry (an action that has since moved off Node 20) or one added via `node20Majors`. Both take the same `owner/repo@vN` shape, matched case-insensitively (`Actions/Checkout@V4` resolves to the same entry as `actions/checkout@v4`; the config file's own `owner/repo@vN` shape check still requires a lowercase `v`, e.g. `actions/checkout@v4`, not `@V4`, ahead of the digits). A trailing prerelease-ish suffix on the ref is tolerated and ignored for major resolution (`actions/checkout@v4-beta` still resolves to major `v4`); this is a deliberate simplification, not full semver-prerelease parsing.
+
+A local `./path` action and a `docker://image` reference are never flagged (neither names a published `owner/repo@vN` action). A reusable-workflow call (`uses:` naming a `.yml`/`.yaml` file rather than an action) is excluded the same way, even when its ref happens to look like a listed major (including when the reusable workflow's own owner/repo, e.g. `actions/checkout/.github/workflows/build.yml@v4`, is itself on the default list). A `uses:` value written inside a step's own `with:` input block (a custom action can name an input literally `uses`) is not collected as a step, the same schema-position gating `run-expression` already applies to `run:`. A `uses:` pinned to a full commit sha is only checked when the same line also carries a trailing `# vN` comment (`uses: actions/checkout@8f4b7f8 # v4`, case-insensitive); a bare sha pin with no version annotation cannot be resolved to a major from the text alone and is not flagged (a deliberate limitation, not a rule the pack tries to work around). A docker-container action (`runs.using: docker`) or a composite action is never Node-20 by itself and is intentionally left off the default list, even when it commonly sits next to Node-20 actions in the same job.
+
+**`audit-gate-missing` and `audit-gate-shape`: the npm-audit gate in `audit.yml`.** A repo's `audit.yml` can carry a dedicated gate step, `npm audit --audit-level=high` (or `critical`, or the stronger `moderate`/`low`), that fails the job on a matching advisory. Two rules guard it, both `block`, both scoped to files literally named `audit.yml`/`audit.yaml` under `.github/workflows/` and to `npm audit` specifically (see "Scope" below):
+
+- **`audit-gate-missing`** reports an `audit.yml` in which no step's normalised shell statements invoke the gate command at all.
+- **`audit-gate-shape`** reports a gate step whose normalised run block matches none of the recognised shapes and no registered template, or whose step or job carries a `continue-on-error` that cannot be proven `false`.
+
+```yaml
+# BLOCKED by workflow-slop/audit-gate-shape: unrecognised gate shape
+- run: npm audit --audit-level=high || true
+```
+
+```yaml
+# fixed: let a non-zero exit fail the step (the R-bare shape)
+- run: npm audit --audit-level=high
+```
+
+**This is a shape allowlist, not a neutralisation blocklist.** An earlier revision of `audit-gate-shape` enumerated the ways a gate can be defused (`|| true`, `; true`, a bare `set +e`, a missing verdict) and reported a block that matched one of them. Every such enumeration leaks in the false-**clean** direction: the next bash construct nobody listed scans green, and bash offers a long tail of them (a shell comment, a here-doc body, a combined `set` flag spelling, a pipeline without `pipefail`, a folded scalar are each a different way to write the same defused gate). The rule asks the opposite question instead, and a gate step is reported **unless** it is recognised. That inverts the leak into false **positives**, which are visible, readable and fixable: register the block as a template, disable the rule for the repo, or use a per-line opt-out. For a `block`-severity security gate that is the only acceptable leak direction. The old enumeration survives only as one extra sentence on a finding that was already reported ("Detected neutralisation signal: ..."); it can never make a block clean.
+
+**Every check reads one normalised view of the run block, never its raw text.** A step's `run:` body goes through a single normalisation step before any check looks at it, and there is no second path:
+
+1. **Here-doc bodies dropped.** On an unquoted `<<`/`<<-` followed by a (possibly quoted) delimiter, the physical lines up to the terminator line are dropped; the redirection statement itself is kept, because it is real program text. A gate command, an `exit 1`, or a `|| true` that exists only inside a `cat <<'MSG'` body is data the shell prints, not a command it runs, and is not read as one.
+2. **Logical lines.** Backslash-continued physical lines are joined into one logical line (the backslash and the newline are dropped, nothing else is inserted, matching bash's own backslash-newline removal), so a `||`/`;` tail written on a continuation line is inspected as part of the line it actually runs on.
+3. **Comments stripped, per logical line.** Each joined line loses its trailing shell comment, and only when the `#` sits outside a quoted string (a quote-parity scan with escaped-quote handling inside a double-quoted span, so `--note="it\"s fine"   # comment` still strips correctly). A `# TODO: restore npm audit --audit-level=high` is a comment, not a gate.
+4. **Statements.** Each comment-free logical line is cut into statements at every unquoted `;`, `&&`, `||` or `|` boundary that is not inside a command substitution, and each statement remembers which separator attached it to the one before.
+5. **Quoting respected per match kind.** A command word (`set +e`, `exit 1`) must start outside any quoted span, so `echo "set +e"` is not a `set +e`; an expansion (`$?`) also counts inside a double-quoted span, because `STATUS="$?"` is a real capture while a single-quoted `'$?'` is inert.
+
+**The recognised shapes.** A gate step is clean when its normalised statement list matches one of these, evaluated in this order after the scalar-style check below:
+
+- **`R-bare`** -- the gate command is the whole block: exactly one statement, first in the block, an optional `timeout <arg>` prefix, any `npm audit` flags, and no operator, redirection or substitution at all. `npm audit --audit-level=moderate` and `timeout 60s npm  audit --audit-level=critical --omit=dev` are `R-bare`; `npm audit --audit-level=high >/dev/null` is not (a redirection of stdout is refused wholesale rather than only for a discarding sink, because "which sink discards" is exactly the kind of enumeration this rule stopped making).
+- **`R-classify`** -- the gate's own exit status is captured and turned into the step's exit status:
+
+  ```bash
+  # permitted before the window: assignments, option-enabling `set -`,
+  # trap (only one that does not itself call `exit`), mkdir, mktemp, cd,
+  # echo, printf
+  set -o pipefail
+  set +e                                    # exactly one, any spelling that
+                                            # disables errexit: +e, +eu,
+                                            # +o errexit
+  npm audit --audit-level=high 2>&1 | tee "$LOG"   # optionally piped, only
+                                                   # into tee, only with
+                                                   # pipefail set earlier
+  STATUS=$?                                 # at most one capture, after the gate
+  set -e                                    # exactly one restore: -e, -eo
+                                            # pipefail, -euo pipefail,
+                                            # -o errexit
+  # permitted after the restore: if/then/else/elif/fi, echo, printf, and
+  # an `exit` of either a non-zero literal or the captured status
+  if [ "$STATUS" -ne 0 ]; then
+    exit 1                                  # required: an exit of a non-zero
+  fi                                        # literal
+  exit $STATUS                              # required: an exit of the captured
+                                            # status
+  ```
+
+  Everything is positional and exhaustive: a statement the shape does not name makes the block unrecognised, so a construct this rule never heard of cannot ride along inside a recognised block (what the shape does not check is which branch a named `exit` sits in; see the honest limits below). That is why the window admits the capture and nothing else (an `echo` between `set +e` and the gate is reported), why a `STATUS=0` reassignment after the restore is reported, and why *every* `exit` after the restore has to be one of the two verdicts: a bare `exit` exits with the status of whatever ran last (post-restore, an `echo`, so zero), and `exit $OTHER` or `exit ${STATUS:-0}` hands over a value the shape knows nothing about. A pre-window `trap` is permitted only when its own body does not call `exit`, since an `EXIT` trap leaves the script's status alone unless it exits itself, and `trap 'exit 0' EXIT` would make every later verdict irrelevant (the `EXIT` signal name is matched case-sensitively, so a cleanup `trap 'rm -f "$LOG"' EXIT` is fine).
+
+- **A registered template** -- see "Registering a gate template" below.
+
+**The normaliser refuses to certify what it does not model.** Before any shape is tried, the block is checked for constructs whose presence makes the statement list an unreliable model of the script. Each refusal is reported with its own reason ("Unrecognised npm-audit gate shape in this audit workflow: ..."), never treated as clean:
+
+- the `run:` value is not a literal block scalar (`|`) or a single-line plain scalar -- a folded `>` scalar joins lines with spaces, a multi-line plain scalar folds the same way, and a quoted scalar carries YAML escapes that would have to be decoded first, so none of them is analysed as shell text (and none counts as a present gate for `audit-gate-missing`);
+- a here-doc redirection, or one whose terminator could not be located;
+- a shell function definition (`name() {`, `function name`);
+- an `eval`;
+- a backgrounding `&` (a `2>&1`, `&>log` or `>&2` redirection is not one);
+- an unbalanced quote on a logical line (a string spanning physical lines);
+- a command substitution spanning a statement separator (`$(echo a || echo b)` on the gate line).
+
+A miss in that list yields a false positive, never a false clean from an unnamed statement (which branch a named `exit` sits in is not evaluated; see the honest limits below): an unmodelled construct that slips past every entry still has to match a recognised shape, and no shape permits a statement it does not name. That is why this one may be a list at all, unlike the neutralisation enumeration it replaced.
+
+**`continue-on-error`.** On the gate step **or** its enclosing job, any value that cannot be proven `false` is reported: a literal `true`, the string `"true"`, and an unresolved `${{ ... }}` expression (which parses as a plain string and cannot be evaluated statically) all count; only literal `false`/`"false"` clears it. A step- or job-level `if:` that would prevent the gate step from running at all is a separate GitHub Actions mechanism this rule does not evaluate.
+
+**Registering a gate template.** A repo whose real gate block is legitimate but unmodelled (a classification block with helper functions, a custom exit-code mapping) registers it by digest instead of rewriting it. The digest is the sha256 of the block's normalised statements, each trimmed, prefixed with the `;`, `&&`, `||` or `|` boundary it followed (a statement that starts a line carries none), and joined by newlines, and a finding on an unmatched block prints it:
+
+```yaml
+# slop.config.yml
+packs:
+  workflow-slop: true
+
+workflow:
+  auditGateTemplates:
+    - name: canonical-audit-gate
+      sha256: 039827d6b99e8648dad25933d62413fd94e32de33be03c0d46cea225b7b6f0ec
+      # (the digest of the gate block in this package's test fixture
+      # fleet-audit-real-shape.yml, shown so the example is runnable against
+      # the shipped fixture; register your own block's digest, which the
+      # finding prints)
+    # or write the statements out and let the tool hash them (this form
+    # describes a newline-separated block; a `;`, `&&`, `||` or `|`
+    # boundary inside a line is part of the digest and needs the sha256
+    # form):
+    - name: bare-gate-with-timeout
+      statements:
+        - timeout 60s npm audit --audit-level=high
+```
+
+The package ships **no** template of its own: a canonical gate block is org content, not package content, so every entry is the consuming repo's own. A matched template is trusted **as is** -- no shape analysis runs on it, because registering the digest is the operator's statement that they reviewed this exact script, and that is how a block carrying constructs no shape models (helper functions, for instance) is recognised. The cost is the flip side of the same property: **a deliberate change to a registered block, including a harmless one, changes its digest and is reported until the operator updates the entry in that repo's `slop.config.yml`.** Comments, indentation, blank lines and line-ending style are already normalised away, so a pure reformat does not move the digest; anything that changes what the script runs does.
+
+**The honest limits.** These are shape checks over one run block, not an evaluation of the script:
+
+- **The rules are bound to the file name.** Only `.github/workflows/audit.yml` and `audit.yaml` are scanned (`appliesTo`), so an npm-audit gate that lives in `ci.yml`, `security.yml`, or any other workflow file is outside both rules entirely, whatever shape it has.
+- **`exit $VAR` is accepted without proving `$VAR` is non-zero at runtime.** `R-classify` requires that the captured status is handed to `exit`, and that no `exit 0`, no other `exit` operand and no reassignment of that variable follows the restore, which is as far as the text goes. It does not evaluate the branch conditions that decide which `exit` is reached.
+- **A registered template is trusted as is.** Its digest match suppresses every shape check for that block, so the review that justified registering it is the only thing standing behind it.
+- **Branch reachability is not modelled.** `R-classify` requires the two verdict exits to be present after the restore and permits `if`/`then`/`else`/`elif`/`fi` around them, but it does not evaluate the conditions, so a block whose verdicts both sit in a branch that is never taken is still recognised. Reviewing the conditions of a recognised block stays a human step.
+- **The rules cannot see a deleted or renamed `audit.yml`.** Both rules are scoped to that file name, so removing the file, or moving the gate to a workflow with another name, produces no finding at all; an inventory check over the repository, not a file scan, is what covers that edit.
+- **The gate step's `shell:` key is not evaluated.** Both recognition paths read the step's `run:` block and its `continue-on-error`, not its shell: a custom `shell:` that never executes the script (for example one that hands the file to `true`) leaves a recognised block and a matching template in place, so the gate is neutralised without a finding. Reviewing a gate step's `shell:` stays a human step.
+- **Workflow triggers are not evaluated.** A gate that is present and correctly shaped but never runs, because `on:` was narrowed or the job carries an `if:` that is never true, reports clean.
+
+**Scope: `npm audit` only.** The gate-command match (`isGateCommand`) requires literal `npm audit` in the statement; `pnpm audit --audit-level=high`, `pip-audit`, `cargo audit`, and a reusable-workflow-call `audit.yml` (`uses: org/repo/.github/workflows/audit.yml@vN`, no `run:` step to inspect) are all out of these rules' reach and are reported by `audit-gate-missing` (the same finding a truly-missing gate produces) rather than silently skipped. A repo whose `audit.yml` legitimately uses one of those does not need to live with that finding: disable either rule on its own while keeping the rest of `workflow-slop` (including `node20-action-major`) via
+
+```yaml
+# slop.config.yml
+packs:
+  workflow-slop: true
+
+rules:
+  "workflow-slop/audit-gate-missing":
+    enabled: false
+  "workflow-slop/audit-gate-shape":
+    enabled: false
+```
+
+For a one-off reviewed exception on a single line, use the pack's existing per-line disable-comment mechanism instead (see [Per-line opt-out](#per-line-opt-out)): `# slop-detector:disable-line=workflow-slop/audit-gate-shape`.
+
 **Wiring pattern for other repos.** This repo's own `.github/workflows/ci.yml` runs the check in a dedicated `workflow-guard` job (separate from `placement-guard`, since this is a security control, not a doc-hygiene lint): install and build `slop-detector`, then
 
 ```bash
@@ -386,7 +540,7 @@ workflow:
     - "matrix.node"
 ```
 
-Defaults applied even without a config: `agent-tics` and `prose-slop` packs on; `comment-slop`, `code-slop`, `ui-slop`, `placement-slop`, `workflow-slop` off; ignores cover `node_modules`, `dist`, `build`, `coverage`, `.git`, lockfiles; `placement.markers`, `placement.instructionGlobs`, `placement.allow`, and `workflow.allowExpressions` default to `[]`.
+Defaults applied even without a config: `agent-tics` and `prose-slop` packs on; `comment-slop`, `code-slop`, `ui-slop`, `placement-slop`, `workflow-slop` off; ignores cover `node_modules`, `dist`, `build`, `coverage`, `.git`, lockfiles; `placement.markers`, `placement.instructionGlobs`, `placement.allow`, `workflow.allowExpressions`, `workflow.node20Majors`, `workflow.node20MajorsIgnore`, and `workflow.auditGateTemplates` default to `[]`.
 
 The `placement` block only matters once `placement-slop` is enabled (see [`placement-slop` by example](#placement-slop-by-example)):
 
@@ -394,7 +548,7 @@ The `placement` block only matters once `placement-slop` is enabled (see [`place
 - `instructionGlobs`: additive glob patterns, on top of the pack's built-in instruction-file globs (`SKILL.md`, `AGENTS.md`, `CLAUDE.md`, `.claude/agents/**`, `.opencode/agents/**`, `.claude/skills/**`); this only ever widens the built-in set, it can't narrow it. Matched against each scanned file's path relative to the scan root (the same root `entrypointGlobs` uses — see [Marking a src barrel as an entrypoint](#marking-a-src-barrel-as-an-entrypoint)). `check packages/foo`, `check ./packages/foo`, and `check /abs/path/packages/foo` are three spellings of the _same_ directory and resolve a given pattern identically; a single-file target (`check packages/foo/SKILL.md`) resolves the scan root to that file's own parent directory, so it also shares patterns with `check packages/foo`: a pattern is tied to _what directory you're scanning_, not to whether the target was a file or a directory. The consequence: changing the scan target to a genuinely different root (e.g. `check .` from the repo root instead of `check packages/foo`) means every pattern has to be rewritten relative to the new root too. A pattern must not start with `/`, same restriction as `entrypointGlobs`, and a leading `./` is normalized away. A pattern that matches zero scanned files is surfaced in `CheckSummary.warnings`, same mechanism as an unmatched `entrypointGlobs` pattern. For CI, the simplest invariant is `check .` from the repo root paired with a config file: one fixed scan root, so the patterns never need to change with the invocation.
 - `allow`: regex patterns (also rejected at config-load time if they'd match the empty string), matched per line, and only the matched span is excused across every rule in the pack, including `block`-severity ones (the escape hatch for something like a legitimate install URL that carries an org handle). The exclusion is scoped to the matched span, not the whole line: a home path, a date, or a tally phrase elsewhere on the same line as an allowed match still fires. For narrower, single-rule suppression use a per-line disable comment instead (see [Per-line opt-out](#per-line-opt-out)).
 
-The `workflow` block only matters once `workflow-slop` is enabled (see [`workflow-slop` by example](#workflow-slop-by-example)): `allowExpressions` is an additive list of exact, whitespace-trimmed `${{ ... }}` expression bodies treated as safe on top of the pack's built-in allowlist. Empty by default, so it never widens what the rule accepts until you configure it.
+The `workflow` block only matters once `workflow-slop` is enabled (see [`workflow-slop` by example](#workflow-slop-by-example)): `allowExpressions` is an additive list of exact, whitespace-trimmed `${{ ... }}` expression bodies treated as safe on top of the pack's built-in allowlist, consumed by `run-expression`. `node20Majors` (additive) and `node20MajorsIgnore` (subtractive, applied after `node20Majors`) are both lists of exact `owner/repo@vN` entries consumed by `node20-action-major`, on top of the pack's built-in default list. `auditGateTemplates` is a list of `{ name, sha256 }` or `{ name, statements }` entries consumed by `audit-gate-shape`, each registering one exact gate block as recognised (see [Registering a gate template](#workflow-slop-by-example)); an entry carrying neither or both of `sha256`/`statements` is rejected at config-load time. All four are empty by default, so none of them widen or narrow what a rule accepts until you configure them.
 
 ## Cross-file rules (experimental)
 
