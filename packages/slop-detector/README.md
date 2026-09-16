@@ -437,7 +437,10 @@ or misleading the moment that cycle is over.
   blank line, a Markdown heading line, or the start of a list item: a
   `## Review rounds` heading, or a previous bullet, does not lend its
   words to the bullet below it, while one list item's own soft-wrapped
-  continuation line is still part of the same sentence.
+  continuation line is still part of the same sentence. Inside a source
+  comment the window is narrower: each `//` comment is its own window,
+  and inside a block comment each ` * ` gutter line starts a new one, so
+  a context word on the previous comment line does not count.
 - **`handoff-phrase`** (warn): `per the <workspace> handoffs` (e.g.
   `per the pandora handoffs`), points a reader at a workspace's own
   operating layer that a package shipped to other repos has no access

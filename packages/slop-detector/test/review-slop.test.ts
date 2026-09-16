@@ -316,6 +316,39 @@ describe("review-slop", () => {
       ).toBeUndefined();
     });
 
+    it("negative: a heading line above does not lend its words to the prose line below it", () => {
+      const text = ["## Review notes", "round 2 changed the wording"].join(
+        "\n",
+      );
+      const v = checkText(text, "docs/NOTES.md", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "review-slop/round-reference"),
+      ).toBeUndefined();
+    });
+
+    it("negative: a blank line between the context word and the token ends the window", () => {
+      const text = [
+        "The reviewer asked for changes",
+        "",
+        "round 2 changed the wording",
+      ].join("\n");
+      const v = checkText(text, "docs/NOTES.md", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "review-slop/round-reference"),
+      ).toBeUndefined();
+    });
+
+    it("negative: a heading line below does not lend its words to the prose line above it", () => {
+      const text = [
+        "We should keep round 2 wording here",
+        "## Review notes",
+      ].join("\n");
+      const v = checkText(text, "docs/NOTES.md", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "review-slop/round-reference"),
+      ).toBeUndefined();
+    });
+
     it("fires on a bare token inside a list item whose own text carries the context word", () => {
       const text = ["## Storage", "- the review moved artifacts into R2"].join(
         "\n",

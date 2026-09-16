@@ -84,13 +84,13 @@
   build`, `typecheck`, `typecheck:test`, `format:check`, and `npm test`
   (495 tests, up from 468) all clean; the orchestrator-workflow package's
   `npm run build`, `typecheck`, `typecheck:test`, `format:check`, and
-  full `npm test` (1162 tests) all clean; `--pack placement-slop` and
+  full `npm test` (1164 tests) all clean; `--pack placement-slop` and
   `--pack workflow-slop` over the whole repository both clean.
 
 - 2026-09-16T08:09:25Z (agent-dx tracker task a378ecca, pandora run
   2026-09-16-open-pool-batch55): `assets/agents/implementer.md`
   gained a pre-return rule bullet, inserted right after the two
-  commit-reporting bullets (a 7-line insertion): before committing, run
+  commit-reporting bullets (a 13-line insertion): before committing, run
   `slop-detector`'s new `review-slop` pack over every changed file and the
   commit message and fix every block-level finding first, worded
   "misfire, not evidence" the same way the `commits` field rule already
@@ -119,7 +119,7 @@
   `run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`)
   in the same commit as these edits. Verified: the slop-detector package's
   own `npm run build`, `typecheck`, `typecheck:test`, `format:check`, and
-  `npm test` (348 tests) all clean with the new `review-slop` pack added;
+  `npm test` (468 tests) all clean with the new `review-slop` pack added;
   the orchestrator-workflow package's `npm run build`, `typecheck`,
   `typecheck:test`, `format:check`, and full `npm test` all clean.
 
