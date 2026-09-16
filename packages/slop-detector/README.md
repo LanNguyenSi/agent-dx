@@ -273,11 +273,11 @@ workflow:
     - "actions/checkout@v4"
 ```
 
-`node20Majors` adds entries on top of the default list; `node20MajorsIgnore` is applied after, so it can drop a default-list entry (an action that has since moved off Node 20) or one added via `node20Majors`. Both take the same exact `owner/repo@vN` shape, matched verbatim (no case-folding).
+`node20Majors` adds entries on top of the default list; `node20MajorsIgnore` is applied after, so it can drop a default-list entry (an action that has since moved off Node 20) or one added via `node20Majors`. Both take the same `owner/repo@vN` shape, matched case-insensitively (`Actions/Checkout@V4` resolves to the same entry as `actions/checkout@v4`; the config file's own `owner/repo@vN` shape check still requires a lowercase `v`, e.g. `actions/checkout@v4`, not `@V4`, ahead of the digits). A trailing prerelease-ish suffix on the ref is tolerated and ignored for major resolution (`actions/checkout@v4-beta` still resolves to major `v4`); this is a deliberate simplification, not full semver-prerelease parsing.
 
-A local `./path` action and a `docker://image` reference are never flagged (neither names a published `owner/repo@vN` action). A reusable-workflow call (`uses:` naming a `.yml`/`.yaml` file rather than an action) is excluded the same way, even when its ref happens to look like a listed major. A `uses:` pinned to a full commit sha is only checked when the same line also carries a trailing `# vN` comment (`uses: actions/checkout@8f4b7f8 # v4`); a bare sha pin with no version annotation cannot be resolved to a major from the text alone and is not flagged (a deliberate limitation, not a rule the pack tries to work around). A docker-container action (`runs.using: docker`) or a composite action is never Node-20 by itself and is intentionally left off the default list, even when it commonly sits next to Node-20 actions in the same job.
+A local `./path` action and a `docker://image` reference are never flagged (neither names a published `owner/repo@vN` action). A reusable-workflow call (`uses:` naming a `.yml`/`.yaml` file rather than an action) is excluded the same way, even when its ref happens to look like a listed major (including when the reusable workflow's own owner/repo, e.g. `actions/checkout/.github/workflows/build.yml@v4`, is itself on the default list). A `uses:` value written inside a step's own `with:` input block (a custom action can name an input literally `uses`) is not collected as a step, the same schema-position gating `run-expression` already applies to `run:`. A `uses:` pinned to a full commit sha is only checked when the same line also carries a trailing `# vN` comment (`uses: actions/checkout@8f4b7f8 # v4`, case-insensitive); a bare sha pin with no version annotation cannot be resolved to a major from the text alone and is not flagged (a deliberate limitation, not a rule the pack tries to work around). A docker-container action (`runs.using: docker`) or a composite action is never Node-20 by itself and is intentionally left off the default list, even when it commonly sits next to Node-20 actions in the same job.
 
-**`audit-gate-shape`: a missing or neutralised npm-audit gate.** A repo's `audit.yml` can carry a dedicated gate step, `npm audit --audit-level=high` (or `--audit-level=critical`), that fails the job on a HIGH/CRITICAL advisory. This rule (scoped to files literally named `audit.yml`/`audit.yaml` under `.github/workflows/`) flags two regressions against that shape: the gate step is missing entirely, or the gate command is present but neutralised so the job stays green regardless of what `npm audit` finds.
+**`audit-gate-shape`: a missing or neutralised npm-audit gate.** A repo's `audit.yml` can carry a dedicated gate step, `npm audit --audit-level=high` (or `critical`, or the stronger `moderate`/`low`), that fails the job on a matching advisory. This rule (scoped to files literally named `audit.yml`/`audit.yaml` under `.github/workflows/`, and to `npm audit` specifically -- see "Scope" below) flags two regressions against that shape: the gate step is missing entirely, or the gate command is present but neutralised so the job stays green regardless of what `npm audit` finds.
 
 ```yaml
 # BLOCKED by workflow-slop/audit-gate-shape: neutralised gate
@@ -289,16 +289,28 @@ A local `./path` action and a `docker://image` reference are never flagged (neit
 - run: npm audit --audit-level=high
 ```
 
-Neutralisation is checked conservatively: backslash-continued physical lines are joined into one logical line first, so a `||` written on a continuation line is still seen; a trailing shell comment is stripped from the gate's logical line before matching (only when the `#` sits outside a quoted string); and then the rule flags when any of the following holds:
+Neutralisation is checked conservatively: backslash-continued physical lines are joined into one logical line first, so a `||` written on a continuation line is still seen; a trailing shell comment is stripped from the gate's logical line before matching (only when the `#` sits outside a quoted string, with escaped-quote handling inside a double-quoted span so `--note="it\"s fine"   # comment` still strips correctly); and then the rule flags when any of the following holds:
 
 - a `||` appears after the gate command on its logical line, and the text immediately after it does not start with `exit`, `false`, or `return`;
-- `set +e` appears before the gate command in the same run block, and the rest of the block does not both capture the gate's exit status (`$?`) and restore `set -e` afterward;
-- `continue-on-error: true` is set on the gate step;
-- the gate line ends in `; true` or `; :`.
+- `set +e` appears before the gate command in the same run block, and the rest of the block does not all three of: capture the gate's exit status (`$?`), restore `set -e` afterward, AND actually convert that captured status back into a non-zero step exit (an `exit <nonzero-literal>` or `exit $STATUS`/`exit $?`-shaped exit later in the block) -- capturing and restoring alone is not a verdict: `set +e; ...; STATUS=$?; set -e; exit 0` (or a branch that only `echo`s the status) still lets the job stay green and is flagged;
+- `continue-on-error` is set, on the gate step OR its enclosing job, to anything that cannot be proven `false` (a literal `true`, the string `"true"`, or an unresolved `${{ ... }}` expression all count; only literal `false`/`"false"` clears it) -- a step- or job-level `if:` that would prevent the gate step from running at all is a separate GitHub Actions mechanism this rule does not evaluate;
+- the gate line contains `; true` or `; :` after the gate command (not required to be the very last thing on the line).
 
-The `set +e` check is intentionally shaped around a legitimate pattern, not a blanket ban on `set +e`: a step that needs to classify the gate's own exit code (network-outage handling, a custom exit-code mapping) commonly runs `set +e`, runs the gate command, captures `STATUS=$?`, restores `set -e`, then branches on `$STATUS`. That shape still turns a HIGH/CRITICAL finding into a non-zero step exit, so it is not flagged. A bare `set +e` before the gate command with no capture-and-restore afterward is the actual neutralisation this half of the rule exists to catch.
+The `set +e` check is intentionally shaped around a legitimate pattern, not a blanket ban on `set +e`: a step that needs to classify the gate's own exit code (network-outage handling, a custom exit-code mapping) commonly runs `set +e`, runs the gate command, captures `STATUS=$?`, restores `set -e`, then `exit $STATUS` (or an equivalent nonzero exit) on a failing status. That shape actually turns a HIGH/CRITICAL finding into a non-zero step exit, so it is not flagged. A bare `set +e` with no capture-and-restore-and-verdict afterward is the actual neutralisation this half of the rule exists to catch; the `; true`/`; :` check is a related but weaker signal -- under today's runner it is inert (the step still fails on the gate's own nonzero exit under `bash -e`), but becomes an effective neutralisation the moment a `set +e` is added earlier in the same run block, so it is still worth flagging on its own.
 
 This is deliberately conservative: it can still flag a legitimate `|| echo "logged"` sitting directly on the gate line. Use the pack's existing per-line disable-comment mechanism for a reviewed exception (see [Per-line opt-out](#per-line-opt-out)): `# slop-detector:disable-line=workflow-slop/audit-gate-shape`.
+
+**Scope: `npm audit` only.** The gate-command match (`isGateCommand`) requires literal `npm audit` in the line; `pnpm audit --audit-level=high`, `pip-audit`, `cargo audit`, and a reusable-workflow-call `audit.yml` (`uses: org/repo/.github/workflows/audit.yml@vN`, no `run:` step to inspect) are all out of this rule's reach and are reported as a missing gate (the same "no recognised npm-audit gate command was found" finding a truly-missing gate produces) rather than silently skipped. A repo whose `audit.yml` legitimately uses one of those does not need to live with that finding: disable this one rule while keeping the rest of `workflow-slop` (including `node20-action-major`) via
+
+```yaml
+# slop.config.yml
+packs:
+  workflow-slop: true
+
+rules:
+  "workflow-slop/audit-gate-shape":
+    enabled: false
+```
 
 **Wiring pattern for other repos.** This repo's own `.github/workflows/ci.yml` runs the check in a dedicated `workflow-guard` job (separate from `placement-guard`, since this is a security control, not a doc-hygiene lint): install and build `slop-detector`, then
 

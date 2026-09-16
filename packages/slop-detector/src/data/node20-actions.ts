@@ -91,4 +91,36 @@ export const DEFAULT_NODE20_ACTIONS: Node20ActionEntry[] = [
     uses: "codecov/codecov-action@v4",
     source: "action.yml runs.using: node20 at the v4 tag",
   },
+  {
+    uses: "actions/upload-artifact@v4",
+    source: "action.yml runs.using: node20 at the v4 tag",
+  },
+  {
+    uses: "actions/cache@v4",
+    source: "action.yml runs.using: node20 at the v4 tag",
+  },
+  {
+    uses: "actions/download-artifact@v4",
+    source: "action.yml runs.using: node20 at the v4 tag",
+  },
+  {
+    uses: "actions/setup-go@v5",
+    source: "action.yml runs.using: node20 at the v5 tag",
+  },
+  {
+    uses: "actions/configure-pages@v5",
+    source: "action.yml runs.using: node20 at the v5 tag",
+  },
+  {
+    uses: "actions/deploy-pages@v4",
+    source: "action.yml runs.using: node20 at the v4 tag",
+  },
+  {
+    uses: "peter-evans/create-pull-request@v6",
+    source: "action.yml runs.using: node20 at the v6 tag",
+  },
+  {
+    uses: "pnpm/action-setup@v4",
+    source: "action.yml runs.using: node20 at the v4 tag",
+  },
 ];

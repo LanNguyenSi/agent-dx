@@ -47,13 +47,16 @@ jobs:
         run: node packages/slop-detector/dist/cli.js check . --pack placement-slop --config slop.config.yml
 
   # Separate job from placement-guard above (same slop-detector CLI, a
-  # different pack): this one is a security control (GitHub Actions
-  # `run:` expression injection, `workflow-slop`), not a doc-hygiene
-  # lint, so it gets its own status check name rather than riding on
-  # placement-guard's. See packages/slop-detector/README.md
-  # "workflow-slop by example" for the rule, the allowlist, and the
-  # sources behind it, and packages/slop-detector/CHANGELOG.md for why
-  # this is a new pack rather than a rule inside an existing one.
+  # different pack): this one is a security control over
+  # `.github/workflows/*.yml` (GitHub Actions `run:` expression injection,
+  # a reintroduced Node-20 action major, and a missing/neutralised
+  # npm-audit gate in audit.yml -- all three rules in `workflow-slop`),
+  # not a doc-hygiene lint, so it gets its own status check name rather
+  # than riding on placement-guard's. See packages/slop-detector/README.md
+  # "workflow-slop by example" for the rules, the allowlist/data-list
+  # config surface, and the sources behind them, and
+  # packages/slop-detector/CHANGELOG.md for why this is a new pack rather
+  # than a rule inside an existing one.
   workflow-guard:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -74,7 +77,7 @@ jobs:
         working-directory: packages/slop-detector
         run: npm run build
 
-      - name: "Check .github/workflows/*.yml for run: expression injection"
+      - name: "Check .github/workflows/*.yml for run: expression injection, Node-20 action majors, and audit-gate shape"
         run: node packages/slop-detector/dist/cli.js check . --pack workflow-slop --config slop.config.yml
 
   # Fails the build (not just a warning) on anchor-check drift in

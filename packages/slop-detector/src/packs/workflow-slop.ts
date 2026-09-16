@@ -401,35 +401,55 @@ function isScalarNode(
 /**
  * Every `uses:` scalar in the parsed document, at any nesting depth (a
  * job-level `uses:` calling a reusable workflow, a step-level `uses:`
- * naming an action). This rule does not gate on schema position the way
- * `collectRunScalars` gates `run:` on "not inside a `with:` input block",
- * because `uses:` never appears inside a `with:` block in the first place
- * (`with:` is always a *sibling* of `uses:` on the same step, holding that
- * action's own inputs).
+ * naming an action). Gated on schema position the same way
+ * `collectRunScalars` gates `run:`: a `uses:` key found while walking
+ * inside a step's own `with:` input block is not a real `uses:` step (a
+ * custom action can name an input literally `uses`, the same way one can
+ * name an input `run`), so `insideWith` is threaded down and a `with:`
+ * pair only starts an input block when its containing mapping also
+ * carries the step's real `uses:` key (`isUsesStep`, computed once per
+ * mapping before the loop, same as `collectRunScalars`).
  */
 function collectUsesRefs(
   node: unknown,
   out: Array<{ value: string; range: [number, number, number] }>,
+  insideWith = false,
 ): void {
   if (!hasItems(node)) return;
+  const isUsesStep = node.items.some(
+    (item) => isPairNode(item) && scalarKeyName(item.key) === "uses",
+  );
   for (const item of node.items) {
     if (isPairNode(item)) {
-      if (scalarKeyName(item.key) === "uses" && isScalarWithRange(item.value)) {
+      const keyName = scalarKeyName(item.key);
+      if (keyName === "uses" && !insideWith && isScalarWithRange(item.value)) {
         out.push({ value: item.value.value, range: item.value.range });
       }
-      collectUsesRefs(item.value, out);
+      collectUsesRefs(
+        item.value,
+        out,
+        insideWith || (isUsesStep && keyName === "with"),
+      );
     } else {
-      collectUsesRefs(item, out);
+      collectUsesRefs(item, out, insideWith);
     }
   }
 }
 
-// A version-ish ref: "v4", "v4.1.2", or a bare "4" (some workflows pin a
-// bare major without the "v"). Only the leading major number is used for
-// matching: a fixed point release like "v4.1.2" still runs whatever
+// A version-ish ref: "v4", "V4", "v4.1.2", or a bare "4" (some workflows
+// pin a bare major without the "v"). Only the leading major number is used
+// for matching: a fixed point release like "v4.1.2" still runs whatever
 // Node runtime its v4 line shipped, so it matches the same "v4" list entry
-// a moving-major "v4" ref would.
-const VERSION_REF_RE = /^v?(\d+)(?:\.\d+){0,2}$/;
+// a moving-major "v4" ref would. Case-insensitive ("V4" resolves the same
+// as "v4"): GitHub Actions itself treats a ref name case-sensitively at
+// the git level, but nothing stops an author from writing an uppercase
+// "V" by hand, and this rule's job is catching the major, not validating
+// the tag's exact casing. A trailing prerelease-ish suffix
+// (`-beta`, `-rc.1`) is tolerated and ignored for major resolution
+// ("v4-beta" still resolves to major "v4"): documented in the README as a
+// deliberate simplification, not an attempt to parse full semver
+// prerelease/build-metadata grammar.
+const VERSION_REF_RE = /^v?(\d+)(?:\.\d+){0,2}(?:-[0-9A-Za-z.]+)?$/i;
 // A commit sha (7-40 hex chars): never a version by itself. Distinguished
 // from a version ref by content (hex-only), not length, since a short sha
 // can coincide with a version-looking string only if it also matches
@@ -488,23 +508,35 @@ function trailingCommentMajor(
     afterOffset,
     newlineIndex === -1 ? text.length : newlineIndex,
   );
-  const match = restOfLine.match(/#.*?\bv(\d+)\b/);
+  const match = restOfLine.match(/#.*?\bv(\d+)\b/i);
   return match ? `v${match[1]}` : undefined;
+}
+
+// Case-folds an `owner/repo@vN` match key (or half of one) for comparison:
+// `Actions/Checkout@v4` and `actions/checkout@V4` resolve to the same
+// entry as `actions/checkout@v4`. Applied to the default list, to
+// `workflow.node20Majors`/`node20MajorsIgnore` config entries, and to the
+// candidate built from a scanned `uses:` value, so all three sides of the
+// comparison are folded consistently.
+function normalizeMajorKey(key: string): string {
+  return key.trim().toLowerCase();
 }
 
 /**
  * The effective Node-20-major match set for this scan: the package's
  * built-in default list, plus `config.workflow.node20Majors`, minus
  * `config.workflow.node20MajorsIgnore` (applied last, so it can also drop
- * a config-added entry). All three are `owner/repo@vN` strings compared
- * verbatim (no case-folding): a `slop.config.yml` entry must match the
- * casing an actual `uses:` value uses.
+ * a config-added entry). All three are `owner/repo@vN` strings, compared
+ * case-insensitively via `normalizeMajorKey`.
  */
 function resolveNode20Majors(config: ResolvedConfig): Set<string> {
-  const majors = new Set(DEFAULT_NODE20_ACTIONS.map((entry) => entry.uses));
-  for (const extra of config.workflow?.node20Majors ?? []) majors.add(extra);
+  const majors = new Set(
+    DEFAULT_NODE20_ACTIONS.map((entry) => normalizeMajorKey(entry.uses)),
+  );
+  for (const extra of config.workflow?.node20Majors ?? [])
+    majors.add(normalizeMajorKey(extra));
   for (const ignored of config.workflow?.node20MajorsIgnore ?? [])
-    majors.delete(ignored);
+    majors.delete(normalizeMajorKey(ignored));
   return majors;
 }
 
@@ -559,7 +591,7 @@ const node20ActionMajor: Rule = {
       if (!parsed) continue;
       if (parsed.major) {
         const candidate = `${parsed.ownerRepo}@${parsed.major}`;
-        if (activeMajors.has(candidate)) {
+        if (activeMajors.has(normalizeMajorKey(candidate))) {
           violations.push(
             makeNode20Violation(
               node20ActionMajor,
@@ -576,7 +608,7 @@ const node20ActionMajor: Rule = {
         const commentMajor = trailingCommentMajor(file.text, ref.range[1]);
         if (!commentMajor) continue; // documented sha-pin limitation, not a finding
         const candidate = `${parsed.ownerRepo}@${commentMajor}`;
-        if (activeMajors.has(candidate)) {
+        if (activeMajors.has(normalizeMajorKey(candidate))) {
           violations.push(
             makeNode20Violation(
               node20ActionMajor,
@@ -602,29 +634,62 @@ function isAuditWorkflowFile(file: FileTarget): boolean {
   return AUDIT_WORKFLOW_FILE_RE.test(normalized);
 }
 
+type ScalarWithRange = { value: unknown; range: [number, number, number] };
+
 interface StepRunInfo {
   runRange: [number, number, number];
-  continueOnError?: { value: unknown; range: [number, number, number] };
+  continueOnError?: ScalarWithRange;
+  /**
+   * The `continue-on-error:` of this step's *enclosing job* (the
+   * `jobs.<job_id>` mapping, identified by its own `steps:` key), when
+   * present — GitHub Actions honours `continue-on-error` at the job level
+   * too, not just per-step, so a step-level check alone misses a job that
+   * stays green regardless of what any of its steps (including the gate)
+   * exit.
+   */
+  jobContinueOnError?: ScalarWithRange;
 }
 
 /**
  * Every `run:`-carrying step mapping in the document, together with that
- * same step's `continue-on-error:` sibling when present. Unlike
- * `collectRunScalars` (which only needs the scalar node), this rule also
- * needs the *step's* other keys, so it collects at the mapping level: any
- * mapping with a `run:` key not inside a `uses:` step's `with:` input
- * block (same schema-position gating as `collectRunScalars`, for the same
- * reason: a custom action can name an input `run`) is treated as a step.
+ * same step's `continue-on-error:` sibling and its enclosing job's
+ * `continue-on-error:` (see `StepRunInfo.jobContinueOnError`), when
+ * present. Unlike `collectRunScalars` (which only needs the scalar node),
+ * this rule also needs the *step's* other keys, so it collects at the
+ * mapping level: any mapping with a `run:` key not inside a `uses:` step's
+ * `with:` input block (same schema-position gating as `collectRunScalars`,
+ * for the same reason: a custom action can name an input `run`) is
+ * treated as a step. `jobContinueOnError` is threaded down from the
+ * nearest enclosing mapping that itself carries a `steps:` key (a job
+ * mapping), not reset by `with:` gating since a job's own
+ * `continue-on-error:` is never inside any step's `with:` block.
  */
 function collectStepRuns(
   node: unknown,
   out: StepRunInfo[],
   insideWith = false,
+  jobContinueOnError?: ScalarWithRange,
 ): void {
   if (!hasItems(node)) return;
   const isUsesStep = node.items.some(
     (item) => isPairNode(item) && scalarKeyName(item.key) === "uses",
   );
+  const isJobMapping = node.items.some(
+    (item) => isPairNode(item) && scalarKeyName(item.key) === "steps",
+  );
+  const effectiveJobCoE = isJobMapping
+    ? (() => {
+        const jobCoePair = node.items.find(
+          (item) =>
+            isPairNode(item) && scalarKeyName(item.key) === "continue-on-error",
+        );
+        return jobCoePair &&
+          isPairNode(jobCoePair) &&
+          isScalarNode(jobCoePair.value)
+          ? { value: jobCoePair.value.value, range: jobCoePair.value.range }
+          : undefined;
+      })()
+    : jobContinueOnError;
   if (!insideWith) {
     const runPair = node.items.find(
       (item) => isPairNode(item) && scalarKeyName(item.key) === "run",
@@ -638,7 +703,11 @@ function collectStepRuns(
         coePair && isPairNode(coePair) && isScalarNode(coePair.value)
           ? { value: coePair.value.value, range: coePair.value.range }
           : undefined;
-      out.push({ runRange: runPair.value.range, continueOnError });
+      out.push({
+        runRange: runPair.value.range,
+        continueOnError,
+        jobContinueOnError: effectiveJobCoE,
+      });
     }
   }
   for (const item of node.items) {
@@ -648,14 +717,22 @@ function collectStepRuns(
         item.value,
         out,
         insideWith || (isUsesStep && keyName === "with"),
+        effectiveJobCoE,
       );
     } else {
-      collectStepRuns(item, out, insideWith);
+      collectStepRuns(item, out, insideWith, effectiveJobCoE);
     }
   }
 }
 
-const AUDIT_GATE_RE = /--audit-level=(high|critical)\b/;
+// `moderate`/`low` are STRONGER gates than `high`/`critical` (npm's
+// `--audit-level` sets the *minimum* severity that fails the command, so a
+// lower threshold fails on strictly more advisories), so they count as a
+// recognised gate too. Scoped to `npm audit` only (see `isGateCommand`
+// below): a `pnpm audit --audit-level=high` or a non-npm audit command
+// (`pip-audit`, `cargo audit`) is out of this rule's reach, documented in
+// the README rather than guessed at here.
+const AUDIT_GATE_RE = /--audit-level=(low|moderate|high|critical)\b/;
 
 function isGateCommand(raw: string): boolean {
   return /\bnpm\s+audit\b/.test(raw) && AUDIT_GATE_RE.test(raw);
@@ -703,17 +780,25 @@ function buildLogicalLines(raw: string, baseOffset: number): LogicalLine[] {
 
 /**
  * `line` with a trailing shell comment removed, only when the `#` sits
- * outside single/double quotes (a simple quote-parity scan, no escape
- * handling, "simple" per the rule's own conservative-by-design brief) and
- * is preceded by whitespace or is the first character. A `#` that fails
- * either test is left alone: it is either quoted data or not a comment
- * delimiter at all (e.g. `foo#bar`, not preceded by whitespace).
+ * outside single/double quotes (a quote-parity scan with one piece of
+ * escape handling: a backslash inside a double-quoted span, e.g.
+ * `--note="it\"s fine"`, escapes the next character instead of closing
+ * the double-quoted span, matching bash's own double-quote escaping.
+ * Single-quoted spans get no escape handling, matching bash: nothing is
+ * special inside single quotes) and is preceded by whitespace or is the
+ * first character. A `#` that fails either test is left alone: it is
+ * either quoted data or not a comment delimiter at all (e.g. `foo#bar`,
+ * not preceded by whitespace).
  */
 function stripTrailingComment(line: string): string {
   let inSingle = false;
   let inDouble = false;
   for (let i = 0; i < line.length; i++) {
     const ch = line[i];
+    if (inDouble && ch === "\\") {
+      i++; // skip the escaped character (e.g. the `"` in `\"`)
+      continue;
+    }
     if (ch === "'" && !inDouble) inSingle = !inSingle;
     else if (ch === '"' && !inSingle) inDouble = !inDouble;
     else if (ch === "#" && !inSingle && !inDouble) {
@@ -731,20 +816,41 @@ interface AuditFinding {
 }
 
 /**
+ * A post-gate `exit` that actually converts a captured status into a
+ * non-zero step exit: either a literal nonzero exit code (`exit 1`,
+ * `exit 2`), or `exit` of a captured variable (`exit $STATUS`,
+ * `exit "$STATUS"`, `exit ${STATUS}`, `exit $?`). Presence of `$?` and
+ * `set -e` alone is not enough: a step can capture the status, restore
+ * strict mode, and then only ever `exit 0` or merely `echo` it, which
+ * still lets the step succeed. This regex is deliberately permissive
+ * about *which* variable is exited (not just `STATUS`): the point is
+ * that some captured value is actually handed to `exit`, not that this
+ * rule can prove that value is always nonzero at runtime.
+ */
+const NONZERO_EXIT_VERDICT_RE =
+  /\bexit\s+(?:[1-9]\d*\b|"?\$\{?(?:STATUS|[A-Za-z_][A-Za-z0-9_]*|\?)\}?"?)/;
+
+/**
  * Every neutralisation signal found in one gate step's `run:` block
  * (`raw`, the step's raw source slice, `baseOffset`-anchored). `raw` is
  * already confirmed by the caller to contain the `npm audit
- * --audit-level=(high|critical)` gate command (`isGateCommand`).
+ * --audit-level=(low|moderate|high|critical)` gate command
+ * (`isGateCommand`).
  *
  * `set +e` is only flagged when it precedes the gate command AND the rest
- * of the block (after the gate command) does *not* both capture the gate's
- * exit status (`$?`) and restore `set -e` afterward: the shape a
- * legitimate "classify the gate's own exit code" step uses (see the
- * canonical audit.yml fixture in this pack's tests/README): `set +e`,
- * run the gate command, `STATUS=$?`, `set -e`, then branch on `$STATUS`.
- * That shape still surfaces a HIGH/CRITICAL finding as a non-zero step
- * exit; a bare `set +e` with no capture-and-restore afterward does not,
- * and is the actual neutralisation this half of the rule exists to catch.
+ * of the block (after the gate command) does *not* all three of: capture
+ * the gate's exit status (`$?`), restore `set -e` afterward, AND convert
+ * that captured status into a non-zero step exit (`NONZERO_EXIT_VERDICT_RE`
+ * above) — the shape a legitimate "classify the gate's own exit code" step
+ * uses (see the canonical audit.yml fixture in this pack's tests/README):
+ * `set +e`, run the gate command, `STATUS=$?`, `set -e`, then
+ * `exit $STATUS` (or an equivalent nonzero exit) on a failing status.
+ * Capturing and restoring alone is not enough: `set +e; ...; STATUS=$?;
+ * set -e; exit 0` (or an echo-only branch that never exits nonzero) still
+ * surfaces nothing, and both scanned clean before this check was added
+ * (a real finding from `audit-gate-shape` review round 1). A bare `set +e`
+ * with no capture-and-restore-and-verdict afterward is the actual
+ * neutralisation this half of the rule exists to catch.
  */
 function checkGateNeutralization(
   raw: string,
@@ -761,12 +867,15 @@ function checkGateNeutralization(
     const after = raw.slice(gateEndInRaw);
     const capturesStatus = /\$\?/.test(after);
     const restoresStrict = /\bset\s+-e\b/.test(after);
-    if (!capturesStatus || !restoresStrict) {
+    const convertsToNonzeroExit = NONZERO_EXIT_VERDICT_RE.test(after);
+    if (!capturesStatus || !restoresStrict || !convertsToNonzeroExit) {
       findings.push({
         offset: baseOffset + setPlusEIndex,
         matched: "set +e",
         message:
-          "`set +e` appears before the `npm audit --audit-level=...` gate command in this run block without both capturing its exit status (`$?`) and restoring `set -e` afterward, so a failing gate no longer fails the step.",
+          !capturesStatus || !restoresStrict
+            ? "`set +e` appears before the `npm audit --audit-level=...` gate command in this run block without both capturing its exit status (`$?`) and restoring `set -e` afterward, so a failing gate no longer fails the step."
+            : "`set +e` appears before the `npm audit --audit-level=...` gate command in this run block; the exit status is captured (`$?`) and `set -e` is restored, but nothing afterward turns that captured status back into a non-zero step exit (no `exit <nonzero>` / `exit $STATUS` verdict), so a failing gate no longer fails the step.",
       });
     }
   }
@@ -798,18 +907,51 @@ function checkGateNeutralization(
       });
     }
 
-    const trimmedStripped = stripped.replace(/\s+$/, "");
-    const tailMatch = trimmedStripped.match(/;\s*(true|:)\s*$/);
+    // Not end-anchored (`; true ; echo done` is still caught mid-line), only
+    // boundary-checked so it does not fire inside a longer token (`; truest`).
+    const tailMatch = stripped.match(/;\s*(true|:)(?=[\s;]|$)/);
     if (tailMatch && tailMatch.index !== undefined) {
       findings.push({
         offset: gateLineMatch.startOffset + tailMatch.index,
         matched: tailMatch[0].trim(),
         message:
-          "The gate line ends in `; true` or `; :`, which discards the `npm audit --audit-level=...` gate command's exit status.",
+          "The gate line contains `; true` or `; :` after the `npm audit --audit-level=...` gate command: a neutralisation attempt that is ineffective under the runner's `bash -e` today (the step still fails on a nonzero gate exit), but becomes effective the moment a `set +e` is added earlier in this run block.",
       });
     }
   }
 
+  return findings;
+}
+
+/**
+ * `continue-on-error` findings for one gate step: checked on the step
+ * itself and on its enclosing job (see `StepRunInfo.jobContinueOnError`).
+ * Flags any value that is not literally `false` (boolean `false` or the
+ * string `"false"`): a literal `true`, the string `"true"`, or an
+ * unresolved `${{ ... }}` expression (which parses as a plain string and
+ * cannot be evaluated statically) is not provably `false`, so all three
+ * are treated the same — a step- or job-level `if:` that would actually
+ * prevent the gate step from running is out of this rule's reach and is
+ * not checked here (documented in the README as a limitation).
+ */
+function continueOnErrorFindings(step: StepRunInfo): AuditFinding[] {
+  const findings: AuditFinding[] = [];
+  const check = (
+    coe: ScalarWithRange | undefined,
+    scope: "the gate step" | "the gate step's enclosing job",
+  ) => {
+    if (!coe) return;
+    if (coe.value === false || coe.value === "false") return;
+    const rendered =
+      typeof coe.value === "string" ? coe.value : String(coe.value);
+    findings.push({
+      offset: coe.range[0],
+      matched: `continue-on-error: ${rendered}`,
+      message: `\`continue-on-error\` on ${scope} is set to \`${rendered}\`, which cannot be proven false: the job may stay green regardless of the \`npm audit --audit-level=...\` gate's exit status.`,
+    });
+  };
+  check(step.continueOnError, "the gate step");
+  check(step.jobContinueOnError, "the gate step's enclosing job");
   return findings;
 }
 
@@ -840,7 +982,7 @@ const auditGateShape: Rule = {
   defaultSeverity: "block",
   enabledByDefault: true,
   rationale:
-    'A fleet sweep added a two-step audit.yml to several repos: a non-blocking report step, then a `npm audit --audit-level=high` (or `critical`) gate step that fails the job on a HIGH/CRITICAL advisory. Nothing stops a later edit from quietly removing the protection while keeping the job green, for example dropping the gate step, appending `|| true`, or flipping `continue-on-error: true` on it. This rule flags an `audit.yml`/`audit.yaml` with no `npm audit --audit-level=high`/`critical` run step at all, and flags a gate step whose command is neutralised: a `||` after the gate command (on its own logical line, joined across a backslash continuation) whose right-hand side is not `exit`/`false`/`return`; a `set +e` before the gate command with no matching exit-status capture and `set -e` restore afterward; `continue-on-error: true` on the gate step; or a gate line ending in `; true`/`; :`. Deliberately conservative: it can still flag a legitimate `|| echo "logged"` on the gate line itself, which is fine as false positives go for a security gate; use a `slop-detector:disable-line` comment for a reviewed exception.',
+    'A fleet sweep added a two-step audit.yml to several repos: a non-blocking report step, then a `npm audit --audit-level=high` (or `critical`) gate step that fails the job on a HIGH/CRITICAL advisory. Nothing stops a later edit from quietly removing the protection while keeping the job green, for example dropping the gate step, appending `|| true`, or flipping `continue-on-error: true` on it. This rule flags an `audit.yml`/`audit.yaml` with no recognised `npm audit --audit-level=low|moderate|high|critical` run step at all (`moderate`/`low` are stronger gates than `high`/`critical` and also count; scoped to `npm audit` only, not `pnpm audit` or a non-npm audit command), and flags a gate step whose command is neutralised: a `||` after the gate command (on its own logical line, joined across a backslash continuation) whose right-hand side is not `exit`/`false`/`return`; a `set +e` before the gate command with no matching exit-status capture, `set -e` restore, AND a resulting non-zero exit verdict afterward; `continue-on-error: true` (or any value not provably `false`, including an unresolved `${{ }}` expression) on the gate step or its enclosing job; or a gate line containing `; true`/`; :` after the gate command. Deliberately conservative: it can still flag a legitimate `|| echo "logged"` on the gate line itself, which is fine as false positives go for a security gate; use a `slop-detector:disable-line` comment for a reviewed exception, or disable the rule entirely per repo via `rules: { "workflow-slop/audit-gate-shape": { enabled: false } }` (e.g. a non-npm audit workflow this rule cannot evaluate).',
   appliesTo: isAuditWorkflowFile,
   check(ctx: RuleContext): Violation[] {
     const { file } = ctx;
@@ -863,7 +1005,7 @@ const auditGateShape: Rule = {
           file,
           0,
           "",
-          "No `run:` step in this audit workflow file invokes `npm audit` with `--audit-level=high` or `--audit-level=critical`: the gate never fails the job on a HIGH/CRITICAL advisory.",
+          "No recognised npm-audit gate command was found in this audit workflow: no `run:` step invokes `npm audit` with `--audit-level=low`, `--audit-level=moderate`, `--audit-level=high`, or `--audit-level=critical`, so the gate never fails the job on a matching advisory. (This rule only recognises `npm audit`; a `pnpm audit` or a non-npm audit command is out of its scope, see the README.)",
         ),
       ];
     }
@@ -882,18 +1024,14 @@ const auditGateShape: Rule = {
           ),
         );
       }
-      if (
-        step.continueOnError &&
-        (step.continueOnError.value === true ||
-          step.continueOnError.value === "true")
-      ) {
+      for (const finding of continueOnErrorFindings(step)) {
         violations.push(
           makeAuditViolation(
             auditGateShape,
             file,
-            step.continueOnError.range[0],
-            "continue-on-error: true",
-            "`continue-on-error: true` on the gate step lets the job stay green regardless of the `npm audit --audit-level=...` gate's exit status.",
+            finding.offset,
+            finding.matched,
+            finding.message,
           ),
         );
       }
