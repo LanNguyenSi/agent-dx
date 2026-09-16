@@ -28,6 +28,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `phpunit-message-reset.txt`, `phpunit-indented-message-line.txt`) pin
   these shapes; the existing `phpunit-error-message-with-port.txt`
   fixture's pinned `file`/`line`/`message` are unchanged.
+- Follow-up to the same tracker (ed353582), from review: the raw-line blank
+  check above was not actually pinned by any fixture (reverting it to a
+  trim-based check, while keeping the locator regex's anchor, left every
+  test green, because the one existing diff-row fixture's anchor alone
+  already keeps its indented row out); a new real capture
+  (`phpunit-raw-blank-check.txt`, a one-space "blank" line immediately
+  followed by an UNINDENTED locator-shaped line) now pins the raw-line
+  blank check on its own. Also narrowed the multi-frame branch: it
+  previously consumed ANY later locator-shaped line once `file` was set,
+  not only a CONSECUTIVE one (no blank line, no other text, in between),
+  which silently dropped a PHPUnit 9.6 chained exception's own `Caused by`
+  message and locator instead of keeping them in `message`; a new real
+  capture (`phpunit-chained-exception.txt`) pins that only a truly
+  consecutive frame is consumed, and that the `Caused by` block's text is
+  folded into `message` like any other line.
 
 ## [0.5.0] - 2026-09-15
 

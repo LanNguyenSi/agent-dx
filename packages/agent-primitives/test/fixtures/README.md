@@ -264,12 +264,15 @@ commands exited `0`.
   unchanged blank line inside the diff prints as a single space, never
   as a zero-length line, and the unchanged `port:12` row directly below
   it prints indented (` port:12`) -- structurally identical to a
-  `file:line` locator once trimmed, and immediately preceded by what a
-  trim-based blank check reads as a blank line. Pins that the entry
-  loop's blank check and its locator match both run against the RAW
-  line: the diff's blank row is not blank (it is one space, not zero
-  characters) and its indented `port:12` row is never read as the
-  locator, which is instead read correctly two lines later
+  `file:line` locator once trimmed. Pins `ENTRY_FILE_LINE`'s own `\S`
+  anchor, which is what actually keeps the indented `port:12` row from
+  being read as the locator here: the row is never blank-gated in the
+  first place (a raw-length blank check already reads the one-space row
+  above it as non-blank, so the entry loop never even reaches the
+  indented row looking for a locator), so this fixture alone does not
+  discriminate a raw-length blank check from a trim-based one -- see
+  `phpunit-raw-blank-check.txt` below for the fixture that does. The
+  real locator is instead read correctly two lines later
   (`tests/DiffTest.php:11`).
 - `phpunit-nested-throw-frames.txt`: an uncaught `RuntimeException`
   thrown from a function called by another function called by the test
@@ -279,8 +282,11 @@ commands exited `0`.
   (`src/Thrower.php:5`, the throw site; `src/Thrower.php:10`, its
   caller; `tests/NestedThrowTest.php:11`, the test method) -- pins that
   the entry loop reports only the first (innermost, throw-site) frame as
-  `file`/`line` and consumes the remaining frames without folding them
-  into `message`.
+  `file`/`line` and consumes the remaining CONSECUTIVE frames (no blank
+  line, no other text, between them) without folding them into
+  `message`; see `phpunit-chained-exception.txt` below for the fixture
+  pinning that a later, non-consecutive locator is folded into `message`
+  instead of consumed.
 - `phpunit-message-reset.txt`: an uncaught `RuntimeException` whose own
   message embeds a blank line followed by two ordinary lines, the second
   of which (`abc:99`) is structurally identical to a locator
@@ -303,6 +309,59 @@ commands exited `0`.
   because it requires a non-whitespace first character on the raw line,
   so the real locator (`tests/IndentedMessageTest.php:9`) is still found
   further down.
+
+### Raw-blank-check and chained-exception captures
+
+Same throwaway-`composer`-project-under-scratch-directory, same
+disposable-Docker-container (`composer:2`, `php:8.3-cli`); PHP 8.3.33
+(cli), PHPUnit 9.6.36. Command for both: `docker run --rm -v
+<scratch>:/work -w /work composer:2 composer require --dev
+phpunit/phpunit:^9.6` (exit `0`) followed by `docker run --rm -v
+<scratch>:/work -w /work php:8.3-cli vendor/bin/phpunit --colors=never
+tests/<File>.php`. Both captures mount the scratch project at `/work`
+and are trimmed of that mount point down to the project-relative path
+(`/work/tests/RawBlankCheckTest.php:9` -> `tests/RawBlankCheckTest.php:9`),
+the same mount-and-trim convention every other `phpunit-*` capture in
+this directory uses (this project's own throwaway captures used `/work`
+as their container mount point throughout, not `/app`).
+
+- `phpunit-raw-blank-check.txt`: an uncaught `RuntimeException` whose
+  own message embeds a genuinely one-space line (not a zero-length one)
+  directly followed by an UNINDENTED `abc:99` line
+  (`tests/RawBlankCheckTest.php`, `testSingleSpaceLineThenLocator`).
+  Exit `2`. Pins that the entry loop's blank check tests the RAW line's
+  *length*, not its trimmed length: `ENTRY_FILE_LINE`'s `\S` anchor does
+  NOT protect here, because `abc:99` is already unindented and matches
+  the anchor fine, so a trim-based blank check (`line.trim().length ===
+  0`) would treat the one-space line as blank and misread the following
+  `abc:99` as the locator, discarding the real one
+  (`tests/RawBlankCheckTest.php:9`) as a dropped extra frame; only
+  testing the raw line's own length keeps that from happening. Unlike
+  `phpunit-diff-indented-locator.txt` above, this fixture discriminates
+  the blank check on its own, independently of the `\S` anchor.
+- `phpunit-chained-exception.txt`: a `RuntimeException` constructed with
+  a chained `LogicException` as its previous-exception argument
+  (`tests/ChainedThrowTest.php`, `testChainedException`,
+  `new RuntimeException("outer", 0, new LogicException("inner:42"))`).
+  Exit `2`. PHPUnit 9.6 prints the first exception's own `file:line`
+  locator, then a blank line, a `Caused by` line, the chained
+  exception's own message line (`LogicException: inner:42` --
+  structurally a locator itself), a blank line, and the chained
+  exception's own `file:line` locator (here identical to the first,
+  since both exceptions are constructed on the same source line). Pins
+  that the entry loop's extra-frame branch only consumes a later
+  locator-shaped line when it is CONSECUTIVE with the frame already
+  captured (no blank line, no other text, in between): neither the
+  `Caused by` block's message line nor its own locator line is
+  consecutive with the first exception's frame (a blank line and, for
+  the message line, the `Caused by` line itself sit in between), so both
+  are folded into `message` as ordinary text
+  (`RuntimeException: outer Caused by LogicException: inner:42
+  tests/ChainedThrowTest.php:9`) instead of being silently dropped the
+  way a true consecutive frame is. This is the fixture that discriminates
+  a broader "any later locator-shaped line is a frame" rule (which would
+  drop the `Caused by` block's message text entirely) from the narrower
+  consecutive-only rule the entry loop actually implements.
 
 ## `vitest-project/`, `tsc-project/`, `eslint-project/`
 

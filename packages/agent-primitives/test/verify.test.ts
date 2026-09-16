@@ -2921,12 +2921,14 @@ describe("phpunitDetector: captured real output", () => {
     }
   });
 
-  it("matches a diff-with-blank-row, a nested-throw-frames, a message-reset, and an indented-message-line run", () => {
+  it("matches a diff-with-blank-row, a nested-throw-frames, a message-reset, an indented-message-line, a raw-blank-check, and a chained-exception run", () => {
     for (const [name, exitCode] of [
       ["phpunit-diff-indented-locator", 1],
       ["phpunit-nested-throw-frames", 2],
       ["phpunit-message-reset", 2],
       ["phpunit-indented-message-line", 2],
+      ["phpunit-raw-blank-check", 2],
+      ["phpunit-chained-exception", 2],
     ] as const) {
       expect(
         phpunitDetector.matches({
@@ -2978,6 +2980,8 @@ describe("phpunitDetector: captured real output", () => {
       "phpunit-nested-throw-frames",
       "phpunit-message-reset",
       "phpunit-indented-message-line",
+      "phpunit-raw-blank-check",
+      "phpunit-chained-exception",
     ]) {
       const output = readCaptured(name);
       expect(vitestDetector.matches({ output, command: "", exitCode: 0 })).toBe(
@@ -3283,11 +3287,16 @@ describe("phpunitDetector: captured real output", () => {
     expect(parsed.failures).toHaveLength(1);
     expect(parsed.failures[0].name).toBe("DiffTest::testConfigDiff");
     // The diff's blank context row is a single space, not a zero-length
-    // line, and is not itself blank under the entry loop's raw-line
-    // check; its indented ` port:12` row right below it is structurally
-    // identical to a locator once trimmed but is never matched against
-    // (never indented), so it is folded into the message like any other
-    // diff row.
+    // line; its indented ` port:12` row right below it is structurally
+    // identical to a locator once trimmed, but `ENTRY_FILE_LINE`'s `\S`
+    // anchor (not the blank check) is what actually keeps it from being
+    // matched, since it is still indented on the raw line, so it is
+    // folded into the message like any other diff row. This fixture
+    // does not by itself discriminate a raw-length blank check from a
+    // trim-based one, since the entry loop never reaches this row
+    // looking for a locator either way (see
+    // `phpunit-raw-blank-check.txt` / the "raw-line blank check" test
+    // below for the fixture that does).
     expect(parsed.failures[0].message).toBe(
       "Failed asserting that two strings are identical. --- Expected +++ Actual @@ @@ 'first port:12 -second' +third'",
     );
@@ -3358,6 +3367,51 @@ describe("phpunitDetector: captured real output", () => {
     expect(parsed.failures[0].line).toBe(9);
   });
 
+  it("parses a message with a genuinely one-space line (not zero-length) followed by an UNINDENTED locator-shaped line: the raw-line blank check, not the anchor, keeps it out", () => {
+    const parsed = phpunitDetector.parse({
+      output: readCaptured("phpunit-raw-blank-check"),
+      command: "vendor/bin/phpunit",
+      exitCode: 2,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].name).toBe(
+      "RawBlankCheckTest::testSingleSpaceLineThenLocator",
+    );
+    // "abc:99" is unindented, so `ENTRY_FILE_LINE`'s `\S` anchor would
+    // happily match it; only the entry loop's blank check testing the
+    // RAW line's length (not its trimmed length) keeps the one-space
+    // line above it from being misread as blank, so "abc:99" is never
+    // mistaken for the locator and is folded into the message instead.
+    expect(parsed.failures[0].message).toBe("RuntimeException: Header abc:99");
+    // The real locator, preceded by a genuinely blank line further
+    // down, is still captured correctly.
+    expect(parsed.failures[0].file).toBe("tests/RawBlankCheckTest.php");
+    expect(parsed.failures[0].line).toBe(9);
+  });
+
+  it("parses a chained exception's PHPUnit 9.6 'Caused by' block: only the first exception's frame becomes file/line, the block's own message and locator are folded into message (not consumed as a consecutive frame)", () => {
+    const parsed = phpunitDetector.parse({
+      output: readCaptured("phpunit-chained-exception"),
+      command: "vendor/bin/phpunit",
+      exitCode: 2,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].name).toBe(
+      "ChainedThrowTest::testChainedException",
+    );
+    expect(parsed.failures[0].file).toBe("tests/ChainedThrowTest.php");
+    expect(parsed.failures[0].line).toBe(9);
+    // The `Caused by` block's own message line and locator line are
+    // both separated from the first exception's captured frame by a
+    // blank line (and, for the message line, the `Caused by` line
+    // itself), so neither is CONSECUTIVE with it: the extra-frame
+    // branch does not consume them, and both are folded into `message`
+    // as ordinary text instead of being silently dropped.
+    expect(parsed.failures[0].message).toBe(
+      "RuntimeException: outer Caused by LogicException: inner:42 tests/ChainedThrowTest.php:9",
+    );
+  });
+
   it("failures invariant: summary.failed + summary.errors is never less than the parsed failures list, across every red/error fixture", () => {
     for (const [name, exitCode] of [
       ["phpunit-fail", 1],
@@ -3370,6 +3424,8 @@ describe("phpunitDetector: captured real output", () => {
       ["phpunit-nested-throw-frames", 2],
       ["phpunit-message-reset", 2],
       ["phpunit-indented-message-line", 2],
+      ["phpunit-raw-blank-check", 2],
+      ["phpunit-chained-exception", 2],
     ] as const) {
       const parsed = phpunitDetector.parse({
         output: readCaptured(name),
@@ -3407,6 +3463,8 @@ describe("phpunitDetector: captured real output", () => {
     "phpunit-nested-throw-frames",
     "phpunit-message-reset",
     "phpunit-indented-message-line",
+    "phpunit-raw-blank-check",
+    "phpunit-chained-exception",
   ] as const;
 
   /** The run's own stated total: the tally line's `Tests: N`, or a green

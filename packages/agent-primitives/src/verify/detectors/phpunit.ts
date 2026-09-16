@@ -119,18 +119,29 @@ const ENTRY_DIVIDER = /^--\s*$/;
  * real: `phpunit-error-message-with-port.txt`'s first message line,
  * "RuntimeException: upstream unreachable at api.example.com:8080",
  * ends in `:8080` and is not preceded by a blank line, so it is never
- * mistaken for the locator that follows it). An uncaught exception can
- * also print more than one such line back to back, with no blank line
- * between them (captured real: `phpunit-nested-throw-frames.txt`'s
- * `/work/src/Thrower.php:5` / `/work/src/Thrower.php:10` /
- * `/work/tests/NestedThrowTest.php:11`, three frames from an innermost
- * throw site out through its callers to the test method): the entry
- * loop below reports only the FIRST such line as `file`/`line` (the
- * frame closest to the fault, matching every single-frame capture's own
- * convention: the throw/assertion site, not the outermost test-method
- * caller) and consumes every immediately-following `file:line` line
- * after it without adding any of them to `message`, rather than folding
- * the extra frames into the message text. */
+ * mistaken for the locator that follows it). Note that this anchor does
+ * NOT exclude a diff's `-`/`+`-prefixed removed/added rows on its own
+ * (`-` and `+` are themselves non-whitespace, so `\S` matches them);
+ * those rows stay unreachable only because PHPUnit's diff renderer
+ * never directly precedes one with a zero-length line, which is what
+ * the entry loop's blank-line precondition actually enforces. An
+ * uncaught exception can also print more than one such line back to
+ * back, with no blank line between them (captured real:
+ * `phpunit-nested-throw-frames.txt`'s `src/Thrower.php:5` /
+ * `src/Thrower.php:10` / `tests/NestedThrowTest.php:11`, three frames
+ * from an innermost throw site out through its callers to the test
+ * method, trimmed of the capture mount point the same way every other
+ * path in this file's fixtures is): the entry loop below reports only
+ * the FIRST such line as `file`/`line` (the frame closest to the fault,
+ * matching every single-frame capture's own convention: the
+ * throw/assertion site, not the outermost test-method caller) and
+ * consumes every immediately-following `file:line` line after it
+ * (consecutive with it -- no blank line, no other text, in between)
+ * without adding any of them to `message`, rather than folding the
+ * extra frames into the message text; a LATER locator-shaped line that
+ * is not consecutive with the captured frame (captured real:
+ * `phpunit-chained-exception.txt`'s `Caused by` block) is folded into
+ * `message` like any other text instead of being consumed. */
 const ENTRY_FILE_LINE = /^(\S.*):(\d+)$/;
 /** A PHP-level deprecation notice PHPUnit lets through to its own
  * output (e.g. a dynamic-property-creation notice on PHP 8.2+, captured
@@ -514,14 +525,38 @@ export const phpunitDetector: Detector = {
       // preceded by a blank line, so without this reset the earlier
       // blank line's `precededByBlank` would still read `true` here and
       // misread `abc:99` as the locator, discarding the real one that
-      // follows).
+      // follows). This blank check is itself pinned independently of
+      // `ENTRY_FILE_LINE`'s own `\S` anchor (captured real:
+      // `phpunit-raw-blank-check.txt`'s message embeds a genuinely
+      // one-space line -- not a zero-length one -- immediately followed
+      // by an UNINDENTED `abc:99` line: the anchor alone would happily
+      // match that unindented line, so only testing the raw line's
+      // *length*, not its trimmed length, keeps `precededByBlank` false
+      // there and stops `abc:99` from being misread as the locator).
       let precededByBlank = false;
+      // Whether the previous non-terminator line was itself a consumed
+      // `file`/`line` locator or frame: gates the extra-frame branch
+      // below to lines that are truly CONSECUTIVE with the one already
+      // captured (no blank line, no other text, in between), matching
+      // the multi-frame capture's own shape (`phpunit-nested-throw-frames.txt`'s
+      // three frames print back to back with nothing between them).
+      // Without this narrower gate, ANY later locator-shaped line in the
+      // entry body -- however far from the captured frame -- would be
+      // silently dropped instead of folded into `message` (captured
+      // real: `phpunit-chained-exception.txt`'s PHPUnit 9.6 `Caused by`
+      // block, whose own `LogicException: inner:42` message line and
+      // its own locator line sit well after the first exception's
+      // frame, separated by a blank line and a `Caused by` line; a
+      // broader "any later locator" rule would swallow that entire
+      // block instead of keeping its text in `message`).
+      let precededByFrame = false;
       let j = i + 1;
       for (; j < lines.length; j++) {
         const line = lines[j];
         if (isEntryBodyTerminator(line)) break;
         if (line.length === 0) {
           precededByBlank = true;
+          precededByFrame = false;
           continue;
         }
         if (file === undefined && precededByBlank) {
@@ -530,18 +565,28 @@ export const phpunitDetector: Detector = {
             file = fileLine[1];
             entryLine = Number(fileLine[2]);
             precededByBlank = false;
+            precededByFrame = true;
             continue;
           }
-        } else if (file !== undefined && ENTRY_FILE_LINE.test(line)) {
-          // A stack-trace frame immediately following the one already
-          // captured above: consumed and dropped rather than folded
-          // into `message` (captured real:
-          // `phpunit-nested-throw-frames.txt`'s second and third
+        } else if (
+          file !== undefined &&
+          precededByFrame &&
+          ENTRY_FILE_LINE.test(line)
+        ) {
+          // A stack-trace frame immediately (no blank line, no other
+          // text) following the one already captured above: consumed
+          // and dropped rather than folded into `message` (captured
+          // real: `phpunit-nested-throw-frames.txt`'s second and third
           // `file:line` frames). `DetectorParseResult` has no field to
           // hold extra frames in, the same reasoning that already drops
           // a risky/warning/incomplete/skipped entry elsewhere in this
-          // file.
+          // file. `precededByFrame` keeps this branch from also
+          // consuming an UNRELATED later locator, such as a chained
+          // exception's own `Caused by` locator (captured real:
+          // `phpunit-chained-exception.txt`), which is preceded by a
+          // blank line and other text, not by a consumed frame.
           precededByBlank = false;
+          precededByFrame = true;
           continue;
         }
         const trimmed = line.trim();
@@ -549,6 +594,7 @@ export const phpunitDetector: Detector = {
           message = message.length > 0 ? `${message} ${trimmed}` : trimmed;
         }
         precededByBlank = false;
+        precededByFrame = false;
       }
       // Resume ON the terminator line, so a section header or marker
       // that ended this entry is still seen by the outer scan.
