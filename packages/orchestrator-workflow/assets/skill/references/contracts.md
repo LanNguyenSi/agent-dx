@@ -175,13 +175,13 @@ the same diagnostics as a single JSON object. It exits `0` when the return
 is structurally valid, `1` when it is structurally invalid (a missing or
 out-of-enum required field, or unparsable, empty, non-mapping input), and
 `2` for a usage error (an unreadable file, an unrecognized `--format`
-value, a missing `<file>` argument, or an excess positional argument).
-`--format json` governs the validation verdict only: a commander parsing
-error or an unrecognized `--format` value still prints plain text to
-stderr regardless of `--format`, except an unreadable file, which still
-emits the JSON envelope on stdout. The check is structural only: it
-never judges semantic adequacy, cannot waive a finding, and passing it is
-never orchestrator acceptance.
+value, or an argument-parsing error: a missing `<file>` argument, an
+unknown option, an excess positional argument). `--format json` governs
+the validation verdict only: an argument-parsing error or an unrecognized
+`--format` value still prints plain text to stderr, except an unreadable
+file, which still emits the JSON envelope on stdout. The check is
+structural only: it never judges semantic adequacy, cannot waive a
+finding, and passing it is never orchestrator acceptance.
 
 `recurrence` classifies each finding against earlier rounds on the same
 task: `new` for a defect class not previously found here, `repeated` for

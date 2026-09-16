@@ -450,6 +450,123 @@ const TOP_LEVEL_CHECKS: Record<(typeof TOP_LEVEL_FIELDS)[number], DocChecker> =
     withdrawn: checkWithdrawn,
   };
 
+/** Every field name any of the four contract constants declares. */
+export type SchemaFieldName =
+  | (typeof TOP_LEVEL_FIELDS)[number]
+  | (typeof FINDING_FIELDS)[number]
+  | (typeof REPRODUCTION_FIELDS)[number]
+  | (typeof WITHDRAWN_FIELDS)[number];
+
+/**
+ * The structural kind of one contract field: which input classes its
+ * checker accepts and which it rejects. Declared once, next to the
+ * dispatch tables above, and read by both this module (for the `expected`
+ * text a diagnostic carries) and `test/review-report.test.ts`'s case
+ * generator, which derives its whole case list from these kinds rather
+ * than from a hand-enumerated list of checks.
+ *
+ * - `enum`: present, a string, and one of `ENUM_VALUES[field]`.
+ * - `string`: present and a string; the empty string is accepted.
+ * - `non-empty-string`: present, a string, and not blank.
+ * - `scalar`: present and either a string or a number.
+ * - `array`: present and an array; an empty array is accepted.
+ * - `mapping-list`: `array`, and every element a mapping.
+ * - `mapping`: present and a mapping.
+ *
+ * A new kind is declared here, in {@link KIND_EXPECTED}, and in the
+ * generator's own `Record<FieldKind, ...>` value tables; each of those is
+ * keyed by this type, so a kind with no expectation text or no input
+ * classes is a compile error rather than an untested kind.
+ */
+export type FieldKind =
+  | "enum"
+  | "string"
+  | "non-empty-string"
+  | "scalar"
+  | "array"
+  | "mapping-list"
+  | "mapping";
+
+/**
+ * The declared kind of every field of every contract constant, keyed by
+ * bare field name the way {@link ENUM_VALUES} is: a name is unique across
+ * the whole contract block except for `description`, which `findings[]`
+ * and `withdrawn[]` share with the same kind. The `satisfies
+ * Record<SchemaFieldName, FieldKind>` clause means a name added to any of
+ * the four constants without a kind here is a TypeScript compile error,
+ * the same way it is already an error to add one without a checker in the
+ * dispatch tables above. Were a future contract to reuse one name at two
+ * levels with two different kinds, this flat map could hold only one of
+ * them: the generator asserts each field's real diagnostics against its
+ * declared kind, so that shows up as a failing generated case rather than
+ * as an unchecked field.
+ */
+export const FIELD_KINDS = {
+  status: "enum",
+  role: "enum",
+  task_id: "non-empty-string",
+  summary: "array",
+  findings: "mapping-list",
+  acceptance_recommendation: "enum",
+  missing_tests: "array",
+  residual_risks: "array",
+  reproduction: "mapping",
+  method_applied: "enum",
+  withdrawn: "mapping-list",
+  severity: "enum",
+  category: "enum",
+  description: "string",
+  suggested_fix: "string",
+  recurrence: "enum",
+  introduced_by_delta: "enum",
+  method: "scalar",
+  sample_size: "scalar",
+  result: "scalar",
+  matches_implementer_claim: "enum",
+  reason: "string",
+} satisfies Record<SchemaFieldName, FieldKind>;
+
+/**
+ * The `expected` text a diagnostic carries, per kind. `enum` is absent on
+ * purpose: its text is the enum's own spellings, read from
+ * {@link ENUM_VALUES}.
+ */
+const KIND_EXPECTED: Record<Exclude<FieldKind, "enum">, string> = {
+  string: "string",
+  "non-empty-string": "non-empty string",
+  scalar: "string",
+  array: "array",
+  "mapping-list": "array",
+  mapping: "mapping",
+};
+
+/**
+ * Fields whose diagnostic wording differs from their kind's default.
+ * `withdrawn`'s own text spells out that an empty list is fine, since a
+ * reviewer with nothing withdrawn must still emit the key.
+ */
+const EXPECTED_OVERRIDES: Partial<Record<SchemaFieldName, string>> = {
+  withdrawn: "array (may be empty)",
+};
+
+/**
+ * The `expected` text this validator's diagnostics about `field` carry.
+ * The checkers above hold that text literally, at their own push sites;
+ * this is the schema's declaration of the same text, which the generated
+ * test cases assert the checkers actually produce, so a checker whose
+ * behaviour stops matching its declared kind fails a case instead of
+ * drifting quietly.
+ */
+export function expectedTextFor(field: SchemaFieldName): string {
+  const override = EXPECTED_OVERRIDES[field];
+  if (override !== undefined) return override;
+  const kind: FieldKind = FIELD_KINDS[field];
+  return kind === "enum" ? ENUM_VALUES[field].join(" | ") : KIND_EXPECTED[kind];
+}
+
+/** The `expected` text a diagnostic about one element of a `mapping-list` carries. */
+export const MAPPING_LIST_ELEMENT_EXPECTED = KIND_EXPECTED.mapping;
+
 interface ExtractedYaml {
   yamlText: string;
   warnings: string[];
@@ -470,11 +587,19 @@ interface ExtractedYaml {
  * structural diagnostic (fix-round, review finding L1). Prose found
  * before the opening fence or after the closing fence is tolerated, but
  * each is named as its own warning rather than silently dropped.
+ *
+ * The closing fence must start at column 0: the pattern anchors it with
+ * `^` under the `m` flag, so a triple-backtick sequence inside a value
+ * (a reviewer quoting a fenced snippet in a `description` block scalar,
+ * which YAML necessarily indents) can no longer close the block early
+ * and hand the parser a truncated document, which surfaced as
+ * diagnostics about fields the return actually carried (fix-round,
+ * review finding L3).
  */
 export function extractYamlSource(raw: string): ExtractedYaml {
   const warnings: string[] = [];
   const withoutBom = raw.replace(/^﻿/, "");
-  const fenceMatch = withoutBom.match(/```[A-Za-z]*\r?\n([\s\S]*?)\r?\n?```/);
+  const fenceMatch = withoutBom.match(/```[A-Za-z]*\r?\n([\s\S]*?)\r?\n?^```/m);
   if (fenceMatch) {
     const start = fenceMatch.index ?? 0;
     const before = withoutBom.slice(0, start);

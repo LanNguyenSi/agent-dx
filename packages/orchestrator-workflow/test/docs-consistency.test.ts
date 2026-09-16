@@ -8762,6 +8762,7 @@ describe("review-report validator schema matches the reviewer output contract ex
   // dozens of them for a reason unrelated to their own content.
   const {
     ENUM_VALUES: REVIEW_REPORT_ENUM_VALUES,
+    FIELD_KINDS: REVIEW_REPORT_FIELD_KINDS,
     FINDING_FIELDS,
     REPRODUCTION_FIELDS,
     TOP_LEVEL_FIELDS: REVIEW_REPORT_TOP_LEVEL_FIELDS,
@@ -8876,6 +8877,75 @@ describe("review-report validator schema matches the reviewer output contract ex
     for (const [key, values] of Object.entries(parsed)) {
       expect(values, `enum spelling for "${key}"`).toEqual(
         REVIEW_REPORT_ENUM_VALUES[key],
+      );
+    }
+  });
+
+  /**
+   * The shape the contract block itself writes for one field, as far as
+   * the block makes it explicit: an alternation (or one of the two fixed
+   * literals) is an enum, a `- ""` list an array, a `- key:` list a list
+   * of mappings, an indented key block a mapping, and any inline
+   * placeholder (`""`, `T-000`) a scalar the block does not further
+   * distinguish.
+   */
+  type FenceShape =
+    | "enum"
+    | "array"
+    | "mapping-list"
+    | "mapping"
+    | "inline-scalar";
+
+  function fenceShapes(block: string): Record<string, FenceShape> {
+    const enumKeys = new Set(Object.keys(enumSpellings(block)));
+    const lines = block.split("\n").filter((line) => line.trim().length > 0);
+    const shapes: Record<string, FenceShape> = {};
+    lines.forEach((line, index) => {
+      const match = line.match(/^(\s*)(?:- )?(\w+):(.*)$/);
+      if (!match) return;
+      const key = match[2];
+      const inline = match[3].trim();
+      if (enumKeys.has(key)) {
+        shapes[key] = "enum";
+        return;
+      }
+      if (inline.length > 0) {
+        shapes[key] = "inline-scalar";
+        return;
+      }
+      const item = (lines[index + 1] ?? "").match(/^\s*- (.*)$/);
+      if (item) {
+        shapes[key] = /^\w+:/.test(item[1]) ? "mapping-list" : "array";
+        return;
+      }
+      shapes[key] = "mapping";
+    });
+    return shapes;
+  }
+
+  /**
+   * Which declared kinds each written shape allows. Only the scalar row
+   * is a set rather than a single kind: the block writes every scalar
+   * placeholder the same way, so which of the three a field really is
+   * (and whether it tolerates a number or a blank string) is pinned by
+   * the generated cases in `test/review-report.test.ts`, not here.
+   */
+  const SHAPE_TO_KINDS: Record<FenceShape, readonly string[]> = {
+    enum: ["enum"],
+    array: ["array"],
+    "mapping-list": ["mapping-list"],
+    mapping: ["mapping"],
+    "inline-scalar": ["string", "non-empty-string", "scalar"],
+  };
+
+  it("every FIELD_KINDS entry names a kind the contract block's own shape for that field allows, for every field the block writes", () => {
+    const block = reviewerOutputContractBlock();
+    const shapes = fenceShapes(block);
+    const kinds: Record<string, string> = REVIEW_REPORT_FIELD_KINDS;
+    expect(Object.keys(shapes).sort()).toEqual(Object.keys(kinds).sort());
+    for (const [field, shape] of Object.entries(shapes)) {
+      expect(SHAPE_TO_KINDS[shape], `kind declared for "${field}"`).toContain(
+        kinds[field],
       );
     }
   });

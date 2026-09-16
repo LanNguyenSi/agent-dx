@@ -18,7 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `assets/agents/reviewer.md` itself, so a contract edit without a matching
   schema edit fails the suite instead of drifting silently. An excess
   positional argument (e.g. two file paths) now also exits `2` as a usage
-  error instead of silently validating only the first path.
+  error instead of silently validating only the first path. A fenced
+  return ends at the first closing fence that starts at column 0, so a
+  triple-backtick sequence inside a value (a reviewer quoting a fenced
+  snippet in a `description`) no longer closes the block early and hands
+  the parser a truncated document.
 - Removed incidental blank-line padding (a run of seven consecutive blank
   lines) and a mid-sentence paragraph split from
   `docs/okf/subagent-contracts-superset.md`'s mutation-probe field
