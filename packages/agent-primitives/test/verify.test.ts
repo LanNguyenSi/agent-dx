@@ -2416,6 +2416,56 @@ describe("eslintDetector: blank-line reset (synthetic)", () => {
   });
 });
 
+describe("phpunitDetector: precededByFrame reset (synthetic)", () => {
+  // Neither shape below is producible by PHPUnit 9.6's real reporter,
+  // which prints an uncaught exception's frames back to back and puts a
+  // `Caused by` block after them (see phpunit-chained-exception.txt); they
+  // are exercised only to cover each reset of the consecutive-frame gate on
+  // its own, the same way the eslint synthetic above covers its reset.
+  const header = [
+    "PHPUnit 9.6.36 by Sebastian Bergmann and contributors.",
+    "",
+    "E                                                                   1 / 1 (100%)",
+    "",
+    "Time: [elided]",
+    "",
+    "There was 1 error:",
+    "",
+    "1) SyntheticTest::testFrames",
+    "RuntimeException: boom",
+    "",
+    "src/A.php:4",
+    "src/A.php:8",
+  ];
+  const footer = ["", "ERRORS!", "Tests: 1, Assertions: 0, Errors: 1."];
+  const parse = (middle: string[]) =>
+    phpunitDetector.parse({
+      output: [...header, ...middle, ...footer].join("\n"),
+      command: "vendor/bin/phpunit",
+      exitCode: 2,
+    });
+
+  it("synthetic: a blank line after a consumed frame ends the consecutive run, so a later locator-shaped line stays in message (pins the reset in the blank-line branch)", () => {
+    const parsed = parse(["", "src/B.php:9"]);
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].file).toBe("src/A.php");
+    expect(parsed.failures[0].line).toBe(4);
+    expect(parsed.failures[0].message).toBe(
+      "RuntimeException: boom src/B.php:9",
+    );
+  });
+
+  it("synthetic: an ordinary text line after a consumed frame ends the consecutive run, so a later locator-shaped line stays in message (pins the reset on the message path)", () => {
+    const parsed = parse(["other text", "src/B.php:9"]);
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].file).toBe("src/A.php");
+    expect(parsed.failures[0].line).toBe(4);
+    expect(parsed.failures[0].message).toBe(
+      "RuntimeException: boom other text src/B.php:9",
+    );
+  });
+});
+
 describe("verify: truncation is read from exec's own stdoutTruncated/stderrTruncated flags", () => {
   // Every stub tail here carries a trailing newline (the shape real
   // command output almost always has) precisely because that shape is
@@ -2921,6 +2971,25 @@ describe("phpunitDetector: captured real output", () => {
     }
   });
 
+  it("matches a diff-with-blank-row, a nested-throw-frames, a message-reset, an indented-message-line, a raw-blank-check, and a chained-exception run", () => {
+    for (const [name, exitCode] of [
+      ["phpunit-diff-indented-locator", 1],
+      ["phpunit-nested-throw-frames", 2],
+      ["phpunit-message-reset", 2],
+      ["phpunit-indented-message-line", 2],
+      ["phpunit-raw-blank-check", 2],
+      ["phpunit-chained-exception", 2],
+    ] as const) {
+      expect(
+        phpunitDetector.matches({
+          output: readCaptured(name),
+          command: "",
+          exitCode,
+        }),
+      ).toBe(true);
+    }
+  });
+
   it("does not match vitest, tsc, or eslint captured output (shape disjointness)", () => {
     for (const name of [
       "vitest-fail",
@@ -2957,6 +3026,12 @@ describe("phpunitDetector: captured real output", () => {
       "phpunit-errors-and-skipped",
       "phpunit-error-message-with-port",
       "phpunit-two-failures-and-risky",
+      "phpunit-diff-indented-locator",
+      "phpunit-nested-throw-frames",
+      "phpunit-message-reset",
+      "phpunit-indented-message-line",
+      "phpunit-raw-blank-check",
+      "phpunit-chained-exception",
     ]) {
       const output = readCaptured(name);
       expect(vitestDetector.matches({ output, command: "", exitCode: 0 })).toBe(
@@ -3253,6 +3328,140 @@ describe("phpunitDetector: captured real output", () => {
     expect(parsed.failures.some((f) => f.name?.includes("Risky"))).toBe(false);
   });
 
+  it("parses a diff message with a blank context row and an indented locator-shaped row: the real locator is still found, not the diff row", () => {
+    const parsed = phpunitDetector.parse({
+      output: readCaptured("phpunit-diff-indented-locator"),
+      command: "vendor/bin/phpunit",
+      exitCode: 1,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].name).toBe("DiffTest::testConfigDiff");
+    // The diff's blank context row is a single space, not a zero-length
+    // line; its indented ` port:12` row right below it is structurally
+    // identical to a locator once trimmed, but `ENTRY_FILE_LINE`'s `\S`
+    // anchor (not the blank check) is what actually keeps it from being
+    // matched, since it is still indented on the raw line, so it is
+    // folded into the message like any other diff row. This fixture
+    // does not by itself discriminate a raw-length blank check from a
+    // trim-based one, since the entry loop never reaches this row
+    // looking for a locator either way (see
+    // `phpunit-raw-blank-check.txt` / the "raw-line blank check" test
+    // below for the fixture that does).
+    expect(parsed.failures[0].message).toBe(
+      "Failed asserting that two strings are identical. --- Expected +++ Actual @@ @@ 'first port:12 -second' +third'",
+    );
+    // The real locator, on its own unindented line two lines below and
+    // preceded by a genuinely blank line, is still captured correctly.
+    expect(parsed.failures[0].file).toBe("tests/DiffTest.php");
+    expect(parsed.failures[0].line).toBe(11);
+  });
+
+  it("parses a multi-frame uncaught-exception trace: only the innermost (throw-site) frame becomes file/line, the rest are dropped from message", () => {
+    const parsed = phpunitDetector.parse({
+      output: readCaptured("phpunit-nested-throw-frames"),
+      command: "vendor/bin/phpunit",
+      exitCode: 2,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].name).toBe("NestedThrowTest::testThrows");
+    // Three consecutive `file:line` lines follow the message with no
+    // blank line between them (the throw site, its caller, and the test
+    // method); only the first becomes file/line.
+    expect(parsed.failures[0].file).toBe("src/Thrower.php");
+    expect(parsed.failures[0].line).toBe(5);
+    // The other two frames are consumed, not folded into the message.
+    expect(parsed.failures[0].message).toBe("RuntimeException: boom");
+  });
+
+  it("parses a message that itself embeds a blank line then a locator-shaped line: precededByBlank resets after the ordinary message line in between, so the real locator is still found", () => {
+    const parsed = phpunitDetector.parse({
+      output: readCaptured("phpunit-message-reset"),
+      command: "vendor/bin/phpunit",
+      exitCode: 2,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].name).toBe(
+      "MessageResetTest::testBlankThenColonDigitText",
+    );
+    // "abc:99" follows the message's own embedded blank line, but is
+    // itself preceded by an ordinary ("Body line") message line, not
+    // directly by the blank line, so it is not mistaken for the locator.
+    expect(parsed.failures[0].message).toBe(
+      "RuntimeException: Header Body line abc:99",
+    );
+    // The real locator, preceded by a genuine blank line further down,
+    // is still captured correctly.
+    expect(parsed.failures[0].file).toBe("tests/MessageResetTest.php");
+    expect(parsed.failures[0].line).toBe(9);
+  });
+
+  it("parses a message with a genuinely blank line followed by an INDENTED locator-shaped line: the indented line is never matched, even preceded by a real blank line", () => {
+    const parsed = phpunitDetector.parse({
+      output: readCaptured("phpunit-indented-message-line"),
+      command: "vendor/bin/phpunit",
+      exitCode: 2,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].name).toBe(
+      "IndentedMessageTest::testIndentedLine",
+    );
+    // "  file:42" is preceded by a genuinely blank (zero-length) line,
+    // not merely a diff-shaped single-space one, isolating the locator
+    // regex's own raw-vs-trimmed behavior from the blank-line check: it
+    // is still never read as the locator, because `ENTRY_FILE_LINE`
+    // requires a non-whitespace first character on the RAW line.
+    expect(parsed.failures[0].message).toBe(
+      "RuntimeException: Header file:42 Trailer",
+    );
+    expect(parsed.failures[0].file).toBe("tests/IndentedMessageTest.php");
+    expect(parsed.failures[0].line).toBe(9);
+  });
+
+  it("parses a message with a genuinely one-space line (not zero-length) followed by an UNINDENTED locator-shaped line: the raw-line blank check, not the anchor, keeps it out", () => {
+    const parsed = phpunitDetector.parse({
+      output: readCaptured("phpunit-raw-blank-check"),
+      command: "vendor/bin/phpunit",
+      exitCode: 2,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].name).toBe(
+      "RawBlankCheckTest::testSingleSpaceLineThenLocator",
+    );
+    // "abc:99" is unindented, so `ENTRY_FILE_LINE`'s `\S` anchor would
+    // happily match it; only the entry loop's blank check testing the
+    // RAW line's length (not its trimmed length) keeps the one-space
+    // line above it from being misread as blank, so "abc:99" is never
+    // mistaken for the locator and is folded into the message instead.
+    expect(parsed.failures[0].message).toBe("RuntimeException: Header abc:99");
+    // The real locator, preceded by a genuinely blank line further
+    // down, is still captured correctly.
+    expect(parsed.failures[0].file).toBe("tests/RawBlankCheckTest.php");
+    expect(parsed.failures[0].line).toBe(9);
+  });
+
+  it("parses a chained exception's PHPUnit 9.6 'Caused by' block: only the first exception's frame becomes file/line, the block's own message and locator are folded into message (not consumed as a consecutive frame)", () => {
+    const parsed = phpunitDetector.parse({
+      output: readCaptured("phpunit-chained-exception"),
+      command: "vendor/bin/phpunit",
+      exitCode: 2,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].name).toBe(
+      "ChainedThrowTest::testChainedException",
+    );
+    expect(parsed.failures[0].file).toBe("tests/ChainedThrowTest.php");
+    expect(parsed.failures[0].line).toBe(9);
+    // The `Caused by` block's own message line and locator line are
+    // both separated from the first exception's captured frame by a
+    // blank line (and, for the message line, the `Caused by` line
+    // itself), so neither is CONSECUTIVE with it: the extra-frame
+    // branch does not consume them, and both are folded into `message`
+    // as ordinary text instead of being silently dropped.
+    expect(parsed.failures[0].message).toBe(
+      "RuntimeException: outer Caused by LogicException: inner:42 tests/ChainedThrowTest.php:9",
+    );
+  });
+
   it("failures invariant: summary.failed + summary.errors is never less than the parsed failures list, across every red/error fixture", () => {
     for (const [name, exitCode] of [
       ["phpunit-fail", 1],
@@ -3261,6 +3470,12 @@ describe("phpunitDetector: captured real output", () => {
       ["phpunit-errors-and-skipped", 2],
       ["phpunit-error-message-with-port", 2],
       ["phpunit-two-failures-and-risky", 1],
+      ["phpunit-diff-indented-locator", 1],
+      ["phpunit-nested-throw-frames", 2],
+      ["phpunit-message-reset", 2],
+      ["phpunit-indented-message-line", 2],
+      ["phpunit-raw-blank-check", 2],
+      ["phpunit-chained-exception", 2],
     ] as const) {
       const parsed = phpunitDetector.parse({
         output: readCaptured(name),
@@ -3294,6 +3509,12 @@ describe("phpunitDetector: captured real output", () => {
     "phpunit-errors-and-skipped",
     "phpunit-error-message-with-port",
     "phpunit-two-failures-and-risky",
+    "phpunit-diff-indented-locator",
+    "phpunit-nested-throw-frames",
+    "phpunit-message-reset",
+    "phpunit-indented-message-line",
+    "phpunit-raw-blank-check",
+    "phpunit-chained-exception",
   ] as const;
 
   /** The run's own stated total: the tally line's `Tests: N`, or a green

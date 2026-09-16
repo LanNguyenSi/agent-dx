@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Fixed the `phpunit` detector's entry loop misfilling `failures[].file`,
+  `line`, and `message` on live-captured PHPUnit 9.6 shapes (tracker
+  ed353582). The blank-line test and the `file:line` locator match now both
+  run against the raw (untrimmed) line, and the locator regex requires a
+  non-whitespace first character: a diff message's blank context row (a
+  single space, never a zero-length line) is no longer read as blank, and an
+  indented diff row such as ` port:12` is never mistaken for the locator.
+  Only the first (innermost, throw-site) frame of a multi-frame trace becomes
+  `file`/`line`; frames printed consecutively after it (no blank line, no
+  other text in between) are consumed and dropped rather than folded into
+  `message`, while a locator-shaped line that is not consecutive with the
+  captured frame, such as a chained exception's own `Caused by` locator,
+  stays in `message` as text. The `precededByBlank` flag resets after every
+  ordinary message line, so a message line ending in `word:digits` is never
+  mistaken for the locator because of an earlier, non-adjacent blank line.
+  Six new real captures pin these shapes (`phpunit-diff-indented-locator.txt`,
+  `phpunit-nested-throw-frames.txt`, `phpunit-message-reset.txt`,
+  `phpunit-indented-message-line.txt`, `phpunit-raw-blank-check.txt`,
+  `phpunit-chained-exception.txt`), plus two synthetic tests for the
+  consecutive-frame gate's resets; the existing
+  `phpunit-error-message-with-port.txt` fixture's pinned
+  `file`/`line`/`message` are unchanged.
+
 ## [0.5.0] - 2026-09-15
 
 - The npm tarball now ships a `LICENSE` file matching the repo root LICENSE

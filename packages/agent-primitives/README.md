@@ -268,15 +268,32 @@ count after failures and errors, never a negative number and never more
 than the run itself reported. A numbered `N) Class::method` entry
 becomes a `failures` entry only under an error or failure section
 header, since a risky or incomplete entry carries the same header
-shape),
-`phpstan` (` [OK] No errors`, or a per-file table closed by ` [ERROR]
-Found N errors`, `summary.errors` preferring that stated total over the
-row count), and `phpcs` (one `FOUND N ERRORS ... AFFECTING M LINES`
-summary PER FILE, summed across every file rather than read from the
-first alone, over one `<line> | ERROR | message` row per finding; a
-clean run prints nothing at all, so there is no "no errors" shape for
-this one to match, same as the tsc/eslint detectors' own clean
-captures). All three target each tool's own DEFAULT non-colorized text
+shape), `phpstan` (` [OK] No errors`, or a per-file table closed by
+` [ERROR] Found N errors`, `summary.errors` preferring that stated
+total over the row count), and `phpcs` (one `FOUND N ERRORS ...
+AFFECTING M LINES` summary PER FILE, summed across every file rather
+than read from the first alone, over one `<line> | ERROR | message` row
+per finding; a clean run prints nothing at all, so there is no "no
+errors" shape for this one to match, same as the tsc/eslint detectors'
+own clean captures). Each `phpunit` entry's own `file:line` locator line
+(set off by a blank line above it in PHPUnit's default reporter) is
+matched against the RAW line, never a trimmed one, both for the blank
+check and for the locator regex itself: so an indented diff row that
+merely looks like `word:digits` once trimmed (a `sebastian/diff`
+context/added/removed row always carries a leading space, `-` or `+`)
+is never mistaken for it, and a one-space "blank" row (the same
+`sebastian/diff` shape for an unchanged blank line) never wrongly
+blank-gates the very next unindented row into being misread as the
+locator either. An uncaught exception's multi-frame trace prints one
+`file:line` per frame back to back with no blank line between them, and
+only the first (innermost, throw-site) frame becomes `file`/`line` --
+the same convention every single-frame capture already follows -- with
+the remaining CONSECUTIVE frames (no blank line, no other text, between
+them) consumed and dropped rather than folded into `message`; a LATER
+locator-shaped line that is not consecutive with that captured frame,
+such as a chained exception's own PHPUnit 9.6 `Caused by` block, is
+folded into `message` like any other text instead of being consumed.
+All three target each tool's own DEFAULT non-colorized text
 output; a non-default format (PHPUnit's JUnit XML, PHPCS's
 `--error-format=raw`, or forced ANSI colors on any of the three) is out
 of scope and falls to `generic`. PHPUnit's `--testdox` and `--teamcity`
