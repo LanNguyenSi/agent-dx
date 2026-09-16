@@ -2416,6 +2416,56 @@ describe("eslintDetector: blank-line reset (synthetic)", () => {
   });
 });
 
+describe("phpunitDetector: precededByFrame reset (synthetic)", () => {
+  // Neither shape below is producible by PHPUnit 9.6's real reporter,
+  // which prints an uncaught exception's frames back to back and puts a
+  // `Caused by` block after them (see phpunit-chained-exception.txt); they
+  // are exercised only to cover each reset of the consecutive-frame gate on
+  // its own, the same way the eslint synthetic above covers its reset.
+  const header = [
+    "PHPUnit 9.6.36 by Sebastian Bergmann and contributors.",
+    "",
+    "E                                                                   1 / 1 (100%)",
+    "",
+    "Time: [elided]",
+    "",
+    "There was 1 error:",
+    "",
+    "1) SyntheticTest::testFrames",
+    "RuntimeException: boom",
+    "",
+    "src/A.php:4",
+    "src/A.php:8",
+  ];
+  const footer = ["", "ERRORS!", "Tests: 1, Assertions: 0, Errors: 1."];
+  const parse = (middle: string[]) =>
+    phpunitDetector.parse({
+      output: [...header, ...middle, ...footer].join("\n"),
+      command: "vendor/bin/phpunit",
+      exitCode: 2,
+    });
+
+  it("synthetic: a blank line after a consumed frame ends the consecutive run, so a later locator-shaped line stays in message (pins the reset in the blank-line branch)", () => {
+    const parsed = parse(["", "src/B.php:9"]);
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].file).toBe("src/A.php");
+    expect(parsed.failures[0].line).toBe(4);
+    expect(parsed.failures[0].message).toBe(
+      "RuntimeException: boom src/B.php:9",
+    );
+  });
+
+  it("synthetic: an ordinary text line after a consumed frame ends the consecutive run, so a later locator-shaped line stays in message (pins the reset on the message path)", () => {
+    const parsed = parse(["other text", "src/B.php:9"]);
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].file).toBe("src/A.php");
+    expect(parsed.failures[0].line).toBe(4);
+    expect(parsed.failures[0].message).toBe(
+      "RuntimeException: boom other text src/B.php:9",
+    );
+  });
+});
+
 describe("verify: truncation is read from exec's own stdoutTruncated/stderrTruncated flags", () => {
   // Every stub tail here carries a trailing newline (the shape real
   // command output almost always has) precisely because that shape is

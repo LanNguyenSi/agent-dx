@@ -8,41 +8,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 - Fixed the `phpunit` detector's entry loop misfilling `failures[].file`,
-  `line`, and `message` on two live-captured PHPUnit 9.6 shapes (tracker
-  ed353582): a diff message's blank context row renders as a single space,
-  never a zero-length line, so trimming before the blank check let the very
-  next (indented, non-blank) diff row be misread as the `file:line` locator;
-  and an uncaught exception's multi-frame trace prints several `file:line`
-  lines back to back with no blank line between them, which were folding
-  into `message` instead of being consumed. The blank check and the locator
-  match now both run against the raw (untrimmed) line, and the locator regex
-  requires a non-whitespace first character, so an indented diff row is
-  never mistaken for it; only the first (innermost) frame of a multi-frame
-  trace becomes `file`/`line`, with the remaining frames consumed and
-  dropped rather than folded into `message`. Also pinned: the entry loop's
-  `precededByBlank` flag resets after every ordinary message line, not only
-  after a consumed locator/frame line, so a message line that just happens
-  to end `word:digits` is never mistaken for the locator merely because an
-  earlier, non-adjacent blank line came before it. Four new real captures
-  (`phpunit-diff-indented-locator.txt`, `phpunit-nested-throw-frames.txt`,
-  `phpunit-message-reset.txt`, `phpunit-indented-message-line.txt`) pin
-  these shapes; the existing `phpunit-error-message-with-port.txt`
-  fixture's pinned `file`/`line`/`message` are unchanged.
-- Follow-up to the same tracker (ed353582), from review: the raw-line blank
-  check above was not actually pinned by any fixture (reverting it to a
-  trim-based check, while keeping the locator regex's anchor, left every
-  test green, because the one existing diff-row fixture's anchor alone
-  already keeps its indented row out); a new real capture
-  (`phpunit-raw-blank-check.txt`, a one-space "blank" line immediately
-  followed by an UNINDENTED locator-shaped line) now pins the raw-line
-  blank check on its own. Also narrowed the multi-frame branch: it
-  previously consumed ANY later locator-shaped line once `file` was set,
-  not only a CONSECUTIVE one (no blank line, no other text, in between),
-  which silently dropped a PHPUnit 9.6 chained exception's own `Caused by`
-  message and locator instead of keeping them in `message`; a new real
-  capture (`phpunit-chained-exception.txt`) pins that only a truly
-  consecutive frame is consumed, and that the `Caused by` block's text is
-  folded into `message` like any other line.
+  `line`, and `message` on live-captured PHPUnit 9.6 shapes (tracker
+  ed353582). The blank-line test and the `file:line` locator match now both
+  run against the raw (untrimmed) line, and the locator regex requires a
+  non-whitespace first character: a diff message's blank context row (a
+  single space, never a zero-length line) is no longer read as blank, and an
+  indented diff row such as ` port:12` is never mistaken for the locator.
+  Only the first (innermost, throw-site) frame of a multi-frame trace becomes
+  `file`/`line`; frames printed consecutively after it (no blank line, no
+  other text in between) are consumed and dropped rather than folded into
+  `message`, while a locator-shaped line that is not consecutive with the
+  captured frame, such as a chained exception's own `Caused by` locator,
+  stays in `message` as text. The `precededByBlank` flag resets after every
+  ordinary message line, so a message line ending in `word:digits` is never
+  mistaken for the locator because of an earlier, non-adjacent blank line.
+  Six new real captures pin these shapes (`phpunit-diff-indented-locator.txt`,
+  `phpunit-nested-throw-frames.txt`, `phpunit-message-reset.txt`,
+  `phpunit-indented-message-line.txt`, `phpunit-raw-blank-check.txt`,
+  `phpunit-chained-exception.txt`), plus two synthetic tests for the
+  consecutive-frame gate's resets; the existing
+  `phpunit-error-message-with-port.txt` fixture's pinned
+  `file`/`line`/`message` are unchanged.
 
 ## [0.5.0] - 2026-09-15
 

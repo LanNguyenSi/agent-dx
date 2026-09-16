@@ -514,10 +514,11 @@ export const phpunitDetector: Detector = {
       // the RAW line, never a trimmed one: a diff message's blank
       // context row is `sebastian/diff`'s own one-space-prefixed empty
       // content, never a zero-length line (captured real:
-      // `phpunit-diff-indented-locator.txt`), so trimming before this
-      // check would wrongly read that row as blank too and set up the
-      // very next (indented, non-blank) diff row to be misread as the
-      // locator by `ENTRY_FILE_LINE`. Reset back to `false` on every
+      // `phpunit-diff-indented-locator.txt`); that fixture's indented
+      // `port:12` row is kept out of `file`/`line` by `ENTRY_FILE_LINE`'s
+      // own `\S` anchor, while the raw-length test here is what the
+      // `phpunit-raw-blank-check.txt` shape below relies on (see
+      // test/fixtures/README.md for which fixture pins which half). Reset back to `false` on every
       // ordinary message line, not only on a consumed locator/frame
       // line (captured real: `phpunit-message-reset.txt`'s blank line
       // followed by two ordinary message lines, the second of which

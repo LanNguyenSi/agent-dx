@@ -93,7 +93,8 @@ was produced in a throwaway `composer` project under a scratch
 directory (never committed), run through disposable Docker containers
 (`composer:2` for `composer require`, `php:8.3-cli` for the tools
 themselves), then trimmed of the capture directory's own absolute path
-(`/app/...` -> the project-relative path) and wall-clock timing
+(`/app/...` -> the project-relative path; the later capture sections
+below name their own mount point) and wall-clock timing
 (`Time: 00:00.NNN, Memory: N.NN MB` / `Time: NNNms; Memory: NMB` ->
 `Time: [elided]`), the same convention the vitest/tsc/eslint captures
 above use. Tool versions used for the capture: PHP 8.3.33 (cli),
@@ -245,12 +246,12 @@ numbered `N) Class::method` entries are absent), so the `phpunit`
 detector is still selected under them and its summary counts are
 correct, with `failures` empty.
 
-### Diff-blank-row, multi-frame, and message-reset captures
+### Diff-blank-row, multi-frame, message-reset, and indented-message captures
 
 Same throwaway-`composer`-project-under-scratch-directory, same
 disposable-Docker-container (`composer:2`, `php:8.3-cli`), same trimming
 convention as the captures above; PHP 8.3.33 (cli), PHPUnit 9.6.36.
-Command for all three: `docker run --rm -v <scratch>:/work -w /work
+Command for all four: `docker run --rm -v <scratch>:/work -w /work
 composer:2 composer require --dev phpunit/phpunit:^9.6` followed by
 `docker run --rm -v <scratch>:/work -w /work php:8.3-cli
 vendor/bin/phpunit --colors=never tests/<File>.php`; both composer
@@ -322,8 +323,10 @@ tests/<File>.php`. Both captures mount the scratch project at `/work`
 and are trimmed of that mount point down to the project-relative path
 (`/work/tests/RawBlankCheckTest.php:9` -> `tests/RawBlankCheckTest.php:9`),
 the same mount-and-trim convention every other `phpunit-*` capture in
-this directory uses (this project's own throwaway captures used `/work`
-as their container mount point throughout, not `/app`).
+the earlier `phpunit-*` captures use (the captures in this section and
+in the preceding diff-blank-row section were mounted at `/work`; the
+earlier PHP captures above document their own `/app` mount, and every
+fixture is trimmed to the project-relative path either way).
 
 - `phpunit-raw-blank-check.txt`: an uncaught `RuntimeException` whose
   own message embeds a genuinely one-space line (not a zero-length one)
