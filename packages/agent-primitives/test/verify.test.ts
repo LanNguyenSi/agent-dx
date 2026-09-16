@@ -2921,6 +2921,22 @@ describe("phpunitDetector: captured real output", () => {
     }
   });
 
+  it("matches a diff-with-blank-row, a nested-throw-frames, and a message-reset run", () => {
+    for (const [name, exitCode] of [
+      ["phpunit-diff-indented-locator", 1],
+      ["phpunit-nested-throw-frames", 2],
+      ["phpunit-message-reset", 2],
+    ] as const) {
+      expect(
+        phpunitDetector.matches({
+          output: readCaptured(name),
+          command: "",
+          exitCode,
+        }),
+      ).toBe(true);
+    }
+  });
+
   it("does not match vitest, tsc, or eslint captured output (shape disjointness)", () => {
     for (const name of [
       "vitest-fail",
@@ -2957,6 +2973,9 @@ describe("phpunitDetector: captured real output", () => {
       "phpunit-errors-and-skipped",
       "phpunit-error-message-with-port",
       "phpunit-two-failures-and-risky",
+      "phpunit-diff-indented-locator",
+      "phpunit-nested-throw-frames",
+      "phpunit-message-reset",
     ]) {
       const output = readCaptured(name);
       expect(vitestDetector.matches({ output, command: "", exitCode: 0 })).toBe(
@@ -3253,6 +3272,68 @@ describe("phpunitDetector: captured real output", () => {
     expect(parsed.failures.some((f) => f.name?.includes("Risky"))).toBe(false);
   });
 
+  it("parses a diff message with a blank context row and an indented locator-shaped row: the real locator is still found, not the diff row", () => {
+    const parsed = phpunitDetector.parse({
+      output: readCaptured("phpunit-diff-indented-locator"),
+      command: "vendor/bin/phpunit",
+      exitCode: 1,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].name).toBe("DiffTest::testConfigDiff");
+    // The diff's blank context row is a single space, not a zero-length
+    // line, and is not itself blank under the entry loop's raw-line
+    // check; its indented ` port:12` row right below it is structurally
+    // identical to a locator once trimmed but is never matched against
+    // (never indented), so it is folded into the message like any other
+    // diff row.
+    expect(parsed.failures[0].message).toBe(
+      "Failed asserting that two strings are identical. --- Expected +++ Actual @@ @@ 'first port:12 -second' +third'",
+    );
+    // The real locator, on its own unindented line two lines below and
+    // preceded by a genuinely blank line, is still captured correctly.
+    expect(parsed.failures[0].file).toBe("tests/DiffTest.php");
+    expect(parsed.failures[0].line).toBe(11);
+  });
+
+  it("parses a multi-frame uncaught-exception trace: only the innermost (throw-site) frame becomes file/line, the rest are dropped from message", () => {
+    const parsed = phpunitDetector.parse({
+      output: readCaptured("phpunit-nested-throw-frames"),
+      command: "vendor/bin/phpunit",
+      exitCode: 2,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].name).toBe("NestedThrowTest::testThrows");
+    // Three consecutive `file:line` lines follow the message with no
+    // blank line between them (the throw site, its caller, and the test
+    // method); only the first becomes file/line.
+    expect(parsed.failures[0].file).toBe("src/Thrower.php");
+    expect(parsed.failures[0].line).toBe(5);
+    // The other two frames are consumed, not folded into the message.
+    expect(parsed.failures[0].message).toBe("RuntimeException: boom");
+  });
+
+  it("parses a message that itself embeds a blank line then a locator-shaped line: precededByBlank resets after the ordinary message line in between, so the real locator is still found", () => {
+    const parsed = phpunitDetector.parse({
+      output: readCaptured("phpunit-message-reset"),
+      command: "vendor/bin/phpunit",
+      exitCode: 2,
+    });
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].name).toBe(
+      "MessageResetTest::testBlankThenColonDigitText",
+    );
+    // "abc:99" follows the message's own embedded blank line, but is
+    // itself preceded by an ordinary ("Body line") message line, not
+    // directly by the blank line, so it is not mistaken for the locator.
+    expect(parsed.failures[0].message).toBe(
+      "RuntimeException: Header Body line abc:99",
+    );
+    // The real locator, preceded by a genuine blank line further down,
+    // is still captured correctly.
+    expect(parsed.failures[0].file).toBe("tests/MessageResetTest.php");
+    expect(parsed.failures[0].line).toBe(9);
+  });
+
   it("failures invariant: summary.failed + summary.errors is never less than the parsed failures list, across every red/error fixture", () => {
     for (const [name, exitCode] of [
       ["phpunit-fail", 1],
@@ -3261,6 +3342,9 @@ describe("phpunitDetector: captured real output", () => {
       ["phpunit-errors-and-skipped", 2],
       ["phpunit-error-message-with-port", 2],
       ["phpunit-two-failures-and-risky", 1],
+      ["phpunit-diff-indented-locator", 1],
+      ["phpunit-nested-throw-frames", 2],
+      ["phpunit-message-reset", 2],
     ] as const) {
       const parsed = phpunitDetector.parse({
         output: readCaptured(name),
@@ -3294,6 +3378,9 @@ describe("phpunitDetector: captured real output", () => {
     "phpunit-errors-and-skipped",
     "phpunit-error-message-with-port",
     "phpunit-two-failures-and-risky",
+    "phpunit-diff-indented-locator",
+    "phpunit-nested-throw-frames",
+    "phpunit-message-reset",
   ] as const;
 
   /** The run's own stated total: the tally line's `Tests: N`, or a green

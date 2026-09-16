@@ -1,0 +1,23 @@
+PHPUnit 9.6.36 by Sebastian Bergmann and contributors.
+
+F                                                                   1 / 1 (100%)
+
+Time: [elided]
+
+There was 1 failure:
+
+1) DiffTest::testConfigDiff
+Failed asserting that two strings are identical.
+--- Expected
++++ Actual
+@@ @@
+ 'first
+ 
+ port:12
+-second'
++third'
+
+tests/DiffTest.php:11
+
+FAILURES!
+Tests: 1, Assertions: 1, Failures: 1.

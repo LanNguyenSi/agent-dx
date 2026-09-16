@@ -245,6 +245,54 @@ numbered `N) Class::method` entries are absent), so the `phpunit`
 detector is still selected under them and its summary counts are
 correct, with `failures` empty.
 
+### Diff-blank-row, multi-frame, and message-reset captures
+
+Same throwaway-`composer`-project-under-scratch-directory, same
+disposable-Docker-container (`composer:2`, `php:8.3-cli`), same trimming
+convention as the captures above; PHP 8.3.33 (cli), PHPUnit 9.6.36.
+Command for all three: `docker run --rm -v <scratch>:/work -w /work
+composer:2 composer require --dev phpunit/phpunit:^9.6` followed by
+`docker run --rm -v <scratch>:/work -w /work php:8.3-cli
+vendor/bin/phpunit --colors=never tests/<File>.php`; both composer
+commands exited `0`.
+
+- `phpunit-diff-indented-locator.txt`: a two-string `assertSame` whose
+  compared strings share an embedded blank line and an embedded
+  `port:12` line, differing only on their last line (`tests/DiffTest.php`,
+  `testConfigDiff`). Exit `1`. PHPUnit's own diff renderer
+  (`sebastian/diff`) prefixes every row with a space, `-` or `+`, so an
+  unchanged blank line inside the diff prints as a single space, never
+  as a zero-length line, and the unchanged `port:12` row directly below
+  it prints indented (` port:12`) -- structurally identical to a
+  `file:line` locator once trimmed, and immediately preceded by what a
+  trim-based blank check reads as a blank line. Pins that the entry
+  loop's blank check and its locator match both run against the RAW
+  line: the diff's blank row is not blank (it is one space, not zero
+  characters) and its indented `port:12` row is never read as the
+  locator, which is instead read correctly two lines later
+  (`tests/DiffTest.php:11`).
+- `phpunit-nested-throw-frames.txt`: an uncaught `RuntimeException`
+  thrown from a function called by another function called by the test
+  itself (`tests/NestedThrowTest.php`, `testThrows`, via
+  `src/Thrower.php`). Exit `2`. PHPUnit prints one `file:line` line per
+  frame, back to back with no blank line between them
+  (`src/Thrower.php:5`, the throw site; `src/Thrower.php:10`, its
+  caller; `tests/NestedThrowTest.php:11`, the test method) -- pins that
+  the entry loop reports only the first (innermost, throw-site) frame as
+  `file`/`line` and consumes the remaining frames without folding them
+  into `message`.
+- `phpunit-message-reset.txt`: an uncaught `RuntimeException` whose own
+  message embeds a blank line followed by two ordinary lines, the second
+  of which (`abc:99`) is structurally identical to a locator
+  (`tests/MessageResetTest.php`, `testBlankThenColonDigitText`). Exit
+  `2`. Pins that the entry loop resets its blank-tracking flag after
+  every ordinary message line, not only after a consumed locator/frame
+  line: without that reset, the flag set by the message's own embedded
+  blank line would still read `true` by the time `abc:99` is reached
+  (even though an intervening ordinary line, not a blank one, immediately
+  precedes it), misreading `abc:99` as the locator and discarding the
+  real one (`tests/MessageResetTest.php:9`) as a dropped extra frame.
+
 ## `vitest-project/`, `tsc-project/`, `eslint-project/`
 
 Minimal, self-contained projects with one deliberately failing check

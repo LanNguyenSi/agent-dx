@@ -268,7 +268,17 @@ count after failures and errors, never a negative number and never more
 than the run itself reported. A numbered `N) Class::method` entry
 becomes a `failures` entry only under an error or failure section
 header, since a risky or incomplete entry carries the same header
-shape),
+shape). Each entry's own `file:line` locator line (set off by a blank
+line above it in PHPUnit's default reporter) is matched against the RAW
+line, never a trimmed one, so an indented diff row that merely looks
+like `word:digits` once trimmed (a `sebastian/diff` context/added/
+removed row always carries a leading space, `-` or `+`) is never
+mistaken for it; an uncaught exception's multi-frame trace prints one
+`file:line` per frame back to back with no blank line between them, and
+only the first (innermost, throw-site) frame becomes `file`/`line` --
+the same convention every single-frame capture already follows -- with
+the remaining frames consumed and dropped rather than folded into
+`message`.
 `phpstan` (` [OK] No errors`, or a per-file table closed by ` [ERROR]
 Found N errors`, `summary.errors` preferring that stated total over the
 row count), and `phpcs` (one `FOUND N ERRORS ... AFFECTING M LINES`

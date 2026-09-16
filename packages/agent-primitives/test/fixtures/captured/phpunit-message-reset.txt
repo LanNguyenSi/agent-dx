@@ -1,0 +1,18 @@
+PHPUnit 9.6.36 by Sebastian Bergmann and contributors.
+
+E                                                                   1 / 1 (100%)
+
+Time: [elided]
+
+There was 1 error:
+
+1) MessageResetTest::testBlankThenColonDigitText
+RuntimeException: Header
+
+Body line
+abc:99
+
+tests/MessageResetTest.php:9
+
+ERRORS!
+Tests: 1, Assertions: 0, Errors: 1.

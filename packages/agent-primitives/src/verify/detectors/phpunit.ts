@@ -98,15 +98,40 @@ const ENTRY_DIVIDER = /^--\s*$/;
 /** The `file:line` locator line PHPUnit prints under each entry's own
  * message, set off by a blank line above (and below) in the default
  * reporter -- never the entry's first line, which is always its message.
- * Captured structurally (`.+` up to the last `:` followed by only digits
- * to end of line), not `\S+`, so a path containing a colon is still
- * handled the same way any other detector here treats a locator line;
- * the blank-line precondition is what the entry loop below actually
- * enforces (captured real: `phpunit-error-message-with-port.txt`'s
- * first message line, "RuntimeException: upstream unreachable at
- * api.example.com:8080", ends in `:8080` and is not preceded by a blank
- * line, so it is never mistaken for the locator that follows it). */
-const ENTRY_FILE_LINE = /^(.+):(\d+)$/;
+ * Matched against the entry loop's RAW (untrimmed) line, never a
+ * trimmed one: a diff message's indented context/added/removed rows
+ * (`sebastian/diff`'s output prefixes every row with a space, `-` or
+ * `+`, so a row whose own content happens to look like `word:digits`,
+ * e.g. an indented ` port:12`, is still indented in the raw line) must
+ * never be mistaken for the locator, which PHPUnit itself never
+ * indents. Requiring the match to start on a non-whitespace character
+ * (`\S`, not `.`) is what excludes an indented row; without it the
+ * regex would still match an indented line's leading space as part of
+ * its `(.+)` capture (captured real:
+ * `phpunit-diff-indented-locator.txt`'s diff carries a blank context
+ * row rendered as a single space -- not a zero-length line -- directly
+ * above an indented ` port:12` context row that is structurally
+ * identical to a locator once trimmed). Captured structurally (`\S.*`
+ * up to the last `:` followed by only digits to end of line), not
+ * `\S+`, so a path containing a colon is still handled the same way any
+ * other detector here treats a locator line; the blank-line
+ * precondition is what the entry loop below actually enforces (captured
+ * real: `phpunit-error-message-with-port.txt`'s first message line,
+ * "RuntimeException: upstream unreachable at api.example.com:8080",
+ * ends in `:8080` and is not preceded by a blank line, so it is never
+ * mistaken for the locator that follows it). An uncaught exception can
+ * also print more than one such line back to back, with no blank line
+ * between them (captured real: `phpunit-nested-throw-frames.txt`'s
+ * `/work/src/Thrower.php:5` / `/work/src/Thrower.php:10` /
+ * `/work/tests/NestedThrowTest.php:11`, three frames from an innermost
+ * throw site out through its callers to the test method): the entry
+ * loop below reports only the FIRST such line as `file`/`line` (the
+ * frame closest to the fault, matching every single-frame capture's own
+ * convention: the throw/assertion site, not the outermost test-method
+ * caller) and consumes every immediately-following `file:line` line
+ * after it without adding any of them to `message`, rather than folding
+ * the extra frames into the message text. */
+const ENTRY_FILE_LINE = /^(\S.*):(\d+)$/;
 /** A PHP-level deprecation notice PHPUnit lets through to its own
  * output (e.g. a dynamic-property-creation notice on PHP 8.2+, captured
  * on a green run alongside its `OK (...)` line): reported as a free-text
@@ -474,27 +499,55 @@ export const phpunitDetector: Detector = {
       // header). Without this guard a message ending in `:<digits>`
       // (captured real: `phpunit-error-message-with-port.txt`'s
       // "RuntimeException: upstream unreachable at api.example.com:8080")
-      // is misread as the locator on its own first line.
+      // is misread as the locator on its own first line. Tested against
+      // the RAW line, never a trimmed one: a diff message's blank
+      // context row is `sebastian/diff`'s own one-space-prefixed empty
+      // content, never a zero-length line (captured real:
+      // `phpunit-diff-indented-locator.txt`), so trimming before this
+      // check would wrongly read that row as blank too and set up the
+      // very next (indented, non-blank) diff row to be misread as the
+      // locator by `ENTRY_FILE_LINE`. Reset back to `false` on every
+      // ordinary message line, not only on a consumed locator/frame
+      // line (captured real: `phpunit-message-reset.txt`'s blank line
+      // followed by two ordinary message lines, the second of which
+      // ends `abc:99` -- structurally a locator -- but is not itself
+      // preceded by a blank line, so without this reset the earlier
+      // blank line's `precededByBlank` would still read `true` here and
+      // misread `abc:99` as the locator, discarding the real one that
+      // follows).
       let precededByBlank = false;
       let j = i + 1;
       for (; j < lines.length; j++) {
         const line = lines[j];
         if (isEntryBodyTerminator(line)) break;
-        const trimmed = line.trim();
-        if (trimmed.length === 0) {
+        if (line.length === 0) {
           precededByBlank = true;
           continue;
         }
         if (file === undefined && precededByBlank) {
-          const fileLine = ENTRY_FILE_LINE.exec(trimmed);
+          const fileLine = ENTRY_FILE_LINE.exec(line);
           if (fileLine) {
             file = fileLine[1];
             entryLine = Number(fileLine[2]);
             precededByBlank = false;
             continue;
           }
+        } else if (file !== undefined && ENTRY_FILE_LINE.test(line)) {
+          // A stack-trace frame immediately following the one already
+          // captured above: consumed and dropped rather than folded
+          // into `message` (captured real:
+          // `phpunit-nested-throw-frames.txt`'s second and third
+          // `file:line` frames). `DetectorParseResult` has no field to
+          // hold extra frames in, the same reasoning that already drops
+          // a risky/warning/incomplete/skipped entry elsewhere in this
+          // file.
+          precededByBlank = false;
+          continue;
         }
-        message = message.length > 0 ? `${message} ${trimmed}` : trimmed;
+        const trimmed = line.trim();
+        if (trimmed.length > 0) {
+          message = message.length > 0 ? `${message} ${trimmed}` : trimmed;
+        }
         precededByBlank = false;
       }
       // Resume ON the terminator line, so a section header or marker
