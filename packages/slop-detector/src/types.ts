@@ -205,9 +205,12 @@ export interface ResolvedConfig {
 
 /**
  * One registered npm-audit gate template. `sha256` is the digest of the
- * gate block's normalised statements (each statement trimmed, joined by
- * newlines); `statements` is the same list written out, from which the
- * digest is computed. Exactly one of the two is given.
+ * gate block's normalised statements (each statement trimmed, prefixed
+ * with the `;`, `&&`, `||` or `|` boundary it followed, joined by
+ * newlines); `statements` is a newline-separated block written out, from
+ * which the digest is computed without separator prefixes, so a block
+ * that carries an in-line boundary needs the `sha256` form. Exactly one
+ * of the two is given.
  *
  * A matched template is trusted as is: `audit-gate-shape` runs no shape
  * analysis on a block whose digest matches, because registering the
@@ -219,9 +222,9 @@ export interface ResolvedConfig {
 export interface AuditGateTemplate {
   /** Name used in messages and in the config file, for the operator. */
   name: string;
-  /** Lowercase hex sha256 of the newline-joined trimmed statements. */
+  /** Lowercase hex sha256 of the trimmed, separator-prefixed statements joined by newlines. */
   sha256?: string;
-  /** The normalised statements themselves, hashed the same way. */
+  /** The statements of a newline-separated block, hashed without separator prefixes. */
   statements?: string[];
 }
 

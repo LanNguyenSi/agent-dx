@@ -1874,14 +1874,10 @@ function tryClassifyShape(
 // ───────────────────────── registered templates ─────────────────────────
 
 /**
- * The template identity of a normalised block: the sha256 of its trimmed
- * statements joined by newlines. Comments, indentation, blank lines and
- * line-ending style are already gone at this point, so the hash is
- * stable against a pure reformat of the same script and changes on any
- * edit to what the script runs.
- */
-/**
- * The text a template digest is taken over: one line per statement, and
+ * The text a template digest is taken over (comments, indentation, blank
+ * lines and line-ending style are already gone at this point, so the
+ * hash is stable against a pure reformat and changes on any edit to what
+ * the script runs): one line per statement, and
  * a statement that followed a `;`, `&&`, `||` or `|` boundary carries
  * that separator as a prefix. Without the prefix two scripts that differ
  * only in how their statements are joined (an `exit 1` on its own line
@@ -1901,6 +1897,7 @@ function templateDigestText(statements: NormalizedStatement[]): string {
     .join("\n");
 }
 
+/** The template identity of a normalised block: the sha256 of {@link templateDigestText}. */
 function templateDigest(statements: NormalizedStatement[]): string {
   return createHash("sha256")
     .update(templateDigestText(statements))
