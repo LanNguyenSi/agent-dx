@@ -1111,7 +1111,7 @@ const TAIL_NOOP_RE = /;\s*(true|:)(?=[\s;]|$)/;
  * `set +e` is only flagged when it precedes the gate command AND the
  * statements after the gate command do *not* all three of: capture the
  * gate's exit status (`$?`), restore `set -e`, AND convert that captured
- * status into a non-zero step exit (`NONZERO_EXIT_VERDICT_RE` above) —
+ * status into a non-zero step exit (`NONZERO_EXIT_VERDICT_RE` above):
  * the shape a legitimate "classify the gate's own exit code" step uses
  * (see the canonical audit.yml fixture in this pack's tests/README):
  * `set +e`, run the gate command, `STATUS=$?`, `set -e`, then
