@@ -5,8 +5,9 @@
   file:line citation in this bundle, read against the current sources
   rather than trusted from `okf-kit check`'s clean report alone.
   Mechanically enumerated every full `path:N[-M]#anchor` citation (630),
-  every `CHANGELOG.md:#[heading]` heading-section citation (19, all in
-  review-gate-and-waivers.md, run-state-lifecycle-and-markers.md and
+  every heading-section citation into `CHANGELOG.md` (the `#[x.y.z]`
+  form, 19 in total, all in review-gate-and-waivers.md,
+  run-state-lifecycle-and-markers.md and
   subagent-contracts-superset.md), this bundle's own path-less anchored
   continuation form (4, all in model-preselection.md, invisible to
   okf-kit's grammar per the Maintenance section below), and this file's
