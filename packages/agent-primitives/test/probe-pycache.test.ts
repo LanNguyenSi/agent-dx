@@ -103,45 +103,55 @@ function initPyRepo(): { repo: string } {
 }
 
 /**
- * Runs `test_fixture.py` directly (never through `probe()`), forcing
- * CPython's DEFAULT co-located `__pycache__` cache location regardless
- * of a host's own compiled-in default: `-X pycache_prefix=` (empty)
- * takes precedence over both a compiled-in default (macOS's system
- * python redirects to a Caches directory unless overridden) and
- * `PYTHONPYCACHEPREFIX`, confirmed by reading `sys.pycache_prefix`
- * under each during this task's own reproduction. Used only for this
- * file's bystander invocations -- the pre-warm below, and the
- * post-restore verification run -- never for the string handed to
- * `probe()` as `-t`, which stays an ordinary test command with no
- * knowledge of this package's own isolation, the same as a real
- * caller's would.
+ * The exact `.pyc` path CPython's own import machinery uses for
+ * `fixture.py`, resolved by asking python3 itself
+ * (`importlib.util.cache_from_source`) rather than assumed to be
+ * co-located `__pycache__`: a host whose python3 redirects its cache
+ * elsewhere by default (observed during this task's own reproduction --
+ * macOS's system python3 redirects to a per-user Caches directory
+ * unless `PYTHONPYCACHEPREFIX`/`-X pycache_prefix` overrides it) still
+ * resolves to the SAME path this file's own ambient (unoverridden)
+ * invocations actually use, so the pre-warm and the post-restore
+ * bystander run below are provably looking at the one location that
+ * matters, on any host -- not merely wherever the common case happens
+ * to put it.
  */
-function runFixtureTest(repo: string): { status: number | null } {
+function ambientPycPath(repo: string): string {
   const result = spawnSync(
     "python3",
-    ["-X", "pycache_prefix=", "test_fixture.py"],
-    {
-      cwd: repo,
-      encoding: "utf8",
-      env: { ...process.env, PYTHONPYCACHEPREFIX: "" },
-    },
+    [
+      "-c",
+      "import importlib.util, sys; print(importlib.util.cache_from_source(sys.argv[1]))",
+      "fixture.py",
+    ],
+    { cwd: repo, encoding: "utf8" },
   );
-  return { status: result.status };
+  const resolved = result.stdout?.trim();
+  if (result.status !== 0 || !resolved) {
+    throw new Error(
+      `could not resolve fixture.py's own cache path via python3: ${result.stderr}`,
+    );
+  }
+  return resolved;
 }
 
-/** The one `.pyc` CPython cached for `fixture.py` under the co-located
- * `__pycache__` `runFixtureTest` forces. Throws (fails the test loudly)
- * if the pre-warm did not actually cache anything, rather than letting
- * a later assertion fail confusingly far from the real cause. */
-function fixturePycPath(repo: string): string {
-  const dir = path.join(repo, "__pycache__");
-  const hit = fs
-    .readdirSync(dir)
-    .find((f) => f.startsWith("fixture.") && f.endsWith(".pyc"));
-  if (hit === undefined) {
-    throw new Error(`no cached bytecode for fixture.py found in ${dir}`);
-  }
-  return path.join(dir, hit);
+/** Runs `test_fixture.py` directly (never through `probe()`), with NO
+ * cache-location override at all: exactly the ambient default this
+ * host's python3 applies on its own (co-located `__pycache__` on most
+ * hosts, a per-user Caches redirect on macOS's system python3). Used
+ * only for this file's own bystander invocations -- the pre-warm below,
+ * and the post-restore verification run -- never for the string handed
+ * to `probe()` as `-t` (`baseOptions` below), which is likewise
+ * ordinary, so both this file's bystander runs and an UNISOLATED
+ * baseline/mutant run (the shape the mutation probes named in this
+ * task's briefing apply) consult the very same location this resolves.
+ */
+function runFixtureTest(repo: string): { status: number | null } {
+  const result = spawnSync("python3", ["test_fixture.py"], {
+    cwd: repo,
+    encoding: "utf8",
+  });
+  return { status: result.status };
 }
 
 interface PycHeader {
@@ -191,13 +201,13 @@ describe("probe(): CPython bytecode-cache isolation", () => {
       useLockDir();
       const { repo } = initPyRepo();
 
-      // Pre-warm: run the ORIGINAL source's test once, forcing
-      // CPython's default co-located cache location, so the hazard's
-      // precondition (a __pycache__ entry sitting there BEFORE probe
-      // ever runs) is real, not merely asserted.
+      // Pre-warm: run the ORIGINAL source's test once, under this
+      // host's own ambient cache location (no override), so the
+      // hazard's precondition (a cache entry sitting there BEFORE
+      // probe ever runs) is real, not merely asserted.
       const warm = runFixtureTest(repo);
       expect(warm.status).toBe(0);
-      const pycPath = fixturePycPath(repo);
+      const pycPath = ambientPycPath(repo);
       const beforeHeader = readPycHeader(pycPath);
 
       // The mechanism, not the symptom: the cached header's own stored
@@ -214,7 +224,7 @@ describe("probe(): CPython bytecode-cache isolation", () => {
       expect(result.mutation_probe?.result).toBe("killed");
       expect(result.mutation_probe?.expectation).toBe("met");
 
-      // The co-located cache from the pre-warm was never touched by
+      // The ambient cache from the pre-warm was never touched by
       // probe's own (isolated) runs: still exactly what the pre-warm
       // produced.
       expect(readPycHeader(pycPath)).toEqual(beforeHeader);
@@ -229,7 +239,7 @@ describe("probe(): CPython bytecode-cache isolation", () => {
 
       const warm = runFixtureTest(repo);
       expect(warm.status).toBe(0);
-      const pycPath = fixturePycPath(repo);
+      const pycPath = ambientPycPath(repo);
       const beforeProbeHeader = readPycHeader(pycPath);
 
       const result = await probe(baseOptions(repo));
@@ -240,16 +250,16 @@ describe("probe(): CPython bytecode-cache isolation", () => {
         FIXTURE_PY,
       );
 
-      // The co-located cache was never shadowed by mutant bytecode in
-      // the first place -- this is what closes the false-red
-      // direction: there is nothing stale left behind to invalidate or
-      // not, because probe's own runs never wrote there at all.
+      // The ambient cache was never shadowed by mutant bytecode in the
+      // first place -- this is what closes the false-red direction:
+      // there is nothing stale left behind to invalidate or not,
+      // because probe's own runs never wrote there at all.
       expect(readPycHeader(pycPath)).toEqual(beforeProbeHeader);
 
       // A bystander running the bare test command directly (never
       // through probe -- a follow-up CI step, a developer re-running
       // the suite by hand) against the restored file, with the
-      // pre-warmed cache still sitting there, must pass.
+      // pre-warmed ambient cache still sitting there, must pass.
       const after = runFixtureTest(repo);
       expect(after.status).toBe(0);
     },
