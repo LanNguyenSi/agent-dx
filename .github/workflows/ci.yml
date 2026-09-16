@@ -48,12 +48,15 @@ jobs:
 
   # Separate job from placement-guard above (same slop-detector CLI, a
   # different pack): this one is a security control over
-  # `.github/workflows/*.yml` (GitHub Actions `run:` expression injection,
-  # a scanned workflow file that did not parse as YAML, a reintroduced
-  # Node-20 action major, and a missing/neutralised npm-audit gate in
-  # audit.yml -- all four rules in `workflow-slop`),
-  # not a doc-hygiene lint, so it gets its own status check name rather
-  # than riding on placement-guard's. See packages/slop-detector/README.md
+  # `.github/workflows/*.yml`, not a doc-hygiene lint, so it gets its own
+  # status check name rather than riding on placement-guard's. It runs all
+  # five rules in `workflow-slop`: `run-expression` (GitHub Actions `run:`
+  # expression injection), `unparseable-workflow` (a scanned workflow file
+  # that did not parse as YAML), `node20-action-major` (a reintroduced
+  # Node-20 action major), `audit-gate-missing` (an audit.yml with no
+  # certifiable npm-audit gate) and `audit-gate-shape` (an npm-audit gate
+  # step whose shape the pack does not recognise). See
+  # packages/slop-detector/README.md
   # "workflow-slop by example" for the rules, the allowlist/data-list
   # config surface, and the sources behind them, and
   # packages/slop-detector/CHANGELOG.md for why this is a new pack rather

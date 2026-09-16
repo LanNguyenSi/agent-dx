@@ -824,24 +824,42 @@ describe("workflow-slop/node20-action-major", () => {
   });
 });
 
-// ─────────────────────────── audit-gate-shape ───────────────────────────
+// ───────────── audit-gate-missing / audit-gate-shape ─────────────
+//
+// These two rules are a SHAPE ALLOWLIST, so the tests come in two
+// halves: negative controls that pin which blocks are recognised
+// (every one of them a real fleet shape or a variant an operator
+// would plausibly write), and findings that pin the reason string
+// reported for everything else. The reason strings are asserted
+// exactly, because "is reported at all" was satisfied by earlier
+// revisions of this rule that reported the wrong thing.
 
-describe("workflow-slop/audit-gate-shape", () => {
-  const AUDIT_PATH = ".github/workflows/audit.yml";
+const AUDIT_PATH = ".github/workflows/audit.yml";
 
-  function ruleViolations(text: string, filePath = AUDIT_PATH) {
-    return checkText(text, filePath, {
-      packs: allPacks,
-      config: defaultConfig(),
-      packFilter: ["workflow-slop"],
-    }).filter((v) => v.ruleId === "workflow-slop/audit-gate-shape");
-  }
+const MISSING_RULE = "workflow-slop/audit-gate-missing";
+const SHAPE_RULE = "workflow-slop/audit-gate-shape";
 
-  // Shape copied from a real fleet audit.yml's gate step: `set +e`, run the
-  // gate command, capture `$?`, `set -e`, then branch/exit on the captured
-  // status. This is the negative control the rule must never flag, even
-  // though it does carry a `set +e` before the gate command.
-  const CANONICAL_AUDIT_YML = [
+function auditViolations(
+  text: string,
+  ruleId: string,
+  config = defaultConfig(),
+  filePath = AUDIT_PATH,
+) {
+  return checkText(text, filePath, {
+    packs: allPacks,
+    config,
+    packFilter: ["workflow-slop"],
+  }).filter((v) => v.ruleId === ruleId);
+}
+
+const missingViolations = (text: string, config = defaultConfig()) =>
+  auditViolations(text, MISSING_RULE, config);
+const shapeViolations = (text: string, config = defaultConfig()) =>
+  auditViolations(text, SHAPE_RULE, config);
+
+/** An audit.yml with the fleet's non-blocking report step plus `gateStep`. */
+function auditYml(gateStep: string[]): string {
+  return [
     "on: push",
     "jobs:",
     "  audit:",
@@ -849,591 +867,1041 @@ describe("workflow-slop/audit-gate-shape", () => {
     "    steps:",
     "      - name: npm audit (full report, non-blocking)",
     "        run: timeout 60s npm audit --no-fund || true",
-    "      - name: npm audit gate (high/critical fail)",
-    "        run: |",
-    "          set -o pipefail",
-    "          set +e",
-    '          timeout 60s npm audit --audit-level=high --no-fund 2>&1 | tee "$LOG"',
-    "          STATUS=$?",
-    "          set -e",
-    '          if [ "$STATUS" -eq 0 ]; then',
-    "            exit 0",
-    "          fi",
-    "          exit 1",
+    ...gateStep,
   ].join("\n");
+}
 
-  it("negative control: the canonical set +e / capture $? / set -e gate shape is not flagged", () => {
-    expect(ruleViolations(CANONICAL_AUDIT_YML)).toHaveLength(0);
+/** A gate step whose `run:` is the literal block scalar `body`. */
+function gateStep(body: string[], stepKeys: string[] = []): string[] {
+  return [
+    "      - name: npm audit gate (high/critical fail)",
+    ...stepKeys.map((k) => `        ${k}`),
+    "        run: |",
+    ...body.map((line) => `          ${line}`),
+  ];
+}
+
+const SHAPE_MESSAGE_TAIL =
+  "A gate step must match one of the recognised shapes (`R-bare`: the gate command alone, no tail; `R-classify`: `set +e`, the gate, `VAR=$?`, `set -e`, then an `exit` of a non-zero literal and an `exit` of the captured status) or an exact template registered in `workflow.auditGateTemplates`.";
+
+/**
+ * The full message `audit-gate-shape` reports for `reason`. Only the
+ * envelope is shared with the rule; every test writes its own `reason`
+ * out literally, since the reason is the load-bearing part.
+ */
+function shapeMessage(
+  reason: string,
+  opts: { digest?: string; signal?: string } = {},
+): string {
+  const parts = [
+    `Unrecognised npm-audit gate shape in this audit workflow: ${reason}.`,
+    SHAPE_MESSAGE_TAIL,
+  ];
+  if (opts.digest) {
+    parts.push(
+      `No registered template matches this block; its normalised statements hash to sha256 ${opts.digest}.`,
+    );
+  }
+  if (opts.signal)
+    parts.push(`Detected neutralisation signal: ${opts.signal}.`);
+  return parts.join(" ");
+}
+
+const MISSING_GATE_MESSAGE =
+  "No certifiable npm-audit gate command was found in this audit workflow: no `run:` step's normalised shell statements invoke `npm audit` with `--audit-level=low`, `--audit-level=moderate`, `--audit-level=high`, or `--audit-level=critical`. Text inside a here-doc body is data, not a command, and a `run:` scalar that is not a literal block scalar (`|`) or a single-line plain scalar is not analysed as shell text, so neither counts as a present gate. (This rule only recognises `npm audit`; a `pnpm audit` or a non-npm audit command is out of its scope, see the README.)";
+
+// The fleet's canonical gate block, byte-identical (after normalisation)
+// in all ten fleet audit.yml files at the revision this fixture was taken
+// from. The digest below is the sha256 of its normalised statements, the
+// value a consuming repo registers in `workflow.auditGateTemplates`. It
+// is NOT a package default: a canonical org gate block is org content.
+const REAL_FLEET_AUDIT_YML = fs.readFileSync(
+  path.join(import.meta.dirname, "fixtures", "fleet-audit-real-shape.yml"),
+  "utf8",
+);
+
+const FLEET_TEMPLATE_SHA256 =
+  "5c4548155eaa651a0d2ad0f374d15ec046ca36ec4f21f5430aea7616224e7ee1";
+
+const withFleetTemplate = () =>
+  mergeConfig({
+    workflow: {
+      auditGateTemplates: [
+        { name: "pandora-canonical-audit-gate", sha256: FLEET_TEMPLATE_SHA256 },
+      ],
+    },
   });
 
-  it("negative control: the report step's own npm audit || true (no --audit-level=) is not itself a gate and is not flagged", () => {
+// The canonical `set +e` / capture / restore / verdict shape, reduced to
+// the statements `R-classify` actually requires.
+const CLASSIFY_BODY = [
+  "set +e",
+  "npm audit --audit-level=high",
+  "STATUS=$?",
+  "set -e",
+  'if [ "$STATUS" -ne 0 ]; then',
+  "  exit 1",
+  "fi",
+  "exit $STATUS",
+];
+
+describe("workflow-slop/audit-gate-missing", () => {
+  it("flags an audit.yml with no npm-audit gate step at all", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - run: npm ci",
+    ].join("\n");
+    const v = missingViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(MISSING_GATE_MESSAGE);
+    expect(v[0].severity).toBe("block");
+  });
+
+  it("the report step's own `npm audit --no-fund || true` (no --audit-level) is not a gate", () => {
+    const text = auditYml([]);
+    expect(missingViolations(text)).toHaveLength(1);
+    // ...and it is not treated as a gate step by the shape rule either.
+    expect(shapeViolations(text)).toHaveLength(0);
+  });
+
+  it("a gate command sitting only in a shell comment is not a present gate", () => {
+    const text = auditYml(
+      gateStep([
+        "# npm audit --audit-level=high (temporarily disabled)",
+        "true",
+      ]),
+    );
+    expect(missingViolations(text)).toHaveLength(1);
+    expect(shapeViolations(text)).toHaveLength(0);
+  });
+
+  // ACCEPTANCE PROBE p4: the gate moved into a here-doc body.
+  it("acceptance probe p4: a gate command only inside a `cat <<'MSG'` here-doc body is not a present gate", () => {
+    const text = auditYml(
+      gateStep([
+        "cat <<'MSG'",
+        "npm audit --audit-level=high",
+        "MSG",
+        "echo done",
+      ]),
+    );
+    const v = missingViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(MISSING_GATE_MESSAGE);
+    // The step is not a gate step at all once the here-doc body is gone,
+    // so the shape rule has nothing to judge: the missing-gate rule is
+    // the one that reports this.
+    expect(shapeViolations(text)).toHaveLength(0);
+  });
+
+  // ACCEPTANCE PROBE p5: the block rewritten as a folded scalar.
+  it("acceptance probe p5: a gate in a folded `run: >` scalar is not a present gate, and the shape rule refuses it", () => {
+    const text = auditYml([
+      "      - name: npm audit gate (high/critical fail)",
+      "        run: >",
+      "          npm audit",
+      "          --audit-level=high",
+    ]);
+    const missing = missingViolations(text);
+    expect(missing).toHaveLength(1);
+    expect(missing[0].message).toBe(MISSING_GATE_MESSAGE);
+    const shape = shapeViolations(text);
+    expect(shape).toHaveLength(1);
+    expect(shape[0].message).toBe(
+      shapeMessage(
+        "the gate step's `run:` value is a folded block scalar (`>`), not a literal block scalar (`|`) or a single-line plain scalar",
+      ),
+    );
+  });
+
+  it("a gate in a multi-line double-quoted scalar is not a present gate, and the shape rule refuses it", () => {
+    const text = auditYml([
+      "      - name: npm audit gate (high/critical fail)",
+      '        run: "npm audit --audit-level=high\\n  || true"',
+    ]);
+    expect(missingViolations(text)).toHaveLength(1);
+    const shape = shapeViolations(text);
+    expect(shape).toHaveLength(1);
+    expect(shape[0].message).toContain(
+      "the gate step's `run:` value is a quoted scalar (YAML escapes are not decoded before shell analysis)",
+    );
+  });
+
+  it("negative control: a single-line plain `run:` gate is a present gate", () => {
+    const text = auditYml([
+      "      - name: npm audit gate (high/critical fail)",
+      "        run: npm audit --audit-level=high",
+    ]);
+    expect(missingViolations(text)).toHaveLength(0);
+  });
+
+  it("negative control: the real fleet audit.yml has a present gate", () => {
+    expect(missingViolations(REAL_FLEET_AUDIT_YML)).toHaveLength(0);
+  });
+
+  it("does not scan a workflow file that is not audit.yml/audit.yaml", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  ci:",
+      "    steps:",
+      "      - run: npm ci",
+    ].join("\n");
+    expect(
+      auditViolations(
+        text,
+        MISSING_RULE,
+        defaultConfig(),
+        ".github/workflows/ci.yml",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("scans audit.yaml the same as audit.yml", () => {
     const text = [
       "on: push",
       "jobs:",
       "  audit:",
       "    steps:",
-      "      - run: npm audit --no-fund || true",
-      "      - run: npm audit --audit-level=high --no-fund",
+      "      - run: npm ci",
     ].join("\n");
-    expect(ruleViolations(text)).toHaveLength(0);
+    expect(
+      auditViolations(
+        text,
+        MISSING_RULE,
+        defaultConfig(),
+        ".github/workflows/audit.yaml",
+      ),
+    ).toHaveLength(1);
+  });
+});
+
+describe("workflow-slop/audit-gate-shape: R-bare", () => {
+  it("negative control: the bare gate command alone is recognised", () => {
+    const text = auditYml([
+      "      - name: npm audit gate (high/critical fail)",
+      "        run: npm audit --audit-level=high",
+    ]);
+    expect(shapeViolations(text)).toHaveLength(0);
+    expect(missingViolations(text)).toHaveLength(0);
   });
 
-  it("negative control: --audit-level=critical is recognised as a valid gate", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: npm audit --audit-level=critical --no-fund",
-    ].join("\n");
-    expect(ruleViolations(text)).toHaveLength(0);
+  it("negative control: --audit-level=moderate (a stronger threshold) is recognised", () => {
+    const text = auditYml(["      - run: npm audit --audit-level=moderate"]);
+    expect(shapeViolations(text)).toHaveLength(0);
+    expect(missingViolations(text)).toHaveLength(0);
   });
 
-  it("negative control: a || exit 1 right-hand side is not a neutralisation", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: npm audit --audit-level=high || exit 1",
-    ].join("\n");
-    expect(ruleViolations(text)).toHaveLength(0);
+  it("negative control: `npm  audit` with doubled whitespace and extra flags is recognised", () => {
+    const text = auditYml([
+      "      - run: timeout 60s npm  audit --audit-level=critical --omit=dev",
+    ]);
+    expect(shapeViolations(text)).toHaveLength(0);
   });
 
-  it("flags a missing gate step (no npm audit --audit-level=high/critical run step anywhere in the file)", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: npm audit --no-fund || true",
-    ].join("\n");
-    const v = ruleViolations(text);
+  it("negative control: CRLF line endings are recognised the same as LF", () => {
+    const text = auditYml(gateStep(["npm audit --audit-level=high"])).replace(
+      /\n/g,
+      "\r\n",
+    );
+    expect(text).toContain("\r\n");
+    expect(shapeViolations(text)).toHaveLength(0);
+    expect(missingViolations(text)).toHaveLength(0);
+  });
+
+  // ACCEPTANCE PROBE p1: `|| true` on the gate line.
+  it("acceptance probe p1: `|| true` on the gate line is reported, with the neutralisation signal", () => {
+    const text = auditYml(gateStep(["npm audit --audit-level=high || true"]));
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "the gate command's logical line carries a `||` tail (`true`)",
+        {
+          signal:
+            "the gate command's logical line ends in a `||` whose right-hand side is not `exit`/`false`/`return`, which makes a failing gate exit zero",
+        },
+      ),
+    );
+    expect(v[0].matched).toBe("npm audit --audit-level=high");
+    expect(v[0].severity).toBe("block");
+  });
+
+  it("acceptance probe p1 in single-line plain form: `|| true` is reported there too", () => {
+    const text = auditYml([
+      "      - run: npm audit --audit-level=high || true",
+    ]);
+    const v = shapeViolations(text);
     expect(v).toHaveLength(1);
     expect(v[0].message).toContain(
-      "No recognised npm-audit gate command was found",
+      "the gate command's logical line carries a `||` tail (`true`)",
     );
   });
 
-  it("flags a bare || true right after the gate command", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: npm audit --audit-level=high || true",
-    ].join("\n");
-    expect(ruleViolations(text).length).toBeGreaterThanOrEqual(1);
-  });
-
-  it("flags || true # keep green (trailing comment does not hide the neutralisation)", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: npm audit --audit-level=high || true # keep green",
-    ].join("\n");
-    expect(ruleViolations(text).length).toBeGreaterThanOrEqual(1);
-  });
-
-  it("flags || true; (a trailing semicolon does not hide it)", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: npm audit --audit-level=high || true;",
-    ].join("\n");
-    expect(ruleViolations(text).length).toBeGreaterThanOrEqual(1);
-  });
-
-  it("flags ||true with no space", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: npm audit --audit-level=high ||true",
-    ].join("\n");
-    expect(ruleViolations(text).length).toBeGreaterThanOrEqual(1);
-  });
-
-  it("flags a backslash-continued gate command followed by || : on the continuation line", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: |",
-      "          npm audit --audit-level=high \\",
-      "            || :",
-    ].join("\n");
-    expect(ruleViolations(text).length).toBeGreaterThanOrEqual(1);
-  });
-
-  it("flags set +e above the gate command with no exit-status capture/restore afterward", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: |",
-      "          set +e",
-      "          npm audit --audit-level=high",
-      '          echo "ignoring failures"',
-    ].join("\n");
-    const v = ruleViolations(text);
-    expect(v.some((x) => x.matched === "set +e")).toBe(true);
-  });
-
-  it("flags continue-on-error: true on the gate step", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - name: gate",
-      "        continue-on-error: true",
-      "        run: npm audit --audit-level=high",
-    ].join("\n");
-    const v = ruleViolations(text);
-    expect(v.some((x) => x.matched === "continue-on-error: true")).toBe(true);
-  });
-
-  it("negative control: continue-on-error: false on the gate step is not flagged", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - name: gate",
-      "        continue-on-error: false",
-      "        run: npm audit --audit-level=high",
-    ].join("\n");
-    expect(ruleViolations(text)).toHaveLength(0);
-  });
-
-  it("flags a gate line ending in ; true", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: npm audit --audit-level=high; true",
-    ].join("\n");
-    expect(ruleViolations(text).length).toBeGreaterThanOrEqual(1);
-  });
-
-  it("flags a gate line ending in ; : (a block scalar run:, since a plain scalar ending in a bare trailing colon is itself ambiguous YAML)", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: |",
-      "          npm audit --audit-level=high; :",
-    ].join("\n");
-    const v = ruleViolations(text);
-    expect(v.length).toBeGreaterThanOrEqual(1);
-    expect(v.some((x) => x.message.includes("; true` or `; :`"))).toBe(true);
-  });
-
-  it("negative control: off by default, does not fire without --pack/config opt-in", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: npm audit --no-fund || true",
-    ].join("\n");
-    const v = checkText(text, AUDIT_PATH, {
-      packs: allPacks,
-      config: defaultConfig(),
-    });
-    expect(v.filter((x) => x.pack === "workflow-slop")).toHaveLength(0);
-  });
-
-  it("negative control: a non-audit workflow file is never scanned by this rule, even with the exact same neutralised gate text", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: npm audit --audit-level=high || true",
-    ].join("\n");
-    expect(ruleViolations(text, ".github/workflows/ci.yml")).toHaveLength(0);
-  });
-
-  // ── non-zero verdict requirement (round-1 review H1 / M3) ──
-  // Presence of `$?` and `set -e` alone is not enough: the captured status
-  // must actually be turned back into a non-zero exit.
-
-  it("flags set +e / capture $? / restore set -e with NO exit verdict afterward (exit 0 only): capture-and-restore is not itself a verdict", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: |",
-      "          set +e",
-      "          npm audit --audit-level=high",
-      "          STATUS=$?",
-      "          set -e",
-      "          exit 0",
-    ].join("\n");
-    const v = ruleViolations(text);
-    expect(v.some((x) => x.matched === "set +e")).toBe(true);
-  });
-
-  it("flags set +e / capture $? / restore set -e with only an echo of the status, no exit at all", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: |",
-      "          set +e",
-      "          npm audit --audit-level=high",
-      "          STATUS=$?",
-      "          set -e",
-      '          echo "status $STATUS"',
-    ].join("\n");
-    const v = ruleViolations(text);
-    expect(v.some((x) => x.matched === "set +e")).toBe(true);
-  });
-
-  it("flags set +e / capture $? / exit $STATUS with NO set -e restore (restoresStrict forced false)", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: |",
-      "          set +e",
-      "          npm audit --audit-level=high",
-      "          STATUS=$?",
-      "          exit $STATUS",
-    ].join("\n");
-    const v = ruleViolations(text);
-    expect(v.some((x) => x.matched === "set +e")).toBe(true);
-  });
-
-  it("flags set +e / set -e restore / exit $STATUS with NO $? capture (capturesStatus forced false)", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: |",
-      "          set +e",
-      "          npm audit --audit-level=high",
-      "          set -e",
-      "          exit $STATUS",
-    ].join("\n");
-    const v = ruleViolations(text);
-    expect(v.some((x) => x.matched === "set +e")).toBe(true);
-  });
-
-  it("negative control: set +e / capture $? / set -e / exit $STATUS (a real non-zero-verdict conversion) is not flagged", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: |",
-      "          set +e",
-      "          npm audit --audit-level=high",
-      "          STATUS=$?",
-      "          set -e",
-      "          exit $STATUS",
-    ].join("\n");
-    expect(ruleViolations(text)).toHaveLength(0);
-  });
-
-  // ── comment-stripping discrimination (round-1 review M2 / L2) ──
-
-  it("negative control: || inside a real trailing comment (block scalar) is not treated as a neutralisation, only once the comment is stripped before the || scan", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: |",
-      "          npm audit --audit-level=high   # do not add || true here",
-    ].join("\n");
-    expect(ruleViolations(text)).toHaveLength(0);
-  });
-
-  it("flags ; true only once a trailing comment after it is stripped (block scalar; the comment text itself is not '; true')", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: |",
-      "          npm audit --audit-level=high; true   # comment",
-    ].join("\n");
-    const v = ruleViolations(text);
-    expect(v.some((x) => x.message.includes("; true` or `; :`"))).toBe(true);
-  });
-
-  it("negative control: an escaped double-quote inside the gate line's own quoted argument does not fool the comment-quote-parity scan into leaving a real comment's || unstripped", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: |",
-      '          npm audit --audit-level=high --note="it\\"s fine"   # || true',
-    ].join("\n");
-    expect(ruleViolations(text)).toHaveLength(0);
-  });
-
-  it("catches ; true mid-line, not just at end-of-line (the tail check is no longer end-anchored)", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: |",
-      "          npm audit --audit-level=high; true ; echo done",
-    ].join("\n");
-    const v = ruleViolations(text);
-    expect(v.some((x) => x.message.includes("; true` or `; :`"))).toBe(true);
-  });
-
-  // ── continue-on-error: not-provably-false + job-level (round-1 review M1) ──
-
-  it("flags continue-on-error set to an unresolved ${{ }} expression on the gate step (not provably false)", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - name: gate",
-      "        continue-on-error: ${{ inputs.allow_failure }}",
-      "        run: npm audit --audit-level=high",
-    ].join("\n");
-    const v = ruleViolations(text);
-    expect(v.some((x) => x.message.includes("cannot be proven false"))).toBe(
-      true,
+  it("`|| true` written on a backslash continuation line is still a tail on the gate", () => {
+    const text = auditYml(
+      gateStep(["npm audit --audit-level=high \\", "  || true"]),
+    );
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain(
+      "the gate command's logical line carries a `||` tail (`true`)",
     );
   });
 
-  it("flags continue-on-error: true set at the job level, above the gate step", () => {
+  it("`; true` after the gate command is reported", () => {
+    const text = auditYml(gateStep(["npm audit --audit-level=high ; true"]));
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "the gate command's logical line carries a `;` tail (`true`)",
+        {
+          signal:
+            "the gate command's logical line ends in `; true` or `; :`, which makes the step's last command succeed",
+        },
+      ),
+    );
+  });
+
+  it("`&& echo ok` after the gate command is reported", () => {
+    const text = auditYml(
+      gateStep(['npm audit --audit-level=high && echo "clean"']),
+    );
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        'the gate command\'s logical line carries a `&&` tail (`echo "clean"`)',
+      ),
+    );
+  });
+
+  it("a stdout redirection on the bare gate is reported", () => {
+    const text = auditYml(
+      gateStep(["npm audit --audit-level=high >/dev/null"]),
+    );
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "the gate statement (`npm audit --audit-level=high >/dev/null`) carries a redirection, a substitution or a token this rule does not model",
+      ),
+    );
+  });
+
+  it("documented conservatism: an unquoted `$( ... || echo x)` on the gate line is reported, not parsed", () => {
+    const text = auditYml(
+      gateStep(["npm audit --audit-level=high $(echo a || echo b)"]),
+    );
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "a command substitution in the run block spans a statement separator",
+      ),
+    );
+  });
+
+  it("a gate piped into tee with no `set +e` window is reported", () => {
+    const text = auditYml(
+      gateStep(['npm audit --audit-level=high | tee "$LOG"']),
+    );
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "the gate command is piped, which only the `set +e` classification shape permits",
+      ),
+    );
+  });
+
+  it("a `set -o pipefail` before the bare gate is still an extra statement", () => {
+    const text = auditYml(
+      gateStep([
+        "set -o pipefail",
+        'npm audit --audit-level=high | tee "$LOG"',
+      ]),
+    );
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "the run block carries another statement beside the gate command (`set -o pipefail`) without a `set +e` classification window",
+      ),
+    );
+  });
+
+  it("an extra statement on its own line beside the bare gate is reported", () => {
+    const text = auditYml(
+      gateStep(["npm audit --audit-level=high", "echo checked"]),
+    );
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "the run block carries another statement beside the gate command (`echo checked`) without a `set +e` classification window",
+      ),
+    );
+  });
+
+  it("a `cd` before the bare gate is reported (the bare shape is the gate command alone)", () => {
+    const text = auditYml(gateStep(["cd api", "npm audit --audit-level=high"]));
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain(
+      "the run block carries another statement beside the gate command (`cd api`)",
+    );
+  });
+});
+
+describe("workflow-slop/audit-gate-shape: R-classify", () => {
+  it("negative control: the canonical set +e / capture / restore / verdict shape is recognised", () => {
+    const text = auditYml(gateStep(CLASSIFY_BODY));
+    expect(shapeViolations(text)).toHaveLength(0);
+    expect(missingViolations(text)).toHaveLength(0);
+  });
+
+  it("negative control: `set +eu` opens the window the same as `set +e`", () => {
+    const body = ["set +eu", ...CLASSIFY_BODY.slice(1)];
+    expect(shapeViolations(auditYml(gateStep(body)))).toHaveLength(0);
+  });
+
+  it("negative control: `set +o errexit` opens the window and `set -o errexit` restores it", () => {
+    const body = [
+      "set +o errexit",
+      "npm audit --audit-level=high",
+      "STATUS=$?",
+      "set -o errexit",
+      "exit 1",
+      'exit "$STATUS"',
+    ];
+    expect(shapeViolations(auditYml(gateStep(body)))).toHaveLength(0);
+  });
+
+  it("negative control: `set -euo pipefail` restores the window, with the gate piped into tee under pipefail", () => {
+    const body = [
+      "set -o pipefail",
+      "set +e",
+      'npm audit --audit-level=high --no-fund 2>&1 | tee "$LOG"',
+      "STATUS=$?",
+      "set -euo pipefail",
+      "exit 1",
+      'exit "$STATUS"',
+    ];
+    expect(shapeViolations(auditYml(gateStep(body)))).toHaveLength(0);
+  });
+
+  it("negative control: `exit ${STATUS}` counts as the exit of the captured status", () => {
+    const body = [
+      "set +e",
+      "npm audit --audit-level=high",
+      'STATUS="$?"',
+      "set -e",
+      "exit 1",
+      "exit ${STATUS}",
+    ];
+    expect(shapeViolations(auditYml(gateStep(body)))).toHaveLength(0);
+  });
+
+  it("negative control: pre-window assignments, a trap and a mktemp are permitted", () => {
+    const body = [
+      "AUDIT_TIMEOUT_SECS=60",
+      'LOG="$(mktemp)"',
+      "trap 'rm -f \"$LOG\"' EXIT",
+      "set -o pipefail",
+      ...CLASSIFY_BODY,
+    ];
+    expect(shapeViolations(auditYml(gateStep(body)))).toHaveLength(0);
+  });
+
+  // ACCEPTANCE PROBE p3: the `set -e` restore deleted.
+  it("acceptance probe p3: a `set +e` window with no `set -e` restore is reported", () => {
+    const body = CLASSIFY_BODY.filter((line) => line !== "set -e");
+    expect(body).not.toContain("set -e");
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage("`set +e` is never followed by a `set -e` restore", {
+        signal:
+          "the run block disables `errexit` and never restores it, so a failing gate does not fail the step",
+      }),
+    );
+  });
+
+  it("a window whose captured status is never exited is reported", () => {
+    const body = [
+      "set +e",
+      "npm audit --audit-level=high",
+      "STATUS=$?",
+      "set -e",
+      'echo "status $STATUS"',
+      "exit 1",
+    ];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "no `exit $STATUS` of the captured gate status runs after the `set -e` restore",
+      ),
+    );
+  });
+
+  it("a window with no `exit` of a non-zero literal is reported", () => {
+    const body = [
+      "set +e",
+      "npm audit --audit-level=high",
+      "STATUS=$?",
+      "set -e",
+      "exit $STATUS",
+    ];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "no `exit` of a non-zero literal runs after the `set -e` restore, so nothing turns a failing gate into a failing step",
+      ),
+    );
+  });
+
+  it("an `exit 0` after the restore is reported", () => {
+    const body = [
+      "set +e",
+      "npm audit --audit-level=high",
+      "STATUS=$?",
+      "set -e",
+      'if [ "$STATUS" -eq 0 ]; then',
+      "  exit 0",
+      "fi",
+      "exit 1",
+      "exit $STATUS",
+    ];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "an `exit 0` statement runs after the `set -e` restore, so the step can report success on a failing gate",
+      ),
+    );
+  });
+
+  it("reassigning the captured status after the restore is reported", () => {
+    const body = [
+      "set +e",
+      "npm audit --audit-level=high",
+      "STATUS=$?",
+      "set -e",
+      "STATUS=0",
+      "exit 1",
+      "exit $STATUS",
+    ];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "a statement this rule does not model runs after the `set -e` restore (`STATUS=0`)",
+      ),
+    );
+  });
+
+  it("a capture that runs before the gate command (wrong order) is reported", () => {
+    const body = [
+      "set +e",
+      "STATUS=$?",
+      "npm audit --audit-level=high",
+      "set -e",
+      "exit 1",
+      "exit $STATUS",
+    ];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "the `set +e` window carries a statement before the gate command (`STATUS=$?`)",
+      ),
+    );
+  });
+
+  it("documented: the window admits only the capture, so an `echo` inside it is reported", () => {
+    const body = [
+      "set +e",
+      'echo "set +e"',
+      "npm audit --audit-level=high",
+      "STATUS=$?",
+      "set -e",
+      "exit 1",
+      "exit $STATUS",
+    ];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        'the `set +e` window carries a statement before the gate command (`echo "set +e"`)',
+      ),
+    );
+  });
+
+  it("a second statement inside the window beside the capture is reported", () => {
+    const body = [
+      "set +e",
+      "npm audit --audit-level=high",
+      "STATUS=$?",
+      "echo inside",
+      "set -e",
+      "exit 1",
+      "exit $STATUS",
+    ];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "the `set +e` window carries more statements than the gate command and one `VAR=$?` capture (`echo inside`)",
+      ),
+    );
+  });
+
+  it("a piped gate with no `set -o pipefail` before it is reported", () => {
+    const body = [
+      "set +e",
+      'npm audit --audit-level=high | tee "$LOG"',
+      "STATUS=$?",
+      "set -e",
+      "exit 1",
+      "exit $STATUS",
+    ];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "the gate command is piped without `set -o pipefail` earlier in the run block, so the pipeline reports `tee`'s exit status, not the gate's",
+      ),
+    );
+  });
+
+  it("a gate piped into something other than tee is reported", () => {
+    const body = [
+      "set -o pipefail",
+      "set +e",
+      "npm audit --audit-level=high | grep -v deprecated",
+      "STATUS=$?",
+      "set -e",
+      "exit 1",
+      "exit $STATUS",
+    ];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "the gate command is piped into something other than `tee` (`grep -v deprecated`)",
+      ),
+    );
+  });
+
+  it("two `set +e` statements in one block are reported", () => {
+    const body = ["set +e", "set +e", ...CLASSIFY_BODY.slice(1)];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage("the run block disables `errexit` more than once"),
+    );
+  });
+
+  it("two `set -e` restores after the window are reported", () => {
+    const body = [
+      "set +e",
+      "npm audit --audit-level=high",
+      "STATUS=$?",
+      "set -e",
+      "set -e",
+      "exit 1",
+      "exit $STATUS",
+    ];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage("`set +e` is followed by more than one `set -e` restore"),
+    );
+  });
+
+  it("a gate command outside the `set +e` window is reported", () => {
+    const body = [
+      "npm audit --audit-level=high",
+      "set +e",
+      "STATUS=$?",
+      "set -e",
+      "exit 1",
+      "exit $STATUS",
+    ];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "the gate command does not sit strictly between the `set +e` and its `set -e` restore",
+      ),
+    );
+  });
+
+  it("two gate commands in one block are reported", () => {
+    const body = [
+      "set +e",
+      "npm audit --audit-level=high",
+      "npm audit --audit-level=critical",
+      "STATUS=$?",
+      "set -e",
+      "exit 1",
+      "exit $STATUS",
+    ];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage("the run block carries 2 npm-audit gate commands, not one"),
+    );
+  });
+
+  it("a `set +u` before the window is reported (only option-enabling `set -` runs pre-window)", () => {
+    const body = ["set +u", ...CLASSIFY_BODY];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "a statement this rule does not model runs before the `set +e` (`set +u`)",
+      ),
+    );
+  });
+
+  it("an unmodelled command before the window is reported", () => {
+    const body = ["npm ci", ...CLASSIFY_BODY];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "a statement this rule does not model runs before the `set +e` (`npm ci`)",
+      ),
+    );
+  });
+});
+
+describe("workflow-slop/audit-gate-shape: normaliser refusals", () => {
+  it("a here-doc redirection in the gate block is refused", () => {
+    const body = [
+      "npm audit --audit-level=high",
+      "cat <<'MSG'",
+      "all good",
+      "MSG",
+    ];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "the run block redirects a here-doc, a construct this rule does not model",
+      ),
+    );
+  });
+
+  it("an `exit 1` that only lives inside a here-doc body after a bare `set +e` is refused, never certified", () => {
+    const body = [
+      "set +e",
+      "npm audit --audit-level=high",
+      "cat <<'MSG'",
+      "exit 1",
+      "MSG",
+    ];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "the run block redirects a here-doc, a construct this rule does not model",
+      ),
+    );
+  });
+
+  it("a here-doc whose terminator is missing is refused with its own reason", () => {
+    const body = [
+      "npm audit --audit-level=high",
+      "cat <<'MSG'",
+      "no terminator follows",
+    ];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "the run block opens a here-doc whose terminator this rule could not locate",
+      ),
+    );
+  });
+
+  it("a `<<<` herestring is not mistaken for a here-doc", () => {
+    const body = ["npm audit --audit-level=high", 'grep -q x <<< "$OUT"'];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        'the run block carries another statement beside the gate command (`grep -q x <<< "$OUT"`) without a `set +e` classification window',
+      ),
+    );
+  });
+
+  it("a shell function definition is refused", () => {
+    const body = ["has_summary() {", '  grep -q x "$1"', "}", ...CLASSIFY_BODY];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "the run block defines a shell function, a construct this rule does not model",
+      ),
+    );
+  });
+
+  it("a `function name` definition is refused too", () => {
+    const body = ["function helper {", "  true", "}", ...CLASSIFY_BODY];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain(
+      "the run block defines a shell function, a construct this rule does not model",
+    );
+  });
+
+  it("an `eval` is refused", () => {
+    const body = ['eval "$GATE"', ...CLASSIFY_BODY];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "the run block calls `eval`, a construct this rule does not model",
+      ),
+    );
+  });
+
+  it("a backgrounded gate command is refused", () => {
+    const body = ["npm audit --audit-level=high &", "wait"];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage("the run block backgrounds a command with `&`"),
+    );
+  });
+
+  it("negative control: `2>&1` and `>&2` are redirections, not backgrounding", () => {
+    const body = [
+      "set -o pipefail",
+      "set +e",
+      'npm audit --audit-level=high 2>&1 | tee "$LOG"',
+      "STATUS=$?",
+      "set -e",
+      'echo "done" >&2',
+      "exit 1",
+      "exit $STATUS",
+    ];
+    expect(shapeViolations(auditYml(gateStep(body)))).toHaveLength(0);
+  });
+
+  it("an unbalanced quote (a string spanning physical lines) is refused", () => {
+    const body = ['echo "set +e', "npm audit --audit-level=high"];
+    const v = shapeViolations(auditYml(gateStep(body)));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shapeMessage("a line of the run block leaves a quote unbalanced"),
+    );
+  });
+});
+
+describe("workflow-slop/audit-gate-shape: continue-on-error", () => {
+  // ACCEPTANCE PROBE p6: continue-on-error: true on the gate step.
+  it("acceptance probe p6: `continue-on-error: true` on an otherwise recognised gate step is reported", () => {
+    const text = auditYml(
+      gateStep(["npm audit --audit-level=high"], ["continue-on-error: true"]),
+    );
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      "`continue-on-error` on the gate step is set to `true`, which cannot be proven false: the job may stay green regardless of the `npm audit --audit-level=...` gate's exit status.",
+    );
+    expect(v[0].matched).toBe("continue-on-error: true");
+  });
+
+  it("job-level `continue-on-error: true` is reported on the gate step's job", () => {
     const text = [
       "on: push",
       "jobs:",
       "  audit:",
+      "    runs-on: ubuntu-latest",
       "    continue-on-error: true",
       "    steps:",
       "      - run: npm audit --audit-level=high",
     ].join("\n");
-    const v = ruleViolations(text);
-    expect(v.some((x) => x.message.includes("enclosing job"))).toBe(true);
-  });
-
-  it("negative control: continue-on-error: false at the job level is not flagged", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    continue-on-error: false",
-      "    steps:",
-      "      - run: npm audit --audit-level=high",
-    ].join("\n");
-    expect(ruleViolations(text)).toHaveLength(0);
-  });
-
-  // ── npm-only scope: moderate/low accepted, pnpm and non-npm documented (round-1 review M5) ──
-
-  it("negative control: --audit-level=moderate is recognised as a (stronger) valid gate", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: npm audit --audit-level=moderate --no-fund",
-    ].join("\n");
-    expect(ruleViolations(text)).toHaveLength(0);
-  });
-
-  it("negative control: --audit-level=low is recognised as a (stronger) valid gate", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: npm audit --audit-level=low --no-fund",
-    ].join("\n");
-    expect(ruleViolations(text)).toHaveLength(0);
-  });
-
-  it("documented finding: a pnpm audit --audit-level=high gate is out of this rule's npm-only scope and is reported as a missing gate with the new wording", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: pnpm audit --audit-level=high",
-    ].join("\n");
-    const v = ruleViolations(text);
+    const v = shapeViolations(text);
     expect(v).toHaveLength(1);
-    expect(v[0].message).toContain(
-      "No recognised npm-audit gate command was found",
+    expect(v[0].message).toBe(
+      "`continue-on-error` on the gate step's enclosing job is set to `true`, which cannot be proven false: the job may stay green regardless of the `npm audit --audit-level=...` gate's exit status.",
     );
   });
 
-  // ── run-block normalisation ──
-  // Every check in this rule consumes `normalizeRunBlock`'s output
-  // (logical lines joined, trailing comments stripped per line,
-  // statements cut at unquoted `;`/`&&`/`||`/`|`, quoted spans respected
-  // per match kind) instead of the raw `run:` text. Each of the three
-  // positives below scanned CLEAN against the raw-text analysis these
-  // tests replaced, and the two negative controls below were false
-  // positives under it.
-
-  const NO_VERDICT_MESSAGE =
-    "nothing afterward turns that captured status back into a non-zero step exit";
-  const NO_CAPTURE_MESSAGE =
-    "without both capturing its exit status (`$?`) and restoring `set -e` afterward";
-  const MISSING_GATE_MESSAGE = "No recognised npm-audit gate command was found";
-  const TAIL_NOOP_MESSAGE = "; true` or `; :`";
-
-  it("flags the canonical gate shape with its exit verdict commented out (a `#`-commented `exit $STATUS` is not a verdict)", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: |",
-      "          set +e",
-      "          npm audit --audit-level=high",
-      "          STATUS=$?",
-      "          set -e",
-      "          # exit $STATUS",
-      '          echo "status=$STATUS"',
-    ].join("\n");
-    const v = ruleViolations(text);
+  it("an unresolved `${{ }}` continue-on-error cannot be proven false and is reported", () => {
+    const text = auditYml(
+      gateStep(
+        ["npm audit --audit-level=high"],
+        ["continue-on-error: ${{ github.event_name == 'push' }}"],
+      ),
+    );
+    const v = shapeViolations(text);
     expect(v).toHaveLength(1);
-    expect(v[0].matched).toBe("set +e");
-    expect(v[0].message).toContain(NO_VERDICT_MESSAGE);
+    expect(v[0].message).toContain("cannot be proven false");
   });
 
-  it("flags a `set +e` gate whose gate boundary a comment naming --audit-level=high above it used to move", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: |",
-      "          # we gate at --audit-level=high",
-      "          set +e",
-      "          npm audit --audit-level=high",
-      "          echo done",
-    ].join("\n");
-    const v = ruleViolations(text);
+  it("negative control: `continue-on-error: false` is provably false and is not reported", () => {
+    const text = auditYml(
+      gateStep(["npm audit --audit-level=high"], ["continue-on-error: false"]),
+    );
+    expect(shapeViolations(text)).toHaveLength(0);
+  });
+});
+
+describe("workflow-slop/audit-gate-shape: registered templates and the fleet shape", () => {
+  it("the package ships no org template: the real fleet gate block is reported without one", () => {
+    const v = shapeViolations(REAL_FLEET_AUDIT_YML);
     expect(v).toHaveLength(1);
-    expect(v[0].matched).toBe("set +e");
-    expect(v[0].message).toContain(NO_CAPTURE_MESSAGE);
+    expect(v[0].message).toBe(
+      shapeMessage(
+        "the run block defines a shell function, a construct this rule does not model",
+      ),
+    );
+    expect(missingViolations(REAL_FLEET_AUDIT_YML)).toHaveLength(0);
   });
 
-  it("flags a gate command that exists only inside a comment as a MISSING gate, not a present one", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: |",
-      "          # TODO: restore npm audit --audit-level=high",
-      '          echo "audit reported"',
-    ].join("\n");
-    const v = ruleViolations(text);
+  it("negative control: the real fleet gate block is recognised once its template is registered", () => {
+    const cfg = withFleetTemplate();
+    expect(shapeViolations(REAL_FLEET_AUDIT_YML, cfg)).toHaveLength(0);
+    expect(missingViolations(REAL_FLEET_AUDIT_YML, cfg)).toHaveLength(0);
+  });
+
+  it("a template registered as an explicit statement list matches the same block as its sha256", () => {
+    const cfg = mergeConfig({
+      workflow: {
+        auditGateTemplates: [
+          {
+            name: "inline-bare-gate",
+            statements: [
+              "set +e",
+              "npm audit --audit-level=high",
+              "STATUS=$?",
+              "set -e",
+            ],
+          },
+        ],
+      },
+    });
+    // The statement list above is a `set +e` window with no verdict at
+    // all: unrecognised by shape, recognised only because it is
+    // registered. That is what "a template is trusted as is" means.
+    const body = [
+      "set +e",
+      "npm audit --audit-level=high",
+      "STATUS=$?",
+      "set -e",
+    ];
+    expect(shapeViolations(auditYml(gateStep(body)), cfg)).toHaveLength(0);
+    expect(shapeViolations(auditYml(gateStep(body)))).toHaveLength(1);
+  });
+
+  it("a block that matches no registered template is reported, with the digest to register", () => {
+    const cfg = withFleetTemplate();
+    const text = auditYml(gateStep(["npm audit --audit-level=high || true"]));
+    const v = shapeViolations(text, cfg);
     expect(v).toHaveLength(1);
-    expect(v[0].message).toContain(MISSING_GATE_MESSAGE);
+    expect(v[0].message).toContain(
+      "the gate command's logical line carries a `||` tail (`true`)",
+    );
+    expect(v[0].message).toMatch(
+      /No registered template matches this block; its normalised statements hash to sha256 [0-9a-f]{64}\./,
+    );
   });
 
-  it("negative control: `set +e` written only inside a quoted echo string is data, not a `set +e`", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: |",
-      '          echo "set +e"',
-      "          npm audit --audit-level=high",
-    ].join("\n");
-    expect(ruleViolations(text)).toHaveLength(0);
-  });
-
-  it("negative control: a `; true` BEFORE the gate command (cd api; true && npm audit ...) is not a tail on the gate", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: |",
-      "          cd api; true && npm audit --audit-level=high",
-    ].join("\n");
-    expect(ruleViolations(text)).toHaveLength(0);
-  });
-
-  it("negative control: a `||` inside the gate command's own quoted argument is not a neutralisation", () => {
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: |",
-      '          npm audit --audit-level=high --note="a || b"',
-    ].join("\n");
-    expect(ruleViolations(text)).toHaveLength(0);
-  });
-
-  it("comment stripping decides which logical line IS the gate line: a commented-out reference to the gate above the real, `; true`-tailed gate line", () => {
-    // Positive-direction pin on the stripper: with comments left in, the
-    // FIRST line matching the gate command is the comment, whose own
-    // post-gate tail is empty, so the real `; true` below it is never
-    // examined and the block scans clean. The `;` inside the comment sits
-    // BEFORE the gate command there, which is what makes this case
-    // discriminate (a comment whose `;` sits after the gate command would
-    // flag either way).
-    const text = [
-      "on: push",
-      "jobs:",
-      "  audit:",
-      "    steps:",
-      "      - run: |",
-      "          # never append `; true` to npm audit --audit-level=high",
-      "          npm audit --audit-level=high ; true",
-    ].join("\n");
-    const v = ruleViolations(text);
-    expect(v).toHaveLength(1);
-    expect(v[0].message).toContain(TAIL_NOOP_MESSAGE);
-    expect(v[0].matched).toBe("; true");
-  });
-
-  // ── real fleet shape, and the reach of the verdict requirement ──
-
-  const REAL_FLEET_AUDIT_YML = fs.readFileSync(
-    path.join(import.meta.dirname, "fixtures", "fleet-audit-real-shape.yml"),
-    "utf8",
-  );
-
-  it("negative control: the real fleet audit.yml shape (comment-heavy gate step: `|| true` in prose, four exit codes, a quoted `;`) is not flagged", () => {
-    expect(ruleViolations(REAL_FLEET_AUDIT_YML)).toHaveLength(0);
-  });
-
-  it("documented limit: flipping only the findings-branch `exit 1` to `exit 0` in the real fleet shape still scans clean, because ANY non-zero exit after the gate satisfies the verdict requirement (its `exit 2`/`exit 3` outage branches remain)", () => {
+  // ACCEPTANCE PROBE p2: the real fleet block with its findings-branch
+  // `exit 1` flipped to `exit 0`. The block is recognised only as a
+  // registered template, so any edit to it, this one included, changes
+  // the digest and is reported.
+  it("acceptance probe p2: flipping the findings-branch `exit 1` to `exit 0` in the real fleet block is reported", () => {
     const neutralised = REAL_FLEET_AUDIT_YML.replace(
       'read the report step above"\n            exit 1',
       'read the report step above"\n            exit 0',
     );
     // Guard the flip itself: a fixture refresh that moves this line must
-    // fail here rather than silently turn the pin into a re-run of the
+    // fail here rather than silently turn the probe into a re-run of the
     // negative control above.
     expect(neutralised).not.toBe(REAL_FLEET_AUDIT_YML);
-    expect(ruleViolations(neutralised)).toHaveLength(0);
+    const cfg = withFleetTemplate();
+    const v = shapeViolations(neutralised, cfg);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain(
+      "Unrecognised npm-audit gate shape in this audit workflow: the run block defines a shell function, a construct this rule does not model.",
+    );
+    expect(v[0].message).toMatch(
+      /No registered template matches this block; its normalised statements hash to sha256 [0-9a-f]{64}\./,
+    );
+  });
+
+  it("a reformat that changes only comments and indentation keeps the registered template matching", () => {
+    const reformatted = REAL_FLEET_AUDIT_YML.replace(
+      "          set +e\n",
+      "          # classify the gate's own exit code\n          set +e\n",
+    );
+    expect(reformatted).not.toBe(REAL_FLEET_AUDIT_YML);
+    expect(shapeViolations(reformatted, withFleetTemplate())).toHaveLength(0);
+  });
+});
+
+describe("workflow-slop/audit-gate-shape: multiple gate steps", () => {
+  it("a clean gate step beside a neutralised one still reports the neutralised one", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - name: gate (root)",
+      "        run: npm audit --audit-level=high",
+      "      - name: gate (mcp)",
+      "        run: npm audit --audit-level=high || true",
+    ].join("\n");
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].line).toBe(9);
+    expect(v[0].message).toContain(
+      "the gate command's logical line carries a `||` tail (`true`)",
+    );
+    expect(missingViolations(text)).toHaveLength(0);
+  });
+
+  it("a `run:` inside a uses: step's with: block is not a gate step", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - uses: acme/runner@v1",
+      "        with:",
+      "          run: npm audit --audit-level=high || true",
+    ].join("\n");
+    expect(shapeViolations(text)).toHaveLength(0);
+    expect(missingViolations(text)).toHaveLength(1);
+  });
+
+  it("a per-line disable comment still works on a shape finding", () => {
+    const text = auditYml([
+      "      - run: npm audit --audit-level=high || true # slop-detector:disable-line=workflow-slop/audit-gate-shape",
+    ]);
+    expect(shapeViolations(text)).toHaveLength(0);
+    // Without the comment the same file reports, so the assertion above
+    // pins the opt-out, not an accidentally clean fixture.
+    expect(
+      shapeViolations(
+        auditYml(["      - run: npm audit --audit-level=high || true"]),
+      ),
+    ).toHaveLength(1);
   });
 });

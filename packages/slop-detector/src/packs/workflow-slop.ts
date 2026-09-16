@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import YAML from "yaml";
 import type {
   FileTarget,
@@ -625,7 +626,33 @@ const node20ActionMajor: Rule = {
   },
 };
 
-// ─────────────────────────── audit-gate-shape ───────────────────────────
+// ───────────────── audit-gate-missing / audit-gate-shape ─────────────────
+//
+// Two rules over `.github/workflows/audit.yml`, both `block`:
+//
+//   - `audit-gate-missing` answers "is there a gate at all": does any
+//     step's normalised run block invoke `npm audit --audit-level=...`
+//     in a statement the shell would actually execute.
+//   - `audit-gate-shape` answers "is the gate one we recognise": the
+//     gate step's normalised statement list must match one of the
+//     shapes below (`R-bare`, `R-classify`) or a template the consuming
+//     repo registered in `workflow.auditGateTemplates`, and neither the
+//     step nor its job may carry a `continue-on-error` that cannot be
+//     proven false.
+//
+// The recognition is a SHAPE ALLOWLIST, not a neutralisation blocklist.
+// Earlier revisions of this rule enumerated the ways a gate can be
+// neutralised (`|| true`, `; true`, a bare `set +e`, ...); every such
+// enumeration leaks in the false-CLEAN direction, because the next bash
+// construct nobody listed scans green. An allowlist leaks the other way:
+// a legitimate block nobody modelled is reported, which is a visible
+// false positive an operator can read, disable per rule, or register as
+// a template. For a `block`-severity security gate that is the only
+// acceptable leak direction.
+//
+// The neutralisation checks survive only as message ENRICHMENT on a
+// block that is already unrecognised (`neutralisationSignal` below).
+// They can never produce a clean verdict.
 
 const AUDIT_WORKFLOW_FILE_RE = /(^|\/)\.github\/workflows\/audit\.ya?ml$/;
 
@@ -636,35 +663,103 @@ function isAuditWorkflowFile(file: FileTarget): boolean {
 
 type ScalarWithRange = { value: unknown; range: [number, number, number] };
 
+/**
+ * Which YAML scalar style a step's `run:` was written in. Only two
+ * styles are analysable as shell text without first undoing YAML's own
+ * processing, and both are the styles the fleet's workflows actually
+ * use:
+ *
+ * - `literal-block` (`run: |`): every source line is one script line,
+ *   verbatim apart from the block's common indentation.
+ * - `single-line-plain` (`run: npm audit --audit-level=high`): one line,
+ *   no YAML escapes.
+ *
+ * Everything else is `other` and refuses: a folded block scalar (`>`)
+ * joins lines with spaces, so the statement boundaries in the source are
+ * not the statement boundaries bash sees; a multi-line plain scalar
+ * folds the same way; a quoted scalar carries YAML escape sequences
+ * (`\n`, `\"`) that would have to be decoded before any shell-level
+ * reasoning. Refusing is the fail-closed answer: the block is reported,
+ * not certified.
+ */
+type RunScalarStyle = "literal-block" | "single-line-plain" | "other";
+
 interface StepRunInfo {
   runRange: [number, number, number];
+  /** YAML scalar style of the `run:` value (see `RunScalarStyle`). */
+  style: RunScalarStyle;
+  /** Human-readable name of the scalar style, for a refusal message. */
+  styleLabel: string;
   continueOnError?: ScalarWithRange;
   /**
    * The `continue-on-error:` of this step's *enclosing job* (the
    * `jobs.<job_id>` mapping, identified by its own `steps:` key), when
-   * present — GitHub Actions honours `continue-on-error` at the job level
-   * too, not just per-step, so a step-level check alone misses a job that
-   * stays green regardless of what any of its steps (including the gate)
-   * exit.
+   * present. GitHub Actions honours `continue-on-error` at the job level
+   * too, not just per-step, so a step-level check alone misses a job
+   * that stays green regardless of what any of its steps (including the
+   * gate) exit.
    */
   jobContinueOnError?: ScalarWithRange;
 }
 
 /**
+ * The YAML scalar style of a `run:` node, from `yaml`'s own `type` tag
+ * plus (for a plain scalar) whether the source slice spans more than one
+ * line. Duck-typed on `.type` rather than imported from `yaml`'s
+ * `Scalar.Type` enum, for the same reason `hasItems` is duck-typed: the
+ * only shape this depends on is "the node reports its style as a
+ * string".
+ */
+function runScalarStyle(
+  node: unknown,
+  raw: string,
+): { style: RunScalarStyle; styleLabel: string } {
+  const type =
+    typeof node === "object" && node !== null && "type" in (node as object)
+      ? (node as { type?: unknown }).type
+      : undefined;
+  if (type === "BLOCK_LITERAL") {
+    return { style: "literal-block", styleLabel: "a literal block scalar" };
+  }
+  if (type === "BLOCK_FOLDED") {
+    return { style: "other", styleLabel: "a folded block scalar (`>`)" };
+  }
+  const multiline = raw.includes("\n");
+  if (type === "PLAIN") {
+    return multiline
+      ? { style: "other", styleLabel: "a multi-line plain scalar" }
+      : {
+          style: "single-line-plain",
+          styleLabel: "a single-line plain scalar",
+        };
+  }
+  if (type === "QUOTE_SINGLE" || type === "QUOTE_DOUBLE") {
+    return {
+      style: "other",
+      styleLabel: multiline
+        ? "a multi-line quoted scalar"
+        : "a quoted scalar (YAML escapes are not decoded before shell analysis)",
+    };
+  }
+  return { style: "other", styleLabel: "an unrecognised scalar style" };
+}
+
+/**
  * Every `run:`-carrying step mapping in the document, together with that
- * same step's `continue-on-error:` sibling and its enclosing job's
+ * step's `continue-on-error:` sibling and its enclosing job's
  * `continue-on-error:` (see `StepRunInfo.jobContinueOnError`), when
- * present. Unlike `collectRunScalars` (which only needs the scalar node),
- * this rule also needs the *step's* other keys, so it collects at the
- * mapping level: any mapping with a `run:` key not inside a `uses:` step's
- * `with:` input block (same schema-position gating as `collectRunScalars`,
- * for the same reason: a custom action can name an input `run`) is
- * treated as a step. `jobContinueOnError` is threaded down from the
- * nearest enclosing mapping that itself carries a `steps:` key (a job
- * mapping), not reset by `with:` gating since a job's own
+ * present. Unlike `collectRunScalars` (which only needs the scalar
+ * node), these rules also need the *step's* other keys, so it collects
+ * at the mapping level: any mapping with a `run:` key not inside a
+ * `uses:` step's `with:` input block (same schema-position gating as
+ * `collectRunScalars`, for the same reason: a custom action can name an
+ * input `run`) is treated as a step. `jobContinueOnError` is threaded
+ * down from the nearest enclosing mapping that itself carries a `steps:`
+ * key (a job mapping), not reset by `with:` gating since a job's own
  * `continue-on-error:` is never inside any step's `with:` block.
  */
 function collectStepRuns(
+  fileText: string,
   node: unknown,
   out: StepRunInfo[],
   insideWith = false,
@@ -703,8 +798,15 @@ function collectStepRuns(
         coePair && isPairNode(coePair) && isScalarNode(coePair.value)
           ? { value: coePair.value.value, range: coePair.value.range }
           : undefined;
+      const range = runPair.value.range;
+      const { style, styleLabel } = runScalarStyle(
+        runPair.value,
+        fileText.slice(range[0], range[1]),
+      );
       out.push({
-        runRange: runPair.value.range,
+        runRange: range,
+        style,
+        styleLabel,
         continueOnError,
         jobContinueOnError: effectiveJobCoE,
       });
@@ -714,24 +816,25 @@ function collectStepRuns(
     if (isPairNode(item)) {
       const keyName = scalarKeyName(item.key);
       collectStepRuns(
+        fileText,
         item.value,
         out,
         insideWith || (isUsesStep && keyName === "with"),
         effectiveJobCoE,
       );
     } else {
-      collectStepRuns(item, out, insideWith, effectiveJobCoE);
+      collectStepRuns(fileText, item, out, insideWith, effectiveJobCoE);
     }
   }
 }
 
 // `moderate`/`low` are STRONGER gates than `high`/`critical` (npm's
-// `--audit-level` sets the *minimum* severity that fails the command, so a
-// lower threshold fails on strictly more advisories), so they count as a
-// recognised gate too. Scoped to `npm audit` only (see `isGateCommand`
+// `--audit-level` sets the *minimum* severity that fails the command, so
+// a lower threshold fails on strictly more advisories), so they count as
+// a recognised gate too. Scoped to `npm audit` only (see `isGateCommand`
 // below): a `pnpm audit --audit-level=high` or a non-npm audit command
-// (`pip-audit`, `cargo audit`) is out of this rule's reach, documented in
-// the README rather than guessed at here.
+// (`pip-audit`, `cargo audit`) is out of these rules' reach, documented
+// in the README rather than guessed at here.
 const AUDIT_GATE_RE = /--audit-level=(low|moderate|high|critical)\b/;
 
 function isGateCommand(raw: string): boolean {
@@ -741,14 +844,15 @@ function isGateCommand(raw: string): boolean {
 // ─────────────────────── run-block normalisation ───────────────────────
 //
 // One normalisation step stands between a gate step's raw `run:` source
-// slice and every check in this rule: `normalizeRunBlock` below. No check
-// reads the raw block text any more. Before it existed the analysis was
-// comment-blind and quote-blind, and each of those was a bypass: a
-// `#`-commented `exit $STATUS` satisfied the non-zero-verdict
-// requirement, a comment merely naming `--audit-level=high` moved the
-// gate boundary so the `set +e` half never ran at all, a gate command
-// written only inside a comment counted as a present gate, and a
-// `set +e` inside an `echo "..."` string was flagged as a real one.
+// slice and every check in these two rules. No check reads the raw block
+// text. In order: here-doc bodies are dropped, physical lines are joined
+// across backslash continuations, each logical line loses its trailing
+// shell comment, and the result is cut into statements at quote-aware
+// command boundaries. Each of those was a bypass before it existed: a
+// `#`-commented `exit $STATUS` satisfied a verdict requirement, a
+// `set +e` inside an `echo "..."` string was read as a real one, and a
+// gate command written only inside a `cat <<'MSG'` body counted as a
+// present gate.
 
 /**
  * One logical line of a `run:` block after normalisation: physical lines
@@ -767,16 +871,29 @@ interface NormalizedLine {
 }
 
 /**
+ * How a statement is attached to the one before it. `start` is the first
+ * statement of the block; `newline` is a plain line break. The operator
+ * separators are kept (rather than thrown away as in a plain split)
+ * because a recognised shape constrains them: `R-bare` allows no
+ * separator at all, and `R-classify` allows `|` only between the gate
+ * command and a `tee`.
+ */
+type StatementSeparator = "start" | "newline" | ";" | "&&" | "||" | "|";
+
+/**
  * One shell statement cut out of a normalized logical line at an
- * unquoted `;`, `&&`, `||` or `|` boundary. `line` is the logical line it
- * came from, kept because the `||` and `; true`/`; :` tail checks are
- * defined over the gate's whole logical line rather than one statement;
- * `indexInLine` is this statement's first character inside `line.text`.
+ * unquoted `;`, `&&`, `||` or `|` boundary. `line` is the logical line
+ * it came from (kept so a message can point at the gate's own line);
+ * `indexInLine` is this statement's first character inside `line.text`;
+ * `trimmed` is `text` without surrounding whitespace, the form every
+ * shape check and the template hash read.
  */
 interface NormalizedStatement {
   text: string;
+  trimmed: string;
   line: NormalizedLine;
   indexInLine: number;
+  separatorBefore: StatementSeparator;
 }
 
 /** The absolute file offset of `line.text[index]`. */
@@ -831,9 +948,25 @@ function quoteContexts(text: string): QuoteContext[] {
   return contexts;
 }
 
+/** True when `text`'s quote scan ends inside a quoted span. */
+function hasUnbalancedQuote(text: string): boolean {
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inDouble && ch === "\\") {
+      i++;
+      continue;
+    }
+    if (ch === "'" && !inDouble) inSingle = !inSingle;
+    else if (ch === '"' && !inSingle) inDouble = !inDouble;
+  }
+  return inSingle || inDouble;
+}
+
 /**
- * Which quoting contexts a match may start in. Rather than blanking every
- * quoted span for every search, this follows the shell:
+ * Which quoting contexts a match may start in. Rather than blanking
+ * every quoted span for every search, this follows the shell:
  *
  * - `"command"` requires a bare start. A command word written inside
  *   quotes is data, not program text, so `echo "set +e"` is not a
@@ -858,8 +991,8 @@ interface UnquotedMatch {
 /**
  * Every match of `re` in `text` at or after `from` whose start sits in a
  * quoting context the match can take effect in (see `MatchKind`), in
- * order. `re` need not be global; a non-global pattern is recompiled with
- * the flag rather than mutated.
+ * order. `re` need not be global; a non-global pattern is recompiled
+ * with the flag rather than mutated.
  */
 function unquotedMatches(
   text: string,
@@ -884,160 +1017,6 @@ function firstUnquoted(
   from = 0,
 ): UnquotedMatch | undefined {
   return unquotedMatches(text, re, kind, from)[0];
-}
-
-/**
- * `raw` (a `run:` scalar's raw source slice) as comment-free logical
- * lines: a physical line ending in a backslash is joined onto the next
- * one (the trailing backslash itself is dropped, nothing else inserted,
- * matching bash's own backslash-newline removal), so a gate command's
- * `||`/`;` tail written on a continuation line is inspected as part of
- * the logical line it actually runs on; then the joined line's trailing
- * shell comment is stripped. `baseOffset` is `raw`'s own start offset in
- * the full file text, so every recorded offset is an absolute file offset
- * usable for a violation location.
- */
-function normalizeLogicalLines(
-  raw: string,
-  baseOffset: number,
-): NormalizedLine[] {
-  const lines: NormalizedLine[] = [];
-  const pushLine = (joined: string, joinedOffsets: number[]) => {
-    const commentFree = stripTrailingComment(joined);
-    lines.push({
-      text: commentFree,
-      offsets: joinedOffsets.slice(0, commentFree.length),
-      lineIndex: lines.length,
-    });
-  };
-  let offset = baseOffset;
-  let joined = "";
-  let joinedOffsets: number[] = [];
-  let continuing = false;
-  for (const physical of raw.split("\n")) {
-    const stripped = physical.endsWith("\r") ? physical.slice(0, -1) : physical;
-    const continues = stripped.endsWith("\\");
-    const keep = continues ? stripped.length - 1 : stripped.length;
-    for (let i = 0; i < keep; i++) {
-      joined += stripped[i];
-      joinedOffsets.push(offset + i);
-    }
-    if (continues) {
-      continuing = true;
-    } else {
-      pushLine(joined, joinedOffsets);
-      joined = "";
-      joinedOffsets = [];
-      continuing = false;
-    }
-    offset += physical.length + 1;
-  }
-  if (continuing) pushLine(joined, joinedOffsets);
-  return lines;
-}
-
-/**
- * `line` cut into statements at every unquoted `;`, `&&`, `||` or `|`
- * boundary, so "before the gate command" and "after the gate command"
- * are decided on real command boundaries instead of raw character
- * distance. Whitespace-only pieces are dropped (a comment-only line
- * strips to one), so a statement list only ever holds real commands.
- */
-function splitStatements(line: NormalizedLine): NormalizedStatement[] {
-  const contexts = quoteContexts(line.text);
-  const pieces: Array<{ start: number; end: number }> = [];
-  let start = 0;
-  let i = 0;
-  while (i < line.text.length) {
-    if (contexts[i] !== "bare") {
-      i++;
-      continue;
-    }
-    const pair = line.text.slice(i, i + 2);
-    const separatorLength =
-      pair === "&&" || pair === "||"
-        ? 2
-        : line.text[i] === ";" || line.text[i] === "|"
-          ? 1
-          : 0;
-    if (separatorLength === 0) {
-      i++;
-      continue;
-    }
-    pieces.push({ start, end: i });
-    i += separatorLength;
-    start = i;
-  }
-  pieces.push({ start, end: line.text.length });
-  return pieces
-    .map((piece) => ({
-      text: line.text.slice(piece.start, piece.end),
-      line,
-      indexInLine: piece.start,
-    }))
-    .filter((statement) => statement.text.trim().length > 0);
-}
-
-/**
- * The single input every `audit-gate-shape` check consumes: one `run:`
- * block's raw source slice turned into comment-free shell statements
- * (see the section header above for what each bypass looked like before
- * this existed).
- */
-function normalizeRunBlock(
-  raw: string,
-  baseOffset: number,
-): NormalizedStatement[] {
-  const statements: NormalizedStatement[] = [];
-  for (const line of normalizeLogicalLines(raw, baseOffset)) {
-    statements.push(...splitStatements(line));
-  }
-  return statements;
-}
-
-/**
- * True when `statement` runs before (respectively after) `gate` in the
- * same normalized block: an earlier (later) logical line, or an earlier
- * (later) statement on the gate's own logical line. Ordered by
- * `lineIndex`/`indexInLine` rather than by position in the statement
- * array, so the comparison says what it means independently of how the
- * array was assembled.
- */
-function runsBeforeGate(
-  statement: NormalizedStatement,
-  gate: NormalizedStatement,
-): boolean {
-  if (statement.line.lineIndex !== gate.line.lineIndex) {
-    return statement.line.lineIndex < gate.line.lineIndex;
-  }
-  return statement.indexInLine < gate.indexInLine;
-}
-
-function runsAfterGate(
-  statement: NormalizedStatement,
-  gate: NormalizedStatement,
-): boolean {
-  if (statement.line.lineIndex !== gate.line.lineIndex) {
-    return statement.line.lineIndex > gate.line.lineIndex;
-  }
-  return statement.indexInLine > gate.indexInLine;
-}
-
-/**
- * The first comment-free statement in a normalized block that actually
- * invokes the npm-audit gate command. This, not a search over the raw
- * block text, is what decides whether a step is a gate step at all: a
- * `# TODO: restore npm audit --audit-level=high` line is a comment, not
- * a gate.
- */
-function findGateStatement(
-  statements: NormalizedStatement[],
-): NormalizedStatement | undefined {
-  return statements.find((statement) => isGateCommand(statement.text));
-}
-
-function blockHasGateCommand(statements: NormalizedStatement[]): boolean {
-  return findGateStatement(statements) !== undefined;
 }
 
 /**
@@ -1071,6 +1050,899 @@ function stripTrailingComment(line: string): string {
   return line;
 }
 
+/** One physical source line of a run block, with its file offset. */
+interface PhysicalLine {
+  text: string;
+  offset: number;
+}
+
+/**
+ * A here-doc redirection found on one physical line: the delimiter word
+ * and whether the `<<-` form (leading tabs stripped from the terminator)
+ * was used. `quoted` is unused by the terminator scan (bash accepts
+ * `EOF`, `'EOF'` and `"EOF"` with the same terminator line) and kept
+ * only to make the parse explicit.
+ */
+interface HeredocRedirection {
+  delimiter: string;
+  dashed: boolean;
+}
+
+/**
+ * Every here-doc redirection opened on `text`, in order. A redirection
+ * is an unquoted `<<` (optionally `<<-`) that is not the `<<<`
+ * herestring, followed by an optionally quoted delimiter word.
+ *
+ * `malformed` is set when an unquoted `<<` is found whose delimiter
+ * cannot be read: the normaliser then has no way to know where the body
+ * ends, which is a refusal, never a guess.
+ */
+function heredocRedirections(text: string): {
+  redirections: HeredocRedirection[];
+  malformed: boolean;
+} {
+  const contexts = quoteContexts(text);
+  const redirections: HeredocRedirection[] = [];
+  let malformed = false;
+  for (let i = 0; i + 1 < text.length; i++) {
+    if (contexts[i] !== "bare") continue;
+    if (text[i] !== "<" || text[i + 1] !== "<") continue;
+    if (text[i + 2] === "<") {
+      i += 2; // `<<<` is a herestring: no body, nothing to strip.
+      continue;
+    }
+    let j = i + 2;
+    const dashed = text[j] === "-";
+    if (dashed) j++;
+    while (j < text.length && (text[j] === " " || text[j] === "\t")) j++;
+    const quote = text[j] === "'" || text[j] === '"' ? text[j] : undefined;
+    if (quote) {
+      const end = text.indexOf(quote, j + 1);
+      if (end === -1) {
+        malformed = true;
+        break;
+      }
+      redirections.push({ delimiter: text.slice(j + 1, end), dashed });
+      i = end;
+      continue;
+    }
+    const word = /^[A-Za-z0-9_.+-]+/.exec(text.slice(j));
+    if (!word) {
+      malformed = true;
+      break;
+    }
+    redirections.push({ delimiter: word[0], dashed });
+    i = j + word[0].length - 1;
+  }
+  return { redirections, malformed };
+}
+
+/**
+ * The common indentation a literal block scalar's source lines carry.
+ * GitHub Actions hands the *dedented* script to bash, so a here-doc
+ * terminator that sits at column 0 of the script sits at exactly this
+ * indentation in the file.
+ */
+function blockIndent(lines: PhysicalLine[]): string {
+  for (const line of lines) {
+    if (line.text.trim().length === 0) continue;
+    return /^[ \t]*/.exec(line.text)?.[0] ?? "";
+  }
+  return "";
+}
+
+/**
+ * True when `line` is the terminator of a here-doc opened with
+ * `delimiter`. Bash requires the terminator to be the delimiter alone on
+ * its own line (leading tabs allowed only for the `<<-` form), so the
+ * file line must be the block's own indentation plus the delimiter. A
+ * line that merely mentions the delimiter mid-script does not terminate
+ * anything.
+ */
+function isHeredocTerminator(
+  line: string,
+  indent: string,
+  redirection: HeredocRedirection,
+): boolean {
+  if (!line.startsWith(indent)) return false;
+  let rest = line.slice(indent.length);
+  if (redirection.dashed) rest = rest.replace(/^\t+/, "");
+  return rest.trimEnd() === redirection.delimiter;
+}
+
+/**
+ * The outcome of dropping every here-doc body from a run block's
+ * physical lines. The redirection statement itself is KEPT (it is real
+ * program text, and no recognised shape permits it, so a block carrying
+ * one is reported); only the body lines, which bash never executes, are
+ * dropped.
+ */
+interface HeredocStrip {
+  lines: PhysicalLine[];
+  /** A here-doc redirection was seen at all. */
+  found: boolean;
+  /** A here-doc whose body end could not be located. */
+  unterminated: boolean;
+}
+
+function stripHeredocBodies(lines: PhysicalLine[]): HeredocStrip {
+  const indent = blockIndent(lines);
+  const kept: PhysicalLine[] = [];
+  let found = false;
+  let unterminated = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    kept.push(line);
+    const { redirections, malformed } = heredocRedirections(line.text);
+    if (malformed) {
+      found = true;
+      unterminated = true;
+      continue;
+    }
+    if (redirections.length === 0) continue;
+    found = true;
+    for (const redirection of redirections) {
+      let terminated = false;
+      while (i + 1 < lines.length) {
+        i++;
+        if (isHeredocTerminator(lines[i].text, indent, redirection)) {
+          terminated = true;
+          break;
+        }
+      }
+      if (!terminated) {
+        unterminated = true;
+        break;
+      }
+    }
+  }
+  return { lines: kept, found, unterminated };
+}
+
+/**
+ * `raw` (a `run:` scalar's source slice, minus a block scalar's header
+ * line) as here-doc-free, comment-free logical lines: a physical line
+ * ending in a backslash is joined onto the next one (the trailing
+ * backslash itself is dropped, nothing else inserted, matching bash's
+ * own backslash-newline removal), so a gate command's `||`/`;` tail
+ * written on a continuation line is inspected as part of the logical
+ * line it actually runs on; then the joined line's trailing shell
+ * comment is stripped. `baseOffset` is `raw`'s own start offset in the
+ * full file text, so every recorded offset is an absolute file offset
+ * usable for a violation location.
+ */
+function normalizeLogicalLines(
+  raw: string,
+  baseOffset: number,
+): { lines: NormalizedLine[]; heredoc: HeredocStrip } {
+  const physical: PhysicalLine[] = [];
+  let offset = baseOffset;
+  for (const source of raw.split("\n")) {
+    const stripped = source.endsWith("\r") ? source.slice(0, -1) : source;
+    physical.push({ text: stripped, offset });
+    offset += source.length + 1;
+  }
+  const heredoc = stripHeredocBodies(physical);
+
+  const lines: NormalizedLine[] = [];
+  const pushLine = (joined: string, joinedOffsets: number[]) => {
+    const commentFree = stripTrailingComment(joined);
+    lines.push({
+      text: commentFree,
+      offsets: joinedOffsets.slice(0, commentFree.length),
+      lineIndex: lines.length,
+    });
+  };
+  let joined = "";
+  let joinedOffsets: number[] = [];
+  let continuing = false;
+  for (const line of heredoc.lines) {
+    const continues = line.text.endsWith("\\");
+    const keep = continues ? line.text.length - 1 : line.text.length;
+    for (let i = 0; i < keep; i++) {
+      joined += line.text[i];
+      joinedOffsets.push(line.offset + i);
+    }
+    if (continues) {
+      continuing = true;
+    } else {
+      pushLine(joined, joinedOffsets);
+      joined = "";
+      joinedOffsets = [];
+      continuing = false;
+    }
+  }
+  if (continuing) pushLine(joined, joinedOffsets);
+  return { lines, heredoc };
+}
+
+/**
+ * `line` cut into statements at every unquoted `;`, `&&`, `||` or `|`
+ * boundary that is not inside a command substitution, so "the statement
+ * list" is a list of things the shell actually runs in sequence.
+ * Whitespace-only pieces are dropped (a comment-only line strips to
+ * one), so a statement list only ever holds real commands.
+ *
+ * `substitutionSpansSeparator` reports a `$( ... )` or a backtick span
+ * that contains one of those boundaries. Such a boundary is NOT a
+ * statement boundary of the block, and splitting there would invent a
+ * statement list bash never runs, so the caller refuses the block
+ * instead of reasoning about it.
+ */
+function splitStatements(line: NormalizedLine): {
+  statements: NormalizedStatement[];
+  substitutionSpansSeparator: boolean;
+} {
+  const contexts = quoteContexts(line.text);
+  const pieces: Array<{
+    start: number;
+    end: number;
+    separatorBefore: StatementSeparator;
+  }> = [];
+  let start = 0;
+  let i = 0;
+  let separator: StatementSeparator = "newline";
+  let depth = 0;
+  let inBacktick = false;
+  let substitutionSpansSeparator = false;
+  while (i < line.text.length) {
+    if (contexts[i] !== "bare") {
+      i++;
+      continue;
+    }
+    if (line.text[i] === "`") {
+      inBacktick = !inBacktick;
+      i++;
+      continue;
+    }
+    if (line.text[i] === "$" && line.text[i + 1] === "(") {
+      depth++;
+      i += 2;
+      continue;
+    }
+    if (line.text[i] === ")" && depth > 0) {
+      depth--;
+      i++;
+      continue;
+    }
+    const pair = line.text.slice(i, i + 2);
+    const separatorLength =
+      pair === "&&" || pair === "||"
+        ? 2
+        : line.text[i] === ";" || line.text[i] === "|"
+          ? 1
+          : 0;
+    if (separatorLength === 0) {
+      i++;
+      continue;
+    }
+    if (depth > 0 || inBacktick) {
+      substitutionSpansSeparator = true;
+      i += separatorLength;
+      continue;
+    }
+    pieces.push({ start, end: i, separatorBefore: separator });
+    separator =
+      separatorLength === 2
+        ? (pair as "&&" | "||")
+        : (line.text[i] as ";" | "|");
+    i += separatorLength;
+    start = i;
+  }
+  pieces.push({ start, end: line.text.length, separatorBefore: separator });
+  const statements = pieces
+    .map((piece) => ({
+      text: line.text.slice(piece.start, piece.end),
+      trimmed: line.text.slice(piece.start, piece.end).trim(),
+      line,
+      indexInLine: piece.start,
+      separatorBefore: piece.separatorBefore,
+    }))
+    .filter((statement) => statement.trimmed.length > 0);
+  return { statements, substitutionSpansSeparator };
+}
+
+/**
+ * One gate step's `run:` block, normalised: the statement list every
+ * check reads, plus the lexical refusals that make the statement list
+ * untrustworthy as a model of the script.
+ *
+ * `refusal` is a reason string, not a boolean: `audit-gate-shape`
+ * reports it verbatim so an operator can see WHICH construct the
+ * normaliser does not model. A construct nobody thought of does not
+ * silently pass here; it fails one of the shape allowlists instead,
+ * because no shape permits an unmodelled statement.
+ */
+interface NormalizedBlock {
+  statements: NormalizedStatement[];
+  refusal?: string;
+  /** Start offset of the block's first content character. */
+  offset: number;
+}
+
+const FUNCTION_DEF_RE =
+  /^(?:function\s+[A-Za-z_][A-Za-z0-9_]*\b|[A-Za-z_][A-Za-z0-9_]*\s*\(\s*\))/;
+const EVAL_RE = /(^|[\s;&|(])eval([\s;&|)]|$)/;
+
+/**
+ * An unquoted `&` that backgrounds a command, as opposed to one that is
+ * part of `&&` or of a file-descriptor redirection (`2>&1`, `&>log`,
+ * `>&2`). A backgrounded command's exit status never reaches the step,
+ * so a block containing one is refused rather than certified.
+ */
+function hasBackgroundingAmpersand(text: string): boolean {
+  const contexts = quoteContexts(text);
+  for (let i = 0; i < text.length; i++) {
+    if (contexts[i] !== "bare" || text[i] !== "&") continue;
+    const prev = i > 0 ? text[i - 1] : "";
+    const next = i + 1 < text.length ? text[i + 1] : "";
+    if (prev === "&" || next === "&") continue; // `&&`
+    if (prev === ">" || prev === "<") continue; // `2>&1`, `<&3`
+    if (next === ">") continue; // `&>log`
+    return true;
+  }
+  return false;
+}
+
+/**
+ * The first lexical refusal in a normalised block, or `undefined` when
+ * the statement list can be trusted as a model of the script.
+ *
+ * A miss in this list yields a FALSE POSITIVE, never a false clean: an
+ * unmodelled construct that slips past every entry here still has to
+ * match a recognised shape, and no shape permits a statement it does not
+ * name. That is why this may be a list at all.
+ */
+function lexicalRefusal(
+  statements: NormalizedStatement[],
+  lines: NormalizedLine[],
+  heredoc: HeredocStrip,
+  substitutionSpansSeparator: boolean,
+): string | undefined {
+  if (heredoc.unterminated) {
+    return "the run block opens a here-doc whose terminator this rule could not locate";
+  }
+  if (heredoc.found) {
+    return "the run block redirects a here-doc, a construct this rule does not model";
+  }
+  for (const line of lines) {
+    if (hasUnbalancedQuote(line.text)) {
+      return "a line of the run block leaves a quote unbalanced";
+    }
+  }
+  if (substitutionSpansSeparator) {
+    return "a command substitution in the run block spans a statement separator";
+  }
+  for (const statement of statements) {
+    if (FUNCTION_DEF_RE.test(statement.trimmed)) {
+      return "the run block defines a shell function, a construct this rule does not model";
+    }
+  }
+  for (const statement of statements) {
+    if (EVAL_RE.test(statement.trimmed)) {
+      return "the run block calls `eval`, a construct this rule does not model";
+    }
+  }
+  for (const statement of statements) {
+    if (hasBackgroundingAmpersand(statement.text)) {
+      return "the run block backgrounds a command with `&`";
+    }
+  }
+  return undefined;
+}
+
+/**
+ * One step's `run:` block turned into the single input both rules read.
+ * `raw` is the scalar's source slice; a literal block scalar's header
+ * line (`|`, `|-`, `|2`) is dropped first so the first logical line is
+ * the first script line.
+ */
+function normalizeRunBlock(
+  raw: string,
+  baseOffset: number,
+  style: RunScalarStyle,
+): NormalizedBlock {
+  let body = raw;
+  let offset = baseOffset;
+  if (style === "literal-block") {
+    const headerEnd = raw.indexOf("\n");
+    if (headerEnd === -1) return { statements: [], offset: baseOffset };
+    body = raw.slice(headerEnd + 1);
+    offset = baseOffset + headerEnd + 1;
+  }
+  const { lines, heredoc } = normalizeLogicalLines(body, offset);
+  const statements: NormalizedStatement[] = [];
+  let substitutionSpansSeparator = false;
+  for (const line of lines) {
+    const split = splitStatements(line);
+    if (split.substitutionSpansSeparator) substitutionSpansSeparator = true;
+    if (statements.length === 0 && split.statements.length > 0) {
+      split.statements[0] = {
+        ...split.statements[0],
+        separatorBefore: "start",
+      };
+    }
+    statements.push(...split.statements);
+  }
+  return {
+    statements,
+    refusal: lexicalRefusal(
+      statements,
+      lines,
+      heredoc,
+      substitutionSpansSeparator,
+    ),
+    offset,
+  };
+}
+
+/**
+ * The first statement in a normalized block that actually invokes the
+ * npm-audit gate command. This, not a search over the raw block text, is
+ * what decides whether a step is a gate step at all: a
+ * `# TODO: restore npm audit --audit-level=high` line is a comment, and
+ * the same text inside a `cat <<'MSG'` body is data, not a gate.
+ */
+function findGateStatement(
+  statements: NormalizedStatement[],
+): NormalizedStatement | undefined {
+  return statements.find((statement) => isGateCommand(statement.trimmed));
+}
+
+// ───────────────────────── `set` option parsing ─────────────────────────
+
+interface SetStatement {
+  isSet: boolean;
+  disablesErrexit: boolean;
+  enablesErrexit: boolean;
+  enablesPipefail: boolean;
+  /** No `+` flag group at all: the statement only ever turns things on. */
+  onlyEnables: boolean;
+}
+
+/**
+ * A `set` builtin call, parsed into the two options these rules care
+ * about. Parsed rather than pattern-matched on `set +e`/`set -e` alone,
+ * because bash spells the same thing several ways and every unhandled
+ * spelling was a bug: `set +eu` and `set +o errexit` disable errexit
+ * exactly as `set +e` does, and `set -euo pipefail` restores it exactly
+ * as `set -e` does. A flag group ending in `o` (`-o`, `-euo`) takes the
+ * option name from the following word.
+ */
+function parseSetStatement(trimmed: string): SetStatement {
+  const none: SetStatement = {
+    isSet: false,
+    disablesErrexit: false,
+    enablesErrexit: false,
+    enablesPipefail: false,
+    onlyEnables: false,
+  };
+  const tokens = trimmed.split(/\s+/).filter((t) => t.length > 0);
+  if (tokens[0] !== "set") return none;
+  const result: SetStatement = { ...none, isSet: true, onlyEnables: true };
+  for (let i = 1; i < tokens.length; i++) {
+    const token = tokens[i];
+    const sign = token[0];
+    if (sign !== "-" && sign !== "+") continue;
+    if (sign === "+") result.onlyEnables = false;
+    const letters = token.slice(1);
+    if (letters.includes("e")) {
+      if (sign === "+") result.disablesErrexit = true;
+      else result.enablesErrexit = true;
+    }
+    if (letters.endsWith("o")) {
+      const option = tokens[i + 1];
+      i++;
+      if (option === "errexit") {
+        if (sign === "+") result.disablesErrexit = true;
+        else result.enablesErrexit = true;
+      }
+      if (option === "pipefail" && sign === "-") result.enablesPipefail = true;
+    }
+  }
+  return result;
+}
+
+// ───────────────────────── recognised gate shapes ─────────────────────────
+
+/**
+ * `R-bare`: the gate command is the whole block. Exactly one statement,
+ * no separator before it, an optional `timeout <arg>` prefix, any
+ * `npm audit` flags, and no redirection, substitution or operator at
+ * all. Redirections are refused wholesale rather than only for a
+ * discarding sink (`>/dev/null`): a gate whose output goes somewhere is
+ * a `R-classify` gate (it pipes into `tee`), and "which sink discards"
+ * is exactly the kind of enumeration this rule stopped making.
+ */
+const BARE_GATE_RE =
+  /^(?:timeout\s+[^\s<>&|;$`]+\s+)?npm\s+audit(?:\s+[^\s<>&|;$`]+)*$/;
+
+/** `VAR=$?` / `VAR="$?"`: the gate's exit status, captured. */
+const STATUS_CAPTURE_RE = /^([A-Za-z_][A-Za-z0-9_]*)=(?:"\$\?"|\$\?)$/;
+
+/** A `tee <arg>` pipeline stage, the only downstream stage a gate may have. */
+const TEE_STAGE_RE = /^tee(?:\s+-[aip]+)*\s+[^\s<>&|;]+$/;
+
+/** `exit <non-zero literal>`. */
+const NONZERO_LITERAL_EXIT_RE = /^exit\s+[1-9]\d*$/;
+
+/** `exit 0` (also `exit 00`), the verdict that makes a gate pointless. */
+const ZERO_EXIT_RE = /^exit\s+0+$/;
+
+/** Statements permitted before the `set +e` window opens. */
+const PRE_WINDOW_COMMAND_RE = /^(?:trap|mkdir|mktemp|cd|echo|printf)\b/;
+const ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
+
+/** Statements permitted after the `set -e` restore. */
+const POST_RESTORE_COMMAND_RE = /^(?:if|then|else|elif|fi|echo|printf|exit)\b/;
+
+/** `exit $VAR` / `exit "$VAR"` / `exit ${VAR}` of one specific variable. */
+function isExitOfVariable(trimmed: string, variable: string): boolean {
+  const re = new RegExp(
+    `^exit\\s+(?:"?\\$${variable}"?|"?\\$\\{${variable}\\}"?)$`,
+  );
+  return re.test(trimmed);
+}
+
+/** A short, quotable form of a statement for a message. */
+function quoteStatement(trimmed: string): string {
+  const clipped =
+    trimmed.length > 48 ? `${trimmed.slice(0, 48).trimEnd()}...` : trimmed;
+  return `\`${clipped}\``;
+}
+
+type ShapeAttempt = { ok: true } | { ok: false; reason: string };
+
+function tryBareShape(
+  statements: NormalizedStatement[],
+  gate: NormalizedStatement,
+): ShapeAttempt {
+  if (statements.length !== 1) {
+    const other = statements.find((statement) => statement !== gate);
+    if (other) {
+      switch (other.separatorBefore) {
+        case "||":
+          return {
+            ok: false,
+            reason: `the gate command's logical line carries a \`||\` tail (${quoteStatement(other.trimmed)})`,
+          };
+        case "&&":
+          return {
+            ok: false,
+            reason: `the gate command's logical line carries a \`&&\` tail (${quoteStatement(other.trimmed)})`,
+          };
+        case ";":
+          return {
+            ok: false,
+            reason: `the gate command's logical line carries a \`;\` tail (${quoteStatement(other.trimmed)})`,
+          };
+        case "|":
+          return {
+            ok: false,
+            reason:
+              "the gate command is piped, which only the `set +e` classification shape permits",
+          };
+        default:
+          return {
+            ok: false,
+            reason: `the run block carries another statement beside the gate command (${quoteStatement(other.trimmed)}) without a \`set +e\` classification window`,
+          };
+      }
+    }
+  }
+  if (gate.separatorBefore !== "start") {
+    return {
+      ok: false,
+      reason: "the gate command is not the first statement of the run block",
+    };
+  }
+  if (!BARE_GATE_RE.test(gate.trimmed)) {
+    return {
+      ok: false,
+      reason: `the gate statement (${quoteStatement(gate.trimmed)}) carries a redirection, a substitution or a token this rule does not model`,
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * `R-classify`: the gate's own exit status is captured and turned into
+ * the step's exit status.
+ *
+ *     <pre-window assignments / option-enabling `set -` / trap / mkdir>
+ *     set +e
+ *     <gate command>            (optionally `| tee <file>`, with pipefail)
+ *     VAR=$?
+ *     set -e
+ *     <if/then/else/fi, echo, exit>   with an `exit <non-zero literal>`
+ *                                     and an `exit $VAR`, and no `exit 0`
+ *
+ * Everything is positional and exhaustive: a statement the shape does
+ * not name makes the block unrecognised, so a construct this rule never
+ * heard of cannot ride along inside a recognised block.
+ */
+function tryClassifyShape(
+  statements: NormalizedStatement[],
+  gate: NormalizedStatement,
+): ShapeAttempt {
+  const parsed = statements.map((statement) => ({
+    statement,
+    set: parseSetStatement(statement.trimmed),
+  }));
+  const openers = parsed.filter((entry) => entry.set.disablesErrexit);
+  if (openers.length === 0) {
+    return {
+      ok: false,
+      reason:
+        "the run block neither is the bare gate command nor opens a `set +e` classification window",
+    };
+  }
+  if (openers.length > 1) {
+    return {
+      ok: false,
+      reason: "the run block disables `errexit` more than once",
+    };
+  }
+  const openerIndex = parsed.indexOf(openers[0]);
+  const restores = parsed.filter(
+    (entry, index) => index > openerIndex && entry.set.enablesErrexit,
+  );
+  if (restores.length === 0) {
+    return {
+      ok: false,
+      reason: "`set +e` is never followed by a `set -e` restore",
+    };
+  }
+  if (restores.length > 1) {
+    return {
+      ok: false,
+      reason: "`set +e` is followed by more than one `set -e` restore",
+    };
+  }
+  const restoreIndex = parsed.indexOf(restores[0]);
+  const gates = statements.filter((statement) =>
+    isGateCommand(statement.trimmed),
+  );
+  if (gates.length !== 1) {
+    return {
+      ok: false,
+      reason: `the run block carries ${gates.length} npm-audit gate commands, not one`,
+    };
+  }
+  const gateIndex = statements.indexOf(gate);
+  if (gateIndex <= openerIndex || gateIndex >= restoreIndex) {
+    return {
+      ok: false,
+      reason:
+        "the gate command does not sit strictly between the `set +e` and its `set -e` restore",
+    };
+  }
+
+  const window = statements.slice(openerIndex + 1, restoreIndex);
+  let cursor = 0;
+  if (window[cursor] !== gate) {
+    return {
+      ok: false,
+      reason: `the \`set +e\` window carries a statement before the gate command (${quoteStatement(window[cursor].trimmed)})`,
+    };
+  }
+  cursor++;
+  let piped = false;
+  while (cursor < window.length && window[cursor].separatorBefore === "|") {
+    if (!TEE_STAGE_RE.test(window[cursor].trimmed)) {
+      return {
+        ok: false,
+        reason: `the gate command is piped into something other than \`tee\` (${quoteStatement(window[cursor].trimmed)})`,
+      };
+    }
+    piped = true;
+    cursor++;
+  }
+  if (piped) {
+    const pipefailBeforeGate = parsed
+      .slice(0, gateIndex)
+      .some((entry) => entry.set.enablesPipefail);
+    if (!pipefailBeforeGate) {
+      return {
+        ok: false,
+        reason:
+          "the gate command is piped without `set -o pipefail` earlier in the run block, so the pipeline reports `tee`'s exit status, not the gate's",
+      };
+    }
+  }
+  let captured: string | undefined;
+  if (cursor < window.length) {
+    const candidate = window[cursor];
+    const capture = STATUS_CAPTURE_RE.exec(candidate.trimmed);
+    if (
+      !capture ||
+      (candidate.separatorBefore !== "newline" &&
+        candidate.separatorBefore !== ";")
+    ) {
+      return {
+        ok: false,
+        reason: `the \`set +e\` window carries a statement other than a \`VAR=$?\` capture (${quoteStatement(candidate.trimmed)})`,
+      };
+    }
+    captured = capture[1];
+    cursor++;
+  }
+  if (cursor !== window.length) {
+    return {
+      ok: false,
+      reason: `the \`set +e\` window carries more statements than the gate command and one \`VAR=$?\` capture (${quoteStatement(window[cursor].trimmed)})`,
+    };
+  }
+  if (!captured) {
+    return {
+      ok: false,
+      reason:
+        "the `set +e` window does not capture the gate's exit status (`VAR=$?`)",
+    };
+  }
+
+  for (const statement of statements.slice(0, openerIndex)) {
+    const set = parseSetStatement(statement.trimmed);
+    const permitted =
+      (set.isSet && set.onlyEnables) ||
+      ASSIGNMENT_RE.test(statement.trimmed) ||
+      PRE_WINDOW_COMMAND_RE.test(statement.trimmed);
+    const separatorOk =
+      statement.separatorBefore === "start" ||
+      statement.separatorBefore === "newline" ||
+      statement.separatorBefore === ";";
+    if (!permitted || !separatorOk) {
+      return {
+        ok: false,
+        reason: `a statement this rule does not model runs before the \`set +e\` (${quoteStatement(statement.trimmed)})`,
+      };
+    }
+  }
+
+  const after = statements.slice(restoreIndex + 1);
+  for (const statement of after) {
+    const separatorOk =
+      statement.separatorBefore === "newline" ||
+      statement.separatorBefore === ";";
+    if (!POST_RESTORE_COMMAND_RE.test(statement.trimmed) || !separatorOk) {
+      return {
+        ok: false,
+        reason: `a statement this rule does not model runs after the \`set -e\` restore (${quoteStatement(statement.trimmed)})`,
+      };
+    }
+  }
+  const zeroExit = after.find((statement) =>
+    ZERO_EXIT_RE.test(statement.trimmed),
+  );
+  if (zeroExit) {
+    return {
+      ok: false,
+      reason:
+        "an `exit 0` statement runs after the `set -e` restore, so the step can report success on a failing gate",
+    };
+  }
+  if (
+    !after.some((statement) => NONZERO_LITERAL_EXIT_RE.test(statement.trimmed))
+  ) {
+    return {
+      ok: false,
+      reason:
+        "no `exit` of a non-zero literal runs after the `set -e` restore, so nothing turns a failing gate into a failing step",
+    };
+  }
+  if (
+    !after.some((statement) => isExitOfVariable(statement.trimmed, captured))
+  ) {
+    return {
+      ok: false,
+      reason: `no \`exit $${captured}\` of the captured gate status runs after the \`set -e\` restore`,
+    };
+  }
+  return { ok: true };
+}
+
+// ───────────────────────── registered templates ─────────────────────────
+
+/**
+ * The template identity of a normalised block: the sha256 of its trimmed
+ * statements joined by newlines. Comments, indentation, blank lines and
+ * line-ending style are already gone at this point, so the hash is
+ * stable against a pure reformat of the same script and changes on any
+ * edit to what the script runs.
+ */
+function templateDigest(statements: NormalizedStatement[]): string {
+  return createHash("sha256")
+    .update(statements.map((statement) => statement.trimmed).join("\n"))
+    .digest("hex");
+}
+
+/**
+ * The name of the registered template this block's statements match, if
+ * any. A template is an exact match on that digest, and a matched
+ * template is trusted AS IS: registering one is a deliberate operator
+ * act that says "I have reviewed this exact script", so no shape
+ * analysis runs on it. That is the mechanism's cost as well as its
+ * point: any later edit to a registered block, including a harmless
+ * one, changes the digest and is reported until the operator registers
+ * the new digest.
+ */
+function matchingTemplate(
+  statements: NormalizedStatement[],
+  config: ResolvedConfig,
+): string | undefined {
+  const templates = config.workflow?.auditGateTemplates ?? [];
+  if (templates.length === 0) return undefined;
+  const digest = templateDigest(statements);
+  for (const template of templates) {
+    const expected =
+      template.sha256 ??
+      (template.statements
+        ? createHash("sha256")
+            .update(template.statements.map((s) => s.trim()).join("\n"))
+            .digest("hex")
+        : undefined);
+    if (expected && expected.toLowerCase() === digest) return template.name;
+  }
+  return undefined;
+}
+
+// ───────────── neutralisation signals (message enrichment only) ─────────────
+
+const OR_OPERATOR_RE = /\|\|/g;
+const TAIL_NOOP_RE = /;\s*(true|:)(?=[\s;]|$)/;
+
+/**
+ * A plain-language note about a known neutralisation pattern in a block
+ * that is ALREADY unrecognised, appended to the finding's message so an
+ * operator reading the report sees the likely intent, not just "shape
+ * not recognised".
+ *
+ * This is the only surviving use of the neutralisation enumeration an
+ * earlier revision of this rule used as its verdict. It cannot make a
+ * block clean: it is called after recognition has already failed, and
+ * returning `undefined` only shortens the message.
+ */
+function neutralisationSignal(
+  statements: NormalizedStatement[],
+  gate: NormalizedStatement,
+): string | undefined {
+  const gateFlag = AUDIT_GATE_RE.exec(gate.trimmed);
+  const gateEnd = gate.indexInLine + gate.text.length;
+  const tailStart = gateFlag
+    ? Math.min(
+        gate.indexInLine + gate.text.indexOf(gateFlag[0]) + gateFlag[0].length,
+        gateEnd,
+      )
+    : gateEnd;
+  for (const m of unquotedMatches(
+    gate.line.text,
+    OR_OPERATOR_RE,
+    "command",
+    tailStart,
+  )) {
+    const rest = gate.line.text.slice(m.index + 2).trimStart();
+    if (!/^(exit|false|return)\b/.test(rest)) {
+      return "the gate command's logical line ends in a `||` whose right-hand side is not `exit`/`false`/`return`, which makes a failing gate exit zero";
+    }
+  }
+  if (firstUnquoted(gate.line.text, TAIL_NOOP_RE, "command", tailStart)) {
+    return "the gate command's logical line ends in `; true` or `; :`, which makes the step's last command succeed";
+  }
+  const parsed = statements.map((statement) =>
+    parseSetStatement(statement.trimmed),
+  );
+  const openerIndex = parsed.findIndex((set) => set.disablesErrexit);
+  if (
+    openerIndex !== -1 &&
+    !parsed.slice(openerIndex + 1).some((set) => set.enablesErrexit)
+  ) {
+    return "the run block disables `errexit` and never restores it, so a failing gate does not fail the step";
+  }
+  return undefined;
+}
+
+// ───────────────────────────── the two rules ─────────────────────────────
+
 interface AuditFinding {
   offset: number;
   matched: string;
@@ -1078,139 +1950,44 @@ interface AuditFinding {
 }
 
 /**
- * A post-gate `exit` that actually converts a captured status into a
- * non-zero step exit: either a literal nonzero exit code (`exit 1`,
- * `exit 2`), or `exit` of a captured variable (`exit $STATUS`,
- * `exit "$STATUS"`, `exit ${STATUS}`, `exit $?`). Presence of `$?` and
- * `set -e` alone is not enough: a step can capture the status, restore
- * strict mode, and then only ever `exit 0` or merely `echo` it, which
- * still lets the step succeed. This regex is deliberately permissive
- * about *which* variable is exited (not just `STATUS`): the point is
- * that some captured value is actually handed to `exit`, not that this
- * rule can prove that value is always nonzero at runtime.
+ * One step of an audit workflow, with its run block already normalised.
+ * `certifiableGate` is the shared answer to "does this step invoke the
+ * gate in a statement this rule can certify": the normalised statement
+ * list carries the gate command AND the `run:` scalar is one of the two
+ * analysable styles. `audit-gate-missing` needs exactly that predicate;
+ * `audit-gate-shape` additionally looks at a non-analysable scalar whose
+ * raw text mentions the gate, so a gate rewritten as a folded scalar is
+ * reported rather than skipped.
  */
-const NONZERO_EXIT_VERDICT_RE =
-  /\bexit\s+(?:[1-9]\d*\b|"?\$\{?(?:STATUS|[A-Za-z_][A-Za-z0-9_]*|\?)\}?"?)/;
+interface AuditStepBlock {
+  step: StepRunInfo;
+  block: NormalizedBlock;
+  gate?: NormalizedStatement;
+  certifiableGate: boolean;
+  rawMentionsGate: boolean;
+}
 
-const SET_PLUS_E_RE = /\bset\s+\+e\b/;
-const SET_MINUS_E_RE = /\bset\s+-e\b/;
-const STATUS_CAPTURE_RE = /\$\?/;
-const OR_OPERATOR_RE = /\|\|/g;
-// Not end-anchored (`; true ; echo done` is still caught mid-line), only
-// boundary-checked so it does not fire inside a longer token (`; truest`).
-const TAIL_NOOP_RE = /;\s*(true|:)(?=[\s;]|$)/;
-
-/**
- * Every neutralisation signal found in one gate step's `run:` block,
- * given that block's normalized statements (`normalizeRunBlock`): every
- * check below reads comment-free, quote-aware text, never the raw block.
- * The caller has already confirmed the block carries the `npm audit
- * --audit-level=(low|moderate|high|critical)` gate command in a real
- * statement (`blockHasGateCommand`).
- *
- * `set +e` is only flagged when it precedes the gate command AND the
- * statements after the gate command do *not* all three of: capture the
- * gate's exit status (`$?`), restore `set -e`, AND convert that captured
- * status into a non-zero step exit (`NONZERO_EXIT_VERDICT_RE` above):
- * the shape a legitimate "classify the gate's own exit code" step uses
- * (see the canonical audit.yml fixture in this pack's tests/README):
- * `set +e`, run the gate command, `STATUS=$?`, `set -e`, then
- * `exit $STATUS` (or an equivalent nonzero exit) on a failing status.
- * Capturing and restoring alone is not enough: `set +e; ...; STATUS=$?;
- * set -e; exit 0` (or an echo-only branch that never exits nonzero) still
- * surfaces nothing. A bare `set +e` with no
- * capture-and-restore-and-verdict afterward is the actual neutralisation
- * this half of the rule exists to catch.
- *
- * The `||` and `; true`/`; :` checks run on the part of the gate's own
- * logical line that comes *after* the gate command, so text before it
- * (`cd api; true && npm audit --audit-level=high`) is never read as a
- * tail on the gate.
- */
-function checkGateNeutralization(
-  statements: NormalizedStatement[],
-): AuditFinding[] {
-  const findings: AuditFinding[] = [];
-  const gate = findGateStatement(statements);
-  if (!gate) return findings;
-  const gateFlag = gate.text.match(AUDIT_GATE_RE);
-  const gateEndInStatement = gateFlag
-    ? (gateFlag.index ?? 0) + gateFlag[0].length
-    : gate.text.length;
-
-  const setPlusE = (() => {
-    for (const statement of statements) {
-      if (!runsBeforeGate(statement, gate)) continue;
-      const hit = firstUnquoted(statement.text, SET_PLUS_E_RE, "command");
-      if (hit) return { statement, index: hit.index };
-    }
-    return undefined;
-  })();
-  if (setPlusE) {
-    const after = [
-      gate.text.slice(gateEndInStatement),
-      ...statements
-        .filter((statement) => runsAfterGate(statement, gate))
-        .map((statement) => statement.text),
-    ];
-    const capturesStatus = after.some((text) =>
-      firstUnquoted(text, STATUS_CAPTURE_RE, "expansion"),
-    );
-    const restoresStrict = after.some((text) =>
-      firstUnquoted(text, SET_MINUS_E_RE, "command"),
-    );
-    const convertsToNonzeroExit = after.some((text) =>
-      firstUnquoted(text, NONZERO_EXIT_VERDICT_RE, "command"),
-    );
-    if (!capturesStatus || !restoresStrict || !convertsToNonzeroExit) {
-      findings.push({
-        offset: statementOffsetAt(setPlusE.statement, setPlusE.index),
-        matched: "set +e",
-        message:
-          !capturesStatus || !restoresStrict
-            ? "`set +e` appears before the `npm audit --audit-level=...` gate command in this run block without both capturing its exit status (`$?`) and restoring `set -e` afterward, so a failing gate no longer fails the step."
-            : "`set +e` appears before the `npm audit --audit-level=...` gate command in this run block; the exit status is captured (`$?`) and `set -e` is restored, but nothing afterward turns that captured status back into a non-zero step exit (no `exit <nonzero>` / `exit $STATUS` verdict), so a failing gate no longer fails the step.",
-      });
-    }
+function collectAuditStepBlocks(file: FileTarget): AuditStepBlock[] {
+  let doc: unknown;
+  try {
+    doc = YAML.parseDocument(file.text, {}).contents;
+  } catch {
+    return [];
   }
-
-  const gateLine = gate.line;
-  const tailStart = gate.indexInLine + gateEndInStatement;
-
-  for (const m of unquotedMatches(
-    gateLine.text,
-    OR_OPERATOR_RE,
-    "command",
-    tailStart,
-  )) {
-    const rest = gateLine.text.slice(m.index + 2).trimStart();
-    if (!/^(exit|false|return)\b/.test(rest)) {
-      findings.push({
-        offset: lineOffsetAt(gateLine, m.index),
-        matched: gateLine.text.slice(m.index, m.index + 12).trimEnd(),
-        message:
-          "`||` appears after the `npm audit --audit-level=...` gate command on its logical line, and the right-hand side is not `exit`/`false`/`return`: a failing gate no longer fails the step.",
-      });
-      break;
-    }
-  }
-
-  const tailNoop = firstUnquoted(
-    gateLine.text,
-    TAIL_NOOP_RE,
-    "command",
-    tailStart,
-  );
-  if (tailNoop) {
-    findings.push({
-      offset: lineOffsetAt(gateLine, tailNoop.index),
-      matched: tailNoop.match.trim(),
-      message:
-        "The gate line contains `; true` or `; :` after the `npm audit --audit-level=...` gate command: a neutralisation attempt that is ineffective under the runner's `bash -e` today (the step still fails on a nonzero gate exit), but becomes effective the moment a `set +e` is added earlier in this run block.",
-    });
-  }
-
-  return findings;
+  const steps: StepRunInfo[] = [];
+  collectStepRuns(file.text, doc, steps);
+  return steps.map((step) => {
+    const raw = file.text.slice(step.runRange[0], step.runRange[1]);
+    const block = normalizeRunBlock(raw, step.runRange[0], step.style);
+    const gate = findGateStatement(block.statements);
+    return {
+      step,
+      block,
+      gate,
+      certifiableGate: step.style !== "other" && gate !== undefined,
+      rawMentionsGate: isGateCommand(raw),
+    };
+  });
 }
 
 /**
@@ -1220,7 +1997,7 @@ function checkGateNeutralization(
  * string `"false"`): a literal `true`, the string `"true"`, or an
  * unresolved `${{ ... }}` expression (which parses as a plain string and
  * cannot be evaluated statically) is not provably `false`, so all three
- * are treated the same — a step- or job-level `if:` that would actually
+ * are treated the same. A step- or job-level `if:` that would actually
  * prevent the gate step from running is out of this rule's reach and is
  * not checked here (documented in the README as a limitation).
  */
@@ -1266,74 +2043,155 @@ function makeAuditViolation(
   };
 }
 
+const MISSING_GATE_MESSAGE =
+  "No certifiable npm-audit gate command was found in this audit workflow: no `run:` step's normalised shell statements invoke `npm audit` with `--audit-level=low`, `--audit-level=moderate`, `--audit-level=high`, or `--audit-level=critical`. Text inside a here-doc body is data, not a command, and a `run:` scalar that is not a literal block scalar (`|`) or a single-line plain scalar is not analysed as shell text, so neither counts as a present gate. (This rule only recognises `npm audit`; a `pnpm audit` or a non-npm audit command is out of its scope, see the README.)";
+
+const auditGateMissing: Rule = {
+  id: "workflow-slop/audit-gate-missing",
+  pack: "workflow-slop",
+  defaultSeverity: "block",
+  enabledByDefault: true,
+  rationale:
+    'A fleet sweep added a two-step audit.yml to several repos: a non-blocking report step, then a `npm audit --audit-level=high` (or `critical`) gate step that fails the job on a HIGH/CRITICAL advisory. The cheapest way to lose that protection is to remove the gate step, or to move the gate command somewhere the shell never runs it. This rule reports an `audit.yml`/`audit.yaml` in which no step invokes `npm audit --audit-level=low|moderate|high|critical` in a statement that actually runs: a gate command sitting only in a comment, only inside a here-doc body, or only in a `run:` scalar style this pack does not analyse as shell text (a folded `>` block, a multi-line or quoted scalar) does not count as a present gate. `moderate`/`low` are stronger gates than `high`/`critical` and also count. Scoped to `npm audit`: a `pnpm audit`, a non-npm audit command, or a reusable-workflow-call audit.yml with no `run:` step reports as missing rather than being silently skipped; disable this one rule per repo via `rules: { "workflow-slop/audit-gate-missing": { enabled: false } }`.',
+  appliesTo: isAuditWorkflowFile,
+  check(ctx: RuleContext): Violation[] {
+    const { file } = ctx;
+    const blocks = collectAuditStepBlocks(file);
+    if (blocks.some((entry) => entry.certifiableGate)) return [];
+    return [
+      makeAuditViolation(auditGateMissing, file, 0, "", MISSING_GATE_MESSAGE),
+    ];
+  },
+};
+
+const SHAPE_MESSAGE_TAIL =
+  "A gate step must match one of the recognised shapes (`R-bare`: the gate command alone, no tail; `R-classify`: `set +e`, the gate, `VAR=$?`, `set -e`, then an `exit` of a non-zero literal and an `exit` of the captured status) or an exact template registered in `workflow.auditGateTemplates`.";
+
+function shapeViolationMessage(
+  reason: string,
+  digest: string | undefined,
+  signal: string | undefined,
+): string {
+  const parts = [
+    `Unrecognised npm-audit gate shape in this audit workflow: ${reason}.`,
+    SHAPE_MESSAGE_TAIL,
+  ];
+  if (digest) {
+    parts.push(
+      `No registered template matches this block; its normalised statements hash to sha256 ${digest}.`,
+    );
+  }
+  if (signal) parts.push(`Detected neutralisation signal: ${signal}.`);
+  return parts.join(" ");
+}
+
 const auditGateShape: Rule = {
   id: "workflow-slop/audit-gate-shape",
   pack: "workflow-slop",
   defaultSeverity: "block",
   enabledByDefault: true,
   rationale:
-    'A fleet sweep added a two-step audit.yml to several repos: a non-blocking report step, then a `npm audit --audit-level=high` (or `critical`) gate step that fails the job on a HIGH/CRITICAL advisory. Nothing stops a later edit from quietly removing the protection while keeping the job green, for example dropping the gate step, appending `|| true`, or flipping `continue-on-error: true` on it. This rule flags an `audit.yml`/`audit.yaml` with no recognised `npm audit --audit-level=low|moderate|high|critical` run step at all (`moderate`/`low` are stronger gates than `high`/`critical` and also count; scoped to `npm audit` only, not `pnpm audit` or a non-npm audit command), and flags a gate step whose command is neutralised: a `||` after the gate command (on its own logical line, joined across a backslash continuation) whose right-hand side is not `exit`/`false`/`return`; a `set +e` before the gate command with no matching exit-status capture, `set -e` restore, AND a resulting non-zero exit verdict afterward; `continue-on-error: true` (or any value not provably `false`, including an unresolved `${{ }}` expression) on the gate step or its enclosing job; or a gate line containing `; true`/`; :` after the gate command. Deliberately conservative: it can still flag a legitimate `|| echo "logged"` on the gate line itself, which is fine as false positives go for a security gate; use a `slop-detector:disable-line` comment for a reviewed exception, or disable the rule entirely per repo via `rules: { "workflow-slop/audit-gate-shape": { enabled: false } }` (e.g. a non-npm audit workflow this rule cannot evaluate).',
+    "The npm-audit gate step in a fleet audit.yml can be kept in place and still be made harmless: `|| true` on the gate line, a `set +e` with no verdict afterward, a `continue-on-error: true` on the step or its job, a pipeline whose exit status is `tee`'s rather than the gate's. Enumerating those patterns leaks in the false-clean direction, because the next bash construct nobody listed scans green, so this rule inverts the question: a gate step is reported unless its normalised run block matches a recognised SHAPE (`R-bare`: exactly the gate command, no tail, no redirection; `R-classify`: exactly one `set +e`, the gate strictly inside the window, at most one `VAR=$?` capture, the gate optionally piped only into `tee` with `set -o pipefail` set earlier, then a `set -e` restore followed by an `exit` of a non-zero literal and an `exit` of the captured status, with no `exit 0`), or matches an exact template the consuming repo registered in `workflow.auditGateTemplates`. The normaliser refuses to certify a block carrying a construct it does not model (a here-doc, a function definition, `eval`, a backgrounded command, an unbalanced quote, a command substitution spanning a statement separator, a `run:` scalar that is not a literal block scalar or a single-line plain scalar) and reports the reason. A `continue-on-error` on the gate step or its enclosing job that cannot be proven `false` is reported too. This is an allowlist, so a legitimate unmodelled gate step is a false positive by design: register it as a template, use `# slop-detector:disable-line=workflow-slop/audit-gate-shape` for a reviewed exception, or disable the rule per repo via `rules: { \"workflow-slop/audit-gate-shape\": { enabled: false } }`.",
   appliesTo: isAuditWorkflowFile,
   check(ctx: RuleContext): Violation[] {
-    const { file } = ctx;
-    let doc: unknown;
-    try {
-      doc = YAML.parseDocument(file.text, {}).contents;
-    } catch {
-      return [];
-    }
-    const steps: StepRunInfo[] = [];
-    collectStepRuns(doc, steps);
-    // Every step's run block goes through the one normalisation step
-    // (`normalizeRunBlock`) before any check, including the check that
-    // decides whether the step is a gate step at all.
-    const stepBlocks = steps.map((step) => ({
-      step,
-      statements: normalizeRunBlock(
-        file.text.slice(step.runRange[0], step.runRange[1]),
-        step.runRange[0],
-      ),
-    }));
-    const gateSteps = stepBlocks.filter((entry) =>
-      blockHasGateCommand(entry.statements),
+    const { file, config } = ctx;
+    const blocks = collectAuditStepBlocks(file);
+    const gateSteps = blocks.filter(
+      (entry) =>
+        entry.certifiableGate ||
+        (entry.step.style === "other" && entry.rawMentionsGate),
     );
+    const violations: Violation[] = [];
+    for (const entry of gateSteps) {
+      for (const finding of continueOnErrorFindings(entry.step)) {
+        violations.push(
+          makeAuditViolation(
+            auditGateShape,
+            file,
+            finding.offset,
+            finding.matched,
+            finding.message,
+          ),
+        );
+      }
+      const offset = entry.gate
+        ? statementOffsetAt(entry.gate, 0)
+        : entry.step.runRange[0];
+      const matched = entry.gate ? entry.gate.trimmed : entry.step.styleLabel;
 
-    if (gateSteps.length === 0) {
-      return [
+      // 1. An unanalysable `run:` scalar style refuses before anything
+      //    else, template included: the statement list of a folded or
+      //    quoted scalar is not what bash runs, so it must not be
+      //    hashed against a template either.
+      if (entry.step.style === "other") {
+        violations.push(
+          makeAuditViolation(
+            auditGateShape,
+            file,
+            offset,
+            matched,
+            shapeViolationMessage(
+              `the gate step's \`run:\` value is ${entry.step.styleLabel}, not a literal block scalar (\`|\`) or a single-line plain scalar`,
+              undefined,
+              undefined,
+            ),
+          ),
+        );
+        continue;
+      }
+      const gate = entry.gate;
+      if (!gate) continue;
+
+      // 2. A registered template is an exact, operator-vouched match and
+      //    short-circuits every shape check, including the lexical
+      //    refusals (the fleet's canonical gate block defines shell
+      //    functions, which no shape models).
+      if (matchingTemplate(entry.block.statements, config) !== undefined) {
+        continue;
+      }
+      const digest = (config.workflow?.auditGateTemplates ?? []).length
+        ? templateDigest(entry.block.statements)
+        : undefined;
+
+      // 3. A construct the normaliser does not model: the statement list
+      //    cannot be trusted, so no shape may be tried against it.
+      if (entry.block.refusal) {
+        violations.push(
+          makeAuditViolation(
+            auditGateShape,
+            file,
+            offset,
+            matched,
+            shapeViolationMessage(entry.block.refusal, digest, undefined),
+          ),
+        );
+        continue;
+      }
+
+      // 4. The shape allowlist. A block with no `set +e` is judged as an
+      //    `R-bare` candidate and one with a `set +e` as an `R-classify`
+      //    candidate, so the reported reason is the one that names the
+      //    shape the author was actually reaching for.
+      const opensWindow = entry.block.statements.some(
+        (statement) => parseSetStatement(statement.trimmed).disablesErrexit,
+      );
+      const attempt = opensWindow
+        ? tryClassifyShape(entry.block.statements, gate)
+        : tryBareShape(entry.block.statements, gate);
+      if (attempt.ok) continue;
+      violations.push(
         makeAuditViolation(
           auditGateShape,
           file,
-          0,
-          "",
-          "No recognised npm-audit gate command was found in this audit workflow: no `run:` step invokes `npm audit` with `--audit-level=low`, `--audit-level=moderate`, `--audit-level=high`, or `--audit-level=critical`, so the gate never fails the job on a matching advisory. (This rule only recognises `npm audit`; a `pnpm audit` or a non-npm audit command is out of its scope, see the README.)",
+          offset,
+          matched,
+          shapeViolationMessage(
+            attempt.reason,
+            digest,
+            neutralisationSignal(entry.block.statements, gate),
+          ),
         ),
-      ];
-    }
-
-    const violations: Violation[] = [];
-    for (const { step, statements } of gateSteps) {
-      for (const finding of checkGateNeutralization(statements)) {
-        violations.push(
-          makeAuditViolation(
-            auditGateShape,
-            file,
-            finding.offset,
-            finding.matched,
-            finding.message,
-          ),
-        );
-      }
-      for (const finding of continueOnErrorFindings(step)) {
-        violations.push(
-          makeAuditViolation(
-            auditGateShape,
-            file,
-            finding.offset,
-            finding.matched,
-            finding.message,
-          ),
-        );
-      }
+      );
     }
     return violations;
   },
@@ -1344,11 +2202,12 @@ const auditGateShape: Rule = {
 export const workflowSlopPack: PackDefinition = {
   id: "workflow-slop",
   description:
-    "GitHub Actions workflow injection and CI-guard regressions: a `${{ ... }}` expression interpolated directly into a `run:` shell script (unless one of the documented non-attacker-controllable contexts), a reintroduced Node-20 action major, and a neutralised or missing npm-audit gate in audit.yml. Off by default; opt in via `--pack workflow-slop` or `packs.workflow-slop: true`.",
+    "GitHub Actions workflow injection and CI-guard regressions: a `${{ ... }}` expression interpolated directly into a `run:` shell script (unless one of the documented non-attacker-controllable contexts), a reintroduced Node-20 action major, an audit.yml with no certifiable npm-audit gate, and an npm-audit gate step whose shape is not one this pack recognises. Off by default; opt in via `--pack workflow-slop` or `packs.workflow-slop: true`.",
   rules: [
     unparseableWorkflow,
     runExpression,
     node20ActionMajor,
+    auditGateMissing,
     auditGateShape,
   ],
 };

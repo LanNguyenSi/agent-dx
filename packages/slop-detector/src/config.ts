@@ -119,10 +119,43 @@ const Node20MajorSchema = z.string().refine(
   }),
 );
 
+// A `workflow.auditGateTemplates` entry registers one exact npm-audit
+// gate block as recognised by `workflow-slop/audit-gate-shape` (see that
+// rule in `packs/workflow-slop.ts`). The digest it compares against is
+// the sha256 of the block's normalised statements, so an entry that
+// carries neither a `sha256` nor a `statements` list can never match
+// anything, and one that carries both leaves it ambiguous which the
+// operator meant to be authoritative. Both are rejected at config-load
+// time rather than failing silently, the same fail-fast treatment
+// `AllowExpressionSchema` gives a malformed `allowExpressions` entry.
+const AuditGateTemplateSchema = z
+  .object({
+    name: z.string().min(1),
+    sha256: z
+      .string()
+      .regex(
+        /^[0-9a-fA-F]{64}$/,
+        "workflow.auditGateTemplates[].sha256 is a 64-character hex sha256 digest",
+      )
+      .optional(),
+    statements: z.array(z.string()).min(1).optional(),
+  })
+  .refine(
+    (t) => (t.sha256 === undefined) !== (t.statements === undefined),
+    (t) => ({
+      message: `workflow.auditGateTemplates entries carry exactly one of "sha256" or "statements", got ${
+        t.sha256 === undefined && t.statements === undefined
+          ? "neither"
+          : "both"
+      } for "${t.name}"`,
+    }),
+  );
+
 const WorkflowConfigSchema = z.object({
   allowExpressions: z.array(AllowExpressionSchema).optional(),
   node20Majors: z.array(Node20MajorSchema).optional(),
   node20MajorsIgnore: z.array(Node20MajorSchema).optional(),
+  auditGateTemplates: z.array(AuditGateTemplateSchema).optional(),
 });
 
 // A pattern written as `./foo/**/*.md` means the same thing as `foo/**/*.md`
@@ -199,6 +232,7 @@ export function defaultConfig(): ResolvedConfig {
       allowExpressions: [],
       node20Majors: [],
       node20MajorsIgnore: [],
+      auditGateTemplates: [],
     },
   };
 }
@@ -229,6 +263,7 @@ export function mergeConfig(file: ConfigFile): ResolvedConfig {
       allowExpressions: file.workflow?.allowExpressions ?? [],
       node20Majors: file.workflow?.node20Majors ?? [],
       node20MajorsIgnore: file.workflow?.node20MajorsIgnore ?? [],
+      auditGateTemplates: file.workflow?.auditGateTemplates ?? [],
     },
   };
 }

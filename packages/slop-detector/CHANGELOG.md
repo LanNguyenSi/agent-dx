@@ -12,8 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `workflow-slop` gains two rules closing the gap between a fleet sweep
-  fixing something by hand and nothing then guarding against it
+- `workflow-slop` gains three rules closing the gap between a fleet
+  sweep fixing something by hand and nothing then guarding against it
   recurring:
   - `workflow-slop/node20-action-major`: flags any `uses:` value
     (job-level or step-level, not inside a step's own `with:` input
@@ -54,64 +54,91 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     release. A `uses:` pinned to a full commit sha is only checked when
     the same line also carries a trailing `# vN` comment; a bare sha pin
     is a documented limitation, not a finding.
-  - `workflow-slop/audit-gate-shape`: scoped to files literally named
-    `audit.yml`/`audit.yaml` under `.github/workflows/`, and to `npm
-    audit` specifically (a `pnpm audit` or non-npm audit command is
-    reported as a missing gate rather than evaluated; disable this one
-    rule per repo via `rules: { "workflow-slop/audit-gate-shape": {
-    enabled: false } }` while keeping the rest of the pack). A repo's
-    `audit.yml` commonly pairs a non-blocking report step with a
-    dedicated `npm audit --audit-level=high` gate step that fails the job
-    on a matching advisory; nothing stops a later edit from quietly
-    removing that protection while keeping the job green. This rule flags
-    (a) no `run:` step anywhere in the file invoking `npm audit` with a
-    recognised `--audit-level` (`low`/`moderate`/`high`/`critical` --
+  - `workflow-slop/audit-gate-missing`: reports an `audit.yml` in which
+    no step's normalised shell statements invoke `npm audit` with a
+    recognised `--audit-level` (`low`/`moderate`/`high`/`critical`;
     `moderate`/`low` are stronger gates than `high`/`critical` and also
-    satisfy it), and (b) a gate command that is present but neutralised:
-    a `||` after the gate command on the gate's own logical line whose
-    right-hand side is not `exit`/`false`/`return`; `set +e` in a
-    statement before the gate command when the statements after it do
-    not all three of capture the exit status (`$?`), restore `set -e`,
-    AND exit non-zero on that captured status (`exit $STATUS`/`exit
-    <nonzero>`, not just `exit 0` or an echo); `continue-on-error` set on
-    the gate step or its enclosing job to anything not provably `false`
-    (a literal `true`, the string `"true"`, or an unresolved `${{ }}`
-    expression all count); or `; true`/`; :` after the gate command on
-    its logical line.
-  - Every `audit-gate-shape` check consumes one normalised view of the
-    run block instead of its raw text, and there is no second path:
-    physical lines joined across backslash continuations, each logical
-    line's trailing shell comment stripped by a quote-parity scan with
-    escaped-double-quote handling, each line then cut into statements at
-    unquoted `;`/`&&`/`||`/`|` boundaries, and each match honoured only
-    where the shell would honour it (a command word such as `set +e` or
-    `exit 1` must start outside any quoted span, so `echo "set +e"` is
-    data; an expansion such as `$?` also counts inside double quotes, so
-    `STATUS="$?"` is a real capture). That view is what decides which
-    statement is the gate command, so a `# TODO: restore npm audit
-    --audit-level=high` line is a comment rather than a present gate, a
-    `# exit $STATUS` is not an exit verdict, and a `; true` sitting
-    before the gate command (`cd api; true && npm audit
-    --audit-level=high`) is not a tail on it. Each of those inputs has
-    its own fixture asserting the exact finding message, and each was
-    measured against a raw-text analysis of the same block first, where
-    the three neutralisations scanned clean and the quoted-span cases
-    were false positives.
-  - The `set +e` half is shaped around a legitimate pattern rather than
-    being a blanket ban: a step that classifies the gate's own exit code
-    runs `set +e`, runs the gate, captures `STATUS=$?`, restores
-    `set -e`, then exits non-zero on a failing status, and that shape is
-    a negative-control fixture (including one copied verbatim from a real
-    multi-branch gate step). Three gaps remain by construction and are
-    documented in the README: the verdict requirement is satisfied by any
-    single non-zero exit anywhere after the gate command, so a
-    multi-branch classifier that loses only its findings-branch exit
-    while keeping other non-zero branches still scans clean (pinned as a
-    limit by a fixture, not claimed as covered); `exit $VAR` is accepted
-    without proving `$VAR` is non-zero; and the rule only ever looks at
-    files named `audit.yml`/`audit.yaml`, so a gate living in another
-    workflow file is outside it. Deliberately conservative otherwise: a
-    legitimate `|| echo "logged"` directly on the gate line still flags.
+    satisfy it). A gate command that exists only in a shell comment,
+    only inside a here-doc body, or only in a `run:` scalar style this
+    pack does not analyse as shell text (a folded `>` block, a
+    multi-line or quoted scalar) is not a present gate. Scoped to files
+    literally named `audit.yml`/`audit.yaml` under `.github/workflows/`,
+    and to `npm audit` specifically: a `pnpm audit`, a non-npm audit
+    command, or a reusable-workflow-call `audit.yml` with no `run:` step
+    reports as missing rather than being silently skipped.
+  - `workflow-slop/audit-gate-shape`: reports a gate step unless its
+    normalised run block matches a recognised SHAPE or an exact template
+    the consuming repo registered. This is an allowlist, not a
+    blocklist of neutralisation patterns: an enumeration of the ways a
+    gate can be defused leaks in the false-clean direction (the next
+    bash construct nobody listed scans green), while an allowlist leaks
+    into false positives, which are visible and fixable. For a
+    `block`-severity security gate that is the only acceptable leak
+    direction. The two recognised shapes are `R-bare` (exactly one
+    statement, first in the block, an optional `timeout <arg>` prefix,
+    any `npm audit` flags, and no operator, redirection or substitution)
+    and `R-classify` (exactly one statement disabling `errexit`, the
+    gate strictly inside the window, at most one `VAR=$?` capture after
+    the gate, the gate optionally piped only into `tee` and only with
+    `set -o pipefail` set earlier, exactly one `set -e` restore, then
+    `if`/`then`/`else`/`elif`/`fi`/`echo`/`printf`/`exit` statements
+    including an `exit` of a non-zero literal and an `exit` of the
+    captured status, with no `exit 0` and no reassignment of the
+    captured variable; before the window only assignments,
+    option-enabling `set -` statements, `trap`, `mkdir`, `mktemp`, `cd`,
+    `echo` and `printf`). Every spelling bash accepts for those `set`
+    calls is parsed rather than pattern-matched, so `set +eu` and
+    `set +o errexit` open the window and `set -eo pipefail` and
+    `set -euo pipefail` restore it. A `continue-on-error` on the gate
+    step or its enclosing job that cannot be proven `false` (a literal
+    `true`, the string `"true"`, or an unresolved `${{ }}` expression)
+    is reported too.
+  - Both rules consume one normalised view of the run block instead of
+    its raw text, and there is no second path: here-doc bodies dropped
+    (the redirection statement itself kept), physical lines joined
+    across backslash continuations, each logical line's trailing shell
+    comment stripped by a quote-parity scan with escaped-double-quote
+    handling, each line cut into statements at unquoted
+    `;`/`&&`/`||`/`|` boundaries outside any command substitution, and
+    each match honoured only where the shell would honour it (a command
+    word such as `set +e` must start outside any quoted span, so
+    `echo "set +e"` is data; an expansion such as `$?` also counts
+    inside double quotes, so `STATUS="$?"` is a real capture).
+  - The normaliser refuses to certify a block carrying a construct it
+    does not model and reports the reason instead: a `run:` value that
+    is not a literal block scalar (`|`) or a single-line plain scalar, a
+    here-doc redirection (or one whose terminator cannot be located), a
+    shell function definition, an `eval`, a backgrounding `&` (a
+    `2>&1`/`&>log`/`>&2` redirection is not one), an unbalanced quote on
+    a logical line, or a command substitution spanning a statement
+    separator. A construct that slips past that list still has to match
+    a recognised shape, and no shape permits a statement it does not
+    name, so a miss there is a false positive rather than a false clean.
+  - New config knob `workflow.auditGateTemplates`, a list of
+    `{ name, sha256 }` or `{ name, statements }` entries; an entry
+    carrying neither or both is rejected at config-load time. A block
+    whose normalised statements (each trimmed, joined by newlines) hash
+    to a registered digest is recognised, which is how a legitimate but
+    unmodelled gate block (helper functions, a custom exit-code
+    mapping) is accepted without rewriting it. A matched template is
+    trusted as is: no shape analysis runs on it. The package ships no
+    template of its own, since a canonical gate block is org content,
+    not package content; `test/fixtures/fleet-audit-real-shape.yml` is
+    the test fixture for the mechanism and the README shows how to
+    register one. The operating cost is the flip side of the same
+    property: a deliberate change to a registered block, including a
+    harmless one, changes its digest and is reported until the operator
+    updates the entry in that repo's `slop.config.yml`. Comments,
+    indentation, blank lines and line-ending style are normalised away,
+    so a pure reformat does not move the digest.
+  - Documented limits, each with a fixture: the rules are bound to the
+    file name (`audit.yml`/`audit.yaml`), so a gate living in another
+    workflow file is outside both; `R-classify` requires that the
+    captured status is handed to `exit` without proving that value is
+    non-zero at runtime, and does not evaluate the branch conditions
+    deciding which `exit` is reached; and a registered template is
+    trusted as is, so the review that justified registering it is the
+    only thing standing behind that block.
 
 - New pack `workflow-slop` (off by default, opt in via `--pack
   workflow-slop` or `packs.workflow-slop: true`), rule
