@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-16T05:19:31Z
+timestamp: 2026-09-16T05:34:45Z
 sources:
   - packages/orchestrator-workflow/assets/agents/explorer.md
   - packages/orchestrator-workflow/assets/agents/task-slicer.md
@@ -641,9 +641,9 @@ mention, packages/orchestrator-workflow/test/docs-consistency.test.ts:1204#"an o
 on the "full sha" / "in order" semantics themselves (not only the
 surrounding clauses), with the installed prompt's in-order semantics cited above, a byte-for-byte cross-copy equality check
 on the field block, packages/orchestrator-workflow/test/docs-consistency.test.ts:1233#"expect(skillBlock).toBe(implementerBlock);", and the not-applicable
-`commits: []` clause, now pinned in the installed prompt alone: the contract-reduction
-refactor (`packages/orchestrator-workflow/CHANGELOG.md:#[0.35.0]`) routed the skill copy's
-duplicate prose to it instead of repeating the clause there, packages/orchestrator-workflow/test/docs-consistency.test.ts:1238#"expect(implementerMd).toContain(clause);".
+`commits: []` clause, now pinned in the installed prompt alone: the contract-reduction refactor
+(`packages/orchestrator-workflow/CHANGELOG.md:#[0.35.0]`) routed the skill copy's duplicate prose to that prompt (and its evidence and probe half to the evidence-and-probes reference, workflow step 6)
+instead of repeating the clause there, packages/orchestrator-workflow/test/docs-consistency.test.ts:1238#"expect(implementerMd).toContain(clause);".
 
 Motivation, `packages/orchestrator-workflow/CHANGELOG.md:#[0.27.0]`
 (agent-tasks task 2355f144): the implementer output contract had no field

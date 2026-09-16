@@ -9,24 +9,30 @@
   its Commits field section, which still claimed the not-applicable
   `commits: []` clause is pinned "in both copies" after the 0.35.0
   contract-reduction refactor (`CHANGELOG.md:#[0.35.0]`) left the clause in
-  the installed implementer prompt alone. The 8-line removal shifted every
+  the installed implementer prompt alone. The 7-line removal shifted every
   same-file citation below it: this log's own two citations into
   `subagent-contracts-superset.md` moved from line 504 to line 503 (both
-  occurrences, line 386 was unaffected); the `SIBLING_GUARD_BUNDLE_ALLOWLIST`
+  occurrences; the citations at lines 329 and 386 sit above the first
+  removal and were unaffected); the `SIBLING_GUARD_BUNDLE_ALLOWLIST`
   entry in `test/docs-consistency.test.ts` for the doc's `:1082` paragraph
   moved `paragraphLine`/`secondCitationLine` from 441/445 to 440/444, and
   the entry for its `:1238` paragraph moved from 645/651 to 638/646 (the new
-  Commits field prose added two lines, so this entry's shift is not the
-  flat 8-line delta the other two carry); that same entry's `claim` text was
+  Commits field prose added two lines, so this entry shifts by 7 lines on
+  its opening citation and 5 on its closing one, rather than the 1-line
+  delta the citations above the blank run carry); that same entry's `claim` text was
   also corrected -- it still described the paragraph's closing citation list
   as walking `:1204, :1210, :1217, :1232`, coordinates the paragraph no
   longer carries (the current closing list is `:1204, :1210, :1233`), a
   drift that predates this pass's own line-shift and was independent of it.
-  Added a matching `[Unreleased]` `CHANGELOG.md` bullet and re-stamped this
-  doc plus `review-gate-and-waivers.md` and `run-state-lifecycle-and-markers.md`
-  (both list `CHANGELOG.md` as a source; their own citations into it use the
-  heading-anchor `#[x.y.z]` form, immune to the `CHANGELOG.md` line shift the
-  new bullet caused, so only the timestamp needed bumping). The new bullet's
+  Added a matching `[Unreleased]` `CHANGELOG.md` bullet and re-stamped
+  `subagent-contracts-superset.md`, `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md` and, in a second commit,
+  `model-preselection.md`: the first three list `CHANGELOG.md` as a source
+  (their own citations into it use the heading-anchor `#[x.y.z]` form,
+  immune to the `CHANGELOG.md` line shift the new bullet caused, so only the
+  timestamp needed bumping), and `review-gate-and-waivers.md` and
+  `model-preselection.md` also list `test/docs-consistency.test.ts`, which
+  the allowlist edit made stale. The new bullet's
   14-line insertion into `[Unreleased]` also shifted this log's own two
   self-citations into `CHANGELOG.md` from line 87 to line 101 and from line
   464 to line 478; both re-pointed after re-reading their anchors. Docs-only:
