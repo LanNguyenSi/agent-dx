@@ -570,7 +570,7 @@ describe("doctor: checks, in both states", () => {
     expect(check?.ok).toBe(true);
     expect(fs.existsSync(callLog)).toBe(false);
     expect(check?.detail).toContain(
-      "the aggregate --version deadline (0ms) was already spent",
+      "doctor's aggregate spawn deadline (0ms) was already spent",
     );
     expect(check?.detail).toContain("first.py");
     expect(check?.detail).toContain("second.py");

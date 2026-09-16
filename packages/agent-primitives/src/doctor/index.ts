@@ -759,7 +759,7 @@ export async function doctor(
     }
     if (deadlineSkipped.length > 0) {
       fallbackNotes.push(
-        `the aggregate --version deadline (${versionDeadlineMs}ms) was ` +
+        `doctor's aggregate spawn deadline (${versionDeadlineMs}ms) was ` +
           `already spent, so the python3 cache-path resolution was skipped ` +
           `for ${deadlineSkipped.join(", ")}; checked only for a co-located ` +
           `__pycache__ there`,

@@ -799,7 +799,7 @@ program
   )
   .option(
     "--target <list>",
-    "probe target path(s) (relative to cwd or absolute), repeatable and comma-separated; for a .py path among these, the CPython bytecode cache python3 itself resolves for that file is reported when python3 is on PATH, and a co-located __pycache__ as a fallback when it is not",
+    "probe target path(s) (relative to cwd or absolute), repeatable and comma-separated; for a .py path among these, the CPython bytecode cache python3 itself resolves for that file is reported, and a co-located __pycache__ is the named fallback whenever python3 cannot be asked or does not answer (absent from PATH, resolving nothing, or doctor's aggregate spawn deadline already spent)",
     collectList,
     [] as string[],
   )

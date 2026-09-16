@@ -2990,8 +2990,10 @@ reused across invocations -- not between the baseline and a mutant's own
 run, and not between two mutants of the same plan. A fresh, empty
 directory has nothing cached in it yet, so CPython recompiles
 unconditionally every time, regardless of what mtime/size coincidence
-would otherwise apply; this also means an existing co-located
-`__pycache__` (from a developer's own prior run, or CI's) is never read
+would otherwise apply; this also means an existing cache (from a
+developer's own prior run, or CI's, wherever this host's `python3` puts
+it: a co-located `__pycache__` on most hosts, a redirected directory
+where `python3` sets `sys.pycache_prefix`) is never read
 OR written by `probe` itself, so it is never at risk of being shadowed
 by mutant bytecode in the first place. The two mechanisms not chosen,
 and why: (a) invalidating the affected `__pycache__` entries after apply

@@ -115,9 +115,11 @@ as a risk in the output rather than silently working around its absence.
 Pass `--target <path>` (a probe target, repeatable/comma-separated) to
 also surface, before a probe run, whether a `.py` target already has a
 CPython bytecode cache: the path `python3` itself resolves for that file
-when a `python3` is on `PATH` (accurate on a host that redirects its
+when `python3` can be asked (accurate on a host that redirects its
 cache elsewhere, as macOS's own system `python3` does), and a co-located
-`__pycache__` only as the fallback when none is, which the check names.
+`__pycache__` as the named fallback whenever it cannot be asked or does
+not answer (absent from `PATH`, resolving nothing, or doctor's aggregate
+spawn deadline already spent).
 The check is informational (`probe` isolates against that cache
 automatically either way).
 
