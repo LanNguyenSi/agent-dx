@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-15T06:25:06Z
+timestamp: 2026-09-16T05:34:45Z
 sources:
   - packages/orchestrator-workflow/assets/agents/explorer.md
   - packages/orchestrator-workflow/assets/agents/task-slicer.md
@@ -428,7 +428,6 @@ at 0.16.0 (later grown to eleven sub-fields; see Mutation probe definition
 fields and expectation split below).
 The installed prompt's matching bullet
 (`implementer.md:72#"rather than omitting the field."`) states the not-applicable signal added in the
-
 R2 pass: when the assignment named no probes, the implementer returns
 `mutation_probes: []` rather than omitting the field, so "none asked for" is
 distinguishable from "asked for and not reported" — before this pass an
@@ -587,12 +586,6 @@ not itself a regression) and `target text no longer present` (a replayed
 probe whose mutant can no longer be applied, the regression signal)
 (`implementer.md:70#"(a replayed probe whose mutant can no longer be"`).
 
-
-
-
-
-
-
 By-definition replay and reviewer-skip rules (the rules themselves live
 in [Fix-round mutation probe replay](#fix-round-mutation-probe-replay)
 above; this is only the field-shape half of that story): the fix-round
@@ -647,8 +640,10 @@ pins the field: the installed prompt's full-sha instruction and field
 mention, packages/orchestrator-workflow/test/docs-consistency.test.ts:1204#"an output missing that field when the task assignment asked for a commit is treated as a misfire, not evidence", the misfire-rule sentence, packages/orchestrator-workflow/test/docs-consistency.test.ts:1210#"field even though the task assignment asked for a commit", a dedicated pin
 on the "full sha" / "in order" semantics themselves (not only the
 surrounding clauses), with the installed prompt's in-order semantics cited above, a byte-for-byte cross-copy equality check
-on the field block, packages/orchestrator-workflow/test/docs-consistency.test.ts:1233#"expect(skillBlock).toBe(implementerBlock);", and the not-applicable `commits: []` clause
-in both copies, packages/orchestrator-workflow/test/docs-consistency.test.ts:1238#"expect(implementerMd).toContain(clause);".
+on the field block, packages/orchestrator-workflow/test/docs-consistency.test.ts:1233#"expect(skillBlock).toBe(implementerBlock);", and the not-applicable
+`commits: []` clause, now pinned in the installed prompt alone: the contract-reduction refactor
+(`packages/orchestrator-workflow/CHANGELOG.md:#[0.35.0]`) routed the skill copy's duplicate prose to that prompt (and its evidence and probe half to the evidence-and-probes reference, workflow step 6)
+instead of repeating the clause there, packages/orchestrator-workflow/test/docs-consistency.test.ts:1238#"expect(implementerMd).toContain(clause);".
 
 Motivation, `packages/orchestrator-workflow/CHANGELOG.md:#[0.27.0]`
 (agent-tasks task 2355f144): the implementer output contract had no field

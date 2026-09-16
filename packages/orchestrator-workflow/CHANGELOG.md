@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Removed incidental blank-line padding (a run of seven consecutive blank
+  lines) and a mid-sentence paragraph split from
+  `docs/okf/subagent-contracts-superset.md`'s mutation-probe field
+  discussion, and corrected its Commits field section, which still said
+  the not-applicable `commits: []` clause is pinned "in both copies"
+  after the 0.35.0 contract-reduction refactor left it in the installed
+  implementer prompt alone. Re-pointed every citation the removed lines
+  shifted (two `docs/okf/log.md` self-citations into this doc, and the
+  `SIBLING_GUARD_BUNDLE_ALLOWLIST` explanation comment in
+  `test/docs-consistency.test.ts`, whose recorded `:1217`/`:1232`
+  coordinates no longer matched the paragraph's current citations).
+  Docs-only: no YAML contract, role prompt, guard matcher, or exemption
+  geometry changed. Anchored by agent-dx tracker task 8a55e082.
+
 ## [0.35.0] - 2026-09-15
 
 - The npm tarball now ships a `LICENSE` file matching the repo root LICENSE
