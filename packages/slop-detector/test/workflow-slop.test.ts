@@ -945,15 +945,18 @@ describe("workflow-slop/audit-gate-shape", () => {
     expect(ruleViolations(text).length).toBeGreaterThanOrEqual(1);
   });
 
-  it("flags a gate line ending in ; :", () => {
+  it("flags a gate line ending in ; : (a block scalar run:, since a plain scalar ending in a bare trailing colon is itself ambiguous YAML)", () => {
     const text = [
       "on: push",
       "jobs:",
       "  audit:",
       "    steps:",
-      "      - run: npm audit --audit-level=high; :",
+      "      - run: |",
+      "          npm audit --audit-level=high; :",
     ].join("\n");
-    expect(ruleViolations(text).length).toBeGreaterThanOrEqual(1);
+    const v = ruleViolations(text);
+    expect(v.length).toBeGreaterThanOrEqual(1);
+    expect(v.some((x) => x.message.includes("; true` or `; :`"))).toBe(true);
   });
 
   it("negative control: off by default, does not fire without --pack/config opt-in", () => {
