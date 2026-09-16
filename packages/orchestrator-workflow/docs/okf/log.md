@@ -88,7 +88,7 @@
   `--pack workflow-slop` over the whole repository both clean.
 
 - 2026-09-16T08:09:25Z (agent-dx tracker task a378ecca, pandora run
-  2026-09-16-open-pool-batch55, T-006): `assets/agents/implementer.md`
+  2026-09-16-open-pool-batch55): `assets/agents/implementer.md`
   gained a pre-return rule bullet, inserted right after the two
   commit-reporting bullets (a 7-line insertion): before committing, run
   `slop-detector`'s new `review-slop` pack over every changed file and the
