@@ -249,8 +249,8 @@ its default already sits at `high`, one step below the reviewer's default
 corresponds to (`medium` for explorer/task-slicer/implementer, `high` for
 reviewer and, since 0.21.0, advisor), the tier a variant is never rendered
 for since that would both collide with and duplicate the default file
-(`init.ts:861-863#"composeClaudeAgentVariant("` Claude Code,
-`init.ts:937-938#"const modelClass = TIER_DEFS[tier].modelClass;"` opencode, both a `continue` guarded by
+(`init.ts:860-863#"composeClaudeAgentVariant("` Claude Code,
+`init.ts:936-938#"const modelClass = TIER_DEFS[tier].modelClass;"` opencode, both a `continue` guarded by
 `tier === DEFAULT_TIER[role]`, role-generic code unchanged by the role
 addition). `TIER_DEFS` (`src/models.ts:200-204#"xhigh: { modelClass:"`) maps each tier to a
 `ModelClass` (`"small" | "medium" | "large"`, `src/models.ts:190#"export type ModelClass ="`) and its requested
