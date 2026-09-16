@@ -744,13 +744,28 @@ describe("probe(): REFUSAL_RESULT_SHAPE contract, every RefusalReason provoked f
       expect(result.reason).toBe("pycache_isolation_failed");
       expect(result.mutant).toBeDefined();
       expect(result.mutation_probe?.result).toBe("inconclusive");
-      // The proof this test exists for: the target is confirmed back at
-      // its ORIGINAL (pre-mutation) content, not left holding
-      // `    return n < 0`. A mutant that replaced `step.ts`'s own
-      // `target.restoreOnce(false)` call on this branch with a
-      // hardcoded `{ ok: true, verified: true }` would still report
-      // `restored_verified: true` below while leaving the mutated
-      // content on disk -- this assertion is what catches that.
+      // The target is confirmed back at its ORIGINAL (pre-mutation)
+      // content, not left holding `    return n < 0`, and the restore
+      // this branch reports is verified.
+      //
+      // NOTE (equivalence): this assertion pair does NOT, by itself,
+      // discriminate a mutant that deletes `step.ts`'s own
+      // `target.restoreOnce(false)` call on this branch:
+      // `index.ts`'s `finally`-block backstop (`runMutantAttempt`'s
+      // caller) restores any mutation still armed for restore when
+      // `probe()` returns, REGARDLESS of why it was left armed, using
+      // the SAME underlying `session.restore` function
+      // `target.restoreOnce` would have called -- so the file still
+      // reads as correctly restored, and `restored_verified` still
+      // reads `true`, whether `step.ts`'s own call ran or was deleted.
+      // Measured directly: this same assertion pair passed against
+      // `agent-primitives probe --file src/probe/step.ts -n 398 -r
+      // '    const { ok, verified } = { ok: true, verified: true };'`
+      // (that mutant SURVIVED here). No black-box assertion through
+      // `probe()`'s own envelope or the target's own content was found
+      // that tells the two restore paths apart, since both call the
+      // identical restore primitive and leave identical observable
+      // state; see the implementation summary's own note on this.
       expect(fs.readFileSync(path.join(repo, "fixture.py"), "utf8")).toBe(
         ["def positive(n):", "    return n > 0", ""].join("\n"),
       );
