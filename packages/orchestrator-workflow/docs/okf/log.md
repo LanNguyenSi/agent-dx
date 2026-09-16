@@ -1,5 +1,73 @@
 # Bundle log
 
+- 2026-09-16T06:31:46Z (reviewer-report validator fix round, agent-dx
+  task 8ab22cb0, pandora run 2026-09-16-open-pool-batch55, T-003, round
+  3): review round 2 (rigorous) returned `fix_required` with one medium
+  (M1) and three low (L1, L4, plus the repeated-lows structural-closure
+  item) findings; this round fixed all of them. M1: the round-2 entry
+  below claimed a missing `<file>` argument, an unknown option, or
+  excess arguments all exited `2`, but commander 12.1.0 defaults
+  `allowExcessArguments` to `true`, so `validate-review-report a.yaml
+  extra.yaml` actually exited `0` and silently validated only `a.yaml`;
+  corrected that sentence below to name only the two cases that were
+  actually true (missing argument, unknown option), and added
+  `.allowExcessArguments(false)` to the command so excess arguments now
+  also route through the scoped `exitOverride` to exit `2`, with a CLI
+  test pinning commander's own "too many arguments" text on stderr.
+  Structural closure of the unpinned-predicate class (repeated lows
+  across rounds 1 and 2): grepped `src/review-report.ts` for every
+  `check*Field` predicate beyond bare presence/type/enum membership,
+  found exactly two (`checkNonEmptyStringField`'s non-emptiness, used
+  for `task_id`; `checkScalarField`'s string-or-number tolerance, used
+  for `reproduction.sample_size`), and added one `it.each` table in
+  `test/review-report.test.ts` pinning a positive and a negative case
+  for each, with a comment that a new predicate helper needs a row
+  added there. L1: `extractYamlSource`'s fence pattern was anchored to
+  the start of the input, so a return prefixed with prose ("Here is my
+  report:\n```yaml ...") fell through to the "literal YAML" branch and
+  produced a raw parse error, while the same prose *after* the fence
+  was already a tolerated warning; the pattern now locates the first
+  fence anywhere in the input and names discarded leading prose with
+  its own warning, mirroring the trailing-prose one. Added
+  `prose-before.yaml`. L4: `--format json` was never honored on any
+  commander-parsing-error path or on the unknown-`--format`-value path
+  (both print plain text to stderr with nothing on stdout regardless of
+  `--format`), while the unreadable-file path does emit the JSON
+  envelope; documented this one clause in `README.md` and the
+  `contracts.md` invocation paragraph rather than changing the
+  behavior, since the unknown-`--format`-value path can structurally
+  never itself be `--format json` (a value of exactly `json` would not
+  be flagged as unknown), and building a JSON envelope for the
+  commander-parsing-error paths from inside a pre-action `exitOverride`
+  handler was a larger, riskier change than this task's scope; added a
+  CLI test pinning the missing-`<file>`-argument-with-`--format json`
+  case as documented (plain text on stderr, empty stdout, exit `2`).
+  Rewording the `contracts.md` invocation paragraph (in place, same
+  start line 168) grew it by four lines (13 to 17), which re-shifted
+  the same six `subagent-contracts-superset.md` citation sites the
+  round-2 entry below already describes moving once, across five
+  distinct line numbers (186/196/198/198/246/270 became
+  190/200/202/202/250/274); re-pointed after re-reading each anchor at
+  its new line. Editing the CHANGELOG `[Unreleased]` entry (added the
+  excess-arguments behavior-change clause) grew it by two lines, which
+  shifted this same log's own two citations into `CHANGELOG.md`
+  (98/475 became 100/477); re-pointed both. `src/review-report.ts` is
+  still not itself listed as a `sources:` entry in any bundle doc.
+  Re-stamped the six docs whose `sources:` list `cli.ts`, `README.md`,
+  `contracts.md`, or `docs-consistency.test.ts` (`install-fence-mechanics.md`,
+  `model-preselection.md`, `operator-install-and-registry.md`,
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`,
+  `subagent-contracts-superset.md`). Verified `okf-kit check docs/okf
+  --require-anchors` at zero findings after the source commit and again
+  after this re-stamp/log commit.
+  Rebase note: after the docs-cleanup and okf-kit install-step changes
+  landed on master, this branch was squashed and rebased; the
+  `[Unreleased]` section now lists this validator bullet above the
+  docs-cleanup bullet, which moved the two live self-citations below
+  from line 101 to line 113 and from line 478 to line 490 of the
+  CHANGELOG (both re-pointed after re-reading their anchors), and the
+  four docs re-stamped by both branches keep the newer stamp.
+
 - 2026-09-16T06:28:05Z (okf-kit install step, review round 3 on the pin-probe change):
   the registry-error branch now prints npm's captured stderr with a
   two-space prefix instead of echoing it verbatim, so a registry or proxy
@@ -82,6 +150,62 @@
   this branch, labelled as such rather than presented as a previously
   shipped behavior.
 
+- 2026-09-16T06:01:36Z (reviewer-report validator fix round, agent-dx
+  task 8ab22cb0, pandora run 2026-09-16-open-pool-batch55, T-003, round
+  2): review round 1 (rigorous) returned `accept_with_notes` with two
+  medium and five low findings; this round fixed all of them. M1 added
+  table-driven tests in `test/review-report.test.ts` (`it.each` over
+  `TOP_LEVEL_FIELDS`, `FINDING_FIELDS`, `REPRODUCTION_FIELDS`,
+  `WITHDRAWN_FIELDS`, and every `ENUM_VALUES` key) so a field or enum a
+  future edit stops checking fails a test instead of surviving deletion
+  with the suite green. M2 replaced `src/review-report.ts`'s longhand
+  sequence of check calls with four dispatch tables
+  (`TOP_LEVEL_CHECKS`, `FINDING_CHECKS`, `REPRODUCTION_CHECKS`,
+  `WITHDRAWN_CHECKS`), each typed `Record<(typeof
+  SOME_FIELDS)[number], Checker>`, so a name added to a `*_FIELDS`
+  constant without a matching checker entry is a TypeScript compile
+  error rather than a silently-unchecked field; diagnostics are
+  unchanged byte-for-byte. L1 scoped a commander `exitOverride` to the
+  `validate-review-report` subcommand so a missing `<file>` argument or
+  an unknown option now exit `2` (a usage error) instead of falling
+  through to commander's own default of `1`, which previously collided
+  with this command's own "structurally invalid"
+  exit code; `contracts.md` and the README's exit-code prose were
+  reworded to state the three codes precisely (0 valid, 1 invalid
+  including unparsable/empty/non-mapping input, 2 usage error including
+  a missing argument). L2 widened `extractYamlSource`'s fence-opening
+  pattern from "three backticks, then optionally yaml or yml, then a
+  newline" to "three backticks, then any run of ASCII letters or none,
+  then a newline", so a language-less bare fence strips the same way a
+  `yaml`-tagged one does, instead of falling through to the "literal
+  YAML" branch and producing a confusing parse error; added
+  `valid-bare-fence.yaml`. L3 reworded the
+  README's "derived from and pinned against the contract block itself"
+  sentence to name `src/review-report.ts` as the hand-maintained copy
+  and add that every listed field is now dispatched to a checker (M2).
+  L5 made the CLI's text mode print `STRUCTURAL_ONLY_NOTE` on both
+  exit-2 branches (previously only on exit 0/1) and put the verdict and
+  the note on the same stream for the two "verdict" exits (stdout for
+  both, where the note previously printed to stderr while a valid
+  verdict printed to stdout); the two usage-error branches keep stderr
+  for both. Also locked in fixtures for empty input, a non-mapping
+  scalar document, multi-document YAML, and CRLF line endings (all
+  already behaved sanely; now asserted). Rewording the `contracts.md`
+  exit-code paragraph (in place, same start line 168) changed its
+  length by one line, which re-shifted the same six
+  `subagent-contracts-superset.md` citation sites the round-1 entry
+  above already describes moving once (185/195/197/197/245/269 became
+  186/196/198/198/246/270); re-pointed after re-reading each anchor at
+  its new line. `src/review-report.ts` is not itself listed as a
+  `sources:` entry in any bundle doc; re-stamped the six docs whose
+  `sources:` list `cli.ts`, `README.md`, `contracts.md`, or
+  `docs-consistency.test.ts` (`install-fence-mechanics.md`,
+  `model-preselection.md`, `operator-install-and-registry.md`,
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`,
+  `subagent-contracts-superset.md`). Verified `okf-kit check docs/okf
+  --require-anchors` at zero findings after the source commit and again
+  after this re-stamp/log commit.
+
 - 2026-09-16T05:36:32Z (CI okf-kit install hardening, pandora run
   2026-09-16-open-pool-batch55, tracker a47de183, review round 1): the
   "Install okf-kit (exact pin, unpublished-pin fallback)" step in both
@@ -134,6 +258,53 @@
   placement convention. `CONTRIBUTING.md`'s "Releasing okf-kit" section
   keeps the procedure but no longer names the release-PR numbers inline,
   pointing here instead.
+- 2026-09-16T05:26:30Z (reviewer-report validator, agent-dx task 8ab22cb0,
+  pandora run 2026-09-16-open-pool-batch55, T-003): added
+  `src/review-report.ts` (the reviewer output contract's structural
+  schema) and a `validate-review-report <file>` CLI subcommand built on
+  it, pinned in `test/docs-consistency.test.ts` against the contract
+  block in `assets/agents/reviewer.md` itself so the two cannot drift
+  apart; documented the invocation in `contracts.md`, the package
+  README, and the CHANGELOG `[Unreleased]` section. The new
+  `test/docs-consistency.test.ts` describe block and the new CLI command
+  were both written with a dynamic `import()` local to their own
+  block/action rather than a top-level static import, specifically so
+  neither addition would shift any line number above it in
+  `docs-consistency.test.ts` or `cli.ts`; confirmed no bundle citation
+  into either file needed re-pointing as a result. The 13-line
+  invocation paragraph inserted into `contracts.md` after its
+  `acceptance_recommendation is mandatory` paragraph did shift six
+  `contracts.md` citation sites in `subagent-contracts-superset.md`
+  across five distinct line numbers (184 to 197, cited twice; 256 to
+  269; 232 to 245; 172 to 185; and 182 to 195); all six were
+  re-pointed after re-reading their anchors at the new lines. (An
+  earlier version of this sentence said "five citations", the
+  distinct-line-number count, where six citation *sites* were
+  actually re-pointed; fixed during the round-1 fix round, review
+  finding L4.) The CHANGELOG `[Unreleased]` bullet's 11-line insertion shifted
+  the two live `log.md` self-citations from line 87 to line 98 and from
+  line 464 to line 475 of the CHANGELOG; both were re-pointed the same
+  way, spelled as prose here rather than citation syntax per this log's
+  own convention. Re-stamped the three bundle docs whose sources list
+  `CHANGELOG.md` (`review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`)
+  after confirming none of their own `CHANGELOG.md` citations (all
+  version-anchor `#[x.y.z]` form) resolve into the shifted range.
+  `review-gate-and-waivers.md`'s "Acceptance-recommendation mandatory
+  rule" section also gained one sentence naming the new validator and
+  citing the new `contracts.md` paragraph by its new line. Running
+  `okf-kit check docs/okf --require-anchors` after the source commit
+  also surfaced three `sources-fresh` (not `citations-resolve`)
+  warnings unrelated to any citation: `install-fence-mechanics.md`,
+  `model-preselection.md`, and `operator-install-and-registry.md` each
+  list `cli.ts`, `README.md`, or `docs-consistency.test.ts` as a
+  source and had gone stale purely from those files' commit timestamps
+  moving forward; none of their own citations into those files needed
+  re-pointing (the new CLI command and the new pinning describe block
+  were both appended after every existing citation target, and the new
+  README section only after the last one). Re-stamped all three.
+  Verified `okf-kit check docs/okf --require-anchors` at zero findings
+  after every edit above, not only at the end.
 - 2026-09-16T05:18:16Z (docs cleanup, agent-dx tracker task 8a55e082, review
   findings on the contract-reduction change base 227bbe4f to head e8c7cee4):
   removed a mid-sentence paragraph split (a stray blank line inside the
@@ -601,7 +772,7 @@
   sentence reverted to its pre-change wording, fails the exact-sub-field
   and regression-signal tests above; restored, the suite is green again.
   `CHANGELOG.md`'s own prose copy of this change is
-  (`CHANGELOG.md:101#"The implementer"`).
+  (`CHANGELOG.md:113#"The implementer"`).
 
   Verified on the committed tree: the full package suite (`npm test`),
   `typecheck`, `typecheck:test`, and `format:check`, all clean. Re-pointed
@@ -869,7 +1040,7 @@
   that binding rather than second-guessing it.
 
   The CHANGELOG bullet for this round is
-  `CHANGELOG.md:478#"Citation scanning is paragraph-joined"`. Verified on
+  `CHANGELOG.md:490#"Citation scanning is paragraph-joined"`. Verified on
   the committed tree: the full package suite, `docs-consistency.test.ts`
   on its own, `typecheck`, `typecheck:test` and `format:check`; the
   figures each guard measured are in its own computed test name, per the

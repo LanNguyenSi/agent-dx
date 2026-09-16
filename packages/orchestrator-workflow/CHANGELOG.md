@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- A `validate-review-report <file>` CLI subcommand (`-` reads stdin) checks a
+  reviewer return's YAML against the reviewer output contract's required
+  fields and enums, printing one diagnostic per missing or invalid field and
+  exiting `0`/`1`/`2` for valid/structurally-invalid/usage-error; `--format
+  json` prints the same diagnostics as one JSON object. The check is
+  structural only, never semantic, and never constitutes orchestrator
+  acceptance. Its schema lives in `src/review-report.ts` and is pinned in
+  `test/docs-consistency.test.ts` against the contract block in
+  `assets/agents/reviewer.md` itself, so a contract edit without a matching
+  schema edit fails the suite instead of drifting silently. An excess
+  positional argument (e.g. two file paths) now also exits `2` as a usage
+  error instead of silently validating only the first path.
 - Removed incidental blank-line padding (a run of seven consecutive blank
   lines) and a mid-sentence paragraph split from
   `docs/okf/subagent-contracts-superset.md`'s mutation-probe field

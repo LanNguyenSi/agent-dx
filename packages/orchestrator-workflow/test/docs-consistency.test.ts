@@ -8741,3 +8741,158 @@ describe("Install okf-kit step: run: body identity and behavior under a stubbed 
     });
   });
 });
+
+/**
+ * 8ab22cb0: `src/review-report.ts` is the one hand-maintained copy of the
+ * reviewer output contract's structure in code, backing the
+ * `validate-review-report` CLI subcommand. It must not become a *second*
+ * hand-maintained copy that drifts from the contract block itself: this
+ * describe block parses the contract's own ```yaml fence in
+ * `assets/agents/reviewer.md` (the source of truth; `contracts.md` carries
+ * a byte-identical copy, pinned elsewhere in this file) and asserts the
+ * parsed field order and enum spellings match the validator's exported
+ * schema exactly, so an edit to one without the other fails this suite.
+ */
+describe("review-report validator schema matches the reviewer output contract exactly (8ab22cb0)", async () => {
+  // Imported dynamically, inside this describe block rather than at module
+  // top level, so this task's addition cannot shift the line numbers of
+  // any statement above it in this 8000+-line file: every doc under
+  // docs/okf/ anchors citations to exact lines in this file, and a
+  // top-level import insertion earlier in the file would have re-pointed
+  // dozens of them for a reason unrelated to their own content.
+  const {
+    ENUM_VALUES: REVIEW_REPORT_ENUM_VALUES,
+    FINDING_FIELDS,
+    REPRODUCTION_FIELDS,
+    TOP_LEVEL_FIELDS: REVIEW_REPORT_TOP_LEVEL_FIELDS,
+    WITHDRAWN_FIELDS,
+  } = await import("../src/review-report.js");
+  const reviewerMd = readAsset("agents/reviewer.md");
+
+  /** Extracts the reviewer prompt's single output-contract yaml fence. */
+  function reviewerOutputContractBlock(): string {
+    const heading =
+      "Return exactly this structure as your final output, nothing else:";
+    const headingIndex = reviewerMd.indexOf(heading);
+    expect(
+      headingIndex,
+      "reviewer output-contract heading not found",
+    ).toBeGreaterThanOrEqual(0);
+    const afterHeading = reviewerMd.slice(headingIndex);
+    const fence = afterHeading.match(/```yaml\n([\s\S]*?)```/);
+    expect(
+      fence,
+      "no yaml fence found after the output-contract heading",
+    ).toBeTruthy();
+    return (fence as RegExpMatchArray)[1];
+  }
+
+  /** Field names at column 0 (top-level, unindented `key:` lines), in order. */
+  function topLevelFieldOrder(block: string): string[] {
+    return [...block.matchAll(/^(\w+):/gm)].map((match) => match[1]);
+  }
+
+  /**
+   * Field names inside the slice of `block` that runs from the line
+   * `${sectionKey}:` up to (not including) the next top-level field name
+   * given as `stopKey`, ignoring any leading `- ` list marker. Order is
+   * preserved.
+   */
+  function nestedFieldOrder(
+    block: string,
+    sectionKey: string,
+    stopKey: string,
+  ): string[] {
+    const startMatch = block.match(new RegExp(`^${sectionKey}:\\n`, "m"));
+    expect(startMatch, `"${sectionKey}:" not found`).toBeTruthy();
+    const start =
+      (startMatch as RegExpMatchArray).index! +
+      (startMatch as RegExpMatchArray)[0].length;
+    const stopMatch = block.slice(start).match(new RegExp(`^${stopKey}:`, "m"));
+    const section = stopMatch
+      ? block.slice(start, start + (stopMatch.index as number))
+      : block.slice(start);
+    return [...section.matchAll(/^\s*(?:- )?(\w+): /gm)].map(
+      (match) => match[1],
+    );
+  }
+
+  /**
+   * Every `key: a | b | c` enum spelling anywhere in the block, keyed by
+   * its bare field name (unique across this contract), plus the two
+   * fixed-literal fields `status`/`role`, which the contract states as a
+   * single unpiped value rather than an alternation.
+   */
+  function enumSpellings(block: string): Record<string, string[]> {
+    const result: Record<string, string[]> = {};
+    for (const match of block.matchAll(/^\s*(?:- )?(\w+): (.+\|.+)$/gm)) {
+      result[match[1]] = match[2].split("|").map((value) => value.trim());
+    }
+    const status = block.match(/^status: (\w+)$/m);
+    const role = block.match(/^role: (\w+)$/m);
+    expect(status, "status literal value not found").toBeTruthy();
+    expect(role, "role literal value not found").toBeTruthy();
+    result.status = [(status as RegExpMatchArray)[1]];
+    result.role = [(role as RegExpMatchArray)[1]];
+    return result;
+  }
+
+  it("top-level field order matches TOP_LEVEL_FIELDS exactly", () => {
+    const block = reviewerOutputContractBlock();
+    expect(topLevelFieldOrder(block)).toEqual([
+      ...REVIEW_REPORT_TOP_LEVEL_FIELDS,
+    ]);
+  });
+
+  it("findings[] sub-field order matches FINDING_FIELDS exactly", () => {
+    const block = reviewerOutputContractBlock();
+    expect(
+      nestedFieldOrder(block, "findings", "acceptance_recommendation"),
+    ).toEqual([...FINDING_FIELDS]);
+  });
+
+  it("reproduction sub-field order matches REPRODUCTION_FIELDS exactly", () => {
+    const block = reviewerOutputContractBlock();
+    expect(nestedFieldOrder(block, "reproduction", "method_applied")).toEqual([
+      ...REPRODUCTION_FIELDS,
+    ]);
+  });
+
+  it("withdrawn[] sub-field order matches WITHDRAWN_FIELDS exactly", () => {
+    const block = reviewerOutputContractBlock();
+    const section = block.slice(block.indexOf("withdrawn:\n"));
+    const fields = [...section.matchAll(/^\s*(?:- )?(\w+): /gm)].map(
+      (match) => match[1],
+    );
+    expect(fields).toEqual([...WITHDRAWN_FIELDS]);
+  });
+
+  it("every enum spelling in the contract block matches ENUM_VALUES exactly, key for key and value for value", () => {
+    const block = reviewerOutputContractBlock();
+    const parsed = enumSpellings(block);
+    expect(Object.keys(parsed).sort()).toEqual(
+      Object.keys(REVIEW_REPORT_ENUM_VALUES).sort(),
+    );
+    for (const [key, values] of Object.entries(parsed)) {
+      expect(values, `enum spelling for "${key}"`).toEqual(
+        REVIEW_REPORT_ENUM_VALUES[key],
+      );
+    }
+  });
+
+  it("contracts.md's byte-identical copy parses to the same schema (belt-and-suspenders on the cross-copy pin)", () => {
+    const contractsMd = readAsset("skill/references/contracts.md");
+    const fence = contractsMd.match(
+      /## Reviewer output contract[\s\S]*?```yaml\n([\s\S]*?)```/,
+    );
+    expect(
+      fence,
+      "reviewer output contract fence not found in contracts.md",
+    ).toBeTruthy();
+    const block = (fence as RegExpMatchArray)[1];
+    expect(topLevelFieldOrder(block)).toEqual([
+      ...REVIEW_REPORT_TOP_LEVEL_FIELDS,
+    ]);
+    expect(enumSpellings(block)).toEqual(REVIEW_REPORT_ENUM_VALUES);
+  });
+});
