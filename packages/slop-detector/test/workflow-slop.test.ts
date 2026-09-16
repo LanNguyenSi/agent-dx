@@ -1935,6 +1935,29 @@ describe("workflow-slop/audit-gate-shape: registered templates and the fleet sha
     const v = shapeViolations(glued, withFleetTemplate());
     expect(v).toHaveLength(1);
     expect(v[0].message).toContain("No registered template matches this block");
+    // The separator must be part of the hashed text itself, independent of
+    // which digest happens to be registered: with a template that matches
+    // neither block, the finding prints each block's own digest, and the
+    // two must differ.
+    const bogus = mergeConfig({
+      workflow: {
+        auditGateTemplates: [
+          {
+            name: "bogus",
+            sha256:
+              "abcdef0000000000000000000000000000000000000000000000000000000000",
+          },
+        ],
+      },
+    });
+    const digestOf = (text: string): string => {
+      const found = shapeViolations(text, bogus);
+      expect(found).toHaveLength(1);
+      const match = /hash to sha256 ([0-9a-f]{64})/.exec(found[0].message);
+      expect(match).not.toBeNull();
+      return match![1];
+    };
+    expect(digestOf(glued)).not.toBe(digestOf(REAL_FLEET_AUDIT_YML));
   });
 
   it("documented limit: R-classify does not evaluate branch conditions, so verdict exits inside a never-taken branch still recognise the block", () => {
