@@ -105,8 +105,24 @@ const AllowExpressionSchema = z.string().refine(
   }),
 );
 
+// `workflow.node20Majors`/`node20MajorsIgnore` entries are the exact
+// `owner/repo@vN` match key `workflow-slop/node20-action-major` compares a
+// `uses:` value's resolved `owner/repo@major` against (see
+// `packs/workflow-slop.ts` and `data/node20-actions.ts`). Reject anything
+// that cannot possibly be that shape at config-load time, the same
+// fail-fast treatment `AllowExpressionSchema` gives a malformed
+// `allowExpressions` entry.
+const Node20MajorSchema = z.string().refine(
+  (e) => /^[^/\s@]+\/[^/\s@]+@v\d+$/.test(e),
+  (e) => ({
+    message: `workflow.node20Majors/node20MajorsIgnore entries are "owner/repo@vN" (e.g. "actions/checkout@v4"), got "${e}"`,
+  }),
+);
+
 const WorkflowConfigSchema = z.object({
   allowExpressions: z.array(AllowExpressionSchema).optional(),
+  node20Majors: z.array(Node20MajorSchema).optional(),
+  node20MajorsIgnore: z.array(Node20MajorSchema).optional(),
 });
 
 // A pattern written as `./foo/**/*.md` means the same thing as `foo/**/*.md`
@@ -179,7 +195,11 @@ export function defaultConfig(): ResolvedConfig {
     treatAsCode: [],
     entrypointGlobs: [],
     placement: { markers: [], instructionGlobs: [], allow: [] },
-    workflow: { allowExpressions: [] },
+    workflow: {
+      allowExpressions: [],
+      node20Majors: [],
+      node20MajorsIgnore: [],
+    },
   };
 }
 
@@ -207,6 +227,8 @@ export function mergeConfig(file: ConfigFile): ResolvedConfig {
     },
     workflow: {
       allowExpressions: file.workflow?.allowExpressions ?? [],
+      node20Majors: file.workflow?.node20Majors ?? [],
+      node20MajorsIgnore: file.workflow?.node20MajorsIgnore ?? [],
     },
   };
 }

@@ -12,6 +12,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `workflow-slop` gains two rules closing the gap between a fleet sweep
+  fixing something by hand and nothing then guarding against it
+  recurring:
+  - `workflow-slop/node20-action-major`: flags any `uses:` value
+    (job-level or step-level) whose `owner/repo@major` is on a
+    data-driven Node-20 GitHub Actions list. A prior fleet-wide sweep
+    across the workspace's repos replaced every Node-20-runtime action
+    major (`actions/checkout@v4`, `actions/setup-node@v4`, and others)
+    with a newer major, but nothing stopped a later workflow edit from
+    reintroducing one (a copy-pasted step from an old example, an
+    unreviewed dependency bump). The list lives in
+    `src/data/node20-actions.ts` (not hardcoded rule logic): each entry
+    was verified by fetching that action's `action.yml` at the moving
+    major tag and reading `runs.using`, confirming
+    `actions/checkout@v4`, `actions/setup-node@v4`,
+    `softprops/action-gh-release@v2`, `actions/github-script@v7`,
+    `docker/build-push-action@v5`/`@v6`, `docker/login-action@v3`,
+    `docker/metadata-action@v5`, `docker/setup-buildx-action@v3`,
+    `astral-sh/setup-uv@v4`/`v5`/`v6`, `actions/setup-python@v5`, and
+    `codecov/codecov-action@v4` are all `node20` at those tags.
+    `softprops/action-gh-release@v1` was checked and deliberately
+    excluded: its `action.yml` reports `runs.using: node16`, not
+    `node20`, at that tag (its `@v2` major is `node20` and is listed).
+    The `docker/*`-owned actions above are JS actions (`runs.using:
+    node20`, `main: dist/index.js`), not container actions, despite the
+    `docker/` org prefix; a genuinely `runs.using: docker` action or a
+    composite action is never Node-20 by itself and is intentionally
+    never on this list. The list is extendable per repo via
+    `workflow.node20Majors` (additive) and `workflow.node20MajorsIgnore`
+    (subtractive, applied after `node20Majors`) in `slop.config.yml`, so
+    a newly discovered or newly fixed major doesn't need a package
+    release. A `uses:` pinned to a full commit sha is only checked when
+    the same line also carries a trailing `# vN` comment; a bare sha pin
+    is a documented limitation, not a finding.
+  - `workflow-slop/audit-gate-shape`: scoped to files literally named
+    `audit.yml`/`audit.yaml` under `.github/workflows/`. A prior sweep
+    added a two-step `audit.yml` (a non-blocking report step, then a
+    `npm audit --audit-level=high` gate step) to seven repos across the
+    workspace; nothing then stopped a later edit from quietly removing
+    the protection while keeping the job green. This rule flags (a) no
+    `run:` step anywhere in the file invoking `npm audit` with
+    `--audit-level=high` or `--audit-level=critical` (missing gate), and
+    (b) a gate command that is present but neutralised: a `||` after the
+    gate command on its logical line (backslash continuations joined
+    first, a trailing comment stripped via a quote-parity scan) whose
+    right-hand side is not `exit`/`false`/`return`; `set +e` before the
+    gate command with no matching exit-status capture (`$?`) and
+    `set -e` restore afterward; `continue-on-error: true` on the gate
+    step; or a gate line ending in `; true`/`; :`. The `set +e` check is
+    shaped around a real, legitimate pattern found in the fleet's own
+    `audit.yml` (`set +e`, run the gate, `STATUS=$?`, `set -e`, branch on
+    `$STATUS`) so that shape is the negative-control fixture, not a
+    false positive; a bare `set +e` with no capture-and-restore afterward
+    is what the check actually catches. Deliberately conservative (a
+    legitimate `|| echo "logged"` directly on the gate line still
+    flags); a prior attempt at this same rule failed review repeatedly on
+    shell-boundary false negatives from a tail-anchored `|| true$`-style
+    pattern, which is why this version joins continuations and strips
+    comments before matching instead.
+
 - New pack `workflow-slop` (off by default, opt in via `--pack
   workflow-slop` or `packs.workflow-slop: true`), rule
   `workflow-slop/run-expression`: flags any `${{ ... }}` expression

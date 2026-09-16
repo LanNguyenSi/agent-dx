@@ -571,3 +571,414 @@ describe("workflow-slop/run-expression", () => {
     });
   });
 });
+
+// ─────────────────────────── node20-action-major ───────────────────────────
+
+describe("workflow-slop/node20-action-major", () => {
+  function ruleViolations(text: string, filePath = WORKFLOW_PATH) {
+    return runViolations(text, filePath).filter(
+      (v) => v.ruleId === "workflow-slop/node20-action-major",
+    );
+  }
+
+  it("flags a step-level uses: on the default Node-20 list (actions/checkout@v4)", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: actions/checkout@v4",
+    ].join("\n");
+    const v = ruleViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].severity).toBe("block");
+    expect(v[0].matched).toBe("actions/checkout@v4");
+  });
+
+  it("flags a job-level uses: the same as a step-level one (docker/build-push-action@v5, a JS action despite the org name)", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    uses: docker/build-push-action@v5",
+    ].join("\n");
+    const v = ruleViolations(text);
+    expect(v).toHaveLength(1);
+  });
+
+  it("flags a fixed point-release pin by its major (actions/setup-node@v4.0.3 still resolves to the v4 major)", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: actions/setup-node@v4.0.3",
+    ].join("\n");
+    const v = ruleViolations(text);
+    expect(v).toHaveLength(1);
+  });
+
+  it("negative control: a major not on the list (actions/checkout@v5) is not flagged", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: actions/checkout@v5",
+    ].join("\n");
+    expect(ruleViolations(text)).toHaveLength(0);
+  });
+
+  it("negative control: a local ./path action is never flagged", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: ./.github/actions/local",
+    ].join("\n");
+    expect(ruleViolations(text)).toHaveLength(0);
+  });
+
+  it("negative control: a docker://image reference is never flagged", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: docker://alpine:3.18",
+    ].join("\n");
+    expect(ruleViolations(text)).toHaveLength(0);
+  });
+
+  it("negative control: a reusable-workflow call (uses: naming a .yml file) is never flagged, even if it happens to end in @v4", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    uses: octo-org/example-repo/.github/workflows/build.yml@v4",
+    ].join("\n");
+    expect(ruleViolations(text)).toHaveLength(0);
+  });
+
+  it("flags a sha-pinned uses: only when a trailing # vN comment resolves it to a listed major", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: actions/checkout@8f4b7f8864 # v4",
+    ].join("\n");
+    const v = ruleViolations(text);
+    expect(v).toHaveLength(1);
+  });
+
+  it("documented limitation: a sha-pinned uses: with no version comment is not flagged", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: actions/checkout@8f4b7f8864",
+    ].join("\n");
+    expect(ruleViolations(text)).toHaveLength(0);
+  });
+
+  it("workflow.node20Majors extends the default list", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: acme/custom-action@v1",
+    ].join("\n");
+    const cfg = mergeConfig({
+      workflow: { node20Majors: ["acme/custom-action@v1"] },
+    });
+    const v = checkText(text, WORKFLOW_PATH, {
+      packs: allPacks,
+      config: cfg,
+      packFilter: ["workflow-slop"],
+    }).filter((x) => x.ruleId === "workflow-slop/node20-action-major");
+    expect(v).toHaveLength(1);
+  });
+
+  it("workflow.node20MajorsIgnore drops a default-list entry", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: actions/checkout@v4",
+    ].join("\n");
+    const cfg = mergeConfig({
+      workflow: { node20MajorsIgnore: ["actions/checkout@v4"] },
+    });
+    const v = checkText(text, WORKFLOW_PATH, {
+      packs: allPacks,
+      config: cfg,
+      packFilter: ["workflow-slop"],
+    }).filter((x) => x.ruleId === "workflow-slop/node20-action-major");
+    expect(v).toHaveLength(0);
+  });
+
+  it("negative control: off by default, does not fire without --pack/config opt-in", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: actions/checkout@v4",
+    ].join("\n");
+    const v = checkText(text, WORKFLOW_PATH, {
+      packs: allPacks,
+      config: defaultConfig(),
+    });
+    expect(v.filter((x) => x.pack === "workflow-slop")).toHaveLength(0);
+  });
+
+  it("the verified default list excludes softprops/action-gh-release@v1 (runs.using: node16, not node20) but includes @v2", async () => {
+    const { DEFAULT_NODE20_ACTIONS } =
+      await import("../src/data/node20-actions.js");
+    const uses = DEFAULT_NODE20_ACTIONS.map((e) => e.uses);
+    expect(uses).not.toContain("softprops/action-gh-release@v1");
+    expect(uses).toContain("softprops/action-gh-release@v2");
+  });
+});
+
+// ─────────────────────────── audit-gate-shape ───────────────────────────
+
+describe("workflow-slop/audit-gate-shape", () => {
+  const AUDIT_PATH = ".github/workflows/audit.yml";
+
+  function ruleViolations(text: string, filePath = AUDIT_PATH) {
+    return checkText(text, filePath, {
+      packs: allPacks,
+      config: defaultConfig(),
+      packFilter: ["workflow-slop"],
+    }).filter((v) => v.ruleId === "workflow-slop/audit-gate-shape");
+  }
+
+  // Shape copied from a real fleet audit.yml's gate step: `set +e`, run the
+  // gate command, capture `$?`, `set -e`, then branch/exit on the captured
+  // status. This is the negative control the rule must never flag, even
+  // though it does carry a `set +e` before the gate command.
+  const CANONICAL_AUDIT_YML = [
+    "on: push",
+    "jobs:",
+    "  audit:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - name: npm audit (full report, non-blocking)",
+    "        run: timeout 60s npm audit --no-fund || true",
+    "      - name: npm audit gate (high/critical fail)",
+    "        run: |",
+    "          set -o pipefail",
+    "          set +e",
+    '          timeout 60s npm audit --audit-level=high --no-fund 2>&1 | tee "$LOG"',
+    "          STATUS=$?",
+    "          set -e",
+    '          if [ "$STATUS" -eq 0 ]; then',
+    "            exit 0",
+    "          fi",
+    "          exit 1",
+  ].join("\n");
+
+  it("negative control: the canonical set +e / capture $? / set -e gate shape is not flagged", () => {
+    expect(ruleViolations(CANONICAL_AUDIT_YML)).toHaveLength(0);
+  });
+
+  it("negative control: the report step's own npm audit || true (no --audit-level=) is not itself a gate and is not flagged", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    steps:",
+      "      - run: npm audit --no-fund || true",
+      "      - run: npm audit --audit-level=high --no-fund",
+    ].join("\n");
+    expect(ruleViolations(text)).toHaveLength(0);
+  });
+
+  it("negative control: --audit-level=critical is recognised as a valid gate", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    steps:",
+      "      - run: npm audit --audit-level=critical --no-fund",
+    ].join("\n");
+    expect(ruleViolations(text)).toHaveLength(0);
+  });
+
+  it("negative control: a || exit 1 right-hand side is not a neutralisation", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    steps:",
+      "      - run: npm audit --audit-level=high || exit 1",
+    ].join("\n");
+    expect(ruleViolations(text)).toHaveLength(0);
+  });
+
+  it("flags a missing gate step (no npm audit --audit-level=high/critical run step anywhere in the file)", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    steps:",
+      "      - run: npm audit --no-fund || true",
+    ].join("\n");
+    const v = ruleViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain("No `run:` step");
+  });
+
+  it("flags a bare || true right after the gate command", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    steps:",
+      "      - run: npm audit --audit-level=high || true",
+    ].join("\n");
+    expect(ruleViolations(text).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("flags || true # keep green (trailing comment does not hide the neutralisation)", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    steps:",
+      "      - run: npm audit --audit-level=high || true # keep green",
+    ].join("\n");
+    expect(ruleViolations(text).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("flags || true; (a trailing semicolon does not hide it)", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    steps:",
+      "      - run: npm audit --audit-level=high || true;",
+    ].join("\n");
+    expect(ruleViolations(text).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("flags ||true with no space", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    steps:",
+      "      - run: npm audit --audit-level=high ||true",
+    ].join("\n");
+    expect(ruleViolations(text).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("flags a backslash-continued gate command followed by || : on the continuation line", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    steps:",
+      "      - run: |",
+      "          npm audit --audit-level=high \\",
+      "            || :",
+    ].join("\n");
+    expect(ruleViolations(text).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("flags set +e above the gate command with no exit-status capture/restore afterward", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    steps:",
+      "      - run: |",
+      "          set +e",
+      "          npm audit --audit-level=high",
+      '          echo "ignoring failures"',
+    ].join("\n");
+    const v = ruleViolations(text);
+    expect(v.some((x) => x.matched === "set +e")).toBe(true);
+  });
+
+  it("flags continue-on-error: true on the gate step", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    steps:",
+      "      - name: gate",
+      "        continue-on-error: true",
+      "        run: npm audit --audit-level=high",
+    ].join("\n");
+    const v = ruleViolations(text);
+    expect(v.some((x) => x.matched === "continue-on-error: true")).toBe(true);
+  });
+
+  it("negative control: continue-on-error: false on the gate step is not flagged", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    steps:",
+      "      - name: gate",
+      "        continue-on-error: false",
+      "        run: npm audit --audit-level=high",
+    ].join("\n");
+    expect(ruleViolations(text)).toHaveLength(0);
+  });
+
+  it("flags a gate line ending in ; true", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    steps:",
+      "      - run: npm audit --audit-level=high; true",
+    ].join("\n");
+    expect(ruleViolations(text).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("flags a gate line ending in ; :", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    steps:",
+      "      - run: npm audit --audit-level=high; :",
+    ].join("\n");
+    expect(ruleViolations(text).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("negative control: off by default, does not fire without --pack/config opt-in", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    steps:",
+      "      - run: npm audit --no-fund || true",
+    ].join("\n");
+    const v = checkText(text, AUDIT_PATH, {
+      packs: allPacks,
+      config: defaultConfig(),
+    });
+    expect(v.filter((x) => x.pack === "workflow-slop")).toHaveLength(0);
+  });
+
+  it("negative control: a non-audit workflow file is never scanned by this rule, even with the exact same neutralised gate text", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    steps:",
+      "      - run: npm audit --audit-level=high || true",
+    ].join("\n");
+    expect(ruleViolations(text, ".github/workflows/ci.yml")).toHaveLength(0);
+  });
+});

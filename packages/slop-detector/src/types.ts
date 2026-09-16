@@ -177,6 +177,21 @@ export interface ResolvedConfig {
      * by default (see `workflow-slop.ts` for why).
      */
     allowExpressions: string[];
+    /**
+     * Additional `owner/repo@vN` entries treated as a Node-20 GitHub
+     * Actions major by `workflow-slop/node20-action-major`, on top of the
+     * pack's built-in default list (`src/data/node20-actions.ts`). Lets a
+     * repo extend the list — a newly discovered Node-20 major, or a
+     * locally vendored action — without waiting on a slop-detector release.
+     */
+    node20Majors: string[];
+    /**
+     * `owner/repo@vN` entries removed from the effective Node-20 list
+     * before `workflow-slop/node20-action-major` runs (applied after
+     * `node20Majors`, so it can also drop a config-added entry). Use this
+     * once an action's moving major tag has migrated off Node 20.
+     */
+    node20MajorsIgnore: string[];
   };
 }
 

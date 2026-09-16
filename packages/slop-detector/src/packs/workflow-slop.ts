@@ -8,6 +8,7 @@ import type {
   Violation,
 } from "../types.js";
 import { findAllRegex, offsetToLineCol } from "../util/text.js";
+import { DEFAULT_NODE20_ACTIONS } from "../data/node20-actions.js";
 
 // ─────────────────────────── file targeting ───────────────────────────
 
@@ -380,11 +381,537 @@ const runExpression: Rule = {
   },
 };
 
+// ─────────────────────────── node20-action-major ───────────────────────────
+
+// A generic scalar-node guard (unlike `isScalarWithRange`, which also
+// requires `.value` to be a `string`): `continue-on-error: true` parses as
+// a YAML *boolean* scalar, whose `.value` is `true`/`false`, not a string.
+function isScalarNode(
+  node: unknown,
+): node is { value: unknown; range: [number, number, number] } {
+  if (typeof node !== "object" || node === null) return false;
+  const candidate = node as { value?: unknown; range?: unknown };
+  return (
+    "value" in candidate &&
+    Array.isArray(candidate.range) &&
+    candidate.range.length >= 2
+  );
+}
+
+/**
+ * Every `uses:` scalar in the parsed document, at any nesting depth (a
+ * job-level `uses:` calling a reusable workflow, a step-level `uses:`
+ * naming an action). This rule does not gate on schema position the way
+ * `collectRunScalars` gates `run:` on "not inside a `with:` input block",
+ * because `uses:` never appears inside a `with:` block in the first place
+ * (`with:` is always a *sibling* of `uses:` on the same step, holding that
+ * action's own inputs).
+ */
+function collectUsesRefs(
+  node: unknown,
+  out: Array<{ value: string; range: [number, number, number] }>,
+): void {
+  if (!hasItems(node)) return;
+  for (const item of node.items) {
+    if (isPairNode(item)) {
+      if (scalarKeyName(item.key) === "uses" && isScalarWithRange(item.value)) {
+        out.push({ value: item.value.value, range: item.value.range });
+      }
+      collectUsesRefs(item.value, out);
+    } else {
+      collectUsesRefs(item, out);
+    }
+  }
+}
+
+// A version-ish ref: "v4", "v4.1.2", or a bare "4" (some workflows pin a
+// bare major without the "v"). Only the leading major number is used for
+// matching: a fixed point release like "v4.1.2" still runs whatever
+// Node runtime its v4 line shipped, so it matches the same "v4" list entry
+// a moving-major "v4" ref would.
+const VERSION_REF_RE = /^v?(\d+)(?:\.\d+){0,2}$/;
+// A commit sha (7-40 hex chars): never a version by itself. Distinguished
+// from a version ref by content (hex-only), not length, since a short sha
+// can coincide with a version-looking string only if it also matches
+// VERSION_REF_RE first, which is checked first below.
+const SHA_REF_RE = /^[0-9a-f]{7,40}$/i;
+
+interface ParsedUses {
+  ownerRepo: string;
+  major?: string;
+  shaRef?: boolean;
+}
+
+/**
+ * Parses a `uses:` value into `owner/repo` plus (when determinable) its
+ * major version. Returns `undefined` for anything this rule cannot or
+ * should not evaluate: a local `./path` or `../path` action, a
+ * `docker://image` reference, or a reusable-workflow call (`uses:` whose
+ * pre-`@` part names a `.yml`/`.yaml` file rather than an action): none of
+ * those name a published action with a `vN` major the way the default list
+ * is keyed.
+ */
+function parseUsesValue(raw: string): ParsedUses | undefined {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("./") || trimmed.startsWith("../")) return undefined;
+  if (trimmed.startsWith("docker://")) return undefined;
+  const atIndex = trimmed.lastIndexOf("@");
+  if (atIndex === -1) return undefined;
+  const before = trimmed.slice(0, atIndex);
+  const ref = trimmed.slice(atIndex + 1);
+  if (/\.ya?ml$/i.test(before)) return undefined; // reusable workflow call
+  const segments = before.split("/").filter(Boolean);
+  if (segments.length < 2) return undefined;
+  const ownerRepo = `${segments[0]}/${segments[1]}`;
+  const versionMatch = ref.match(VERSION_REF_RE);
+  if (versionMatch) return { ownerRepo, major: `v${versionMatch[1]}` };
+  if (SHA_REF_RE.test(ref)) return { ownerRepo, shaRef: true };
+  return { ownerRepo };
+}
+
+/**
+ * The major version named in a trailing `# vN` comment on the same
+ * physical line as a sha-pinned `uses:` value (e.g.
+ * `uses: actions/checkout@8f4b7f8 # v4`). `afterOffset` is the end offset
+ * of the `uses:` scalar; only text between there and the next newline (or
+ * end of file) is inspected, so a comment on an unrelated later line can
+ * never match. Returns `undefined` (not a violation) when no such
+ * comment is present: a bare sha pin with no version annotation is the
+ * documented limitation of this rule (see README), not a finding.
+ */
+function trailingCommentMajor(
+  text: string,
+  afterOffset: number,
+): string | undefined {
+  const newlineIndex = text.indexOf("\n", afterOffset);
+  const restOfLine = text.slice(
+    afterOffset,
+    newlineIndex === -1 ? text.length : newlineIndex,
+  );
+  const match = restOfLine.match(/#.*?\bv(\d+)\b/);
+  return match ? `v${match[1]}` : undefined;
+}
+
+/**
+ * The effective Node-20-major match set for this scan: the package's
+ * built-in default list, plus `config.workflow.node20Majors`, minus
+ * `config.workflow.node20MajorsIgnore` (applied last, so it can also drop
+ * a config-added entry). All three are `owner/repo@vN` strings compared
+ * verbatim (no case-folding): a `slop.config.yml` entry must match the
+ * casing an actual `uses:` value uses.
+ */
+function resolveNode20Majors(config: ResolvedConfig): Set<string> {
+  const majors = new Set(DEFAULT_NODE20_ACTIONS.map((entry) => entry.uses));
+  for (const extra of config.workflow?.node20Majors ?? []) majors.add(extra);
+  for (const ignored of config.workflow?.node20MajorsIgnore ?? [])
+    majors.delete(ignored);
+  return majors;
+}
+
+function makeNode20Violation(
+  rule: Rule,
+  file: FileTarget,
+  ref: { range: [number, number, number] },
+  candidate: string,
+  matchedText: string,
+): Violation {
+  const start = offsetToLineCol(file.text, ref.range[0]);
+  const end = offsetToLineCol(file.text, ref.range[0] + matchedText.length);
+  return {
+    ruleId: rule.id,
+    pack: rule.pack,
+    severity: rule.defaultSeverity,
+    path: file.path,
+    line: start.line,
+    column: start.column,
+    endLine: end.line,
+    endColumn: end.column,
+    message: `\`uses: ${matchedText}\` resolves to \`${candidate}\`, a GitHub Actions major on the Node-20 runtime list (the pack's built-in default, or \`workflow.node20Majors\`). Bump to a newer major, or drop this entry via \`workflow.node20MajorsIgnore\` once it has moved off Node 20.`,
+    rationale: rule.rationale,
+    matched: matchedText,
+  };
+}
+
+const node20ActionMajor: Rule = {
+  id: "workflow-slop/node20-action-major",
+  pack: "workflow-slop",
+  defaultSeverity: "block",
+  enabledByDefault: true,
+  rationale:
+    "A fleet-wide sweep moved every workflow off the actions/runtimes still pinned to the deprecated Node-20 actions major, but nothing stopped a later workflow edit from reintroducing one (copy-pasting a step from an old gist, an unreviewed dependency bump). This rule flags a `uses:` value whose `owner/repo@major` is on the Node-20 list, so the regression is caught at review time instead of silently landing again. The list is data (`workflow.node20Majors`/`workflow.node20MajorsIgnore` in slop.config.yml, on top of the package's built-in default), not hardcoded logic, so a newly discovered or newly fixed major does not need a package release. A docker-container action (`runs.using: docker`) or a composite action is never Node-20 by itself and is intentionally never on the default list, even when it commonly sits next to Node-20 actions in the same job.",
+  appliesTo: isWorkflowFile,
+  check(ctx: RuleContext): Violation[] {
+    const { file, config } = ctx;
+    let doc: unknown;
+    try {
+      doc = YAML.parseDocument(file.text, {}).contents;
+    } catch {
+      return [];
+    }
+    const usesRefs: Array<{ value: string; range: [number, number, number] }> =
+      [];
+    collectUsesRefs(doc, usesRefs);
+    const activeMajors = resolveNode20Majors(config);
+
+    const violations: Violation[] = [];
+    for (const ref of usesRefs) {
+      const parsed = parseUsesValue(ref.value);
+      if (!parsed) continue;
+      if (parsed.major) {
+        const candidate = `${parsed.ownerRepo}@${parsed.major}`;
+        if (activeMajors.has(candidate)) {
+          violations.push(
+            makeNode20Violation(
+              node20ActionMajor,
+              file,
+              ref,
+              candidate,
+              ref.value,
+            ),
+          );
+        }
+        continue;
+      }
+      if (parsed.shaRef) {
+        const commentMajor = trailingCommentMajor(file.text, ref.range[1]);
+        if (!commentMajor) continue; // documented sha-pin limitation, not a finding
+        const candidate = `${parsed.ownerRepo}@${commentMajor}`;
+        if (activeMajors.has(candidate)) {
+          violations.push(
+            makeNode20Violation(
+              node20ActionMajor,
+              file,
+              ref,
+              candidate,
+              ref.value,
+            ),
+          );
+        }
+      }
+    }
+    return violations;
+  },
+};
+
+// ─────────────────────────── audit-gate-shape ───────────────────────────
+
+const AUDIT_WORKFLOW_FILE_RE = /(^|\/)\.github\/workflows\/audit\.ya?ml$/;
+
+function isAuditWorkflowFile(file: FileTarget): boolean {
+  const normalized = file.path.split("\\").join("/");
+  return AUDIT_WORKFLOW_FILE_RE.test(normalized);
+}
+
+interface StepRunInfo {
+  runRange: [number, number, number];
+  continueOnError?: { value: unknown; range: [number, number, number] };
+}
+
+/**
+ * Every `run:`-carrying step mapping in the document, together with that
+ * same step's `continue-on-error:` sibling when present. Unlike
+ * `collectRunScalars` (which only needs the scalar node), this rule also
+ * needs the *step's* other keys, so it collects at the mapping level: any
+ * mapping with a `run:` key not inside a `uses:` step's `with:` input
+ * block (same schema-position gating as `collectRunScalars`, for the same
+ * reason: a custom action can name an input `run`) is treated as a step.
+ */
+function collectStepRuns(
+  node: unknown,
+  out: StepRunInfo[],
+  insideWith = false,
+): void {
+  if (!hasItems(node)) return;
+  const isUsesStep = node.items.some(
+    (item) => isPairNode(item) && scalarKeyName(item.key) === "uses",
+  );
+  if (!insideWith) {
+    const runPair = node.items.find(
+      (item) => isPairNode(item) && scalarKeyName(item.key) === "run",
+    );
+    if (runPair && isPairNode(runPair) && isScalarWithRange(runPair.value)) {
+      const coePair = node.items.find(
+        (item) =>
+          isPairNode(item) && scalarKeyName(item.key) === "continue-on-error",
+      );
+      const continueOnError =
+        coePair && isPairNode(coePair) && isScalarNode(coePair.value)
+          ? { value: coePair.value.value, range: coePair.value.range }
+          : undefined;
+      out.push({ runRange: runPair.value.range, continueOnError });
+    }
+  }
+  for (const item of node.items) {
+    if (isPairNode(item)) {
+      const keyName = scalarKeyName(item.key);
+      collectStepRuns(
+        item.value,
+        out,
+        insideWith || (isUsesStep && keyName === "with"),
+      );
+    } else {
+      collectStepRuns(item, out, insideWith);
+    }
+  }
+}
+
+const AUDIT_GATE_RE = /--audit-level=(high|critical)\b/;
+
+function isGateCommand(raw: string): boolean {
+  return /\bnpm\s+audit\b/.test(raw) && AUDIT_GATE_RE.test(raw);
+}
+
+interface LogicalLine {
+  text: string;
+  startOffset: number;
+}
+
+/**
+ * `raw` (a `run:` scalar's raw source slice) split into logical lines: a
+ * physical line ending in a backslash is joined onto the next physical
+ * line (the trailing backslash itself is dropped, nothing else is
+ * inserted, matching bash's own backslash-newline removal), so a gate
+ * command's `||`/`;` tail written on a continuation line is inspected as
+ * part of the same logical line it actually runs on. `baseOffset` is
+ * `raw`'s own start offset in the full file text, so each logical line's
+ * `startOffset` is an absolute file offset usable for violation locations.
+ */
+function buildLogicalLines(raw: string, baseOffset: number): LogicalLine[] {
+  const physicalLines = raw.split("\n");
+  const lines: LogicalLine[] = [];
+  let offset = baseOffset;
+  let currentText = "";
+  let currentStart = offset;
+  let building = false;
+  for (const physical of physicalLines) {
+    const stripped = physical.endsWith("\r") ? physical.slice(0, -1) : physical;
+    if (!building) currentStart = offset;
+    if (stripped.endsWith("\\")) {
+      currentText += stripped.slice(0, -1);
+      building = true;
+    } else {
+      currentText += stripped;
+      lines.push({ text: currentText, startOffset: currentStart });
+      currentText = "";
+      building = false;
+    }
+    offset += physical.length + 1;
+  }
+  if (building) lines.push({ text: currentText, startOffset: currentStart });
+  return lines;
+}
+
+/**
+ * `line` with a trailing shell comment removed, only when the `#` sits
+ * outside single/double quotes (a simple quote-parity scan, no escape
+ * handling, "simple" per the rule's own conservative-by-design brief) and
+ * is preceded by whitespace or is the first character. A `#` that fails
+ * either test is left alone: it is either quoted data or not a comment
+ * delimiter at all (e.g. `foo#bar`, not preceded by whitespace).
+ */
+function stripTrailingComment(line: string): string {
+  let inSingle = false;
+  let inDouble = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === "'" && !inDouble) inSingle = !inSingle;
+    else if (ch === '"' && !inSingle) inDouble = !inDouble;
+    else if (ch === "#" && !inSingle && !inDouble) {
+      const prev = i === 0 ? undefined : line[i - 1];
+      if (prev === undefined || /\s/.test(prev)) return line.slice(0, i);
+    }
+  }
+  return line;
+}
+
+interface AuditFinding {
+  offset: number;
+  matched: string;
+  message: string;
+}
+
+/**
+ * Every neutralisation signal found in one gate step's `run:` block
+ * (`raw`, the step's raw source slice, `baseOffset`-anchored). `raw` is
+ * already confirmed by the caller to contain the `npm audit
+ * --audit-level=(high|critical)` gate command (`isGateCommand`).
+ *
+ * `set +e` is only flagged when it precedes the gate command AND the rest
+ * of the block (after the gate command) does *not* both capture the gate's
+ * exit status (`$?`) and restore `set -e` afterward: the shape a
+ * legitimate "classify the gate's own exit code" step uses (see the
+ * canonical audit.yml fixture in this pack's tests/README): `set +e`,
+ * run the gate command, `STATUS=$?`, `set -e`, then branch on `$STATUS`.
+ * That shape still surfaces a HIGH/CRITICAL finding as a non-zero step
+ * exit; a bare `set +e` with no capture-and-restore afterward does not,
+ * and is the actual neutralisation this half of the rule exists to catch.
+ */
+function checkGateNeutralization(
+  raw: string,
+  baseOffset: number,
+): AuditFinding[] {
+  const findings: AuditFinding[] = [];
+  const gateMatch = raw.match(AUDIT_GATE_RE);
+  const gateEndInRaw = gateMatch
+    ? (gateMatch.index ?? 0) + gateMatch[0].length
+    : 0;
+
+  const setPlusEIndex = raw.search(/\bset\s+\+e\b/);
+  if (setPlusEIndex !== -1 && setPlusEIndex < gateEndInRaw) {
+    const after = raw.slice(gateEndInRaw);
+    const capturesStatus = /\$\?/.test(after);
+    const restoresStrict = /\bset\s+-e\b/.test(after);
+    if (!capturesStatus || !restoresStrict) {
+      findings.push({
+        offset: baseOffset + setPlusEIndex,
+        matched: "set +e",
+        message:
+          "`set +e` appears before the `npm audit --audit-level=...` gate command in this run block without both capturing its exit status (`$?`) and restoring `set -e` afterward, so a failing gate no longer fails the step.",
+      });
+    }
+  }
+
+  const logicalLines = buildLogicalLines(raw, baseOffset);
+  const gateLineMatch = logicalLines.find((l) => isGateCommand(l.text));
+  if (gateLineMatch) {
+    const stripped = stripTrailingComment(gateLineMatch.text);
+    const strippedGateMatch = stripped.match(AUDIT_GATE_RE);
+    const afterGateIdx = strippedGateMatch
+      ? (strippedGateMatch.index ?? 0) + strippedGateMatch[0].length
+      : 0;
+    const tail = stripped.slice(afterGateIdx);
+
+    let badOrOffset: number | undefined;
+    for (const m of findAllRegex(tail, /\|\|/g)) {
+      const rest = tail.slice(m.index + 2).trimStart();
+      if (!/^(exit|false|return)\b/.test(rest)) {
+        badOrOffset = m.index;
+        break;
+      }
+    }
+    if (badOrOffset !== undefined) {
+      findings.push({
+        offset: gateLineMatch.startOffset + afterGateIdx + badOrOffset,
+        matched: tail.slice(badOrOffset, badOrOffset + 12).trimEnd(),
+        message:
+          "`||` appears after the `npm audit --audit-level=...` gate command on its logical line, and the right-hand side is not `exit`/`false`/`return`: a failing gate no longer fails the step.",
+      });
+    }
+
+    const trimmedStripped = stripped.replace(/\s+$/, "");
+    const tailMatch = trimmedStripped.match(/;\s*(true|:)\s*$/);
+    if (tailMatch && tailMatch.index !== undefined) {
+      findings.push({
+        offset: gateLineMatch.startOffset + tailMatch.index,
+        matched: tailMatch[0].trim(),
+        message:
+          "The gate line ends in `; true` or `; :`, which discards the `npm audit --audit-level=...` gate command's exit status.",
+      });
+    }
+  }
+
+  return findings;
+}
+
+function makeAuditViolation(
+  rule: Rule,
+  file: FileTarget,
+  offset: number,
+  matched: string,
+  message: string,
+): Violation {
+  const start = offsetToLineCol(file.text, offset);
+  return {
+    ruleId: rule.id,
+    pack: rule.pack,
+    severity: rule.defaultSeverity,
+    path: file.path,
+    line: start.line,
+    column: start.column,
+    message,
+    rationale: rule.rationale,
+    matched,
+  };
+}
+
+const auditGateShape: Rule = {
+  id: "workflow-slop/audit-gate-shape",
+  pack: "workflow-slop",
+  defaultSeverity: "block",
+  enabledByDefault: true,
+  rationale:
+    'A fleet sweep added a two-step audit.yml to several repos: a non-blocking report step, then a `npm audit --audit-level=high` (or `critical`) gate step that fails the job on a HIGH/CRITICAL advisory. Nothing stops a later edit from quietly removing the protection while keeping the job green, for example dropping the gate step, appending `|| true`, or flipping `continue-on-error: true` on it. This rule flags an `audit.yml`/`audit.yaml` with no `npm audit --audit-level=high`/`critical` run step at all, and flags a gate step whose command is neutralised: a `||` after the gate command (on its own logical line, joined across a backslash continuation) whose right-hand side is not `exit`/`false`/`return`; a `set +e` before the gate command with no matching exit-status capture and `set -e` restore afterward; `continue-on-error: true` on the gate step; or a gate line ending in `; true`/`; :`. Deliberately conservative: it can still flag a legitimate `|| echo "logged"` on the gate line itself, which is fine as false positives go for a security gate; use a `slop-detector:disable-line` comment for a reviewed exception.',
+  appliesTo: isAuditWorkflowFile,
+  check(ctx: RuleContext): Violation[] {
+    const { file } = ctx;
+    let doc: unknown;
+    try {
+      doc = YAML.parseDocument(file.text, {}).contents;
+    } catch {
+      return [];
+    }
+    const steps: StepRunInfo[] = [];
+    collectStepRuns(doc, steps);
+    const gateSteps = steps.filter((step) =>
+      isGateCommand(file.text.slice(step.runRange[0], step.runRange[1])),
+    );
+
+    if (gateSteps.length === 0) {
+      return [
+        makeAuditViolation(
+          auditGateShape,
+          file,
+          0,
+          "",
+          "No `run:` step in this audit workflow file invokes `npm audit` with `--audit-level=high` or `--audit-level=critical`: the gate never fails the job on a HIGH/CRITICAL advisory.",
+        ),
+      ];
+    }
+
+    const violations: Violation[] = [];
+    for (const step of gateSteps) {
+      const raw = file.text.slice(step.runRange[0], step.runRange[1]);
+      for (const finding of checkGateNeutralization(raw, step.runRange[0])) {
+        violations.push(
+          makeAuditViolation(
+            auditGateShape,
+            file,
+            finding.offset,
+            finding.matched,
+            finding.message,
+          ),
+        );
+      }
+      if (
+        step.continueOnError &&
+        (step.continueOnError.value === true ||
+          step.continueOnError.value === "true")
+      ) {
+        violations.push(
+          makeAuditViolation(
+            auditGateShape,
+            file,
+            step.continueOnError.range[0],
+            "continue-on-error: true",
+            "`continue-on-error: true` on the gate step lets the job stay green regardless of the `npm audit --audit-level=...` gate's exit status.",
+          ),
+        );
+      }
+    }
+    return violations;
+  },
+};
+
 // ─────────────────────────── pack export ───────────────────────────
 
 export const workflowSlopPack: PackDefinition = {
   id: "workflow-slop",
   description:
-    "GitHub Actions workflow injection: a `${{ ... }}` expression interpolated directly into a `run:` shell script, where the expression is not one of the documented non-attacker-controllable contexts. Off by default; opt in via `--pack workflow-slop` or `packs.workflow-slop: true`.",
-  rules: [unparseableWorkflow, runExpression],
+    "GitHub Actions workflow injection and CI-guard regressions: a `${{ ... }}` expression interpolated directly into a `run:` shell script (unless one of the documented non-attacker-controllable contexts), a reintroduced Node-20 action major, and a neutralised or missing npm-audit gate in audit.yml. Off by default; opt in via `--pack workflow-slop` or `packs.workflow-slop: true`.",
+  rules: [
+    unparseableWorkflow,
+    runExpression,
+    node20ActionMajor,
+    auditGateShape,
+  ],
 };

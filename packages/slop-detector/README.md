@@ -58,7 +58,7 @@ Each pack groups related rules. Enable or disable per repo via `slop.config.yml`
 | `code-slop` (9 rules)      | off, opt in via `--pack`                | try/catch around code that cannot throw, defaults on required-typed params, empty / rethrow catches, `async` without `await`, backcompat shims for unreleased APIs, phantom imports of undeclared packages, stub function bodies, unused exports, single-callsite helpers  |
 | `ui-slop` (6 rules)        | off, opt in via `--pack ui-slop`        | Gradient text, purple+cyan AI palettes, animated layout properties, skipped heading levels, plus opt-in monospace-everywhere and flat type hierarchy (info-level). Scans CSS / SCSS / LESS / HTML / JSX.                                                                   |
 | `placement-slop` (5 rules) | off, opt in via `--pack placement-slop` | Org-, machine-, and point-in-time-bound evidence leaking into reusable instruction files (`SKILL.md`, `AGENTS.md`, `CLAUDE.md`, agent/skill prompt files): home paths, dated evidence, tally phrases (`n=8`, `p=0.016`, `so far`), opaque ids, and configured org markers. <!-- slop-detector:disable-line=placement-slop --> |
-| `workflow-slop` (2 rules)  | off, opt in via `--pack workflow-slop`  | GitHub Actions workflow injection: a `${{ ... }}` expression interpolated directly into a `run:` shell script, unless it is one of the documented non-attacker-controllable contexts, plus a fail-closed check that a scanned workflow file actually parsed as YAML. Scans `.github/workflows/*.yml`/`*.yaml`. |
+| `workflow-slop` (4 rules)  | off, opt in via `--pack workflow-slop`  | GitHub Actions workflow injection and CI-guard regressions: a `${{ ... }}` expression interpolated directly into a `run:` shell script (unless it is one of the documented non-attacker-controllable contexts); a fail-closed check that a scanned workflow file actually parsed as YAML; a reintroduced Node-20 GitHub Actions major; and a missing or neutralised `npm audit --audit-level=high`/`critical` gate in `audit.yml`. Scans `.github/workflows/*.yml`/`*.yaml`. |
 
 The five opt-in packs (`comment-slop`, `code-slop`, `ui-slop`, `placement-slop`, `workflow-slop`) are off by default because their false-positive surface in mixed codebases is wider; opt in with `--pack <id>` or set `packs.<id>: true` in `slop.config.yml`.
 
@@ -247,6 +247,59 @@ workflow:
 
 **`unparseable-workflow`: a broken workflow file is never scored clean.** `run-expression` walks the YAML tree `yaml`'s parser produced, but that parser does not throw on most syntax errors, it records them and still returns whatever partial tree it managed to build. A workflow file broken partway through (an unterminated quoted scalar, an unbalanced flow collection) can silently drop everything after the break, including a `${{ ... }}` expression this pack exists to catch. The `unparseable-workflow` rule reports one `block`-severity finding whenever a scanned workflow file has a YAML syntax error, naming the file and the first parse error, so a broken file always produces at least one workflow-slop finding instead of a false-clean result.
 
+**`node20-action-major`: a reintroduced Node-20 GitHub Actions major.** A fleet sweep can move every workflow off the actions/runtimes still pinned to a deprecated Node-20 major, but nothing then stops a later edit (a copy-pasted step, an unreviewed dependency bump) from reintroducing one. This rule flags any `uses:` value (job-level or step-level) whose `owner/repo@major` is on a Node-20 list:
+
+```yaml
+# BLOCKED by workflow-slop/node20-action-major
+- uses: actions/checkout@v4
+```
+
+```yaml
+# fixed: bump past the flagged major
+- uses: actions/checkout@v5
+```
+
+The list is data, not hardcoded logic: `src/data/node20-actions.ts` ships a default list, each entry verified by fetching that action's `action.yml` at the moving major tag and reading `runs.using`. Extend it per repo without waiting on a package release:
+
+```yaml
+# slop.config.yml
+packs:
+  workflow-slop: true
+
+workflow:
+  node20Majors:
+    - "acme/custom-action@v1"
+  node20MajorsIgnore:
+    - "actions/checkout@v4"
+```
+
+`node20Majors` adds entries on top of the default list; `node20MajorsIgnore` is applied after, so it can drop a default-list entry (an action that has since moved off Node 20) or one added via `node20Majors`. Both take the same exact `owner/repo@vN` shape, matched verbatim (no case-folding).
+
+A local `./path` action and a `docker://image` reference are never flagged (neither names a published `owner/repo@vN` action). A reusable-workflow call (`uses:` naming a `.yml`/`.yaml` file rather than an action) is excluded the same way, even when its ref happens to look like a listed major. A `uses:` pinned to a full commit sha is only checked when the same line also carries a trailing `# vN` comment (`uses: actions/checkout@8f4b7f8 # v4`); a bare sha pin with no version annotation cannot be resolved to a major from the text alone and is not flagged (a deliberate limitation, not a rule the pack tries to work around). A docker-container action (`runs.using: docker`) or a composite action is never Node-20 by itself and is intentionally left off the default list, even when it commonly sits next to Node-20 actions in the same job.
+
+**`audit-gate-shape`: a missing or neutralised npm-audit gate.** A repo's `audit.yml` can carry a dedicated gate step, `npm audit --audit-level=high` (or `--audit-level=critical`), that fails the job on a HIGH/CRITICAL advisory. This rule (scoped to files literally named `audit.yml`/`audit.yaml` under `.github/workflows/`) flags two regressions against that shape: the gate step is missing entirely, or the gate command is present but neutralised so the job stays green regardless of what `npm audit` finds.
+
+```yaml
+# BLOCKED by workflow-slop/audit-gate-shape: neutralised gate
+- run: npm audit --audit-level=high || true
+```
+
+```yaml
+# fixed: let a non-zero exit fail the step
+- run: npm audit --audit-level=high
+```
+
+Neutralisation is checked conservatively: backslash-continued physical lines are joined into one logical line first, so a `||` written on a continuation line is still seen; a trailing shell comment is stripped from the gate's logical line before matching (only when the `#` sits outside a quoted string); and then the rule flags when any of the following holds:
+
+- a `||` appears after the gate command on its logical line, and the text immediately after it does not start with `exit`, `false`, or `return`;
+- `set +e` appears before the gate command in the same run block, and the rest of the block does not both capture the gate's exit status (`$?`) and restore `set -e` afterward;
+- `continue-on-error: true` is set on the gate step;
+- the gate line ends in `; true` or `; :`.
+
+The `set +e` check is intentionally shaped around a legitimate pattern, not a blanket ban on `set +e`: a step that needs to classify the gate's own exit code (network-outage handling, a custom exit-code mapping) commonly runs `set +e`, runs the gate command, captures `STATUS=$?`, restores `set -e`, then branches on `$STATUS`. That shape still turns a HIGH/CRITICAL finding into a non-zero step exit, so it is not flagged. A bare `set +e` before the gate command with no capture-and-restore afterward is the actual neutralisation this half of the rule exists to catch.
+
+This is deliberately conservative: it can still flag a legitimate `|| echo "logged"` sitting directly on the gate line. Use the pack's existing per-line disable-comment mechanism for a reviewed exception (see [Per-line opt-out](#per-line-opt-out)): `# slop-detector:disable-line=workflow-slop/audit-gate-shape`.
+
 **Wiring pattern for other repos.** This repo's own `.github/workflows/ci.yml` runs the check in a dedicated `workflow-guard` job (separate from `placement-guard`, since this is a security control, not a doc-hygiene lint): install and build `slop-detector`, then
 
 ```bash
@@ -386,7 +439,7 @@ workflow:
     - "matrix.node"
 ```
 
-Defaults applied even without a config: `agent-tics` and `prose-slop` packs on; `comment-slop`, `code-slop`, `ui-slop`, `placement-slop`, `workflow-slop` off; ignores cover `node_modules`, `dist`, `build`, `coverage`, `.git`, lockfiles; `placement.markers`, `placement.instructionGlobs`, `placement.allow`, and `workflow.allowExpressions` default to `[]`.
+Defaults applied even without a config: `agent-tics` and `prose-slop` packs on; `comment-slop`, `code-slop`, `ui-slop`, `placement-slop`, `workflow-slop` off; ignores cover `node_modules`, `dist`, `build`, `coverage`, `.git`, lockfiles; `placement.markers`, `placement.instructionGlobs`, `placement.allow`, `workflow.allowExpressions`, `workflow.node20Majors`, and `workflow.node20MajorsIgnore` default to `[]`.
 
 The `placement` block only matters once `placement-slop` is enabled (see [`placement-slop` by example](#placement-slop-by-example)):
 
@@ -394,7 +447,7 @@ The `placement` block only matters once `placement-slop` is enabled (see [`place
 - `instructionGlobs`: additive glob patterns, on top of the pack's built-in instruction-file globs (`SKILL.md`, `AGENTS.md`, `CLAUDE.md`, `.claude/agents/**`, `.opencode/agents/**`, `.claude/skills/**`); this only ever widens the built-in set, it can't narrow it. Matched against each scanned file's path relative to the scan root (the same root `entrypointGlobs` uses — see [Marking a src barrel as an entrypoint](#marking-a-src-barrel-as-an-entrypoint)). `check packages/foo`, `check ./packages/foo`, and `check /abs/path/packages/foo` are three spellings of the _same_ directory and resolve a given pattern identically; a single-file target (`check packages/foo/SKILL.md`) resolves the scan root to that file's own parent directory, so it also shares patterns with `check packages/foo`: a pattern is tied to _what directory you're scanning_, not to whether the target was a file or a directory. The consequence: changing the scan target to a genuinely different root (e.g. `check .` from the repo root instead of `check packages/foo`) means every pattern has to be rewritten relative to the new root too. A pattern must not start with `/`, same restriction as `entrypointGlobs`, and a leading `./` is normalized away. A pattern that matches zero scanned files is surfaced in `CheckSummary.warnings`, same mechanism as an unmatched `entrypointGlobs` pattern. For CI, the simplest invariant is `check .` from the repo root paired with a config file: one fixed scan root, so the patterns never need to change with the invocation.
 - `allow`: regex patterns (also rejected at config-load time if they'd match the empty string), matched per line, and only the matched span is excused across every rule in the pack, including `block`-severity ones (the escape hatch for something like a legitimate install URL that carries an org handle). The exclusion is scoped to the matched span, not the whole line: a home path, a date, or a tally phrase elsewhere on the same line as an allowed match still fires. For narrower, single-rule suppression use a per-line disable comment instead (see [Per-line opt-out](#per-line-opt-out)).
 
-The `workflow` block only matters once `workflow-slop` is enabled (see [`workflow-slop` by example](#workflow-slop-by-example)): `allowExpressions` is an additive list of exact, whitespace-trimmed `${{ ... }}` expression bodies treated as safe on top of the pack's built-in allowlist. Empty by default, so it never widens what the rule accepts until you configure it.
+The `workflow` block only matters once `workflow-slop` is enabled (see [`workflow-slop` by example](#workflow-slop-by-example)): `allowExpressions` is an additive list of exact, whitespace-trimmed `${{ ... }}` expression bodies treated as safe on top of the pack's built-in allowlist, consumed by `run-expression`. `node20Majors` (additive) and `node20MajorsIgnore` (subtractive, applied after `node20Majors`) are both lists of exact `owner/repo@vN` entries consumed by `node20-action-major`, on top of the pack's built-in default list. All three are empty by default, so none of them widen or narrow what a rule accepts until you configure them.
 
 ## Cross-file rules (experimental)
 
