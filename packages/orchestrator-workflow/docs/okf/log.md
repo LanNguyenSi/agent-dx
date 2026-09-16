@@ -1,5 +1,21 @@
 # Bundle log
 
+- 2026-09-16T13:17:23Z (release cut, pandora run 2026-09-16-releases-batch55,
+  REL-001): cut the `[Unreleased]` section under a new `[0.36.0] -
+  2026-09-16` heading, keeping an empty `[Unreleased]` heading above it,
+  and bumped `package.json`/`package-lock.json` to 0.36.0. The two-line
+  insertion shifted the two live `log.md` self-citations from line 140
+  to line 142 and from line 517 to line 519 of the CHANGELOG; both were
+  re-pointed after re-reading their anchors at the new lines. Re-stamped
+  the three bundle docs whose sources list `CHANGELOG.md`
+  (`review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`,
+  `subagent-contracts-superset.md`) after confirming none of their own
+  citations resolve into the shifted range; no other bundle doc lists
+  `package.json` as a source. Cut the paired agent-primitives release
+  (0.5.0 to 0.6.0) in the same commit; okf-kit (one CI-only entry) and
+  `slop-detector` (npm name owned by an unrelated third party, never
+  published under that name) were left unreleased.
+
 - 2026-09-16T11:03:00Z (agent-dx tracker task 2e7680f6, pandora run
   2026-09-16-open-pool-batch55): independent line-by-line audit of every
   file:line citation in this bundle, read against the current sources
