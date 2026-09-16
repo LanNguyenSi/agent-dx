@@ -14,7 +14,22 @@ export interface Failure {
 /** Per-check tallies. `warnings` counts detector-level findings that are
  * not failures (e.g. eslint `warning`-severity entries); it is unrelated
  * to the top-level envelope `warnings` array, which carries free-text
- * notices such as `detector_matched_nothing`. */
+ * notices such as `detector_matched_nothing`.
+ *
+ * What a detector counts here can depend on the TOOL's own version, so
+ * `warnings: 0` is not by itself a claim that the tool reported no
+ * warning: the phpunit detector counts a plain `Warnings: N` tally token
+ * here for PHPUnit 9, and for any output whose own version banner is not
+ * there to be read (the fail-safe default), where the token means N
+ * synthetic tests that never ran a body. PHPUnit 10 and up reuse the
+ * same token for N tests that DID run and raised a PHP-level warning, so
+ * there it lands in `passed` instead and this field stays `0`, with the
+ * count named in a `phpunit_warnings:` entry of
+ * `DetectorParseResult.warnings` rather than dropped (see
+ * `verify/detectors/phpunit.ts`'s tally-category table). Where the
+ * missing banner is what makes the reading undecidable, `verify`'s
+ * `zero_tests_ambiguous:` warning says which of the two readings the
+ * summary printed beside it carries. */
 export interface Summary {
   passed: number;
   failed: number;

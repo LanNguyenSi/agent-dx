@@ -9,7 +9,10 @@ import { genericDetector } from "./detectors/generic.js";
 import { vitestDetector } from "./detectors/vitest.js";
 import { tscDetector } from "./detectors/tsc.js";
 import { eslintDetector } from "./detectors/eslint.js";
-import { phpunitDetector } from "./detectors/phpunit.js";
+import {
+  phpunitDetector,
+  phpunitZeroTestsVerdict,
+} from "./detectors/phpunit.js";
 import { phpstanDetector } from "./detectors/phpstan.js";
 import { phpcsDetector } from "./detectors/phpcs.js";
 import type {
@@ -686,6 +689,60 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
       command,
       exitCode: execResult.exitCode,
     });
+
+    // A phpunit check whose own STATUS is `pass` while its tally shows
+    // zero tests actually ran (an empty/filtered suite, an all-skipped
+    // run, or a PHPUnit 9 warnings-only run such as `Tests: 1,
+    // Assertions: 0, Warnings: 1.`) still keeps that `pass` status here
+    // -- the status is the verdict, not this warning (see README) -- but
+    // a reader is told the pass is hollow. Checked against `status`, not
+    // the exit code: `--pass-regex` can decide `pass` on a non-zero exit
+    // (a green suite that PHPUnit itself exits non-zero for, over a
+    // deprecation notice, say), and the warning below is worded on that
+    // same status rather than claiming an exit code that may not be `0`
+    // at all. Reuses `phpunitZeroTestsVerdict` (the same reading
+    // `probe`'s own zero-tests guard is built on) rather than re-deriving
+    // the tally here, so the two never drift apart.
+    //
+    // Three-valued on purpose: `no_tests_executed:` is claimed ONLY for
+    // the `"zero"` reading, i.e. only where PHPUnit itself stated that
+    // nothing ran. Wherever the question cannot be answered from the
+    // output -- a tally whose reading turns on a PHPUnit major version
+    // the output does not state (a truncated capture whose banner fell
+    // off the front), or an output with no result report in it at all
+    // (a mid-suite `exit()`/`die()`) -- this warns
+    // `zero_tests_ambiguous:` with the reason instead: claiming
+    // `no_tests_executed:` there asserts something the output does not
+    // say, which is exactly the false claim both a green, banner-
+    // truncated PHPUnit 11 run and a completed `--no-results` run got
+    // from earlier versions of this branch.
+    //
+    // Both texts carry the reading's OWN `reason` rather than a
+    // hardcoded sentence about a tally line: the `"zero"` verdict has
+    // two origins (PHPUnit's `No tests executed!` line and a tally
+    // derivation), and naming the tally line for both of them was a
+    // claim about output that the explicit-statement case does not
+    // have.
+    if (status === "pass" && detector === phpunitDetector) {
+      const zeroTests = phpunitZeroTestsVerdict(output);
+      if (zeroTests.verdict === "zero") {
+        parsed = {
+          ...parsed,
+          warnings: [
+            ...parsed.warnings,
+            `no_tests_executed: phpunit executed no test at all even though the check passed: ${zeroTests.reason}.`,
+          ],
+        };
+      } else if (zeroTests.verdict === "ambiguous") {
+        parsed = {
+          ...parsed,
+          warnings: [
+            ...parsed.warnings,
+            `zero_tests_ambiguous: the check passed, but whether phpunit executed any test at all cannot be read from its own output, so no_tests_executed is not claimed either way: ${zeroTests.reason}.`,
+          ],
+        };
+      }
+    }
 
     // The truncation adjustment runs whenever this check's own `status`
     // already needed it (`fail`/`error`), and ADDITIONALLY whenever a

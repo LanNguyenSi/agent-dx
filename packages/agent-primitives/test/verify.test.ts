@@ -15,6 +15,7 @@ import {
   DEFAULT_CHECKS,
   DEFAULT_DETECTORS,
 } from "../src/verify/index.js";
+import { phpunitZeroTestsVerdict } from "../src/verify/detectors/phpunit.js";
 import { UsageError } from "../src/envelope.js";
 import type {
   Detector,
@@ -35,6 +36,13 @@ const CAPTURED_DIR = path.join(FIXTURES_DIR, "captured");
  * from). */
 function readCaptured(name: string): string {
   return fs.readFileSync(path.join(CAPTURED_DIR, `${name}.txt`), "utf8");
+}
+
+/** The three-valued zero-tests reading for one phpunit output, verdict
+ * only: `"zero"`, `"not_zero"`, or `"ambiguous"` (see
+ * `phpunitZeroTestsVerdict` for what each one means). */
+function zeroTests(output: string): string {
+  return phpunitZeroTestsVerdict(output).verdict;
 }
 
 const tmpDirs: string[] = [];
@@ -3579,6 +3587,1153 @@ describe("phpunitDetector: captured real output", () => {
     expect(passed).toBeGreaterThanOrEqual(0);
     expect(failed).toBeGreaterThanOrEqual(0);
     expect(skipped).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe("phpunitDetector: PHPUnit 11 residuals (tracker 3a0c5242)", () => {
+  it("matches the PHPUnit-error, two-word-deprecation-tally, and exit-mid-suite captures", () => {
+    for (const [name, exitCode] of [
+      ["phpunit-error-data-provider", 2],
+      ["phpunit-two-word-deprecation-tally", 0],
+      ["phpunit-exit-mid-suite", 0],
+    ] as const) {
+      expect(
+        phpunitDetector.matches({
+          output: readCaptured(name),
+          command: "",
+          exitCode,
+        }),
+      ).toBe(true);
+    }
+  });
+
+  it("vitest, tsc, and eslint detectors do not match the three new PHPUnit-11 captures (disjointness)", () => {
+    for (const name of [
+      "phpunit-error-data-provider",
+      "phpunit-two-word-deprecation-tally",
+      "phpunit-exit-mid-suite",
+    ]) {
+      const output = readCaptured(name);
+      expect(vitestDetector.matches({ output, command: "", exitCode: 0 })).toBe(
+        false,
+      );
+      expect(tscDetector.matches({ output, command: "", exitCode: 0 })).toBe(
+        false,
+      );
+      expect(eslintDetector.matches({ output, command: "", exitCode: 0 })).toBe(
+        false,
+      );
+    }
+  });
+
+  it("the exit-mid-suite capture does not make phpunit shadow vitest/tsc/eslint captured output (the banner check is phpunit-only)", () => {
+    for (const name of [
+      "vitest-fail",
+      "vitest-pass",
+      "vitest-no-tests",
+      "tsc-errors",
+      "tsc-clean",
+      "eslint-errors",
+      "eslint-warnings",
+      "eslint-clean",
+    ]) {
+      expect(
+        phpunitDetector.matches({
+          output: readCaptured(name),
+          command: "",
+          exitCode: name.includes("clean") ? 0 : 1,
+        }),
+      ).toBe(false);
+    }
+  });
+
+  it("selectDetector against DEFAULT_DETECTORS: the exit-mid-suite capture selects phpunit, not generic", () => {
+    const selection = selectDetector(DEFAULT_DETECTORS, genericDetector, {
+      output: readCaptured("phpunit-exit-mid-suite"),
+      command: "vendor/bin/phpunit",
+      exitCode: 0,
+    });
+    expect(selection.detector.name).toBe("phpunit");
+  });
+
+  it("parses the PHPUnit-error capture: the invalid-data-provider entry becomes a failures entry, counted in summary.errors", () => {
+    const parsed = phpunitDetector.parse({
+      output: readCaptured("phpunit-error-data-provider"),
+      command: "vendor/bin/phpunit",
+      exitCode: 2,
+    });
+    expect(parsed.summary.errors).toBe(1);
+    expect(parsed.failures).toHaveLength(1);
+    expect(parsed.failures[0].name).toBe(
+      "DataProviderThrowsTest::testSomething",
+    );
+    expect(parsed.failures[0].file).toBe("tests/DataProviderThrowsTest.php");
+    expect(parsed.failures[0].line).toBe(20);
+    expect(parsed.failures[0].message).toContain(
+      "The data provider specified for DataProviderThrowsTest::testSomething is invalid",
+    );
+    // The failures invariant still holds for this PHPUnit-11-only
+    // section kind, same as it does for an ordinary `error` section.
+    expect(
+      parsed.summary.failed + parsed.summary.errors,
+    ).toBeGreaterThanOrEqual(parsed.failures.length);
+  });
+
+  it("parses the two-word-deprecation-tally capture: both genuinely-run tests still count as passed, the PHPUnit Deprecations token is not mistaken for a not-executed category", () => {
+    const parsed = phpunitDetector.parse({
+      output: readCaptured("phpunit-two-word-deprecation-tally"),
+      command: "vendor/bin/phpunit",
+      exitCode: 0,
+    });
+    expect(parsed.summary).toEqual({
+      passed: 2,
+      failed: 0,
+      skipped: 0,
+      errors: 0,
+      warnings: 0,
+    });
+    expect(parsed.failures).toEqual([]);
+  });
+
+  it("the two-word-deprecation-tally capture is NOT read as zero tests executed (a real pass, not a hollow one)", () => {
+    expect(zeroTests(readCaptured("phpunit-two-word-deprecation-tally"))).toBe(
+      "not_zero",
+    );
+  });
+
+  it("the exit-mid-suite capture parses to an all-zero summary with no failures (same graceful convention as No tests executed!)", () => {
+    const parsed = phpunitDetector.parse({
+      output: readCaptured("phpunit-exit-mid-suite"),
+      command: "vendor/bin/phpunit",
+      exitCode: 0,
+    });
+    expect(parsed.summary).toEqual({
+      passed: 0,
+      failed: 0,
+      skipped: 0,
+      errors: 0,
+      warnings: 0,
+    });
+    expect(parsed.failures).toEqual([]);
+  });
+
+  it("the exit-mid-suite capture reads as AMBIGUOUS, never as zero: its own single progress dot is one test that ran and passed before the kill", () => {
+    const output = readCaptured("phpunit-exit-mid-suite");
+    // The capture's own bytes: PHPUnit's banner, its `Runtime:` line,
+    // and exactly one `.` -- `testFirst` genuinely ran and passed
+    // before `testExits` killed the PHP process (see
+    // test/fixtures/README.md). A `"zero"` verdict here would be false
+    // about this very fixture, not merely unproven, which is why the
+    // reading answers this shape with "cannot be read" instead.
+    expect(output).toMatch(/\n\.$/);
+    expect(zeroTests(output)).toBe("ambiguous");
+    const reason = phpunitZeroTestsVerdict(output).reason;
+    expect(reason).toContain("neither a result summary");
+    expect(reason).toContain("nor a progress counter");
+    expect(reason).toContain("Memory: <m>` line");
+  });
+
+  it("the 9.6.36 exit-mid-suite capture reads ambiguous too (this reading is not version-specific)", () => {
+    // Same three-test class, same `exit(0)` in its second test, run
+    // under PHPUnit 9.6.36 instead of 11.5.56: banner, blank line, one
+    // dot, exit 0 (9.6 prints no `Runtime:` line at all). The reading
+    // turns on absent completion evidence, not on a major version, so
+    // both captures land in the same arm.
+    const output = readCaptured("phpunit-exit-mid-suite-9");
+    expect(output).toContain("PHPUnit 9.6.36 by");
+    expect(output).not.toContain("Runtime:");
+    expect(zeroTests(output)).toBe("ambiguous");
+  });
+
+  it("verify: the exit-mid-suite capture (exit 0) stays status pass and gets zero_tests_ambiguous, NOT the no_tests_executed claim", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run test --silent": {
+        exitCode: 0,
+        stdoutTail: readCaptured("phpunit-exit-mid-suite"),
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: [phpunitDetector],
+    });
+    const check = result.checks[0];
+    expect(check.status).toBe("pass");
+    expect(check.detector).toBe("phpunit");
+    expect(result.warnings.some((w) => w.includes("no_tests_executed:"))).toBe(
+      false,
+    );
+    const ambiguous = result.warnings.filter((w) =>
+      w.includes("zero_tests_ambiguous:"),
+    );
+    expect(ambiguous).toHaveLength(1);
+    expect(ambiguous[0]).toContain("test: zero_tests_ambiguous:");
+    expect(ambiguous[0]).toContain("neither a result summary");
+    expect(ambiguous[0]).toContain("mid-suite `exit()`/`die()`");
+  });
+});
+
+/** One PHPUnit 11-shaped green tally tail with NO version banner in it,
+ * standing in for a run long enough that `exec.ts`'s tail-keeping
+ * truncation (last 60 lines / 6000 chars) dropped PHPUnit's very first
+ * line while keeping its very last one. `lines` pads the progress block
+ * so the same shape can be built at a realistic length. Every count
+ * here is the shape the version question turns on: all 15 tests both ran
+ * and raised a PHP-level warning, so PHPUnit 10+ reads this as 15
+ * executed and passed while PHPUnit 9 reads the same token as 15
+ * synthetic tests that never ran at all. */
+function bannerlessGreenPhpunit11Tail(lines = 6): string {
+  const progress = Array.from(
+    { length: lines },
+    (_, i) => `WWWWWWWWWWWWWWW${" ".repeat(20)}${(i + 1) * 15} / 225 (100%)`,
+  );
+  return [
+    ...progress,
+    "",
+    "Time: 00:00.412, Memory: 10.00 MB",
+    "",
+    "OK, but there were issues!",
+    "Tests: 15, Assertions: 15, Warnings: 15.",
+    "",
+  ].join("\n");
+}
+
+/** One synthetic PHPUnit banner over the plain-`Warnings` tally shape.
+ * Synthetic on purpose and labelled as such: this suite has no captured
+ * run for PHPUnit 10, nor for any prerelease banner, and the ONLY thing
+ * these cases vary is the version string PHPUnit states about itself,
+ * which is exactly what the reading turns on. The tally line itself is
+ * `phpunit-warnings.txt`'s own captured one. */
+function syntheticBanneredWarningsTally(version: string): string {
+  return [
+    `PHPUnit ${version} by Sebastian Bergmann and contributors.`,
+    "",
+    "W                                                                   1 / 1 (100%)",
+    "",
+    "Time: 00:00.031, Memory: 8.00 MB",
+    "",
+    "OK, but there were issues!",
+    "Tests: 1, Assertions: 0, Warnings: 1.",
+    "",
+  ].join("\n");
+}
+
+const PHPUNIT_11_WARNINGS_MOVED_WARNING =
+  "phpunit_warnings: PHPUnit 11 reads this run's `Warnings: 1` tally count as 1 test(s) that ran, so it is reported in summary.passed rather than in summary.warnings.";
+
+describe("phpunitDetector: version-aware plain Warnings reading (PHPUnit 10 and up)", () => {
+  it("real PHPUnit 11.5.56 capture: a single test that raises E_USER_WARNING is read as executed and passed, not as zero tests executed", () => {
+    const output = readCaptured("phpunit-warning-test-executed");
+    const parsed = phpunitDetector.parse({
+      output,
+      command: "vendor/bin/phpunit",
+      exitCode: 0,
+    });
+    // passed equals the stated Tests count (1) minus real non-executed
+    // categories (none here: no Skipped, no Incomplete).
+    expect(parsed.summary).toEqual({
+      passed: 1,
+      failed: 0,
+      skipped: 0,
+      errors: 0,
+      warnings: 0,
+    });
+    expect(parsed.failures).toEqual([]);
+    expect(zeroTests(output)).toBe("not_zero");
+    // The count does not simply vanish along with `summary.warnings: 0`:
+    // the version-aware reading folds it into `passed`, and the detector
+    // says so, naming the count.
+    expect(parsed.warnings).toEqual([PHPUNIT_11_WARNINGS_MOVED_WARNING]);
+  });
+
+  it("real PHPUnit 11.5.56 capture: three tests raising a warning, a deprecation, and a notice all still count as executed and passed", () => {
+    const output = readCaptured(
+      "phpunit-warnings-deprecations-notices-executed",
+    );
+    const parsed = phpunitDetector.parse({
+      output,
+      command: "vendor/bin/phpunit",
+      exitCode: 0,
+    });
+    expect(parsed.summary).toEqual({
+      passed: 3,
+      failed: 0,
+      skipped: 0,
+      errors: 0,
+      warnings: 0,
+    });
+    expect(parsed.failures).toEqual([]);
+    expect(zeroTests(output)).toBe("not_zero");
+    // One `Warnings: 1` token among the three tests: only that one is
+    // version-dependent, so only that one is named (the plain
+    // `Deprecations`/`Notices` tokens are spent nowhere on any version).
+    expect(parsed.warnings).toEqual([PHPUNIT_11_WARNINGS_MOVED_WARNING]);
+  });
+
+  it("verify: the plain-Warnings-executed PHPUnit 11 capture stays status pass, gets NO no_tests_executed warning, and carries the moved count", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run test --silent": {
+        exitCode: 0,
+        stdoutTail: readCaptured("phpunit-warning-test-executed"),
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: [phpunitDetector],
+    });
+    const check = result.checks[0];
+    expect(check.status).toBe("pass");
+    expect(check.detector).toBe("phpunit");
+    expect(result.warnings.some((w) => w.includes("no_tests_executed:"))).toBe(
+      false,
+    );
+    expect(
+      result.warnings.some((w) => w.includes("zero_tests_ambiguous:")),
+    ).toBe(false);
+    expect(result.warnings).toContain(
+      `test: ${PHPUNIT_11_WARNINGS_MOVED_WARNING}`,
+    );
+  });
+
+  it("PHPUnit 9.6.36's own phpunit-warnings.txt capture is unaffected: a plain Warnings token still reads as not executed (fail-safe default kept byte-identical)", () => {
+    const output = readCaptured("phpunit-warnings");
+    const parsed = phpunitDetector.parse({
+      output,
+      command: "vendor/bin/phpunit",
+      exitCode: 0,
+    });
+    expect(parsed.summary).toEqual({
+      passed: 0,
+      failed: 0,
+      skipped: 0,
+      errors: 0,
+      warnings: 1,
+    });
+    expect(zeroTests(output)).toBe("zero");
+    // Nothing to move here: under 9 the count IS `summary.warnings`, so
+    // the detector adds no warning about it.
+    expect(parsed.warnings).toEqual([]);
+  });
+
+  it("a SYNTHETIC PHPUnit 10.5.0 banner over the same plain-Warnings tally reads as executed too (the threshold is major 10, not 11)", () => {
+    const output = syntheticBanneredWarningsTally("10.5.0");
+    const parsed = phpunitDetector.parse({
+      output,
+      command: "vendor/bin/phpunit",
+      exitCode: 0,
+    });
+    expect(parsed.summary).toEqual({
+      passed: 1,
+      failed: 0,
+      skipped: 0,
+      errors: 0,
+      warnings: 0,
+    });
+    expect(zeroTests(output)).toBe("not_zero");
+    expect(parsed.warnings).toEqual([
+      "phpunit_warnings: PHPUnit 10 reads this run's `Warnings: 1` tally count as 1 test(s) that ran, so it is reported in summary.passed rather than in summary.warnings.",
+    ]);
+  });
+
+  it("a SYNTHETIC prerelease banner (PHPUnit 11.0.0-RC1) is read at its own major, not as a banner-less output", () => {
+    const output = syntheticBanneredWarningsTally("11.0.0-RC1");
+    const parsed = phpunitDetector.parse({
+      output,
+      command: "vendor/bin/phpunit",
+      exitCode: 0,
+    });
+    // A prerelease tail the version pattern does not accept would leave
+    // no readable major at all, which is the banner-less case below:
+    // `passed: 0` and an `ambiguous` reading instead of these two.
+    expect(parsed.summary).toEqual({
+      passed: 1,
+      failed: 0,
+      skipped: 0,
+      errors: 0,
+      warnings: 0,
+    });
+    expect(zeroTests(output)).toBe("not_zero");
+    expect(parsed.warnings).toEqual([PHPUNIT_11_WARNINGS_MOVED_WARNING]);
+  });
+
+  it("a SYNTHETIC prerelease banner with a dotted tail (PHPUnit 12.0.0-alpha.1) is read at its own major too", () => {
+    const output = syntheticBanneredWarningsTally("12.0.0-alpha.1");
+    const parsed = phpunitDetector.parse({
+      output,
+      command: "vendor/bin/phpunit",
+      exitCode: 0,
+    });
+    expect(parsed.summary).toEqual({
+      passed: 1,
+      failed: 0,
+      skipped: 0,
+      errors: 0,
+      warnings: 0,
+    });
+    expect(zeroTests(output)).toBe("not_zero");
+    expect(parsed.warnings).toEqual([
+      "phpunit_warnings: PHPUnit 12 reads this run's `Warnings: 1` tally count as 1 test(s) that ran, so it is reported in summary.passed rather than in summary.warnings.",
+    ]);
+  });
+
+  it("no banner at all (front-truncated output): the zero-tests reading is ambiguous, while the summary keeps the fail-safe PHPUnit 9 reading", () => {
+    // A tally-only fragment with no version banner line at all,
+    // standing in for a front-truncated capture (`exec.ts` drops lines
+    // off the front, so a long enough run can drop the banner near the
+    // top while keeping the tally at the very end -- see
+    // `PHPUNIT_BANNER`'s own docblock). There is no version to read, so
+    // the SUMMARY keeps the fail-safe PHPUnit 9 reading (a number has to
+    // be printed either way), but the zero-tests question, whose answer
+    // flips entirely with the version here, is reported as unreadable
+    // rather than answered.
+    const output = "WARNINGS!\nTests: 1, Assertions: 0, Warnings: 1.\n";
+    const parsed = phpunitDetector.parse({
+      output,
+      command: "vendor/bin/phpunit",
+      exitCode: 0,
+    });
+    expect(parsed.summary).toEqual({
+      passed: 0,
+      failed: 0,
+      skipped: 0,
+      errors: 0,
+      warnings: 1,
+    });
+    expect(zeroTests(output)).toBe("ambiguous");
+    expect(phpunitZeroTestsVerdict(output).reason).toContain(
+      "states no PHPUnit version banner",
+    );
+    expect(phpunitZeroTestsVerdict(output).reason).toContain("`Warnings: 1`");
+  });
+
+  it("no banner, but a tally whose two readings agree: the verdict is that agreed value, not ambiguous", () => {
+    // 5 tests, one of which raised a warning: read as a 9 that is 4
+    // executed, read as a 10+ it is 5, and both are nonzero -- the
+    // count is unreadable, the zero-tests question is not. Pins that
+    // `ambiguous` reports a genuinely undecidable verdict rather than
+    // firing on every banner-less output that merely carries the token.
+    const output = "WARNINGS!\nTests: 5, Assertions: 4, Warnings: 1.\n";
+    expect(zeroTests(output)).toBe("not_zero");
+    const parsed = phpunitDetector.parse({
+      output,
+      command: "vendor/bin/phpunit",
+      exitCode: 0,
+    });
+    expect(parsed.summary).toEqual({
+      passed: 4,
+      failed: 0,
+      skipped: 0,
+      errors: 0,
+      warnings: 1,
+    });
+    // No banner, so no version states that the count moved: the
+    // fail-safe reading keeps it in `summary.warnings` and the detector
+    // stays quiet.
+    expect(parsed.warnings).toEqual([]);
+  });
+
+  it("no banner, and the two readings disagree about EXECUTED while agreeing about PASSED: still ambiguous, because the question is what ran, not what passed", () => {
+    // SYNTHETIC (banner-less by construction, and PHPUnit would print
+    // `FAILURES!` rather than `WARNINGS!` above this tally): one test,
+    // counted BOTH as a warning and as a failure. Read as a PHPUnit 9,
+    // the warning token takes the single test out of the budget, so
+    // nothing executed and nothing passed; read as a 10+, the test ran
+    // and its failure takes it, so one executed and still nothing
+    // passed. The two readings therefore disagree about `executed` and
+    // agree about `passed` -- a disagreement check written on `passed`
+    // finds nothing ambiguous here and falls through to `"zero"`,
+    // asserting that nothing ran about a run that, read as a 10+, ran
+    // its one test and failed it.
+    const output =
+      "WARNINGS!\nTests: 1, Assertions: 0, Warnings: 1, Failures: 1.\n";
+    expect(zeroTests(output)).toBe("ambiguous");
+    const reason = phpunitZeroTestsVerdict(output).reason;
+    expect(reason).toContain("`Warnings: 1`");
+    expect(reason).toContain("leaving 0 executed");
+    expect(reason).toContain("leaving 1");
+    // The fail-safe summary printed beside the warning, and the reading
+    // it carries, are named in the warning text itself (Summary.warnings
+    // documents the same version dependence).
+    expect(reason).toContain("carries the PHPUnit 9 reading");
+    const parsed = phpunitDetector.parse({
+      output,
+      command: "vendor/bin/phpunit",
+      exitCode: 0,
+    });
+    expect(parsed.summary).toEqual({
+      passed: 0,
+      failed: 0,
+      skipped: 0,
+      errors: 0,
+      warnings: 1,
+    });
+  });
+});
+
+describe("verify: phpunit zero_tests_ambiguous warning (a banner-less green PHPUnit 11 run)", () => {
+  it("a banner-less PHPUnit-11-shaped green tally gets the ambiguity warning and NO no_tests_executed claim", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const output = bannerlessGreenPhpunit11Tail();
+    // Read as a PHPUnit 9 this run executed nothing; read as a PHPUnit
+    // 10+ it ran and passed all 15. The output itself does not say
+    // which, so claiming `no_tests_executed:` here would be a false
+    // claim about a green run whose banner merely fell out of the kept
+    // tail.
+    expect(zeroTests(output)).toBe("ambiguous");
+    const { fn } = makeStubExec({
+      "npm run test --silent": { exitCode: 0, stdoutTail: output },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: [phpunitDetector],
+    });
+    const check = result.checks[0];
+    expect(check.status).toBe("pass");
+    // Still this detector's own output (the tally line selects it), so
+    // the ambiguity is reported rather than silently falling to generic.
+    expect(check.detector).toBe("phpunit");
+    expect(result.warnings.some((w) => w.includes("no_tests_executed:"))).toBe(
+      false,
+    );
+    const ambiguous = result.warnings.filter((w) =>
+      w.includes("zero_tests_ambiguous:"),
+    );
+    expect(ambiguous).toHaveLength(1);
+    expect(ambiguous[0]).toContain("test: zero_tests_ambiguous:");
+    expect(ambiguous[0]).toContain("states no PHPUnit version banner");
+    expect(ambiguous[0]).toContain("`Warnings: 15`");
+    // The count the two readings disagree about is named on both sides,
+    // so a reader can act on it without re-running anything.
+    expect(ambiguous[0]).toContain("leaving 0 executed");
+    expect(ambiguous[0]).toContain("leaving 15");
+  });
+
+  it("a genuinely zero-executed run whose version IS stated keeps the no_tests_executed claim and gets no ambiguity warning", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run test --silent": {
+        exitCode: 0,
+        stdoutTail: readCaptured("phpunit-warnings"),
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: [phpunitDetector],
+    });
+    expect(result.checks[0].status).toBe("pass");
+    expect(result.warnings.some((w) => w.includes("no_tests_executed:"))).toBe(
+      true,
+    );
+    expect(
+      result.warnings.some((w) => w.includes("zero_tests_ambiguous:")),
+    ).toBe(false);
+  });
+});
+
+describe("phpunitDetector: selection and banner-anchoring guards", () => {
+  it("a non-phpunit detector selection with zero-test-looking output gets no no_tests_executed warning (the detector === phpunitDetector guard)", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    // `phpunit-warnings.txt` genuinely reads as zero tests executed
+    // (asserted below), but `phpunitDetector` is deliberately left out
+    // of the detector pool here, so `selectDetector` falls to the
+    // generic fallback instead (vitest's own detector does not match
+    // this output either -- pinned elsewhere: "vitest, tsc, and eslint
+    // detectors do not match phpunit captured output"). The phpunit-only
+    // `no_tests_executed:` warning must never fire for a non-phpunit
+    // selection, however the underlying output reads: without the
+    // `detector === phpunitDetector` guard, this exact case would get
+    // the warning even though no phpunit-specific parsing ever ran.
+    const output = readCaptured("phpunit-warnings");
+    expect(zeroTests(output)).toBe("zero");
+    const { fn } = makeStubExec({
+      "npm run test --silent": {
+        exitCode: 0,
+        stdoutTail: output,
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: [vitestDetector],
+    });
+    const check = result.checks[0];
+    expect(check.status).toBe("pass");
+    expect(check.detector).toBe("generic");
+    expect(result.warnings.some((w) => w.includes("no_tests_executed:"))).toBe(
+      false,
+    );
+    expect(
+      result.warnings.some((w) => w.includes("zero_tests_ambiguous:")),
+    ).toBe(false);
+  });
+
+  it("the banner selects this detector only on its own whole line: indented, prefixed, or reduced to the credit line, it does not", () => {
+    const banner = "PHPUnit 11.5.56 by Sebastian Bergmann and contributors.";
+    const matches = (output: string): boolean =>
+      phpunitDetector.matches({ output, command: "", exitCode: 0 });
+
+    // Control: PHPUnit's own real banner, alone on its line, IS this
+    // detector's output (it is the only shape an `exit()` mid-suite run
+    // leaves behind).
+    expect(matches(`${banner}\n`)).toBe(true);
+
+    // The REAL banner text, indented by a log forwarder that pads every
+    // line: the pattern is anchored at the line start itself (`^`), not
+    // at the first non-space character (`^\s*`), so this is not read as
+    // PHPUnit's own output.
+    expect(
+      matches(`some other tool's log\n  ${banner}\nmore log lines\n`),
+    ).toBe(false);
+
+    // The REAL banner text, prefixed by a CI line-tagger: anchored
+    // (`/^PHPUnit`), not merely "contains PHPUnit ... contributors."
+    // anywhere in the line.
+    expect(matches(`[ci] ${banner}\n[ci] Runtime:       PHP 8.3.33\n`)).toBe(
+      false,
+    );
+
+    // The credit line WITHOUT the version prefix, mid-sentence and
+    // indented: a changelog or a release note quoting PHPUnit's credit
+    // line is not a PHPUnit run, so the version prefix is load-bearing
+    // and not decoration.
+    expect(
+      matches(
+        "This changelog entry mentions PHPUnit's own credit line, by Sebastian Bergmann and contributors. in passing, but is not real phpunit output.\n",
+      ),
+    ).toBe(false);
+    expect(
+      matches(
+        "some other tool's log\n  by Sebastian Bergmann and contributors.\nmore log lines\n",
+      ),
+    ).toBe(false);
+    // The same credit line at the very start of its own UNINDENTED line,
+    // which is what a pattern reduced to the credit line -- or one whose
+    // version prefix merely became optional -- would happily match. The
+    // two cases above cannot tell those apart, since neither of them
+    // starts at a line boundary at all: measured, a mutant making the
+    // version prefix optional survives the whole suite without this
+    // one case.
+    expect(matches("by Sebastian Bergmann and contributors.\n")).toBe(false);
+  });
+
+  it("phpunitDetector does not match the phpstan/phpcs captured output (pin: the three PHP detectors never shadow each other)", () => {
+    for (const name of [
+      "phpstan-clean",
+      "phpstan-errors",
+      "phpcs-clean",
+      "phpcs-errors",
+      "phpcs-two-files",
+      "phpcs-warnings-only",
+    ]) {
+      expect(
+        phpunitDetector.matches({
+          output: readCaptured(name),
+          command: "",
+          exitCode: 1,
+        }),
+      ).toBe(false);
+    }
+  });
+});
+
+describe("phpunitDetector: exit-mid-suite front-truncation limit", () => {
+  it("a banner-less exit-mid-suite tail (the banner itself truncated off the front) falls to the generic detector, with no no_tests_executed warning", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    // Stands in for a large suite whose `exit()` kill happens so far into
+    // the run that even PHPUnit's own version banner (the very first
+    // line it prints) has already been pushed out of exec.ts's kept tail
+    // (60 lines / 6000 chars) by the time the process dies -- see
+    // PHPUNIT_BANNER's own docblock on this limit. No banner, no marker,
+    // no tally: none of this detector's `matches()` checks fire, so
+    // selection falls to `generic` and the zero-tests reading is never
+    // even consulted.
+    const bannerlessTail = Array.from(
+      { length: 5 },
+      (_, i) => `.`.repeat(1) + ` progress line ${i}`,
+    ).join("\n");
+    expect(
+      phpunitDetector.matches({
+        output: bannerlessTail,
+        command: "",
+        exitCode: 0,
+      }),
+    ).toBe(false);
+    const { fn } = makeStubExec({
+      "npm run test --silent": {
+        exitCode: 0,
+        stdoutTail: bannerlessTail,
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: [phpunitDetector],
+    });
+    const check = result.checks[0];
+    expect(check.status).toBe("pass");
+    expect(check.detector).toBe("generic");
+    expect(result.warnings.some((w) => w.includes("no_tests_executed:"))).toBe(
+      false,
+    );
+    expect(
+      result.warnings.some((w) => w.includes("zero_tests_ambiguous:")),
+    ).toBe(false);
+  });
+});
+
+/** Every `phpunit-*` capture in `test/fixtures/captured/`, derived from
+ * the directory itself rather than from a hand-kept list: a capture
+ * added for a new shape joins the disjointness pins below by existing.
+ * The hand-kept list this replaces named 19 captures and silently fell
+ * behind every capture added after it. */
+const CAPTURED_PHPUNIT_FIXTURES: readonly string[] = fs
+  .readdirSync(CAPTURED_DIR)
+  .filter((file) => file.startsWith("phpunit-") && file.endsWith(".txt"))
+  .map((file) => file.slice(0, -".txt".length))
+  .sort();
+
+describe("phpunitDetector: every captured phpunit fixture is disjoint from the other detectors (list derived from the fixtures directory)", () => {
+  it("the list is derived, not hand-kept: it covers more captures than the 19 the old array named, including the newest ones", () => {
+    expect(CAPTURED_PHPUNIT_FIXTURES.length).toBeGreaterThan(19);
+    expect(CAPTURED_PHPUNIT_FIXTURES).toContain("phpunit-no-results-green");
+    expect(CAPTURED_PHPUNIT_FIXTURES).toContain("phpunit-no-results-red");
+    expect(CAPTURED_PHPUNIT_FIXTURES).toContain(
+      "phpunit-no-results-filter-miss",
+    );
+    expect(CAPTURED_PHPUNIT_FIXTURES).toContain("phpunit-list-tests");
+    expect(CAPTURED_PHPUNIT_FIXTURES).toContain("phpunit-exit-mid-suite-9");
+  });
+
+  it("neither vitest, tsc, eslint, phpstan nor phpcs matches ANY captured phpunit output", () => {
+    for (const name of CAPTURED_PHPUNIT_FIXTURES) {
+      const input = { output: readCaptured(name), command: "", exitCode: 0 };
+      for (const detector of [
+        vitestDetector,
+        tscDetector,
+        eslintDetector,
+        phpstanDetector,
+        phpcsDetector,
+      ]) {
+        // Compared as a labelled string so a failure names the fixture
+        // and the detector that shadowed it, not merely `true !== false`.
+        expect(
+          `${name} matched by ${detector.name}: ${detector.matches(input)}`,
+        ).toBe(`${name} matched by ${detector.name}: false`);
+      }
+    }
+  });
+
+  it("selectDetector against DEFAULT_DETECTORS selects phpunit (never generic, never an ambiguous pair) for every captured phpunit output", () => {
+    for (const name of CAPTURED_PHPUNIT_FIXTURES) {
+      const selection = selectDetector(DEFAULT_DETECTORS, genericDetector, {
+        output: readCaptured(name),
+        command: "vendor/bin/phpunit",
+        exitCode: 0,
+      });
+      expect(`${name}: ${selection.detector.name}`).toBe(`${name}: phpunit`);
+      expect(selection.ambiguousCandidates).toBeUndefined();
+    }
+  });
+});
+
+describe("phpunitDetector: a suppressed result report is not a missing one (PHPUnit 10+ --no-results, tracker 3a0c5242)", () => {
+  it("(i) a COMPLETED green `--no-results` run reads not_zero: its progress counter and post-run Time/Memory line are the completion evidence", () => {
+    const output = readCaptured("phpunit-no-results-green");
+    // Captured real (PHPUnit 11.5.56, exit 0, two tests that both ran
+    // and passed): banner, `Runtime:`, `..  2 / 2 (100%)`, `Time:
+    // 00:00.007, Memory: 8.00 MB`. No `OK (`, no marker, no tally --
+    // `--no-results` suppresses the result report, not the run. Read as
+    // a killed run (as this arm did before this change), `verify`
+    // claims `no_tests_executed` about a green suite and `probe`
+    // refuses every baseline of a project that runs PHPUnit this way.
+    expect(output).toMatch(/^\.\.\s+2 \/ 2 \(100%\)$/m);
+    expect(output).toContain("Time: 00:00.007, Memory: 8.00 MB");
+    expect(output).not.toContain("OK (");
+    expect(zeroTests(output)).toBe("not_zero");
+  });
+
+  it("(i) verify: the completed `--no-results` run stays pass with NO zero-tests warning of either kind", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run test --silent": {
+        exitCode: 0,
+        stdoutTail: readCaptured("phpunit-no-results-green"),
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: [phpunitDetector],
+    });
+    const check = result.checks[0];
+    expect(check.status).toBe("pass");
+    expect(check.detector).toBe("phpunit");
+    expect(result.warnings.some((w) => w.includes("no_tests_executed:"))).toBe(
+      false,
+    );
+    expect(
+      result.warnings.some((w) => w.includes("zero_tests_ambiguous:")),
+    ).toBe(false);
+    // The suppressed report leaves no tally to read, so the counts stay
+    // at the same graceful all-zero convention `No tests executed!`
+    // already uses: this fixture's own `2 / 2 (100%)` counter is
+    // deliberately NOT turned into `passed: 2`, since the RED capture
+    // below prints the very same counter (see `PROGRESS_COUNTER_LINE`).
+    expect(check.summary).toEqual({
+      passed: 0,
+      failed: 0,
+      skipped: 0,
+      errors: 0,
+      warnings: 0,
+    });
+  });
+
+  it("(ii) `--no-results` plus a `--filter` that matches nothing reads ambiguous: banner and `Runtime:` alone, no completion evidence at all", () => {
+    const output = readCaptured("phpunit-no-results-filter-miss");
+    expect(output).toContain("Runtime:");
+    expect(output).not.toMatch(/\d+ \/ \d+ \(/);
+    expect(output).not.toContain("Time:");
+    expect(zeroTests(output)).toBe("ambiguous");
+    // Measured contrast: the SAME filter miss WITHOUT `--no-results`
+    // prints PHPUnit's own `No tests executed!` line on both majors
+    // (captured real as `phpunit-no-tests-executed.txt`), which is a
+    // statement, not an absence, and reads `"zero"`.
+    expect(zeroTests(readCaptured("phpunit-no-tests-executed"))).toBe("zero");
+  });
+
+  it("(iii) `--list-tests` reads ambiguous: documented over-caution, a listing never claimed to run anything", () => {
+    const output = readCaptured("phpunit-list-tests");
+    expect(output).toContain("Available tests:");
+    expect(zeroTests(output)).toBe("ambiguous");
+  });
+
+  it("(iv) a RED `--no-results` run (exit 1) is status fail, so the pass-only zero-tests guard never fires", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const output = readCaptured("phpunit-no-results-red");
+    // Captured real (PHPUnit 11.5.56, exit 1): the same counter and
+    // Time/Memory shape as the green capture, with `.F` progress
+    // characters -- which is exactly why the counter is read as
+    // evidence of completion and never as a passed count.
+    expect(output).toMatch(/^\.F\s+2 \/ 2 \(100%\)$/m);
+    const { fn } = makeStubExec({
+      "npm run test --silent": { exitCode: 1, stdoutTail: output },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: [phpunitDetector],
+    });
+    const check = result.checks[0];
+    expect(check.status).toBe("fail");
+    expect(check.detector).toBe("phpunit");
+    expect(result.warnings.some((w) => w.includes("no_tests_executed:"))).toBe(
+      false,
+    );
+    expect(
+      result.warnings.some((w) => w.includes("zero_tests_ambiguous:")),
+    ).toBe(false);
+  });
+
+  it("(vii) `--no-results --no-progress` and `--no-output` print NOTHING at all, so the output is not phpunit's to read (generic selection, no phpunit claim)", async () => {
+    // Measured (PHPUnit 11.5.56, exit 0, both flag combinations): zero
+    // bytes on stdout and stderr. Constructed here as empty strings
+    // rather than kept as zero-byte fixture files: a zero-byte file
+    // pins nothing about which tool produced it, and an empty capture
+    // carries no PHPUnit evidence whatsoever -- which is the point.
+    for (const output of ["", "\n"]) {
+      expect(
+        phpunitDetector.matches({ output, command: "", exitCode: 0 }),
+      ).toBe(false);
+      const selection = selectDetector(DEFAULT_DETECTORS, genericDetector, {
+        output,
+        command: "vendor/bin/phpunit --no-results --no-progress",
+        exitCode: 0,
+      });
+      expect(selection.detector.name).toBe("generic");
+    }
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run test --silent": { exitCode: 0, stdoutTail: "" },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: [phpunitDetector],
+    });
+    expect(result.checks[0].status).toBe("pass");
+    expect(result.checks[0].detector).toBe("generic");
+    expect(result.warnings.some((w) => w.includes("no_tests_executed:"))).toBe(
+      false,
+    );
+    expect(
+      result.warnings.some((w) => w.includes("zero_tests_ambiguous:")),
+    ).toBe(false);
+  });
+
+  it("the post-run Time/Memory line alone is enough completion evidence (SYNTHETIC: banner plus Time, no counter)", () => {
+    // SYNTHETIC, and labelled as such: no measured PHPUnit invocation
+    // produces a Time/Memory line without a progress counter (both
+    // print together at the end of a completed run, and
+    // `--no-results --no-progress` prints neither because it prints
+    // nothing at all). Its only job is to isolate the Time conjunct:
+    // with that conjunct alone removed from the reading, this input
+    // would be reported as an unreadable result.
+    const output = [
+      "PHPUnit 11.5.56 by Sebastian Bergmann and contributors.",
+      "",
+      "Runtime:       PHP 8.3.33",
+      "",
+      "Time: 00:00.007, Memory: 8.00 MB",
+      "",
+    ].join("\n");
+    expect(output).not.toMatch(/\d+ \/ \d+ \(/);
+    expect(zeroTests(output)).toBe("not_zero");
+  });
+
+  it("the progress counter alone is enough completion evidence, which is also this reading's second documented limit (SYNTHETIC: banner plus counter, no Time)", () => {
+    // SYNTHETIC, and labelled as such: this is the shape a mid-suite
+    // `exit()`/`die()` leaves once the suite is long enough to have
+    // finished a whole progress ROW (PHPUnit prints the `N / M (P%)`
+    // counter at the end of each row) before the kill. Reproducing it
+    // for real needs a suite of more than 63 tests, so it is
+    // constructed here instead, and the limit it pins is documented in
+    // the README: such a kill falls silent (`"not_zero"`) rather than
+    // being reported as unreadable.
+    const output = [
+      "PHPUnit 11.5.56 by Sebastian Bergmann and contributors.",
+      "",
+      "Runtime:       PHP 8.3.33",
+      "",
+      `${".".repeat(63)}  63 / 200 ( 31%)`,
+      "....",
+    ].join("\n");
+    expect(output).not.toContain("Time:");
+    expect(zeroTests(output)).toBe("not_zero");
+  });
+
+  it("the banner conjunct is load-bearing: an output with no phpunit shape in it at all is never reported as an unreadable phpunit result", () => {
+    // The unreadable-result reading is about PHPUnit's OWN output, and
+    // the banner is the only thing that says the output is PHPUnit's at
+    // all. Without that conjunct, ANY silent output -- a front-truncated
+    // tail, another tool's log, an empty string -- would be reported as
+    // a phpunit run whose result cannot be read.
+    for (const output of [
+      "some other tool said nothing useful\n",
+      Array.from({ length: 5 }, (_, i) => `. progress line ${i}`).join("\n"),
+      "",
+    ]) {
+      expect(zeroTests(output)).toBe("not_zero");
+      expect(phpunitZeroTestsVerdict(output).reason).toContain(
+        "no phpunit summary line",
+      );
+    }
+  });
+});
+
+describe("verify: phpunit no_tests_executed detector warning (AC-005)", () => {
+  it("a warnings-only phpunit run stays status pass but gets the no_tests_executed warning", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run test --silent": {
+        exitCode: 0,
+        stdoutTail: readCaptured("phpunit-warnings"),
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: [phpunitDetector],
+    });
+    const check = result.checks[0];
+    expect(check.status).toBe("pass");
+    expect(result.warnings.some((w) => w.includes("no_tests_executed:"))).toBe(
+      true,
+    );
+  });
+
+  it("an all-skipped phpunit run (exit 0) also gets the warning", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run test --silent": {
+        exitCode: 0,
+        stdoutTail: readCaptured("phpunit-all-skipped"),
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: [phpunitDetector],
+    });
+    const check = result.checks[0];
+    expect(check.status).toBe("pass");
+    expect(result.warnings.some((w) => w.includes("no_tests_executed:"))).toBe(
+      true,
+    );
+  });
+
+  it("an empty/filtered phpunit run (No tests executed!, exit 0) also gets the warning", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run test --silent": {
+        exitCode: 0,
+        stdoutTail: readCaptured("phpunit-no-tests-executed"),
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: [phpunitDetector],
+    });
+    const check = result.checks[0];
+    expect(check.status).toBe("pass");
+    expect(result.warnings.some((w) => w.includes("no_tests_executed:"))).toBe(
+      true,
+    );
+  });
+
+  it("a genuine green phpunit run (phpunit-pass.txt) does NOT get the warning", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run test --silent": {
+        exitCode: 0,
+        stdoutTail: readCaptured("phpunit-pass"),
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: [phpunitDetector],
+    });
+    const check = result.checks[0];
+    expect(check.status).toBe("pass");
+    expect(result.warnings.some((w) => w.includes("no_tests_executed:"))).toBe(
+      false,
+    );
+  });
+
+  it("a failing (non-zero exit) phpunit run never gets the pass-only warning, even if its tally shows zero executed", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run test --silent": {
+        exitCode: 1,
+        stdoutTail: readCaptured("phpunit-warnings"),
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: [phpunitDetector],
+    });
+    const check = result.checks[0];
+    expect(check.status).toBe("fail");
+    // `phpunit-warnings.txt` (PHPUnit 9.6.36, plain `Warnings: 1`, not
+    // executed under 9, its own banner stating that 9) genuinely reads
+    // as zero executed tests, independent of exit code (asserted
+    // below); only `status === "pass"` gates the warning, so a mutant
+    // widening that condition to `true` would add the warning here even
+    // though `status` is `fail`. A capture that executed a real test
+    // would read `not_zero` and let the assertion below pass for the
+    // wrong reason under that mutant.
+    expect(zeroTests(readCaptured("phpunit-warnings"))).toBe("zero");
+    expect(result.warnings.some((w) => w.includes("no_tests_executed:"))).toBe(
+      false,
+    );
+  });
+
+  it("the warning wording names the status, not the exit code, since --pass-regex can decide pass on a non-zero exit", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run test --silent": {
+        exitCode: 7,
+        stdoutTail: readCaptured("phpunit-warnings"),
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: [phpunitDetector],
+      passRegexes: { test: compilePassRegex("Warnings: 1") },
+    });
+    const check = result.checks[0];
+    expect(check.status).toBe("pass");
+    expect(
+      result.warnings.some((w) =>
+        w.includes(
+          "no_tests_executed: phpunit executed no test at all even though the check passed: phpunit's own tally line leaves zero executed tests once every not-executed category is taken out of its stated total.",
+        ),
+      ),
+    ).toBe(true);
+    // The old wording claimed an exit code of 0, which is false here
+    // (exit 7, matched only via --pass-regex): pin that the message
+    // never claims that.
+    expect(
+      result.warnings.some((w) => w.includes("even though the check exited 0")),
+    ).toBe(false);
   });
 });
 

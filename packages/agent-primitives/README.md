@@ -255,20 +255,45 @@ zero-exit check). Three more default candidates cover PHP: `phpunit`
 (`OK (N tests, M assertions)`; `FAILURES!`/`ERRORS!`/`WARNINGS!`/`OK,
 but incomplete, skipped, or risky tests!` plus a `Tests: N, Assertions:
 M, ...` tally line whose named counts -- `Errors`, `Failures`,
-`Warnings`, `Skipped`, `Incomplete`, `Risky` -- are read by name, not
-position, since PHPUnit's own field order changes with which marker
-fired; and `No tests executed!`; a PHP-level deprecation notice on an
-otherwise green run is reported as a detector warning, not a failure.
-The counts are derived by spending the run's own stated total, one
-category at a time: Skipped, Incomplete and Warnings did not execute
-(PHPUnit counts a warning such as `No tests found in class "X".` as a
-whole synthetic test), Failures, Errors and Risky did (a risky test ran,
-it just asserted nothing), so `passed` is what remains of the executed
-count after failures and errors, never a negative number and never more
-than the run itself reported. A numbered `N) Class::method` entry
-becomes a `failures` entry only under an error or failure section
-header, since a risky or incomplete entry carries the same header
-shape), `phpstan` (` [OK] No errors`, or a per-file table closed by
+`Warnings`, `Skipped`, `Incomplete`, `Risky`, and, under PHPUnit 11, the
+two-word `PHPUnit Deprecations`/`PHPUnit Warnings`/`PHPUnit Notices` (a
+meta issue about the test suite's own use of a deprecated PHPUnit
+feature, not about the code under test) or the plain single-word
+`Deprecations`/`Notices` -- are read by name, not position, since
+PHPUnit's own field order changes with which marker fired; and `No
+tests executed!`; a PHP-level deprecation notice on an otherwise green
+run is reported as a detector warning, not a failure. The counts are
+derived by spending the run's own stated total, one category at a time:
+Skipped and Incomplete never execute, Failures, Errors and Risky always
+do (a risky test ran, it just asserted nothing), so `passed` is what
+remains of the executed count after failures and errors, never a
+negative number and never more than the run itself reported. `Warnings`
+is version-dependent, read off PHPUnit's own version banner: under
+PHPUnit 9 it does not execute either (PHPUnit counts a warning such as
+`No tests found in class "X".` as a whole synthetic test that never ran
+a body), but under PHPUnit 10/11 the same plain `Warnings: N` token
+counts N tests that DID run and raised a PHP-level warning during their
+own execution, so it executes there, folded into `passed` the same way
+`Risky` is (captured real, PHPUnit 11.5.56: a single test raising
+`E_USER_WARNING`, `Tests: 1, Assertions: 1, Warnings: 1.`, exit `0`,
+derives `passed: 1`, not `passed: 0`, and names the count in a
+`phpunit_warnings:` detector warning, since `summary.warnings` stays `0`
+there). A prerelease banner (`PHPUnit 11.0.0-RC1`) is read at its own
+major too. Output whose banner is not present at all (front-truncated
+away) keeps the PHPUnit 9 reading for the summary, as the fail-safe
+default, but is NOT read as a verdict about whether anything ran: see
+the zero-tests reading under `probe` below.
+`Deprecations`/`Notices` and their two-word `PHPUnit `-prefixed
+counterparts are read (so a two-word one no longer breaks the whole
+tally line's match) but deliberately spent nowhere on any PHPUnit
+version: they are raised inside a test that genuinely ran, so treating
+them as not-executed would wrongly shrink a real `passed` count. A
+numbered `N) Class::method` entry becomes a `failures` entry only under
+an error or failure section header, or under PHPUnit 11's own `There was
+1 PHPUnit error:` section kind (a suite-level failure such as an invalid
+data provider, counted under the tally's `Errors:` the same as an
+ordinary error), since a risky or incomplete entry carries the same
+header shape), `phpstan` (` [OK] No errors`, or a per-file table closed by
 ` [ERROR] Found N errors`, `summary.errors` preferring that stated
 total over the row count), and `phpcs` (one `FOUND N ERRORS ...
 AFFECTING M LINES` summary PER FILE, summed across every file rather
@@ -1729,8 +1754,10 @@ or a `Tests` summary with nothing `passed` and nothing `failed` (an
 all-skipped/all-todo run, the shape a `-t`/name filter that matches no
 test inside files vitest still loaded produces), or a complete vitest
 `--reporter=json` result whose `numPassedTests + numFailedTests` is zero,
-and node's built-in
-`--test` runner's own zero-count summary line. Either hit is
+node's built-in
+`--test` runner's own zero-count summary line, and PHPUnit's own
+zero-tests reading (which additionally refuses an output that cannot be
+read either way -- see the PHP section's zero-tests paragraphs). Any hit is
 `status: "inconclusive"`, `reason: "no_tests_executed"`, exit `2`,
 `mutation_probe.result: "not_run"` -- never `"killed"`/`"survived"`, a
 verdict that measured nothing. A baseline that reported no exit code of
@@ -1739,7 +1766,7 @@ killed, or one something outside it killed, has a cut-short tail that
 proves nothing about the suite, whatever happens to sit at its end, so a
 zero-count summary line in such a tail leaves the refusal at
 `baseline_failed` (with the signal named in `warnings`) rather than
-claiming the suite executed nothing. **Both detectors, and the generic
+claiming the suite executed nothing. **These detectors, and the generic
 fallback, `--require-baseline-evidence`, and `--pass-regex`, all
 described below, only ever see each side's CAPTURED output tail** (the
 same 60-line/6000-character bound every exec result reports as
@@ -1749,7 +1776,7 @@ output; a summary line, a `--require-baseline-evidence` pattern, or a
 miss, not "not present at all" -- see the truncation paragraph below for
 how that is surfaced.
 
-For a test runner neither built-in detector recognizes, a mutant run
+For a test runner no built-in detector recognizes, a mutant run
 whose own verdict rests on a PASS -- exit code `0` by default, or
 `--pass-regex`'s own match when that flag is given (a `survived`
 verdict, whichever `--expect` was given -- the predicate direction is
@@ -1757,7 +1784,7 @@ verdict, whichever `--expect` was given -- the predicate direction is
 `survived` under either `--expect`) -- additionally falls back to
 comparing its own output
 against the baseline's: byte-identical stdout/stderr on both sides, with
-no summary line either detector recognizes on either side either, is
+no summary line any of those detectors recognizes on either side either, is
 read as "this ran the same nothing twice" rather than a real verdict. A
 `survived`/`killed` verdict resting on a FAILING verdict already
 carries a real signal (the run itself disagreed with the baseline)
@@ -2296,7 +2323,7 @@ above.
 | `pre_failed` | present | present | `--pre` exited non-zero during the baseline phase |
 | `baseline_failed` | present | present | the baseline test itself exited non-zero, or reported no exit code at all (it timed out, or a signal killed it), or `--pass-regex` was given and its pattern did not match the baseline's own output |
 | `target_changed_during_baseline` | present | present | the baseline run rewrote the target (a formatter, a codegen step) before any mutation |
-| `no_tests_executed` | present | present | the baseline's own output shows a known test runner (vitest, node's built-in `--test`) executed nothing, whatever its exit code -- see the zero-tests paragraph above |
+| `no_tests_executed` | present | present | the baseline's own output shows a known test runner (vitest, node's built-in `--test`, phpunit) executed nothing, whatever its exit code -- and, for phpunit only, also where that output cannot be read either way (an unreadable result, or a tally whose reading needs a version banner the output does not carry), which this one reason overstates as "executed nothing"; see the zero-tests paragraphs above |
 | `baseline_evidence_not_matched` | present | present | `--require-baseline-evidence <regex>` was given and did not match the baseline's own output |
 
 The six `present` rows are exactly the refusals that fire past the dry
@@ -2756,17 +2783,148 @@ already had via its own `--pass-regex`/`passWhen.regex`.
 all-skipped/no-test-files shapes and node `--test`'s zero-count summary
 now also recognizes PHPUnit's own `No tests executed!` line and any run
 whose executed count is zero: the stated total less every tally category
-that did not execute (Skipped, Incomplete and Warnings), which covers an
-all-skipped run, a warnings-only run, and a stated `OK (0 tests, 0
+that did not execute (Skipped and Incomplete always; plain `Warnings`
+too under PHPUnit 9, read off the run's own version banner -- see "Three
+more default candidates cover PHP" above), which covers an all-skipped
+run, a PHPUnit 9 warnings-only run, and a stated `OK (0 tests, 0
 assertions)` (defensive -- not observed from a real capture; PHPUnit
 9.6.36 prints `No tests executed!` for an empty suite instead). A red
 run that is ALSO all-skipped/incomplete does not confuse this guard,
 since it never relies on `passed`/`failed`/`errors` alone; an all-risky
-run is deliberately not flagged, since a risky test did run. A baseline
-(or mutant run) that exits `0` with nothing actually executed is
-`status: "inconclusive"`, `reason: "no_tests_executed"`, never read as a
-real pass, exactly like the vitest/node cases documented under `probe`
-above.
+run is deliberately not flagged, since a risky test did run, and neither
+is a PHPUnit 10/11 warnings-only run, since the version-aware reading
+also counts that as executed. A baseline (or mutant run) that exits `0`
+with nothing actually executed is `status: "inconclusive"`, `reason:
+"no_tests_executed"`, never read as a real pass, exactly like the
+vitest/node cases documented under `probe` above.
+
+**The zero-tests reading is three-valued**: `phpunitZeroTestsVerdict`
+returns `"zero"` (nothing executed), `"not_zero"` (no evidence that
+nothing executed), or `"ambiguous"` (the question cannot be answered
+from this output at all). `"zero"` is only ever taken from something
+PHPUnit itself stated -- its own `No tests executed!` line, or a tally
+whose executed count derives to zero without depending on a version the
+output does not state -- never from an absence in the output.
+
+`"ambiguous"` has two causes. First, a missing result report: the output
+carries PHPUnit's version banner but no summary line, no `N / M (P%)`
+progress counter and no post-run `Time: <t>, Memory: <m>` line, the
+shape a mid-suite `exit()`/`die()` leaves behind (see below). Second, a
+missing version: the output states no PHPUnit version banner AND its
+tally carries a version-dependent count that decides the question -- a
+long green PHPUnit 11 run ending in `Tests: 15, Assertions: 15,
+Warnings: 15.` whose banner fell out of the kept tail executed nothing
+when read as a 9 and ran and passed all 15 when read as a 10+, and the
+output itself does not say which. Where the two readings agree (a
+nonzero `Warnings` count alongside other, version-independent executed
+tests) the verdict is that agreed value, not `"ambiguous"`: the count is
+unreadable, the zero-tests question is not.
+
+The two callers collapse that third value in opposite directions, on
+purpose. `verify` warns `no_tests_executed:` only for `"zero"` and emits
+a distinct `zero_tests_ambiguous:` warning for `"ambiguous"`, so it
+never asserts a hollow pass it cannot actually read; both texts carry
+the reading's own reason (for the missing-version cause: the unreadable
+count, both readings' executed totals, and which of the two the summary
+printed beside it carries). `probe` refuses on anything but
+`"not_zero"`: it cannot warn and carry on the way `verify` can, and
+scoring such a run would compare a mutant whose executed count cannot be
+read against the baseline as if it had run and passed, reporting
+`survived`. A refusal costs a probe result; the other collapse buys a
+verdict with a false one. That refusal reports the existing
+`no_tests_executed` reason, which overstates what is known for either
+cause: the run may in fact have executed everything under a PHPUnit 10+
+reading, and an unreadable-result run may well have executed and passed
+a test before it was killed. The overstatement is an accepted limit of
+this release, not a description of the reading; a dedicated refusal
+reason for "cannot be read" is a follow-up, since `RefusalReason` is
+part of `probe`'s published result contract.
+
+**An `exit()`/`die()` call mid-suite is read as an UNREADABLE result,
+not as zero tests.** A test method that calls `exit()`/`die()` (or is
+otherwise killed -- a fatal signal, a segfault) terminates the PHP
+process itself before PHPUnit prints any result report at all: no `OK
+(`, no marker, no tally, no `No tests executed!`, just PHPUnit's own
+version banner and however many progress characters printed before the
+kill (captured real on both majors: `phpunit-exit-mid-suite.txt` under
+PHPUnit 11.5.56 and `phpunit-exit-mid-suite-9.txt` under 9.6.36, exit
+`0`, one `.` and nothing else; see `test/fixtures/README.md`). This
+detector's own `matches()` recognizes PHPUnit's version banner on its
+own, so the shape reaches this detector instead of falling to `generic`,
+and `phpunitZeroTestsVerdict` reports it as `"ambiguous"`: nothing in
+such an output says how many tests ran, and that single progress dot in
+the captured fixture is one test that genuinely ran and passed before
+the kill, so a zero-tests claim about it would be false rather than
+merely unproven. Both the `probe` zero-tests guard above and the
+`verify` warning below pick the shape up automatically, since both are
+built on that same function; in `probe`, a mutant run whose own output
+collapses to it reports `mutation_probe.result: "not_run"` with
+`reason: "no_tests_executed"` rather than `"killed"`, since a crashed
+run is not evidence the test discriminates the mutant (that reason's own
+overstatement is the accepted limit named above).
+
+A COMPLETED run whose result report is merely suppressed is excluded by
+its own completion evidence: PHPUnit 10 and up accept `--no-results`,
+and a green two-test suite run that way prints its banner, its `..  2 /
+2 (100%)` progress counter and its post-run `Time: 00:00.007, Memory:
+8.00 MB` line before stopping, exit `0` (captured real:
+`phpunit-no-results-green.txt`; PHPUnit 9.6.36 rejects the flag outright
+with `Unknown option "--no-results"`, exit `1`, so the shape is 10+
+only). Requiring both of those to be ABSENT is what separates a
+suppressed report from a missing one -- without it, such a green run was
+read as a killed one, `verify` claimed `no_tests_executed` about it, and
+`probe` refused every baseline of a project that runs PHPUnit that way.
+The counter is read as evidence of completion only and never as a count:
+the same flag on a RED suite prints the identical `2 / 2 (100%)` tail
+with `.F` progress characters (`phpunit-no-results-red.txt`, exit `1`),
+so it counts tests PHPUnit reached, not tests that passed.
+
+Three limits. First, the counter pattern is anchored at the end of a
+line only, not to a progress row: any line that merely ENDS in the
+`N / M (P%)` shape is read as completion evidence. A kill late enough to
+have completed a whole progress row (PHPUnit prints the counter at the
+end of each row, so that needs more than 63 tests) is the expected case,
+but a failure message or a PHP fatal-error line ending in that shape
+has the same effect, and the reading then falls silent (`"not_zero"`)
+instead of reporting the result as unreadable; a row-anchored tightening
+of the pattern is not pinned by the suite either way. Second, the banner
+is the selection signal, so a banner-only output (`phpunit --version`)
+selects this detector and reads `"ambiguous"`, and with two banners in
+one capture the first one wins the version read for the tally
+categories. Third, inherited from `exec.ts`'s
+own bounded tail (60 lines / 6000 characters, kept from the END of a
+truncated capture): a suite large enough to push even the version banner
+itself -- PHPUnit's very first line -- out of that tail before the
+`exit()`/`die()` kill falls to `generic`, since none of `matches()`'s
+checks fire on a banner-less tail; only `probe`'s byte-identical generic
+fallback catches a MUTANT that changes such a large, front-truncated
+run's shape, never a baseline that already was that shape. A
+`--list-tests` listing (banner plus `Available tests:` and the test
+names; 9.6 prints `Available test(s):`) has no completion evidence
+either and is reported as unreadable too: over-caution rather than a
+correct description, and the fail-safe direction for both callers.
+
+**`verify` now warns on a hollow phpunit pass, too.** Before this, only
+`probe`'s zero-tests guard (via `phpunitZeroTestsVerdict`) caught a
+warnings-only, all-skipped, or empty/filtered PHPUnit run; a plain
+`verify` call read the same run as an ordinary `pass` with nothing to
+say about it. `verify` now pushes a `no_tests_executed:` detector
+warning onto any phpunit check whose own status is `pass` while
+PHPUnit's own output states that it executed nothing -- carrying the
+reading's own reason clause, so the text says which of the two origins
+it came from (the explicit `No tests executed!` line, or the tally
+derivation) instead of naming a tally line the explicit case does not
+have -- reusing `phpunitZeroTestsVerdict` rather than re-deriving it,
+and only for a `phpunit`-selected check: a non-`phpunit` detector
+selection never gets this warning, however its own output reads. The
+check's `status` itself is NOT changed to anything else: the status
+stays the verdict (`pass`), same as every other check here, and this
+warning is only the signal that the pass is hollow, for a caller that
+wants to notice; the warning's own wording names the status rather than
+an exit code, since `--pass-regex` can decide `pass` on a non-zero exit.
+A caller that must actually refuse a hollow pass, not merely be warned
+about it, still wants `probe`'s own zero-tests guard (or `--pass-regex`
+naming a real summary line), not this warning.
 
 **The pass predicate** (`--pass-regex`/`passWhen.regex`) is implemented on
 both `probe` and `verify`; each documents its own option in its own
