@@ -36,9 +36,9 @@
   corrections, found by the independent review of this audit, are
   range-scope misses rather than wrong sites: model-preselection.md's
   sentence about the tier a variant is never rendered for names a
-  `continue` guard that sat one line above each cited range
-  (`init.ts:861-863` and `init.ts:937-938`); both ranges now start on
-  the guard line (`init.ts:860-863`, `init.ts:936-938`), anchors
+  `continue` guard that sat one line above each cited range into
+  `src/init.ts` (lines 861 to 863 and 937 to 938); both ranges now
+  start on the guard line (860 to 863 and 936 to 938), anchors
   unchanged.
 
   Also explicitly re-checked the specific leads the tracker task
