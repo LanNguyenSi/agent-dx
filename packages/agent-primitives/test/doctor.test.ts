@@ -52,22 +52,17 @@ const HAS_PYTHON3 = (() => {
   }
 })();
 
-/** The exact cache path THIS host's real python3 (real `process.env`
- * included, so an already-set `PYTHONPYCACHEPREFIX` is honoured the
- * same way doctor's own child invocation honours it) would use for
- * `target` under `cwd`: what `doctor`'s own `python-bytecode-cache`
- * check resolves internally, computed independently here so a test can
- * plant a fixture cache file at the one path the check will actually
- * look for. */
 /** A `python3` stand-in written into `binDir`, for the cases that turn
- * on WHETHER doctor spawns its cache-path resolution and on what it does
- * with an answer it does not get, rather than on a real CPython's own
- * resolution: doctor looks `python3` up on the `pathEnv` it is handed
- * and runs a plain `python3 -c ...`, so a stub pins both on any host,
- * one with no CPython included. Every call appends a line to `callLog`
- * (a path outside `binDir`), so a test can assert the spawn did not
- * happen at all; `printsPath`, when given, is echoed as the resolved
- * cache path the way the real resolver's one line of stdout is. */
+ * on WHETHER doctor spawns its cache-path resolution, on WHAT it asks
+ * about, and on what it does with an answer it does not get, rather
+ * than on a real CPython's own resolution: doctor looks `python3` up on
+ * the `pathEnv` it is handed and runs a plain `python3 -c ...`, so a
+ * stub pins all three on any host, one with no CPython included. Every
+ * call appends its own arguments to `callLog` (a path outside
+ * `binDir`), so a test can assert the spawn did not happen at all, or
+ * assert which source path it was asked about; `printsPath`, when
+ * given, is echoed as the resolved cache path the way the real
+ * resolver's one line of stdout is. */
 function writePython3Stub(
   binDir: string,
   callLog: string,
@@ -76,7 +71,7 @@ function writePython3Stub(
   const script = [
     "#!/bin/sh",
     "# Test stub; see writePython3Stub in doctor.test.ts.",
-    `printf '%s\\n' 'called' >> '${callLog}'`,
+    `printf '%s\\n' "$*" >> '${callLog}'`,
     ...(opts.printsPath !== undefined
       ? [`printf '%s\\n' '${opts.printsPath}'`]
       : []),
@@ -88,15 +83,23 @@ function writePython3Stub(
   fs.chmodSync(stubPath, 0o755);
 }
 
+/** The exact cache path THIS host's real python3 (real `process.env`
+ * included, so an already-set `PYTHONPYCACHEPREFIX` is honoured the
+ * same way doctor's own child invocation honours it) would use for
+ * `target` under `cwd`: what `doctor`'s own `python-bytecode-cache`
+ * check resolves internally, computed independently here so a test can
+ * plant a fixture cache file at the one path the check will actually
+ * look for. */
 function resolveCachePathViaPython3(cwd: string, target: string): string {
+  const realCwd = fs.realpathSync(cwd);
   const result = spawnSync(
     "python3",
     [
       "-c",
       "import importlib.util, sys; print(importlib.util.cache_from_source(sys.argv[1]))",
-      target,
+      path.resolve(realCwd, target),
     ],
-    { cwd, encoding: "utf8" },
+    { cwd: realCwd, encoding: "utf8" },
   );
   const resolved = result.stdout?.trim();
   if (result.status !== 0 || !resolved) {
@@ -104,7 +107,15 @@ function resolveCachePathViaPython3(cwd: string, target: string): string {
       `could not resolve ${target}'s own cache path via python3: ${result.stderr}`,
     );
   }
-  return resolved;
+  // Real, absolute, both ways, for the two reasons
+  // `resolvePyCacheTarget`'s own docblock gives (an unset prefix
+  // answering relatively, a set prefix joining the source's own real
+  // directory). This helper has to resolve exactly as the check does,
+  // since a test plants a fixture cache at the one path the check will
+  // look for. Where the helper and the implementation shared the
+  // unresolved spelling, the assertions passed while both looked at the
+  // wrong place.
+  return path.resolve(realCwd, resolved);
 }
 
 afterEach(() => {
@@ -504,6 +515,80 @@ describe("doctor: checks, in both states", () => {
     expect(check?.ok).toBe(true);
     expect(check?.detail).toContain("fixture.py");
     expect(check?.detail).toContain("python3 not found on PATH");
+  });
+
+  it("python-bytecode-cache: asks python3 about the target's real absolute path, not the spelling the caller used", async () => {
+    // The other half of the same resolution: `cache_from_source` joins
+    // the prefix with the SOURCE's own directory, and for a relative
+    // source that directory is `os.getcwd()`, which is always the real
+    // path. A directory reached through a symlink therefore has two
+    // spellings that answer differently on a host whose python3
+    // redirects its cache (macOS's own, where every mkdtemp path is
+    // reached through `/var -> /private/var`), and only the real one
+    // names the file the interpreter's own imports write. Pinned here
+    // through the stub's argument log, which needs no CPython at all;
+    // the assertion is exact on every host, and discriminates on any
+    // host whose temp directory is reached through a symlink, this one
+    // included.
+    const dir = makeTmpDir();
+    const binDir = makeTmpDir();
+    const callLog = path.join(makeTmpDir(), "python3-calls.txt");
+    fs.writeFileSync(path.join(dir, "fixture.py"), "");
+    writePython3Stub(binDir, callLog, { exitStatus: 0, printsPath: "" });
+    await doctor({
+      required: [],
+      optional: [],
+      cwd: dir,
+      targets: ["fixture.py"],
+      pathEnv: binDir,
+    });
+    const asked = fs.readFileSync(callLog, "utf8");
+    expect(asked).toContain(path.join(fs.realpathSync(dir), "fixture.py"));
+  });
+
+  it("python-bytecode-cache: resolves a RELATIVE cache path from python3 against the given cwd, not this process's own", async () => {
+    // `cache_from_source` is a pure string transform, so a python3 with
+    // no `sys.pycache_prefix` set (every ordinary host but macOS's own
+    // system python3) answers a relative source path with an equally
+    // relative cache path. Checked against the wrong base, that reports
+    // a cache belonging to whatever directory the caller's process
+    // happens to sit in, or none where the target really has one. The
+    // stub answers relatively on purpose; the planted cache sits in the
+    // fixture directory, which is the `cwd` the caller named and the
+    // only place the answer may be read against.
+    const dir = makeTmpDir();
+    const binDir = makeTmpDir();
+    const callLog = path.join(makeTmpDir(), "python3-calls.txt");
+    fs.writeFileSync(path.join(dir, "fixture.py"), "");
+    const relativeAnswer = path.join("__pycache__", "fixture.cpython-312.pyc");
+    // The expectation is spelled with the REAL directory, the one the
+    // check resolves against: a mkdtemp path is reached through a
+    // symlink on macOS, and the same file then has two spellings.
+    const plantedCache = path.join(fs.realpathSync(dir), relativeAnswer);
+    fs.mkdirSync(path.dirname(plantedCache), { recursive: true });
+    fs.writeFileSync(plantedCache, "");
+    writePython3Stub(binDir, callLog, {
+      exitStatus: 0,
+      printsPath: relativeAnswer,
+    });
+    const result = await doctor({
+      required: [],
+      optional: [],
+      cwd: dir,
+      targets: ["fixture.py"],
+      pathEnv: binDir,
+    });
+    const check = result.checks.find((c) => c.name === "python-bytecode-cache");
+    expect(check?.ok).toBe(true);
+    expect(fs.existsSync(callLog)).toBe(true);
+    // Found, and named by its absolute path under the given cwd. Read
+    // against this process's cwd instead, the same answer names nothing
+    // that exists, and the check reports no cache at all.
+    expect(check?.detail).toContain(plantedCache);
+    expect(check?.detail).not.toContain("no Python bytecode cache found");
+    // The fallback clauses are for a target that could not be resolved;
+    // this one was.
+    expect(check?.detail).not.toContain("did not resolve a cache path");
   });
 
   it("python-bytecode-cache: ok, names the target it fell back for when python3 IS on PATH but resolves no cache path for it", async () => {

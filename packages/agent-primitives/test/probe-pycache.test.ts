@@ -139,16 +139,39 @@ function initPyRepo(): { repo: string } {
  * bystander run below are provably looking at the one location that
  * matters, on any host -- not merely wherever the common case happens
  * to put it.
+ *
+ * The source path handed to `cache_from_source` is absolute and REAL
+ * (`fs.realpathSync`), and the answer is resolved against that same
+ * real directory. Both halves are load-bearing, for the two shapes
+ * `cache_from_source` has, and it is a pure string transform in each:
+ *
+ * - With no cache prefix set (every ordinary host, the Linux CI
+ *   included), a relative `fixture.py` answers the equally relative
+ *   `__pycache__/fixture.cpython-3X.pyc`, which every `fs` call here
+ *   would resolve against the VITEST process's own cwd (this package)
+ *   rather than the fixture repository.
+ * - With a prefix set (macOS's own system python3 redirects to a
+ *   per-user Caches directory), the answer is absolute either way, but
+ *   the prefix is joined with the source's own directory, and for a
+ *   relative source that directory comes from `os.getcwd()`, which is
+ *   always the REAL path. A `mkdtemp` path on macOS is reached through
+ *   the `/var -> /private/var` symlink, so the unresolved spelling
+ *   answers a directory under the prefix that the interpreter's own
+ *   imports never write to.
+ *
+ * Asking about the real absolute path satisfies both: it is what the
+ * interpreter's own unoverridden imports of that file resolve to.
  */
 function ambientPycPath(repo: string): string {
+  const realRepo = fs.realpathSync(repo);
   const result = spawnSync(
     "python3",
     [
       "-c",
       "import importlib.util, sys; print(importlib.util.cache_from_source(sys.argv[1]))",
-      "fixture.py",
+      path.join(realRepo, "fixture.py"),
     ],
-    { cwd: repo, encoding: "utf8" },
+    { cwd: realRepo, encoding: "utf8" },
   );
   const resolved = result.stdout?.trim();
   if (result.status !== 0 || !resolved) {
@@ -156,7 +179,7 @@ function ambientPycPath(repo: string): string {
       `could not resolve fixture.py's own cache path via python3: ${result.stderr}`,
     );
   }
-  return resolved;
+  return path.resolve(realRepo, resolved);
 }
 
 /** Runs `test_fixture.py` directly (never through `probe()`), with NO

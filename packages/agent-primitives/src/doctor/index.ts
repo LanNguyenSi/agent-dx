@@ -155,13 +155,47 @@ function findOnPath(
  * actually use. Returns `undefined` on any failure (a non-zero exit, no
  * stdout, or the spawn itself throwing/timing out) so the caller can
  * fall back to the co-located guess for that one target instead of
- * reporting "no cache" on a resolver failure. */
+ * reporting "no cache" on a resolver failure.
+ *
+ * The answer is always absolute, and always about the directory the
+ * caller named: the target is resolved against the REAL `cwd` before
+ * `python3` is asked, and the reply is resolved against that same real
+ * directory. `cache_from_source` is a pure string transform on the path
+ * handed to it, and it has two shapes, each of which needs one half of
+ * that:
+ *
+ * - With no cache prefix set (the ordinary case everywhere but a host
+ *   like macOS's system `python3`, which redirects `sys.pycache_prefix`
+ *   by default), a relative `pkg/mod.py` comes back as the equally
+ *   relative `pkg/__pycache__/mod.cpython-3X.pyc`. Checked with
+ *   `fs.existsSync`, that would be read against THIS process's own cwd
+ *   rather than the `cwd` the caller named (`-C`, or a library caller's
+ *   `cwd` option): a cache reported that is not the target's, or none
+ *   reported where the target has one.
+ * - With a prefix set, the answer is absolute either way, but the
+ *   prefix is joined with the source's own directory, which for a
+ *   relative source is `os.getcwd()` and therefore always the REAL
+ *   path. Asking about an unresolved absolute spelling of a directory
+ *   reached through a symlink (`/var -> /private/var` on macOS, the
+ *   shape every `mkdtemp` path has there) answers a directory under the
+ *   prefix that the interpreter's own imports never write to.
+ *
+ * `realpathSync` failing (a `cwd` that does not exist, which the CLI
+ * rejects up front but a library caller could still pass) falls back to
+ * the path as given: the resolution may then be wrong in the second
+ * shape above, which is no worse than not resolving at all. */
 function resolvePyCacheTarget(
   python3Path: string,
   cwd: string,
   target: string,
   timeoutMs: number,
 ): string | undefined {
+  let realCwd: string;
+  try {
+    realCwd = fs.realpathSync(cwd);
+  } catch {
+    realCwd = cwd;
+  }
   let result;
   try {
     result = spawnSync(
@@ -169,16 +203,16 @@ function resolvePyCacheTarget(
       [
         "-c",
         "import importlib.util, sys; print(importlib.util.cache_from_source(sys.argv[1]))",
-        target,
+        path.resolve(realCwd, target),
       ],
-      { cwd, timeout: timeoutMs, encoding: "utf8" },
+      { cwd: realCwd, timeout: timeoutMs, encoding: "utf8" },
     );
   } catch {
     return undefined;
   }
   if (result.status !== 0) return undefined;
   const resolved = result.stdout?.trim();
-  return resolved ? resolved : undefined;
+  return resolved ? path.resolve(realCwd, resolved) : undefined;
 }
 
 /** The co-located guess `python-bytecode-cache` falls back to when
