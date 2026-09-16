@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-09-16
+
 - A `validate-review-report <file>` CLI subcommand (`-` reads stdin) checks a
   reviewer return's YAML against the reviewer output contract's required
   fields and enums, printing one diagnostic per missing or invalid field and
