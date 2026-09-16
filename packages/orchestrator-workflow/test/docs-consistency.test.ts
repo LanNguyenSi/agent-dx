@@ -8966,3 +8966,75 @@ describe("review-report validator schema matches the reviewer output contract ex
     expect(enumSpellings(block)).toEqual(REVIEW_REPORT_ENUM_VALUES);
   });
 });
+
+describe("implementer pre-return review-slop check names the exact command", () => {
+  const implementerMd = unwrap(readAsset("agents/implementer.md"));
+
+  // Worded tool-agnostically ("when slop-detector is available") per
+  // agent-dx task a378ecca: the installed prompt cannot assume any one
+  // install layout, so it leads with the PATH-installed `slop-detector
+  // check ...` form every consumer can have and names the vendored `node
+  // packages/slop-detector/dist/cli.js check ...` path as the in-repository
+  // alternative. `check` takes one-or-more paths (`<changed file>
+  // [<changed file> ...]`), not a single `<changed files>` placeholder
+  // that CLI would silently only scan the first of; the commit-message
+  // invocation is spelled with its `git log -1 --format=%B | ... check
+  // --stdin-path COMMIT_MSG` pipe so the sentence names something that
+  // actually runs, not just the flag in isolation.
+  const PRE_RETURN_SENTENCE =
+    "Before committing, when slop-detector is available run `slop-detector check <changed file> [<changed file> ...] --pack review-slop` over every changed file, and `git log -1 --format=%B | slop-detector check --stdin-path COMMIT_MSG --pack review-slop` over the commit message; where it is vendored in the repository rather than installed on PATH, the same two invocations run as `node packages/slop-detector/dist/cli.js check ...`. Fix every block-level finding before returning, or add a legitimate match to `review.allow` in the repository's slop.config.yml rather than deleting correct text. Only exit `0` or `1` is a result; exit `2` is a usage error (a mistyped invocation, or `--stdin-path` with nothing piped in), so it is not a clean check. A returned report that skipped this check on a diff with block-level findings is a misfire, not evidence.";
+
+  it("assets/agents/implementer.md carries the pre-return review-slop check sentence verbatim", () => {
+    expect(implementerMd).toContain(PRE_RETURN_SENTENCE);
+  });
+
+  it("the sentence names --pack review-slop over every changed file and over a piped commit message, the vendored path as the alternative, and exit 2 as a usage error", () => {
+    expect(implementerMd).toContain(
+      "slop-detector check <changed file> [<changed file> ...] --pack review-slop",
+    );
+    expect(implementerMd).toContain(
+      "git log -1 --format=%B | slop-detector check --stdin-path COMMIT_MSG --pack review-slop",
+    );
+    expect(implementerMd).toContain(
+      "node packages/slop-detector/dist/cli.js check ...",
+    );
+    expect(implementerMd).toContain(
+      "exit `2` is a usage error (a mistyped invocation, or `--stdin-path` with nothing piped in), so it is not a clean check",
+    );
+    expect(implementerMd).toContain("when slop-detector is available");
+  });
+
+  it("the sentence states that skipping the check on a diff with block-level findings is a misfire, not evidence", () => {
+    expect(implementerMd).toContain(
+      "skipped this check on a diff with block-level findings is a misfire, not evidence",
+    );
+  });
+});
+
+describe("implementer pre-return check leads with the portable invocation", () => {
+  const implementerMd = unwrap(readAsset("agents/implementer.md"));
+
+  // The PATH-installed form has to come FIRST and the repository-vendored
+  // `node <pkg>/dist/cli.js` path second: the prompt is installed into
+  // arbitrary repositories, most of which have no `packages/slop-detector`
+  // directory at all, so leading with that path names a command that does
+  // not exist there. The vendored path stays as the named alternative for
+  // a repository that carries the package instead of installing it.
+  it("names the PATH-installed command before the repository-vendored path", () => {
+    const pathForm = implementerMd.indexOf(
+      "`slop-detector check <changed file>",
+    );
+    const vendoredForm = implementerMd.indexOf(
+      "node packages/slop-detector/dist/cli.js check ...",
+    );
+    expect(pathForm).toBeGreaterThan(-1);
+    expect(vendoredForm).toBeGreaterThan(-1);
+    expect(pathForm).toBeLessThan(vendoredForm);
+  });
+
+  it("presents the vendored path as the in-repository alternative, not the default", () => {
+    expect(implementerMd).toContain(
+      "where it is vendored in the repository rather than installed on PATH, the same two invocations run as `node packages/slop-detector/dist/cli.js check ...`",
+    );
+  });
+});

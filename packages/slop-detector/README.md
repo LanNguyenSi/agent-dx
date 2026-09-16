@@ -59,8 +59,9 @@ Each pack groups related rules. Enable or disable per repo via `slop.config.yml`
 | `ui-slop` (6 rules)        | off, opt in via `--pack ui-slop`        | Gradient text, purple+cyan AI palettes, animated layout properties, skipped heading levels, plus opt-in monospace-everywhere and flat type hierarchy (info-level). Scans CSS / SCSS / LESS / HTML / JSX.                                                                   |
 | `placement-slop` (5 rules) | off, opt in via `--pack placement-slop` | Org-, machine-, and point-in-time-bound evidence leaking into reusable instruction files (`SKILL.md`, `AGENTS.md`, `CLAUDE.md`, agent/skill prompt files): home paths, dated evidence, tally phrases (`n=8`, `p=0.016`, `so far`), opaque ids, and configured org markers. <!-- slop-detector:disable-line=placement-slop --> |
 | `workflow-slop` (5 rules)  | off, opt in via `--pack workflow-slop`  | GitHub Actions workflow injection and CI-guard regressions: a `${{ ... }}` expression interpolated directly into a `run:` shell script (unless it is one of the documented non-attacker-controllable contexts); a fail-closed check that a scanned workflow file actually parsed as YAML; a reintroduced Node-20 GitHub Actions major; an `audit.yml` with no certifiable `npm audit --audit-level=...` gate; and an npm-audit gate step whose shape is not one the pack recognises. Scans `.github/workflows/*.yml`/`*.yaml`. |
+| `review-slop` (3 rules)    | off, opt in via `--pack review-slop`    | Run-local review tokens leaking into reusable content: finding ids (`F1`, `F2a`), round references (`round 2`, `R3`, `review round 1 fixes`), and workspace-handoff phrases (`per the <workspace> handoffs`). Scans Markdown, TypeScript/JavaScript source comments, test titles, and a commit-message file. |
 
-The five opt-in packs (`comment-slop`, `code-slop`, `ui-slop`, `placement-slop`, `workflow-slop`) are off by default because their false-positive surface in mixed codebases is wider; opt in with `--pack <id>` or set `packs.<id>: true` in `slop.config.yml`.
+The six opt-in packs (`comment-slop`, `code-slop`, `ui-slop`, `placement-slop`, `workflow-slop`, `review-slop`) are off by default because their false-positive surface in mixed codebases is wider; opt in with `--pack <id>` or set `packs.<id>: true` in `slop.config.yml`.
 
 Run `slop-detector list-rules` for the full rule catalogue with severities and rationales.
 
@@ -409,6 +410,148 @@ node packages/slop-detector/dist/cli.js check . --pack workflow-slop --config sl
 
 from the repo root. Any repo that vendors (or npm-installs) `slop-detector` can copy that one step into an existing CI job; no other wiring is needed since the pack is off by default until named with `--pack` or `packs.workflow-slop: true`.
 
+### `review-slop` by example
+
+Opt in with `--pack review-slop`. Three rules catch run-local review
+tokens: content that only means something inside the one review cycle (or
+the one workspace's handoff process) that produced it, and reads as dead
+or misleading the moment that cycle is over.
+
+- **`finding-id`** (block): a finding shorthand like `F1` or `F2a` (a
+  capital `F`, exactly one digit, an optional lowercase letter), only
+  resolvable against the review cycle that minted it. `F1-2026` (a
+  version- or date-shaped token immediately followed by a hyphen and a
+  digit) never matches; an isolated `F1`/`F5`-shaped word with no other
+  review-process context (a Formula 1 reference, a function key) is not
+  otherwise disambiguated, since this pack does not do LLM-judged
+  precision -- see "Negative fixtures" below.
+- **`round-reference`** (block): `round 2`, `R3`, `review round 1
+  fixes`, same problem, for the round itself rather than a specific
+  finding inside it. A digitless `review round` never matches, at any
+  severity (the kit's own vocabulary for its own review-round mechanism
+  uses this exact phrase); `round N` and a bare `RN` token only match
+  when the same sentence also carries a review-process word (`review`,
+  `finding`, `fix`, or -- for the bare token -- `round` itself), so an
+  unrelated `round 2 of the DNS retry` or a Cloudflare `R2` bucket is
+  left alone. "The same sentence" is bounded by a `.`, `!` or `?`, a
+  blank line, a Markdown heading line, or the start of a list item: a
+  `## Review rounds` heading, or a previous bullet, does not lend its
+  words to the bullet below it, while one list item's own soft-wrapped
+  continuation line is still part of the same sentence. Inside a source
+  comment the window is narrower: each `//` comment is its own window,
+  and inside a block comment each ` * ` gutter line starts a new one, so
+  a context word on the previous comment line does not count.
+- **`handoff-phrase`** (warn): `per the <workspace> handoffs` (e.g.
+  `per the pandora handoffs`), points a reader at a workspace's own
+  operating layer that a package shipped to other repos has no access
+  to.
+
+All three scan the same four surfaces: Markdown files (`.md`/`.mdx`/
+`.markdown`), TypeScript/JavaScript source comments (line and block),
+test titles, and a commit-message file (see "Commit-message mode"
+below).
+
+A test title is the first string-literal argument of an `it`/`test`/
+`describe` call, including a chained modifier
+(`.only`/`.skip`/`.each`/`.concurrent`/`.for`, up to two deep, so
+`it.only.each` counts) and the curried `.each` forms where the title sits
+in the outer call: ``it.each(table)("title", fn)`` and
+``it.each`table`("title", fn)``. A title built by template literal or
+string concatenation rather than a plain string literal is not scanned,
+and neither is a string literal outside a test call.
+
+```markdown
+<!-- BLOCKED by review-slop/finding-id and review-slop/round-reference -->
+Fixed per finding F5 in review round 2; F2/F5 crossover handled in R3.
+```
+
+```ts
+// BLOCKED by review-slop/finding-id and review-slop/round-reference
+// Mutation-check intent (F1, review R1)
+it("F2a: does not regress the earlier fix", () => {
+  /* ... */
+});
+```
+
+```markdown
+<!-- clean: no run-local review token -->
+Fixed the off-by-one in the paginator; added a regression test.
+```
+
+**Negative fixtures that stay clean by design**, so the pack doesn't
+punish adjacent, unrelated content: an 8-char lowercase-hex tracker id
+(a workspace's own convention, a different shape than `F`/`R` plus
+digits), `round-trip`, a version number (`v1.2.3`, `1.0`), a bare plural
+`rounds` with no digit or `review` prefix, a two-digit `F`-number
+(`F16`, `F22`, a function-key range) or an `F1-2026`-shaped token, a
+hyphenated `round-2` cross-reference (`round-reference` requires
+whitespace, not a hyphen, before the digit), a bare `R2`/`R3`/`R1`-shaped
+token with no review-process word in its sentence (a Cloudflare `R2`
+bucket, `DeepSeek-R1`, a model name), and a code-block label like an
+`R1` resistor or an `F1` JSON key inside a fenced (backtick- or
+tilde-delimited) code block: fenced and inline code spans are stripped
+from Markdown before either rule runs, the same way `prose-slop`'s rules
+already skip code spans. A fence is recognized only where one actually
+opens a code block: at the start of a line, with at most three spaces of
+indentation, both for the opener and the closer. A mid-sentence run of
+three backticks or tildes (prose *about* fences, a `~~~` used as a
+visual separator) therefore does not open anything, and does not blank
+the prose up to the next such run. (An indented, four-space code block
+is *not* stripped -- only a fenced one -- so a review token inside one
+still flags; wrap it in a fence, or add it to `review.allow`, instead.)
+
+**Commit-message mode.** `check --stdin-path COMMIT_MSG` (or a path
+ending in `COMMIT_EDITMSG`/`.commitmsg`, e.g. a real `.git/COMMIT_EDITMSG`
+git-hook file) is scanned the same way a Markdown file is:
+
+```bash
+git log -1 --format=%B HEAD | node packages/slop-detector/dist/cli.js check --stdin-path COMMIT_MSG --pack review-slop
+```
+
+`check` also takes more than one path (`check fileA fileB --pack
+review-slop`, or `--pack review-slop fileA fileB`, either ordering): each
+is scanned and folded into one combined result, and the same file named
+twice is scanned once rather than counted twice.
+
+`--stdin-path` only applies when reading stdin (no path given, or a bare
+`-`); passing it together with a real path is a usage error (exit `2`).
+So is reading stdin with nothing to read, and emptiness is the predicate
+there, not whether stdin is a terminal: a TTY, `< /dev/null`, an empty
+pipe and a whitespace-only pipe all exit `2` with a message naming
+`--stdin-path`, because a clean report over an empty document reads as
+"checked, found nothing" when in fact nothing was checked. A stdin that
+is opened but never written to and never closed (an inherited, non-TTY
+stream with no writer, which is what a CI step or an agent harness
+spawning the CLI with stdio inherited hands it) used to hang forever; it
+is now bounded by a 10-second idle timeout, re-armed on every chunk, and
+reports the same usage error. `SLOP_DETECTOR_STDIN_TIMEOUT_MS` overrides
+that bound for a pipeline whose producer legitimately stalls longer.
+
+**Configuration.**
+
+```yaml
+# slop.config.yml
+packs:
+  review-slop: true
+
+review:
+  allow:
+    - "R1"
+  allowPaths:
+    - "**/CHANGELOG.md"
+```
+
+`review.allow` is a regex allowlist with the same per-span semantics as
+`placement.allow`: a matched span is excused across every rule in the
+pack, on every scanned surface (Markdown text, and a whole comment or
+test title on the code surfaces). `review.allowPaths` is a glob allowlist
+matched relative to the scan root; a whole file matching any pattern is
+skipped by every rule in the pack. It defaults to `["**/CHANGELOG.md"]`
+even without a config: a repo's changelog convention narrating rounds and
+finding ids by design is a config-level allow, not a violation, so the
+default excuses that file at the file level rather than forcing every
+repo to add the same entry by hand.
+
 ## What a run looks like
 
 ```
@@ -453,6 +596,7 @@ flowchart LR
         J["ui-slop.ts<br/>off by default"]
         P["placement-slop.ts<br/>off by default"]
         W["workflow-slop.ts<br/>off by default"]
+        RV["review-slop.ts<br/>off by default"]
     end
 
     K["engine.ts<br/>checkPath / checkFiles / checkText"]
@@ -475,6 +619,7 @@ flowchart LR
     J --> E
     P --> E
     W --> E
+    RV --> E
     E --> K
     K --> L
     L --> M
@@ -538,9 +683,15 @@ placement:
 workflow:
   allowExpressions:
     - "matrix.node"
+
+review:
+  allow:
+    - "R1"
+  allowPaths:
+    - "**/CHANGELOG.md"
 ```
 
-Defaults applied even without a config: `agent-tics` and `prose-slop` packs on; `comment-slop`, `code-slop`, `ui-slop`, `placement-slop`, `workflow-slop` off; ignores cover `node_modules`, `dist`, `build`, `coverage`, `.git`, lockfiles; `placement.markers`, `placement.instructionGlobs`, `placement.allow`, `workflow.allowExpressions`, `workflow.node20Majors`, `workflow.node20MajorsIgnore`, and `workflow.auditGateTemplates` default to `[]`.
+Defaults applied even without a config: `agent-tics` and `prose-slop` packs on; `comment-slop`, `code-slop`, `ui-slop`, `placement-slop`, `workflow-slop`, `review-slop` off; ignores cover `node_modules`, `dist`, `build`, `coverage`, `.git`, lockfiles; `placement.markers`, `placement.instructionGlobs`, `placement.allow`, `workflow.allowExpressions`, `workflow.node20Majors`, `workflow.node20MajorsIgnore`, and `workflow.auditGateTemplates` default to `[]`; `review.allow` defaults to `[]` and `review.allowPaths` defaults to `["**/CHANGELOG.md"]` (see [`review-slop` by example](#review-slop-by-example)).
 
 The `placement` block only matters once `placement-slop` is enabled (see [`placement-slop` by example](#placement-slop-by-example)):
 

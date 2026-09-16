@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { allPacks } from "../src/packs/registry.js";
 
 // These counts are documented in prose in two places: the repo root
-// README.md ("seven rule packs") and this package's own rule-pack table
+// README.md ("eight rule packs") and this package's own rule-pack table
 // (README.md). The assertions below fail if a rule is added or removed
 // without the docs being updated, so the numbers cannot silently drift from
 // the registry.
@@ -14,6 +14,7 @@ const expectedRuleCounts: Record<string, number> = {
   "ui-slop": 6,
   "placement-slop": 5,
   "workflow-slop": 5,
+  "review-slop": 3,
 };
 
 describe("rule registry counts (doc-drift guard)", () => {
@@ -24,9 +25,9 @@ describe("rule registry counts (doc-drift guard)", () => {
     expect(actual).toEqual(expectedRuleCounts);
   });
 
-  it("the seven packs total 44 rules", () => {
+  it("the eight packs total 47 rules", () => {
     const total = allPacks.reduce((sum, p) => sum + p.rules.length, 0);
-    expect(total).toBe(44);
+    expect(total).toBe(47);
   });
 
   it("registers placement-slop and lists its five rule ids", () => {
@@ -57,5 +58,18 @@ describe("rule registry counts (doc-drift guard)", () => {
       ].sort(),
     );
     expect(pack!.rules.every((r) => r.pack === "workflow-slop")).toBe(true);
+  });
+
+  it("registers review-slop and lists its three rule ids", () => {
+    const pack = allPacks.find((p) => p.id === "review-slop");
+    expect(pack).toBeDefined();
+    expect(pack!.rules.map((r) => r.id).sort()).toEqual(
+      [
+        "review-slop/finding-id",
+        "review-slop/handoff-phrase",
+        "review-slop/round-reference",
+      ].sort(),
+    );
+    expect(pack!.rules.every((r) => r.pack === "review-slop")).toBe(true);
   });
 });

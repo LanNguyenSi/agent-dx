@@ -276,6 +276,96 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
       totals are 15 clean / 17 with findings / 54 occurrences, not the
       14/18/56 first reported.
 
+- New pack `review-slop` (off by default, opt in via `--pack review-slop`
+  or `packs.review-slop: true`): three rules, `review-slop/finding-id`
+  and `review-slop/round-reference` (block), `review-slop/handoff-phrase`
+  (warn), flag run-local review tokens (finding ids like `F1`/`F2a`,
+  round references like `round 2`/`R3`/`review round 1 fixes`, and
+  workspace-handoff phrases like `per the <workspace> handoffs`) leaking
+  into Markdown files, TypeScript/JavaScript source comments, test titles,
+  and a commit-message file (`check --stdin-path COMMIT_MSG`, or a path
+  ending `COMMIT_EDITMSG`/`.commitmsg`).
+  - Precision, since every one of these token shapes also occurs as
+    ordinary prose: `finding-id` takes a capital `F` plus exactly one
+    digit and an optional lowercase letter, so a two-digit `F16`/`F22` (a
+    function-key range) and an `F1-2026`-shaped version or date never
+    match. A digitless `review round` never matches at any severity: that
+    is the workflow kit's own name for its own mechanism, not run-local
+    evidence. `round N` and a bare `RN` token match only when the same
+    sentence also carries a review-process word (`review`, `finding`,
+    `fix`, or, for the bare token, `round` itself), so `round 2 of the DNS
+    retry`, a Cloudflare `R2` bucket and `DeepSeek-R1` are left alone.
+    "The same sentence" is bounded by a `.`, `!` or `?`, a blank line, a
+    Markdown heading line, or the start of a list item, so a
+    `## Review rounds` heading and a preceding bullet do not lend their
+    words to the bullet below, while one list item's own soft-wrapped
+    continuation line is part of the same sentence.
+  - A test title is the first string-literal argument of an
+    `it`/`test`/`describe` call, including a chained
+    `.only`/`.skip`/`.each`/`.concurrent`/`.for` (up to two deep, so
+    `it.only.each` counts) and the two curried `.each` forms whose title
+    sits in the outer call, `it.each(table)("title", fn)` and
+    ``it.each`table`("title", fn)``.
+  - Config surface: `review.allow` (regex allowlist; a matched span is
+    excused on the Markdown surface, and a matching whole comment or whole
+    test title on the two code surfaces) and `review.allowPaths` (glob
+    allowlist matched against the scan-root-relative path, with a
+    user-typed leading `./` normalized away as `placement.instructionGlobs`
+    already does, default `["**/CHANGELOG.md"]`, since a repo's changelog
+    convention narrating rounds and finding ids by design is a
+    config-level allow rather than a violation).
+  - Negative fixtures that stay clean: a tracker id (`e904f25a`),
+    `round-trip`, a version number (`v1.2.3`), a bare plural `rounds`
+    without a digit or `review` prefix, a hyphenated `round-2`
+    cross-reference, and an `R1`/`F1` code-block label; fenced and inline
+    code spans are stripped from Markdown before either block rule runs.
+  - Anchored on pandora batch 51
+    (`.ai/runs/2026-09-13-quickwins-batch51`): four review rounds (or
+    post-merge cleanup commits) across five repos were spent on exactly
+    this token class, caught only by grep, nothing mechanical. agent-dx
+    PR #263 (commits `8d46ca09`, `494f1a32`) carried finding-id test
+    titles (`F1:`, `F2a:`, `F2/F5 crossover:`) and round/handoff-phrase
+    comments (`review round 2 finding F5`, `(F1, review R1)`, `per the
+    pandora handoffs`) before a follow-up cleanup commit removed them by
+    hand.
+  - `packages/orchestrator-workflow`'s `assets/agents/implementer.md`
+    gains a matching pre-return rule naming this pack's exact check
+    command; see that package's own CHANGELOG.md.
+
+- `check` takes one or more positional paths (`check fileA fileB`), each
+  scanned and folded into one result, with a path named twice (or spelled
+  two ways) scanned once instead of counted twice. `--pack` is a
+  repeatable single-value option (`-p a -p b`, or one comma-separated
+  `-p a,b`) rather than a variadic one, so `--pack review-slop fileA
+  fileB` no longer swallows the two paths as pack names. Two invocations
+  that used to pass silently are usage errors (exit `2`): a real path
+  together with `--stdin-path`, which only ever names piped content and
+  never opens a file; and reading stdin with nothing to read, where
+  emptiness rather than TTY-ness is the predicate, so a TTY,
+  `< /dev/null`, an empty pipe and a whitespace-only pipe all report
+  instead of printing a clean report over an empty document (exit `0`,
+  "0 violations"), which reads as "checked, found nothing" when nothing
+  was checked. A stdin that is opened and then never written to and never
+  closed, which is what a CI step or an agent harness spawning the CLI
+  with stdio inherited hands it, no longer hangs forever: the read is
+  bounded by a 10-second idle timeout, re-armed on every chunk so a large
+  but flowing input is never truncated, and reports the same usage error.
+  `SLOP_DETECTOR_STDIN_TIMEOUT_MS` overrides that bound for a pipeline
+  whose producer legitimately stalls longer.
+
+- `stripFencedCode`, shared by `prose-slop`, `agent-tics` and
+  `review-slop`, anchors both the opener and the closer of a backtick or
+  tilde fence to the start of a line, with CommonMark's up-to-three
+  spaces of leading indentation. Unanchored, a mid-sentence run of three
+  backticks or tildes (prose about fences, a `~~~` used as a visual
+  separator) opened a "fence" that ran to the next such run anywhere
+  later in the file and blanked every word between them, hiding real
+  findings from every rule that reads prose through this helper. On this
+  repo's own tree the anchoring surfaced 56 previously masked warnings
+  (54 `prose-slop/em-dash`, 2 `prose-slop/hedging-opener`), all of them
+  in one Markdown file that discusses a stray triple-backtick run in
+  prose; the block count and both CI pack scans are unchanged.
+
 ## [0.3.1] - 2026-08-26
 
 ### Changed

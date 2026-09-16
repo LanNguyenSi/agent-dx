@@ -17,6 +17,40 @@ describe("prose-slop", () => {
     expect(v.find((x) => x.ruleId === "prose-slop/em-dash")).toBeUndefined();
   });
 
+  it("does not flag em-dash inside a tilde-fenced block", () => {
+    const text = "Prose normal.\n\n~~~\ncode \u2014 ok\n~~~\n";
+    const v = checkText(text, "x.md", baseOpts());
+    expect(v.find((x) => x.ruleId === "prose-slop/em-dash")).toBeUndefined();
+  });
+
+  // A fence only opens a code block at the start of a line. Both fence
+  // regexes used to be unanchored, so a mid-sentence run of three tildes or
+  // backticks opened a "fence" that ran to the next such run anywhere later
+  // in the file and blanked every word between them -- real findings in
+  // ordinary prose, silently gone. This util is shared by prose-slop,
+  // agent-tics and review-slop, so the loss was pack-wide.
+  it("still flags an em-dash between two stray mid-sentence tilde runs", () => {
+    const text =
+      "A stray ~~~ marker, an em dash \u2014 here, and a second ~~~ run later.\n";
+    const v = checkText(text, "x.md", baseOpts());
+    expect(v.find((x) => x.ruleId === "prose-slop/em-dash")).toBeDefined();
+  });
+
+  it("a stray mid-sentence backtick run does not swallow the prose before a real fence", () => {
+    const text = [
+      "Write ``` to open a fence \u2014 like this.",
+      "",
+      "```",
+      "code \u2014 ok",
+      "```",
+      "",
+    ].join("\n");
+    const v = checkText(text, "x.md", baseOpts());
+    const hits = v.filter((x) => x.ruleId === "prose-slop/em-dash");
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.line).toBe(1);
+  });
+
   it("does not flag em-dash inside inline code", () => {
     const v = checkText("Use `foo — bar` notation.", "x.md", baseOpts());
     expect(v.find((x) => x.ruleId === "prose-slop/em-dash")).toBeUndefined();

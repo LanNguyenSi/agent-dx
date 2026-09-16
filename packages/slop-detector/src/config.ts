@@ -18,6 +18,7 @@ const PackIdSchema = z.enum([
   "ui-slop",
   "placement-slop",
   "workflow-slop",
+  "review-slop",
 ]);
 
 const RuleOverrideSchema = z.object({
@@ -158,6 +159,19 @@ const WorkflowConfigSchema = z.object({
   auditGateTemplates: z.array(AuditGateTemplateSchema).optional(),
 });
 
+// `review.allowPaths` is matched against a path already made relative to
+// the scan root (mirrors `InstructionGlobSchema`/`EntrypointGlobSchema`
+// above) -- a leading "/" can never match that relative path.
+const ReviewAllowPathSchema = z.string().refine((g) => !g.startsWith("/"), {
+  message:
+    'review.allowPaths patterns are matched relative to the scan root (or the nearest package.json directory), not as absolute paths: remove the leading "/"',
+});
+
+const ReviewConfigSchema = z.object({
+  allow: z.array(RegexPatternSchema).optional(),
+  allowPaths: z.array(ReviewAllowPathSchema).optional(),
+});
+
 // A pattern written as `./foo/**/*.md` means the same thing as `foo/**/*.md`
 // once it's matched against an already-relativized path (`path.relative`
 // never produces a leading "./"), but users naturally type the "./" prefix.
@@ -177,6 +191,7 @@ const ConfigFileSchema = z.object({
   entrypointGlobs: z.array(EntrypointGlobSchema).optional(),
   placement: PlacementConfigSchema.optional(),
   workflow: WorkflowConfigSchema.optional(),
+  review: ReviewConfigSchema.optional(),
 });
 
 export type ConfigFile = z.infer<typeof ConfigFileSchema>;
@@ -189,7 +204,17 @@ const DEFAULT_PACKS: Record<PackId, boolean> = {
   "ui-slop": false,
   "placement-slop": false,
   "workflow-slop": false,
+  "review-slop": false,
 };
+
+/**
+ * Exported so `review-slop.ts`'s `isAllowedPath` can fall back to the exact
+ * same array (rather than a second, drift-prone `["**\/CHANGELOG.md"]`
+ * literal) when it receives a hand-built `ResolvedConfig` that omits
+ * `review` entirely -- the same defensive fallback `defaultConfig`'s own
+ * `placement`/`workflow` fields document.
+ */
+export const DEFAULT_REVIEW_ALLOW_PATHS = ["**/CHANGELOG.md"];
 
 const DEFAULT_IGNORES = [
   "**/node_modules/**",
@@ -234,6 +259,7 @@ export function defaultConfig(): ResolvedConfig {
       node20MajorsIgnore: [],
       auditGateTemplates: [],
     },
+    review: { allow: [], allowPaths: [...DEFAULT_REVIEW_ALLOW_PATHS] },
   };
 }
 
@@ -264,6 +290,17 @@ export function mergeConfig(file: ConfigFile): ResolvedConfig {
       node20Majors: file.workflow?.node20Majors ?? [],
       node20MajorsIgnore: file.workflow?.node20MajorsIgnore ?? [],
       auditGateTemplates: file.workflow?.auditGateTemplates ?? [],
+    },
+    review: {
+      allow: file.review?.allow ?? [],
+      // Same `./`-stripping `placement.instructionGlobs` gets above --
+      // `review.allowPaths` is matched against an already-relativized path
+      // (see `relativizeToScanRoot` in review-slop.ts), so a user-typed
+      // `./foo/**` prefix must normalize to `foo/**` or it silently never
+      // matches.
+      allowPaths: (
+        file.review?.allowPaths ?? [...DEFAULT_REVIEW_ALLOW_PATHS]
+      ).map(stripLeadingDotSlash),
     },
   };
 }

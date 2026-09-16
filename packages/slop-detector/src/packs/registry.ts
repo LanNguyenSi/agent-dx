@@ -6,6 +6,7 @@ import { codeSlopPack } from "./code-slop.js";
 import { uiSlopPack } from "./ui-slop.js";
 import { placementSlopPack } from "./placement-slop.js";
 import { workflowSlopPack } from "./workflow-slop.js";
+import { reviewSlopPack } from "./review-slop.js";
 
 export const allPacks: PackDefinition[] = [
   agentTicsPack,
@@ -15,6 +16,7 @@ export const allPacks: PackDefinition[] = [
   uiSlopPack,
   placementSlopPack,
   workflowSlopPack,
+  reviewSlopPack,
 ];
 
 export function packsByFilter(filter?: string[]): PackDefinition[] {

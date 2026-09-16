@@ -37,6 +37,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Docs-only: no YAML contract, role prompt, guard matcher, or exemption
   geometry changed. Anchored by agent-dx tracker task 8a55e082.
 
+- `assets/agents/implementer.md` gains a pre-return rule bullet next to
+  the commit-reporting ones: before committing, when slop-detector is
+  available run `slop-detector check <changed file> [<changed file> ...]
+  --pack review-slop` over every changed file and `git log -1
+  --format=%B | slop-detector check --stdin-path COMMIT_MSG --pack
+  review-slop` over the commit message, with the repository-vendored
+  `node packages/slop-detector/dist/cli.js check ...` path named as the
+  alternative where the CLI is not installed on PATH; fix every
+  block-level finding before returning, or add a legitimate match to
+  `review.allow`. Only exit `0` or `1` is a result: exit `2` is a usage
+  error, not a clean check. A returned report that skipped the check on a
+  diff with block-level findings is a misfire, not evidence. Pinned by
+  `test/docs-consistency.test.ts`;
+  `docs/okf/subagent-contracts-superset.md` gained a matching sentence
+  describing the rule.
+  - Anchored by pandora batch 51 (`.ai/runs/2026-09-13-quickwins-batch51`):
+    four review rounds (or post-merge cleanup commits) across five repos
+    were spent catching run-local review tokens (finding ids, round
+    references, workspace-handoff phrases) that nothing mechanical
+    flagged before `slop-detector`'s new `review-slop` pack existed; see
+    that package's own CHANGELOG.md for the pack itself and the
+    pre-cleanup PR the fixtures were drawn from.
+
 ## [0.35.0] - 2026-09-15
 
 - The npm tarball now ships a `LICENSE` file matching the repo root LICENSE
