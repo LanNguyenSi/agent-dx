@@ -114,11 +114,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     a logical line, or a command substitution spanning a statement
     separator. A construct that slips past that list still has to match
     a recognised shape, and no shape permits a statement it does not
-    name, so a miss there is a false positive rather than a false clean.
+    name, so a miss there is a false positive rather than a false clean
+    from an unnamed statement; which branch a named `exit` sits in is not
+    evaluated (a documented limit).
   - New config knob `workflow.auditGateTemplates`, a list of
     `{ name, sha256 }` or `{ name, statements }` entries; an entry
     carrying neither or both is rejected at config-load time. A block
-    whose normalised statements (each trimmed, joined by newlines) hash
+    whose normalised statements (each trimmed, prefixed with the `;`,
+    `&&`, `||` or `|` boundary it followed, joined by newlines) hash
     to a registered digest is recognised, which is how a legitimate but
     unmodelled gate block (helper functions, a custom exit-code
     mapping) is accepted without rewriting it. A matched template is

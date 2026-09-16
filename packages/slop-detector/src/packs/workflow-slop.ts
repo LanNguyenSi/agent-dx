@@ -1880,9 +1880,30 @@ function tryClassifyShape(
  * stable against a pure reformat of the same script and changes on any
  * edit to what the script runs.
  */
+/**
+ * The text a template digest is taken over: one line per statement, and
+ * a statement that followed a `;`, `&&`, `||` or `|` boundary carries
+ * that separator as a prefix. Without the prefix two scripts that differ
+ * only in how their statements are joined (an `exit 1` on its own line
+ * versus `|| exit 1` glued to the previous command) hash identically,
+ * and a registered template would keep matching after an edit that
+ * changes what the script does. The `{ name, statements }` config form
+ * describes a newline-separated block, so its entries carry no prefix.
+ */
+function templateDigestText(statements: NormalizedStatement[]): string {
+  return statements
+    .map((statement) =>
+      statement.separatorBefore === "start" ||
+      statement.separatorBefore === "newline"
+        ? statement.trimmed
+        : `${statement.separatorBefore} ${statement.trimmed}`,
+    )
+    .join("\n");
+}
+
 function templateDigest(statements: NormalizedStatement[]): string {
   return createHash("sha256")
-    .update(statements.map((statement) => statement.trimmed).join("\n"))
+    .update(templateDigestText(statements))
     .digest("hex");
 }
 

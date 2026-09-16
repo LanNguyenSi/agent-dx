@@ -331,7 +331,7 @@ A local `./path` action and a `docker://image` reference are never flagged (neit
                                             # status
   ```
 
-  Everything is positional and exhaustive: a statement the shape does not name makes the block unrecognised, so a construct this rule never heard of cannot ride along inside a recognised block. That is why the window admits the capture and nothing else (an `echo` between `set +e` and the gate is reported), why a `STATUS=0` reassignment after the restore is reported, and why *every* `exit` after the restore has to be one of the two verdicts: a bare `exit` exits with the status of whatever ran last (post-restore, an `echo`, so zero), and `exit $OTHER` or `exit ${STATUS:-0}` hands over a value the shape knows nothing about. A pre-window `trap` is permitted only when its own body does not call `exit`, since an `EXIT` trap leaves the script's status alone unless it exits itself, and `trap 'exit 0' EXIT` would make every later verdict irrelevant (the `EXIT` signal name is matched case-sensitively, so a cleanup `trap 'rm -f "$LOG"' EXIT` is fine).
+  Everything is positional and exhaustive: a statement the shape does not name makes the block unrecognised, so a construct this rule never heard of cannot ride along inside a recognised block (what the shape does not check is which branch a named `exit` sits in; see the honest limits below). That is why the window admits the capture and nothing else (an `echo` between `set +e` and the gate is reported), why a `STATUS=0` reassignment after the restore is reported, and why *every* `exit` after the restore has to be one of the two verdicts: a bare `exit` exits with the status of whatever ran last (post-restore, an `echo`, so zero), and `exit $OTHER` or `exit ${STATUS:-0}` hands over a value the shape knows nothing about. A pre-window `trap` is permitted only when its own body does not call `exit`, since an `EXIT` trap leaves the script's status alone unless it exits itself, and `trap 'exit 0' EXIT` would make every later verdict irrelevant (the `EXIT` signal name is matched case-sensitively, so a cleanup `trap 'rm -f "$LOG"' EXIT` is fine).
 
 - **A registered template** -- see "Registering a gate template" below.
 
@@ -359,8 +359,15 @@ packs:
 workflow:
   auditGateTemplates:
     - name: canonical-audit-gate
-      sha256: 5c4548155eaa651a0d2ad0f374d15ec046ca36ec4f21f5430aea7616224e7ee1
-    # or write the statements out and let the tool hash them:
+      sha256: 039827d6b99e8648dad25933d62413fd94e32de33be03c0d46cea225b7b6f0ec
+      # (the digest of the gate block in this package's test fixture
+      # fleet-audit-real-shape.yml, shown so the example is runnable against
+      # the shipped fixture; register your own block's digest, which the
+      # finding prints)
+    # or write the statements out and let the tool hash them (this form
+    # describes a newline-separated block; a `;`, `&&`, `||` or `|`
+    # boundary inside a line is part of the digest and needs the sha256
+    # form):
     - name: bare-gate-with-timeout
       statements:
         - timeout 60s npm audit --audit-level=high
@@ -373,6 +380,9 @@ The package ships **no** template of its own: a canonical gate block is org cont
 - **The rules are bound to the file name.** Only `.github/workflows/audit.yml` and `audit.yaml` are scanned (`appliesTo`), so an npm-audit gate that lives in `ci.yml`, `security.yml`, or any other workflow file is outside both rules entirely, whatever shape it has.
 - **`exit $VAR` is accepted without proving `$VAR` is non-zero at runtime.** `R-classify` requires that the captured status is handed to `exit`, and that no `exit 0`, no other `exit` operand and no reassignment of that variable follows the restore, which is as far as the text goes. It does not evaluate the branch conditions that decide which `exit` is reached.
 - **A registered template is trusted as is.** Its digest match suppresses every shape check for that block, so the review that justified registering it is the only thing standing behind it.
+- **Branch reachability is not modelled.** `R-classify` requires the two verdict exits to be present after the restore and permits `if`/`then`/`else`/`elif`/`fi` around them, but it does not evaluate the conditions, so a block whose verdicts both sit in a branch that is never taken is still recognised. Reviewing the conditions of a recognised block stays a human step.
+- **The rules cannot see a deleted or renamed `audit.yml`.** Both rules are scoped to that file name, so removing the file, or moving the gate to a workflow with another name, produces no finding at all; an inventory check over the repository, not a file scan, is what covers that edit.
+- **Workflow triggers are not evaluated.** A gate that is present and correctly shaped but never runs, because `on:` was narrowed or the job carries an `if:` that is never true, reports clean.
 
 **Scope: `npm audit` only.** The gate-command match (`isGateCommand`) requires literal `npm audit` in the statement; `pnpm audit --audit-level=high`, `pip-audit`, `cargo audit`, and a reusable-workflow-call `audit.yml` (`uses: org/repo/.github/workflows/audit.yml@vN`, no `run:` step to inspect) are all out of these rules' reach and are reported by `audit-gate-missing` (the same finding a truly-missing gate produces) rather than silently skipped. A repo whose `audit.yml` legitimately uses one of those does not need to live with that finding: disable either rule on its own while keeping the rest of `workflow-slop` (including `node20-action-major`) via
 

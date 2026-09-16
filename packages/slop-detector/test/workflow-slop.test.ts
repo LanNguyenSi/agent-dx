@@ -921,7 +921,7 @@ const REAL_FLEET_AUDIT_YML = fs.readFileSync(
 );
 
 const FLEET_TEMPLATE_SHA256 =
-  "5c4548155eaa651a0d2ad0f374d15ec046ca36ec4f21f5430aea7616224e7ee1";
+  "039827d6b99e8648dad25933d62413fd94e32de33be03c0d46cea225b7b6f0ec";
 
 const withFleetTemplate = () =>
   mergeConfig({
@@ -1924,6 +1924,40 @@ describe("workflow-slop/audit-gate-shape: registered templates and the fleet sha
     );
     expect(reformatted).not.toBe(REAL_FLEET_AUDIT_YML);
     expect(shapeViolations(reformatted, withFleetTemplate())).toHaveLength(0);
+  });
+
+  it("a separator-only edit of a registered block (an `exit 1` glued onto the previous command with `||`) changes the digest and is reported", () => {
+    const glued = REAL_FLEET_AUDIT_YML.replace(
+      'read the report step above"\n            exit 1\n',
+      'read the report step above" || exit 1\n',
+    );
+    expect(glued).not.toBe(REAL_FLEET_AUDIT_YML);
+    const v = shapeViolations(glued, withFleetTemplate());
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain("No registered template matches this block");
+  });
+
+  it("documented limit: R-classify does not evaluate branch conditions, so verdict exits inside a never-taken branch still recognise the block", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - run: |",
+      "          set +e",
+      "          npm audit --audit-level=high",
+      "          STATUS=$?",
+      "          set -e",
+      "          if false; then",
+      "            exit 1",
+      "          fi",
+      "          if false; then",
+      "            exit $STATUS",
+      "          fi",
+      '          echo "gate done"',
+    ].join("\n");
+    expect(shapeViolations(text)).toHaveLength(0);
   });
 });
 
