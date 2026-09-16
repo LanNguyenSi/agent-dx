@@ -782,19 +782,25 @@ describe("probe(): REFUSAL_RESULT_SHAPE contract, every RefusalReason provoked f
     // own invocation (the second `beginPyCacheIsolation` call, exactly
     // as above) AND the restore that follows cannot write.
     //
-    // With the call in place, the branch sees `ok: false`, reports
-    // `restore_failed` with `step.ts`'s own
-    // "restore failed; the original content is preserved at backup
-    // path ..." warning, and never pushes the isolation branch's
-    // "restored and the restore verified" line at all. Delete the call
-    // (replace it with a literal `{ ok: true, verified: true }`) and
-    // the same run pushes that "restored and the restore verified"
-    // claim while the target still holds the mutant, with the failure
-    // reported afterwards by `index.ts`'s `finally` backstop in the
-    // backstop's own words ("restore failed after an unexpected
-    // error") rather than this branch's. Both warning assertions below
-    // therefore discriminate the deletion; the reason alone does not
-    // (the backstop reports `restore_failed` too).
+    // What each build reports on this provocation, measured on both
+    // (the call in place, and the call replaced by a literal
+    // `{ ok: true, verified: true }`), is what picks the two
+    // assertions below. With the call in place: `restore_failed`, and
+    // one warning, `step.ts`'s own "restore failed; the original
+    // content is preserved at backup path ...". With the call deleted:
+    // `restore_failed` as well, but two warnings, the isolation
+    // branch's "the mutant was restored and the restore verified"
+    // (untrue: the target still holds the mutant) followed by
+    // `index.ts`'s `finally` backstop reporting the same failure in the
+    // backstop's own words, "restore failed after an unexpected error;
+    // the original content is preserved at backup path ...".
+    //
+    // So the two warnings are what discriminate the deletion, and the
+    // three other observable facts do not: the reason is
+    // `restore_failed` either way, `mutation_probe.restored_verified`
+    // is `false` either way, and the mutant is still on disk either
+    // way. The latter two are asserted anyway, as properties of a run
+    // whose restore failed; only the warnings are the discriminator.
     //
     // The restore is broken through `beginInplace`, the seam this file
     // already partial-mocks, rather than by chmod-ing the log dir:
