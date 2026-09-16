@@ -58,19 +58,33 @@
   line, since it grows by insertion at the top and a line citation into
   it drifts under every entry added above it; leave this file's own
   historical citations unrepointed except its two live self-citations
-  into `CHANGELOG.md`, and this bundle's path-less continuation form,
-  both covered only by `test/docs-consistency.test.ts`'s own guards
-  since okf-kit's grammar cannot see either. This audit found that
-  policy already fully applied, with nothing left to widen it for: zero
-  bare (unanchored) full citations anywhere in the bundle, zero bare-line
-  `CHANGELOG.md:N` citations, and the citation-sibling-drift guard's own
-  bundle-wide tests green on the committed tree (see Verified below).
-  The decision is to keep the existing scope -- string anchors as the
-  default, heading-section anchors reserved for insert-at-top targets
-  like `CHANGELOG.md` -- rather than introduce a third anchor class,
-  since every citation-drift risk this audit could name is already
-  covered by an okf-kit anchor check or by this package's own
-  sibling-drift/live-self-citation guards.
+  into `CHANGELOG.md`. This audit found that policy already fully
+  applied, with nothing left to widen it for: zero bare (unanchored)
+  full citations anywhere in the bundle, zero bare-line `CHANGELOG.md:N`
+  citations, and the citation-sibling-drift guard's own bundle-wide
+  tests green on the committed tree (see Verified below). The decision
+  is to keep the existing scope -- string anchors as the default,
+  heading-section anchors reserved for insert-at-top targets like
+  `CHANGELOG.md` -- rather than introduce a third anchor class, for
+  every citation class this audit could directly verify.
+
+  One gap this pass found rather than closed: this bundle's own
+  path-less anchored continuation form (`:N-M#"..."`, four citations,
+  all in model-preselection.md) is invisible to okf-kit's grammar (see
+  its README's "Anchored path-less continuation form" section), and
+  `test/docs-consistency.test.ts`'s citation-sibling-drift guard checks
+  only whether such a continuation duplicates a citation or leaves an
+  uncited sibling occurrence nearby, not whether its own line/anchor
+  pair actually resolves. A deliberate re-point of one of these four
+  (same anchor text, wrong line, reverted before any commit; see
+  Verified below) passed both okf-kit and the full
+  `test/docs-consistency.test.ts` suite; only reading the target caught
+  it. All four are read-verified correct as of this entry, but nothing
+  mechanical re-checks them going forward -- a candidate for either a
+  dedicated `docs-consistency.test.ts` self-resolution check or
+  retiring the form in favour of full citations, neither attempted
+  here (out of this task's own scope, which is the audit itself, not a
+  guard change).
 
   Re-stamped install-fence-mechanics.md, model-preselection.md,
   operator-install-and-registry.md, review-gate-and-waivers.md,
