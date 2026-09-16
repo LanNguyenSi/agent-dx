@@ -659,12 +659,12 @@ finding first
 (`packages/orchestrator-workflow/assets/agents/implementer.md:136#"Before committing, when slop-detector is available run"`),
 worded the same "misfire, not evidence" way as the `commits` field rule
 just above it (see [Subagent misfire rule](#subagent-misfire-rule-0110-evidence-relocated-0240)).
-Reworded at T-006 round 2 to name a `check` invocation that takes
-one-or-more paths (`<changed file> [<changed file> ...]`) rather than a
-single `<changed files>` placeholder the CLI's own `check [path]` command
-silently only scanned the first of, and to spell the commit-message
-invocation as the `git log -1 --format=%B | ... check --stdin-path
-COMMIT_MSG` pipe it actually is.
+Reworded to name a `check` invocation that takes one-or-more paths
+(`<changed file> [<changed file> ...]`) rather than a single
+`<changed files>` placeholder the CLI silently only scanned the first of,
+to lead with the PATH-installed form rather than a repository-vendored
+path, and to state that only exit `0` or `1` is a result while exit `2`
+is a usage error rather than a clean check.
 
 ## Review-method axis: method_applied and withdrawn
 

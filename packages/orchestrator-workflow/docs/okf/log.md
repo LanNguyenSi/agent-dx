@@ -1,91 +1,91 @@
 # Bundle log
 
-- 2026-09-16T09:14:56Z (agent-dx tracker task a378ecca, pandora run
-  2026-09-16-open-pool-batch55, T-006, round-2 fix): the pre-return rule
-  bullet added below (2026-09-16T08:09:25Z entry) was rigorous-review
-  fix_required (H1: the prescribed `check <changed files> --pack
-  review-slop` command silently scanned only the first path, since `check
-  [path]` took a single optional positional; H2: the round-reference rule
-  block-flagged the kit's own digitless "review round" vocabulary). Both
-  are fixed at the source: `packages/slop-detector/src/cli.ts`'s `check`
-  command now takes `[paths...]` (one-or-more positionals, scanned and
-  summed into one `CheckSummary`) and `--pack` is now a repeatable
-  single-value option rather than a variadic one, so `--pack review-slop
-  fileA fileB` no longer swallows the paths as pack names; a path given
-  together with `--stdin-path` is now a usage error (exit 2), and reading
-  stdin with nothing piped in (a TTY) is now a usage error too, instead of
-  a silent green no-op. `packages/slop-detector/src/packs/review-slop.ts`'s
-  round-reference rule no longer matches a digitless `review round` at
-  any severity, and both it and `finding-id` gained precision fixes
-  (single-digit `F`-ids only, plus a same-sentence review-context
-  requirement for `round N`/bare `RN` tokens) and a fix for the `.each`
-  tagged-template test-title form. The installed prompt's bullet, at
-  `implementer.md` line 136 ("Before committing, when slop-detector is
-  available run"; spelled as prose here rather than citation syntax, per
-  this log's own convention, since a `path:line#"..."` citation this
-  close above the "docs cleanup" entry's own bare-line-number
-  continuation citations below would be picked up by those instead of
-  their intended `test/docs-consistency.test.ts` target), is reworded to
-  name a `check` invocation over one-or-more changed files and the
-  actual `git log -1 --format=%B | ... check --stdin-path COMMIT_MSG`
-  pipe, instead of a single `<changed files>` placeholder the old CLI
-  silently only scanned the first of. The insertion point and line count
-  of the bullet are unchanged (still starts at line 136), but the bullet
-  itself grew from 7 to 13 lines (a 6-line net insertion), shifting every
-  citation into `implementer.md` at or after old line 143 down by 6; re-pointed in
-  `subagent-contracts-superset.md` (`role: implementer` 175->181 x2,
-  `restored_verified:` 205->211, `replayed: false | true` 206->212) and in
-  this file's own citation (`expectation: met | violated | not_applicable`
-  203->209, further below). The CHANGELOG.md bullet documenting this rule
-  was also reworded to match (a net +14-line insertion), shifting this
-  file's own two `CHANGELOG.md` self-citations from line 135 to 149 and
-  from 512 to 526 (both re-pointed further below). Re-verified over
-  agent-dx commits 8d46ca09 and
-  494f1a32 (see this run's evidence): the changed-files-only scan (not the
-  whole checked-out tree) now reports 7 and 16 block findings respectively
-  (down from the first cut's 21 and 29), while still reporting the test-title
-  and comment tokens (`F1:`, `F2a:`, `F2/F5 crossover:` at line 1002's
-  `F2`/`F5` pair) and the commit-body ids (`F1, F5, F4, F6, F3, F2, R1`
-  and `F2a, F2b, R3`) the acceptance criterion's verification names. The
-  whole-repo `--pack review-slop` scan dropped from the first cut's 465
-  findings in 30 files to 342 findings in 22 files (after a further
-  dogfood-found fix to the paragraph-scoping of the same-paragraph
-  context check, below); the remainder is either this pack's own dogfood
-  fixtures (its rationale strings, its own test file) or pre-existing kit
-  content out of this task's scope (e.g.
-  `doctor.ts`'s digit-ful `review round 2, M1`-style source comments,
-  which are genuine round-plus-finding-id citations, not false
-  positives, and are not touched here since `doctor.ts` is not in this
-  task's `allowed_changes`).
+- 2026-09-16T10:12:00Z (agent-dx tracker task a378ecca, pandora run
+  2026-09-16-open-pool-batch55): the pre-return rule bullet added below
+  (the 2026-09-16T08:09:25Z entry) and the `review-slop` pack it names
+  were both revised after an independent review pass, at the source
+  rather than in the prose describing them.
 
-  **Dogfood-found fix (M1's "same-sentence" filter, above).** Running
-  `review-slop` over this task's own changed files (per the reworded
-  bullet's own rule) flagged `round 1` in this entry's own prose, one
-  wrapped line below its context word ("findings"). The context-window
-  helper originally treated every `\n` as a sentence boundary, which
-  collapses to just the current physical line inside a hand-wrapped
-  Markdown paragraph (every prose file in this repo wraps around 72-80
-  columns), wrongly missing a context word one line above or below the
-  match. Fixed to bound the window on an actual sentence terminator
-  (`.`/`!`/`?`) or a real paragraph break (a blank line, i.e. two
-  adjacent newlines) instead, leaving a single soft-wrap newline as part
-  of the same window. This is a strictly more permissive fix (it can only
-  add matches the stricter version missed, never remove one the stricter
-  version kept), so no existing fixture needed to change; two new ones
-  were added (the wrapped-context positive and a blank-line-paragraph
-  negative). The three remaining findings in this entry's own prose
-  after that fix (`round-2`/`round-1`/`the first cut's` in the paragraph
-  above) are dodged by wording, not by a config allowlist: `docs/okf/`
-  is not in review.allowPaths, and this task's `allowed_changes` does
-  not cover the root `slop.config.yml` that default lives in, so adding
-  it there is left as an open question for the orchestrator rather than
-  done here.
+  **The CLI the bullet prescribes.**
+  `packages/slop-detector/src/cli.ts`'s `check` command takes
+  `[paths...]` (one or more positionals, scanned and summed into one
+  `CheckSummary`, with a path named twice, or spelled two ways, scanned
+  once), and `--pack` is a repeatable single-value option rather than a
+  variadic one, so `--pack review-slop fileA fileB` no longer swallows
+  the two paths as pack names. A real path together with `--stdin-path`
+  is a usage error (exit 2), and so is reading stdin with nothing to
+  read. The predicate there is emptiness, not whether stdin is a
+  terminal: every non-interactive shape of "nothing piped in"
+  (`< /dev/null`, an empty pipe, a whitespace-only pipe) used to print a
+  clean report over an empty document and exit 0, which reads as
+  "checked, found nothing" when in fact nothing was checked. A stdin
+  opened and then never written to and never closed, which is what a CI
+  step or an agent harness spawning the CLI with stdio inherited hands
+  it, no longer waits forever either: the read is bounded by a 10-second
+  idle timeout, re-armed on every chunk so a large but flowing input is
+  never truncated, and reports the same usage error. Those four shapes,
+  plus the two argv shapes this prompt prescribes verbatim, are pinned
+  end to end in that package's `test/cli.test.ts`, so a change to the
+  CLI's arity or flags fails a test in its own package instead of only
+  leaving this prompt stale in ours.
 
-  Verified: the slop-detector package's own `npm run build`, `typecheck`,
-  `typecheck:test`, `format:check`, and `npm test` (368 tests, up from
-  348) all clean; the orchestrator-workflow package's `npm run build`,
-  `typecheck`, `typecheck:test`, `format:check`, and full `npm test`
-  (1162 tests) all clean.
+  **The pack's context gate.** `review-slop`'s round-reference gate is
+  one sentence, bounded by a `.`, `!` or `?`, a blank line, a Markdown
+  heading line, or the start of a list item. A single soft-wrap newline
+  is deliberately not a bound (every prose file here wraps around 72 to
+  80 columns, so the context word often sits one wrapped line away), and
+  a list item's own continuation line is therefore part of the same
+  sentence. The bound had been documented as the whole paragraph while
+  being implemented as the sentence, and the sentence carried neither
+  structural bound, so a heading followed by period-less bullets lent its
+  own words to a bullet two lines down. One rule is now implemented and
+  stated identically in the pack source, its rationale string, the
+  package README, and that package's CHANGELOG. The test-title surface
+  also recognizes a chained `.concurrent`/`.for` and a two-level chain
+  (`it.only.each`), and both curried `.each` shapes, the call form and
+  the tagged-template one. `stripFencedCode`, shared with `prose-slop`
+  and `agent-tics`, now anchors fence openers and closers to the start of
+  a line, so a mid-sentence run of three backticks or tildes no longer
+  opens a "fence" that blanks every word up to the next such run. This
+  file is where that mattered most: it discusses stray triple-backtick
+  runs in prose, and the anchoring surfaced 56 previously masked
+  `prose-slop` warnings in it.
+
+  **This prompt's bullet**, at `implementer.md` line 136 ("Before
+  committing, when slop-detector is available run"; spelled as prose here
+  rather than citation syntax, per this log's own convention, since a
+  `path:line#"..."` citation this close above the "docs cleanup" entry's
+  own bare-line-number continuation citations below would be picked up by
+  those instead of their intended `test/docs-consistency.test.ts`
+  target), now leads with the PATH-installed `slop-detector check ...`
+  form and names the repository-vendored `node
+  packages/slop-detector/dist/cli.js check ...` path as the alternative
+  for a repository that carries the package instead of installing it:
+  this prompt installs into arbitrary repositories, most of which have no
+  such directory at all, so leading with that path named a command that
+  does not exist there. The bullet also states that only exit `0` or `1`
+  is a result and exit `2` is a usage error rather than a clean check.
+  Its insertion point and line count are unchanged (still 13 lines from
+  line 136), so no citation into `implementer.md` moved again; the pins
+  in `test/docs-consistency.test.ts` were edited in place at their
+  existing line positions, with two further ones appended at the end of
+  that file for the command ordering.
+
+  `CHANGELOG.md`'s `[Unreleased]` bullets for this work now describe what
+  ships rather than the defect history of an unreleased first cut, which
+  shortened that section by nine lines and moved this file's own two
+  `CHANGELOG.md` self-citations from line 149 to line 140 and from line
+  526 to line 517 (both re-pointed further below).
+  `subagent-contracts-superset.md`'s matching sentence lost a run-local
+  slice id and gained the two statements above, at an unchanged line
+  count.
+
+  Verified on the committed tree: the slop-detector package's `npm run
+  build`, `typecheck`, `typecheck:test`, `format:check`, and `npm test`
+  (495 tests, up from 468) all clean; the orchestrator-workflow package's
+  `npm run build`, `typecheck`, `typecheck:test`, `format:check`, and
+  full `npm test` (1162 tests) all clean; `--pack placement-slop` and
+  `--pack workflow-slop` over the whole repository both clean.
 
 - 2026-09-16T08:09:25Z (agent-dx tracker task a378ecca, pandora run
   2026-09-16-open-pool-batch55, T-006): `assets/agents/implementer.md`
@@ -996,7 +996,7 @@
   sentence reverted to its pre-change wording, fails the exact-sub-field
   and regression-signal tests above; restored, the suite is green again.
   `CHANGELOG.md`'s own prose copy of this change is
-  (`CHANGELOG.md:149#"The implementer"`).
+  (`CHANGELOG.md:140#"The implementer"`).
 
   Verified on the committed tree: the full package suite (`npm test`),
   `typecheck`, `typecheck:test`, and `format:check`, all clean. Re-pointed
@@ -1264,7 +1264,7 @@
   that binding rather than second-guessing it.
 
   The CHANGELOG bullet for this round is
-  `CHANGELOG.md:526#"Citation scanning is paragraph-joined"`. Verified on
+  `CHANGELOG.md:517#"Citation scanning is paragraph-joined"`. Verified on
   the committed tree: the full package suite, `docs-consistency.test.ts`
   on its own, `typecheck`, `typecheck:test` and `format:check`; the
   figures each guard measured are in its own computed test name, per the
