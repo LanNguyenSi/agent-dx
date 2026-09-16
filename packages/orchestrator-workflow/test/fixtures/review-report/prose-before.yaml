@@ -1,0 +1,19 @@
+Here is my report:
+```yaml
+status: reviewed
+role: reviewer
+task_id: T-003
+summary:
+  - "Validator implemented and tested."
+findings: []
+acceptance_recommendation: accept
+missing_tests: []
+residual_risks: []
+reproduction:
+  method: "Ran the full suite once."
+  sample_size: "1"
+  result: "All tests passed."
+  matches_implementer_claim: matched
+method_applied: normal
+withdrawn: []
+```

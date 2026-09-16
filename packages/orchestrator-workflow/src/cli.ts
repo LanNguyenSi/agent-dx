@@ -1610,6 +1610,122 @@ program
     process.exitCode = exitCode;
   });
 
+const validateReviewReportCommand = program
+  .command("validate-review-report")
+  .description(
+    "Check a reviewer return's YAML against the reviewer output contract's required fields and enums; reports structural validity ONLY, never semantic adequacy, and never waives a finding or constitutes orchestrator acceptance",
+  )
+  .argument(
+    "<file>",
+    "path to a file holding the reviewer return's YAML, or - to read stdin",
+  )
+  .option("--format <format>", "output format: text (default) or json", "text")
+  // commander 12's default for a subcommand is `allowExcessArguments:
+  // true`, so `validate-review-report a.yaml extra.yaml` silently
+  // validated only `a.yaml` and exited 0 (fix-round, review finding M1).
+  // Disabling it turns a trailing extra argument into commander's own
+  // "too many arguments" parsing error, which the scoped `exitOverride`
+  // below then maps to exit 2 like every other usage error.
+  .allowExcessArguments(false)
+  .action(async (file: string, opts: { format?: string }) => {
+    // Imported dynamically, here rather than as a top-level static import,
+    // so this command's addition cannot shift the line numbers of any
+    // statement above it in this file: several docs/okf/ citations anchor
+    // to exact lines in src/cli.ts, and a top-level import would have
+    // re-pointed all of them for a reason unrelated to their own content.
+    const { STRUCTURAL_ONLY_NOTE, validateReviewReport } =
+      await import("./review-report.js");
+    const format = opts.format ?? "text";
+    if (format !== "text" && format !== "json") {
+      console.error(
+        `Unknown --format value: ${format} (expected "text" or "json")`,
+      );
+      console.error(STRUCTURAL_ONLY_NOTE);
+      process.exitCode = 2;
+      return;
+    }
+
+    let raw: string;
+    try {
+      raw = readFileSync(file === "-" ? 0 : file, "utf8");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const label = file === "-" ? "stdin" : file;
+      if (format === "json") {
+        console.log(
+          JSON.stringify({
+            valid: false,
+            diagnostics: [
+              { path: "<file>", expected: "a readable file", got: message },
+            ],
+            warnings: [],
+            note: STRUCTURAL_ONLY_NOTE,
+          }),
+        );
+      } else {
+        console.error(`Could not read ${label}: ${message}`);
+        console.error(STRUCTURAL_ONLY_NOTE);
+      }
+      process.exitCode = 2;
+      return;
+    }
+
+    const result = validateReviewReport(raw);
+
+    if (format === "json") {
+      console.log(
+        JSON.stringify({
+          valid: result.valid,
+          diagnostics: result.diagnostics,
+          warnings: result.warnings,
+          note: STRUCTURAL_ONLY_NOTE,
+        }),
+      );
+      process.exitCode = result.valid ? 0 : 1;
+      return;
+    }
+
+    for (const warning of result.warnings) {
+      console.error(`warning: ${warning}`);
+    }
+    // Both the exit-0 (valid) and exit-1 (invalid) cases are "verdict
+    // paths": a validation verdict was actually computed, so its message
+    // and the structural-only note that qualifies it belong on the same
+    // stream. Previously the note printed on stderr unconditionally while
+    // the valid-case verdict printed on stdout, splitting one reading
+    // across two streams (fix-round, review finding L5); the two exit-2
+    // "usage error" branches above keep stderr for both, since no verdict
+    // was computed there.
+    if (result.valid) {
+      console.log("Structurally valid reviewer return.");
+    } else {
+      console.log(
+        `Structurally invalid reviewer return (${result.diagnostics.length} issue${
+          result.diagnostics.length === 1 ? "" : "s"
+        }):`,
+      );
+      for (const diagnostic of result.diagnostics) {
+        console.log(
+          `  ${diagnostic.path}: expected ${diagnostic.expected}, got ${diagnostic.got}`,
+        );
+      }
+    }
+    console.log(STRUCTURAL_ONLY_NOTE);
+    process.exitCode = result.valid ? 0 : 1;
+  });
+
+// Commander's default for a parsing failure (a missing `<file>` argument,
+// an unknown option, excess arguments) is exit code 1, the same code this
+// command otherwise reserves for "structurally invalid" -- collapsing
+// "you didn't invoke this right" into "the return you gave me is invalid"
+// (fix-round, review finding L1). Scoped to this one subcommand so every
+// other command's existing commander-parsing exit behavior is untouched:
+// commander already prints the error message itself before calling this
+// callback, so remapping the exit code is all that is needed here.
+validateReviewReportCommand.exitOverride((err) => {
+  process.exit(err.exitCode === 0 ? 0 : 2);
+});
+
 program.parseAsync(process.argv).catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : error);
   process.exitCode = 1;

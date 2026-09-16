@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-09-16T06:28:37Z
+timestamp: 2026-09-16T07:15:50Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/agents/reviewer.md
@@ -287,7 +287,13 @@ second-person rule ("always set it in your output; never leave it blank or
 omit it"). This is distinct from the per-finding `Decision` column and the
 severity ladder above: a reviewer could previously satisfy every other part
 of the contract and still omit the one field that carries its overall
-verdict.
+verdict. 8ab22cb0 adds a mechanical, structure-only check for this same
+requirement: the `validate-review-report` CLI subcommand documented at
+`packages/orchestrator-workflow/assets/skill/references/contracts.md:168#"A structural check for this exact contract ships as a CLI subcommand:"`
+parses a reviewer return and reports a missing or invalid
+`acceptance_recommendation` (or any other required field) as a diagnostic,
+but never judges semantic adequacy or substitutes for this rule's
+orchestrator-side ask-back response.
 
 Motivated by the same 16-round dogfood as the mutation-probes hardening in
 [subagent-contracts-superset.md](subagent-contracts-superset.md#mutation-probes-requirement-0160)

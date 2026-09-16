@@ -691,3 +691,41 @@ references.
 package's version, so a release of `okf-kit` must bump those pins in the
 same commit as the version cut; see `CONTRIBUTING.md`'s "Releasing okf-kit"
 section (repo root) for the order.
+
+## Reviewer-report validation
+
+```bash
+orchestrator-workflow validate-review-report path/to/return.yaml
+orchestrator-workflow validate-review-report - < path/to/return.yaml
+orchestrator-workflow validate-review-report path/to/return.yaml --format json
+```
+
+Checks a reviewer return's YAML against the reviewer output contract's
+required fields and enums (see the "Reviewer output contract" section of
+`assets/skill/references/contracts.md`, byte-identical to the contract in
+`assets/agents/reviewer.md`), whether the return is fenced in a code
+block (any language tag, or none) or given unfenced, and prints one
+diagnostic per missing or invalid field. A fenced return ends at the
+first closing fence that starts at column 0, so a reviewer quoting a
+fenced snippet inside a value (a `description` block scalar, which YAML
+indents) does not truncate the return. `--format json` prints the same
+diagnostics as a single JSON object instead of human-readable text. It
+exits `0` when the return is structurally valid, `1` when it is
+structurally invalid (a required field is missing or its value falls
+outside its enum, or the input is unparsable, empty, or not a mapping),
+and `2` for a usage error (an unreadable file, an unrecognized `--format`
+value, a missing `<file>` argument, an unknown option, or an excess
+positional argument).
+`--format json` governs the validation verdict only: a commander parsing
+error (missing argument, unknown option, excess arguments) or an
+unrecognized `--format` value itself still prints plain text to stderr
+with nothing on stdout, regardless of `--format`; the one exception is an
+unreadable file, which does emit the JSON envelope on stdout. This check
+is structural only: it never judges semantic adequacy, cannot waive a
+finding, and passing it is never orchestrator acceptance. The
+required-field set it checks is hand-maintained in `src/review-report.ts`
+and pinned against the contract block itself by
+`test/docs-consistency.test.ts`, so a contract edit without a matching
+schema edit fails the suite instead of drifting silently; every field
+listed there is dispatched to its own checker, so an entry added to the
+list without a checker fails to typecheck rather than passing unchecked.
