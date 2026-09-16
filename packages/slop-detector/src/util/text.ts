@@ -36,13 +36,25 @@ export function findAllRegex(
   return results;
 }
 
+// Backtick and tilde fences are the two fence styles Markdown (CommonMark
+// / GFM) recognizes; an indented (four-space) code block is deliberately
+// NOT stripped here -- see review-slop's README section for why.
+//
+// Both the opener and the closer are anchored to the start of a line (with
+// CommonMark's up-to-three spaces of leading indentation), because a fence
+// only opens a code block there. Unanchored, a mid-sentence run of three
+// backticks or tildes -- prose *about* fences, a `~~~` used as a visual
+// separator, a triple backtick inside a longer inline span -- paired with
+// the next such run anywhere later in the file and blanked every word
+// between them, hiding real findings from every rule that reads prose
+// through this helper (prose-slop, agent-tics, review-slop).
+const BACKTICK_FENCE = /^ {0,3}```[\s\S]*?^ {0,3}```/gm;
+const TILDE_FENCE = /^ {0,3}~~~[\s\S]*?^ {0,3}~~~/gm;
+
 export function stripFencedCode(text: string): string {
-  // Backtick and tilde fences are the two fence styles Markdown (CommonMark
-  // / GFM) recognizes; an indented (four-space) code block is deliberately
-  // NOT stripped here -- see review-slop's README section for why.
   return text
-    .replace(/```[\s\S]*?```/g, (block) => " ".repeat(block.length))
-    .replace(/~~~[\s\S]*?~~~/g, (block) => " ".repeat(block.length));
+    .replace(BACKTICK_FENCE, (block) => " ".repeat(block.length))
+    .replace(TILDE_FENCE, (block) => " ".repeat(block.length));
 }
 
 export function stripInlineCode(text: string): string {

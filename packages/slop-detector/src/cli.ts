@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import path from "node:path";
 import process from "node:process";
 import { Command } from "commander";
 import { checkPath, checkText, summarize } from "./engine.js";
@@ -8,6 +9,14 @@ import { allPacks, packsByFilter } from "./packs/registry.js";
 import { renderText } from "./cli-render.js";
 import type { CheckSummary } from "./types.js";
 
+// Idle bound for a stdin read; `readStdin` below says what it protects
+// against and why this value. Declared up here rather than next to
+// `readStdin` because `program.parseAsync()` below runs the `check` action
+// while this module is still evaluating, so a `const` declared after that
+// call is in its temporal dead zone when the action reads it (a hoisted
+// `function` is not, which is why every other helper can live below).
+const DEFAULT_STDIN_IDLE_TIMEOUT_MS = 10_000;
+
 const program = new Command();
 
 program
@@ -15,6 +24,13 @@ program
   .description("Configurable AI-slop linter for PRs and content")
   .version(readVersion());
 
+// `check`'s argv shape (`[paths...]`, `--pack`, `--stdin-path`) is
+// prescribed verbatim by orchestrator-workflow's installed implementer
+// prompt (`packages/orchestrator-workflow/assets/agents/implementer.md`,
+// its pre-return review-slop bullet), so it is a published interface, not
+// an internal one: `test/cli.test.ts` runs those exact argv shapes end to
+// end, which makes an arity or flag change here fail a test instead of
+// only leaving that prompt stale.
 program
   .command("check [paths...]")
   .description(
@@ -121,12 +137,18 @@ async function runCheck(
 
   let summary: CheckSummary;
   if (wantsStdin) {
+    // A TTY is the one shape of "nothing piped in" that can be recognized
+    // without reading anything at all, so it stays a fast path; every
+    // other shape is decided by the emptiness check below, after the read.
     if (process.stdin.isTTY) {
-      throw new Error(
-        "no path given and stdin is a TTY (nothing piped in) -- pass a path, or pipe content in, e.g. `git log -1 --format=%B | slop-detector check --stdin-path COMMIT_MSG`",
+      throw noStdinContentError("stdin is a TTY, so nothing was piped in");
+    }
+    const text = await readStdin(stdinIdleTimeoutMs());
+    if (text.trim().length === 0) {
+      throw noStdinContentError(
+        "stdin ended without any non-whitespace content",
       );
     }
-    const text = await readStdin();
     const violations = checkText(text, opts.stdinPath, {
       packs,
       config,
@@ -139,11 +161,19 @@ async function runCheck(
     // single target, then merged: `filesScanned` sums, violations and any
     // warnings concatenate, and `summarize` recomputes the block/warn/info
     // counts over the combined violation list.
+    // De-duplicated on the resolved absolute path first, so `check a.md
+    // ./a.md` (or the same file listed twice by a caller pasting a changed-file
+    // list) scans and counts it once instead of doubling both `filesScanned`
+    // and every violation it carries.
+    const seen = new Set<string>();
     const perPath: CheckSummary[] = [];
     for (const rawPath of rawPaths) {
       if (!fs.existsSync(rawPath)) {
         throw new Error(`Path does not exist: ${rawPath}`);
       }
+      const resolved = path.resolve(rawPath);
+      if (seen.has(resolved)) continue;
+      seen.add(resolved);
       perPath.push(checkPath(rawPath, { packs, config, packFilter }));
     }
     const violations = perPath.flatMap((s) => s.violations);
@@ -180,15 +210,72 @@ function normalizeOpts(raw: unknown): CheckOpts {
   };
 }
 
-async function readStdin(): Promise<string> {
+// Reading stdin has to both terminate and produce something. `check` with
+// no path (or a bare "-") scans content piped in on stdin, and
+// `--stdin-path` only names that piped content, so a caller who meant to
+// scan a file but piped nothing in has two ways to go wrong, and both used
+// to pass silently:
+//
+//   - stdin ends with no content at all (an interactive TTY, `< /dev/null`,
+//     `printf "" |`, a whitespace-only body). That produced a clean,
+//     green report over an empty document -- exit 0, "0 violations" --
+//     which reads as "checked, nothing found" rather than "nothing was
+//     checked". Emptiness, not TTY-ness, is the predicate for this.
+//   - stdin never ends at all: an inherited, non-TTY stream with no writer,
+//     which is what a CI step or an agent harness spawning the CLI with
+//     stdio inherited hands it. That hung forever with no output.
+//
+// The second is bounded by an IDLE timeout, re-armed on every chunk, so a
+// large but flowing input is never truncated and only a stream that
+// produces nothing at all for this long is given up on. The trade-off: a
+// pipeline whose producer legitimately stalls longer than this reports a
+// usage error instead of waiting. 10s is far above any of the documented
+// producers (a `git log`, a file redirect, a heredoc), and
+// SLOP_DETECTOR_STDIN_TIMEOUT_MS overrides it (it exists so the
+// never-ending-stdin case is cheap to pin in `test/cli.test.ts`; the
+// default must stand on its own without a caller setting anything).
+function stdinIdleTimeoutMs(): number {
+  const raw = process.env.SLOP_DETECTOR_STDIN_TIMEOUT_MS;
+  if (raw === undefined) return DEFAULT_STDIN_IDLE_TIMEOUT_MS;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : DEFAULT_STDIN_IDLE_TIMEOUT_MS;
+}
+
+function noStdinContentError(reason: string): Error {
+  return new Error(
+    `${reason}, so nothing was scanned. \`check\` with no path (or a bare "-") scans content piped in on stdin, and \`--stdin-path <name>\` only names that piped content -- it never opens a file. Pipe content in, e.g. \`git log -1 --format=%B | slop-detector check --stdin-path COMMIT_MSG --pack review-slop\`, or pass one or more paths to scan files instead.`,
+  );
+}
+
+async function readStdin(idleTimeoutMs: number): Promise<string> {
   return new Promise((resolve, reject) => {
     let data = "";
+    let idle: NodeJS.Timeout | undefined;
+    const arm = () => {
+      clearTimeout(idle);
+      idle = setTimeout(() => {
+        process.stdin.pause();
+        reject(
+          noStdinContentError(
+            `stdin produced no data for ${idleTimeoutMs}ms and never ended`,
+          ),
+        );
+      }, idleTimeoutMs);
+    };
+    const settle = (fn: () => void) => {
+      clearTimeout(idle);
+      fn();
+    };
     process.stdin.setEncoding("utf8");
     process.stdin.on("data", (chunk: string) => {
       data += chunk;
+      arm();
     });
-    process.stdin.on("end", () => resolve(data));
-    process.stdin.on("error", reject);
+    process.stdin.on("end", () => settle(() => resolve(data)));
+    process.stdin.on("error", (err: Error) => settle(() => reject(err)));
+    arm();
   });
 }
 

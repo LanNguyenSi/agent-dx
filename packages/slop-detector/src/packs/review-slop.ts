@@ -154,9 +154,9 @@ function isAllowedByReviewAllow(text: string, config: ResolvedConfig): boolean {
  * against (the stripped prose text, a comment's value, or a test title's
  * string-literal value) and the match's `[start, end)` span within that
  * same local text, decide whether the match should still count. Used by
- * `round-reference` to require a review-context word in the same paragraph
- * at all; `finding-id` and `handoff-phrase` pass no filter and keep every
- * match.
+ * `round-reference` to require a review-context word in the same sentence
+ * (as `sentenceWindow` below bounds one) at all; `finding-id` and
+ * `handoff-phrase` pass no filter and keep every match.
  */
 type MatchFilter = (text: string, start: number, end: number) => boolean;
 
@@ -201,39 +201,67 @@ function scanComments(
 }
 
 const TEST_CALL_NAMES = new Set(["it", "test", "describe"]);
-const TEST_MEMBER_NAMES = new Set(["only", "skip", "each"]);
+// The modifier properties the three entry points chain in vitest and jest:
+// `.only`, `.skip`, `.each`, plus vitest's `.concurrent` and `.for`.
+const TEST_MEMBER_NAMES = new Set([
+  "only",
+  "skip",
+  "each",
+  "concurrent",
+  "for",
+]);
+// `it.only.each` / `test.concurrent.each` is as deep as those APIs
+// compose; a longer chain is not a test entry point this pack recognizes.
+const MAX_TEST_MEMBER_DEPTH = 2;
+
+/**
+ * True for a callee naming a test entry point: a bare `it`/`test`/
+ * `describe` identifier, or that identifier followed by up to
+ * `MAX_TEST_MEMBER_DEPTH` non-computed modifier properties from
+ * `TEST_MEMBER_NAMES` (`describe.skip`, `it.each`, `it.only.each`,
+ * `test.concurrent.each`).
+ */
+function isTestTitleCallee(callee: TSESTree.Node): boolean {
+  let node: TSESTree.Node = callee;
+  let depth = 0;
+  while (node.type === "MemberExpression") {
+    if (node.computed || node.property.type !== "Identifier") return false;
+    if (!TEST_MEMBER_NAMES.has(node.property.name)) return false;
+    depth++;
+    if (depth > MAX_TEST_MEMBER_DEPTH) return false;
+    node = node.object;
+  }
+  return node.type === "Identifier" && TEST_CALL_NAMES.has(node.name);
+}
 
 function isTestTitleCall(node: TSESTree.CallExpression): boolean {
+  return isTestTitleCallee(node.callee);
+}
+
+/**
+ * True for a CURRIED test-title call: one whose callee is itself the thing
+ * that produced the title-taking function, so the title sits in the OUTER
+ * call's first argument rather than in the callee's own. Two shapes, both
+ * `.each` tables:
+ *
+ * - `it.each(table)("title", fn)` -- the callee is a `CallExpression`
+ *   (`it.each(table)`).
+ * - ``it.each`table`("title", fn)`` -- the callee is a
+ *   `TaggedTemplateExpression` whose tag is `it.each`.
+ *
+ * One level up from the ordinary `isTestTitleCall` shapes above, which
+ * carry the title in their own first argument.
+ */
+function isCurriedEachTitleCall(node: TSESTree.CallExpression): boolean {
   const callee = node.callee;
-  if (callee.type === "Identifier" && TEST_CALL_NAMES.has(callee.name)) {
-    return true;
-  }
-  if (
-    callee.type === "MemberExpression" &&
-    !callee.computed &&
-    callee.object.type === "Identifier" &&
-    TEST_CALL_NAMES.has(callee.object.name) &&
-    callee.property.type === "Identifier" &&
-    TEST_MEMBER_NAMES.has(callee.property.name)
-  ) {
-    return true;
+  if (callee.type === "CallExpression") return isTestTitleCall(callee);
+  if (callee.type === "TaggedTemplateExpression") {
+    return isTestTitleCallee(callee.tag);
   }
   return false;
 }
 
-/**
- * Every call whose own callee is `<it|test|describe>.each` (a tagged
- * template call, `it.each(table)("title", fn)`), one level up from the
- * ordinary `isTestTitleCall` shapes above: the outer node is itself a
- * `CallExpression` whose `callee` is the `.each(...)` call, so the title
- * lives in the OUTER call's first argument, not the inner one.
- */
-function isTaggedEachTitleCall(node: TSESTree.CallExpression): boolean {
-  const callee = node.callee;
-  return callee.type === "CallExpression" && isTestTitleCall(callee);
-}
-
-/** Every match of `re` inside the first string-literal argument of an `it`/`test`/`describe` (or `.only`/`.skip`/`.each`, including the tagged `it.each(table)("title", fn)` form) call. */
+/** Every match of `re` inside the first string-literal argument of an `it`/`test`/`describe` call (including a chained `.only`/`.skip`/`.each`/`.concurrent`/`.for`, and the curried ``it.each(table)("title", fn)`` / ``it.each`table`("title", fn)`` forms). */
 function scanTestTitles(
   file: FileTarget,
   config: ResolvedConfig,
@@ -246,7 +274,7 @@ function scanTestTitles(
   walk(result.ast as unknown as AnyNode, (node) => {
     if (node.type !== "CallExpression") return;
     const call = node as unknown as TSESTree.CallExpression;
-    if (!isTestTitleCall(call) && !isTaggedEachTitleCall(call)) return;
+    if (!isTestTitleCall(call) && !isCurriedEachTitleCall(call)) return;
     const arg = call.arguments[0];
     if (!arg || arg.type !== "Literal" || typeof arg.value !== "string") {
       return;
@@ -358,8 +386,8 @@ const ROUND_TOKEN = /\bR\d{1,2}\b/g;
 // false positive in isolation (`## Round 2` heading, `round 2 of the DNS
 // retry`, a Cloudflare `R2` bucket, `DeepSeek-R1`, `see pin R3`). Rather
 // than guess from the token's shape alone, each match is only kept when
-// its own sentence also carries a review-process word -- the same
-// sentence-scoped precision `review.allow` already uses (see
+// the same sentence also carries a review-process word -- one sentence,
+// bounded by `.`, `!`, `?`, a blank line, a heading, or a list item (see
 // `sentenceWindow` below). `round`/`rounds` counts as context for a bare
 // `R\d+` token (a nearby "round" is real evidence, e.g. "over several
 // rounds we settled on R3"), but deliberately NOT for `round \d+` itself
@@ -370,42 +398,71 @@ const ROUND_WORD_CONTEXT =
 const ROUND_TOKEN_CONTEXT =
   /\b(review|reviewer|round[s]?|fix(?:e[ds]|ing)?|finding[s]?)\b/i;
 
-/**
- * The substring of `text` bounded by the nearest sentence-terminating
- * character (`.`, `!`, `?`, or a newline) before `start` and after `end`,
- * exclusive of those boundary characters themselves -- the same-sentence
- * window a context word is looked up in.
- */
-/**
- * True when `text[i]` is a `\n` that is part of a blank line (a real
- * Markdown paragraph break), i.e. immediately adjacent to another
- * newline. A single soft-wrap newline inside a hand-wrapped paragraph
- * (every prose file in this repo wraps around 72-80 columns) is NOT a
- * sentence/paragraph boundary on its own -- treating every line break as
- * one made the context window in a wrapped paragraph collapse to
- * whatever fragment happens to share a physical line with the match,
- * wrongly missing a context word one wrapped line away (found via this
- * pack's own dogfood run over `docs/okf/log.md`, itself a hand-wrapped
- * Markdown file).
- */
-function isBlankLineNewline(text: string, i: number): boolean {
-  if (text[i] !== "\n") return false;
-  return text[i - 1] === "\n" || text[i + 1] === "\n";
+// An ATX heading line and a list-item line, both allowing CommonMark's
+// up-to-three leading spaces of indentation. Used as structural sentence
+// boundaries below, not to parse Markdown.
+const HEADING_LINE = /^ {0,3}#{1,6}(?:\s|$)/;
+const LIST_ITEM_LINE = /^ {0,3}(?:[-*+][ \t]|\d{1,9}[.)][ \t])/;
+
+function lineStart(text: string, i: number): number {
+  return text.lastIndexOf("\n", i) + 1;
 }
 
+function lineEnd(text: string, i: number): number {
+  const nl = text.indexOf("\n", i);
+  return nl === -1 ? text.length : nl;
+}
+
+/**
+ * True when the `\n` at `text[i]` ends the sentence window, i.e. when it
+ * is structural rather than a soft wrap:
+ *
+ * - it is part of a blank line (a real paragraph break),
+ * - it terminates a Markdown heading line, or
+ * - the line after it starts a heading or a list item.
+ *
+ * A plain soft-wrap newline inside one paragraph (or inside one list
+ * item's own wrapped body) is NOT a boundary: every prose file in this
+ * repo wraps around 72-80 columns, and treating each line break as a
+ * boundary collapsed the window to whatever fragment happened to share a
+ * physical line with the match, wrongly missing a context word one
+ * wrapped line away (found via this pack's own dogfood run over
+ * `docs/okf/log.md`, itself a hand-wrapped Markdown file). The heading
+ * and list-item cases close the other direction: a heading's own words
+ * ("## Review rounds") and a preceding list item's words are not part of
+ * the following bullet's sentence, and without them a period-less bullet
+ * list under such a heading inherited its context words two lines up.
+ */
+function isWindowBoundaryNewline(text: string, i: number): boolean {
+  if (text[i] !== "\n") return false;
+  if (text[i - 1] === "\n" || text[i + 1] === "\n") return true;
+  if (i > 0 && HEADING_LINE.test(text.slice(lineStart(text, i - 1), i))) {
+    return true;
+  }
+  const nextLine = text.slice(i + 1, lineEnd(text, i + 1));
+  return HEADING_LINE.test(nextLine) || LIST_ITEM_LINE.test(nextLine);
+}
+
+/**
+ * The substring of `text` around `[start, end)` bounded by the nearest
+ * sentence boundary on each side, exclusive of the boundary itself: a
+ * `.`, `!` or `?`, or a structural newline (a blank line, a heading line,
+ * or the start of a list item -- see `isWindowBoundaryNewline`). This is
+ * the one sentence a context word is looked up in.
+ */
 function sentenceWindow(text: string, start: number, end: number): string {
   let begin = start;
   while (begin > 0) {
     const ch = text[begin - 1];
     if (ch === "." || ch === "!" || ch === "?") break;
-    if (isBlankLineNewline(text, begin - 1)) break;
+    if (isWindowBoundaryNewline(text, begin - 1)) break;
     begin--;
   }
   let stop = end;
   while (stop < text.length) {
     const ch = text[stop];
     if (ch === "." || ch === "!" || ch === "?") break;
-    if (isBlankLineNewline(text, stop)) break;
+    if (isWindowBoundaryNewline(text, stop)) break;
     stop++;
   }
   return text.slice(begin, stop);
@@ -421,7 +478,7 @@ const roundReference: Rule = {
   defaultSeverity: "block",
   enabledByDefault: true,
   rationale:
-    "A review-round reference (`round 2`, `R3`, `review round 1 fixes`) only makes sense inside the run that produced it. Baked into a test title, a source comment, a commit message, or a doc, it is stale the moment the next round starts. Only flagged when the same paragraph also carries a review-process word (`review`, `finding`, `fix`, or -- for the bare `R3` shorthand -- `round` itself), so an unrelated `round 2 of the DNS retry` or a Cloudflare `R2` bucket is left alone.",
+    "A review-round reference (`round 2`, `R3`, `review round 1 fixes`) only makes sense inside the run that produced it. Baked into a test title, a source comment, a commit message, or a doc, it is stale the moment the next round starts. Only flagged when the same sentence -- bounded by `.`, `!`, `?`, a blank line, a heading, or a list item -- also carries a review-process word (`review`, `finding`, `fix`, or -- for the bare `R3` shorthand -- `round` itself), so an unrelated `round 2 of the DNS retry` or a Cloudflare `R2` bucket is left alone.",
   appliesTo: appliesToReviewSurface,
   check(ctx: RuleContext): Violation[] {
     return checkReviewTokenRule(

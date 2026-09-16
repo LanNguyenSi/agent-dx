@@ -430,10 +430,14 @@ or misleading the moment that cycle is over.
   finding inside it. A digitless `review round` never matches, at any
   severity (the kit's own vocabulary for its own review-round mechanism
   uses this exact phrase); `round N` and a bare `RN` token only match
-  when the same paragraph also carries a review-process word (`review`,
+  when the same sentence also carries a review-process word (`review`,
   `finding`, `fix`, or -- for the bare token -- `round` itself), so an
   unrelated `round 2 of the DNS retry` or a Cloudflare `R2` bucket is
-  left alone.
+  left alone. "The same sentence" is bounded by a `.`, `!` or `?`, a
+  blank line, a Markdown heading line, or the start of a list item: a
+  `## Review rounds` heading, or a previous bullet, does not lend its
+  words to the bullet below it, while one list item's own soft-wrapped
+  continuation line is still part of the same sentence.
 - **`handoff-phrase`** (warn): `per the <workspace> handoffs` (e.g.
   `per the pandora handoffs`), points a reader at a workspace's own
   operating layer that a package shipped to other repos has no access
@@ -441,9 +445,17 @@ or misleading the moment that cycle is over.
 
 All three scan the same four surfaces: Markdown files (`.md`/`.mdx`/
 `.markdown`), TypeScript/JavaScript source comments (line and block),
-test titles (the first string-literal argument of `it`/`test`/`describe`,
-including `.only`/`.skip`/`.each`), and a commit-message file (see
-"Commit-message mode" below).
+test titles, and a commit-message file (see "Commit-message mode"
+below).
+
+A test title is the first string-literal argument of an `it`/`test`/
+`describe` call, including a chained modifier
+(`.only`/`.skip`/`.each`/`.concurrent`/`.for`, up to two deep, so
+`it.only.each` counts) and the curried `.each` forms where the title sits
+in the outer call: ``it.each(table)("title", fn)`` and
+``it.each`table`("title", fn)``. A title built by template literal or
+string concatenation rather than a plain string literal is not scanned,
+and neither is a string literal outside a test call.
 
 ```markdown
 <!-- BLOCKED by review-slop/finding-id and review-slop/round-reference -->
@@ -476,9 +488,14 @@ bucket, `DeepSeek-R1`, a model name), and a code-block label like an
 `R1` resistor or an `F1` JSON key inside a fenced (backtick- or
 tilde-delimited) code block: fenced and inline code spans are stripped
 from Markdown before either rule runs, the same way `prose-slop`'s rules
-already skip code spans. (An indented, four-space code block is *not*
-stripped -- only a fenced one -- so a review token inside one still
-flags; wrap it in a fence, or add it to `review.allow`, instead.)
+already skip code spans. A fence is recognized only where one actually
+opens a code block: at the start of a line, with at most three spaces of
+indentation, both for the opener and the closer. A mid-sentence run of
+three backticks or tildes (prose *about* fences, a `~~~` used as a
+visual separator) therefore does not open anything, and does not blank
+the prose up to the next such run. (An indented, four-space code block
+is *not* stripped -- only a fenced one -- so a review token inside one
+still flags; wrap it in a fence, or add it to `review.allow`, instead.)
 
 **Commit-message mode.** `check --stdin-path COMMIT_MSG` (or a path
 ending in `COMMIT_EDITMSG`/`.commitmsg`, e.g. a real `.git/COMMIT_EDITMSG`
@@ -490,10 +507,22 @@ git log -1 --format=%B HEAD | node packages/slop-detector/dist/cli.js check --st
 
 `check` also takes more than one path (`check fileA fileB --pack
 review-slop`, or `--pack review-slop fileA fileB`, either ordering): each
-is scanned and folded into one combined result. `--stdin-path` only
-applies when reading stdin (no path given, or a bare `-`); passing it
-together with a real path is a usage error (exit `2`), as is reading
-stdin with nothing piped in.
+is scanned and folded into one combined result, and the same file named
+twice is scanned once rather than counted twice.
+
+`--stdin-path` only applies when reading stdin (no path given, or a bare
+`-`); passing it together with a real path is a usage error (exit `2`).
+So is reading stdin with nothing to read, and emptiness is the predicate
+there, not whether stdin is a terminal: a TTY, `< /dev/null`, an empty
+pipe and a whitespace-only pipe all exit `2` with a message naming
+`--stdin-path`, because a clean report over an empty document reads as
+"checked, found nothing" when in fact nothing was checked. A stdin that
+is opened but never written to and never closed (an inherited, non-TTY
+stream with no writer, which is what a CI step or an agent harness
+spawning the CLI with stdio inherited hands it) used to hang forever; it
+is now bounded by a 10-second idle timeout, re-armed on every chunk, and
+reports the same usage error. `SLOP_DETECTOR_STDIN_TIMEOUT_MS` overrides
+that bound for a pipeline whose producer legitimately stalls longer.
 
 **Configuration.**
 

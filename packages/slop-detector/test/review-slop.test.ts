@@ -276,6 +276,79 @@ describe("review-slop", () => {
     });
   });
 
+  // The context window is ONE sentence: bounded by `.`, `!`, `?`, a blank
+  // line, a heading line, or the start of a list item. Each bound is pinned
+  // separately here, because each one is the difference between a precise
+  // rule and one that borrows a context word from unrelated neighbouring
+  // prose.
+  describe("round-reference: what bounds the context sentence", () => {
+    it("negative: a context word in a PREVIOUS sentence of the same paragraph does not count", () => {
+      // One physical line, two sentences: only the `.` separates the
+      // context words ("reviewer", "fix") from the bare token.
+      const text =
+        "The reviewer asked for a fix. The R2 bucket holds the artifacts.";
+      const v = checkText(text, "docs/NOTES.md", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "review-slop/round-reference"),
+      ).toBeUndefined();
+    });
+
+    it("negative: a heading's own words do not leak into the period-less bullets under it", () => {
+      const text = [
+        "## Review rounds",
+        "- moved storage into the R2 bucket",
+        "- benchmarked DeepSeek-R1 on the same prompts",
+      ].join("\n");
+      const v = checkText(text, "docs/NOTES.md", baseOpts());
+      expect(
+        v.filter((x) => x.ruleId === "review-slop/round-reference"),
+      ).toHaveLength(0);
+    });
+
+    it("negative: one bullet's words do not leak into the next bullet", () => {
+      const text = [
+        "- the reviewer signed this one off",
+        "- storage moved to R2",
+      ].join("\n");
+      const v = checkText(text, "docs/NOTES.md", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "review-slop/round-reference"),
+      ).toBeUndefined();
+    });
+
+    it("fires on a bare token inside a list item whose own text carries the context word", () => {
+      const text = ["## Storage", "- the review moved artifacts into R2"].join(
+        "\n",
+      );
+      const v = checkText(text, "docs/NOTES.md", baseOpts());
+      const hit = v.find((x) => x.ruleId === "review-slop/round-reference");
+      expect(hit).toBeDefined();
+      expect(hit?.matched).toBe("R2");
+    });
+
+    it("fires when the context word is on a wrapped list item's first line and the match on its continuation line", () => {
+      // A list item's own soft-wrapped continuation line is part of the same
+      // sentence (its leading indent is not a new list-item start), so the
+      // context word one line up still counts.
+      const text = [
+        "- the reviewer asked for a storage change, so we",
+        "  moved the artifacts into R2",
+      ].join("\n");
+      const v = checkText(text, "docs/NOTES.md", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "review-slop/round-reference"),
+      ).toBeDefined();
+    });
+
+    it("fires on a bare token whose sentence carries `rounds` as its context word", () => {
+      const text = "Over several rounds we settled on R3 for the storage tier.";
+      const v = checkText(text, "docs/NOTES.md", baseOpts());
+      const hit = v.find((x) => x.ruleId === "review-slop/round-reference");
+      expect(hit).toBeDefined();
+      expect(hit?.matched).toBe("R3");
+    });
+  });
+
   describe("handoff-phrase (Markdown)", () => {
     it("fires (warn) on a workspace-handoff phrase", () => {
       const v = checkText(
@@ -382,13 +455,71 @@ describe("review-slop", () => {
       expect(hits).toHaveLength(2);
     });
 
-    it("fires on a finding id in a tagged it.each(table)(title, fn) title", () => {
+    it("fires on a finding id in a curried it.each(table)(title, fn) title", () => {
       const text =
         'it.each(table)("F1: kills the mutant", ({ x }) => { expect(x).toBe(1); });';
       const v = checkText(text, "src/fix.test.ts", baseOpts());
       expect(
         v.find((x) => x.ruleId === "review-slop/finding-id"),
       ).toBeDefined();
+    });
+
+    it("fires on a finding id in a curried it.each`table`(title, fn) tagged-template title", () => {
+      const text = [
+        "it.each`",
+        "  a    | b",
+        "  ${1} | ${2}",
+        '`("F1: kills the mutant", ({ a }) => { expect(a).toBe(1); });',
+      ].join("\n");
+      const v = checkText(text, "src/fix.test.ts", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "review-slop/finding-id"),
+      ).toBeDefined();
+    });
+
+    it("fires on a round reference in an it.only.each(table)(title) title", () => {
+      const text =
+        'it.only.each(table)("review round 2 regression", () => {});';
+      const v = checkText(text, "src/fix.test.ts", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "review-slop/round-reference"),
+      ).toBeDefined();
+    });
+
+    it("fires on a finding id in an it.skip.each`table`(title) title", () => {
+      const text = [
+        "it.skip.each`",
+        "  a",
+        "  ${1}",
+        '`("F3: skipped", () => {});',
+      ].join("\n");
+      const v = checkText(text, "src/fix.test.ts", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "review-slop/finding-id"),
+      ).toBeDefined();
+    });
+
+    it("fires on a finding id in an it.concurrent(title) title", () => {
+      const text = 'it.concurrent("F4: runs alongside", async () => {});';
+      const v = checkText(text, "src/fix.test.ts", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "review-slop/finding-id"),
+      ).toBeDefined();
+    });
+
+    it("fires on a finding id in a curried test.for(cases)(title) title", () => {
+      const text =
+        'test.for(cases)("F5: each case", ([a]) => { expect(a).toBe(1); });';
+      const v = checkText(text, "src/fix.test.ts", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "review-slop/finding-id"),
+      ).toBeDefined();
+    });
+
+    it("negative: a curried .each on a callee that is not a test entry point does not fire", () => {
+      const text = 'helpers.each(table)("F1: not a test title", () => {});';
+      const v = checkText(text, "src/fix.test.ts", baseOpts());
+      expect(v).toHaveLength(0);
     });
 
     it("fires on a round reference in a test() title", () => {
@@ -506,6 +637,44 @@ describe("review-slop", () => {
       expect(
         vBlocked.find((x) => x.ruleId === "review-slop/round-reference"),
       ).toBeDefined();
+    });
+
+    it("an allow pattern excuses a whole source comment (comment surface)", () => {
+      // On the two code surfaces the allow check is per comment / per title,
+      // not per span: a pattern matching anywhere in the comment excuses
+      // every match inside it, which is why the pattern here deliberately
+      // does not overlap the token it excuses.
+      const text = ["// Mutation-check intent (F1)", "function fix() {}"].join(
+        "\n",
+      );
+      const withAllow = mergeConfig({
+        review: { allow: ["Mutation-check intent"] },
+      });
+      const vAllowed = checkText(text, "src/fix.ts", {
+        packs: allPacks,
+        config: withAllow,
+        packFilter: ["review-slop"],
+      });
+      expect(vAllowed).toHaveLength(0);
+
+      const vBlocked = checkText(text, "src/fix.ts", baseOpts());
+      expect(vBlocked.find((x) => x.matched === "F1")).toBeDefined();
+    });
+
+    it("an allow pattern excuses a whole test title (test-title surface)", () => {
+      const text = 'it("F1: keeps the earlier fix", () => {});';
+      const withAllow = mergeConfig({
+        review: { allow: ["keeps the earlier fix"] },
+      });
+      const vAllowed = checkText(text, "src/fix.test.ts", {
+        packs: allPacks,
+        config: withAllow,
+        packFilter: ["review-slop"],
+      });
+      expect(vAllowed).toHaveLength(0);
+
+      const vBlocked = checkText(text, "src/fix.test.ts", baseOpts());
+      expect(vBlocked.find((x) => x.matched === "F1")).toBeDefined();
     });
   });
 
