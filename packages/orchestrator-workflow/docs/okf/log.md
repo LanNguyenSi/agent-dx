@@ -1,5 +1,12 @@
 # Bundle log
 
+- 2026-09-16T07:43:37Z (reviewer-report validator, review round 4 delta): the
+  `--format json` envelope for an unreadable file is now pinned by a CLI
+  test, the unreachable BOM strip in `extractYamlSource` is gone, the
+  `scalar` kind's diagnostics say "string or number", and the README's
+  exit-2 list names the unknown-option case; re-stamped the docs listing
+  `README.md` as a source (`install-fence-mechanics.md`, `model-preselection.md`, `run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`).
+
 - 2026-09-16T07:15:50Z (reviewer-report validator, round 4, agent-dx task
   8ab22cb0, pandora run 2026-09-16-open-pool-batch55, T-003): review
   round 3 (rigorous) returned `fix_required` on the same test-adequacy
