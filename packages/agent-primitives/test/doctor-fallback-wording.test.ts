@@ -15,13 +15,19 @@ import { describe, expect, it } from "vitest";
  * that stops naming it in words a human -- or this guard -- can find)
  * fails here instead of only being caught by review.
  *
- * The three reasons are matched by stable key phrases rather than one
- * exact sentence, since the four surfaces are different prose forms
- * (a CLI option description, two Markdown documents, a TSDoc comment)
- * that are not expected to share one literal sentence, only the same
- * three facts. Backticks are stripped before matching so a Markdown
- * surface's `` `PATH` `` and a plain-text surface's `PATH` are the same
- * match.
+ * All four surfaces now carry the same shared parenthetical listing the
+ * three reasons (a CLI option description, two Markdown documents, and
+ * a TSDoc comment each wrap it at their own column width, but the words
+ * themselves are one shared list, not four independent prose forms).
+ * The three reasons are still matched by stable key phrases rather than
+ * one exact string, since the surfaces still differ in punctuation and
+ * backtick use around that shared list; the match is scoped to the
+ * parenthetical itself, not the whole surrounding section, so a key
+ * phrase appearing elsewhere in the section (unrelated prose, or a
+ * different check's own parenthetical) can never make this guard pass
+ * for the wrong reason. Backticks are stripped before matching so a
+ * Markdown surface's `` `PATH` `` and a plain-text surface's `PATH` are
+ * the same match.
  */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -67,13 +73,30 @@ interface Surface {
  * Throws (rather than returning an empty slice a missing-reason
  * assertion would then blame on the wrong cause) when the heading is
  * not found, since a renamed or removed heading is itself the kind of
- * drift this guard exists to catch. */
+ * drift this guard exists to catch. Heading lines inside a fenced code
+ * block (between a pair of ``` lines) are never treated as headings --
+ * a `#` comment inside a fenced `bash`/`json` example would otherwise
+ * be mistaken for a Markdown heading and could truncate or misplace the
+ * section this extracts. */
 function extractMarkdownSection(
   markdown: string,
   headingPattern: RegExp,
 ): string {
   const lines = markdown.split("\n");
-  const startIndex = lines.findIndex((line) => headingPattern.test(line));
+  const isFence = (line: string): boolean => /^\s*```/.test(line);
+
+  let inFence = false;
+  let startIndex = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (isFence(lines[i])) {
+      inFence = !inFence;
+      continue;
+    }
+    if (!inFence && headingPattern.test(lines[i])) {
+      startIndex = i;
+      break;
+    }
+  }
   if (startIndex === -1) {
     throw new Error(
       `no heading matching ${String(headingPattern)} found; the doctor ` +
@@ -81,8 +104,15 @@ function extractMarkdownSection(
     );
   }
   const startLevel = /^#+/.exec(lines[startIndex])?.[0].length ?? 0;
+
+  inFence = false;
   let endIndex = lines.length;
   for (let i = startIndex + 1; i < lines.length; i++) {
+    if (isFence(lines[i])) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
     const level = /^#+/.exec(lines[i])?.[0].length ?? 0;
     if (level > 0 && level <= startLevel) {
       endIndex = i;
@@ -92,23 +122,41 @@ function extractMarkdownSection(
   return lines.slice(startIndex, endIndex).join("\n");
 }
 
-/** Extracts the `--target` option's description from `src/cli.ts`: the
- * quoted string literal on the same line as `"--target"`. Read as a
- * single line rather than parsed as TypeScript, since only the
- * description string's own words are the surface under test. */
+/** Marker immediately following the `--target` option's description
+ * literal in `src/cli.ts` today: the next commander `.option(...)`
+ * argument, its parser function. Exact rather than a generous window,
+ * so a future unrelated line landing within a wide window can never be
+ * mistaken for part of the description this guard reads. */
+const CLI_TARGET_OPTION_MARKER = '"--target <list>",';
+const CLI_TARGET_NEXT_ARG_MARKER = "collectList,";
+
+/** Extracts the `--target` option's description string from
+ * `src/cli.ts`: everything between the option's own declaration
+ * (`"--target <list>",`) and the next commander argument
+ * (`collectList,`), which is exactly the quoted description literal
+ * plus its surrounding whitespace and trailing comma. Throws when
+ * either marker is absent, since a renamed option flag or a reordered
+ * argument list is itself the kind of drift this guard exists to
+ * catch, not something a wide fallback window should paper over. */
 function extractCliTargetDescription(cliSource: string): string {
-  const line = cliSource
-    .split("\n")
-    .find((l) => l.includes('"--target') && l.includes("description"));
-  if (line !== undefined) return line;
-  // The description may live on a following line from the option
-  // declaration; fall back to the whole option block by locating
-  // "--target" and taking a generous window of source after it.
-  const idx = cliSource.indexOf('"--target');
-  if (idx === -1) {
-    throw new Error('no "--target" option declaration found in src/cli.ts');
+  const optionIdx = cliSource.indexOf(CLI_TARGET_OPTION_MARKER);
+  if (optionIdx === -1) {
+    throw new Error(
+      `no ${CLI_TARGET_OPTION_MARKER} option declaration found in src/cli.ts`,
+    );
   }
-  return cliSource.slice(idx, idx + 1200);
+  const descriptionStart = optionIdx + CLI_TARGET_OPTION_MARKER.length;
+  const nextArgIdx = cliSource.indexOf(
+    CLI_TARGET_NEXT_ARG_MARKER,
+    descriptionStart,
+  );
+  if (nextArgIdx === -1) {
+    throw new Error(
+      `no ${CLI_TARGET_NEXT_ARG_MARKER} marker found after the --target ` +
+        "option description in src/cli.ts",
+    );
+  }
+  return cliSource.slice(descriptionStart, nextArgIdx);
 }
 
 /** Extracts the `DoctorOptions` interface body from `src/doctor/index.ts`,
@@ -134,6 +182,48 @@ function extractDoctorOptionsInterface(doctorSource: string): string {
     .split("\n")
     .map((line) => line.replace(/^\s*(\/\*\*|\*\/|\*)\s?/, ""))
     .join(" ");
+}
+
+/** Slices out the shared fallback-reasons parenthetical from a
+ * surface's already-scoped text: the `(...)` group that follows the
+ * LAST occurrence of the word `co-located` in that text. Every one of
+ * the four surfaces mentions `co-located` at least once before the
+ * reasons list itself (introducing the guess the reasons explain the
+ * fallback to), so the reasons parenthetical is always the one nearest
+ * to, and after, that final mention -- never an earlier, unrelated
+ * parenthetical the same surface's prose happens to contain (an aside
+ * about the guess being "a filesystem stat, no spawn", for instance).
+ * Matching against this narrower slice, not the whole surface section,
+ * is what stops a dropped reason from being masked by the same words
+ * appearing elsewhere in the section. Throws when no `co-located`
+ * mention, or no parenthetical after it, is found. */
+function extractCoLocatedParenthetical(text: string): string {
+  const marker = "co-located";
+  let searchFrom = 0;
+  let lastMarkerIdx = -1;
+  for (;;) {
+    const idx = text.indexOf(marker, searchFrom);
+    if (idx === -1) break;
+    lastMarkerIdx = idx;
+    searchFrom = idx + marker.length;
+  }
+  if (lastMarkerIdx === -1) {
+    throw new Error(`no "${marker}" mention found in surface text`);
+  }
+  const openIdx = text.indexOf("(", lastMarkerIdx);
+  if (openIdx === -1) {
+    throw new Error(
+      `no fallback-reasons parenthetical found after the last "${marker}" ` +
+        "mention in surface text",
+    );
+  }
+  const closeIdx = text.indexOf(")", openIdx);
+  if (closeIdx === -1) {
+    throw new Error(
+      "fallback-reasons parenthetical is missing its closing paren",
+    );
+  }
+  return text.slice(openIdx + 1, closeIdx);
 }
 
 const SURFACES: Surface[] = [
@@ -179,22 +269,98 @@ describe("doctor: python-bytecode-cache fallback wording, across all four surfac
   for (const surface of SURFACES) {
     for (const reason of FALLBACK_REASONS) {
       it(`${surface.name} names "${reason.name}"`, () => {
-        const text = normalizeForMatch(surface.read());
-        expect(text).toContain(reason.keyPhrase);
+        const parenthetical = normalizeForMatch(
+          extractCoLocatedParenthetical(surface.read()),
+        );
+        expect(parenthetical).toContain(reason.keyPhrase);
       });
     }
   }
 
   it("every surface names all three reasons, none of them silently reduced to a subset", () => {
     for (const surface of SURFACES) {
-      const text = normalizeForMatch(surface.read());
+      const parenthetical = normalizeForMatch(
+        extractCoLocatedParenthetical(surface.read()),
+      );
       const missing = FALLBACK_REASONS.filter(
-        (reason) => !text.includes(reason.keyPhrase),
+        (reason) => !parenthetical.includes(reason.keyPhrase),
       ).map((reason) => reason.name);
       expect(
         missing,
         `${surface.name} is missing: ${missing.join(", ")}`,
       ).toEqual([]);
+    }
+  });
+
+  it("src/cli.ts extraction stays bounded and ends exactly at the next option argument", () => {
+    // Pins the exact-bounds contract extractCliTargetDescription relies
+    // on: a regression back to a generous fallback window (which could
+    // pull in hundreds of characters of unrelated `.action` body) fails
+    // here even if it happened to still contain the three key phrases.
+    const cliSource = fs.readFileSync(
+      path.join(PACKAGE_ROOT, "src", "cli.ts"),
+      "utf8",
+    );
+    const description = extractCliTargetDescription(cliSource);
+    expect(description.length).toBeLessThan(600);
+    expect(description.trimEnd().endsWith('",')).toBe(true);
+    expect(
+      cliSource.indexOf(
+        CLI_TARGET_NEXT_ARG_MARKER,
+        cliSource.indexOf(CLI_TARGET_OPTION_MARKER) +
+          CLI_TARGET_OPTION_MARKER.length,
+      ),
+    ).toBe(
+      cliSource.indexOf(CLI_TARGET_OPTION_MARKER) +
+        CLI_TARGET_OPTION_MARKER.length +
+        description.length,
+    );
+  });
+
+  it("src/doctor/index.ts emits one runtime detail fragment per documented fallback reason, in the same order the docs list them", () => {
+    // The check's own runtime detail strings use different words than
+    // the docs' parenthetical (a grammatical sentence fragment folded
+    // into a wider message, versus a short parenthetical list), by
+    // design: negative_space for this round forbids changing either
+    // wording to make them match literally. This instead pins the
+    // mapping between the two vocabularies explicitly, so a future edit
+    // that drops or reorders one of the three runtime fragments (not
+    // just the docs' words) still fails a test.
+    //
+    //   docs' key phrase (FALLBACK_REASONS)      runtime detail fragment (src/doctor/index.ts)
+    //   ----------------------------------------  ----------------------------------------------
+    //   "absent from PATH"                        "python3 not found on PATH"
+    //   "resolving nothing"                        "did not resolve a cache path"
+    //   "doctor's aggregate spawn deadline
+    //    already spent"                            "doctor's aggregate spawn deadline"
+    const DETAIL_FRAGMENTS = [
+      "python3 not found on PATH",
+      "did not resolve a cache path",
+      "doctor's aggregate spawn deadline",
+    ];
+    const doctorSource = fs.readFileSync(
+      path.join(PACKAGE_ROOT, "src", "doctor", "index.ts"),
+      "utf8",
+    );
+    // Scoped to the `fallbackNotes` construction, not the whole file:
+    // the docblock above (already covered by its own surface test)
+    // repeats "doctor's aggregate spawn deadline already spent" in
+    // prose earlier in the file, which would otherwise be matched
+    // instead of the runtime emission this test targets.
+    const emissionStart = doctorSource.indexOf(
+      "const fallbackNotes: string[] = [];",
+    );
+    expect(emissionStart).toBeGreaterThan(-1);
+    const emissionSource = doctorSource.slice(emissionStart);
+
+    let searchFrom = 0;
+    for (const fragment of DETAIL_FRAGMENTS) {
+      const idx = emissionSource.indexOf(fragment, searchFrom);
+      expect(
+        idx,
+        `expected src/doctor/index.ts to emit "${fragment}" after offset ${searchFrom} within the fallbackNotes construction`,
+      ).toBeGreaterThan(-1);
+      searchFrom = idx + fragment.length;
     }
   });
 });

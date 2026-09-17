@@ -19,7 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   naming all three fallback reasons (`python3` absent from `PATH`,
   `python3` resolving nothing, or the deadline already spent); the
   README and the docblock are aligned to the same three-reason wording
-  the CLI help text and the skill already used.
+  the CLI help text and the skill already used, and all four surfaces
+  now share one fallback-reasons parenthetical, which the guard matches
+  against directly rather than against the whole surrounding section.
 
 ## [0.6.0] - 2026-09-16
 

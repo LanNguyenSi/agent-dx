@@ -767,19 +767,26 @@ describe("doctor: checks, in both states", () => {
   });
 
   it("python-bytecode-cache: a deadline spent WHILE the first target's own resolution is in flight lets that target resolve through python3 and pushes only the second into the deadline clause", async () => {
-    // Same margin the aggregate `--version`-deadline test above uses
-    // (a 150ms stub sleep against a 100ms deadline, with a generous
-    // 5000ms per-item timeout so that timeout never fires on its own):
-    // the deadline check runs at the TOP of each target's own turn (see
-    // the `python-bytecode-cache` loop in src/doctor/index.ts), so the
-    // first target's resolution -- already in flight when its own
-    // check ran, before the deadline was spent -- completes normally,
-    // and only the second target's turn finds the deadline already
-    // spent. Pinned through the stub's call log and the resolved cache
-    // path, never through wall-clock timing assertions, so this is
-    // deterministic on both macOS and Linux; the 50ms margin between
-    // the 100ms deadline and the 150ms sleep is the same one the
-    // existing aggregate-deadline test above already relies on.
+    // Same margin the aggregate `--version`-deadline test above uses in
+    // spirit (a stub sleep well past the deadline, with a generous
+    // 5000ms per-item timeout so that timeout never fires on its own),
+    // but with a wider absolute gap than that test's own 100ms/150ms:
+    // measured pre-loop overhead on this suite runs 4-18ms warm but as
+    // high as 181ms on a cold-cache sample, which would eat a 100ms
+    // deadline before the loop even starts and make target 1 land in
+    // the deadline-skipped clause too -- turning this test's own
+    // readFileSync(resolvedCache) assumption false and failing loudly
+    // rather than silently passing. A 300ms deadline against a 400ms
+    // stub sleep keeps the same invariant (sleep > deadline, so target 2
+    // is always deadline-skipped) with headroom past that cold-cache
+    // overhead. The deadline check runs at the TOP of each target's own
+    // turn (see the `python-bytecode-cache` loop in
+    // src/doctor/index.ts), so the first target's resolution -- already
+    // in flight when its own check ran, before the deadline was spent
+    // -- completes normally, and only the second target's turn finds
+    // the deadline already spent. Pinned through the stub's call log
+    // and the resolved cache path, never through wall-clock timing
+    // assertions, so this is deterministic on both macOS and Linux.
     const dir = makeTmpDir();
     const binDir = makeTmpDir();
     const callLog = path.join(makeTmpDir(), "python3-calls.txt");
@@ -790,7 +797,7 @@ describe("doctor: checks, in both states", () => {
     writePython3Stub(binDir, callLog, {
       exitStatus: 0,
       printsPath: resolvedCache,
-      sleepMs: 150,
+      sleepMs: 400,
     });
     const result = await doctor({
       required: [],
@@ -799,7 +806,7 @@ describe("doctor: checks, in both states", () => {
       targets: ["first.py", "second.py"],
       pathEnv: binDir,
       versionTimeoutMs: 5000,
-      versionDeadlineMs: 100,
+      versionDeadlineMs: 300,
     });
     const check = result.checks.find((c) => c.name === "python-bytecode-cache");
     expect(check?.ok).toBe(true);
@@ -808,7 +815,7 @@ describe("doctor: checks, in both states", () => {
     expect(fs.readFileSync(callLog, "utf8").trim().split("\n").length).toBe(1);
     expect(check?.detail).toContain(`first.py (${resolvedCache})`);
     expect(check?.detail).toContain(
-      "doctor's aggregate spawn deadline (100ms) was already spent",
+      "doctor's aggregate spawn deadline (300ms) was already spent",
     );
     expect(check?.detail).toContain("second.py");
     // first.py resolved cleanly through the stub: it must not also be
@@ -823,13 +830,16 @@ describe("doctor: checks, in both states", () => {
 
   it("python-bytecode-cache: a detail can carry both the unresolved and the deadline-spent fallback clauses at once, joined by '; '", async () => {
     // The first target is asked and fails to resolve (a non-zero exit,
-    // consuming 150ms before returning), landing it in the `unresolved`
-    // fallback; by the time the loop reaches the second target the
-    // 100ms aggregate deadline is already spent, landing it in the
-    // `deadlineSkipped` fallback instead. One run, one target in each
-    // of the two remaining fallback reasons, so the joined text this
-    // asserts is the one no other test in this file exercises: both
-    // clauses present together, in the order the code pushes them
+    // consuming 400ms before returning -- see the deadline-spent test
+    // above for why this margin is 300ms/400ms rather than 100ms/150ms:
+    // measured pre-loop overhead runs 4-18ms warm but up to 181ms on a
+    // cold-cache sample), landing it in the `unresolved` fallback; by
+    // the time the loop reaches the second target the 300ms aggregate
+    // deadline is already spent, landing it in the `deadlineSkipped`
+    // fallback instead. One run, one target in each of the two
+    // remaining fallback reasons, so the joined text this asserts is
+    // the one no other test in this file exercises: both clauses
+    // present together, in the order the code pushes them
     // (`unresolved` first, `deadlineSkipped` second), joined by the
     // exact `"; "` the check's own `fallbackNotes.join("; ")` uses.
     const dir = makeTmpDir();
@@ -837,7 +847,7 @@ describe("doctor: checks, in both states", () => {
     const callLog = path.join(makeTmpDir(), "python3-calls.txt");
     fs.writeFileSync(path.join(dir, "first.py"), "");
     fs.writeFileSync(path.join(dir, "second.py"), "");
-    writePython3Stub(binDir, callLog, { exitStatus: 3, sleepMs: 150 });
+    writePython3Stub(binDir, callLog, { exitStatus: 3, sleepMs: 400 });
     const result = await doctor({
       required: [],
       optional: [],
@@ -845,7 +855,7 @@ describe("doctor: checks, in both states", () => {
       targets: ["first.py", "second.py"],
       pathEnv: binDir,
       versionTimeoutMs: 5000,
-      versionDeadlineMs: 100,
+      versionDeadlineMs: 300,
     });
     const check = result.checks.find((c) => c.name === "python-bytecode-cache");
     expect(check?.ok).toBe(true);
@@ -853,7 +863,7 @@ describe("doctor: checks, in both states", () => {
     const unresolvedClause =
       "python3 did not resolve a cache path for first.py; checked only for a co-located __pycache__ there";
     const deadlineClause =
-      "doctor's aggregate spawn deadline (100ms) was already spent, so the python3 cache-path resolution was skipped for second.py; checked only for a co-located __pycache__ there";
+      "doctor's aggregate spawn deadline (300ms) was already spent, so the python3 cache-path resolution was skipped for second.py; checked only for a co-located __pycache__ there";
     expect(check?.detail).toContain(`${unresolvedClause}; ${deadlineClause}`);
   }, 10000);
 
