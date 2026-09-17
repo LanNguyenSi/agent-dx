@@ -256,11 +256,15 @@ export const sourcesFreshRule: Rule = {
               // the same sense a backwards move is -- a notice, not a
               // warning, so --strict is unaffected (D-009).
               sameInstantReported = true;
+              const rewriteLocationPhrase =
+                result.sameInstant.location === "working-tree"
+                  ? "in the working tree"
+                  : "in the doc's last commit";
               findings.push({
                 ruleId: RULE_ID,
                 severity: "notice",
                 file: doc.relPath,
-                message: `re-stamp did not move the timestamp forward: ${result.sameInstant.previousIso} and ${result.sameInstant.newIso} name the same instant, so this is not a re-verification`,
+                message: `re-stamp did not move the timestamp forward: ${result.sameInstant.previousValue} was rewritten as ${result.sameInstant.newValue} ${rewriteLocationPhrase}, but both name the same instant (${result.sameInstant.instantIso}), so this is not a re-verification`,
               });
             }
           }
@@ -888,10 +892,20 @@ type RestampVerdict =
  * differently worded findings) -- OR, when the value moved to the SAME
  * instant (D-009: a cosmetic rewrite, e.g. adding milliseconds, or
  * switching between a quoted string and a native YAML date that name the
- * same instant), the single shared instant in `sameInstant` instead, mutually
- * exclusive with `backwards`. Kept as structured fields on the result rather
- * than a bare boolean so a caller can never lose or misplace which
- * commit/working-tree pair the movement (or non-movement) belongs to.
+ * same instant), `sameInstant` instead, mutually exclusive with
+ * `backwards`. Kept as structured fields on the result rather than a bare
+ * boolean so a caller can never lose or misplace which commit/working-tree
+ * pair the movement (or non-movement) belongs to.
+ *
+ * `sameInstant` carries the two RAW frontmatter values (rendered by
+ * `describeTimestampValue`) and the ONE instant they both resolve to,
+ * rather than two ISO renderings: by construction both sides resolve to the
+ * identical instant there, so two ISO fields could only ever print the same
+ * string twice and would say nothing about what was actually rewritten.
+ * What distinguishes the two sides in that case IS the raw spelling, which
+ * is exactly what the reader needs to see to recognize their own edit.
+ * `backwards` keeps two ISO renderings because its two instants genuinely
+ * differ, and the instants (not the spellings) are what moved.
  */
 type RestampResult = {
   verdict: RestampVerdict;
@@ -901,11 +915,58 @@ type RestampResult = {
     location: "commit" | "working-tree";
   };
   sameInstant?: {
-    previousIso: string;
-    newIso: string;
+    previousValue: string;
+    newValue: string;
+    instantIso: string;
     location: "commit" | "working-tree";
   };
 };
+
+/**
+ * Whether one side of the direction comparison resolves to an instant that
+ * is the SAME on every machine, which is what `compareRestampDirection` has
+ * to have before it may call one value earlier or later than another
+ * (D-013).
+ *
+ * A string with no `Z` and no numeric offset ("2026-01-01T13:00:00") is
+ * parsed by `Date.parse` in the MACHINE'S OWN timezone, so the same two
+ * frontmatter values can compare forward on a UTC runner and backward on a
+ * UTC+9 laptop -- a verdict (and, under `--strict`, an exit code) that
+ * depends on `TZ` rather than on the repository. `hasUtcDesignator` is the
+ * same test `sources-fresh-future` applies for the same reason; its doc
+ * comment's note that this rule's day-wide thresholds make the ambiguity
+ * immaterial stopped holding once direction became a strict inequality,
+ * which no threshold widens.
+ *
+ * A native `Date` (`getRawTimestampString` returns undefined for it) is
+ * comparable: it carries no designator because it needs none -- the YAML
+ * parser already resolved it to a fixed instant (a `!!timestamp` scalar
+ * without a zone is UTC by the YAML 1.1 spec, not local time), and
+ * `Date#getTime()` is that instant on every machine. Undefined for any
+ * OTHER reason (missing, blank, non-scalar) cannot reach here: this is only
+ * consulted for a side `getTimestampEpochMs` already resolved, and those
+ * cases resolve to undefined there.
+ */
+function isDirectionComparable(parsed: unknown): boolean {
+  const raw = getRawTimestampString(parsed);
+  return raw === undefined || hasUtcDesignator(raw);
+}
+
+/**
+ * How the same-instant notice names ONE side's frontmatter value: its raw
+ * spelling, quoted, so the reader sees the two different strings that
+ * resolve to the one instant. A native `Date` has no raw spelling to quote
+ * (`getRawTimestampString` returns undefined), so it is named by shape plus
+ * the instant it resolved to -- which is what makes the string-to-date
+ * rewrite readable as the distinct change it is rather than as one value
+ * printed twice.
+ */
+function describeTimestampValue(parsed: unknown, epochMs: number): string {
+  const raw = getRawTimestampString(parsed);
+  return raw === undefined
+    ? `a native YAML date naming ${epochMsToIso(epochMs)}`
+    : `"${raw}"`;
+}
 
 /**
  * Decides the value-comparison branch of a restamp verdict from two parsed
@@ -943,12 +1004,14 @@ type RestampResult = {
  *    there is nothing to notice.
  *
  * When EITHER side's `timestamp` cannot be parsed to an instant at all
- * (missing, blank, or a string `Date.parse` rejects), direction cannot be
- * judged: this falls back to today's pre-D-004 behaviour of comparing the
- * two values' raw IDENTITY (`getTimestampIdentity`) instead of guessing a
- * direction -- any textual change still counts as `restamped`, exactly as
- * before this decision existed, and never triggers `backwards` or
- * `sameInstant` (there is no direction to report either way).
+ * (missing, blank, or a string `Date.parse` rejects), OR either side is a
+ * string carrying no UTC designator (D-013, see
+ * `isDirectionComparable`), direction cannot be judged: this falls back to
+ * today's pre-D-004 behaviour of comparing the two values' raw IDENTITY
+ * (`getTimestampIdentity`) instead of guessing a direction -- any textual
+ * change still counts as `restamped`, exactly as before this decision
+ * existed, and never triggers `backwards` or `sameInstant` (there is no
+ * direction to report either way).
  */
 function compareRestampDirection(
   currentParsed: unknown,
@@ -957,7 +1020,12 @@ function compareRestampDirection(
 ): RestampResult {
   const currentEpochMs = getTimestampEpochMs(currentParsed);
   const beforeEpochMs = getTimestampEpochMs(beforeParsed);
-  if (currentEpochMs === undefined || beforeEpochMs === undefined) {
+  if (
+    currentEpochMs === undefined ||
+    beforeEpochMs === undefined ||
+    !isDirectionComparable(currentParsed) ||
+    !isDirectionComparable(beforeParsed)
+  ) {
     const currentStamp = getTimestampIdentity(currentParsed);
     const beforeStamp = getTimestampIdentity(beforeParsed);
     return {
@@ -989,8 +1057,9 @@ function compareRestampDirection(
   return {
     verdict: "not-restamped",
     sameInstant: {
-      previousIso: epochMsToIso(beforeEpochMs),
-      newIso: epochMsToIso(currentEpochMs),
+      previousValue: describeTimestampValue(beforeParsed, beforeEpochMs),
+      newValue: describeTimestampValue(currentParsed, currentEpochMs),
+      instantIso: epochMsToIso(currentEpochMs),
       location,
     },
   };

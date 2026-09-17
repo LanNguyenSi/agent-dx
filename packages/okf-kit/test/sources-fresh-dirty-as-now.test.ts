@@ -748,9 +748,12 @@ describe("sources-fresh: --dirty-as-now", () => {
         ruleId: "sources-fresh",
         severity: "notice",
       });
-      expect(sameInstant?.message).toContain("2025-02-01T00:00:00.000Z");
-      expect(sameInstant?.message).toContain(
-        "name the same instant, so this is not a re-verification",
+      // Both raw values, the one instant, and the working-tree phrasing
+      // that distinguishes this path from the committed one, asserted as
+      // one exact string: a notice that printed a single value twice
+      // cannot satisfy it.
+      expect(sameInstant?.message).toBe(
+        're-stamp did not move the timestamp forward: "2025-02-01T00:00:00Z" was rewritten as "2025-02-01T00:00:00.000Z" in the working tree, but both name the same instant (2025-02-01T00:00:00.000Z), so this is not a re-verification',
       );
     });
 
@@ -829,6 +832,57 @@ describe("sources-fresh: --dirty-as-now", () => {
       expect(findings).toHaveLength(1);
       expect(findings[0].message).toContain("STALE");
       expect(findings[0].message).toContain("source.ts");
+    });
+
+    it("with the flag: a dirty doc whose on-disk timestamp is byte-identical to HEAD's gets the plain STALE warning and NEITHER the backwards warning NOR the same-instant notice (D-009)", () => {
+      // The same fixture shape as the test above, asserted against the
+      // specific guard it exists for: an UNCHANGED stamp is not a re-stamp
+      // ATTEMPT, so the same-instant notice (which fires when the raw value
+      // was rewritten to another spelling of the same instant) must NOT
+      // fire here. The test above pins the finding COUNT; this one pins the
+      // two message kinds by name on the WORKING-TREE path, so a
+      // byte-identical value can never start emitting a notice that tells
+      // the reader to go look at a re-stamp nobody made.
+      repo.commitFile(
+        "source.ts",
+        "export const a = 1;\n",
+        "2025-01-01T00:00:00Z",
+      );
+      const committedDoc = docContent({
+        type: "concept",
+        timestamp: "2025-02-01T00:00:00Z",
+        sources: ["source.ts"],
+      });
+      repo.commitFile("bundle/doc.md", committedDoc, "2025-02-01T00:00:00Z");
+
+      fs.writeFileSync(
+        path.join(repo.dir, "source.ts"),
+        "export const a = 2;\n",
+      );
+      const bodyEditOnly = committedDoc.replace(
+        "# Doc\n",
+        "# Doc\n\nA local body edit, stamp untouched.\n",
+      );
+      fs.writeFileSync(path.join(repo.dir, "bundle/doc.md"), bodyEditOnly);
+      // The frontmatter block is byte-identical; only the body differs.
+      expect(bodyEditOnly.split("---\n")[1]).toEqual(
+        committedDoc.split("---\n")[1],
+      );
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      ctx.dirtyAsNow = true;
+      const findings = sourcesFreshRule.run(ctx);
+
+      expect(
+        findings.filter((f) => f.message.includes("moved backwards")),
+      ).toEqual([]);
+      expect(
+        findings.filter((f) =>
+          f.message.includes("did not move the timestamp forward"),
+        ),
+      ).toEqual([]);
+      expect(findings.map((f) => f.severity)).toEqual(["warning"]);
+      expect(findings[0].message).toContain("STALE");
     });
 
     it("control, flag OFF: committing the same source-edit-plus-re-stamp together reports clean (what the flag is matching)", () => {

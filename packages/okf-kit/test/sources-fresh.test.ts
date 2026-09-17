@@ -1106,9 +1106,14 @@ describe("sources-fresh", () => {
         ruleId: "sources-fresh",
         severity: "notice",
       });
-      expect(sameInstant?.message).toContain("2026-01-01T00:00:00.000Z");
-      expect(sameInstant?.message).toContain(
-        "name the same instant, so this is not a re-verification",
+      // The notice names BOTH raw values, which is the only thing that
+      // distinguishes the two sides here (their instants are identical by
+      // construction), plus the one instant and the path it happened on.
+      // Asserted as one exact string so a notice that printed one value
+      // twice -- what two ISO fields could only ever produce -- cannot
+      // satisfy it.
+      expect(sameInstant?.message).toBe(
+        're-stamp did not move the timestamp forward: "2026-01-01T00:00:00Z" was rewritten as "2026-01-01T00:00:00.000Z" in the doc\'s last commit, but both name the same instant (2026-01-01T00:00:00.000Z), so this is not a re-verification',
       );
     });
 

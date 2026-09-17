@@ -81,9 +81,11 @@ export function getTimestampEpochMs(parsed: unknown): number | undefined {
  * absent, blank, or not a string -- notably, a native `Date` instance (see
  * `getTimestampEpoch`'s doc comment) returns undefined here too, since a
  * `Date`'s `getTime()` is always UTC-unambiguous and carries none of the
- * local-timezone risk `hasUtcDesignator` exists to catch. Used only by
- * `sources-fresh-future`'s UTC-designator gate; `sources-fresh` itself has
- * no need for the raw string, only the resolved epoch.
+ * local-timezone risk `hasUtcDesignator` exists to catch. Used by
+ * `sources-fresh-future`'s UTC-designator gate, by `sources-fresh`'s
+ * re-stamp DIRECTION comparison for that same gate (`isDirectionComparable`,
+ * D-013), and by that comparison's same-instant notice to name each side's
+ * raw spelling (`describeTimestampValue`).
  */
 export function getRawTimestampString(parsed: unknown): string | undefined {
   if (!isRecord(parsed)) return undefined;
@@ -103,9 +105,18 @@ export function getRawTimestampString(parsed: unknown): string | undefined {
  * allowance is only 10 minutes. A numeric offset, unlike a bare local
  * time, is unambiguous: `Date.parse`/`Date#getTime()` already normalizes
  * it to a real UTC instant, so no extra conversion is needed here beyond
- * recognizing it as present. `sources-fresh`'s own thresholds are in
- * days, wide enough that this ambiguity doesn't practically matter there,
- * so this helper is deliberately NOT applied to that rule's comparison.
+ * recognizing it as present.
+ *
+ * Applied by BOTH rules, for two different reasons. `sources-fresh-future`
+ * needs it because its whole allowance is minutes wide, narrower than the
+ * hours a timezone shifts. `sources-fresh` needs it for its re-stamp
+ * DIRECTION comparison (`isDirectionComparable`, D-013), which is a strict
+ * inequality between two frontmatter values and so has no threshold to
+ * absorb the shift at all: the same pair of values reads as a forward move
+ * on a UTC runner and as a backwards move on a UTC+9 laptop. What stays
+ * ungated is `sources-fresh`'s day-wide STALENESS comparison, where a few
+ * hours really are immaterial and gating them would turn a harmless
+ * ambiguity into a skipped check.
  */
 export function hasUtcDesignator(raw: string): boolean {
   return /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw.trim());
