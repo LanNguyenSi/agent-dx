@@ -166,22 +166,41 @@ When it is missing, the orchestrator asks the reviewer to resupply it
 instead of inferring one from the findings list.
 
 A structural check for this exact contract ships as a CLI subcommand:
-`orchestrator-workflow validate-review-report <file>` (pass `-` to read the
-return from stdin instead) parses the reviewer return's YAML, fenced in a
-code block with any language tag or none, or unfenced, and checks the
-required fields and enums above one by one, printing a diagnostic (path,
-expected, got) for each missing or invalid field; add `--format json` for
-the same diagnostics as a single JSON object. It exits `0` when the return
-is structurally valid, `1` when it is structurally invalid (a missing or
-out-of-enum required field, or unparsable, empty, non-mapping input), and
-`2` for a usage error (an unreadable file, an unrecognized `--format`
-value, or an argument-parsing error: a missing `<file>` argument, an
-unknown option, an excess positional argument). `--format json` governs
-the validation verdict only: an argument-parsing error or an unrecognized
-`--format` value still prints plain text to stderr, except an unreadable
-file, which still emits the JSON envelope on stdout. The check is
-structural only: it never judges semantic adequacy, cannot waive a
-finding, and passing it is never orchestrator acceptance.
+`orchestrator-workflow validate-review-report <file>` (pass `-` to read
+the return from stdin instead) parses the reviewer return's YAML, fenced
+in a code block with any language tag or none, or unfenced, and checks
+the required fields and enums above one by one, printing a diagnostic
+(path, expected, got) for each missing or invalid field; every element of
+a string-array field (`summary`, `missing_tests`, `residual_risks`) must
+itself be a string, with a diagnostic at `<field>[<index>]` for each one
+that is not (a number, a mapping, a boolean, and `null` -- a bare or `~`
+bullet -- are all rejected the same way). A fenced return ends at the
+first closing fence that starts at column 0, repeats at least as many
+backticks as the opening one, and carries nothing but whitespace after
+that run, so a return wrapped in four backticks may quote a snippet
+fenced in three without truncating itself; a return with no closing
+fence satisfying all three is not fenced at all and reaches the parser
+whole, including one whose opener is longer than every closing run
+present. When more than one fenced block
+is present, the first one whose fence tag's first word is `yaml` or `yml`
+is validated, case-insensitively and counting whitespace-separated
+attributes (`yaml title=x` counts; `yaml,title=x` does not, its first
+word being the whole string), falling back to the first fence only when
+none carries that word, with a warning naming any earlier fence skipped
+this way. The same preference can validate a later worked example instead
+of an earlier, real but unfenced return, which the emitted warning also
+names. Add `--format json` for the same diagnostics as a single JSON
+object. It exits `0` when the return is structurally valid, `1` when it
+is structurally invalid (a missing or out-of-enum required field, or
+unparsable, empty, non-mapping input), and `2` for a usage error (an
+unreadable file, an unrecognized `--format` value, or an argument-parsing
+error: a missing `<file>` argument, an unknown option, an excess
+positional argument). `--format json` governs the validation verdict
+only: an argument-parsing error or an unrecognized `--format` value still
+prints plain text to stderr, except an unreadable file, which still emits
+the JSON envelope on stdout. The check is structural only: it never
+judges semantic adequacy, cannot waive a finding, and passing it is never
+orchestrator acceptance.
 
 `recurrence` classifies each finding against earlier rounds on the same
 task: `new` for a defect class not previously found here, `repeated` for

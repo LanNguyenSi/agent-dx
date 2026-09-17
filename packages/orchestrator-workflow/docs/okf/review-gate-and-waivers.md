@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-09-17T06:01:00.614Z
+timestamp: 2026-09-17T06:39:16.007Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/agents/reviewer.md
@@ -104,8 +104,8 @@ carry Decision `accepted`; the gate only inspects Decision on high/critical
 rows. Since 0.16.0 the field is hard-mandatory, not just conventionally
 expected: "`acceptance_recommendation` is mandatory: every reviewer return
 must set it. When it is missing, the orchestrator asks the reviewer to
-resupply it instead of inferring one from the findings list" (`references/contracts.md:
-355-357`; the installed `reviewer.md:124#"never leave it blank or omit it."` prompt carries the mirrored
+resupply it instead of inferring one from the findings list"
+(`packages/orchestrator-workflow/assets/skill/references/contracts.md:164-166#"instead of inferring one from the findings list."`; the installed `reviewer.md:124#"never leave it blank or omit it."` prompt carries the mirrored
 second-person rule). Full treatment is out of scope here; see
 [Acceptance-recommendation mandatory rule](#acceptance-recommendation-mandatory-rule-0160)
 below.

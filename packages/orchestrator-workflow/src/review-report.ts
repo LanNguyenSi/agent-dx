@@ -192,6 +192,29 @@ function checkScalarField(
   }
 }
 
+/**
+ * Checks a top-level `array`-kind field (`summary`, `missing_tests`,
+ * `residual_risks`): the contract writes each of these as a plain list of
+ * strings (`- ""`), so every element that is not a string is its own
+ * diagnostic at `<key>[<index>]`, `expected: "string"`, alongside the
+ * container-level checks. All offending elements are reported, not only
+ * the first, the same way {@link checkFindings} reports every non-mapping
+ * `findings[]` entry rather than stopping at one.
+ *
+ * Emptiness is deliberately not judged here: an element that is an
+ * explicitly quoted empty or blank string (`- ""`, `- "   "`) is still a
+ * string and passes, the same tolerance {@link checkStringField}'s plain
+ * `"string"` kind gives a top-level field (unlike
+ * {@link checkNonEmptyStringField}'s `"non-empty-string"` kind, which
+ * `task_id` uses). A bare `- ` or `- ~` bullet is not a string at all --
+ * YAML parses either as `null`, which this checker rejects the same as
+ * any other non-string element; only a quoted placeholder passes. These
+ * three fields are declared `"array"` in {@link FIELD_KINDS}, not
+ * `"non-empty-string"`, so a quoted element gets the same tolerance its
+ * own kind implies; a reviewer emitting a quoted placeholder blank bullet
+ * is a content question the orchestrator judges, not a structural one
+ * this validator judges.
+ */
 function checkArrayField(
   doc: Record<string, unknown>,
   key: string,
@@ -208,7 +231,17 @@ function checkArrayField(
       expected: "array",
       got: describeValue(value),
     });
+    return;
   }
+  value.forEach((element, index) => {
+    if (typeof element !== "string") {
+      diagnostics.push({
+        path: `${key}[${index}]`,
+        expected: "string",
+        got: describeValue(element),
+      });
+    }
+  });
 }
 
 /**
@@ -473,7 +506,9 @@ export type SchemaFieldName =
  * - `string`: present and a string; the empty string is accepted.
  * - `non-empty-string`: present, a string, and not blank.
  * - `scalar`: present and either a string or a number.
- * - `array`: present and an array; an empty array is accepted.
+ * - `array`: present and an array; an empty array is accepted, and every
+ *   element must be a string (each non-string element is its own
+ *   diagnostic at `<field>[<index>]`; see {@link checkArrayField}).
  * - `mapping-list`: `array`, and every element a mapping.
  * - `mapping`: present and a mapping.
  *
@@ -487,7 +522,7 @@ export type FieldKind =
   | "string"
   | "non-empty-string"
   | "scalar"
-  | "array" // container only; element types are not checked (deliberate for the three plain lists)
+  | "array" // the three plain string lists: element kind is checked, element non-emptiness is not
   | "mapping-list"
   | "mapping";
 
@@ -571,6 +606,9 @@ export function expectedTextFor(field: SchemaFieldName): string {
 /** The `expected` text a diagnostic about one element of a `mapping-list` carries. */
 export const MAPPING_LIST_ELEMENT_EXPECTED = KIND_EXPECTED.mapping;
 
+/** The `expected` text a diagnostic about one non-string element of a plain `array`-kind field (`summary`, `missing_tests`, `residual_risks`) carries. */
+export const ARRAY_ELEMENT_EXPECTED = KIND_EXPECTED.string;
+
 interface ExtractedYaml {
   yamlText: string;
   warnings: string[];
@@ -592,30 +630,108 @@ interface ExtractedYaml {
  * before the opening fence or after the closing fence is tolerated, but
  * each is named as its own warning rather than silently dropped.
  *
- * The closing fence must start at column 0: the pattern anchors it with
- * `^` under the `m` flag, so a triple-backtick sequence inside a value
- * (a reviewer quoting a fenced snippet in a `description` block scalar,
- * which YAML necessarily indents) can no longer close the block early
- * and hand the parser a truncated document, which surfaced as
- * diagnostics about fields the return actually carried (fix-round,
- * review finding L3).
+ * The opening fence's whole backtick run is captured, and the closing
+ * fence must be a run at least as long, starting at column 0, with
+ * nothing but whitespace after it (CommonMark's own rule): the pattern
+ * backreferences the captured run and anchors it with `^` under the `m`
+ * flag. So a triple-backtick sequence inside a value (a reviewer quoting
+ * a fenced snippet in a `description` block scalar, which YAML
+ * necessarily indents) can no longer close the block early and hand the
+ * parser a truncated document, which surfaced as diagnostics about
+ * fields the return actually carried (fix-round, review finding L3);
+ * and a return a reviewer wrapped in four backticks precisely because
+ * it contains a fence of its own is closed by its own four-backtick run
+ * rather than by that inner one. Matching a fixed three backticks
+ * instead of the run left a longer opener's remaining backticks in the
+ * info string, which read as the tag `` `yaml `` and matched no
+ * yaml/yml fence at all. The OPENING fence keeps its own position
+ * discipline unchanged: it is located anywhere in the input rather than
+ * anchored to a line start.
+ *
+ * Lookarounds on both sides of the run keep it whole, so the opening
+ * run is never re-entered at a shorter length. Without them, an input
+ * whose long backtick run has no valid closer is retried at every
+ * shorter run length from every offset inside the run, each retry
+ * rescanning the lazy body: work quadratic in the run's length, which a
+ * single pasted return of a few hundred backticks already turns into
+ * seconds (CHANGELOG [Unreleased] names the measurement). Keeping the
+ * run whole also makes the "closing run at least as long as the opening
+ * one" rule above literal: an opener longer than any closing run in the
+ * input is no fence at all, where splitting the run instead matched it
+ * and pushed the leftover backticks into the info string. One cost
+ * stays: every backtick run is still tried as an opener candidate, and a
+ * candidate with no qualifying closer scans to the end of the input, so
+ * an input of many runs with no valid closer costs work quadratic in the
+ * number of runs (well under a second at several thousand runs; a
+ * well-formed return is unaffected). Anchoring the opener to a line
+ * start would remove it, at the price of the position-free opener the
+ * paragraph above keeps.
+ *
+ * When the input carries more than one fenced block (a reviewer pasting
+ * a worked example ahead of the real return, say), the FIRST fence whose
+ * info string's first whitespace-delimited word is `yaml` or `yml`
+ * (case-insensitive) is preferred over every earlier fence, tagged or
+ * not; only when none of the fences carries that word does today's
+ * original first-fence behaviour apply. The whole info string is
+ * captured, not only a leading run of letters, so a tag followed by
+ * attributes (` ```yaml title=x `) is still recognised as `yaml` --
+ * previously the capture stopped at the first non-letter and required a
+ * newline right after it, so an attribute-bearing info string matched no
+ * fence at all, tagged or not; this also widens the untagged first-fence
+ * fallback, so an attribute-bearing fence with no yaml/yml word is at
+ * least recognised as a fence. This preference rule is not free of
+ * surprises of its own: a reviewer whose own return is left unfenced and
+ * who then quotes a ```yaml example afterward has that later example
+ * validated instead of their real return, which the emitted warning
+ * names. Preferring a later, differently-positioned fence over
+ * `fences[0]` is itself named as a warning, distinct from the existing
+ * before/after prose warnings; the before-warning is suppressed when the
+ * text preceding the chosen fence consists only of the skipped fence(s)
+ * and whitespace, since calling a legitimate (if unpreferred) fenced
+ * block "prose" alongside the skip warning that already names it is
+ * redundant; real prose ahead of a skipped fence still warns as before.
  */
 export function extractYamlSource(raw: string): ExtractedYaml {
   const warnings: string[] = [];
   // No BOM handling: the yaml parser accepts a leading U+FEFF and the
   // fenced path trims it away with the surrounding prose.
   const withoutBom = raw;
-  const fenceMatch = withoutBom.match(/```[A-Za-z]*\r?\n([\s\S]*?)\r?\n?^```/m);
-  if (fenceMatch) {
-    const start = fenceMatch.index ?? 0;
+  const fences = [
+    ...withoutBom.matchAll(
+      /(?<!`)(`{3,})(?!`)([^\r\n]*)\r?\n([\s\S]*?)\r?\n?^\1`*[ \t]*$/gm,
+    ),
+  ];
+  if (fences.length > 0) {
+    const fenceTag = (info: string): string =>
+      info.trim().split(/\s+/, 1)[0] ?? "";
+    const yamlTaggedIndex = fences.findIndex((match) =>
+      /^(?:yaml|yml)$/i.test(fenceTag(match[2])),
+    );
+    const chosenIndex = yamlTaggedIndex >= 0 ? yamlTaggedIndex : 0;
+    const chosen = fences[chosenIndex];
+    if (chosenIndex > 0) {
+      const skippedCount = chosenIndex;
+      const noun = skippedCount === 1 ? "block" : "blocks";
+      const verb = skippedCount === 1 ? "was" : "were";
+      warnings.push(
+        `${skippedCount} earlier fenced ${noun} without a yaml/yml tag ${verb} skipped in favor of the later \`${fenceTag(chosen[2])}\` fenced block; only that later block was validated`,
+      );
+    }
+    const start = chosen.index ?? 0;
     const before = withoutBom.slice(0, start);
-    if (before.trim().length > 0) {
+    const beforeIsOnlySkippedFences =
+      chosenIndex > 0 &&
+      fences
+        .slice(0, chosenIndex)
+        .reduce((text, skipped) => text.replace(skipped[0], ""), before)
+        .trim().length === 0;
+    if (before.trim().length > 0 && !beforeIsOnlySkippedFences) {
       warnings.push(
         "prose found before the opening ```yaml fence; only the fenced block was validated",
       );
     }
-    const inner = fenceMatch[1];
-    const after = withoutBom.slice(start + fenceMatch[0].length);
+    const inner = chosen[3];
+    const after = withoutBom.slice(start + chosen[0].length);
     if (after.trim().length > 0) {
       warnings.push(
         "prose found after the closing ```yaml fence; only the fenced block was validated",

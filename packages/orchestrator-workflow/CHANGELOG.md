@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `validate-review-report` now checks that every element of a string-array
+  field (`summary`, `missing_tests`, `residual_risks`) is a string, one
+  diagnostic per offending element at `<field>[<index>]`; and
+  `extractYamlSource` now prefers a fenced block tagged `yaml`/`yml` when
+  several fences are present, falling back to the first fence only when
+  none carries that tag, with a warning naming the earlier fence it
+  skipped. The fence tag is now matched against the whole info string's
+  first whitespace-delimited word rather than a leading run of letters,
+  so a tag followed by attributes (a fence opened `yaml title=x`) is
+  recognized as `yaml` instead of matching no fence at all. The "prose
+  found before" warning no longer also fires when the text preceding the
+  preferred fence is exactly the skipped fence(s) plus whitespace, so a
+  skipped fence is no longer double-reported as both skipped and prose.
+  The opening fence's backtick run is now consumed whole and the closing
+  fence must repeat at least as many backticks at column 0 with nothing
+  but whitespace after it, so a return opened with four backticks is
+  recognized as `yaml` (the run's leftover backticks previously landed in
+  the info string, making the tag itself start with a backtick) and ends
+  at its own four-backtick run rather than at a three-backtick line
+  inside it. Widening the info-string capture also widens what counts as
+  a fence at all: any attribute-bearing fence, and any fence opened with
+  more than three backticks, is now a fence, so input whose only fence
+  was opened `js title=x` is treated as fenced rather than as literal
+  YAML. Only whitespace-separated attributes count toward the tag:
+  `yaml title=x` counts, `yaml,title=x` does not, its first word being
+  the whole string. That opening run is now matched whole and never
+  re-entered at a shorter length, which bounds the scan: a run with no
+  valid closer was previously retried at every shorter run length from
+  every offset inside the run, each retry rescanning the block body, so
+  a 2000-backtick run in a 22 KB return took roughly 50 seconds through
+  `extractYamlSource` where it now takes under a millisecond. Keeping
+  the run whole also makes the closing-length rule literal: a return
+  whose opening run is longer than every closing run in it is no fence
+  at all and reaches the parser whole, where splitting the run
+  previously matched it and read its leftover backticks as the start of
+  the tag.
+
 ## [0.36.0] - 2026-09-16
 
 - A `validate-review-report <file>` CLI subcommand (`-` reads stdin) checks a

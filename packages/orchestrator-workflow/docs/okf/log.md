@@ -1189,7 +1189,7 @@
   sentence reverted to its pre-change wording, fails the exact-sub-field
   and regression-signal tests above; restored, the suite is green again.
   `CHANGELOG.md`'s own prose copy of this change is
-  (`CHANGELOG.md:142#"The implementer"`).
+  (`CHANGELOG.md:179#"The implementer"`).
 
   Verified on the committed tree: the full package suite (`npm test`),
   `typecheck`, `typecheck:test`, and `format:check`, all clean. Re-pointed
@@ -1457,7 +1457,7 @@
   that binding rather than second-guessing it.
 
   The CHANGELOG bullet for this round is
-  `CHANGELOG.md:519#"Citation scanning is paragraph-joined"`. Verified on
+  `CHANGELOG.md:556#"Citation scanning is paragraph-joined"`. Verified on
   the committed tree: the full package suite, `docs-consistency.test.ts`
   on its own, `typecheck`, `typecheck:test` and `format:check`; the
   figures each guard measured are in its own computed test name, per the
@@ -10066,6 +10066,158 @@ references still pass the same guards. Re-verified the six source-bearing
 module documents and refreshed their verification timestamps after the source
 and test commits. The baseline validator replay and saved-plan mutation
 evidence are retained in the consuming workspace's run record.
+
+## 2026-09-17 (agent-dx 30455574, validate-review-report element kinds and fence preference)
+
+`validate-review-report` gained two rules: every element of a string-array
+field (`summary`, `missing_tests`, `residual_risks`) must itself be a
+string, reported per offending element at `<field>[<index>]`; and
+`extractYamlSource` now prefers the first fenced block tagged `yaml` or
+`yml` when several fences are present, warning about the fence(s) it
+skipped, falling back to the first fence only when none carries that tag.
+README.md, contracts.md, and CHANGELOG.md were updated to describe both
+rules.
+
+Re-verified and re-stamped the five docs whose sources list README.md,
+contracts.md, or CHANGELOG.md: install-fence-mechanics.md,
+model-preselection.md, review-gate-and-waivers.md,
+run-state-lifecycle-and-markers.md, subagent-contracts-superset.md. Five
+live citations in subagent-contracts-superset.md moved with the
+contracts.md edit: 202 to 208 (two occurrences, the Task-slicer heading),
+274 to 280, 250 to 256, 190 to 196, and 200 to 206. This log's own two
+self-citations into CHANGELOG.md moved from 142 to 150 and from 519 to
+527. review-gate-and-waivers.md's own long-stale contracts.md citation,
+previously written across a line break and pointing past the end of that
+290-line file, is now a single-line, anchored citation resolving to
+contracts.md's current acceptance_recommendation paragraph.
+
+Verified from the worktree root: build, typecheck, typecheck:test, and
+format:check all clean; vitest green, including
+docs-consistency.test.ts. okf-kit check
+packages/orchestrator-workflow/docs/okf --require-anchors --json: 0
+errors, 1 warning at the pre-fix commit (citations-resolve, log.md,
+range-exceeds-file, from this entry's own prior text); 0 errors, 0
+warnings, 0 notices after this round's edits. A second, older, unrelated
+citation split across a line break exists in an earlier log entry above
+(the run-state-lifecycle-and-markers.md CHANGELOG.md reference near
+"deliberately historical"); it predates this task, is deliberately frozen
+against a past commit rather than the live file, and is left as found.
+
+A follow-up fix round on the same task corrected checkArrayField's
+docblock (a bare or `~` bullet parses as null and is rejected, not
+tolerated as a placeholder), widened test coverage to reject `null` and a
+boolean array element alongside a number and a mapping, and bumped
+TOP_LEVEL_FIELDS' generated case count to the measured 106 (not the
+guessed 112). The fence-tag capture was widened again, from a leading run
+of letters to the whole info string tested against its first
+whitespace-delimited word, so an attribute-bearing tag (`yaml title=x`)
+is recognized instead of matching no fence at all; the redundant
+before-warning on a skip-only prefix is now suppressed. A mutation probe
+showed the single-fence `yaml title=x` case alone does not discriminate
+that first-word test from a comparison against the whole info string,
+since both land on fence index 0 when only one fence is present; the
+two-fence case that does discriminate them (an earlier plain fence, a
+later `yaml title=x` one) was added and kills that mutant. README.md and
+contracts.md were corrected and extended for both changes; an earlier
+draft of both paragraphs wrapped a literal triple-backtick example across
+a line break, which self-matched as a second real fenced code block under
+contracts.md's Reviewer output contract heading and broke
+acceptance-baseline.test.ts; the wording was rewritten to a
+single-backtick inline example instead. This shifted contracts.md by 5
+lines starting after its own line 176: subagent-contracts-superset.md's
+five citations moved from 208 (twice), 280, 256, 196, and 206 to 213
+(twice), 285, 261, 201, and 211. CHANGELOG.md shifted by 6 lines starting
+after its own line 15: this log's own two self-citations moved from 150
+and 527 to 156 and 533. Re-verified and re-stamped the same five
+source-bearing docs again after confirming their own citations still
+resolve. Verified from the worktree root at that commit: build,
+typecheck, typecheck:test, and format:check all clean, vitest green with
+the tests named above; okf-kit check
+packages/orchestrator-workflow/docs/okf --require-anchors --json at 0
+errors, 0 warnings, 0 notices once committed within the stamp's skew
+allowance.
+
+A second follow-up corrected the fence grammar itself. Widening the
+info-string capture had left the opening fence matching a fixed three
+backticks, so a return opened with four put the leftover backtick into
+the info string: its first word read as a backtick followed by yaml,
+matched no yaml/yml tag, and with an earlier untagged fence present the
+validator validated that earlier block and emitted a prose-after warning
+in place of the skip warning. The pattern now captures the whole opening
+backtick run and requires the closing fence to repeat at least as many
+backticks at column 0 with nothing but whitespace after it; the opening
+fence keeps its existing position discipline, located anywhere in the
+input rather than anchored to a line start, since anchoring it would
+narrow behaviour this correction does not need to touch. Three tests pin
+the four-backtick case (a lone fence, one preferred over an earlier bash
+fence, and one whose body carries a three-backtick pair at column 0) and
+two pin the attribute wording both reference paragraphs carried:
+`yaml,title=x` is a single word and falls back to an earlier fence, and a
+lone `js title=x` fence is a fence rather than literal YAML. The
+over-promising "trailing attributes still count" claim in README.md and
+contracts.md is replaced by that whitespace-separated wording, both
+paragraphs were rewrapped by hand to the prevailing fill, and the
+CHANGELOG bullet now names the widening of what counts as a fence at all,
+which reaches beyond the yaml case. contracts.md grew by 4 lines from its
+own line 168, moving subagent-contracts-superset.md's five live citations
+from 201, 211, 213 (twice), 261, and 285 to 205, 215, 217 (twice), 265,
+and 289; CHANGELOG.md grew by 13 lines inside its [Unreleased] section,
+moving this log's own two self-citations from 156 and 533 to 169 and 546.
+README.md grew by one line, below every citation into it. Every anchor
+was re-read at its new line before the re-point, and the same five
+source-bearing docs were re-verified and re-stamped. Verified from the
+worktree root: build, typecheck, typecheck:test, and format:check all
+clean; vitest green with the five added fence tests. okf-kit check
+packages/orchestrator-workflow/docs/okf --require-anchors --json: 0
+errors, 0 warnings, 0 notices after the re-point and re-stamp. Mutation
+probes rerun through agent-primitives: the element-kind check, the tag
+predicate, the whole-info-string revert, and the before-warning
+suppression all still killed; restoring the three-backtick opener grammar
+kills all three four-backtick tests, and relaxing the closing fence to
+any run of three or more backticks kills the column-0 body test alone.
+
+A third follow-up bounded that pattern and pinned the closing line's
+tail. The opening backtick run is now held whole by a lookaround on each
+side: without them a run with no valid closer is re-entered at every
+shorter length from every offset inside it, each retry rescanning the
+lazy body. Measured through `extractYamlSource` on a 22 KB return
+carrying a 2000-backtick run, that cost 52 seconds on the branch and 51
+seconds under the probe's worktree copy, against 0.2 milliseconds once
+the run is held whole. Holding it whole also makes the closing-length
+rule literal, so an opener longer than every closing run present is no
+fence at all and its text reaches the parser whole, where splitting the
+run had matched it and read the leftover backticks as the start of the
+tag. The whitespace-only tail after the closing run, which only the
+CHANGELOG stated, is now in the validator paragraphs of README.md and
+contracts.md, and three tests pin the three shapes: a return whose
+closing run is followed by prose reaches the parser whole, so does one
+whose opener outruns every closer, and the unterminated 2000-backtick run
+returns inside a two-second bound. contracts.md grew by 2 lines from its
+own line 177, moving subagent-contracts-superset.md's five live citations
+from 205, 215, 217 (twice), 265, and 289 to 207, 217, 219 (twice), 267,
+and 291; CHANGELOG.md grew by 10 lines inside its [Unreleased] section,
+moving this log's own two self-citations from 169 and 546 to 179 and 556.
+README.md grew by 2 lines, below every citation into it. Every anchor was
+re-read at its new line before the re-point, and the same five
+source-bearing docs were re-verified and re-stamped. Verified from the
+worktree root: build, typecheck, typecheck:test, and format:check all
+clean; vitest green. okf-kit check
+packages/orchestrator-workflow/docs/okf --require-anchors --json: 0
+errors, 0 warnings, 0 notices after the re-point and re-stamp. Mutation
+probes through agent-primitives, five of five killed with every
+expectation met: removing the two lookarounds fails the bound test and
+the longer-opener test; dropping the closing line's whitespace-only tail
+fails the trailed-closer test alone; the three replays hold, with the
+three-backtick-only opener now failing four tests, the relaxed closing
+run two, and the disabled tag predicate eight.
+
+A closing docs pass on the same change generalised the README and
+contracts.md sentence on returns with no qualifying closing fence (the
+whole text reaches the parser, the longer-opener case included), named
+the residual per-run scan cost in the extractor docblock, reflowed one
+docblock, and removed a stale suite total from this entry; the five
+contracts.md citations above moved by two lines and were re-read at
+their new lines, and the five source-bearing docs were re-stamped.
 
 ## 2026-09-17 (agent-dx 74a5a857, slop-detector stdin bound is now first-byte)
 
