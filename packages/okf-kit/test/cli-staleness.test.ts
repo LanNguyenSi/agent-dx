@@ -493,6 +493,60 @@ describe("okf-kit cli staleness (sources-fresh + repo-root auto-detection)", () 
     });
   });
 
+  it("a COMMITTED backwards re-stamp fails --strict (exit 1) and appears in --json with severity warning (D-004, M4)", () => {
+    // The --dirty-as-now matrix above only pins the WORKING-TREE backwards
+    // path; this pins the committed path (restampedByOwnLastCommit) at the
+    // CLI level, mirroring the unit-level test in sources-fresh.test.ts.
+    const repo = createTmpGitRepo();
+    try {
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content:
+              "---\ntype: concept\ntimestamp: 2026-03-01T00:00:00Z\nsources:\n  - source.ts\n---\n\n# Doc\n",
+          },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content:
+              "---\ntype: concept\ntimestamp: 2026-02-01T00:00:00Z\nsources:\n  - source.ts\n---\n\n# Doc\n",
+          },
+          { relPath: "source.ts", content: "export const a = 2;\n" },
+        ],
+        "2026-04-01T00:00:00Z",
+      );
+
+      const result = runCli([
+        "check",
+        path.join(repo.dir, "bundle"),
+        "--repo-root",
+        repo.dir,
+        "--strict",
+        "--json",
+      ]);
+      const parsed = JSON.parse(result.stdout) as JsonReport;
+      const backwards = parsed.findings.find(
+        (f) =>
+          f.ruleId === "sources-fresh" &&
+          f.message.includes("re-stamp moved backwards"),
+      );
+      expect(backwards).toBeDefined();
+      expect(backwards?.severity).toBe("warning");
+      expect(backwards?.message).toContain("2026-03-01T00:00:00.000Z");
+      expect(backwards?.message).toContain("2026-02-01T00:00:00.000Z");
+      expect(backwards?.message).toContain("in the doc's last commit");
+      expect(result.status).toBe(1);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it("skips staleness with a notice when the bundle is not inside a git work tree", () => {
     const plainDir = fs.mkdtempSync(path.join(os.tmpdir(), "okf-kit-plain-"));
     try {

@@ -14,16 +14,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (or working-tree edit) that moves the stamp BACKWARDS no longer counts
   as a re-verification: the affected sources stay STALE, and the doc gets
   one additional `re-stamp moved backwards: timestamp <prev-iso> ->
-  <new-iso> ...` warning naming the previous and new values. A rewrite to
+<new-iso> ...` warning naming the previous and new values. A rewrite to
   the same instant in a different raw representation (`...00Z` to
   `...00.000Z`) also no longer counts as a re-stamp (neither forward nor
   backward), correcting a known limitation the README previously
-  documented the other way. Tracker: agent-dx task `ccdf051b`.
+  documented the other way; that same-instant case now additionally gets
+  its own `re-stamp did not move the timestamp forward: <prev-iso> and
+<new-iso> name the same instant, so this is not a re-verification`
+  notice (not a warning, so `--strict` is unaffected), guarded once per
+  doc the same way the backwards warning is -- an unchanged (byte-identical)
+  timestamp value still gets neither. The direction comparison itself now
+  reads both instants at MILLISECOND resolution (a new `getTimestampEpochMs`
+  helper in `src/util.ts`, used only here), so two re-stamps less than a
+  second apart are no longer misread as the same instant. When either side
+  of the comparison cannot be parsed to an instant at all, the check falls
+  back to comparing the raw values' identity, exactly as before this
+  direction rule existed. Tracker: agent-dx task `ccdf051b`.
 
 - CI: the agent-dx `okf-anchor-guard` job (`.github/workflows/ci.yml`) and
   `okf-staleness` job (`.github/workflows/okf-staleness.yml`)'s "Install
   okf-kit" step now probes the pinned version with `npm view
-  okf-kit@<pin> version`, confirms a failed probe with a second,
+okf-kit@<pin> version`, confirms a failed probe with a second,
   package-level `npm view okf-kit versions --json` probe before deciding
   anything, then installs the published pin, builds
   `packages/okf-kit` from the PR tree when the pin is confirmed
@@ -83,7 +94,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `check` gets `--dirty-as-now`: an opt-in flag under which every
   uncommitted change (modified, staged, or untracked per `git status
-  --porcelain --untracked-files=all`) is modeled as though it landed in
+--porcelain --untracked-files=all`) is modeled as though it landed in
   ONE virtual commit made
   right now, applied at a single shared choke point
   (`commitEpochWithDirtyAsNow` in `src/rules/sources-fresh.ts`) so both
@@ -111,7 +122,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gate can actually be made green by following its own remedy (re-stamp,
   then commit) while the source stays uncommitted. Reads the work tree's
   dirty paths once per `check` run (`git --no-optional-locks status
-  --porcelain=v2 -z --untracked-files=all`), not once per unique source
+--porcelain=v2 -z --untracked-files=all`), not once per unique source
   path, and normalizes a `./`-prefixed or `/`-suffixed path spelling
   before matching it against that dirty-paths set, so any spelling of the
   same source or doc path matches consistently. `--untracked-files=all` is
@@ -264,7 +275,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that catches an implausible value), and a doc-only prose edit with
   unchanged sources remains outside both rules' reach. When git cannot
   answer the question at all, the doc gets one `staleness not
-  assessable` notice rather than a STALE warning or a silent pass. See
+assessable` notice rather than a STALE warning or a silent pass. See
   the README's "Staleness (sources-fresh)" section for the full contract
   and its remaining known limitations.
 - `sources-fresh`'s re-stamp lookup no longer misjudges two more shapes
@@ -370,7 +381,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   misclassified `blank-start-line`; `LINE_REF_RE`'s leading `\b` no longer
   matches right after a hyphen, so "in-line 999", "multi-line 999", and
   "command-line 999" are no longer mis-extracted as citations to line 999;
-  a reference inside an HTML comment (`` <!-- see line 5 above --> ``) or
+  a reference inside an HTML comment (`<!-- see line 5 above -->`) or
   on a line that is itself a Markdown ATX heading (`## Line 3 semantics`)
   is now excluded from extraction, the same way a fenced code block's
   example already was; and a finding now quotes the doc's own matched text
@@ -388,7 +399,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `citations-resolve`: a fifth `--require-anchors` check,
   `anchor-required-continuation` (warning), closes a gap the four checks
   added in 0.8.0 left open: they all fire only for a "full" citation, so a
-  continuation (`` `:N` ``/`` `:N-M` ``, `` -`M` ``/`` –`M` ``, `` (`N`) ``)
+  continuation (`` `:N` ``/`` `:N-M` ``, `` -`M` ``/`` –`M` ``, ``(`N`)``)
   or a bound paragraph-bound short-form `:N-M` chained off an
   ALREADY-anchored full citation was invisible to `--require-anchors`
   entirely: it carries no path of its own to hang an anchor on (see
@@ -412,7 +423,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `prose-line-references`: default mode (no `--prose-line-references`) is
   byte-identical before and after this change: verified by building the
   CLI at both the pre-change commit and this change, then running `check
-  --json` in default mode against the same three real bundles as below
+--json` in default mode against the same three real bundles as below
   (each repo's full real tree as `--repo-root`, not a narrow `docs/okf`-
   only extraction, since this rule's own file-mention resolution needs the
   rest of the repo present) and diffing the JSON output byte for byte --
@@ -471,8 +482,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--repo-root` (a narrow `docs/okf`-only extraction under-counts this,
   since most citations fail to resolve without the rest of the repo
   present): agent-dx's own orchestrator-workflow bundle 70
-  `anchor-required-continuation` findings, harness 24, agent-grounding
-  24. Consumer CI pins (agent-dx's and agent-grounding's own
+  `anchor-required-continuation` findings, harness 24, agent-grounding 24. Consumer CI pins (agent-dx's and agent-grounding's own
   `okf-anchor-guard` jobs, which select findings by the trailing
   `[rule-id]` bracket) must be bumped to this version before
   `anchor-required-continuation` starts gating; that bump is out of scope
@@ -631,7 +641,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   content. This is a **notice**, not a warning (`markdown-range-boundary-bracket-or-fence`):
   mechanical verification of "is this still the same block" is far less
   reliable for prose than for code brace structure. A range starting on a
-  genuine *opening* fence line is exempted from the fence-as-drift-signal
+  genuine _opening_ fence line is exempted from the fence-as-drift-signal
   part of this check: citing a fenced block starting at its own opening
   delimiter is the natural, correct way to cite it.
 - `citations-resolve` now supports an optional **anchor** on a full
@@ -645,10 +655,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   this form as part of the same change -- see that package's CHANGELOG).
   Two forms, told apart by the anchor text itself:
   - **Heading form** (bare/unquoted, e.g. `#0.24.0` or `#[0.24.0]`): the
-    citation's nearest *enclosing* Markdown heading must contain the
+    citation's nearest _enclosing_ Markdown heading must contain the
     anchor text, and no heading of the same or shallower level may start
     before the range's end line -- i.e. the heading must enclose the
-    *whole* range, not merely precede its start. Deliberately capped at
+    _whole_ range, not merely precede its start. Deliberately capped at
     heading level 2: a Keep-a-Changelog `CHANGELOG.md` nests `## [x.y.z]`
     release headings around identically-named `### Added`/`### Changed`/
     `### Fixed` subsections repeated in every release, so "nearest heading
@@ -660,7 +670,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     following `,`/`)` is never captured as part of it, and a hyphenated
     token (`0.24.0-rc1`) is captured whole rather than truncated at the
     first hyphen. A `#`-led comment line inside a fenced code block in the
-    *target* is excluded from the heading search on both ends of the
+    _target_ is excluded from the heading search on both ends of the
     enclosure check, the same way a citing doc's own fences are already
     excluded from short-form matching. Mismatch is reported as
     `anchor-heading-mismatch` (wrong section) or
@@ -677,45 +687,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     unrelated later quote character in the document -- which would
     otherwise silently hide every citation in between from this rule
     entirely. Mismatch is `anchor-not-found-in-range`, a **warning**.
-  Anchors are full-citation-only (a continuation or short-form citation
-  never carries its own path to hang one on) and strictly additive: the
-  `#anchor` suffix is optional, so an existing anchorless citation matches
-  and is checked exactly as before. Three rejected alternatives: embedding
-  the literal heading markup (`` #"## [0.24.0]" ``) was rejected as reading
-  worse in prose for no additional precision over the shorter heading-form
-  token; a detached anchor elsewhere in the sentence was rejected as
-  needing a second, unparseable-without-a-new-grammar citation site that
-  is easy to leave behind when a sentence is edited later; a named-capture
-  slug matching `sources-fresh`'s YAML shape was rejected because it would
-  require a second citation site (frontmatter plus prose) to stay in sync,
-  the exact class of drift this rule exists to catch.
-  **Known limitations:** the heading form's containment check is a plain
-  substring match against the heading's raw text, not a token-boundary
-  match (an anchor `0.1` matches a heading containing `[0.10.0]`); this is
-  a deliberate mechanical simplification, not a semantic guarantee. The
-  heading form also runs against a target's raw lines regardless of file
-  type, so a `# comment` line in a `.yml`/`.json` target is matched as a
-  heading; restricting the heading form to `.md` targets is left as a
-  known limitation rather than implemented in this change.
-  **Measured** (this change; see the PR for the full mutation-probe log):
-  the migrated `orchestrator-workflow` bundle (3 docs, 16 anchored
-  citations) reports the same 0 errors / 13 warnings / 22 notices with the
-  anchors present as without them (0 true findings, since all 16 were
-  already correct; 0 false positives from the new check, in this corpus).
-  A read-only sample against `agent-grounding/docs/okf` (not migrated to
-  this form, out of scope for this change, and carrying no anchors at all)
-  serves as a backward-compatibility check rather than a false-positive
-  measurement of the anchor check itself: it reports 0 anchor findings,
-  confirming an anchorless corpus is unaffected, as expected from the
-  backward-compatible design. Two mutation probes against the
-  `orchestrator-workflow` bundle: shifting one migrated citation's range
-  into its neighbouring release section raised the warning count from 13
-  to 14 (`anchor-heading-mismatch`), reverted to 13 clean; inserting an
-  8-line dummy entry at the top of that package's `CHANGELOG.md`
-  (simulating a normal release-note insertion) raised the warning count
-  from 13 to 29, flagging all 16 migrated citations as
-  `anchor-heading-mismatch` (the historical failure mode this change
-  targets), reverted to 13 clean.
+    Anchors are full-citation-only (a continuation or short-form citation
+    never carries its own path to hang one on) and strictly additive: the
+    `#anchor` suffix is optional, so an existing anchorless citation matches
+    and is checked exactly as before. Three rejected alternatives: embedding
+    the literal heading markup (`#"## [0.24.0]"`) was rejected as reading
+    worse in prose for no additional precision over the shorter heading-form
+    token; a detached anchor elsewhere in the sentence was rejected as
+    needing a second, unparseable-without-a-new-grammar citation site that
+    is easy to leave behind when a sentence is edited later; a named-capture
+    slug matching `sources-fresh`'s YAML shape was rejected because it would
+    require a second citation site (frontmatter plus prose) to stay in sync,
+    the exact class of drift this rule exists to catch.
+    **Known limitations:** the heading form's containment check is a plain
+    substring match against the heading's raw text, not a token-boundary
+    match (an anchor `0.1` matches a heading containing `[0.10.0]`); this is
+    a deliberate mechanical simplification, not a semantic guarantee. The
+    heading form also runs against a target's raw lines regardless of file
+    type, so a `# comment` line in a `.yml`/`.json` target is matched as a
+    heading; restricting the heading form to `.md` targets is left as a
+    known limitation rather than implemented in this change.
+    **Measured** (this change; see the PR for the full mutation-probe log):
+    the migrated `orchestrator-workflow` bundle (3 docs, 16 anchored
+    citations) reports the same 0 errors / 13 warnings / 22 notices with the
+    anchors present as without them (0 true findings, since all 16 were
+    already correct; 0 false positives from the new check, in this corpus).
+    A read-only sample against `agent-grounding/docs/okf` (not migrated to
+    this form, out of scope for this change, and carrying no anchors at all)
+    serves as a backward-compatibility check rather than a false-positive
+    measurement of the anchor check itself: it reports 0 anchor findings,
+    confirming an anchorless corpus is unaffected, as expected from the
+    backward-compatible design. Two mutation probes against the
+    `orchestrator-workflow` bundle: shifting one migrated citation's range
+    into its neighbouring release section raised the warning count from 13
+    to 14 (`anchor-heading-mismatch`), reverted to 13 clean; inserting an
+    8-line dummy entry at the top of that package's `CHANGELOG.md`
+    (simulating a normal release-note insertion) raised the warning count
+    from 13 to 29, flagging all 16 migrated citations as
+    `anchor-heading-mismatch` (the historical failure mode this change
+    targets), reverted to 13 clean.
 
 ### Fixed
 
@@ -756,7 +766,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to "no full `path:N` citation earlier in this paragraph to bind to".
 - Three successive rounds tried to separate a real short-form citation
   from ordinary prose that merely contains an N-M-shaped number pair by
-  deciding from the range's *values*: an inverted-pair/span-cap check,
+  deciding from the range's _values_: an inverted-pair/span-cap check,
   then a year/well-known-port plausibility gate, then a
   containment-or-adjacency check against the paragraph's last full
   citation (`isContainedOrAdjacent`, now removed -- there is no longer a
@@ -814,25 +824,22 @@ surfaces citation drift beyond the single pre-existing one already known
 (`install-fence-mechanics.md`'s `init.ts:538-569`, a short-form landing on
 a lone closing brace, restored to a warning by this round's gate change --
 see "Fixed" above): a compound colon-form list in the same doc, citing
-`test/init.test.ts`'s `describe("tier variants (\`--tiers\`)")` block,
+`test/init.test.ts`'s `describe("tier variants (\`--tiers\`)")`block,
 names 15 short-form sub-ranges. 13 of them produce a citations-resolve
-finding (12 `test-range-start-not-head` warnings, 1
-`test-range-end-not-closing` notice on `:1229-1265`); 11 of those 13 are
+finding (12`test-range-start-not-head`warnings, 1`test-range-end-not-closing`notice on`:1229-1265`); 11 of those 13 are
 exact-length blocks shifted by a constant offset from their real
-`describe`/`it` block (+33 lines for three of them, +116 for the other
+`describe`/`it`block (+33 lines for three of them, +116 for the other
 eight -- consistent with roughly two rounds of content having been
 inserted earlier in the same block without the rest of the list being
-re-numbered). The other 2 of the 13 do not fit that pattern: `:1229-1265`
-is at offset 0 (its start line is the real block head) but cites a
-37-line span against a real 70-line block that grew; `:1636-1725` cites a
+re-numbered). The other 2 of the 13 do not fit that pattern:`:1229-1265`is at offset 0 (its start line is the real block head) but cites a
+37-line span against a real 70-line block that grew;`:1636-1725`cites a
 90-line span against a real 91-line block. Of the 2 remaining
-citations that produce no finding at all: `:1170-1227` is genuinely
-correct (not drifted); `:1614-1626` is drifted by the same +116 pattern
+citations that produce no finding at all:`:1170-1227`is genuinely
+correct (not drifted);`:1614-1626`is drifted by the same +116 pattern
 as the 8 above but produces no finding -- a known, inherent blind spot of
 this mechanical, non-semantic checker: its cited start line coincidentally
-lands on a real (but different) `describe`/`it` head, and its cited end
-line coincidentally lands on a real (but unrelated, nested) closing
-`});`, so the check cannot distinguish it from a correct citation. Fixing
+lands on a real (but different)`describe`/`it`head, and its cited end
+line coincidentally lands on a real (but unrelated, nested) closing`});`, so the check cannot distinguish it from a correct citation. Fixing
 any of these citations is out of scope for this change (no content fixes
 to consumer-bundle citations).
 
@@ -846,7 +853,7 @@ The current dogfood bundle has four such citations, around
 ### Added
 
 - New rule `citations-resolve`: for docs with a repo root, flags a
-  `` `path:N`/`path:N-M` `` citation (and its `` `:N` ``/`` -`M` ``/`` (`N`) ``
+  `` `path:N`/`path:N-M` `` citation (and its `` `:N` ``/`` -`M` ``/``(`N`)``
   continuations) whose target file is missing, whose range is inverted or
   exceeds the file, or whose start line is blank or (for a non-markdown
   target) only a closing brace. Ported from agent-grounding's
@@ -861,7 +868,7 @@ The current dogfood bundle has four such citations, around
   part of the OKF spec, and not exercised by the ported tests) -- this rule
   only scans the docs already loaded for the bundle being checked.
   `citations-resolve` findings are warn-level: an existing `okf-kit check
-  --strict` run that was previously green can now fail once this version is
+--strict` run that was previously green can now fail once this version is
   picked up, purely from this rule's new warnings, with no other change to
   the bundle. Two path-resolution refinements differ from the
   agent-grounding original: (1) a bare filename with no `/` (e.g.

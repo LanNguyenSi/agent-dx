@@ -5,6 +5,7 @@ import { runGit as defaultRunGit } from "../git.js";
 import {
   getRawTimestampString,
   getTimestampEpoch,
+  getTimestampEpochMs,
   getTimestampIdentity,
   getValidSources,
   hasUtcDesignator,
@@ -173,10 +174,12 @@ export const sourcesFreshRule: Rule = {
       };
       // At most one "not assessable" notice per doc, however many of its
       // sources hit the unanswerable re-stamp question. Likewise at most
-      // one "moved backwards" warning per doc (see the isStale branch
-      // below), independent of the notice.
+      // one "moved backwards" warning per doc, and at most one "same
+      // instant" notice per doc (D-009) -- see the isStale branch below --
+      // independent of each other and of the not-assessable notice.
       let notAssessableReported = false;
       let backwardsReported = false;
+      let sameInstantReported = false;
 
       for (const source of sources) {
         // A missing path on disk is sources-shape's job to report; avoid a
@@ -244,6 +247,20 @@ export const sourcesFreshRule: Rule = {
                 severity: "warning",
                 file: doc.relPath,
                 message: `re-stamp moved backwards: timestamp ${result.backwards.previousIso} -> ${result.backwards.newIso} ${locationPhrase} is not a re-verification`,
+              });
+            } else if (result.sameInstant && !sameInstantReported) {
+              // Not restamped (isStale stays true, reported as the usual
+              // STALE warning below), PLUS one extra NOTICE per doc: the
+              // value was rewritten but never moved forward, so it carries
+              // no verification claim either, but it is not a mistake in
+              // the same sense a backwards move is -- a notice, not a
+              // warning, so --strict is unaffected (D-009).
+              sameInstantReported = true;
+              findings.push({
+                ruleId: RULE_ID,
+                severity: "notice",
+                file: doc.relPath,
+                message: `re-stamp did not move the timestamp forward: ${result.sameInstant.previousIso} and ${result.sameInstant.newIso} name the same instant, so this is not a re-verification`,
               });
             }
           }
@@ -767,6 +784,13 @@ function epochToIso(epochSeconds: number): string {
   return new Date(epochSeconds * 1000).toISOString();
 }
 
+/** Like `epochToIso`, but for a millisecond epoch (`getTimestampEpochMs`,
+ * D-008) -- used only by `compareRestampDirection`'s `backwards` and
+ * `sameInstant` results. */
+function epochMsToIso(epochMs: number): string {
+  return new Date(epochMs).toISOString();
+}
+
 /**
  * Per-run cache of a doc's own REAL (committed) last-commit epoch, keyed by
  * the `BundleContext` instance so `sources-fresh`'s doc-commit comparison
@@ -861,13 +885,22 @@ type RestampVerdict =
  * than the one it replaced), the two parsed instants so the rule can report
  * exactly what moved and where (`location` distinguishes the committed path
  * from the `--dirty-as-now` working-tree path, since the two produce
- * differently worded findings). Kept as a structured field on the result
- * rather than a bare boolean so a caller can never lose or misplace which
- * commit/working-tree pair the movement belongs to.
+ * differently worded findings) -- OR, when the value moved to the SAME
+ * instant (D-009: a cosmetic rewrite, e.g. adding milliseconds, or
+ * switching between a quoted string and a native YAML date that name the
+ * same instant), the single shared instant in `sameInstant` instead, mutually
+ * exclusive with `backwards`. Kept as structured fields on the result rather
+ * than a bare boolean so a caller can never lose or misplace which
+ * commit/working-tree pair the movement (or non-movement) belongs to.
  */
 type RestampResult = {
   verdict: RestampVerdict;
   backwards?: {
+    previousIso: string;
+    newIso: string;
+    location: "commit" | "working-tree";
+  };
+  sameInstant?: {
     previousIso: string;
     newIso: string;
     location: "commit" | "working-tree";
@@ -882,54 +915,85 @@ type RestampResult = {
  * working-tree value for the dirty path).
  *
  * D-004: a re-stamp only counts when the new value is STRICTLY LATER than
- * the value it replaced -- comparing PARSED INSTANTS (epoch seconds), never
- * raw strings, so a squash that re-dates sources (and the doc) to the merge
- * instant still passes (later than any pre-merge stamp) while a genuinely
- * backdated re-stamp does not. Three outcomes:
+ * the value it replaced -- comparing PARSED INSTANTS, never raw strings, so
+ * a squash that re-dates sources (and the doc) to the merge instant still
+ * passes (later than any pre-merge stamp) while a genuinely backdated
+ * re-stamp does not. D-008: that comparison reads both instants at
+ * MILLISECOND resolution (`getTimestampEpochMs`), not the whole-second
+ * floor `getTimestampEpoch` uses for every other caller in this file, so a
+ * genuine forward move of a few hundred milliseconds (two re-stamps inside
+ * the same second) is never misread as the same instant. Three outcomes:
  *
- *  - new epoch > old epoch: `restamped` (a real re-verification).
- *  - new epoch < old epoch: `not-restamped`, AND flagged via `backwards` --
- *    a backwards move is never a re-verification and is additionally
- *    reported as its own warning by the caller.
- *  - new epoch === old epoch (a cosmetic rewrite, e.g. adding milliseconds,
- *    or switching between a quoted string and a native YAML date that name
- *    the same instant): `not-restamped`, but NOT `backwards` -- nothing was
- *    certified newer, but nothing moved backwards either.
+ *  - new instant > old instant: `restamped` (a real re-verification).
+ *  - new instant < old instant: `not-restamped`, AND flagged via
+ *    `backwards` -- a backwards move is never a re-verification and is
+ *    additionally reported as its own WARNING by the caller.
+ *  - new instant === old instant, at millisecond resolution: `not-restamped`
+ *    always (nothing was certified newer). Additionally flagged via
+ *    `sameInstant` (D-009) ONLY when the raw VALUE was actually rewritten
+ *    to a different representation of that same instant (switching between
+ *    a quoted string and a native YAML date, or adding milliseconds that
+ *    round to nothing -- decided by `getTimestampIdentity`, since two equal
+ *    instants can still have differently-spelled raw values) -- the caller
+ *    reports THAT case as its own NOTICE (not a warning, so `--strict` is
+ *    unaffected) rather than silently folding it into the ordinary STALE
+ *    wording. A byte-identical value (the common case: a co-committed body
+ *    edit or formatter run that never touches the stamp at all) was never a
+ *    re-stamp ATTEMPT, so it gets neither `backwards` nor `sameInstant` --
+ *    there is nothing to notice.
  *
- * When EITHER side's `timestamp` cannot be parsed to an epoch at all
+ * When EITHER side's `timestamp` cannot be parsed to an instant at all
  * (missing, blank, or a string `Date.parse` rejects), direction cannot be
  * judged: this falls back to today's pre-D-004 behaviour of comparing the
  * two values' raw IDENTITY (`getTimestampIdentity`) instead of guessing a
  * direction -- any textual change still counts as `restamped`, exactly as
- * before this decision existed, and never triggers `backwards` (there is no
- * direction to report).
+ * before this decision existed, and never triggers `backwards` or
+ * `sameInstant` (there is no direction to report either way).
  */
 function compareRestampDirection(
   currentParsed: unknown,
   beforeParsed: unknown,
   location: "commit" | "working-tree",
 ): RestampResult {
-  const currentEpoch = getTimestampEpoch(currentParsed);
-  const beforeEpoch = getTimestampEpoch(beforeParsed);
-  if (currentEpoch === undefined || beforeEpoch === undefined) {
+  const currentEpochMs = getTimestampEpochMs(currentParsed);
+  const beforeEpochMs = getTimestampEpochMs(beforeParsed);
+  if (currentEpochMs === undefined || beforeEpochMs === undefined) {
     const currentStamp = getTimestampIdentity(currentParsed);
     const beforeStamp = getTimestampIdentity(beforeParsed);
     return {
       verdict: currentStamp !== beforeStamp ? "restamped" : "not-restamped",
     };
   }
-  if (currentEpoch > beforeEpoch) return { verdict: "restamped" };
-  if (currentEpoch < beforeEpoch) {
+  if (currentEpochMs > beforeEpochMs) return { verdict: "restamped" };
+  if (currentEpochMs < beforeEpochMs) {
     return {
       verdict: "not-restamped",
       backwards: {
-        previousIso: epochToIso(beforeEpoch),
-        newIso: epochToIso(currentEpoch),
+        previousIso: epochMsToIso(beforeEpochMs),
+        newIso: epochMsToIso(currentEpochMs),
         location,
       },
     };
   }
-  return { verdict: "not-restamped" };
+  // Same instant. An UNCHANGED value (byte-identical frontmatter, the
+  // common case: a co-committed body edit or formatter run that never
+  // touches the doc's timestamp at all) reports nothing extra here -- it
+  // was never a re-stamp ATTEMPT, so there is nothing to notice. Only a
+  // value that was actually rewritten to a DIFFERENT raw representation of
+  // the same instant (getTimestampIdentity differs) gets the D-009 notice:
+  // that is the case someone touched the stamp but the instant never
+  // actually moved.
+  const currentStamp = getTimestampIdentity(currentParsed);
+  const beforeStamp = getTimestampIdentity(beforeParsed);
+  if (currentStamp === beforeStamp) return { verdict: "not-restamped" };
+  return {
+    verdict: "not-restamped",
+    sameInstant: {
+      previousIso: epochMsToIso(beforeEpochMs),
+      newIso: epochMsToIso(currentEpochMs),
+      location,
+    },
+  };
 }
 
 /**
