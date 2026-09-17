@@ -79,8 +79,8 @@ function runCliWithOpenStdin(
 /**
  * Sibling of `runCliWithOpenStdin` that drives stdin with a `script`
  * callback instead of leaving it untouched, so a caller can pin the
- * data-then-stall shape: write something, wait past the idle bound, then
- * end stdin. `script` gets `write`/`end` once the child is spawned; nothing
+ * data-then-stall shape: write something, wait past the first-byte bound,
+ * then end stdin. `script` gets `write`/`end` once the child is spawned; nothing
  * here waits for it, so a script that itself awaits a `setTimeout` before
  * calling `end` is what actually produces the stall.
  */
@@ -283,8 +283,12 @@ describe("cli check with nothing piped in on stdin", () => {
       ["check", "--stdin-path", "COMMIT_MSG", "--pack", "review-slop"],
       300,
       (write, end) => {
+        // The stall (3000ms) needs a wide margin over the bound (300ms) so
+        // this still discriminates re-arm-on-every-chunk on a loaded
+        // runner, where the child's startup and first `readStdin` call can
+        // themselves eat a few hundred ms.
         write("Fixed per finding F5 in review round 2.\n");
-        setTimeout(end, 900);
+        setTimeout(end, 3000);
       },
     );
     expect(stdout).toMatch(/1 files scanned/);

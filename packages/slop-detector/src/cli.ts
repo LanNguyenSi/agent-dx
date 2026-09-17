@@ -7,7 +7,11 @@ import { checkPath, checkText, summarize } from "./engine.js";
 import { defaultConfig, loadConfig } from "./config.js";
 import { allPacks, packsByFilter } from "./packs/registry.js";
 import { renderText } from "./cli-render.js";
-import { noStdinContentError, readStdin, stdinIdleTimeoutMs } from "./stdin.js";
+import {
+  noStdinContentError,
+  readStdin,
+  stdinFirstByteTimeoutMs,
+} from "./stdin.js";
 import type { CheckSummary } from "./types.js";
 
 const program = new Command();
@@ -133,10 +137,18 @@ async function runCheck(
     // A TTY is the one shape of "nothing piped in" that can be recognized
     // without reading anything at all, so it stays a fast path; every
     // other shape is decided by the emptiness check below, after the read.
+    //
+    // The first-byte-bound resolver, the "no content at all" error, and the
+    // reader itself live in ./stdin.ts (its module comment has the full
+    // rationale and trade-off), not here: that keeps them importable by a
+    // unit test without that import triggering this module's own
+    // `program.parseAsync()` side effect. What stays here is the TTY fast
+    // path above and the post-read emptiness check below, since both are
+    // about `check`'s own argument handling rather than stdin mechanics.
     if (process.stdin.isTTY) {
       throw noStdinContentError("stdin is a TTY, so nothing was piped in");
     }
-    const text = await readStdin(stdinIdleTimeoutMs());
+    const text = await readStdin(stdinFirstByteTimeoutMs());
     if (text.trim().length === 0) {
       throw noStdinContentError(
         "stdin ended without any non-whitespace content",
@@ -202,14 +214,6 @@ function normalizeOpts(raw: unknown): CheckOpts {
     stdinPath: typeof r.stdinPath === "string" ? r.stdinPath : "<stdin>",
   };
 }
-
-// The idle-bound resolver, the "no content at all" error, and the reader
-// itself live in ./stdin.ts (its module comment has the full rationale and
-// trade-off), not here: that keeps them importable by a unit test without
-// that import triggering this module's own `program.parseAsync()` side
-// effect. What stays here is the TTY fast path above and the
-// post-read emptiness check, since both are about `check`'s own argument
-// handling rather than stdin mechanics.
 
 function readVersion(): string {
   try {

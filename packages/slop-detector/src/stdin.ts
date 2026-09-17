@@ -14,41 +14,41 @@
 //     no writer, which is what a CI step or an agent harness spawning the
 //     CLI with stdio inherited hands it. That hung forever with no output.
 //
-// The second is bounded by an IDLE timeout that is armed once, before the
-// first byte, and cleared for good the moment any data arrives -- it is
+// The second is bounded by a FIRST-BYTE timeout that is armed once, before
+// the first byte, and cleared for good the moment any data arrives -- it is
 // never re-armed. The guard exists only for a stdin with no writer at all;
 // once a producer has proven it is alive by writing something, this reader
 // trusts it to keep going and waits for `end` without a bound. The
 // trade-off: a producer that writes some data and then stalls forever
 // mid-stream (rather than never starting) is an ordinary pipe hang again,
 // not a bounded usage error -- unlike the never-written case, that shape is
-// indistinguishable from a producer that is just slow, and a fixed idle
-// bound during a large flowing input, once one that we know is arriving,
-// would either be a false timeout on somebody's over-a-few-seconds write or
-// no protection at all. 10s is far above any of the documented producers (a
+// indistinguishable from a producer that is just slow, and a fixed bound
+// during a large flowing input, once one that we know is arriving, would
+// either be a false timeout on somebody's over-a-few-seconds write or no
+// protection at all. 10s is far above any of the documented producers (a
 // `git log`, a file redirect, a heredoc), and
 // SLOP_DETECTOR_STDIN_TIMEOUT_MS overrides it (it exists so the
 // never-written-stdin case is cheap to pin in `test/cli.test.ts`; the
 // default must stand on its own without a caller setting anything).
 
-export const DEFAULT_STDIN_IDLE_TIMEOUT_MS = 10_000;
+export const DEFAULT_STDIN_FIRST_BYTE_TIMEOUT_MS = 10_000;
 
 /**
- * Resolves the idle bound from `SLOP_DETECTOR_STDIN_TIMEOUT_MS`, falling
- * back to `DEFAULT_STDIN_IDLE_TIMEOUT_MS` when the variable is unset, not a
- * finite number, or not strictly positive. Takes `env` as a parameter (
- * defaulting to `process.env`) so the branches are unit-testable without
- * spawning a subprocess.
+ * Resolves the first-byte bound from `SLOP_DETECTOR_STDIN_TIMEOUT_MS`,
+ * falling back to `DEFAULT_STDIN_FIRST_BYTE_TIMEOUT_MS` when the variable
+ * is unset, not a finite number, or not strictly positive. Takes `env` as a
+ * parameter (defaulting to `process.env`) so the branches are
+ * unit-testable without spawning a subprocess.
  */
-export function stdinIdleTimeoutMs(
+export function stdinFirstByteTimeoutMs(
   env: NodeJS.ProcessEnv = process.env,
 ): number {
   const raw = env.SLOP_DETECTOR_STDIN_TIMEOUT_MS;
-  if (raw === undefined) return DEFAULT_STDIN_IDLE_TIMEOUT_MS;
+  if (raw === undefined) return DEFAULT_STDIN_FIRST_BYTE_TIMEOUT_MS;
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed > 0
     ? parsed
-    : DEFAULT_STDIN_IDLE_TIMEOUT_MS;
+    : DEFAULT_STDIN_FIRST_BYTE_TIMEOUT_MS;
 }
 
 export function noStdinContentError(reason: string): Error {
@@ -73,25 +73,25 @@ export interface StdinLike {
 }
 
 export function readStdin(
-  idleTimeoutMs: number,
+  firstByteTimeoutMs: number,
   stdin: StdinLike = process.stdin,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     let data = "";
-    let idle: NodeJS.Timeout | undefined = setTimeout(() => {
+    let firstByte: NodeJS.Timeout | undefined = setTimeout(() => {
       stdin.pause();
       reject(
         noStdinContentError(
-          `stdin produced no data for ${idleTimeoutMs}ms and never ended`,
+          `stdin produced no data for ${firstByteTimeoutMs}ms and never ended`,
         ),
       );
-    }, idleTimeoutMs);
+    }, firstByteTimeoutMs);
     // Cleared once, on the first chunk, and never re-armed after that --
     // see the module comment above for why.
     const disarm = () => {
-      if (idle === undefined) return;
-      clearTimeout(idle);
-      idle = undefined;
+      if (firstByte === undefined) return;
+      clearTimeout(firstByte);
+      firstByte = undefined;
     };
     const settle = (fn: () => void) => {
       disarm();
