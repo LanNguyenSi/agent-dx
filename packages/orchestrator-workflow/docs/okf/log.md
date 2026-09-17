@@ -14,7 +14,22 @@
   are unchanged. Re-stamped `model-preselection.md`,
   `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and
   `subagent-contracts-superset.md`, the four docs whose `sources` list
-  that test file.
+  that test file. A follow-up fix to the same tracker task additionally
+  made the four extractions lazy and memoized so a parse miss in one
+  fails only its own dependent assertions instead of aborting collection
+  of the whole test file (probed by unquoting an `ALLOWLIST` value: 397
+  of 398 tests in the file still ran), sliced `on.push.tags` to its own
+  block before matching so a `"<pkg>/v*"`-shaped item elsewhere in the
+  file cannot be collected, added a sixth assertion pinning all six
+  hand-maintained prose copies of the package list (count and tokens)
+  across the two operator workflows, `publish-npm.yml`, and
+  `CONTRIBUTING.md`, added an inline-fixture negative control proving the
+  set-equality comparison actually discriminates a drifted list, and
+  appended the likely token-scope cause to `npm-dist-tag.yml`'s and
+  `npm-deprecate.yml`'s (via `.github/scripts/print-deprecations.mjs`)
+  final read-back messages, updating the three comments that had
+  described them as not naming the cause; re-stamped the same four docs
+  again in this commit.
 
 - 2026-09-16T13:17:23Z (release cut, pandora run 2026-09-16-releases-batch55,
   REL-001): cut the `[Unreleased]` section under a new `[0.36.0] -

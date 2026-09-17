@@ -11,7 +11,8 @@ name: Move an npm dist-tag
 # it works non-interactively in CI. Adding a package to the allowlist
 # does not widen the token: re-scope it by hand on npmjs.com in the same
 # change, or this workflow accepts the package and then fails at the
-# registry read-back assertion, which does not name the cause.
+# registry read-back assertion, whose error message now names that as the
+# likely cause.
 # The npm CLI cannot create granular tokens, so it was created by hand on
 # npmjs.com (Access Tokens -> Generate New Token -> Granular Access Token).
 # The token has an expiry; its rotation date is tracked by the maintainer
@@ -186,6 +187,6 @@ jobs:
             fi
             echo "not yet visible: ${TAG} -> '${actual:-<absent>}' (want ${VERSION}); retrying"
           done
-          echo "::error::${PACKAGE}@${TAG} still does not point at ${VERSION} after polling; the write did not land." >&2
+          echo "::error::${PACKAGE}@${TAG} still does not point at ${VERSION} after polling; the write did not land; if ${PACKAGE} was recently added to the allowlist, check that NPM_AGENT_DX_TOKEN is scoped to it on npmjs.com." >&2
           npm view "$PACKAGE" dist-tags --json || true
           exit 1

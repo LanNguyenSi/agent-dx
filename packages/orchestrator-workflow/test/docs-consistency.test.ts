@@ -9050,6 +9050,14 @@ describe("implementer pre-return check leads with the portable invocation", () =
  * forgotten in another) with no test to catch it. This parses the
  * values straight out of the workflow YAML, publish-npm.yml being the
  * source of truth, and asserts set-equality of their tokens.
+ *
+ * The four extractions used to run in this describe's body,
+ * at collection time; the exactly-one-match `expect` inside each extractor
+ * throws there, so one unparsed YAML line anywhere (an unquoted ALLOWLIST,
+ * a legitimate second key) aborted collection of this entire test FILE, not
+ * just this describe. Each extraction is now a memoized lazy getter, called
+ * from inside each `it` body, so a parse miss fails only the assertions
+ * that depend on it and every other test in the file still runs.
  */
 describe("the dist-tag, deprecate, and publish allowlists stay pinned to each other", () => {
   const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
@@ -9081,13 +9089,41 @@ describe("the dist-tag, deprecate, and publish allowlists stay pinned to each ot
     return extractQuotedListFromSource(readRepoFile(relPath), varName, relPath);
   }
 
-  // publish-npm.yml's on.push.tags entries look like `- "<pkg>/v*"`;
-  // anchored per line (leading whitespace, then a `- "..."` list item)
-  // so only real tag-pattern lines match, not incidental text elsewhere
-  // in the file.
+  // publish-npm.yml's on.push.tags patterns live inside the `on.push.tags:`
+  // block specifically; a `- "<pkg>/v*"`-shaped item anywhere ELSE in the
+  // file (e.g. under a hypothetical `branches-ignore:` list) must never be
+  // read as a publishable tag pattern. This slices the source down to the
+  // `tags:` block first (from the `tags:` key to the next line at the same
+  // or lower indentation) and only matches `- "..."` items inside that
+  // slice.
+  function extractOnPushTagsBlock(source: string, label: string): string {
+    const lines = source.split("\n");
+    const tagsLineIndex = lines.findIndex((line) =>
+      /^[ \t]*tags:[ \t]*$/.test(line),
+    );
+    expect(
+      tagsLineIndex,
+      `expected an "on.push.tags:" key to slice from in ${label}`,
+    ).toBeGreaterThan(-1);
+    const tagsIndent = lines[tagsLineIndex].match(/^[ \t]*/)?.[0].length ?? 0;
+    const blockLines: string[] = [];
+    for (let i = tagsLineIndex + 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.trim() === "") {
+        blockLines.push(line);
+        continue;
+      }
+      const indent = line.match(/^[ \t]*/)?.[0].length ?? 0;
+      if (indent <= tagsIndent) break;
+      blockLines.push(line);
+    }
+    return blockLines.join("\n");
+  }
+
   function extractTagPackages(source: string, label: string): string[] {
+    const block = extractOnPushTagsBlock(source, label);
     const re = /^[ \t]*-[ \t]*"([^"]+)\/v\*"[ \t]*$/gm;
-    const matches = [...source.matchAll(re)];
+    const matches = [...block.matchAll(re)];
     expect(
       matches.length,
       `on.push.tags: expected at least one "<pkg>/v*" entry in ${label}, found 0`,
@@ -9095,27 +9131,41 @@ describe("the dist-tag, deprecate, and publish allowlists stay pinned to each ot
     return matches.map((m) => m[1]);
   }
 
-  const publishNpmSource = readRepoFile(".github/workflows/publish-npm.yml");
-  const publishable = extractQuotedListFromSource(
-    publishNpmSource,
-    "PUBLISHABLE",
-    ".github/workflows/publish-npm.yml",
-  );
-  const tagPackages = extractTagPackages(
-    publishNpmSource,
-    ".github/workflows/publish-npm.yml",
-  );
-  const distTagAllowlist = extractQuotedList(
-    ".github/workflows/npm-dist-tag.yml",
-    "ALLOWLIST",
-  );
-  const deprecateAllowlist = extractQuotedList(
-    ".github/workflows/npm-deprecate.yml",
-    "ALLOWLIST",
-  );
+  let _publishNpmSource: string | undefined;
+  const publishNpmSource = (): string =>
+    (_publishNpmSource ??= readRepoFile(".github/workflows/publish-npm.yml"));
+
+  let _publishable: string[] | undefined;
+  const publishable = (): string[] =>
+    (_publishable ??= extractQuotedListFromSource(
+      publishNpmSource(),
+      "PUBLISHABLE",
+      ".github/workflows/publish-npm.yml",
+    ));
+
+  let _tagPackages: string[] | undefined;
+  const tagPackages = (): string[] =>
+    (_tagPackages ??= extractTagPackages(
+      publishNpmSource(),
+      ".github/workflows/publish-npm.yml",
+    ));
+
+  let _distTagAllowlist: string[] | undefined;
+  const distTagAllowlist = (): string[] =>
+    (_distTagAllowlist ??= extractQuotedList(
+      ".github/workflows/npm-dist-tag.yml",
+      "ALLOWLIST",
+    ));
+
+  let _deprecateAllowlist: string[] | undefined;
+  const deprecateAllowlist = (): string[] =>
+    (_deprecateAllowlist ??= extractQuotedList(
+      ".github/workflows/npm-deprecate.yml",
+      "ALLOWLIST",
+    ));
 
   it("found a non-empty PUBLISHABLE list to pin against (sanity: not vacuously true)", () => {
-    expect(publishable.length).toBeGreaterThan(0);
+    expect(publishable().length).toBeGreaterThan(0);
   });
 
   it("does not let a comment-shadowed definition win, and rejects a duplicated one", () => {
@@ -9140,24 +9190,125 @@ describe("the dist-tag, deprecate, and publish allowlists stay pinned to each ot
     ).toThrow(/expected exactly one definition/);
   });
 
+  it("negative control: a drifted ALLOWLIST is NOT judged equal to PUBLISHABLE (the comparison logic actually discriminates)", () => {
+    const publishableTokens = extractQuotedListFromSource(
+      'PUBLISHABLE: "orchestrator-workflow okf-kit agent-primitives"',
+      "PUBLISHABLE",
+      "fixture:publishable",
+    );
+    const driftedTokens = extractQuotedListFromSource(
+      'ALLOWLIST: "orchestrator-workflow okf-kit"',
+      "ALLOWLIST",
+      "fixture:drifted",
+    );
+    expect([...driftedTokens].sort()).not.toEqual(
+      [...publishableTokens].sort(),
+    );
+  });
+
   it("npm-dist-tag.yml's ALLOWLIST is the same tokens as publish-npm.yml's PUBLISHABLE", () => {
     expect(
-      [...distTagAllowlist].sort(),
+      [...distTagAllowlist()].sort(),
       "npm-dist-tag.yml ALLOWLIST drifted from publish-npm.yml PUBLISHABLE",
-    ).toEqual([...publishable].sort());
+    ).toEqual([...publishable()].sort());
   });
 
   it("npm-deprecate.yml's ALLOWLIST is the same tokens as publish-npm.yml's PUBLISHABLE", () => {
     expect(
-      [...deprecateAllowlist].sort(),
+      [...deprecateAllowlist()].sort(),
       "npm-deprecate.yml ALLOWLIST drifted from publish-npm.yml PUBLISHABLE",
-    ).toEqual([...publishable].sort());
+    ).toEqual([...publishable()].sort());
   });
 
   it("publish-npm.yml's on.push.tags packages are the same tokens as its own PUBLISHABLE list", () => {
     expect(
-      [...tagPackages].sort(),
+      [...tagPackages()].sort(),
       "publish-npm.yml on.push.tags (the list that decides whether the publish workflow fires) drifted from publish-npm.yml's own PUBLISHABLE list; both must be updated together, see publish-npm.yml:5",
-    ).toEqual([...publishable].sort());
+    ).toEqual([...publishable()].sort());
+  });
+
+  it("does not collect a tag-pattern-shaped item outside the on.push.tags block (e.g. under branches-ignore)", () => {
+    const fixture = [
+      "on:",
+      "  push:",
+      "    branches-ignore:",
+      '      - "zzz-unrelated/v*"',
+      "    tags:",
+      '      - "orchestrator-workflow/v*"',
+      "  workflow_dispatch:",
+      "    inputs: {}",
+    ].join("\n");
+    expect(extractTagPackages(fixture, "fixture:branches-ignore")).toEqual([
+      "orchestrator-workflow",
+    ]);
+  });
+
+  // The three ALLOWLIST/PUBLISHABLE values above are pinned
+  // by parsed YAML, but six more copies of the same package list live in
+  // prose (English comments in the two operator workflows and
+  // publish-npm.yml, plus a CONTRIBUTING.md sentence) that nothing read: a
+  // package added to the three parsed lists would pass every assertion
+  // above while all six parentheticals kept naming the old set. This globs
+  // every workflow file plus CONTRIBUTING.md, collects every
+  // `(orchestrator-workflow, ...)`-shaped parenthetical, and pins both the
+  // COUNT (so a copy silently dropped or a new one silently added is
+  // caught) and each copy's token set against PUBLISHABLE.
+  const workflowsDir = `${repoRoot}/.github/workflows`;
+  const workflowFiles = readdirSync(workflowsDir).filter(
+    (name) => name.endsWith(".yml") || name.endsWith(".yaml"),
+  );
+  const EXPECTED_PROSE_COPY_COUNT = 6;
+
+  function extractParentheticalPackageCopies(source: string): string[][] {
+    // Collapse all whitespace runs (a parenthetical can wrap across a
+    // multi-line "#" comment or a Markdown paragraph) and strip comment
+    // markers before matching, so the parenthetical reads as one string
+    // regardless of which file style it sits in.
+    const collapsed = source.replace(/\s+/g, " ").replace(/#/g, "");
+    // The comma is required right after the package name so a parenthetical
+    // like publish-npm.yml's "(orchestrator-workflow/v0.1.0)" (a single tag
+    // example, not a package-list copy) is never mistaken for one.
+    const re = /\(orchestrator-workflow,[^)]*\)/g;
+    return [...collapsed.matchAll(re)].map((m) =>
+      m[0]
+        .slice(1, -1)
+        .split(",")
+        .map((token) => token.trim())
+        .filter(Boolean),
+    );
+  }
+
+  function collectProsePackageCopies(): { label: string; tokens: string[] }[] {
+    const found: { label: string; tokens: string[] }[] = [];
+    for (const file of workflowFiles) {
+      const relPath = `.github/workflows/${file}`;
+      for (const tokens of extractParentheticalPackageCopies(
+        readRepoFile(relPath),
+      )) {
+        found.push({ label: relPath, tokens });
+      }
+    }
+    for (const tokens of extractParentheticalPackageCopies(
+      readRepoFile("CONTRIBUTING.md"),
+    )) {
+      found.push({ label: "CONTRIBUTING.md", tokens });
+    }
+    return found;
+  }
+
+  it(`found exactly ${EXPECTED_PROSE_COPY_COUNT} prose copies of the package list (a dropped or a newly added copy must fail this, not silently pass)`, () => {
+    const copies = collectProsePackageCopies();
+    expect(
+      copies.length,
+      `found ${copies.length}: ${JSON.stringify(copies, null, 2)}`,
+    ).toBe(EXPECTED_PROSE_COPY_COUNT);
+  });
+
+  it("every prose copy names the same tokens as publish-npm.yml's PUBLISHABLE list", () => {
+    const wanted = [...publishable()].sort().join(",");
+    const mismatches = collectProsePackageCopies()
+      .filter((copy) => [...copy.tokens].sort().join(",") !== wanted)
+      .map((copy) => `${copy.label}: (${copy.tokens.join(", ")})`);
+    expect(mismatches, mismatches.join("\n")).toEqual([]);
   });
 });

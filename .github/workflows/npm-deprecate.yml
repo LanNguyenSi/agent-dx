@@ -12,7 +12,8 @@ name: Deprecate an npm version
 # works non-interactively in CI. Adding a package to the allowlist does
 # not widen the token: re-scope it by hand on npmjs.com in the same
 # change, or this workflow accepts the package and then fails at the
-# registry read-back assertion, which does not name the cause.
+# registry read-back assertion, whose warning message now names that as
+# the likely cause.
 # The npm CLI cannot create granular tokens, so it was created by hand on
 # npmjs.com (Access Tokens -> Generate New Token -> Granular Access Token).
 # The token has an expiry; its rotation date is tracked by the maintainer
