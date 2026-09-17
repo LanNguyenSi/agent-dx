@@ -239,6 +239,53 @@ describe("validateReviewReport: fence handling", () => {
       "1 earlier fenced block without a yaml/yml tag was skipped in favor of the later `yaml` fenced block; only that later block was validated",
     ]);
   });
+
+  it("recognises a fence opened with four backticks: the tag is the info string after the whole run, not the run's leftover backticks", () => {
+    const raw = "````yaml\nstatus: reviewed\n````\n";
+    const { yamlText, warnings } = extractYamlSource(raw);
+    expect(yamlText).toBe("status: reviewed");
+    expect(warnings).toEqual([]);
+  });
+
+  it("prefers a later ````yaml fence over an earlier ```bash fence, with the skip warning as the only warning", () => {
+    const raw =
+      "```bash\necho not yaml\n```\n````yaml\nstatus: reviewed\n````\n";
+    const { yamlText, warnings } = extractYamlSource(raw);
+    expect(yamlText).toBe("status: reviewed");
+    expect(warnings).toEqual([
+      "1 earlier fenced block without a yaml/yml tag was skipped in favor of the later `yaml` fenced block; only that later block was validated",
+    ]);
+  });
+
+  it("closes a four-backtick fence at its own four-backtick run, not at a ``` line at column 0 inside the body", () => {
+    // Four backticks are what a reviewer reaches for when the return
+    // itself quotes a fenced snippet at column 0, where the indentation
+    // rule pinned above does not help: the closing run must be at least
+    // as long as the opening one, so the inner ``` pair is body text.
+    const raw =
+      "````yaml\nstatus: reviewed\nnote: see the snippet below\n```ts\nconst value = record[key];\n```\nmethod_applied: rigorous\n````\n";
+    const { yamlText, warnings } = extractYamlSource(raw);
+    expect(yamlText).toContain("const value = record[key];");
+    expect(yamlText).toContain("method_applied: rigorous");
+    expect(warnings).toEqual([]);
+  });
+
+  it("reads a comma-joined tag as one word: ```yaml,title=x is not a yaml fence, so an earlier ```bash fence is kept", () => {
+    const raw =
+      "```bash\necho not yaml\n```\n```yaml,title=x\nstatus: reviewed\n```\n";
+    const { yamlText, warnings } = extractYamlSource(raw);
+    expect(yamlText).toBe("echo not yaml");
+    expect(warnings).toEqual([
+      "prose found after the closing ```yaml fence; only the fenced block was validated",
+    ]);
+  });
+
+  it("treats a lone ```js title=x fence as a fence, not as unfenced literal YAML", () => {
+    const raw = "```js title=x\nstatus: reviewed\n```\n";
+    const { yamlText, warnings } = extractYamlSource(raw);
+    expect(yamlText).toBe("status: reviewed");
+    expect(warnings).toEqual([]);
+  });
 });
 
 describe("validateReviewReport: edge-case inputs behave sanely", () => {

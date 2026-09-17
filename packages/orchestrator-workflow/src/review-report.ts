@@ -630,13 +630,23 @@ interface ExtractedYaml {
  * before the opening fence or after the closing fence is tolerated, but
  * each is named as its own warning rather than silently dropped.
  *
- * The closing fence must start at column 0: the pattern anchors it with
- * `^` under the `m` flag, so a triple-backtick sequence inside a value
- * (a reviewer quoting a fenced snippet in a `description` block scalar,
- * which YAML necessarily indents) can no longer close the block early
- * and hand the parser a truncated document, which surfaced as
- * diagnostics about fields the return actually carried (fix-round,
- * review finding L3).
+ * The opening fence's whole backtick run is captured, and the closing
+ * fence must be a run at least as long, starting at column 0, with
+ * nothing but whitespace after it (CommonMark's own rule): the pattern
+ * backreferences the captured run and anchors it with `^` under the `m`
+ * flag. So a triple-backtick sequence inside a value (a reviewer quoting
+ * a fenced snippet in a `description` block scalar, which YAML
+ * necessarily indents) can no longer close the block early and hand the
+ * parser a truncated document, which surfaced as diagnostics about
+ * fields the return actually carried (fix-round, review finding L3);
+ * and a return a reviewer wrapped in four backticks precisely because
+ * it contains a fence of its own is closed by its own four-backtick run
+ * rather than by that inner one. Matching a fixed three backticks
+ * instead of the run left a longer opener's remaining backticks in the
+ * info string, which read as the tag `` `yaml `` and matched no
+ * yaml/yml fence at all. The OPENING fence keeps its own position
+ * discipline unchanged: it is located anywhere in the input rather than
+ * anchored to a line start.
  *
  * When the input carries more than one fenced block (a reviewer pasting
  * a worked example ahead of the real return, say), the FIRST fence whose
@@ -668,13 +678,15 @@ export function extractYamlSource(raw: string): ExtractedYaml {
   // fenced path trims it away with the surrounding prose.
   const withoutBom = raw;
   const fences = [
-    ...withoutBom.matchAll(/```([^\r\n]*)\r?\n([\s\S]*?)\r?\n?^```/gm),
+    ...withoutBom.matchAll(
+      /(`{3,})([^\r\n]*)\r?\n([\s\S]*?)\r?\n?^\1`*[ \t]*$/gm,
+    ),
   ];
   if (fences.length > 0) {
     const fenceTag = (info: string): string =>
       info.trim().split(/\s+/, 1)[0] ?? "";
     const yamlTaggedIndex = fences.findIndex((match) =>
-      /^(?:yaml|yml)$/i.test(fenceTag(match[1])),
+      /^(?:yaml|yml)$/i.test(fenceTag(match[2])),
     );
     const chosenIndex = yamlTaggedIndex >= 0 ? yamlTaggedIndex : 0;
     const chosen = fences[chosenIndex];
@@ -683,7 +695,7 @@ export function extractYamlSource(raw: string): ExtractedYaml {
       const noun = skippedCount === 1 ? "block" : "blocks";
       const verb = skippedCount === 1 ? "was" : "were";
       warnings.push(
-        `${skippedCount} earlier fenced ${noun} without a yaml/yml tag ${verb} skipped in favor of the later \`${fenceTag(chosen[1])}\` fenced block; only that later block was validated`,
+        `${skippedCount} earlier fenced ${noun} without a yaml/yml tag ${verb} skipped in favor of the later \`${fenceTag(chosen[2])}\` fenced block; only that later block was validated`,
       );
     }
     const start = chosen.index ?? 0;
@@ -699,7 +711,7 @@ export function extractYamlSource(raw: string): ExtractedYaml {
         "prose found before the opening ```yaml fence; only the fenced block was validated",
       );
     }
-    const inner = chosen[2];
+    const inner = chosen[3];
     const after = withoutBom.slice(start + chosen[0].length);
     if (after.trim().length > 0) {
       warnings.push(

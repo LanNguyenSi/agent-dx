@@ -20,6 +20,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   found before" warning no longer also fires when the text preceding the
   preferred fence is exactly the skipped fence(s) plus whitespace, so a
   skipped fence is no longer double-reported as both skipped and prose.
+  The opening fence's backtick run is now consumed whole and the closing
+  fence must repeat at least as many backticks at column 0 with nothing
+  but whitespace after it, so a return opened with four backticks is
+  recognized as `yaml` (the run's leftover backticks previously landed in
+  the info string, making the tag itself start with a backtick) and ends
+  at its own four-backtick run rather than at a three-backtick line
+  inside it. Widening the info-string capture also widens what counts as
+  a fence at all: any attribute-bearing fence, and any fence opened with
+  more than three backticks, is now a fence, so input whose only fence
+  was opened `js title=x` is treated as fenced rather than as literal
+  YAML. Only whitespace-separated attributes count toward the tag:
+  `yaml title=x` counts, `yaml,title=x` does not, its first word being
+  the whole string.
 
 ## [0.36.0] - 2026-09-16
 
