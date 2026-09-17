@@ -553,10 +553,12 @@ describe("doctor fallback wording: Markdown section extraction", () => {
     "",
     "~~~bash",
     "# agent-primitives doctor --target path/to/module.py",
+    "```",
     "## not a heading either",
     "~~~",
     "",
     "```json",
+    "~~~",
     "# also inside a fence",
     "```",
     "",
@@ -587,6 +589,17 @@ describe("doctor fallback wording: Markdown section extraction", () => {
 
   it("does not end the section at a # line inside a ``` fence", () => {
     const section = extractMarkdownSection(FIXTURE, /^#{1,6}\s+`doctor`\s*$/);
+    expect(section).toContain("# also inside a fence");
+    expect(section).toContain("The last line of the doctor section.");
+  });
+
+  it("does not let a ``` line inside a ~~~ block (or the reverse) close the other's fence", () => {
+    // Each fence in the fixture carries the other marker on a line of
+    // its own. Tracked as one boolean, the stray ``` inside the ~~~
+    // block would close it, the `## not a heading either` line right
+    // after would read as a heading, and the section would end there.
+    const section = extractMarkdownSection(FIXTURE, /^#{1,6}\s+`doctor`\s*$/);
+    expect(section).toContain("## not a heading either");
     expect(section).toContain("# also inside a fence");
     expect(section).toContain("The last line of the doctor section.");
   });
