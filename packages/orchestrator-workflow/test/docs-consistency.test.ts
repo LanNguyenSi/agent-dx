@@ -9038,3 +9038,442 @@ describe("implementer pre-return check leads with the portable invocation", () =
     );
   });
 });
+
+/**
+ * npm-dist-tag.yml and npm-deprecate.yml each validate their `package`
+ * input against their own `ALLOWLIST` env, and both comment blocks claim
+ * that allowlist tracks publish-npm.yml's `PUBLISHABLE` list, which in
+ * turn is supposed to track publish-npm.yml's own `on.push.tags`
+ * patterns (the list that decides whether the publish workflow fires at
+ * all; see publish-npm.yml:5). Nothing pinned any of those claims, so
+ * the lists could silently drift apart (a package added to one,
+ * forgotten in another) with no test to catch it. This parses the
+ * values straight out of the workflow YAML, publish-npm.yml being the
+ * source of truth, and asserts set-equality of their tokens.
+ *
+ * The four extractions used to run in this describe's body,
+ * at collection time; the exactly-one-match `expect` inside each extractor
+ * throws there, so one unparsed YAML line anywhere (an unquoted ALLOWLIST,
+ * a legitimate second key) aborted collection of this entire test FILE, not
+ * just this describe. Each extraction is now a memoized lazy getter, called
+ * from inside each `it` body, so a parse miss fails only the assertions
+ * that depend on it and every other test in the file still runs.
+ */
+describe("the dist-tag, deprecate, and publish allowlists stay pinned to each other", () => {
+  const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+  const readRepoFile = (relPath: string): string =>
+    readFileSync(`${repoRoot}/${relPath}`, "utf8");
+
+  // Anchored to line start (only leading whitespace allowed before the
+  // key) so a commented-out `# ALLOWLIST: "..."` line above the real one
+  // never matches, and required to match exactly once so a second,
+  // later definition of the same key cannot silently win or lose against
+  // the first. Without both properties a shadowed or duplicated
+  // definition would resolve to whichever match a bare `.match()` finds
+  // first, which is not necessarily the one that is actually in effect.
+  function extractQuotedListFromSource(
+    source: string,
+    varName: string,
+    label: string,
+  ): string[] {
+    const re = new RegExp(String.raw`^[ \t]*${varName}:[ \t]*"([^"]*)"`, "gm");
+    const matches = [...source.matchAll(re)];
+    expect(
+      matches.length,
+      `${varName}: expected exactly one definition in ${label}, found ${matches.length}`,
+    ).toBe(1);
+    return matches[0][1].split(/\s+/).filter(Boolean);
+  }
+
+  // publish-npm.yml's on.push.tags patterns live inside the `on.push.tags:`
+  // block specifically; a `- "<pkg>/v*"`-shaped item anywhere ELSE in the
+  // file (e.g. under a hypothetical `branches-ignore:` list) must never be
+  // read as a publishable tag pattern. This slices the source down to the
+  // `tags:` block first (from the `tags:` key to the next line at the same
+  // or lower indentation) and only matches `- "..."` items inside that
+  // slice.
+  function extractOnPushTagsBlock(source: string, label: string): string {
+    const lines = source.split("\n");
+    const tagsLineIndex = lines.findIndex((line) =>
+      /^[ \t]*tags:[ \t]*\r?$/.test(line),
+    );
+    expect(
+      tagsLineIndex,
+      `expected an "on.push.tags:" key to slice from in ${label}`,
+    ).toBeGreaterThan(-1);
+    const tagsIndent = lines[tagsLineIndex].match(/^[ \t]*/)?.[0].length ?? 0;
+    const blockLines: string[] = [];
+    for (let i = tagsLineIndex + 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (line.trim() === "") {
+        blockLines.push(line);
+        continue;
+      }
+      const indent = line.match(/^[ \t]*/)?.[0].length ?? 0;
+      if (indent <= tagsIndent) break;
+      blockLines.push(line);
+    }
+    return blockLines.join("\n");
+  }
+
+  function extractTagPackages(source: string, label: string): string[] {
+    const block = extractOnPushTagsBlock(source, label);
+    const re = /^[ \t]*-[ \t]*"([^"]+)\/v\*"[ \t]*\r?$/gm;
+    const matches = [...block.matchAll(re)];
+    expect(
+      matches.length,
+      `on.push.tags: expected at least one "<pkg>/v*" entry in ${label}, found 0`,
+    ).toBeGreaterThan(0);
+    return matches.map((m) => m[1]);
+  }
+
+  let _publishNpmSource: string | undefined;
+  const publishNpmSource = (): string =>
+    (_publishNpmSource ??= readRepoFile(".github/workflows/publish-npm.yml"));
+
+  let _publishable: string[] | undefined;
+  const publishable = (): string[] =>
+    (_publishable ??= extractQuotedListFromSource(
+      publishNpmSource(),
+      "PUBLISHABLE",
+      ".github/workflows/publish-npm.yml",
+    ));
+
+  let _tagPackages: string[] | undefined;
+  const tagPackages = (): string[] =>
+    (_tagPackages ??= extractTagPackages(
+      publishNpmSource(),
+      ".github/workflows/publish-npm.yml",
+    ));
+
+  let _distTagSource: string | undefined;
+  const distTagSource = (): string =>
+    (_distTagSource ??= readRepoFile(".github/workflows/npm-dist-tag.yml"));
+
+  let _deprecateSource: string | undefined;
+  const deprecateSource = (): string =>
+    (_deprecateSource ??= readRepoFile(".github/workflows/npm-deprecate.yml"));
+
+  let _printDeprecationsSource: string | undefined;
+  const printDeprecationsSource = (): string =>
+    (_printDeprecationsSource ??= readRepoFile(
+      ".github/scripts/print-deprecations.mjs",
+    ));
+
+  let _contributingSource: string | undefined;
+  const contributingSource = (): string =>
+    (_contributingSource ??= readRepoFile("CONTRIBUTING.md"));
+
+  let _distTagAllowlist: string[] | undefined;
+  const distTagAllowlist = (): string[] =>
+    (_distTagAllowlist ??= extractQuotedListFromSource(
+      distTagSource(),
+      "ALLOWLIST",
+      ".github/workflows/npm-dist-tag.yml",
+    ));
+
+  let _deprecateAllowlist: string[] | undefined;
+  const deprecateAllowlist = (): string[] =>
+    (_deprecateAllowlist ??= extractQuotedListFromSource(
+      deprecateSource(),
+      "ALLOWLIST",
+      ".github/workflows/npm-deprecate.yml",
+    ));
+
+  // The last matching line, not every occurrence: npm-dist-tag.yml has
+  // several `::error::` lines, and NPM_AGENT_DX_TOKEN/allowlist both
+  // appear elsewhere in the file (an earlier `::error::` names the
+  // missing-secret case; the header comment always names the allowlist),
+  // so a whole-source `toContain` would stay green even if the specific
+  // hint on the final line were reverted. Isolating the line is what
+  // makes the assertion below actually discriminate that revert.
+  function lastLineContaining(
+    source: string,
+    substring: string,
+    label: string,
+  ): string {
+    const lines = source.split("\n").filter((line) => line.includes(substring));
+    expect(
+      lines.length,
+      `expected at least one line containing "${substring}" in ${label}`,
+    ).toBeGreaterThan(0);
+    return lines[lines.length - 1];
+  }
+
+  function soleLineContaining(
+    source: string,
+    substring: string,
+    label: string,
+  ): string {
+    const lines = source.split("\n").filter((line) => line.includes(substring));
+    expect(
+      lines.length,
+      `expected exactly one line containing "${substring}" in ${label}, found ${lines.length}`,
+    ).toBe(1);
+    return lines[0];
+  }
+
+  function paragraphContaining(
+    source: string,
+    substring: string,
+    label: string,
+  ): string {
+    // \r?\n on both sides of the blank line: on a CRLF checkout a bare
+    // /\n[ \t]*\n/ never matches, the whole file collapses into a single
+    // "paragraph", and the exactly-one guard below silently degrades into
+    // a whole-file toContain that a second NPM_AGENT_DX_TOKEN paragraph
+    // would pass.
+    const paragraphs = source.split(/\r?\n[ \t]*\r?\n/);
+    const matches = paragraphs.filter((p) => p.includes(substring));
+    expect(
+      matches.length,
+      `expected exactly one paragraph containing "${substring}" in ${label}, found ${matches.length}`,
+    ).toBe(1);
+    return matches[0];
+  }
+
+  it("found a non-empty PUBLISHABLE list to pin against (sanity: not vacuously true)", () => {
+    expect(publishable().length).toBeGreaterThan(0);
+  });
+
+  it("does not let a comment-shadowed definition win, and rejects a duplicated one", () => {
+    const shadowed = [
+      '# ALLOWLIST: "orchestrator-workflow okf-kit"',
+      'ALLOWLIST: "orchestrator-workflow okf-kit agent-primitives"',
+    ].join("\n");
+    expect(
+      extractQuotedListFromSource(shadowed, "ALLOWLIST", "fixture:shadowed"),
+    ).toEqual(["orchestrator-workflow", "okf-kit", "agent-primitives"]);
+
+    const duplicated = [
+      'ALLOWLIST: "orchestrator-workflow okf-kit agent-primitives"',
+      'ALLOWLIST: "orchestrator-workflow okf-kit"',
+    ].join("\n");
+    expect(() =>
+      extractQuotedListFromSource(
+        duplicated,
+        "ALLOWLIST",
+        "fixture:duplicated",
+      ),
+    ).toThrow(/expected exactly one definition/);
+  });
+
+  it("negative control: a drifted ALLOWLIST is NOT judged equal to PUBLISHABLE (the comparison logic actually discriminates)", () => {
+    const publishableTokens = extractQuotedListFromSource(
+      'PUBLISHABLE: "orchestrator-workflow okf-kit agent-primitives"',
+      "PUBLISHABLE",
+      "fixture:publishable",
+    );
+    const driftedTokens = extractQuotedListFromSource(
+      'ALLOWLIST: "orchestrator-workflow okf-kit"',
+      "ALLOWLIST",
+      "fixture:drifted",
+    );
+    expect([...driftedTokens].sort()).not.toEqual(
+      [...publishableTokens].sort(),
+    );
+  });
+
+  it("npm-dist-tag.yml's ALLOWLIST is the same tokens as publish-npm.yml's PUBLISHABLE", () => {
+    expect(
+      [...distTagAllowlist()].sort(),
+      "npm-dist-tag.yml ALLOWLIST drifted from publish-npm.yml PUBLISHABLE",
+    ).toEqual([...publishable()].sort());
+  });
+
+  it("npm-deprecate.yml's ALLOWLIST is the same tokens as publish-npm.yml's PUBLISHABLE", () => {
+    expect(
+      [...deprecateAllowlist()].sort(),
+      "npm-deprecate.yml ALLOWLIST drifted from publish-npm.yml PUBLISHABLE",
+    ).toEqual([...publishable()].sort());
+  });
+
+  it("the token-scope cause hint stays on npm-dist-tag.yml's final ::error::, print-deprecations.mjs's UNCONFIRMED ::warning::, and CONTRIBUTING.md's token paragraph", () => {
+    const finalDistTagError = lastLineContaining(
+      distTagSource(),
+      "::error::",
+      ".github/workflows/npm-dist-tag.yml",
+    );
+    const unconfirmedWarning = soleLineContaining(
+      printDeprecationsSource(),
+      "::warning::",
+      ".github/scripts/print-deprecations.mjs",
+    );
+    const tokenParagraph = paragraphContaining(
+      contributingSource(),
+      "NPM_AGENT_DX_TOKEN",
+      "CONTRIBUTING.md",
+    );
+
+    // Each site carries its own required cause-hint pattern, not just the
+    // NPM_AGENT_DX_TOKEN and allowlist words: both of those words survive
+    // in all three places for other reasons (the dist-tag line names the
+    // allowlist to say the package is not on it, CONTRIBUTING.md's
+    // paragraph is about the token and the allowlist throughout), so
+    // checking only for them leaves the actual hint sentence deletable
+    // with the suite still green. The pattern is matched against the
+    // whitespace-normalised text because CONTRIBUTING.md's sentence wraps
+    // across Markdown source lines.
+    for (const [label, text, causeHint] of [
+      [
+        "npm-dist-tag.yml final ::error::",
+        finalDistTagError,
+        /recently added to the allowlist, check that NPM_AGENT_DX_TOKEN is scoped/,
+      ],
+      [
+        "print-deprecations.mjs UNCONFIRMED ::warning::",
+        unconfirmedWarning,
+        /recently added to the allowlist, check that NPM_AGENT_DX_TOKEN is scoped/,
+      ],
+      [
+        "CONTRIBUTING.md token paragraph",
+        tokenParagraph,
+        /names that as the likely cause/,
+      ],
+    ] as const) {
+      expect(text, `${label} lost the NPM_AGENT_DX_TOKEN mention`).toContain(
+        "NPM_AGENT_DX_TOKEN",
+      );
+      expect(text.toLowerCase(), `${label} lost the allowlist mention`).toMatch(
+        /allowlist/,
+      );
+      expect(
+        text.replace(/\s+/g, " "),
+        `${label} lost the token-scope cause hint (expected to match ${String(
+          causeHint,
+        )})`,
+      ).toMatch(causeHint);
+    }
+  });
+
+  it("publish-npm.yml's on.push.tags packages are the same tokens as its own PUBLISHABLE list", () => {
+    expect(
+      [...tagPackages()].sort(),
+      "publish-npm.yml on.push.tags (the list that decides whether the publish workflow fires) drifted from publish-npm.yml's own PUBLISHABLE list; both must be updated together, see publish-npm.yml:5",
+    ).toEqual([...publishable()].sort());
+  });
+
+  it("does not collect a tag-pattern-shaped item outside the on.push.tags block (e.g. under branches-ignore)", () => {
+    const fixture = [
+      "on:",
+      "  push:",
+      "    branches-ignore:",
+      '      - "zzz-unrelated/v*"',
+      "    tags:",
+      '      - "orchestrator-workflow/v*"',
+      "  workflow_dispatch:",
+      "    inputs: {}",
+    ].join("\n");
+    expect(extractTagPackages(fixture, "fixture:branches-ignore")).toEqual([
+      "orchestrator-workflow",
+    ]);
+  });
+
+  // The three ALLOWLIST/PUBLISHABLE values above are pinned
+  // by parsed YAML, but six more copies of the same package list live in
+  // prose (English comments in the two operator workflows and
+  // publish-npm.yml, plus a CONTRIBUTING.md sentence) that nothing read: a
+  // package added to the three parsed lists would pass every assertion
+  // above while all six parentheticals kept naming the old set. This globs
+  // every workflow file plus CONTRIBUTING.md and README.md, collects every
+  // parenthetical whose comma-separated tokens are all known package
+  // names, and pins both the COUNT (so a copy silently dropped or a new
+  // one silently added is caught) and each copy's token set against
+  // PUBLISHABLE.
+  //
+  // readdirSync(workflowsDir) used to run directly in this describe's
+  // body, at collection time, which reintroduces the whole-file collection
+  // hazard the module comment above describes: an unreadable directory
+  // here would abort every test in the file, not just the ones that
+  // depend on it. It is now a memoized lazy getter like publishNpmSource
+  // and friends, called only from inside collectProsePackageCopies().
+  let _workflowFiles: string[] | undefined;
+  const workflowFiles = (): string[] =>
+    (_workflowFiles ??= readdirSync(`${repoRoot}/.github/workflows`).filter(
+      (name) => name.endsWith(".yml") || name.endsWith(".yaml"),
+    ));
+
+  const EXPECTED_PROSE_COPY_COUNT = 6;
+
+  // Matches any parenthetical, not only one that happens to start with
+  // "orchestrator-workflow,": a drifted copy that dropped, reordered, or
+  // renamed a package (or a copy in a file this test does not expect,
+  // such as README.md) would keep matching the old start-anchored regex
+  // only by accident, and would pass silently if the drift also moved
+  // orchestrator-workflow out of first place or out of the parenthetical
+  // altogether. A parenthetical only counts as a package-list copy when
+  // EVERY one of its comma-separated tokens is a known publishable name
+  // (from `names`, PUBLISHABLE's own token set) and there is MORE THAN
+  // one token. That keeps a single-tag example like publish-npm.yml's
+  // "(orchestrator-workflow/v0.1.0)" (one token, not a plain package
+  // name), an unrelated aside like "(see npm-deprecate.yml and
+  // npm-dist-tag.yml)" (tokens that are not package names), and ordinary
+  // prose naming one package in passing, such as "the primitives package
+  // (agent-primitives)", from being mistaken for a copy. The floor of two
+  // means the scan would stop recognising copies if PUBLISHABLE ever
+  // shrank to a single package; the pinned count below turns that into a
+  // failure rather than a silent pass.
+  function extractParentheticalPackageCopies(
+    source: string,
+    names: ReadonlySet<string>,
+  ): string[][] {
+    // Collapse all whitespace runs (a parenthetical can wrap across a
+    // multi-line "#" comment or a Markdown paragraph) and strip comment
+    // markers before matching, so the parenthetical reads as one string
+    // regardless of which file style it sits in.
+    const collapsed = source.replace(/\s+/g, " ").replace(/#/g, "");
+    const re = /\(([^)]*)\)/g;
+    const copies: string[][] = [];
+    for (const m of collapsed.matchAll(re)) {
+      const tokens = m[1]
+        .split(",")
+        .map((token) => token.trim())
+        .filter(Boolean);
+      if (tokens.length > 1 && tokens.every((token) => names.has(token))) {
+        copies.push(tokens);
+      }
+    }
+    return copies;
+  }
+
+  function collectProsePackageCopies(): { label: string; tokens: string[] }[] {
+    const names = new Set(publishable());
+    const found: { label: string; tokens: string[] }[] = [];
+    for (const file of workflowFiles()) {
+      const relPath = `.github/workflows/${file}`;
+      for (const tokens of extractParentheticalPackageCopies(
+        readRepoFile(relPath),
+        names,
+      )) {
+        found.push({ label: relPath, tokens });
+      }
+    }
+    for (const relPath of ["CONTRIBUTING.md", "README.md"]) {
+      for (const tokens of extractParentheticalPackageCopies(
+        relPath === "CONTRIBUTING.md"
+          ? contributingSource()
+          : readRepoFile(relPath),
+        names,
+      )) {
+        found.push({ label: relPath, tokens });
+      }
+    }
+    return found;
+  }
+
+  it(`found exactly ${EXPECTED_PROSE_COPY_COUNT} prose copies of the package list (a dropped or a newly added copy must fail this, not silently pass)`, () => {
+    const copies = collectProsePackageCopies();
+    expect(
+      copies.length,
+      `found ${copies.length}: ${JSON.stringify(copies, null, 2)}`,
+    ).toBe(EXPECTED_PROSE_COPY_COUNT);
+  });
+
+  it("every prose copy names the same tokens as publish-npm.yml's PUBLISHABLE list", () => {
+    const wanted = [...publishable()].sort().join(",");
+    const mismatches = collectProsePackageCopies()
+      .filter((copy) => [...copy.tokens].sort().join(",") !== wanted)
+      .map((copy) => `${copy.label}: (${copy.tokens.join(", ")})`);
+    expect(mismatches, mismatches.join("\n")).toEqual([]);
+  });
+});

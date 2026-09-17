@@ -5,10 +5,15 @@ name: Deprecate an npm version
 # because the write-capable NPM_AGENT_DX_TOKEN lives only as a repository
 # secret.
 #
-# NPM_AGENT_DX_TOKEN is a granular npm automation token scoped to the
-# packages this workflow's allowlist names (orchestrator-workflow, okf-kit),
-# with publish/write permission (deprecation and, in npm-dist-tag.yml,
-# dist-tag moves) and 2FA-bypass enabled so it works non-interactively in CI.
+# NPM_AGENT_DX_TOKEN must be a granular npm automation token scoped to
+# every package this workflow's allowlist names (orchestrator-workflow,
+# okf-kit, agent-primitives), with publish/write permission (deprecation
+# and, in npm-dist-tag.yml, dist-tag moves) and 2FA-bypass enabled so it
+# works non-interactively in CI. Adding a package to the allowlist does
+# not widen the token: re-scope it by hand on npmjs.com in the same
+# change, or this workflow accepts the package and then fails at the
+# registry read-back assertion in .github/scripts/print-deprecations.mjs,
+# whose warning message names that as the likely cause.
 # The npm CLI cannot create granular tokens, so it was created by hand on
 # npmjs.com (Access Tokens -> Generate New Token -> Granular Access Token).
 # The token has an expiry; its rotation date is tracked by the maintainer
@@ -72,8 +77,12 @@ jobs:
           PACKAGE: ${{ inputs.package }}
           VERSION: ${{ inputs.version }}
           MESSAGE: ${{ inputs.message }}
-          # Keep in step with publish-npm.yml's PUBLISHABLE list.
-          ALLOWLIST: "orchestrator-workflow okf-kit"
+          # Keep in step with publish-npm.yml's PUBLISHABLE list
+          # (orchestrator-workflow, okf-kit, agent-primitives). Adding a
+          # package here requires NPM_AGENT_DX_TOKEN to be re-scoped to it by
+          # hand on npmjs.com (see the header comment above); this validation
+          # does not check that.
+          ALLOWLIST: "orchestrator-workflow okf-kit agent-primitives"
         run: |
           set -euo pipefail
 
