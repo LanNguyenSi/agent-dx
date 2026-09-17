@@ -714,13 +714,14 @@ starts at column 0, so a reviewer quoting a fenced snippet inside a
 value (a `description` block scalar, which YAML indents) does not
 truncate the return. When the return carries more than one fenced
 block, the first one whose fence tag's first word is `yaml` or `yml`
-(case-insensitive; trailing attributes still count, as in ```yaml
-title=x```) is validated, falling back to the first fence only when
-none carries that word; a warning names any earlier fence skipped this
-way. This preference can validate a later worked example instead of an
-earlier, real but unfenced return: a reviewer who leaves their own
-return unfenced and then quotes a ```yaml``` example afterward has that
-example validated instead, which the emitted warning also names.
+(case-insensitive; trailing attributes still count, so a fence opened
+`yaml title=x` still counts as `yaml`) is validated, falling back to
+the first fence only when none carries that word; a warning names any
+earlier fence skipped this way. This preference can validate a later
+worked example instead of an earlier, real but unfenced return: a
+reviewer who leaves their own return unfenced and then quotes a
+`yaml`-tagged example afterward has that example validated instead,
+which the emitted warning also names.
 `--format json` prints the same diagnostics as a single JSON object
 instead of human-readable text. It
 exits `0` when the return is structurally valid, `1` when it is

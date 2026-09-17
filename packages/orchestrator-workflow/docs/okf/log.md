@@ -1129,7 +1129,7 @@
   sentence reverted to its pre-change wording, fails the exact-sub-field
   and regression-signal tests above; restored, the suite is green again.
   `CHANGELOG.md`'s own prose copy of this change is
-  (`CHANGELOG.md:150#"The implementer"`).
+  (`CHANGELOG.md:156#"The implementer"`).
 
   Verified on the committed tree: the full package suite (`npm test`),
   `typecheck`, `typecheck:test`, and `format:check`, all clean. Re-pointed
@@ -1397,7 +1397,7 @@
   that binding rather than second-guessing it.
 
   The CHANGELOG bullet for this round is
-  `CHANGELOG.md:527#"Citation scanning is paragraph-joined"`. Verified on
+  `CHANGELOG.md:533#"Citation scanning is paragraph-joined"`. Verified on
   the committed tree: the full package suite, `docs-consistency.test.ts`
   on its own, `typecheck`, `typecheck:test` and `format:check`; the
   figures each guard measured are in its own computed test name, per the
@@ -10042,3 +10042,31 @@ citation split across a line break exists in an earlier log entry above
 (the run-state-lifecycle-and-markers.md CHANGELOG.md reference near
 "deliberately historical"); it predates this task, is deliberately frozen
 against a past commit rather than the live file, and is left as found.
+
+A follow-up fix round on the same task corrected checkArrayField's
+docblock (a bare or `~` bullet parses as null and is rejected, not
+tolerated as a placeholder), widened test coverage to reject `null` and
+a boolean array element alongside a number and a mapping, and bumped
+TOP_LEVEL_FIELDS' generated case count to the measured 106 (not the
+guessed 112). The fence-tag capture was widened again, from a leading
+run of letters to the whole info string tested against its first
+whitespace-delimited word, so an attribute-bearing tag (`yaml title=x`)
+is recognized instead of matching no fence at all; the redundant
+before-warning on a skip-only prefix is now suppressed. README.md and
+contracts.md were corrected and extended for both changes; an earlier
+draft of both paragraphs wrapped a literal triple-backtick example
+across a line break, which self-matched as a second real fenced code
+block under contracts.md's Reviewer output contract heading and broke
+acceptance-baseline.test.ts; the wording was rewritten to a single-
+backtick inline example instead. This shifted contracts.md by 5 lines
+starting after its own line 176: subagent-contracts-superset.md's five
+citations moved from 208 (twice), 280, 256, 196, and 206 to 213 (twice),
+285, 261, 201, and 211. CHANGELOG.md shifted by 6 lines starting after
+its own line 15: this log's own two self-citations moved from 150 and
+527 to 156 and 533. Re-verified and re-stamped the same five
+source-bearing docs again after confirming their own citations still
+resolve. Verified from the worktree root: build, typecheck,
+typecheck:test, and format:check all clean; vitest 1189 passed. okf-kit
+check packages/orchestrator-workflow/docs/okf --require-anchors --json:
+0 errors, 0 warnings, 0 notices once committed within the stamp's skew
+allowance.
