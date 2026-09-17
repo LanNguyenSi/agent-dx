@@ -9040,36 +9040,77 @@ describe("implementer pre-return check leads with the portable invocation", () =
 });
 
 /**
- * agent-dx tracker 8ebaf3f6: npm-dist-tag.yml and npm-deprecate.yml each
- * validate their `package` input against their own `ALLOWLIST` env, and
- * both comment blocks claim that allowlist tracks publish-npm.yml's
- * `PUBLISHABLE` list. Nothing pinned that claim, so the three lists could
- * silently drift apart (a package added to one, forgotten in another)
- * with no test to catch it. This parses the three values straight out of
- * the workflow YAML, publish-npm.yml being the source of truth, and
- * asserts set-equality of their space-separated tokens.
+ * npm-dist-tag.yml and npm-deprecate.yml each validate their `package`
+ * input against their own `ALLOWLIST` env, and both comment blocks claim
+ * that allowlist tracks publish-npm.yml's `PUBLISHABLE` list, which in
+ * turn is supposed to track publish-npm.yml's own `on.push.tags`
+ * patterns (the list that decides whether the publish workflow fires at
+ * all; see publish-npm.yml:5). Nothing pinned any of those claims, so
+ * the lists could silently drift apart (a package added to one,
+ * forgotten in another) with no test to catch it. This parses the
+ * values straight out of the workflow YAML, publish-npm.yml being the
+ * source of truth, and asserts set-equality of their tokens.
  */
 describe("the dist-tag, deprecate, and publish allowlists stay pinned to each other", () => {
   const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
   const readRepoFile = (relPath: string): string =>
     readFileSync(`${repoRoot}/${relPath}`, "utf8");
 
-  function extractQuotedList(source: string, varName: string): string[] {
-    const match = source.match(new RegExp(`${varName}:\\s*"([^"]*)"`));
-    expect(match, `${varName} not found`).not.toBeNull();
-    return (match as RegExpMatchArray)[1].split(/\s+/).filter(Boolean);
+  // Anchored to line start (only leading whitespace allowed before the
+  // key) so a commented-out `# ALLOWLIST: "..."` line above the real one
+  // never matches, and required to match exactly once so a second,
+  // later definition of the same key cannot silently win or lose against
+  // the first. Without both properties a shadowed or duplicated
+  // definition would resolve to whichever match a bare `.match()` finds
+  // first, which is not necessarily the one that is actually in effect.
+  function extractQuotedListFromSource(
+    source: string,
+    varName: string,
+    label: string,
+  ): string[] {
+    const re = new RegExp(String.raw`^[ \t]*${varName}:[ \t]*"([^"]*)"`, "gm");
+    const matches = [...source.matchAll(re)];
+    expect(
+      matches.length,
+      `${varName}: expected exactly one definition in ${label}, found ${matches.length}`,
+    ).toBe(1);
+    return matches[0][1].split(/\s+/).filter(Boolean);
   }
 
-  const publishable = extractQuotedList(
-    readRepoFile(".github/workflows/publish-npm.yml"),
+  function extractQuotedList(relPath: string, varName: string): string[] {
+    return extractQuotedListFromSource(readRepoFile(relPath), varName, relPath);
+  }
+
+  // publish-npm.yml's on.push.tags entries look like `- "<pkg>/v*"`;
+  // anchored per line (leading whitespace, then a `- "..."` list item)
+  // so only real tag-pattern lines match, not incidental text elsewhere
+  // in the file.
+  function extractTagPackages(source: string, label: string): string[] {
+    const re = /^[ \t]*-[ \t]*"([^"]+)\/v\*"[ \t]*$/gm;
+    const matches = [...source.matchAll(re)];
+    expect(
+      matches.length,
+      `on.push.tags: expected at least one "<pkg>/v*" entry in ${label}, found 0`,
+    ).toBeGreaterThan(0);
+    return matches.map((m) => m[1]);
+  }
+
+  const publishNpmSource = readRepoFile(".github/workflows/publish-npm.yml");
+  const publishable = extractQuotedListFromSource(
+    publishNpmSource,
     "PUBLISHABLE",
+    ".github/workflows/publish-npm.yml",
+  );
+  const tagPackages = extractTagPackages(
+    publishNpmSource,
+    ".github/workflows/publish-npm.yml",
   );
   const distTagAllowlist = extractQuotedList(
-    readRepoFile(".github/workflows/npm-dist-tag.yml"),
+    ".github/workflows/npm-dist-tag.yml",
     "ALLOWLIST",
   );
   const deprecateAllowlist = extractQuotedList(
-    readRepoFile(".github/workflows/npm-deprecate.yml"),
+    ".github/workflows/npm-deprecate.yml",
     "ALLOWLIST",
   );
 
@@ -9077,17 +9118,46 @@ describe("the dist-tag, deprecate, and publish allowlists stay pinned to each ot
     expect(publishable.length).toBeGreaterThan(0);
   });
 
-  it("npm-dist-tag.yml's ALLOWLIST is the same set of tokens as publish-npm.yml's PUBLISHABLE", () => {
+  it("does not let a comment-shadowed definition win, and rejects a duplicated one", () => {
+    const shadowed = [
+      '# ALLOWLIST: "orchestrator-workflow okf-kit"',
+      'ALLOWLIST: "orchestrator-workflow okf-kit agent-primitives"',
+    ].join("\n");
+    expect(
+      extractQuotedListFromSource(shadowed, "ALLOWLIST", "fixture:shadowed"),
+    ).toEqual(["orchestrator-workflow", "okf-kit", "agent-primitives"]);
+
+    const duplicated = [
+      'ALLOWLIST: "orchestrator-workflow okf-kit agent-primitives"',
+      'ALLOWLIST: "orchestrator-workflow okf-kit"',
+    ].join("\n");
+    expect(() =>
+      extractQuotedListFromSource(
+        duplicated,
+        "ALLOWLIST",
+        "fixture:duplicated",
+      ),
+    ).toThrow(/expected exactly one definition/);
+  });
+
+  it("npm-dist-tag.yml's ALLOWLIST is the same tokens as publish-npm.yml's PUBLISHABLE", () => {
     expect(
       [...distTagAllowlist].sort(),
       "npm-dist-tag.yml ALLOWLIST drifted from publish-npm.yml PUBLISHABLE",
     ).toEqual([...publishable].sort());
   });
 
-  it("npm-deprecate.yml's ALLOWLIST is the same set of tokens as publish-npm.yml's PUBLISHABLE", () => {
+  it("npm-deprecate.yml's ALLOWLIST is the same tokens as publish-npm.yml's PUBLISHABLE", () => {
     expect(
       [...deprecateAllowlist].sort(),
       "npm-deprecate.yml ALLOWLIST drifted from publish-npm.yml PUBLISHABLE",
+    ).toEqual([...publishable].sort());
+  });
+
+  it("publish-npm.yml's on.push.tags packages are the same tokens as its own PUBLISHABLE list", () => {
+    expect(
+      [...tagPackages].sort(),
+      "publish-npm.yml on.push.tags (the list that decides whether the publish workflow fires) drifted from publish-npm.yml's own PUBLISHABLE list; both must be updated together, see publish-npm.yml:5",
     ).toEqual([...publishable].sort());
   });
 });

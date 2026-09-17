@@ -1,5 +1,21 @@
 # Bundle log
 
+- 2026-09-17T04:42:19Z (agent-dx tracker task 8ebaf3f6, pandora run
+  2026-09-17-open-pool-batch56): the dist-tag/deprecate/publish
+  allowlist pin `describe` in
+  `packages/orchestrator-workflow/test/docs-consistency.test.ts` gained a
+  fourth assertion (publish-npm.yml's own `on.push.tags` patterns pinned
+  against its own `PUBLISHABLE` list) and an anchored, exactly-one-match
+  extractor with a fixture test proving a comment-shadowed or duplicated
+  `ALLOWLIST`/`PUBLISHABLE` line can no longer be mistaken for the real
+  one; both additions land after the file's existing last `describe`.
+  Re-read every citation this bundle makes into that test file against
+  the edited file; all resolve to lines well before the append point and
+  are unchanged. Re-stamped `model-preselection.md`,
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and
+  `subagent-contracts-superset.md`, the four docs whose `sources` list
+  that test file.
+
 - 2026-09-16T13:17:23Z (release cut, pandora run 2026-09-16-releases-batch55,
   REL-001): cut the `[Unreleased]` section under a new `[0.36.0] -
   2026-09-16` heading, keeping an empty `[Unreleased]` heading above it,
