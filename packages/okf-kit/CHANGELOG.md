@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-17
+
+### Changed
+
 - `sources-fresh`'s re-stamp escape hatch now requires the new frontmatter
   `timestamp` value to be a strictly LATER instant than the value it
   replaced, on both the committed path (`restampedByOwnLastCommit`) and the

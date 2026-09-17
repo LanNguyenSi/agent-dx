@@ -8438,6 +8438,16 @@ describe("Install okf-kit step: run: body identity and behavior under a stubbed 
       }
     });
 
+    // The pin these replays feed the stubbed npm and expect in the step's
+    // output is the workflow's real pin, read from packages/okf-kit's own
+    // version (the pin-parity guard above pins the two equal), so a release
+    // that bumps the pin does not have to touch this block.
+    const WORKFLOW_PIN: string = (
+      JSON.parse(readRepoFile("packages/okf-kit/package.json")) as {
+        version: string;
+      }
+    ).version;
+
     function writePkgVersion(version: string) {
       writeFileSync(
         `${repoDir}/packages/okf-kit/package.json`,
@@ -8516,30 +8526,30 @@ describe("Install okf-kit step: run: body identity and behavior under a stubbed 
 
     describe.each(bodies)("%s's run: body", (_label, getBody) => {
       it("published: npm view prints the version -> published-pin, exit 0, installs the pin", () => {
-        writePkgVersion("0.12.1");
+        writePkgVersion(WORKFLOW_PIN);
         const { status, stdout, calls } = runInstall(getBody(), {
-          NPM_STUB_PIN: "0.12.1",
+          NPM_STUB_PIN: WORKFLOW_PIN,
           NPM_STUB_VIEW_PIN_EXIT: "0",
-          NPM_STUB_VIEW_PIN_STDOUT: "0.12.1\n",
+          NPM_STUB_VIEW_PIN_STDOUT: `${WORKFLOW_PIN}\n`,
           NPM_STUB_VIEW_PIN_STDERR: "",
           NPM_STUB_VIEW_VERSIONS_EXIT: "0",
           NPM_STUB_VIEW_VERSIONS_STDOUT: "",
           NPM_STUB_VIEW_VERSIONS_STDERR: "",
         });
         expect(stdout).toContain(
-          "okf-kit install path: published-pin (okf-kit@0.12.1)",
+          `okf-kit install path: published-pin (okf-kit@${WORKFLOW_PIN})`,
         );
         expect(status).toBe(0);
         expect(calls).toContain(
-          "install -g okf-kit@0.12.1 --no-audit --no-fund",
+          `install -g okf-kit@${WORKFLOW_PIN} --no-audit --no-fund`,
         );
         expect(calls.some((c) => c.startsWith("ci "))).toBe(false);
       });
 
       it("unpublished, pin equals package.json's version: build-from-tree, exit 0, ci/build/install-from-tree ran", () => {
-        writePkgVersion("0.12.1");
+        writePkgVersion(WORKFLOW_PIN);
         const { status, stdout, calls } = runInstall(getBody(), {
-          NPM_STUB_PIN: "0.12.1",
+          NPM_STUB_PIN: WORKFLOW_PIN,
           NPM_STUB_VIEW_PIN_EXIT: "1",
           NPM_STUB_VIEW_PIN_STDOUT: "",
           NPM_STUB_VIEW_PIN_STDERR: "npm error code E404\n",
@@ -8548,7 +8558,7 @@ describe("Install okf-kit step: run: body identity and behavior under a stubbed 
           NPM_STUB_VIEW_VERSIONS_STDERR: "",
         });
         expect(stdout).toContain(
-          "okf-kit install path: unpublished-pin-build-from-tree (okf-kit@0.12.1 == packages/okf-kit/package.json)",
+          `okf-kit install path: unpublished-pin-build-from-tree (okf-kit@${WORKFLOW_PIN} == packages/okf-kit/package.json)`,
         );
         expect(status).toBe(0);
         expect(calls).toContain("ci --no-audit --no-fund");
@@ -8558,7 +8568,8 @@ describe("Install okf-kit step: run: body identity and behavior under a stubbed 
         );
         expect(
           calls.some(
-            (c) => c === "install -g okf-kit@0.12.1 --no-audit --no-fund",
+            (c) =>
+              c === `install -g okf-kit@${WORKFLOW_PIN} --no-audit --no-fund`,
           ),
         ).toBe(false);
       });
@@ -8566,7 +8577,7 @@ describe("Install okf-kit step: run: body identity and behavior under a stubbed 
       it("unpublished, pin does not equal package.json's version: fails loudly", () => {
         writePkgVersion("9.9.9");
         const { status, stdout, stderr } = runInstall(getBody(), {
-          NPM_STUB_PIN: "0.12.1",
+          NPM_STUB_PIN: WORKFLOW_PIN,
           NPM_STUB_VIEW_PIN_EXIT: "1",
           NPM_STUB_VIEW_PIN_STDOUT: "",
           NPM_STUB_VIEW_PIN_STDERR: "npm error code E404\n",
@@ -8579,7 +8590,7 @@ describe("Install okf-kit step: run: body identity and behavior under a stubbed 
         );
         expect(status).not.toBe(0);
         expect(stderr).toContain(
-          "::error title=okf-kit install::pin okf-kit@0.12.1 is confirmed unpublished",
+          `::error title=okf-kit install::pin okf-kit@${WORKFLOW_PIN} is confirmed unpublished`,
         );
         expect(stderr).toContain(
           "does not equal packages/okf-kit/package.json's version (9.9.9); refusing to install",
@@ -8587,9 +8598,9 @@ describe("Install okf-kit step: run: body identity and behavior under a stubbed 
       });
 
       it("network error on both probes: fails loudly, never falls back", () => {
-        writePkgVersion("0.12.1");
+        writePkgVersion(WORKFLOW_PIN);
         const { status, stdout, stderr, calls } = runInstall(getBody(), {
-          NPM_STUB_PIN: "0.12.1",
+          NPM_STUB_PIN: WORKFLOW_PIN,
           NPM_STUB_VIEW_PIN_EXIT: "1",
           NPM_STUB_VIEW_PIN_STDOUT: "",
           NPM_STUB_VIEW_PIN_STDERR: "npm error network request failed\n",
@@ -8603,7 +8614,7 @@ describe("Install okf-kit step: run: body identity and behavior under a stubbed 
           calls.some((c) => c.startsWith("ci ") || c.startsWith("install")),
         ).toBe(false);
         expect(stderr).toContain(
-          "::error title=okf-kit install::npm view okf-kit@0.12.1 version failed",
+          `::error title=okf-kit install::npm view okf-kit@${WORKFLOW_PIN} version failed`,
         );
         expect(stderr).toContain(
           "refusing to guess: npm error network request failed",
@@ -8611,30 +8622,33 @@ describe("Install okf-kit step: run: body identity and behavior under a stubbed 
       });
 
       it("package-level probe succeeds and the pin IS in the list: treated as published, installs the pin", () => {
-        writePkgVersion("0.12.1");
+        writePkgVersion(WORKFLOW_PIN);
         const { status, stdout, calls } = runInstall(getBody(), {
-          NPM_STUB_PIN: "0.12.1",
+          NPM_STUB_PIN: WORKFLOW_PIN,
           NPM_STUB_VIEW_PIN_EXIT: "1",
           NPM_STUB_VIEW_PIN_STDOUT: "",
           NPM_STUB_VIEW_PIN_STDERR: "npm error code E404\n",
           NPM_STUB_VIEW_VERSIONS_EXIT: "0",
-          NPM_STUB_VIEW_VERSIONS_STDOUT: JSON.stringify(["0.12.1", "1.1.0"]),
+          NPM_STUB_VIEW_VERSIONS_STDOUT: JSON.stringify([
+            WORKFLOW_PIN,
+            "1.1.0",
+          ]),
           NPM_STUB_VIEW_VERSIONS_STDERR: "",
         });
         expect(stdout).toContain(
-          "okf-kit install path: published-pin (okf-kit@0.12.1, confirmed via okf-kit versions probe",
+          `okf-kit install path: published-pin (okf-kit@${WORKFLOW_PIN}, confirmed via okf-kit versions probe`,
         );
         expect(status).toBe(0);
         expect(calls).toContain(
-          "install -g okf-kit@0.12.1 --no-audit --no-fund",
+          `install -g okf-kit@${WORKFLOW_PIN} --no-audit --no-fund`,
         );
         expect(calls.some((c) => c.startsWith("ci "))).toBe(false);
       });
 
       it("npm view exits 0 with empty stdout: fails loudly, never exits 0", () => {
-        writePkgVersion("0.12.1");
+        writePkgVersion(WORKFLOW_PIN);
         const { status, stdout } = runInstall(getBody(), {
-          NPM_STUB_PIN: "0.12.1",
+          NPM_STUB_PIN: WORKFLOW_PIN,
           NPM_STUB_VIEW_PIN_EXIT: "0",
           NPM_STUB_VIEW_PIN_STDOUT: "",
           NPM_STUB_VIEW_PIN_STDERR: "",
@@ -8656,9 +8670,9 @@ describe("Install okf-kit step: run: body identity and behavior under a stubbed 
       // from-tree build (or, for a bare string that happens to contain
       // the pin, straight to installing it) instead of refusing.
       it("versions probe returns a non-array JSON object (npm's own error shape): registry-error, never falls back", () => {
-        writePkgVersion("0.12.1");
+        writePkgVersion(WORKFLOW_PIN);
         const { status, stdout, calls } = runInstall(getBody(), {
-          NPM_STUB_PIN: "0.12.1",
+          NPM_STUB_PIN: WORKFLOW_PIN,
           NPM_STUB_VIEW_PIN_EXIT: "1",
           NPM_STUB_VIEW_PIN_STDOUT: "",
           NPM_STUB_VIEW_PIN_STDERR: "npm error code E404\n",
@@ -8676,14 +8690,14 @@ describe("Install okf-kit step: run: body identity and behavior under a stubbed 
       });
 
       it("versions probe returns a bare JSON string equal to the pin: registry-error, never falls back", () => {
-        writePkgVersion("0.12.1");
+        writePkgVersion(WORKFLOW_PIN);
         const { status, stdout, calls } = runInstall(getBody(), {
-          NPM_STUB_PIN: "0.12.1",
+          NPM_STUB_PIN: WORKFLOW_PIN,
           NPM_STUB_VIEW_PIN_EXIT: "1",
           NPM_STUB_VIEW_PIN_STDOUT: "",
           NPM_STUB_VIEW_PIN_STDERR: "npm error code E404\n",
           NPM_STUB_VIEW_VERSIONS_EXIT: "0",
-          NPM_STUB_VIEW_VERSIONS_STDOUT: JSON.stringify("0.12.1"),
+          NPM_STUB_VIEW_VERSIONS_STDOUT: JSON.stringify(WORKFLOW_PIN),
           NPM_STUB_VIEW_VERSIONS_STDERR: "",
         });
         expect(stdout).toContain("okf-kit install path: registry-error (fail)");
@@ -8694,9 +8708,9 @@ describe("Install okf-kit step: run: body identity and behavior under a stubbed 
       });
 
       it("versions probe returns truncated JSON: registry-error, never falls back", () => {
-        writePkgVersion("0.12.1");
+        writePkgVersion(WORKFLOW_PIN);
         const { status, stdout, calls } = runInstall(getBody(), {
-          NPM_STUB_PIN: "0.12.1",
+          NPM_STUB_PIN: WORKFLOW_PIN,
           NPM_STUB_VIEW_PIN_EXIT: "1",
           NPM_STUB_VIEW_PIN_STDOUT: "",
           NPM_STUB_VIEW_PIN_STDERR: "npm error code E404\n",
@@ -8722,7 +8736,7 @@ describe("Install okf-kit step: run: body identity and behavior under a stubbed 
         });
         try {
           const { status, stderr } = runInstall(getBody(), {
-            NPM_STUB_PIN: "0.12.1",
+            NPM_STUB_PIN: WORKFLOW_PIN,
             NPM_STUB_VIEW_PIN_EXIT: "1",
             NPM_STUB_VIEW_PIN_STDOUT: "",
             NPM_STUB_VIEW_PIN_STDERR: "npm error code E404\n",
@@ -8735,7 +8749,7 @@ describe("Install okf-kit step: run: body identity and behavior under a stubbed 
             "::error title=okf-kit install::cannot read packages/okf-kit/package.json",
           );
         } finally {
-          writePkgVersion("0.12.1");
+          writePkgVersion(WORKFLOW_PIN);
         }
       });
     });
