@@ -64,6 +64,22 @@ const HAS_PYTHON3 = (() => {
   }
 })();
 
+/** The aggregate spawn deadline every `python-bytecode-cache` case that
+ * needs the resolution to actually happen pins, rather than inheriting
+ * the 3000ms default. That default is shared with doctor's own
+ * `--version` captures, which run BEFORE the target loop: on a cold
+ * cache their measured overhead reaches 181ms, and under a loaded
+ * machine (a full suite in parallel) it can reach the default itself,
+ * at which point the target loop skips its `python3` resolution
+ * entirely and these cases fail on a missing call log or a detail
+ * naming the deadline instead of the branch they are about. Sixty
+ * seconds is far past anything that overhead can reach while staying
+ * finite, and every case that pins it also asserts the deadline clause
+ * is absent, so a spent deadline fails by name rather than opaquely.
+ * The cases that put the deadline itself under test pin their own,
+ * deliberately small, value instead. */
+const GENEROUS_DEADLINE_MS = 60_000;
+
 /** A `python3` stand-in written into `binDir`, for the cases that turn
  * on WHETHER doctor spawns its cache-path resolution, on WHAT it asks
  * about, and on what it does with an answer it does not get, rather
@@ -451,11 +467,13 @@ describe("doctor: checks, in both states", () => {
       optional: [],
       cwd: dir,
       targets: ["fixture.py"],
+      versionDeadlineMs: GENEROUS_DEADLINE_MS,
     });
     const check = result.checks.find((c) => c.name === "python-bytecode-cache");
     expect(check?.ok).toBe(true);
     expect(check?.detail).toContain("no Python bytecode cache found");
     expect(check?.detail).toContain("fixture.py");
+    expect(check?.detail).not.toContain("already spent");
   });
 
   it.skipIf(!HAS_PYTHON3)(
@@ -479,6 +497,7 @@ describe("doctor: checks, in both states", () => {
         optional: [],
         cwd: dir,
         targets: ["fixture.py"],
+        versionDeadlineMs: GENEROUS_DEADLINE_MS,
       });
       const check = result.checks.find(
         (c) => c.name === "python-bytecode-cache",
@@ -487,6 +506,7 @@ describe("doctor: checks, in both states", () => {
       expect(check?.detail).toContain("fixture.py");
       expect(check?.detail).toContain(cachePath);
       expect(check?.detail).toContain("PYTHONPYCACHEPREFIX");
+      expect(check?.detail).not.toContain("already spent");
     },
   );
 
@@ -511,12 +531,14 @@ describe("doctor: checks, in both states", () => {
           optional: [],
           cwd: dir,
           targets: ["fixture.py"],
+          versionDeadlineMs: GENEROUS_DEADLINE_MS,
         });
         const check = result.checks.find(
           (c) => c.name === "python-bytecode-cache",
         );
         expect(check?.ok).toBe(true);
         expect(check?.detail).toContain(cachePath);
+        expect(check?.detail).not.toContain("already spent");
       } finally {
         if (before === undefined) delete process.env.PYTHONPYCACHEPREFIX;
         else process.env.PYTHONPYCACHEPREFIX = before;
@@ -535,11 +557,13 @@ describe("doctor: checks, in both states", () => {
       cwd: dir,
       targets: ["fixture.py"],
       pathEnv: emptyPath,
+      versionDeadlineMs: GENEROUS_DEADLINE_MS,
     });
     const check = result.checks.find((c) => c.name === "python-bytecode-cache");
     expect(check?.ok).toBe(true);
     expect(check?.detail).toContain("fixture.py");
     expect(check?.detail).toContain("python3 not found on PATH");
+    expect(check?.detail).not.toContain("already spent");
   });
 
   it.skipIf(!HAS_PYTHON3)(
@@ -574,12 +598,14 @@ describe("doctor: checks, in both states", () => {
         optional: [],
         cwd: link,
         targets: ["fixture.py"],
+        versionDeadlineMs: GENEROUS_DEADLINE_MS,
       });
       const check = result.checks.find(
         (c) => c.name === "python-bytecode-cache",
       );
       expect(check?.ok).toBe(true);
       expect(check?.detail).toContain(cachedPath);
+      expect(check?.detail).not.toContain("already spent");
     },
   );
 
@@ -605,6 +631,7 @@ describe("doctor: checks, in both states", () => {
       cwd: path.join(os.tmpdir(), `agent-primitives-absent-${randomUUID()}`),
       targets: ["fixture.py"],
       pathEnv: binDir,
+      versionDeadlineMs: GENEROUS_DEADLINE_MS,
     });
     const check = result.checks.find((c) => c.name === "python-bytecode-cache");
     expect(check?.ok).toBe(true);
@@ -612,6 +639,7 @@ describe("doctor: checks, in both states", () => {
       "python3 did not resolve a cache path for fixture.py",
     );
     expect(check?.detail).not.toContain("python3 not found on PATH");
+    expect(check?.detail).not.toContain("already spent");
   });
 
   it("python-bytecode-cache: asks python3 about the target's real absolute path, not the spelling the caller used", async () => {
@@ -632,13 +660,19 @@ describe("doctor: checks, in both states", () => {
     const callLog = path.join(makeTmpDir(), "python3-calls.txt");
     fs.writeFileSync(path.join(dir, "fixture.py"), "");
     writePython3Stub(binDir, callLog, { exitStatus: 0, printsPath: "" });
-    await doctor({
+    const result = await doctor({
       required: [],
       optional: [],
       cwd: dir,
       targets: ["fixture.py"],
       pathEnv: binDir,
+      versionDeadlineMs: GENEROUS_DEADLINE_MS,
     });
+    // Asserted before the call log is read: a deadline spent before the
+    // target loop would leave no log at all, and the resulting ENOENT
+    // names the file rather than the cause.
+    const check = result.checks.find((c) => c.name === "python-bytecode-cache");
+    expect(check?.detail).not.toContain("already spent");
     const asked = fs.readFileSync(callLog, "utf8");
     expect(asked).toContain(path.join(fs.realpathSync(dir), "fixture.py"));
   });
@@ -674,9 +708,11 @@ describe("doctor: checks, in both states", () => {
       cwd: dir,
       targets: ["fixture.py"],
       pathEnv: binDir,
+      versionDeadlineMs: GENEROUS_DEADLINE_MS,
     });
     const check = result.checks.find((c) => c.name === "python-bytecode-cache");
     expect(check?.ok).toBe(true);
+    expect(check?.detail).not.toContain("already spent");
     expect(fs.existsSync(callLog)).toBe(true);
     // Found, and named by its absolute path under the given cwd. Read
     // against this process's cwd instead, the same answer names nothing
@@ -707,9 +743,11 @@ describe("doctor: checks, in both states", () => {
       cwd: dir,
       targets: ["fixture.py"],
       pathEnv: binDir,
+      versionDeadlineMs: GENEROUS_DEADLINE_MS,
     });
     const check = result.checks.find((c) => c.name === "python-bytecode-cache");
     expect(check?.ok).toBe(true);
+    expect(check?.detail).not.toContain("already spent");
     // python3 really was asked: this is the resolution-failed path, not
     // the python3-absent one.
     expect(fs.existsSync(callLog)).toBe(true);
@@ -880,12 +918,14 @@ describe("doctor: checks, in both states", () => {
       cwd: sub,
       targets: ["fixture.py"],
       pathEnv: emptyPath,
+      versionDeadlineMs: GENEROUS_DEADLINE_MS,
     });
     const check = result.checks.find((c) => c.name === "python-bytecode-cache");
     expect(check?.ok).toBe(true);
     expect(check?.detail).toContain(
       path.join(fs.realpathSync(sub), "__pycache__"),
     );
+    expect(check?.detail).not.toContain("already spent");
   });
 });
 

@@ -19,9 +19,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   naming all three fallback reasons (`python3` absent from `PATH`,
   `python3` resolving nothing, or the deadline already spent); the
   README and the docblock are aligned to the same three-reason wording
-  the CLI help text and the skill already used, and all four surfaces
-  now share one fallback-reasons parenthetical, which the guard matches
-  against directly rather than against the whole surrounding section.
+  the CLI help text and the skill already used. Each of the four
+  surfaces names those three reasons in its own fallback-reasons
+  parenthetical, which the guard matches against rather than against
+  the whole surrounding section; the parenthetical is located by the
+  clause that introduces it ("does not answer"), and a surface where
+  that clause is missing, or occurs more than once, fails the guard
+  instead of being resolved by position. The check's own deadline-spent
+  branch is no longer reachable by accident in the tests that are about
+  another branch: every `--target` case whose assertion needs the
+  `python3` resolution to have happened pins a generous aggregate
+  deadline and asserts the deadline clause is absent, so a deadline
+  spent by unrelated pre-loop overhead fails by name.
 
 ## [0.6.0] - 2026-09-16
 
