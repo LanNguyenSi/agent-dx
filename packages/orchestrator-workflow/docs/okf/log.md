@@ -1129,7 +1129,7 @@
   sentence reverted to its pre-change wording, fails the exact-sub-field
   and regression-signal tests above; restored, the suite is green again.
   `CHANGELOG.md`'s own prose copy of this change is
-  (`CHANGELOG.md:156#"The implementer"`).
+  (`CHANGELOG.md:169#"The implementer"`).
 
   Verified on the committed tree: the full package suite (`npm test`),
   `typecheck`, `typecheck:test`, and `format:check`, all clean. Re-pointed
@@ -1397,7 +1397,7 @@
   that binding rather than second-guessing it.
 
   The CHANGELOG bullet for this round is
-  `CHANGELOG.md:533#"Citation scanning is paragraph-joined"`. Verified on
+  `CHANGELOG.md:546#"Citation scanning is paragraph-joined"`. Verified on
   the committed tree: the full package suite, `docs-consistency.test.ts`
   on its own, `typecheck`, `typecheck:test` and `format:check`; the
   figures each guard measured are in its own computed test name, per the
@@ -10045,28 +10045,74 @@ against a past commit rather than the live file, and is left as found.
 
 A follow-up fix round on the same task corrected checkArrayField's
 docblock (a bare or `~` bullet parses as null and is rejected, not
-tolerated as a placeholder), widened test coverage to reject `null` and
-a boolean array element alongside a number and a mapping, and bumped
+tolerated as a placeholder), widened test coverage to reject `null` and a
+boolean array element alongside a number and a mapping, and bumped
 TOP_LEVEL_FIELDS' generated case count to the measured 106 (not the
-guessed 112). The fence-tag capture was widened again, from a leading
-run of letters to the whole info string tested against its first
+guessed 112). The fence-tag capture was widened again, from a leading run
+of letters to the whole info string tested against its first
 whitespace-delimited word, so an attribute-bearing tag (`yaml title=x`)
 is recognized instead of matching no fence at all; the redundant
-before-warning on a skip-only prefix is now suppressed. README.md and
+before-warning on a skip-only prefix is now suppressed. A mutation probe
+showed the single-fence `yaml title=x` case alone does not discriminate
+that first-word test from a comparison against the whole info string,
+since both land on fence index 0 when only one fence is present; the
+two-fence case that does discriminate them (an earlier plain fence, a
+later `yaml title=x` one) was added and kills that mutant. README.md and
 contracts.md were corrected and extended for both changes; an earlier
-draft of both paragraphs wrapped a literal triple-backtick example
-across a line break, which self-matched as a second real fenced code
-block under contracts.md's Reviewer output contract heading and broke
-acceptance-baseline.test.ts; the wording was rewritten to a single-
-backtick inline example instead. This shifted contracts.md by 5 lines
-starting after its own line 176: subagent-contracts-superset.md's five
-citations moved from 208 (twice), 280, 256, 196, and 206 to 213 (twice),
-285, 261, 201, and 211. CHANGELOG.md shifted by 6 lines starting after
-its own line 15: this log's own two self-citations moved from 150 and
-527 to 156 and 533. Re-verified and re-stamped the same five
+draft of both paragraphs wrapped a literal triple-backtick example across
+a line break, which self-matched as a second real fenced code block under
+contracts.md's Reviewer output contract heading and broke
+acceptance-baseline.test.ts; the wording was rewritten to a
+single-backtick inline example instead. This shifted contracts.md by 5
+lines starting after its own line 176: subagent-contracts-superset.md's
+five citations moved from 208 (twice), 280, 256, 196, and 206 to 213
+(twice), 285, 261, 201, and 211. CHANGELOG.md shifted by 6 lines starting
+after its own line 15: this log's own two self-citations moved from 150
+and 527 to 156 and 533. Re-verified and re-stamped the same five
 source-bearing docs again after confirming their own citations still
-resolve. Verified from the worktree root: build, typecheck,
-typecheck:test, and format:check all clean; vitest 1189 passed. okf-kit
-check packages/orchestrator-workflow/docs/okf --require-anchors --json:
-0 errors, 0 warnings, 0 notices once committed within the stamp's skew
+resolve. Verified from the worktree root at that commit: build,
+typecheck, typecheck:test, and format:check all clean, vitest green with
+the tests named above; okf-kit check
+packages/orchestrator-workflow/docs/okf --require-anchors --json at 0
+errors, 0 warnings, 0 notices once committed within the stamp's skew
 allowance.
+
+A second follow-up corrected the fence grammar itself. Widening the
+info-string capture had left the opening fence matching a fixed three
+backticks, so a return opened with four put the leftover backtick into
+the info string: its first word read as a backtick followed by yaml,
+matched no yaml/yml tag, and with an earlier untagged fence present the
+validator validated that earlier block and emitted a prose-after warning
+in place of the skip warning. The pattern now captures the whole opening
+backtick run and requires the closing fence to repeat at least as many
+backticks at column 0 with nothing but whitespace after it; the opening
+fence keeps its existing position discipline, located anywhere in the
+input rather than anchored to a line start, since anchoring it would
+narrow behaviour this correction does not need to touch. Three tests pin
+the four-backtick case (a lone fence, one preferred over an earlier bash
+fence, and one whose body carries a three-backtick pair at column 0) and
+two pin the attribute wording both reference paragraphs carried:
+`yaml,title=x` is a single word and falls back to an earlier fence, and a
+lone `js title=x` fence is a fence rather than literal YAML. The
+over-promising "trailing attributes still count" claim in README.md and
+contracts.md is replaced by that whitespace-separated wording, both
+paragraphs were rewrapped by hand to the prevailing fill, and the
+CHANGELOG bullet now names the widening of what counts as a fence at all,
+which reaches beyond the yaml case. contracts.md grew by 4 lines from its
+own line 168, moving subagent-contracts-superset.md's five live citations
+from 201, 211, 213 (twice), 261, and 285 to 205, 215, 217 (twice), 265,
+and 289; CHANGELOG.md grew by 13 lines inside its [Unreleased] section,
+moving this log's own two self-citations from 156 and 533 to 169 and 546.
+README.md grew by one line, below every citation into it. Every anchor
+was re-read at its new line before the re-point, and the same five
+source-bearing docs were re-verified and re-stamped. Verified from the
+worktree root: build, typecheck, typecheck:test, and format:check all
+clean; vitest green with the five added fence tests, 1195 tests at this
+entry's bundle commit. okf-kit check
+packages/orchestrator-workflow/docs/okf --require-anchors --json: 0
+errors, 0 warnings, 0 notices after the re-point and re-stamp. Mutation
+probes rerun through agent-primitives: the element-kind check, the tag
+predicate, the whole-info-string revert, and the before-warning
+suppression all still killed; restoring the three-backtick opener grammar
+kills all three four-backtick tests, and relaxing the closing fence to
+any run of three or more backticks kills the column-0 body test alone.
