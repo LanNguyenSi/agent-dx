@@ -1129,7 +1129,7 @@
   sentence reverted to its pre-change wording, fails the exact-sub-field
   and regression-signal tests above; restored, the suite is green again.
   `CHANGELOG.md`'s own prose copy of this change is
-  (`CHANGELOG.md:169#"The implementer"`).
+  (`CHANGELOG.md:179#"The implementer"`).
 
   Verified on the committed tree: the full package suite (`npm test`),
   `typecheck`, `typecheck:test`, and `format:check`, all clean. Re-pointed
@@ -1397,7 +1397,7 @@
   that binding rather than second-guessing it.
 
   The CHANGELOG bullet for this round is
-  `CHANGELOG.md:546#"Citation scanning is paragraph-joined"`. Verified on
+  `CHANGELOG.md:556#"Citation scanning is paragraph-joined"`. Verified on
   the committed tree: the full package suite, `docs-consistency.test.ts`
   on its own, `typecheck`, `typecheck:test` and `format:check`; the
   figures each guard measured are in its own computed test name, per the
@@ -10107,8 +10107,7 @@ README.md grew by one line, below every citation into it. Every anchor
 was re-read at its new line before the re-point, and the same five
 source-bearing docs were re-verified and re-stamped. Verified from the
 worktree root: build, typecheck, typecheck:test, and format:check all
-clean; vitest green with the five added fence tests, 1195 tests at this
-entry's bundle commit. okf-kit check
+clean; vitest green with the five added fence tests. okf-kit check
 packages/orchestrator-workflow/docs/okf --require-anchors --json: 0
 errors, 0 warnings, 0 notices after the re-point and re-stamp. Mutation
 probes rerun through agent-primitives: the element-kind check, the tag
@@ -10116,3 +10115,38 @@ predicate, the whole-info-string revert, and the before-warning
 suppression all still killed; restoring the three-backtick opener grammar
 kills all three four-backtick tests, and relaxing the closing fence to
 any run of three or more backticks kills the column-0 body test alone.
+
+A third follow-up bounded that pattern and pinned the closing line's
+tail. The opening backtick run is now held whole by a lookaround on each
+side: without them a run with no valid closer is re-entered at every
+shorter length from every offset inside it, each retry rescanning the
+lazy body. Measured through `extractYamlSource` on a 22 KB return
+carrying a 2000-backtick run, that cost 52 seconds on the branch and 51
+seconds under the probe's worktree copy, against 0.2 milliseconds once
+the run is held whole. Holding it whole also makes the closing-length
+rule literal, so an opener longer than every closing run present is no
+fence at all and its text reaches the parser whole, where splitting the
+run had matched it and read the leftover backticks as the start of the
+tag. The whitespace-only tail after the closing run, which only the
+CHANGELOG stated, is now in the validator paragraphs of README.md and
+contracts.md, and three tests pin the three shapes: a return whose
+closing run is followed by prose reaches the parser whole, so does one
+whose opener outruns every closer, and the unterminated 2000-backtick run
+returns inside a two-second bound. contracts.md grew by 2 lines from its
+own line 177, moving subagent-contracts-superset.md's five live citations
+from 205, 215, 217 (twice), 265, and 289 to 207, 217, 219 (twice), 267,
+and 291; CHANGELOG.md grew by 10 lines inside its [Unreleased] section,
+moving this log's own two self-citations from 169 and 546 to 179 and 556.
+README.md grew by 2 lines, below every citation into it. Every anchor was
+re-read at its new line before the re-point, and the same five
+source-bearing docs were re-verified and re-stamped. Verified from the
+worktree root: build, typecheck, typecheck:test, and format:check all
+clean; vitest green. okf-kit check
+packages/orchestrator-workflow/docs/okf --require-anchors --json: 0
+errors, 0 warnings, 0 notices after the re-point and re-stamp. Mutation
+probes through agent-primitives, five of five killed with every
+expectation met: removing the two lookarounds fails the bound test and
+the longer-opener test; dropping the closing line's whitespace-only tail
+fails the trailed-closer test alone; the three replays hold, with the
+three-backtick-only opener now failing four tests, the relaxed closing
+run two, and the disabled tag predicate eight.
