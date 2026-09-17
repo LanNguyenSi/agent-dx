@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `doctor`'s `python-bytecode-cache` check is pinned for a partially
+  spent aggregate deadline (a target already in flight when the
+  deadline is crossed still resolves through `python3`, and only a
+  later target in the same run falls back) and for a detail carrying
+  both the "did not resolve" and the "deadline already spent" fallback
+  clauses at once, joined by `"; "` (tracker 0c1b257c). A mechanical
+  guard (`test/doctor-fallback-wording.test.ts`) now fails when the
+  `--target` help text (`src/cli.ts`), `assets/skill/SKILL.md`, the
+  README's `doctor` section, or the `DoctorOptions` docblock stops
+  naming all three fallback reasons (`python3` absent from `PATH`,
+  `python3` resolving nothing, or the deadline already spent); the
+  README and the docblock are aligned to the same three-reason wording
+  the CLI help text and the skill already used.
+
 ## [0.6.0] - 2026-09-16
 
 - `probe` isolates a Python target's `--pre`/test-command runs from

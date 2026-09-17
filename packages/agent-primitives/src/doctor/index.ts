@@ -81,9 +81,10 @@ export interface DoctorOptions {
    * extension is silently ignored (CPython's own cache never applies to
    * it). Each such target's cache path is the one `python3` itself
    * resolves (`importlib.util.cache_from_source`) when a `python3` is on
-   * `PATH`, and a co-located `__pycache__` only as the fallback when
-   * none is (or when that resolution did not come back), which the
-   * check's own detail names. Omitted or empty: the check is skipped
+   * `PATH`, and a co-located `__pycache__` only as the fallback when it
+   * cannot be asked or does not answer (absent from `PATH`, resolving
+   * nothing, or doctor's aggregate spawn deadline already spent), which
+   * the check's own detail names. Omitted or empty: the check is skipped
    * entirely rather than reported as passing, since "no target named" is
    * not the same claim as "no cache found for the target". */
   targets?: string[];
