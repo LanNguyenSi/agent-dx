@@ -139,13 +139,65 @@ describe("validateReviewReport: fence handling", () => {
     expect(result.warnings).toEqual([]);
   });
 
-  it("prefers a later ```yaml fence over an earlier untagged fence, and warns the earlier fence was skipped", () => {
+  it("prefers a later ```yaml fence over an earlier untagged fence, warns the earlier fence was skipped, and does not also call it prose", () => {
     const raw = "```bash\necho not yaml\n```\n```yaml\nstatus: reviewed\n```\n";
     const { yamlText, warnings } = extractYamlSource(raw);
     expect(yamlText).toBe("status: reviewed");
+    // Only the skip warning fires: the text preceding the chosen fence
+    // is exactly the skipped ```bash fence plus whitespace, so the
+    // before-warning (which would otherwise call that same fenced block
+    // "prose") is suppressed.
     expect(warnings).toEqual([
-      "1 earlier fenced block without a yaml/yml tag was skipped in favor of the later ```yaml``` fenced block; only that later block was validated",
+      "1 earlier fenced block without a yaml/yml tag was skipped in favor of the later `yaml` fenced block; only that later block was validated",
+    ]);
+  });
+
+  it("still warns about real prose ahead of a skipped fence, distinct from the skipped fence itself", () => {
+    const raw =
+      "Some notes first.\n```bash\necho not yaml\n```\n```yaml\nstatus: reviewed\n```\n";
+    const { yamlText, warnings } = extractYamlSource(raw);
+    expect(yamlText).toBe("status: reviewed");
+    expect(warnings).toEqual([
+      "1 earlier fenced block without a yaml/yml tag was skipped in favor of the later `yaml` fenced block; only that later block was validated",
       "prose found before the opening ```yaml fence; only the fenced block was validated",
+    ]);
+  });
+
+  it("names the plural skip warning when two earlier fences are skipped for a yaml fence last (M4)", () => {
+    const raw =
+      "```bash\necho 1\n```\n```\necho 2\n```\n```yaml\nstatus: reviewed\n```\n";
+    const { yamlText, warnings } = extractYamlSource(raw);
+    expect(yamlText).toBe("status: reviewed");
+    expect(warnings).toEqual([
+      "2 earlier fenced blocks without a yaml/yml tag were skipped in favor of the later `yaml` fenced block; only that later block was validated",
+    ]);
+  });
+
+  it("prefers a later yaml fence over CRLF-terminated skipped fences, with no stray \\r left in the chosen text (M3)", () => {
+    const raw =
+      "```bash\r\necho not yaml\r\n```\r\n```yaml\r\nstatus: reviewed\r\n```\r\n";
+    const { yamlText, warnings } = extractYamlSource(raw);
+    expect(yamlText).toBe("status: reviewed");
+    expect(yamlText).not.toContain("\r");
+    expect(warnings).toEqual([
+      "1 earlier fenced block without a yaml/yml tag was skipped in favor of the later `yaml` fenced block; only that later block was validated",
+    ]);
+  });
+
+  it("recognises a yaml tag followed by attributes (```yaml title=x), which the pre-widening capture matched no fence for at all", () => {
+    const raw = "```yaml title=x\nstatus: reviewed\n```\n";
+    const { yamlText, warnings } = extractYamlSource(raw);
+    expect(yamlText).toBe("status: reviewed");
+    expect(warnings).toEqual([]);
+  });
+
+  it("prefers a later ```yaml fence over an earlier ```bash title=x fence, recognising the attribute-bearing fence as skipped rather than as unmatched", () => {
+    const raw =
+      "```bash title=x\necho not yaml\n```\n```yaml\nstatus: reviewed\n```\n";
+    const { yamlText, warnings } = extractYamlSource(raw);
+    expect(yamlText).toBe("status: reviewed");
+    expect(warnings).toEqual([
+      "1 earlier fenced block without a yaml/yml tag was skipped in favor of the later `yaml` fenced block; only that later block was validated",
     ]);
   });
 
@@ -174,8 +226,7 @@ describe("validateReviewReport: fence handling", () => {
     const { yamlText, warnings } = extractYamlSource(raw);
     expect(yamlText).toBe("status: reviewed");
     expect(warnings).toEqual([
-      "1 earlier fenced block without a yaml/yml tag was skipped in favor of the later ```yaml``` fenced block; only that later block was validated",
-      "prose found before the opening ```yaml fence; only the fenced block was validated",
+      "1 earlier fenced block without a yaml/yml tag was skipped in favor of the later `yaml` fenced block; only that later block was validated",
     ]);
   });
 });
@@ -381,7 +432,12 @@ describe("validateReviewReport: schema-derived coverage of every field and input
   const NON_MAPPING_ELEMENTS: readonly ProbeValue[] = [NUMBER, NULL];
 
   /** Elements a plain `array`-kind field must reject at the element's own path. */
-  const NON_STRING_ELEMENTS: readonly ProbeValue[] = [NUMBER, MAPPING];
+  const NON_STRING_ELEMENTS: readonly ProbeValue[] = [
+    NUMBER,
+    MAPPING,
+    NULL,
+    BOOLEAN,
+  ];
 
   /**
    * The four contract constants, each with the validator's own path
@@ -596,7 +652,7 @@ describe("validateReviewReport: schema-derived coverage of every field and input
     // generator whose case list was emptied or shortened fails here
     // whatever else it still produces.
     expect(counts).toEqual({
-      TOP_LEVEL_FIELDS: 100,
+      TOP_LEVEL_FIELDS: 106,
       FINDING_FIELDS: 60,
       REPRODUCTION_FIELDS: 31,
       WITHDRAWN_FIELDS: 16,
@@ -674,6 +730,42 @@ describe("validateReviewReport: array element-kind edge cases beyond the generat
     expect(result.diagnostics).toEqual([
       { path: "missing_tests[0]", expected: "string", got: "7" },
       { path: "residual_risks[0]", expected: "string", got: "mapping" },
+    ]);
+  });
+
+  it("rejects a bare blank bullet and a ~ bullet as null, not as an empty string", () => {
+    // A bare `- ` or `- ~` bullet parses as YAML null, not as an empty
+    // string: only an explicitly quoted placeholder is a string that
+    // passes. `stringifyYaml`'s own rendering of a JS `null` element
+    // would write `- null`, not a bare bullet, so this is asserted
+    // against literal YAML source text instead of a stringified doc, the
+    // same way `extractYamlSource`'s own fence tests read raw text.
+    const raw = [
+      "status: reviewed",
+      "role: reviewer",
+      "task_id: T-003",
+      "summary:",
+      "  - ",
+      "  - ~",
+      '  - ""',
+      "findings: []",
+      "acceptance_recommendation: accept_with_notes",
+      "missing_tests: []",
+      "residual_risks: []",
+      "reproduction:",
+      '  method: ""',
+      '  sample_size: ""',
+      '  result: ""',
+      "  matches_implementer_claim: not_applicable",
+      "method_applied: normal",
+      "withdrawn: []",
+      "",
+    ].join("\n");
+    const result = validateReviewReport(raw);
+    expect(result.valid).toBe(false);
+    expect(result.diagnostics).toEqual([
+      { path: "summary[0]", expected: "string", got: "null" },
+      { path: "summary[1]", expected: "string", got: "null" },
     ]);
   });
 });

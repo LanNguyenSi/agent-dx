@@ -201,15 +201,19 @@ function checkScalarField(
  * the first, the same way {@link checkFindings} reports every non-mapping
  * `findings[]` entry rather than stopping at one.
  *
- * Emptiness is deliberately not judged here: an element that is an empty
- * or blank string is still a string and passes, the same tolerance
- * {@link checkStringField}'s plain `"string"` kind gives a top-level
- * field (unlike {@link checkNonEmptyStringField}'s `"non-empty-string"`
- * kind, which `task_id` uses). These three fields are declared `"array"`
- * in {@link FIELD_KINDS}, not `"non-empty-string"`, so their elements get
- * the same tolerance their own kind implies; a reviewer emitting a
- * placeholder blank bullet is a content question the orchestrator judges,
- * not a structural one this validator judges.
+ * Emptiness is deliberately not judged here: an element that is an
+ * explicitly quoted empty or blank string (`- ""`, `- "   "`) is still a
+ * string and passes, the same tolerance {@link checkStringField}'s plain
+ * `"string"` kind gives a top-level field (unlike
+ * {@link checkNonEmptyStringField}'s `"non-empty-string"` kind, which
+ * `task_id` uses). A bare `- ` or `- ~` bullet is not a string at all --
+ * YAML parses either as `null`, which this checker rejects the same as
+ * any other non-string element; only a quoted placeholder passes. These
+ * three fields are declared `"array"` in {@link FIELD_KINDS}, not
+ * `"non-empty-string"`, so a quoted element
+ * gets the same tolerance its own kind implies; a reviewer emitting a
+ * quoted placeholder blank bullet is a content question the orchestrator
+ * judges, not a structural one this validator judges.
  */
 function checkArrayField(
   doc: Record<string, unknown>,
@@ -636,14 +640,27 @@ interface ExtractedYaml {
  *
  * When the input carries more than one fenced block (a reviewer pasting
  * a worked example ahead of the real return, say), the FIRST fence whose
- * own language tag is `yaml` or `yml` (case-insensitive) is preferred
- * over every earlier fence, tagged or not; only when none of the fences
- * carries that tag does today's original first-fence behaviour apply.
- * Preferring a later, differently-positioned fence over `fences[0]` is
- * itself named as a warning, distinct from the existing before/after
- * prose warnings, which are still computed relative to whichever fence
- * was actually chosen (so the skipped earlier fence(s) read as "prose
- * before" the chosen one, same as any other discarded leading text).
+ * info string's first whitespace-delimited word is `yaml` or `yml`
+ * (case-insensitive) is preferred over every earlier fence, tagged or
+ * not; only when none of the fences carries that word does today's
+ * original first-fence behaviour apply. The whole info string is
+ * captured, not only a leading run of letters, so a tag followed by
+ * attributes (` ```yaml title=x `) is still recognised as `yaml` --
+ * previously the capture stopped at the first non-letter and required a
+ * newline right after it, so an attribute-bearing info string matched no
+ * fence at all, tagged or not; this also widens the untagged first-fence
+ * fallback, so an attribute-bearing fence with no yaml/yml word is at
+ * least recognised as a fence. This preference rule is not free of
+ * surprises of its own: a reviewer whose own return is left unfenced and
+ * who then quotes a ```yaml example afterward has that later example
+ * validated instead of their real return, which the emitted warning
+ * names. Preferring a later, differently-positioned fence over
+ * `fences[0]` is itself named as a warning, distinct from the existing
+ * before/after prose warnings; the before-warning is suppressed when the
+ * text preceding the chosen fence consists only of the skipped fence(s)
+ * and whitespace, since calling a legitimate (if unpreferred) fenced
+ * block "prose" alongside the skip warning that already names it is
+ * redundant; real prose ahead of a skipped fence still warns as before.
  */
 export function extractYamlSource(raw: string): ExtractedYaml {
   const warnings: string[] = [];
@@ -651,11 +668,13 @@ export function extractYamlSource(raw: string): ExtractedYaml {
   // fenced path trims it away with the surrounding prose.
   const withoutBom = raw;
   const fences = [
-    ...withoutBom.matchAll(/```([A-Za-z]*)\r?\n([\s\S]*?)\r?\n?^```/gm),
+    ...withoutBom.matchAll(/```([^\r\n]*)\r?\n([\s\S]*?)\r?\n?^```/gm),
   ];
   if (fences.length > 0) {
+    const fenceTag = (info: string): string =>
+      info.trim().split(/\s+/, 1)[0] ?? "";
     const yamlTaggedIndex = fences.findIndex((match) =>
-      /^(?:yaml|yml)$/i.test(match[1]),
+      /^(?:yaml|yml)$/i.test(fenceTag(match[1])),
     );
     const chosenIndex = yamlTaggedIndex >= 0 ? yamlTaggedIndex : 0;
     const chosen = fences[chosenIndex];
@@ -664,12 +683,18 @@ export function extractYamlSource(raw: string): ExtractedYaml {
       const noun = skippedCount === 1 ? "block" : "blocks";
       const verb = skippedCount === 1 ? "was" : "were";
       warnings.push(
-        `${skippedCount} earlier fenced ${noun} without a yaml/yml tag ${verb} skipped in favor of the later \`\`\`${chosen[1]}\`\`\` fenced block; only that later block was validated`,
+        `${skippedCount} earlier fenced ${noun} without a yaml/yml tag ${verb} skipped in favor of the later \`${fenceTag(chosen[1])}\` fenced block; only that later block was validated`,
       );
     }
     const start = chosen.index ?? 0;
     const before = withoutBom.slice(0, start);
-    if (before.trim().length > 0) {
+    const beforeIsOnlySkippedFences =
+      chosenIndex > 0 &&
+      fences
+        .slice(0, chosenIndex)
+        .reduce((text, skipped) => text.replace(skipped[0], ""), before)
+        .trim().length === 0;
+    if (before.trim().length > 0 && !beforeIsOnlySkippedFences) {
       warnings.push(
         "prose found before the opening ```yaml fence; only the fenced block was validated",
       );

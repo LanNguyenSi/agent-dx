@@ -13,7 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `extractYamlSource` now prefers a fenced block tagged `yaml`/`yml` when
   several fences are present, falling back to the first fence only when
   none carries that tag, with a warning naming the earlier fence it
-  skipped.
+  skipped. The fence tag is now matched against the whole info string's
+  first whitespace-delimited word rather than a leading run of letters,
+  so a tag followed by attributes (```yaml title=x```) is recognized as
+  `yaml` instead of matching no fence at all. The "prose found before"
+  warning no longer also fires when the text preceding the preferred
+  fence is exactly the skipped fence(s) plus whitespace, so a skipped
+  fence is no longer double-reported as both skipped and prose.
 
 ## [0.36.0] - 2026-09-16
 

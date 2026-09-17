@@ -707,15 +707,22 @@ required fields and enums (see the "Reviewer output contract" section of
 block (any language tag, or none) or given unfenced, and prints one
 diagnostic per missing or invalid field. Every element of a string-array
 field (`summary`, `missing_tests`, `residual_risks`) must itself be a
-string; a non-string element (a number, a mapping) is its own diagnostic
-at `<field>[<index>]`. A fenced return ends at the first closing fence
-that starts at column 0, so a reviewer quoting a fenced snippet inside a
+string; a non-string element (a number, a mapping, a boolean, or `null`
+-- written as a bare or `~` bullet) is its own diagnostic at
+`<field>[<index>]`. A fenced return ends at the first closing fence that
+starts at column 0, so a reviewer quoting a fenced snippet inside a
 value (a `description` block scalar, which YAML indents) does not
-truncate the return. When the return carries more than one fenced block,
-the first one tagged `yaml` or `yml` is validated, falling back to the
-first fence only when none carries that tag; a warning names any earlier
-fence skipped this way. `--format json` prints the same diagnostics as a
-single JSON object instead of human-readable text. It
+truncate the return. When the return carries more than one fenced
+block, the first one whose fence tag's first word is `yaml` or `yml`
+(case-insensitive; trailing attributes still count, as in ```yaml
+title=x```) is validated, falling back to the first fence only when
+none carries that word; a warning names any earlier fence skipped this
+way. This preference can validate a later worked example instead of an
+earlier, real but unfenced return: a reviewer who leaves their own
+return unfenced and then quotes a ```yaml``` example afterward has that
+example validated instead, which the emitted warning also names.
+`--format json` prints the same diagnostics as a single JSON object
+instead of human-readable text. It
 exits `0` when the return is structurally valid, `1` when it is
 structurally invalid (a required field is missing or its value falls
 outside its enum, or the input is unparsable, empty, or not a mapping),

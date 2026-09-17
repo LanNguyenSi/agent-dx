@@ -173,10 +173,15 @@ required fields and enums above one by one, printing a diagnostic (path,
 expected, got) for each missing or invalid field; every element of a
 string-array field (`summary`, `missing_tests`, `residual_risks`) must
 itself be a string, with a diagnostic at `<field>[<index>]` for each one
-that is not. When more than one fenced block is present, the first one
-tagged `yaml` or `yml` is validated (falling back to the first fence only
-when none carries that tag), with a warning naming any earlier fence
-skipped this way. Add `--format json` for
+that is not (a number, a mapping, a boolean, and `null` -- a bare or `~`
+bullet -- are all rejected the same way). When more than one fenced block
+is present, the first one whose fence tag's first word is `yaml` or `yml`
+(case-insensitive; trailing attributes still count, as in ```yaml
+title=x```) is validated, falling back to the first fence only when none
+carries that word, with a warning naming any earlier fence skipped this
+way. The same preference can validate a later worked example instead of
+an earlier, real but unfenced return, which the emitted warning also
+names. Add `--format json` for
 the same diagnostics as a single JSON object. It exits `0` when the return
 is structurally valid, `1` when it is structurally invalid (a missing or
 out-of-enum required field, or unparsable, empty, non-mapping input), and
