@@ -43,7 +43,19 @@
   pattern as the other extractions, and dropped the change-relative
   "now" wording from the three cause-hint comments while naming
   `print-deprecations.mjs` and "these workflows'" allowlist in them;
-  re-stamped the same four docs a third time.
+  re-stamped the same four docs a third time. A third follow-up gave each
+  of those three sites its own required cause-hint pattern, matched
+  against the whitespace-normalised text, so deleting a hint sentence
+  while leaving the token name and the word "allowlist" in place fails
+  instead of passing; made `paragraphContaining`'s blank-line split
+  CRLF-tolerant, since on a CRLF checkout the source collapsed into a
+  single paragraph and the exactly-one guard degraded into a whole-file
+  substring check; required a parenthetical to carry more than one token
+  before it counts as a package-list copy, so prose naming a single
+  package in passing is no longer collected; and dropped the
+  `extractQuotedList` wrapper left unused when its callers moved to
+  `extractQuotedListFromSource`; re-stamped the same four docs a fourth
+  time.
 
 - 2026-09-16T13:17:23Z (release cut, pandora run 2026-09-16-releases-batch55,
   REL-001): cut the `[Unreleased]` section under a new `[0.36.0] -

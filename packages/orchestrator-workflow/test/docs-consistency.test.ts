@@ -9085,10 +9085,6 @@ describe("the dist-tag, deprecate, and publish allowlists stay pinned to each ot
     return matches[0][1].split(/\s+/).filter(Boolean);
   }
 
-  function extractQuotedList(relPath: string, varName: string): string[] {
-    return extractQuotedListFromSource(readRepoFile(relPath), varName, relPath);
-  }
-
   // publish-npm.yml's on.push.tags patterns live inside the `on.push.tags:`
   // block specifically; a `- "<pkg>/v*"`-shaped item anywhere ELSE in the
   // file (e.g. under a hypothetical `branches-ignore:` list) must never be
@@ -9222,7 +9218,12 @@ describe("the dist-tag, deprecate, and publish allowlists stay pinned to each ot
     substring: string,
     label: string,
   ): string {
-    const paragraphs = source.split(/\n[ \t]*\n/);
+    // \r?\n on both sides of the blank line: on a CRLF checkout a bare
+    // /\n[ \t]*\n/ never matches, the whole file collapses into a single
+    // "paragraph", and the exactly-one guard below silently degrades into
+    // a whole-file toContain that a second NPM_AGENT_DX_TOKEN paragraph
+    // would pass.
+    const paragraphs = source.split(/\r?\n[ \t]*\r?\n/);
     const matches = paragraphs.filter((p) => p.includes(substring));
     expect(
       matches.length,
@@ -9304,10 +9305,31 @@ describe("the dist-tag, deprecate, and publish allowlists stay pinned to each ot
       "CONTRIBUTING.md",
     );
 
-    for (const [label, text] of [
-      ["npm-dist-tag.yml final ::error::", finalDistTagError],
-      ["print-deprecations.mjs UNCONFIRMED ::warning::", unconfirmedWarning],
-      ["CONTRIBUTING.md token paragraph", tokenParagraph],
+    // Each site carries its own required cause-hint pattern, not just the
+    // NPM_AGENT_DX_TOKEN and allowlist words: both of those words survive
+    // in all three places for other reasons (the dist-tag line names the
+    // allowlist to say the package is not on it, CONTRIBUTING.md's
+    // paragraph is about the token and the allowlist throughout), so
+    // checking only for them leaves the actual hint sentence deletable
+    // with the suite still green. The pattern is matched against the
+    // whitespace-normalised text because CONTRIBUTING.md's sentence wraps
+    // across Markdown source lines.
+    for (const [label, text, causeHint] of [
+      [
+        "npm-dist-tag.yml final ::error::",
+        finalDistTagError,
+        /recently added to the allowlist, check that NPM_AGENT_DX_TOKEN is scoped/,
+      ],
+      [
+        "print-deprecations.mjs UNCONFIRMED ::warning::",
+        unconfirmedWarning,
+        /recently added to the allowlist, check that NPM_AGENT_DX_TOKEN is scoped/,
+      ],
+      [
+        "CONTRIBUTING.md token paragraph",
+        tokenParagraph,
+        /names that as the likely cause/,
+      ],
     ] as const) {
       expect(text, `${label} lost the NPM_AGENT_DX_TOKEN mention`).toContain(
         "NPM_AGENT_DX_TOKEN",
@@ -9315,6 +9337,12 @@ describe("the dist-tag, deprecate, and publish allowlists stay pinned to each ot
       expect(text.toLowerCase(), `${label} lost the allowlist mention`).toMatch(
         /allowlist/,
       );
+      expect(
+        text.replace(/\s+/g, " "),
+        `${label} lost the token-scope cause hint (expected to match ${String(
+          causeHint,
+        )})`,
+      ).toMatch(causeHint);
     }
   });
 
@@ -9375,12 +9403,16 @@ describe("the dist-tag, deprecate, and publish allowlists stay pinned to each ot
   // orchestrator-workflow out of first place or out of the parenthetical
   // altogether. A parenthetical only counts as a package-list copy when
   // EVERY one of its comma-separated tokens is a known publishable name
-  // (from `names`, PUBLISHABLE's own token set) and there is at least one
-  // token, which keeps a single-tag example like publish-npm.yml's
+  // (from `names`, PUBLISHABLE's own token set) and there is MORE THAN
+  // one token. That keeps a single-tag example like publish-npm.yml's
   // "(orchestrator-workflow/v0.1.0)" (one token, not a plain package
-  // name) and an unrelated aside like "(see npm-deprecate.yml and
-  // npm-dist-tag.yml)" (tokens that are not package names) from being
-  // mistaken for a copy.
+  // name), an unrelated aside like "(see npm-deprecate.yml and
+  // npm-dist-tag.yml)" (tokens that are not package names), and ordinary
+  // prose naming one package in passing, such as "the primitives package
+  // (agent-primitives)", from being mistaken for a copy. The floor of two
+  // means the scan would stop recognising copies if PUBLISHABLE ever
+  // shrank to a single package; the pinned count below turns that into a
+  // failure rather than a silent pass.
   function extractParentheticalPackageCopies(
     source: string,
     names: ReadonlySet<string>,
@@ -9397,7 +9429,7 @@ describe("the dist-tag, deprecate, and publish allowlists stay pinned to each ot
         .split(",")
         .map((token) => token.trim())
         .filter(Boolean);
-      if (tokens.length > 0 && tokens.every((token) => names.has(token))) {
+      if (tokens.length > 1 && tokens.every((token) => names.has(token))) {
         copies.push(tokens);
       }
     }
