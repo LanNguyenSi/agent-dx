@@ -11,10 +11,10 @@ name: Move an npm dist-tag
 # and, in npm-deprecate.yml, deprecation; 2FA-bypass is enabled so it
 # works non-interactively in CI. With that scope, adding a package to the
 # allowlist needs no token change. Only if the scope is ever narrowed to
-# named packages does a new allowlist entry need a re-scope by hand on
-# npmjs.com in the same change, or this workflow accepts the package and
-# then fails at the registry read-back assertion, whose error message
-# names the token as the likely cause.
+# named packages would a new allowlist entry need a re-scope by hand on
+# npmjs.com in the same change. Without that re-scope this workflow
+# accepts the package and then fails at the registry read-back assertion,
+# whose error message names the token as the likely cause.
 # The npm CLI cannot create granular tokens, so it was created by hand on
 # npmjs.com (Access Tokens -> Generate New Token -> Granular Access Token).
 # The token has an expiry; its rotation date is tracked by the maintainer
@@ -190,6 +190,6 @@ jobs:
             fi
             echo "not yet visible: ${TAG} -> '${actual:-<absent>}' (want ${VERSION}); retrying"
           done
-          echo "::error::${PACKAGE}@${TAG} still does not point at ${VERSION} after polling; the write did not land; if ${PACKAGE} was recently added to the allowlist, check that NPM_AGENT_DX_TOKEN on npmjs.com can write it." >&2
+          echo "::error::${PACKAGE}@${TAG} still does not point at ${VERSION} after polling; the write did not land; if ${PACKAGE} was recently added to the allowlist, check that NPM_AGENT_DX_TOKEN on npmjs.com can write it and has not expired." >&2
           npm view "$PACKAGE" dist-tags --json || true
           exit 1

@@ -12,11 +12,11 @@ name: Deprecate an npm version
 # in npm-dist-tag.yml, dist-tag moves; 2FA-bypass is enabled so it works
 # non-interactively in CI. With that scope, adding a package to the
 # allowlist needs no token change. Only if the scope is ever narrowed to
-# named packages does a new allowlist entry need a re-scope by hand on
-# npmjs.com in the same change, or this workflow accepts the package and
-# then fails at the registry read-back assertion in
-# .github/scripts/print-deprecations.mjs, whose warning message names the
-# token as the likely cause.
+# named packages would a new allowlist entry need a re-scope by hand on
+# npmjs.com in the same change. Without that re-scope this workflow
+# accepts the package and then fails at the registry read-back assertion
+# in .github/scripts/print-deprecations.mjs, whose warning message names
+# the token as the likely cause.
 # The npm CLI cannot create granular tokens, so it was created by hand on
 # npmjs.com (Access Tokens -> Generate New Token -> Granular Access Token).
 # The token has an expiry; its rotation date is tracked by the maintainer

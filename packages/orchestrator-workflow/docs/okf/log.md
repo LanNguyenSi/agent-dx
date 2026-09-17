@@ -10250,5 +10250,6 @@ headers, their allowlist step comments, CONTRIBUTING's token paragraph
 and both read-back failure hints no longer describe the token as scoped
 to the allowlisted packages or instruct a per-package re-scope. The
 cause-hint pin in `test/docs-consistency.test.ts` follows the new hint
-wording; the four docs sourcing that test file were re-verified and
-re-stamped (no citation into it moved).
+wording (and now also names an expired token as a cause); the four docs
+sourcing that test file were re-verified and re-stamped twice, once per
+edit of the pin (no citation into it moved).

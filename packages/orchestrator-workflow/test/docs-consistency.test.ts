@@ -9342,7 +9342,7 @@ describe("the dist-tag, deprecate, and publish allowlists stay pinned to each ot
       [
         "CONTRIBUTING.md token paragraph",
         tokenParagraph,
-        /names that as the likely cause/,
+        /names the token as the likely cause/,
       ],
     ] as const) {
       expect(text, `${label} lost the NPM_AGENT_DX_TOKEN mention`).toContain(
