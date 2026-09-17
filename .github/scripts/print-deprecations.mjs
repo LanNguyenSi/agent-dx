@@ -168,7 +168,7 @@ if (!state.deprecated.includes(expect)) {
   console.log("\nregistry state now:");
   render(state);
   console.error(
-    `::warning::${pkg}@${expect} is not visible as deprecated yet. The write may still be propagating through the registry CDN, or it may not have landed; if ${pkg} was recently added to the allowlist, check that NPM_AGENT_DX_TOKEN is scoped to it on npmjs.com. Re-run this check before re-running the deprecate step.`,
+    `::warning::${pkg}@${expect} is not visible as deprecated yet. The write may still be propagating through the registry CDN, or it may not have landed; if ${pkg} was recently added to the allowlist, check that NPM_AGENT_DX_TOKEN on npmjs.com can write it. Re-run this check before re-running the deprecate step.`,
   );
   process.exit(3);
 }

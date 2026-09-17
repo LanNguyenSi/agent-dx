@@ -10240,3 +10240,15 @@ pin: they read it from packages/okf-kit's own version, so a pin bump no
 longer turns that block red. Re-verified and re-stamped the four docs
 that source the test file; no citation into it moved (the edit sits
 inside one describe well below every cited line).
+
+## 2026-09-17 (npm token scope wording)
+
+The operator confirmed that NPM_AGENT_DX_TOKEN has read and write access
+to all of the account's packages and that publishing runs over OIDC; the
+token serves only the dist-tag and deprecate workflows. The two workflow
+headers, their allowlist step comments, CONTRIBUTING's token paragraph
+and both read-back failure hints no longer describe the token as scoped
+to the allowlisted packages or instruct a per-package re-scope. The
+cause-hint pin in `test/docs-consistency.test.ts` follows the new hint
+wording; the four docs sourcing that test file were re-verified and
+re-stamped (no citation into it moved).
