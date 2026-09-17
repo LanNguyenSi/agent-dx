@@ -150,8 +150,10 @@ export function hasUtcDesignator(raw: string): boolean {
  * The `date:`/`string:` prefixes keep the two YAML shapes distinguishable: a
  * `!!timestamp`-tagged scalar resolving to a native `Date` and a plain string
  * are different frontmatter, so rewriting one into the other counts as a
- * changed identity here (consulted only when at least one side is otherwise
- * unparseable to an instant). Deliberately NOT normalized to an epoch: this
+ * changed identity here (consulted whenever `compareRestampDirection`
+ * cannot judge direction: either side unparseable to an instant, or either
+ * side a string with no UTC designator). Deliberately NOT normalized to an
+ * epoch: this
  * is an identity test ("did the raw value change"), not a chronological
  * one. Whether the new value is CORRECT is a separate question this
  * function deliberately does not answer (see the README's known limitations).

@@ -1117,6 +1117,93 @@ describe("sources-fresh", () => {
       );
     });
 
+    it("a rewrite from a quoted string to a native YAML date naming the SAME instant is NOT a re-stamp -> stays STALE + same-instant notice naming the date branch (D-004, D-009)", () => {
+      // describeTimestampValue's OTHER branch: when the rewritten side is a
+      // native `Date` (a `!!timestamp`-tagged scalar, no raw string to
+      // quote), the same-instant notice names it by shape plus the instant
+      // it resolved to ("a native YAML date naming <iso>") rather than by a
+      // quoted raw spelling. Both sides still name the same instant, so
+      // this is `not-restamped` exactly like the string-to-string rewrite
+      // above, just exercising the branch that has no raw string at all.
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: `${fm(STAMP)}\n# Doc\n`,
+          },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: `${fm("!!timestamp 2026-01-01 00:00:00")}\n# Doc\n`,
+          },
+          { relPath: "source.ts", content: "export const a = 2;\n" },
+        ],
+        "2026-03-01T00:00:00Z",
+      );
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      const findings = sourcesFreshRule.run(ctx);
+      expect(findings).toHaveLength(2);
+      const stale = findings.find((f) => f.message.includes("STALE"));
+      const sameInstant = findings.find((f) =>
+        f.message.includes("did not move the timestamp forward"),
+      );
+      expect(stale).toMatchObject({
+        ruleId: "sources-fresh",
+        severity: "warning",
+      });
+      expect(stale?.message).not.toContain("moved backwards");
+      expect(sameInstant).toMatchObject({
+        ruleId: "sources-fresh",
+        severity: "notice",
+      });
+      expect(sameInstant?.message).toBe(
+        're-stamp did not move the timestamp forward: "2026-01-01T00:00:00Z" was rewritten as a native YAML date naming 2026-01-01T00:00:00.000Z in the doc\'s last commit, but both name the same instant (2026-01-01T00:00:00.000Z), so this is not a re-verification',
+      );
+    });
+
+    it("a five-month BACKWARDS move between two designator-less timestamps stays clean of the backwards warning and the same-instant notice (D-013 fallback)", () => {
+      // Neither value carries a UTC designator, so isDirectionComparable
+      // rejects both and compareRestampDirection falls back to comparing
+      // raw IDENTITY only (pre-D-004 behavior): the values differ, so this
+      // reads as an ordinary `restamped`, and the direction those two
+      // values actually imply (a five-month move BACKWARDS, were it judged)
+      // never surfaces as the "moved backwards" warning or the
+      // same-instant notice -- there is no direction verdict to report
+      // either way, and the source stays clean. This is the committed-path
+      // unit-level pin for the invariant `cli-staleness.test.ts` already
+      // checks holds across two `TZ`s end-to-end.
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: `${fm("2026-06-01T00:00:00")}\n# Doc\n`,
+          },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: `${fm("2026-01-01T00:00:00")}\n# Doc\n`,
+          },
+          { relPath: "source.ts", content: "export const a = 2;\n" },
+        ],
+        "2026-03-01T00:00:00Z",
+      );
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      const findings = sourcesFreshRule.run(ctx);
+      expect(findings).toEqual([]);
+    });
+
     it("a forward re-stamp of less than a second still counts as restamped -> passes, at millisecond resolution (D-008)", () => {
       // D-008: compareRestampDirection compares at MILLISECOND resolution
       // (getTimestampEpochMs), not the whole-second floor getTimestampEpoch

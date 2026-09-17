@@ -35,11 +35,17 @@ function runCliWithTz(args: string[], tz: string): RunResult {
     const stdout = execFileSync("node", [CLI_PATH, ...args], {
       encoding: "utf8",
       env: { ...process.env, TZ: tz },
+      timeout: 30_000,
     });
     return { status: 0, stdout, stderr: "" };
   } catch (err) {
-    const e = err as { status: number; stdout: string; stderr: string };
-    return { status: e.status, stdout: e.stdout, stderr: e.stderr };
+    const e = err as { status?: number; stdout?: unknown; stderr?: unknown };
+    if (typeof e.stdout !== "string") throw err;
+    return {
+      status: e.status ?? 1,
+      stdout: e.stdout,
+      stderr: typeof e.stderr === "string" ? e.stderr : "",
+    };
   }
 }
 

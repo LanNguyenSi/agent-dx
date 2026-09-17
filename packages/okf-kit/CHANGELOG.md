@@ -31,8 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parsed to an instant at all, or one spelled without a UTC designator
   (`2026-01-01T13:00:00`, which `Date.parse` resolves in the machine's own
   timezone), falls back to comparing the raw values' identity exactly as
-  before this direction rule existed, so neither the verdict nor the
-  `--strict` exit code can depend on the runner's `TZ`. A native YAML date
+  before this direction rule existed, so no direction verdict, and no
+  `--strict` exit code arising from one, can depend on the runner's `TZ`;
+  the rule's day-wide staleness comparison still resolves a
+  designator-less stamp in local time, unchanged by this release. A native
+  YAML date
   (`!!timestamp`) needs no designator and is judged normally. Tracker:
   agent-dx task `ccdf051b`.
 

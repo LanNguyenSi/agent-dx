@@ -757,6 +757,88 @@ describe("sources-fresh: --dirty-as-now", () => {
       );
     });
 
+    it("with the flag: HEAD committed as a native YAML date, re-stamped locally to a LATER string with a UTC designator -> direction judged, restamped/clean (D-013)", () => {
+      // HEAD's committed value carries no raw string at all (a
+      // `!!timestamp`-tagged scalar), so `isDirectionComparable` takes its
+      // "no designator to gate" branch there; the on-disk value has a real
+      // `Z`. Both are direction-comparable, the instants differ, and the
+      // move is FORWARD, so this is an ordinary re-stamp under
+      // `--dirty-as-now` -- clean, not a fallback to raw-identity
+      // comparison the way a designator-less STRING would be.
+      repo.commitFile(
+        "source.ts",
+        "export const a = 1;\n",
+        "2025-01-01T00:00:00Z",
+      );
+      repo.commitFile(
+        "bundle/doc.md",
+        "---\ntype: concept\ntimestamp: !!timestamp 2025-02-01 00:00:00\nsources:\n  - source.ts\n---\n\n# Doc\n",
+        "2025-02-01T00:00:00Z",
+      );
+
+      fs.writeFileSync(
+        path.join(repo.dir, "source.ts"),
+        "export const a = 2;\n",
+      );
+      writeDoc(repo.dir, "bundle/doc.md", {
+        type: "concept",
+        timestamp: "2025-03-01T00:00:00Z",
+        sources: ["source.ts"],
+      });
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      ctx.dirtyAsNow = true;
+      expect(sourcesFreshRule.run(ctx)).toEqual([]);
+    });
+
+    it("with the flag: HEAD committed as a native YAML date, re-stamped locally to an EARLIER string with a UTC designator -> direction judged, STALE + backwards warning (D-013)", () => {
+      // The other direction of the same fixture shape: the on-disk value
+      // is a real `Z` string EARLIER than HEAD's native-date instant.
+      // Direction is still judged (neither side is ambiguous), and it
+      // reads backwards, so per D-004 this is not a re-verification.
+      repo.commitFile(
+        "source.ts",
+        "export const a = 1;\n",
+        "2025-01-01T00:00:00Z",
+      );
+      repo.commitFile(
+        "bundle/doc.md",
+        "---\ntype: concept\ntimestamp: !!timestamp 2025-03-01 00:00:00\nsources:\n  - source.ts\n---\n\n# Doc\n",
+        "2025-03-01T00:00:00Z",
+      );
+
+      fs.writeFileSync(
+        path.join(repo.dir, "source.ts"),
+        "export const a = 2;\n",
+      );
+      writeDoc(repo.dir, "bundle/doc.md", {
+        type: "concept",
+        timestamp: "2025-01-15T00:00:00Z",
+        sources: ["source.ts"],
+      });
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      ctx.dirtyAsNow = true;
+      const findings = sourcesFreshRule.run(ctx);
+
+      expect(findings).toHaveLength(2);
+      const stale = findings.find((f) => f.message.includes("STALE"));
+      const backwards = findings.find((f) =>
+        f.message.includes("moved backwards"),
+      );
+      expect(stale).toMatchObject({
+        ruleId: "sources-fresh",
+        severity: "warning",
+      });
+      expect(backwards).toMatchObject({
+        ruleId: "sources-fresh",
+        severity: "warning",
+      });
+      expect(backwards?.message).toContain("2025-03-01T00:00:00.000Z");
+      expect(backwards?.message).toContain("2025-01-15T00:00:00.000Z");
+      expect(backwards?.message).toContain("in the working tree");
+    });
+
     it("with the flag: a doc committed with an unparseable timestamp, re-stamped locally to a valid value, falls back to raw-identity comparison -> restamped/clean (D-004 fallback)", () => {
       // HEAD's committed doc timestamp does not parse, so
       // compareRestampDirection's ms comparison cannot judge direction and
