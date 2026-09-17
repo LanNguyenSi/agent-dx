@@ -653,6 +653,81 @@ describe("okf-kit cli staleness (sources-fresh + repo-root auto-detection)", () 
     }
   });
 
+  it("the OLDER side is gated too: a designator-less value in the FIRST PARENT reads identically under TZ=UTC and TZ=Asia/Tokyo (D-013)", () => {
+    // Mirror of the test above, with the two sides swapped: here the bare
+    // datetime is the value the commit REPLACED (the first parent's), and
+    // the commit's own value carries a `Z`. Ungated, the parent's
+    // "2026-01-01T13:00:00" resolves to 13:00 UTC on a UTC runner (later
+    // than the commit's 12:00Z: a backwards move, STALE plus the backwards
+    // warning, `--strict` exit 1) and to 04:00 UTC on a UTC+9 one (earlier:
+    // a forward move, clean, exit 0) -- the same repository, two opposite
+    // verdicts again. Gating only the NEWER side would leave that half
+    // silently TZ-dependent, which is why both sides go through
+    // `isDirectionComparable`.
+    //
+    // As above, the fixture keeps the day-wide STALENESS comparison far
+    // from its own boundary (the source's commit is a month after the
+    // doc's stamp under either reading), so the direction verdict is the
+    // only thing a timezone shift could flip here.
+    const repo = createTmpGitRepo();
+    try {
+      const doc = (stampLine: string): string =>
+        `---\ntype: concept\ntimestamp: ${stampLine}\nsources:\n  - source.ts\n---\n\n# Doc\n`;
+      repo.commitFiles(
+        [
+          // Unquoted on purpose: YAML 1.2's core schema leaves a bare
+          // datetime a STRING (only an explicit `!!timestamp` tag resolves
+          // to a native `Date`), so this is the designator-less string
+          // shape the gate is about, not the native-date shape the test
+          // below covers.
+          { relPath: "bundle/doc.md", content: doc("2026-01-01T13:00:00") },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+      repo.commitFiles(
+        [
+          { relPath: "bundle/doc.md", content: doc('"2026-01-01T12:00:00Z"') },
+          { relPath: "source.ts", content: "export const a = 2;\n" },
+        ],
+        "2026-02-01T00:00:00Z",
+      );
+
+      const args = [
+        "check",
+        path.join(repo.dir, "bundle"),
+        "--repo-root",
+        repo.dir,
+        "--strict",
+        "--json",
+      ];
+      const utc = runCliWithTz(args, "UTC");
+      const tokyo = runCliWithTz(args, "Asia/Tokyo");
+      const freshness = (result: RunResult) =>
+        (JSON.parse(result.stdout) as JsonReport).findings.filter((f) =>
+          f.ruleId.startsWith("sources-fresh"),
+        );
+
+      expect(freshness(tokyo)).toEqual(freshness(utc));
+      expect(tokyo.status).toBe(utc.status);
+      // And the invariant verdict is the right one: with the older side
+      // carrying no designator, no direction is claimed at all, so the
+      // changed value takes the raw-identity fallback and counts as a
+      // re-stamp -- no backwards warning, no STALE, on either machine.
+      expect(
+        freshness(utc).filter(
+          (f) =>
+            f.message.includes("moved backwards") ||
+            f.message.includes("STALE"),
+        ),
+      ).toEqual([]);
+      expect(utc.status).toBe(0);
+      expect(tokyo.status).toBe(0);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
   it("a native YAML date (`!!timestamp`) has no designator to carry and is judged for direction anyway, identically under both timezones (D-013)", () => {
     // The other side of the same decision: `getRawTimestampString` returns
     // undefined for a native date, and that undefined means "nothing to

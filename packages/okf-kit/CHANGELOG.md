@@ -33,11 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   timezone), falls back to comparing the raw values' identity exactly as
   before this direction rule existed, so no direction verdict, and no
   `--strict` exit code arising from one, can depend on the runner's `TZ`;
-  the rule's day-wide staleness comparison still resolves a
-  designator-less stamp in local time, unchanged by this release. A native
-  YAML date
-  (`!!timestamp`) needs no designator and is judged normally. Tracker:
-  agent-dx task `ccdf051b`.
+  that holds for either side of the comparison, the new value and the one
+  it replaced alike. The rule's day-wide staleness comparison still
+  resolves a designator-less stamp in local time, unchanged by this
+  release, and a native YAML date (`!!timestamp`) needs no designator and
+  is judged normally. Tracker: agent-dx task `ccdf051b`.
 
 - CI: the agent-dx `okf-anchor-guard` job (`.github/workflows/ci.yml`) and
   `okf-staleness` job (`.github/workflows/okf-staleness.yml`)'s "Install

@@ -926,26 +926,19 @@ type RestampResult = {
  * Whether one side of the direction comparison resolves to an instant that
  * is the SAME on every machine, which is what `compareRestampDirection` has
  * to have before it may call one value earlier or later than another
- * (D-013).
- *
- * A string with no `Z` and no numeric offset ("2026-01-01T13:00:00") is
- * parsed by `Date.parse` in the MACHINE'S OWN timezone, so the same two
- * frontmatter values can compare forward on a UTC runner and backward on a
- * UTC+9 laptop -- a verdict (and, under `--strict`, an exit code) that
- * depends on `TZ` rather than on the repository. `hasUtcDesignator` is the
- * same test `sources-fresh-future` applies for the same reason; its doc
- * comment's note that this rule's day-wide thresholds make the ambiguity
- * immaterial stopped holding once direction became a strict inequality,
- * which no threshold widens.
+ * (D-013). BOTH sides go through it, not just the newer one.
  *
  * A native `Date` (`getRawTimestampString` returns undefined for it) is
- * comparable: it carries no designator because it needs none -- the YAML
- * parser already resolved it to a fixed instant (a `!!timestamp` scalar
- * without a zone is UTC by the YAML 1.1 spec, not local time), and
- * `Date#getTime()` is that instant on every machine. Undefined for any
- * OTHER reason (missing, blank, non-scalar) cannot reach here: this is only
- * consulted for a side `getTimestampEpochMs` already resolved, and those
- * cases resolve to undefined there.
+ * comparable: the YAML parser already resolved it to a fixed instant (a
+ * `!!timestamp` scalar without a zone is UTC by the YAML 1.1 spec, not
+ * local time), and `Date#getTime()` is that instant on every machine.
+ * Undefined for any OTHER reason (missing, blank, non-scalar) cannot reach
+ * here: this is only consulted for a side `getTimestampEpochMs` already
+ * resolved, and those cases resolve to undefined there.
+ *
+ * What `hasUtcDesignator` tests, which comparisons this gate covers, and
+ * why, is written down once: see the README's "Designator gate" paragraph
+ * under "Staleness (sources-fresh)".
  */
 function isDirectionComparable(parsed: unknown): boolean {
   const raw = getRawTimestampString(parsed);
@@ -1005,9 +998,9 @@ function describeTimestampValue(parsed: unknown, epochMs: number): string {
  *
  * When EITHER side's `timestamp` cannot be parsed to an instant at all
  * (missing, blank, or a string `Date.parse` rejects), OR either side is a
- * string carrying no UTC designator (D-013, see
- * `isDirectionComparable`), direction cannot be judged: this falls back to
- * today's pre-D-004 behaviour of comparing the two values' raw IDENTITY
+ * string the designator gate rejects (D-013, see `isDirectionComparable`),
+ * direction cannot be judged: this falls back to today's pre-D-004
+ * behaviour of comparing the two values' raw IDENTITY
  * (`getTimestampIdentity`) instead of guessing a direction -- any textual
  * change still counts as `restamped`, exactly as before this decision
  * existed, and never triggers `backwards` or `sameInstant` (there is no
