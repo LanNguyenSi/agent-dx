@@ -7,15 +7,8 @@ import { checkPath, checkText, summarize } from "./engine.js";
 import { defaultConfig, loadConfig } from "./config.js";
 import { allPacks, packsByFilter } from "./packs/registry.js";
 import { renderText } from "./cli-render.js";
+import { noStdinContentError, readStdin, stdinIdleTimeoutMs } from "./stdin.js";
 import type { CheckSummary } from "./types.js";
-
-// Idle bound for a stdin read; `readStdin` below says what it protects
-// against and why this value. Declared up here rather than next to
-// `readStdin` because `program.parseAsync()` below runs the `check` action
-// while this module is still evaluating, so a `const` declared after that
-// call is in its temporal dead zone when the action reads it (a hoisted
-// `function` is not, which is why every other helper can live below).
-const DEFAULT_STDIN_IDLE_TIMEOUT_MS = 10_000;
 
 const program = new Command();
 
@@ -210,74 +203,13 @@ function normalizeOpts(raw: unknown): CheckOpts {
   };
 }
 
-// Reading stdin has to both terminate and produce something. `check` with
-// no path (or a bare "-") scans content piped in on stdin, and
-// `--stdin-path` only names that piped content, so a caller who meant to
-// scan a file but piped nothing in has two ways to go wrong, and both used
-// to pass silently:
-//
-//   - stdin ends with no content at all (an interactive TTY, `< /dev/null`,
-//     `printf "" |`, a whitespace-only body). That produced a clean,
-//     green report over an empty document -- exit 0, "0 violations" --
-//     which reads as "checked, nothing found" rather than "nothing was
-//     checked". Emptiness, not TTY-ness, is the predicate for this.
-//   - stdin never ends at all: an inherited, non-TTY stream with no writer,
-//     which is what a CI step or an agent harness spawning the CLI with
-//     stdio inherited hands it. That hung forever with no output.
-//
-// The second is bounded by an IDLE timeout, re-armed on every chunk, so a
-// large but flowing input is never truncated and only a stream that
-// produces nothing at all for this long is given up on. The trade-off: a
-// pipeline whose producer legitimately stalls longer than this reports a
-// usage error instead of waiting. 10s is far above any of the documented
-// producers (a `git log`, a file redirect, a heredoc), and
-// SLOP_DETECTOR_STDIN_TIMEOUT_MS overrides it (it exists so the
-// never-ending-stdin case is cheap to pin in `test/cli.test.ts`; the
-// default must stand on its own without a caller setting anything).
-function stdinIdleTimeoutMs(): number {
-  const raw = process.env.SLOP_DETECTOR_STDIN_TIMEOUT_MS;
-  if (raw === undefined) return DEFAULT_STDIN_IDLE_TIMEOUT_MS;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0
-    ? parsed
-    : DEFAULT_STDIN_IDLE_TIMEOUT_MS;
-}
-
-function noStdinContentError(reason: string): Error {
-  return new Error(
-    `${reason}, so nothing was scanned. \`check\` with no path (or a bare "-") scans content piped in on stdin, and \`--stdin-path <name>\` only names that piped content -- it never opens a file. Pipe content in, e.g. \`git log -1 --format=%B | slop-detector check --stdin-path COMMIT_MSG --pack review-slop\`, or pass one or more paths to scan files instead.`,
-  );
-}
-
-async function readStdin(idleTimeoutMs: number): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let data = "";
-    let idle: NodeJS.Timeout | undefined;
-    const arm = () => {
-      clearTimeout(idle);
-      idle = setTimeout(() => {
-        process.stdin.pause();
-        reject(
-          noStdinContentError(
-            `stdin produced no data for ${idleTimeoutMs}ms and never ended`,
-          ),
-        );
-      }, idleTimeoutMs);
-    };
-    const settle = (fn: () => void) => {
-      clearTimeout(idle);
-      fn();
-    };
-    process.stdin.setEncoding("utf8");
-    process.stdin.on("data", (chunk: string) => {
-      data += chunk;
-      arm();
-    });
-    process.stdin.on("end", () => settle(() => resolve(data)));
-    process.stdin.on("error", (err: Error) => settle(() => reject(err)));
-    arm();
-  });
-}
+// The idle-bound resolver, the "no content at all" error, and the reader
+// itself live in ./stdin.ts (its module comment has the full rationale and
+// trade-off), not here: that keeps them importable by a unit test without
+// that import triggering this module's own `program.parseAsync()` side
+// effect. What stays here is the TTY fast path above and the
+// post-read emptiness check, since both are about `check`'s own argument
+// handling rather than stdin mechanics.
 
 function readVersion(): string {
   try {

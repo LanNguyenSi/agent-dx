@@ -76,6 +76,51 @@ function runCliWithOpenStdin(
   });
 }
 
+/**
+ * Sibling of `runCliWithOpenStdin` that drives stdin with a `script`
+ * callback instead of leaving it untouched, so a caller can pin the
+ * data-then-stall shape: write something, wait past the idle bound, then
+ * end stdin. `script` gets `write`/`end` once the child is spawned; nothing
+ * here waits for it, so a script that itself awaits a `setTimeout` before
+ * calling `end` is what actually produces the stall.
+ */
+function runCliWithStdinScript(
+  args: string[],
+  timeoutMs: number,
+  script: (write: (chunk: string) => void, end: () => void) => void,
+): Promise<{ stdout: string; stderr: string; status: number | null }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      ["--import", "tsx", cliEntry, ...args],
+      {
+        cwd: packageRoot,
+        stdio: ["pipe", "pipe", "pipe"],
+        env: {
+          ...process.env,
+          SLOP_DETECTOR_STDIN_TIMEOUT_MS: String(timeoutMs),
+        },
+      },
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (c: string) => {
+      stdout += c;
+    });
+    child.stderr.on("data", (c: string) => {
+      stderr += c;
+    });
+    child.on("error", reject);
+    child.on("close", (status) => resolve({ stdout, stderr, status }));
+    script(
+      (chunk) => child.stdin.write(chunk),
+      () => child.stdin.end(),
+    );
+  });
+}
+
 let tmp: string;
 
 beforeEach(() => {
@@ -231,6 +276,20 @@ describe("cli check with nothing piped in on stdin", () => {
     expect(status).toBe(2);
     expect(stderr).toMatch(/produced no data for 400ms and never ended/);
     expect(stderr).toContain("--stdin-path");
+  }, 20_000);
+
+  it("data then a stall past the bound is still scanned once stdin ends (arm-once, not re-armed on every chunk)", async () => {
+    const { stdout, status } = await runCliWithStdinScript(
+      ["check", "--stdin-path", "COMMIT_MSG", "--pack", "review-slop"],
+      300,
+      (write, end) => {
+        write("Fixed per finding F5 in review round 2.\n");
+        setTimeout(end, 900);
+      },
+    );
+    expect(stdout).toMatch(/1 files scanned/);
+    expect(stdout).toContain("F5");
+    expect(status).toBe(1);
   }, 20_000);
 
   it("a non-empty pipe is still scanned (the bound never truncates real input)", () => {

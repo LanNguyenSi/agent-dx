@@ -10,6 +10,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The npm tarball now ships a `LICENSE` file matching the repo root LICENSE
   (MIT), asserted by the monorepo's `lint-package-licenses` CI job.
 
+### Fixed
+
+- `check`'s stdin idle timeout is now armed once, before the first byte,
+  and cleared for good on the first chunk that arrives, instead of being
+  re-armed on every chunk. It still bounds a stdin that is opened and
+  never written to at all (the CI/agent-harness no-writer shape the
+  timeout was added for); the trade-off is that a producer which writes
+  some data and then stalls forever mid-stream is no longer bounded by it
+  and hangs like an ordinary pipe again, since a producer that has proven
+  it is alive is trusted to keep going.
+
 ### Added
 
 - `workflow-slop` gains three rules closing the gap between a fleet
