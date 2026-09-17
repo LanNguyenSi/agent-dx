@@ -6,9 +6,10 @@ name: Deprecate an npm version
 # secret.
 #
 # NPM_AGENT_DX_TOKEN is a granular npm automation token scoped to the
-# packages this workflow's allowlist names (orchestrator-workflow, okf-kit),
-# with publish/write permission (deprecation and, in npm-dist-tag.yml,
-# dist-tag moves) and 2FA-bypass enabled so it works non-interactively in CI.
+# packages this workflow's allowlist names (orchestrator-workflow, okf-kit,
+# agent-primitives), with publish/write permission (deprecation and, in
+# npm-dist-tag.yml, dist-tag moves) and 2FA-bypass enabled so it works
+# non-interactively in CI.
 # The npm CLI cannot create granular tokens, so it was created by hand on
 # npmjs.com (Access Tokens -> Generate New Token -> Granular Access Token).
 # The token has an expiry; its rotation date is tracked by the maintainer
@@ -72,8 +73,9 @@ jobs:
           PACKAGE: ${{ inputs.package }}
           VERSION: ${{ inputs.version }}
           MESSAGE: ${{ inputs.message }}
-          # Keep in step with publish-npm.yml's PUBLISHABLE list.
-          ALLOWLIST: "orchestrator-workflow okf-kit"
+          # Keep in step with publish-npm.yml's PUBLISHABLE list
+          # (orchestrator-workflow, okf-kit, agent-primitives).
+          ALLOWLIST: "orchestrator-workflow okf-kit agent-primitives"
         run: |
           set -euo pipefail
 

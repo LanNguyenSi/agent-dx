@@ -9038,3 +9038,56 @@ describe("implementer pre-return check leads with the portable invocation", () =
     );
   });
 });
+
+/**
+ * agent-dx tracker 8ebaf3f6: npm-dist-tag.yml and npm-deprecate.yml each
+ * validate their `package` input against their own `ALLOWLIST` env, and
+ * both comment blocks claim that allowlist tracks publish-npm.yml's
+ * `PUBLISHABLE` list. Nothing pinned that claim, so the three lists could
+ * silently drift apart (a package added to one, forgotten in another)
+ * with no test to catch it. This parses the three values straight out of
+ * the workflow YAML, publish-npm.yml being the source of truth, and
+ * asserts set-equality of their space-separated tokens.
+ */
+describe("the dist-tag, deprecate, and publish allowlists stay pinned to each other", () => {
+  const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
+  const readRepoFile = (relPath: string): string =>
+    readFileSync(`${repoRoot}/${relPath}`, "utf8");
+
+  function extractQuotedList(source: string, varName: string): string[] {
+    const match = source.match(new RegExp(`${varName}:\\s*"([^"]*)"`));
+    expect(match, `${varName} not found`).not.toBeNull();
+    return (match as RegExpMatchArray)[1].split(/\s+/).filter(Boolean);
+  }
+
+  const publishable = extractQuotedList(
+    readRepoFile(".github/workflows/publish-npm.yml"),
+    "PUBLISHABLE",
+  );
+  const distTagAllowlist = extractQuotedList(
+    readRepoFile(".github/workflows/npm-dist-tag.yml"),
+    "ALLOWLIST",
+  );
+  const deprecateAllowlist = extractQuotedList(
+    readRepoFile(".github/workflows/npm-deprecate.yml"),
+    "ALLOWLIST",
+  );
+
+  it("found a non-empty PUBLISHABLE list to pin against (sanity: not vacuously true)", () => {
+    expect(publishable.length).toBeGreaterThan(0);
+  });
+
+  it("npm-dist-tag.yml's ALLOWLIST is the same set of tokens as publish-npm.yml's PUBLISHABLE", () => {
+    expect(
+      [...distTagAllowlist].sort(),
+      "npm-dist-tag.yml ALLOWLIST drifted from publish-npm.yml PUBLISHABLE",
+    ).toEqual([...publishable].sort());
+  });
+
+  it("npm-deprecate.yml's ALLOWLIST is the same set of tokens as publish-npm.yml's PUBLISHABLE", () => {
+    expect(
+      [...deprecateAllowlist].sort(),
+      "npm-deprecate.yml ALLOWLIST drifted from publish-npm.yml PUBLISHABLE",
+    ).toEqual([...publishable].sort());
+  });
+});

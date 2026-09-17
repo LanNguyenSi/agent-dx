@@ -5,9 +5,10 @@ name: Move an npm dist-tag
 # the write-capable NPM_AGENT_DX_TOKEN lives only as a repository secret.
 #
 # NPM_AGENT_DX_TOKEN is a granular npm automation token scoped to the
-# packages this workflow's allowlist names (orchestrator-workflow, okf-kit),
-# with publish/write permission (dist-tag moves and, in npm-deprecate.yml,
-# deprecation) and 2FA-bypass enabled so it works non-interactively in CI.
+# packages this workflow's allowlist names (orchestrator-workflow, okf-kit,
+# agent-primitives), with publish/write permission (dist-tag moves and, in
+# npm-deprecate.yml, deprecation) and 2FA-bypass enabled so it works
+# non-interactively in CI.
 # The npm CLI cannot create granular tokens, so it was created by hand on
 # npmjs.com (Access Tokens -> Generate New Token -> Granular Access Token).
 # The token has an expiry; its rotation date is tracked by the maintainer
@@ -73,11 +74,12 @@ jobs:
           PACKAGE: ${{ inputs.package }}
           VERSION: ${{ inputs.version }}
           TAG: ${{ inputs.tag }}
-          # NPM PACKAGE NAMES. publish-npm.yml's PUBLISHABLE list holds package
+          # NPM PACKAGE NAMES. publish-npm.yml's PUBLISHABLE list
+          # (orchestrator-workflow, okf-kit, agent-primitives) holds package
           # DIRECTORY names; today the two coincide, but a future package whose
           # npm name diverges from its directory name must be added here under
           # its npm name, not copied verbatim.
-          ALLOWLIST: "orchestrator-workflow okf-kit"
+          ALLOWLIST: "orchestrator-workflow okf-kit agent-primitives"
         run: |
           set -euo pipefail
 
