@@ -178,8 +178,10 @@ bullet -- are all rejected the same way). A fenced return ends at the
 first closing fence that starts at column 0, repeats at least as many
 backticks as the opening one, and carries nothing but whitespace after
 that run, so a return wrapped in four backticks may quote a snippet
-fenced in three without truncating itself; an opener longer than every
-closing run present is no fence at all. When more than one fenced block
+fenced in three without truncating itself; a return with no closing
+fence satisfying all three is not fenced at all and reaches the parser
+whole, including one whose opener is longer than every closing run
+present. When more than one fenced block
 is present, the first one whose fence tag's first word is `yaml` or `yml`
 is validated, case-insensitively and counting whitespace-separated
 attributes (`yaml title=x` counts; `yaml,title=x` does not, its first

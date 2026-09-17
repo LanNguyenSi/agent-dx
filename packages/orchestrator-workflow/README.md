@@ -714,9 +714,10 @@ starts at column 0, repeats at least as many backticks as the opening
 fence, and carries nothing but whitespace after that run, so neither a
 reviewer quoting a fenced snippet inside a value (a `description` block
 scalar, which YAML indents) nor one wrapping a return in four backticks
-around a snippet fenced at column 0 truncates the return. An opener
-longer than every closing run in the return is no fence at all, so its
-whole text reaches the parser. When the return carries more than one
+around a snippet fenced at column 0 truncates the return. A return
+with no closing fence satisfying all three is not fenced at all, so its
+whole text reaches the parser; that includes one whose opener is longer
+than every closing run present. When the return carries more than one
 fenced block, the first one whose fence tag's first word is `yaml` or
 `yml` is validated, case-insensitively and counting whitespace-separated
 attributes (`yaml title=x` counts; `yaml,title=x` does not, its first

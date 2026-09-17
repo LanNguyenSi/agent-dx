@@ -10032,7 +10032,7 @@ previously written across a line break and pointing past the end of that
 contracts.md's current acceptance_recommendation paragraph.
 
 Verified from the worktree root: build, typecheck, typecheck:test, and
-format:check all clean; vitest 1177 passed, including
+format:check all clean; vitest green, including
 docs-consistency.test.ts. okf-kit check
 packages/orchestrator-workflow/docs/okf --require-anchors --json: 0
 errors, 1 warning at the pre-fix commit (citations-resolve, log.md,
@@ -10150,3 +10150,11 @@ the longer-opener test; dropping the closing line's whitespace-only tail
 fails the trailed-closer test alone; the three replays hold, with the
 three-backtick-only opener now failing four tests, the relaxed closing
 run two, and the disabled tag predicate eight.
+
+A closing docs pass on the same change generalised the README and
+contracts.md sentence on returns with no qualifying closing fence (the
+whole text reaches the parser, the longer-opener case included), named
+the residual per-run scan cost in the extractor docblock, reflowed one
+docblock, and removed a stale suite total from this entry; the five
+contracts.md citations above moved by two lines and were re-read at
+their new lines, and the five source-bearing docs were re-stamped.

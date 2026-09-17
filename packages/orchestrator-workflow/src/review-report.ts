@@ -210,10 +210,10 @@ function checkScalarField(
  * YAML parses either as `null`, which this checker rejects the same as
  * any other non-string element; only a quoted placeholder passes. These
  * three fields are declared `"array"` in {@link FIELD_KINDS}, not
- * `"non-empty-string"`, so a quoted element
- * gets the same tolerance its own kind implies; a reviewer emitting a
- * quoted placeholder blank bullet is a content question the orchestrator
- * judges, not a structural one this validator judges.
+ * `"non-empty-string"`, so a quoted element gets the same tolerance its
+ * own kind implies; a reviewer emitting a quoted placeholder blank bullet
+ * is a content question the orchestrator judges, not a structural one
+ * this validator judges.
  */
 function checkArrayField(
   doc: Record<string, unknown>,
@@ -658,7 +658,14 @@ interface ExtractedYaml {
  * run whole also makes the "closing run at least as long as the opening
  * one" rule above literal: an opener longer than any closing run in the
  * input is no fence at all, where splitting the run instead matched it
- * and pushed the leftover backticks into the info string.
+ * and pushed the leftover backticks into the info string. One cost
+ * stays: every backtick run is still tried as an opener candidate, and a
+ * candidate with no qualifying closer scans to the end of the input, so
+ * an input of many runs with no valid closer costs work quadratic in the
+ * number of runs (well under a second at several thousand runs; a
+ * well-formed return is unaffected). Anchoring the opener to a line
+ * start would remove it, at the price of the position-free opener the
+ * paragraph above keeps.
  *
  * When the input carries more than one fenced block (a reviewer pasting
  * a worked example ahead of the real return, say), the FIRST fence whose
