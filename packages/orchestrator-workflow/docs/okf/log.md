@@ -10007,79 +10007,38 @@ module documents and refreshed their verification timestamps after the source
 and test commits. The baseline validator replay and saved-plan mutation
 evidence are retained in the consuming workspace's run record.
 
-## 2026-09-17 — Array element-kind check and fence-tag preference (agent-dx 30455574)
+## 2026-09-17 (agent-dx 30455574, validate-review-report element kinds and fence preference)
 
-`validate-review-report` gained two rules: (1) every element of a
-string-array field (`summary`, `missing_tests`, `residual_risks`) must
-itself be a string, one diagnostic per offending element at
-`<field>[<index>]`, empty strings tolerated the same way `checkStringField`
-already tolerates them for a top-level `"string"`-kind field; (2)
+`validate-review-report` gained two rules: every element of a string-array
+field (`summary`, `missing_tests`, `residual_risks`) must itself be a
+string, reported per offending element at `<field>[<index>]`; and
 `extractYamlSource` now prefers the first fenced block tagged `yaml` or
-`yml` (case-insensitive) when several fences are present in one return,
-falling back to the original first-fence behaviour only when none carries
-that tag, with a warning naming the earlier fence(s) it skipped. Neither
-`src/review-report.ts` nor `test/review-report.test.ts` is a `sources:`
-entry in any bundle doc (unchanged from every prior round's note), so
-their own edits needed no re-stamp on that account.
+`yml` when several fences are present, warning about the fence(s) it
+skipped, falling back to the first fence only when none carries that tag.
+README.md, contracts.md, and CHANGELOG.md were updated to describe both
+rules.
 
-README.md's "Reviewer-report validation" section and contracts.md's
-validator paragraph (the prose immediately after the reviewer output
-contract's own fence, which is untouched byte-for-byte) each gained one
-to two sentences naming both rules; CHANGELOG.md gained a matching
-`[Unreleased]` bullet (net +8 lines, nothing below it released yet).
+Re-verified and re-stamped the five docs whose sources list README.md,
+contracts.md, or CHANGELOG.md: install-fence-mechanics.md,
+model-preselection.md, review-gate-and-waivers.md,
+run-state-lifecycle-and-markers.md, subagent-contracts-superset.md. Five
+live citations in subagent-contracts-superset.md moved with the
+contracts.md edit: 202 to 208 (two occurrences, the Task-slicer heading),
+274 to 280, 250 to 256, 190 to 196, and 200 to 206. This log's own two
+self-citations into CHANGELOG.md moved from 142 to 150 and from 519 to
+527. review-gate-and-waivers.md's own long-stale contracts.md citation,
+previously written across a line break and pointing past the end of that
+290-line file, is now a single-line, anchored citation resolving to
+contracts.md's current acceptance_recommendation paragraph.
 
-Re-verified and re-stamped the five docs whose `sources:` list README.md,
-contracts.md, or CHANGELOG.md (`install-fence-mechanics.md`,
-`model-preselection.md`, `review-gate-and-waivers.md`,
-`run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`).
-The CHANGELOG.md `[Unreleased]` insertion moved this log's own two live
-self-citations from line 142 to 150 and from line 519 to 527 (both
-re-pointed after re-reading their anchors); every other bundle citation
-into `CHANGELOG.md`, across the three docs that carry one
-(`review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`,
-`subagent-contracts-superset.md`), uses the heading-anchor `#[x.y.z]`
-form and needed no change. The contracts.md paragraph edit landed inside
-the CLI-check prose (old line 170 onward, net +6), which shifted five
-live citations in `subagent-contracts-superset.md`: `202 -> 208` (two
-occurrences, the Task-slicer heading), `274 -> 280`
-(`would_change_recommendation_if:`), `250 -> 256` (`rather than
-inventing new field`), `190 -> 196` (Review-round escalation budget's
-trigger), and `200 -> 206` (`when nothing was withdrawn.`); all five
-re-verified by direct read after the shift. `review-gate-and-waivers.md`'s
-own contracts.md citations (143, 149, 158, 166, 168) all sit above the
-edit and needed no change; its pre-existing
-`references/contracts.md:355-357` citation on line 107 does not resolve
-against this 290-line file even before this round's edit and is left as
-found, out of this round's scope (confirmed pre-existing: the same
-finding reproduces against the base commit, before any edit this round).
-README.md's edit landed after every live citation into it, across the
-three docs that carry one (`install-fence-mechanics.md:235`,
-`model-preselection.md:345/398/424`,
-`run-state-lifecycle-and-markers.md:216/222`, all well above the edit's
-old line 705), so none needed re-pointing.
-
-Verified from the worktree root: `npm run build`, `npm run typecheck`,
-`npm run typecheck:test`, `npm run format:check` all clean;
-`npx vitest run` 1177 passed (1177), including
-`test/docs-consistency.test.ts`'s reviewer-contract-schema pin (the
-schema's `FIELD_KINDS.array` kind name is unchanged, only its runtime
-element check gained new behaviour, so that pin needed no edit).
-`npx okf-kit@0.12.1 check packages/orchestrator-workflow/docs/okf
---require-anchors --json` from the repository root, run three times
-across this round: after the source commit, before the doc/log commit:
-0 errors, 6 warnings (4 `sources-fresh-future`, since the four
-timestamps had already been bumped but not yet committed; 1 pre-existing
-citation into `references/contracts.md` at old lines 355-357,
-range-exceeds-file, out of scope per above; 1 self-inflicted
-false-positive from this entry's own first draft, a `CHANGELOG.md`
-heading-anchor form written as one contiguous backtick span, fixed by
-splitting the path and the anchor into separate spans, matching this
-file's existing convention at line 24 for an illustrative citation
-form). After the doc/log commit landed: 0 errors, 1 warning (the
-pre-existing `references/contracts.md` one, unchanged). Final run, after
-fixing this same paragraph's own re-introduction of the
-now-fixed-once-already contiguous-span mistake (this sentence itself had
-briefly re-triggered both findings by quoting them the same way the
-original draft did): 0 errors, 1 warning, matching the prior run --
-confirming this paragraph's own text is not itself parsed as a live
-citation.
+Verified from the worktree root: build, typecheck, typecheck:test, and
+format:check all clean; vitest 1177 passed, including
+docs-consistency.test.ts. okf-kit check
+packages/orchestrator-workflow/docs/okf --require-anchors --json: 0
+errors, 1 warning at the pre-fix commit (citations-resolve, log.md,
+range-exceeds-file, from this entry's own prior text); 0 errors, 0
+warnings, 0 notices after this round's edits. A second, older, unrelated
+citation split across a line break exists in an earlier log entry above
+(the run-state-lifecycle-and-markers.md CHANGELOG.md reference near
+"deliberately historical"); it predates this task, is deliberately frozen
+against a past commit rather than the live file, and is left as found.
