@@ -9150,19 +9150,86 @@ describe("the dist-tag, deprecate, and publish allowlists stay pinned to each ot
       ".github/workflows/publish-npm.yml",
     ));
 
+  let _distTagSource: string | undefined;
+  const distTagSource = (): string =>
+    (_distTagSource ??= readRepoFile(".github/workflows/npm-dist-tag.yml"));
+
+  let _deprecateSource: string | undefined;
+  const deprecateSource = (): string =>
+    (_deprecateSource ??= readRepoFile(".github/workflows/npm-deprecate.yml"));
+
+  let _printDeprecationsSource: string | undefined;
+  const printDeprecationsSource = (): string =>
+    (_printDeprecationsSource ??= readRepoFile(
+      ".github/scripts/print-deprecations.mjs",
+    ));
+
+  let _contributingSource: string | undefined;
+  const contributingSource = (): string =>
+    (_contributingSource ??= readRepoFile("CONTRIBUTING.md"));
+
   let _distTagAllowlist: string[] | undefined;
   const distTagAllowlist = (): string[] =>
-    (_distTagAllowlist ??= extractQuotedList(
-      ".github/workflows/npm-dist-tag.yml",
+    (_distTagAllowlist ??= extractQuotedListFromSource(
+      distTagSource(),
       "ALLOWLIST",
+      ".github/workflows/npm-dist-tag.yml",
     ));
 
   let _deprecateAllowlist: string[] | undefined;
   const deprecateAllowlist = (): string[] =>
-    (_deprecateAllowlist ??= extractQuotedList(
-      ".github/workflows/npm-deprecate.yml",
+    (_deprecateAllowlist ??= extractQuotedListFromSource(
+      deprecateSource(),
       "ALLOWLIST",
+      ".github/workflows/npm-deprecate.yml",
     ));
+
+  // The last matching line, not every occurrence: npm-dist-tag.yml has
+  // several `::error::` lines, and NPM_AGENT_DX_TOKEN/allowlist both
+  // appear elsewhere in the file (an earlier `::error::` names the
+  // missing-secret case; the header comment always names the allowlist),
+  // so a whole-source `toContain` would stay green even if the specific
+  // hint on the final line were reverted. Isolating the line is what
+  // makes the assertion below actually discriminate that revert.
+  function lastLineContaining(
+    source: string,
+    substring: string,
+    label: string,
+  ): string {
+    const lines = source.split("\n").filter((line) => line.includes(substring));
+    expect(
+      lines.length,
+      `expected at least one line containing "${substring}" in ${label}`,
+    ).toBeGreaterThan(0);
+    return lines[lines.length - 1];
+  }
+
+  function soleLineContaining(
+    source: string,
+    substring: string,
+    label: string,
+  ): string {
+    const lines = source.split("\n").filter((line) => line.includes(substring));
+    expect(
+      lines.length,
+      `expected exactly one line containing "${substring}" in ${label}, found ${lines.length}`,
+    ).toBe(1);
+    return lines[0];
+  }
+
+  function paragraphContaining(
+    source: string,
+    substring: string,
+    label: string,
+  ): string {
+    const paragraphs = source.split(/\n[ \t]*\n/);
+    const matches = paragraphs.filter((p) => p.includes(substring));
+    expect(
+      matches.length,
+      `expected exactly one paragraph containing "${substring}" in ${label}, found ${matches.length}`,
+    ).toBe(1);
+    return matches[0];
+  }
 
   it("found a non-empty PUBLISHABLE list to pin against (sanity: not vacuously true)", () => {
     expect(publishable().length).toBeGreaterThan(0);
@@ -9220,6 +9287,37 @@ describe("the dist-tag, deprecate, and publish allowlists stay pinned to each ot
     ).toEqual([...publishable()].sort());
   });
 
+  it("the token-scope cause hint stays on npm-dist-tag.yml's final ::error::, print-deprecations.mjs's UNCONFIRMED ::warning::, and CONTRIBUTING.md's token paragraph", () => {
+    const finalDistTagError = lastLineContaining(
+      distTagSource(),
+      "::error::",
+      ".github/workflows/npm-dist-tag.yml",
+    );
+    const unconfirmedWarning = soleLineContaining(
+      printDeprecationsSource(),
+      "::warning::",
+      ".github/scripts/print-deprecations.mjs",
+    );
+    const tokenParagraph = paragraphContaining(
+      contributingSource(),
+      "NPM_AGENT_DX_TOKEN",
+      "CONTRIBUTING.md",
+    );
+
+    for (const [label, text] of [
+      ["npm-dist-tag.yml final ::error::", finalDistTagError],
+      ["print-deprecations.mjs UNCONFIRMED ::warning::", unconfirmedWarning],
+      ["CONTRIBUTING.md token paragraph", tokenParagraph],
+    ] as const) {
+      expect(text, `${label} lost the NPM_AGENT_DX_TOKEN mention`).toContain(
+        "NPM_AGENT_DX_TOKEN",
+      );
+      expect(text.toLowerCase(), `${label} lost the allowlist mention`).toMatch(
+        /allowlist/,
+      );
+    }
+  });
+
   it("publish-npm.yml's on.push.tags packages are the same tokens as its own PUBLISHABLE list", () => {
     expect(
       [...tagPackages()].sort(),
@@ -9249,49 +9347,84 @@ describe("the dist-tag, deprecate, and publish allowlists stay pinned to each ot
   // publish-npm.yml, plus a CONTRIBUTING.md sentence) that nothing read: a
   // package added to the three parsed lists would pass every assertion
   // above while all six parentheticals kept naming the old set. This globs
-  // every workflow file plus CONTRIBUTING.md, collects every
-  // `(orchestrator-workflow, ...)`-shaped parenthetical, and pins both the
-  // COUNT (so a copy silently dropped or a new one silently added is
-  // caught) and each copy's token set against PUBLISHABLE.
-  const workflowsDir = `${repoRoot}/.github/workflows`;
-  const workflowFiles = readdirSync(workflowsDir).filter(
-    (name) => name.endsWith(".yml") || name.endsWith(".yaml"),
-  );
+  // every workflow file plus CONTRIBUTING.md and README.md, collects every
+  // parenthetical whose comma-separated tokens are all known package
+  // names, and pins both the COUNT (so a copy silently dropped or a new
+  // one silently added is caught) and each copy's token set against
+  // PUBLISHABLE.
+  //
+  // readdirSync(workflowsDir) used to run directly in this describe's
+  // body, at collection time, which reintroduces the whole-file collection
+  // hazard the module comment above describes: an unreadable directory
+  // here would abort every test in the file, not just the ones that
+  // depend on it. It is now a memoized lazy getter like publishNpmSource
+  // and friends, called only from inside collectProsePackageCopies().
+  let _workflowFiles: string[] | undefined;
+  const workflowFiles = (): string[] =>
+    (_workflowFiles ??= readdirSync(`${repoRoot}/.github/workflows`).filter(
+      (name) => name.endsWith(".yml") || name.endsWith(".yaml"),
+    ));
+
   const EXPECTED_PROSE_COPY_COUNT = 6;
 
-  function extractParentheticalPackageCopies(source: string): string[][] {
+  // Matches any parenthetical, not only one that happens to start with
+  // "orchestrator-workflow,": a drifted copy that dropped, reordered, or
+  // renamed a package (or a copy in a file this test does not expect,
+  // such as README.md) would keep matching the old start-anchored regex
+  // only by accident, and would pass silently if the drift also moved
+  // orchestrator-workflow out of first place or out of the parenthetical
+  // altogether. A parenthetical only counts as a package-list copy when
+  // EVERY one of its comma-separated tokens is a known publishable name
+  // (from `names`, PUBLISHABLE's own token set) and there is at least one
+  // token, which keeps a single-tag example like publish-npm.yml's
+  // "(orchestrator-workflow/v0.1.0)" (one token, not a plain package
+  // name) and an unrelated aside like "(see npm-deprecate.yml and
+  // npm-dist-tag.yml)" (tokens that are not package names) from being
+  // mistaken for a copy.
+  function extractParentheticalPackageCopies(
+    source: string,
+    names: ReadonlySet<string>,
+  ): string[][] {
     // Collapse all whitespace runs (a parenthetical can wrap across a
     // multi-line "#" comment or a Markdown paragraph) and strip comment
     // markers before matching, so the parenthetical reads as one string
     // regardless of which file style it sits in.
     const collapsed = source.replace(/\s+/g, " ").replace(/#/g, "");
-    // The comma is required right after the package name so a parenthetical
-    // like publish-npm.yml's "(orchestrator-workflow/v0.1.0)" (a single tag
-    // example, not a package-list copy) is never mistaken for one.
-    const re = /\(orchestrator-workflow,[^)]*\)/g;
-    return [...collapsed.matchAll(re)].map((m) =>
-      m[0]
-        .slice(1, -1)
+    const re = /\(([^)]*)\)/g;
+    const copies: string[][] = [];
+    for (const m of collapsed.matchAll(re)) {
+      const tokens = m[1]
         .split(",")
         .map((token) => token.trim())
-        .filter(Boolean),
-    );
+        .filter(Boolean);
+      if (tokens.length > 0 && tokens.every((token) => names.has(token))) {
+        copies.push(tokens);
+      }
+    }
+    return copies;
   }
 
   function collectProsePackageCopies(): { label: string; tokens: string[] }[] {
+    const names = new Set(publishable());
     const found: { label: string; tokens: string[] }[] = [];
-    for (const file of workflowFiles) {
+    for (const file of workflowFiles()) {
       const relPath = `.github/workflows/${file}`;
       for (const tokens of extractParentheticalPackageCopies(
         readRepoFile(relPath),
+        names,
       )) {
         found.push({ label: relPath, tokens });
       }
     }
-    for (const tokens of extractParentheticalPackageCopies(
-      readRepoFile("CONTRIBUTING.md"),
-    )) {
-      found.push({ label: "CONTRIBUTING.md", tokens });
+    for (const relPath of ["CONTRIBUTING.md", "README.md"]) {
+      for (const tokens of extractParentheticalPackageCopies(
+        relPath === "CONTRIBUTING.md"
+          ? contributingSource()
+          : readRepoFile(relPath),
+        names,
+      )) {
+        found.push({ label: relPath, tokens });
+      }
     }
     return found;
   }

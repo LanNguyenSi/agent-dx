@@ -29,7 +29,21 @@
   `npm-deprecate.yml`'s (via `.github/scripts/print-deprecations.mjs`)
   final read-back messages, updating the three comments that had
   described them as not naming the cause; re-stamped the same four docs
-  again in this commit.
+  again in this commit. A second follow-up pinned that cause hint itself
+  with an assertion isolated to `npm-dist-tag.yml`'s final `::error::`
+  line, `print-deprecations.mjs`'s sole `::warning::` line, and
+  `CONTRIBUTING.md`'s token paragraph (not the whole source, so a
+  reverted hint elsewhere in the same file cannot hide behind an
+  unrelated match), broadened the prose-copy scan from a
+  start-anchored `(orchestrator-workflow, ...)` match to any
+  parenthetical whose comma-separated tokens are all known publishable
+  names and extended it to the repo-root `README.md` (the pinned count
+  stayed six; `README.md` carries no copy today), folded the
+  `readdirSync` workflow-file listing into the same lazy, memoized
+  pattern as the other extractions, and dropped the change-relative
+  "now" wording from the three cause-hint comments while naming
+  `print-deprecations.mjs` and "these workflows'" allowlist in them;
+  re-stamped the same four docs a third time.
 
 - 2026-09-16T13:17:23Z (release cut, pandora run 2026-09-16-releases-batch55,
   REL-001): cut the `[Unreleased]` section under a new `[0.36.0] -
