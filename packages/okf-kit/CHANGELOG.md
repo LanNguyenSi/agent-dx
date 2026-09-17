@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `sources-fresh`'s re-stamp escape hatch now requires the new frontmatter
+  `timestamp` value to be a strictly LATER instant than the value it
+  replaced, on both the committed path (`restampedByOwnLastCommit`) and the
+  `--dirty-as-now` working-tree path (`dirtyDocRestampVerdict`). A commit
+  (or working-tree edit) that moves the stamp BACKWARDS no longer counts as
+  a re-verification: the affected sources stay STALE, and the doc gets one
+  additional `re-stamp moved backwards: timestamp <prev-iso> -> <new-iso>
+  <where> is not a re-verification` warning naming both instants. A rewrite
+  to the same instant in a different raw spelling (`...00Z` to
+  `...00.000Z`) also no longer counts as a re-stamp, correcting a known
+  limitation the README previously documented the other way; that case gets
+  its own `re-stamp did not move the timestamp forward: <prev-raw> was
+  rewritten as <new-raw> <where>, but both name the same instant (<iso>),
+  so this is not a re-verification` notice (not a warning, so `--strict` is
+  unaffected), guarded once per doc the same way the backwards warning is.
+  An unchanged, byte-identical timestamp value still gets neither: it was
+  never a re-stamp attempt. The comparison reads both instants at
+  MILLISECOND resolution (a new `getTimestampEpochMs` helper in
+  `src/util.ts`, used only here), so two re-stamps less than a second apart
+  are not misread as the same instant. Direction is judged only where both
+  values name the same instant on every machine: a value that cannot be
+  parsed to an instant at all, or one spelled without a UTC designator
+  (`2026-01-01T13:00:00`, which `Date.parse` resolves in the machine's own
+  timezone), falls back to comparing the raw values' identity exactly as
+  before this direction rule existed, so no direction verdict, and no
+  `--strict` exit code arising from one, can depend on the runner's `TZ`;
+  that holds for either side of the comparison, the new value and the one
+  it replaced alike. The rule's day-wide staleness comparison still
+  resolves a designator-less stamp in local time, unchanged by this
+  release, and a native YAML date (`!!timestamp`) needs no designator and
+  is judged normally. Tracker: agent-dx task `ccdf051b`.
+
 - CI: the agent-dx `okf-anchor-guard` job (`.github/workflows/ci.yml`) and
   `okf-staleness` job (`.github/workflows/okf-staleness.yml`)'s "Install
   okf-kit" step now probes the pinned version with `npm view

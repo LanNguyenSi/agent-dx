@@ -606,11 +606,10 @@ describe("sources-fresh: --dirty-as-now", () => {
    * must rescue a dirty source under `--dirty-as-now` exactly like a real
    * re-stamp committed together with the source does without the flag --
    * otherwise the README's own recommended remedy ("commit both, matching
-   * CI") could not turn a `--dirty-as-now --strict` failure clean. See the
-   * HIGH finding in round 1 review: without this rescue, a doc bumped to
-   * "now" on disk still read STALE against a dirty source's own
-   * `--dirty-as-now` substitution because a few seconds elapse between
-   * writing the bump and running `check`.
+   * CI") could not turn a `--dirty-as-now --strict` failure clean. Without
+   * this rescue, a doc bumped to "now" on disk still read STALE against a
+   * dirty source's own `--dirty-as-now` substitution because a few seconds
+   * elapse between writing the bump and running `check`.
    */
   describe("doc re-stamped locally (working-tree re-stamp parity)", () => {
     it("with the flag: a dirty source paired with a doc re-stamped locally (uncommitted) reports clean", () => {
@@ -636,6 +635,237 @@ describe("sources-fresh: --dirty-as-now", () => {
       );
       // Locally re-stamp the doc (uncommitted): the on-disk timestamp value
       // now differs from the value committed at HEAD.
+      writeDoc(repo.dir, "bundle/doc.md", {
+        type: "concept",
+        timestamp: "2025-09-01T00:00:00Z",
+        sources: ["source.ts"],
+      });
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      ctx.dirtyAsNow = true;
+      expect(sourcesFreshRule.run(ctx)).toEqual([]);
+    });
+
+    it("with the flag: a doc re-stamped locally to an EARLIER value than HEAD's is not a re-stamp -> STALE + backwards warning (D-004)", () => {
+      repo.commitFile(
+        "source.ts",
+        "export const a = 1;\n",
+        "2025-01-01T00:00:00Z",
+      );
+      repo.commitFile(
+        "bundle/doc.md",
+        docContent({
+          type: "concept",
+          timestamp: "2025-02-01T00:00:00Z",
+          sources: ["source.ts"],
+        }),
+        "2025-02-01T00:00:00Z",
+      );
+
+      // Locally dirty the source (uncommitted edit).
+      fs.writeFileSync(
+        path.join(repo.dir, "source.ts"),
+        "export const a = 2;\n",
+      );
+      // Locally re-stamp the doc BACKWARDS (uncommitted): the on-disk value
+      // is strictly EARLIER than the value committed at HEAD, so per D-004
+      // this is not a re-verification.
+      writeDoc(repo.dir, "bundle/doc.md", {
+        type: "concept",
+        timestamp: "2025-01-15T00:00:00Z",
+        sources: ["source.ts"],
+      });
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      ctx.dirtyAsNow = true;
+      const findings = sourcesFreshRule.run(ctx);
+
+      expect(findings).toHaveLength(2);
+      const stale = findings.find((f) => f.message.includes("STALE"));
+      const backwards = findings.find((f) =>
+        f.message.includes("moved backwards"),
+      );
+      expect(stale).toMatchObject({
+        ruleId: "sources-fresh",
+        severity: "warning",
+      });
+      expect(stale?.message).toContain("source.ts");
+      expect(backwards).toMatchObject({
+        ruleId: "sources-fresh",
+        severity: "warning",
+      });
+      expect(backwards?.message).toContain("2025-02-01T00:00:00.000Z");
+      expect(backwards?.message).toContain("2025-01-15T00:00:00.000Z");
+      expect(backwards?.message).toContain("in the working tree");
+    });
+
+    it("with the flag: a doc re-stamped locally to the SAME instant as HEAD's (different representation) is not a re-stamp -> STALE + same-instant notice (D-009)", () => {
+      repo.commitFile(
+        "source.ts",
+        "export const a = 1;\n",
+        "2025-01-01T00:00:00Z",
+      );
+      repo.commitFile(
+        "bundle/doc.md",
+        docContent({
+          type: "concept",
+          timestamp: "2025-02-01T00:00:00Z",
+          sources: ["source.ts"],
+        }),
+        "2025-02-01T00:00:00Z",
+      );
+
+      // Locally dirty the source (uncommitted edit).
+      fs.writeFileSync(
+        path.join(repo.dir, "source.ts"),
+        "export const a = 2;\n",
+      );
+      // Locally rewrite the doc's stamp to the SAME instant committed at
+      // HEAD, just in a different raw representation (adds milliseconds
+      // that round to nothing): per D-009 this is not a re-verification
+      // either, and gets a NOTICE (not a warning) naming both values.
+      writeDoc(repo.dir, "bundle/doc.md", {
+        type: "concept",
+        timestamp: "2025-02-01T00:00:00.000Z",
+        sources: ["source.ts"],
+      });
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      ctx.dirtyAsNow = true;
+      const findings = sourcesFreshRule.run(ctx);
+
+      expect(findings).toHaveLength(2);
+      const stale = findings.find((f) => f.message.includes("STALE"));
+      const sameInstant = findings.find((f) =>
+        f.message.includes("did not move the timestamp forward"),
+      );
+      expect(stale).toMatchObject({
+        ruleId: "sources-fresh",
+        severity: "warning",
+      });
+      expect(stale?.message).toContain("source.ts");
+      expect(sameInstant).toMatchObject({
+        ruleId: "sources-fresh",
+        severity: "notice",
+      });
+      // Both raw values, the one instant, and the working-tree phrasing
+      // that distinguishes this path from the committed one, asserted as
+      // one exact string: a notice that printed a single value twice
+      // cannot satisfy it.
+      expect(sameInstant?.message).toBe(
+        're-stamp did not move the timestamp forward: "2025-02-01T00:00:00Z" was rewritten as "2025-02-01T00:00:00.000Z" in the working tree, but both name the same instant (2025-02-01T00:00:00.000Z), so this is not a re-verification',
+      );
+    });
+
+    it("with the flag: HEAD committed as a native YAML date, re-stamped locally to a LATER string with a UTC designator -> direction judged, restamped/clean (D-013)", () => {
+      // HEAD's committed value carries no raw string at all (a
+      // `!!timestamp`-tagged scalar), so `isDirectionComparable` takes its
+      // "no designator to gate" branch there; the on-disk value has a real
+      // `Z`. Both are direction-comparable, the instants differ, and the
+      // move is FORWARD, so this is an ordinary re-stamp under
+      // `--dirty-as-now` -- clean, not a fallback to raw-identity
+      // comparison the way a designator-less STRING would be.
+      repo.commitFile(
+        "source.ts",
+        "export const a = 1;\n",
+        "2025-01-01T00:00:00Z",
+      );
+      repo.commitFile(
+        "bundle/doc.md",
+        "---\ntype: concept\ntimestamp: !!timestamp 2025-02-01 00:00:00\nsources:\n  - source.ts\n---\n\n# Doc\n",
+        "2025-02-01T00:00:00Z",
+      );
+
+      fs.writeFileSync(
+        path.join(repo.dir, "source.ts"),
+        "export const a = 2;\n",
+      );
+      writeDoc(repo.dir, "bundle/doc.md", {
+        type: "concept",
+        timestamp: "2025-03-01T00:00:00Z",
+        sources: ["source.ts"],
+      });
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      ctx.dirtyAsNow = true;
+      expect(sourcesFreshRule.run(ctx)).toEqual([]);
+    });
+
+    it("with the flag: HEAD committed as a native YAML date, re-stamped locally to an EARLIER string with a UTC designator -> direction judged, STALE + backwards warning (D-013)", () => {
+      // The other direction of the same fixture shape: the on-disk value
+      // is a real `Z` string EARLIER than HEAD's native-date instant.
+      // Direction is still judged (neither side is ambiguous), and it
+      // reads backwards, so per D-004 this is not a re-verification.
+      repo.commitFile(
+        "source.ts",
+        "export const a = 1;\n",
+        "2025-01-01T00:00:00Z",
+      );
+      repo.commitFile(
+        "bundle/doc.md",
+        "---\ntype: concept\ntimestamp: !!timestamp 2025-03-01 00:00:00\nsources:\n  - source.ts\n---\n\n# Doc\n",
+        "2025-03-01T00:00:00Z",
+      );
+
+      fs.writeFileSync(
+        path.join(repo.dir, "source.ts"),
+        "export const a = 2;\n",
+      );
+      writeDoc(repo.dir, "bundle/doc.md", {
+        type: "concept",
+        timestamp: "2025-01-15T00:00:00Z",
+        sources: ["source.ts"],
+      });
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      ctx.dirtyAsNow = true;
+      const findings = sourcesFreshRule.run(ctx);
+
+      expect(findings).toHaveLength(2);
+      const stale = findings.find((f) => f.message.includes("STALE"));
+      const backwards = findings.find((f) =>
+        f.message.includes("moved backwards"),
+      );
+      expect(stale).toMatchObject({
+        ruleId: "sources-fresh",
+        severity: "warning",
+      });
+      expect(backwards).toMatchObject({
+        ruleId: "sources-fresh",
+        severity: "warning",
+      });
+      expect(backwards?.message).toContain("2025-03-01T00:00:00.000Z");
+      expect(backwards?.message).toContain("2025-01-15T00:00:00.000Z");
+      expect(backwards?.message).toContain("in the working tree");
+    });
+
+    it("with the flag: a doc committed with an unparseable timestamp, re-stamped locally to a valid value, falls back to raw-identity comparison -> restamped/clean (D-004 fallback)", () => {
+      // HEAD's committed doc timestamp does not parse, so
+      // compareRestampDirection's ms comparison cannot judge direction and
+      // falls back to getTimestampIdentity: the on-disk value is a real,
+      // different string, so it still counts as restamped, exactly as
+      // before D-004/D-008 existed for this unparseable-either-side case.
+      repo.commitFile(
+        "source.ts",
+        "export const a = 1;\n",
+        "2025-01-01T00:00:00Z",
+      );
+      repo.commitFile(
+        "bundle/doc.md",
+        docContent({
+          type: "concept",
+          timestamp: "not-a-date",
+          sources: ["source.ts"],
+        }),
+        "2025-02-01T00:00:00Z",
+      );
+
+      // Locally dirty the source (uncommitted edit).
+      fs.writeFileSync(
+        path.join(repo.dir, "source.ts"),
+        "export const a = 2;\n",
+      );
+      // Locally re-stamp the doc (uncommitted) to a real, parseable value.
       writeDoc(repo.dir, "bundle/doc.md", {
         type: "concept",
         timestamp: "2025-09-01T00:00:00Z",
@@ -684,6 +914,57 @@ describe("sources-fresh: --dirty-as-now", () => {
       expect(findings).toHaveLength(1);
       expect(findings[0].message).toContain("STALE");
       expect(findings[0].message).toContain("source.ts");
+    });
+
+    it("with the flag: a dirty doc whose on-disk timestamp is byte-identical to HEAD's gets the plain STALE warning and NEITHER the backwards warning NOR the same-instant notice (D-009)", () => {
+      // The same fixture shape as the test above, asserted against the
+      // specific guard it exists for: an UNCHANGED stamp is not a re-stamp
+      // ATTEMPT, so the same-instant notice (which fires when the raw value
+      // was rewritten to another spelling of the same instant) must NOT
+      // fire here. The test above pins the finding COUNT; this one pins the
+      // two message kinds by name on the WORKING-TREE path, so a
+      // byte-identical value can never start emitting a notice that tells
+      // the reader to go look at a re-stamp nobody made.
+      repo.commitFile(
+        "source.ts",
+        "export const a = 1;\n",
+        "2025-01-01T00:00:00Z",
+      );
+      const committedDoc = docContent({
+        type: "concept",
+        timestamp: "2025-02-01T00:00:00Z",
+        sources: ["source.ts"],
+      });
+      repo.commitFile("bundle/doc.md", committedDoc, "2025-02-01T00:00:00Z");
+
+      fs.writeFileSync(
+        path.join(repo.dir, "source.ts"),
+        "export const a = 2;\n",
+      );
+      const bodyEditOnly = committedDoc.replace(
+        "# Doc\n",
+        "# Doc\n\nA local body edit, stamp untouched.\n",
+      );
+      fs.writeFileSync(path.join(repo.dir, "bundle/doc.md"), bodyEditOnly);
+      // The frontmatter block is byte-identical; only the body differs.
+      expect(bodyEditOnly.split("---\n")[1]).toEqual(
+        committedDoc.split("---\n")[1],
+      );
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      ctx.dirtyAsNow = true;
+      const findings = sourcesFreshRule.run(ctx);
+
+      expect(
+        findings.filter((f) => f.message.includes("moved backwards")),
+      ).toEqual([]);
+      expect(
+        findings.filter((f) =>
+          f.message.includes("did not move the timestamp forward"),
+        ),
+      ).toEqual([]);
+      expect(findings.map((f) => f.severity)).toEqual(["warning"]);
+      expect(findings[0].message).toContain("STALE");
     });
 
     it("control, flag OFF: committing the same source-edit-plus-re-stamp together reports clean (what the flag is matching)", () => {

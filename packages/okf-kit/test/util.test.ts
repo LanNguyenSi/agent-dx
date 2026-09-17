@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   getRawTimestampString,
   getTimestampEpoch,
+  getTimestampEpochMs,
   getTimestampIdentity,
   hasUtcDesignator,
 } from "../src/util.js";
@@ -42,6 +43,47 @@ describe("getTimestampEpoch", () => {
     expect(getTimestampEpoch(undefined)).toBeUndefined();
     expect(getTimestampEpoch(null)).toBeUndefined();
     expect(getTimestampEpoch(["not", "a", "record"])).toBeUndefined();
+  });
+});
+
+describe("getTimestampEpochMs", () => {
+  it("distinguishes two instants less than a second apart, unlike getTimestampEpoch (D-008)", () => {
+    const earlier = getTimestampEpochMs({
+      timestamp: "2026-01-01T00:00:00.000Z",
+    });
+    const later = getTimestampEpochMs({
+      timestamp: "2026-01-01T00:00:00.500Z",
+    });
+    expect(earlier).toBeDefined();
+    expect(later).toBeDefined();
+    expect(later).toBeGreaterThan(earlier as number);
+    // The whole-second floor both instants would share under
+    // getTimestampEpoch -- pinning WHY the millisecond helper exists.
+    expect(getTimestampEpoch({ timestamp: "2026-01-01T00:00:00.000Z" })).toBe(
+      getTimestampEpoch({ timestamp: "2026-01-01T00:00:00.500Z" }),
+    );
+  });
+
+  it("parses a Date instance directly, at millisecond resolution", () => {
+    const date = new Date("2026-01-01T00:00:00.123Z");
+    expect(getTimestampEpochMs({ timestamp: date })).toBe(date.getTime());
+  });
+
+  it("returns undefined for an invalid Date instance", () => {
+    expect(
+      getTimestampEpochMs({ timestamp: new Date("not-a-date") }),
+    ).toBeUndefined();
+  });
+
+  it("returns undefined for an unparseable string", () => {
+    expect(getTimestampEpochMs({ timestamp: "not-a-date" })).toBeUndefined();
+  });
+
+  it("returns undefined when timestamp is missing, non-scalar, or parsed is not a record", () => {
+    expect(getTimestampEpochMs({})).toBeUndefined();
+    expect(getTimestampEpochMs({ timestamp: 12345 })).toBeUndefined();
+    expect(getTimestampEpochMs(undefined)).toBeUndefined();
+    expect(getTimestampEpochMs(null)).toBeUndefined();
   });
 });
 
