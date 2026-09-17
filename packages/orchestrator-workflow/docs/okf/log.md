@@ -10229,3 +10229,14 @@ writes some data and then stalls mid-stream is once more an ordinary pipe
 hang rather than a bounded usage error, unlike the never-written case the
 bound still catches. See packages/slop-detector/CHANGELOG.md's Unreleased
 section for the full trade-off.
+
+## 2026-09-17 (okf-kit 0.13.0 release cut)
+
+okf-kit cut to 0.13.0 (the sources-fresh direction rule and the
+unpublished-pin CI path), both workflow pins bumped by
+`scripts/bump-okf-kit-pin.mjs`. The stubbed-npm replays of the Install
+okf-kit step in `test/docs-consistency.test.ts` no longer hard-code the
+pin: they read it from packages/okf-kit's own version, so a pin bump no
+longer turns that block red. Re-verified and re-stamped the four docs
+that source the test file; no citation into it moved (the edit sits
+inside one describe well below every cited line).
