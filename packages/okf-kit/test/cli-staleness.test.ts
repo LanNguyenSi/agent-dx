@@ -1,13 +1,52 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runCli } from "./helpers.js";
+import { runCli, type RunResult } from "./helpers.js";
 import { createTmpGitRepo, writeDoc, type TmpGitRepo } from "./git-helpers.js";
 
 interface JsonReport {
   findings: Array<{ ruleId: string; severity: string; message: string }>;
   summary: { errors: number; warnings: number; notices: number };
+}
+
+const CLI_PATH = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "dist",
+  "cli.js",
+);
+
+/**
+ * Spawns the built CLI with an explicit `TZ`, so a check's verdict can be
+ * compared across two machine timezones inside one test run.
+ *
+ * A SUBPROCESS is the only form that actually works here: Node resolves the
+ * process timezone once and caches it, so assigning `process.env.TZ` inside
+ * the already-running test process leaves `Date.parse`'s local-time
+ * interpretation on whatever zone the runner started in -- a test written
+ * that way would pass under every `TZ` without ever exercising a second
+ * one.
+ */
+function runCliWithTz(args: string[], tz: string): RunResult {
+  try {
+    const stdout = execFileSync("node", [CLI_PATH, ...args], {
+      encoding: "utf8",
+      env: { ...process.env, TZ: tz },
+      timeout: 30_000,
+    });
+    return { status: 0, stdout, stderr: "" };
+  } catch (err) {
+    const e = err as { status?: number; stdout?: unknown; stderr?: unknown };
+    if (typeof e.stdout !== "string") throw err;
+    return {
+      status: e.status ?? 1,
+      stdout: e.stdout,
+      stderr: typeof e.stderr === "string" ? e.stderr : "",
+    };
+  }
 }
 
 describe("okf-kit cli staleness (sources-fresh + repo-root auto-detection)", () => {
@@ -447,7 +486,7 @@ describe("okf-kit cli staleness (sources-fresh + repo-root auto-detection)", () 
       }
     });
 
-    it("(v) backwards re-stamp (on-disk timestamp moved EARLIER than HEAD's) + source dirty: still a re-stamp, clean, exit 0 (documented)", () => {
+    it("(v) backwards re-stamp (on-disk timestamp moved EARLIER than HEAD's) + source dirty: STALE + backwards warning, exit 1 (D-004)", () => {
       const repo = createTmpGitRepo();
       try {
         setupBaseline(repo);
@@ -455,9 +494,10 @@ describe("okf-kit cli staleness (sources-fresh + repo-root auto-detection)", () 
           path.join(repo.dir, "source.ts"),
           "export const a = 2;\n",
         );
-        // Moved BACKWARDS relative to the committed 2025-02-01 value --
-        // still counts as a re-stamp (a changed value in EITHER direction),
-        // documented in the README's "any CHANGE of value" wording.
+        // Moved BACKWARDS relative to the committed 2025-02-01 value -- per
+        // D-004, only a value strictly LATER than the one it replaced
+        // counts as a re-stamp, so this is NOT a re-verification: the doc
+        // stays STALE and gets the extra "moved backwards" warning.
         dirtyDoc(repo, "2025-01-15T00:00:00.000Z");
 
         const result = runCli([
@@ -467,12 +507,291 @@ describe("okf-kit cli staleness (sources-fresh + repo-root auto-detection)", () 
           repo.dir,
           "--dirty-as-now",
           "--strict",
+          "--json",
         ]);
-        expect(result.status).toBe(0);
+        const parsed = JSON.parse(result.stdout) as JsonReport;
+        expect(
+          parsed.findings.some(
+            (f) => f.ruleId === "sources-fresh" && f.message.includes("STALE"),
+          ),
+        ).toBe(true);
+        expect(
+          parsed.findings.some(
+            (f) =>
+              f.ruleId === "sources-fresh" &&
+              f.message.includes("re-stamp moved backwards") &&
+              f.message.includes("2025-02-01T00:00:00.000Z") &&
+              f.message.includes("2025-01-15T00:00:00.000Z") &&
+              f.message.includes("in the working tree"),
+          ),
+        ).toBe(true);
+        expect(result.status).toBe(1);
       } finally {
         repo.cleanup();
       }
     });
+  });
+
+  it("a COMMITTED backwards re-stamp fails --strict (exit 1) and appears in --json with severity warning (D-004, M4)", () => {
+    // The --dirty-as-now matrix above only pins the WORKING-TREE backwards
+    // path; this pins the committed path (restampedByOwnLastCommit) at the
+    // CLI level, mirroring the unit-level test in sources-fresh.test.ts.
+    const repo = createTmpGitRepo();
+    try {
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content:
+              "---\ntype: concept\ntimestamp: 2026-03-01T00:00:00Z\nsources:\n  - source.ts\n---\n\n# Doc\n",
+          },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content:
+              "---\ntype: concept\ntimestamp: 2026-02-01T00:00:00Z\nsources:\n  - source.ts\n---\n\n# Doc\n",
+          },
+          { relPath: "source.ts", content: "export const a = 2;\n" },
+        ],
+        "2026-04-01T00:00:00Z",
+      );
+
+      const result = runCli([
+        "check",
+        path.join(repo.dir, "bundle"),
+        "--repo-root",
+        repo.dir,
+        "--strict",
+        "--json",
+      ]);
+      const parsed = JSON.parse(result.stdout) as JsonReport;
+      const backwards = parsed.findings.find(
+        (f) =>
+          f.ruleId === "sources-fresh" &&
+          f.message.includes("re-stamp moved backwards"),
+      );
+      expect(backwards).toBeDefined();
+      expect(backwards?.severity).toBe("warning");
+      expect(backwards?.message).toContain("2026-03-01T00:00:00.000Z");
+      expect(backwards?.message).toContain("2026-02-01T00:00:00.000Z");
+      expect(backwards?.message).toContain("in the doc's last commit");
+      expect(result.status).toBe(1);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("the re-stamp direction verdict never depends on the machine's timezone: a stamp with no UTC designator reads identically under TZ=UTC and TZ=Asia/Tokyo (D-013)", () => {
+    // A bare datetime ("2026-01-01T13:00:00", no `Z`, no offset) is parsed
+    // by `Date.parse` in the MACHINE'S timezone. Compared against a
+    // `Z`-suffixed parent value it therefore resolves to 13:00 UTC on a UTC
+    // runner (a forward move) and to 04:00 UTC on a UTC+9 one (a backwards
+    // move) -- the same repository, two opposite verdicts and two opposite
+    // `--strict` exit codes. D-013 takes the raw-identity fallback whenever
+    // either side carries no designator, so no direction is claimed at all.
+    //
+    // The fixture keeps the day-wide STALENESS comparison far from its own
+    // boundary on purpose (the source's commit is a month after the doc's
+    // stamp under either reading), so the only thing a timezone shift could
+    // flip here is the direction verdict this test is about.
+    const repo = createTmpGitRepo();
+    try {
+      const doc = (stamp: string): string =>
+        `---\ntype: concept\ntimestamp: "${stamp}"\nsources:\n  - source.ts\n---\n\n# Doc\n`;
+      repo.commitFiles(
+        [
+          { relPath: "bundle/doc.md", content: doc("2026-01-01T12:00:00Z") },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+      repo.commitFiles(
+        [
+          { relPath: "bundle/doc.md", content: doc("2026-01-01T13:00:00") },
+          { relPath: "source.ts", content: "export const a = 2;\n" },
+        ],
+        "2026-02-01T00:00:00Z",
+      );
+
+      const args = [
+        "check",
+        path.join(repo.dir, "bundle"),
+        "--repo-root",
+        repo.dir,
+        "--strict",
+        "--json",
+      ];
+      const utc = runCliWithTz(args, "UTC");
+      const tokyo = runCliWithTz(args, "Asia/Tokyo");
+      const freshness = (result: RunResult) =>
+        (JSON.parse(result.stdout) as JsonReport).findings.filter((f) =>
+          f.ruleId.startsWith("sources-fresh"),
+        );
+
+      expect(freshness(tokyo)).toEqual(freshness(utc));
+      expect(tokyo.status).toBe(utc.status);
+      // And the invariant verdict is the right one, not merely the same
+      // wrong one twice: with no designator the direction is not judged, so
+      // the changed value falls back to counting as a re-stamp (the
+      // behavior that predates the direction rule) and nothing claims a
+      // move in either direction.
+      expect(
+        freshness(utc).filter(
+          (f) =>
+            f.message.includes("moved backwards") ||
+            f.message.includes("STALE"),
+        ),
+      ).toEqual([]);
+      expect(utc.status).toBe(0);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("the OLDER side is gated too: a designator-less value in the FIRST PARENT reads identically under TZ=UTC and TZ=Asia/Tokyo (D-013)", () => {
+    // Mirror of the test above, with the two sides swapped: here the bare
+    // datetime is the value the commit REPLACED (the first parent's), and
+    // the commit's own value carries a `Z`. Ungated, the parent's
+    // "2026-01-01T13:00:00" resolves to 13:00 UTC on a UTC runner (later
+    // than the commit's 12:00Z: a backwards move, STALE plus the backwards
+    // warning, `--strict` exit 1) and to 04:00 UTC on a UTC+9 one (earlier:
+    // a forward move, clean, exit 0) -- the same repository, two opposite
+    // verdicts again. Gating only the NEWER side would leave that half
+    // silently TZ-dependent, which is why both sides go through
+    // `isDirectionComparable`.
+    //
+    // As above, the fixture keeps the day-wide STALENESS comparison far
+    // from its own boundary (the source's commit is a month after the
+    // doc's stamp under either reading), so the direction verdict is the
+    // only thing a timezone shift could flip here.
+    const repo = createTmpGitRepo();
+    try {
+      const doc = (stampLine: string): string =>
+        `---\ntype: concept\ntimestamp: ${stampLine}\nsources:\n  - source.ts\n---\n\n# Doc\n`;
+      repo.commitFiles(
+        [
+          // Unquoted on purpose: YAML 1.2's core schema leaves a bare
+          // datetime a STRING (only an explicit `!!timestamp` tag resolves
+          // to a native `Date`), so this is the designator-less string
+          // shape the gate is about, not the native-date shape the test
+          // below covers.
+          { relPath: "bundle/doc.md", content: doc("2026-01-01T13:00:00") },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+      repo.commitFiles(
+        [
+          { relPath: "bundle/doc.md", content: doc('"2026-01-01T12:00:00Z"') },
+          { relPath: "source.ts", content: "export const a = 2;\n" },
+        ],
+        "2026-02-01T00:00:00Z",
+      );
+
+      const args = [
+        "check",
+        path.join(repo.dir, "bundle"),
+        "--repo-root",
+        repo.dir,
+        "--strict",
+        "--json",
+      ];
+      const utc = runCliWithTz(args, "UTC");
+      const tokyo = runCliWithTz(args, "Asia/Tokyo");
+      const freshness = (result: RunResult) =>
+        (JSON.parse(result.stdout) as JsonReport).findings.filter((f) =>
+          f.ruleId.startsWith("sources-fresh"),
+        );
+
+      expect(freshness(tokyo)).toEqual(freshness(utc));
+      expect(tokyo.status).toBe(utc.status);
+      // And the invariant verdict is the right one: with the older side
+      // carrying no designator, no direction is claimed at all, so the
+      // changed value takes the raw-identity fallback and counts as a
+      // re-stamp -- no backwards warning, no STALE, on either machine.
+      expect(
+        freshness(utc).filter(
+          (f) =>
+            f.message.includes("moved backwards") ||
+            f.message.includes("STALE"),
+        ),
+      ).toEqual([]);
+      expect(utc.status).toBe(0);
+      expect(tokyo.status).toBe(0);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("a native YAML date (`!!timestamp`) has no designator to carry and is judged for direction anyway, identically under both timezones (D-013)", () => {
+    // The other side of the same decision: `getRawTimestampString` returns
+    // undefined for a native date, and that undefined means "nothing to
+    // gate", not "ambiguous" -- the YAML parser already fixed the instant
+    // (a zone-less `!!timestamp` is UTC per YAML 1.1, not local time), so
+    // direction IS judged for it. The fixture is discriminating in both
+    // directions at once: the parent is a native date at 2026-02-01, the
+    // commit's own value the EARLIER `2026-01-15T00:00:00Z`, so treating
+    // the date side as ambiguous would take the raw-identity fallback and
+    // report this changed value clean, while reading it as local time on
+    // the UTC+9 run would move the reported previous instant off
+    // 2026-02-01T00:00:00.000Z.
+    const repo = createTmpGitRepo();
+    try {
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content:
+              "---\ntype: concept\ntimestamp: !!timestamp 2026-02-01 00:00:00\nsources:\n  - source.ts\n---\n\n# Doc\n",
+          },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content:
+              '---\ntype: concept\ntimestamp: "2026-01-15T00:00:00Z"\nsources:\n  - source.ts\n---\n\n# Doc\n',
+          },
+          { relPath: "source.ts", content: "export const a = 2;\n" },
+        ],
+        "2026-03-01T00:00:00Z",
+      );
+
+      const args = [
+        "check",
+        path.join(repo.dir, "bundle"),
+        "--repo-root",
+        repo.dir,
+        "--strict",
+        "--json",
+      ];
+      const utc = runCliWithTz(args, "UTC");
+      const tokyo = runCliWithTz(args, "Asia/Tokyo");
+      const freshness = (result: RunResult) =>
+        (JSON.parse(result.stdout) as JsonReport).findings.filter((f) =>
+          f.ruleId.startsWith("sources-fresh"),
+        );
+
+      expect(freshness(tokyo)).toEqual(freshness(utc));
+      expect(tokyo.status).toBe(utc.status);
+      const backwards = freshness(utc).find((f) =>
+        f.message.includes("moved backwards"),
+      );
+      expect(backwards?.severity).toBe("warning");
+      expect(backwards?.message).toContain("2026-02-01T00:00:00.000Z");
+      expect(backwards?.message).toContain("2026-01-15T00:00:00.000Z");
+      expect(utc.status).toBe(1);
+    } finally {
+      repo.cleanup();
+    }
   });
 
   it("skips staleness with a notice when the bundle is not inside a git work tree", () => {

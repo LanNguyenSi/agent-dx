@@ -1,5 +1,65 @@
 # Bundle log
 
+- 2026-09-17T04:42:19Z (agent-dx tracker task 8ebaf3f6, pandora run
+  2026-09-17-open-pool-batch56): the dist-tag/deprecate/publish
+  allowlist pin `describe` in
+  `packages/orchestrator-workflow/test/docs-consistency.test.ts` gained a
+  fourth assertion (publish-npm.yml's own `on.push.tags` patterns pinned
+  against its own `PUBLISHABLE` list) and an anchored, exactly-one-match
+  extractor with a fixture test proving a comment-shadowed or duplicated
+  `ALLOWLIST`/`PUBLISHABLE` line can no longer be mistaken for the real
+  one; both additions land after the file's existing last `describe`.
+  Re-read every citation this bundle makes into that test file against
+  the edited file; all resolve to lines well before the append point and
+  are unchanged. Re-stamped `model-preselection.md`,
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and
+  `subagent-contracts-superset.md`, the four docs whose `sources` list
+  that test file. A follow-up fix to the same tracker task additionally
+  made the four extractions lazy and memoized so a parse miss in one
+  fails only its own dependent assertions instead of aborting collection
+  of the whole test file (probed by unquoting an `ALLOWLIST` value: 397
+  of 398 tests in the file still ran), sliced `on.push.tags` to its own
+  block before matching so a `"<pkg>/v*"`-shaped item elsewhere in the
+  file cannot be collected, added a sixth assertion pinning all six
+  hand-maintained prose copies of the package list (count and tokens)
+  across the two operator workflows, `publish-npm.yml`, and
+  `CONTRIBUTING.md`, added an inline-fixture negative control proving the
+  set-equality comparison actually discriminates a drifted list, and
+  appended the likely token-scope cause to `npm-dist-tag.yml`'s and
+  `npm-deprecate.yml`'s (via `.github/scripts/print-deprecations.mjs`)
+  final read-back messages, updating the three comments that had
+  described them as not naming the cause; re-stamped the same four docs
+  again in this commit. A second follow-up pinned that cause hint itself
+  with an assertion isolated to `npm-dist-tag.yml`'s final `::error::`
+  line, `print-deprecations.mjs`'s sole `::warning::` line, and
+  `CONTRIBUTING.md`'s token paragraph (not the whole source, so a
+  reverted hint elsewhere in the same file cannot hide behind an
+  unrelated match), broadened the prose-copy scan from a
+  start-anchored `(orchestrator-workflow, ...)` match to any
+  parenthetical whose comma-separated tokens are all known publishable
+  names and extended it to the repo-root `README.md` (the pinned count
+  stayed six; `README.md` carries no copy today), folded the
+  `readdirSync` workflow-file listing into the same lazy, memoized
+  pattern as the other extractions, and dropped the change-relative
+  "now" wording from the three cause-hint comments while naming
+  `print-deprecations.mjs` and "these workflows'" allowlist in them;
+  re-stamped the same four docs a third time. A third follow-up gave each
+  of those three sites its own required cause-hint pattern, matched
+  against the whitespace-normalised text, so deleting a hint sentence
+  while leaving the token name and the word "allowlist" in place fails
+  instead of passing; made `paragraphContaining`'s blank-line split
+  CRLF-tolerant, since on a CRLF checkout the source collapsed into a
+  single paragraph and the exactly-one guard degraded into a whole-file
+  substring check; required a parenthetical to carry more than one token
+  before it counts as a package-list copy, so prose naming a single
+  package in passing is no longer collected; and dropped the
+  `extractQuotedList` wrapper left unused when its callers moved to
+  `extractQuotedListFromSource`; re-stamped the same four docs a fourth
+  time. The tag-block and tag-item extractors in that same
+  `describe` now tolerate a CRLF checkout (an optional `\r` before the
+  line end), matching the paragraph splitter; the four docs were
+  re-stamped once more for that edit.
+
 - 2026-09-16T13:17:23Z (release cut, pandora run 2026-09-16-releases-batch55,
   REL-001): cut the `[Unreleased]` section under a new `[0.36.0] -
   2026-09-16` heading, keeping an empty `[Unreleased]` heading above it,
@@ -10158,3 +10218,14 @@ the residual per-run scan cost in the extractor docblock, reflowed one
 docblock, and removed a stale suite total from this entry; the five
 contracts.md citations above moved by two lines and were re-read at
 their new lines, and the five source-bearing docs were re-stamped.
+
+## 2026-09-17 (agent-dx 74a5a857, slop-detector stdin bound is now first-byte)
+
+The stdin bound the 2026-09-16T10:12:00Z entry above describes as a
+10-second idle timeout, re-armed on every chunk, is now a first-byte
+timeout instead: armed once before the first byte arrives and cleared for
+good the moment any data arrives, never re-armed again. A producer that
+writes some data and then stalls mid-stream is once more an ordinary pipe
+hang rather than a bounded usage error, unlike the never-written case the
+bound still catches. See packages/slop-detector/CHANGELOG.md's Unreleased
+section for the full trade-off.

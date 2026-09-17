@@ -131,8 +131,12 @@ with `baseline_failed` rather than a verdict. Pass `--target
 <path>[,<path>...]` (a probe target, repeatable or comma-separated) to
 also report a `python-bytecode-cache` check for every `.py` path among
 them, naming whatever CPython bytecode cache already exists for that
-target; see the `probe` section's own "Python bytecode cache" entry
-above for what the check reports and why it is informational.
+target, and naming why whenever `python3` cannot be asked or does not
+answer and it falls back to a co-located `__pycache__` guess (`python3`
+absent from `PATH`, resolving nothing, or doctor's aggregate spawn
+deadline already spent); see the `probe` section's own "Python
+bytecode cache" entry above for what the check reports and why it is
+informational.
 
 ```bash
 agent-primitives doctor

@@ -523,9 +523,17 @@ pipe and a whitespace-only pipe all exit `2` with a message naming
 is opened but never written to and never closed (an inherited, non-TTY
 stream with no writer, which is what a CI step or an agent harness
 spawning the CLI with stdio inherited hands it) used to hang forever; it
-is now bounded by a 10-second idle timeout, re-armed on every chunk, and
-reports the same usage error. `SLOP_DETECTOR_STDIN_TIMEOUT_MS` overrides
-that bound for a pipeline whose producer legitimately stalls longer.
+is now bounded by a 10-second first-byte timeout that is armed once,
+before the first byte, and cleared for good the moment any data arrives,
+and reports the same usage error. `SLOP_DETECTOR_STDIN_TIMEOUT_MS`
+overrides that bound. Trade-off: only the never-written case is bounded; a
+producer that writes some data and then stalls forever mid-stream is an
+ordinary pipe hang again, not a timed-out usage error, since a producer
+that has proven it is alive is trusted to keep going -- and a whitespace-only
+first chunk counts as proof too, since the timeout clears on any data
+regardless of content and the emptiness check only runs after `end`, so a
+whitespace-only chunk followed by a stall disarms the guard the same way a
+real one does.
 
 **Configuration.**
 

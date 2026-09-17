@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `doctor`'s `python-bytecode-cache` check is pinned for a partially
+  spent aggregate deadline (a target already in flight when the
+  deadline is crossed still resolves through `python3`, and only a
+  later target in the same run falls back) and for a detail carrying
+  both the "did not resolve" and the "deadline already spent" fallback
+  clauses at once, joined by `"; "` (tracker 0c1b257c). A mechanical
+  guard (`test/doctor-fallback-wording.test.ts`) now fails when the
+  `--target` help text (`src/cli.ts`), `assets/skill/SKILL.md`, the
+  README's `doctor` section, or the `DoctorOptions` docblock stops
+  naming all three fallback reasons (`python3` absent from `PATH`,
+  `python3` resolving nothing, or the deadline already spent); the
+  README and the docblock are aligned to the same three-reason wording
+  the CLI help text and the skill already used. Each of the four
+  surfaces names those three reasons in its own fallback-reasons
+  parenthetical, which the guard matches against rather than against
+  the whole surrounding section; the parenthetical is located by the
+  clause that introduces it ("does not answer"), and a surface where
+  that clause is missing, or occurs more than once, fails the guard
+  instead of being resolved by position. The check's own deadline-spent
+  branch is no longer reachable by accident in the tests that are about
+  another branch: every `--target` case whose assertion needs the
+  `python3` resolution to have happened pins a generous aggregate
+  deadline and asserts the deadline clause is absent, so a deadline
+  spent by unrelated pre-loop overhead fails by name.
+
 ## [0.6.0] - 2026-09-16
 
 - `probe` isolates a Python target's `--pre`/test-command runs from

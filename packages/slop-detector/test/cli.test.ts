@@ -76,6 +76,51 @@ function runCliWithOpenStdin(
   });
 }
 
+/**
+ * Sibling of `runCliWithOpenStdin` that drives stdin with a `script`
+ * callback instead of leaving it untouched, so a caller can pin the
+ * data-then-stall shape: write something, wait past the first-byte bound,
+ * then end stdin. `script` gets `write`/`end` once the child is spawned; nothing
+ * here waits for it, so a script that itself awaits a `setTimeout` before
+ * calling `end` is what actually produces the stall.
+ */
+function runCliWithStdinScript(
+  args: string[],
+  timeoutMs: number,
+  script: (write: (chunk: string) => void, end: () => void) => void,
+): Promise<{ stdout: string; stderr: string; status: number | null }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      ["--import", "tsx", cliEntry, ...args],
+      {
+        cwd: packageRoot,
+        stdio: ["pipe", "pipe", "pipe"],
+        env: {
+          ...process.env,
+          SLOP_DETECTOR_STDIN_TIMEOUT_MS: String(timeoutMs),
+        },
+      },
+    );
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (c: string) => {
+      stdout += c;
+    });
+    child.stderr.on("data", (c: string) => {
+      stderr += c;
+    });
+    child.on("error", reject);
+    child.on("close", (status) => resolve({ stdout, stderr, status }));
+    script(
+      (chunk) => child.stdin.write(chunk),
+      () => child.stdin.end(),
+    );
+  });
+}
+
 let tmp: string;
 
 beforeEach(() => {
@@ -231,6 +276,44 @@ describe("cli check with nothing piped in on stdin", () => {
     expect(status).toBe(2);
     expect(stderr).toMatch(/produced no data for 400ms and never ended/);
     expect(stderr).toContain("--stdin-path");
+  }, 20_000);
+
+  it("data then a stall past the bound is still scanned once stdin ends (arm-once, not re-armed on every chunk)", async () => {
+    const { stdout, status } = await runCliWithStdinScript(
+      ["check", "--stdin-path", "COMMIT_MSG", "--pack", "review-slop"],
+      300,
+      (write, end) => {
+        // The stall (3000ms) needs a wide margin over the bound (300ms) so
+        // this still discriminates re-arm-on-every-chunk on a loaded
+        // runner, where the child's startup and first `readStdin` call can
+        // themselves eat a few hundred ms.
+        write("Fixed per finding F5 in review round 2.\n");
+        setTimeout(end, 3000);
+      },
+    );
+    expect(stdout).toMatch(/1 files scanned/);
+    expect(stdout).toContain("F5");
+    expect(status).toBe(1);
+  }, 20_000);
+
+  it("whitespace-only data then a stall past the bound is still a usage error, not a scan (disarm needs real data)", async () => {
+    const { stderr, status } = await runCliWithStdinScript(
+      ["check", "--stdin-path", "COMMIT_MSG", "--pack", "review-slop"],
+      300,
+      (write, end) => {
+        // Same wide margin as the sibling data-then-stall case above: the
+        // written chunk is whitespace-only, so it must not disarm the
+        // bound (disarm needs real data, per the emptiness predicate), and
+        // the read should still end in the usual "no content" usage error
+        // once stdin closes, not hang or scan an empty document.
+        write(" \n");
+        setTimeout(end, 3000);
+      },
+    );
+    expect(status).toBe(2);
+    expect(stderr).toContain("--stdin-path");
+    expect(stderr).toMatch(/non-whitespace content/);
+    expect(stderr).toMatch(/nothing was scanned/);
   }, 20_000);
 
   it("a non-empty pipe is still scanned (the bound never truncates real input)", () => {
