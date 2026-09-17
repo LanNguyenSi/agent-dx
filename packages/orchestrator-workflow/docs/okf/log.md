@@ -10006,3 +10006,14 @@ references still pass the same guards. Re-verified the six source-bearing
 module documents and refreshed their verification timestamps after the source
 and test commits. The baseline validator replay and saved-plan mutation
 evidence are retained in the consuming workspace's run record.
+
+## 2026-09-17 (agent-dx 74a5a857, slop-detector stdin bound is now first-byte)
+
+The stdin bound the 2026-09-16T10:12:00Z entry above describes as a
+10-second idle timeout, re-armed on every chunk, is now a first-byte
+timeout instead: armed once before the first byte arrives and cleared for
+good the moment any data arrives, never re-armed again. A producer that
+writes some data and then stalls mid-stream is once more an ordinary pipe
+hang rather than a bounded usage error, unlike the never-written case the
+bound still catches. See packages/slop-detector/CHANGELOG.md's Unreleased
+section for the full trade-off.
