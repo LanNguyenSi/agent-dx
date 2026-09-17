@@ -55,7 +55,10 @@
   package in passing is no longer collected; and dropped the
   `extractQuotedList` wrapper left unused when its callers moved to
   `extractQuotedListFromSource`; re-stamped the same four docs a fourth
-  time.
+  time. The tag-block and tag-item extractors in that same
+  `describe` now tolerate a CRLF checkout (an optional `\r` before the
+  line end), matching the paragraph splitter; the four docs were
+  re-stamped once more for that edit.
 
 - 2026-09-16T13:17:23Z (release cut, pandora run 2026-09-16-releases-batch55,
   REL-001): cut the `[Unreleased]` section under a new `[0.36.0] -

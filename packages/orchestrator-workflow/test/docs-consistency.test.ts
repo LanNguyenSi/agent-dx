@@ -9095,7 +9095,7 @@ describe("the dist-tag, deprecate, and publish allowlists stay pinned to each ot
   function extractOnPushTagsBlock(source: string, label: string): string {
     const lines = source.split("\n");
     const tagsLineIndex = lines.findIndex((line) =>
-      /^[ \t]*tags:[ \t]*$/.test(line),
+      /^[ \t]*tags:[ \t]*\r?$/.test(line),
     );
     expect(
       tagsLineIndex,
@@ -9118,7 +9118,7 @@ describe("the dist-tag, deprecate, and publish allowlists stay pinned to each ot
 
   function extractTagPackages(source: string, label: string): string[] {
     const block = extractOnPushTagsBlock(source, label);
-    const re = /^[ \t]*-[ \t]*"([^"]+)\/v\*"[ \t]*$/gm;
+    const re = /^[ \t]*-[ \t]*"([^"]+)\/v\*"[ \t]*\r?$/gm;
     const matches = [...block.matchAll(re)];
     expect(
       matches.length,
