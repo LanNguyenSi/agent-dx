@@ -10065,13 +10065,21 @@ Verified from the worktree root: `npm run build`, `npm run typecheck`,
 schema's `FIELD_KINDS.array` kind name is unchanged, only its runtime
 element check gained new behaviour, so that pin needed no edit).
 `npx okf-kit@0.12.1 check packages/orchestrator-workflow/docs/okf
---require-anchors --json` from the repository root, after the source
-commit but before this doc/log commit: 0 errors, 6 warnings (4
-`sources-fresh-future`, expected to clear once this commit lands and
-becomes each re-stamped doc's own last commit; 1 pre-existing
-`references/contracts.md:355-357` range-exceeds-file, out of scope per
-above; 1 self-inflicted `CHANGELOG.md:#x.y.z` false-positive from this
-entry's own first draft, fixed by splitting the path and anchor into
-separate backtick spans, matching this file's existing convention for an
-illustrative citation form). Re-run after this commit lands to confirm
-the warning count drops to the expected residual.
+--require-anchors --json` from the repository root, run three times
+across this round: after the source commit, before the doc/log commit:
+0 errors, 6 warnings (4 `sources-fresh-future`, since the four
+timestamps had already been bumped but not yet committed; 1 pre-existing
+citation into `references/contracts.md` at old lines 355-357,
+range-exceeds-file, out of scope per above; 1 self-inflicted
+false-positive from this entry's own first draft, a `CHANGELOG.md`
+heading-anchor form written as one contiguous backtick span, fixed by
+splitting the path and the anchor into separate spans, matching this
+file's existing convention at line 24 for an illustrative citation
+form). After the doc/log commit landed: 0 errors, 1 warning (the
+pre-existing `references/contracts.md` one, unchanged). Final run, after
+fixing this same paragraph's own re-introduction of the
+now-fixed-once-already contiguous-span mistake (this sentence itself had
+briefly re-triggered both findings by quoting them the same way the
+original draft did): 0 errors, 1 warning, matching the prior run --
+confirming this paragraph's own text is not itself parsed as a live
+citation.
