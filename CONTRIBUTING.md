@@ -37,14 +37,17 @@ Each package is self-contained, no root install.
 Publishing runs in CI via npm Trusted Publishing (OIDC, `id-token: write`;
 see `.github/workflows/publish-npm.yml`) and needs no npm token. The other
 npm writes (deprecate, dist-tag) still run via the `NPM_AGENT_DX_TOKEN`
-repository secret, which must be a granular automation token scoped to
-every package on these workflows' allowlist (orchestrator-workflow,
+repository secret, a granular automation token whose package scope is
+all of the account's packages with read and write access, so it can
+write every package on these workflows' allowlist (orchestrator-workflow,
 okf-kit, agent-primitives) (see `npm-deprecate.yml` and
-`npm-dist-tag.yml`), since OIDC only covers `npm publish`. Adding a
-package to the allowlist does not widen the token: re-scope it by hand
-on npmjs.com in the same change, or the workflow accepts the package and
-then fails at the registry read-back assertion, whose error/warning
-message names that as the likely cause. There is no working local
+`npm-dist-tag.yml`), since OIDC only covers `npm publish`. With that
+scope, adding a package to the allowlist needs no token change. Only if
+the scope is ever narrowed to named packages would a new allowlist entry
+need a re-scope by hand on npmjs.com in the same change. Without that
+re-scope the workflow accepts the package and then fails at the registry
+read-back assertion, whose error/warning message names the token as the
+likely cause. There is no working local
 npm token; do not debug a local `E401`/`E404`, trigger the workflow
 instead.
 

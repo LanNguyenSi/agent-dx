@@ -9332,17 +9332,17 @@ describe("the dist-tag, deprecate, and publish allowlists stay pinned to each ot
       [
         "npm-dist-tag.yml final ::error::",
         finalDistTagError,
-        /recently added to the allowlist, check that NPM_AGENT_DX_TOKEN is scoped/,
+        /recently added to the allowlist, check that NPM_AGENT_DX_TOKEN on npmjs\.com can write it/,
       ],
       [
         "print-deprecations.mjs UNCONFIRMED ::warning::",
         unconfirmedWarning,
-        /recently added to the allowlist, check that NPM_AGENT_DX_TOKEN is scoped/,
+        /recently added to the allowlist, check that NPM_AGENT_DX_TOKEN on npmjs\.com can write it/,
       ],
       [
         "CONTRIBUTING.md token paragraph",
         tokenParagraph,
-        /names that as the likely cause/,
+        /names the token as the likely cause/,
       ],
     ] as const) {
       expect(text, `${label} lost the NPM_AGENT_DX_TOKEN mention`).toContain(

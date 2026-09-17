@@ -4,15 +4,17 @@ name: Move an npm dist-tag
 # already-published version. Runs here rather than on a workstation because
 # the write-capable NPM_AGENT_DX_TOKEN lives only as a repository secret.
 #
-# NPM_AGENT_DX_TOKEN must be a granular npm automation token scoped to
-# every package this workflow's allowlist names (orchestrator-workflow,
-# okf-kit, agent-primitives), with publish/write permission (dist-tag
-# moves and, in npm-deprecate.yml, deprecation) and 2FA-bypass enabled so
-# it works non-interactively in CI. Adding a package to the allowlist
-# does not widen the token: re-scope it by hand on npmjs.com in the same
-# change, or this workflow accepts the package and then fails at the
-# registry read-back assertion, whose error message names that as the
-# likely cause.
+# NPM_AGENT_DX_TOKEN is a granular npm automation token whose package
+# scope is all of the account's packages with read and write access, so
+# it can write every package this workflow's allowlist names
+# (orchestrator-workflow, okf-kit, agent-primitives) for dist-tag moves
+# and, in npm-deprecate.yml, deprecation; 2FA-bypass is enabled so it
+# works non-interactively in CI. With that scope, adding a package to the
+# allowlist needs no token change. Only if the scope is ever narrowed to
+# named packages would a new allowlist entry need a re-scope by hand on
+# npmjs.com in the same change. Without that re-scope this workflow
+# accepts the package and then fails at the registry read-back assertion,
+# whose error message names the token as the likely cause.
 # The npm CLI cannot create granular tokens, so it was created by hand on
 # npmjs.com (Access Tokens -> Generate New Token -> Granular Access Token).
 # The token has an expiry; its rotation date is tracked by the maintainer
@@ -82,9 +84,10 @@ jobs:
           # (orchestrator-workflow, okf-kit, agent-primitives) holds package
           # DIRECTORY names; today the two coincide, but a future package whose
           # npm name diverges from its directory name must be added here under
-          # its npm name, not copied verbatim. Adding a package here requires
-          # NPM_AGENT_DX_TOKEN to be re-scoped to it by hand on npmjs.com (see
-          # the header comment above); this validation does not check that.
+          # its npm name, not copied verbatim. Adding a package here needs no
+          # token change while NPM_AGENT_DX_TOKEN keeps its all-packages scope
+          # (see the header comment above); this validation does not check
+          # the token's scope.
           ALLOWLIST: "orchestrator-workflow okf-kit agent-primitives"
         run: |
           set -euo pipefail
@@ -187,6 +190,6 @@ jobs:
             fi
             echo "not yet visible: ${TAG} -> '${actual:-<absent>}' (want ${VERSION}); retrying"
           done
-          echo "::error::${PACKAGE}@${TAG} still does not point at ${VERSION} after polling; the write did not land; if ${PACKAGE} was recently added to the allowlist, check that NPM_AGENT_DX_TOKEN is scoped to it on npmjs.com." >&2
+          echo "::error::${PACKAGE}@${TAG} still does not point at ${VERSION} after polling; the write did not land; if ${PACKAGE} was recently added to the allowlist, check that NPM_AGENT_DX_TOKEN on npmjs.com can write it and has not expired." >&2
           npm view "$PACKAGE" dist-tags --json || true
           exit 1
