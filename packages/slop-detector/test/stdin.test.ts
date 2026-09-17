@@ -15,9 +15,14 @@ import {
 // the end-to-end subprocess coverage for the two argv-visible shapes.
 class FakeStdin extends EventEmitter implements StdinLike {
   paused = false;
+  // Separate from `paused` (which only records the latest state) so a
+  // test can assert pause() fired exactly once, from the timeout handler
+  // alone, rather than merely that it fired at least once.
+  pauseCallCount = 0;
   setEncoding(): void {}
   pause(): void {
     this.paused = true;
+    this.pauseCallCount++;
   }
 }
 
@@ -98,15 +103,21 @@ describe("readStdin", () => {
     }
   });
 
-  it("propagates a stream error", async () => {
-    const stdin = new FakeStdin();
-    const promise = readStdin(1_000, stdin);
-    const boom = new Error("boom");
-    stdin.emit("error", boom);
-    await expect(promise).rejects.toBe(boom);
+  it("propagates a stream error and clears the timer", async () => {
+    vi.useFakeTimers();
+    try {
+      const stdin = new FakeStdin();
+      const promise = readStdin(1_000, stdin);
+      const boom = new Error("boom");
+      stdin.emit("error", boom);
+      await expect(promise).rejects.toBe(boom);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("once the bound fires and the promise has rejected, late data/end is inert: no unhandled rejection", async () => {
+  it("late data and end after the bound fired do not re-arm the guard or change the outcome", async () => {
     vi.useFakeTimers();
     try {
       const stdin = new FakeStdin();
@@ -121,8 +132,26 @@ describe("readStdin", () => {
       // The promise already settled (rejected); a producer that shows up
       // late must not change that outcome or throw on its own.
       stdin.emit("data", "too late");
+      // Advance past the bound again before `end`: if the data handler
+      // above wrongly re-armed the guard, this is where that second
+      // timer fires and calls pause() a second time. The real `end`
+      // handler's own disarm() would clean up any dangling timer either
+      // way, so checking timer count only after `end` cannot catch a
+      // re-arm that already fired and settled in between; the pause()
+      // count below is what actually discriminates it.
+      await vi.advanceTimersByTimeAsync(50);
       stdin.emit("end");
       await assertion;
+      // A data handler that re-armed the guard (instead of staying a
+      // no-op once already disarmed) would leave a fresh timer pending
+      // here.
+      expect(vi.getTimerCount()).toBe(0);
+      // pause() fires exactly once, from the timeout handler itself; a
+      // mutant that drops that call leaves this at 0, and a mutant that
+      // re-arms the guard in the data handler leaves this at 2 (once
+      // from the original bound, once from the re-armed timer that
+      // fires on the second advance above).
+      expect(stdin.pauseCallCount).toBe(1);
     } finally {
       vi.useRealTimers();
     }

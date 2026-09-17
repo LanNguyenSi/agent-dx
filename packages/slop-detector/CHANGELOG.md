@@ -348,10 +348,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   was checked. A stdin that is opened and then never written to and never
   closed, which is what a CI step or an agent harness spawning the CLI
   with stdio inherited hands it, no longer hangs forever: the read is
-  bounded by a 10-second idle timeout, re-armed on every chunk so a large
-  but flowing input is never truncated, and reports the same usage error.
-  `SLOP_DETECTOR_STDIN_TIMEOUT_MS` overrides that bound for a pipeline
-  whose producer legitimately stalls longer.
+  bounded by a 10-second first-byte timeout, armed once before the first
+  byte and cleared for good on the first chunk that arrives (a producer
+  that writes some data and then stalls forever mid-stream is not bounded
+  by it and hangs like an ordinary pipe again, since a producer that has
+  proven it is alive is trusted to keep going), and reports the same
+  usage error. `SLOP_DETECTOR_STDIN_TIMEOUT_MS` overrides that bound for
+  a producer that legitimately takes longer to write its first byte.
 
 - `stripFencedCode`, shared by `prose-slop`, `agent-tics` and
   `review-slop`, anchors both the opener and the closer of a backtick or
@@ -365,17 +368,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (54 `prose-slop/em-dash`, 2 `prose-slop/hedging-opener`), all of them
   in one Markdown file that discusses a stray triple-backtick run in
   prose; the block count and both CI pack scans are unchanged.
-
-### Fixed
-
-- `check`'s stdin first-byte timeout is now armed once, before the first
-  byte, and cleared for good on the first chunk that arrives, instead of
-  being re-armed on every chunk. It still bounds a stdin that is opened and
-  never written to at all (the CI/agent-harness no-writer shape the
-  timeout was added for); the trade-off is that a producer which writes
-  some data and then stalls forever mid-stream is no longer bounded by it
-  and hangs like an ordinary pipe again, since a producer that has proven
-  it is alive is trusted to keep going.
 
 ## [0.3.1] - 2026-08-26
 

@@ -143,8 +143,8 @@ async function runCheck(
     // rationale and trade-off), not here: that keeps them importable by a
     // unit test without that import triggering this module's own
     // `program.parseAsync()` side effect. What stays here is the TTY fast
-    // path above and the post-read emptiness check below, since both are
-    // about `check`'s own argument handling rather than stdin mechanics.
+    // path and the post-read emptiness check below, since both are about
+    // `check`'s own argument handling rather than stdin mechanics.
     if (process.stdin.isTTY) {
       throw noStdinContentError("stdin is a TTY, so nothing was piped in");
     }
