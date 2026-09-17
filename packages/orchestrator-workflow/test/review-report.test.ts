@@ -201,6 +201,16 @@ describe("validateReviewReport: fence handling", () => {
     ]);
   });
 
+  it("prefers a later ```yaml title=x fence over an earlier plain untagged fence: the tag test reads only the first word, not the whole info string", () => {
+    const raw =
+      "```bash\necho not yaml\n```\n```yaml title=x\nstatus: reviewed\n```\n";
+    const { yamlText, warnings } = extractYamlSource(raw);
+    expect(yamlText).toBe("status: reviewed");
+    expect(warnings).toEqual([
+      "1 earlier fenced block without a yaml/yml tag was skipped in favor of the later `yaml` fenced block; only that later block was validated",
+    ]);
+  });
+
   it("keeps first-fence behaviour when neither of two fences is tagged yaml/yml", () => {
     const raw = "```\nstatus: reviewed\n```\n```\nrole: reviewer\n```\n";
     const { yamlText, warnings } = extractYamlSource(raw);
