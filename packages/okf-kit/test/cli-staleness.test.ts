@@ -447,7 +447,7 @@ describe("okf-kit cli staleness (sources-fresh + repo-root auto-detection)", () 
       }
     });
 
-    it("(v) backwards re-stamp (on-disk timestamp moved EARLIER than HEAD's) + source dirty: still a re-stamp, clean, exit 0 (documented)", () => {
+    it("(v) backwards re-stamp (on-disk timestamp moved EARLIER than HEAD's) + source dirty: STALE + backwards warning, exit 1 (D-004)", () => {
       const repo = createTmpGitRepo();
       try {
         setupBaseline(repo);
@@ -455,9 +455,10 @@ describe("okf-kit cli staleness (sources-fresh + repo-root auto-detection)", () 
           path.join(repo.dir, "source.ts"),
           "export const a = 2;\n",
         );
-        // Moved BACKWARDS relative to the committed 2025-02-01 value --
-        // still counts as a re-stamp (a changed value in EITHER direction),
-        // documented in the README's "any CHANGE of value" wording.
+        // Moved BACKWARDS relative to the committed 2025-02-01 value -- per
+        // D-004, only a value strictly LATER than the one it replaced
+        // counts as a re-stamp, so this is NOT a re-verification: the doc
+        // stays STALE and gets the extra "moved backwards" warning.
         dirtyDoc(repo, "2025-01-15T00:00:00.000Z");
 
         const result = runCli([
@@ -467,8 +468,25 @@ describe("okf-kit cli staleness (sources-fresh + repo-root auto-detection)", () 
           repo.dir,
           "--dirty-as-now",
           "--strict",
+          "--json",
         ]);
-        expect(result.status).toBe(0);
+        const parsed = JSON.parse(result.stdout) as JsonReport;
+        expect(
+          parsed.findings.some(
+            (f) => f.ruleId === "sources-fresh" && f.message.includes("STALE"),
+          ),
+        ).toBe(true);
+        expect(
+          parsed.findings.some(
+            (f) =>
+              f.ruleId === "sources-fresh" &&
+              f.message.includes("re-stamp moved backwards") &&
+              f.message.includes("2025-02-01T00:00:00.000Z") &&
+              f.message.includes("2025-01-15T00:00:00.000Z") &&
+              f.message.includes("in the working tree"),
+          ),
+        ).toBe(true);
+        expect(result.status).toBe(1);
       } finally {
         repo.cleanup();
       }

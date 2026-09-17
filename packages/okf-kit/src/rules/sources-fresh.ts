@@ -32,7 +32,7 @@ export const DEFAULT_FUTURE_SKEW_SECONDS = 600;
 export const sourcesFreshRule: Rule = {
   id: RULE_ID,
   description:
-    "Frontmatter `sources` paths must not have a last-commit time newer than the doc's `timestamp`, unless the doc's own last commit lands at/after the source's and that same commit actually re-stamped the doc: the doc's parsed frontmatter `timestamp` VALUE at that commit differs from its value in the commit's first parent (rename-aware; creating the doc counts as re-stamping it). Creation is trusted only in a genuinely unshallow repository: in a shallow clone, a commit with no parents can simply be where history was cut off, not a real root commit, so it gets the same `not assessable` notice instead of being assumed created. When git cannot answer the question at all, the doc gets a `not assessable` notice instead of either a STALE warning or a silent pass.",
+    "Frontmatter `sources` paths must not have a last-commit time newer than the doc's `timestamp`, unless the doc's own last commit lands at/after the source's and that same commit actually re-stamped the doc: the doc's parsed frontmatter `timestamp` VALUE at that commit is strictly LATER than its value in the commit's first parent (rename-aware; creating the doc counts as re-stamping it). A commit that moves the stamp BACKWARDS is not a re-stamp: the affected sources stay STALE, and the doc additionally gets a `re-stamp moved backwards` warning naming the previous and new values. Creation is trusted only in a genuinely unshallow repository: in a shallow clone, a commit with no parents can simply be where history was cut off, not a real root commit, so it gets the same `not assessable` notice instead of being assumed created. When git cannot answer the question at all, the doc gets a `not assessable` notice instead of either a STALE warning or a silent pass.",
   run(ctx) {
     const findings: Finding[] = [];
 
@@ -150,8 +150,8 @@ export const sourcesFreshRule: Rule = {
       // commitEpoch` gate below fires for a dirty doc exactly as for a real
       // co-commit, so ONE verdict function is picked here rather than two
       // mechanisms answering overlapping questions.
-      let restampMemo: RestampVerdict | undefined;
-      const restampFor = (): RestampVerdict => {
+      let restampMemo: RestampResult | undefined;
+      const restampFor = (): RestampResult => {
         if (restampMemo !== undefined) return restampMemo;
         restampMemo =
           ctx.dirtyAsNow && isDirtyForShared(ctx, git, repoRoot, repoRelDocPath)
@@ -159,7 +159,7 @@ export const sourcesFreshRule: Rule = {
                 git,
                 repoRoot,
                 repoRelDocPath,
-                getTimestampIdentity(doc.frontmatter.parsed),
+                doc.frontmatter.parsed,
                 showPrefixFor,
               )
             : restampedByOwnLastCommit(
@@ -172,8 +172,11 @@ export const sourcesFreshRule: Rule = {
         return restampMemo;
       };
       // At most one "not assessable" notice per doc, however many of its
-      // sources hit the unanswerable re-stamp question.
+      // sources hit the unanswerable re-stamp question. Likewise at most
+      // one "moved backwards" warning per doc (see the isStale branch
+      // below), independent of the notice.
       let notAssessableReported = false;
+      let backwardsReported = false;
 
       for (const source of sources) {
         // A missing path on disk is sources-shape's job to report; avoid a
@@ -205,12 +208,12 @@ export const sourcesFreshRule: Rule = {
           // it fresh would be a silent pass.
           const docCommitEpoch = docCommitEpochFor();
           if (docCommitEpoch !== null && docCommitEpoch >= commitEpoch) {
-            const verdict = restampFor();
-            if (verdict === "restamped") {
+            const result = restampFor();
+            if (result.verdict === "restamped") {
               isStale = false;
             } else if (
-              verdict === "unknown" ||
-              verdict === "unknown-shallow-root"
+              result.verdict === "unknown" ||
+              result.verdict === "unknown-shallow-root"
             ) {
               if (!notAssessableReported) {
                 notAssessableReported = true;
@@ -219,12 +222,29 @@ export const sourcesFreshRule: Rule = {
                   severity: "notice",
                   file: doc.relPath,
                   message:
-                    verdict === "unknown-shallow-root"
+                    result.verdict === "unknown-shallow-root"
                       ? "staleness not assessable: this is a shallow clone (`git clone --depth`), so git cannot tell whether the doc's earliest available commit really created it or is just where history was cut off -- use `fetch-depth: 0` (or an unshallow checkout) to assess it"
                       : "staleness not assessable: git could not read the doc's own last commit to decide whether it re-stamped the doc",
                 });
               }
               continue;
+            } else if (result.backwards && !backwardsReported) {
+              // Not restamped (isStale stays true, reported as the usual
+              // STALE warning below), PLUS one extra warning per doc
+              // naming the doc and both instants: a backwards move is not
+              // a re-verification and must not blend silently into the
+              // ordinary STALE wording (AC-002).
+              backwardsReported = true;
+              const locationPhrase =
+                result.backwards.location === "working-tree"
+                  ? "in the working tree"
+                  : "in the doc's last commit";
+              findings.push({
+                ruleId: RULE_ID,
+                severity: "warning",
+                file: doc.relPath,
+                message: `re-stamp moved backwards: timestamp ${result.backwards.previousIso} -> ${result.backwards.newIso} ${locationPhrase} is not a re-verification`,
+              });
             }
           }
         }
@@ -692,13 +712,14 @@ function commitEpochWithDirtyAsNow(
  * `restampedByOwnLastCommit`'s co-commit check, used in its place (see
  * `restampFor` in the rule above) whenever the doc itself is dirty. The
  * virtual commit's implicit "first parent" is simply HEAD, so this compares
- * the doc's CURRENT (working-tree) parsed `timestamp` identity -- already
- * read from disk by the caller, since `BundleDoc` always reflects the
- * working tree, dirty or not -- against the value committed at HEAD for the
- * same path. Any change of value, in EITHER direction (including a
- * backwards re-stamp), counts as re-stamped, mirroring the committed
- * rescue's "changed, not corrected" semantics documented on
- * `restampedByOwnLastCommit` below.
+ * the doc's CURRENT (working-tree) parsed `timestamp` value -- already read
+ * from disk by the caller, since `BundleDoc` always reflects the working
+ * tree, dirty or not -- against the value committed at HEAD for the same
+ * path. Per D-004, only a value that moves STRICTLY LATER than the one
+ * committed at HEAD counts as re-stamped; a backwards move is
+ * `not-restamped` and flagged via `compareRestampDirection`'s `backwards`
+ * field (`location: "working-tree"`), mirroring the committed rescue's
+ * direction rule documented on `restampedByOwnLastCommit` below.
  *
  * Distinguishes a genuinely untracked/new doc (no entry for this path at
  * HEAD at all -- `git ls-tree HEAD -- <path>` succeeds with EMPTY output,
@@ -715,30 +736,31 @@ function dirtyDocRestampVerdict(
   git: RunGit,
   repoRoot: string,
   repoRelDocPath: string,
-  onDiskTimestamp: unknown,
+  onDiskParsed: unknown,
   showPrefix: () => string | null,
-): RestampVerdict {
+): RestampResult {
   // A pathspec (`--`), cwd-relative: stays in the root-relative frame.
   const treeEntry = git(
     ["ls-tree", "-z", "HEAD", "--", repoRelDocPath],
     repoRoot,
   );
-  if (treeEntry === null) return "unknown";
-  if (treeEntry === "") return "restamped";
+  if (treeEntry === null) return { verdict: "unknown" };
+  if (treeEntry === "") return { verdict: "restamped" };
 
   const prefix = showPrefix();
-  if (prefix === null) return "unknown";
+  if (prefix === null) return { verdict: "unknown" };
   const committed = showBlob(
     git,
     repoRoot,
     "HEAD",
     toTopLevelPath(prefix, repoRelDocPath),
   );
-  if (committed === null) return "unknown";
-  const committedStamp = getTimestampIdentity(
+  if (committed === null) return { verdict: "unknown" };
+  return compareRestampDirection(
+    onDiskParsed,
     parseFrontmatter(committed).frontmatter.parsed,
+    "working-tree",
   );
-  return committedStamp !== onDiskTimestamp ? "restamped" : "not-restamped";
 }
 
 function epochToIso(epochSeconds: number): string {
@@ -834,9 +856,88 @@ type RestampVerdict =
   "restamped" | "not-restamped" | "unknown" | "unknown-shallow-root";
 
 /**
+ * The full result of a restamp-direction decision: the `RestampVerdict`
+ * plus, when the value moved BACKWARDS (the new instant is strictly EARLIER
+ * than the one it replaced), the two parsed instants so the rule can report
+ * exactly what moved and where (`location` distinguishes the committed path
+ * from the `--dirty-as-now` working-tree path, since the two produce
+ * differently worded findings). Kept as a structured field on the result
+ * rather than a bare boolean so a caller can never lose or misplace which
+ * commit/working-tree pair the movement belongs to.
+ */
+type RestampResult = {
+  verdict: RestampVerdict;
+  backwards?: {
+    previousIso: string;
+    newIso: string;
+    location: "commit" | "working-tree";
+  };
+};
+
+/**
+ * Decides the value-comparison branch of a restamp verdict from two parsed
+ * frontmatter values: `beforeParsed` (the older side: the first parent's
+ * committed value, or the value committed at HEAD for the dirty path) and
+ * `currentParsed` (the newer side: the commit's own value, or the on-disk
+ * working-tree value for the dirty path).
+ *
+ * D-004: a re-stamp only counts when the new value is STRICTLY LATER than
+ * the value it replaced -- comparing PARSED INSTANTS (epoch seconds), never
+ * raw strings, so a squash that re-dates sources (and the doc) to the merge
+ * instant still passes (later than any pre-merge stamp) while a genuinely
+ * backdated re-stamp does not. Three outcomes:
+ *
+ *  - new epoch > old epoch: `restamped` (a real re-verification).
+ *  - new epoch < old epoch: `not-restamped`, AND flagged via `backwards` --
+ *    a backwards move is never a re-verification and is additionally
+ *    reported as its own warning by the caller.
+ *  - new epoch === old epoch (a cosmetic rewrite, e.g. adding milliseconds,
+ *    or switching between a quoted string and a native YAML date that name
+ *    the same instant): `not-restamped`, but NOT `backwards` -- nothing was
+ *    certified newer, but nothing moved backwards either.
+ *
+ * When EITHER side's `timestamp` cannot be parsed to an epoch at all
+ * (missing, blank, or a string `Date.parse` rejects), direction cannot be
+ * judged: this falls back to today's pre-D-004 behaviour of comparing the
+ * two values' raw IDENTITY (`getTimestampIdentity`) instead of guessing a
+ * direction -- any textual change still counts as `restamped`, exactly as
+ * before this decision existed, and never triggers `backwards` (there is no
+ * direction to report).
+ */
+function compareRestampDirection(
+  currentParsed: unknown,
+  beforeParsed: unknown,
+  location: "commit" | "working-tree",
+): RestampResult {
+  const currentEpoch = getTimestampEpoch(currentParsed);
+  const beforeEpoch = getTimestampEpoch(beforeParsed);
+  if (currentEpoch === undefined || beforeEpoch === undefined) {
+    const currentStamp = getTimestampIdentity(currentParsed);
+    const beforeStamp = getTimestampIdentity(beforeParsed);
+    return {
+      verdict: currentStamp !== beforeStamp ? "restamped" : "not-restamped",
+    };
+  }
+  if (currentEpoch > beforeEpoch) return { verdict: "restamped" };
+  if (currentEpoch < beforeEpoch) {
+    return {
+      verdict: "not-restamped",
+      backwards: {
+        previousIso: epochToIso(beforeEpoch),
+        newIso: epochToIso(currentEpoch),
+        location,
+      },
+    };
+  }
+  return { verdict: "not-restamped" };
+}
+
+/**
  * Whether `doc`'s own last commit actually re-stamped it, decided by
  * comparing the doc's PARSED FRONTMATTER `timestamp` VALUE at that commit
- * against its value in the commit's FIRST PARENT. A doc created by that
+ * against its value in the commit's FIRST PARENT (see
+ * `compareRestampDirection`: the new value must be strictly LATER, not
+ * merely different, D-004). A doc created by that
  * commit (or by a genuine root commit of an unshallow repository) counts as
  * re-stamped: its stamp arrived with it. In a SHALLOW clone (`git clone
  * --depth`), the doc's last commit can have an EMPTY parent list purely
@@ -848,9 +949,10 @@ type RestampVerdict =
  *
  * This is what narrows `sources-fresh`'s co-commit staleness exception: a
  * commit that merely happens to also touch the doc file (a typo fix, a
- * repo-wide formatter run, a rename) without changing the stamp carries no
- * verification claim and must NOT suppress staleness; only a commit that
- * actually rewrote the stamp (or created the doc) does.
+ * repo-wide formatter run, a rename) without moving the stamp strictly
+ * forward carries no verification claim and must NOT suppress staleness;
+ * only a commit that actually moved the stamp to a later instant (or
+ * created the doc) does.
  *
  * WHY VALUES AND NOT DIFF TEXT. An earlier version of this check scanned
  * `git log -1 -p -- <doc>` for a `^\+timestamp:` line. Scanning diff TEXT is
@@ -872,13 +974,13 @@ type RestampVerdict =
  *     an invisible false-positive STALE. Both trees are perfectly readable
  *     via `git show`, merge or not.
  *
- * Its limits, stated rather than hidden: this answers "did the value
- * change", never "is the new value right". A hand-typed or backdated stamp
- * still counts as a re-stamp (`sources-fresh-future` is the rule that
- * catches an implausible value), and comparing against only the FIRST parent
- * means a merge that takes its doc content wholesale from the second parent
- * is judged against the first-parent baseline, which is the same baseline
- * the PR under review is measured against.
+ * Its limits, stated rather than hidden: this answers "did the value move
+ * strictly forward", never "is the new value plausible". A hand-typed
+ * forward-dated stamp still counts as a re-stamp (`sources-fresh-future` is
+ * the rule that catches an implausible future value), and comparing against
+ * only the FIRST parent means a merge that takes its doc content wholesale
+ * from the second parent is judged against the first-parent baseline, which
+ * is the same baseline the PR under review is measured against.
  *
  * Spends at most 4 git processes and returns early before most of them: 1
  * for the commit + parents, 1 for the rename-aware name-status lookup
@@ -891,7 +993,7 @@ function restampedByOwnLastCommit(
   repoRelDocPath: string,
   isShallowRepo: () => boolean,
   showPrefix: () => string | null,
-): RestampVerdict {
+): RestampResult {
   // %H then %P on its own line: the doc's last commit and its parent list in
   // ONE process. Default history simplification is exactly what this needs
   // for a single path: a merge whose result for that path differs from every
@@ -902,9 +1004,9 @@ function restampedByOwnLastCommit(
     ["log", "-1", "--format=%H%n%P", "--", repoRelDocPath],
     repoRoot,
   );
-  if (head === null) return "unknown";
+  if (head === null) return { verdict: "unknown" };
   const [sha, parentLine] = head.split("\n");
-  if (!sha) return "unknown";
+  if (!sha) return { verdict: "unknown" };
   const parents = (parentLine ?? "").split(" ").filter((p) => p !== "");
   // An empty parent list means "the doc arrived with the repo's first
   // commit, stamp and all" ONLY in a genuinely unshallow repository. In a
@@ -916,7 +1018,7 @@ function restampedByOwnLastCommit(
   // staleness. isShallowRepo() is checked here, not unconditionally at the
   // top of this function, so an unshallow repo never pays for it.
   if (parents.length === 0) {
-    return isShallowRepo() ? "unknown-shallow-root" : "restamped";
+    return { verdict: isShallowRepo() ? "unknown-shallow-root" : "restamped" };
   }
   const firstParent = parents[0];
 
@@ -924,7 +1026,7 @@ function restampedByOwnLastCommit(
   // (see getShowPrefixShared): the diff-tree entries previousPathIn matches
   // against, and both `<rev>:<path>` blob reads.
   const prefix = showPrefix();
-  if (prefix === null) return "unknown";
+  if (prefix === null) return { verdict: "unknown" };
   const topLevelDocPath = toTopLevelPath(prefix, repoRelDocPath);
 
   const previous = previousPathIn(
@@ -934,23 +1036,22 @@ function restampedByOwnLastCommit(
     sha,
     topLevelDocPath,
   );
-  if (previous.kind === "unknown") return "unknown";
-  if (previous.kind === "created") return "restamped";
+  if (previous.kind === "unknown") return { verdict: "unknown" };
+  if (previous.kind === "created") return { verdict: "restamped" };
 
   const current = showBlob(git, repoRoot, sha, topLevelDocPath);
-  if (current === null) return "unknown";
+  if (current === null) return { verdict: "unknown" };
   const before = showBlob(git, repoRoot, firstParent, previous.path);
-  if (before === null) return "unknown";
+  if (before === null) return { verdict: "unknown" };
 
-  const currentStamp = getTimestampIdentity(
+  // Both undefined (no parseable stamp on either side) compares equal in
+  // compareRestampDirection's identity fallback, i.e. "not re-stamped" --
+  // nothing was rewritten, so nothing is claimed.
+  return compareRestampDirection(
     parseFrontmatter(current).frontmatter.parsed,
-  );
-  const beforeStamp = getTimestampIdentity(
     parseFrontmatter(before).frontmatter.parsed,
+    "commit",
   );
-  // Both undefined (no parseable stamp on either side) compares equal, i.e.
-  // "not re-stamped" -- nothing was rewritten, so nothing is claimed.
-  return currentStamp !== beforeStamp ? "restamped" : "not-restamped";
 }
 
 /**

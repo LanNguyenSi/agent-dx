@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `sources-fresh`'s re-stamp escape hatch now requires the new frontmatter
+  `timestamp` value to be strictly LATER than the value it replaced, on
+  both the committed path (`restampedByOwnLastCommit`) and the
+  `--dirty-as-now` working-tree path (`dirtyDocRestampVerdict`). A commit
+  (or working-tree edit) that moves the stamp BACKWARDS no longer counts
+  as a re-verification: the affected sources stay STALE, and the doc gets
+  one additional `re-stamp moved backwards: timestamp <prev-iso> ->
+  <new-iso> ...` warning naming the previous and new values. A rewrite to
+  the same instant in a different raw representation (`...00Z` to
+  `...00.000Z`) also no longer counts as a re-stamp (neither forward nor
+  backward), correcting a known limitation the README previously
+  documented the other way. Tracker: agent-dx task `ccdf051b`.
+
 - CI: the agent-dx `okf-anchor-guard` job (`.github/workflows/ci.yml`) and
   `okf-staleness` job (`.github/workflows/okf-staleness.yml`)'s "Install
   okf-kit" step now probes the pinned version with `npm view

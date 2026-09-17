@@ -1057,15 +1057,16 @@ describe("sources-fresh", () => {
       expect(findings[0].message).toContain("STALE");
     });
 
-    it("a cosmetic timestamp rewrite (same instant, different representation) still counts as a re-stamp -> passes", () => {
-      // Pins the documented identity contract: this rule answers "did the
-      // stamp VALUE change", never "does the new value mean a different
-      // instant" -- a rewrite from `...00Z` to `...00.000Z` names the same
-      // instant but is a different raw string, and getTimestampIdentity
-      // (util.ts) compares raw strings, not resolved epochs, so it counts
-      // as a re-stamp exactly like a genuine backdated/hand-typed change
-      // would (see the rule's own "answers 'did the value change', never
-      // 'is the new value right'" doc comment).
+    it("a cosmetic timestamp rewrite (same instant, different representation) is NOT a re-stamp -> stays STALE (D-004)", () => {
+      // D-004: the direction check compares PARSED INSTANTS, not raw
+      // strings. A rewrite from `...00Z` to `...00.000Z` is a different raw
+      // string but names the SAME instant, so it is neither a forward nor a
+      // backward move -- nothing was certified strictly newer, so it is
+      // `not-restamped` (and, since the instant did not move EARLIER
+      // either, it is not reported as a backwards move: only a genuine
+      // backwards move gets that extra warning). Before D-004,
+      // getTimestampIdentity's raw-string comparison alone counted this as
+      // a re-stamp; pinned here to the corrected outcome.
       repo.commitFiles(
         [
           {
@@ -1085,6 +1086,85 @@ describe("sources-fresh", () => {
           { relPath: "source.ts", content: "export const a = 2;\n" },
         ],
         "2026-03-01T00:00:00Z",
+      );
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      const findings = sourcesFreshRule.run(ctx);
+      expect(findings).toHaveLength(1);
+      expect(findings[0].severity).toBe("warning");
+      expect(findings[0].message).toContain("STALE");
+      expect(findings[0].message).not.toContain("moved backwards");
+    });
+
+    it("a re-stamp that moves the frontmatter timestamp BACKWARDS is not a re-verification -> stays STALE + backwards warning (D-004)", () => {
+      // The doc is stamped 2026-03-01, then a later commit changes the
+      // source AND re-stamps the doc to the EARLIER 2026-02-01 -- a
+      // backwards move never certifies anything, so the source stays STALE
+      // and the doc additionally gets one "moved backwards" warning naming
+      // both instants (AC-002).
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: `${fm("2026-03-01T00:00:00Z")}\n# Doc\n`,
+          },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: `${fm("2026-02-01T00:00:00Z")}\n# Doc\n`,
+          },
+          { relPath: "source.ts", content: "export const a = 2;\n" },
+        ],
+        "2026-04-01T00:00:00Z",
+      );
+
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      const findings = sourcesFreshRule.run(ctx);
+
+      expect(findings).toHaveLength(2);
+      const stale = findings.find((f) => f.message.includes("STALE"));
+      const backwards = findings.find((f) =>
+        f.message.includes("moved backwards"),
+      );
+      expect(stale).toMatchObject({
+        ruleId: "sources-fresh",
+        severity: "warning",
+      });
+      expect(stale?.message).toContain("source.ts");
+      expect(backwards).toMatchObject({
+        ruleId: "sources-fresh",
+        severity: "warning",
+      });
+      expect(backwards?.message).toContain("2026-03-01T00:00:00.000Z");
+      expect(backwards?.message).toContain("2026-02-01T00:00:00.000Z");
+      expect(backwards?.message).toContain("in the doc's last commit");
+    });
+
+    it("a re-stamp that moves the frontmatter timestamp strictly FORWARD still counts as a re-stamp -> passes (D-004)", () => {
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: `${fm("2026-03-01T00:00:00Z")}\n# Doc\n`,
+          },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content: `${fm("2026-04-01T00:00:00Z")}\n# Doc\n`,
+          },
+          { relPath: "source.ts", content: "export const a = 2;\n" },
+        ],
+        "2026-05-01T00:00:00Z",
       );
 
       const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
