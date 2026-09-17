@@ -32,7 +32,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   was opened `js title=x` is treated as fenced rather than as literal
   YAML. Only whitespace-separated attributes count toward the tag:
   `yaml title=x` counts, `yaml,title=x` does not, its first word being
-  the whole string.
+  the whole string. That opening run is now matched whole and never
+  re-entered at a shorter length, which bounds the scan: a run with no
+  valid closer was previously retried at every shorter run length from
+  every offset inside the run, each retry rescanning the block body, so
+  a 2000-backtick run in a 22 KB return took roughly 50 seconds through
+  `extractYamlSource` where it now takes under a millisecond. Keeping
+  the run whole also makes the closing-length rule literal: a return
+  whose opening run is longer than every closing run in it is no fence
+  at all and reaches the parser whole, where splitting the run
+  previously matched it and read its leftover backticks as the start of
+  the tag.
 
 ## [0.36.0] - 2026-09-16
 

@@ -648,6 +648,18 @@ interface ExtractedYaml {
  * discipline unchanged: it is located anywhere in the input rather than
  * anchored to a line start.
  *
+ * Lookarounds on both sides of the run keep it whole, so the opening
+ * run is never re-entered at a shorter length. Without them, an input
+ * whose long backtick run has no valid closer is retried at every
+ * shorter run length from every offset inside the run, each retry
+ * rescanning the lazy body: work quadratic in the run's length, which a
+ * single pasted return of a few hundred backticks already turns into
+ * seconds (CHANGELOG [Unreleased] names the measurement). Keeping the
+ * run whole also makes the "closing run at least as long as the opening
+ * one" rule above literal: an opener longer than any closing run in the
+ * input is no fence at all, where splitting the run instead matched it
+ * and pushed the leftover backticks into the info string.
+ *
  * When the input carries more than one fenced block (a reviewer pasting
  * a worked example ahead of the real return, say), the FIRST fence whose
  * info string's first whitespace-delimited word is `yaml` or `yml`
@@ -679,7 +691,7 @@ export function extractYamlSource(raw: string): ExtractedYaml {
   const withoutBom = raw;
   const fences = [
     ...withoutBom.matchAll(
-      /(`{3,})([^\r\n]*)\r?\n([\s\S]*?)\r?\n?^\1`*[ \t]*$/gm,
+      /(?<!`)(`{3,})(?!`)([^\r\n]*)\r?\n([\s\S]*?)\r?\n?^\1`*[ \t]*$/gm,
     ),
   ];
   if (fences.length > 0) {

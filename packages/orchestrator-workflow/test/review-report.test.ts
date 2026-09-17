@@ -286,6 +286,38 @@ describe("validateReviewReport: fence handling", () => {
     expect(yamlText).toBe("status: reviewed");
     expect(warnings).toEqual([]);
   });
+
+  it("does not close a fence at a run trailed by prose: the closing line carries nothing but whitespace after its run", () => {
+    // Drop that tail clause and this input closes at "``` end", so the
+    // return validates as the fenced block plus a prose-after warning
+    // instead of being handed to the parser whole.
+    const raw = "```yaml\nstatus: reviewed\n``` end\n";
+    const { yamlText, warnings } = extractYamlSource(raw);
+    expect(yamlText).toBe(raw);
+    expect(warnings).toEqual([]);
+  });
+
+  it("treats an opener longer than every closing run as no fence at all, rather than splitting the run so its leftover backticks start the tag", () => {
+    const raw = "````yaml\nstatus: reviewed\n```\n";
+    const { yamlText, warnings } = extractYamlSource(raw);
+    expect(yamlText).toBe(raw);
+    expect(warnings).toEqual([]);
+  });
+
+  it("returns promptly on a long backtick run with no closer: the opening run is never re-entered at a shorter length", () => {
+    // The lookarounds around the run are what bound this. Re-entering a
+    // 2000-backtick run at every shorter length from every offset inside
+    // it, each retry rescanning the lazy body, takes tens of seconds on
+    // this ~22 KB input; the bound is loose enough that only that class
+    // of blow-up trips it.
+    const raw = "`".repeat(2000) + "yaml\n" + "status: reviewed\n".repeat(1200);
+    const startedAt = performance.now();
+    const { yamlText, warnings } = extractYamlSource(raw);
+    const elapsedMs = performance.now() - startedAt;
+    expect(yamlText).toBe(raw);
+    expect(warnings).toEqual([]);
+    expect(elapsedMs).toBeLessThan(2000);
+  });
 });
 
 describe("validateReviewReport: edge-case inputs behave sanely", () => {
