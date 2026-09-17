@@ -170,7 +170,13 @@ A structural check for this exact contract ships as a CLI subcommand:
 return from stdin instead) parses the reviewer return's YAML, fenced in a
 code block with any language tag or none, or unfenced, and checks the
 required fields and enums above one by one, printing a diagnostic (path,
-expected, got) for each missing or invalid field; add `--format json` for
+expected, got) for each missing or invalid field; every element of a
+string-array field (`summary`, `missing_tests`, `residual_risks`) must
+itself be a string, with a diagnostic at `<field>[<index>]` for each one
+that is not. When more than one fenced block is present, the first one
+tagged `yaml` or `yml` is validated (falling back to the first fence only
+when none carries that tag), with a warning naming any earlier fence
+skipped this way. Add `--format json` for
 the same diagnostics as a single JSON object. It exits `0` when the return
 is structurally valid, `1` when it is structurally invalid (a missing or
 out-of-enum required field, or unparsable, empty, non-mapping input), and

@@ -7,6 +7,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { describe, expect, it } from "vitest";
 
 import {
+  ARRAY_ELEMENT_EXPECTED,
   ENUM_VALUES,
   FIELD_KINDS,
   FINDING_FIELDS,
@@ -137,6 +138,46 @@ describe("validateReviewReport: fence handling", () => {
     expect(result.valid).toBe(true);
     expect(result.warnings).toEqual([]);
   });
+
+  it("prefers a later ```yaml fence over an earlier untagged fence, and warns the earlier fence was skipped", () => {
+    const raw = "```bash\necho not yaml\n```\n```yaml\nstatus: reviewed\n```\n";
+    const { yamlText, warnings } = extractYamlSource(raw);
+    expect(yamlText).toBe("status: reviewed");
+    expect(warnings).toEqual([
+      "1 earlier fenced block without a yaml/yml tag was skipped in favor of the later ```yaml``` fenced block; only that later block was validated",
+      "prose found before the opening ```yaml fence; only the fenced block was validated",
+    ]);
+  });
+
+  it("keeps first-fence behaviour when neither of two fences is tagged yaml/yml", () => {
+    const raw = "```\nstatus: reviewed\n```\n```\nrole: reviewer\n```\n";
+    const { yamlText, warnings } = extractYamlSource(raw);
+    expect(yamlText).toBe("status: reviewed");
+    // No skip warning (neither fence is tagged yaml/yml, so the first is
+    // kept, as before this task); the second fence still reads as
+    // trailing prose after the chosen (first) one, same as any other
+    // discarded trailing text.
+    expect(warnings).toEqual([
+      "prose found after the closing ```yaml fence; only the fenced block was validated",
+    ]);
+  });
+
+  it("treats a ```yml tag the same as ```yaml", () => {
+    const raw = "```yml\nstatus: reviewed\n```\n";
+    const { yamlText, warnings } = extractYamlSource(raw);
+    expect(yamlText).toBe("status: reviewed");
+    expect(warnings).toEqual([]);
+  });
+
+  it("prefers a ```yaml fence found after an earlier untagged fence, the same as one found after a differently-tagged fence", () => {
+    const raw = "```\nrole: reviewer\n```\n```yaml\nstatus: reviewed\n```\n";
+    const { yamlText, warnings } = extractYamlSource(raw);
+    expect(yamlText).toBe("status: reviewed");
+    expect(warnings).toEqual([
+      "1 earlier fenced block without a yaml/yml tag was skipped in favor of the later ```yaml``` fenced block; only that later block was validated",
+      "prose found before the opening ```yaml fence; only the fenced block was validated",
+    ]);
+  });
 });
 
 describe("validateReviewReport: edge-case inputs behave sanely", () => {
@@ -209,6 +250,11 @@ describe("validateReviewReport: edge-case inputs behave sanely", () => {
  *   non-mapping `reproduction` are rejected at the container's own path,
  *   a scalar or null element at the element's path, and an empty list is
  *   accepted;
+ * - array element kind: a non-string element (a number, a mapping) of a
+ *   plain `array`-kind field (`summary`, `missing_tests`,
+ *   `residual_risks`) is rejected at `<field>[<index>]`, expecting
+ *   `string`, while an empty-array field and a string element (including
+ *   an empty string) are accepted;
  * - the diagnostic itself: path, `expected` (the schema's own
  *   `expectedTextFor`, never a text retyped here) and `got` are asserted
  *   in full, and a rejecting case must produce exactly one diagnostic,
@@ -218,8 +264,9 @@ describe("validateReviewReport: edge-case inputs behave sanely", () => {
  * this validator deliberately never judges; and a rule added INSIDE an
  * existing checker without a new FieldKind (a length bound on a string,
  * say) is generated for by nothing here and needs its own kind or its
- * own named test to be pinned. Element types of the plain `array` kind
- * are likewise not checked (see the FieldKind doc comment).
+ * own named test to be pinned. Emptiness of a plain `array`-kind
+ * field's own string elements is likewise not judged (see
+ * {@link checkArrayField}'s own doc comment in `src/review-report.ts`).
  *
  * Where a new field or kind must be declared: a new contract field goes
  * into its constant, into the matching dispatch table, and into
@@ -332,6 +379,9 @@ describe("validateReviewReport: schema-derived coverage of every field and input
 
   /** Elements a `mapping-list` must reject at the element's own path. */
   const NON_MAPPING_ELEMENTS: readonly ProbeValue[] = [NUMBER, NULL];
+
+  /** Elements a plain `array`-kind field must reject at the element's own path. */
+  const NON_STRING_ELEMENTS: readonly ProbeValue[] = [NUMBER, MAPPING];
 
   /**
    * The four contract constants, each with the validator's own path
@@ -458,6 +508,22 @@ describe("validateReviewReport: schema-derived coverage of every field and input
           }
         }
 
+        if (kind === "array") {
+          for (const probe of NON_STRING_ELEMENTS) {
+            cases.push({
+              ...common,
+              name: `${path} (array): rejects an element that is ${probe.label}`,
+              klass: "wrong-type",
+              apply: setter([probe.value]),
+              diagnostic: {
+                path: `${path}[0]`,
+                expected: ARRAY_ELEMENT_EXPECTED,
+                got: probe.got,
+              },
+            });
+          }
+        }
+
         for (const probe of ACCEPTED_VALUES[kind]) {
           cases.push({
             ...common,
@@ -530,7 +596,7 @@ describe("validateReviewReport: schema-derived coverage of every field and input
     // generator whose case list was emptied or shortened fails here
     // whatever else it still produces.
     expect(counts).toEqual({
-      TOP_LEVEL_FIELDS: 94,
+      TOP_LEVEL_FIELDS: 100,
       FINDING_FIELDS: 60,
       REPRODUCTION_FIELDS: 31,
       WITHDRAWN_FIELDS: 16,
@@ -576,6 +642,39 @@ describe("validateReviewReport: schema-derived coverage of every field and input
     const result = validateReviewReport(stringifyYaml(doc));
     expect(result.valid).toBe(true);
     expect(result.diagnostics).toEqual([]);
+  });
+});
+
+describe("validateReviewReport: array element-kind edge cases beyond the generated single-element probes", () => {
+  it("reports one diagnostic per offending element, each at its own index, alongside untouched valid elements", () => {
+    const doc = validDoc();
+    doc.summary = ["a real bullet", 42, { nested: "v" }, "another bullet"];
+    const result = validateReviewReport(stringifyYaml(doc));
+    expect(result.valid).toBe(false);
+    expect(result.diagnostics).toEqual([
+      { path: "summary[1]", expected: "string", got: "42" },
+      { path: "summary[2]", expected: "string", got: "mapping" },
+    ]);
+  });
+
+  it("accepts an empty string element: emptiness is not judged, only element kind", () => {
+    const doc = validDoc();
+    doc.missing_tests = ["", "   ", "a real gap"];
+    const result = validateReviewReport(stringifyYaml(doc));
+    expect(result.valid).toBe(true);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it("checks missing_tests and residual_risks independently of summary and of each other", () => {
+    const doc = validDoc();
+    doc.missing_tests = [7];
+    doc.residual_risks = [{ nested: "v" }];
+    const result = validateReviewReport(stringifyYaml(doc));
+    expect(result.valid).toBe(false);
+    expect(result.diagnostics).toEqual([
+      { path: "missing_tests[0]", expected: "string", got: "7" },
+      { path: "residual_risks[0]", expected: "string", got: "mapping" },
+    ]);
   });
 });
 

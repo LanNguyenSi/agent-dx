@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `validate-review-report` now checks that every element of a string-array
+  field (`summary`, `missing_tests`, `residual_risks`) is a string, one
+  diagnostic per offending element at `<field>[<index>]`; and
+  `extractYamlSource` now prefers a fenced block tagged `yaml`/`yml` when
+  several fences are present, falling back to the first fence only when
+  none carries that tag, with a warning naming the earlier fence it
+  skipped.
+
 ## [0.36.0] - 2026-09-16
 
 - A `validate-review-report <file>` CLI subcommand (`-` reads stdin) checks a

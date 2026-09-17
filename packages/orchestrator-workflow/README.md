@@ -705,11 +705,17 @@ required fields and enums (see the "Reviewer output contract" section of
 `assets/skill/references/contracts.md`, byte-identical to the contract in
 `assets/agents/reviewer.md`), whether the return is fenced in a code
 block (any language tag, or none) or given unfenced, and prints one
-diagnostic per missing or invalid field. A fenced return ends at the
-first closing fence that starts at column 0, so a reviewer quoting a
-fenced snippet inside a value (a `description` block scalar, which YAML
-indents) does not truncate the return. `--format json` prints the same
-diagnostics as a single JSON object instead of human-readable text. It
+diagnostic per missing or invalid field. Every element of a string-array
+field (`summary`, `missing_tests`, `residual_risks`) must itself be a
+string; a non-string element (a number, a mapping) is its own diagnostic
+at `<field>[<index>]`. A fenced return ends at the first closing fence
+that starts at column 0, so a reviewer quoting a fenced snippet inside a
+value (a `description` block scalar, which YAML indents) does not
+truncate the return. When the return carries more than one fenced block,
+the first one tagged `yaml` or `yml` is validated, falling back to the
+first fence only when none carries that tag; a warning names any earlier
+fence skipped this way. `--format json` prints the same diagnostics as a
+single JSON object instead of human-readable text. It
 exits `0` when the return is structurally valid, `1` when it is
 structurally invalid (a required field is missing or its value falls
 outside its enum, or the input is unparsable, empty, or not a mapping),
