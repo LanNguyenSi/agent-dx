@@ -22,13 +22,12 @@
 // trade-off: a producer that writes some data and then stalls forever
 // mid-stream (rather than never starting) is an ordinary pipe hang again,
 // not a bounded usage error -- unlike the never-written case, that shape is
-// indistinguishable from a producer that is just slow, and a fixed bound
-// during a large flowing input, once one that we know is arriving, would
-// either be a false timeout on somebody's over-a-few-seconds write or no
-// protection at all. 10s is far above any of the documented producers (a
-// `git log`, a file redirect, a heredoc), and
-// SLOP_DETECTOR_STDIN_TIMEOUT_MS overrides it (it exists so the
-// never-written-stdin case is cheap to pin in `test/cli.test.ts`; the
+// indistinguishable from a producer that is just slow: once data is known
+// to be arriving, any fixed mid-stream bound is either too short (a false
+// timeout on somebody's slow write) or too long to protect anything. 10s is
+// far above any of the documented producers (a `git log`, a file redirect,
+// a heredoc), and SLOP_DETECTOR_STDIN_TIMEOUT_MS overrides it (it exists so
+// the bounded stdin shapes are cheap to pin in `test/cli.test.ts`; the
 // default must stand on its own without a caller setting anything).
 
 export const DEFAULT_STDIN_FIRST_BYTE_TIMEOUT_MS = 10_000;

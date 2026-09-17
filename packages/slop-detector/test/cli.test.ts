@@ -296,6 +296,26 @@ describe("cli check with nothing piped in on stdin", () => {
     expect(status).toBe(1);
   }, 20_000);
 
+  it("whitespace-only data then a stall past the bound is still a usage error, not a scan (disarm needs real data)", async () => {
+    const { stderr, status } = await runCliWithStdinScript(
+      ["check", "--stdin-path", "COMMIT_MSG", "--pack", "review-slop"],
+      300,
+      (write, end) => {
+        // Same wide margin as the sibling data-then-stall case above: the
+        // written chunk is whitespace-only, so it must not disarm the
+        // bound (disarm needs real data, per the emptiness predicate), and
+        // the read should still end in the usual "no content" usage error
+        // once stdin closes, not hang or scan an empty document.
+        write(" \n");
+        setTimeout(end, 3000);
+      },
+    );
+    expect(status).toBe(2);
+    expect(stderr).toContain("--stdin-path");
+    expect(stderr).toMatch(/non-whitespace content/);
+    expect(stderr).toMatch(/nothing was scanned/);
+  }, 20_000);
+
   it("a non-empty pipe is still scanned (the bound never truncates real input)", () => {
     const { stdout, status } = runCli(
       ["check", "--stdin-path", "COMMIT_MSG", "--pack", "review-slop"],
