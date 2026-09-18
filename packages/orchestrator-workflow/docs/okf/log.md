@@ -37,7 +37,20 @@
   and right cases); this again pushed every citation at or after the
   first round-2 edit point down, this time by 136 lines, and all ten of
   `log.md`'s own citations into that test file were re-read against the
-  edited file and re-stamped again in the same commit.
+  edited file and re-stamped again in the same commit. A third pass
+  closed two review findings on the comments (restored the own-line
+  fallback qualifier for a bare `:N` in the sanity-test comment, and
+  replaced a hard line-number self-reference with the cited allowlist
+  entry's own doc/real/range keys) and replaced the hand-enumerated
+  near-miss fixtures with a table crossing every token shape the grammar
+  knows against every dimension the predicate consults, so a future
+  conjunct is pinned by adding a row instead of a hand-written case;
+  prettier reflows each table row's object literal onto several lines,
+  so the redesign grew the fixture block despite fewer hand-written
+  cases, pushing every citation at or after line 7218 (pre-edit) down by
+  149 lines, and all ten of `log.md`'s own citations into that test file
+  were re-read against the edited file and re-stamped again in the same
+  commit.
 
 - 2026-09-17T04:42:19Z (agent-dx tracker task 8ebaf3f6, pandora run
   2026-09-17-open-pool-batch56): the dist-tag/deprecate/publish
@@ -1415,7 +1428,7 @@
   exists on both sides, the unanchored-citation brake's
   (`test/docs-consistency.test.ts:3547#"in-scope citations (sanity: the brake itself did not go blind"`)
   and this round's new floor for the log.md guard
-  (`test/docs-consistency.test.ts:8452#"anchored full citations of docs/okf/log.md"`);
+  (`test/docs-consistency.test.ts:8601#"anchored full citations of docs/okf/log.md"`);
   run `npx vitest run test/docs-consistency.test.ts -t "did not go
   blind"` and read both figures off the passing tests' own names. The
   round-3 entry's and bullet's counts are struck, not corrected.
@@ -1436,9 +1449,9 @@
   findings, allowlist geometry and failure messages still name real doc
   lines. Pinned both ways by their own fixtures: a wrapped full citation
   with a stale anchor
-  (`test/docs-consistency.test.ts:8300#"is still checked (a stale wrapped anchor fails)"`)
+  (`test/docs-consistency.test.ts:8449#"is still checked (a stale wrapped anchor fails)"`)
   and a wrapped continuation form
-  (`test/docs-consistency.test.ts:8316#"that wraps across a hard line break is still flagged"`),
+  (`test/docs-consistency.test.ts:8465#"that wraps across a hard line break is still flagged"`),
   both of which the round-3 per-line scan passed unseen. Checked rather
   than argued: with the round-2 tree's own `log.md` put in place (`git
   show 0cbded8:packages/orchestrator-workflow/docs/okf/log.md`), this
@@ -1456,7 +1469,7 @@
   excused every citation after it and the guard still reported clean. The
   shared helper above carries the single fence pass and the throw, so
   there is one copy now; an unbalanced-fence fixture
-  (`test/docs-consistency.test.ts:8337#"throws instead of silently excusing every citation"`)
+  (`test/docs-consistency.test.ts:8486#"throws instead of silently excusing every citation"`)
   pins the loud failure, and the computed floor named above pins
   non-vacuity on the real file.
 
@@ -1480,15 +1493,15 @@
   outside the repository and was read and anchor-checked against it; and
   its bespoke bare-name map bound a bare basename to this package's own
   file even where the repository root carries a file of that name. Now
-  (`test/docs-consistency.test.ts:8104#"function resolveLogCitationPath("`):
+  (`test/docs-consistency.test.ts:8253#"function resolveLogCitationPath("`):
   a cited path carrying a `..` segment is rejected before any lookup,
   containment under the repository root is asserted on the fallback
   anyway, and a bare name that collides with a root file is reported
   ambiguous with both candidates named, so the entry has to write the
   path out in full. The collision set is computed from the map and the
   disk, not hand-listed. Fixtures for both
-  (`test/docs-consistency.test.ts:8351#"escaping the repository with a"`,
-  `test/docs-consistency.test.ts:8396#"is reported ambiguous, not silently bound"`).
+  (`test/docs-consistency.test.ts:8500#"escaping the repository with a"`,
+  `test/docs-consistency.test.ts:8545#"is reported ambiguous, not silently bound"`).
   Residual, named rather than closed: the deeper repo-wide basename
   ambiguity okf-kit reports (a basename that exists in more than one
   package, `SKILL.md`) is still bound unconditionally by
@@ -1550,7 +1563,7 @@
   inherited, never written on its own line) while every existing
   assertion stays green on the smaller set. Closed two ways: a
   source-span pin
-  (`test/docs-consistency.test.ts:7967#"resolution sites stay wired to extractSiblingGuardCitations"`)
+  (`test/docs-consistency.test.ts:8116#"resolution sites stay wired to extractSiblingGuardCitations"`)
   asserting each of the three sites'
   own source still calls `extractSiblingGuardCitations(` and carries no
   bare `matchAll(ANCHOR_CITATION_RE)` loop, and a synthetic-doc-set
@@ -1568,12 +1581,12 @@
   excluded from `ANCHOR_OKF_DOCS`, from both guards above, and from
   okf-kit's own citation grammar, nothing reads it. Halt-rule redesign
   (D-037) rather than another rephrase: a third guard,
-  `test/docs-consistency.test.ts:8042#"log.md's own citations resolve, and it carries no path-less continuation citation form"`,
+  `test/docs-consistency.test.ts:8191#"log.md's own citations resolve, and it carries no path-less continuation citation form"`,
   checks `log.md` itself. Its resolver
   (`resolveLogCitationPath`) extends `anchorScopeResolve` with the
   package's own CHANGELOG/README/INSTALL-AGENT and its docs/okf siblings,
   plus a real-file-on-disk fallback. Its checker
-  (`test/docs-consistency.test.ts:8161#"function checkLogCitations("`)
+  (`test/docs-consistency.test.ts:8310#"function checkLogCitations("`)
   enforces two rules: every full, anchored citation must resolve (target
   exists, anchor text somewhere inside the cited range), and any anchored
   path-less continuation form is forbidden outright, since a log entry
