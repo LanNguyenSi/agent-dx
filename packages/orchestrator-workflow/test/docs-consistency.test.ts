@@ -7068,11 +7068,16 @@ function siblingGuardEntryGeometryViolation(
 // Round 4 (L1): every doc line number an entry itself records, across both
 // kinds -- `start`/`end` (both kinds), `paragraphLine` (both kinds),
 // `secondCitationLine` (duplicate-citation only), `uncitedLines`
-// (wrong-sibling-anchor only, zero or more). A `claim` is falsifiable only
-// if it names at least one of these; extracted to its own function so a
-// dedicated, bundle-independent fixture can probe it directly rather than
-// only through the real array (which never contains a bad entry to catch
-// a weakened check with).
+// (wrong-sibling-anchor only, zero or more). Every `line N`/`uncited N`
+// token in a claim's enumeration must be one of these -- but they are not
+// the only way a claim is falsifiable: a `:N`/`:N-M` range token may
+// instead resolve against the entry's own range, one of these lines (a
+// bare `:N` only), or a real sibling citation the doc's own scan finds
+// (see `siblingGuardClaimIsFalsifiable` below), so a claim naming ONLY a
+// sibling citation, with no own-line token at all, still passes;
+// extracted to its own function so a dedicated, bundle-independent
+// fixture can probe it directly rather than only through the real array
+// (which never contains a bad entry to catch a weakened check with).
 function siblingGuardEntryOwnLines(
   entry: SiblingGuardAllowlistEntry,
 ): number[] {
@@ -7098,9 +7103,14 @@ function siblingGuardEntryOwnLines(
 // M"), and a bare `:N`/`:N-M` range not preceded by a path character --
 // the lookbehind excludes a colon that is part of a full `path.ext:N`
 // citation (e.g. the `src/init.ts:461` aside in the model-preselection.md
-// entry below), which names a DIFFERENT file's line by a wholly separate
-// mechanism (a real citation, checked by the bundle guard itself) and is
-// not part of this claim's own falsifiable enumeration.
+// entry below) from this claim-enumeration check -- that exclusion does
+// NOT by itself mean the citation is checked anywhere else: a
+// `path.ext:N` token inside a claim string is only ever verified when the
+// SAME citation also appears, literally, in a bundle doc the guard scans
+// (the bundle guard's own citation-resolution checks operate on doc text,
+// not on claim strings). `src/init.ts:461` (the model-preselection.md
+// allowlist claim, :6905) is not currently cited anywhere in that doc's
+// own text, so this particular aside is presently unchecked by anything.
 const SIBLING_GUARD_CLAIM_LINE_RE = /\bline\s+(\d+)\b/g;
 const SIBLING_GUARD_CLAIM_LINES_RE = /\blines\s+(\d+)\s+and\s+(\d+)\b/g;
 const SIBLING_GUARD_CLAIM_UNCITED_RE =
@@ -7208,11 +7218,15 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
   // Round 4 (L1): renamed from "states a falsifiable claim", which the
   // body only checked by length -- a 41-character string with no relation
   // to the entry it sits on would have passed. Now also requires the claim
-  // to name at least one of the entry's own recorded lines (`start`,
-  // `end`, `paragraphLine`, `secondCitationLine`, `uncitedLines`), so a
-  // claim that talks ABOUT the right shape but never actually points at
-  // the geometry it is supposed to falsify fails here.
-  it("every allowlist entry's claim is long enough AND names one of its own recorded lines (sanity: a falsifiable claim, not just a long string)", () => {
+  // to be falsifiable (`siblingGuardClaimIsFalsifiable`): every `line
+  // N`/`uncited N` token must be one of the entry's own recorded lines
+  // (`start`, `end`, `paragraphLine`, `secondCitationLine`,
+  // `uncitedLines`), and every `:N`/`:N-M` token must resolve against the
+  // entry's own range, one of those same lines, or a real sibling
+  // citation the doc's own scan finds -- so a claim that talks ABOUT the
+  // right shape but never actually points at any of that geometry fails
+  // here.
+  it("every allowlist entry's claim is long enough AND is falsifiable (one of its own recorded lines, or a real sibling citation the doc carries) (sanity: a falsifiable claim, not just a long string)", () => {
     for (const entry of SIBLING_GUARD_BUNDLE_ALLOWLIST) {
       expect(entry.claim.length, JSON.stringify(entry)).toBeGreaterThan(40);
       expect(
@@ -7280,7 +7294,13 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
   // and a `:N` naming a citation the fixture doc does not carry are each
   // rejected; a claim enumerating only real sibling citations (own lines
   // plus a `:N` the doc's own citation scan actually finds into
-  // `entry.real`) passes.
+  // `entry.real`) passes. Round 2 (M1/M2/L1): three near-miss citations
+  // in the fixture doc (right file wrong line, right start wrong end,
+  // right range wrong file) each still fail the `:N` identity match; a
+  // claim naming ONLY a real sibling citation, with no own-line token at
+  // all, passes; and the `lines N and M` / `uncited N and M` two-number
+  // branches are each exercised with a wrong second number (fails) and a
+  // right one (passes).
   it("siblingGuardClaimIsFalsifiable parses the claim's citation enumeration as tokens, not digit substrings, and verifies :N/:N-M references against the doc's own citation scan", () => {
     const entry: SiblingGuardAllowlistEntry = {
       doc: "fixture-doc.md",
@@ -7353,6 +7373,122 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
       ),
       "a claim enumerating only its own lines plus a :N sibling the doc's " +
         "own citation scan actually finds must pass",
+    ).toBe(true);
+
+    const onlyRealSiblingNoOwnLine: SiblingGuardAllowlistEntry = {
+      ...entry,
+      claim:
+        "the sibling range :30 is the only evidence this claim points at, " +
+        "and it names none of the entry's own recorded lines directly.",
+    };
+    expect(
+      siblingGuardClaimIsFalsifiable(
+        onlyRealSiblingNoOwnLine,
+        realSiblingDoc,
+        identity,
+      ),
+      "a claim naming ONLY a real sibling citation, with no own-line " +
+        "token at all, must still pass",
+    ).toBe(true);
+
+    const wrongCitationLine: SiblingGuardAllowlistEntry = {
+      ...entry,
+      claim:
+        "line 5 introduces the check, and the sibling evidence at :30 is " +
+        "cited in this fixture doc's own text, but at the wrong line.",
+    };
+    expect(
+      siblingGuardClaimIsFalsifiable(
+        wrongCitationLine,
+        "line 5 introduces the check and cites the sibling range " +
+          "fixture-sibling.ts:40 at a different line.\n",
+        identity,
+      ),
+      "a `:N` token whose start matches no citation's own start (the " +
+        "doc's citation sits at a different line: right file, wrong " +
+        "line) must fail",
+    ).toBe(false);
+
+    const wrongCitationEnd: SiblingGuardAllowlistEntry = {
+      ...entry,
+      claim:
+        "line 5 introduces the check, and the sibling evidence at :30 is " +
+        "cited in this fixture doc's own text, but as a wider range.",
+    };
+    expect(
+      siblingGuardClaimIsFalsifiable(
+        wrongCitationEnd,
+        "line 5 introduces the check and cites the sibling range " +
+          "fixture-sibling.ts:30-99 as a wider span.\n",
+        identity,
+      ),
+      "a `:N` token whose end does not match the citation's own end " +
+        "(right start, wrong end) must fail",
+    ).toBe(false);
+
+    const wrongCitationFile: SiblingGuardAllowlistEntry = {
+      ...entry,
+      claim:
+        "line 5 introduces the check, and the sibling evidence at :30 is " +
+        "cited in this fixture doc's own text, but for another file.",
+    };
+    expect(
+      siblingGuardClaimIsFalsifiable(
+        wrongCitationFile,
+        "line 5 introduces the check and cites the sibling range " +
+          "other-fixture.ts:30 for a different file.\n",
+        identity,
+      ),
+      "a `:N` token whose range matches a citation into a DIFFERENT " +
+        "real file (right range, wrong file) must fail",
+    ).toBe(false);
+
+    const linesShapeWrongSecond: SiblingGuardAllowlistEntry = {
+      ...entry,
+      claim:
+        "lines 5 and 21 together introduce this citation, and the second " +
+        "number here is not one of the entry's own recorded lines.",
+    };
+    expect(
+      siblingGuardClaimIsFalsifiable(linesShapeWrongSecond, "", noResolve),
+      "a `lines N and M` token whose SECOND number is not an own line " +
+        "must fail",
+    ).toBe(false);
+
+    const linesShapeBothOwn: SiblingGuardAllowlistEntry = {
+      ...entry,
+      claim:
+        "lines 5 and 20 together introduce this citation and its uncited " +
+        "occurrence, both of which are the entry's own recorded lines.",
+    };
+    expect(
+      siblingGuardClaimIsFalsifiable(linesShapeBothOwn, "", noResolve),
+      "a `lines N and M` token whose two numbers are both own lines " +
+        "must pass",
+    ).toBe(true);
+
+    const uncitedShapeWrongSecond: SiblingGuardAllowlistEntry = {
+      ...entry,
+      claim:
+        "uncited 20 and 99 both sit in this sentence, and the second " +
+        "number here is not one of the entry's own recorded lines.",
+    };
+    expect(
+      siblingGuardClaimIsFalsifiable(uncitedShapeWrongSecond, "", noResolve),
+      "an `uncited N and M` token whose SECOND number is not an own " +
+        "line must fail",
+    ).toBe(false);
+
+    const uncitedShapeBothOwn: SiblingGuardAllowlistEntry = {
+      ...entry,
+      claim:
+        "uncited 20 and 12 both sit in this sentence, and both numbers " +
+        "are the entry's own recorded lines.",
+    };
+    expect(
+      siblingGuardClaimIsFalsifiable(uncitedShapeBothOwn, "", noResolve),
+      "an `uncited N and M` token whose two numbers are both own lines " +
+        "must pass",
     ).toBe(true);
   });
 
