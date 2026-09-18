@@ -44,6 +44,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   previously matched it and read its leftover backticks as the start of
   the tag.
 
+- `check-release-changelogs`'s `VERSION_HEADING_RE` (rule 1, version-heading)
+  now accepts the same prerelease identifier class as `parseSemver`
+  (`[0-9A-Za-z.-]`, including the hyphen), sourced from one shared
+  `PRERELEASE_IDENTIFIER_CHARS` constant so the two cannot drift apart
+  again: a package.json version with a hyphenated prerelease tag such as
+  `1.0.0-alpha-1` parsed fine through `parseSemver` but previously never
+  matched the heading regex, which only accepted `[\w.]`. The previous
+  0.35.0 hardening bullet named the new rules without naming three
+  details of their own contract: the `--expect <csv>` option overrides
+  rule 5's (checked-package-scope) expectation list, and an empty csv
+  (`--expect ""`) opts out of rule 5 entirely rather than passing it
+  vacuously; rule 5 itself only runs when that expectation list is
+  non-empty, so a fixture whose packages do not share this repo's names
+  can still run the other four rules without a spurious finding; and
+  rule 2's (fresh-unreleased) direction check compares versions by
+  semver precedence, not string inequality, with build metadata stripped
+  before the comparison since two versions differing only in build
+  metadata carry equal precedence per the semver spec. The shared class
+  is narrower than `\w`: an underscore prerelease heading such as
+  `1.0.0-alpha_1` is no longer accepted either, since semver's own
+  prerelease grammar forbids underscores and `parseSemver` already
+  rejected such a version before this change.
+
 ## [0.36.0] - 2026-09-16
 
 - A `validate-review-report <file>` CLI subcommand (`-` reads stdin) checks a

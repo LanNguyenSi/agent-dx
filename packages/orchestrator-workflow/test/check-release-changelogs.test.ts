@@ -124,6 +124,68 @@ describe("check-release-changelogs.mjs", () => {
     expect(result.stderr).toMatch(/\[version-heading\]/);
   });
 
+  it("rule 1 (version-heading): accepts a hyphenated prerelease heading, matching parseSemver's identifier class", () => {
+    // VERSION_HEADING_RE and parseSemver share PRERELEASE_IDENTIFIER_CHARS
+    // ([0-9A-Za-z.-]); before that constant existed, VERSION_HEADING_RE
+    // only accepted [\w.] and silently failed to match a heading whose
+    // prerelease tag contained a hyphen, even though the same version
+    // parsed fine through parseSemver.
+    writePackage("widget", "1.0.0-alpha-1", CLEAN_CHANGELOG("1.0.0-alpha-1"));
+    const result = run([]);
+    expect(result.status).toBe(0);
+  });
+
+  it("rule 1 (version-heading): a hyphenated prerelease heading that does not match package.json still fails", () => {
+    writePackage(
+      "widget",
+      "1.0.0-alpha-2",
+      CLEAN_CHANGELOG("1.0.0-alpha-1"), // heading says a different prerelease
+    );
+    const result = run([]);
+    expect(result.status).toBe(1);
+    // Asserted against the mismatch message itself, not just the rule
+    // tag: under a mutant that narrows the shared prerelease class back
+    // to [\w.] (dropping the hyphen), the heading no longer matches at
+    // all and the guard falls through to the "no heading found" finding
+    // instead, which also carries the [version-heading] tag and would
+    // satisfy a tag-only assertion without the mutant being caught.
+    expect(result.stderr).toMatch(
+      /top CHANGELOG heading is \[1\.0\.0-alpha-1\] but package\.json version is 1\.0\.0-alpha-2/,
+    );
+  });
+
+  it("rule 1 (version-heading): an underscore prerelease heading is no longer accepted (semver forbids it; parseSemver already rejected it)", () => {
+    writePackage("widget", "1.0.0-alpha_1", CLEAN_CHANGELOG("1.0.0-alpha_1"));
+    const result = run([]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/no "## \[x\.y\.z\]" release heading found/);
+  });
+
+  it("rule 1 (version-heading): an empty prerelease heading fails", () => {
+    writePackage(
+      "widget",
+      "1.0.0-alpha",
+      "# Changelog\n\n## [Unreleased]\n\n## [1.0.0-]\n\n- did a thing\n",
+    );
+    const result = run([]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/no "## \[x\.y\.z\]" release heading found/);
+  });
+
+  it("rule 1 (version-heading): a heading-shaped string inside a paragraph is not the top heading (the regex is line-anchored)", () => {
+    // Pins VERSION_HEADING_RE's `^` anchor: without it the mid-line
+    // `## [9.9.9]` below would be taken as the top release heading and
+    // rule 1 would report a 9.9.9 vs 1.0.0 mismatch instead of passing.
+    writePackage(
+      "widget",
+      "1.0.0",
+      "# Changelog\n\n## [Unreleased]\n\nSee the note under ## [9.9.9] in the archive.\n\n## [1.0.0]\n\n- did a thing\n",
+    );
+    const result = run([]);
+    expect(result.status).toBe(0);
+    expect(result.stderr).not.toMatch(/\[version-heading\]/);
+  });
+
   it("rule 2 (fresh-unreleased): fails when the version increased but [Unreleased] is still populated", () => {
     writePackage(
       "widget",

@@ -112,6 +112,221 @@ describe("review-slop", () => {
     });
   });
 
+  describe("finding-id: severity-letter form", () => {
+    it("fires on a severity-letter id gated by a 'review' context word", () => {
+      const v = checkText(
+        "Still open: (M1) needs another pass before review.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      const hit = v.find((x) => x.ruleId === "review-slop/finding-id");
+      expect(hit).toBeDefined();
+      expect(hit?.matched).toBe("M1");
+    });
+
+    it("fires on a severity-letter id gated by a 'finding' context word", () => {
+      const v = checkText(
+        "See finding L2 for detail.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      const hit = v.find((x) => x.ruleId === "review-slop/finding-id");
+      expect(hit).toBeDefined();
+      expect(hit?.matched).toBe("L2");
+    });
+
+    it("fires on a severity-letter id gated by a 'fixed' context word", () => {
+      const v = checkText(
+        "C4 was fixed in this pass.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      const hit = v.find((x) => x.ruleId === "review-slop/finding-id");
+      expect(hit).toBeDefined();
+      expect(hit?.matched).toBe("C4");
+    });
+
+    it("fires on a severity-letter id gated by a 'round' context word", () => {
+      const v = checkText(
+        "Addressed H3 in this round.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      const hit = v.find((x) => x.ruleId === "review-slop/finding-id");
+      expect(hit).toBeDefined();
+      expect(hit?.matched).toBe("H3");
+    });
+
+    it("negative: 'the M1 chip' without a gating context word does not fire", () => {
+      const v = checkText(
+        "Runs fine on the M1 chip.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      expect(
+        v.find((x) => x.ruleId === "review-slop/finding-id"),
+      ).toBeUndefined();
+    });
+
+    it("negative: 'an L2 cache' without a gating context word does not fire", () => {
+      const v = checkText(
+        "Tuned for an L2 cache line size.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      expect(
+        v.find((x) => x.ruleId === "review-slop/finding-id"),
+      ).toBeUndefined();
+    });
+
+    it("negative: '<H1>' in JSX-shaped prose without a gating context word does not fire", () => {
+      const v = checkText(
+        "Rendered as <H1>Title</H1> in the component.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      expect(
+        v.find((x) => x.ruleId === "review-slop/finding-id"),
+      ).toBeUndefined();
+    });
+
+    it("negative: a bare 'H1' heading mention without a gating context word does not fire", () => {
+      const v = checkText(
+        "# H1\n\nThe largest heading level in HTML.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      expect(
+        v.find((x) => x.ruleId === "review-slop/finding-id"),
+      ).toBeUndefined();
+    });
+
+    it("negative: a severity-letter id immediately followed by a hyphenated year does not fire", () => {
+      const v = checkText(
+        "Filed under M1-2026 during review.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      expect(
+        v.find((x) => x.ruleId === "review-slop/finding-id"),
+      ).toBeUndefined();
+    });
+
+    it("does not double up: the F form stays ungated regardless of context", () => {
+      const v = checkText(
+        "Runs fine on the F1 track.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      const hit = v.find((x) => x.ruleId === "review-slop/finding-id");
+      expect(hit).toBeDefined();
+      expect(hit?.matched).toBe("F1");
+    });
+
+    it("fires on a severity-letter id gated inside a TS line comment", () => {
+      const text = [
+        "function build() {",
+        "  // Closed M1 after the second review pass.",
+        "  return true;",
+        "}",
+      ].join("\n");
+      const v = checkText(text, "src/build.ts", baseOpts());
+      const hit = v.find((x) => x.ruleId === "review-slop/finding-id");
+      expect(hit).toBeDefined();
+      expect(hit?.matched).toBe("M1");
+    });
+
+    it("fires on a severity-letter id gated inside an it() title", () => {
+      const text =
+        'it("L2 finding: keeps the cache warm", () => { expect(1).toBe(1); });';
+      const v = checkText(text, "src/cache.test.ts", baseOpts());
+      const hit = v.find((x) => x.ruleId === "review-slop/finding-id");
+      expect(hit).toBeDefined();
+      expect(hit?.matched).toBe("L2");
+    });
+
+    it("the context word is matched case-insensitively", () => {
+      const v = checkText(
+        "Filed M1 during Review.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      const hit = v.find((x) => x.ruleId === "review-slop/finding-id");
+      expect(hit).toBeDefined();
+      expect(hit?.matched).toBe("M1");
+    });
+
+    it("documented limitation: a bug-fix sentence naming a chip/cache-shaped id still fires (see review.allow)", () => {
+      // The gate only checks whether a review-process word shares the
+      // sentence, not whether the sentence is actually about a review
+      // finding -- so an ordinary bug-fix sentence that happens to name
+      // an Apple chip generation is a known, accepted false positive
+      // rather than a bug. `review.allow` (or `review.allowPaths`) is
+      // the intended escape hatch for a line like this one, not a
+      // smarter gate.
+      const v = checkText(
+        "This fix makes the M1 build reproducible.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      const hit = v.find((x) => x.ruleId === "review-slop/finding-id");
+      expect(hit).toBeDefined();
+      expect(hit?.matched).toBe("M1");
+    });
+
+    it("negative: a two-digit severity-letter token does not fire (pins the word boundary and single-digit shape)", () => {
+      const v = checkText(
+        "Filed M12 during review.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      expect(
+        v.find((x) => x.ruleId === "review-slop/finding-id"),
+      ).toBeUndefined();
+    });
+
+    it("fires on a lettered severity-letter token (pins the optional lowercase letter)", () => {
+      const v = checkText(
+        "Filed M2a during review.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      const hit = v.find((x) => x.ruleId === "review-slop/finding-id");
+      expect(hit).toBeDefined();
+      expect(hit?.matched).toBe("M2a");
+    });
+
+    it("negative: a review-process word in a previous, period-terminated sentence does not count for the severity form", () => {
+      const v = checkText(
+        "Some review findings landed earlier. Runs fine on the M1 chip.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      expect(
+        v.find((x) => x.ruleId === "review-slop/finding-id"),
+      ).toBeUndefined();
+    });
+
+    it("negative: a severity-letter id plus a review word inside a fenced code block does not fire", () => {
+      const text = ["```json", '{ "M1": "review" }', "```"].join("\n");
+      const v = checkText(text, "docs/NOTES.md", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "review-slop/finding-id"),
+      ).toBeUndefined();
+    });
+
+    it("negative: a severity-letter id plus a review word inside inline code does not fire", () => {
+      const v = checkText(
+        "See `M1 review` for detail.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      expect(
+        v.find((x) => x.ruleId === "review-slop/finding-id"),
+      ).toBeUndefined();
+    });
+  });
+
   describe("round-reference (Markdown)", () => {
     it("fires on a round-plus-digit reference", () => {
       const v = checkText(
