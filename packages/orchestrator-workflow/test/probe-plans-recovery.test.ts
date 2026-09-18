@@ -321,15 +321,17 @@ describe("ceremony rule copies stay bound to their normative sites", () => {
  * come from, and who checks them. The implementer prompt is the normative
  * site for the field semantics (contracts.md defers to it and carries a
  * verbatim copy for the orchestrator); step 6 of the workflow is the
- * normative site for the orchestrator's cross-check. Tier variants of the
- * prompt are rendered from the one source file, which the init tests cover.
+ * normative site for the orchestrator's cross-check. Rendered tier variants
+ * are a named omission: every harness composer in src/init.ts emits the whole
+ * asset body as one string, a path the read-only roles exercise positively,
+ * so a variant cannot lose a sentence the source file has.
  */
 const PROBE_FIELD_LEGEND =
-  "`result: killed` means the suite detected the mutant (the named test failed with the mutant applied) and `survived` means it did not; `expectation: met` means that outcome is what the probe was expected to show and `violated` means it is not.";
+  "`result: killed` means the probe's test command reacted to the mutant under the runner's own pass predicate and `survived` means it did not; `expectation: met` means that outcome is what the probe was expected to show and `violated` means it is not; both are `not_applicable` when no `result` was measured.";
 const PROBE_FIELD_COPY_RULE =
-  "When the probe runner states a machine-readable verdict, copy `result` and `expectation` from it verbatim, never from your own reading of the test output, and quote the runner's verdict for each probe in `tests.executed` so both fields can be checked against it.";
+  "When the probe runner states a machine-readable verdict, copy whichever of `result` and `expectation` it states from it verbatim, never from your own reading of the test output; when it states only `result`, set `expectation` by comparing that verdict with the probe's declared expectation. Quote the runner's verdict for each probe in `tests.executed`, and say there when `expectation` was set this way, so both fields can be checked against it.";
 const PROBE_ROW_CROSS_CHECK =
-  "Before transferring a probe row, compare its `result` and `expectation` with the runner verdict quoted in `tests.executed`; on a mismatch or a missing verdict, resupply it (ask the same implementer for the verdict, or rerun the probe yourself) and record the resupply, rather than inferring either field.";
+  "Before transferring a probe row, compare its `result` and `expectation` with the runner verdict quoted in `tests.executed`; on a mismatch, or when a verdict the runner states is not quoted, resupply it (ask the same implementer for the verdict, respawn one when it is gone, or rerun the probe yourself in isolation), record the resupply in `03-decisions.md`, and treat it as a transfer blocker rather than a misfire, since the return itself parses; never infer either field. A quoted probe verdict is not a named result of the verification set, so the set's missing-or-extra rule does not apply to it.";
 const PROBE_VERDICT_BULLET =
   "- The two verdict fields of a mutation probe now carry a legend, a";
 
