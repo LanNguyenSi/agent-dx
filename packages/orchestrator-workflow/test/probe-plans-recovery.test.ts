@@ -11,8 +11,9 @@ const unwrap = (text: string) => text.replace(/\s+/g, " ");
 
 const PACKAGE_DIR = fileURLToPath(new URL("..", import.meta.url));
 const changelog = readFileSync(`${PACKAGE_DIR}/CHANGELOG.md`, "utf8");
-const gateBundleDoc = unwrap(
-  readFileSync(`${PACKAGE_DIR}/docs/okf/review-gate-and-waivers.md`, "utf8"),
+const gateBundleDoc = readFileSync(
+  `${PACKAGE_DIR}/docs/okf/review-gate-and-waivers.md`,
+  "utf8",
 );
 
 /** One `## ` section of a reference, heading included, up to the next one. */
@@ -27,7 +28,8 @@ function sectionOf(source: string, heading: string): string {
 function changelogBullet(opening: string): string {
   const start = changelog.indexOf(opening);
   expect(start, `CHANGELOG bullet not found: ${opening}`).toBeGreaterThan(-1);
-  return unwrap(changelog.slice(start, changelog.indexOf("\n- ", start + 1)));
+  const next = changelog.indexOf("\n- ", start + 1);
+  return unwrap(changelog.slice(start, next === -1 ? undefined : next));
 }
 
 describe("persisted probe plans and recovery references", () => {
@@ -118,7 +120,9 @@ describe("fix-regression decision point", () => {
         '- `references/review-and-recovery.md` gains a "Fix-regression decision',
       ),
     ).toContain(FIX_REGRESSION_TRIGGER);
-    expect(gateBundleDoc).toContain(FIX_REGRESSION_TRIGGER);
+    expect(
+      sectionOf(gateBundleDoc, "## Fix-regression decision point"),
+    ).toContain(FIX_REGRESSION_TRIGGER);
   });
 
   it("evaluates the qualifier on the findings, not on the recurrence field", () => {
@@ -188,9 +192,9 @@ describe("fix-regression decision point", () => {
  * pinned per rule are the acceptance criterion's claim list for this change.
  */
 const BASELINE_REVISION_RULE =
-  "Record a baseline revision only when scope or the normative text of a criterion changes, including a change to what its verification checks; a wording precision that leaves the check itself unchanged is a `03-decisions.md` entry, not a revision.";
+  "Record a baseline revision only when scope or the normative text of a criterion changes, including a change to what its verification checks; a wording precision that leaves the check itself unchanged is a `03-decisions.md` entry, not a revision";
 const DOCS_ONLY_REVIEW_DEFAULT =
-  "For a review round whose entire delta is documentation, default to the `-medium` reviewer tier with `review_method: normal` where tier variants are installed";
+  "For a review round whose entire delta is a docs-only delta in the sense of step 8's docs-only closure, default to the `-medium` reviewer tier with `review_method: normal` where tier variants are installed";
 const PROSE_MUTANTS_DO_NOT_CONVERGE =
   "A prose mutant survives exactly when its bytes sit in no assertion";
 const ADEQUACY_ROUND_CAP =
@@ -203,13 +207,19 @@ describe("baseline revisions and the docs-only review default", () => {
 
   it("limits baseline revisions to scope and criterion text, next to who may revise", () => {
     expect(workflow).toContain(
-      `and verified rationale for carrying unchanged evidence forward. ${BASELINE_REVISION_RULE}`,
+      `and verified rationale for carrying unchanged evidence forward. ${BASELINE_REVISION_RULE}: the orchestrator records it, states in that entry why no evidence is invalidated, and communicates the corrected wording in the next delegation.`,
     );
   });
 
   it("names the docs-only default without touching the review minimums", () => {
     expect(workflow).toContain(
-      `${DOCS_ONLY_REVIEW_DEFAULT}; going higher is the orchestrator's call with a recorded reason, and the minimums named above are unaffected.`,
+      `${DOCS_ONLY_REVIEW_DEFAULT}. This refines the general tier default above for that one class only: there \`-medium\` is the default and a higher tier is the non-default choice recorded with a one-line reason. A review round that touches an instruction, policy, template or prompt file keeps the general default, whatever the file type, and the minimums named above are unaffected.`,
+    );
+    expect(workflow).toContain(
+      "defaulting to the unsuffixed subagent when unsure; record a non-default tier choice with a one-line reason in `03-decisions.md` when the task is non-trivial",
+    );
+    expect(workflow).toContain(
+      "the entire unreviewed delta contains only explanatory documentation, comments, or citations",
     );
     expect(workflow).toContain(
       "do not pair `adversarial` with the `-medium` reviewer tier",
@@ -252,13 +262,13 @@ describe("pinned-prose changes", () => {
       "Name one normative site per rule when slicing; every other site that states the rule is a copy.",
     );
     expect(section).toContain(
-      "List the load-bearing claims of the normative site in the acceptance criterion, and pin each one as the whole sentence or clause that carries it. That list is the pin obligation.",
+      "List the load-bearing claims of the normative site in the acceptance criterion, and pin each one as the whole sentence or clause that carries it. That list is the pin obligation. Every normative sentence the change adds or alters at that site is a claim; one left off the list is named in the criterion with the reason it is not load-bearing.",
     );
   });
 
   it("bounds the reviewer's mutant space and binds copies by a constant", () => {
     expect(section).toContain(
-      "Bound the reviewer's prose mutant space to that list in the briefing. A survivor outside the list is a scope note, not a finding, unless the reviewer shows that the unlisted sentence is load-bearing.",
+      "Bound the reviewer's prose mutant space to that list in the briefing. A survivor outside the list is a scope note in the reviewer's `residual_risks`, not a finding, unless the reviewer shows that the unlisted sentence is load-bearing.",
     );
     expect(section).toContain(
       "Bind each copy to the normative site through one shared test constant, and let a pointer point without restating the rule.",
@@ -267,13 +277,16 @@ describe("pinned-prose changes", () => {
 
   it("caps adequacy rounds, exempts semantic findings and leaves the gate alone", () => {
     expect(section).toContain(
-      `${ADEQUACY_ROUND_CAP} Pin gaps that remain become accepted notes or a follow-up.`,
+      `${ADEQUACY_ROUND_CAP} A test-adequacy review round is one whose only unresolved findings are \`tests\` findings about pin gaps on the pinned prose; a round with any other unresolved finding is an ordinary round outside the cap. Pin gaps that remain become accepted notes or a follow-up.`,
     );
     expect(section).toContain(
       "Semantic findings are exempt from the bound and from the cap: two sites stating different rules, a contradiction with another rule, and a false claim are defects at whatever severity they deserve.",
     );
     expect(section).toContain(
-      "The review gate is unchanged: a high or critical finding still blocks.",
+      "The cap changes neither the Round-2 halt rule, the Review-round escalation budget nor the Fix-regression decision point: a capped round still counts as a negative round where it is one.",
+    );
+    expect(section).toContain(
+      "The review gate is unchanged: a high or critical finding of any category still blocks and is never capped away, and accepting one follows the waiver rules.",
     );
     expect(section).toContain(
       "Anchored by an observed run; see the entry for this rule in the orchestrator-workflow CHANGELOG.",
@@ -294,7 +307,11 @@ describe("ceremony rule copies stay bound to their normative sites", () => {
     for (const constant of constants) expect(bullet).toContain(constant);
   });
 
-  it("the bundle doc repeats each rule in the reference's own words", () => {
-    for (const constant of constants) expect(gateBundleDoc).toContain(constant);
+  it("the bundle doc's own section repeats each rule in the reference's own words", () => {
+    const bundleSection = sectionOf(
+      gateBundleDoc,
+      "## Ceremony rules: baseline revisions, docs-only review default, pinned prose",
+    );
+    for (const constant of constants) expect(bundleSection).toContain(constant);
   });
 });

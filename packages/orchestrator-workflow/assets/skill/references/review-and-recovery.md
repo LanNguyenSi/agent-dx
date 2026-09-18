@@ -123,20 +123,30 @@ the next unpinned sentence do not converge. For such a change:
   states the rule is a copy.
 - List the load-bearing claims of the normative site in the acceptance
   criterion, and pin each one as the whole sentence or clause that carries
-  it. That list is the pin obligation.
+  it. That list is the pin obligation. Every normative sentence the change
+  adds or alters at that site is a claim; one left off the list is named
+  in the criterion with the reason it is not load-bearing.
 - Bound the reviewer's prose mutant space to that list in the briefing. A
-  survivor outside the list is a scope note, not a finding, unless the
-  reviewer shows that the unlisted sentence is load-bearing.
+  survivor outside the list is a scope note in the reviewer's
+  `residual_risks`, not a finding, unless the reviewer shows that the
+  unlisted sentence is load-bearing.
 - Bind each copy to the normative site through one shared test constant,
   and let a pointer point without restating the rule.
-- Cap test-adequacy review rounds on the change at two. Pin gaps that
-  remain become accepted notes or a follow-up.
+- Cap test-adequacy review rounds on the change at two. A test-adequacy
+  review round is one whose only unresolved findings are `tests` findings
+  about pin gaps on the pinned prose; a round with any other unresolved
+  finding is an ordinary round outside the cap. Pin gaps that remain
+  become accepted notes or a follow-up.
 
 Semantic findings are exempt from the bound and from the cap: two sites
 stating different rules, a contradiction with another rule, and a false
-claim are defects at whatever severity they deserve. The review gate is
-unchanged: a high or critical finding still blocks. Anchored by an observed
-run; see the entry for this rule in the orchestrator-workflow CHANGELOG.
+claim are defects at whatever severity they deserve. The cap changes
+neither the Round-2 halt rule, the Review-round escalation budget nor the
+Fix-regression decision point: a capped round still counts as a negative
+round where it is one. The review gate is unchanged: a high or critical
+finding of any category still blocks and is never capped away, and
+accepting one follows the waiver rules. Anchored by an observed run; see
+the entry for this rule in the orchestrator-workflow CHANGELOG.
 
 ## Final acceptance rule
 
