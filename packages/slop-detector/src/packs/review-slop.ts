@@ -155,8 +155,10 @@ function isAllowedByReviewAllow(text: string, config: ResolvedConfig): boolean {
  * string-literal value) and the match's `[start, end)` span within that
  * same local text, decide whether the match should still count. Used by
  * `round-reference` to require a review-context word in the same sentence
- * (as `sentenceWindow` below bounds one) at all; `finding-id` and
- * `handoff-phrase` pass no filter and keep every match.
+ * (as `sentenceWindow` below bounds one) for both of its patterns, and by
+ * `finding-id` for its severity-letter alternative only -- the plain `F`
+ * form stays ungated. `handoff-phrase` passes no filter and keeps every
+ * match.
  */
 type MatchFilter = (text: string, start: number, end: number) => boolean;
 
@@ -341,19 +343,75 @@ function checkReviewTokenRule(
 // README's review-slop section for the same note).
 const FINDING_ID = /\bF\d[a-z]?\b(?!-\d)/g;
 
+// The same run-local shorthand, extended to four severity-letter forms
+// this workspace's own review reports also use for a finding id: an
+// uppercase H, M, L, or C (high, medium, low, critical) followed by
+// exactly one digit and an optional lowercase letter, with the same
+// trailing negative lookahead as the F form above (so `M1-2026` does
+// not match either). Left ungated, this shape would swallow far more
+// ordinary vocabulary than the capital F does: `H1`-`H6` are HTML and
+// Markdown heading levels, `M1`-`M3` are Apple chip generations (and
+// economists' money-supply measures), `L1`/`L2` are cache or network
+// layers, and `C1`-`C4` range from a hazmat class to a vitamin name.
+// So, unlike the F form, a severity-letter match only counts when the
+// same sentence window (see `sentenceWindow` and `hasReviewContext`
+// further down this file) also carries a review-process word --
+// `FINDING_ID_CONTEXT` below names the set.
+//
+// This is a coarse gate, not disambiguation: a sentence naming one of
+// the four letters above clears purely because no review-process word
+// shares its sentence window, not because the pack understood the
+// sentence was about a chip or a cache. A genuine bug-fix sentence
+// that happens to name one of these letters is therefore a known,
+// accepted false positive -- see the package README's review-slop
+// section and this package's own test suite for a pinned example --
+// and `config.review.allow` (or `allowPaths`) is the escape hatch for
+// it, not a smarter filter.
+const SEVERITY_FINDING_ID = /\b[HMLC]\d[a-z]?\b(?!-\d)/g;
+
+// Both `round \d+` and the bare `R\d+` token read ordinary prose as a
+// false positive in isolation (`## Round 2` heading, `round 2 of the DNS
+// retry`, a Cloudflare `R2` bucket, `DeepSeek-R1`, `see pin R3`). Rather
+// than guess from the token's shape alone, each match is only kept when
+// the same sentence also carries a review-process word -- one sentence,
+// bounded by `.`, `!`, `?`, a blank line, a heading, or a list item (see
+// `sentenceWindow` below). `round`/`rounds` counts as context for a bare
+// `R\d+` token (a nearby "round" is real evidence, e.g. "over several
+// rounds we settled on R3"), but deliberately NOT for `round \d+` itself
+// -- the matched phrase always contains the word "round", so including it
+// in its own context set would make the filter a no-op.
+const ROUND_WORD_CONTEXT =
+  /\b(review|reviewer|fix(?:e[ds]|ing)?|finding[s]?)\b/i;
+const ROUND_TOKEN_CONTEXT =
+  /\b(review|reviewer|round[s]?|fix(?:e[ds]|ing)?|finding[s]?)\b/i;
+
+// The review-process word set gating `SEVERITY_FINDING_ID` above is the
+// bare round token's set, by alias rather than by a second literal: a
+// bare severity-letter id is exactly as ambiguous as a bare `RN` round
+// token and deserves the same context words, `round`/`rounds` included,
+// and one source cannot drift from the other when the vocabulary is
+// extended.
+const FINDING_ID_CONTEXT = ROUND_TOKEN_CONTEXT;
+
 const findingId: Rule = {
   id: "review-slop/finding-id",
   pack: "review-slop",
   defaultSeverity: "block",
   enabledByDefault: true,
   rationale:
-    "A finding id (`F1`, `F2a`) only resolves against the one review round it was minted in. Baked into a test title, a source comment, a commit message, or a doc, it reads as a precise reference but is opaque and dead the moment that round is over.",
+    "A finding id (`F1`, `F2a`, or a severity-letter id like `M1`/`H2a` when the same sentence also carries a review-process word) only resolves against the one review round it was minted in. Baked into a test title, a source comment, a commit message, or a doc, it reads as a precise reference but is opaque and dead the moment that round is over. The severity-letter gate is coarse (it clears only on the absence of a review-process word, not on the sentence's topic), so a genuine bug-fix sentence naming a chip or cache id is an accepted false positive; `review.allow` or `review.allowPaths` is the escape hatch.",
   appliesTo: appliesToReviewSurface,
   check(ctx: RuleContext): Violation[] {
     return checkReviewTokenRule(
       findingId,
       ctx,
-      [{ re: FINDING_ID }],
+      [
+        { re: FINDING_ID },
+        {
+          re: SEVERITY_FINDING_ID,
+          filter: hasReviewContext(FINDING_ID_CONTEXT),
+        },
+      ],
       (matched) =>
         `Run-local finding id \`${matched}\`: only resolvable against the review round it was minted in.`,
     );
@@ -381,22 +439,6 @@ const ROUND_WORD = /\bround\s+\d+\b/gi;
 // markdown code block via `stripFencedCode` in `scanProseSurface`, same
 // carve-out as `finding-id` gets for a key name in a code block.
 const ROUND_TOKEN = /\bR\d{1,2}\b/g;
-
-// Both `round \d+` and the bare `R\d+` token read ordinary prose as a
-// false positive in isolation (`## Round 2` heading, `round 2 of the DNS
-// retry`, a Cloudflare `R2` bucket, `DeepSeek-R1`, `see pin R3`). Rather
-// than guess from the token's shape alone, each match is only kept when
-// the same sentence also carries a review-process word -- one sentence,
-// bounded by `.`, `!`, `?`, a blank line, a heading, or a list item (see
-// `sentenceWindow` below). `round`/`rounds` counts as context for a bare
-// `R\d+` token (a nearby "round" is real evidence, e.g. "over several
-// rounds we settled on R3"), but deliberately NOT for `round \d+` itself
-// -- the matched phrase always contains the word "round", so including it
-// in its own context set would make the filter a no-op.
-const ROUND_WORD_CONTEXT =
-  /\b(review|reviewer|fix(?:e[ds]|ing)?|finding[s]?)\b/i;
-const ROUND_TOKEN_CONTEXT =
-  /\b(review|reviewer|round[s]?|fix(?:e[ds]|ing)?|finding[s]?)\b/i;
 
 // An ATX heading line and a list-item line, both allowing CommonMark's
 // up-to-three leading spaces of indentation. Used as structural sentence
@@ -528,6 +570,6 @@ const handoffPhrase: Rule = {
 export const reviewSlopPack: PackDefinition = {
   id: "review-slop",
   description:
-    "Run-local review tokens leaking into reusable content: finding ids (`F1`, `F2a`), round references (`round 2`, `R3`, `review round 1 fixes`), and workspace-handoff phrases (`per the <workspace> handoffs`). Scans Markdown, TS/JS source comments, test titles, and a commit-message file. Off by default; opt in via `--pack review-slop` or `packs.review-slop: true`.",
+    "Run-local review tokens leaking into reusable content: finding ids (`F1`, `F2a`, or a severity-letter id like `M1`/`H2a` when the same sentence also carries a review-process word), round references (`round 2`, `R3`, `review round 1 fixes`), and workspace-handoff phrases (`per the <workspace> handoffs`). Scans Markdown, TS/JS source comments, test titles, and a commit-message file. Off by default; opt in via `--pack review-slop` or `packs.review-slop: true`.",
   rules: [findingId, roundReference, handoffPhrase],
 };
