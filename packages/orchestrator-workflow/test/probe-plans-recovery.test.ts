@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import { listSkillReferenceNames, readAsset } from "../src/assets.js";
@@ -54,12 +57,15 @@ describe("persisted probe plans and recovery references", () => {
 
 /**
  * The Round-2 halt rule needs a defect class to recur before it stops a
- * task. A fix that introduces a new high finding of a class not seen before
- * passed under it for one more round. This pins the decision point that
- * closes that gap: its three qualifiers, the recorded outcomes, and the
- * boundaries that keep it from becoming a second halt rule or a budget
- * counter.
+ * task, so a fix that breaks something of a class not seen before passed
+ * under it for one more round. This pins the decision point that closes
+ * that gap. The section in review-and-recovery.md is the rule's only
+ * normative statement; FIX_REGRESSION_TRIGGER binds the sites that restate
+ * its trigger to the section's own words, and step 8 must not restate it.
  */
+const FIX_REGRESSION_TRIGGER =
+  "at least one `high` or `critical` finding that the previous round's review did not report, with `introduced_by_delta: yes`";
+
 describe("fix-regression decision point", () => {
   const section = unwrap(
     recovery.slice(
@@ -81,13 +87,30 @@ describe("fix-regression decision point", () => {
     expect(section).toContain(
       "the review of a fix round (any implementation round after the task's first)",
     );
-    expect(section).toContain(
-      "at least one `high` or `critical` finding that the previous round's review did not report, with `introduced_by_delta: yes`",
-    );
+    expect(section).toContain(FIX_REGRESSION_TRIGGER);
     expect(section).toContain(
       "`unknown` and `no` do not trigger this decision point",
     );
-    expect(section).toContain("The signal needs no recurrence");
+    expect(section).toContain(
+      "The signal needs no recurrence: it fires even when the new finding's defect class has not appeared on this task before, which is what separates it from the Round-2 halt rule above.",
+    );
+  });
+
+  it("binds the sites that restate the trigger to the section's own words", () => {
+    const packageDir = fileURLToPath(new URL("..", import.meta.url));
+    const changelog = readFileSync(`${packageDir}/CHANGELOG.md`, "utf8");
+    const bulletStart = changelog.indexOf(
+      '- `references/review-and-recovery.md` gains a "Fix-regression decision',
+    );
+    expect(bulletStart).toBeGreaterThan(-1);
+    const bullet = unwrap(
+      changelog.slice(bulletStart, changelog.indexOf("\n- ", bulletStart + 1)),
+    );
+    expect(bullet).toContain(FIX_REGRESSION_TRIGGER);
+    const bundleDoc = unwrap(
+      readFileSync(`${packageDir}/docs/okf/review-gate-and-waivers.md`, "utf8"),
+    );
+    expect(bundleDoc).toContain(FIX_REGRESSION_TRIGGER);
   });
 
   it("evaluates the qualifier on the findings, not on the recurrence field", () => {
