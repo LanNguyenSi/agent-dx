@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Three ceremony rules in the skill references, none of which changes the
+  review gate, the waiver rules or the AGENTS.md section (byte-identical, so
+  no AGENTS.md re-install is needed; the rules reach an existing install
+  with the next kit re-install). Step 6 of
+  `references/evidence-and-probes.md` now says: "Record a baseline revision
+  only when scope or the normative text of a criterion changes, including a
+  change to what its verification checks; a wording precision that leaves
+  the check itself unchanged is a `03-decisions.md` entry, not a revision";
+  the orchestrator records that entry, states in it why no evidence is
+  invalidated, and communicates the corrected wording in the next
+  delegation. Step 7 now says: "For a review round whose entire delta is a
+  docs-only delta in the sense of step 8's docs-only closure, default to the
+  `-medium` reviewer tier with `review_method: normal` where tier variants
+  are installed". That refines the general tier default for this one class
+  only, a round that touches an instruction, policy, template or prompt file
+  keeps the general default, and the minimum review methods are untouched;
+  the AGENTS.md section does not yet point to this refinement.
+  `references/review-and-recovery.md` gains a "Pinned-prose changes" section
+  for a change whose acceptance rests on tests that pin documentation
+  wording: "A prose mutant survives exactly when its bytes sit in no
+  assertion", so review rounds that hunt for the next unpinned sentence do
+  not converge. The section asks for one normative site per rule, a claim
+  list in the acceptance criterion as the pin obligation (every normative
+  sentence the change adds or alters at that site is a claim, an omission is
+  named with its reason), a reviewer briefing that bounds the prose mutant
+  space to that list, copies bound to the normative site by one shared test
+  constant, and: "Cap test-adequacy review rounds on the change at two." It
+  defines the capped round, exempts semantic findings, and changes neither
+  the Round-2 halt rule, the escalation budget, the Fix-regression decision
+  point nor the review gate. Step 7 points to the section without restating
+  it. Evidence (issue #300 and the change that added the Fix-regression
+  decision point; one repository each, not a benchmark): the issue reports
+  baseline revisions r1 to r3 for two wording precisions of a verification
+  method, and a run in which the top reviewer tier was about half the day's
+  cost across nine reviewer rounds and an advisor, where the documentation
+  rounds did not need that tier; the decision point itself, about 27 lines
+  of rule text, took four review rounds with unpinned prose reported in
+  every one, until the trigger was held in one test constant and the mutant
+  space was bounded. Pinned in `test/probe-plans-recovery.test.ts`.
 - `references/review-and-recovery.md` gains a "Fix-regression decision
   point" between the Review-round escalation budget and the Final
   acceptance rule: when the review of a fix round reports at least one

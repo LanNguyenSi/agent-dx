@@ -137,7 +137,7 @@ directory and the subagents.
    acceptance; the coverage index is not a results database or acceptance
    engine. Only the orchestrator can explicitly revise a baseline, recording
    old/new revisions, affected IDs, authority and reason, invalidated evidence,
-   and verified rationale for carrying unchanged evidence forward.
+   and verified rationale for carrying unchanged evidence forward. Record a baseline revision only when scope or the normative text of a criterion changes, including a change to what its verification checks; a wording precision that leaves the check itself unchanged is a `03-decisions.md` entry, not a revision: the orchestrator records it, states in that entry why no evidence is invalidated, and communicates the corrected wording in the next delegation.
 7. **Delegate review.** Send the diff to the reviewer subagent, naming in the
    briefing the base and head revision the diff was generated from. When tier
    variants are installed, pick the reviewer tier (the installed
@@ -152,7 +152,7 @@ directory and the subagents.
    cosmetics; `rigorous` otherwise. The method is orthogonal to the tier and
    never substitutes for it: do not pair `adversarial` with the `-medium`
    reviewer tier, a budget mismatch that names probes without the effort to run
-   them; tiers themselves are unchanged by this axis. When the reviewer's
+   them; tiers themselves are unchanged by this axis. For a review round whose entire delta is a docs-only delta in the sense of step 8's docs-only closure, default to the `-medium` reviewer tier with `review_method: normal` where tier variants are installed. This refines the general tier default above for that one class only: there `-medium` is the default and a higher tier is the non-default choice recorded with a one-line reason. A review round that touches an instruction, policy, template or prompt file keeps the general default, whatever the file type, and the minimums named above are unaffected. For a change whose acceptance rests on tests that pin documentation wording, write the briefing as the Pinned-prose changes section of [review and recovery](review-and-recovery.md) requires. When the reviewer's
    environment cannot use version control to see the diff (for example a
    policy-gated repository), supply the diff as a pre-generated file in the
    briefing instead of expecting the reviewer to derive it, and have the
