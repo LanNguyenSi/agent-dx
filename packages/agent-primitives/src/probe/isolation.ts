@@ -43,8 +43,23 @@ export interface InplaceSession {
    * normal async control flow. This is the single mutation-probed
    * function for the whole restore guarantee: a no-op here must fail
    * both the SIGTERM test and every post-run hash assertion.
+   *
+   * `true` means the CONTENT is back: the file exists again at
+   * `targetPath` with the backup's bytes. Putting the modes back (the
+   * target's own, and those of any directory this restore had to
+   * recreate) is attempted afterwards and reported through
+   * `takeRestoreWarnings`, never through this return value -- see
+   * `restoreModes`.
    */
   restore(): boolean;
+  /**
+   * Drains and returns the mode-correction warnings produced by the
+   * `restore()` calls made since the last drain (see `restoreModes`);
+   * empty for every restore that put every mode back, which is the
+   * normal case. Drained rather than read so a plan's later mutant on
+   * the same target never re-reports an earlier mutant's warning.
+   */
+  takeRestoreWarnings(): string[];
 }
 
 /** Test seam: lets a test inject an `open` that makes the backup name
@@ -54,6 +69,223 @@ export interface InplaceSession {
  * the genuine `fs.openSync`. */
 export interface InplaceDeps {
   open?: (filePath: string, flags: string) => number;
+}
+
+/** One directory in `targetPath`'s ancestor chain whose mode was
+ * captured at `beginInplace` time because a deletion mutant's `git
+ * apply` could remove it along with the file (see `captureAncestorModes`
+ * below). Captured for every level of the chain; written back only for
+ * the levels a restore actually had to recreate (see `restoreModes`). */
+interface AncestorMode {
+  dir: string;
+  mode: number;
+}
+
+/**
+ * Captures the mode of every directory from `targetPath`'s own parent
+ * upwards, as far as `boundRoot`. A deletion mutant's real `git apply`
+ * can remove more than one of them along with the file: git never
+ * tracks an empty directory, so deleting the only tracked file in
+ * `a/b/` removes `b/` too, and `a/` with it when `b/` was `a/`'s only
+ * entry, and so on up the chain. `restore()`'s `mkdirSync` recreates
+ * every such level at the process's default mode rather than the one it
+ * actually had, so the mode of every level has to be known here for
+ * `restoreModes` to put it back.
+ *
+ * `boundRoot` is the tree the mutation happens in (the worktree copy
+ * under `-i worktree`, the containment root otherwise). The walk stops
+ * there because nothing `git apply` does inside that tree can remove a
+ * directory above it: a level outside the tree is never recreated, so
+ * its mode is never at risk, and walking past the tree would reach
+ * shared system directories this process has no business recording (or
+ * writing back) at all.
+ *
+ * The immediate parent is captured unconditionally, before the bound is
+ * consulted at all: it always exists whenever `targetPath` does (the
+ * precondition `beginInplace` already relies on to read `targetPath`'s
+ * own content), and it is the one level at risk even when `boundRoot`
+ * is spelled differently from `targetPath`'s own prefix. Every further
+ * level is captured only while it is still provably inside `boundRoot`,
+ * with both sides passed through `resolveDeepestExisting` the way
+ * `containment.ts` requires of every `isPathContained` comparison.
+ */
+function captureAncestorModes(
+  targetPath: string,
+  boundRoot: string,
+): AncestorMode[] {
+  const resolvedRoot = resolveDeepestExisting(path.resolve(boundRoot));
+  const modes: AncestorMode[] = [];
+  let dir = path.dirname(targetPath);
+  for (;;) {
+    try {
+      modes.push({ dir, mode: fs.statSync(dir).mode });
+    } catch {
+      // An ancestor this process cannot stat has no mode to put back;
+      // nothing above it can be recorded either, since the walk reads
+      // each level through the one below it.
+      break;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break; // filesystem root
+    if (!isPathContained(resolvedRoot, resolveDeepestExisting(parent))) break;
+    dir = parent;
+  }
+  return modes;
+}
+
+/**
+ * The directories a single `fs.mkdirSync(deepest, { recursive: true })`
+ * call actually created, deepest first: `deepest` itself down to (and
+ * including) `shallowestCreated`, which is what that call returns -- the
+ * FIRST directory it had to create, or `undefined` when every level was
+ * already there.
+ *
+ * `undefined` therefore means "this restore created nothing", and the
+ * answer is the empty list: a directory that was already on disk was
+ * never at risk of losing its mode, so a restore must not touch it.
+ * That is the whole difference between correcting what this restore
+ * disturbed and chmod-ing an existing parent directory on every restore
+ * of every mutant -- the latter fails outright (`EPERM`) whenever the
+ * parent is simply not this process's to chmod (`/tmp`, `$TMPDIR`,
+ * `/usr/local`, a foreign-owned mount), turning a fully successful
+ * restore into a reported failure.
+ */
+function directoriesRecreatedBy(
+  shallowestCreated: string | undefined,
+  deepest: string,
+): string[] {
+  if (shallowestCreated === undefined) return [];
+  // Both are absolute and normalised (`shallowestCreated` is a prefix
+  // of the very path `deepest` was passed in as), so a `deepest` that
+  // does not sit under it means the two came from different calls and
+  // nothing can be attributed to this restore.
+  if (!isPathContained(shallowestCreated, deepest)) return [];
+  const dirs: string[] = [];
+  let dir = deepest;
+  for (;;) {
+    dirs.push(dir);
+    if (dir === shallowestCreated) break;
+    const parent = path.dirname(dir);
+    if (parent === dir) break; // filesystem root; unreachable past the check
+    dir = parent;
+  }
+  return dirs;
+}
+
+/** A mode as an operator would read it in a warning: the permission
+ * bits only, zero-padded octal with the leading `0o` a Node caller
+ * would type. */
+function formatMode(mode: number): string {
+  return `0o${(mode & 0o7777).toString(8).padStart(4, "0")}`;
+}
+
+/** An errno code for a warning, or the error's own message when it
+ * carries no code. */
+function errnoLabel(err: unknown): string {
+  const code = (err as NodeJS.ErrnoException | undefined)?.code;
+  if (typeof code === "string") return code;
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Puts `p`'s mode back to `mode`, and ONLY when it is not already
+ * there: a `chmod` that would change nothing is still a `chmod`, and it
+ * still fails with `EPERM` on a path this process does not own, so
+ * issuing one unconditionally turns "the mode is already right" into a
+ * reported problem. The comparison is on the permission bits alone
+ * (`& 0o7777`), since `statSync().mode` also carries the file-type bits
+ * that `chmodSync` has no business being handed.
+ *
+ * A failure here is a warning, never a restore failure: the content is
+ * what `restore()` promises and what `restored_verified` attests by
+ * hash, and a file that is back byte-for-byte under a mode this process
+ * could not correct is a metadata problem to report, not a mutation
+ * left on disk.
+ *
+ * `kind` picks the warning's opening clause: a `directory` was never
+ * mutated in place, it was recreated by `restore()`'s own `mkdirSync`,
+ * so "restored its content" would misdescribe what happened to it. The
+ * target `file` keeps the original "restored ...'s content" wording.
+ */
+function chmodBackTo(
+  p: string,
+  mode: number,
+  warn: (message: string) => void,
+  kind: "file" | "directory" = "file",
+): void {
+  const wanted = mode & 0o7777;
+  const lead =
+    kind === "directory" ? `recreated ${p}` : `restored ${p}'s content`;
+  let current: number;
+  try {
+    current = fs.statSync(p).mode & 0o7777;
+  } catch (err) {
+    warn(
+      `${lead}, but could not read its mode back to ` +
+        `compare it against the ${formatMode(wanted)} it had before the ` +
+        `mutation (${errnoLabel(err)}); the content restore itself is ` +
+        `unaffected`,
+    );
+    return;
+  }
+  if (current === wanted) return;
+  try {
+    fs.chmodSync(p, wanted);
+  } catch (err) {
+    warn(
+      `${lead}, but could not put its mode back to ` +
+        `${formatMode(wanted)} from ${formatMode(current)} ` +
+        `(${errnoLabel(err)}); the content restore itself is unaffected ` +
+        `and is what restored_verified attests`,
+    );
+  }
+}
+
+/**
+ * Corrects the modes a single `restore()` is responsible for, and
+ * nothing else: every directory THAT restore's own `mkdirSync`
+ * recreated (`shallowestCreated` is its return value), plus the target
+ * file itself.
+ *
+ * The target is always a candidate because `copyFileSync` on Darwin
+ * copies the BACKUP file's own metadata onto the destination even when
+ * the destination already exists, and the backup was created under
+ * `logDir` with the ordinary default mode -- so an ordinary text
+ * mutant's restore, too, can land a non-default target mode back at
+ * `0644`. A candidate is only ever chmod-ed when its mode actually
+ * differs (`chmodBackTo`), so the common case issues no `chmod` at all.
+ *
+ * Only the MODE is corrected. Whatever else `copyFileSync` carries over
+ * from the backup -- on Darwin, the destination's group among it -- is
+ * left as the copy made it, exactly as it was before any of this
+ * existed: a probe restores the target's content and its permission
+ * bits, and has never claimed to restore its ownership.
+ *
+ * Deliberately outside `restore()`'s own content try/catch: every
+ * failure in here is reported through `warn` and leaves `restore()`
+ * returning `true`, because the content is already back on disk by the
+ * time this runs.
+ */
+function restoreModes(
+  targetPath: string,
+  targetMode: number,
+  ancestorModes: readonly AncestorMode[],
+  shallowestCreated: string | undefined,
+  warn: (message: string) => void,
+): void {
+  for (const dir of directoriesRecreatedBy(
+    shallowestCreated,
+    path.dirname(targetPath),
+  )) {
+    const captured = ancestorModes.find((ancestor) => ancestor.dir === dir);
+    // A recreated level with no captured mode is one the capture walk
+    // stopped short of (outside `boundRoot`, or unstattable then):
+    // there is no recorded mode to put back, so it keeps whatever
+    // `mkdirSync` gave it rather than being chmod-ed to a guess.
+    if (captured === undefined) continue;
+    chmodBackTo(dir, captured.mode, warn, "directory");
+  }
+  chmodBackTo(targetPath, targetMode, warn);
 }
 
 /**
@@ -70,10 +302,15 @@ export interface InplaceDeps {
  * the other's. The atomicity is the create's own, not a check before it:
  * an `EEXIST` here means somebody else won the name, whether they took
  * it an hour ago or between this line and the previous one.
+ *
+ * `boundRoot` bounds the ancestor-mode capture (`captureAncestorModes`):
+ * the tree the mutation happens in, i.e. the worktree copy under
+ * `-i worktree` and the containment root otherwise.
  */
 export function beginInplace(
   targetPath: string,
   logDir: string,
+  boundRoot: string,
   deps: InplaceDeps = {},
 ): InplaceSession {
   const open = deps.open ?? fs.openSync;
@@ -95,16 +332,46 @@ export function beginInplace(
   const data = fs.readFileSync(targetPath);
   fs.writeSync(fd, data);
   fs.closeSync(fd);
+  const targetMode = fs.statSync(targetPath).mode;
+  const ancestorModes = captureAncestorModes(targetPath, boundRoot);
+  const modeWarnings: string[] = [];
   return {
     backupPath,
     targetPath,
+    takeRestoreWarnings(): string[] {
+      return modeWarnings.splice(0, modeWarnings.length);
+    },
     restore(): boolean {
+      let shallowestCreated: string | undefined;
       try {
+        // A deletion mutant's real `git apply` can remove `targetPath`'s
+        // own parent directory along with the file, and every further
+        // level the file's removal left empty: `copyFileSync` alone
+        // would then fail with `ENOENT` on a directory that is simply
+        // gone, not on the file itself. Recreating them first is a no-op
+        // (and no additional failure surface) for every other mutant
+        // kind, whose parent directory was never touched -- and the
+        // return value says exactly which levels, if any, this restore
+        // had to put back, which is what keeps the mode correction below
+        // off directories it never disturbed.
+        shallowestCreated = fs.mkdirSync(path.dirname(targetPath), {
+          recursive: true,
+        });
         fs.copyFileSync(backupPath, targetPath);
-        return true;
       } catch {
         return false;
       }
+      // Past this point the content is back on disk, so nothing below
+      // may turn into a failed restore: `restoreModes` reports through
+      // `modeWarnings` instead, and this returns `true` either way.
+      restoreModes(
+        targetPath,
+        targetMode,
+        ancestorModes,
+        shallowestCreated,
+        (message) => modeWarnings.push(message),
+      );
+      return true;
     },
   };
 }

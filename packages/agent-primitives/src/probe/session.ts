@@ -60,6 +60,11 @@ export interface MutantField {
    * fully shown by `before`/`after` alone; see
    * `MutantComputed.diff`'s docblock in `mutant.ts` for exactly when. */
   diff?: MutantDiffField;
+  /** Mirrors `MutantComputed.deleted`: `true` only for a `patch` mutant
+   * whose applied result is "the target file no longer exists" (a
+   * deletion patch), absent for every other mutant. See that field's
+   * own docblock in `mutant.ts`. */
+  deleted?: boolean;
 }
 
 export interface MutationProbeField {
@@ -1267,7 +1272,12 @@ export function openTarget(
 ): Promise<
   { ok: true; target: TargetSession } | { ok: false; warning: string }
 > {
-  const session = beginInplace(input.mutationFilePath, rt.logDir);
+  // `rt.applyRoot` is the tree this target is actually mutated in (the
+  // worktree copy under `-i worktree`, the containment root otherwise),
+  // which is what bounds the restore's ancestor-mode capture: no
+  // directory above that tree can be removed by a mutant applied inside
+  // it, so none above it is ever recreated by a restore either.
+  const session = beginInplace(input.mutationFilePath, rt.logDir, rt.applyRoot);
   rt.setRestoreState({
     restore: session.restore,
     targetPath: session.targetPath,

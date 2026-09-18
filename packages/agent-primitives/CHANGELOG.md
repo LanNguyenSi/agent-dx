@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `probe`'s `-p/--patch` mutant now accepts a unified diff whose applied
+  result deletes the whole target file, instead of the dry run throwing
+  once `git apply` removed the scratch copy: `computePatch` treats the
+  file's absence as content `""` (`mutant.line` `1`, `mutant.before` the
+  original first line, `mutant.after` `""`), and reports it via a new
+  `mutant.deleted: true` field, present only for this shape. The real
+  apply removes the target file for real in both isolation modes; the
+  restore recreates it byte-identically from the same backup and hash
+  verification every other mutant already uses (now also recreating the
+  target's own parent directory first when the deletion removed it too --
+  git does not track an empty directory, so deleting the last tracked
+  file in one removes the directory along with it, which the prior
+  `copyFileSync`-only restore could not write back into), so
+  `mutation_probe.restored_verified` is `true` the same way, and the run
+  classifies `killed`/`survived` like any other patch mutant, under
+  `--plan` as well as on its own. The restore now also preserves the
+  permission bits of the target and of every directory it had to
+  recreate, up the whole chain the deletion pruned and bounded by the
+  repository (or worktree) root: both `mkdirSync` and, on Darwin,
+  `copyFileSync` onto an already-existing destination would otherwise
+  leave the process's default mode instead. A directory the restore did
+  NOT recreate is never chmod-ed, so a target under a directory this
+  process may write in but does not own (`/tmp`, `$TMPDIR`, a
+  foreign-owned mount) probes normally, and a mode that cannot be
+  written back is reported as a warning naming the path and both modes
+  rather than as a failed restore. A marker left behind by a SIGKILL
+  between the real deletion and the marker's own removal -- the target
+  genuinely absent, `marker.mutatedHash` the deletion sentinel -- is now
+  auto-recovered by the next invocation the same way an ordinary
+  mutated-content marker already was, instead of refusing
+  `stale_probe_marker` with no mention that the target is missing, and
+  `doctor` now reports that same marker shape as recoverable instead of
+  telling an operator to delete it. `doctor`'s unrecoverable-marker
+  detail now names each marker's backup path beside the marker file, so
+  the only remaining copy of a missing target's content is never thrown
+  away along with the marker.
+  `mutation_probe.mutant`/`verified_applied_via` now both end on
+  `(whole file deleted)` for this shape (tracker
+  8e203884-31f2-4fb8-bf8f-bab7208fa696).
 - `doctor`'s `python-bytecode-cache` check is pinned for a partially
   spent aggregate deadline (a target already in flight when the
   deadline is crossed still resolves through `python3`, and only a

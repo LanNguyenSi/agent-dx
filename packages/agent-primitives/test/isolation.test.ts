@@ -92,7 +92,7 @@ describe("beginInplace", () => {
     const original = "original content\n";
     fs.writeFileSync(target, original);
 
-    const session = beginInplace(target, logDir);
+    const session = beginInplace(target, logDir, dir);
     fs.writeFileSync(target, "mutated\n");
     expect(session.restore()).toBe(true);
     expect(fs.readFileSync(target, "utf8")).toBe(original);
@@ -112,7 +112,7 @@ describe("beginInplace", () => {
     const takenContent = "an earlier session's backup\n";
     fs.writeFileSync(takenPath, takenContent);
 
-    const session = beginInplace(target, logDir);
+    const session = beginInplace(target, logDir, dir);
 
     expect(session.backupPath).not.toBe(takenPath);
     expect(fs.readFileSync(takenPath, "utf8")).toBe(takenContent);
@@ -142,7 +142,7 @@ describe("beginInplace", () => {
       return fs.openSync(filePath, flags);
     };
 
-    const session = beginInplace(target, logDir, { open });
+    const session = beginInplace(target, logDir, dir, { open });
 
     expect(raced).toBe(true);
     // The other session's backup is untouched: not truncated, not
@@ -162,9 +162,9 @@ describe("beginInplace", () => {
     const target = path.join(dir, "fixture.js");
     fs.writeFileSync(target, "original content\n");
 
-    const first = beginInplace(target, logDir);
-    const second = beginInplace(target, logDir);
-    const third = beginInplace(target, logDir);
+    const first = beginInplace(target, logDir, dir);
+    const second = beginInplace(target, logDir, dir);
+    const third = beginInplace(target, logDir, dir);
 
     const paths = [first.backupPath, second.backupPath, third.backupPath];
     expect(new Set(paths).size).toBe(3);
@@ -172,6 +172,263 @@ describe("beginInplace", () => {
       expect(fs.readFileSync(backupPath, "utf8")).toBe("original content\n");
     }
   });
+
+  /** The mode a freshly created file gets in `dir` under this process's
+   * own umask, measured rather than assumed: `beginInplace`'s backup is
+   * created exactly this way (`openSync(..., "wx")`), so a target set to
+   * this mode is a target whose mode a restore has nothing to correct,
+   * whatever umask the machine running the test uses. */
+  function defaultNewFileMode(dir: string): number {
+    const probePath = path.join(dir, `mode-probe-${randomUUID()}`);
+    fs.closeSync(fs.openSync(probePath, "wx"));
+    const mode = fs.statSync(probePath).mode & 0o7777;
+    fs.rmSync(probePath);
+    return mode;
+  }
+
+  it.skipIf(process.platform === "win32")(
+    "issues no chmod at all when the restore recreated no directory and the target's own mode is already right",
+    () => {
+      const dir = makeTmpDir();
+      const logDir = makeTmpDir();
+      const target = path.join(dir, "fixture.js");
+      fs.writeFileSync(target, "original content\n");
+      fs.chmodSync(target, defaultNewFileMode(logDir));
+
+      const session = beginInplace(target, logDir, dir);
+      fs.writeFileSync(target, "mutated\n");
+
+      const chmod = vi.spyOn(fs, "chmodSync");
+      try {
+        expect(session.restore()).toBe(true);
+        // The parent directory was there the whole time, so this restore
+        // recreated nothing and has no directory mode to put back; the
+        // target's own mode already matches what it had. A chmod issued
+        // anyway is not harmless: on a parent directory this process
+        // does not own (`/tmp`, `$TMPDIR`, `/usr/local`, a foreign-owned
+        // mount) it fails with EPERM, which is how a fully successful
+        // restore came to be reported as a failed one.
+        expect(chmod.mock.calls).toEqual([]);
+      } finally {
+        chmod.mockRestore();
+      }
+      expect(fs.readFileSync(target, "utf8")).toBe("original content\n");
+      expect(session.takeRestoreWarnings()).toEqual([]);
+    },
+  );
+
+  it.skipIf(isRoot || process.platform === "win32")(
+    "leaves a parent directory's mode exactly as it finds it when the restore recreated nothing, even after that mode changed since the backup was taken",
+    () => {
+      const dir = makeTmpDir();
+      const logDir = makeTmpDir();
+      fs.chmodSync(dir, 0o755);
+      const target = path.join(dir, "fixture.js");
+      fs.writeFileSync(target, "original content\n");
+
+      const session = beginInplace(target, logDir, dir);
+      // Somebody else's change, after this session recorded 0755. The
+      // parent was never removed and never recreated, so its mode is
+      // not this restore's to put back: writing the recorded one over
+      // it would undo a change the probe never made.
+      fs.chmodSync(dir, 0o700);
+      fs.writeFileSync(target, "mutated\n");
+
+      expect(session.restore()).toBe(true);
+
+      expect(session.takeRestoreWarnings()).toEqual([]);
+      expect(fs.readFileSync(target, "utf8")).toBe("original content\n");
+      expect(fs.statSync(dir).mode & 0o7777).toBe(0o700);
+    },
+  );
+
+  it.skipIf(isRoot || process.platform === "win32")(
+    "puts back the mode of every directory it had to recreate, up the whole chain, and the target's own",
+    () => {
+      const root = makeTmpDir();
+      const logDir = makeTmpDir();
+      const outer = path.join(root, "a");
+      const inner = path.join(outer, "b");
+      fs.mkdirSync(inner, { recursive: true });
+      const target = path.join(inner, "f.txt");
+      fs.writeFileSync(target, "original\n");
+      fs.chmodSync(target, 0o755);
+      fs.chmodSync(inner, 0o750);
+      fs.chmodSync(outer, 0o700);
+
+      const session = beginInplace(target, logDir, root);
+      // Exactly what a deletion mutant's real `git apply` leaves behind
+      // when the target was the only tracked file below `a/`: the file
+      // gone, and every directory its removal emptied pruned with it.
+      fs.rmSync(outer, { recursive: true, force: true });
+
+      expect(session.restore()).toBe(true);
+
+      expect(session.takeRestoreWarnings()).toEqual([]);
+      expect(fs.readFileSync(target, "utf8")).toBe("original\n");
+      expect(fs.statSync(outer).mode & 0o7777).toBe(0o700);
+      expect(fs.statSync(inner).mode & 0o7777).toBe(0o750);
+      expect(fs.statSync(target).mode & 0o7777).toBe(0o755);
+    },
+  );
+
+  it.skipIf(isRoot || process.platform === "win32")(
+    "never writes a mode back above boundRoot, even for a directory the restore itself recreated",
+    () => {
+      const root = makeTmpDir();
+      const logDir = makeTmpDir();
+      const outer = path.join(root, "a");
+      const inner = path.join(outer, "b");
+      fs.mkdirSync(inner, { recursive: true });
+      const target = path.join(inner, "f.txt");
+      fs.writeFileSync(target, "original\n");
+      fs.chmodSync(inner, 0o750);
+      fs.chmodSync(outer, 0o700);
+
+      // The bound is the INNER directory: `a/` sits above the tree this
+      // session is told the mutation happens in, so its mode is never
+      // recorded and never written back, even though the restore below
+      // has to recreate it to get to `b/`.
+      const session = beginInplace(target, logDir, inner);
+      fs.rmSync(outer, { recursive: true, force: true });
+
+      expect(session.restore()).toBe(true);
+
+      expect(session.takeRestoreWarnings()).toEqual([]);
+      expect(fs.readFileSync(target, "utf8")).toBe("original\n");
+      expect(fs.statSync(inner).mode & 0o7777).toBe(0o750);
+      expect(fs.statSync(outer).mode & 0o7777).not.toBe(0o700);
+    },
+  );
+
+  it.skipIf(isRoot || process.platform === "win32")(
+    "reports a chmod it could not make as a warning naming the path and both modes, restores anyway, and still corrects every other level",
+    () => {
+      const root = makeTmpDir();
+      const logDir = makeTmpDir();
+      const outer = path.join(root, "a");
+      const inner = path.join(outer, "b");
+      fs.mkdirSync(inner, { recursive: true });
+      const target = path.join(inner, "f.txt");
+      fs.writeFileSync(target, "original\n");
+      fs.chmodSync(target, 0o755);
+      fs.chmodSync(inner, 0o750);
+      fs.chmodSync(outer, 0o700);
+
+      const session = beginInplace(target, logDir, root);
+      fs.rmSync(outer, { recursive: true, force: true });
+      // The recreated file takes the backup's own mode on every platform
+      // (the destination does not exist yet), so pinning the backup at
+      // 0600 guarantees the target comes back needing a chmod to 0755
+      // and the file arm of the warning is exercised deterministically.
+      fs.chmodSync(session.backupPath, 0o600);
+
+      // Stands in for a directory (and a file) this process is not
+      // allowed to chmod at all; the real cases (a foreign-owned mount,
+      // `/tmp`) cannot be produced portably from a test.
+      const realChmod = fs.chmodSync;
+      const chmod = vi.spyOn(fs, "chmodSync").mockImplementation(((
+        p: fs.PathLike,
+        mode: fs.Mode,
+      ) => {
+        if (String(p) === outer || String(p) === target) {
+          const err = new Error(
+            "EPERM: operation not permitted, chmod",
+          ) as NodeJS.ErrnoException;
+          err.code = "EPERM";
+          throw err;
+        }
+        realChmod(p, mode);
+      }) as typeof fs.chmodSync);
+      try {
+        // The content is back on disk, which is the whole of what
+        // `restore()` promises and what `restored_verified` attests: a
+        // mode this process could not set is reported, never turned
+        // into a failed restore.
+        expect(session.restore()).toBe(true);
+      } finally {
+        chmod.mockRestore();
+      }
+
+      const warnings = session.takeRestoreWarnings();
+      expect(warnings.length).toBe(2);
+      const dirWarning = warnings.find(
+        (w) => w.includes(outer) && !w.includes(target),
+      );
+      const fileWarning = warnings.find((w) => w.includes(target));
+      expect(dirWarning).toBeDefined();
+      expect(fileWarning).toBeDefined();
+      // A recreated directory reads "recreated <dir>", never "restored
+      // <dir>'s content": the latter would misdescribe a directory that
+      // was never mutated in place, only rebuilt by `mkdirSync`. The
+      // target file, which WAS mutated in place, keeps the "restored
+      // ...'s content" lead; both arms of that distinction are pinned
+      // here.
+      expect(dirWarning).toContain(`recreated ${outer}`);
+      expect(dirWarning).toContain("0o0700");
+      expect(dirWarning).toMatch(/from 0o\d{4}/);
+      expect(dirWarning).toContain("EPERM");
+      expect(fileWarning).toContain(`restored ${target}'s content`);
+      expect(fileWarning).not.toContain("recreated");
+      expect(fileWarning).toContain("0o0755");
+      expect(fileWarning).toContain("EPERM");
+      // Drained, not merely read: a later restore on the same session
+      // must not re-report this one's warning.
+      expect(session.takeRestoreWarnings()).toEqual([]);
+      expect(fs.readFileSync(target, "utf8")).toBe("original\n");
+      // Every level the restore COULD correct still was; the target,
+      // whose chmod was refused, keeps the backup's 0600.
+      expect(fs.statSync(inner).mode & 0o7777).toBe(0o750);
+      expect(fs.statSync(target).mode & 0o7777).toBe(0o600);
+    },
+  );
+
+  it.skipIf(isRoot || process.platform === "win32")(
+    "captures and restores the immediate parent's mode even when boundRoot is spelled differently from the target's own prefix (a symlinked ancestor), which a bound-checked first capture would miss",
+    () => {
+      // `outside` sits nowhere under `root`'s own tree; `link`, INSIDE
+      // `root`, is a symlink to it, so the target's literal parent
+      // (`link`) resolves to a place `isPathContained(root, ...)` would
+      // reject. The immediate-parent capture is unconditional exactly
+      // for this level: bound-checking it too (the mutant this test
+      // exists to kill) would skip recording its mode, and a restore
+      // that later recreates it as a plain directory would then have no
+      // recorded mode to put back.
+      const outside = makeTmpDir();
+      fs.chmodSync(outside, 0o700);
+      const root = makeTmpDir();
+      const logDir = makeTmpDir();
+      const link = path.join(root, "link");
+      fs.symlinkSync(outside, link, "dir");
+      const target = path.join(link, "f.txt");
+      fs.writeFileSync(target, "original\n");
+
+      const session = beginInplace(target, logDir, root);
+      // Removes only the `link` symlink node itself, per Node's own
+      // `rmSync` semantics for a symlink to a directory: `outside` and
+      // its contents are untouched.
+      fs.rmSync(link, { recursive: true, force: true });
+
+      // Pin the umask so `mkdirSync`'s default mode (0o777 & ~umask) is
+      // 0o755 and therefore differs from the captured 0o700: under an
+      // ambient umask 077 the default would already be 0o700 and this
+      // test could not tell a captured mode from an uncaptured one.
+      const previousUmask = process.umask(0o022);
+      try {
+        expect(session.restore()).toBe(true);
+      } finally {
+        process.umask(previousUmask);
+      }
+
+      expect(session.takeRestoreWarnings()).toEqual([]);
+      expect(fs.readFileSync(target, "utf8")).toBe("original\n");
+      // `mkdirSync` recreated `link` as a plain directory (the symlink
+      // is gone), so its mode is only right here if the immediate
+      // parent's mode really was captured.
+      expect(fs.lstatSync(link).isSymbolicLink()).toBe(false);
+      expect(fs.statSync(link).mode & 0o7777).toBe(0o700);
+    },
+  );
 });
 
 describe("countNumstatFiles", () => {

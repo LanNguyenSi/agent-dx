@@ -364,8 +364,8 @@ async function provokeBackupVerificationFailed(): Promise<ProbeResult> {
     typeof import("../src/probe/isolation.js")
   >("../src/probe/isolation.js");
   const mockBeginInplace = vi.mocked(beginInplace);
-  mockBeginInplace.mockImplementationOnce((targetPath, logDir) => {
-    const session = actualIsolation.beginInplace(targetPath, logDir);
+  mockBeginInplace.mockImplementationOnce((targetPath, logDir, boundRoot) => {
+    const session = actualIsolation.beginInplace(targetPath, logDir, boundRoot);
     fs.writeFileSync(session.backupPath, "truncated backup\n");
     return session;
   });
@@ -838,8 +838,12 @@ describe("probe(): REFUSAL_RESULT_SHAPE contract, every RefusalReason provoked f
       },
     );
     const mockBeginInplace = vi.mocked(beginInplace);
-    mockBeginInplace.mockImplementationOnce((targetPath, logDir) => {
-      const session = actualIsolation.beginInplace(targetPath, logDir);
+    mockBeginInplace.mockImplementationOnce((targetPath, logDir, boundRoot) => {
+      const session = actualIsolation.beginInplace(
+        targetPath,
+        logDir,
+        boundRoot,
+      );
       return { ...session, restore: () => false };
     });
     try {

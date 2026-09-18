@@ -1504,6 +1504,49 @@ the working tree itself for `-i inplace`). `--file` and `-n, --line`
 are required for `-r` and for `-M`/`-w`, which have nothing to derive
 them from; `-p` alone needs neither, as described above.
 
+`-p, --patch` supports a patch whose applied result deletes the whole
+target file (a `deleted file mode`/`+++ /dev/null` unified diff, the
+shape `git rm` plus `git diff --cached` produces), the same as any
+other patch shape: the dry run treats the file's absence after `git
+apply` as content `""`, so `mutant.line`/`mutant.before` are the first
+line at which the applied result actually differs from the original
+(the original's own first line for most files, but line 2, not 1, for
+one whose first line is already empty, and so on for every leading
+empty line) and `mutant.after` is `""`; `mutant.deleted` is `true` only
+for this shape (absent for every other mutant, including a patch that
+empties a file's content while leaving the file itself in place -- a
+different applied result `mutant.deleted` does not describe), and both
+`mutation_probe.mutant` and `mutation_probe.verified_applied_via` end on
+`(whole file deleted)` for it. Deleting a file that was already empty
+has no content to change, so it is refused as `mutant_not_applicable`
+with `patch applied cleanly but produced no content change (the patch
+deletes a file that was already empty)`, the same way an identity patch
+against a non-empty file is. The real apply removes the target file for
+real, in both isolation modes; the restore recreates it byte-identically
+from the same backup any other mutant restores from, verified by hash
+the same way, so `mutation_probe.restored_verified` is `true` the same
+way. The run classifies `killed`/`survived` like any other patch
+mutant, from whether the test command depends on the file's presence.
+A `--plan` mutant of this shape behaves identically, including beside
+other mutants on the same file: the deletion is restored and the
+restore verified before the next mutant is even computed.
+
+Modes, on that restore: git tracks no directory mode at all and removes
+every directory a deletion emptied (it never tracks an empty one), so a
+plain `mkdirSync` would put the whole chain back at the process's
+default mode rather than the modes those directories actually had. The
+restore records each level's mode up to the repository (or worktree)
+root beforehand and writes it back for exactly the levels it had to
+recreate, plus the target file's own mode. Directories that were there
+all along are never touched -- a probe does not chmod a parent
+directory it did not disturb, which also means a target under a
+directory this process may write in but does not own (`/tmp`,
+`$TMPDIR`, a foreign-owned mount) probes normally. A mode that cannot
+be written back is reported as a warning naming the path and both
+modes, never as a failed restore: the content is what
+`mutation_probe.restored_verified` attests, and it is verified by hash
+either way. Only the permission bits are restored, never ownership.
+
 The dist trap: a project whose test command runs built output
 (`dist/`, `lib/`, ...) rather than `--file` itself needs `--pre` to
 rebuild before every test invocation, or a real mutant never reaches the
@@ -2146,22 +2189,43 @@ exact mutated state the marker describes, and that the recorded backup
 still hashes to the pre-mutation content the marker recorded. That second
 check happens before any copy, because the copy is destructive: a backup
 that no longer matches would otherwise be written over the target,
-destroying the only remaining copy of the mutated file. When either proof
-fails, the probe refuses with `reason: "stale_probe_marker"`, leaves the
-target exactly as it found it, and names the backup path for a human to
-inspect. The backup lives under the probe's own `--log-dir` (a per-run
-scratch directory, not something a crash is guaranteed to have left
-behind); when it is gone, automatic recovery is not possible and the
-warning says so and names the marker file itself instead -- delete that
-file to clear it manually. `agent-primitives doctor` also reports any
-such marker left for the current repository, and applies the same two
-proofs before it says anything about automatic recovery: it hashes the
-recorded backup and compares the target, points at re-running `probe`
-only for a marker the next probe would really recover, and names the
-marker file and the manual delete for every other one; it compares the
-marker's target against
-the current repository with both paths fully resolved, so a symlinked
-ancestor cannot hide a marker that is really there.
+destroying the only remaining copy of the mutated file. A `SIGKILL`
+between a deletion mutant's real apply and the marker's own removal
+leaves this same shape behind, only with the target genuinely absent
+rather than mutated in place (the marker's `mutatedHash` is the
+deletion sentinel, never a real content hash): recovery there is the
+same proof against the backup, then recreating the file, and any
+directory removed with it, from that backup -- rather than waiting on a
+mutated-content hash that will never appear. This recovery restores
+content only, never modes: it runs in a later process than the one that
+took the backup, and the marker records hashes alone, so the mode the
+target (or a recreated directory) had before the mutation is not
+knowable from anything left on disk. The in-process restore of a probe
+that was not killed does put modes back, because it recorded them
+itself before mutating anything.
+
+When either proof fails, the probe refuses with
+`reason: "stale_probe_marker"`, leaves the target exactly as it found
+it, and names the backup path for a human to inspect -- by hand, either
+`git checkout -- <file>` (when the target is tracked and unmodified
+upstream of this marker) or copying the named backup back into place.
+The backup lives under the probe's own `--log-dir` (a per-run scratch
+directory, not something a crash is guaranteed to have left behind);
+when it is gone, automatic recovery is not possible and the warning
+says so and names the marker file itself instead -- delete that file to
+clear it manually.
+
+`agent-primitives doctor` also reports any such marker left for the
+current repository, and applies the same proofs before it says anything
+about automatic recovery: it hashes the recorded backup and compares
+the target (an absent target counts as the mutated state for a marker
+whose `mutatedHash` is the deletion sentinel, and for no other), points
+at re-running `probe` only for a marker the next probe would really
+recover, and names both the marker file and the backup it points at for
+every other one, since that backup may be the only remaining copy of
+the target's pre-mutation content. It compares the marker's target
+against the current repository with both paths fully resolved, so a
+symlinked ancestor cannot hide a marker that is really there.
 
 The target file is backed up immediately, before the baseline ever runs,
 and the backup is verified against the file's pre-mutation hash; a backup
@@ -2259,7 +2323,7 @@ exactly which `reason` is which).
 | `status` | string | always | `"killed"`, `"survived"`, `"inconclusive"`, `"usage_error"`, or `"baseline_failed"`. The last is the CLI envelope's own literal status for a failing baseline (the library's `probe()` itself still returns `status: "inconclusive"`, `reason: "baseline_failed"`; the CLI remaps it so a consumer does not also have to read `reason` to tell a failing baseline apart from every other inconclusive outcome). Same exit-code class either way (`cannot-conclude`, exit `2`), so a caller gating on the exit code alone sees no difference. `"killed"`/`"survived"` are always this mutant's actual, measured outcome (see the `--expect` paragraph above) -- under a non-default `--expect`, the exit code follows `mutation_probe.expectation` instead of this field's own word (`0` for `"met"`, `1` for `"violated"`), so a caller gating on the exit code alone still sees `--expect` honored even though `status` itself no longer flips. |
 | `reason` | string | whenever `status` is not a clean verdict | machine-readable cause, e.g. `"baseline_failed"`, `"pre_failed"`, `"restore_failed"`, `"aborted"`, `"target_changed_during_baseline"`, `"mutant_not_applicable"` |
 | `message` | string | top-level usage error only (see above) | the human-readable message commander (or this CLI's own pre-`probe()` check) produced; `reason` is still present alongside it, so a consumer can key off `reason` without also reading `message` |
-| `mutant` | `{ file, line, before, after, form, diff? }` | once the mutant has been computed AND this refusal reports it | present for `killed`, `survived`, and every mutant-phase inconclusive reason (`apply_hash_mismatch`, mutant-phase `pre_failed`/`aborted`, `restore_failed`, `worktree_original_tree_modified`, `timeout`); for a refusal from before any mutant run (reported before or during the run's own setup), see the [refusal reason shape](#refusal-reason-shape) table below -- it is present for exactly seven of those reasons (`aborted`, `pre_failed`, `baseline_failed`, `target_changed_during_baseline`, `no_tests_executed`, `baseline_evidence_not_matched`, `pycache_isolation_failed`, all past the dry run that computes the one mutant this run would apply) and absent for every other one. `diff` only for a `-p/--patch` mutant whose change is not fully shown by `before`/`after` alone (see above). A `mutation_probe.result` of `"not_run"` also reaches a `survived`-shaped mutant run whose classify step itself found zero-tests evidence (mutant-side, or the generic byte-identical fallback): there `mutant`/`mutation_probe` are present as usual for a mutant-phase outcome, `status`/`reason` are `"inconclusive"`/`"no_tests_executed"` in place of `"survived"`, and `mutation_probe.result` is forced to `"not_run"` even though the commands did run -- see the zero-tests paragraph above. |
+| `mutant` | `{ file, line, before, after, form, diff?, deleted? }` | once the mutant has been computed AND this refusal reports it | present for `killed`, `survived`, and every mutant-phase inconclusive reason (`apply_hash_mismatch`, mutant-phase `pre_failed`/`aborted`, `restore_failed`, `worktree_original_tree_modified`, `timeout`); for a refusal from before any mutant run (reported before or during the run's own setup), see the [refusal reason shape](#refusal-reason-shape) table below -- it is present for exactly seven of those reasons (`aborted`, `pre_failed`, `baseline_failed`, `target_changed_during_baseline`, `no_tests_executed`, `baseline_evidence_not_matched`, `pycache_isolation_failed`, all past the dry run that computes the one mutant this run would apply) and absent for every other one. `diff` only for a `-p/--patch` mutant whose change is not fully shown by `before`/`after` alone (see above). `deleted` (boolean) only for a `-p/--patch` mutant whose applied result deletes the target file outright (see the `-p, --patch` paragraph above); absent (never `false`) for every other mutant. A `mutation_probe.result` of `"not_run"` also reaches a `survived`-shaped mutant run whose classify step itself found zero-tests evidence (mutant-side, or the generic byte-identical fallback): there `mutant`/`mutation_probe` are present as usual for a mutant-phase outcome, `status`/`reason` are `"inconclusive"`/`"no_tests_executed"` in place of `"survived"`, and `mutation_probe.result` is forced to `"not_run"` even though the commands did run -- see the zero-tests paragraph above. |
 | `mutation_probe` | `{ mutant, verified_applied_via, result, restored_verified, reason?, expectation? }` | once the mutant has been computed | present for every reason `mutant` covers above (the same seven setup-phase refusals, plus every mutant-phase outcome): `result` is always a string once this object is present, so a consumer reading `mutation_probe.result` does not have to shape-sniff `status` first; `"not_run"` for the seven setup-phase refusals (`aborted`, `pre_failed`, `baseline_failed`, `target_changed_during_baseline`, `no_tests_executed`, `baseline_evidence_not_matched`, `pycache_isolation_failed`), `reason` naming which, and for the mutant-phase zero-tests override described just above. `expectation` (`"met"`/`"violated"`) is present only alongside a `result` of `"killed"` or `"survived"`: whether that actual outcome matched the `--expect` this mutant ran under (see the `--expect` paragraph above); absent for `"not_run"`/`"inconclusive"`, which measured nothing to compare against an expectation. ABSENT (both `result` and `expectation`) for every other setup-phase refusal (see the table below), none of which ever computed a mutant. See the mapping below for an implementer report. |
 | `baseline` | `{ exitCode, durationMs, logPath, timedOut }` | once the baseline has run | absent for `mutant_not_applicable` and any earlier refusal, and for the baseline-phase `pre_failed`/`aborted` (the baseline itself never ran: the `--pre` ahead of it did); `exitCode` is unchanged by `--pass-regex` -- it is always the baseline's real exit code, kept as data even once the regex, not this field, decides `status`/`reason` (see `--pass-regex` above) |
 | `test` | `{ command, exitCode, durationMs, timedOut, stdoutTail, stderrTail, logPath, env? }` | once the mutant run has happened | `env` only when at least one `--env NAME=VALUE` was given: the overrides this run applied, redacted (see `env` below); `exitCode` is likewise unchanged by `--pass-regex` -- the field that distinguishes a mutant run that crashed (no output on either stream) from a genuine test failure once the regex is what decides `killed`/`survived` |

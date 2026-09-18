@@ -40,6 +40,28 @@ export interface MutantComputed {
   after: string;
   newContent: string;
   mutatedHash: string;
+  /** Set only for a `patch` mutant whose applied result is "the target
+   * file no longer exists" (a deletion patch): `git apply` removed the
+   * dry-run scratch copy outright, so there is no post-mutation file to
+   * read back. `newContent` is then the empty string and `mutatedHash`
+   * is `DELETED_FILE_HASH`, a sentinel `step.ts` compares the real
+   * target's post-apply state against instead of hashing a file that is
+   * not there -- see that constant's own docblock. `line`/`before`/
+   * `after` still come from the same `firstDiffLine(originalContent, "")`
+   * call `computePatch` makes below the try/catch that reads the
+   * scratch file: the first line AT WHICH the applied result actually
+   * differs, not simply `originalContent`'s own first line -- a file
+   * whose own first line is already empty makes that line 2, not 1, and
+   * so on for every leading empty line. `before` is `originalContent`'s
+   * content at that line, `after` is `""`. When `originalContent` was
+   * itself empty, `firstDiffLine` finds no difference at all (there is
+   * nothing left to delete) and that same check refuses the mutant as
+   * "produced no content change" instead of setting this field. Absent
+   * (never `false`) for every other mutant, including a `patch` that
+   * empties a file's content without removing the file itself -- that
+   * is a `newContent` of `""` with the file still present, a different
+   * applied result this field does not describe. */
+  deleted?: boolean;
   /** Exec log paths produced while computing this mutant (empty for
    * `replace`/`match`, which do no exec calls; the dry-run `git apply`
    * and, for `patch`, the `--numstat` check for `patch`). */
@@ -289,6 +311,16 @@ export const GIT_DIFF_READ_CONFIG_ARGS = [
  * 8 MiB.
  */
 export const PATCH_MAX_BYTES = 8 * 1024 * 1024;
+
+/** `MutantComputed.mutatedHash`/the post-apply hash `step.ts` compares
+ * it against, for a `patch` mutant whose applied result deletes the
+ * target file: a fixed sentinel, never a real sha256 digest (those are
+ * always 64 lowercase hex characters; this is not), so it can never
+ * collide with an actual file's content hash and stands in for "no file
+ * exists to hash" on both sides of the comparison -- the dry run's
+ * prediction (`computePatch`, on `MutantComputed.deleted`) and the real
+ * apply's own post-apply check (`step.ts`'s `runMutantAttempt`). */
+export const DELETED_FILE_HASH = "<deleted-file:no-content-hash>";
 
 /** What every `git apply` here is given beyond its argv: the caller's
  * abort signal (so an interrupted apply is killed rather than left to
@@ -1156,7 +1188,25 @@ async function computePatch(
     };
   }
 
-  const newContent = fs.readFileSync(scratchFile, "utf8");
+  // A patch whose applied result deletes the target file leaves nothing
+  // at `scratchFile` for `git apply` to have written: `readFileSync`
+  // throws `ENOENT` rather than returning short or empty content, which
+  // is exactly how a real deletion (as opposed to a patch that merely
+  // empties the file while leaving it in place) is told apart here.
+  // Treated as content `""`, the same `firstDiffLine` comparison below
+  // already reports correctly for: line 1, `before` the original first
+  // line, `after` `""` -- `deleted: true` is the only extra signal a
+  // deletion needs, carried alongside for `step.ts` to apply (and
+  // restore) the real target as an absence rather than an empty file.
+  let newContent: string;
+  let deleted = false;
+  try {
+    newContent = fs.readFileSync(scratchFile, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    newContent = "";
+    deleted = true;
+  }
   // One comparison of the applied result against the original answers
   // both questions at once: `undefined` is "the patch changed nothing"
   // (identical content), and otherwise the line it names IS the line
@@ -1166,7 +1216,10 @@ async function computePatch(
   if (diff === undefined)
     return {
       applicable: false,
-      reason: "patch applied cleanly but produced no content change",
+      reason: deleted
+        ? "patch applied cleanly but produced no content change " +
+          "(the patch deletes a file that was already empty)"
+        : "patch applied cleanly but produced no content change",
       logPaths,
     };
   // The multi-hunk excerpt (and the extra `git diff --no-index` call
@@ -1250,8 +1303,9 @@ async function computePatch(
     before: diff.before,
     after: diff.after,
     newContent,
-    mutatedHash: hashString(newContent),
+    mutatedHash: deleted ? DELETED_FILE_HASH : hashString(newContent),
     logPaths: excerptLogPaths,
+    ...(deleted ? { deleted: true } : {}),
     ...(diffField !== undefined ? { diff: diffField } : {}),
     ...(combinedWarning !== undefined ? { diffWarning: combinedWarning } : {}),
   };
@@ -1439,9 +1493,18 @@ export function formatMutantSummary(
   after: string,
   diff?: MutantDiffField,
   excerptOmittedFromEnvelope = false,
+  deleted = false,
 ): string {
   file = capDescriptorPath(file);
-  if (diff === undefined) return `${file}:${line}: ${before} -> ${after}`;
+  // The `(whole file deleted)` suffix is appended to whatever this
+  // function would otherwise have returned -- the plain `before -> after`
+  // line for the single-hunk case, or the `diff` tail for a multi-hunk
+  // deletion -- so a reader never has to infer "the file is gone" from
+  // an `after` of `""` alone.
+  const withDeletedSuffix = (summary: string): string =>
+    deleted ? `${summary} (whole file deleted)` : summary;
+  if (diff === undefined)
+    return withDeletedSuffix(`${file}:${line}: ${before} -> ${after}`);
   const lineWord = pluralizeCount(
     diff.changedLineCount,
     "changed line",
@@ -1458,11 +1521,13 @@ export function formatMutantSummary(
     `${String(diff.hunkCount)} ${hunkWord}; ` +
     `${describeExcerptPointer(diff, excerptOmittedFromEnvelope)})`;
   if (diff.removed !== diff.added) {
-    if (diff.added === 0) return `${file}:${line}: ${before} removed ${tail}`;
-    if (diff.removed === 0) return `${file}:${line}: ${after} added ${tail}`;
-    return `${file}:${line}: ${before} changed ${tail}`;
+    if (diff.added === 0)
+      return withDeletedSuffix(`${file}:${line}: ${before} removed ${tail}`);
+    if (diff.removed === 0)
+      return withDeletedSuffix(`${file}:${line}: ${after} added ${tail}`);
+    return withDeletedSuffix(`${file}:${line}: ${before} changed ${tail}`);
   }
-  return `${file}:${line}: ${before} -> ${after} ${tail}`;
+  return withDeletedSuffix(`${file}:${line}: ${before} -> ${after} ${tail}`);
 }
 
 /**
@@ -1489,13 +1554,19 @@ export function formatVerifiedAppliedVia(
   after: string,
   diff?: MutantDiffField,
   excerptOmittedFromEnvelope = false,
+  deleted = false,
 ): string {
+  // See `formatMutantSummary`'s own comment: the same suffix, appended
+  // to whichever shape this function returns, so the pair never
+  // disagrees on whether the target is gone.
+  const withDeletedSuffix = (via: string): string =>
+    deleted ? `${via} (whole file deleted)` : via;
   if (diff === undefined) {
-    return [
-      `${capDescriptorPath(file)}:${line}`,
-      `- ${before}`,
-      `+ ${after}`,
-    ].join("\n");
+    return withDeletedSuffix(
+      [`${capDescriptorPath(file)}:${line}`, `- ${before}`, `+ ${after}`].join(
+        "\n",
+      ),
+    );
   }
   const hunkWord = pluralizeCount(diff.hunkCount, "hunk", "hunks");
   const lineWord = pluralizeCount(
@@ -1503,12 +1574,12 @@ export function formatVerifiedAppliedVia(
     "changed line",
     "changed lines",
   );
-  return (
+  return withDeletedSuffix(
     "git diff --no-index of the before/after scratch copies: " +
-    `${String(diff.hunkCount)} ${hunkWord}, ${String(diff.changedLineCount)} ` +
-    `${lineWord} (${String(diff.removed)} removed, ${String(diff.added)} ` +
-    "added); " +
-    describeExcerptPointer(diff, excerptOmittedFromEnvelope)
+      `${String(diff.hunkCount)} ${hunkWord}, ${String(diff.changedLineCount)} ` +
+      `${lineWord} (${String(diff.removed)} removed, ${String(diff.added)} ` +
+      "added); " +
+      describeExcerptPointer(diff, excerptOmittedFromEnvelope),
   );
 }
 
@@ -1691,6 +1762,12 @@ export interface MutantOriginal {
   before: string;
   after: string;
   diff?: MutantDiffField | undefined;
+  /** Mirrors `MutantComputed.deleted`/`MutantField.deleted`: whether the
+   * descriptors this correction rewrites must keep naming the target as
+   * deleted. The caller always passes the same `MutantField` object it
+   * built the delivered envelope from, which already carries this
+   * field when set, so no separate plumbing is needed here. */
+  deleted?: boolean | undefined;
 }
 
 /** One pre-envelope `plan.results[]` entry, as far as this correction
@@ -1846,6 +1923,7 @@ function rewriteProbeDescriptors(
       original.after,
       d,
       omitted,
+      original.deleted,
     ),
   );
   rewrite("verified_applied_via", (d, omitted) =>
@@ -1856,6 +1934,7 @@ function rewriteProbeDescriptors(
       original.after,
       d,
       omitted,
+      original.deleted,
     ),
   );
   return added;
@@ -2125,6 +2204,8 @@ function reservedForDescriptorGrowth(
       original.before,
       original.after,
       originalDiff,
+      false,
+      original.deleted,
     ),
   );
   const viaIntact = intact(
@@ -2135,6 +2216,8 @@ function reservedForDescriptorGrowth(
       original.before,
       original.after,
       originalDiff,
+      false,
+      original.deleted,
     ),
   );
   return (summaryIntact ? slack : 0) + (viaIntact ? slack : 0);

@@ -695,18 +695,21 @@ describe("probePlan(): the target is restored between mutants (I2)", () => {
     // between-mutants hash check exists for (a restore that "verified"
     // but not on the file the next mutant would land on).
     const decoy = path.join(makeTmpDir(), "decoy.js");
-    vi.mocked(beginInplace).mockImplementationOnce((targetPath, logDir) => {
-      const real = beginInplace(targetPath, logDir);
-      fs.copyFileSync(targetPath, decoy);
-      return {
-        backupPath: real.backupPath,
-        targetPath: decoy,
-        restore: () => {
-          fs.copyFileSync(real.backupPath, decoy);
-          return true;
-        },
-      };
-    });
+    vi.mocked(beginInplace).mockImplementationOnce(
+      (targetPath, logDir, boundRoot) => {
+        const real = beginInplace(targetPath, logDir, boundRoot);
+        fs.copyFileSync(targetPath, decoy);
+        return {
+          backupPath: real.backupPath,
+          targetPath: decoy,
+          takeRestoreWarnings: () => [],
+          restore: () => {
+            fs.copyFileSync(real.backupPath, decoy);
+            return true;
+          },
+        };
+      },
+    );
 
     const result = await probePlan(
       planOptions(repo, [
@@ -1330,6 +1333,75 @@ describe("probePlan(): the worktree is synced once and cleaned up once (I4)", ()
     expect(runsSeen(repo)).toEqual([]);
     expect(gitOutput(repo, ["status", "--porcelain"])).toBe("");
   }, 60000);
+});
+
+/** A patch whose applied result is "the target file no longer exists",
+ * produced by git itself (`git rm` plus `git diff --cached`) and with
+ * the working tree and index restored afterwards, so the plan under
+ * test still sees the original committed content. The same helper
+ * `probe.test.ts` uses for the single-probe deletion tests. */
+function deletionPatch(repo: string, relPath: string): string {
+  const abs = path.join(repo, relPath);
+  const original = fs.readFileSync(abs, "utf8");
+  git(repo, ["rm", "-q", "--", relPath]);
+  const diff = gitOutput(repo, ["diff", "--cached", "--", relPath]);
+  git(repo, ["checkout", "HEAD", "--", relPath]);
+  expect(fs.readFileSync(abs, "utf8")).toBe(original);
+  expect(diff).not.toBe("");
+  const patchPath = path.join(makeTmpDir(), "delete.patch");
+  fs.writeFileSync(patchPath, diff);
+  return patchPath;
+}
+
+describe("probePlan(): a -p mutant that deletes the whole target file", () => {
+  for (const isolation of ["inplace", "worktree"] as const) {
+    it(`runs a deletion mutant beside an ordinary replace mutant on the same file under --isolation ${isolation}: both classify, the deletion reports mutant.deleted, and the file is back before the next mutant is computed`, async () => {
+      useLockDir();
+      const { repo } = initRepo();
+      const target = path.join(repo, "fixture.js");
+      const before = fs.readFileSync(target, "utf8");
+      const beforeHash = await sha256File(target);
+      const patchPath = deletionPatch(repo, "fixture.js");
+
+      const result = await probePlan(
+        planOptions(
+          repo,
+          [
+            { file: "fixture.js", form: "patch", patchPath },
+            replaceMutant(2, "  return false;"),
+          ],
+          { isolation },
+        ),
+      );
+
+      expect(result.status).toBe("killed");
+      expect(result.summary.killed).toBe(2);
+      const [deletion, replace] = result.results;
+      expect(deletion.status).toBe("killed");
+      expect(deletion.mutant?.deleted).toBe(true);
+      expect(deletion.mutant?.line).toBe(1);
+      expect(deletion.mutant?.after).toBe("");
+      expect(deletion.mutation_probe?.mutant).toContain("(whole file deleted)");
+      expect(deletion.mutation_probe?.restored_verified).toBe(true);
+      // The second mutant is computed and applied only against a
+      // target the plan has proved is back at its pre-mutation
+      // content (I2), which a deletion whose restore did not recreate
+      // the file could never satisfy: `before` here is the ORIGINAL
+      // line 2, not anything the deletion left behind.
+      expect(replace.status).toBe("killed");
+      expect(replace.reason).toBeUndefined();
+      expect(replace.mutant?.before).toBe("  return n > 0;");
+      expect(replace.mutant?.deleted).toBeUndefined();
+      expect(await sha256File(target)).toBe(beforeHash);
+      expect(fs.readFileSync(target, "utf8")).toBe(before);
+      // Tracked paths only: `-i inplace` runs the fixture's test
+      // command in the repository itself, which writes its own
+      // untracked `runs.txt` there by design.
+      expect(
+        gitOutput(repo, ["status", "--porcelain", "--untracked-files=no"]),
+      ).toBe("");
+    }, 60000);
+  }
 });
 
 describe("probePlan(): refusals before the lock, the marker or any worktree", () => {
