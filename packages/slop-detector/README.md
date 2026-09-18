@@ -59,7 +59,7 @@ Each pack groups related rules. Enable or disable per repo via `slop.config.yml`
 | `ui-slop` (6 rules)        | off, opt in via `--pack ui-slop`        | Gradient text, purple+cyan AI palettes, animated layout properties, skipped heading levels, plus opt-in monospace-everywhere and flat type hierarchy (info-level). Scans CSS / SCSS / LESS / HTML / JSX.                                                                   |
 | `placement-slop` (5 rules) | off, opt in via `--pack placement-slop` | Org-, machine-, and point-in-time-bound evidence leaking into reusable instruction files (`SKILL.md`, `AGENTS.md`, `CLAUDE.md`, agent/skill prompt files): home paths, dated evidence, tally phrases (`n=8`, `p=0.016`, `so far`), opaque ids, and configured org markers. <!-- slop-detector:disable-line=placement-slop --> |
 | `workflow-slop` (5 rules)  | off, opt in via `--pack workflow-slop`  | GitHub Actions workflow injection and CI-guard regressions: a `${{ ... }}` expression interpolated directly into a `run:` shell script (unless it is one of the documented non-attacker-controllable contexts); a fail-closed check that a scanned workflow file actually parsed as YAML; a reintroduced Node-20 GitHub Actions major; an `audit.yml` with no certifiable `npm audit --audit-level=...` gate; and an npm-audit gate step whose shape is not one the pack recognises. Scans `.github/workflows/*.yml`/`*.yaml`. |
-| `review-slop` (3 rules)    | off, opt in via `--pack review-slop`    | Run-local review tokens leaking into reusable content: finding ids (`F1`, `F2a`), round references (`round 2`, `R3`, `review round 1 fixes`), and workspace-handoff phrases (`per the <workspace> handoffs`). Scans Markdown, TypeScript/JavaScript source comments, test titles, and a commit-message file. |
+| `review-slop` (3 rules)    | off, opt in via `--pack review-slop`    | Run-local review tokens leaking into reusable content: finding ids (`F1`, `F2a`, or a severity-letter id like `M1`/`H2a` when the same sentence also carries a review-process word), round references (`round 2`, `R3`, `review round 1 fixes`), and workspace-handoff phrases (`per the <workspace> handoffs`). Scans Markdown, TypeScript/JavaScript source comments, test titles, and a commit-message file. |
 
 The six opt-in packs (`comment-slop`, `code-slop`, `ui-slop`, `placement-slop`, `workflow-slop`, `review-slop`) are off by default because their false-positive surface in mixed codebases is wider; opt in with `--pack <id>` or set `packs.<id>: true` in `slop.config.yml`.
 
@@ -424,7 +424,17 @@ or misleading the moment that cycle is over.
   digit) never matches; an isolated `F1`/`F5`-shaped word with no other
   review-process context (a Formula 1 reference, a function key) is not
   otherwise disambiguated, since this pack does not do LLM-judged
-  precision -- see "Negative fixtures" below.
+  precision -- see "Negative fixtures" below. The same shape also
+  matches a severity-letter id -- `H1`, `M2`, `L3`, `C4` (high, medium,
+  low, critical), same digit-plus-optional-letter shape and hyphenated-
+  year exclusion as the `F` form -- but, unlike the `F` form, only when
+  the same sentence also carries a review-process word (`review`,
+  `reviewer`, `finding`/`findings`, `fix`/`fixed`/`fixes`/`fixing`, or
+  `round`/`rounds`): left ungated, these four letters would swallow
+  plain vocabulary far more often than a capital `F` does (`H1`-`H6`
+  heading levels, `M1`-`M3` chip generations, `L1`/`L2` cache layers, a
+  `C4` hazmat class), so `the M1 chip` and `an L2 cache` stay clean while
+  `(M1)` in a sentence that also mentions a review or a fix still fires.
 - **`round-reference`** (block): `round 2`, `R3`, `review round 1
   fixes`, same problem, for the round itself rather than a specific
   finding inside it. A digitless `review round` never matches, at any

@@ -341,19 +341,50 @@ function checkReviewTokenRule(
 // README's review-slop section for the same note).
 const FINDING_ID = /\bF\d[a-z]?\b(?!-\d)/g;
 
+// The same run-local shorthand, extended to four severity-letter forms
+// this workspace's own review reports also use for a finding id: an
+// uppercase H, M, L, or C (high, medium, low, critical) followed by
+// exactly one digit and an optional lowercase letter, with the same
+// trailing negative lookahead as the F form above (so `M1-2026` does
+// not match either). Left ungated, this shape would swallow far more
+// ordinary vocabulary than the capital F does: `H1`-`H6` are HTML and
+// Markdown heading levels, `M1`-`M3` are Apple chip generations (and
+// economists' money-supply measures), `L1`/`L2` are cache or network
+// layers, and `C1`-`C4` range from a hazmat class to a vitamin name.
+// So, unlike the F form, a severity-letter match only counts when the
+// same sentence window (see `sentenceWindow` and `hasReviewContext`
+// further down this file) also carries a review-process word --
+// `FINDING_ID_CONTEXT` below names the set.
+const SEVERITY_FINDING_ID = /\b[HMLC]\d[a-z]?\b(?!-\d)/g;
+
+// The review-process word set gating `SEVERITY_FINDING_ID` above: the
+// same words `round-reference`'s own context sets use (see
+// `ROUND_WORD_CONTEXT`/`ROUND_TOKEN_CONTEXT` further down), plus
+// `round`/`rounds` itself, since a bare severity-letter id is exactly
+// as ambiguous as a bare `RN` round token and deserves the same context
+// word.
+const FINDING_ID_CONTEXT =
+  /\b(review|reviewer|finding[s]?|fix(?:e[ds]|ing)?|round[s]?)\b/i;
+
 const findingId: Rule = {
   id: "review-slop/finding-id",
   pack: "review-slop",
   defaultSeverity: "block",
   enabledByDefault: true,
   rationale:
-    "A finding id (`F1`, `F2a`) only resolves against the one review round it was minted in. Baked into a test title, a source comment, a commit message, or a doc, it reads as a precise reference but is opaque and dead the moment that round is over.",
+    "A finding id (`F1`, `F2a`, or a severity-letter id like `M1`/`H2a` when the same sentence also carries a review-process word) only resolves against the one review round it was minted in. Baked into a test title, a source comment, a commit message, or a doc, it reads as a precise reference but is opaque and dead the moment that round is over.",
   appliesTo: appliesToReviewSurface,
   check(ctx: RuleContext): Violation[] {
     return checkReviewTokenRule(
       findingId,
       ctx,
-      [{ re: FINDING_ID }],
+      [
+        { re: FINDING_ID },
+        {
+          re: SEVERITY_FINDING_ID,
+          filter: hasReviewContext(FINDING_ID_CONTEXT),
+        },
+      ],
       (matched) =>
         `Run-local finding id \`${matched}\`: only resolvable against the review round it was minted in.`,
     );

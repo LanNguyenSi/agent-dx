@@ -112,6 +112,118 @@ describe("review-slop", () => {
     });
   });
 
+  describe("finding-id: severity-letter form", () => {
+    it("fires on a severity-letter id gated by a 'review' context word", () => {
+      const v = checkText(
+        "Still open: (M1) needs another pass before review.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      const hit = v.find((x) => x.ruleId === "review-slop/finding-id");
+      expect(hit).toBeDefined();
+      expect(hit?.matched).toBe("M1");
+    });
+
+    it("fires on a severity-letter id gated by a 'finding' context word", () => {
+      const v = checkText(
+        "See finding L2 for detail.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      const hit = v.find((x) => x.ruleId === "review-slop/finding-id");
+      expect(hit).toBeDefined();
+      expect(hit?.matched).toBe("L2");
+    });
+
+    it("fires on a severity-letter id gated by a 'fixed' context word", () => {
+      const v = checkText(
+        "C4 was fixed in this pass.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      const hit = v.find((x) => x.ruleId === "review-slop/finding-id");
+      expect(hit).toBeDefined();
+      expect(hit?.matched).toBe("C4");
+    });
+
+    it("fires on a severity-letter id gated by a 'round' context word", () => {
+      const v = checkText(
+        "Addressed H3 in this round.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      const hit = v.find((x) => x.ruleId === "review-slop/finding-id");
+      expect(hit).toBeDefined();
+      expect(hit?.matched).toBe("H3");
+    });
+
+    it("negative: 'the M1 chip' without a gating context word does not fire", () => {
+      const v = checkText(
+        "Runs fine on the M1 chip.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      expect(
+        v.find((x) => x.ruleId === "review-slop/finding-id"),
+      ).toBeUndefined();
+    });
+
+    it("negative: 'an L2 cache' without a gating context word does not fire", () => {
+      const v = checkText(
+        "Tuned for an L2 cache line size.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      expect(
+        v.find((x) => x.ruleId === "review-slop/finding-id"),
+      ).toBeUndefined();
+    });
+
+    it("negative: '<H1>' in JSX-shaped prose without a gating context word does not fire", () => {
+      const v = checkText(
+        "Rendered as <H1>Title</H1> in the component.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      expect(
+        v.find((x) => x.ruleId === "review-slop/finding-id"),
+      ).toBeUndefined();
+    });
+
+    it("negative: a bare 'H1' heading mention without a gating context word does not fire", () => {
+      const v = checkText(
+        "# H1\n\nThe largest heading level in HTML.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      expect(
+        v.find((x) => x.ruleId === "review-slop/finding-id"),
+      ).toBeUndefined();
+    });
+
+    it("negative: a severity-letter id immediately followed by a hyphenated year does not fire", () => {
+      const v = checkText(
+        "Filed under M1-2026 during review.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      expect(
+        v.find((x) => x.ruleId === "review-slop/finding-id"),
+      ).toBeUndefined();
+    });
+
+    it("does not double up: the F form stays ungated regardless of context", () => {
+      const v = checkText(
+        "Runs fine on the F1 track.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      const hit = v.find((x) => x.ruleId === "review-slop/finding-id");
+      expect(hit).toBeDefined();
+      expect(hit?.matched).toBe("F1");
+    });
+  });
+
   describe("round-reference (Markdown)", () => {
     it("fires on a round-plus-digit reference", () => {
       const v = checkText(
