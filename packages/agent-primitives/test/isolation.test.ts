@@ -218,6 +218,31 @@ describe("beginInplace", () => {
   );
 
   it.skipIf(isRoot || process.platform === "win32")(
+    "leaves a parent directory's mode exactly as it finds it when the restore recreated nothing, even after that mode changed since the backup was taken",
+    () => {
+      const dir = makeTmpDir();
+      const logDir = makeTmpDir();
+      fs.chmodSync(dir, 0o755);
+      const target = path.join(dir, "fixture.js");
+      fs.writeFileSync(target, "original content\n");
+
+      const session = beginInplace(target, logDir, dir);
+      // Somebody else's change, after this session recorded 0755. The
+      // parent was never removed and never recreated, so its mode is
+      // not this restore's to put back: writing the recorded one over
+      // it would undo a change the probe never made.
+      fs.chmodSync(dir, 0o700);
+      fs.writeFileSync(target, "mutated\n");
+
+      expect(session.restore()).toBe(true);
+
+      expect(session.takeRestoreWarnings()).toEqual([]);
+      expect(fs.readFileSync(target, "utf8")).toBe("original content\n");
+      expect(fs.statSync(dir).mode & 0o7777).toBe(0o700);
+    },
+  );
+
+  it.skipIf(isRoot || process.platform === "win32")(
     "puts back the mode of every directory it had to recreate, up the whole chain, and the target's own",
     () => {
       const root = makeTmpDir();
