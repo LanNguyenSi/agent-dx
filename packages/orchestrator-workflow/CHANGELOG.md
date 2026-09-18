@@ -30,12 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   assertion", so review rounds that hunt for the next unpinned sentence do
   not converge. The section asks for one normative site per rule, a claim
   list in the acceptance criterion as the pin obligation (every normative
-  sentence the change adds or alters is a claim, an omission is named with
-  its reason), a reviewer briefing that bounds the prose mutant space to
-  that list, copies bound to the normative site by one shared test constant,
-  and: "Cap test-adequacy review rounds on the change at two." It defines
-  the capped round, exempts semantic findings, and changes neither the
-  Round-2 halt rule, the escalation budget, the Fix-regression decision
+  sentence the change adds or alters at that site is a claim, an omission is
+  named with its reason), a reviewer briefing that bounds the prose mutant
+  space to that list, copies bound to the normative site by one shared test
+  constant, and: "Cap test-adequacy review rounds on the change at two." It
+  defines the capped round, exempts semantic findings, and changes neither
+  the Round-2 halt rule, the escalation budget, the Fix-regression decision
   point nor the review gate. Step 7 points to the section without restating
   it. Evidence (issue #300 and the change that added the Fix-regression
   decision point; one repository each, not a benchmark): the issue reports

@@ -10523,3 +10523,6 @@ one), added the boundary, the definition and the derivable claim list,
 completed the revision rule, corrected the evidence passage, and scoped the
 bundle assertions to their sections. The bullet length and the two
 self-citation lines above are those of the final bullet.
+A second review confirmed those fixes and left notes; one was closed without a
+further round: the changelog's summary of the claim-list obligation had
+dropped the words "at that site" and so read wider than the section.
