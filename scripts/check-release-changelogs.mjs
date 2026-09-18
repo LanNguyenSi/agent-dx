@@ -148,9 +148,13 @@ const PRERELEASE_IDENTIFIER_CHARS = "0-9A-Za-z.-";
 // Matches the first release heading, skipping any leading `## [Unreleased]`
 // heading (which never matches the `x.y.z` shape below and is therefore
 // already excluded by the pattern itself). The optional trailing
-// `+[\w.]+` group accepts build metadata, mirroring parseSemver's own
-// tolerance below, so a package.json version that carries build metadata
-// can still have a matching heading instead of always failing rule 1.
+// `+[\w.]+` group accepts build metadata so a package.json version that
+// carries it can still have a matching heading instead of always failing
+// rule 1. Known gap: this group is deliberately narrower than parseSemver
+// below, which strips everything after `+` and so tolerates any build
+// metadata; a hyphenated build tag such as "1.0.0+build-1" parses there
+// but does not match here and is reported as a missing heading. Only the
+// prerelease group shares its character class with parseSemver.
 const VERSION_HEADING_RE = new RegExp(
   `^## \\[(\\d+\\.\\d+\\.\\d+(?:-[${PRERELEASE_IDENTIFIER_CHARS}]+)?(?:\\+[\\w.]+)?)\\]`,
   "m",

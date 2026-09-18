@@ -172,6 +172,20 @@ describe("check-release-changelogs.mjs", () => {
     expect(result.stderr).toMatch(/no "## \[x\.y\.z\]" release heading found/);
   });
 
+  it("rule 1 (version-heading): a heading-shaped string inside a paragraph is not the top heading (the regex is line-anchored)", () => {
+    // Pins VERSION_HEADING_RE's `^` anchor: without it the mid-line
+    // `## [9.9.9]` below would be taken as the top release heading and
+    // rule 1 would report a 9.9.9 vs 1.0.0 mismatch instead of passing.
+    writePackage(
+      "widget",
+      "1.0.0",
+      "# Changelog\n\n## [Unreleased]\n\nSee the note under ## [9.9.9] in the archive.\n\n## [1.0.0]\n\n- did a thing\n",
+    );
+    const result = run([]);
+    expect(result.status).toBe(0);
+    expect(result.stderr).not.toMatch(/\[version-heading\]/);
+  });
+
   it("rule 2 (fresh-unreleased): fails when the version increased but [Unreleased] is still populated", () => {
     writePackage(
       "widget",
