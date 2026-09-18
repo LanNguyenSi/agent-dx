@@ -2728,7 +2728,7 @@
   not-machine-readable sentence intact), and the test pin. The CHANGELOG
   edit added 4 lines inside the 0.14.0 entry, shifting every entry from
   0.13.0 downward by another +4 (on top of the +27 from the entry's original
-  insertion), every `CHANGELOG.md:` citation across all three docs was
+  insertion); every `CHANGELOG.md:` citation across all three docs was
   re-verified directly against the current file a second time and corrected;
   `SKILL.md:`/`reviewer.md:` citations were unaffected (the enum rename was a
   same-line replacement, no line-count change in either file). Also added a
@@ -2757,7 +2757,7 @@
   `test/init.test.ts` citations needed the same treatment for a second,
   independent reason: several were already stale at HEAD, predating even
   the profile feature commit (`631-651`, `705-717`, `719-726` did not
-  correspond to any test in the file as committed), these are corrected to
+  correspond to any test in the file as committed); these are corrected to
   the tests' actual current locations rather than shifted from a wrong
   baseline. This fix-round's own additions to `test/init.test.ts` (a
   CLI-path test pinning the pre-0.15.0-manifest full-not-minimal fallback,
@@ -2808,7 +2808,7 @@
   byte-for-byte `reproduction`-field test since 0.14.0
   (`test/docs-consistency.test.ts:1013#"expect(skillBlock).toBe(reviewerBlock);"`); the doc now states the true
   current set of three guarded pairs (task-slicer/subagent-input, reviewer,
-  implementer, the last two by byte-for-byte field-block equality tests)
+  implementer; the last two by byte-for-byte field-block equality tests)
   and names explorer as the one pair still without a dedicated guard; (2)
   the Subagent misfire rule's "Two detection signals" enumeration omitted
   the `mutation_probes`-omission trigger added in 0.16.0, now folded into
@@ -2840,7 +2840,7 @@
   wrong citation), but did not attempt a citation-by-citation audit of
   spans this pass did not otherwise touch or of citations into files this
   diff never changed (`agents-md-section.md`, the templates, `models.ts`,
-  `template-markers.test.ts`), those are flagged as a follow-up, not
+  `template-markers.test.ts`); those are flagged as a follow-up, not
   fixed here, per the task's own boundary ("pre-existing stale entries on
   OTHER docs/parts are not yours to fix"). model-preselection.md was
   re-stamped only, no content change: its one shifted source
@@ -3170,8 +3170,8 @@
   directly touch. Every citation into `models.ts`/`init.ts`/`cli.ts` shifted
   by the fix commit was re-derived from a direct read of the current file at
   that exact location (grep for the anchor phrase or `it(...)`/`describe(...)`
-  title, then read the exact span), not a computed offset applied blindly (
-  the same discipline every prior pass in this log used), though three
+  title, then read the exact span), not a computed offset applied blindly
+  (the same discipline every prior pass in this log used), though three
   distinct uniform shifts turned out to hold across large stretches of
   `cli.ts` and `test/init.test.ts` (a `--no-tiers` commander option addition
   shifted every `cli.ts` line after it by a flat +4 before the tiers-
@@ -3497,7 +3497,8 @@
   `effortLine` parameter's JSDoc on `composeOpencodeAgentVariant`
   (init.ts at historical lines 298-304) claimed the caller passes the value in "since the
   caller already needs that same value to decide whether to skip writing
-  this variant at all." That claim was false since fix-round-1: the skip decision (init.ts at historical lines 511,
+  this variant at all". That claim was false since fix-round-1: the skip
+  decision (init.ts at historical lines 511,
   `variantModelValue === undefined`) depends only on the class model's
   resolution, computed and checked *before* `effortLine` exists at all
   (init.ts at historical lines 526 computes it only after that check passes); the real reason
@@ -3527,7 +3528,7 @@
   either `init.ts` or `cli.ts` (both edits kept their surrounding
   functions' line numbers stable), confirmed directly rather than assumed,
   so no citation into either file needed re-deriving because of these two
-  fixes specifically, only R3-L1's test insertions shifted `init.test.ts`
+  fixes specifically; only R3-L1's test insertions shifted `init.test.ts`
   citations, handled separately below.
 
   R3-L4 restores a lost case in README's opencode-effort bullet list
@@ -10256,15 +10257,21 @@ edit of the pin (no citation into it moved).
 
 ## 2026-09-18 (agent-dx 3e017800, log.md prose slop)
 
-`node packages/slop-detector/dist/cli.js check docs/okf/log.md` reported 57
-prose-slop warnings on this file (55 em dashes, 2 hedging openers), a count
+`node packages/slop-detector/dist/cli.js check
+packages/orchestrator-workflow/docs/okf/log.md --config slop.config.yml`
+(from the repo root) reported 57 prose-slop warnings on this file (55 em dashes, 2 hedging openers), a count
 the tool had not surfaced before its fenced-code stripping was anchored at a
 line start, which had let a mid-sentence triple-backtick mention mask the
 prose after it and skip the rest of the file. Replaced every flagged em dash
 with a comma, colon, parentheses, or a sentence split chosen per sentence,
 and reworded the two hedging-opener sentences, without touching any citation,
-code span, or quoted anchor string; the file's line count and every existing
-`CHANGELOG.md:`/`SKILL.md:` self-citation are unchanged. The same check now
+code span, or quoted anchor string; the replacements moved no cited line
+(this log is not cited by line number) and every existing
+`CHANGELOG.md:`/`SKILL.md:` self-citation is unchanged. The same check now
 reports zero violations, and the `review-slop` pack's finding count on this
 file is unchanged at 290 (all pre-existing run-local round references,
 unrelated to this fix).
+The independent reviewer then named four comma splices, one list ambiguity
+and one line-initial parenthesis the swaps had left behind, a period moved
+inside a quoted JSDoc sentence, and an unrunnable command; the orchestrator
+repaired them as a docs-only closure.
