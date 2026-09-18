@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-18T14:48:30.000Z
+timestamp: 2026-09-18T15:00:17.000Z
 sources:
   - packages/orchestrator-workflow/assets/agents/explorer.md
   - packages/orchestrator-workflow/assets/agents/task-slicer.md
@@ -762,8 +762,9 @@ The orchestrator's side is in step 6 of the workflow
 The contract shape, the enums and the eleven sub-fields are unchanged, and no
 tool is named. `reason` keeps its meaning (required only for
 `not_applicable`), which is why the quoted verdict goes to `tests.executed`.
-A runner that states only a kill verdict is the expected case: `expectation`
-is then set from the probe's declared expectation and the quote says so.
+A runner that states only a kill verdict is covered: `expectation` is then
+set from the probe's declared expectation and the quote says so. A return
+with no machine-readable verdict at all is outside the copy rule.
 Pinned by `test/probe-plans-recovery.test.ts`, which asserts the three quoted
 sentences against the prompt, `contracts.md`, the workflow, the CHANGELOG
 bullet and this section.

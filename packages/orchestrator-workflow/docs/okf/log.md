@@ -10552,9 +10552,14 @@ states only a kill verdict, since `expectation` follows from the probe's
 declared intent, and found the legend's parenthetical defining `killed` by the
 reader's own view of the test outcome. The fix round lets each field be copied
 when the verdict states it, sets `expectation` from the declared expectation
-otherwise, glosses `killed` by the runner's own pass predicate, names
+when the verdict states only `result`, glosses `killed` by the runner's own pass predicate, names
 `03-decisions.md` for a resupply and calls it a transfer blocker rather than
 a misfire, and says that a quoted verdict is no named result of the
 verification set. The long appended lines are deliberate: the prompt is cited
 by line at many places in this bundle, and merging the new rule into the
 bullet's older runner sentence is left to a follow-up that re-points them.
+A second review confirmed the fixes; two documentation notes were closed
+without a further round: this entry had said "otherwise" where the rule covers
+only a verdict that states `result` alone, and the bundle section had called
+the kill-only runner the expected case, which the repository's own runner,
+stating both fields, does not support.
