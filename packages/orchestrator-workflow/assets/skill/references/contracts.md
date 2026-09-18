@@ -126,7 +126,7 @@ commits:
 Follow [evidence-and-probes.md workflow step 6](evidence-and-probes.md#workflow)
 for implementation evidence, verification, mutation probes, and replay. For
 output-field semantics and commit reporting, follow the installed
-implementer role prompt. Return the selected contract's YAML envelope.
+implementer role prompt. Return the selected contract's YAML envelope. `result: killed` means the probe's test command reacted to the mutant under the runner's own pass predicate and `survived` means it did not; `expectation: met` means that outcome is what the probe was expected to show and `violated` means it is not; both are `not_applicable` when no `result` was measured. When the probe runner states a machine-readable verdict, copy whichever of `result` and `expectation` it states from it verbatim, never from your own reading of the test output; when it states only `result`, set `expectation` by comparing that verdict with the probe's declared expectation. Quote the runner's verdict for each probe in `tests.executed`, and say there when `expectation` was set this way, so both fields can be checked against it.
 
 ## Reviewer output contract
 

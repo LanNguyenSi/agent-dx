@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- The two verdict fields of a mutation probe now carry a legend, a source
+  and a check. `assets/agents/implementer.md`, the normative site for the
+  output-field semantics, says: "`result: killed` means the probe's test
+  command reacted to the mutant under the runner's own pass predicate and
+  `survived` means it did not; `expectation: met` means that outcome is what
+  the probe was expected to show and `violated` means it is not; both are
+  `not_applicable` when no `result` was measured." and: "When the probe
+  runner states a machine-readable verdict, copy whichever of `result` and
+  `expectation` it states from it verbatim, never from your own reading of
+  the test output; when it states only `result`, set `expectation` by
+  comparing that verdict with the probe's declared expectation. Quote the
+  runner's verdict for each probe in `tests.executed`, and say there when
+  `expectation` was set this way, so both fields can be checked against it."
+  `references/contracts.md` carries both sentences verbatim for the
+  orchestrator. Step 6 of `references/evidence-and-probes.md` adds the
+  orchestrator's side: "Before transferring a probe row, compare its
+  `result` and `expectation` with the runner verdict quoted in
+  `tests.executed`; on a mismatch, or when a verdict the runner states is
+  not quoted, resupply it (ask the same implementer for the verdict, respawn
+  one when it is gone, or rerun the probe yourself in isolation), record the
+  resupply in `03-decisions.md`, and treat it as a transfer blocker rather
+  than a misfire, since the return itself parses; never infer either field.
+  A quoted probe verdict is not a named result of the verification set, so
+  the set's missing-or-extra rule does not apply to it." The contract shape,
+  the enums and the eleven `mutation_probes` sub-fields are unchanged, no
+  tool is named, and every sentence was appended to an existing line so no
+  cited line moved (the prompt is cited by line throughout the knowledge
+  bundle); the prompt change reaches an existing install with the next kit
+  re-install, which also re-renders the tier variants. Evidence (issue #300,
+  one run, not a benchmark): an implementer returned all six probes as
+  `survived` with `expectation: violated` while its own evidence showed the
+  suite failing on every mutant, and the mislabel was caught only because
+  the orchestrator compared the fields with that evidence by hand. Pinned in
+  `test/probe-plans-recovery.test.ts`.
 - Three ceremony rules in the skill references, none of which changes the
   review gate, the waiver rules or the AGENTS.md section (byte-identical, so
   no AGENTS.md re-install is needed; the rules reach an existing install

@@ -1268,7 +1268,7 @@
   sentence reverted to its pre-change wording, fails the exact-sub-field
   and regression-signal tests above; restored, the suite is green again.
   `CHANGELOG.md`'s own prose copy of this change is
-  (`CHANGELOG.md:260#"The implementer"`).
+  (`CHANGELOG.md:294#"The implementer"`).
 
   Verified on the committed tree: the full package suite (`npm test`),
   `typecheck`, `typecheck:test`, and `format:check`, all clean. Re-pointed
@@ -1536,7 +1536,7 @@
   that binding rather than second-guessing it.
 
   The CHANGELOG bullet for this round is
-  `CHANGELOG.md:637#"Citation scanning is paragraph-joined"`. Verified on
+  `CHANGELOG.md:671#"Citation scanning is paragraph-joined"`. Verified on
   the committed tree: the full package suite, `docs-consistency.test.ts`
   on its own, `typecheck`, `typecheck:test` and `format:check`; the
   figures each guard measured are in its own computed test name, per the
@@ -10353,10 +10353,10 @@ list is non-empty, and rule 2's semver-precedence comparison with build
 metadata stripped before it.
 
 The 19-line insertion re-pointed this log's own two live self-citations
-into `CHANGELOG.md`, from line 179 to line 198 (moved again to line 260
-by later rounds, `CHANGELOG.md:260#"The implementer"`) and from line
-556 to line 575 (moved again to line 637,
-`CHANGELOG.md:637#"Citation scanning is paragraph-joined"`); both were
+into `CHANGELOG.md`, from line 179 to line 198 (moved again to line 294
+by later rounds, `CHANGELOG.md:294#"The implementer"`) and from line
+556 to line 575 (moved again to line 671,
+`CHANGELOG.md:671#"Citation scanning is paragraph-joined"`); both were
 re-read at their new lines before the re-point. Re-verified and
 re-stamped the three docs whose `sources:` list `CHANGELOG.md`
 (`run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`,
@@ -10382,9 +10382,9 @@ one, and two fixture tests were added (the underscore heading, and an
 empty prerelease heading `## [1.0.0-]`), plus the round-1 mismatch test
 was tightened to assert the exact mismatch message instead of only the
 `[version-heading]` tag. The 4-line bullet growth re-pointed this log's
-two live self-citations again, from line 198 to line 202 (moved again to line 260 by a later
-round, `CHANGELOG.md:260#"The implementer"`) and from line 575 to line 579
-(moved again to line 637, `CHANGELOG.md:637#"Citation scanning is paragraph-joined"`); both were
+two live self-citations again, from line 198 to line 202 (moved again to line 294 by a later
+round, `CHANGELOG.md:294#"The implementer"`) and from line 575 to line 579
+(moved again to line 671, `CHANGELOG.md:671#"Citation scanning is paragraph-joined"`); both were
 re-read at their new lines before the re-point.
 
 Verified from the worktree root: `build`, `typecheck`, `typecheck:test`,
@@ -10432,10 +10432,10 @@ before this change is 74, and the step 8 sentence added no line).
 the same name covering the trigger, the four recorded outcomes and the
 boundaries against the halt rule and the budget, with five anchored
 citations. The 19-line `CHANGELOG.md` bullet re-pointed this log's two live
-self-citations, from line 202 to line 221 (moved again to line 260 by a
-later change, `CHANGELOG.md:260#"The implementer"`) and from line 579 to
-line 598 (moved again to line 637,
-`CHANGELOG.md:637#"Citation scanning is paragraph-joined"`), in the two
+self-citations, from line 202 to line 221 (moved again to line 294 by a
+later change, `CHANGELOG.md:294#"The implementer"`) and from line 579 to
+line 598 (moved again to line 671,
+`CHANGELOG.md:671#"Citation scanning is paragraph-joined"`), in the two
 live sites and in the two earlier entries that quote them; both were
 re-read at their new lines before the re-point. Re-verified and re-stamped
 the three docs whose `sources:` list the changed files
@@ -10500,9 +10500,10 @@ one section quoting the four bound clauses with five anchored citations. The
 tests hold those clauses as constants and assert them against the references,
 the changelog bullet and that doc, the pattern the previous entry arrived at.
 The 39-line `CHANGELOG.md` bullet re-pointed this log's two live
-self-citations, from line 221 to line 260
-(`CHANGELOG.md:260#"The implementer"`) and from line 598 to line 637
-(`CHANGELOG.md:637#"Citation scanning is paragraph-joined"`), in the live
+self-citations, from line 221 to line 260 (moved again to line 294 by a
+later change, `CHANGELOG.md:294#"The implementer"`) and from line 598 to
+line 637 (moved again to line 671,
+`CHANGELOG.md:671#"Citation scanning is paragraph-joined"`), in the live
 sites and in the earlier entries that quote them; both were re-read at their
 new lines. Re-verified and re-stamped the three docs whose `sources:` list the
 changed files: every anchored citation into the two references resolves at
@@ -10526,3 +10527,39 @@ self-citation lines above are those of the final bullet.
 A second review confirmed those fixes and left notes; one was closed without a
 further round: the changelog's summary of the claim-list obligation had
 dropped the words "at that site" and so read wider than the section.
+
+## 2026-09-18 (agent-dx 20a01c2f, probe verdict fields)
+
+`assets/agents/implementer.md` (the normative site for output-field
+semantics), `assets/skill/references/contracts.md` (verbatim copy) and step 6
+of `assets/skill/references/evidence-and-probes.md` (the orchestrator's
+cross-check) each gained sentences appended to an existing line, so none of
+the three files moved a cited line: the prompt stays 221 lines, contracts.md
+303 and the workflow 314.
+[subagent-contracts-superset.md](subagent-contracts-superset.md) gained a
+section quoting the three sentences with three anchored citations; the tests
+hold them as constants and assert them against every site. The
+34-line `CHANGELOG.md` bullet re-pointed this log's two live
+self-citations, from line 260 to line 294
+(`CHANGELOG.md:294#"The implementer"`) and from line 637 to line 671
+(`CHANGELOG.md:671#"Citation scanning is paragraph-joined"`), in the live
+sites and in the earlier entries that quote them; both were re-read at their
+new lines. Re-verified and re-stamped the docs whose `sources:` list the
+changed files.
+
+The independent review found the copy rule unsatisfiable for a runner that
+states only a kill verdict, since `expectation` follows from the probe's
+declared intent, and found the legend's parenthetical defining `killed` by the
+reader's own view of the test outcome. The fix round lets each field be copied
+when the verdict states it, sets `expectation` from the declared expectation
+when the verdict states only `result`, glosses `killed` by the runner's own pass predicate, names
+`03-decisions.md` for a resupply and calls it a transfer blocker rather than
+a misfire, and says that a quoted verdict is no named result of the
+verification set. The long appended lines are deliberate: the prompt is cited
+by line at many places in this bundle, and merging the new rule into the
+bullet's older runner sentence is left to a follow-up that re-points them.
+A second review confirmed the fixes; two documentation notes were closed
+without a further round: this entry had said "otherwise" where the rule covers
+only a verdict that states `result` alone, and the bundle section had called
+the kill-only runner the expected case, which the repository's own runner,
+stating both fields, does not support.

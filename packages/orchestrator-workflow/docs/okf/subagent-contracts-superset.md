@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-18T14:16:10.000Z
+timestamp: 2026-09-18T15:00:17.000Z
 sources:
   - packages/orchestrator-workflow/assets/agents/explorer.md
   - packages/orchestrator-workflow/assets/agents/task-slicer.md
@@ -745,6 +745,29 @@ never-`adversarial`-on-`-medium` constraint
 Motivation and the anchoring dogfood evidence live in
 `CHANGELOG.md:#[0.32.0]#"A review-method axis, orthogonal to the effort tier"`,
 not here.
+
+## Probe verdict fields: legend, copy rule, cross-check
+
+The implementer prompt is the normative site for what `result` and
+`expectation` mean and where their values come from
+(`packages/orchestrator-workflow/assets/agents/implementer.md:106#"reacted to the mutant under the runner's own pass predicate"`):
+"`result: killed` means the probe's test command reacted to the mutant under the runner's own pass predicate and `survived` means it did not; `expectation: met` means that outcome is what the probe was expected to show and `violated` means it is not; both are `not_applicable` when no `result` was measured."
+"When the probe runner states a machine-readable verdict, copy whichever of `result` and `expectation` it states from it verbatim, never from your own reading of the test output; when it states only `result`, set `expectation` by comparing that verdict with the probe's declared expectation. Quote the runner's verdict for each probe in `tests.executed`, and say there when `expectation` was set this way, so both fields can be checked against it."
+`contracts.md` defers output-field semantics to the prompt and carries the two
+sentences verbatim for the orchestrator
+(`packages/orchestrator-workflow/assets/skill/references/contracts.md:129#"reacted to the mutant under the runner's own pass predicate"`).
+The orchestrator's side is in step 6 of the workflow
+(`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:115#"Before transferring a probe row"`):
+"Before transferring a probe row, compare its `result` and `expectation` with the runner verdict quoted in `tests.executed`; on a mismatch, or when a verdict the runner states is not quoted, resupply it (ask the same implementer for the verdict, respawn one when it is gone, or rerun the probe yourself in isolation), record the resupply in `03-decisions.md`, and treat it as a transfer blocker rather than a misfire, since the return itself parses; never infer either field. A quoted probe verdict is not a named result of the verification set, so the set's missing-or-extra rule does not apply to it."
+The contract shape, the enums and the eleven sub-fields are unchanged, and no
+tool is named. `reason` keeps its meaning (required only for
+`not_applicable`), which is why the quoted verdict goes to `tests.executed`.
+A runner that states only a kill verdict is covered: `expectation` is then
+set from the probe's declared expectation and the quote says so. A return
+with no machine-readable verdict at all is outside the copy rule.
+Pinned by `test/probe-plans-recovery.test.ts`, which asserts the three quoted
+sentences against the prompt, `contracts.md`, the workflow, the CHANGELOG
+bullet and this section.
 
 ## Cross-links
 

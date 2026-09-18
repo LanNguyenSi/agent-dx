@@ -315,3 +315,69 @@ describe("ceremony rule copies stay bound to their normative sites", () => {
     for (const constant of constants) expect(bundleSection).toContain(constant);
   });
 });
+
+/**
+ * What the two verdict fields of a mutation probe mean, where their values
+ * come from, and who checks them. The implementer prompt is the normative
+ * site for the field semantics (contracts.md defers to it and carries a
+ * verbatim copy for the orchestrator); step 6 of the workflow is the
+ * normative site for the orchestrator's cross-check. Rendered tier variants
+ * are a named omission: every harness composer in src/init.ts emits the whole
+ * asset body as one string, a path the read-only roles exercise positively,
+ * so a variant cannot lose a sentence the source file has.
+ */
+const PROBE_FIELD_LEGEND =
+  "`result: killed` means the probe's test command reacted to the mutant under the runner's own pass predicate and `survived` means it did not; `expectation: met` means that outcome is what the probe was expected to show and `violated` means it is not; both are `not_applicable` when no `result` was measured.";
+const PROBE_FIELD_COPY_RULE =
+  "When the probe runner states a machine-readable verdict, copy whichever of `result` and `expectation` it states from it verbatim, never from your own reading of the test output; when it states only `result`, set `expectation` by comparing that verdict with the probe's declared expectation. Quote the runner's verdict for each probe in `tests.executed`, and say there when `expectation` was set this way, so both fields can be checked against it.";
+const PROBE_ROW_CROSS_CHECK =
+  "Before transferring a probe row, compare its `result` and `expectation` with the runner verdict quoted in `tests.executed`; on a mismatch, or when a verdict the runner states is not quoted, resupply it (ask the same implementer for the verdict, respawn one when it is gone, or rerun the probe yourself in isolation), record the resupply in `03-decisions.md`, and treat it as a transfer blocker rather than a misfire, since the return itself parses; never infer either field. A quoted probe verdict is not a named result of the verification set, so the set's missing-or-extra rule does not apply to it.";
+const PROBE_VERDICT_BULLET =
+  "- The two verdict fields of a mutation probe now carry a legend, a";
+
+describe("mutation probe verdict fields", () => {
+  const implementerPrompt = unwrap(readAsset("agents/implementer.md"));
+  const contracts = unwrap(readAsset("skill/references/contracts.md"));
+
+  it("the implementer prompt defines both fields and where their values come from", () => {
+    expect(implementerPrompt).toContain(
+      `\`mutation_probes\` sub-fields. ${PROBE_FIELD_LEGEND} ${PROBE_FIELD_COPY_RULE}`,
+    );
+  });
+
+  it("contracts.md carries the same legend and copy rule for the orchestrator", () => {
+    expect(contracts).toContain(
+      `Return the selected contract's YAML envelope. ${PROBE_FIELD_LEGEND} ${PROBE_FIELD_COPY_RULE}`,
+    );
+  });
+
+  it("step 6 has the orchestrator check the fields against the quoted verdict before transfer", () => {
+    expect(unwrap(probes)).toContain(
+      `subsection, with the round it was named in. ${PROBE_ROW_CROSS_CHECK}`,
+    );
+  });
+
+  it("names no concrete probe tool", () => {
+    for (const text of [implementerPrompt, contracts, unwrap(probes)])
+      expect(text).not.toContain("agent-primitives");
+  });
+
+  it("binds the CHANGELOG bullet and the bundle doc to the same words", () => {
+    const bullet = changelogBullet(PROBE_VERDICT_BULLET);
+    const bundleSection = sectionOf(
+      readFileSync(
+        `${PACKAGE_DIR}/docs/okf/subagent-contracts-superset.md`,
+        "utf8",
+      ),
+      "## Probe verdict fields: legend, copy rule, cross-check",
+    );
+    for (const constant of [
+      PROBE_FIELD_LEGEND,
+      PROBE_FIELD_COPY_RULE,
+      PROBE_ROW_CROSS_CHECK,
+    ]) {
+      expect(bullet).toContain(constant);
+      expect(bundleSection).toContain(constant);
+    }
+  });
+});

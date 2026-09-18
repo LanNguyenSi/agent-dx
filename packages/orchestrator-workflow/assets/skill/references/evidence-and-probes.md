@@ -112,7 +112,7 @@ directory and the subagents.
    `03-decisions.md` and consolidate evidence in
    `04-implementation-summary.md`, recording each probe the implementer
    reports as a row in `04-implementation-summary.md`'s Mutation Probes
-   subsection, with the round it was named in. Each row's Before/After
+   subsection, with the round it was named in. Before transferring a probe row, compare its `result` and `expectation` with the runner verdict quoted in `tests.executed`; on a mismatch, or when a verdict the runner states is not quoted, resupply it (ask the same implementer for the verdict, respawn one when it is gone, or rerun the probe yourself in isolation), record the resupply in `03-decisions.md`, and treat it as a transfer blocker rather than a misfire, since the return itself parses; never infer either field. A quoted probe verdict is not a named result of the verification set, so the set's missing-or-extra rule does not apply to it. Each row's Before/After
    cells hold a single-line excerpt; when the mutant's actual before/after
    text is multi-line or contains an unescaped `|`, or the mutant is a
    patch/diff rather than a text swap, the full text or diff goes in the
