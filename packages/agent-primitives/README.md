@@ -1508,17 +1508,29 @@ them from; `-p` alone needs neither, as described above.
 target file (a `deleted file mode`/`+++ /dev/null` unified diff, the
 shape `git rm` plus `git diff --cached` produces), the same as any
 other patch shape: the dry run treats the file's absence after `git
-apply` as content `""`, so `mutant.line` is `1`, `mutant.before` is the
-original first line, and `mutant.after` is `""`; `mutant.deleted` is
-`true` only for this shape (absent for every other mutant, including a
-patch that empties a file's content while leaving the file itself in
-place -- a different applied result `mutant.deleted` does not
-describe). The real apply removes the target file for real, in both
-isolation modes; the restore recreates it byte-identically from the
-same backup any other mutant restores from, verified by hash the same
-way, so `mutation_probe.restored_verified` is `true` the same way; the
-run classifies `killed`/`survived` like any other patch mutant, from
-whether the test command depends on the file's presence.
+apply` as content `""`, so `mutant.line`/`mutant.before` are the first
+line at which the applied result actually differs from the original
+(the original's own first line for most files, but line 2, not 1, for
+one whose first line is already empty, and so on for every leading
+empty line) and `mutant.after` is `""`; `mutant.deleted` is `true` only
+for this shape (absent for every other mutant, including a patch that
+empties a file's content while leaving the file itself in place -- a
+different applied result `mutant.deleted` does not describe), and both
+`mutation_probe.mutant` and `mutation_probe.verified_applied_via` end on
+`(whole file deleted)` for it. Deleting a file that was already empty
+has no content to change, so it is refused as `mutant_not_applicable`
+with `patch applied cleanly but produced no content change (the patch
+deletes a file that was already empty)`, the same way an identity patch
+against a non-empty file is. The real apply removes the target file for
+real, in both isolation modes; the restore recreates it byte-identically
+from the same backup any other mutant restores from, verified by hash
+the same way, so `mutation_probe.restored_verified` is `true` the same
+way -- and now also restores the target's own file mode and its
+recreated parent directory's mode, which a plain `mkdirSync`/
+`copyFileSync` would otherwise leave at the process's default rather
+than the mode either one actually had; the run classifies
+`killed`/`survived` like any other patch mutant, from whether the test
+command depends on the file's presence.
 
 The dist trap: a project whose test command runs built output
 (`dist/`, `lib/`, ...) rather than `--file` itself needs `--pre` to
@@ -2162,14 +2174,24 @@ exact mutated state the marker describes, and that the recorded backup
 still hashes to the pre-mutation content the marker recorded. That second
 check happens before any copy, because the copy is destructive: a backup
 that no longer matches would otherwise be written over the target,
-destroying the only remaining copy of the mutated file. When either proof
+destroying the only remaining copy of the mutated file. A `SIGKILL`
+between a deletion mutant's real apply and the marker's own removal
+leaves this same shape behind, only with the target genuinely absent
+rather than mutated in place (the marker's `mutatedHash` is the
+deletion sentinel, never a real content hash): recovery there is the
+same proof against the backup, then recreating the file (and its
+parent directory, if that was removed too) from it, rather than waiting
+on a mutated-content hash that will never appear. When either proof
 fails, the probe refuses with `reason: "stale_probe_marker"`, leaves the
 target exactly as it found it, and names the backup path for a human to
-inspect. The backup lives under the probe's own `--log-dir` (a per-run
-scratch directory, not something a crash is guaranteed to have left
-behind); when it is gone, automatic recovery is not possible and the
-warning says so and names the marker file itself instead -- delete that
-file to clear it manually. `agent-primitives doctor` also reports any
+inspect -- by hand, either `git checkout -- <file>` (when the target is
+tracked and unmodified upstream of this marker) or copying the named
+backup back into place. The backup lives under the probe's own
+`--log-dir` (a per-run scratch directory, not something a crash is
+guaranteed to have left behind); when it is gone, automatic recovery is
+not possible and the warning says so and names the marker file itself
+instead -- delete that file to clear it manually. `agent-primitives
+doctor` also reports any
 such marker left for the current repository, and applies the same two
 proofs before it says anything about automatic recovery: it hashes the
 recorded backup and compares the target, points at re-running `probe`
