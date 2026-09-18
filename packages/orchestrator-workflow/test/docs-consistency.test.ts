@@ -7302,10 +7302,36 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
   // grammar knows against every dimension the predicate consults, naming
   // the right value (asserted true) or perturbing exactly that dimension
   // (asserted false), so a future conjunct is pinned by adding a row, not
-  // a hand-written case. Kept as named assertions because the table
-  // cannot express them: a blank enumeration (a digit substring, not a
-  // citation-shaped token), and a claim that passes on a real sibling
-  // citation alone, with no own-line token at all.
+  // a hand-written case.
+  //
+  // A fourth pass: the table still had holes found only by hand --
+  // no row carried a WRONG start with the entry's own end, so the `start`
+  // half of the own-range identity survived the whole file, and no row
+  // resolved a bare `:N` through the own-line fallback, so `isOwnLine`
+  // could be replaced by `false` and this fixture stayed green. Both are
+  // rows now, and the class itself ("a conjunct nobody pinned") is closed
+  // structurally rather than by another hand pass: `CONJUNCTS` below names
+  // every boolean decision site the predicate's outcome depends on -- its
+  // own, plus those of the two helpers it calls
+  // (`siblingGuardEntryOwnLines`, `siblingGuardClaimEnumeration`) -- each
+  // mapped to the row labels whose outcome flips when exactly that site is
+  // neutralised, and the mapping is itself asserted: a conjunct naming no
+  // row, a conjunct naming a row that does not exist, and a row no
+  // conjunct claims all fail here. The two cases the previous round kept
+  // as separate assertions after the loop (a blank enumeration, and a
+  // claim resolving purely on a real sibling citation) are rows now too,
+  // so the table is the whole coverage statement instead of most of it.
+  //
+  // One boolean site is deliberately absent from `CONJUNCTS`: the
+  // `docCitations === undefined` memoization guard in the range loop
+  // decides only whether the doc scan is recomputed, so neutralising it
+  // (`true`) is an equivalent mutant with no observable outcome to pin;
+  // the opposite mutant (`false`) throws, which any sibling row catches.
+  //
+  // The row loop collects every mismatching row instead of throwing on the
+  // first one, so a mutation probe's failure output names ALL the rows its
+  // mutant flips: that is what makes each conjunct's `rows` list checkable
+  // against a probe envelope rather than only by reading.
   it("siblingGuardClaimIsFalsifiable parses the claim's citation enumeration as tokens, not digit substrings, and verifies :N/:N-M references against the doc's own citation scan", () => {
     const entry: SiblingGuardAllowlistEntry = {
       doc: "fixture-doc.md",
@@ -7339,15 +7365,55 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
     const mkClaim = (token: string): string =>
       `the token here is ${token}, and nothing else appears in this sentence.`;
 
+    // A minimal pair around the length floor (`claim.length <= 40`), both
+    // naming the entry's own uncited line so the enumeration is valid and
+    // only the floor decides. Their exact lengths are asserted below, so
+    // an edit to either sentence cannot silently un-pin the boundary.
+    const CLAIM_40 = "line 20 is where the uncited anchor sat.";
+    const CLAIM_41 = "line 20 is where the uncited anchor sits.";
+
     interface Case {
       label: string;
       claim: string;
+      // Only for a row that needs a geometry the shared fixture entry
+      // does not carry (`secondCitationLine`); every other row perturbs
+      // the claim, not the entry.
+      entryOverride?: Partial<SiblingGuardAllowlistEntry>;
       docText: string;
       resolve: (citedPath: string) => string | undefined;
       expected: boolean;
     }
 
+    // Every boolean decision site the predicate's outcome depends on,
+    // named once and mapped to the rows that discriminate it. `site`
+    // quotes the source expression rather than a line number, which would
+    // drift on the next insertion above it.
+    interface Conjunct {
+      id: string;
+      site: string;
+      description: string;
+      rows: string[];
+    }
+
     const CASES: Case[] = [
+      // The length floor, the predicate's first conjunct: the
+      // 40-character row kills a mutant that removes the floor
+      // (`<= -1`), the 41-character row one that moves it up (`<= 41`).
+      {
+        label: "length floor / exactly 40 characters, own line named",
+        claim: CLAIM_40,
+        docText: "",
+        resolve: noResolve,
+        expected: false,
+      },
+      {
+        label: "length floor / exactly 41 characters, own line named",
+        claim: CLAIM_41,
+        docText: "",
+        resolve: noResolve,
+        expected: true,
+      },
+
       // `line N`: pins that each own-line dimension is actually
       // consulted (a future conjunct dropping one breaks its own
       // right-row); one generic wrong row confirms rejection still
@@ -7378,6 +7444,17 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
       {
         label: "line N / uncitedLines[0]",
         claim: mkClaim("line 20"),
+        docText: "",
+        resolve: noResolve,
+        expected: true,
+      },
+      // The one own-line dimension the shared fixture entry leaves unset,
+      // and so the only row that fails when `siblingGuardEntryOwnLines`
+      // stops contributing `secondCitationLine`.
+      {
+        label: "line N / secondCitationLine",
+        claim: mkClaim("line 7"),
+        entryOverride: { secondCitationLine: 7 },
         docText: "",
         resolve: noResolve,
         expected: true,
@@ -7485,14 +7562,15 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
       },
 
       // Dashed `:N-M` against the entry's OWN range: the exact range
-      // passes. Perturbing the end while the start still equals one of
-      // the entry's own recorded lines must still fail: the own-start
-      // row kills a mutant that drops the `end` half of the own-range
-      // identity check; all four rows (own start, own end, paragraphLine,
-      // uncitedLines[0]) kill a mutant that lets the own-LINE fallback
-      // apply to a dashed (non-single) range too. None of these ranges is
-      // a real sibling citation either, so only the two identity checks
-      // are ever in play.
+      // passes. Perturbing ONE half while the other stays right must
+      // still fail, in both directions: the own-start/wrong-end row kills
+      // a mutant that drops the `end` half of the own-range identity, the
+      // wrong-start/own-end row the mirror mutant that drops the `start`
+      // half (the hole the previous pass left open). All five perturbed
+      // rows start on one of the entry's own recorded lines, so each also
+      // kills a mutant that lets the own-LINE fallback apply to a dashed
+      // (non-single) range. None of these ranges is a real sibling
+      // citation either, so only the two identity checks are ever in play.
       {
         label: ":N-M / exact own range",
         claim: mkClaim(":10-12"),
@@ -7504,6 +7582,14 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
         label:
           ":N-M / own start, wrong end (kills the own-range end-check-dropped mutant)",
         claim: mkClaim(":10-99"),
+        docText: "",
+        resolve: noResolve,
+        expected: false,
+      },
+      {
+        label:
+          ":N-M / wrong start, own end (kills the own-range start-check-dropped mutant)",
+        claim: mkClaim(":5-12"),
         docText: "",
         resolve: noResolve,
         expected: false,
@@ -7533,10 +7619,27 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
         expected: false,
       },
 
+      // Bare `:N` through the OWN-LINE fallback, with no doc at all: the
+      // only row that reaches `ownLines.includes(range.start)` on a range
+      // token and passes, so it is the one row a mutant replacing
+      // `isOwnLine` with `false` (or forcing the `single` flag false)
+      // flips. Without it that fallback was pinned only by the
+      // bundle-dependent allowlist test, never by this fixture.
+      {
+        label:
+          ":N / own uncited line, empty doc (kills the own-line-fallback-dropped mutant)",
+        claim: mkClaim(":20"),
+        docText: "",
+        resolve: noResolve,
+        expected: true,
+      },
+
       // Bare `:N` against a real sibling citation: right file and number
       // passes; the same number cited into a DIFFERENT file fails (the
       // `c.real === entry.real` conjunct); a number no citation carries
-      // at all fails generically.
+      // at all fails generically -- that last row is also what a mutant
+      // dropping only the membership half of `isOwnLine` flips, since it
+      // would let any single-number token through.
       {
         label: ":N / real sibling point, right file",
         claim: mkClaim(":30"),
@@ -7595,50 +7698,350 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
         resolve: identity,
         expected: false,
       },
+
+      // The two shapes the previous round kept as standalone assertions
+      // after the loop. A blank enumeration is a claim whose only digits
+      // are a substring of an own line (20, inside "2026") with no
+      // citation-shaped token around them; the second row is the one
+      // claim here that carries no own-line token at all and passes
+      // purely on a real sibling citation.
+      {
+        label:
+          "empty enumeration / a digit substring of an own line, no citation-shaped token",
+        claim:
+          "this note was filed under document id 2026-fixture, unrelated " +
+          "to any of the entry's actual recorded citations here.",
+        docText: "",
+        resolve: noResolve,
+        expected: false,
+      },
+      {
+        label: ":N / only a real sibling citation, no own-line token anywhere",
+        claim:
+          "the sibling range :30 is the only evidence this claim points at, " +
+          "and it names none of the entry's own recorded lines directly.",
+        docText: SIB_POINT,
+        resolve: identity,
+        expected: true,
+      },
     ];
 
-    for (const testCase of CASES) {
+    const CONJUNCTS: Conjunct[] = [
+      {
+        id: "claim-length-floor",
+        site: "siblingGuardClaimIsFalsifiable: entry.claim.length <= 40",
+        description:
+          "the length floor, boundary included: 40 characters is too short " +
+          "however well the claim enumerates, 41 is not",
+        rows: [
+          "length floor / exactly 40 characters, own line named",
+          "length floor / exactly 41 characters, own line named",
+        ],
+      },
+      {
+        id: "empty-enumeration",
+        site: "siblingGuardClaimIsFalsifiable: lineRefs.length === 0 && rangeRefs.length === 0",
+        description:
+          "no citation-shaped token at all is unfalsifiable and fails closed",
+        rows: [
+          "empty enumeration / a digit substring of an own line, no citation-shaped token",
+        ],
+      },
+      {
+        id: "empty-enumeration-lines-half",
+        site: "... lineRefs.length === 0 (the left half of that test)",
+        description:
+          "a claim carrying line tokens but no range token is not empty",
+        rows: ["line N / own start"],
+      },
+      {
+        id: "empty-enumeration-ranges-half",
+        site: "... rangeRefs.length === 0 (the right half of that test)",
+        description:
+          "a claim carrying range tokens but no line token is not empty",
+        rows: [
+          ":N-M / exact own range",
+          ":N / only a real sibling citation, no own-line token anywhere",
+        ],
+      },
+      {
+        id: "line-ref-membership",
+        site: "siblingGuardClaimIsFalsifiable: lineRefs.some((lineRef) => !ownLines.includes(lineRef))",
+        description:
+          "every line/uncited token names one of the entry's own recorded lines",
+        rows: [
+          "line N / not an own line",
+          "uncited N / not an own line",
+          "lines N and M / first not own",
+          "lines N and M / second not own",
+        ],
+      },
+      {
+        id: "own-lines-start",
+        site: "siblingGuardEntryOwnLines: entry.start",
+        description: "the entry's own range start is one of its own lines",
+        rows: ["line N / own start", "uncited N / own start"],
+      },
+      {
+        id: "own-lines-end",
+        site: "siblingGuardEntryOwnLines: entry.end",
+        description: "the entry's own range end is one of its own lines",
+        rows: ["line N / own end", "uncited N / own end"],
+      },
+      {
+        id: "own-lines-paragraph-line",
+        site: "siblingGuardEntryOwnLines: entry.paragraphLine",
+        description: "the entry's citing doc line is one of its own lines",
+        rows: ["line N / paragraphLine", "uncited N / paragraphLine"],
+      },
+      {
+        id: "own-lines-second-citation-line",
+        site: "siblingGuardEntryOwnLines: entry.secondCitationLine (when set)",
+        description:
+          "a duplicate-citation entry's second citing line is one of its own lines",
+        rows: ["line N / secondCitationLine"],
+      },
+      {
+        id: "own-lines-uncited-lines",
+        site: "siblingGuardEntryOwnLines: entry.uncitedLines",
+        description:
+          "the target-file lines carrying the uncited anchor are own lines",
+        rows: [
+          "line N / uncitedLines[0]",
+          ":N / own uncited line, empty doc (kills the own-line-fallback-dropped mutant)",
+        ],
+      },
+      {
+        id: "own-range-start",
+        site: "isOwnRange: range.start === entry.start",
+        description:
+          "a range token matching the entry's own range must match its START",
+        rows: [
+          ":N-M / wrong start, own end (kills the own-range start-check-dropped mutant)",
+        ],
+      },
+      {
+        id: "own-range-end",
+        site: "isOwnRange: range.end === entry.end",
+        description:
+          "a range token matching the entry's own range must match its END",
+        rows: [
+          ":N-M / own start, wrong end (kills the own-range end-check-dropped mutant)",
+        ],
+      },
+      {
+        id: "own-line-single-guard",
+        site: "isOwnLine: range.single",
+        description:
+          "the own-line fallback applies to a bare `:N` only, never to a dashed `:N-M`",
+        rows: [
+          ":N-M / own start, wrong end (kills the own-range end-check-dropped mutant)",
+          ":N-M / wrong start, own end (kills the own-range start-check-dropped mutant)",
+          ":N-M / own end as start, wrong end (kills the own-line-fallback-on-a-range mutant)",
+          ":N-M / paragraphLine as start, wrong end (kills the own-line-fallback-on-a-range mutant)",
+          ":N-M / uncitedLines[0] as start, wrong end (kills the own-line-fallback-on-a-range mutant)",
+        ],
+      },
+      {
+        id: "own-line-membership",
+        site: "isOwnLine: ownLines.includes(range.start)",
+        description:
+          "a bare `:N` falls back to the entry's own lines, and only to those",
+        rows: [
+          ":N / own uncited line, empty doc (kills the own-line-fallback-dropped mutant)",
+          ":N / no citation at that number",
+        ],
+      },
+      {
+        id: "sibling-citation-real",
+        site: "isSiblingCitation: c.real === entry.real",
+        description:
+          "the doc citation backing a range token must point at THIS entry's target file",
+        rows: [
+          ":N / same number, wrong file",
+          ":N-M / same range, wrong file (kills the sibling-real-dropped mutant)",
+        ],
+      },
+      {
+        id: "sibling-citation-start",
+        site: "isSiblingCitation: c.start === range.start",
+        description: "... and must start at the token's own start",
+        rows: [":N-M / wrong start (kills the sibling-real-only mutant)"],
+      },
+      {
+        id: "sibling-citation-end",
+        site: "isSiblingCitation: c.end === range.end",
+        description: "... and must end at the token's own end",
+        rows: [":N-M / wrong end (kills the sibling-end-check-dropped mutant)"],
+      },
+      {
+        id: "grammar-line-token",
+        site: "SIBLING_GUARD_CLAIM_LINE_RE",
+        description: "`line N` is read as a token at all",
+        rows: [
+          "line N / own start",
+          "line N / own end",
+          "line N / paragraphLine",
+          "line N / uncitedLines[0]",
+          "line N / secondCitationLine",
+        ],
+      },
+      {
+        id: "grammar-lines-token",
+        site: "SIBLING_GUARD_CLAIM_LINES_RE",
+        description:
+          "`lines N and M` is read as a token (the `line` regex cannot match it)",
+        rows: ["lines N and M / both own"],
+      },
+      {
+        id: "grammar-uncited-token",
+        site: "SIBLING_GUARD_CLAIM_UNCITED_RE",
+        description:
+          "a bare number directly after `uncited` is read as a token",
+        rows: [
+          "uncited N / own start",
+          "uncited N / own end",
+          "uncited N / paragraphLine",
+          "uncited N / uncitedLines[0]",
+          "uncited N and M / both own",
+        ],
+      },
+      {
+        id: "grammar-range-token",
+        site: "SIBLING_GUARD_CLAIM_RANGE_RE",
+        description: "a bare `:N`/`:N-M` is read as a token",
+        rows: [
+          ":N-M / exact own range",
+          ":N / own uncited line, empty doc (kills the own-line-fallback-dropped mutant)",
+          ":N / real sibling point, right file",
+          ":N-M / real sibling range, right file/start/end",
+          ":N / only a real sibling citation, no own-line token anywhere",
+        ],
+      },
+      {
+        id: "lines-first-capture",
+        site: "siblingGuardClaimEnumeration: lineRefs.push(Number(m[1]), ...) for `lines N and M`",
+        description: "the FIRST number of `lines N and M` is checked",
+        rows: ["lines N and M / first not own"],
+      },
+      {
+        id: "lines-second-capture",
+        site: "siblingGuardClaimEnumeration: lineRefs.push(..., Number(m[2])) for `lines N and M`",
+        description: "the SECOND number of `lines N and M` is checked",
+        rows: ["lines N and M / second not own"],
+      },
+      {
+        id: "uncited-first-capture",
+        site: "siblingGuardClaimEnumeration: lineRefs.push(Number(m[1])) for `uncited N`",
+        description: "the FIRST number after `uncited` is checked",
+        rows: [
+          "uncited N and M / first not own (kills the first-capture-dropped mutant)",
+        ],
+      },
+      {
+        id: "uncited-second-capture",
+        site: "siblingGuardClaimEnumeration: if (m[2] !== undefined) lineRefs.push(Number(m[2]))",
+        description:
+          "the optional SECOND number after `uncited` is checked when present",
+        rows: [
+          "uncited N and M / second not own (kills the second-capture-dropped mutant)",
+        ],
+      },
+      {
+        id: "range-single-flag",
+        site: "siblingGuardClaimEnumeration: const single = m[2] === undefined",
+        description:
+          "only a token written without `-M` counts as single, and every such token does",
+        rows: [
+          ":N-M / own start, wrong end (kills the own-range end-check-dropped mutant)",
+          ":N / own uncited line, empty doc (kills the own-line-fallback-dropped mutant)",
+        ],
+      },
+      {
+        id: "range-end-derivation",
+        site: "siblingGuardClaimEnumeration: const end = single ? start : Number(m[2])",
+        description:
+          "a dashed token's end is its own second number, not a repeat of its start",
+        rows: [":N-M / real sibling range, right file/start/end"],
+      },
+    ];
+
+    // Rows kept for documentation rather than to discriminate a conjunct.
+    // Empty by design: a row that pins nothing is a row that can rot.
+    const SHAPE_ONLY_ROWS: string[] = [];
+
+    expect(
+      CLAIM_40.length,
+      "the length-floor rows are a boundary pair; the rejected one must be exactly 40 characters",
+    ).toBe(40);
+    expect(
+      CLAIM_41.length,
+      "the length-floor rows are a boundary pair; the accepted one must be exactly 41 characters",
+    ).toBe(41);
+
+    const labels = CASES.map((testCase) => testCase.label);
+    expect(new Set(labels).size, "every CASES row needs its own label").toBe(
+      labels.length,
+    );
+    expect(
+      new Set(CONJUNCTS.map((conjunct) => conjunct.id)).size,
+      "every conjunct needs its own id",
+    ).toBe(CONJUNCTS.length);
+
+    const labelSet = new Set(labels);
+    const danglingRefs = CONJUNCTS.flatMap((conjunct) =>
+      conjunct.rows
+        .filter((row) => !labelSet.has(row))
+        .map((row) => `${conjunct.id} -> ${row}`),
+    );
+    expect(
+      danglingRefs,
+      `every conjunct must name rows that exist in CASES:\n${danglingRefs.join("\n")}`,
+    ).toEqual([]);
+
+    const unpinnedConjuncts = CONJUNCTS.filter(
+      (conjunct) => conjunct.rows.length === 0,
+    ).map((conjunct) => conjunct.id);
+    expect(
+      unpinnedConjuncts,
+      `every conjunct needs at least one discriminating row:\n${unpinnedConjuncts.join("\n")}`,
+    ).toEqual([]);
+
+    const pinnedRows = new Set(CONJUNCTS.flatMap((conjunct) => conjunct.rows));
+    const orphanRows = labels.filter(
+      (label) => !pinnedRows.has(label) && !SHAPE_ONLY_ROWS.includes(label),
+    );
+    expect(
+      orphanRows,
+      `every row must be claimed by a conjunct or listed in SHAPE_ONLY_ROWS:\n${orphanRows.join("\n")}`,
+    ).toEqual([]);
+
+    const staleShapeOnly = SHAPE_ONLY_ROWS.filter(
+      (label) => !labelSet.has(label),
+    );
+    expect(
+      staleShapeOnly,
+      `SHAPE_ONLY_ROWS must name rows that exist:\n${staleShapeOnly.join("\n")}`,
+    ).toEqual([]);
+
+    const mismatches = CASES.filter((testCase) => {
       const testEntry: SiblingGuardAllowlistEntry = {
         ...entry,
+        ...testCase.entryOverride,
         claim: testCase.claim,
       };
-      expect(
+      return (
         siblingGuardClaimIsFalsifiable(
           testEntry,
           testCase.docText,
           testCase.resolve,
-        ),
-        testCase.label,
-      ).toBe(testCase.expected);
-    }
-
-    const blankEnumeration: SiblingGuardAllowlistEntry = {
-      ...entry,
-      claim:
-        "this note was filed under document id 2026-fixture, unrelated " +
-        "to any of the entry's actual recorded citations here.",
-    };
+        ) !== testCase.expected
+      );
+    }).map((testCase) => `${testCase.label} (expected ${testCase.expected})`);
     expect(
-      siblingGuardClaimIsFalsifiable(blankEnumeration, "", noResolve),
-      "a digit substring of an own line (20, inside 2026) with no " +
-        "citation-shaped token is a blank enumeration and must fail",
-    ).toBe(false);
-
-    const onlyRealSiblingNoOwnLine: SiblingGuardAllowlistEntry = {
-      ...entry,
-      claim:
-        "the sibling range :30 is the only evidence this claim points at, " +
-        "and it names none of the entry's own recorded lines directly.",
-    };
-    expect(
-      siblingGuardClaimIsFalsifiable(
-        onlyRealSiblingNoOwnLine,
-        SIB_POINT,
-        identity,
-      ),
-      "a claim naming ONLY a real sibling citation, with no own-line " +
-        "token at all, must still pass",
-    ).toBe(true);
+      mismatches,
+      `rows whose outcome disagrees with the table:\n${mismatches.join("\n")}`,
+    ).toEqual([]);
   });
 
   // Round 3 (R1): the entries' recorded geometry is re-derived from the
