@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `references/review-and-recovery.md` gains a "Fix-regression decision
+  point" between the Review-round escalation budget and the Final
+  acceptance rule: when the review of a fix round reports at least one
+  `high` or `critical` finding that the previous round's review did not
+  report, with `introduced_by_delta: yes`, the orchestrator names in one
+  sentence why the fix could introduce it and records one of four outcomes
+  in `03-decisions.md` (continue with the stated reason, redesign, split,
+  hold) before another fix round starts. It is a decision point, not a
+  halt, and changes neither the Round-2 halt rule nor the budget. The
+  rule is defined only in that section; step 8 of
+  `references/evidence-and-probes.md` points to it without restating the
+  trigger. The AGENTS.md section is unchanged, so no AGENTS.md re-install
+  is needed; the rule reaches an existing install with the next kit
+  re-install, like any other skill-reference change. Evidence (issue #300,
+  one repository, one model mix, not a benchmark): in a five-round run the
+  third review already showed that the fix had introduced new high
+  findings, but the defect class only recurred in the fourth review, so
+  the halt rule fired one round, about an hour, after the structural
+  problem was visible. Pinned in `test/probe-plans-recovery.test.ts`.
 - `validate-review-report` now checks that every element of a string-array
   field (`summary`, `missing_tests`, `residual_risks`) is a string, one
   diagnostic per offending element at `<field>[<index>]`; and

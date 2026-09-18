@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import { listSkillReferenceNames, readAsset } from "../src/assets.js";
@@ -49,5 +52,123 @@ describe("persisted probe plans and recovery references", () => {
     expect(unwrap(recovery)).toContain(
       "Do not require probes for all findings",
     );
+  });
+});
+
+/**
+ * The Round-2 halt rule needs a defect class to recur before it stops a
+ * task, so a fix that breaks something of a class not seen before passed
+ * under it for one more round. This pins the decision point that closes
+ * that gap. The section in review-and-recovery.md is the rule's only
+ * normative statement; FIX_REGRESSION_TRIGGER binds the sites that restate
+ * its trigger to the section's own words, and step 8 must not restate it.
+ */
+const FIX_REGRESSION_TRIGGER =
+  "at least one `high` or `critical` finding that the previous round's review did not report, with `introduced_by_delta: yes`";
+
+describe("fix-regression decision point", () => {
+  const section = unwrap(
+    recovery.slice(
+      recovery.indexOf("## Fix-regression decision point"),
+      recovery.indexOf("## Final acceptance rule"),
+    ),
+  );
+
+  it("sits between the escalation budget and the final acceptance rule", () => {
+    const budget = recovery.indexOf("## Review-round escalation budget");
+    const point = recovery.indexOf("## Fix-regression decision point");
+    const final = recovery.indexOf("## Final acceptance rule");
+    expect(budget).toBeGreaterThan(-1);
+    expect(point).toBeGreaterThan(budget);
+    expect(final).toBeGreaterThan(point);
+  });
+
+  it("states the qualifiers of the signal", () => {
+    expect(section).toContain(
+      "the review of a fix round (any implementation round after the task's first)",
+    );
+    expect(section).toContain(FIX_REGRESSION_TRIGGER);
+    expect(section).toContain(
+      "`unknown` and `no` do not trigger this decision point",
+    );
+    expect(section).toContain(
+      "The signal needs no recurrence: it fires even when the new finding's defect class has not appeared on this task before, which is what separates it from the Round-2 halt rule above.",
+    );
+  });
+
+  it("binds the sites that restate the trigger to the section's own words", () => {
+    const packageDir = fileURLToPath(new URL("..", import.meta.url));
+    const changelog = readFileSync(`${packageDir}/CHANGELOG.md`, "utf8");
+    const bulletStart = changelog.indexOf(
+      '- `references/review-and-recovery.md` gains a "Fix-regression decision',
+    );
+    expect(bulletStart).toBeGreaterThan(-1);
+    const bullet = unwrap(
+      changelog.slice(bulletStart, changelog.indexOf("\n- ", bulletStart + 1)),
+    );
+    expect(bullet).toContain(FIX_REGRESSION_TRIGGER);
+    const bundleDoc = unwrap(
+      readFileSync(`${packageDir}/docs/okf/review-gate-and-waivers.md`, "utf8"),
+    );
+    expect(bundleDoc).toContain(FIX_REGRESSION_TRIGGER);
+  });
+
+  it("evaluates the qualifier on the findings, not on the recurrence field", () => {
+    expect(section).toContain(
+      "Read the qualifier off the findings of the two reviews, not off `recurrence`: a `recurrence: repeated` finding that the previous round's review did not report still triggers it.",
+    );
+  });
+
+  it("leaves `unknown` to the halt rule and the budget, which both act on it", () => {
+    expect(section).toContain(
+      "`no` continues through the ordinary finding gate, and `unknown` keeps its existing treatment under the Round-2 halt rule and the escalation budget",
+    );
+    expect(section).not.toContain("they follow the ordinary finding gate");
+    const whole = unwrap(recovery);
+    expect(whole).toContain(
+      "Apply this signal only to `introduced_by_delta: yes`/`unknown`",
+    );
+    expect(whole).toContain(
+      "A negative round counts only with at least one introduced_by_delta yes/unknown finding",
+    );
+  });
+
+  it("requires a recorded decision with four outcomes before another fix round", () => {
+    expect(section).toContain("Before another fix round starts");
+    expect(section).toContain(
+      "record one of four outcomes as a decision in `03-decisions.md`: continue with the stated reason, redesign, split, or hold",
+    );
+    expect(section).toContain(
+      "Spawning the advisor for this decision is optional",
+    );
+  });
+
+  it("stays a decision point: no halt signal, no budget count, no review shortcut", () => {
+    expect(section).toContain("This is a decision point, not a halt");
+    expect(section).toContain("it is not a round-2 halt signal");
+    expect(section).toContain(
+      "it does not count toward the Review-round escalation budget (the negative round itself still counts there as before)",
+    );
+    expect(section).toContain("It never replaces a review round");
+    expect(section).toContain(
+      "When the same review also fires the Round-2 halt signal, the halt rule governs",
+    );
+  });
+
+  it("states its evidence strength as an observed run and points to the CHANGELOG", () => {
+    expect(section).toContain(
+      "Anchored by an observed run; see the entry for this rule in the orchestrator-workflow CHANGELOG.",
+    );
+  });
+
+  it("is reachable from the acceptance step, which points without restating the trigger", () => {
+    expect(unwrap(probes)).toContain(
+      "When a fix round's review meets the trigger of the Fix-regression decision point (defined only in [review and recovery](review-and-recovery.md), not restated here), record the Fix-regression decision point before another fix round starts.",
+    );
+    const pointerLine = probes
+      .split("\n")
+      .find((line) => line.includes("Fix-regression decision point"));
+    expect(pointerLine).toBeDefined();
+    expect(pointerLine).not.toContain("introduced_by_delta: yes`, record");
   });
 });

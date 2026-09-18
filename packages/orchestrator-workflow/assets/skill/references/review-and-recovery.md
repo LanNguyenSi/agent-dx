@@ -82,6 +82,35 @@ through the reviewer subagent in full; this budget forces a change in
 approach, not a shortcut past the review gate. Anchored by a measurement;
 see the entry for this rule in the orchestrator-workflow CHANGELOG.
 
+## Fix-regression decision point
+
+The signal: the review of a fix round (any implementation round after the
+task's first) reports at least one `high` or `critical` finding that the
+previous round's review did not report, with `introduced_by_delta: yes`, so
+the fix itself broke something. Read the qualifier off the findings of the
+two reviews, not off `recurrence`: a `recurrence: repeated` finding that
+the previous round's review did not report still triggers it. `unknown` and
+`no` do not trigger this decision point: `no` continues through the
+ordinary finding gate, and `unknown` keeps its existing treatment under the
+Round-2 halt rule and the escalation budget. The signal needs no
+recurrence: it fires even when the new finding's defect class has not
+appeared on this task before, which is what separates it from the Round-2
+halt rule above.
+
+Before another fix round starts, name in one sentence why the fix could
+introduce the defect (the structural cause, or the statement that there is
+none), and record one of four outcomes as a decision in `03-decisions.md`:
+continue with the stated reason, redesign, split, or hold (a merge-hold to
+the operator). Spawning the advisor for this decision is optional.
+
+This is a decision point, not a halt: continuing is a valid outcome, it is
+not a round-2 halt signal, and it does not count toward the Review-round
+escalation budget (the negative round itself still counts there as
+before). It never replaces a review round. When the same review also fires
+the Round-2 halt signal, the halt rule governs and this record is folded
+into its split-or-redesign decision. Anchored by an observed run; see the
+entry for this rule in the orchestrator-workflow CHANGELOG.
+
 ## Final acceptance rule
 
 Subagents provide evidence. The orchestrator decides. The operator receives

@@ -1268,7 +1268,7 @@
   sentence reverted to its pre-change wording, fails the exact-sub-field
   and regression-signal tests above; restored, the suite is green again.
   `CHANGELOG.md`'s own prose copy of this change is
-  (`CHANGELOG.md:202#"The implementer"`).
+  (`CHANGELOG.md:221#"The implementer"`).
 
   Verified on the committed tree: the full package suite (`npm test`),
   `typecheck`, `typecheck:test`, and `format:check`, all clean. Re-pointed
@@ -1536,7 +1536,7 @@
   that binding rather than second-guessing it.
 
   The CHANGELOG bullet for this round is
-  `CHANGELOG.md:579#"Citation scanning is paragraph-joined"`. Verified on
+  `CHANGELOG.md:598#"Citation scanning is paragraph-joined"`. Verified on
   the committed tree: the full package suite, `docs-consistency.test.ts`
   on its own, `typecheck`, `typecheck:test` and `format:check`; the
   figures each guard measured are in its own computed test name, per the
@@ -10353,10 +10353,10 @@ list is non-empty, and rule 2's semver-precedence comparison with build
 metadata stripped before it.
 
 The 19-line insertion re-pointed this log's own two live self-citations
-into `CHANGELOG.md`, from line 179 to line 198 (moved again to line 202
-by a later round, `CHANGELOG.md:202#"The implementer"`) and from line
-556 to line 575 (moved again to line 579,
-`CHANGELOG.md:579#"Citation scanning is paragraph-joined"`); both were
+into `CHANGELOG.md`, from line 179 to line 198 (moved again to line 221
+by later rounds, `CHANGELOG.md:221#"The implementer"`) and from line
+556 to line 575 (moved again to line 598,
+`CHANGELOG.md:598#"Citation scanning is paragraph-joined"`); both were
 re-read at their new lines before the re-point. Re-verified and
 re-stamped the three docs whose `sources:` list `CHANGELOG.md`
 (`run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`,
@@ -10382,9 +10382,9 @@ one, and two fixture tests were added (the underscore heading, and an
 empty prerelease heading `## [1.0.0-]`), plus the round-1 mismatch test
 was tightened to assert the exact mismatch message instead of only the
 `[version-heading]` tag. The 4-line bullet growth re-pointed this log's
-two live self-citations again, from line 198 to line 202
-(`CHANGELOG.md:202#"The implementer"`) and from line 575 to line 579
-(`CHANGELOG.md:579#"Citation scanning is paragraph-joined"`); both were
+two live self-citations again, from line 198 to line 202 (moved again to line 221 by a later
+round, `CHANGELOG.md:221#"The implementer"`) and from line 575 to line 579
+(moved again to line 598, `CHANGELOG.md:598#"Citation scanning is paragraph-joined"`); both were
 re-read at their new lines before the re-point.
 
 Verified from the worktree root: `build`, `typecheck`, `typecheck:test`,
@@ -10419,3 +10419,67 @@ The independent reviewer then named four comma splices, one list ambiguity
 and one line-initial parenthesis the swaps had left behind, a period moved
 inside a quoted JSDoc sentence, and an unrunnable command; the orchestrator
 repaired them as a docs-only closure.
+
+## 2026-09-18 (agent-dx c563b339, fix-regression decision point)
+
+`assets/skill/references/review-and-recovery.md` gained a "Fix-regression
+decision point" section between the Review-round escalation budget and the
+Final acceptance rule, and step 8 of `evidence-and-probes.md` gained a
+pointer sentence appended to an existing line, so neither reference moved a
+cited line (the highest line this bundle cited in `review-and-recovery.md`
+before this change is 74, and the step 8 sentence added no line).
+[review-gate-and-waivers.md](review-gate-and-waivers.md) gained a section of
+the same name covering the trigger, the four recorded outcomes and the
+boundaries against the halt rule and the budget, with five anchored
+citations. The 19-line `CHANGELOG.md` bullet re-pointed this log's two live
+self-citations, from line 202 to line 221
+(`CHANGELOG.md:221#"The implementer"`) and from line 579 to line 598
+(`CHANGELOG.md:598#"Citation scanning is paragraph-joined"`), in the two
+live sites and in the two earlier entries that quote them; both were
+re-read at their new lines before the re-point. Re-verified and re-stamped
+the three docs whose `sources:` list the changed files
+(review-gate-and-waivers.md, run-state-lifecycle-and-markers.md,
+subagent-contracts-superset.md): every anchored citation into the two
+references still resolves at its unchanged line, and the sections that
+describe the halt rule and the budget were re-read against the new section
+and stay accurate, since the new rule changes neither.
+
+The independent reviewer then found that the section's clause on `unknown`
+contradicted the halt rule and the budget, which both act on `unknown`, that
+the trigger lacked the qualifier "that the previous round's review did not
+report" which its two pointers carry, and that the changelog bullet's
+"no re-install" claim was wrong for a rule shipped in a skill reference; two
+reviewer mutants on unpinned sentences survived. The fix round scoped the
+clause, added the qualifier, corrected the bullet, pinned both sentences and
+the `unknown` treatment, and moved the two citations of this change that sit
+below the grown paragraph by two lines; the bullet's growth is already
+included in the line numbers above.
+
+A second review found the trigger still worded two ways (the section's
+"that the previous round's review did not report" against "a new finding" in
+step 8 and the changelog, where `new` already names a `recurrence` value)
+and a surviving mutant on the step 8 sentence. Since that class had recurred
+after a fix, the pointer was redesigned instead of aligned: step 8 now points
+to the section without restating the trigger and is pinned as a whole
+sentence, the changelog bullet quotes the section's phrasing, and the section
+says how the qualifier is evaluated against the `recurrence` field. The
+paragraph grew again, so this change's two citations below it were re-pointed
+once more.
+
+A third review found the boundary sentence pinned only on its first words,
+the test comment still describing the trigger in the old words, an absolute
+claim in the bundle doc that the bundle itself contradicted, and the
+changelog bullet only near-quoting the section. An advisor consulted under
+the escalation budget separated the two causes: a prose mutant survives
+whenever its bytes sit in no assertion, which no number of rounds ends, while
+differing trigger wordings come from one normative statement restated at
+several sites. The last round therefore pins the boundary sentence whole,
+holds the trigger in one test constant asserted against the section, the
+changelog bullet and the bundle doc, removes the absolute claim, and cuts the
+bullet to its load-bearing sentences; the bullet length and the two
+self-citation lines above reflect that final bullet.
+The final review's two documentation notes were closed without a further
+round: the changelog bullet now says the rule is defined only in the section
+(step 8 also instructs, so "only normative statement" overstated it), and the
+bundle doc states the naming obligation with the reference's own escape
+clause.
