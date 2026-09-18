@@ -317,16 +317,21 @@ describe("beginInplace", () => {
 
       const session = beginInplace(target, logDir, root);
       fs.rmSync(outer, { recursive: true, force: true });
+      // The recreated file takes the backup's own mode on every platform
+      // (the destination does not exist yet), so pinning the backup at
+      // 0600 guarantees the target comes back needing a chmod to 0755
+      // and the file arm of the warning is exercised deterministically.
+      fs.chmodSync(session.backupPath, 0o600);
 
-      // Stands in for a directory this process is not allowed to chmod
-      // at all; the real cases (a foreign-owned mount, `/tmp`) cannot be
-      // produced portably from a test.
+      // Stands in for a directory (and a file) this process is not
+      // allowed to chmod at all; the real cases (a foreign-owned mount,
+      // `/tmp`) cannot be produced portably from a test.
       const realChmod = fs.chmodSync;
       const chmod = vi.spyOn(fs, "chmodSync").mockImplementation(((
         p: fs.PathLike,
         mode: fs.Mode,
       ) => {
-        if (String(p) === outer) {
+        if (String(p) === outer || String(p) === target) {
           const err = new Error(
             "EPERM: operation not permitted, chmod",
           ) as NodeJS.ErrnoException;
@@ -346,22 +351,35 @@ describe("beginInplace", () => {
       }
 
       const warnings = session.takeRestoreWarnings();
-      expect(warnings.length).toBe(1);
-      expect(warnings[0]).toContain(outer);
+      expect(warnings.length).toBe(2);
+      const dirWarning = warnings.find(
+        (w) => w.includes(outer) && !w.includes(target),
+      );
+      const fileWarning = warnings.find((w) => w.includes(target));
+      expect(dirWarning).toBeDefined();
+      expect(fileWarning).toBeDefined();
       // A recreated directory reads "recreated <dir>", never "restored
       // <dir>'s content": the latter would misdescribe a directory that
-      // was never mutated in place, only rebuilt by `mkdirSync`.
-      expect(warnings[0]).toContain(`recreated ${outer}`);
-      expect(warnings[0]).toContain("0o0700");
-      expect(warnings[0]).toMatch(/from 0o\d{4}/);
-      expect(warnings[0]).toContain("EPERM");
+      // was never mutated in place, only rebuilt by `mkdirSync`. The
+      // target file, which WAS mutated in place, keeps the "restored
+      // ...'s content" lead; both arms of that distinction are pinned
+      // here.
+      expect(dirWarning).toContain(`recreated ${outer}`);
+      expect(dirWarning).toContain("0o0700");
+      expect(dirWarning).toMatch(/from 0o\d{4}/);
+      expect(dirWarning).toContain("EPERM");
+      expect(fileWarning).toContain(`restored ${target}'s content`);
+      expect(fileWarning).not.toContain("recreated");
+      expect(fileWarning).toContain("0o0755");
+      expect(fileWarning).toContain("EPERM");
       // Drained, not merely read: a later restore on the same session
       // must not re-report this one's warning.
       expect(session.takeRestoreWarnings()).toEqual([]);
       expect(fs.readFileSync(target, "utf8")).toBe("original\n");
-      // Every level the restore COULD correct still was.
+      // Every level the restore COULD correct still was; the target,
+      // whose chmod was refused, keeps the backup's 0600.
       expect(fs.statSync(inner).mode & 0o7777).toBe(0o750);
-      expect(fs.statSync(target).mode & 0o7777).toBe(0o755);
+      expect(fs.statSync(target).mode & 0o7777).toBe(0o600);
     },
   );
 
@@ -391,7 +409,16 @@ describe("beginInplace", () => {
       // its contents are untouched.
       fs.rmSync(link, { recursive: true, force: true });
 
-      expect(session.restore()).toBe(true);
+      // Pin the umask so `mkdirSync`'s default mode (0o777 & ~umask) is
+      // 0o755 and therefore differs from the captured 0o700: under an
+      // ambient umask 077 the default would already be 0o700 and this
+      // test could not tell a captured mode from an uncaptured one.
+      const previousUmask = process.umask(0o022);
+      try {
+        expect(session.restore()).toBe(true);
+      } finally {
+        process.umask(previousUmask);
+      }
 
       expect(session.takeRestoreWarnings()).toEqual([]);
       expect(fs.readFileSync(target, "utf8")).toBe("original\n");

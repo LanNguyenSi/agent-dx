@@ -2413,7 +2413,12 @@ describe("probe(): -p deletion restores the whole recreated directory chain's mo
       // (`restoreOnceReportingModes` in step.ts): without it, the
       // warning stays trapped inside the session and never reaches the
       // caller.
-      const warning = result.warnings.find((w) => w.includes(soleDir));
+      // Narrowed to the mode warning's own lead: the apply_hash_mismatch
+      // warning names the target path, which has soleDir as a prefix, so a
+      // plain includes() would match it and make toBeDefined() inert.
+      const warning = result.warnings.find((w) =>
+        w.startsWith(`recreated ${soleDir},`),
+      );
       expect(warning).toBeDefined();
       expect(warning).toContain("0o0700");
       expect(warning).toMatch(/from 0o\d{4}/);
@@ -2497,7 +2502,12 @@ describe("probe(): -p deletion restores the whole recreated directory chain's mo
       expect(result.reason).toBe("apply_hash_mismatch");
       expect(result.mutation_probe?.restored_verified).toBe(true);
       expect(fs.readFileSync(target, "utf8")).toBe(before);
-      const warning = result.warnings.find((w) => w.includes(soleDir));
+      // Narrowed to the mode warning's own lead: the apply_hash_mismatch
+      // warning names the target path, which has soleDir as a prefix, so a
+      // plain includes() would match it and make toBeDefined() inert.
+      const warning = result.warnings.find((w) =>
+        w.startsWith(`recreated ${soleDir},`),
+      );
       expect(warning).toBeDefined();
       expect(warning).toContain("0o0700");
       expect(warning).toMatch(/from 0o\d{4}/);
