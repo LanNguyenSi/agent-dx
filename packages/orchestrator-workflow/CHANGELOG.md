@@ -61,7 +61,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rule 2's (fresh-unreleased) direction check compares versions by
   semver precedence, not string inequality, with build metadata stripped
   before the comparison since two versions differing only in build
-  metadata carry equal precedence per the semver spec.
+  metadata carry equal precedence per the semver spec. The shared class
+  is narrower than `\w`: an underscore prerelease heading such as
+  `1.0.0-alpha_1` is no longer accepted either, since semver's own
+  prerelease grammar forbids underscores and `parseSemver` already
+  rejected such a version before this change.
 
 ## [0.36.0] - 2026-09-16
 

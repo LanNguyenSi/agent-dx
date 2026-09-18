@@ -135,7 +135,14 @@ const EXPECTED_CHECKED_PACKAGES = [
 // package.json version with a hyphenated prerelease tag such as
 // "1.0.0-alpha-1" parsed fine but never matched the heading regex. Both
 // sites build their prerelease group from this one string instead of
-// repeating the character class literally.
+// repeating the character class literally. Deliberately narrower than
+// `\w`: no underscore, since semver's own prerelease grammar
+// (dot-separated alphanumerics and hyphens only) forbids it and
+// parseSemver already rejected it before this change. This string is
+// spliced verbatim into a `[...]` character class at both call sites, so
+// the trailing `-` must stay last in the string: inside a character
+// class a hyphen anywhere else opens a range (e.g. `a-z`) instead of
+// matching a literal hyphen.
 const PRERELEASE_IDENTIFIER_CHARS = "0-9A-Za-z.-";
 
 // Matches the first release heading, skipping any leading `## [Unreleased]`

@@ -1189,7 +1189,7 @@
   sentence reverted to its pre-change wording, fails the exact-sub-field
   and regression-signal tests above; restored, the suite is green again.
   `CHANGELOG.md`'s own prose copy of this change is
-  (`CHANGELOG.md:198#"The implementer"`).
+  (`CHANGELOG.md:202#"The implementer"`).
 
   Verified on the committed tree: the full package suite (`npm test`),
   `typecheck`, `typecheck:test`, and `format:check`, all clean. Re-pointed
@@ -1457,7 +1457,7 @@
   that binding rather than second-guessing it.
 
   The CHANGELOG bullet for this round is
-  `CHANGELOG.md:575#"Citation scanning is paragraph-joined"`. Verified on
+  `CHANGELOG.md:579#"Citation scanning is paragraph-joined"`. Verified on
   the committed tree: the full package suite, `docs-consistency.test.ts`
   on its own, `typecheck`, `typecheck:test` and `format:check`; the
   figures each guard measured are in its own computed test name, per the
@@ -10273,10 +10273,11 @@ list is non-empty, and rule 2's semver-precedence comparison with build
 metadata stripped before it.
 
 The 19-line insertion re-pointed this log's own two live self-citations
-into `CHANGELOG.md`, from line 179 to line 198
-(`CHANGELOG.md:198#"The implementer"`) and from line 556 to line 575
-(`CHANGELOG.md:575#"Citation scanning is paragraph-joined"`); both were
-re-read at their new lines before the re-point. Re-verified and
+into `CHANGELOG.md`, from line 179 to line 198 (moved again to line 202
+by a later round, `CHANGELOG.md:202#"The implementer"`) and from line
+556 to line 575 (moved again to line 579, `CHANGELOG.md:579#"Citation
+scanning is paragraph-joined"`); both were re-read at their new lines
+before the re-point. Re-verified and
 re-stamped the three docs whose `sources:` list `CHANGELOG.md`
 (`run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`,
 `review-gate-and-waivers.md`): none of the three names the script or the
