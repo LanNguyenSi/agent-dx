@@ -369,14 +369,29 @@ const FINDING_ID = /\bF\d[a-z]?\b(?!-\d)/g;
 // it, not a smarter filter.
 const SEVERITY_FINDING_ID = /\b[HMLC]\d[a-z]?\b(?!-\d)/g;
 
-// The review-process word set gating `SEVERITY_FINDING_ID` above: the
-// same words `round-reference`'s own context sets use (see
-// `ROUND_WORD_CONTEXT`/`ROUND_TOKEN_CONTEXT` further down), plus
-// `round`/`rounds` itself, since a bare severity-letter id is exactly
-// as ambiguous as a bare `RN` round token and deserves the same context
-// word.
-const FINDING_ID_CONTEXT =
-  /\b(review|reviewer|finding[s]?|fix(?:e[ds]|ing)?|round[s]?)\b/i;
+// Both `round \d+` and the bare `R\d+` token read ordinary prose as a
+// false positive in isolation (`## Round 2` heading, `round 2 of the DNS
+// retry`, a Cloudflare `R2` bucket, `DeepSeek-R1`, `see pin R3`). Rather
+// than guess from the token's shape alone, each match is only kept when
+// the same sentence also carries a review-process word -- one sentence,
+// bounded by `.`, `!`, `?`, a blank line, a heading, or a list item (see
+// `sentenceWindow` below). `round`/`rounds` counts as context for a bare
+// `R\d+` token (a nearby "round" is real evidence, e.g. "over several
+// rounds we settled on R3"), but deliberately NOT for `round \d+` itself
+// -- the matched phrase always contains the word "round", so including it
+// in its own context set would make the filter a no-op.
+const ROUND_WORD_CONTEXT =
+  /\b(review|reviewer|fix(?:e[ds]|ing)?|finding[s]?)\b/i;
+const ROUND_TOKEN_CONTEXT =
+  /\b(review|reviewer|round[s]?|fix(?:e[ds]|ing)?|finding[s]?)\b/i;
+
+// The review-process word set gating `SEVERITY_FINDING_ID` above is the
+// bare round token's set, by alias rather than by a second literal: a
+// bare severity-letter id is exactly as ambiguous as a bare `RN` round
+// token and deserves the same context words, `round`/`rounds` included,
+// and one source cannot drift from the other when the vocabulary is
+// extended.
+const FINDING_ID_CONTEXT = ROUND_TOKEN_CONTEXT;
 
 const findingId: Rule = {
   id: "review-slop/finding-id",
@@ -384,7 +399,7 @@ const findingId: Rule = {
   defaultSeverity: "block",
   enabledByDefault: true,
   rationale:
-    "A finding id (`F1`, `F2a`, or a severity-letter id like `M1`/`H2a` when the same sentence also carries a review-process word) only resolves against the one review round it was minted in. Baked into a test title, a source comment, a commit message, or a doc, it reads as a precise reference but is opaque and dead the moment that round is over.",
+    "A finding id (`F1`, `F2a`, or a severity-letter id like `M1`/`H2a` when the same sentence also carries a review-process word) only resolves against the one review round it was minted in. Baked into a test title, a source comment, a commit message, or a doc, it reads as a precise reference but is opaque and dead the moment that round is over. The severity-letter gate is coarse (it clears only on the absence of a review-process word, not on the sentence's topic), so a genuine bug-fix sentence naming a chip or cache id is an accepted false positive; `review.allow` or `review.allowPaths` is the escape hatch.",
   appliesTo: appliesToReviewSurface,
   check(ctx: RuleContext): Violation[] {
     return checkReviewTokenRule(
@@ -424,22 +439,6 @@ const ROUND_WORD = /\bround\s+\d+\b/gi;
 // markdown code block via `stripFencedCode` in `scanProseSurface`, same
 // carve-out as `finding-id` gets for a key name in a code block.
 const ROUND_TOKEN = /\bR\d{1,2}\b/g;
-
-// Both `round \d+` and the bare `R\d+` token read ordinary prose as a
-// false positive in isolation (`## Round 2` heading, `round 2 of the DNS
-// retry`, a Cloudflare `R2` bucket, `DeepSeek-R1`, `see pin R3`). Rather
-// than guess from the token's shape alone, each match is only kept when
-// the same sentence also carries a review-process word -- one sentence,
-// bounded by `.`, `!`, `?`, a blank line, a heading, or a list item (see
-// `sentenceWindow` below). `round`/`rounds` counts as context for a bare
-// `R\d+` token (a nearby "round" is real evidence, e.g. "over several
-// rounds we settled on R3"), but deliberately NOT for `round \d+` itself
-// -- the matched phrase always contains the word "round", so including it
-// in its own context set would make the filter a no-op.
-const ROUND_WORD_CONTEXT =
-  /\b(review|reviewer|fix(?:e[ds]|ing)?|finding[s]?)\b/i;
-const ROUND_TOKEN_CONTEXT =
-  /\b(review|reviewer|round[s]?|fix(?:e[ds]|ing)?|finding[s]?)\b/i;
 
 // An ATX heading line and a list-item line, both allowing CommonMark's
 // up-to-three leading spaces of indentation. Used as structural sentence

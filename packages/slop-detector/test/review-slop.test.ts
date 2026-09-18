@@ -223,6 +223,39 @@ describe("review-slop", () => {
       expect(hit?.matched).toBe("F1");
     });
 
+    it("fires on a severity-letter id gated inside a TS line comment", () => {
+      const text = [
+        "function build() {",
+        "  // Closed M1 after the second review pass.",
+        "  return true;",
+        "}",
+      ].join("\n");
+      const v = checkText(text, "src/build.ts", baseOpts());
+      const hit = v.find((x) => x.ruleId === "review-slop/finding-id");
+      expect(hit).toBeDefined();
+      expect(hit?.matched).toBe("M1");
+    });
+
+    it("fires on a severity-letter id gated inside an it() title", () => {
+      const text =
+        'it("L2 finding: keeps the cache warm", () => { expect(1).toBe(1); });';
+      const v = checkText(text, "src/cache.test.ts", baseOpts());
+      const hit = v.find((x) => x.ruleId === "review-slop/finding-id");
+      expect(hit).toBeDefined();
+      expect(hit?.matched).toBe("L2");
+    });
+
+    it("the context word is matched case-insensitively", () => {
+      const v = checkText(
+        "Filed M1 during Review.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      const hit = v.find((x) => x.ruleId === "review-slop/finding-id");
+      expect(hit).toBeDefined();
+      expect(hit?.matched).toBe("M1");
+    });
+
     it("documented limitation: a bug-fix sentence naming a chip/cache-shaped id still fires (see review.allow)", () => {
       // The gate only checks whether a review-process word shares the
       // sentence, not whether the sentence is actually about a review
