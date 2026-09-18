@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The npm tarball now ships a `LICENSE` file matching the repo root LICENSE
   (MIT), asserted by the monorepo's `lint-package-licenses` CI job.
+- `review-slop/finding-id` now also matches a severity-letter finding id:
+  an uppercase `H`, `M`, `L`, or `C` (high, medium, low, critical)
+  followed by exactly one digit and an optional lowercase letter, the
+  same shape and hyphenated-year exclusion the `F` form already has. The
+  `F` form stays ungated; the new severity-letter alternative only
+  counts when the same sentence also carries a review-process word
+  (`review`, `reviewer`, `finding`/`findings`,
+  `fix`/`fixed`/`fixes`/`fixing`, or `round`/`rounds`) -- the same
+  sentence-window mechanism `round-reference`'s own bare-token gate
+  already uses -- since these four letters collide with plain
+  vocabulary (heading levels, chip generations, cache layers, a hazmat
+  class) far more often than a capital `F` does. Measured with
+  `node dist/cli.js check . --pack review-slop` from the monorepo root:
+  696 files scanned both times, 530 violations before this change, 811
+  after (281 new `finding-id` hits, entirely from severity-letter ids
+  now caught in pre-existing content such as
+  `packages/orchestrator-workflow/docs/okf/log.md`'s own review-round
+  entries; that pre-existing corpus is not scrubbed as part of this
+  change). The gate is coarse, not disambiguation: a sentence naming
+  one of the four letters clears only because no review-process word
+  shares it, not because the pack understood the sentence's topic, so
+  a genuine bug-fix sentence that happens to name one of them (a chip
+  generation, a cache layer) still fires as a known, accepted false
+  positive; `review.allow` (or `review.allowPaths`) is the escape
+  hatch for such a line, not a smarter gate.
 
 ### Added
 

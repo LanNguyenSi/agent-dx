@@ -1268,7 +1268,7 @@
   sentence reverted to its pre-change wording, fails the exact-sub-field
   and regression-signal tests above; restored, the suite is green again.
   `CHANGELOG.md`'s own prose copy of this change is
-  (`CHANGELOG.md:179#"The implementer"`).
+  (`CHANGELOG.md:202#"The implementer"`).
 
   Verified on the committed tree: the full package suite (`npm test`),
   `typecheck`, `typecheck:test`, and `format:check`, all clean. Re-pointed
@@ -1536,7 +1536,7 @@
   that binding rather than second-guessing it.
 
   The CHANGELOG bullet for this round is
-  `CHANGELOG.md:556#"Citation scanning is paragraph-joined"`. Verified on
+  `CHANGELOG.md:579#"Citation scanning is paragraph-joined"`. Verified on
   the committed tree: the full package suite, `docs-consistency.test.ts`
   on its own, `typecheck`, `typecheck:test` and `format:check`; the
   figures each guard measured are in its own computed test name, per the
@@ -2707,8 +2707,8 @@
   package version 0.13.0 (contract half of the completeness-reader
   fail-closed fix, agent-tasks fa0eca65): 05-review-findings.md's
   placeholder/legend row gained a comment (and detailed workflow reference a matching
-  sentence) documenting it as a fail-closed signal — replace on findings
-  transfer, delete for a genuine zero-findings review — closing the
+  sentence) documenting it as a fail-closed signal (replace on findings
+  transfer, delete for a genuine zero-findings review), closing the
   "mixed-state bypass" where an untouched placeholder row plus a filled
   acceptance-recommendation marker read as a passed, zero-findings review;
   runtime enforcement is a lockstep sibling change in grounding-mcp (out of
@@ -2717,7 +2717,7 @@
   deliberately outside the completeness check) and a `02-tasks.md`
   `sources:` entry. The SKILL.md edit shifted every line at or after its old
   line 121 by +4; all three docs' `SKILL.md:` line citations at or after
-  that point were re-verified and corrected — each corrected citation was
+  that point were re-verified and corrected: each corrected citation was
   checked against the CURRENT SKILL.md content directly (heading text,
   yaml-fence boundaries, or exact quoted prose), not derived by assuming a
   uniform +4 offset, though the offset turned out uniform in every case
@@ -2727,11 +2727,11 @@
 
   Correction (same day, found in review): the SKILL.md +4 shift was checked
   and fixed everywhere in the pass above, but a second, smaller shift was
-  missed at the time — the placeholder-row comment added to
+  missed at the time: the placeholder-row comment added to
   05-review-findings.md itself (new line 14) pushed every line at or after
   the template's old line 14 down by +1, and none of the three docs'
   `05-review-findings.md:` citations past that point were re-checked against
-  it in the first pass. Review caught four resulting stale citations —
+  it in the first pass. Review caught four resulting stale citations:
   review-gate-and-waivers.md's `05-review-findings.md`, line 25 (Acceptance
   Recommendation enum line, should read 05-review-findings.md at historical lines 31) and `27` (the
   acceptance-recommendation marker, should read historical lines 33), and
@@ -2770,7 +2770,7 @@
   implementer's "8/8 green" flake-rate claim on a `maxWorkers`-cap fix was
   overturned only because the reviewer independently reran the suite and
   found 2/6 red on an independent 6-run sample (flake rate ~1/3, matching
-  the pre-fix baseline) — nothing in the prior contract had required that
+  the pre-fix baseline). Nothing in the prior contract had required that
   rerun. All three docs' `SKILL.md:`, `reviewer.md:`, and `CHANGELOG.md:`
   line citations were re-verified directly against the edited files'
   current content (not derived by assuming a uniform offset, per the lesson
@@ -2779,7 +2779,7 @@
   with its exact numbers. Correction found and fixed in the same pass: the
   `CHANGELOG.md:` citations in all three docs were ALREADY stale before this
   run, by exactly the 31 lines the 0.13.0 entry added on 2026-07-18 earlier
-  today — that insertion's downstream CHANGELOG.md line-citation shift was
+  today. That insertion's downstream CHANGELOG.md line-citation shift was
   never checked in the log entry above (it only re-verified SKILL.md
   shifts), so every `CHANGELOG.md:` citation in the bundle was off by +31
   even before today's +27-line 0.14.0 insertion added a second, compounding
@@ -2788,7 +2788,7 @@
   in isolation. model-preselection.md was re-stamped only (no content
   change; the `sources-fresh` staleness check flagged it because it also
   lists `test/docs-consistency.test.ts` as a source and this run appended a
-  new test block to that file's end — the one citation it makes into that
+  new test block to that file's end: the one citation it makes into that
   file, test/docs-consistency.test.ts at historical lines 36-40, sits well before the
   appended block and was re-verified unchanged).
   `packages/orchestrator-workflow/test/docs-consistency.test.ts` gained one
@@ -2807,7 +2807,7 @@
   not-machine-readable sentence intact), and the test pin. The CHANGELOG
   edit added 4 lines inside the 0.14.0 entry, shifting every entry from
   0.13.0 downward by another +4 (on top of the +27 from the entry's original
-  insertion) — every `CHANGELOG.md:` citation across all three docs was
+  insertion); every `CHANGELOG.md:` citation across all three docs was
   re-verified directly against the current file a second time and corrected;
   `SKILL.md:`/`reviewer.md:` citations were unaffected (the enum rename was a
   same-line replacement, no line-count change in either file). Also added a
@@ -2828,7 +2828,7 @@
   and `init.ts` gained a `profile` manifest field, a `profile`-aware
   `readInstalledManifest` fallback, `rolesForProfile`-scoped per-role
   installs, and (this fix-round) a full -> minimal downgrade-note block
-  inserted before `installKitFile` — `runInit` moved from its old
+  inserted before `installKitFile`: `runInit` moved from its old
   src/init.ts at historical lines 178 to 198, and every citation at or after the old
   init.ts:216 templates-loop shifted by +21 (not a uniform offset applied
   blindly: every citation in both docs was checked against a direct read of
@@ -2836,7 +2836,7 @@
   `test/init.test.ts` citations needed the same treatment for a second,
   independent reason: several were already stale at HEAD, predating even
   the profile feature commit (`631-651`, `705-717`, `719-726` did not
-  correspond to any test in the file as committed) — these are corrected to
+  correspond to any test in the file as committed); these are corrected to
   the tests' actual current locations rather than shifted from a wrong
   baseline. This fix-round's own additions to `test/init.test.ts` (a
   CLI-path test pinning the pre-0.15.0-manifest full-not-minimal fallback,
@@ -2851,11 +2851,11 @@
 
   Known gap, explicitly out of this pass's scope (the task named only these
   two docs): `okf-kit check docs/okf --strict` still exits 1 with 3
-  pre-existing warnings unrelated to this fix-round —
+  pre-existing warnings unrelated to this fix-round:
   run-state-lifecycle-and-markers.md's `README.md`/`INSTALL-AGENT.md`
   staleness and subagent-contracts-superset.md's `src/models.ts` staleness
-  (its `models.ts` `DEFAULT_MODELS` citation, at minimum, is now stale too
-  — it cited lines 27-32 at the time, having moved to `70-75` by the same
+  (its `models.ts` `DEFAULT_MODELS` citation, at minimum, is now stale too:
+  it cited lines 27-32 at the time, having moved to `70-75` by the same
   Profile-block insertion documented above). Neither install-fence-mechanics.md nor
   model-preselection.md contributes any finding to that run. Full suite
   152/152 (147 + 5 new: the fallback test above, three downgrade-note
@@ -2875,8 +2875,8 @@
   update, breaking with the 0.13.0/0.14.0/0.15.0 precedent of updating the
   bundle in the same commit as the feature; the R2 pass closed that gap and
   also hardened the feature itself on review findings (`mutation_probes`
-  shipped with no trigger the kit itself ever produced — SKILL.md step 6
-  said nothing about naming probes — and no not-applicable signal, so an
+  shipped with no trigger the kit itself ever produced (SKILL.md step 6
+  said nothing about naming probes) and no not-applicable signal, so an
   implementer never given probes and one that silently dropped them
   returned the identical placeholder block; both closed by a new step-6
   sentence and a `mutation_probes: []` clause added to both output-contract
@@ -2887,7 +2887,7 @@
   byte-for-byte `reproduction`-field test since 0.14.0
   (`test/docs-consistency.test.ts:1013#"expect(skillBlock).toBe(reviewerBlock);"`); the doc now states the true
   current set of three guarded pairs (task-slicer/subagent-input, reviewer,
-  implementer — the last two by byte-for-byte field-block equality tests)
+  implementer; the last two by byte-for-byte field-block equality tests)
   and names explorer as the one pair still without a dedicated guard; (2)
   the Subagent misfire rule's "Two detection signals" enumeration omitted
   the `mutation_probes`-omission trigger added in 0.16.0, now folded into
@@ -2908,7 +2908,7 @@
   problem: nearly every `SKILL.md:`/`CHANGELOG.md:`/`test/docs-consistency.
   test.ts:` citation in both docs downstream of `SKILL.md`'s Workflow step 6
   was already stale at each doc's own last-stamped commit, not only because
-  of this diff — spot checks (e.g. the Explorer output contract citation,
+  of this diff: spot checks (e.g. the Explorer output contract citation,
   the Subagent input contract citation, the CHANGELOG 0.11.0 motivation
   citation) resolved to wrong content even at the 0.15.0-era commit the
   docs claimed to be verified against, meaning a past re-stamp pass marked
@@ -2919,7 +2919,7 @@
   wrong citation), but did not attempt a citation-by-citation audit of
   spans this pass did not otherwise touch or of citations into files this
   diff never changed (`agents-md-section.md`, the templates, `models.ts`,
-  `template-markers.test.ts`) — those are flagged as a follow-up, not
+  `template-markers.test.ts`); those are flagged as a follow-up, not
   fixed here, per the task's own boundary ("pre-existing stale entries on
   OTHER docs/parts are not yours to fix"). model-preselection.md was
   re-stamped only, no content change: its one shifted source
@@ -2990,7 +2990,7 @@
   every citation, do not assume a uniform offset" discipline used elsewhere
   in this log, applied here to citations outside this fix-round's own diff
   because the task scope was "every citation in these three docs," not just
-  the ones this diff broke. `subagent-contracts-superset.md` additionally
+  the ones this diff broke. `subagent-contracts-superset.md` also
   needed two `task-slicer.md:` citation corrections (the output-contract
   block and the scope-boundaries sentence) since that installed prompt also
   gained a bullet in this fix-round; `explorer.md` and `implementer.md`
@@ -3028,7 +3028,7 @@
   0.18.0 feature itself on four review findings, each requiring a real
   content change (not just a citation fix): (1) `SKILL.md`'s "every
   incident of this exact signal has resolved on the first resume attempt"
-  overstated the record — only four resume outcomes for this signal are
+  overstated the record: only four resume outcomes for this signal are
   actually recorded (three on 2026-07-16, one on 2026-07-20); the
   2026-07-19 session named in the 0.18.0 CHANGELOG entry never had a resume
   outcome recorded at all. `SKILL.md` and the CHANGELOG entry now bind the
@@ -3073,7 +3073,7 @@
   `DEFAULT_MODELS.reviewer` to `"sonnet"` (matching the other three roles)
   turned the new derived-assertion test red plus 4 pre-existing runtime
   tests in `opencode.test.ts`/`init.test.ts` that exercise the reviewer's
-  actual default model end to end — expected collateral, since
+  actual default model end to end: expected collateral, since
   `DEFAULT_MODELS` backs runtime behavior beyond this one prose claim, not a
   sign the new test is redundant with those. Full suite 187/187 (182 + 5
   new), `tsc --noEmit` clean, `tsc --noEmit -p tsconfig.test.json` clean,
@@ -3117,7 +3117,7 @@
   and its `run-base fill instruction`/`hand off` `describe`-block citations
   (`297-305`, `244-295`) were already wrong at the 0.17.0-pass baseline
   (verified by reading the same line ranges in that commit directly, which
-  showed unrelated 0.16.0-entry content, not this hook) — a latent bug this
+  showed unrelated 0.16.0-entry content, not this hook), a latent bug this
   pass's "re-verify every citation, not just the ones this diff broke"
   scope caught and corrected to `268-275`/`277-281`/`283-287`/`289-292`/
   `294-297`/`299-314` and `317-325`/`264-315` respectively.
@@ -3128,7 +3128,7 @@
   confirmed unaffected by any change in this pass or the 0.18.0 commit, so
   left un-re-stamped per the 0.14.0/0.17.0 precedent above of not
   re-stamping a doc whose own citations did not move). After this pass:
-  identical single warning, 0 new findings — the model-preselection.md
+  identical single warning, 0 new findings: the model-preselection.md
   warning is expected to persist until a pass that actually touches its
   cited ranges re-stamps it; not fixed here, per the task's own boundary.
 
@@ -3249,8 +3249,8 @@
   directly touch. Every citation into `models.ts`/`init.ts`/`cli.ts` shifted
   by the fix commit was re-derived from a direct read of the current file at
   that exact location (grep for the anchor phrase or `it(...)`/`describe(...)`
-  title, then read the exact span), not a computed offset applied blindly —
-  the same discipline every prior pass in this log used — though three
+  title, then read the exact span), not a computed offset applied blindly
+  (the same discipline every prior pass in this log used), though three
   distinct uniform shifts turned out to hold across large stretches of
   `cli.ts` and `test/init.test.ts` (a `--no-tiers` commander option addition
   shifted every `cli.ts` line after it by a flat +4 before the tiers-
@@ -3264,10 +3264,10 @@
   (the AGENTS.md-restore-on-mangle test, the inline-marker-immunity test,
   and both CLAUDE.md-import tests) were initially copied forward unshifted
   on the wrong assumption that "the cited source file (`writers.ts`) didn't
-  change" meant "the test citation doesn't need to move either" — it does,
+  change" meant "the test citation doesn't need to move either": it does,
   since the test *file* still shifted even though the function under test
   did not; all four were corrected by direct re-read before this entry was
-  written, the same "verify, don't assume — even inside a region you already
+  written, the same "verify, don't assume, even inside a region you already
   trust" lesson the 2026-08-17 entry above names for exactly this failure
   mode.
 
@@ -3277,7 +3277,7 @@
   section now documents `--no-tiers` (the commander-negatable counterpart to
   `--tiers`, M2), the family-based (not provider-id-based) opencode effort
   dispatch via the new `isClaudeFamilyModel` helper (M4, with the concrete
-  failure mode named — a `github-copilot/claude-*` or nested
+  failure mode named: a `github-copilot/claude-*` or nested
   `openrouter/anthropic/claude-*` model previously fell through to
   `reasoningEffort:` instead of `variant:`), and a new "Unresolved-class
   guard" paragraph covering both halves of M1 (the per-class stderr warning
@@ -3293,7 +3293,7 @@
   `--no-tiers`-driven downgrade-note block (M2) and the profile-downgrade
   note loop's extension to also cover a dropped role's tier-variant files
   when `previous.tiers` was true (M3), plus why the two note loops never
-  double-fire (they iterate disjoint role sets — dropped roles vs. still-
+  double-fire (they iterate disjoint role sets: dropped roles vs. still-
   installed roles). The `L1` content-assertion addition (pinning the exact
   four-line legacy default-file frontmatter, not just the file-set) and the
   new invariant test (`DEFAULT_TIER[role]` is always a member of
@@ -3302,14 +3302,14 @@
   enumeration of the `tier variants` describe block.
 
   `okf-kit check docs/okf --strict` immediately before this pass's commit:
-  9 `sources-fresh` warnings — 2 on review-gate-and-waivers.md, 4 on
+  9 `sources-fresh` warnings: 2 on review-gate-and-waivers.md, 4 on
   run-state-lifecycle-and-markers.md, 3 on subagent-contracts-superset.md,
   none on either doc this pass touches (their own timestamps were already
   the newest in the bundle from the T-002 pass above, so nothing had gone
   stale against them yet at measurement time; the 9 warnings are all
   mtime-driven staleness against files this fix-round's *commit* had not
-  yet touched from git's perspective — `docs-consistency.test.ts`,
-  `CHANGELOG.md`, `README.md`, `INSTALL-AGENT.md`, `models.ts` — since this
+  yet touched from git's perspective (`docs-consistency.test.ts`,
+  `CHANGELOG.md`, `README.md`, `INSTALL-AGENT.md`, `models.ts`), since this
   checker keys "changed" off each file's last commit time, not raw
   filesystem mtime, so uncommitted working-tree edits do not move the
   needle until committed). Measured again after this pass's commit: see the
@@ -3521,7 +3521,7 @@
   `previous.tiers && !tiers` block, the one the new "opencode + unresolved
   tier-class models... exactly 0 leftover notes" test exercises; reverting
   to unconditional `ROLE_TIERS` enumeration) turned that test red (9
-  phantom notes instead of 0), restored and re-verified green — this probe
+  phantom notes instead of 0), restored and re-verified green. This probe
   demonstrates only that one loop's gate; the review-round-2 fix touched an
   analogous gate inside the full -> minimal profile-downgrade loop's own
   tier-variant sub-loop (`init.ts` ~393) too, but no test in this round
@@ -3549,7 +3549,7 @@
   `ROLE_TIERS` enumeration turned a dedicated test red), but its mutation
   probe never touched the sibling gate inside the *full -> minimal
   profile-downgrade* loop's own tier-variant sub-loop (`init.ts` ~393,
-  `if (previous.files[variantPath] !== undefined)`) — on HEAD that gate
+  `if (previous.files[variantPath] !== undefined)`). On HEAD that gate
   behaves identically to its sibling, but nothing in the 233-test suite
   actually exercised it, so a `if (true)` mutant there survived silently.
   A new test/init.test.ts at historical lines 989-1025 `describe` closes the gap: an opencode
@@ -3560,7 +3560,7 @@
   variant notes. Measured directly in this pass, working tree committed
   first per this repo's commit-before-mutation-probe convention: reverting
   `init.ts`'s gate to `if (true)` turned exactly this one new test red (6
-  notes instead of the expected 2 — the 2 real base-file notes plus 4
+  notes instead of the expected 2: the 2 real base-file notes plus 4
   phantom variant notes, one per non-default tier of each of the two
   dropped roles), with the other 232 tests unaffected; restored to the
   byte-identical pre-mutant state (confirmed via `git diff`) and the full
@@ -3569,14 +3569,15 @@
   sentence above: it had described the tiers-off-loop probe as covering
   "both `init.ts` note loops," which overstated what that probe actually
   demonstrated (only the tiers-off loop; the profile-downgrade loop's own
-  gate was the untested one R3-L1 found) — corrected in place rather than
+  gate was the untested one R3-L1 found), corrected in place rather than
   left to imply a coverage this bundle did not have at the time.
 
   R3-L2 is a pure-comment correctness fix, no behavior change: the
   `effortLine` parameter's JSDoc on `composeOpencodeAgentVariant`
   (init.ts at historical lines 298-304) claimed the caller passes the value in "since the
   caller already needs that same value to decide whether to skip writing
-  this variant at all" — false since fix-round-1: the skip decision (init.ts at historical lines 511,
+  this variant at all". That claim was false since fix-round-1: the skip
+  decision (init.ts at historical lines 511,
   `variantModelValue === undefined`) depends only on the class model's
   resolution, computed and checked *before* `effortLine` exists at all
   (init.ts at historical lines 526 computes it only after that check passes); the real reason
@@ -3588,7 +3589,7 @@
   writes" section that had already *proved* the skip check does not depend
   on `effortLine` two sentences earlier via the R2-L1 equivalence proof,
   then contradicted its own proof by attributing the fourth-parameter
-  change to that same dependency) — both corrected the same way, in place,
+  change to that same dependency), both corrected the same way, in place,
   crediting R3-L2 explicitly so a future re-verification pass does not
   mistake the correction for original fix-round-2 content.
 
@@ -3606,7 +3607,7 @@
   either `init.ts` or `cli.ts` (both edits kept their surrounding
   functions' line numbers stable), confirmed directly rather than assumed,
   so no citation into either file needed re-deriving because of these two
-  fixes specifically — only R3-L1's test insertions shifted `init.test.ts`
+  fixes specifically; only R3-L1's test insertions shifted `init.test.ts`
   citations, handled separately below.
 
   R3-L4 restores a lost case in README's opencode-effort bullet list
@@ -3646,7 +3647,7 @@
   shift needed real care: `git diff --stat` shows a clean +82 lines, 0
   deletions, in exactly two hunks (`git diff` hunk headers: `@@ -970,6
   +970,60 @@` and `@@ -1230,6 +1284,34 @@`), giving a three-zone shift
-  rather than one uniform delta — old line <= 972 unshifted, 973-1232
+  rather than one uniform delta: old line <= 972 unshifted, 973-1232
   shifted +54 (the R3-L1 `describe` block, inserted right after the
   existing R2-M2 one and before the kit-owned-file-conflicts one), and
   >= 1233 shifted +82 (the R3-L4 test, inserted between the existing Ollama
@@ -3748,7 +3749,7 @@
 
   Correction (same-day review round 1 on this pass): the "82 total ...
   checked directly against the current file content" claim above should be
-  read as 82 checked, not 82 verified correct — the review found two of
+  read as 82 checked, not 82 verified correct: the review found two of
   them were checked but still left wrong. `run-state-lifecycle-and-
   markers.md:172`'s compound citation SKILL.md at historical lines 177-178,172-173 shifted
   only its first range; the second range, for the "Repos without a bundle
@@ -3765,8 +3766,8 @@
   `06-handoff.md` bullet, corrected to historical lines 46-47. All three were fixed in
   that round; because the round's own SKILL.md edits (one new
   Intent-paragraph sentence, two rewrapped step paragraphs) shifted lines
-  again, every `SKILL.md:` citation across all four docs — not just these
-  three — was re-verified a second time against the post-round file rather
+  again, every `SKILL.md:` citation across all four docs (not just these
+  three) was re-verified a second time against the post-round file rather
   than assumed to still hold from the numbers recorded above.
 
   `okf-kit check docs/okf --strict`: 0 warnings, 0 findings on the
@@ -3850,10 +3851,10 @@
   change in the file); `docs-consistency.test.ts` (+10 for any citation at
   or after old line 445, from this pass's own edit to the misfire-rule test
   pair; +102 for any citation at or after old line 1440, from the new
-  advisor-policy `describe` appended at the file's end — both hunk
+  advisor-policy `describe` appended at the file's end, both hunk
   boundaries confirmed via `git diff -U0` before trusting either shift,
   matching this log's established practice); `src/models.ts` (no uniform
-  shift usable — `ROLES` moved 3-8 -> 8-14, `READ_ONLY_ROLES` 14-17 -> 22-26,
+  shift usable: `ROLES` moved 3-8 -> 8-14, `READ_ONLY_ROLES` 14-17 -> 22-26,
   `DEFAULT_MODELS` 70-75 -> 80-86, the tier-data block 146-199 -> 157-212,
   every citation individually relocated by anchor text); `test/init.test.ts`
   (T-001's own diff landed in 25 separate hunks scattered across the whole
@@ -3864,7 +3865,7 @@
   shift` as a self-consistency proof before trusting the table, then every
   citation actually used in `model-preselection.md`/`install-fence-
   mechanics.md` was additionally spot-checked by direct read, not trusted on
-  the table alone — the tier-variants `describe`'s own internal boundaries
+  the table alone. The tier-variants `describe`'s own internal boundaries
   (each `it`'s start/end line) were located by `grep -n "^  it("` rather
   than computed, since several sub-citations there needed splitting
   differently than the old ranges once the advisor-specific assertions
@@ -3886,7 +3887,7 @@
   its defaults table, its "Which tiers each role gets" tier-data paragraph,
   and its "Rendering" paragraph (4 base files + 9 variants = 13 total,
   now 5 + 10 = 15) all gained advisor rows/clauses; its "Docs-consistency
-  pins" section notes the guard proved itself for real — every enumeration
+  pins" section notes the guard proved itself for real: every enumeration
   site failed red on the advisor addition until each listed doc was
   updated. install-fence-mechanics.md's profile bullet notes `rolesForProfile`
   itself needed no code change (`MINIMAL_PROFILE_ROLES` simply never named
@@ -3904,7 +3905,7 @@
   (the R2-M2 harness-switch test) does not claim whether an
   `advisor-xhigh.md` leftover note is now also present, since that specific
   test's own assertions never enumerated an exact total count or advisor's
-  variant path either before or after this pass — not re-verified here,
+  variant path either before or after this pass: not re-verified here,
   explicitly out of this pass's scope rather than silently assumed
   unaffected. review-gate-and-waivers.md and run-state-lifecycle-and-
   markers.md needed citation corrections only (their content describes the
@@ -3932,7 +3933,7 @@
   headroom (`2026-08-20T23:59:00Z`, inherited from the prior 0.20.0 pass)
   comfortably past any commit made today, so the mtime-based `sources-fresh`
   gate cannot fire against a same-day commit regardless of whether the
-  doc's own prose was re-verified — the checker's known date-granularity
+  doc's own prose was re-verified: the checker's known date-granularity
   limit, not a false negative; the doc content itself was independently
   re-verified by the direct-read citation discipline described above, not
   by trusting the checker's clean report alone. Full suite 247/247 (241
@@ -3976,8 +3977,8 @@
   (the differing-model role list is now derived from `DEFAULT_MODELS` via
   `ROLES.filter((role) => DEFAULT_MODELS[role] !== DEFAULT_MODELS.reviewer)`
   rather than hardcoded) and L3 (the advisor's zero-observation parenthetical
-  reworded from "the signal itself has never been observed for the advisor"
-  — which reads like negative evidence against the correlation — to "the
+  reworded from "the signal itself has never been observed for the advisor",
+  which reads like negative evidence against the correlation, to "the
   advisor has had no spawns yet, so it contributes no evidence either way").
   Every citation into `SKILL.md`, `docs-consistency.test.ts`, and
   `CHANGELOG.md` inside `subagent-contracts-superset.md` was individually
@@ -3997,8 +3998,8 @@
   `cli.ts` (`promptProfile`, +5 lines from old line 78 on) and
   `test/init.test.ts` (+1 from old line 23, +4 from old line 377, +32 from
   old line 405) edits. None of that content describes what this round
-  actually changed (M1's label derivation, M2's tripwire/pin additions) —
-  the underlying mechanics they document are untouched — so a mechanical
+  actually changed (M1's label derivation, M2's tripwire/pin additions). The
+  underlying mechanics they document are untouched, so a mechanical
   55-citation re-stamp of those two docs was scoped out of this pass rather
   than risk transcription errors at that volume for peripheral-content
   citations; the one citation in `install-fence-mechanics.md` that *does*
@@ -4007,7 +4008,7 @@
   the remaining `cli.ts`/`init.test.ts` citations in both docs.
 
   `okf-kit check docs/okf --strict`: 0 warnings, 0 findings both before this
-  pass's edits (working-tree-only, uncommitted) and after — re-verified by
+  pass's edits (working-tree-only, uncommitted) and after, re-verified by
   direct read per the citation discipline above, not by trusting the
   checker's clean report alone (same known date-granularity limit on the
   `sources-fresh` gate the 0.21.0 entry above documents). CHANGELOG.md's
@@ -4188,7 +4189,7 @@
   and the doc-touch itself silently suppressing two real pre-existing
   `sources-fresh` STALE warnings against `INSTALL-AGENT.md` via
   `sources-fresh`'s doc-committed-at/after-source override (a `git log`
-  timestamp effect, not a frontmatter one — touching a doc file at all
+  timestamp effect, not a frontmatter one: touching a doc file at all
   updates its own last-commit time, regardless of what the edit is).
   Fix-round-2 re-derived every round-1-touched citation from a direct read
   of the actual current source (`src/init.ts`/`src/cli.ts`/`SKILL.md`/
@@ -4373,7 +4374,7 @@
   `pinned-default-effort`/`advisor escalation`/`advisor output contract`
   and both README-table describes below the insertion point), then again
   after this round's own `npx prettier --write` pass on the test file
-  additionally collapsed two long single-argument `.indexOf(...)` calls
+  also collapsed two long single-argument `.indexOf(...)` calls
   (one pre-existing, at the top of the file before any of this round's
   edits, one inside this round's own new code) into single lines, a net
   -4 shift compounding the first pass's numbers; a uniform -2 held for
@@ -10132,7 +10133,7 @@ closing delta's finding-set delta against base is zero.
   and `npm run typecheck:test` were clean both before and after this
   round's edits.
 
-## 2026-09-14 — Routed workflow references and saved probe plans
+## 2026-09-14 (Routed workflow references and saved probe plans)
 
 Repointed live citations after moving the detailed workflow, role contracts,
 run-state/harness guidance, and recovery rules out of the compact skill entry.
@@ -10332,3 +10333,89 @@ cause-hint pin in `test/docs-consistency.test.ts` follows the new hint
 wording (and now also names an expired token as a cause); the four docs
 sourcing that test file were re-verified and re-stamped twice, once per
 edit of the pin (no citation into it moved).
+
+## 2026-09-18 (agent-dx d19ae5d7, check-release-changelogs hyphenated prerelease headings)
+
+`check-release-changelogs.mjs`'s `VERSION_HEADING_RE` (rule 1,
+version-heading) previously accepted only `[\w.]` in a heading's
+prerelease tag, while `parseSemver` already accepted `[0-9A-Za-z.-]`; a
+package.json version with a hyphenated prerelease such as `1.0.0-alpha-1`
+parsed fine through `parseSemver` but never matched the heading regex.
+Both sites now build their prerelease group from one shared
+`PRERELEASE_IDENTIFIER_CHARS` constant so the two cannot drift apart
+again. Two fixture tests were added: a hyphenated heading that matches
+package.json's version passes rule 1, and a hyphenated heading that does
+not match still fails it. `CHANGELOG.md`'s `[Unreleased]` section gained
+a bullet naming this fix and three details the 0.35.0 hardening bullet
+left unnamed: the `--expect <csv>` option (an empty csv opts out of rule
+5, checked-package-scope), rule 5 running only when that expectation
+list is non-empty, and rule 2's semver-precedence comparison with build
+metadata stripped before it.
+
+The 19-line insertion re-pointed this log's own two live self-citations
+into `CHANGELOG.md`, from line 179 to line 198 (moved again to line 202
+by a later round, `CHANGELOG.md:202#"The implementer"`) and from line
+556 to line 575 (moved again to line 579,
+`CHANGELOG.md:579#"Citation scanning is paragraph-joined"`); both were
+re-read at their new lines before the re-point. Re-verified and
+re-stamped the three docs whose `sources:` list `CHANGELOG.md`
+(`run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`,
+`review-gate-and-waivers.md`): none of the three names the script or the
+changed rule, and each of their own `CHANGELOG.md` citations is
+heading-anchored (`#[x.y.z]`), so no body edit was needed beyond the
+timestamp.
+
+Verified from the worktree root: `build`, `typecheck`, `typecheck:test`,
+and `format:check` all clean; the full package suite green (1210
+passed). `node scripts/check-release-changelogs.mjs --base origin/master`
+exits 0. One mutation probe through `agent-primitives probe`, killed with
+expectation met: narrowing the shared prerelease class back to `[\w.]`
+(dropping the hyphen) fails the hyphenated-heading fixture test; restored
+and re-verified clean.
+
+A second round narrowed the shared class further: an underscore
+prerelease heading (`1.0.0-alpha_1`) is no longer accepted either, since
+semver's own prerelease grammar forbids underscores and `parseSemver`
+already rejected such a version before this change; the round-1 bullet
+above was extended in place with this clause rather than adding a new
+one, and two fixture tests were added (the underscore heading, and an
+empty prerelease heading `## [1.0.0-]`), plus the round-1 mismatch test
+was tightened to assert the exact mismatch message instead of only the
+`[version-heading]` tag. The 4-line bullet growth re-pointed this log's
+two live self-citations again, from line 198 to line 202
+(`CHANGELOG.md:202#"The implementer"`) and from line 575 to line 579
+(`CHANGELOG.md:579#"Citation scanning is paragraph-joined"`); both were
+re-read at their new lines before the re-point.
+
+Verified from the worktree root: `build`, `typecheck`, `typecheck:test`,
+and `format:check` all clean; the full package suite green (1212
+passed, up from 1210 by the two new fixtures). Three mutation probes
+through `agent-primitives probe`, all killed with expectation met:
+narrowing the shared class back to `[\w.]` (also kills two pre-existing
+tests beyond the hyphenated fixture: the tightened mismatch test and the
+prerelease step-down direction-guard test), re-adding the underscore
+(`0-9A-Za-z._-`), and widening `VERSION_HEADING_RE`'s prerelease
+repetition from `+` to `*`; each mutant was restored and re-verified
+clean. `node scripts/check-release-changelogs.mjs --base origin/master`
+exits 0.
+
+## 2026-09-18 (agent-dx 3e017800, log.md prose slop)
+
+`node packages/slop-detector/dist/cli.js check
+packages/orchestrator-workflow/docs/okf/log.md --config slop.config.yml`
+(from the repo root) reported 57 prose-slop warnings on this file (55 em dashes, 2 hedging openers), a count
+the tool had not surfaced before its fenced-code stripping was anchored at a
+line start, which had let a mid-sentence triple-backtick mention mask the
+prose after it and skip the rest of the file. Replaced every flagged em dash
+with a comma, colon, parentheses, or a sentence split chosen per sentence,
+and reworded the two hedging-opener sentences, without touching any citation,
+code span, or quoted anchor string; the replacements moved no cited line
+(this log is not cited by line number) and every existing
+`CHANGELOG.md:`/`SKILL.md:` self-citation is unchanged. The same check now
+reports zero violations, and the `review-slop` pack's finding count on this
+file is unchanged at 290 (all pre-existing run-local round references,
+unrelated to this fix).
+The independent reviewer then named four comma splices, one list ambiguity
+and one line-initial parenthesis the swaps had left behind, a period moved
+inside a quoted JSDoc sentence, and an unrunnable command; the orchestrator
+repaired them as a docs-only closure.
