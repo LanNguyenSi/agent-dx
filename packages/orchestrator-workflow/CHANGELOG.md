@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in `03-decisions.md` (continue with the stated reason, redesign, split,
   hold) before another fix round starts. It is a decision point, not a
   halt, and changes neither the Round-2 halt rule nor the budget. The
-  section is the rule's only normative statement; step 8 of
+  rule is defined only in that section; step 8 of
   `references/evidence-and-probes.md` points to it without restating the
   trigger. The AGENTS.md section is unchanged, so no AGENTS.md re-install
   is needed; the rule reaches an existing install with the next kit

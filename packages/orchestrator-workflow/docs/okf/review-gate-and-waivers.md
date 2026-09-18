@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-09-18T13:08:40.000Z
+timestamp: 2026-09-18T13:24:17.000Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/agents/reviewer.md
@@ -370,7 +370,8 @@ the qualifier is read off the findings of the two reviews, not off
 not report still triggers it. `unknown` and `no` do not trigger it;
 `unknown` keeps its treatment under the halt rule and the budget, which
 both act on it. Before another fix round the
-orchestrator names the structural cause in one sentence and records one of
+orchestrator names in one sentence why the fix could introduce the defect
+(the structural cause, or the statement that there is none) and records one of
 four outcomes in `03-decisions.md`: continue with the stated reason,
 redesign, split, or hold
 (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:102#"record one of four outcomes as a decision in"`);

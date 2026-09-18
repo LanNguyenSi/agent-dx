@@ -10478,3 +10478,8 @@ holds the trigger in one test constant asserted against the section, the
 changelog bullet and the bundle doc, removes the absolute claim, and cuts the
 bullet to its load-bearing sentences; the bullet length and the two
 self-citation lines above reflect that final bullet.
+The final review's two documentation notes were closed without a further
+round: the changelog bullet now says the rule is defined only in the section
+(step 8 also instructs, so "only normative statement" overstated it), and the
+bundle doc states the naming obligation with the reference's own escape
+clause.
