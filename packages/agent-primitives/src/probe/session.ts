@@ -60,6 +60,11 @@ export interface MutantField {
    * fully shown by `before`/`after` alone; see
    * `MutantComputed.diff`'s docblock in `mutant.ts` for exactly when. */
   diff?: MutantDiffField;
+  /** Mirrors `MutantComputed.deleted`: `true` only for a `patch` mutant
+   * whose applied result is "the target file no longer exists" (a
+   * deletion patch), absent for every other mutant. See that field's
+   * own docblock in `mutant.ts`. */
+  deleted?: boolean;
 }
 
 export interface MutationProbeField {

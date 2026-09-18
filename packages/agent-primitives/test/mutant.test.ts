@@ -8,6 +8,7 @@ import {
   buildBoundedHunkExcerpt,
   computeMutant,
   DEFAULT_GIT_APPLY_TIMEOUT_MS,
+  DELETED_FILE_HASH,
   DIFF_EXCERPT_MAX_CHARS,
   DIFF_EXCERPT_MAX_LINES,
   formatMutantSummary,
@@ -311,6 +312,41 @@ describe("computeMutant: patch form", () => {
     for (const logPath of result.logPaths) {
       expect(fs.existsSync(logPath)).toBe(true);
     }
+  });
+
+  it("dry-runs a patch that deletes the whole target file: newContent '', line 1, before the original first line, after '', deleted: true, and the real file untouched", async () => {
+    const { root, relPath, absFile, content } = initRepoWithFile();
+    const patchPath = path.join(root, "delete.patch");
+    fs.writeFileSync(
+      patchPath,
+      [
+        `diff --git a/${relPath} b/${relPath}`,
+        "deleted file mode 100644",
+        "index 0000000..0000000 100644",
+        `--- a/${relPath}`,
+        "+++ /dev/null",
+        "@@ -1,3 +0,0 @@",
+        "-function isPositive(n) {",
+        "-  return n > 0;",
+        "-}",
+      ].join("\n") + "\n",
+    );
+    const result = await computeMutant(
+      { form: "patch", file: absFile, patchPath },
+      { root, logDir: makeTmpDir(), originalContent: content },
+    );
+    expect(result.applicable).toBe(true);
+    if (!result.applicable) return;
+    expect(result.deleted).toBe(true);
+    expect(result.newContent).toBe("");
+    expect(result.line).toBe(1);
+    expect(result.before).toBe("function isPositive(n) {");
+    expect(result.after).toBe("");
+    expect(result.mutatedHash).toBe(DELETED_FILE_HASH);
+    // The dry run applied against a scratch copy only: the real file on
+    // disk must still exist, byte-identical to its original content.
+    expect(fs.existsSync(absFile)).toBe(true);
+    expect(fs.readFileSync(absFile, "utf8")).toBe(content);
   });
 });
 

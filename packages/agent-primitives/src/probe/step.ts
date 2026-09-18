@@ -11,6 +11,7 @@ import { truncationNote } from "../pass-regex.js";
 import {
   applyPatchForReal,
   computeMutant,
+  DELETED_FILE_HASH,
   formatMutantSummary,
   formatVerifiedAppliedVia,
   type MutantComputed,
@@ -165,6 +166,7 @@ export async function prepareMutant(
       after: computed.after,
       form: spec.form,
       ...(computed.diff !== undefined ? { diff: computed.diff } : {}),
+      ...(computed.deleted ? { deleted: true } : {}),
     },
     mutantSummary: formatMutantSummary(
       target.displayFile,
@@ -352,7 +354,22 @@ export async function runMutantAttempt(
     fs.writeFileSync(target.mutationFilePath, computed.newContent);
   }
 
-  const afterApplyHash = await sha256File(target.mutationFilePath);
+  // A deletion patch's real `git apply` above (the `spec.form ===
+  // "patch"` branch) removes `target.mutationFilePath` outright, so
+  // there is no file left to hash the normal way: `computed.deleted`
+  // says the dry run predicted exactly that, and the real target's
+  // current absence is compared against it via the same
+  // `DELETED_FILE_HASH` sentinel `computePatch` put in
+  // `computed.mutatedHash`, rather than calling `sha256File` on a path
+  // that is not there. A target that is, unexpectedly, still present
+  // after a deletion patch hashes to its real (non-sentinel) content
+  // instead, which the mismatch check below already treats as
+  // `apply_hash_mismatch` -- no separate handling needed for that case.
+  const afterApplyHash = computed.deleted
+    ? fs.existsSync(target.mutationFilePath)
+      ? await sha256File(target.mutationFilePath)
+      : DELETED_FILE_HASH
+    : await sha256File(target.mutationFilePath);
   if (
     afterApplyHash === target.preHash ||
     afterApplyHash !== computed.mutatedHash

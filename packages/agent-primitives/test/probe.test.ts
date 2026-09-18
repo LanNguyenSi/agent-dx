@@ -1952,6 +1952,79 @@ describe("probe(): -p integration through probe(), and --pre in both phases", ()
   });
 });
 
+/** A `-p` patch whose applied result is "the target file no longer
+ * exists": built via `git rm` + `git diff --cached` against `repo`'s own
+ * committed content, the same "`deleted file mode`, `+++ /dev/null`"
+ * shape a real `git diff` of a deletion produces, then the working tree
+ * and index are restored so the probe under test still sees the
+ * original, committed content. */
+function deletionPatch(repo: string, relPath: string): string {
+  const abs = path.join(repo, relPath);
+  const original = fs.readFileSync(abs, "utf8");
+  git(repo, ["rm", "-q", "--", relPath]);
+  const diff = gitOutput(repo, ["diff", "--cached", "--", relPath]);
+  git(repo, ["checkout", "HEAD", "--", relPath]);
+  expect(fs.readFileSync(abs, "utf8")).toBe(original);
+  expect(diff).not.toBe("");
+  const patchPath = path.join(makeTmpDir(), "delete.patch");
+  fs.writeFileSync(patchPath, diff);
+  return patchPath;
+}
+
+describe("probe(): -p patch that deletes the whole target file", () => {
+  it("killed: a test command that fails when the file is missing sees it gone, and the file is restored byte-identical afterwards", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+    const patchPath = deletionPatch(repo, "fixture.js");
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        testCommand: "test -f fixture.js",
+      }),
+    );
+
+    expect(result.status).toBe("killed");
+    expect(result.mutant?.deleted).toBe(true);
+    expect(result.mutant?.line).toBe(1);
+    expect(result.mutant?.before).toBe(before.split("\n")[0]);
+    expect(result.mutant?.after).toBe("");
+    expect(result.mutation_probe?.result).toBe("killed");
+    expect(result.mutation_probe?.expectation).toBe("met");
+    expect(result.mutation_probe?.restored_verified).toBe(true);
+    expect(fs.existsSync(path.join(repo, "fixture.js"))).toBe(true);
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+  });
+
+  it("survived: a test command indifferent to the file never notices it is gone, and the file is restored byte-identical afterwards", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+    const patchPath = deletionPatch(repo, "fixture.js");
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        testCommand: "true",
+        expect: "pass",
+      }),
+    );
+
+    expect(result.status).toBe("survived");
+    expect(result.mutant?.deleted).toBe(true);
+    expect(result.mutation_probe?.result).toBe("survived");
+    expect(result.mutation_probe?.expectation).toBe("met");
+    expect(result.mutation_probe?.restored_verified).toBe(true);
+    expect(fs.existsSync(path.join(repo, "fixture.js"))).toBe(true);
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+  });
+});
+
 describe("probe(): -p derives --file and -n when neither is given", () => {
   it("derives --file (the single path the patch touches) and -n (the first hunk's changed line, header start plus its one leading context line), mirroring the explicit --file end-to-end patch test", async () => {
     useLockDir();

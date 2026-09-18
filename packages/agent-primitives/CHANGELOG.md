@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `probe`'s `-p/--patch` mutant now accepts a unified diff whose applied
+  result deletes the whole target file, instead of the dry run throwing
+  once `git apply` removed the scratch copy: `computePatch` treats the
+  file's absence as content `""` (`mutant.line` `1`, `mutant.before` the
+  original first line, `mutant.after` `""`), and reports it via a new
+  `mutant.deleted: true` field, present only for this shape. The real
+  apply removes the target file for real in both isolation modes; the
+  restore recreates it byte-identically from the same backup and hash
+  verification every other mutant already uses, so
+  `mutation_probe.restored_verified` is `true` the same way, and the run
+  classifies `killed`/`survived` like any other patch mutant (tracker
+  8e203884-31f2-4fb8-bf8f-bab7208fa696).
 - `doctor`'s `python-bytecode-cache` check is pinned for a partially
   spent aggregate deadline (a target already in flight when the
   deadline is crossed still resolves through `python3`, and only a

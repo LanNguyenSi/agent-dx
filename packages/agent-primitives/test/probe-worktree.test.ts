@@ -106,6 +106,13 @@ function git(cwd: string, args: string[]): void {
   execFileSync("git", args, { cwd });
 }
 
+/** Same as `git`, but returns stdout -- used to capture a real `git
+ * diff` as a test fixture patch, rather than hand-writing a hunk
+ * header (mirrors `probe.test.ts`'s own `gitOutput`). */
+function gitOutput(cwd: string, args: string[]): string {
+  return execFileSync("git", args, { cwd, encoding: "utf8" });
+}
+
 /** Every entry under `root` (`.git` excluded), keyed by its path relative
  * to `root`, mapped to whether it is a symlink and, either way, a hash
  * of its own content (a symlink's own target string, a regular file's
@@ -735,6 +742,81 @@ describe("probe(): worktree isolation, killed and survived on a clean tree", () 
 
     expect(result.status).toBe("survived");
     expect(result.isolation.mode).toBe("worktree");
+  });
+});
+
+/** A `-p` patch whose applied result is "the target file no longer
+ * exists": built via `git rm` + `git diff --cached` against `repo`'s own
+ * committed content (mirrors `probe.test.ts`'s own `deletionPatch`),
+ * then the working tree and index are restored so the probe under test
+ * still sees the original, committed content. */
+function deletionPatch(repo: string, relPath: string): string {
+  const abs = path.join(repo, relPath);
+  const original = fs.readFileSync(abs, "utf8");
+  git(repo, ["rm", "-q", "--", relPath]);
+  const diff = gitOutput(repo, ["diff", "--cached", "--", relPath]);
+  git(repo, ["checkout", "HEAD", "--", relPath]);
+  expect(fs.readFileSync(abs, "utf8")).toBe(original);
+  expect(diff).not.toBe("");
+  const patchPath = path.join(makeTmpDir(), "delete.patch");
+  fs.writeFileSync(patchPath, diff);
+  return patchPath;
+}
+
+describe("probe(): worktree isolation, -p patch that deletes the whole target file", () => {
+  it("killed: the isolated copy's own deletion is what the test command sees, and the original tree and the restored copy are both byte-identical to the original content", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+    const patchPath = deletionPatch(repo, "fixture.js");
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        testCommand: "test -f fixture.js",
+      }),
+    );
+
+    expect(result.status).toBe("killed");
+    expect(result.mutant?.deleted).toBe(true);
+    expect(result.mutant?.line).toBe(1);
+    expect(result.mutant?.before).toBe(before.split("\n")[0]);
+    expect(result.mutant?.after).toBe("");
+    expect(result.mutation_probe?.result).toBe("killed");
+    expect(result.mutation_probe?.expectation).toBe("met");
+    expect(result.mutation_probe?.restored_verified).toBe(true);
+    expect(result.isolation.mode).toBe("worktree");
+    // The original tree was never touched: only the worktree's own
+    // synced copy was mutated and deleted.
+    expect(fs.existsSync(path.join(repo, "fixture.js"))).toBe(true);
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
+  });
+
+  it("survived: a test command indifferent to the file never notices the isolated copy is gone", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+    const patchPath = deletionPatch(repo, "fixture.js");
+
+    const result = await probe(
+      baseOptions(repo, {
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        testCommand: "true",
+        expect: "pass",
+      }),
+    );
+
+    expect(result.status).toBe("survived");
+    expect(result.mutant?.deleted).toBe(true);
+    expect(result.mutation_probe?.result).toBe("survived");
+    expect(result.mutation_probe?.expectation).toBe("met");
+    expect(result.mutation_probe?.restored_verified).toBe(true);
+    expect(fs.existsSync(path.join(repo, "fixture.js"))).toBe(true);
+    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   });
 });
 

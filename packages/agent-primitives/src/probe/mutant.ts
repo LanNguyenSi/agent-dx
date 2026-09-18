@@ -40,6 +40,22 @@ export interface MutantComputed {
   after: string;
   newContent: string;
   mutatedHash: string;
+  /** Set only for a `patch` mutant whose applied result is "the target
+   * file no longer exists" (a deletion patch): `git apply` removed the
+   * dry-run scratch copy outright, so there is no post-mutation file to
+   * read back. `newContent` is then the empty string and `mutatedHash`
+   * is `DELETED_FILE_HASH`, a sentinel `step.ts` compares the real
+   * target's post-apply state against instead of hashing a file that is
+   * not there -- see that constant's own docblock. `line`/`before`/
+   * `after` still follow the normal `firstDiffLine(originalContent, "")`
+   * rule: the first line of `originalContent`, and `""`, unless
+   * `originalContent` was itself empty (nothing to delete, refused
+   * earlier as "produced no content change"). Absent (never `false`)
+   * for every other mutant, including a `patch` that empties a file's
+   * content without removing the file itself -- that is a `newContent`
+   * of `""` with the file still present, a different applied result
+   * this field does not describe. */
+  deleted?: boolean;
   /** Exec log paths produced while computing this mutant (empty for
    * `replace`/`match`, which do no exec calls; the dry-run `git apply`
    * and, for `patch`, the `--numstat` check for `patch`). */
@@ -289,6 +305,16 @@ export const GIT_DIFF_READ_CONFIG_ARGS = [
  * 8 MiB.
  */
 export const PATCH_MAX_BYTES = 8 * 1024 * 1024;
+
+/** `MutantComputed.mutatedHash`/the post-apply hash `step.ts` compares
+ * it against, for a `patch` mutant whose applied result deletes the
+ * target file: a fixed sentinel, never a real sha256 digest (those are
+ * always 64 lowercase hex characters; this is not), so it can never
+ * collide with an actual file's content hash and stands in for "no file
+ * exists to hash" on both sides of the comparison -- the dry run's
+ * prediction (`computePatch`, on `MutantComputed.deleted`) and the real
+ * apply's own post-apply check (`step.ts`'s `runMutantAttempt`). */
+export const DELETED_FILE_HASH = "<deleted-file:no-content-hash>";
 
 /** What every `git apply` here is given beyond its argv: the caller's
  * abort signal (so an interrupted apply is killed rather than left to
@@ -1156,7 +1182,25 @@ async function computePatch(
     };
   }
 
-  const newContent = fs.readFileSync(scratchFile, "utf8");
+  // A patch whose applied result deletes the target file leaves nothing
+  // at `scratchFile` for `git apply` to have written: `readFileSync`
+  // throws `ENOENT` rather than returning short or empty content, which
+  // is exactly how a real deletion (as opposed to a patch that merely
+  // empties the file while leaving it in place) is told apart here.
+  // Treated as content `""`, the same `firstDiffLine` comparison below
+  // already reports correctly for: line 1, `before` the original first
+  // line, `after` `""` -- `deleted: true` is the only extra signal a
+  // deletion needs, carried alongside for `step.ts` to apply (and
+  // restore) the real target as an absence rather than an empty file.
+  let newContent: string;
+  let deleted = false;
+  try {
+    newContent = fs.readFileSync(scratchFile, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+    newContent = "";
+    deleted = true;
+  }
   // One comparison of the applied result against the original answers
   // both questions at once: `undefined` is "the patch changed nothing"
   // (identical content), and otherwise the line it names IS the line
@@ -1250,8 +1294,9 @@ async function computePatch(
     before: diff.before,
     after: diff.after,
     newContent,
-    mutatedHash: hashString(newContent),
+    mutatedHash: deleted ? DELETED_FILE_HASH : hashString(newContent),
     logPaths: excerptLogPaths,
+    ...(deleted ? { deleted: true } : {}),
     ...(diffField !== undefined ? { diff: diffField } : {}),
     ...(combinedWarning !== undefined ? { diffWarning: combinedWarning } : {}),
   };
