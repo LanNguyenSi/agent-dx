@@ -1268,7 +1268,7 @@
   sentence reverted to its pre-change wording, fails the exact-sub-field
   and regression-signal tests above; restored, the suite is green again.
   `CHANGELOG.md`'s own prose copy of this change is
-  (`CHANGELOG.md:225#"The implementer"`).
+  (`CHANGELOG.md:227#"The implementer"`).
 
   Verified on the committed tree: the full package suite (`npm test`),
   `typecheck`, `typecheck:test`, and `format:check`, all clean. Re-pointed
@@ -1536,7 +1536,7 @@
   that binding rather than second-guessing it.
 
   The CHANGELOG bullet for this round is
-  `CHANGELOG.md:602#"Citation scanning is paragraph-joined"`. Verified on
+  `CHANGELOG.md:604#"Citation scanning is paragraph-joined"`. Verified on
   the committed tree: the full package suite, `docs-consistency.test.ts`
   on its own, `typecheck`, `typecheck:test` and `format:check`; the
   figures each guard measured are in its own computed test name, per the
@@ -10353,10 +10353,10 @@ list is non-empty, and rule 2's semver-precedence comparison with build
 metadata stripped before it.
 
 The 19-line insertion re-pointed this log's own two live self-citations
-into `CHANGELOG.md`, from line 179 to line 198 (moved again to line 225
-by later rounds, `CHANGELOG.md:225#"The implementer"`) and from line
-556 to line 575 (moved again to line 602,
-`CHANGELOG.md:602#"Citation scanning is paragraph-joined"`); both were
+into `CHANGELOG.md`, from line 179 to line 198 (moved again to line 227
+by later rounds, `CHANGELOG.md:227#"The implementer"`) and from line
+556 to line 575 (moved again to line 604,
+`CHANGELOG.md:604#"Citation scanning is paragraph-joined"`); both were
 re-read at their new lines before the re-point. Re-verified and
 re-stamped the three docs whose `sources:` list `CHANGELOG.md`
 (`run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`,
@@ -10382,9 +10382,9 @@ one, and two fixture tests were added (the underscore heading, and an
 empty prerelease heading `## [1.0.0-]`), plus the round-1 mismatch test
 was tightened to assert the exact mismatch message instead of only the
 `[version-heading]` tag. The 4-line bullet growth re-pointed this log's
-two live self-citations again, from line 198 to line 202 (moved again to line 225 by a later
-round, `CHANGELOG.md:225#"The implementer"`) and from line 575 to line 579
-(moved again to line 602, `CHANGELOG.md:602#"Citation scanning is paragraph-joined"`); both were
+two live self-citations again, from line 198 to line 202 (moved again to line 227 by a later
+round, `CHANGELOG.md:227#"The implementer"`) and from line 575 to line 579
+(moved again to line 604, `CHANGELOG.md:604#"Citation scanning is paragraph-joined"`); both were
 re-read at their new lines before the re-point.
 
 Verified from the worktree root: `build`, `typecheck`, `typecheck:test`,
@@ -10431,10 +10431,10 @@ before this change is 74, and the step 8 sentence added no line).
 [review-gate-and-waivers.md](review-gate-and-waivers.md) gained a section of
 the same name covering the trigger, the four recorded outcomes and the
 boundaries against the halt rule and the budget, with five anchored
-citations. The 23-line `CHANGELOG.md` bullet re-pointed this log's two live
-self-citations, from line 202 to line 225
-(`CHANGELOG.md:225#"The implementer"`) and from line 579 to line 602
-(`CHANGELOG.md:602#"Citation scanning is paragraph-joined"`), in the two
+citations. The 25-line `CHANGELOG.md` bullet re-pointed this log's two live
+self-citations, from line 202 to line 227
+(`CHANGELOG.md:227#"The implementer"`) and from line 579 to line 604
+(`CHANGELOG.md:604#"Citation scanning is paragraph-joined"`), in the two
 live sites and in the two earlier entries that quote them; both were
 re-read at their new lines before the re-point. Re-verified and re-stamped
 the three docs whose `sources:` list the changed files
@@ -10443,6 +10443,7 @@ subagent-contracts-superset.md): every anchored citation into the two
 references still resolves at its unchanged line, and the sections that
 describe the halt rule and the budget were re-read against the new section
 and stay accurate, since the new rule changes neither.
+
 The independent reviewer then found that the section's clause on `unknown`
 contradicted the halt rule and the budget, which both act on `unknown`, that
 the trigger lacked the qualifier "that the previous round's review did not
@@ -10453,3 +10454,15 @@ clause, added the qualifier, corrected the bullet, pinned both sentences and
 the `unknown` treatment, and moved the two citations of this change that sit
 below the grown paragraph by two lines; the bullet's growth is already
 included in the line numbers above.
+
+A second review found the trigger still worded two ways (the section's
+"that the previous round's review did not report" against "a new finding" in
+step 8 and the changelog, where `new` already names a `recurrence` value)
+and a surviving mutant on the step 8 sentence. Since that class had recurred
+after a fix, the pointer was redesigned instead of aligned: step 8 now points
+to the section without restating the trigger and is pinned as a whole
+sentence, the changelog bullet quotes the section's phrasing, and the section
+says how the qualifier is evaluated against the `recurrence` field. The
+paragraph grew again, so this change's two citations below it were re-pointed
+once more, and the bullet length and the two self-citation lines above
+already reflect the final bullet.

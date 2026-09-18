@@ -226,7 +226,7 @@ directory and the subagents.
    halt signal across repeated review-fix cycles (see Round-2 halt rule
    below). By the second round-2 halt signal or the third `fix_required`
    review round on the same task, apply the Review-round escalation budget
-   (see below) instead of running another round unaided. When a fix round's review reports a new `high` or `critical` finding with `introduced_by_delta: yes`, record the Fix-regression decision point (see [review and recovery](review-and-recovery.md)) before another fix round starts. At an advisor
+   (see below) instead of running another round unaided. When a fix round's review meets the trigger of the Fix-regression decision point (defined only in [review and recovery](review-and-recovery.md), not restated here), record the Fix-regression decision point before another fix round starts. At an advisor
    trigger (architectural uncertainty, conflicting
    requirements, a high-commitment fork among valid options, repeated
    implementation failures, a review deadlock, a high-risk decision), the

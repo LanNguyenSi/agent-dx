@@ -77,7 +77,7 @@ describe("fix-regression decision point", () => {
     expect(final).toBeGreaterThan(point);
   });
 
-  it("states the three qualifiers of the signal", () => {
+  it("states the qualifiers of the signal", () => {
     expect(section).toContain(
       "the review of a fix round (any implementation round after the task's first)",
     );
@@ -88,6 +88,12 @@ describe("fix-regression decision point", () => {
       "`unknown` and `no` do not trigger this decision point",
     );
     expect(section).toContain("The signal needs no recurrence");
+  });
+
+  it("evaluates the qualifier on the findings, not on the recurrence field", () => {
+    expect(section).toContain(
+      "Read the qualifier off the findings of the two reviews, not off `recurrence`: a `recurrence: repeated` finding that the previous round's review did not report still triggers it.",
+    );
   });
 
   it("leaves `unknown` to the halt rule and the budget, which both act on it", () => {
@@ -132,9 +138,14 @@ describe("fix-regression decision point", () => {
     );
   });
 
-  it("is reachable from the acceptance step", () => {
+  it("is reachable from the acceptance step, which points without restating the trigger", () => {
     expect(unwrap(probes)).toContain(
-      "record the Fix-regression decision point (see [review and recovery](review-and-recovery.md)) before another fix round starts",
+      "When a fix round's review meets the trigger of the Fix-regression decision point (defined only in [review and recovery](review-and-recovery.md), not restated here), record the Fix-regression decision point before another fix round starts.",
     );
+    const pointerLine = probes
+      .split("\n")
+      .find((line) => line.includes("Fix-regression decision point"));
+    expect(pointerLine).toBeDefined();
+    expect(pointerLine).not.toContain("introduced_by_delta: yes`, record");
   });
 });

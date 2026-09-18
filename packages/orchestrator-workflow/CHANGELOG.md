@@ -9,8 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `references/review-and-recovery.md` gains a "Fix-regression decision
   point" between the Review-round escalation budget and the Final
-  acceptance rule: when the review of a fix round reports a new `high` or
-  `critical` finding with `introduced_by_delta: yes`, the orchestrator
+  acceptance rule: when the review of a fix round reports a `high` or
+  `critical` finding that the previous round's review did not report, with
+  `introduced_by_delta: yes`, the orchestrator
   names in one sentence why the fix could introduce it and records one of
   four outcomes in `03-decisions.md` (continue with the stated reason,
   redesign, split, hold) before another fix round starts. `unknown` and
@@ -18,7 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deliberately not a halt: it is no round-2 halt signal, adds nothing to
   the escalation budget's count, and never replaces a review round; when
   the Round-2 halt signal fires in the same review, the halt rule governs.
-  Step 8 of `references/evidence-and-probes.md` points to it. The Round-2
+  Step 8 of `references/evidence-and-probes.md` points to it without
+  restating the trigger, which is defined in the section alone. The Round-2
   halt rule, the budget thresholds, the reviewer output contract and the
   AGENTS.md section are unchanged, so no AGENTS.md re-install is needed;
   the rule itself ships in a skill reference and reaches an existing
