@@ -21,6 +21,7 @@ import {
   applyPatchForReal,
   computeMutant,
   DEFAULT_GIT_APPLY_TIMEOUT_MS,
+  DELETED_FILE_HASH,
   PATCH_MAX_BYTES,
 } from "../src/probe/mutant.js";
 import { beginInplace } from "../src/probe/isolation.js";
@@ -1025,6 +1026,52 @@ describe("probe(): SIGKILL-left marker is recovered by the next invocation", () 
     expect(readMarkerFor(markerKey)).toBeUndefined();
   });
 
+  it("recovers a marker left by a SIGKILL mid-deletion: the target is genuinely absent, its marker's mutatedHash is DELETED_FILE_HASH, and the backup matches preHash", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const absFile = path.join(repo, "fixture.js");
+    const markerKey = fs.realpathSync(absFile);
+    const originalContent = fs.readFileSync(absFile, "utf8");
+    const preHash = await sha256File(absFile);
+
+    // Simulate exactly what a SIGKILL between the real `git apply`
+    // deletion and the marker's own removal leaves behind: the target
+    // genuinely gone (not merely mutated), a backup holding the
+    // original, and a marker whose `mutatedHash` is the sentinel a
+    // deletion mutant always records rather than a real content hash.
+    const backupDir = makeTmpDir();
+    const backupPath = path.join(backupDir, "backup-fixture.js");
+    fs.writeFileSync(backupPath, originalContent);
+    fs.rmSync(absFile);
+    expect(fs.existsSync(absFile)).toBe(false);
+
+    const deadPid = spawnSync(process.execPath, ["-e", "process.exit(0)"]).pid;
+    if (!deadPid) throw new Error("failed to obtain a dead pid for the test");
+
+    writeMarker(markerKey, {
+      targetPath: absFile,
+      backupPath,
+      preHash,
+      mutatedHash: DELETED_FILE_HASH,
+      pid: deadPid,
+      timestamp: new Date().toISOString(),
+    });
+
+    const result = await probe(
+      baseOptions(repo, { line: 5, replaceText: "  return n * 3;" }),
+    );
+
+    expect(result.warnings).toContain("recovered_stale_probe");
+    // The recovery recreates the file from the backup before the
+    // requested probe's own (separate) mutation runs, and that mutation
+    // is itself restored by the normal flow, so the file ends up back
+    // at its true original.
+    expect(result.status).toBe("survived");
+    expect(fs.existsSync(absFile)).toBe(true);
+    expect(fs.readFileSync(absFile, "utf8")).toBe(originalContent);
+    expect(readMarkerFor(markerKey)).toBeUndefined();
+  });
+
   it("recovers a marker whose recorded pid is alive (a live foreign process), since under the lock every marker is treated as an unfinished probe regardless of pid", async () => {
     useLockDir();
     const { repo } = initRepo();
@@ -1995,6 +2042,13 @@ describe("probe(): -p patch that deletes the whole target file", () => {
     expect(result.mutation_probe?.result).toBe("killed");
     expect(result.mutation_probe?.expectation).toBe("met");
     expect(result.mutation_probe?.restored_verified).toBe(true);
+    // Both descriptors name the applied result as a deletion, not just
+    // an `after` of `""` a reader could otherwise misread as "emptied,
+    // still present".
+    expect(result.mutation_probe?.mutant).toContain("(whole file deleted)");
+    expect(result.mutation_probe?.verified_applied_via).toContain(
+      "(whole file deleted)",
+    );
     expect(fs.existsSync(path.join(repo, "fixture.js"))).toBe(true);
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   });
@@ -2063,6 +2117,73 @@ describe("probe(): -p patch that deletes the whole target file", () => {
       before,
     );
   });
+
+  it.skipIf(process.platform === "win32")(
+    "restores a 0700 sole-file directory's and a 100755 file's own modes, not the default modes mkdirSync/copyFileSync would otherwise leave, after a killed deletion probe",
+    async () => {
+      useLockDir();
+      const { repo } = initRepo();
+      fs.mkdirSync(path.join(repo, "sole"));
+      const target = path.join(repo, "sole", "marker.txt");
+      fs.writeFileSync(target, "only entry\n");
+      fs.chmodSync(target, 0o755);
+      git(repo, ["add", "-A"]);
+      git(repo, [
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-q",
+        "-m",
+        "add sole/marker.txt",
+      ]);
+      const before = fs.readFileSync(target, "utf8");
+      // `deletionPatch` itself does a `git rm` + `git checkout HEAD`
+      // round trip to build the patch and restore the working tree,
+      // which (git prunes/recreates the now-empty/-refilled directory
+      // along the way) would otherwise wipe out a mode set beforehand:
+      // set it only once the working tree is back at its final,
+      // pre-probe state.
+      const patchPath = deletionPatch(repo, "sole/marker.txt");
+      fs.chmodSync(path.join(repo, "sole"), 0o700);
+
+      const result = await probe(
+        baseOptions(repo, {
+          file: "sole/marker.txt",
+          form: "patch",
+          replaceText: undefined,
+          patchPath,
+          testCommand: "test -f sole/marker.txt",
+        }),
+      );
+
+      expect(result.status).toBe("killed");
+      expect(result.mutant?.deleted).toBe(true);
+      expect(result.mutation_probe?.restored_verified).toBe(true);
+      expect(fs.readFileSync(target, "utf8")).toBe(before);
+      expect(fs.statSync(path.join(repo, "sole")).mode & 0o777).toBe(0o700);
+      expect(fs.statSync(target).mode & 0o777).toBe(0o755);
+    },
+  );
+});
+
+describe("probe(): an ordinary -r text mutant restores the target's own mode", () => {
+  it.skipIf(process.platform === "win32")(
+    "restores a 100755 tracked file's mode after a killed text mutant, not the backup's own mode `copyFileSync` would otherwise leave on Darwin",
+    async () => {
+      useLockDir();
+      const { repo } = initRepo();
+      const target = path.join(repo, "fixture.js");
+      fs.chmodSync(target, 0o755);
+      const before = fs.readFileSync(target, "utf8");
+
+      const result = await probe(baseOptions(repo));
+
+      expect(result.status).toBe("killed");
+      expect(result.mutation_probe?.restored_verified).toBe(true);
+      expect(fs.readFileSync(target, "utf8")).toBe(before);
+      expect(fs.statSync(target).mode & 0o777).toBe(0o755);
+    },
+  );
 });
 
 describe("probe(): -p derives --file and -n when neither is given", () => {

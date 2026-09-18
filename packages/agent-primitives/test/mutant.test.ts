@@ -343,10 +343,50 @@ describe("computeMutant: patch form", () => {
     expect(result.before).toBe("function isPositive(n) {");
     expect(result.after).toBe("");
     expect(result.mutatedHash).toBe(DELETED_FILE_HASH);
+    // The sentinel must never collide with a real sha256 digest of any
+    // content, so `step.ts`'s "does the real target's post-apply hash
+    // match what the dry run predicted" comparison can never be fooled
+    // by a file that happens to hash to this exact string.
+    expect(DELETED_FILE_HASH).not.toMatch(/^[0-9a-f]{64}$/);
     // The dry run applied against a scratch copy only: the real file on
     // disk must still exist, byte-identical to its original content.
     expect(fs.existsSync(absFile)).toBe(true);
     expect(fs.readFileSync(absFile, "utf8")).toBe(content);
+  });
+
+  it("refuses a patch that deletes an already-empty tracked file, naming the empty-file case rather than the generic no-op wording alone", async () => {
+    const root = makeTmpDir();
+    git(root, ["init", "-q"]);
+    git(root, ["config", "user.email", "test@example.com"]);
+    git(root, ["config", "user.name", "test"]);
+    const relPath = "empty.txt";
+    const absFile = path.join(root, relPath);
+    fs.writeFileSync(absFile, "");
+    git(root, ["add", "-A"]);
+    git(root, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+    git(root, ["rm", "-q", "--", relPath]);
+    const diff = execFileSync("git", ["diff", "--cached", "--", relPath], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    git(root, ["checkout", "HEAD", "--", relPath]);
+    expect(diff).not.toBe("");
+    const patchPath = path.join(root, "delete-empty.patch");
+    fs.writeFileSync(patchPath, diff);
+
+    const result = await computeMutant(
+      { form: "patch", file: absFile, patchPath },
+      { root, logDir: makeTmpDir(), originalContent: "" },
+    );
+
+    expect(result.applicable).toBe(false);
+    if (result.applicable) return;
+    expect(result.reason).toBe(
+      "patch applied cleanly but produced no content change " +
+        "(the patch deletes a file that was already empty)",
+    );
+    expect(fs.existsSync(absFile)).toBe(true);
+    expect(fs.readFileSync(absFile, "utf8")).toBe("");
   });
 });
 
@@ -1865,6 +1905,21 @@ describe("formatMutantSummary / formatVerifiedAppliedVia", () => {
   it("formats a 3-line before/after snippet", () => {
     const snippet = formatVerifiedAppliedVia("/a/b.js", 3, "x", "y");
     expect(snippet.split("\n")).toEqual(["/a/b.js:3", "- x", "+ y"]);
+  });
+
+  it("appends '(whole file deleted)' to both descriptors when deleted is true, and leaves them unchanged when it is false or omitted", () => {
+    expect(
+      formatMutantSummary("/a/b.js", 1, "x", "", undefined, false, true),
+    ).toBe("/a/b.js:1: x ->  (whole file deleted)");
+    expect(
+      formatVerifiedAppliedVia("/a/b.js", 1, "x", "", undefined, false, true),
+    ).toBe(["/a/b.js:1", "- x", "+ "].join("\n") + " (whole file deleted)");
+    expect(formatMutantSummary("/a/b.js", 3, "x", "y")).toBe(
+      formatMutantSummary("/a/b.js", 3, "x", "y", undefined, false, false),
+    );
+    expect(formatVerifiedAppliedVia("/a/b.js", 3, "x", "y")).toBe(
+      formatVerifiedAppliedVia("/a/b.js", 3, "x", "y", undefined, false, false),
+    );
   });
 
   it("caps a very long file path (e.g. a long -l/-C path) with the envelope's own truncation-marker wording, naming the true omitted-character count, instead of pasting it whole into mutant/verified_applied_via", () => {
