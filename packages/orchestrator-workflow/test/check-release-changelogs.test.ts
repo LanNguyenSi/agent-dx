@@ -124,6 +124,28 @@ describe("check-release-changelogs.mjs", () => {
     expect(result.stderr).toMatch(/\[version-heading\]/);
   });
 
+  it("rule 1 (version-heading): accepts a hyphenated prerelease heading, matching parseSemver's identifier class", () => {
+    // VERSION_HEADING_RE and parseSemver share PRERELEASE_IDENTIFIER_CHARS
+    // ([0-9A-Za-z.-]); before that constant existed, VERSION_HEADING_RE
+    // only accepted [\w.] and silently failed to match a heading whose
+    // prerelease tag contained a hyphen, even though the same version
+    // parsed fine through parseSemver.
+    writePackage("widget", "1.0.0-alpha-1", CLEAN_CHANGELOG("1.0.0-alpha-1"));
+    const result = run([]);
+    expect(result.status).toBe(0);
+  });
+
+  it("rule 1 (version-heading): a hyphenated prerelease heading that does not match package.json still fails", () => {
+    writePackage(
+      "widget",
+      "1.0.0-alpha-2",
+      CLEAN_CHANGELOG("1.0.0-alpha-1"), // heading says a different prerelease
+    );
+    const result = run([]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/\[version-heading\]/);
+  });
+
   it("rule 2 (fresh-unreleased): fails when the version increased but [Unreleased] is still populated", () => {
     writePackage(
       "widget",
