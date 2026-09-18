@@ -1525,12 +1525,27 @@ against a non-empty file is. The real apply removes the target file for
 real, in both isolation modes; the restore recreates it byte-identically
 from the same backup any other mutant restores from, verified by hash
 the same way, so `mutation_probe.restored_verified` is `true` the same
-way -- and now also restores the target's own file mode and its
-recreated parent directory's mode, which a plain `mkdirSync`/
-`copyFileSync` would otherwise leave at the process's default rather
-than the mode either one actually had; the run classifies
-`killed`/`survived` like any other patch mutant, from whether the test
-command depends on the file's presence.
+way. The run classifies `killed`/`survived` like any other patch
+mutant, from whether the test command depends on the file's presence.
+A `--plan` mutant of this shape behaves identically, including beside
+other mutants on the same file: the deletion is restored and the
+restore verified before the next mutant is even computed.
+
+Modes, on that restore: git tracks no directory mode at all and removes
+every directory a deletion emptied (it never tracks an empty one), so a
+plain `mkdirSync` would put the whole chain back at the process's
+default mode rather than the modes those directories actually had. The
+restore records each level's mode up to the repository (or worktree)
+root beforehand and writes it back for exactly the levels it had to
+recreate, plus the target file's own mode. Directories that were there
+all along are never touched -- a probe does not chmod a parent
+directory it did not disturb, which also means a target under a
+directory this process may write in but does not own (`/tmp`,
+`$TMPDIR`, a foreign-owned mount) probes normally. A mode that cannot
+be written back is reported as a warning naming the path and both
+modes, never as a failed restore: the content is what
+`mutation_probe.restored_verified` attests, and it is verified by hash
+either way. Only the permission bits are restored, never ownership.
 
 The dist trap: a project whose test command runs built output
 (`dist/`, `lib/`, ...) rather than `--file` itself needs `--pre` to
@@ -2179,27 +2194,38 @@ between a deletion mutant's real apply and the marker's own removal
 leaves this same shape behind, only with the target genuinely absent
 rather than mutated in place (the marker's `mutatedHash` is the
 deletion sentinel, never a real content hash): recovery there is the
-same proof against the backup, then recreating the file (and its
-parent directory, if that was removed too) from it, rather than waiting
-on a mutated-content hash that will never appear. When either proof
-fails, the probe refuses with `reason: "stale_probe_marker"`, leaves the
-target exactly as it found it, and names the backup path for a human to
-inspect -- by hand, either `git checkout -- <file>` (when the target is
-tracked and unmodified upstream of this marker) or copying the named
-backup back into place. The backup lives under the probe's own
-`--log-dir` (a per-run scratch directory, not something a crash is
-guaranteed to have left behind); when it is gone, automatic recovery is
-not possible and the warning says so and names the marker file itself
-instead -- delete that file to clear it manually. `agent-primitives
-doctor` also reports any
-such marker left for the current repository, and applies the same two
-proofs before it says anything about automatic recovery: it hashes the
-recorded backup and compares the target, points at re-running `probe`
-only for a marker the next probe would really recover, and names the
-marker file and the manual delete for every other one; it compares the
-marker's target against
-the current repository with both paths fully resolved, so a symlinked
-ancestor cannot hide a marker that is really there.
+same proof against the backup, then recreating the file, and any
+directory removed with it, from that backup -- rather than waiting on a
+mutated-content hash that will never appear. This recovery restores
+content only, never modes: it runs in a later process than the one that
+took the backup, and the marker records hashes alone, so the mode the
+target (or a recreated directory) had before the mutation is not
+knowable from anything left on disk. The in-process restore of a probe
+that was not killed does put modes back, because it recorded them
+itself before mutating anything.
+
+When either proof fails, the probe refuses with
+`reason: "stale_probe_marker"`, leaves the target exactly as it found
+it, and names the backup path for a human to inspect -- by hand, either
+`git checkout -- <file>` (when the target is tracked and unmodified
+upstream of this marker) or copying the named backup back into place.
+The backup lives under the probe's own `--log-dir` (a per-run scratch
+directory, not something a crash is guaranteed to have left behind);
+when it is gone, automatic recovery is not possible and the warning
+says so and names the marker file itself instead -- delete that file to
+clear it manually.
+
+`agent-primitives doctor` also reports any such marker left for the
+current repository, and applies the same proofs before it says anything
+about automatic recovery: it hashes the recorded backup and compares
+the target (an absent target counts as the mutated state for a marker
+whose `mutatedHash` is the deletion sentinel, and for no other), points
+at re-running `probe` only for a marker the next probe would really
+recover, and names both the marker file and the backup it points at for
+every other one, since that backup may be the only remaining copy of
+the target's pre-mutation content. It compares the marker's target
+against the current repository with both paths fully resolved, so a
+symlinked ancestor cannot hide a marker that is really there.
 
 The target file is backed up immediately, before the baseline ever runs,
 and the backup is verified against the file's pre-mutation hash; a backup

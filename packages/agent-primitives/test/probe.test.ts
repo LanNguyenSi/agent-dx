@@ -892,8 +892,12 @@ describe("probe(): the backup is verified before anything is mutated", () => {
       typeof import("../src/probe/isolation.js")
     >("../src/probe/isolation.js");
     const mockBeginInplace = vi.mocked(beginInplace);
-    mockBeginInplace.mockImplementationOnce((targetPath, logDir) => {
-      const session = actualIsolation.beginInplace(targetPath, logDir);
+    mockBeginInplace.mockImplementationOnce((targetPath, logDir, boundRoot) => {
+      const session = actualIsolation.beginInplace(
+        targetPath,
+        logDir,
+        boundRoot,
+      );
       fs.writeFileSync(session.backupPath, "truncated backup\n");
       return session;
     });
@@ -1070,6 +1074,61 @@ describe("probe(): SIGKILL-left marker is recovered by the next invocation", () 
     expect(fs.existsSync(absFile)).toBe(true);
     expect(fs.readFileSync(absFile, "utf8")).toBe(originalContent);
     expect(readMarkerFor(markerKey)).toBeUndefined();
+  });
+
+  it("refuses a SIGKILL-deletion marker whose backup does not hash to the recorded pre-mutation hash: the target stays deleted, the marker stays, and nothing is written over either", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    const absFile = path.join(repo, "fixture.js");
+    const markerKey = fs.realpathSync(absFile);
+    const preHash = await sha256File(absFile);
+
+    // The same SIGKILL-mid-deletion shape as the test above, except the
+    // backup is not this target's pre-mutation content (truncated,
+    // half-written, or some other run's). Recreating the file from it
+    // would silently put content on disk that was never there, under a
+    // path whose only other copy is already gone.
+    const backupDir = makeTmpDir();
+    const backupPath = path.join(backupDir, "backup-fixture.js");
+    fs.writeFileSync(backupPath, "not this target's pre-mutation content\n");
+    fs.rmSync(absFile);
+    expect(fs.existsSync(absFile)).toBe(false);
+
+    const deadPid = spawnSync(process.execPath, ["-e", "process.exit(0)"]).pid;
+    if (!deadPid) throw new Error("failed to obtain a dead pid for the test");
+
+    writeMarker(markerKey, {
+      targetPath: absFile,
+      backupPath,
+      preHash,
+      mutatedHash: DELETED_FILE_HASH,
+      pid: deadPid,
+      timestamp: new Date().toISOString(),
+    });
+
+    const result = await probe(
+      baseOptions(repo, { line: 5, replaceText: "  return n * 3;" }),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("stale_probe_marker");
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("does not match the pre-mutation hash") &&
+          w.includes("the target was left deleted") &&
+          w.includes(backupPath),
+      ),
+    ).toBe(true);
+    expect(result.warnings).not.toContain("recovered_stale_probe");
+    // Neither side was touched: the target is still absent (never
+    // written from an untrusted backup), and the marker is still there
+    // for a human, or for a later invocation with a good backup.
+    expect(fs.existsSync(absFile)).toBe(false);
+    expect(readMarkerFor(markerKey)).toBeDefined();
+    expect(fs.readFileSync(backupPath, "utf8")).toBe(
+      "not this target's pre-mutation content\n",
+    );
   });
 
   it("recovers a marker whose recorded pid is alive (a live foreign process), since under the lock every marker is treated as an unfinished probe regardless of pid", async () => {
@@ -2182,6 +2241,111 @@ describe("probe(): an ordinary -r text mutant restores the target's own mode", (
       expect(result.mutation_probe?.restored_verified).toBe(true);
       expect(fs.readFileSync(target, "utf8")).toBe(before);
       expect(fs.statSync(target).mode & 0o777).toBe(0o755);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "still reports killed and restored_verified true when the target's parent directory cannot be chmod-ed at all (a target under /tmp, $TMPDIR or a foreign-owned mount)",
+    async () => {
+      useLockDir();
+      const { repo } = initRepo();
+      const target = path.join(repo, "fixture.js");
+      const before = fs.readFileSync(target, "utf8");
+
+      // Stands in for the real cases, which cannot be produced
+      // portably: a parent directory this process may read and write
+      // inside but does not own, so `chmod` on the directory itself is
+      // EPERM. Measured on macOS's own `/private/tmp` (root:wheel,
+      // 1777) as uid 501.
+      const realChmod = fs.chmodSync;
+      const attempted: string[] = [];
+      const chmod = vi.spyOn(fs, "chmodSync").mockImplementation(((
+        p: fs.PathLike,
+        mode: fs.Mode,
+      ) => {
+        attempted.push(String(p));
+        if (String(p) === repo) {
+          const err = new Error(
+            "EPERM: operation not permitted, chmod",
+          ) as NodeJS.ErrnoException;
+          err.code = "EPERM";
+          throw err;
+        }
+        realChmod(p, mode);
+      }) as typeof fs.chmodSync);
+      try {
+        const result = await probe(baseOptions(repo));
+
+        expect(result.status).toBe("killed");
+        expect(result.reason).toBeUndefined();
+        expect(result.mutation_probe?.result).toBe("killed");
+        expect(result.mutation_probe?.restored_verified).toBe(true);
+        // An ordinary text mutant never removes the target's parent, so
+        // the restore never recreates it and must never chmod it: the
+        // EPERM above is not caught and tolerated, it is never
+        // provoked. Asserted directly, because tolerating the failure
+        // would pass every other assertion here while still leaving the
+        // directory's mode at whatever a future restore decided.
+        expect(attempted).not.toContain(repo);
+      } finally {
+        chmod.mockRestore();
+      }
+      expect(fs.readFileSync(target, "utf8")).toBe(before);
+    },
+  );
+});
+
+describe("probe(): -p deletion restores the whole recreated directory chain's modes", () => {
+  it.skipIf(isRoot || process.platform === "win32")(
+    "restores a two-level sole-entry chain (0700 above 0750) and the 100755 file itself, not the default modes mkdirSync would leave at every level",
+    async () => {
+      useLockDir();
+      const { repo } = initRepo();
+      fs.mkdirSync(path.join(repo, "a", "b"), { recursive: true });
+      const target = path.join(repo, "a", "b", "marker.txt");
+      fs.writeFileSync(target, "only entry\n");
+      // Committed as 100755, so the deletion patch built below names
+      // that mode and `git apply` finds the working tree in the state
+      // its preimage describes.
+      fs.chmodSync(target, 0o755);
+      git(repo, ["add", "-A"]);
+      git(repo, [
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-q",
+        "-m",
+        "add a/b/marker.txt",
+      ]);
+      const before = fs.readFileSync(target, "utf8");
+      // Directory modes are set only once `deletionPatch`'s own `git rm`
+      // plus `git checkout HEAD` round trip is done: that round trip
+      // prunes and recreates both directories, which would otherwise
+      // wipe a mode set beforehand. Git tracks no directory mode at all,
+      // so these are exactly the modes only the restore can put back.
+      const patchPath = deletionPatch(repo, "a/b/marker.txt");
+      fs.chmodSync(path.join(repo, "a", "b"), 0o750);
+      fs.chmodSync(path.join(repo, "a"), 0o700);
+
+      const result = await probe(
+        baseOptions(repo, {
+          file: "a/b/marker.txt",
+          form: "patch",
+          replaceText: undefined,
+          patchPath,
+          testCommand: "test -f a/b/marker.txt",
+        }),
+      );
+
+      expect(result.status).toBe("killed");
+      expect(result.mutant?.deleted).toBe(true);
+      expect(result.mutation_probe?.restored_verified).toBe(true);
+      expect(fs.readFileSync(target, "utf8")).toBe(before);
+      expect(fs.statSync(path.join(repo, "a")).mode & 0o777).toBe(0o700);
+      expect(fs.statSync(path.join(repo, "a", "b")).mode & 0o777).toBe(0o750);
+      expect(fs.statSync(target).mode & 0o777).toBe(0o755);
+      // Nothing the restore did shows up as a change to git either.
+      expect(gitOutput(repo, ["status", "--porcelain"])).toBe("");
     },
   );
 });

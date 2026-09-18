@@ -21,6 +21,7 @@ import {
   SCRATCH_OWNER_MAX_AGE_HOURS,
   scratchOwnerPath,
 } from "../probe/isolation.js";
+import { DELETED_FILE_HASH } from "../probe/mutant.js";
 
 export interface ToolCheck {
   name: string;
@@ -582,14 +583,24 @@ export async function doctor(
     );
   }
   if (unrecoverable.length > 0) {
+    // Each marker is named together with the backup it points at, never
+    // on its own: the backup may be the only remaining copy of the
+    // target's pre-mutation content (a target that is gone altogether,
+    // for one), and "delete the marker file" without that path in the
+    // same sentence reads like an instruction to throw it away.
     detailParts.push(
       `${unrecoverable.length} stale probe marker(s) for this repository ` +
         `that the next probe would refuse to recover (the backup is ` +
         `missing, or it no longer hashes to the pre-mutation content the ` +
         `marker records, or the target is no longer in the mutated state ` +
         `the marker describes); auto-recovery is not possible; inspect ` +
-        `the marker file(s), then delete them to clear the report: ` +
-        unrecoverable.map((m) => m.markerPath).join(", "),
+        `the marker file(s) and the backup(s) they name -- a backup that ` +
+        `is still there may hold the only copy of the target's ` +
+        `pre-mutation content -- then delete the marker file(s) to clear ` +
+        `the report: ` +
+        unrecoverable
+          .map((m) => `${m.markerPath} (backup: ${m.backupPath})`)
+          .join(", "),
     );
   }
   checks.push({
@@ -874,17 +885,33 @@ export async function doctor(
  * hash counts as recoverable too: probe clears such a marker and carries
  * on. Everything else is a marker only a human can clear.
  *
+ * A deletion mutant's post-mutation state is the target's ABSENCE, not
+ * some content to hash, and its marker records `DELETED_FILE_HASH` in
+ * place of a real digest (see that constant's own docblock). `probe`'s
+ * stale-marker branch recovers exactly that shape -- no target, that
+ * sentinel, a backup that still hashes to `preHash` -- by recreating
+ * the file from the backup, so this reports it as recoverable rather
+ * than telling an operator to delete the only marker pointing at a
+ * missing file's backup. An absent target under any OTHER `mutatedHash`
+ * is still a marker only a human can clear: nothing recorded says the
+ * absence is what the mutant produced.
+ *
  * Kept in step with `probe`'s stale-marker branch by hand; the doctor
- * test asserting a mismatched backup is reported as unrecoverable is
- * what holds the two together.
+ * tests asserting a mismatched backup is reported as unrecoverable and
+ * a deletion marker as recoverable are what hold the two together.
  */
 async function isAutoRecoverable(marker: MarkerEntry): Promise<boolean> {
   const targetHash = await sha256File(marker.targetPath).catch(() => undefined);
-  if (targetHash === undefined) return false;
+  const backupMatchesPreHash = async (): Promise<boolean> =>
+    (await sha256File(marker.backupPath).catch(() => undefined)) ===
+    marker.preHash;
+  if (targetHash === undefined) {
+    if (marker.mutatedHash !== DELETED_FILE_HASH) return false;
+    return backupMatchesPreHash();
+  }
   if (targetHash === marker.preHash) return true;
   if (targetHash !== marker.mutatedHash) return false;
-  const backupHash = await sha256File(marker.backupPath).catch(() => undefined);
-  return backupHash === marker.preHash;
+  return backupMatchesPreHash();
 }
 
 interface ScratchWorktreeRegistry {

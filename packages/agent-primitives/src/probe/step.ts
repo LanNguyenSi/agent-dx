@@ -276,6 +276,25 @@ export async function runMutantAttempt(
       aborted: false,
     };
   };
+  /**
+   * `target.restoreOnce`, plus the drain of whatever modes that restore
+   * could not put back (`InplaceSession.takeRestoreWarnings`). Those are
+   * observations about the target's -- or a recreated parent
+   * directory's -- permission bits, never restore failures: the content
+   * is already back and is what `restored_verified` attests by hash, so
+   * they belong in this mutant's own `warnings` beside every other
+   * observation about the run, and never in its verdict. Every restore
+   * this function performs goes through here (or, for the one direct
+   * `restoreAndVerify` below, drains the same way), so no path can
+   * quietly swallow one.
+   */
+  const restoreOnceReportingModes = async (
+    aborted: boolean,
+  ): Promise<{ ok: boolean; verified: boolean }> => {
+    const outcome = await target.restoreOnce(aborted);
+    warnings.push(...target.session.takeRestoreWarnings());
+    return outcome;
+  };
 
   // The signal handler must own THIS mutant's restore state from the
   // moment the file is about to change until the restore is verified;
@@ -325,7 +344,9 @@ export async function runMutantAttempt(
       applyStarted.closed,
     );
     if (applyResult.exitCode !== 0) {
-      const { ok, verified } = await target.restoreOnce(applyResult.aborted);
+      const { ok, verified } = await restoreOnceReportingModes(
+        applyResult.aborted,
+      );
       if (!ok || !verified) {
         return restoreFailedOutcome([applyResult.logPath]);
       }
@@ -382,6 +403,10 @@ export async function runMutantAttempt(
       target.session,
       target.preHash,
     );
+    // The same drain `restoreOnceReportingModes` does for every other
+    // restore in this function; this one path arms and clears the
+    // restore state by hand rather than going through `restoreOnce`.
+    warnings.push(...target.session.takeRestoreWarnings());
     rt.setRestoreState(null);
     if (verified) removeMarkerFor(target.absFile);
     if (!ok || !verified) return restoreFailedOutcome();
@@ -434,7 +459,7 @@ export async function runMutantAttempt(
     // isolation setup, not about a signal, and a plan that must stop
     // because one arrived stops either way (its terminal check reads
     // `crashHandlers.isHandling()` alongside `outcome.aborted`).
-    const { ok, verified } = await target.restoreOnce(rt.signal.aborted);
+    const { ok, verified } = await restoreOnceReportingModes(rt.signal.aborted);
     if (!ok || !verified) return restoreFailedOutcome();
     warnings.push(
       `${mutantRun.isolationError}; the mutant was restored and the restore verified`,
@@ -451,7 +476,9 @@ export async function runMutantAttempt(
   }
   if (!mutantRun.ok) {
     noteIncompleteOutput(warnings, "mutant --pre", mutantRun.pre);
-    const { ok, verified } = await target.restoreOnce(mutantRun.pre.aborted);
+    const { ok, verified } = await restoreOnceReportingModes(
+      mutantRun.pre.aborted,
+    );
     // The `--pre` log path is deliberately not folded in here (unlike the
     // `pre_failed` return below it): a restore that failed is reported
     // with the mutant's own dry-run logs, the same set every other
@@ -489,7 +516,7 @@ export async function runMutantAttempt(
 
   // (5) restore, (6) verify restore by hash.
   const { ok: restoreOk, verified: restoredVerified } =
-    await target.restoreOnce(testResult.aborted);
+    await restoreOnceReportingModes(testResult.aborted);
 
   const testField: TestPhaseField = {
     command: rt.testCommand,

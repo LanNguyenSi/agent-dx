@@ -108,6 +108,13 @@ export async function recoverTargetMarker(
   // backup is still hashed against `marker.preHash` before it is copied
   // anywhere, for the same reason the branch below checks it: a corrupt
   // or mismatched backup must never silently become the recovered file.
+  //
+  // This recovery restores CONTENT only, never modes: it runs in a
+  // later process than the one that took the backup, and the marker
+  // records hashes alone, so the mode the target (or a directory
+  // recreated here) had before the mutation is not knowable from
+  // anything on disk. `isolation.ts`'s in-process `restore()` does put
+  // modes back, because it captured them itself at `beginInplace` time.
   if (currentHash === undefined && marker.mutatedHash === DELETED_FILE_HASH) {
     const backupHash = await sha256File(marker.backupPath).catch(
       () => undefined,

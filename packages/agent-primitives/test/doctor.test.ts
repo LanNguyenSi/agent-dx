@@ -16,6 +16,7 @@ import {
   SCRATCH_OWNER_MAX_AGE_HOURS,
   scratchOwnerPath,
 } from "../src/probe/isolation.js";
+import { DELETED_FILE_HASH } from "../src/probe/mutant.js";
 import { writeGitShim } from "./helpers/git-shim.js";
 
 const tmpDirs: string[] = [];
@@ -1086,6 +1087,69 @@ describe("doctor: stale-probe-marker check", () => {
     const check = result.checks.find((c) => c.name === "stale-probe-marker");
     expect(check?.ok).toBe(false);
     expect(check?.detail).toContain("auto-recover");
+  });
+
+  it("promises auto-recovery for a deletion marker: the target is genuinely absent, mutatedHash is the deletion sentinel, and the backup still hashes to preHash", async () => {
+    const lockDir = makeTmpDir();
+    const cwd = makeTmpDir();
+    const original = "original content";
+    // Exactly what a SIGKILL between a deletion mutant's real apply and
+    // the marker's own removal leaves behind, and exactly what probe's
+    // own stale-marker branch recovers: no target at all, a marker
+    // whose mutatedHash is the sentinel rather than any real digest,
+    // and a backup that still hashes to the pre-mutation content.
+    const target = path.join(cwd, "target.js");
+    const backupPath = path.join(lockDir, "backup-target.js");
+    fs.writeFileSync(backupPath, original);
+    const dead = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+    fs.writeFileSync(
+      path.join(lockDir, "abc.marker.json"),
+      JSON.stringify({
+        targetPath: target,
+        backupPath,
+        preHash: sha256(original),
+        mutatedHash: DELETED_FILE_HASH,
+        pid: dead.pid,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    const result = await doctor({ required: [], optional: [], cwd, lockDir });
+    const check = result.checks.find((c) => c.name === "stale-probe-marker");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain(backupPath);
+    expect(check?.detail).toContain("auto-recover");
+    expect(check?.detail).not.toContain("auto-recovery is not possible");
+  });
+
+  it("not ok for an absent target under any other mutatedHash, and names the backup beside the marker so an operator never deletes the only pointer to it", async () => {
+    const lockDir = makeTmpDir();
+    const cwd = makeTmpDir();
+    const original = "original content";
+    // The target is gone, but nothing recorded says its absence is what
+    // the mutant produced: probe refuses this one, and the backup is
+    // the only remaining copy of the target's content.
+    const target = path.join(cwd, "target.js");
+    const backupPath = path.join(lockDir, "backup-target.js");
+    fs.writeFileSync(backupPath, original);
+    const dead = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+    const markerPath = path.join(lockDir, "abc.marker.json");
+    fs.writeFileSync(
+      markerPath,
+      JSON.stringify({
+        targetPath: target,
+        backupPath,
+        preHash: sha256(original),
+        mutatedHash: sha256("mutated content"),
+        pid: dead.pid,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    const result = await doctor({ required: [], optional: [], cwd, lockDir });
+    const check = result.checks.find((c) => c.name === "stale-probe-marker");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("auto-recovery is not possible");
+    expect(check?.detail).not.toContain("auto-recover,");
+    expect(check?.detail).toContain(`${markerPath} (backup: ${backupPath})`);
   });
 
   it("not ok, and names the marker file instead of promising auto-recovery, when a stale marker's backup exists but does not hash to the pre-mutation content it records", async () => {

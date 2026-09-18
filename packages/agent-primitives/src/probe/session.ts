@@ -1272,7 +1272,12 @@ export function openTarget(
 ): Promise<
   { ok: true; target: TargetSession } | { ok: false; warning: string }
 > {
-  const session = beginInplace(input.mutationFilePath, rt.logDir);
+  // `rt.applyRoot` is the tree this target is actually mutated in (the
+  // worktree copy under `-i worktree`, the containment root otherwise),
+  // which is what bounds the restore's ancestor-mode capture: no
+  // directory above that tree can be removed by a mutant applied inside
+  // it, so none above it is ever recreated by a restore either.
+  const session = beginInplace(input.mutationFilePath, rt.logDir, rt.applyRoot);
   rt.setRestoreState({
     restore: session.restore,
     targetPath: session.targetPath,
