@@ -103,7 +103,7 @@ Rules:
   from its result fields (`verified_applied_via`, `result`, `expectation`,
   `reason`, `restored_verified`), take the definition fields from that
   mutant record so the copied report still carries all eleven
-  `mutation_probes` sub-fields.
+  `mutation_probes` sub-fields. `result: killed` means the suite detected the mutant (the named test failed with the mutant applied) and `survived` means it did not; `expectation: met` means that outcome is what the probe was expected to show and `violated` means it is not. When the probe runner states a machine-readable verdict, copy `result` and `expectation` from it verbatim, never from your own reading of the test output, and quote the runner's verdict for each probe in `tests.executed` so both fields can be checked against it.
 - Run every long test, build, or mutation-probe command in the foreground
   and wait for it to finish before returning. When one foreground call
   cannot hold it to completion, poll the backgrounded run to completion

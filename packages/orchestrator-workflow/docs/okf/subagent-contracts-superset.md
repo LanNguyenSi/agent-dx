@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-18T14:16:10.000Z
+timestamp: 2026-09-18T14:32:56.000Z
 sources:
   - packages/orchestrator-workflow/assets/agents/explorer.md
   - packages/orchestrator-workflow/assets/agents/task-slicer.md
@@ -745,6 +745,26 @@ never-`adversarial`-on-`-medium` constraint
 Motivation and the anchoring dogfood evidence live in
 `CHANGELOG.md:#[0.32.0]#"A review-method axis, orthogonal to the effort tier"`,
 not here.
+
+## Probe verdict fields: legend, copy rule, cross-check
+
+The implementer prompt is the normative site for what `result` and
+`expectation` mean and where their values come from
+(`packages/orchestrator-workflow/assets/agents/implementer.md:106#"means the suite detected the mutant"`):
+"`result: killed` means the suite detected the mutant (the named test failed with the mutant applied) and `survived` means it did not; `expectation: met` means that outcome is what the probe was expected to show and `violated` means it is not."
+"When the probe runner states a machine-readable verdict, copy `result` and `expectation` from it verbatim, never from your own reading of the test output, and quote the runner's verdict for each probe in `tests.executed` so both fields can be checked against it."
+`contracts.md` defers output-field semantics to the prompt and carries the two
+sentences verbatim for the orchestrator
+(`packages/orchestrator-workflow/assets/skill/references/contracts.md:129#"means the suite detected the mutant"`).
+The orchestrator's side is in step 6 of the workflow
+(`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:115#"Before transferring a probe row"`):
+"Before transferring a probe row, compare its `result` and `expectation` with the runner verdict quoted in `tests.executed`; on a mismatch or a missing verdict, resupply it (ask the same implementer for the verdict, or rerun the probe yourself) and record the resupply, rather than inferring either field."
+The contract shape, the enums and the eleven sub-fields are unchanged, and no
+tool is named. `reason` keeps its meaning (required only for
+`not_applicable`), which is why the quoted verdict goes to `tests.executed`.
+Pinned by `test/probe-plans-recovery.test.ts`, which asserts the three quoted
+sentences against the prompt, `contracts.md`, the workflow, the CHANGELOG
+bullet and this section.
 
 ## Cross-links
 

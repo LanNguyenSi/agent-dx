@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- The two verdict fields of a mutation probe now carry a legend, a source
+  and a check. `assets/agents/implementer.md`, the normative site for the
+  output-field semantics, says: "`result: killed` means the suite detected
+  the mutant (the named test failed with the mutant applied) and `survived`
+  means it did not; `expectation: met` means that outcome is what the probe
+  was expected to show and `violated` means it is not." and: "When the probe
+  runner states a machine-readable verdict, copy `result` and `expectation`
+  from it verbatim, never from your own reading of the test output, and
+  quote the runner's verdict for each probe in `tests.executed` so both
+  fields can be checked against it." `references/contracts.md` carries both
+  sentences verbatim for the orchestrator. Step 6 of
+  `references/evidence-and-probes.md` adds the orchestrator's side: "Before
+  transferring a probe row, compare its `result` and `expectation` with the
+  runner verdict quoted in `tests.executed`; on a mismatch or a missing
+  verdict, resupply it (ask the same implementer for the verdict, or rerun
+  the probe yourself) and record the resupply, rather than inferring either
+  field." The contract shape, the enums and the eleven `mutation_probes`
+  sub-fields are unchanged, no tool is named, and every sentence was
+  appended to an existing line so no cited line moved; the prompt change
+  reaches an existing install with the next kit re-install, which also
+  re-renders the tier variants. Evidence (issue #300, one run, not a
+  benchmark): an implementer returned all six probes as `survived` with
+  `expectation: violated` while its own evidence showed the suite failing on
+  every mutant, and the mislabel was caught only because the orchestrator
+  compared the fields with that evidence by hand. Pinned in
+  `test/probe-plans-recovery.test.ts`.
 - Three ceremony rules in the skill references, none of which changes the
   review gate, the waiver rules or the AGENTS.md section (byte-identical, so
   no AGENTS.md re-install is needed; the rules reach an existing install

@@ -112,7 +112,7 @@ directory and the subagents.
    `03-decisions.md` and consolidate evidence in
    `04-implementation-summary.md`, recording each probe the implementer
    reports as a row in `04-implementation-summary.md`'s Mutation Probes
-   subsection, with the round it was named in. Each row's Before/After
+   subsection, with the round it was named in. Before transferring a probe row, compare its `result` and `expectation` with the runner verdict quoted in `tests.executed`; on a mismatch or a missing verdict, resupply it (ask the same implementer for the verdict, or rerun the probe yourself) and record the resupply, rather than inferring either field. Each row's Before/After
    cells hold a single-line excerpt; when the mutant's actual before/after
    text is multi-line or contains an unescaped `|`, or the mutant is a
    patch/diff rather than a text swap, the full text or diff goes in the
