@@ -1189,7 +1189,7 @@
   sentence reverted to its pre-change wording, fails the exact-sub-field
   and regression-signal tests above; restored, the suite is green again.
   `CHANGELOG.md`'s own prose copy of this change is
-  (`CHANGELOG.md:179#"The implementer"`).
+  (`CHANGELOG.md:202#"The implementer"`).
 
   Verified on the committed tree: the full package suite (`npm test`),
   `typecheck`, `typecheck:test`, and `format:check`, all clean. Re-pointed
@@ -1457,7 +1457,7 @@
   that binding rather than second-guessing it.
 
   The CHANGELOG bullet for this round is
-  `CHANGELOG.md:556#"Citation scanning is paragraph-joined"`. Verified on
+  `CHANGELOG.md:579#"Citation scanning is paragraph-joined"`. Verified on
   the committed tree: the full package suite, `docs-consistency.test.ts`
   on its own, `typecheck`, `typecheck:test` and `format:check`; the
   figures each guard measured are in its own computed test name, per the
@@ -10254,6 +10254,71 @@ cause-hint pin in `test/docs-consistency.test.ts` follows the new hint
 wording (and now also names an expired token as a cause); the four docs
 sourcing that test file were re-verified and re-stamped twice, once per
 edit of the pin (no citation into it moved).
+
+## 2026-09-18 (agent-dx d19ae5d7, check-release-changelogs hyphenated prerelease headings)
+
+`check-release-changelogs.mjs`'s `VERSION_HEADING_RE` (rule 1,
+version-heading) previously accepted only `[\w.]` in a heading's
+prerelease tag, while `parseSemver` already accepted `[0-9A-Za-z.-]`; a
+package.json version with a hyphenated prerelease such as `1.0.0-alpha-1`
+parsed fine through `parseSemver` but never matched the heading regex.
+Both sites now build their prerelease group from one shared
+`PRERELEASE_IDENTIFIER_CHARS` constant so the two cannot drift apart
+again. Two fixture tests were added: a hyphenated heading that matches
+package.json's version passes rule 1, and a hyphenated heading that does
+not match still fails it. `CHANGELOG.md`'s `[Unreleased]` section gained
+a bullet naming this fix and three details the 0.35.0 hardening bullet
+left unnamed: the `--expect <csv>` option (an empty csv opts out of rule
+5, checked-package-scope), rule 5 running only when that expectation
+list is non-empty, and rule 2's semver-precedence comparison with build
+metadata stripped before it.
+
+The 19-line insertion re-pointed this log's own two live self-citations
+into `CHANGELOG.md`, from line 179 to line 198 (moved again to line 202
+by a later round, `CHANGELOG.md:202#"The implementer"`) and from line
+556 to line 575 (moved again to line 579,
+`CHANGELOG.md:579#"Citation scanning is paragraph-joined"`); both were
+re-read at their new lines before the re-point. Re-verified and
+re-stamped the three docs whose `sources:` list `CHANGELOG.md`
+(`run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`,
+`review-gate-and-waivers.md`): none of the three names the script or the
+changed rule, and each of their own `CHANGELOG.md` citations is
+heading-anchored (`#[x.y.z]`), so no body edit was needed beyond the
+timestamp.
+
+Verified from the worktree root: `build`, `typecheck`, `typecheck:test`,
+and `format:check` all clean; the full package suite green (1210
+passed). `node scripts/check-release-changelogs.mjs --base origin/master`
+exits 0. One mutation probe through `agent-primitives probe`, killed with
+expectation met: narrowing the shared prerelease class back to `[\w.]`
+(dropping the hyphen) fails the hyphenated-heading fixture test; restored
+and re-verified clean.
+
+A second round narrowed the shared class further: an underscore
+prerelease heading (`1.0.0-alpha_1`) is no longer accepted either, since
+semver's own prerelease grammar forbids underscores and `parseSemver`
+already rejected such a version before this change; the round-1 bullet
+above was extended in place with this clause rather than adding a new
+one, and two fixture tests were added (the underscore heading, and an
+empty prerelease heading `## [1.0.0-]`), plus the round-1 mismatch test
+was tightened to assert the exact mismatch message instead of only the
+`[version-heading]` tag. The 4-line bullet growth re-pointed this log's
+two live self-citations again, from line 198 to line 202
+(`CHANGELOG.md:202#"The implementer"`) and from line 575 to line 579
+(`CHANGELOG.md:579#"Citation scanning is paragraph-joined"`); both were
+re-read at their new lines before the re-point.
+
+Verified from the worktree root: `build`, `typecheck`, `typecheck:test`,
+and `format:check` all clean; the full package suite green (1212
+passed, up from 1210 by the two new fixtures). Three mutation probes
+through `agent-primitives probe`, all killed with expectation met:
+narrowing the shared class back to `[\w.]` (also kills two pre-existing
+tests beyond the hyphenated fixture: the tightened mismatch test and the
+prerelease step-down direction-guard test), re-adding the underscore
+(`0-9A-Za-z._-`), and widening `VERSION_HEADING_RE`'s prerelease
+repetition from `+` to `*`; each mutant was restored and re-verified
+clean. `node scripts/check-release-changelogs.mjs --base origin/master`
+exits 0.
 
 ## 2026-09-18 (agent-dx 3e017800, log.md prose slop)
 
