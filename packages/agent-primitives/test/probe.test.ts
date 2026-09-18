@@ -2348,6 +2348,162 @@ describe("probe(): -p deletion restores the whole recreated directory chain's mo
       expect(gitOutput(repo, ["status", "--porcelain"])).toBe("");
     },
   );
+
+  it.skipIf(isRoot || process.platform === "win32")(
+    "drains a recreated directory's chmod-failure warning into result.warnings (killed path), naming the directory and both modes, and still reports killed and restored_verified true",
+    async () => {
+      useLockDir();
+      const { repo } = initRepo();
+      fs.mkdirSync(path.join(repo, "sole"));
+      const target = path.join(repo, "sole", "marker.txt");
+      fs.writeFileSync(target, "only entry\n");
+      fs.chmodSync(target, 0o755);
+      git(repo, ["add", "-A"]);
+      git(repo, [
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-q",
+        "-m",
+        "add sole/marker.txt",
+      ]);
+      const before = fs.readFileSync(target, "utf8");
+      const patchPath = deletionPatch(repo, "sole/marker.txt");
+      fs.chmodSync(path.join(repo, "sole"), 0o700);
+      const soleDir = path.join(repo, "sole");
+
+      // Stands in for a directory this process is not allowed to chmod
+      // at all; the real cases (a foreign-owned mount, `/tmp`) cannot be
+      // produced portably from a test.
+      const realChmod = fs.chmodSync;
+      const chmod = vi.spyOn(fs, "chmodSync").mockImplementation(((
+        p: fs.PathLike,
+        mode: fs.Mode,
+      ) => {
+        if (String(p) === soleDir) {
+          const err = new Error(
+            "EPERM: operation not permitted, chmod",
+          ) as NodeJS.ErrnoException;
+          err.code = "EPERM";
+          throw err;
+        }
+        realChmod(p, mode);
+      }) as typeof fs.chmodSync);
+
+      let result: ProbeResult;
+      try {
+        result = await probe(
+          baseOptions(repo, {
+            file: "sole/marker.txt",
+            form: "patch",
+            replaceText: undefined,
+            patchPath,
+            testCommand: "test -f sole/marker.txt",
+          }),
+        );
+      } finally {
+        chmod.mockRestore();
+      }
+
+      expect(result.status).toBe("killed");
+      expect(result.mutation_probe?.result).toBe("killed");
+      expect(result.mutation_probe?.restored_verified).toBe(true);
+      expect(fs.readFileSync(target, "utf8")).toBe(before);
+      // This is the probe-level drain of `InplaceSession.takeRestoreWarnings`
+      // (`restoreOnceReportingModes` in step.ts): without it, the
+      // warning stays trapped inside the session and never reaches the
+      // caller.
+      const warning = result.warnings.find((w) => w.includes(soleDir));
+      expect(warning).toBeDefined();
+      expect(warning).toContain("0o0700");
+      expect(warning).toMatch(/from 0o\d{4}/);
+      expect(warning).toContain("EPERM");
+    },
+  );
+
+  it.skipIf(isRoot || process.platform === "win32")(
+    "drains a recreated directory's chmod-failure warning into result.warnings on the apply_hash_mismatch restore path too (:409), not only the ordinary restoreOnce path",
+    async () => {
+      useLockDir();
+      const { repo } = initRepo();
+      fs.mkdirSync(path.join(repo, "sole"));
+      const target = path.join(repo, "sole", "marker.txt");
+      fs.writeFileSync(target, "only entry\n");
+      fs.chmodSync(target, 0o755);
+      git(repo, ["add", "-A"]);
+      git(repo, [
+        "-c",
+        "commit.gpgsign=false",
+        "commit",
+        "-q",
+        "-m",
+        "add sole/marker.txt",
+      ]);
+      const before = fs.readFileSync(target, "utf8");
+      const patchPath = deletionPatch(repo, "sole/marker.txt");
+      fs.chmodSync(path.join(repo, "sole"), 0o700);
+      const soleDir = path.join(repo, "sole");
+
+      // The real `git apply` below still really deletes the file; only
+      // the predicted hash this one call reports back is wrong, so the
+      // post-apply comparison takes the mismatch/restore-and-verify
+      // branch (step.ts:409) instead of the ordinary killed path
+      // (step.ts:295) exercised by the sibling test above.
+      const actualMutant = await vi.importActual<
+        typeof import("../src/probe/mutant.js")
+      >("../src/probe/mutant.js");
+      const mockComputeMutant = vi.mocked(computeMutant);
+      mockComputeMutant.mockImplementationOnce(async (spec, mutantOpts) => {
+        const real = await actualMutant.computeMutant(spec, mutantOpts);
+        if (!real.applicable) return real;
+        return { ...real, mutatedHash: "0".repeat(64) };
+      });
+
+      const realChmod = fs.chmodSync;
+      const chmod = vi.spyOn(fs, "chmodSync").mockImplementation(((
+        p: fs.PathLike,
+        mode: fs.Mode,
+      ) => {
+        if (String(p) === soleDir) {
+          const err = new Error(
+            "EPERM: operation not permitted, chmod",
+          ) as NodeJS.ErrnoException;
+          err.code = "EPERM";
+          throw err;
+        }
+        realChmod(p, mode);
+      }) as typeof fs.chmodSync);
+
+      let result: ProbeResult;
+      try {
+        result = await probe(
+          baseOptions(repo, {
+            file: "sole/marker.txt",
+            form: "patch",
+            replaceText: undefined,
+            patchPath,
+            testCommand: "test -f sole/marker.txt",
+          }),
+        );
+      } finally {
+        chmod.mockRestore();
+        mockComputeMutant.mockImplementation(
+          (...args: Parameters<typeof computeMutant>) =>
+            actualMutant.computeMutant(...args),
+        );
+      }
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("apply_hash_mismatch");
+      expect(result.mutation_probe?.restored_verified).toBe(true);
+      expect(fs.readFileSync(target, "utf8")).toBe(before);
+      const warning = result.warnings.find((w) => w.includes(soleDir));
+      expect(warning).toBeDefined();
+      expect(warning).toContain("0o0700");
+      expect(warning).toMatch(/from 0o\d{4}/);
+      expect(warning).toContain("EPERM");
+    },
+  );
 });
 
 describe("probe(): -p derives --file and -n when neither is given", () => {
@@ -4020,8 +4176,8 @@ describe("probe(): the emergency restore is the last write to the target", () =>
     // (delivered once the test command dies) and only then, after a
     // delay comfortably past exec.ts's 250ms flush grace but well under
     // the 2000ms default settle bound, writes the target and exits --
-    // which is what finally lets the run's stdio truly close. Before
-    // round 6's fix, the signal handler awaited the run's own promise
+    // which is what finally lets the run's stdio truly close. Before the
+    // fix this pins, the signal handler awaited the run's own promise
     // (settled early by the flush grace) instead of true closure, so
     // this write landed AFTER the restore and the marker was already
     // gone.

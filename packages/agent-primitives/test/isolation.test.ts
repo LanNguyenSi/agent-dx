@@ -348,6 +348,10 @@ describe("beginInplace", () => {
       const warnings = session.takeRestoreWarnings();
       expect(warnings.length).toBe(1);
       expect(warnings[0]).toContain(outer);
+      // A recreated directory reads "recreated <dir>", never "restored
+      // <dir>'s content": the latter would misdescribe a directory that
+      // was never mutated in place, only rebuilt by `mkdirSync`.
+      expect(warnings[0]).toContain(`recreated ${outer}`);
       expect(warnings[0]).toContain("0o0700");
       expect(warnings[0]).toMatch(/from 0o\d{4}/);
       expect(warnings[0]).toContain("EPERM");
@@ -358,6 +362,44 @@ describe("beginInplace", () => {
       // Every level the restore COULD correct still was.
       expect(fs.statSync(inner).mode & 0o7777).toBe(0o750);
       expect(fs.statSync(target).mode & 0o7777).toBe(0o755);
+    },
+  );
+
+  it.skipIf(isRoot || process.platform === "win32")(
+    "captures and restores the immediate parent's mode even when boundRoot is spelled differently from the target's own prefix (a symlinked ancestor), which a bound-checked first capture would miss",
+    () => {
+      // `outside` sits nowhere under `root`'s own tree; `link`, INSIDE
+      // `root`, is a symlink to it, so the target's literal parent
+      // (`link`) resolves to a place `isPathContained(root, ...)` would
+      // reject. The immediate-parent capture is unconditional exactly
+      // for this level: bound-checking it too (the mutant this test
+      // exists to kill) would skip recording its mode, and a restore
+      // that later recreates it as a plain directory would then have no
+      // recorded mode to put back.
+      const outside = makeTmpDir();
+      fs.chmodSync(outside, 0o700);
+      const root = makeTmpDir();
+      const logDir = makeTmpDir();
+      const link = path.join(root, "link");
+      fs.symlinkSync(outside, link, "dir");
+      const target = path.join(link, "f.txt");
+      fs.writeFileSync(target, "original\n");
+
+      const session = beginInplace(target, logDir, root);
+      // Removes only the `link` symlink node itself, per Node's own
+      // `rmSync` semantics for a symlink to a directory: `outside` and
+      // its contents are untouched.
+      fs.rmSync(link, { recursive: true, force: true });
+
+      expect(session.restore()).toBe(true);
+
+      expect(session.takeRestoreWarnings()).toEqual([]);
+      expect(fs.readFileSync(target, "utf8")).toBe("original\n");
+      // `mkdirSync` recreated `link` as a plain directory (the symlink
+      // is gone), so its mode is only right here if the immediate
+      // parent's mode really was captured.
+      expect(fs.lstatSync(link).isSymbolicLink()).toBe(false);
+      expect(fs.statSync(link).mode & 0o7777).toBe(0o700);
     },
   );
 });

@@ -201,19 +201,27 @@ function errnoLabel(err: unknown): string {
  * hash, and a file that is back byte-for-byte under a mode this process
  * could not correct is a metadata problem to report, not a mutation
  * left on disk.
+ *
+ * `kind` picks the warning's opening clause: a `directory` was never
+ * mutated in place, it was recreated by `restore()`'s own `mkdirSync`,
+ * so "restored its content" would misdescribe what happened to it. The
+ * target `file` keeps the original "restored ...'s content" wording.
  */
 function chmodBackTo(
   p: string,
   mode: number,
   warn: (message: string) => void,
+  kind: "file" | "directory" = "file",
 ): void {
   const wanted = mode & 0o7777;
+  const lead =
+    kind === "directory" ? `recreated ${p}` : `restored ${p}'s content`;
   let current: number;
   try {
     current = fs.statSync(p).mode & 0o7777;
   } catch (err) {
     warn(
-      `restored ${p}'s content, but could not read its mode back to ` +
+      `${lead}, but could not read its mode back to ` +
         `compare it against the ${formatMode(wanted)} it had before the ` +
         `mutation (${errnoLabel(err)}); the content restore itself is ` +
         `unaffected`,
@@ -225,7 +233,7 @@ function chmodBackTo(
     fs.chmodSync(p, wanted);
   } catch (err) {
     warn(
-      `restored ${p}'s content, but could not put its mode back to ` +
+      `${lead}, but could not put its mode back to ` +
         `${formatMode(wanted)} from ${formatMode(current)} ` +
         `(${errnoLabel(err)}); the content restore itself is unaffected ` +
         `and is what restored_verified attests`,
@@ -275,7 +283,7 @@ function restoreModes(
     // there is no recorded mode to put back, so it keeps whatever
     // `mkdirSync` gave it rather than being chmod-ed to a guess.
     if (captured === undefined) continue;
-    chmodBackTo(dir, captured.mode, warn);
+    chmodBackTo(dir, captured.mode, warn, "directory");
   }
   chmodBackTo(targetPath, targetMode, warn);
 }

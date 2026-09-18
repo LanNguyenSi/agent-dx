@@ -1121,6 +1121,39 @@ describe("doctor: stale-probe-marker check", () => {
     expect(check?.detail).not.toContain("auto-recovery is not possible");
   });
 
+  it("not ok for a deletion marker whose backup does not hash to preHash: the deletion sentinel alone is not enough, and never promises auto-recovery", async () => {
+    const lockDir = makeTmpDir();
+    const cwd = makeTmpDir();
+    const original = "original content";
+    // Absent target and the deletion sentinel match the recoverable
+    // shape, but the backup itself is not what the marker's preHash
+    // says it should be (truncated, half-written, or some other run's):
+    // there is nothing safe to copy back, so this must still refuse.
+    const target = path.join(cwd, "target.js");
+    const backupPath = path.join(lockDir, "backup-target.js");
+    fs.writeFileSync(backupPath, "not the pre-mutation content");
+    const dead = spawnSync(process.execPath, ["-e", "process.exit(0)"]);
+    const markerPath = path.join(lockDir, "abc.marker.json");
+    fs.writeFileSync(
+      markerPath,
+      JSON.stringify({
+        targetPath: target,
+        backupPath,
+        preHash: sha256(original),
+        mutatedHash: DELETED_FILE_HASH,
+        pid: dead.pid,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    const result = await doctor({ required: [], optional: [], cwd, lockDir });
+    const check = result.checks.find((c) => c.name === "stale-probe-marker");
+    expect(check?.ok).toBe(false);
+    expect(check?.detail).toContain("auto-recovery is not possible");
+    expect(check?.detail).not.toContain("auto-recover,");
+    expect(check?.detail).toContain(markerPath);
+    expect(check?.detail).toContain(backupPath);
+  });
+
   it("not ok for an absent target under any other mutatedHash, and names the backup beside the marker so an operator never deletes the only pointer to it", async () => {
     const lockDir = makeTmpDir();
     const cwd = makeTmpDir();
