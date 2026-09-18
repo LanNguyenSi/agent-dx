@@ -128,13 +128,37 @@ const EXPECTED_CHECKED_PACKAGES = [
   "slop-detector",
 ];
 
+// The prerelease identifier character class shared by VERSION_HEADING_RE
+// below and parseSemver further down, so the two cannot drift apart the
+// way they used to: VERSION_HEADING_RE only accepted `[\w.]` (no
+// hyphen), while parseSemver already accepted `[0-9A-Za-z.-]`, so a
+// package.json version with a hyphenated prerelease tag such as
+// "1.0.0-alpha-1" parsed fine but never matched the heading regex. Both
+// sites build their prerelease group from this one string instead of
+// repeating the character class literally. Deliberately narrower than
+// `\w`: no underscore, since semver's own prerelease grammar
+// (dot-separated alphanumerics and hyphens only) forbids it and
+// parseSemver already rejected it before this change. This string is
+// spliced verbatim into a `[...]` character class at both call sites, so
+// the trailing `-` must stay last in the string: inside a character
+// class a hyphen anywhere else opens a range (e.g. `a-z`) instead of
+// matching a literal hyphen.
+const PRERELEASE_IDENTIFIER_CHARS = "0-9A-Za-z.-";
+
 // Matches the first release heading, skipping any leading `## [Unreleased]`
 // heading (which never matches the `x.y.z` shape below and is therefore
 // already excluded by the pattern itself). The optional trailing
-// `+[\w.]+` group accepts build metadata, mirroring parseSemver's own
-// tolerance below, so a package.json version that carries build metadata
-// can still have a matching heading instead of always failing rule 1.
-const VERSION_HEADING_RE = /^## \[(\d+\.\d+\.\d+(?:-[\w.]+)?(?:\+[\w.]+)?)\]/m;
+// `+[\w.]+` group accepts build metadata so a package.json version that
+// carries it can still have a matching heading instead of always failing
+// rule 1. Known gap: this group is deliberately narrower than parseSemver
+// below, which strips everything after `+` and so tolerates any build
+// metadata; a hyphenated build tag such as "1.0.0+build-1" parses there
+// but does not match here and is reported as a missing heading. Only the
+// prerelease group shares its character class with parseSemver.
+const VERSION_HEADING_RE = new RegExp(
+  `^## \\[(\\d+\\.\\d+\\.\\d+(?:-[${PRERELEASE_IDENTIFIER_CHARS}]+)?(?:\\+[\\w.]+)?)\\]`,
+  "m",
+);
 const UNRELEASED_HEADING_RE = /^## \[Unreleased\]\s*\n/m;
 const NEXT_HEADING_RE = /^## \[/m;
 // A `CHANGELOG.md:<n>` or `CHANGELOG.md:<n>-<m>` mention, captured with its
@@ -321,7 +345,9 @@ function parseSemver(version) {
     return null;
   }
   const withoutBuild = version.split("+")[0];
-  const m = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(withoutBuild);
+  const m = new RegExp(
+    `^(\\d+)\\.(\\d+)\\.(\\d+)(?:-([${PRERELEASE_IDENTIFIER_CHARS}]+))?$`,
+  ).exec(withoutBuild);
   if (!m) {
     return null;
   }
