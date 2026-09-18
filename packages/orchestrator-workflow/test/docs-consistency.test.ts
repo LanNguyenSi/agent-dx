@@ -7087,13 +7087,112 @@ function siblingGuardEntryOwnLines(
   ];
 }
 
+// agent-dx 3c7bf237: the claim's citation enumeration, parsed as the
+// citation-shaped TOKENS a reviewer would actually read it as, not as a
+// digit-substring search (the earlier `claim.includes(String(n))` check
+// treated "2026" as naming line 20, and "src/init.ts:461" as naming
+// sibling range 461-461 -- neither is a citation of anything the claim
+// enumerates). Four token shapes, matching the vocabulary the 12 real
+// claims above actually use: `line N`, `lines N and M`, a bare number
+// directly after `uncited` (one or two, "uncited N" / "uncited N and
+// M"), and a bare `:N`/`:N-M` range not preceded by a path character --
+// the lookbehind excludes a colon that is part of a full `path.ext:N`
+// citation (e.g. the `src/init.ts:461` aside in the model-preselection.md
+// entry below), which names a DIFFERENT file's line by a wholly separate
+// mechanism (a real citation, checked by the bundle guard itself) and is
+// not part of this claim's own falsifiable enumeration.
+const SIBLING_GUARD_CLAIM_LINE_RE = /\bline\s+(\d+)\b/g;
+const SIBLING_GUARD_CLAIM_LINES_RE = /\blines\s+(\d+)\s+and\s+(\d+)\b/g;
+const SIBLING_GUARD_CLAIM_UNCITED_RE =
+  /\buncited\s+(\d+)(?:\s+and\s+(\d+))?\b/g;
+const SIBLING_GUARD_CLAIM_RANGE_RE = /(?<![\w./]):(\d+)(?:-(\d+))?\b/g;
+
+// `single` marks a bare `:N` token written with no `-M` (as opposed to a
+// `:N-M` range): the 12 real claims use this shape both for an own
+// single-point range (`:1082` where start === end === 1082) and, at least
+// once, as shorthand for a doc line (`:156` for `paragraphLine: 156`,
+// read the way "the :156 sentence" reads in prose) -- so a single-number
+// token additionally falls back to the entry's own recorded lines, the
+// same set rule (b) checks `line N`/`uncited N` against, before falling
+// back to the doc's own citation scan. A dashed `:N-M` token has no such
+// single-line reading and is checked only against the entry's own range
+// or a real sibling citation.
+interface SiblingGuardClaimRangeRef {
+  start: number;
+  end: number;
+  single: boolean;
+}
+
+interface SiblingGuardClaimEnumeration {
+  lineRefs: number[];
+  rangeRefs: SiblingGuardClaimRangeRef[];
+}
+
+function siblingGuardClaimEnumeration(
+  claim: string,
+): SiblingGuardClaimEnumeration {
+  const lineRefs: number[] = [];
+  const rangeRefs: SiblingGuardClaimRangeRef[] = [];
+  for (const m of claim.matchAll(SIBLING_GUARD_CLAIM_LINE_RE)) {
+    lineRefs.push(Number(m[1]));
+  }
+  for (const m of claim.matchAll(SIBLING_GUARD_CLAIM_LINES_RE)) {
+    lineRefs.push(Number(m[1]), Number(m[2]));
+  }
+  for (const m of claim.matchAll(SIBLING_GUARD_CLAIM_UNCITED_RE)) {
+    lineRefs.push(Number(m[1]));
+    if (m[2] !== undefined) lineRefs.push(Number(m[2]));
+  }
+  for (const m of claim.matchAll(SIBLING_GUARD_CLAIM_RANGE_RE)) {
+    const start = Number(m[1]);
+    const single = m[2] === undefined;
+    const end = single ? start : Number(m[2]);
+    rangeRefs.push({ start, end, single });
+  }
+  return { lineRefs, rangeRefs };
+}
+
+// agent-dx 3c7bf237: (a) an empty enumeration (no citation-shaped token at
+// all, even one naming an own line by coincidence of digits) is
+// unfalsifiable and fails closed. (b) every `line N`/`uncited N` token
+// must be one of the entry's own recorded lines (`siblingGuardEntryOwnLines`
+// unchanged). (c) every bare `:N`/`:N-M` token must be either the entry's
+// own range, a single-number `:N` naming one of the entry's own recorded
+// lines the same way a `line N` token would, or an actual citation into
+// `entry.real` that `extractSiblingGuardCitations` finds in `entry.doc`'s
+// own text -- reusing the guard's own scan rather than a second,
+// driftable grammar. `docText` and `resolveRealPath` are only consulted
+// when a range token needs the sibling-citation fallback, so a claim that
+// resolves entirely against the entry's own range/lines never needs a doc
+// fixture.
 function siblingGuardClaimIsFalsifiable(
   entry: SiblingGuardAllowlistEntry,
+  docText: string,
+  resolveRealPath: (citedPath: string) => string | undefined,
 ): boolean {
   if (entry.claim.length <= 40) return false;
-  return siblingGuardEntryOwnLines(entry).some((n) =>
-    entry.claim.includes(String(n)),
-  );
+  const { lineRefs, rangeRefs } = siblingGuardClaimEnumeration(entry.claim);
+  if (lineRefs.length === 0 && rangeRefs.length === 0) return false;
+
+  const ownLines = siblingGuardEntryOwnLines(entry);
+  if (lineRefs.some((lineRef) => !ownLines.includes(lineRef))) return false;
+
+  let docCitations: SiblingGuardCitation[] | undefined;
+  for (const range of rangeRefs) {
+    const isOwnRange = range.start === entry.start && range.end === entry.end;
+    const isOwnLine = range.single && ownLines.includes(range.start);
+    if (isOwnRange || isOwnLine) continue;
+    if (docCitations === undefined) {
+      docCitations = extractSiblingGuardCitations(docText, resolveRealPath);
+    }
+    const isSiblingCitation = docCitations.some(
+      (c) =>
+        c.real === entry.real && c.start === range.start && c.end === range.end,
+    );
+    if (!isSiblingCitation) return false;
+  }
+
+  return true;
 }
 
 describe("the citation-sibling-drift guard reports zero (unallowlisted) findings on the current bundle", () => {
@@ -7117,9 +7216,13 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
     for (const entry of SIBLING_GUARD_BUNDLE_ALLOWLIST) {
       expect(entry.claim.length, JSON.stringify(entry)).toBeGreaterThan(40);
       expect(
-        siblingGuardClaimIsFalsifiable(entry),
+        siblingGuardClaimIsFalsifiable(
+          entry,
+          readBundleDoc(entry.doc),
+          resolveRealPath,
+        ),
         `${entry.doc} (${entry.real}:${entry.start}-${entry.end}) claim names ` +
-          `none of its own recorded lines (${siblingGuardEntryOwnLines(entry).join(", ")}): ${entry.claim}`,
+          `none of its own recorded lines or a real sibling citation (own lines: ${siblingGuardEntryOwnLines(entry).join(", ")}): ${entry.claim}`,
       ).toBe(true);
     }
   });
@@ -7144,9 +7247,11 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
       uncitedLines: [20],
       claim: "a common idiom explains this coincidence.", // 41 chars, no digits
     };
+    const noDoc = "";
+    const noResolve = (): string | undefined => undefined;
     expect(longEnoughButUnrelated.claim.length).toBeGreaterThan(40);
     expect(
-      siblingGuardClaimIsFalsifiable(longEnoughButUnrelated),
+      siblingGuardClaimIsFalsifiable(longEnoughButUnrelated, noDoc, noResolve),
       "a claim long enough to pass the old length-only check, but naming " +
         "none of the entry's own recorded lines (5, 10, 12, 20), must " +
         "still be rejected as unfalsifiable",
@@ -7157,9 +7262,97 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
       claim: "line 20 is a different, unrelated coincidence entirely.",
     };
     expect(
-      siblingGuardClaimIsFalsifiable(namesItsOwnLine),
+      siblingGuardClaimIsFalsifiable(namesItsOwnLine, noDoc, noResolve),
       "the same length, now naming one of its own recorded lines (20), " +
         "must pass",
+    ).toBe(true);
+  });
+
+  // agent-dx 3c7bf237: `siblingGuardClaimIsFalsifiable` used to accept any
+  // claim that CONTAINED an own line's digits anywhere in its text, so a
+  // claim naming an unrelated year or id that happened to embed those
+  // digits (a blank enumeration) passed. It also never checked a `:N`
+  // sibling token against anything: a claim could name a wrong line, or a
+  // range that is neither the entry's own nor a citation the doc actually
+  // carries, and still pass as long as SOME digit matched somewhere. This
+  // fixture pins the parser: a blank enumeration (a digit substring of an
+  // own line, but no citation-shaped token) fails closed; a wrong `line N`
+  // and a `:N` naming a citation the fixture doc does not carry are each
+  // rejected; a claim enumerating only real sibling citations (own lines
+  // plus a `:N` the doc's own citation scan actually finds into
+  // `entry.real`) passes.
+  it("siblingGuardClaimIsFalsifiable parses the claim's citation enumeration as tokens, not digit substrings, and verifies :N/:N-M references against the doc's own citation scan", () => {
+    const entry: SiblingGuardAllowlistEntry = {
+      doc: "fixture-doc.md",
+      kind: "wrong-sibling-anchor",
+      real: "fixture-sibling.ts",
+      start: 10,
+      end: 12,
+      anchorKey: "deadbeef",
+      paragraphLine: 5,
+      uncitedLines: [20],
+      claim: "placeholder, overwritten per case below",
+    };
+    const noResolve = (): string | undefined => undefined;
+    const identity = (citedPath: string): string => citedPath;
+
+    const blankEnumeration: SiblingGuardAllowlistEntry = {
+      ...entry,
+      claim:
+        "this note was filed under document id 2026-fixture, unrelated " +
+        "to any of the entry's actual recorded citations here.",
+    };
+    expect(
+      siblingGuardClaimIsFalsifiable(blankEnumeration, "", noResolve),
+      "a digit substring of an own line (20, inside 2026) with no " +
+        "citation-shaped token is a blank enumeration and must fail",
+    ).toBe(false);
+
+    const wrongLine: SiblingGuardAllowlistEntry = {
+      ...entry,
+      claim:
+        "line 99 is where this sentence's evidence actually sits, which " +
+        "is not one of this entry's own recorded lines at all.",
+    };
+    expect(
+      siblingGuardClaimIsFalsifiable(wrongLine, "", noResolve),
+      "a `line N` token naming a line the entry does not itself record " +
+        "must fail",
+    ).toBe(false);
+
+    const wrongCitation: SiblingGuardAllowlistEntry = {
+      ...entry,
+      claim:
+        "line 5 introduces the check, and the sibling evidence at :30 " +
+        "is not actually cited anywhere in this fixture doc's own text.",
+    };
+    expect(
+      siblingGuardClaimIsFalsifiable(
+        wrongCitation,
+        "no citations here.",
+        identity,
+      ),
+      "a `:N` token that is neither the entry's own range nor a citation " +
+        "the doc actually carries into entry.real must fail",
+    ).toBe(false);
+
+    const realSiblingDoc =
+      "line 5 introduces the check and cites the sibling range " +
+      "fixture-sibling.ts:30 for context.\n";
+    const onlyRealSiblings: SiblingGuardAllowlistEntry = {
+      ...entry,
+      claim:
+        "line 5 introduces the check and cites the sibling range :30 " +
+        "for context, while uncited 20 belongs to a different guard.",
+    };
+    expect(
+      siblingGuardClaimIsFalsifiable(
+        onlyRealSiblings,
+        realSiblingDoc,
+        identity,
+      ),
+      "a claim enumerating only its own lines plus a :N sibling the doc's " +
+        "own citation scan actually finds must pass",
     ).toBe(true);
   });
 
