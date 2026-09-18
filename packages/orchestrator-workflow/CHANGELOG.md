@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-09-18
+
 - The two verdict fields of a mutation probe now carry a legend, a source
   and a check. `assets/agents/implementer.md`, the normative site for the
   output-field semantics, says: "`result: killed` means the probe's test
