@@ -222,6 +222,76 @@ describe("review-slop", () => {
       expect(hit).toBeDefined();
       expect(hit?.matched).toBe("F1");
     });
+
+    it("documented limitation: a bug-fix sentence naming a chip/cache-shaped id still fires (see review.allow)", () => {
+      // The gate only checks whether a review-process word shares the
+      // sentence, not whether the sentence is actually about a review
+      // finding -- so an ordinary bug-fix sentence that happens to name
+      // an Apple chip generation is a known, accepted false positive
+      // rather than a bug. `review.allow` (or `review.allowPaths`) is
+      // the intended escape hatch for a line like this one, not a
+      // smarter gate.
+      const v = checkText(
+        "This fix makes the M1 build reproducible.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      const hit = v.find((x) => x.ruleId === "review-slop/finding-id");
+      expect(hit).toBeDefined();
+      expect(hit?.matched).toBe("M1");
+    });
+
+    it("negative: a two-digit severity-letter token does not fire (pins the word boundary and single-digit shape)", () => {
+      const v = checkText(
+        "Filed M12 during review.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      expect(
+        v.find((x) => x.ruleId === "review-slop/finding-id"),
+      ).toBeUndefined();
+    });
+
+    it("fires on a lettered severity-letter token (pins the optional lowercase letter)", () => {
+      const v = checkText(
+        "Filed M2a during review.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      const hit = v.find((x) => x.ruleId === "review-slop/finding-id");
+      expect(hit).toBeDefined();
+      expect(hit?.matched).toBe("M2a");
+    });
+
+    it("negative: a review-process word in a previous, period-terminated sentence does not count for the severity form", () => {
+      const v = checkText(
+        "Some review findings landed earlier. Runs fine on the M1 chip.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      expect(
+        v.find((x) => x.ruleId === "review-slop/finding-id"),
+      ).toBeUndefined();
+    });
+
+    it("negative: a severity-letter id plus a review word inside a fenced code block does not fire", () => {
+      const text = ["```json", '{ "M1": "review" }', "```"].join("\n");
+      const v = checkText(text, "docs/NOTES.md", baseOpts());
+      expect(
+        v.find((x) => x.ruleId === "review-slop/finding-id"),
+      ).toBeUndefined();
+    });
+
+    it("negative: a severity-letter id plus a review word inside inline code does not fire", () => {
+      const v = checkText(
+        "See `M1 review` for detail.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      expect(
+        v.find((x) => x.ruleId === "review-slop/finding-id"),
+      ).toBeUndefined();
+    });
   });
 
   describe("round-reference (Markdown)", () => {

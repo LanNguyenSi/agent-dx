@@ -155,8 +155,10 @@ function isAllowedByReviewAllow(text: string, config: ResolvedConfig): boolean {
  * string-literal value) and the match's `[start, end)` span within that
  * same local text, decide whether the match should still count. Used by
  * `round-reference` to require a review-context word in the same sentence
- * (as `sentenceWindow` below bounds one) at all; `finding-id` and
- * `handoff-phrase` pass no filter and keep every match.
+ * (as `sentenceWindow` below bounds one) for both of its patterns, and by
+ * `finding-id` for its severity-letter alternative only -- the plain `F`
+ * form stays ungated. `handoff-phrase` passes no filter and keeps every
+ * match.
  */
 type MatchFilter = (text: string, start: number, end: number) => boolean;
 
@@ -355,6 +357,16 @@ const FINDING_ID = /\bF\d[a-z]?\b(?!-\d)/g;
 // same sentence window (see `sentenceWindow` and `hasReviewContext`
 // further down this file) also carries a review-process word --
 // `FINDING_ID_CONTEXT` below names the set.
+//
+// This is a coarse gate, not disambiguation: a sentence naming one of
+// the four letters above clears purely because no review-process word
+// shares its sentence window, not because the pack understood the
+// sentence was about a chip or a cache. A genuine bug-fix sentence
+// that happens to name one of these letters is therefore a known,
+// accepted false positive -- see the package README's review-slop
+// section and this package's own test suite for a pinned example --
+// and `config.review.allow` (or `allowPaths`) is the escape hatch for
+// it, not a smarter filter.
 const SEVERITY_FINDING_ID = /\b[HMLC]\d[a-z]?\b(?!-\d)/g;
 
 // The review-process word set gating `SEVERITY_FINDING_ID` above: the
@@ -559,6 +571,6 @@ const handoffPhrase: Rule = {
 export const reviewSlopPack: PackDefinition = {
   id: "review-slop",
   description:
-    "Run-local review tokens leaking into reusable content: finding ids (`F1`, `F2a`), round references (`round 2`, `R3`, `review round 1 fixes`), and workspace-handoff phrases (`per the <workspace> handoffs`). Scans Markdown, TS/JS source comments, test titles, and a commit-message file. Off by default; opt in via `--pack review-slop` or `packs.review-slop: true`.",
+    "Run-local review tokens leaking into reusable content: finding ids (`F1`, `F2a`, or a severity-letter id like `M1`/`H2a` when the same sentence also carries a review-process word), round references (`round 2`, `R3`, `review round 1 fixes`), and workspace-handoff phrases (`per the <workspace> handoffs`). Scans Markdown, TS/JS source comments, test titles, and a commit-message file. Off by default; opt in via `--pack review-slop` or `packs.review-slop: true`.",
   rules: [findingId, roundReference, handoffPhrase],
 };

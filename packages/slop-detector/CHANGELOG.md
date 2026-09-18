@@ -27,7 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now caught in pre-existing content such as
   `packages/orchestrator-workflow/docs/okf/log.md`'s own review-round
   entries; that pre-existing corpus is not scrubbed as part of this
-  change).
+  change). The gate is coarse, not disambiguation: a sentence naming
+  one of the four letters clears only because no review-process word
+  shares it, not because the pack understood the sentence's topic, so
+  a genuine bug-fix sentence that happens to name one of them (a chip
+  generation, a cache layer) still fires as a known, accepted false
+  positive; `review.allow` (or `review.allowPaths`) is the escape
+  hatch for such a line, not a smarter gate.
 
 ### Added
 

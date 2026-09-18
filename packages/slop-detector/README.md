@@ -433,8 +433,16 @@ or misleading the moment that cycle is over.
   `round`/`rounds`): left ungated, these four letters would swallow
   plain vocabulary far more often than a capital `F` does (`H1`-`H6`
   heading levels, `M1`-`M3` chip generations, `L1`/`L2` cache layers, a
-  `C4` hazmat class), so `the M1 chip` and `an L2 cache` stay clean while
-  `(M1)` in a sentence that also mentions a review or a fix still fires.
+  `C4` hazmat class), so `the M1 chip` and `an L2 cache` stay clean only
+  while their sentence carries no review-process word, and `(M1)` in a
+  sentence that also mentions a review or a fix still fires. This is a
+  coarse gate, not disambiguation: it clears a sentence because no
+  review-process word shares it, not because the pack understood the
+  sentence's topic, so a genuine bug-fix sentence that happens to name
+  one of these letters -- `This fix makes the M1 build reproducible.`
+  or `We fixed the L2 cache eviction bug.` -- still fires, as a known,
+  accepted false positive; `review.allow` (or `review.allowPaths`) is
+  the escape hatch for such a line, not a smarter gate.
 - **`round-reference`** (block): `round 2`, `R3`, `review round 1
   fixes`, same problem, for the round itself rather than a specific
   finding inside it. A digitless `review round` never matches, at any
