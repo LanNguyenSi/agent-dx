@@ -82,10 +82,26 @@ describe("fix-regression decision point", () => {
       "the review of a fix round (any implementation round after the task's first)",
     );
     expect(section).toContain(
-      "at least one `high` or `critical` finding with `introduced_by_delta: yes`",
+      "at least one `high` or `critical` finding that the previous round's review did not report, with `introduced_by_delta: yes`",
     );
-    expect(section).toContain("`unknown` and `no` do not trigger it");
+    expect(section).toContain(
+      "`unknown` and `no` do not trigger this decision point",
+    );
     expect(section).toContain("The signal needs no recurrence");
+  });
+
+  it("leaves `unknown` to the halt rule and the budget, which both act on it", () => {
+    expect(section).toContain(
+      "`no` continues through the ordinary finding gate, and `unknown` keeps its existing treatment under the Round-2 halt rule and the escalation budget",
+    );
+    expect(section).not.toContain("they follow the ordinary finding gate");
+    const whole = unwrap(recovery);
+    expect(whole).toContain(
+      "Apply this signal only to `introduced_by_delta: yes`/`unknown`",
+    );
+    expect(whole).toContain(
+      "A negative round counts only with at least one introduced_by_delta yes/unknown finding",
+    );
   });
 
   it("requires a recorded decision with four outcomes before another fix round", () => {
@@ -102,11 +118,17 @@ describe("fix-regression decision point", () => {
     expect(section).toContain("This is a decision point, not a halt");
     expect(section).toContain("it is not a round-2 halt signal");
     expect(section).toContain(
-      "it does not count toward the Review-round escalation budget",
+      "it does not count toward the Review-round escalation budget (the negative round itself still counts there as before)",
     );
     expect(section).toContain("It never replaces a review round");
     expect(section).toContain(
       "When the same review also fires the Round-2 halt signal, the halt rule governs",
+    );
+  });
+
+  it("states its evidence strength as an observed run and points to the CHANGELOG", () => {
+    expect(section).toContain(
+      "Anchored by an observed run; see the entry for this rule in the orchestrator-workflow CHANGELOG.",
     );
   });
 

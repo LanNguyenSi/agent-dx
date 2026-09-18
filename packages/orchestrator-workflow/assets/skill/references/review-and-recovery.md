@@ -85,12 +85,14 @@ see the entry for this rule in the orchestrator-workflow CHANGELOG.
 ## Fix-regression decision point
 
 The signal: the review of a fix round (any implementation round after the
-task's first) reports at least one `high` or `critical` finding with
-`introduced_by_delta: yes`, so the fix itself broke something. `unknown`
-and `no` do not trigger it; they follow the ordinary finding gate. The
-signal needs no recurrence: it fires even when the new finding's defect
-class has not appeared on this task before, which is what separates it
-from the Round-2 halt rule above.
+task's first) reports at least one `high` or `critical` finding that the
+previous round's review did not report, with `introduced_by_delta: yes`,
+so the fix itself broke something. `unknown` and `no` do not trigger this
+decision point: `no` continues through the ordinary finding gate, and
+`unknown` keeps its existing treatment under the Round-2 halt rule and the
+escalation budget. The signal needs no recurrence: it fires even when the
+new finding's defect class has not appeared on this task before, which is
+what separates it from the Round-2 halt rule above.
 
 Before another fix round starts, name in one sentence why the fix could
 introduce the defect (the structural cause, or the statement that there is
