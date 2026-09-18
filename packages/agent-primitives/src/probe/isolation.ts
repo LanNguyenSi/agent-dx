@@ -100,6 +100,15 @@ export function beginInplace(
     targetPath,
     restore(): boolean {
       try {
+        // A deletion mutant's real `git apply` can remove `targetPath`'s
+        // own parent directory along with the file, when the file was
+        // the directory's only tracked entry (git never tracks empty
+        // directories): `copyFileSync` alone would then fail with
+        // `ENOENT` on a directory that is simply gone, not on the file
+        // itself. Recreating it first is a no-op (and no additional
+        // failure surface) for every other mutant kind, whose parent
+        // directory was never touched.
+        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
         fs.copyFileSync(backupPath, targetPath);
         return true;
       } catch {

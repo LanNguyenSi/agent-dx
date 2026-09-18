@@ -15,7 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mutant.deleted: true` field, present only for this shape. The real
   apply removes the target file for real in both isolation modes; the
   restore recreates it byte-identically from the same backup and hash
-  verification every other mutant already uses, so
+  verification every other mutant already uses (now also recreating the
+  target's own parent directory first when the deletion removed it too --
+  git does not track an empty directory, so deleting the last tracked
+  file in one removes the directory along with it, which the prior
+  `copyFileSync`-only restore could not write back into), so
   `mutation_probe.restored_verified` is `true` the same way, and the run
   classifies `killed`/`survived` like any other patch mutant (tracker
   8e203884-31f2-4fb8-bf8f-bab7208fa696).

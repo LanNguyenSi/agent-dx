@@ -2023,6 +2023,46 @@ describe("probe(): -p patch that deletes the whole target file", () => {
     expect(fs.existsSync(path.join(repo, "fixture.js"))).toBe(true);
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   });
+
+  it("restores the parent directory too when the deleted file was git's only tracked entry there (git removes a now-empty directory along with the last file in it)", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.mkdirSync(path.join(repo, "sole"));
+    fs.writeFileSync(path.join(repo, "sole", "marker.txt"), "only entry\n");
+    git(repo, ["add", "-A"]);
+    git(repo, [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-q",
+      "-m",
+      "add sole/marker.txt",
+    ]);
+    const before = fs.readFileSync(
+      path.join(repo, "sole", "marker.txt"),
+      "utf8",
+    );
+    const patchPath = deletionPatch(repo, "sole/marker.txt");
+
+    const result = await probe(
+      baseOptions(repo, {
+        file: "sole/marker.txt",
+        form: "patch",
+        replaceText: undefined,
+        patchPath,
+        testCommand: "test -f sole/marker.txt",
+      }),
+    );
+
+    expect(result.status).toBe("killed");
+    expect(result.mutant?.deleted).toBe(true);
+    expect(result.mutation_probe?.result).toBe("killed");
+    expect(result.mutation_probe?.restored_verified).toBe(true);
+    expect(fs.existsSync(path.join(repo, "sole", "marker.txt"))).toBe(true);
+    expect(fs.readFileSync(path.join(repo, "sole", "marker.txt"), "utf8")).toBe(
+      before,
+    );
+  });
 });
 
 describe("probe(): -p derives --file and -n when neither is given", () => {
