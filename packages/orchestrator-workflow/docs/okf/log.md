@@ -1,5 +1,28 @@
 # Bundle log
 
+- 2026-09-18T00:00:00Z (agent-dx tracker task 3c7bf237-f587-40bb-b1dc-
+  ac0f213db91c, pandora run 2026-09-18-open-pool-batch57):
+  `siblingGuardClaimIsFalsifiable` in
+  `packages/orchestrator-workflow/test/docs-consistency.test.ts` now
+  parses an allowlist entry's `claim` as citation-shaped tokens (`line
+  N`, `lines N and M`, a bare number after `uncited`, and a bare
+  `:N`/`:N-M` not preceded by a path character) instead of a
+  digit-substring search, fails closed on a blank enumeration, checks
+  every `line`/`uncited` token against the entry's own recorded lines,
+  and checks every `:N`/`:N-M` token against the entry's own range, its
+  own recorded lines (a bare single-number token only), or a real
+  sibling citation the doc's own citation scan finds into `entry.real`;
+  this pure re-stamp-free growth added a new helper block, a new
+  fixture test, and a docCitations-typed variable well after every
+  existing citation this bundle makes into that test file, pushing
+  every citation at or after line 7638 (pre-edit) down by 193 lines.
+  Re-read all ten of `log.md`'s own citations into that test file
+  against the edited file (the only bundle doc citing that far down;
+  every other doc's citations into it sit above the edit point and are
+  unchanged) and re-stamped each one's line number in this commit; no
+  anchor text moved or changed, only the line number each citation
+  names.
+
 - 2026-09-17T04:42:19Z (agent-dx tracker task 8ebaf3f6, pandora run
   2026-09-17-open-pool-batch56): the dist-tag/deprecate/publish
   allowlist pin `describe` in
@@ -1376,7 +1399,7 @@
   exists on both sides, the unanchored-citation brake's
   (`test/docs-consistency.test.ts:3547#"in-scope citations (sanity: the brake itself did not go blind"`)
   and this round's new floor for the log.md guard
-  (`test/docs-consistency.test.ts:8123#"anchored full citations of docs/okf/log.md"`);
+  (`test/docs-consistency.test.ts:8316#"anchored full citations of docs/okf/log.md"`);
   run `npx vitest run test/docs-consistency.test.ts -t "did not go
   blind"` and read both figures off the passing tests' own names. The
   round-3 entry's and bullet's counts are struck, not corrected.
@@ -1397,9 +1420,9 @@
   findings, allowlist geometry and failure messages still name real doc
   lines. Pinned both ways by their own fixtures: a wrapped full citation
   with a stale anchor
-  (`test/docs-consistency.test.ts:7971#"is still checked (a stale wrapped anchor fails)"`)
+  (`test/docs-consistency.test.ts:8164#"is still checked (a stale wrapped anchor fails)"`)
   and a wrapped continuation form
-  (`test/docs-consistency.test.ts:7987#"that wraps across a hard line break is still flagged"`),
+  (`test/docs-consistency.test.ts:8180#"that wraps across a hard line break is still flagged"`),
   both of which the round-3 per-line scan passed unseen. Checked rather
   than argued: with the round-2 tree's own `log.md` put in place (`git
   show 0cbded8:packages/orchestrator-workflow/docs/okf/log.md`), this
@@ -1417,7 +1440,7 @@
   excused every citation after it and the guard still reported clean. The
   shared helper above carries the single fence pass and the throw, so
   there is one copy now; an unbalanced-fence fixture
-  (`test/docs-consistency.test.ts:8008#"throws instead of silently excusing every citation"`)
+  (`test/docs-consistency.test.ts:8201#"throws instead of silently excusing every citation"`)
   pins the loud failure, and the computed floor named above pins
   non-vacuity on the real file.
 
@@ -1441,15 +1464,15 @@
   outside the repository and was read and anchor-checked against it; and
   its bespoke bare-name map bound a bare basename to this package's own
   file even where the repository root carries a file of that name. Now
-  (`test/docs-consistency.test.ts:7775#"function resolveLogCitationPath("`):
+  (`test/docs-consistency.test.ts:7968#"function resolveLogCitationPath("`):
   a cited path carrying a `..` segment is rejected before any lookup,
   containment under the repository root is asserted on the fallback
   anyway, and a bare name that collides with a root file is reported
   ambiguous with both candidates named, so the entry has to write the
   path out in full. The collision set is computed from the map and the
   disk, not hand-listed. Fixtures for both
-  (`test/docs-consistency.test.ts:8022#"escaping the repository with a"`,
-  `test/docs-consistency.test.ts:8067#"is reported ambiguous, not silently bound"`).
+  (`test/docs-consistency.test.ts:8215#"escaping the repository with a"`,
+  `test/docs-consistency.test.ts:8260#"is reported ambiguous, not silently bound"`).
   Residual, named rather than closed: the deeper repo-wide basename
   ambiguity okf-kit reports (a basename that exists in more than one
   package, `SKILL.md`) is still bound unconditionally by
@@ -1511,7 +1534,7 @@
   inherited, never written on its own line) while every existing
   assertion stays green on the smaller set. Closed two ways: a
   source-span pin
-  (`test/docs-consistency.test.ts:7638#"resolution sites stay wired to extractSiblingGuardCitations"`)
+  (`test/docs-consistency.test.ts:7831#"resolution sites stay wired to extractSiblingGuardCitations"`)
   asserting each of the three sites'
   own source still calls `extractSiblingGuardCitations(` and carries no
   bare `matchAll(ANCHOR_CITATION_RE)` loop, and a synthetic-doc-set
@@ -1529,12 +1552,12 @@
   excluded from `ANCHOR_OKF_DOCS`, from both guards above, and from
   okf-kit's own citation grammar, nothing reads it. Halt-rule redesign
   (D-037) rather than another rephrase: a third guard,
-  `test/docs-consistency.test.ts:7713#"log.md's own citations resolve, and it carries no path-less continuation citation form"`,
+  `test/docs-consistency.test.ts:7906#"log.md's own citations resolve, and it carries no path-less continuation citation form"`,
   checks `log.md` itself. Its resolver
   (`resolveLogCitationPath`) extends `anchorScopeResolve` with the
   package's own CHANGELOG/README/INSTALL-AGENT and its docs/okf siblings,
   plus a real-file-on-disk fallback. Its checker
-  (`test/docs-consistency.test.ts:7832#"function checkLogCitations("`)
+  (`test/docs-consistency.test.ts:8025#"function checkLogCitations("`)
   enforces two rules: every full, anchored citation must resolve (target
   exists, anchor text somewhere inside the cited range), and any anchored
   path-less continuation form is forbidden outright, since a log entry
