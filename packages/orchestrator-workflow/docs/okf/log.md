@@ -57,8 +57,9 @@
   row resolved a bare `:N` through the own-line fallback, so `isOwnLine`
   could be replaced by `false` without this fixture noticing) and closed
   the class behind them structurally instead of by another hand pass: the
-  fixture now carries a `CONJUNCTS` array naming every boolean decision
-  site the predicate's outcome depends on, including those of
+  fixture now carries a `CONJUNCTS` array naming every leaf boolean
+  operand the predicate's outcome depends on (combinators and pure
+  derivations are pinned through their operands' rows), including those of
   `siblingGuardEntryOwnLines` and `siblingGuardClaimEnumeration`, each
   mapped to the row labels whose outcome flips when exactly that site is
   neutralised, and the mapping is itself asserted: a conjunct naming no

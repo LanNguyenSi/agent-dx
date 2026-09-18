@@ -7311,8 +7311,8 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
   // could be replaced by `false` and this fixture stayed green. Both are
   // rows now, and the class itself ("a conjunct nobody pinned") is closed
   // structurally rather than by another hand pass: `CONJUNCTS` below names
-  // every boolean decision site the predicate's outcome depends on -- its
-  // own, plus those of the two helpers it calls
+  // every leaf boolean operand the predicate's outcome depends on (its
+  // combinators and derivations ride on those rows), plus those of the two helpers it calls
   // (`siblingGuardEntryOwnLines`, `siblingGuardClaimEnumeration`) -- each
   // mapped to the row labels whose outcome flips when exactly that site is
   // neutralised, and the mapping is itself asserted: a conjunct naming no
