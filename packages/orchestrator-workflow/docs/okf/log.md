@@ -10253,3 +10253,41 @@ cause-hint pin in `test/docs-consistency.test.ts` follows the new hint
 wording (and now also names an expired token as a cause); the four docs
 sourcing that test file were re-verified and re-stamped twice, once per
 edit of the pin (no citation into it moved).
+
+## 2026-09-18 (agent-dx d19ae5d7, check-release-changelogs hyphenated prerelease headings)
+
+`check-release-changelogs.mjs`'s `VERSION_HEADING_RE` (rule 1,
+version-heading) previously accepted only `[\w.]` in a heading's
+prerelease tag, while `parseSemver` already accepted `[0-9A-Za-z.-]`; a
+package.json version with a hyphenated prerelease such as `1.0.0-alpha-1`
+parsed fine through `parseSemver` but never matched the heading regex.
+Both sites now build their prerelease group from one shared
+`PRERELEASE_IDENTIFIER_CHARS` constant so the two cannot drift apart
+again. Two fixture tests were added: a hyphenated heading that matches
+package.json's version passes rule 1, and a hyphenated heading that does
+not match still fails it. `CHANGELOG.md`'s `[Unreleased]` section gained
+a bullet naming this fix and three details the 0.35.0 hardening bullet
+left unnamed: the `--expect <csv>` option (an empty csv opts out of rule
+5, checked-package-scope), rule 5 running only when that expectation
+list is non-empty, and rule 2's semver-precedence comparison with build
+metadata stripped before it.
+
+The 19-line insertion re-pointed this log's own two live self-citations
+into `CHANGELOG.md`, from line 179 to line 198
+(`CHANGELOG.md:198#"The implementer"`) and from line 556 to line 575
+(`CHANGELOG.md:575#"Citation scanning is paragraph-joined"`); both were
+re-read at their new lines before the re-point. Re-verified and
+re-stamped the three docs whose `sources:` list `CHANGELOG.md`
+(`run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`,
+`review-gate-and-waivers.md`): none of the three names the script or the
+changed rule, and each of their own `CHANGELOG.md` citations is
+heading-anchored (`#[x.y.z]`), so no body edit was needed beyond the
+timestamp.
+
+Verified from the worktree root: `build`, `typecheck`, `typecheck:test`,
+and `format:check` all clean; the full package suite green (1210
+passed). `node scripts/check-release-changelogs.mjs --base origin/master`
+exits 0. One mutation probe through `agent-primitives probe`, killed with
+expectation met: narrowing the shared prerelease class back to `[\w.]`
+(dropping the hyphen) fails the hyphenated-heading fixture test; restored
+and re-verified clean.
