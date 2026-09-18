@@ -1,6 +1,6 @@
 # Bundle log
 
-- 2026-09-18T00:00:00Z (agent-dx tracker task 3c7bf237-f587-40bb-b1dc-
+- 2026-09-18T04:42:03.000Z (agent-dx tracker task 3c7bf237-f587-40bb-b1dc-
   ac0f213db91c, pandora run 2026-09-18-open-pool-batch57):
   `siblingGuardClaimIsFalsifiable` in
   `packages/orchestrator-workflow/test/docs-consistency.test.ts` now
@@ -21,7 +21,12 @@
   every other doc's citations into it sit above the edit point and are
   unchanged) and re-stamped each one's line number in this commit; no
   anchor text moved or changed, only the line number each citation
-  names.
+  names. The four docs whose `sources` list that test file
+  (`model-preselection.md`, `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`)
+  were re-verified against the committed file (their highest cited line
+  is 4896, above the edit point) and re-stamped by the orchestrator so
+  the sources-fresh rule sees a stamp later than the source commit.
 
 - 2026-09-17T04:42:19Z (agent-dx tracker task 8ebaf3f6, pandora run
   2026-09-17-open-pool-batch56): the dist-tag/deprecate/publish
