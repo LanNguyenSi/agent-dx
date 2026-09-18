@@ -24,6 +24,7 @@ import {
 } from "./containment.js";
 import type { WorktreeSyncSuccess } from "./isolation.js";
 import { linkRelPath, type LinkCandidate } from "./link-policy.js";
+import { DELETED_FILE_HASH } from "./mutant.js";
 import { hasPythonTarget } from "./pycache.js";
 import { detectKnownZeroTestsEvidence } from "./zero-tests.js";
 import {
@@ -94,6 +95,49 @@ export async function recoverTargetMarker(
       reason: "stale_probe_marker",
       warning: `stale probe marker found for ${displayFile}, but its backup is missing (${marker.backupPath}); automatic recovery is not possible; delete the marker file to clear it: ${markerFilePathFor(absFile)}`,
     };
+  }
+  // A deletion mutant's real apply (`DELETED_FILE_HASH`'s own docblock)
+  // leaves the target genuinely absent as its post-mutation state, not
+  // some content to hash -- a run killed (e.g. SIGKILL) between that
+  // apply and the marker's own removal leaves exactly this shape behind:
+  // no target, a marker whose `mutatedHash` is the sentinel. The two
+  // hash-based branches below can never match it (`currentHash` is
+  // `undefined` here, and neither branch's `===` can hold against
+  // `undefined`), so without this branch such a marker falls through to
+  // the generic refusal at the bottom and is never auto-recovered. The
+  // backup is still hashed against `marker.preHash` before it is copied
+  // anywhere, for the same reason the branch below checks it: a corrupt
+  // or mismatched backup must never silently become the recovered file.
+  if (currentHash === undefined && marker.mutatedHash === DELETED_FILE_HASH) {
+    const backupHash = await sha256File(marker.backupPath).catch(
+      () => undefined,
+    );
+    if (backupHash !== marker.preHash) {
+      return {
+        reason: "stale_probe_marker",
+        warning: `stale probe marker found for ${displayFile}, but its backup does not match the pre-mutation hash the marker records (${marker.backupPath}); the target was left deleted; inspect the backup, then delete the marker file to clear it: ${markerFilePathFor(absFile)}`,
+      };
+    }
+    let restored = false;
+    try {
+      fs.mkdirSync(path.dirname(displayFile), { recursive: true });
+      fs.copyFileSync(marker.backupPath, displayFile);
+      restored = true;
+    } catch {
+      restored = false;
+    }
+    const restoredHash = restored
+      ? await sha256File(displayFile).catch(() => undefined)
+      : undefined;
+    if (!restored || restoredHash !== marker.preHash) {
+      return {
+        reason: "stale_probe_marker",
+        warning: `automatic recovery of a stale probe marker failed; the target was left deleted; backup at ${marker.backupPath}`,
+      };
+    }
+    removeMarkerFor(absFile);
+    warnings.push("recovered_stale_probe");
+    return undefined;
   }
   if (currentHash !== undefined && currentHash === marker.mutatedHash) {
     // The backup is hashed and required to match the marker's own

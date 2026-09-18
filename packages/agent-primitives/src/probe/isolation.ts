@@ -71,6 +71,41 @@ export interface InplaceDeps {
  * an `EEXIST` here means somebody else won the name, whether they took
  * it an hour ago or between this line and the previous one.
  */
+/** One directory in `targetPath`'s ancestor chain whose mode was
+ * captured at `beginInplace` time because a deletion mutant's `git
+ * apply` could remove it along with the file (see `captureAncestorModes`
+ * below). */
+interface AncestorMode {
+  dir: string;
+  mode: number;
+}
+
+/**
+ * Captures `targetPath`'s immediate parent directory's own mode -- the
+ * one directory a deletion mutant's real `git apply` can remove along
+ * with the file (when the file was the directory's only tracked entry;
+ * git never tracks empty directories) and `restore()`'s `mkdirSync`
+ * recreates at the process's default mode, not the one it actually had.
+ *
+ * Stops at exactly this one level rather than walking further up a
+ * chain that COULD also have been pruned (a directory whose only entry
+ * was itself the now-empty child): without a repository root to bound
+ * that walk, it has no reliable stopping point of its own, and a target
+ * sitting directly under a shared, few-entry system location can make it
+ * reach a directory this process is not actually allowed to `chmod`
+ * (measured: macOS's own `$TMPDIR` root, `EPERM` despite being owned by
+ * the same uid) -- turning an ordinary restore into a reported failure
+ * over a directory that was never at risk of being removed in the first
+ * place. `targetPath`'s parent always exists whenever `targetPath`
+ * itself does (the precondition `beginInplace` already relies on to
+ * read `targetPath`'s own content below), so this always returns
+ * exactly one entry.
+ */
+function captureAncestorModes(targetPath: string): AncestorMode[] {
+  const dir = path.dirname(targetPath);
+  return [{ dir, mode: fs.statSync(dir).mode }];
+}
+
 export function beginInplace(
   targetPath: string,
   logDir: string,
@@ -95,6 +130,8 @@ export function beginInplace(
   const data = fs.readFileSync(targetPath);
   fs.writeSync(fd, data);
   fs.closeSync(fd);
+  const targetMode = fs.statSync(targetPath).mode;
+  const ancestorModes = captureAncestorModes(targetPath);
   return {
     backupPath,
     targetPath,
@@ -110,6 +147,18 @@ export function beginInplace(
         // directory was never touched.
         fs.mkdirSync(path.dirname(targetPath), { recursive: true });
         fs.copyFileSync(backupPath, targetPath);
+        // `mkdirSync` above creates a recreated directory at the
+        // process's default mode (0755 minus umask), not the mode
+        // captured above, and `copyFileSync` on Darwin copies the
+        // BACKUP file's own metadata onto the destination even when the
+        // destination already exists -- since the backup lives under
+        // `logDir` (created with the ordinary default mode too), that
+        // loses a non-default target mode on every restore, not only a
+        // deletion's. Both are corrected here, inside this same
+        // try/catch, so a chmod failure still reports as a failed
+        // restore rather than a silently wrong one.
+        for (const { dir, mode } of ancestorModes) fs.chmodSync(dir, mode);
+        fs.chmodSync(targetPath, targetMode);
         return true;
       } catch {
         return false;

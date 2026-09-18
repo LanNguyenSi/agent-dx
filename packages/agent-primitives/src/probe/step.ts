@@ -174,6 +174,8 @@ export async function prepareMutant(
       computed.before,
       computed.after,
       computed.diff,
+      false,
+      computed.deleted,
     ),
     verifiedAppliedVia: formatVerifiedAppliedVia(
       target.displayFile,
@@ -181,6 +183,8 @@ export async function prepareMutant(
       computed.before,
       computed.after,
       computed.diff,
+      false,
+      computed.deleted,
     ),
     logPaths: computed.logPaths,
   };
