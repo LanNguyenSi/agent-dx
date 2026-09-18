@@ -1268,7 +1268,7 @@
   sentence reverted to its pre-change wording, fails the exact-sub-field
   and regression-signal tests above; restored, the suite is green again.
   `CHANGELOG.md`'s own prose copy of this change is
-  (`CHANGELOG.md:221#"The implementer"`).
+  (`CHANGELOG.md:255#"The implementer"`).
 
   Verified on the committed tree: the full package suite (`npm test`),
   `typecheck`, `typecheck:test`, and `format:check`, all clean. Re-pointed
@@ -1536,7 +1536,7 @@
   that binding rather than second-guessing it.
 
   The CHANGELOG bullet for this round is
-  `CHANGELOG.md:598#"Citation scanning is paragraph-joined"`. Verified on
+  `CHANGELOG.md:632#"Citation scanning is paragraph-joined"`. Verified on
   the committed tree: the full package suite, `docs-consistency.test.ts`
   on its own, `typecheck`, `typecheck:test` and `format:check`; the
   figures each guard measured are in its own computed test name, per the
@@ -10353,10 +10353,10 @@ list is non-empty, and rule 2's semver-precedence comparison with build
 metadata stripped before it.
 
 The 19-line insertion re-pointed this log's own two live self-citations
-into `CHANGELOG.md`, from line 179 to line 198 (moved again to line 221
-by later rounds, `CHANGELOG.md:221#"The implementer"`) and from line
-556 to line 575 (moved again to line 598,
-`CHANGELOG.md:598#"Citation scanning is paragraph-joined"`); both were
+into `CHANGELOG.md`, from line 179 to line 198 (moved again to line 255
+by later rounds, `CHANGELOG.md:255#"The implementer"`) and from line
+556 to line 575 (moved again to line 632,
+`CHANGELOG.md:632#"Citation scanning is paragraph-joined"`); both were
 re-read at their new lines before the re-point. Re-verified and
 re-stamped the three docs whose `sources:` list `CHANGELOG.md`
 (`run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`,
@@ -10382,9 +10382,9 @@ one, and two fixture tests were added (the underscore heading, and an
 empty prerelease heading `## [1.0.0-]`), plus the round-1 mismatch test
 was tightened to assert the exact mismatch message instead of only the
 `[version-heading]` tag. The 4-line bullet growth re-pointed this log's
-two live self-citations again, from line 198 to line 202 (moved again to line 221 by a later
-round, `CHANGELOG.md:221#"The implementer"`) and from line 575 to line 579
-(moved again to line 598, `CHANGELOG.md:598#"Citation scanning is paragraph-joined"`); both were
+two live self-citations again, from line 198 to line 202 (moved again to line 255 by a later
+round, `CHANGELOG.md:255#"The implementer"`) and from line 575 to line 579
+(moved again to line 632, `CHANGELOG.md:632#"Citation scanning is paragraph-joined"`); both were
 re-read at their new lines before the re-point.
 
 Verified from the worktree root: `build`, `typecheck`, `typecheck:test`,
@@ -10432,9 +10432,10 @@ before this change is 74, and the step 8 sentence added no line).
 the same name covering the trigger, the four recorded outcomes and the
 boundaries against the halt rule and the budget, with five anchored
 citations. The 19-line `CHANGELOG.md` bullet re-pointed this log's two live
-self-citations, from line 202 to line 221
-(`CHANGELOG.md:221#"The implementer"`) and from line 579 to line 598
-(`CHANGELOG.md:598#"Citation scanning is paragraph-joined"`), in the two
+self-citations, from line 202 to line 221 (moved again to line 255 by a
+later change, `CHANGELOG.md:255#"The implementer"`) and from line 579 to
+line 598 (moved again to line 632,
+`CHANGELOG.md:632#"Citation scanning is paragraph-joined"`), in the two
 live sites and in the two earlier entries that quote them; both were
 re-read at their new lines before the re-point. Re-verified and re-stamped
 the three docs whose `sources:` list the changed files
@@ -10483,3 +10484,27 @@ round: the changelog bullet now says the rule is defined only in the section
 (step 8 also instructs, so "only normative statement" overstated it), and the
 bundle doc states the naming obligation with the reference's own escape
 clause.
+
+## 2026-09-18 (agent-dx 8366c1f5, baseline revisions, docs-only review default, pinned prose)
+
+Three ceremony rules, each at one normative site. Steps 6 and 7 of
+`assets/skill/references/evidence-and-probes.md` each gained a sentence
+appended to an existing line (the baseline-revision rule next to who may
+revise a baseline; the docs-only review default and a pointer next to the
+review-method paragraph), so that file moved no cited line.
+`assets/skill/references/review-and-recovery.md` gained a "Pinned-prose
+changes" section after the Fix-regression decision point; the highest line
+this bundle cited in that file before this change is 106, so nothing moved
+there either. [review-gate-and-waivers.md](review-gate-and-waivers.md) gained
+one section quoting the four bound clauses with five anchored citations. The
+tests hold those clauses as constants and assert them against the references,
+the changelog bullet and that doc, the pattern the previous entry arrived at.
+The 34-line `CHANGELOG.md` bullet re-pointed this log's two live
+self-citations, from line 221 to line 255
+(`CHANGELOG.md:255#"The implementer"`) and from line 598 to line 632
+(`CHANGELOG.md:632#"Citation scanning is paragraph-joined"`), in the live
+sites and in the earlier entries that quote them; both were re-read at their
+new lines. Re-verified and re-stamped the three docs whose `sources:` list the
+changed files: every anchored citation into the two references resolves at
+its unchanged line, and no claim in those docs about baseline revisions,
+reviewer tiers or review rounds is contradicted by the new sentences.

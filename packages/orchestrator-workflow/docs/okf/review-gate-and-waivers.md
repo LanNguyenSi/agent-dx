@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-09-18T13:24:17.000Z
+timestamp: 2026-09-18T13:41:22.000Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/agents/reviewer.md
@@ -386,6 +386,37 @@ The rule lives only in the skill references; `agents-md-section.md` does
 not carry it, so it needs no AGENTS.md re-install and reaches an existing
 install with the next kit re-install. Pinned by
 `test/probe-plans-recovery.test.ts`.
+
+## Ceremony rules: baseline revisions, docs-only review default, pinned prose
+
+Three rules scale ceremony without touching the gate above; none of them is
+in `agents-md-section.md`.
+
+Baseline revisions (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:140#"Record a baseline revision only when"`):
+"Record a baseline revision only when scope or the normative text of a criterion changes, including a change to what its verification checks; a wording precision that leaves the check itself unchanged is a `03-decisions.md` entry, not a revision."
+Who may revise a baseline and what a revision records is unchanged.
+
+Docs-only review default (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:155#"For a review round whose entire delta is documentation"`):
+"For a review round whose entire delta is documentation, default to the `-medium` reviewer tier with `review_method: normal` where tier variants are installed";
+going higher is the orchestrator's call with a recorded reason, and the
+minimum review methods stay as they are, including that `adversarial` is
+never paired with the `-medium` tier.
+
+Pinned-prose changes (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:114#"## Pinned-prose changes"`)
+cover a change whose acceptance rests on tests that pin documentation
+wording. The reason given is that
+"A prose mutant survives exactly when its bytes sit in no assertion"
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:118#"mutant survives exactly when its bytes sit in no assertion"`),
+so rounds that hunt for the next unpinned sentence do not converge. The
+section asks for one normative site per rule, a claim list in the acceptance
+criterion as the pin obligation, a briefing that bounds the reviewer's prose
+mutant space to that list, copies bound by one shared test constant, and
+"Cap test-adequacy review rounds on the change at two."
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:132#"Cap test-adequacy review rounds on the change at two."`).
+Semantic findings are exempt from the bound and the cap, and the review gate
+is unchanged. Step 7 of the workflow points to the section without restating
+it. Pinned by `test/probe-plans-recovery.test.ts`, which asserts the quoted
+clauses against the references, the CHANGELOG bullet and this doc.
 
 ## See also
 

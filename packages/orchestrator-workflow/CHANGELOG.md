@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Three ceremony rules in the skill references, none of which changes the
+  review gate, the waiver rules or the AGENTS.md section (byte-identical, so
+  no AGENTS.md re-install is needed; the rules reach an existing install
+  with the next kit re-install). Step 6 of
+  `references/evidence-and-probes.md` now says: "Record a baseline revision
+  only when scope or the normative text of a criterion changes, including a
+  change to what its verification checks; a wording precision that leaves
+  the check itself unchanged is a `03-decisions.md` entry, not a revision."
+  Step 7 now says: "For a review round whose entire delta is documentation,
+  default to the `-medium` reviewer tier with `review_method: normal` where
+  tier variants are installed"; going higher stays the orchestrator's call
+  with a recorded reason, and the minimum review methods for security
+  judgment, install or deploy scripts, hand-edited lockfiles, cross-major
+  overrides and operator-flagged changes are untouched.
+  `references/review-and-recovery.md` gains a "Pinned-prose changes" section
+  for a change whose acceptance rests on tests that pin documentation
+  wording: "A prose mutant survives exactly when its bytes sit in no
+  assertion", so review rounds that hunt for the next unpinned sentence do
+  not converge. The section asks for one normative site per rule, a claim
+  list in the acceptance criterion as the pin obligation, a reviewer
+  briefing that bounds the prose mutant space to that list, copies bound to
+  the normative site by one shared test constant, and: "Cap test-adequacy
+  review rounds on the change at two." Semantic findings (two sites stating
+  different rules, a contradiction, a false claim) are exempt from the bound
+  and the cap. Step 7 points to the section without restating it. Evidence
+  (issue #300 and the change that added the Fix-regression decision point;
+  one repository each, not a benchmark): one observed run recorded three
+  baseline revisions for two wording precisions of a verification method; in
+  another the top reviewer tier on documentation-only rounds was about half
+  the day's cost; and the decision point itself, about 27 lines of rule
+  text, took four review rounds in which a surviving prose mutant was
+  reported in each of the first three, until the trigger was held in one
+  test constant and the mutant space was bounded. Pinned in
+  `test/probe-plans-recovery.test.ts`.
 - `references/review-and-recovery.md` gains a "Fix-regression decision
   point" between the Review-round escalation budget and the Final
   acceptance rule: when the review of a fix round reports at least one
