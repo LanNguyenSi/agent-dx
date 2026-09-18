@@ -10569,9 +10569,12 @@ stating both fields, does not support.
 
 Cut the `[Unreleased]` section under a new `[0.37.0] - 2026-09-18` heading,
 keeping an empty `[Unreleased]` heading above it, and bumped `package.json`
-and `package-lock.json` to 0.37.0 (minor: three new rule sections and a
-prompt rule, no breaking change, the AGENTS.md section untouched since
-0.36.0). The two-line insertion shifted this log's two live self-citations
+and `package-lock.json` to 0.37.0 (minor under 0.x: two new rule sections,
+two new step rules, one prompt rule, and the `validate-review-report` and
+`check-release-changelogs` fixes; the AGENTS.md section untouched since
+0.36.0). One consumer-visible behaviour change: `validate-review-report` is
+stricter, so a reviewer return with a non-string element in a string-array
+field now exits 1 where 0.36.0 exited 0. The two-line insertion shifted this log's two live self-citations
 from line 294 to line 296 (`CHANGELOG.md:296#"The implementer"`) and from
 line 671 to line 673
 (`CHANGELOG.md:673#"Citation scanning is paragraph-joined"`); both were
