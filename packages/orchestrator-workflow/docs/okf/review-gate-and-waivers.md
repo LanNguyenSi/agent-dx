@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-09-18T06:19:43.000Z
+timestamp: 2026-09-18T12:25:34.000Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/agents/reviewer.md
@@ -354,6 +354,31 @@ repeated` field so the orchestrator can read the trigger off the
 reviewer's own return; full field-duplication mechanics are out of scope
 here, see
 [subagent-contracts-superset.md](subagent-contracts-superset.md#recurrence-field).
+
+## Fix-regression decision point
+
+The halt rule and the budget both need something to repeat (a defect
+class, or negative rounds). A third, earlier rule covers a fix round whose
+review shows that the fix itself broke something, without any repetition
+yet (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:85#"## Fix-regression decision point"`):
+the trigger is at least one `high` or `critical` finding with
+`introduced_by_delta: yes` in the review of a fix round
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:88#"reports at least one"`);
+`unknown` and `no` do not trigger it. Before another fix round the
+orchestrator names the structural cause in one sentence and records one of
+four outcomes in `03-decisions.md`: continue with the stated reason,
+redesign, split, or hold
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:97#"record one of four outcomes as a decision in"`);
+an advisor spawn is optional. It is a decision point and not a halt
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:101#"This is a decision point, not a halt"`):
+continuing is a valid outcome, it is no round-2 halt signal, it adds
+nothing to the budget's count, and it never replaces a review round; when
+the same review also fires the Round-2 halt signal, the halt rule governs.
+Step 8 of the workflow points to it
+(`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:229#"record the Fix-regression decision point"`).
+The rule lives only in the skill references; `agents-md-section.md` does
+not carry it, so installing it needs no AGENTS.md re-install. Pinned by
+`test/probe-plans-recovery.test.ts`.
 
 ## See also
 
