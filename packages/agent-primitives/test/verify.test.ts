@@ -538,7 +538,7 @@ describe("verify: --fail-fast falls through a skipped check", () => {
       "npm run lint --silent",
       "npm run test --silent",
     ]);
-    expect(result.status).toBe("pass");
+    expect(result.status).toBe("error");
   });
 
   it("stops after the first check that actually fails, once past any leading skips", async () => {
@@ -553,7 +553,7 @@ describe("verify: --fail-fast falls through a skipped check", () => {
     expect(result.checks.map((c) => c.name)).toEqual(["build", "typecheck"]);
     expect(result.checks[0].status).toBe("skipped");
     expect(result.checks[1].status).toBe("fail");
-    expect(result.status).toBe("fail");
+    expect(result.status).toBe("error");
   });
 });
 

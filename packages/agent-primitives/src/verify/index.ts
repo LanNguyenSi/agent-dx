@@ -430,11 +430,6 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
   const logDir = path.join(options.logDir, "verify", runId);
 
   const scripts = readScripts(options.cwd);
-  // The conventional default set is best-effort: packages commonly expose
-  // only a subset of build/typecheck/lint/test. An explicit `-c` list is a
-  // caller's declared verification contract, so each missing command in it
-  // is an unresolved non-pass instead of an optional default omission.
-  const explicitChecks = options.checks !== undefined;
   const warnings: string[] = [];
   const namesNeedingScripts = names.some(
     (name) => !Object.prototype.hasOwnProperty.call(overrides, name),
@@ -497,14 +492,12 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
           `${name}: --pass-regex (${skippedPassRegex.source}) was given but the check resolved to skipped, so the predicate was never consulted`,
         );
       }
-      if (explicitChecks) {
-        warnings.push(
-          `${name}: no_script: no -x override or matching package.json script`,
-        );
-      }
-      // Keep resolving later names: an explicit check list records this
-      // omission as a non-pass, but --fail-fast does not make its other
-      // requested checks disappear from the envelope.
+      warnings.push(
+        `${name}: no_script: no -x override or matching package.json script`,
+      );
+      // Keep resolving later names: the omission is a non-pass, but
+      // --fail-fast does not make other requested checks disappear from the
+      // envelope.
       continue;
     }
 
@@ -884,7 +877,7 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
   } else {
     overallStatus = checks.some((c) => c.status === "error")
       ? "error"
-      : explicitChecks && checks.some((c) => c.status === "skipped")
+      : checks.some((c) => c.status === "skipped")
         ? "error"
         : checks.some((c) => c.status === "fail")
           ? "fail"

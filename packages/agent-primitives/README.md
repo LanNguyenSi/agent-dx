@@ -230,9 +230,8 @@ any command is built; a name outside that pattern is `status:
 "usage_error"`, exit `2`, and is never run.
 
 Check resolution, per name: an `-x` override wins; otherwise a matching
-`package.json` `scripts[name]` runs as `npm run <name> --silent`; a name
-explicitly selected with `-c` that has neither is recorded as `status:
-"skipped", reason: "no_script"`,
+`package.json` `scripts[name]` runs as `npm run <name> --silent`; a requested
+name with neither is recorded as `status: "skipped", reason: "no_script"`,
 with a warning naming the missing script. It is an explicit non-pass: the
 overall result is `status: "error"`, exit `2`, even when other requested
 checks pass. Supply the command deliberately with `-x name=command` when
@@ -396,9 +395,8 @@ missing entries even when the total is trustworthy. A detector's own
 warnings, and a log file the run could not write to, are reported in the
 top-level `warnings`, each prefixed with the check name.
 
-Overall `status` is `error` if any check errored or an explicitly selected
-check was unresolved, else `fail` if any check failed, else `pass`; `error`
-wins over `fail`. Exit code follows `status`
+Overall `status` is `error` if any check errored or was unresolved, else
+`fail` if any check failed, else `pass`; `error` wins over `fail`. Exit code follows `status`
 the same way every other subcommand's does.
 
 `SIGINT` and `SIGTERM` are handled for every subcommand: the CLI kills
