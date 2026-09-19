@@ -7,12 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-09-19
+
 - A run now declares a run mode. `assets/templates/00-goal.md` carries
   `<!-- solution-acceptance: mode = delegated -->` below the run-base
   markers; the value is `single`, `delegated`, or `batch`, and a missing or
-  unrecognised value means `delegated`, so existing runs and the default
-  flow are unchanged. `references/run-state-and-harness.md` gains a final
-  "Run mode" section, the only normative statement: `single` is one coherent
+  unrecognised value means `delegated`, so existing runs and the default flow
+  are unchanged. `references/run-state-and-harness.md` gains a final "Run
+  mode" section, the only normative statement: `single` is one coherent
   workstream that the orchestrator implements itself, `delegated` is one
   implementer per slice, `batch` is parallel implementers in separate
   worktrees with an integration check. The section gives the selection rule
@@ -20,9 +22,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   omit `01-plan.md` and `02-tasks.md`; `batch` fills a new Integration
   section in `04-implementation-summary.md`), makes a mode switch a D-ID row
   instead of a new run, and keeps the reviewer mandatory in all three modes.
-  `SKILL.md` points to the section from the route list and from step 1, and the sequence steps in `SKILL.md` and `references/evidence-and-probes.md` that are written for the default mode now say so. No
-  reader enforces the marker. The AGENTS.md policy section (`assets/agents-md-section.md`) and the README follow: non-trivial implementation follows the run mode, with `delegated` as the default, and both name each mode in one clause and point to the skill for the definitions; the README gains a "Run modes" section.
-  The policy section also names the run's `mode` marker in its Run state list and points to the docs-only review default of the skill's Delegate review step. Because the policy section changed, an existing install receives it only with its next `init` or `apply`. In run mode `single` the reviewer replays the orchestrator's probes: step 7 of `references/evidence-and-probes.md` excludes the skip permission for probes named by definition in that mode and requires the reviewer to replay every named orchestrator probe (named by its full definition or by a resolved immutable plan-and-result reference, not by an id alone) and to report in `reproduction` whether each replayed verdict matches the recorded one, a mismatch being a finding of at least `high` that also sets `matches_implementer_claim: mismatched`, and a briefing in that mode without any named probe being missing evidence; `assets/agents/reviewer.md` (every rendered variant) carries the duty, counts it in its method table among the obligations that apply under every `review_method`, and keeps it inert unless the briefing names the mode, and the reviewer output contract is unchanged.
+  `SKILL.md` points to the section from the route list and from step 1, and
+  the sequence steps in `SKILL.md` and `references/evidence-and-probes.md`
+  that are written for the default mode now say so. No reader enforces the
+  marker.
+- The AGENTS.md policy section (`assets/agents-md-section.md`) and the README
+  follow the run mode: non-trivial implementation follows the run mode, with
+  `delegated` as the default, and both name each mode in one clause and point
+  to the skill for the definitions; the README gains a "Run modes" section.
+  The policy section also names the run's `mode` marker in its Run state list
+  and points to the docs-only review default of the skill's Delegate review
+  step. Its review sentence and its Scaling delegation slicing bullet are
+  reworded as well: review is never skipped "in any run mode, not even for
+  docs or bulk changes" (`bulk` where the old text said batch, now a mode
+  name), and implementer subagents are scoped to the run modes `delegated`
+  and `batch`. Because the policy section changed, an existing install
+  receives it only with its next `init` or `apply`.
+- In run mode `single` the reviewer replays the orchestrator's probes: step 7
+  of `references/evidence-and-probes.md` excludes the skip permission for
+  probes named by definition in that mode and requires the reviewer to replay
+  every named orchestrator probe (named by its full definition or by a
+  resolved immutable plan-and-result reference, not by an id alone) and to
+  report in `reproduction` whether each replayed verdict matches the recorded
+  one, a mismatch being a finding of at least `high` that also sets
+  `matches_implementer_claim: mismatched`, and a briefing in that mode
+  without any named probe being missing evidence; `assets/agents/reviewer.md`
+  (every rendered variant) carries the duty, counts it in its method table
+  among the obligations that apply under every `review_method`, and keeps it
+  inert unless the briefing names the mode, and the reviewer output contract
+  is unchanged.
 
 ## [0.37.0] - 2026-09-18
 
