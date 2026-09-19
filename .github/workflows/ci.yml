@@ -46,6 +46,32 @@ jobs:
       - name: Check for org-, machine-, or point-in-time-bound evidence in instruction files
         run: node packages/slop-detector/dist/cli.js check . --pack placement-slop --config slop.config.yml
 
+  review-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/slop-detector/package-lock.json
+
+      - name: Install slop-detector
+        working-directory: packages/slop-detector
+        shell: bash
+        run: npm ci --no-audit --no-fund
+
+      - name: Build slop-detector
+        working-directory: packages/slop-detector
+        shell: bash
+        run: npm run build
+
+      - name: Check for run-local review references in reusable content
+        shell: bash
+        run: node packages/slop-detector/dist/cli.js check . --pack review-slop --config slop.config.yml
+
   # Separate job from placement-guard above (same slop-detector CLI, a
   # different pack): this one is a security control over
   # `.github/workflows/*.yml`, not a doc-hygiene lint, so it gets its own

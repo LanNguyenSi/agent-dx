@@ -37,6 +37,10 @@ node packages/slop-detector/dist/cli.js check examples/slop-sample.md --explain
 
 Full pack reference, sample output, the scan pipeline, and the rationale (including a data point from running it against 20 recently merged PRs): [packages/slop-detector/README.md](packages/slop-detector/README.md).
 
+CI runs a dedicated `review-guard` job with `review-slop` over the repository. Its
+root configuration keeps the maintained OKF evidence corpus and deliberate rule
+fixtures out of that reusable-content gate.
+
 ## Packages
 
 | Package | What it does | npm |
