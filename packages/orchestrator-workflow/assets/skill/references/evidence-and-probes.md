@@ -198,7 +198,7 @@ directory and the subagents.
    not merely their id; a probe recorded with only an id and no definition
    cannot be skipped this way and is `not_applicable`. The reviewer may
    then skip re-running the ones named by definition.
-   The reviewer output contract itself is unchanged. Never run mutation probes
+   The reviewer output contract itself is unchanged. In run mode `single` that skip permission does not apply: nobody but the orchestrator has seen its probe evidence, so the orchestrator records its own probes with their full definition in `04-implementation-summary.md` before requesting review, the reviewer briefing names the run mode and each of those probes by definition, and the reviewer must replay every orchestrator probe that the briefing names by definition, through the probe runner when one is available and never in the reviewed tree. It reports per probe, in `reproduction`, the probe, the replayed runner verdict, and whether that verdict matches the recorded `result` and `expectation`; a mismatch is a finding of at least `high`, and a probe named only by id is `not_applicable` and counts as missing evidence, not as a pass. Never run mutation probes
    in place against a worktree a reviewer subagent is concurrently reviewing;
    isolate the probe in a separate worktree or wait until the reviewer has
    returned before probing that tree again. For an explicitly adopted v1 run,
