@@ -26,7 +26,7 @@ role definitions where available rather than improvising prompts.
 
 ## Route before acting
 
-- **Create or resume a run; select a harness:** read
+- **Create or resume a run; choose its run mode; select a harness:** read
   [run-state and harness](references/run-state-and-harness.md). For a misfire,
   inconclusive probe, interrupted, blocked, or partial run, repeated finding,
   halt, or escalation also read
@@ -43,7 +43,7 @@ role definitions where available rather than improvising prompts.
 
 ## Orchestration sequence
 
-1. **Understand.** Create and bind run state, record contract provenance
+1. **Understand.** Create and bind run state, choose and record the run mode (Run mode section of the reference below), record contract provenance
    before planning, and resolve unknown provenance before delegation. Read
    [run-state and harness](references/run-state-and-harness.md) and
    [contracts](references/contracts.md).

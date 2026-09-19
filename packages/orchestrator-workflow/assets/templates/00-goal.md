@@ -2,6 +2,8 @@
 
 <!-- solution-acceptance: run-base = TODO -->
 <!-- solution-acceptance: run-base[<repo-basename>] = <sha> -->
+<!-- solution-acceptance: mode = delegated -->
+<!-- Run mode: single | delegated | batch. A missing or unrecognised value means delegated. -->
 
 ## Acceptance Baseline
 

@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-09-18T15:09:42.000Z
+timestamp: 2026-09-19T04:58:11.000Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -393,7 +393,7 @@ are distinguished only by the `<key>` token and by which of `00-goal.md`,
 in `00-goal.md` on a multi-repo run also turns up a fourth line, the keyed
 `run-base[<repo-basename>]` marker: same `run-base` key family, same
 fail-open posture, one line per repository instead of one line total; see
-the keyed-marker section above.
+the keyed-marker section above. The same grep also finds the `mode` key there, a record rather than a gate; see the last section of this doc.
 
 ## Note: 05-review-findings.md's 0.14.0 trailing comment is not a marker
 
@@ -405,3 +405,36 @@ and no enum, so none of the marker/table mechanics in this doc changed; the
 requirement itself is out of scope here — see
 [review-gate-and-waivers.md](review-gate-and-waivers.md) and
 [subagent-contracts-superset.md](subagent-contracts-superset.md).
+
+## The run mode marker: a record, fails OPEN
+
+`00-goal.md` carries a fourth key of the same comment grammar below the two
+run-base lines, shipped with its default value instead of a `TODO`
+(packages/orchestrator-workflow/assets/templates/00-goal.md:5#"<!-- solution-acceptance: mode = delegated -->").
+The value is `single`, `delegated`, or `batch`, and a missing or unrecognised
+value means `delegated`
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:178#"The marker is a record for the orchestrator, the reviewer,"),
+so a run created from an older template is a `delegated` run without any
+edit. No reader enforces the marker
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:179#"and the operator; no reader enforces it."):
+it tells the reviewer and the operator who implemented, and it is what a
+briefing quotes. The three definitions, the selection rule by the shape of
+the work, the run files each mode requires, and the rule that a mode switch
+is a D-ID row and never a new run are stated once, in the reference's last
+section
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:173#"## Run mode");
+`SKILL.md` and the reference's Intent only point there. `single` makes
+`01-plan.md` and `02-tasks.md` optional and keeps `04-implementation-summary.md`
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:203#"Run files per mode:"),
+because the verification set, the mutation probes, and the baseline coverage
+table live there; `batch` adds an Integration section to the same template
+(packages/orchestrator-workflow/assets/templates/04-implementation-summary.md:114#"## Integration").
+The marker line and its explanatory comment deliberately avoid naming both
+tokens of a run-base marker, which the consuming reader would flag as a
+malformed run-base attempt; the pin for that is
+packages/orchestrator-workflow/test/template-markers.test.ts:524#"adds no line that names both tokens of a run-base marker",
+next to the count-and-default pin
+(packages/orchestrator-workflow/test/template-markers.test.ts:507#"has exactly one mode marker, defaulting to delegated").
+The section's sentences are pinned as constants in
+`test/run-mode-constants.ts`, and `test/run-mode.test.ts` checks that no
+pointer site restates them.

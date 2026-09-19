@@ -110,3 +110,9 @@ intentional supersession and rationale in `03-decisions.md`.
 ## Risks / Notes
 
 - <!-- note -->
+
+## Integration
+
+<!-- Batch runs only (run mode `batch`); leave as is otherwise. Per merged
+slice: branch or worktree, merge order, conflicts and how they were resolved,
+and the verification set outcome on the integrated tree. -->
