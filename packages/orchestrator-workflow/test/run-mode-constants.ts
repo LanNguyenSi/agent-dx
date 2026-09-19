@@ -34,5 +34,13 @@ export const REVIEWER_IN_ALL_MODES =
  * own words because a reviewer runs without the skill loaded; this constant
  * binds the prompt and the contracts pointer to the rule's own wording.
  */
-export const SINGLE_REPLAY_RULE =
-  "replay every orchestrator probe that the briefing names by definition";
+export const SINGLE_REPLAY_RULE = "replay every named orchestrator probe";
+
+/**
+ * What "named" means is defined once in step 7; the reviewer prompt repeats
+ * it because a reviewer runs without the skill. Every other clause of the
+ * rule speaks of named probes only, so a further naming form is added in
+ * one place.
+ */
+export const NAMED_PROBE_FORMS =
+  "its full definition or a resolved immutable plan-and-result reference";

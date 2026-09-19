@@ -16,7 +16,13 @@
   plan-and-result reference counts like an inline definition), named the
   replay in the `normal` method row's list of obligations that apply under
   every method, and added what a mixed replay outcome and a briefing
-  without any named probe mean; all of it inside existing lines.
+  without any named probe mean; all of it inside existing lines. A second
+  review round found that fix asymmetric (the briefing could name a probe
+  by reference while the reviewer-side clause still said by definition),
+  so the rule sentence was rebuilt around one definition of a named probe
+  that every other clause refers to, and this bundle's paraphrase of the
+  `normal` method row in `subagent-contracts-superset.md` gained the third
+  obligation it had been missing.
 - 2026-09-19T05:31:21.000Z (agent-dx tracker task 3d74bdfb-6450-4436-ad38-
   ea0565d5ae2b, pandora run 2026-09-19-issue300-stage2): the generated
   policy section and the README now follow the run mode.

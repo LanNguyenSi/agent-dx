@@ -9,7 +9,7 @@ import { readAsset } from "../src/assets.js";
 import { composeCodexAgent } from "../src/codex.js";
 import { runInit } from "../src/init.js";
 import { DEFAULT_MODELS, DEFAULT_TIER, ROLE_TIERS } from "../src/models.js";
-import { SINGLE_REPLAY_RULE } from "./run-mode-constants.js";
+import { NAMED_PROBE_FORMS, SINGLE_REPLAY_RULE } from "./run-mode-constants.js";
 
 const unwrap = (text: string) => text.replace(/\s+/g, " ");
 const probes = unwrap(readAsset("skill/references/evidence-and-probes.md"));
@@ -19,7 +19,7 @@ const reviewer = unwrap(reviewerRaw);
 
 const BEFORE_THE_RULE = "The reviewer output contract itself is unchanged.";
 const REVIEWER_DUTY =
-  "When the briefing names run mode `single`, the orchestrator implemented the change itself and nobody has cross-checked its probe evidence: replay every orchestrator probe that the briefing names by definition";
+  "When the briefing names run mode `single`, the orchestrator implemented the change itself and nobody has cross-checked its probe evidence: replay every named orchestrator probe, where named means the briefing gives its full definition or a resolved immutable plan-and-result reference";
 
 /**
  * In a delegated run the orchestrator cross-checks the implementer's probe
@@ -40,19 +40,29 @@ describe("single-mode probe replay", () => {
     expect(step7).toContain(`the reviewer must ${SINGLE_REPLAY_RULE},`);
   });
 
-  it("step 7 names the orchestrator's side, the report, the mismatch severity and the id-only case", () => {
+  it("step 7 defines a named probe once and every other clause speaks of named probes only", () => {
     expect(step7).toContain(
-      "the orchestrator records its own probes with their full definition, or a resolved immutable plan-and-result reference, in `04-implementation-summary.md` before requesting review",
+      `A probe counts as named when the briefing gives ${NAMED_PROBE_FORMS}; an id alone does not name a probe.`,
+    );
+    expect(step7.split(NAMED_PROBE_FORMS)).toHaveLength(2);
+    const rule = step7.slice(step7.indexOf("In run mode `single`"));
+    expect(rule).not.toContain("by definition");
+    expect(rule).not.toContain("by that reference");
+  });
+
+  it("step 7 names the orchestrator's side, the report, the mismatch consequences and the missing-evidence cases", () => {
+    expect(step7).toContain(
+      "The orchestrator records every probe it ran in one of those two forms in `04-implementation-summary.md` before requesting review",
     );
     expect(step7).toContain(
-      "the reviewer briefing names the run mode and each of those probes by definition or by that reference",
+      "the reviewer briefing states the run mode and names each of those probes",
     );
     expect(step7).toContain("never in the reviewed tree");
     expect(step7).toContain(
-      "whether that verdict matches the recorded `result` and `expectation`; a mismatch is a finding of at least `high` and sets `matches_implementer_claim: mismatched`",
+      "whether that verdict matches the recorded `result` and `expectation`; a mismatch is a finding of at least `high` and sets `matches_implementer_claim: mismatched`.",
     );
     expect(step7).toContain(
-      "a probe named only by id is `not_applicable` and counts as missing evidence, not as a pass, and a `single` briefing that names no probe at all is missing evidence too",
+      "A probe given only by id is `not_applicable` and counts as missing evidence, not as a pass, and so does a `single` briefing that names no probe at all.",
     );
   });
 
@@ -71,12 +81,13 @@ describe("single-mode probe replay", () => {
 
   it("the reviewer prompt carries the duty, bound to the rule's wording, and keeps it inert without the mode line", () => {
     expect(REVIEWER_DUTY).toContain(SINGLE_REPLAY_RULE);
+    expect(REVIEWER_DUTY).toContain(NAMED_PROBE_FORMS);
     expect(reviewer).toContain(REVIEWER_DUTY);
     expect(reviewer).toContain(
       "Do not skip a named probe in that mode, under any `review_method`; any mismatch also sets `matches_implementer_claim: mismatched`.",
     );
     expect(reviewer).toContain(
-      "A mismatch is a finding of at least `high`; a probe named only by id is `not_applicable` and is missing evidence, not a pass.",
+      "A mismatch is a finding of at least `high`; a probe given only by id is `not_applicable` and is missing evidence, not a pass, and so is a briefing in that mode that names no probe.",
     );
     expect(reviewer).toContain(
       "Without that mode line in the briefing this obligation does not exist.",
@@ -93,9 +104,7 @@ describe("single-mode probe replay", () => {
     expect(probes).toContain(
       "Assignments and summaries may point to it and a result artifact instead of resending a definition",
     );
-    expect(step7).toContain(
-      "or a resolved immutable plan-and-result reference",
-    );
+    expect(step7).toContain(NAMED_PROBE_FORMS);
   });
 
   it("the duty sits above the output block and no mode value leaks into that block", () => {
