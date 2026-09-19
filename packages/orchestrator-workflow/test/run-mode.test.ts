@@ -93,10 +93,11 @@ describe("run mode pointer sites", () => {
     runState.slice(0, runState.indexOf(`${HEADING}\n`)),
   );
   const skill = unwrap(skillMd);
+  const probes = unwrap(readAsset("skill/references/evidence-and-probes.md"));
 
   it("the reference's Intent points to the section", () => {
     expect(outsideSection).toContain(
-      "Who implements non-trivial work follows the run mode (see Run mode at the end of this reference).",
+      "Who implements non-trivial work depends on the run mode (see Run mode, the last section).",
     );
   });
 
@@ -105,7 +106,16 @@ describe("run mode pointer sites", () => {
       "**Create or resume a run; choose its run mode; select a harness:**",
     );
     expect(skill).toContain(
-      "choose and record the run mode (Run mode section of the reference below)",
+      "choose and record the run mode (see the Run mode section of run-state and harness)",
+    );
+  });
+
+  it("the sequence steps written for the default mode say so and point to the section", () => {
+    expect(skill).toContain(
+      "Steps 3 and 4 are written for the default run mode; the Run mode section says what changes in the other two.",
+    );
+    expect(probes).toContain(
+      "(Steps 4 to 6 are written for the default run mode; Run mode in run-state and harness says what changes in the other two.)",
     );
   });
 
@@ -119,12 +129,14 @@ describe("run mode pointer sites", () => {
     for (const text of restatable) {
       expect(outsideSection).not.toContain(text);
       expect(skill).not.toContain(text);
+      expect(probes).not.toContain(text);
     }
     // A reworded restatement would slip past the byte pins above; the mode
     // names themselves must not appear as defined terms outside the section.
-    for (const site of [outsideSection, skill]) {
-      expect(site).not.toMatch(/`single`\s*[:=]/);
-      expect(site).not.toMatch(/`batch`\s*[:=]/);
+    for (const site of [outsideSection, skill, probes]) {
+      for (const mode of RUN_MODES) {
+        expect(site).not.toMatch(new RegExp(`\`${mode}\`\\s*[:=]`));
+      }
     }
   });
 });

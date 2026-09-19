@@ -40,7 +40,7 @@ directory and the subagents.
    contract instead.
 3. **Plan.** Fill `01-plan.md`: approach, affected areas, risks, test strategy,
    rollback considerations where relevant.
-4. **Slice tasks.** For non-trivial changes, fill `02-tasks.md`. Delegate to
+4. **Slice tasks.** (Steps 4 to 6 are written for the default run mode; Run mode in run-state and harness says what changes in the other two.) For non-trivial changes, fill `02-tasks.md`. Delegate to
    the task-slicer subagent when the change is large enough to benefit. Each
    explicitly adopted v1 task carries: id, title, goal, acceptance baseline, acceptance criteria,
    relevant files, relevant docs, constraints, suggested tests, allowed changes, forbidden

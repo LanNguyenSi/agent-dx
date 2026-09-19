@@ -20,7 +20,12 @@
   each was checked to contain its anchor at the new line. The other docs
   cite the CHANGELOG by heading and needed no change. The three docs whose
   `sources` list an edited file were re-verified with the anchor guard
-  against the committed sources and re-stamped.
+  against the committed sources and re-stamped. A review round then added
+  a mode qualifier to the sequence steps of `SKILL.md` and
+  `evidence-and-probes.md` (appended to existing lines), widened the
+  no-restatement pin to all three mode names and to that second reference,
+  and corrected this bundle's own enumerations of the marker keys in
+  `run-state-lifecycle-and-markers.md`, which still counted three.
 - 2026-09-18T04:42:03.000Z (agent-dx tracker task 3c7bf237-f587-40bb-b1dc-
   ac0f213db91c, pandora run 2026-09-18-open-pool-batch57):
   `siblingGuardClaimIsFalsifiable` in

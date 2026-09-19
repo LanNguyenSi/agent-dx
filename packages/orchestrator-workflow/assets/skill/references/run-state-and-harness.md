@@ -15,7 +15,7 @@ tasks to specialized subagents. The goal is to improve quality, reduce
 context-window pressure, and keep the operator informed through structured
 handoffs.
 
-Scale the ceremony to the task. Who implements non-trivial work follows the run mode (see Run mode at the end of this reference). The workflow below is the default for
+Scale the ceremony to the task. Who implements non-trivial work depends on the run mode (see Run mode, the last section). The workflow below is the default for
 non-trivial work; a trivial change (a typo, a one-line fix) may be done
 directly by the orchestrator and reviewed by it, without slicing or spawning
 subagents. Review judgment still applies to every change; only the size of

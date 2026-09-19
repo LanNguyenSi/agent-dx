@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   omit `01-plan.md` and `02-tasks.md`; `batch` fills a new Integration
   section in `04-implementation-summary.md`), makes a mode switch a D-ID row
   instead of a new run, and keeps the reviewer mandatory in all three modes.
-  `SKILL.md` points to the section from the route list and from step 1. No
+  `SKILL.md` points to the section from the route list and from step 1, and the sequence steps in `SKILL.md` and `references/evidence-and-probes.md` that are written for the default mode now say so. No
   reader enforces the marker. The AGENTS.md policy section still describes
   the delegated flow only; it follows in a later change of this release.
 

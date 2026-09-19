@@ -353,11 +353,11 @@ vocabulary, and that it is marked Optional and bundle-scoped).
 
 Two test files carry this doc's guarantees:
 `packages/orchestrator-workflow/test/template-markers.test.ts` pins the
-three markers (regex + count + default value + byte-exact line for
-run-base), the keyed `run-base[<repo-basename>]` placeholder line that
+four marker keys (regex + count + default value, plus the byte-exact line for
+run-base and for the run mode marker), the keyed `run-base[<repo-basename>]` placeholder line that
 ships as a fourth line in `00-goal.md` beside the unkeyed run-base marker
 (still one `run-base` key; the keyed line adds a per-repository variant, not
-a fourth key), the findings-table header/legend/example-row triad above, and
+a key of its own, unlike the `mode` key of the last section), the findings-table header/legend/example-row triad above, and
 (0.13.0) the placeholder-row fail-closed convention (literal row wording,
 mutation-checked; the replace/delete rule documented next to it).
 `02-tasks.md` carries no marker or pinned shape of its own — it is a
@@ -381,13 +381,13 @@ by SKILL.md's Workflow steps are out of scope here too; see
 
 ## Gotcha for anyone grepping `solution-acceptance:`
 
-All three marker keys share one comment grammar,
+All marker keys share one comment grammar,
 `<!-- solution-acceptance: <key> = <value> -->`, but a naive grep for the
 prefix mixes a fail-open change-binding marker (`run-base`) with two
 fail-closed acceptance verdicts (`acceptance-recommendation`,
 `final-status`). Treating all three as "the acceptance gate" is wrong:
 leaving `run-base` as `TODO` is harmless (day-granular fallback), leaving
-either verdict marker as `TODO` keeps the run non-accepting. The three keys
+either verdict marker as `TODO` keeps the run non-accepting. These three keys, and the record-only `mode` key beside `run-base`,
 are distinguished only by the `<key>` token and by which of `00-goal.md`,
 `05-review-findings.md`, `06-handoff.md` they live in. A grep for the prefix
 in `00-goal.md` on a multi-repo run also turns up a fourth line, the keyed
