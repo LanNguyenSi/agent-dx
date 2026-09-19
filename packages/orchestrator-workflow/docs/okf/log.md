@@ -10697,3 +10697,14 @@ Re-stamped the bundle docs whose `sources:` list `CHANGELOG.md` after
 confirming that none of their own citations resolve into the shifted range.
 agent-primitives and slop-detector carry unreleased entries of their own
 and were left as they are.
+
+## 2026-09-19 (bundle prose gate freshness recheck)
+
+Verified the post-stamp deltas in `packages/orchestrator-workflow/README.md`,
+`assets/agents-md-section.md`, and `test/docs-consistency.test.ts`: they add
+run-mode policy and pins, without changing model routing. Verified the
+post-stamp `CHANGELOG.md` build-metadata release-guard entry: it leaves the
+review-gate, run-state, and subagent-contract source semantics and their
+heading citations unchanged. Re-stamped model-preselection.md,
+review-gate-and-waivers.md, run-state-lifecycle-and-markers.md, and
+subagent-contracts-superset.md after the source review.

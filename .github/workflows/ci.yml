@@ -46,6 +46,33 @@ jobs:
       - name: Check for org-, machine-, or point-in-time-bound evidence in instruction files
         run: node packages/slop-detector/dist/cli.js check . --pack placement-slop --config slop.config.yml
 
+  bundle-prose-guard:
+    name: OKF bundle prose guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/slop-detector/package-lock.json
+
+      - name: Install slop-detector
+        working-directory: packages/slop-detector
+        shell: bash
+        run: npm ci --no-audit --no-fund
+
+      - name: Build slop-detector
+        working-directory: packages/slop-detector
+        shell: bash
+        run: npm run build
+
+      - name: Check the orchestrator-workflow OKF bundle for prose slop
+        shell: bash
+        run: node packages/slop-detector/dist/cli.js check packages/orchestrator-workflow/docs/okf --pack prose-slop --config slop.bundle.config.yml
+
   review-guard:
     runs-on: ubuntu-latest
     timeout-minutes: 5

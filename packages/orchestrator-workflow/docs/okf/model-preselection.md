@@ -3,7 +3,7 @@ type: module
 title: Model preselection and routing
 description: How legacy role models and harness-specific role/tier selections flow through the CLI and manifests into agent definitions.
 tags: [models, routing, cli, manifest, per-role, harness-adapters]
-timestamp: 2026-09-19T05:51:38.000Z
+timestamp: 2026-09-19T12:05:39.000Z
 sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/routing.ts
@@ -36,7 +36,7 @@ session's main model (`src/models.ts:76-78#"* deliberately not configured here."
 0.15.0 every role in `ROLES` still gets a preselected model regardless of
 `--profile` (models are resolved before roles are filtered down to what the
 profile installs); see [install-fence-mechanics.md](install-fence-mechanics.md)
-for how `--profile` scopes which roles get an actual subagent file — since
+for how `--profile` scopes which roles get an actual subagent file: since
 0.21.0 `advisor` is scoped out of `minimal` the same way `explorer` and
 `task-slicer` already were, via the same `MINIMAL_PROFILE_ROLES` set
 (`src/models.ts:42#"const MINIMAL_PROFILE_ROLES: ReadonlySet<Role> = new"`) simply not naming it, no new profile logic needed.
@@ -87,7 +87,7 @@ below.
    the roles `rolesForProfile(profile)` selects (`src/cli-inputs.ts:102#"for (const role of roles) {"`
    iterates a `roles` parameter instead of the full `ROLES` list), so a
    `minimal` install is not asked for `explorer`/`task-slicer` models (and,
-   since 0.21.0, not for `advisor` either — the same `rolesForProfile`
+   since 0.21.0, not for `advisor` either: the same `rolesForProfile`
    scoping picked up the new role automatically, no `cli-inputs.ts` change
    required). Since
    0.19.0 the CLI also resolves `tiers` right after models, on the same
@@ -242,7 +242,7 @@ the only route back to `tiers: false` was hand-editing the manifest.
 `"low" | "medium" | "high" | "xhigh"` (`src/models.ts:162#"export type Tier ="`). `ROLE_TIERS` (`src/models.ts:169-174#"advisor: ["`) is
 which tiers each role gets a variant for: explorer and task-slicer
 `low, medium, high`; implementer all four; reviewer `medium, high, xhigh`;
-since 0.21.0, advisor `high, xhigh` (the smallest tier list of any role —
+since 0.21.0, advisor `high, xhigh` (the smallest tier list of any role:
 its default already sits at `high`, one step below the reviewer's default
 `--tiers` ceiling, so it only ever gets one variant, `-xhigh`).
 `DEFAULT_TIER` (`src/models.ts:182-187#"advisor:"`) is the tier each role's plain file already
@@ -261,7 +261,7 @@ from `src/index.ts` since fix-round-1 (review finding L2), the same
 public-surface treatment `Profile`/`PROFILES` already had; the two
 previously-unused `TIERS`/`isTier` exports that finding also flagged were
 dropped outright rather than forced into a real call site, since the
-`tiers` field they would degrade is a plain `boolean`, not a `Tier` value —
+`tiers` field they would degrade is a plain `boolean`, not a `Tier` value:
 `isTier` had nothing to validate.
 
 **Composition.** `composeClaudeAgentVariant` (`init.ts:399-414#"disallowedTools: Edit, Write, NotebookEdit"`) is the
@@ -471,7 +471,7 @@ This is the fix-round-1 form (review finding M2); the original 0.19.0
 release read `opts.tiers ? true : (previous?.tiers ?? false)`, which had no
 way to express an explicit "turn it off" short of hand-editing the
 manifest, since commander only ever set `opts.tiers` to `true` or left it
-`undefined` — there was no negated flag to produce `false`. commander's
+`undefined`: there was no negated flag to produce `false`. commander's
 negatable-option pairing (`--tiers` / `--no-tiers` declared under the same
 `"tiers"` option name, `cli.ts:194-196#"explicitly turn effort-tier subagent variants off, overriding a previously installed --tiers value"`) resolves `opts.tiers` to `true`
 when `--tiers` is passed, `false` when `--no-tiers` is passed, and
@@ -492,7 +492,7 @@ M2; before the fix this transition was silent, see
 dropped roles' tier-variant files too, not just their base files
 (`init.ts:627-636#"variantPath}: now untracked after the full"`, review finding M3;
 `test/init.test.ts:894-931#"The variant files themselves are untouched, only untracked, same as"` pins the note count, since 0.21.0 asserting 8
-notes rather than 6 for the base-plus-tiers case — advisor became a third
+notes rather than 6 for the base-plus-tiers case: advisor became a third
 dropped role, contributing 1 base-file note plus 1 non-default-tier note of
 its own, purely from `ROLES` growing by one in `src/models.ts`, no code
 change of its own). Since fix-round-2 (review
@@ -592,7 +592,7 @@ the three capability-aware Codex dispatch paths.
 `test/docs-consistency.test.ts` guards enumeration sites so a role
 added to `ROLES` (`src/models.ts:1-8#"export const ROLES: Role[] = ["`) cannot silently go undocumented in
 model-facing docs, each targeting the specific list rather than the whole
-file — the guard proved itself for real at 0.21.0: every site below failed
+file; the guard proved itself for real at 0.21.0: every site below failed
 red on the advisor addition until each listed doc was updated to name the
 fifth role, the same "did I update every place a role is enumerated" check
 the "Solution-neutral notes" section below describes.
@@ -617,7 +617,7 @@ enumeration site: README's "Effort tiers" role/tier table against
 (tiers-available list order, default-tier value, and a row-count check with
 no extras or omissions), so a tier added to or removed from either
 `models.ts` map without a matching table edit fails loudly the same way a
-role addition already does for the four sites above — since 0.21.0 this
+role addition already does for the four sites above: since 0.21.0 this
 also covers the advisor row (`ROLE_TIERS.advisor = ["high", "xhigh"]`,
 `DEFAULT_TIER.advisor = "high"`), the test iterating `ROLES` so the new
 per-role assertions came for free from the `models.ts` addition alone, no

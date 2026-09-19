@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-19T11:22:53.000Z
+timestamp: 2026-09-19T12:05:39.000Z
 sources:
   - packages/orchestrator-workflow/assets/agents/explorer.md
   - packages/orchestrator-workflow/assets/agents/task-slicer.md
@@ -39,7 +39,7 @@ The advisor role is qualitatively different from the other four: it is
 escalation-only, spawned only at defined triggers rather than at a fixed
 point in every run, and installed only under the `full` profile, never
 `minimal` (see [install-fence-mechanics.md](install-fence-mechanics.md) for
-the profile-scoping mechanics — `MINIMAL_PROFILE_ROLES`, `src/models.ts:42#"const MINIMAL_PROFILE_ROLES: ReadonlySet<Role> = new"`,
+the profile-scoping mechanics: `MINIMAL_PROFILE_ROLES`, `src/models.ts:42#"const MINIMAL_PROFILE_ROLES: ReadonlySet<Role> = new"`,
 simply does not name it, the same way it never named explorer/task-slicer).
 
 Read-only vs. writable is also a code-level set:
@@ -54,7 +54,7 @@ computes it: `ROLES.filter((role) => !READ_ONLY_ROLES.has(role))` →
 Edit/Write/NotebookEdit; Bash mutation is guarded by prompt instruction alone,
 which `packages/orchestrator-workflow/test/docs-consistency.test.ts:677#"out of this kit's scope"`
 pins README.md to state honestly ("guarded by instruction only", "nothing
-technically prevents it") rather than claiming full closure — since 0.21.0
+technically prevents it") rather than claiming full closure: since 0.21.0
 the pinned phrase names `explorer, reviewer, and advisor` instead of just
 the first two, the same README.md paragraph, no new test needed since the
 existing pin checks the phrase's substance, not a hardcoded role list.
@@ -131,7 +131,7 @@ trivial change.
   `escalation_necessary: warranted | unwarranted`, corrected from a bare
   `yes | no` YAML-1.1-boolean-synonym enum, M4); unlike the explorer pair,
   this pair now has a dedicated automated byte-for-byte drift guard too,
-  added in review round 1 (M2) — see below.
+  added in review round 1 (M2); see below.
 - Subagent input contract (the shape the orchestrator sends when delegating,
   not a role's own output) lives only in
   `packages/orchestrator-workflow/assets/skill/references/contracts.md:40#"## Subagent input contract"`; there is no
@@ -139,7 +139,7 @@ trivial change.
   not what a subagent returns. Its `role:` enum
   (`role: advisor | explorer | implementer | reviewer | task_slicer`) is the
   one place the advisor's role name itself was added to this contract, since
-  the orchestrator input contract does not need an advisor-specific field —
+  the orchestrator input contract does not need an advisor-specific field:
   every field it lists (`goal`, `context`, `constraints`,
   `acceptance_baseline`, `acceptance_criteria`, `allowed_changes`, `forbidden_changes`,
   `expected_output`) applies to an advisor spawn the same way it applies to
@@ -163,11 +163,11 @@ equality test cannot: renaming a sub-field identically in both copies still
 passes the equality check (it only proves the two copies match each other),
 but fails the exact-name pin. The explorer pair still has no dedicated
 automated drift guard today, protected only by direct read and review. The
-advisor pair started the same way — a 0.21.0
+advisor pair started the same way: a 0.21.0
 `describe("advisor escalation policy ships in the AGENTS.md section and
 SKILL.md")` block (`test/docs-consistency.test.ts:2596#"explorer, task-slicer, implementer, reviewer, advisor"`) only pinned
 that `SKILL.md` carries an Advisor output contract block with the right
-top-level shape, a substring-presence pin, not byte-for-byte equality — but
+top-level shape, a substring-presence pin, not byte-for-byte equality, but
 review round 1 (M2) closed that gap: a dedicated
 `describe("advisor output contract is byte-identical between SKILL.md and
 advisor.md (review round 1, M2)")` block
@@ -375,8 +375,8 @@ test/docs-consistency.test.ts:637#"did not resolve on resume; only a fresh, expl
 immediately after the placeholder-row rule): when acceptance rests on
 empirical or probabilistic evidence (flake rates, benchmarks, "n runs
 green", performance/timing numbers), the reviewer must independently
-reproduce it — its own runs or measurements, not a re-read of the
-implementer's log — and record method, sample size, and result against the
+reproduce it (its own runs or measurements, not a re-read of the
+implementer's log) and record method, sample size, and result against the
 implementer's claim. The trigger is deliberately narrow: a single
 deterministic check (one test run, `tsc`, lint) does not qualify. The GitHub
 Actions run-step shell replay named in both installed prompts (see CHANGELOG's
@@ -398,7 +398,7 @@ Motivation, `packages/orchestrator-workflow/CHANGELOG.md:#[0.14.0]` (0.14.0): th
 agent-dx run `2026-07-18-harness-subprocess-test-deflake` accepted an
 implementer's "8/8 green" flake-rate claim on a `maxWorkers` cap fix, then
 the reviewer independently reran the suite and found 2/6 red on an
-independent 6-run sample (flake rate ~1/3, matching the pre-fix baseline) —
+independent 6-run sample (flake rate ~1/3, matching the pre-fix baseline):
 nothing in the prior contract had required that rerun, so the first pass
 would have accepted the implementer's number as reported. This clause is a
 docs/prompt-only change: no runtime code in this package depends on the new
@@ -418,7 +418,7 @@ orchestrator-checkable reference to the installed implementer prompt's
 claim-only-what-was-measured rule (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:92#"not backed by a check it actually ran as"`): treat a verification
 claim in the implementer's report as unverified unless it is backed by a
 check the implementer actually ran. Before this R2 pass step 6 said nothing
-about naming probes at all — the field's only trigger lived in the misfire
+about naming probes at all: the field's only trigger lived in the misfire
 rule's prose, mirroring the gap the 0.14.0 reproduction trigger closed for
 step 7 in the log entry above, but left open here until this pass.
 
@@ -430,7 +430,7 @@ The installed prompt's matching bullet
 (`implementer.md:72#"rather than omitting the field."`) states the not-applicable signal added in the
 R2 pass: when the assignment named no probes, the implementer returns
 `mutation_probes: []` rather than omitting the field, so "none asked for" is
-distinguishable from "asked for and not reported" — before this pass an
+distinguishable from "asked for and not reported": before this pass an
 implementer never given probes and one that silently dropped them returned
 the identical placeholder block. An output missing the field when probes
 *were* named is a misfire (see Subagent misfire rule above), worded

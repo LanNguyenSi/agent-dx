@@ -1,0 +1,5 @@
+rules:
+  prose-slop/em-dash:
+    severity: block
+  prose-slop/hedging-opener:
+    severity: block
