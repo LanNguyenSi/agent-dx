@@ -17,31 +17,31 @@ review:
     - "packages/slop-detector/test/review-slop.test.ts"
     # This package reference documents the literal review-slop examples.
     - "packages/slop-detector/README.md"
-    # This CLI fixture preserves a historic finding-id input.
+    # Grandfather legacy CLI test titles/comments; excludes this entire file, including future content.
     - "packages/agent-primitives/test/cli.test.ts"
-    # This mutation fixture preserves historic finding-id mutant labels.
+    # Grandfather legacy mutation test titles/comments; excludes this entire file, including future content.
     - "packages/agent-primitives/test/mutant.test.ts"
-    # This plan fixture preserves a historic review-round command label.
+    # Grandfather legacy probe-plan test titles/comments; excludes this entire file, including future content.
     - "packages/agent-primitives/test/plan.test.ts"
-    # This verifier fixture preserves historic finding-id check labels.
+    # Grandfather legacy verification test titles/comments; excludes this entire file, including future content.
     - "packages/agent-primitives/test/verify.test.ts"
-    # This adoption fixture asserts historic review-report status labels.
+    # Grandfather legacy adoption test titles/comments; excludes this entire file, including future content.
     - "packages/orchestrator-workflow/test/adopt.test.ts"
-    # This apply fixture preserves a historic review-report error label.
+    # Grandfather legacy apply test titles/comments; excludes this entire file, including future content.
     - "packages/orchestrator-workflow/test/apply.test.ts"
-    # This CLI-init fixture asserts historic review-round behavior.
+    # Grandfather legacy CLI-init test titles/comments; excludes this entire file, including future content.
     - "packages/orchestrator-workflow/test/cli-init.test.ts"
-    # This CLI-inputs fixture preserves historic review finding inputs.
+    # Grandfather legacy CLI-inputs test titles/comments; excludes this entire file, including future content.
     - "packages/orchestrator-workflow/test/cli-inputs.test.ts"
-    # This docs fixture verifies the maintained review-history corpus.
+    # Grandfather legacy documentation-consistency test titles/comments; excludes this entire file, including future content.
     - "packages/orchestrator-workflow/test/docs-consistency.test.ts"
-    # This doctor fixture asserts historic review-report diagnostics.
+    # Grandfather legacy doctor test titles/comments; excludes this entire file, including future content.
     - "packages/orchestrator-workflow/test/doctor.test.ts"
-    # This init fixture preserves historic review-round install behavior.
+    # Grandfather legacy initialization test titles/comments; excludes this entire file, including future content.
     - "packages/orchestrator-workflow/test/init.test.ts"
-    # This report fixture asserts historic finding-id validation behavior.
+    # Grandfather legacy review-report test titles/comments; excludes this entire file, including future content.
     - "packages/orchestrator-workflow/test/review-report.test.ts"
-    # This marker fixture preserves a historic review-round template marker.
+    # Grandfather legacy template-marker test titles/comments; excludes this entire file, including future content.
     - "packages/orchestrator-workflow/test/template-markers.test.ts"
   allow:
     # Grandfathered source comments below record concrete historical fixes;
