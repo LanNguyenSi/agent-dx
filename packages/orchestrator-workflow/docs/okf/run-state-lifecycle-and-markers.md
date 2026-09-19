@@ -277,7 +277,7 @@ template's untouched-state signature, and prior to 0.13.0 the contract said
 nothing about what to do with it. grounding-mcp's completeness reader
 identifies a real finding row by its SEVERITY cell carrying a single
 concrete value, so the slash-list legend row is (by design) never counted as
-a finding — a run that fills the acceptance-recommendation marker with
+a finding: a run that fills the acceptance-recommendation marker with
 `accept` but leaves this row byte-for-byte as shipped therefore reads as
 `complete: true` with zero findings, indistinguishable from a genuine
 zero-findings review (the "mixed-state bypass"). 0.13.0 documents the fix's
@@ -286,7 +286,7 @@ contract half in this repo: a comment directly below the placeholder row
 consumer-recognized literal and states the rule the orchestrator must follow:
 replace the row when transferring findings, or delete it outright for a
 genuine zero-findings review (a header row with no data rows is valid;
-leaving the legend row next to real finding rows is also fine) — and
+leaving the legend row next to real finding rows is also fine), and
 SKILL.md's step 7 carries the same one-sentence rule
 (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:170#"rows as the template never having been filled in. When"). The runtime half (grounding-mcp's reader treating a
 survived, unaccompanied placeholder row as an explicit format blocker,
@@ -301,9 +301,9 @@ the replace/delete rule is documented next to the row.
 
 ## Why 02-tasks.md is not part of the completeness check
 
-The completeness reader reads exactly three run files —
+The completeness reader reads exactly three run files:
 `00-goal.md` (run-base only), `05-review-findings.md`, and
-`06-handoff.md` — and never opens `02-tasks.md`. This is deliberate, not an
+`06-handoff.md`, and never opens `02-tasks.md`. This is deliberate, not an
 oversight to fix later: `02-tasks.md` records a planning artifact (the task
 slices an orchestrator produced before implementation), not an acceptance
 signal like a review recommendation or a final status. SKILL.md's own
@@ -311,7 +311,7 @@ scaling rule allows slicing to be skipped entirely for a small or
 well-understood change (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:22#"the apparatus changes. When tier variants are", 150-154: task slicing is "for
 non-trivial changes"; a trivial change may skip the run directory
 altogether). Folding `02-tasks.md` into the completeness check would force
-every legitimately slim run — one that correctly skipped slicing — to
+every legitimately slim run, one that correctly skipped slicing, to
 either fabricate a tasks file or fail a gate that was never meant to judge
 planning artifacts, a false positive the reader's file selection avoids by
 construction.
@@ -360,7 +360,7 @@ ships as a fourth line in `00-goal.md` beside the unkeyed run-base marker
 a key of its own, unlike the `mode` key of the last section), the findings-table header/legend/example-row triad above, and
 (0.13.0) the placeholder-row fail-closed convention (literal row wording,
 mutation-checked; the replace/delete rule documented next to it).
-`02-tasks.md` carries no marker or pinned shape of its own — it is a
+`02-tasks.md` carries no marker or pinned shape of its own: it is a
 `sources:` entry here only because the "why it's excluded from the
 completeness check" section above cites it, not because this doc pins
 anything inside it.
@@ -402,7 +402,7 @@ reviewers at the new reviewer-contract reproduction requirement, appended
 after the acceptance-recommendation marker so no marker, header, or
 placeholder-row line shifted. It carries no `solution-acceptance:` prefix
 and no enum, so none of the marker/table mechanics in this doc changed; the
-requirement itself is out of scope here — see
+requirement itself is out of scope here; see
 [review-gate-and-waivers.md](review-gate-and-waivers.md) and
 [subagent-contracts-superset.md](subagent-contracts-superset.md).
 

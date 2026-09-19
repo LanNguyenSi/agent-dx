@@ -252,8 +252,8 @@ independently verify an implementer's *empirical* claim (a flake rate, a
 benchmark, "n runs green", a timing number) rather than transcribe it into
 the findings table as reported. detailed workflow reference now states it right after
 the placeholder-row rule (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:177#"lint): only claims that could vary run to run trigger"`): when acceptance rests on such
-evidence, the reviewer must reproduce it independently — its own runs or
-measurements — and record method, sample size, and result against the
+evidence, the reviewer must reproduce it independently (its own runs or
+measurements) and record method, sample size, and result against the
 implementer's claim; a single deterministic check (one test run, `tsc`,
 lint) does not trigger it. The installed `reviewer.md` prompt carries the
 same rule (`reviewer.md:149#"lint) do not trigger this."`), and both output contracts gained a matching
@@ -267,7 +267,7 @@ Motivating incident (`CHANGELOG.md:#[0.14.0]`): agent-dx run
 implementer's evidence read "8/8" full-suite runs green for a `maxWorkers`
 concurrency cap; the reviewer reran the suite independently (6 sequential
 runs) and got 2/6 red with the same failure signatures, a ~1/3 flake rate
-matching the pre-fix baseline — the fix did not work, and nothing in the
+matching the pre-fix baseline: the fix did not work, and nothing in the
 review contract at the time had required that independent rerun before
 transcribing the implementer's number as an accepted finding. Full
 role-contract duplication mechanics (where the SKILL.md/reviewer.md copies
@@ -281,7 +281,7 @@ previously forced a reviewer return to set `acceptance_recommendation` at
 all, so the orchestrator could be left inferring a verdict from the findings
 list alone. The field is now hard-mandatory in both output-contract copies:
 `packages/orchestrator-workflow/assets/skill/references/contracts.md:166#"instead of inferring one from the findings list."` states it and adds the orchestrator's response when it is
-missing — ask the reviewer to resupply it, rather than infer one from the
+missing: ask the reviewer to resupply it, rather than infer one from the
 findings, and the installed `reviewer.md:124#"never leave it blank or omit it."` prompt carries the mirrored
 second-person rule ("always set it in your output; never leave it blank or
 omit it"). This is distinct from the per-finding `Decision` column and the
