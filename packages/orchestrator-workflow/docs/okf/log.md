@@ -1,5 +1,17 @@
 # Bundle log
 
+- 2026-09-19T06:03:26.000Z (agent-dx tracker task 026b48a3-dd1f-4a60-82b6-
+  a163b3f9a588, pandora run 2026-09-19-issue300-stage2): in run mode
+  `single` the reviewer replays the orchestrator's probes.
+  `subagent-contracts-superset.md` extends its passage on the skip
+  permission for probes named by definition with the inversion for that
+  mode, citing the rule in step 7 of `evidence-and-probes.md`, the duty in
+  the reviewer prompt and the pointer in `contracts.md`. All three source
+  edits and the CHANGELOG addition extend existing lines, and the bundle
+  passage was extended on its own last line, so no cited line moved and no
+  citation was re-pointed. The docs whose `sources` list an edited file
+  were re-verified with the anchor guard against the committed sources and
+  re-stamped.
 - 2026-09-19T05:31:21.000Z (agent-dx tracker task 3d74bdfb-6450-4436-ad38-
   ea0565d5ae2b, pandora run 2026-09-19-issue300-stage2): the generated
   policy section and the README now follow the run mode.

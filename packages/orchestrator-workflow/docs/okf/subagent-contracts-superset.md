@@ -596,7 +596,7 @@ permission was tightened the same way in this task: it names the
 replayed-and-killed probes by their mutant definition and
 `verified_applied_via` value rather than only their id, since an id
 alone cannot be skipped by this rule either
-(`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:195#"the orchestrator's reviewer briefing names the replayed probes the"`).
+(`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:195#"the orchestrator's reviewer briefing names the replayed probes the"`). Run mode `single` inverts this permission: the orchestrator is then the author of the probes, so the same step requires the reviewer to replay every orchestrator probe the briefing names by definition and to report, in the existing `reproduction` field, whether each replayed verdict matches the recorded one (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:201#"that skip permission does not apply"). The reviewer prompt carries the duty in its own words, because a reviewer runs without the skill, and keeps it inert unless the briefing names the mode (packages/orchestrator-workflow/assets/agents/reviewer.md:166#"Without that mode line in the briefing this obligation does not exist."); `contracts.md` only points to the step and adds no output field (packages/orchestrator-workflow/assets/skill/references/contracts.md:219#"no output field is added for it"). `test/single-probe-replay.test.ts` binds the prompt and the pointer to the rule's wording through one constant and checks every rendered reviewer variant.
 
 The pins that hold them: an exact sub-field-name pin independent of the
 byte-for-byte cross-copy equality check
