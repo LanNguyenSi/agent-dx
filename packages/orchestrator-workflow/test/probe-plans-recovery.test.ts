@@ -82,8 +82,7 @@ describe("persisted probe plans and recovery references", () => {
  * The Round-2 halt rule needs a defect class to recur before it stops a
  * task, so a fix that breaks something of a class not seen before passed
  * under it for one more round. This pins the decision point that closes
- * that gap. The section in review-and-recovery.md is the rule's only
- * normative statement; FIX_REGRESSION_TRIGGER binds the sites that restate
+ * that gap. The rule is defined only in that section; FIX_REGRESSION_TRIGGER binds the sites that restate
  * its trigger to the section's own words, and step 8 must not restate it.
  */
 const FIX_REGRESSION_TRIGGER =
@@ -148,6 +147,9 @@ describe("fix-regression decision point", () => {
   it("requires a recorded decision with four outcomes before another fix round", () => {
     expect(section).toContain("Before another fix round starts");
     expect(section).toContain(
+      "Before another fix round starts, name in one sentence why the fix could introduce the defect (the structural cause, or the statement that there is none)",
+    );
+    expect(section).toContain(
       "record one of four outcomes as a decision in `03-decisions.md`: continue with the stated reason, redesign, split, or hold",
     );
     expect(section).toContain(
@@ -181,7 +183,8 @@ describe("fix-regression decision point", () => {
       .split("\n")
       .find((line) => line.includes("Fix-regression decision point"));
     expect(pointerLine).toBeDefined();
-    expect(pointerLine).not.toContain("introduced_by_delta: yes`, record");
+    expect(pointerLine).not.toContain("introduced_by_delta");
+    expect(pointerLine).not.toMatch(/`high` or `critical`/);
   });
 });
 
