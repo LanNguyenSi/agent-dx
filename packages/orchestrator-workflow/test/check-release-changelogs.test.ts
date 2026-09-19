@@ -154,6 +154,32 @@ describe("check-release-changelogs.mjs", () => {
     );
   });
 
+  it("rule 1 (version-heading): accepts a hyphenated build-metadata heading", () => {
+    writePackage("widget", "1.0.0+build-1", CLEAN_CHANGELOG("1.0.0+build-1"));
+    const result = run([]);
+    expect(result.status).toBe(0);
+  });
+
+  it("rule 1 (version-heading): a hyphenated build-metadata heading that does not match package.json still fails", () => {
+    writePackage(
+      "widget",
+      "1.0.0+build-2",
+      CLEAN_CHANGELOG("1.0.0+build-1"),
+    );
+    const result = run([]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(
+      /top CHANGELOG heading is \[1\.0\.0\+build-1\] but package\.json version is 1\.0\.0\+build-2/,
+    );
+  });
+
+  it("rule 1 (version-heading): an underscore build tag is not accepted", () => {
+    writePackage("widget", "1.0.0+build_1", CLEAN_CHANGELOG("1.0.0+build_1"));
+    const result = run([]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toMatch(/no "## \[x\.y\.z\]" release heading found/);
+  });
+
   it("rule 1 (version-heading): an underscore prerelease heading is no longer accepted (semver forbids it; parseSemver already rejected it)", () => {
     writePackage("widget", "1.0.0-alpha_1", CLEAN_CHANGELOG("1.0.0-alpha_1"));
     const result = run([]);

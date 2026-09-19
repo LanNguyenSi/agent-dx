@@ -145,18 +145,22 @@ const EXPECTED_CHECKED_PACKAGES = [
 // matching a literal hyphen.
 const PRERELEASE_IDENTIFIER_CHARS = "0-9A-Za-z.-";
 
+// Build metadata uses the same dot-separated identifier grammar as a
+// prerelease. Keep its class separate because `parseSemver` intentionally
+// ignores build metadata for precedence, whereas the heading still has to
+// spell it exactly. Underscores are not SemVer identifier characters.
+const BUILD_METADATA_IDENTIFIER_CHARS = "0-9A-Za-z.-";
+
 // Matches the first release heading, skipping any leading `## [Unreleased]`
 // heading (which never matches the `x.y.z` shape below and is therefore
 // already excluded by the pattern itself). The optional trailing
-// `+[\w.]+` group accepts build metadata so a package.json version that
-// carries it can still have a matching heading instead of always failing
-// rule 1. Known gap: this group is deliberately narrower than parseSemver
-// below, which strips everything after `+` and so tolerates any build
-// metadata; a hyphenated build tag such as "1.0.0+build-1" parses there
-// but does not match here and is reported as a missing heading. Only the
-// prerelease group shares its character class with parseSemver.
+// `+[0-9A-Za-z.-]+` accepts SemVer build metadata so a package.json version
+// carrying it can still have a matching heading instead of always failing
+// rule 1. Build metadata remains excluded from parseSemver's precedence
+// comparison, but its heading grammar rejects underscores just like the
+// prerelease grammar does.
 const VERSION_HEADING_RE = new RegExp(
-  `^## \\[(\\d+\\.\\d+\\.\\d+(?:-[${PRERELEASE_IDENTIFIER_CHARS}]+)?(?:\\+[\\w.]+)?)\\]`,
+  `^## \\[(\\d+\\.\\d+\\.\\d+(?:-[${PRERELEASE_IDENTIFIER_CHARS}]+)?(?:\\+[${BUILD_METADATA_IDENTIFIER_CHARS}]+)?)\\]`,
   "m",
 );
 const UNRELEASED_HEADING_RE = /^## \[Unreleased\]\s*\n/m;
