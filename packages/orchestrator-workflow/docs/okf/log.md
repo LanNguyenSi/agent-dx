@@ -22,7 +22,11 @@
   so the rule sentence was rebuilt around one definition of a named probe
   that every other clause refers to, and this bundle's paraphrase of the
   `normal` method row in `subagent-contracts-superset.md` gained the third
-  obligation it had been missing.
+  obligation it had been missing. A third round added the same negative
+  pin for the prompt's duty span that the rule already had, and moved the
+  statement that the duty holds under any `review_method` from step 7,
+  which does not say it, to the reviewer prompt, which does, in this
+  bundle's passage and in the CHANGELOG.
 - 2026-09-19T05:31:21.000Z (agent-dx tracker task 3d74bdfb-6450-4436-ad38-
   ea0565d5ae2b, pandora run 2026-09-19-issue300-stage2): the generated
   policy section and the README now follow the run mode.

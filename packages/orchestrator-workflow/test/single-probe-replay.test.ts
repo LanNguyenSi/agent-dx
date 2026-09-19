@@ -94,6 +94,21 @@ describe("single-mode probe replay", () => {
     );
   });
 
+  it("the prompt's duty span defines named once and enumerates no naming form outside that definition", () => {
+    // Mirror of the step 7 pin: the prompt is the copy a reviewer reads
+    // without the skill, so a clause that re-enumerates the forms there
+    // would bring back the asymmetry between the two sites.
+    const duty = reviewer.slice(
+      reviewer.indexOf("When the briefing names run mode `single`"),
+      reviewer.indexOf("Return exactly this structure"),
+    );
+    expect(duty.length).toBeGreaterThan(0);
+    expect(duty.split(NAMED_PROBE_FORMS)).toHaveLength(2);
+    expect(duty).not.toContain("by definition");
+    expect(duty).not.toContain("by that reference");
+    expect(duty).not.toContain("may be skipped");
+  });
+
   it("the `normal` method row counts the replay among the obligations that apply under every method", () => {
     expect(reviewer).toContain(
       "the empirical-reproduction rule, the GitHub Actions shell replay rule, and the probe replay of a run mode `single` briefing apply under every method.",
