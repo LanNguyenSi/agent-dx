@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   build-metadata identifiers, so `1.0.0+build-1` can match its release
   heading. Build metadata follows SemVer's identifier grammar: underscores
   remain invalid, and metadata remains excluded from precedence comparison.
-
+- The default-mode sequence qualifiers now cover their planning steps and point to the Run mode section of run-state and harness.
 ## [0.38.0] - 2026-09-19
 
 - A run now declares a run mode. `assets/templates/00-goal.md` carries

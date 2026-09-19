@@ -10708,3 +10708,12 @@ review-gate, run-state, and subagent-contract source semantics and their
 heading citations unchanged. Re-stamped model-preselection.md,
 review-gate-and-waivers.md, run-state-lifecycle-and-markers.md, and
 subagent-contracts-superset.md after the source review.
+
+## 2026-09-19 (orchestrator-workflow run-mode qualifier alignment)
+
+Re-verified the three docs sourcing the in-place default-mode qualifiers
+after source commit 53ca4d37963b03ec73c3f86cc97f1e6899e23007. The two qualifier
+edits, two test pins and Unreleased note are byte-identical to the verified
+implementation after integration; cited source lines are unchanged. Kept the
+bundle prose cleanup and its verification entry, then re-stamped the three
+docs after the integrated source commit.
