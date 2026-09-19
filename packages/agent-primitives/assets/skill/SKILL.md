@@ -32,6 +32,10 @@ checks the acceptance criteria name, for example `agent-primitives verify
 first; open a check's `logPath` only once something failed. When the
 runner is on PATH, never trim its output by hand instead of using its own
 `--max-failures` bound.
+Every requested check must resolve to a command and pass. A missing
+`package.json` script is reported as `status: "skipped", reason:
+"no_script"` and makes the enclosing verify result `status: "error"`; use
+`-x name=command` only when deliberately supplying that command.
 
 ## 3. Probe
 

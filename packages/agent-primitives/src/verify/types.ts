@@ -78,6 +78,10 @@ export interface CheckResult {
   detector?: string;
   summary: Summary;
   failures: Failure[];
+  /** Present when no command could be resolved for a requested check.
+   * A no-script check is recorded instead of silently falling out of the
+   * run, and makes the enclosing verify result a non-pass. */
+  reason?: "no_script";
   logPath?: string;
   /** Present only when this check had a `--pass-regex` predicate AND that
    * predicate was actually consulted to decide `status` (i.e. `status`

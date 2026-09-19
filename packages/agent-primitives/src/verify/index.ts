@@ -290,9 +290,8 @@ function applyFailuresInvariant(
 }
 
 /** Reads `package.json` `scripts` from `cwd`. Returns `undefined` (rather
- * than throwing) when the file is missing or unparsable: a missing
- * package.json just means every script-based check resolves to
- * `skipped`, not a hard verify failure. */
+ * than throwing) when the file is missing or unparsable: requested
+ * script-based checks then report their unresolved `no_script` result. */
 function readScripts(cwd: string): Record<string, string> | undefined {
   try {
     const text = fs.readFileSync(path.join(cwd, "package.json"), "utf8");
@@ -310,7 +309,7 @@ interface Resolution {
 
 /** Resolution per name: `-x` (overrides) wins; else `package.json`
  * `scripts[name]` runs as `npm run <name> --silent`; a name with neither
- * resolves to `skipped`. */
+ * resolves to a `no_script` skipped result. */
 function resolveCommand(
   name: string,
   overrides: Record<string, string>,
@@ -470,10 +469,11 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
       const skippedResult: CheckResult = {
         name,
         status: "skipped",
+        reason: "no_script",
         exitCode: null,
         durationMs: 0,
         timedOut: false,
-        summary: emptySummary(),
+        summary: { ...emptySummary(), skipped: 1 },
         failures: [],
       };
       checks.push(skippedResult);
@@ -492,9 +492,12 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
           `${name}: --pass-regex (${skippedPassRegex.source}) was given but the check resolved to skipped, so the predicate was never consulted`,
         );
       }
-      // A skipped check is not a non-pass finding: --fail-fast falls
-      // through it and continues to the next check, rather than stopping
-      // a run just because one check name resolved to nothing.
+      warnings.push(
+        `${name}: no_script: no -x override or matching package.json script`,
+      );
+      // Keep resolving later names: the omission is a non-pass, but
+      // --fail-fast does not make other requested checks disappear from the
+      // envelope.
       continue;
     }
 
@@ -874,9 +877,11 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
   } else {
     overallStatus = checks.some((c) => c.status === "error")
       ? "error"
-      : checks.some((c) => c.status === "fail")
-        ? "fail"
-        : "pass";
+      : checks.some((c) => c.status === "skipped")
+        ? "error"
+        : checks.some((c) => c.status === "fail")
+          ? "fail"
+          : "pass";
   }
 
   return {

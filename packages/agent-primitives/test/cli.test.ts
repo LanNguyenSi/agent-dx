@@ -506,10 +506,8 @@ describe("boundText", () => {
 });
 
 describe("cli verify", () => {
-  // Every case here passes an explicit -C to a fresh, empty tmp dir (never
-  // the package's own real cwd): `verify` with no package.json and no `-x`
-  // override for a default check name just skips it, so these never touch
-  // this package's own real build/typecheck/lint/test scripts.
+  // Override-only cases select an empty check list so their outcome does not
+  // depend on the fixture lacking default package scripts.
   it("-x mycheck='exit 1' is a fail with one synthetic failure, status fail, exit 1", async () => {
     const cwd = makeTmpDir();
     const logDir = makeTmpDir();
@@ -519,6 +517,8 @@ describe("cli verify", () => {
       "-l",
       logDir,
       "verify",
+      "-c",
+      "",
       "-x",
       "mycheck=exit 1",
     ]);
@@ -541,6 +541,8 @@ describe("cli verify", () => {
       "-l",
       logDir,
       "verify",
+      "-c",
+      "",
       "-x",
       "mycheck=exit 0",
     ]);
@@ -558,6 +560,8 @@ describe("cli verify", () => {
       "-l",
       logDir,
       "verify",
+      "-c",
+      "",
       "-x",
       "mycheck=printf 'OK (11 tests, 17 assertions)\\n'; exit 1",
       "--pass-regex",
@@ -590,6 +594,8 @@ describe("cli verify", () => {
       "-l",
       logDir,
       "verify",
+      "-c",
+      "",
       "-x",
       "mycheck=printf 'something else entirely\\n'",
       "--pass-regex",
@@ -658,6 +664,8 @@ describe("cli verify", () => {
       "-l",
       logDir,
       "verify",
+      "-c",
+      "",
       "-x",
       "nope=nonexistent-binary-xyz",
     ]);
@@ -693,6 +701,8 @@ describe("cli verify", () => {
       "-m",
       "8000",
       "verify",
+      "-c",
+      "",
       "-x",
       `big=node ${scriptPath}`,
     ]);
@@ -722,7 +732,7 @@ describe("cli verify", () => {
     expect(fs.existsSync(sentinel)).toBe(false);
   });
 
-  it("--fail-fast on a package missing `build` runs typecheck, lint, and test", async () => {
+  it("--fail-fast on a package missing `build` runs typecheck, lint, and test, then reports the missing check", async () => {
     const cwd = makeTmpDir();
     fs.writeFileSync(
       path.join(cwd, "package.json"),
@@ -741,14 +751,14 @@ describe("cli verify", () => {
       "verify",
       "--fail-fast",
     ]);
-    expect(run.code).toBe(0);
+    expect(run.code).toBe(2);
     const parsed = JSON.parse(run.stdout);
-    expect(parsed.status).toBe("pass");
+    expect(parsed.status).toBe("error");
     const names = parsed.checks.map((c: { name: string }) => c.name);
     expect(names).toEqual(["build", "typecheck", "lint", "test"]);
     expect(
-      parsed.checks.find((c: { name: string }) => c.name === "build").status,
-    ).toBe("skipped");
+      parsed.checks.find((c: { name: string }) => c.name === "build").reason,
+    ).toBe("no_script");
     for (const name of ["typecheck", "lint", "test"]) {
       expect(
         parsed.checks.find((c: { name: string }) => c.name === name).status,
@@ -796,6 +806,8 @@ describe("cli verify", () => {
       "-l",
       logDir,
       "verify",
+      "-c",
+      "",
       "--max-failures",
       "0",
     ]);
@@ -859,6 +871,8 @@ describe("cli verify", () => {
       "-l",
       logDir,
       "verify",
+      "-c",
+      "",
       "--max-failures",
       "1",
       "-x",
@@ -1138,7 +1152,7 @@ describe("parsePassRegexOverride", () => {
     expect(result.a.flags).toBe("m");
   });
 
-  it("a repeated --pass-regex for the SAME check name replaces the earlier one, last-wins (F4)", () => {
+  it("a repeated --pass-regex for the same check name replaces the earlier one, last-wins", () => {
     const first = parsePassRegexOverride("a=^FIRST$", {});
     const second = parsePassRegexOverride("a=^SECOND$", first);
     expect(Object.keys(second)).toEqual(["a"]);

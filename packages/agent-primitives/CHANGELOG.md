@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `verify` now reports a requested check with no matching `package.json`
+  script and no `-x` override as `status: "skipped", reason: "no_script"`
+  and returns an overall non-pass, instead of silently accepting a partial
+  verification run. Use `-x name=command` to supply an intentional command
+  (tracker 8d8848a9-dc81-4f25-8604-8123f8764d16).
+
 - `probe`'s `-p/--patch` mutant now accepts a unified diff whose applied
   result deletes the whole target file, instead of the dry run throwing
   once `git apply` removed the scratch copy: `computePatch` treats the
