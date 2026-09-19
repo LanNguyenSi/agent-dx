@@ -849,6 +849,11 @@ For a faster, staged-files-only variant pair with [lint-staged](https://github.c
 
 A dedicated GitHub Action with PR annotations is planned for M3.
 
+This repository also runs a dedicated `review-guard` CI job. It builds this
+package and runs `node packages/slop-detector/dist/cli.js check . --pack
+review-slop --config slop.config.yml`; the root config documents the intentional
+corpora and examples excluded from that whole-repository check.
+
 ## MCP server
 
 slop-detector also ships a stdio [MCP](https://modelcontextprotocol.io) server (`bin`: `slop-detector-mcp`, entry point `dist/mcp.js`), so an agent can scan commit messages, PR bodies, and files as a native tool call instead of shelling out to the CLI.

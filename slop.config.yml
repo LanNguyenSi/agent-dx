@@ -1,5 +1,84 @@
 packs:
   placement-slop: true
+  review-slop: true
+
+# Review history is intentional in the OKF evidence journal. The bundle has
+# its own anchored-citation and freshness guards, so review-slop does not
+# reinterpret that journal as shipped review debris.
+review:
+  allowPaths:
+    # OKF is a maintained evidence corpus that records review history by design.
+    - "packages/orchestrator-workflow/docs/okf/**"
+    # Changelogs intentionally record historical review outcomes.
+    - "**/CHANGELOG.md"
+    # This source file contains review-slop's literal rule examples.
+    - "packages/slop-detector/src/packs/review-slop.ts"
+    # This fixture asserts the literal examples and their allow semantics.
+    - "packages/slop-detector/test/review-slop.test.ts"
+    # This package reference documents the literal review-slop examples.
+    - "packages/slop-detector/README.md"
+    # Grandfather legacy CLI test titles/comments; excludes this entire file, including future content.
+    - "packages/agent-primitives/test/cli.test.ts"
+    # Grandfather legacy mutation test titles/comments; excludes this entire file, including future content.
+    - "packages/agent-primitives/test/mutant.test.ts"
+    # Grandfather legacy probe-plan test titles/comments; excludes this entire file, including future content.
+    - "packages/agent-primitives/test/plan.test.ts"
+    # Grandfather legacy verification test titles/comments; excludes this entire file, including future content.
+    - "packages/agent-primitives/test/verify.test.ts"
+    # Grandfather legacy adoption test titles/comments; excludes this entire file, including future content.
+    - "packages/orchestrator-workflow/test/adopt.test.ts"
+    # Grandfather legacy apply test titles/comments; excludes this entire file, including future content.
+    - "packages/orchestrator-workflow/test/apply.test.ts"
+    # Grandfather legacy CLI-init test titles/comments; excludes this entire file, including future content.
+    - "packages/orchestrator-workflow/test/cli-init.test.ts"
+    # Grandfather legacy CLI-inputs test titles/comments; excludes this entire file, including future content.
+    - "packages/orchestrator-workflow/test/cli-inputs.test.ts"
+    # Grandfather legacy documentation-consistency test titles/comments; excludes this entire file, including future content.
+    - "packages/orchestrator-workflow/test/docs-consistency.test.ts"
+    # Grandfather legacy doctor test titles/comments; excludes this entire file, including future content.
+    - "packages/orchestrator-workflow/test/doctor.test.ts"
+    # Grandfather legacy initialization test titles/comments; excludes this entire file, including future content.
+    - "packages/orchestrator-workflow/test/init.test.ts"
+    # Grandfather legacy review-report test titles/comments; excludes this entire file, including future content.
+    - "packages/orchestrator-workflow/test/review-report.test.ts"
+    # Grandfather legacy template-marker test titles/comments; excludes this entire file, including future content.
+    - "packages/orchestrator-workflow/test/template-markers.test.ts"
+  allow:
+    # Grandfathered source comments below record concrete historical fixes;
+    # each literal is narrower than excluding its production file.
+    - 'interactive-prompt suite \(agent-tasks fe834823, fix round 3, review'
+    - 'rather than inlined here \(agent-tasks fe834823, fix round 3,'
+    - 'parser could not validate \(fix-round-2, review finding M3\)'
+    - 'and `drift` status lines \(fix-round-2, review finding L6\)'
+    - 'different question \(fix-round, review finding L8\)'
+    - 'fix-round, review finding M1\)\. `init`/`uninstall`/`apply`'
+    - 'have overwritten it \(fix-round, review finding M2\)'
+    - 'review finding L8\): this is not a damaged or hand-edited'
+    - 'fix-round, review findings M3/L5\), not an inline ternary chain'
+    - 'same exit code \(fix-round, review finding M3\)'
+    - 'status turned up immediately after \(fix-round, review finding M3;'
+    - 'validated only `a\.yaml` and exited 0 \(fix-round, review finding M1\)'
+    - 'across two streams \(fix-round, review finding L5\)'
+    - 'fix-round, review finding L1\)\. Scoped to this one subcommand'
+    - 'removes an `unverifiable` target \(review round 2, M1\)'
+    - 'fix-round-2 \(review finding L6\)'
+    - 'used to carry \(fix-round, review findings M3/L5\)'
+    - 'fix-round-2 review finding M3: the note used to print unconditionally'
+    - 'returns `false` either way \(review round 2, M2\)'
+    - 'exactly that \(review round 2, M3\)'
+    - 'single locked critical section \(review round 1, H1'
+    - 'code \(fix-round, review finding M3\)\. Appended at the end'
+    - 'TypeScript compile error \(fix-round, review finding M2\)'
+    - 'name added to `FINDING_FIELDS` without a matching entry here'
+    - 'clean structural diagnostic; fix-round, review finding L2\)'
+    - 'structural diagnostic \(fix-round, review finding L1\)'
+    - 'fields the return actually carried \(fix-round, review finding L3\)'
+    # Both package README hits describe stable product vocabulary, not a run.
+    - 'M5\+ roadmap'
+    - 'rule table above for the exact finding names'
+    # The two okf-kit comments use L1 as documented grammar, not a review id.
+    - 'finding L1 \(:1170-1227, \.\.\.\)'
+    - '`L1` already means "review finding 1" in this package'
 
 # The three evidence-class rules default to warn upstream; block them here
 # so the placement-guard CI job actually fails on a home path or an
