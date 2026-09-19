@@ -492,3 +492,43 @@ describe("05-review-findings.md method-applied reader grammar", () => {
     );
   });
 });
+
+/**
+ * The run mode marker reuses the solution-acceptance grammar. It ships with
+ * the default value, not with a TODO: unlike the acceptance verdicts it fails
+ * open (a missing or unrecognised value means `delegated`), so the shipped
+ * template is already a valid run of the default mode. This block sits at the
+ * end of the file so that no line cited from the knowledge bundle moves.
+ */
+describe("run mode marker in 00-goal.md", () => {
+  const goalTemplate = readAsset("templates/00-goal.md");
+  const lines = goalTemplate.split(/\r?\n/);
+
+  it("has exactly one mode marker, defaulting to delegated", () => {
+    const modeRe = /solution-acceptance:\s*mode\s*=\s*(\S+)/g;
+    const matches = [...goalTemplate.matchAll(modeRe)];
+    expect(matches).toHaveLength(1);
+    expect(matches[0][1]).toBe("delegated");
+  });
+
+  it("carries the marker line byte-exactly, directly below the keyed run-base line", () => {
+    const keyedIndex = lines.indexOf(
+      "<!-- solution-acceptance: run-base[<repo-basename>] = <sha> -->",
+    );
+    expect(keyedIndex).toBeGreaterThanOrEqual(0);
+    expect(lines[keyedIndex + 1]).toBe(
+      "<!-- solution-acceptance: mode = delegated -->",
+    );
+  });
+
+  it("adds no line that names both tokens of a run-base marker", () => {
+    // The consuming reader treats any line carrying both tokens as an
+    // attempted run-base marker; the mode marker and its comment must not
+    // look like one.
+    const both = lines.filter(
+      (line) =>
+        line.includes("solution-acceptance") && line.includes("run-base"),
+    );
+    expect(both).toHaveLength(2);
+  });
+});

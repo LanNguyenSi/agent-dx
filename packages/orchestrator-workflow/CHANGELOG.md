@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- A run now declares a run mode. `assets/templates/00-goal.md` carries
+  `<!-- solution-acceptance: mode = delegated -->` below the run-base
+  markers; the value is `single`, `delegated`, or `batch`, and a missing or
+  unrecognised value means `delegated`, so existing runs and the default
+  flow are unchanged. `references/run-state-and-harness.md` gains a final
+  "Run mode" section, the only normative statement: `single` is one coherent
+  workstream that the orchestrator implements itself, `delegated` is one
+  implementer per slice, `batch` is parallel implementers in separate
+  worktrees with an integration check. The section gives the selection rule
+  by the shape of the work, the run files each mode requires (`single` may
+  omit `01-plan.md` and `02-tasks.md`; `batch` fills a new Integration
+  section in `04-implementation-summary.md`), makes a mode switch a D-ID row
+  instead of a new run, and keeps the reviewer mandatory in all three modes.
+  `SKILL.md` points to the section from the route list and from step 1, and the sequence steps in `SKILL.md` and `references/evidence-and-probes.md` that are written for the default mode now say so. No
+  reader enforces the marker. The AGENTS.md policy section still describes
+  the delegated flow only; it follows in a later change of this release.
+
 ## [0.37.0] - 2026-09-18
 
 - The two verdict fields of a mutation probe now carry a legend, a source

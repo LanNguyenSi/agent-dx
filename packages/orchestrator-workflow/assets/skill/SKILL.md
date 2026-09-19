@@ -26,7 +26,7 @@ role definitions where available rather than improvising prompts.
 
 ## Route before acting
 
-- **Create or resume a run; select a harness:** read
+- **Create or resume a run; choose its run mode; select a harness:** read
   [run-state and harness](references/run-state-and-harness.md). For a misfire,
   inconclusive probe, interrupted, blocked, or partial run, repeated finding,
   halt, or escalation also read
@@ -43,7 +43,7 @@ role definitions where available rather than improvising prompts.
 
 ## Orchestration sequence
 
-1. **Understand.** Create and bind run state, record contract provenance
+1. **Understand.** Create and bind run state, choose and record the run mode (see the Run mode section of run-state and harness), record contract provenance
    before planning, and resolve unknown provenance before delegation. Read
    [run-state and harness](references/run-state-and-harness.md) and
    [contracts](references/contracts.md).
@@ -53,7 +53,7 @@ role definitions where available rather than improvising prompts.
    tool over raw grep. Otherwise proceed.
 3. **Plan and slice.** Fill `01-plan.md` and `02-tasks.md`; validate narrow,
    ordered, testable tasks and their allowed/forbidden changes. Read
-   [contracts](references/contracts.md).
+   [contracts](references/contracts.md). Steps 3 and 4 are written for the default run mode; the Run mode section says what changes in the other two.
 4. **Implement and prove.** Read the detailed workflow before delegating each
    implementer one narrow task and resolve its repository-bound verification
    set before authorizing commands,
