@@ -390,7 +390,7 @@ leaving `run-base` as `TODO` is harmless (day-granular fallback), leaving
 either verdict marker as `TODO` keeps the run non-accepting. These three keys, and the record-only `mode` key beside `run-base`,
 are distinguished only by the `<key>` token and by which of `00-goal.md`,
 `05-review-findings.md`, `06-handoff.md` they live in. A grep for the prefix
-in `00-goal.md` on a multi-repo run also turns up a fourth line, the keyed
+in `00-goal.md` on a multi-repo run also turns up another line, the keyed
 `run-base[<repo-basename>]` marker: same `run-base` key family, same
 fail-open posture, one line per repository instead of one line total; see
 the keyed-marker section above. The same grep also finds the `mode` key there, a record rather than a gate; see the last section of this doc.
