@@ -27,3 +27,20 @@ export const MODE_SWITCH_RULE =
   "A mode switch is a recorded decision: add a D-ID row to `03-decisions.md` and update the marker; never start a new run for it.";
 export const REVIEWER_IN_ALL_MODES =
   "The reviewer is mandatory in all three modes";
+
+/**
+ * The single-mode replay duty is stated once, in step 7 of
+ * evidence-and-probes.md. The reviewer prompt has to carry the duty in its
+ * own words because a reviewer runs without the skill loaded; this constant
+ * binds the prompt and the contracts pointer to the rule's own wording.
+ */
+export const SINGLE_REPLAY_RULE = "replay every named orchestrator probe";
+
+/**
+ * What "named" means is defined once in step 7; the reviewer prompt repeats
+ * it because a reviewer runs without the skill. Every other clause of the
+ * rule speaks of named probes only, so a further naming form is added in
+ * one place.
+ */
+export const NAMED_PROBE_FORMS =
+  "its full definition or a resolved immutable plan-and-result reference";

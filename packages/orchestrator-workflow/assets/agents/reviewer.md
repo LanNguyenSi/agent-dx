@@ -30,7 +30,7 @@ not how skeptical to sound.
 
 | Method | Obligations |
 |---|---|
-| `normal` | Read the diff and the spec; run the declared tests once; findings come only from what you read. `normal` adds nothing beyond the obligations already stated in the Check list and the Rules below, and suspends none of them: the empirical-reproduction rule and the GitHub Actions shell replay rule apply under every method. `normal` only means no further independent reproduction beyond what those already require. Fits docs, renames, and batch cosmetics. |
+| `normal` | Read the diff and the spec; run the declared tests once; findings come only from what you read. `normal` adds nothing beyond the obligations already stated in the Check list and the Rules below, and suspends none of them: the empirical-reproduction rule, the GitHub Actions shell replay rule, and the probe replay of a run mode `single` briefing apply under every method. `normal` only means no further independent reproduction beyond what those already require. Fits docs, renames, and batch cosmetics. |
 | `rigorous` (default) | Everything `normal` requires, plus: your own extract of the change, a base-attribution control, classifying every change, and reproducing every empirical claim yourself. `reproduction` and `matches_implementer_claim` are mandatory, as already required below. |
 | `adversarial` | Everything `rigorous` requires, plus: one discriminating probe or negative control per acceptance criterion; an active search of the neighbouring scenario space (environment, install modes, platform, ordering, concurrency); an attempt to break the claimed invariant; and an explicit list of break attempts that failed. |
 
@@ -163,7 +163,7 @@ Rules:
   locator/index) rather than repeat its inline definition. Verify the plan and
   result bind the checked state, cwd, attempt, expectation, application, and
   restoration; a plan alone, stale reference, or unresolved reference is not
-  evidence. Legacy inline probe reports remain valid.
+  evidence. Legacy inline probe reports remain valid. When the briefing names run mode `single`, the orchestrator implemented the change itself and nobody has cross-checked its probe evidence: replay every named orchestrator probe, where named means the briefing gives its full definition or a resolved immutable plan-and-result reference (in a scratch copy or an isolating probe runner, never in the reviewed tree), and state in `reproduction`, per probe, the replayed verdict and whether it matches the recorded `result` and `expectation`. Do not skip a named probe in that mode, under any `review_method`; any mismatch also sets `matches_implementer_claim: mismatched`. A mismatch is a finding of at least `high`; a probe given only by id is `not_applicable` and is missing evidence, not a pass, and so is a briefing in that mode that names no probe. Without that mode line in the briefing this obligation does not exist.
 
 Return exactly this structure as your final output, nothing else:
 ```yaml

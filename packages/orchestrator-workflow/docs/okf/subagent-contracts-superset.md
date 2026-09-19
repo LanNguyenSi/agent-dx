@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-19T05:51:38.000Z
+timestamp: 2026-09-19T06:51:12.000Z
 sources:
   - packages/orchestrator-workflow/assets/agents/explorer.md
   - packages/orchestrator-workflow/assets/agents/task-slicer.md
@@ -596,7 +596,7 @@ permission was tightened the same way in this task: it names the
 replayed-and-killed probes by their mutant definition and
 `verified_applied_via` value rather than only their id, since an id
 alone cannot be skipped by this rule either
-(`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:195#"the orchestrator's reviewer briefing names the replayed probes the"`).
+(`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:195#"the orchestrator's reviewer briefing names the replayed probes the"`). Run mode `single` inverts this permission: the orchestrator is then the author of the probes, so the same step defines once what a named probe is (its full definition or a resolved immutable plan-and-result reference, never an id alone), requires the reviewer to replay every named orchestrator probe, and to report, in the existing `reproduction` field, whether each replayed verdict matches the recorded one, a mismatch also setting `matches_implementer_claim: mismatched` (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:201#"that skip permission does not apply"). The reviewer prompt carries the duty in its own words, because a reviewer runs without the skill, applies it under any `review_method` (its `normal` row lists the replay among the obligations no method suspends), and keeps it inert unless the briefing names the mode (packages/orchestrator-workflow/assets/agents/reviewer.md:166#"Without that mode line in the briefing this obligation does not exist."); `contracts.md` only points to the step and adds no output field (packages/orchestrator-workflow/assets/skill/references/contracts.md:219#"no output field is added for it"). `test/single-probe-replay.test.ts` binds the prompt and the pointer to the rule's wording through one constant and checks every rendered reviewer variant.
 
 The pins that hold them: an exact sub-field-name pin independent of the
 byte-for-byte cross-copy equality check
@@ -683,7 +683,7 @@ only in `reviewer.md` (SKILL.md carries the selection rule in prose, not
 a duplicate table): `normal` reads the diff and spec and runs the
 declared tests once, adding nothing beyond the obligations the Check
 list and the Rules below it already state and suspending none of them:
-the empirical-reproduction rule and the GitHub Actions shell replay rule
+the empirical-reproduction rule, the GitHub Actions shell replay rule, and the probe replay of a run mode `single` briefing
 apply under every method
 (`packages/orchestrator-workflow/assets/agents/reviewer.md:33#"adds nothing beyond the obligations already stated in the Check list"`);
 `rigorous` is the default when a briefing names none

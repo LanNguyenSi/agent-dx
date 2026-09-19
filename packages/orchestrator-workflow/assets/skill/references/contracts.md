@@ -216,7 +216,7 @@ in the matching marker, and resupplies a mismatch or omission rather than
 accepting it. `withdrawn`
 lists each finding the reviewer proposed and then retracted under the
 withdrawal rule (`rigorous` and `adversarial` only), with its reason;
-emit `withdrawn: []` when nothing was withdrawn.
+emit `withdrawn: []` when nothing was withdrawn. In run mode `single`, `reproduction` also carries the result of the reviewer's duty to replay every named orchestrator probe; step 7 of the detailed workflow states the rule, and no output field is added for it.
 
 ## Task slicer output contract
 
