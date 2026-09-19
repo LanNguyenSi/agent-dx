@@ -53,7 +53,7 @@ role definitions where available rather than improvising prompts.
    tool over raw grep. Otherwise proceed.
 3. **Plan and slice.** Fill `01-plan.md` and `02-tasks.md`; validate narrow,
    ordered, testable tasks and their allowed/forbidden changes. Read
-   [contracts](references/contracts.md). Steps 3 and 4 are written for the default run mode; the Run mode section says what changes in the other two.
+   [contracts](references/contracts.md). Steps 3 and 4 are written for the default run mode; the Run mode section of run-state and harness says what changes in the other two modes.
 4. **Implement and prove.** Read the detailed workflow before delegating each
    implementer one narrow task and resolve its repository-bound verification
    set before authorizing commands,

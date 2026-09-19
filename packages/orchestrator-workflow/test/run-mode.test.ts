@@ -112,10 +112,10 @@ describe("run mode pointer sites", () => {
 
   it("the sequence steps written for the default mode say so and point to the section", () => {
     expect(skill).toContain(
-      "Steps 3 and 4 are written for the default run mode; the Run mode section says what changes in the other two.",
+      "Steps 3 and 4 are written for the default run mode; the Run mode section of run-state and harness says what changes in the other two modes.",
     );
     expect(probes).toContain(
-      "(Steps 4 to 6 are written for the default run mode; Run mode in run-state and harness says what changes in the other two.)",
+      "(Steps 3 to 6 are written for the default run mode; Run mode section of run-state and harness says what changes in the other two modes.)",
     );
   });
 
