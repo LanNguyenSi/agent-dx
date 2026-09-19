@@ -1,5 +1,19 @@
 # Bundle log
 
+- 2026-09-19T05:31:21.000Z (agent-dx tracker task 3d74bdfb-6450-4436-ad38-
+  ea0565d5ae2b, pandora run 2026-09-19-issue300-stage2): the generated
+  policy section and the README now follow the run mode.
+  `run-state-lifecycle-and-markers.md` gained a closing paragraph in its
+  run mode section with anchored citations into the policy section's
+  reworded implementation bullet, its Run state list and the README's new
+  "Run modes" section. The policy-section edits replace text inside
+  existing lines, the README section was inserted below the last README
+  line this bundle cites, the new pins were appended to the end of
+  `test/docs-consistency.test.ts`, and the CHANGELOG change rewrites two
+  existing lines of the Unreleased bullet, so no cited line moved and no
+  citation was re-pointed. The docs whose `sources` list an edited file
+  were re-verified with the anchor guard against the committed sources and
+  re-stamped.
 - 2026-09-19T04:59:36.000Z (agent-dx tracker task 5b66d626-4220-44df-b52d-
   0b9d8a7fba58, pandora run 2026-09-19-issue300-stage2): the kit gained a
   run mode. `run-state-lifecycle-and-markers.md` has a new last section on

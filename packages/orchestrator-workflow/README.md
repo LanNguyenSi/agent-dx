@@ -6,8 +6,8 @@ subagent definitions with preselected models for the harnesses you actually
 use (Claude Code, OpenAI Codex, opencode).
 
 The workflow itself: the primary agent acts as the orchestrator. It owns goal,
-plan, task validation, acceptance, and the operator handoff. Implementation
-and review are delegated to narrow subagents that return structured YAML
+plan, task validation, acceptance, and the operator handoff. Review, and by default implementation, is
+delegated to narrow subagents (see [Run modes](#run-modes)) that return structured YAML
 evidence. Every unit of work leaves an auditable run directory behind.
 
 ### Acceptance-baseline adoption
@@ -535,6 +535,17 @@ resolves to via `--models`, including a model with no effort support at all
 `effort: high`). On Haiku 4.5, which does not support the `effort`
 parameter, the harness ignores the pinned value rather than rejecting it
 (anchored by a measurement, see CHANGELOG 0.23.0).
+
+## Run modes
+
+Every run records a mode in `00-goal.md`: `single`, `delegated`, or `batch`.
+`delegated` is the default and the flow this README describes. In `single`
+the orchestrator implements one coherent workstream itself; `batch` runs
+implementers in parallel worktrees. The reviewer is mandatory in all three modes.
+The definitions, the rule for choosing a mode, and the run files each mode
+requires are stated once, in the Run mode section of the installed skill
+reference
+[`run-state-and-harness.md`](assets/skill/references/run-state-and-harness.md).
 
 ## Operator-level install
 

@@ -438,3 +438,21 @@ next to the count-and-default pin
 The section's sentences are pinned as constants in
 `test/run-mode-constants.ts`, and `test/run-mode.test.ts` checks that no
 pointer site restates them.
+
+The generated policy section and the README follow the same rule of one
+normative place. The Core rules bullet on implementation now reads
+"Non-trivial implementation follows the run mode recorded in `00-goal.md`"
+(packages/orchestrator-workflow/assets/agents-md-section.md:24#"Non-trivial implementation follows the run mode recorded in");
+it names `delegated` as the default and the other two modes in one clause
+each, and ends by pointing to the skill's Run mode section. The Run state
+list of the policy section names the marker beside the keyed run-base marker
+(packages/orchestrator-workflow/assets/agents-md-section.md:178#"marker per repository for multi-repo runs").
+The README has a short "Run modes" section
+(packages/orchestrator-workflow/README.md:539#"## Run modes")
+that links the reference. Both sites are pinned against restating a
+definition, a file list, the switch rule or the default's wording by the last
+block of `test/docs-consistency.test.ts`, which imports the constants of
+`test/run-mode-constants.ts` rather than spelling the mode names again. All
+policy-section edits replace text within existing lines, so the lines other
+bundle docs cite there did not move; a policy-section change reaches an
+existing install only with its next `init` or `apply`.
