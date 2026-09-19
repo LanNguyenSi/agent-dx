@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -42,17 +42,17 @@ describe("single-mode probe replay", () => {
 
   it("step 7 names the orchestrator's side, the report, the mismatch severity and the id-only case", () => {
     expect(step7).toContain(
-      "the orchestrator records its own probes with their full definition in `04-implementation-summary.md` before requesting review",
+      "the orchestrator records its own probes with their full definition, or a resolved immutable plan-and-result reference, in `04-implementation-summary.md` before requesting review",
     );
     expect(step7).toContain(
-      "the reviewer briefing names the run mode and each of those probes by definition",
+      "the reviewer briefing names the run mode and each of those probes by definition or by that reference",
     );
     expect(step7).toContain("never in the reviewed tree");
     expect(step7).toContain(
-      "whether that verdict matches the recorded `result` and `expectation`; a mismatch is a finding of at least `high`",
+      "whether that verdict matches the recorded `result` and `expectation`; a mismatch is a finding of at least `high` and sets `matches_implementer_claim: mismatched`",
     );
     expect(step7).toContain(
-      "a probe named only by id is `not_applicable` and counts as missing evidence, not as a pass",
+      "a probe named only by id is `not_applicable` and counts as missing evidence, not as a pass, and a `single` briefing that names no probe at all is missing evidence too",
     );
   });
 
@@ -72,7 +72,9 @@ describe("single-mode probe replay", () => {
   it("the reviewer prompt carries the duty, bound to the rule's wording, and keeps it inert without the mode line", () => {
     expect(REVIEWER_DUTY).toContain(SINGLE_REPLAY_RULE);
     expect(reviewer).toContain(REVIEWER_DUTY);
-    expect(reviewer).toContain("Do not skip a named probe in that mode.");
+    expect(reviewer).toContain(
+      "Do not skip a named probe in that mode, under any `review_method`; any mismatch also sets `matches_implementer_claim: mismatched`.",
+    );
     expect(reviewer).toContain(
       "A mismatch is a finding of at least `high`; a probe named only by id is `not_applicable` and is missing evidence, not a pass.",
     );
@@ -81,7 +83,22 @@ describe("single-mode probe replay", () => {
     );
   });
 
-  it("the duty sits above the output block, which stays as it was", () => {
+  it("the `normal` method row counts the replay among the obligations that apply under every method", () => {
+    expect(reviewer).toContain(
+      "the empirical-reproduction rule, the GitHub Actions shell replay rule, and the probe replay of a run mode `single` briefing apply under every method.",
+    );
+  });
+
+  it("the orchestrator-side clause agrees with the persisted probe plan provision", () => {
+    expect(probes).toContain(
+      "Assignments and summaries may point to it and a result artifact instead of resending a definition",
+    );
+    expect(step7).toContain(
+      "or a resolved immutable plan-and-result reference",
+    );
+  });
+
+  it("the duty sits above the output block and no mode value leaks into that block", () => {
     const duty = reviewerRaw.indexOf("When the briefing names run mode");
     const output = reviewerRaw.indexOf("Return exactly this structure");
     expect(duty).toBeGreaterThan(-1);
@@ -135,6 +152,13 @@ describe("single-mode probe replay", () => {
           expect(rendered, `${harness}/reviewer${suffix}.md`).toContain(
             REVIEWER_DUTY,
           );
+        }
+        for (const file of readdirSync(join(target, harness, "agents"))) {
+          if (file.startsWith("reviewer")) continue;
+          expect(
+            readFileSync(join(target, harness, "agents", file), "utf8"),
+            `${harness}/${file}`,
+          ).not.toContain("When the briefing names run mode");
         }
       }
     } finally {

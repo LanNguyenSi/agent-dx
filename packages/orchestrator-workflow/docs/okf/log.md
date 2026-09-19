@@ -11,7 +11,12 @@
   passage was extended on its own last line, so no cited line moved and no
   citation was re-pointed. The docs whose `sources` list an edited file
   were re-verified with the anchor guard against the committed sources and
-  re-stamped.
+  re-stamped. A review round then aligned the rule's orchestrator-side
+  clause with the persisted probe plan provision (a resolved immutable
+  plan-and-result reference counts like an inline definition), named the
+  replay in the `normal` method row's list of obligations that apply under
+  every method, and added what a mixed replay outcome and a briefing
+  without any named probe mean; all of it inside existing lines.
 - 2026-09-19T05:31:21.000Z (agent-dx tracker task 3d74bdfb-6450-4436-ad38-
   ea0565d5ae2b, pandora run 2026-09-19-issue300-stage2): the generated
   policy section and the README now follow the run mode.
