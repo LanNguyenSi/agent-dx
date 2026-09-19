@@ -157,6 +157,17 @@ describe("review-slop", () => {
       expect(hit?.matched).toBe("H3");
     });
 
+    it.each([
+      ["reviewed", "C4 was reviewed and closed."],
+      ["reviews", "The reviews closed C4."],
+      ["reviewing", "Reviewing C4 uncovered the regression."],
+    ])("fires on a severity-letter id gated by '%s'", (_inflection, text) => {
+      const v = checkText(text, "docs/NOTES.md", baseOpts());
+      const hit = v.find((x) => x.ruleId === "review-slop/finding-id");
+      expect(hit).toBeDefined();
+      expect(hit?.matched).toBe("C4");
+    });
+
     it("negative: 'the M1 chip' without a gating context word does not fire", () => {
       const v = checkText(
         "Runs fine on the M1 chip.",
@@ -352,6 +363,43 @@ describe("review-slop", () => {
       const hit = v.find((x) => x.ruleId === "review-slop/round-reference");
       expect(hit).toBeDefined();
       expect(hit?.matched).toBe("R3");
+    });
+
+    it.each([
+      ["reviewed", "R3 was reviewed."],
+      ["reviews", "The team reviews R3."],
+      ["reviewing", "Reviewing R3 found the regression."],
+    ])(
+      "fires on a bare round-letter token gated by '%s'",
+      (_inflection, text) => {
+        const v = checkText(text, "docs/NOTES.md", baseOpts());
+        const hit = v.find((x) => x.ruleId === "review-slop/round-reference");
+        expect(hit).toBeDefined();
+        expect(hit?.matched).toBe("R3");
+      },
+    );
+
+    it.each([
+      ["reviewed", "round 2 is being reviewed."],
+      ["reviews", "The team reviews round 2."],
+      ["reviewing", "Reviewing round 2 found the regression."],
+    ])(
+      "fires on a round-plus-digit reference gated by '%s'",
+      (_inflection, text) => {
+        const v = checkText(text, "docs/NOTES.md", baseOpts());
+        const hit = v.find((x) => x.ruleId === "review-slop/round-reference");
+        expect(hit).toBeDefined();
+        expect(hit?.matched).toBe("round 2");
+      },
+    );
+
+    it("negative: a review inflection without a round or finding token stays clean", () => {
+      const v = checkText(
+        "The reviews page is current.",
+        "docs/NOTES.md",
+        baseOpts(),
+      );
+      expect(v).toHaveLength(0);
     });
 
     it("negative: a bare round-letter token with no review context does not fire", () => {

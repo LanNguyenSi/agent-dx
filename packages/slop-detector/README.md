@@ -429,7 +429,8 @@ or misleading the moment that cycle is over.
   low, critical), same digit-plus-optional-letter shape and hyphenated-
   year exclusion as the `F` form -- but, unlike the `F` form, only when
   the same sentence also carries a review-process word (`review`,
-  `reviewer`, `finding`/`findings`, `fix`/`fixed`/`fixes`/`fixing`, or
+  `reviewer`, `reviewed`/`reviews`/`reviewing`, `finding`/`findings`,
+  `fix`/`fixed`/`fixes`/`fixing`, or
   `round`/`rounds`): left ungated, these four letters would swallow
   plain vocabulary far more often than a capital `F` does (`H1`-`H6`
   heading levels, `M1`-`M3` chip generations, `L1`/`L2` cache layers, a
@@ -449,7 +450,8 @@ or misleading the moment that cycle is over.
   severity (the kit's own vocabulary for its own review-round mechanism
   uses this exact phrase); `round N` and a bare `RN` token only match
   when the same sentence also carries a review-process word (`review`,
-  `finding`, `fix`, or -- for the bare token -- `round` itself), so an
+  `reviewer`, `reviewed`, `reviews`, `reviewing`, `finding`, `fix`, or --
+  for the bare token -- `round` itself), so an
   unrelated `round 2 of the DNS retry` or a Cloudflare `R2` bucket is
   left alone. "The same sentence" is bounded by a `.`, `!` or `?`, a
   blank line, a Markdown heading line, or the start of a list item: a
