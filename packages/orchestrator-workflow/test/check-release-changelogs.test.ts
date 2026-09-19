@@ -161,11 +161,7 @@ describe("check-release-changelogs.mjs", () => {
   });
 
   it("rule 1 (version-heading): a hyphenated build-metadata heading that does not match package.json still fails", () => {
-    writePackage(
-      "widget",
-      "1.0.0+build-2",
-      CLEAN_CHANGELOG("1.0.0+build-1"),
-    );
+    writePackage("widget", "1.0.0+build-2", CLEAN_CHANGELOG("1.0.0+build-1"));
     const result = run([]);
     expect(result.status).toBe(1);
     expect(result.stderr).toMatch(
