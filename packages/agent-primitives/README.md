@@ -231,10 +231,14 @@ any command is built; a name outside that pattern is `status:
 
 Check resolution, per name: an `-x` override wins; otherwise a matching
 `package.json` `scripts[name]` runs as `npm run <name> --silent`; a name
-with neither resolves to `status: "skipped"`. When the resolved check list
-is empty (e.g. `-c ''`), or every requested check resolves to `skipped`,
-the run is `status: "error"` with `reason: "nothing_verified"`, exit `2`,
-and a warning, never a silent pass. A shell exit of `126` (not executable)
+explicitly selected with `-c` that has neither is recorded as `status:
+"skipped", reason: "no_script"`,
+with a warning naming the missing script. It is an explicit non-pass: the
+overall result is `status: "error"`, exit `2`, even when other requested
+checks pass. Supply the command deliberately with `-x name=command` when
+that is intended. When the resolved check list is empty (e.g. `-c ''`), or
+every requested check resolves to `skipped`, the run also carries
+`reason: "nothing_verified"`. A shell exit of `126` (not executable)
 or `127` (not found) is `status: "error"`, never `"fail"`: it means the
 check itself could not run, not that it ran and found a problem; the same
 is true when the exec layer itself fails to even start a check at all
@@ -392,8 +396,9 @@ missing entries even when the total is trustworthy. A detector's own
 warnings, and a log file the run could not write to, are reported in the
 top-level `warnings`, each prefixed with the check name.
 
-Overall `status` is `error` if any check errored, else `fail` if any check
-failed, else `pass`; `error` wins over `fail`. Exit code follows `status`
+Overall `status` is `error` if any check errored or an explicitly selected
+check was unresolved, else `fail` if any check failed, else `pass`; `error`
+wins over `fail`. Exit code follows `status`
 the same way every other subcommand's does.
 
 `SIGINT` and `SIGTERM` are handled for every subcommand: the CLI kills

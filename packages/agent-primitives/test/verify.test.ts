@@ -127,7 +127,7 @@ describe("verify: check resolution", () => {
     });
   });
 
-  it("a check with neither an override nor a matching script is skipped and never invoked", async () => {
+  it("a requested check with neither an override nor a matching script is an explicit no_script non-pass", async () => {
     const cwd = makeTmpDir();
     // A second, resolvable check keeps this run from being all-skipped
     // (which is its own status: "error" / nothing_verified case, covered
@@ -148,9 +148,28 @@ describe("verify: check resolution", () => {
     expect(result.checks[0]).toMatchObject({
       name: "lint",
       status: "skipped",
+      reason: "no_script",
       failures: [],
     });
-    expect(result.status).toBe("pass");
+    expect(result.checks[0].summary.skipped).toBe(1);
+    expect(result.warnings).toContain(
+      "lint: no_script: no -x override or matching package.json script",
+    );
+    expect(result.status).toBe("error");
+
+    const overridden = await verify({
+      cwd,
+      logDir,
+      checks: ["lint"],
+      overrides: { lint: "echo ok" },
+      execFn: fn,
+    });
+    expect(overridden.checks[0]).toMatchObject({
+      name: "lint",
+      command: "echo ok",
+      status: "pass",
+    });
+    expect(overridden.status).toBe("pass");
   });
 
   it("a check name that appears only via -x (not in the requested/default list) still runs", async () => {
@@ -1132,7 +1151,7 @@ describe("verify: --pass-regex opt-in success predicate", () => {
     expect(result.checks[0].status).toBe("pass");
   });
 
-  it("a requested check with a predicate that resolves to skipped (no script, no -x) warns the predicate was never consulted (F1)", async () => {
+  it("a requested check with a predicate that resolves to skipped (no script, no -x) warns the predicate was never consulted", async () => {
     const cwd = makeTmpDir();
     // Only `build` has a script; `test` is requested and carries a
     // predicate, but has neither a package.json script nor an -x
@@ -1161,9 +1180,7 @@ describe("verify: --pass-regex opt-in success predicate", () => {
           `test: --pass-regex (^OK \\() was given but the check resolved to skipped, so the predicate was never consulted`,
       ),
     ).toBe(true);
-    // The overall run is not itself affected: a skipped check is still
-    // not a non-pass finding.
-    expect(result.status).toBe("pass");
+    expect(result.status).toBe("error");
   });
 });
 
@@ -1221,7 +1238,7 @@ describe("verify: --pass-regex with a real detector, summary comes from the dete
     ).toBe(true);
   });
 
-  it("a predicate-decided fail with zero parsed failures gets exactly one synthetic entry labeled from the predicate, not the exit code (F2)", async () => {
+  it("a predicate-decided fail with zero parsed failures gets exactly one synthetic entry labeled from the predicate, not the exit code", async () => {
     const cwd = makeTmpDir();
     writePackageJson(cwd, { test: "te" });
     const logDir = makeTmpDir();
@@ -1317,7 +1334,7 @@ describe("verify: --pass-regex map lookup guards inherited Object.prototype name
   });
 });
 
-describe("verify: --pass-regex signal-band wording and truncated-tail caveats (F3)", () => {
+describe("verify: --pass-regex signal-band wording and truncated-tail caveats", () => {
   it("a match despite exit 137 (SIGKILL's 128+N band) gets the signal wording, not plain deprecation-notice wording", async () => {
     const cwd = makeTmpDir();
     writePackageJson(cwd, { test: "te" });
