@@ -380,10 +380,15 @@ const SEVERITY_FINDING_ID = /\b[HMLC]\d[a-z]?\b(?!-\d)/g;
 // rounds we settled on R3"), but deliberately NOT for `round \d+` itself
 // -- the matched phrase always contains the word "round", so including it
 // in its own context set would make the filter a no-op.
-const ROUND_WORD_CONTEXT =
-  /\b(review|reviewer|fix(?:e[ds]|ing)?|finding[s]?)\b/i;
-const ROUND_TOKEN_CONTEXT =
-  /\b(review|reviewer|round[s]?|fix(?:e[ds]|ing)?|finding[s]?)\b/i;
+const REVIEW_CONTEXT_WORD = "review(?:e[dr]|s|ing)?";
+const ROUND_WORD_CONTEXT = new RegExp(
+  `\\b(${REVIEW_CONTEXT_WORD}|fix(?:e[ds]|ing)?|finding[s]?)\\b`,
+  "i",
+);
+const ROUND_TOKEN_CONTEXT = new RegExp(
+  `\\b(${REVIEW_CONTEXT_WORD}|round[s]?|fix(?:e[ds]|ing)?|finding[s]?)\\b`,
+  "i",
+);
 
 // The review-process word set gating `SEVERITY_FINDING_ID` above is the
 // bare round token's set, by alias rather than by a second literal: a
@@ -399,7 +404,7 @@ const findingId: Rule = {
   defaultSeverity: "block",
   enabledByDefault: true,
   rationale:
-    "A finding id (`F1`, `F2a`, or a severity-letter id like `M1`/`H2a` when the same sentence also carries a review-process word) only resolves against the one review round it was minted in. Baked into a test title, a source comment, a commit message, or a doc, it reads as a precise reference but is opaque and dead the moment that round is over. The severity-letter gate is coarse (it clears only on the absence of a review-process word, not on the sentence's topic), so a genuine bug-fix sentence naming a chip or cache id is an accepted false positive; `review.allow` or `review.allowPaths` is the escape hatch.",
+    "A finding id (`F1`, `F2a`, or a severity-letter id like `M1`/`H2a` when the same sentence also carries a review-process word such as `reviewed`, `reviews`, or `reviewing`) only resolves against the one review round it was minted in. Baked into a test title, a source comment, a commit message, or a doc, it reads as a precise reference but is opaque and dead the moment that round is over. The severity-letter gate is coarse (it clears only on the absence of a review-process word, not on the sentence's topic), so a genuine bug-fix sentence naming a chip or cache id is an accepted false positive; `review.allow` or `review.allowPaths` is the escape hatch.",
   appliesTo: appliesToReviewSurface,
   check(ctx: RuleContext): Violation[] {
     return checkReviewTokenRule(
@@ -520,7 +525,7 @@ const roundReference: Rule = {
   defaultSeverity: "block",
   enabledByDefault: true,
   rationale:
-    "A review-round reference (`round 2`, `R3`, `review round 1 fixes`) only makes sense inside the run that produced it. Baked into a test title, a source comment, a commit message, or a doc, it is stale the moment the next round starts. Only flagged when the same sentence -- bounded by `.`, `!`, `?`, a blank line, a heading, or a list item -- also carries a review-process word (`review`, `finding`, `fix`, or -- for the bare `R3` shorthand -- `round` itself), so an unrelated `round 2 of the DNS retry` or a Cloudflare `R2` bucket is left alone.",
+    "A review-round reference (`round 2`, `R3`, `review round 1 fixes`) only makes sense inside the run that produced it. Baked into a test title, a source comment, a commit message, or a doc, it is stale the moment the next round starts. Only flagged when the same sentence -- bounded by `.`, `!`, `?`, a blank line, a heading, or a list item -- also carries a review-process word (`review`, `reviewed`, `reviews`, `reviewing`, `finding`, `fix`, or -- for the bare `R3` shorthand -- `round` itself), so an unrelated `round 2 of the DNS retry` or a Cloudflare `R2` bucket is left alone.",
   appliesTo: appliesToReviewSurface,
   check(ctx: RuleContext): Violation[] {
     return checkReviewTokenRule(

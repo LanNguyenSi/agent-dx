@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `review-slop` now recognises `reviewed`, `reviews`, and `reviewing` as
+  review-process context in the `round-reference` word form, bare `R` token,
+  and severity-letter `finding-id` gates. Previously those gates accepted
+  `review` and `reviewer` but missed these inflections, so `C4 was reviewed
+  and closed.` stayed clean while `C4 was fixed.` fired. Measured with
+  `node packages/slop-detector/dist/cli.js check . --pack review-slop --format json`
+  from the monorepo root: 699 files scanned and 810 violations before, then
+  699 files scanned and 813 violations after. Existing review-slop hits
+  in the package's intentional examples remain fixtures; this change does not
+  expand `allowPaths` or alter the pre-existing corpus.
 - The npm tarball now ships a `LICENSE` file matching the repo root LICENSE
   (MIT), asserted by the monorepo's `lint-package-licenses` CI job.
 - `review-slop/finding-id` now also matches a severity-letter finding id:
