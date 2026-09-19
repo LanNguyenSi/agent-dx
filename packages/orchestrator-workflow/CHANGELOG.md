@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-09-19
+
 - A run now declares a run mode. `assets/templates/00-goal.md` carries
   `<!-- solution-acceptance: mode = delegated -->` below the run-base
   markers; the value is `single`, `delegated`, or `batch`, and a missing or
