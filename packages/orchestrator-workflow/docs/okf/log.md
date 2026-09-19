@@ -13,7 +13,12 @@
   existing lines of the Unreleased bullet, so no cited line moved and no
   citation was re-pointed. The docs whose `sources` list an edited file
   were re-verified with the anchor guard against the committed sources and
-  re-stamped.
+  re-stamped. A review round then scoped the Scaling delegation bullet on
+  implementer subagents to the two modes that have them, made the Core
+  rules sentence on review mode-neutral (its cited last line is unchanged,
+  and `review-gate-and-waivers.md` quotes the new wording), reworded both
+  intro sentences, and split the docs-only pin so that the pointer and the
+  no-restatement check fail separately.
 - 2026-09-19T04:59:36.000Z (agent-dx tracker task 5b66d626-4220-44df-b52d-
   0b9d8a7fba58, pandora run 2026-09-19-issue300-stage2): the kit gained a
   run mode. `run-state-lifecycle-and-markers.md` has a new last section on

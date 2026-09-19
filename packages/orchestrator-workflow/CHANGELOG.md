@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   section in `04-implementation-summary.md`), makes a mode switch a D-ID row
   instead of a new run, and keeps the reviewer mandatory in all three modes.
   `SKILL.md` points to the section from the route list and from step 1, and the sequence steps in `SKILL.md` and `references/evidence-and-probes.md` that are written for the default mode now say so. No
-  reader enforces the marker. The AGENTS.md policy section (`assets/agents-md-section.md`) and the README follow: non-trivial implementation follows the run mode, with `delegated` as the default, and both point to the skill instead of defining the modes again; the README gains a "Run modes" section.
+  reader enforces the marker. The AGENTS.md policy section (`assets/agents-md-section.md`) and the README follow: non-trivial implementation follows the run mode, with `delegated` as the default, and both name each mode in one clause and point to the skill for the definitions; the README gains a "Run modes" section.
   The policy section also names the run's `mode` marker in its Run state list and points to the docs-only review default of the skill's Delegate review step. Because the policy section changed, an existing install receives it only with its next `init` or `apply`.
 
 ## [0.37.0] - 2026-09-18

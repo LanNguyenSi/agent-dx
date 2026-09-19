@@ -10416,7 +10416,7 @@ describe("run mode in the policy section and the README", () => {
       "The skill's Run mode section defines the modes and how to choose one.",
     );
     expect(policy).toContain(
-      "who implements non-trivial work follows the run mode (Core rules)",
+      "which agent implements non-trivial work follows from the run mode (Core rules)",
     );
   });
 
@@ -10430,6 +10430,19 @@ describe("run mode in the policy section and the README", () => {
     expect(readme).not.toContain(
       "Implementation and review are delegated to narrow subagents",
     );
+  });
+
+  it("the policy section scopes implementer subagents to the modes that have them and keeps review unconditional", () => {
+    expect(policy).toContain(
+      "Slicing and, in run modes `delegated` and `batch`, implementer subagents are for non-trivial work:",
+    );
+    expect(policy).not.toContain(
+      "Slicing and implementer subagents are for non-trivial work",
+    );
+    expect(policy).toContain(
+      "Review itself is never skipped, in any run mode, not even for docs or bulk changes.",
+    );
+    expect(policy).toContain("Either way, review is never skipped.");
   });
 
   it("the policy section's run state list names the mode marker beside run-base", () => {
@@ -10449,7 +10462,9 @@ describe("run mode in the policy section and the README", () => {
     expect(readme).toContain(
       "[`run-state-and-harness.md`](assets/skill/references/run-state-and-harness.md)",
     );
-    expect(readme).toContain("(see [Run modes](#run-modes))");
+    expect(readme).toContain(
+      "Review is always delegated to narrow subagents, and by default so is implementation (see [Run modes](#run-modes));",
+    );
   });
 
   it("neither site restates a definition, a file list, the switch rule or the default's wording", () => {
@@ -10470,12 +10485,17 @@ describe("run mode in the policy section and the README", () => {
     }
   });
 
-  it("the policy section points to the docs-only review default instead of restating it", () => {
+  const DOCS_ONLY_RULE_WORDS =
+    "default to the `-medium` reviewer tier with `review_method: normal`";
+
+  it("the policy section points to the docs-only review default", () => {
     expect(policy).toContain(
       "A docs-only delta has its own review default; the skill's Delegate review step states it.",
     );
-    const rule =
-      "default to the `-medium` reviewer tier with `review_method: normal`";
+  });
+
+  it("the policy section does not restate the docs-only rule, and the pointer's target carries it", () => {
+    const rule = DOCS_ONLY_RULE_WORDS;
     expect(policy).not.toContain(rule);
     // The pointer names a real target: the rule lives inside that step.
     const step = probes.slice(

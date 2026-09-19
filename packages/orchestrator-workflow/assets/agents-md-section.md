@@ -6,7 +6,7 @@ This repository uses an orchestrator-led agent workflow, installed and updated b
 
 The primary agent acts as the orchestrator. It owns the goal, planning, task
 validation, delegation, final acceptance, and the operator handoff. Non-trivial
-review is delegated to a narrow subagent; who implements non-trivial work follows the run mode (Core rules). The full procedure
+review is delegated to a narrow subagent; which agent implements non-trivial work follows from the run mode (Core rules). The full procedure
 and the subagent I/O contracts live in the `orchestrator-workflow` skill.
 
 ### Core rules
@@ -24,7 +24,7 @@ and the subagent I/O contracts live in the `orchestrator-workflow` skill.
 - Non-trivial implementation follows the run mode recorded in `00-goal.md`. `delegated`, the default, sends it to narrow implementer subagents, one task
   per subagent; in `single` the orchestrator implements one coherent workstream itself; `batch` runs implementers in parallel worktrees. The skill's Run mode section defines the modes and how to choose one.
 - Non-trivial review goes to a separate reviewer subagent (see Scaling
-  delegation). Review itself is never skipped, not even for docs or batch
+  delegation). Review itself is never skipped, in any run mode, not even for docs or bulk
   changes.
 - Final acceptance and the final answer to the operator stay with the
   orchestrator.
@@ -41,7 +41,7 @@ default, not a ritual.
   solution; skip it when the change is well understood. Under a `minimal`
   profile there is no explorer subagent to spawn; run this step inline
   instead.
-- Slicing and implementer subagents are for non-trivial work: multiple files,
+- Slicing and, in run modes `delegated` and `batch`, implementer subagents are for non-trivial work: multiple files,
   real logic, or anything that benefits from decomposition or a fresh context.
   Under a `minimal` profile there is no task-slicer subagent; the orchestrator
   slices inline with the same contract.

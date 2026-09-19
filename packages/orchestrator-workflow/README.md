@@ -6,8 +6,8 @@ subagent definitions with preselected models for the harnesses you actually
 use (Claude Code, OpenAI Codex, opencode).
 
 The workflow itself: the primary agent acts as the orchestrator. It owns goal,
-plan, task validation, acceptance, and the operator handoff. Review, and by default implementation, is
-delegated to narrow subagents (see [Run modes](#run-modes)) that return structured YAML
+plan, task validation, acceptance, and the operator handoff. Review is always delegated to narrow subagents, and by default so is
+implementation (see [Run modes](#run-modes)); the subagents return structured YAML
 evidence. Every unit of work leaves an auditable run directory behind.
 
 ### Acceptance-baseline adoption

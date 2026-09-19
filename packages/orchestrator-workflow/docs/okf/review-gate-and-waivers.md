@@ -24,8 +24,8 @@ sources:
 # Review gate and waivers
 
 Review is never skipped. Core rule: "Non-trivial review goes to a separate
-reviewer subagent... Review itself is never skipped, not even for docs or
-batch changes"
+reviewer subagent... Review itself is never skipped, in any run mode, not even for docs or
+bulk changes"
 (`packages/orchestrator-workflow/assets/agents-md-section.md:28#"changes."`). Scaling
 delegation lets a trivial change be reviewed by the orchestrator itself
 instead of a spawned reviewer subagent, but restates the same floor: "Either
