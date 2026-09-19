@@ -10372,3 +10372,136 @@ describe("the dist-tag, deprecate, and publish allowlists stay pinned to each ot
     expect(mismatches, mismatches.join("\n")).toEqual([]);
   });
 });
+
+/**
+ * The run mode's only normative statement is the Run mode section of
+ * run-state-and-harness.md (pinned in run-mode.test.ts). The policy section
+ * and the README name the three modes and the default and point there; they
+ * must not define a mode a second time. This block sits at the end of the
+ * file so that no line cited from the knowledge bundle moves.
+ */
+import {
+  ALL_FILES_MODES,
+  DEFINITION_BATCH,
+  DEFINITION_DELEGATED,
+  DEFINITION_SINGLE,
+  MODE_SWITCH_RULE,
+  REVIEWER_IN_ALL_MODES,
+  RUN_MODES,
+  RUN_MODE_DEFAULT,
+  SINGLE_MANDATORY_FILES,
+} from "./run-mode-constants.js";
+
+describe("run mode in the policy section and the README", () => {
+  const policy = unwrap(readRawAsset("agents-md-section.md"));
+  const readme = unwrap(readFileSync(`${PACKAGE_DIR}/README.md`, "utf8"));
+  const probes = unwrap(
+    readRawAsset("skill/references/evidence-and-probes.md"),
+  );
+
+  it("the policy section ties non-trivial implementation to the run mode and names all three modes", () => {
+    expect(policy).toContain(
+      "Non-trivial implementation follows the run mode recorded in `00-goal.md`.",
+    );
+    expect(policy).toContain(
+      "`delegated`, the default, sends it to narrow implementer subagents, one task per subagent;",
+    );
+    expect(policy).toContain(
+      "in `single` the orchestrator implements one coherent workstream itself;",
+    );
+    expect(policy).toContain(
+      "`batch` runs implementers in parallel worktrees.",
+    );
+    expect(policy).toContain(
+      "The skill's Run mode section defines the modes and how to choose one.",
+    );
+    expect(policy).toContain(
+      "which agent implements non-trivial work follows from the run mode (Core rules)",
+    );
+  });
+
+  it("the policy section no longer states delegation of implementation as unconditional", () => {
+    expect(policy).not.toContain(
+      "Non-trivial implementation goes to narrow implementer subagents",
+    );
+    expect(policy).not.toContain(
+      "implementation and review are delegated to narrow subagents",
+    );
+    expect(readme).not.toContain(
+      "Implementation and review are delegated to narrow subagents",
+    );
+  });
+
+  it("the policy section scopes implementer subagents to the modes that have them and keeps review unconditional", () => {
+    expect(policy).toContain(
+      "Slicing and, in run modes `delegated` and `batch`, implementer subagents are for non-trivial work:",
+    );
+    expect(policy).not.toContain(
+      "Slicing and implementer subagents are for non-trivial work",
+    );
+    expect(policy).toContain(
+      "Review itself is never skipped, in any run mode, not even for docs or bulk changes.",
+    );
+    expect(policy).toContain("Either way, review is never skipped.");
+  });
+
+  it("the policy section's run state list names the mode marker beside run-base", () => {
+    expect(policy).toContain(
+      "marker per repository for multi-repo runs, next to the run's `mode` marker.",
+    );
+  });
+
+  it("the README names the three modes, the default and the reviewer rule, and links the reference", () => {
+    expect(readme).toContain(
+      `Every run records a mode in \`00-goal.md\`: \`${RUN_MODES[0]}\`, \`${RUN_MODES[1]}\`, or \`${RUN_MODES[2]}\`.`,
+    );
+    expect(readme).toContain(
+      "`delegated` is the default and the flow this README describes.",
+    );
+    expect(readme).toContain(`${REVIEWER_IN_ALL_MODES}.`);
+    expect(readme).toContain(
+      "[`run-state-and-harness.md`](assets/skill/references/run-state-and-harness.md)",
+    );
+    expect(readme).toContain(
+      "Review is always delegated to narrow subagents, and by default so is implementation (see [Run modes](#run-modes));",
+    );
+  });
+
+  it("neither site restates a definition, a file list, the switch rule or the default's wording", () => {
+    const restatable = [
+      DEFINITION_SINGLE,
+      DEFINITION_DELEGATED,
+      DEFINITION_BATCH,
+      SINGLE_MANDATORY_FILES,
+      ALL_FILES_MODES,
+      MODE_SWITCH_RULE,
+      RUN_MODE_DEFAULT,
+    ];
+    for (const site of [policy, readme]) {
+      for (const text of restatable) expect(site).not.toContain(text);
+      for (const mode of RUN_MODES) {
+        expect(site).not.toMatch(new RegExp(`\`${mode}\`\\s*[:=]`));
+      }
+    }
+  });
+
+  const DOCS_ONLY_RULE_WORDS =
+    "default to the `-medium` reviewer tier with `review_method: normal`";
+
+  it("the policy section points to the docs-only review default", () => {
+    expect(policy).toContain(
+      "A docs-only delta has its own review default; the skill's Delegate review step states it.",
+    );
+  });
+
+  it("the policy section does not restate the docs-only rule, and the pointer's target carries it", () => {
+    const rule = DOCS_ONLY_RULE_WORDS;
+    expect(policy).not.toContain(rule);
+    // The pointer names a real target: the rule lives inside that step.
+    const step = probes.slice(
+      probes.indexOf("7. **Delegate review.**"),
+      probes.indexOf("8. **Decide acceptance.**"),
+    );
+    expect(step).toContain(rule);
+  });
+});

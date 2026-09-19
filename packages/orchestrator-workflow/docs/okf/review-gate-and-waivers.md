@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-09-19T05:15:31.000Z
+timestamp: 2026-09-19T05:51:38.000Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/agents/reviewer.md
@@ -24,8 +24,8 @@ sources:
 # Review gate and waivers
 
 Review is never skipped. Core rule: "Non-trivial review goes to a separate
-reviewer subagent... Review itself is never skipped, not even for docs or
-batch changes"
+reviewer subagent... Review itself is never skipped, in any run mode, not even for docs or
+bulk changes"
 (`packages/orchestrator-workflow/assets/agents-md-section.md:28#"changes."`). Scaling
 delegation lets a trivial change be reviewed by the orchestrator itself
 instead of a spawned reviewer subagent, but restates the same floor: "Either

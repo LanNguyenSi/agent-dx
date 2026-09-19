@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-09-19T05:15:31.000Z
+timestamp: 2026-09-19T05:51:38.000Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -438,3 +438,21 @@ next to the count-and-default pin
 The section's sentences are pinned as constants in
 `test/run-mode-constants.ts`, and `test/run-mode.test.ts` checks that no
 pointer site restates them.
+
+The generated policy section and the README follow the same rule of one
+normative place. The Core rules bullet on implementation now reads
+"Non-trivial implementation follows the run mode recorded in `00-goal.md`"
+(packages/orchestrator-workflow/assets/agents-md-section.md:24#"Non-trivial implementation follows the run mode recorded in");
+it names `delegated` as the default and the other two modes in one clause
+each, and ends by pointing to the skill's Run mode section. The Run state
+list of the policy section names the marker beside the keyed run-base marker
+(packages/orchestrator-workflow/assets/agents-md-section.md:178#"marker per repository for multi-repo runs").
+The README has a short "Run modes" section
+(packages/orchestrator-workflow/README.md:539#"## Run modes")
+that links the reference. Both sites are pinned against restating a
+definition, a file list, the switch rule or the default's wording by the last
+block of `test/docs-consistency.test.ts`, which imports the constants of
+`test/run-mode-constants.ts` rather than spelling the mode names again. All
+policy-section edits replace text within existing lines, so the lines other
+bundle docs cite there did not move; a policy-section change reaches an
+existing install only with its next `init` or `apply`.

@@ -6,7 +6,7 @@ This repository uses an orchestrator-led agent workflow, installed and updated b
 
 The primary agent acts as the orchestrator. It owns the goal, planning, task
 validation, delegation, final acceptance, and the operator handoff. Non-trivial
-implementation and review are delegated to narrow subagents. The full procedure
+review is delegated to a narrow subagent; which agent implements non-trivial work follows from the run mode (Core rules). The full procedure
 and the subagent I/O contracts live in the `orchestrator-workflow` skill.
 
 ### Core rules
@@ -21,10 +21,10 @@ and the subagent I/O contracts live in the `orchestrator-workflow` skill.
   inline with the same read-only discipline instead.
 - The orchestrator plans features itself. It may delegate task slicing, but it
   validates the sliced tasks before implementation starts.
-- Non-trivial implementation goes to narrow implementer subagents, one task
-  per subagent.
+- Non-trivial implementation follows the run mode recorded in `00-goal.md`. `delegated`, the default, sends it to narrow implementer subagents, one task
+  per subagent; in `single` the orchestrator implements one coherent workstream itself; `batch` runs implementers in parallel worktrees. The skill's Run mode section defines the modes and how to choose one.
 - Non-trivial review goes to a separate reviewer subagent (see Scaling
-  delegation). Review itself is never skipped, not even for docs or batch
+  delegation). Review itself is never skipped, in any run mode, not even for docs or bulk
   changes.
 - Final acceptance and the final answer to the operator stay with the
   orchestrator.
@@ -41,7 +41,7 @@ default, not a ritual.
   solution; skip it when the change is well understood. Under a `minimal`
   profile there is no explorer subagent to spawn; run this step inline
   instead.
-- Slicing and implementer subagents are for non-trivial work: multiple files,
+- Slicing and, in run modes `delegated` and `batch`, implementer subagents are for non-trivial work: multiple files,
   real logic, or anything that benefits from decomposition or a fresh context.
   Under a `minimal` profile there is no task-slicer subagent; the orchestrator
   slices inline with the same contract.
@@ -55,7 +55,7 @@ default, not a ritual.
   scripts, hand-edited lockfiles, cross-major overrides, or anything the
   operator flags high-risk; `normal` fits only docs, renames, or batch
   cosmetics; `rigorous` is the default otherwise. Never pair `adversarial`
-  with the `-medium` reviewer tier; tiers themselves are unchanged.
+  with the `-medium` reviewer tier; tiers themselves are unchanged. A docs-only delta has its own review default; the skill's Delegate review step states it.
 - When tier variants are installed (manifest `tiers: true`), the orchestrator
   picks the effort tier per task by complexity and risk, at its own judgment.
   The unsuffixed default subagent is the normal case; `-high`/`-xhigh` fit
@@ -175,7 +175,7 @@ Workflow state lives under `.ai/`:
   routing selections.
 - Every worktree a run touches carries a `.ai/run` pointer (absolute path of
   the run directory, gitignored) and `00-goal.md` carries one
-  `run-base[<repo-basename>]` marker per repository for multi-repo runs.
+  `run-base[<repo-basename>]` marker per repository for multi-repo runs, next to the run's `mode` marker.
 
 ### Models
 
