@@ -133,6 +133,23 @@ a CHANGELOG cut, `node scripts/check-release-changelogs.mjs --base
 origin/master`, then a tag `agent-primitives/v<new-version>`; it also has
 no pin of its own to bump.
 
+### Comparing a release candidate with a published version
+
+To compare a candidate with the version published to npm, use isolated
+directories for both copies:
+
+1. In a scratch directory, run `npm pack <package>@<version>` and compare
+   the tarball's SHA-1 with `npm view <package>@<version> dist.shasum`.
+2. Create a prefix there with `npm init -y && npm install <tarball>`, then
+   confirm `<prefix>/node_modules/<package>` is a real directory, not a
+   symlink.
+3. Run the published binary from `<prefix>/node_modules/.bin/`.
+4. Copy the candidate package outside the working tree, pack it there, and
+   install and run it from a separate prefix the same way.
+
+Do not use `npx <package>@<version>` as this control: a global npm link can
+shadow the registry package. Use `npm ls -g --depth=0` to find global links.
+
 ## Style
 
 Match the surrounding code. Prefer small, reviewable diffs.
