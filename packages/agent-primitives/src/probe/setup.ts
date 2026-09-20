@@ -1051,11 +1051,25 @@ export async function openRunSetup(
     );
     if (zeroTestsEvidence.detected) {
       await settleTargetsAfterNonMutatingBaseline("the baseline run");
-      pushBaselineFailBandWarning("no_tests_executed");
+      // `ambiguous` is only ever set on the phpunit branch
+      // (`zero-tests.ts`): a phpunit output whose own zero-tests reading
+      // is `"ambiguous"` (an unreadable result, or a tally that needs a
+      // version banner the output does not carry) is refused with its
+      // own dedicated reason instead of `"no_tests_executed"`, which
+      // stays for what it always meant -- an explicit statement that
+      // nothing ran -- so a reader of `reason` is never told an
+      // unreadable run "executed nothing" when the output never said
+      // that at all.
+      const reason: RefusalReason = zeroTestsEvidence.ambiguous
+        ? "zero_tests_ambiguous"
+        : "no_tests_executed";
+      pushBaselineFailBandWarning(reason);
       warnings.push(
-        `the baseline run's own output shows no test was actually executed (${zeroTestsEvidence.via}); see ${baselineTest.logPath}`,
+        zeroTestsEvidence.ambiguous
+          ? `the baseline run's own output cannot be read for whether any test executed at all (${zeroTestsEvidence.via}); see ${baselineTest.logPath}`
+          : `the baseline run's own output shows no test was actually executed (${zeroTestsEvidence.via}); see ${baselineTest.logPath}`,
       );
-      return refuse("inconclusive", "no_tests_executed", undefined, {
+      return refuse("inconclusive", reason, undefined, {
         logPaths: stepLogPaths,
         baseline,
       });

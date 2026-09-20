@@ -451,6 +451,26 @@ async function provokeNoTestsExecuted(): Promise<ProbeResult> {
   );
 }
 
+/** A baseline that exits `0` and prints PHPUnit's own version banner
+ * plus nothing else this detector recognizes as a result report: the
+ * shape a mid-suite `exit()`/`die()` leaves behind
+ * (`phpunit-exit-mid-suite.txt`'s own real capture, reproduced here with
+ * `console.log` since the detector is a pure text parser). No `OK (`, no
+ * `FAILURES!`/`ERRORS!`/`WARNINGS!` marker, no tally, no `No tests
+ * executed!`, no progress counter, no post-run `Time:` line --
+ * `phpunitZeroTestsVerdict` reads this `"ambiguous"`, never `"zero"`,
+ * since nothing here actually STATES that no test ran. */
+async function provokeZeroTestsAmbiguous(): Promise<ProbeResult> {
+  useLockDir();
+  const { repo } = initRepo();
+  return probe(
+    baseOptions(repo, {
+      testCommand:
+        "node -e \"console.log('PHPUnit 11.5.56 by Sebastian Bergmann and contributors.'); console.log(''); console.log('Runtime:       PHP 8.3.33'); console.log(''); console.log('.');\"",
+    }),
+  );
+}
+
 /** A baseline that passes normally (the default fixture test) but whose
  * output never matches an opt-in `--require-baseline-evidence` the
  * caller supplied. */
@@ -568,6 +588,7 @@ const provocations: Record<RefusalReason, Provocation> = {
   baseline_failed: provokeBaselineFailed,
   target_changed_during_baseline: provokeTargetChangedDuringBaseline,
   no_tests_executed: provokeNoTestsExecuted,
+  zero_tests_ambiguous: provokeZeroTestsAmbiguous,
   baseline_evidence_not_matched: provokeBaselineEvidenceNotMatched,
   pycache_isolation_failed: provokePycacheIsolationFailed,
 };
@@ -609,6 +630,7 @@ const EXPECTED_SHAPE: Record<
   baseline_failed: { mutant: true, mutationProbe: true },
   target_changed_during_baseline: { mutant: true, mutationProbe: true },
   no_tests_executed: { mutant: true, mutationProbe: true },
+  zero_tests_ambiguous: { mutant: true, mutationProbe: true },
   baseline_evidence_not_matched: { mutant: true, mutationProbe: true },
   pycache_isolation_failed: { mutant: true, mutationProbe: true },
 };

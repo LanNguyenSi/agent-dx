@@ -15,7 +15,10 @@ import {
   DEFAULT_CHECKS,
   DEFAULT_DETECTORS,
 } from "../src/verify/index.js";
-import { phpunitZeroTestsVerdict } from "../src/verify/detectors/phpunit.js";
+import {
+  phpunitZeroTestsVerdict,
+  PROGRESS_COUNTER_LINE,
+} from "../src/verify/detectors/phpunit.js";
 import { UsageError } from "../src/envelope.js";
 import type {
   Detector,
@@ -4382,6 +4385,98 @@ describe("phpunitDetector: every captured phpunit fixture is disjoint from the o
   });
 });
 
+/**
+ * A line whose shape ANY reader would call a PHPUnit progress row on
+ * sight -- something ending in the `N / M (P%)` counter, loosely -- but
+ * matched with no requirement on what precedes it (`.*`, not
+ * `PROGRESS_MARKER_CLASS`). Deliberately looser than
+ * `PROGRESS_COUNTER_LINE` itself: this is the "does this look like a
+ * row at all" question, so a fixture line it does not even match is not
+ * this control's business.
+ */
+const LOOSE_COUNTER_LINE = /^.*\d+ \/ \d+ \(\s*\d+%\)\s*$/;
+
+/**
+ * Fixture-line pairs (keyed `"<fixture>:<exact line text>"`) where
+ * `PROGRESS_COUNTER_LINE` deliberately does not match a
+ * `LOOSE_COUNTER_LINE`-shaped line, each with a falsifiable reason a
+ * reader can check against the fixture itself. Empty across every
+ * capture measured here (`test/fixtures/captured/phpunit-*.txt`): no
+ * real PHPUnit progress row measured so far needs the allowance, so an
+ * entry landing here is a signal to look hard at whether the row shape
+ * itself needs widening rather than a reason to allowlist and move on.
+ */
+const PROGRESS_COUNTER_LINE_ALLOWLIST: Record<string, string> = {};
+
+/**
+ * Every `LOOSE_COUNTER_LINE`-shaped line in `output` that
+ * `PROGRESS_COUNTER_LINE` does not match and `allowlist` does not excuse
+ * (keyed `"<fixtureName>:<line>"`), as a list of failure messages
+ * (empty when the fixture is fully covered). Factored out of the
+ * directory-driven test below so the synthetic allowlist-mechanism test
+ * beneath it exercises the exact same check, not a second copy of it.
+ */
+function progressCounterLineGaps(
+  fixtureName: string,
+  output: string,
+  allowlist: Readonly<Record<string, string>>,
+): string[] {
+  const gaps: string[] = [];
+  for (const line of output.split("\n")) {
+    if (!LOOSE_COUNTER_LINE.test(line)) continue;
+    if (PROGRESS_COUNTER_LINE.test(line)) continue;
+    const key = `${fixtureName}:${line}`;
+    if (Object.hasOwn(allowlist, key)) continue;
+    gaps.push(
+      `${fixtureName}: counter-shaped line not matched by PROGRESS_COUNTER_LINE and not allowlisted: ${JSON.stringify(line)}`,
+    );
+  }
+  return gaps;
+}
+
+describe("phpunitDetector: PROGRESS_COUNTER_LINE positive control (every counter-shaped line across every captured phpunit fixture is covered)", () => {
+  it("every LOOSE_COUNTER_LINE-shaped line in every captured phpunit fixture also matches PROGRESS_COUNTER_LINE, unless allowlisted", () => {
+    // Directory-derived, reusing the same exhaustiveness-tested list the
+    // disjointness pins above use, so a newly captured fixture is
+    // covered automatically. With `D`/`N` dropped from the marker
+    // alphabet, `phpunit-warnings-deprecations-notices-executed.txt`'s
+    // `WDN ... 3 / 3 (100%)` row is LOOSE_COUNTER_LINE-shaped but not
+    // PROGRESS_COUNTER_LINE-shaped, so this assertion fails: a capture
+    // carrying a marker the alphabet does not know is caught here.
+    const gaps: string[] = [];
+    for (const name of CAPTURED_PHPUNIT_FIXTURES) {
+      gaps.push(
+        ...progressCounterLineGaps(
+          name,
+          readCaptured(name),
+          PROGRESS_COUNTER_LINE_ALLOWLIST,
+        ),
+      );
+    }
+    expect(gaps).toEqual([]);
+  });
+
+  it("the allowlist mechanism itself is exercised: an un-allowlisted counter-shaped mismatch is reported, the same mismatch allowlisted is not (SYNTHETIC, proves progressCounterLineGaps cannot be silently neutralised)", () => {
+    // A synthetic line shaped like a progress row (LOOSE_COUNTER_LINE
+    // matches) but carrying a marker character PROGRESS_COUNTER_LINE's
+    // class does not accept (a digit ahead of the counter, which no
+    // real PHPUnit marker ever is): stands in for a future, genuinely
+    // exceptional capture without waiting for one to exist.
+    const output = "9WDN  3 / 3 (100%)";
+    expect(LOOSE_COUNTER_LINE.test(output)).toBe(true);
+    expect(PROGRESS_COUNTER_LINE.test(output)).toBe(false);
+    expect(progressCounterLineGaps("synthetic-fixture", output, {})).toEqual([
+      `synthetic-fixture: counter-shaped line not matched by PROGRESS_COUNTER_LINE and not allowlisted: ${JSON.stringify(output)}`,
+    ]);
+    expect(
+      progressCounterLineGaps("synthetic-fixture", output, {
+        "synthetic-fixture:9WDN  3 / 3 (100%)":
+          "synthetic-only: a leading digit before the marker run is not a real PHPUnit shape, exercised here only to prove the allowlist itself is load-bearing",
+      }),
+    ).toEqual([]);
+  });
+});
+
 describe("phpunitDetector: a suppressed result report is not a missing one (PHPUnit 10+ --no-results, tracker 3a0c5242)", () => {
   it("(i) a COMPLETED green `--no-results` run reads not_zero: its progress counter and post-run Time/Memory line are the completion evidence", () => {
     const output = readCaptured("phpunit-no-results-green");
@@ -4429,12 +4524,15 @@ describe("phpunitDetector: a suppressed result report is not a missing one (PHPU
     // already uses: this fixture's own `2 / 2 (100%)` counter is
     // deliberately NOT turned into `passed: 2`, since the RED capture
     // below prints the very same counter (see `PROGRESS_COUNTER_LINE`).
+    // It is instead reported as `attempted: 2`: tests PHPUnit reached,
+    // never tests that passed.
     expect(check.summary).toEqual({
       passed: 0,
       failed: 0,
       skipped: 0,
       errors: 0,
       warnings: 0,
+      attempted: 2,
     });
   });
 
@@ -4449,6 +4547,70 @@ describe("phpunitDetector: a suppressed result report is not a missing one (PHPU
     // (captured real as `phpunit-no-tests-executed.txt`), which is a
     // statement, not an absence, and reads `"zero"`.
     expect(zeroTests(readCaptured("phpunit-no-tests-executed"))).toBe("zero");
+  });
+
+  it("(ii) verify: `summary.attempted` is explicitly ABSENT (never present-but-undefined) for a phpunit output with no progress counter to read one from", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run test --silent": {
+        exitCode: 0,
+        stdoutTail: readCaptured("phpunit-no-results-filter-miss"),
+      },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: [phpunitDetector],
+    });
+    const check = result.checks[0];
+    expect(check.detector).toBe("phpunit");
+    // `toHaveProperty`/`in` would pass for a key present with value
+    // `undefined`; the field must be genuinely absent from the object
+    // (see `Summary.attempted`'s own docblock: absent whenever no
+    // counter is in the output either, not merely `undefined`).
+    expect(Object.hasOwn(check.summary, "attempted")).toBe(false);
+  });
+
+  it("a suppressed-report run whose progress row carries PHPUnit 10/11's D/N (deprecation/notice) markers still reports `summary.attempted` (SYNTHETIC: composed from two real captures, since no `--no-results` run against a deprecation/notice-raising suite was captured and PHP/PHPUnit is not available locally to capture one)", async () => {
+    // Composed, not invented: the banner/Runtime/Time frame is
+    // `phpunit-no-results-green.txt` verbatim, with its own `..  2 / 2
+    // (100%)` progress row swapped for
+    // `phpunit-warnings-deprecations-notices-executed.txt`'s own real
+    // `WDN ... 3 / 3 (100%)` row (a PHPUnit 11.5.56 capture, three
+    // tests, one each raising a warning/deprecation/notice). Both
+    // halves are real PHPUnit output; only their combination -- a
+    // `--no-results` run against that particular suite -- was never
+    // actually captured. Without `D`/`N` in the marker alphabet
+    // `PROGRESS_COUNTER_LINE` does not match the `WDN` row, so
+    // `progressCounterAttempted` returns `undefined` and this
+    // suppressed-report run gets no `attempted` field, same as one with
+    // no progress row in it at all.
+    const green = readCaptured("phpunit-no-results-green");
+    const wdnRow =
+      "WDN                                                                 3 / 3 (100%)";
+    const output = green.replace(/^\.\.\s+2 \/ 2 \(100%\)$/m, wdnRow);
+    expect(output).not.toBe(green);
+    expect(output).toContain(wdnRow);
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, { test: "te" });
+    const logDir = makeTmpDir();
+    const { fn } = makeStubExec({
+      "npm run test --silent": { exitCode: 0, stdoutTail: output },
+    });
+    const result = await verify({
+      cwd,
+      logDir,
+      checks: ["test"],
+      execFn: fn,
+      detectors: [phpunitDetector],
+    });
+    const check = result.checks[0];
+    expect(check.detector).toBe("phpunit");
+    expect(check.summary.attempted).toBe(3);
   });
 
   it("(iii) `--list-tests` reads ambiguous: documented over-caution, a listing never claimed to run anything", () => {
@@ -4486,6 +4648,10 @@ describe("phpunitDetector: a suppressed result report is not a missing one (PHPU
     expect(
       result.warnings.some((w) => w.includes("zero_tests_ambiguous:")),
     ).toBe(false);
+    // Same `attempted: 2` as the green capture: the counter counts
+    // tests PHPUnit reached, not tests that passed, so a RED run
+    // reports the identical attempted count as its green twin.
+    expect(check.summary.attempted).toBe(2);
   });
 
   it("(vii) `--no-results --no-progress` and `--no-output` print NOTHING at all, so the output is not phpunit's to read (generic selection, no phpunit claim)", async () => {
@@ -4584,6 +4750,187 @@ describe("phpunitDetector: a suppressed result report is not a missing one (PHPU
       expect(phpunitZeroTestsVerdict(output).reason).toContain(
         "no phpunit summary line",
       );
+    }
+  });
+});
+
+describe("phpunitDetector: unreadable-result tightening mutants, each pinned by its own isolated case", () => {
+  it("the progress-counter anchor: a message line that merely ENDS in the N / M (P%) shape is not completion evidence (SYNTHETIC, closes a documented limit)", () => {
+    // Banner present, no OK/marker/tally/`No tests executed!`, no
+    // genuine progress row and no Time/Memory line -- structurally the
+    // same unreadable shape as `phpunit-exit-mid-suite.txt` -- except
+    // for one fatal-error line that happens to END in a counter-shaped
+    // fraction. Before the row-start anchor, PROGRESS_COUNTER_LINE
+    // matched this line too (it only required the digits/slash/percent
+    // tail, anchored at `$` alone) and read the run as `"not_zero"`
+    // instead of `"ambiguous"`, a false claim about a run PHPUnit never
+    // actually finished reporting. The anchored pattern requires the
+    // WHOLE line, from its start, to be nothing but progress-marker
+    // characters ahead of the counter, which this message line is not.
+    const output = [
+      "PHPUnit 11.5.56 by Sebastian Bergmann and contributors.",
+      "",
+      "Runtime:       PHP 8.3.33",
+      "",
+      "Fatal error: Allowed memory size exhausted at 2 / 2 (100%)",
+      "",
+    ].join("\n");
+    expect(output).toMatch(/\d+ \/ \d+ \(\s*\d+%\)\s*$/m);
+    expect(zeroTests(output)).toBe("ambiguous");
+  });
+
+  it("the marker alphabet is closed: a word carrying a character outside it, ahead of the counter, is neither completion evidence nor an attempted source (SYNTHETIC)", () => {
+    // A one-word line has no colon, digit or inner space to keep it out,
+    // so only the closed marker alphabet does. With an open letter class
+    // each of these lines reads a report-less output as "not_zero" and
+    // the last one overrides the real row's attempted count.
+    const banner = [
+      "PHPUnit 11.5.56 by Sebastian Bergmann and contributors.",
+      "",
+      "Runtime:       PHP 8.3.33",
+      "",
+    ].join("\n");
+    for (const line of [
+      "Aborted 5 / 9 ( 55%)",
+      "Error 3 / 3 (100%)",
+      "Done. 12 / 12 (100%)",
+      "PHP 1 / 1 (100%)",
+      "progress 2 / 2 (100%)",
+    ]) {
+      expect(PROGRESS_COUNTER_LINE.test(line)).toBe(false);
+      expect(zeroTests(`${banner}\n${line}\n`)).toBe("ambiguous");
+    }
+    const green = readCaptured("phpunit-no-results-green");
+    const parsed = phpunitDetector.parse({
+      output: `${green.replace(/\n*$/, "")}\nbatch 99 / 99 (100%)\n`,
+      command: "vendor/bin/phpunit",
+      exitCode: 0,
+    });
+    expect(parsed.summary.attempted).toBe(2);
+    // The accepted residual, pinned so a change to it is a decision: a
+    // word made only of marker letters is a real row by shape and
+    // alphabet, so it matches. The pattern is not proof of origin.
+    expect(PROGRESS_COUNTER_LINE.test("FEW 3 / 3 (100%)")).toBe(true);
+  });
+
+  it("the counter's padding is horizontal-only: a marker line and the counter line below it do not bleed together into one match across the line break (SYNTHETIC, pins the [ \\t]* fix)", () => {
+    // A bare `\s*` padding matches a newline too, so under the `m` flag
+    // a match starting on the marker line could swallow the line break
+    // and read the marker line plus the counter line below it as ONE
+    // combined row, even though the docblock, README and CHANGELOG all
+    // describe this pattern as anchored to a single whole line. A
+    // boolean `.test()` alone cannot prove this either way here: the
+    // counter line by itself, with zero leading marker characters, is
+    // already a valid match on its own, so `.test()` on this input
+    // returns `true` regardless of whether the padding is horizontal or
+    // not. The actual matched TEXT is what tells the two apart, so this
+    // pin checks that instead.
+    const input = "....\n2 / 2 (100%)";
+    const match = PROGRESS_COUNTER_LINE.exec(input);
+    expect(match).not.toBeNull();
+    // Confined to the counter's own line: never the marker line above it
+    // pulled in across the `\n`.
+    expect(match?.[0]).toBe("2 / 2 (100%)");
+    expect(match?.[0]).not.toContain("\n");
+    expect(match?.[1]).toBe("2");
+  });
+
+  it("the ERRORS! conjunct alone: present with no accompanying tally and no completion evidence, this run is NOT reported as an unreadable result", () => {
+    // Isolates the `ERRORS_MARKER` check from `TALLY_LINE` (which a real
+    // PHPUnit run always prints alongside a marker, see
+    // `phpunitResultUnreadable`'s own docblock): a synthetic fixture
+    // carrying `ERRORS!` alone is a deliberate completion signal a test
+    // double can construct, not a sign PHPUnit was cut off. Falls
+    // through to `deriveCounts`, which finds no tally either, so the
+    // verdict is `"not_zero"` ("no phpunit summary line"), never
+    // `"ambiguous"`. Mutating this one conjunct to `true` (so its
+    // absence is no longer required) would misread this fixture as
+    // ambiguous, since every other conjunct here is already satisfied.
+    const output = [
+      "PHPUnit 11.5.56 by Sebastian Bergmann and contributors.",
+      "",
+      "ERRORS!",
+      "",
+    ].join("\n");
+    expect(output).toContain("ERRORS!");
+    expect(output).not.toMatch(/Tests: \d+, Assertions: \d+/);
+    expect(zeroTests(output)).toBe("not_zero");
+  });
+
+  it("the WARNINGS! conjunct alone: same isolation, present with no tally and no completion evidence stays NOT unreadable", () => {
+    const output = [
+      "PHPUnit 11.5.56 by Sebastian Bergmann and contributors.",
+      "",
+      "WARNINGS!",
+      "",
+    ].join("\n");
+    expect(output).toContain("WARNINGS!");
+    expect(output).not.toMatch(/Tests: \d+, Assertions: \d+/);
+    expect(zeroTests(output)).toBe("not_zero");
+  });
+
+  it("the TALLY_LINE conjunct alone: a tally line with no marker and no completion evidence stays NOT unreadable", () => {
+    // Defensive shape (a real PHPUnit run never prints a bare tally with
+    // no marker ahead of it either), same isolation idiom as the two
+    // marker-alone cases above: this time `deriveCounts` actually reads
+    // a real (executed: 2) tally, so the verdict is the ordinary
+    // `"not_zero"` an executed count produces, not the "no summary line"
+    // reason the marker-alone cases hit.
+    const output = [
+      "PHPUnit 11.5.56 by Sebastian Bergmann and contributors.",
+      "",
+      "Tests: 2, Assertions: 2.",
+      "",
+    ].join("\n");
+    expect(zeroTests(output)).toBe("not_zero");
+    expect(phpunitZeroTestsVerdict(output).reason).not.toContain(
+      "no phpunit summary line",
+    );
+  });
+
+  it("TIME_MEMORY_LINE's `, Memory: ` half: a time-only line (no Memory:) is NOT completion evidence on its own (SYNTHETIC)", () => {
+    // Contrast with the pre-existing "post-run Time/Memory line alone is
+    // enough completion evidence" test just above, which carries BOTH
+    // halves: PHPUnit never prints `Time:` without `Memory:` on the same
+    // line in any real capture, but a test double that dropped the
+    // second half must not be misread as the real shape either.
+    const output = [
+      "PHPUnit 11.5.56 by Sebastian Bergmann and contributors.",
+      "",
+      "Runtime:       PHP 8.3.33",
+      "",
+      "Time: 00:00.007",
+      "",
+    ].join("\n");
+    expect(output).not.toContain("Memory:");
+    expect(output).not.toMatch(/\d+ \/ \d+ \(/);
+    expect(zeroTests(output)).toBe("ambiguous");
+  });
+
+  it("reverse disjointness: phpunitDetector.matches() is false for every captured fixture that is not one of phpunit's own", () => {
+    // Directory-derived rather than a hand-typed list, so a new
+    // non-phpunit fixture added later is checked automatically: every
+    // captured `.txt` file NOT in `CAPTURED_PHPUNIT_FIXTURES` (the same
+    // exhaustiveness-tested list the forward disjointness pins above
+    // use, rather than a second, independently maintained `phpunit-`
+    // prefix filter that could drift from it) must never be selected as
+    // PHPUnit's own output, including the two other PHP tools captured
+    // here (`phpcs-*`, `phpstan-*`), whose shapes share nothing with
+    // `phpunitDetector`'s own OK/marker/tally/banner checks.
+    const phpunitFixtureFiles = new Set(
+      CAPTURED_PHPUNIT_FIXTURES.map((name) => `${name}.txt`),
+    );
+    const nonPhpunitFixtures = fs
+      .readdirSync(CAPTURED_DIR)
+      .filter(
+        (name) => name.endsWith(".txt") && !phpunitFixtureFiles.has(name),
+      );
+    expect(nonPhpunitFixtures.length).toBeGreaterThan(0);
+    for (const name of nonPhpunitFixtures) {
+      const output = fs.readFileSync(path.join(CAPTURED_DIR, name), "utf8");
+      expect(
+        phpunitDetector.matches({ output, command: "", exitCode: 0 }),
+      ).toBe(false);
     }
   });
 });

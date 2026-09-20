@@ -53,19 +53,27 @@ import { combinedOutput } from "../exec.js";
  * scored normally: refusing those would refuse every baseline of a
  * project that runs PHPUnit that way.
  *
- * The refusal's own reason (`no_tests_executed`, see `session.ts`) is
- * the nearest of the existing reasons and OVERSTATES what is known for
- * either ambiguous cause: the run may in fact have executed every one
- * of its tests under a PHPUnit 10+ reading, and an unreadable-result
- * run may well have executed and passed a test before it was killed
- * (the captured `exit()` fixture's own single progress dot is exactly
- * that). That overstatement is an accepted, recorded limit of this
- * release rather than an oversight -- a dedicated refusal reason for
- * "cannot be read" is a follow-up, since `RefusalReason` is part of
- * `probe`'s published result contract -- and it is the only thing kept
- * imprecise here: the verdict itself, and every text `verify` prints,
- * name the absence for what it is. `verify` keeps the two apart, since
- * it warns rather than refuses and can afford the distinction.
+ * The baseline-stage caller (`setup.ts`) tells the two ambiguous causes
+ * apart from a genuine `"zero"` reading by this module's own `ambiguous`
+ * field (below), which is populated only on the phpunit branch and only
+ * from `phpunitZeroTestsVerdict`'s own three-valued reading: `true` for
+ * `"ambiguous"`, `false` for `"zero"`. `setup.ts` refuses the former
+ * with the dedicated `"zero_tests_ambiguous"` `RefusalReason` (additive
+ * to `RefusalReason`, see `session.ts`) instead of `"no_tests_executed"`,
+ * which stays for what it always meant: an explicit statement that
+ * nothing ran (PHPUnit's own `No tests executed!` line, or a tally that
+ * derives an executed count of zero without depending on a version the
+ * output does not state). Both are still baseline-phase refusals with
+ * the same `mutant`/`mutation_probe` presence in
+ * `REFUSAL_RESULT_SHAPE`: only the vocabulary changed, not the
+ * fail-safe collapse itself, and neither ambiguous cause is split
+ * further from the other one here (that finer split -- unreadable
+ * result vs. version-ambiguous tally -- is out of scope for this
+ * change; both still map to the one new reason). `verify` already kept
+ * the two apart in its own warning text (`no_tests_executed:` vs.
+ * `zero_tests_ambiguous:`) before this change; `probe`'s refusal reason
+ * now names the same distinction instead of overstating an ambiguous
+ * result as "executed nothing".
  */
 
 export type ZeroTestsDetectorName = "vitest" | "node_test" | "phpunit";
@@ -73,6 +81,15 @@ export type ZeroTestsDetectorName = "vitest" | "node_test" | "phpunit";
 export interface ZeroTestsEvidence {
   detected: boolean;
   via?: ZeroTestsDetectorName;
+  /** Present (`true`/`false`, never omitted) only when `via` is
+   * `"phpunit"`: whether the detection came from `phpunitZeroTestsVerdict`
+   * reading `"ambiguous"` (`true`, the output cannot be read either way)
+   * rather than `"zero"` (`false`, PHPUnit itself stated nothing ran).
+   * `setup.ts`'s baseline-stage caller reads this to choose between the
+   * `"zero_tests_ambiguous"` and `"no_tests_executed"` `RefusalReason`s
+   * (see this module's own docblock above); absent for the vitest and
+   * node_test branches, which have no ambiguous reading to distinguish. */
+  ambiguous?: boolean;
 }
 
 /**
@@ -190,9 +207,17 @@ export function detectKnownZeroTestsEvidence(
     // PHPUnit warning as an executed test (see that function's docblock).
     // Anything but a clean `"not_zero"` is reported as detected: an
     // `"ambiguous"` reading is refused rather than scored, the fail-safe
-    // collapse for a probe (see this module's own docblock).
-    if (phpunitZeroTestsVerdict(combined).verdict !== "not_zero") {
-      return { detected: true, via: "phpunit" };
+    // collapse for a probe (see this module's own docblock). `ambiguous`
+    // is set from the verdict itself, never guessed at: `true` only for
+    // `"ambiguous"`, `false` for `"zero"`, so `setup.ts` can pick the
+    // right `RefusalReason` without re-deriving the reading.
+    const verdict = phpunitZeroTestsVerdict(combined);
+    if (verdict.verdict !== "not_zero") {
+      return {
+        detected: true,
+        via: "phpunit",
+        ambiguous: verdict.verdict === "ambiguous",
+      };
     }
     return { detected: false };
   }

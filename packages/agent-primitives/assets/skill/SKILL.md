@@ -222,6 +222,13 @@ Skipped, Incomplete and Warnings) is zero, the same way it recognizes
 vitest's and node's zero-count shapes. Watch the two PHPUnit shapes that
 exit `0` with nothing executed: an all-skipped run and a warnings-only
 run (`No tests found in class "X".`); the guard, not the exit code, is
-what catches those. A composer `vendor-dir`/`bin-dir` link rule remains
-its own pending task (issue #225 part 2). See the package README's
-"Non-JS test runners" section for the full detail.
+what catches those. A phpunit baseline whose output cannot be read
+either way (a mid-suite `exit()`/`die()` with no result report at all,
+or a tally that needs a version banner the output does not carry)
+refuses with its own `reason: "zero_tests_ambiguous"` instead of
+`no_tests_executed`, which stays for an explicit statement that nothing
+ran; `verify`'s own summary for a suppressed-report run (`--no-results`)
+additionally carries `summary.attempted`, PHPUnit's own progress-counter
+count -- attempted, never passed. A composer `vendor-dir`/`bin-dir` link
+rule remains its own pending task (issue #225 part 2). See the package
+README's "Non-JS test runners" section for the full detail.

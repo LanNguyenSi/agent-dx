@@ -200,14 +200,18 @@ export type ProbeStatus =
  * `mutant` and `mutation_probe` (a real mutant was applied), so they
  * need no contract entry to stay consistent.
  *
- * `"no_tests_executed"` and `"baseline_evidence_not_matched"` are both
- * baseline-phase refusals too, reported from the same point
- * `"baseline_failed"`/`"target_changed_during_baseline"` are (after the
- * mutant is computed, on a baseline that otherwise exited 0): the first
- * when the baseline's own output shows a known test runner (vitest,
- * node's built-in `--test`) executed nothing (see `zero-tests.ts`), the
- * second when an opt-in `--require-baseline-evidence <regex>` was given
- * and did not match the baseline output. Both `true`, the same as the
+ * `"no_tests_executed"`, `"zero_tests_ambiguous"`, and
+ * `"baseline_evidence_not_matched"` are all baseline-phase refusals too,
+ * reported from the same point `"baseline_failed"`/
+ * `"target_changed_during_baseline"` are (after the mutant is computed,
+ * on a baseline that otherwise exited 0): the first two when the
+ * baseline's own output shows a known test runner (vitest, node's
+ * built-in `--test`, phpunit) executed nothing, or -- phpunit only --
+ * cannot be read either way (see `zero-tests.ts`, whose
+ * `ZeroTestsEvidence.ambiguous` field is what `setup.ts` reads to tell
+ * the two apart), the third when an opt-in `--require-baseline-evidence
+ * <regex>` was given
+ * and did not match the baseline output. All `true`, the same as the
  * other baseline-phase reasons.
  *
  * `"pycache_isolation_failed"` is `runPreThenTest` (`session.ts` itself)
@@ -239,6 +243,7 @@ export type RefusalReason =
   | "baseline_failed"
   | "target_changed_during_baseline"
   | "no_tests_executed"
+  | "zero_tests_ambiguous"
   | "baseline_evidence_not_matched"
   | "pycache_isolation_failed";
 
@@ -296,6 +301,7 @@ export const REFUSAL_RESULT_SHAPE: Record<
   baseline_failed: { mutant: true, mutationProbe: true },
   target_changed_during_baseline: { mutant: true, mutationProbe: true },
   no_tests_executed: { mutant: true, mutationProbe: true },
+  zero_tests_ambiguous: { mutant: true, mutationProbe: true },
   baseline_evidence_not_matched: { mutant: true, mutationProbe: true },
   pycache_isolation_failed: { mutant: true, mutationProbe: true },
 };

@@ -7,6 +7,91 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `probe`'s phpunit zero-tests reading gains a dedicated, additive
+  `RefusalReason`: a baseline whose `phpunitZeroTestsVerdict` reads
+  `"ambiguous"` (a mid-suite `exit()`/`die()` with no result report at
+  all, or a tally that needs a version banner the output does not carry)
+  now refuses `reason: "zero_tests_ambiguous"` instead of the existing
+  `no_tests_executed`, which keeps its original meaning: an explicit
+  `No tests executed!` line, or a tally whose derived executed count is
+  zero without depending on an absent version. `zero-tests.ts`'s
+  `ZeroTestsEvidence` gained the `ambiguous` field (`true`/`false`,
+  present only on the phpunit branch) that lets `setup.ts` pick the
+  right reason; `REFUSAL_RESULT_SHAPE` carries the new reason with the
+  same `{ mutant: true, mutationProbe: true }` shape every other
+  baseline-phase refusal has, so it needs no change to `index.ts`'s
+  mechanical envelope mapping. Splitting the two `"ambiguous"` causes
+  (an unreadable result vs. a missing version banner) from each other is
+  still out of scope; both map to this one reason. `verify`'s own
+  envelope summary for a phpunit check whose real tally cannot be
+  derived at all (a suppressed-report `--no-results` run chief among
+  them) now also carries `Summary.attempted`: the last `N / M (P%)`
+  progress-counter row's own `N`, documented as tests PHPUnit reached,
+  never tests that passed, and pinned against the real
+  `phpunit-no-results-green.txt`/`phpunit-no-results-red.txt` captures
+  (both report `attempted: 2`). The progress-counter pattern itself is
+  now anchored to the whole line, not merely to its end
+  (`^[.FEWIRSDN]*[ \t]*(\d+) \/ (\d+) \([ \t]*\d+%\)[ \t]*$` in place of a bare
+  `\b\d+ \/ \d+ \(\s*\d+%\)\s*$`): a line that merely ENDS in the
+  `N / M (P%)` shape (a failure message or fatal-error line reporting
+  some unrelated fraction) no longer counts as PHPUnit's own completion
+  evidence, a documented limit this closes. The marker prefix is a closed
+  alphabet, `.FEWIRSDN`; measured in this suite's captures are `.`, `F`
+  and `W` under PHPUnit 9.6.36 and 11.5.56, `E`, `I`, `R` and `S` under
+  9.6.36, and `D` and `N` under 11.5.56
+  (`phpunit-warnings-deprecations-notices-executed.txt`'s own
+  `WDN ... 3 / 3 (100%)` row). Two earlier revisions of this same
+  unreleased change were measured and dropped: the seven-character
+  alphabet without `D`/`N` failed to match that real row (a baseline cut
+  off after it read `"ambiguous"` where the pre-anchoring pattern read
+  `"not_zero"`, a probe refusal, and a `--no-results` run lost its
+  `Summary.attempted`); an open letter class matched it but also matched
+  a line of one ordinary word plus the counter (`Aborted 5 / 9 ( 55%)`),
+  turning a report-less output from `"ambiguous"` into `"not_zero"` and
+  letting such a line override `Summary.attempted`. The closed alphabet
+  fails in the safe direction (an unknown marker means a refusal, not a
+  false pass) and cannot go stale unnoticed: a new directory-derived
+  positive control asserts every counter-shaped line across every
+  captured phpunit fixture is matched by this pattern (empty allowlist
+  today, with its own mechanism test proving that allowlist cannot be
+  silently neutralised), and negative cases pin that a single-word line
+  ending in the counter shape is neither completion evidence nor an
+  `attempted` source. Separately, the horizontal padding
+  around the counter (`\s*` in the first anchored version) is now
+  `[ \t]*`: `\s` also matches a newline, which under this pattern's `m`
+  flag let a match starting on a marker line swallow the line break and
+  read that marker line plus the counter line below it as one combined
+  row, contradicting the "whole line" anchoring this change describes;
+  pinned by asserting the matched TEXT stays confined to the counter's
+  own line, since a bare boolean check cannot tell a same-line match
+  from a two-line one when the counter line alone, with no leading
+  markers, is already a valid match by itself. New tests also pin the
+  previously redundant `ERRORS!`/`WARNINGS!`/`TALLY_LINE` conjuncts of
+  `phpunitResultUnreadable` (each isolated from the other three and from
+  any completion evidence, so mutating any one of them to `true` alone
+  now fails a test, joining the pre-existing `FAILURES!` pin), the
+  `, Memory: ` half of `TIME_MEMORY_LINE` (a time-only line, with no
+  `Memory:`, still reads `"ambiguous"`), a directory-derived reverse
+  disjointness assertion (`phpunitDetector.matches()` is false for every
+  non-`phpunit-*` fixture under `test/fixtures/captured/`, the
+  non-phpunit set itself now derived from the same exhaustiveness-tested
+  fixture list the forward disjointness pins already use), and
+  `Summary.attempted`'s own presence/absence boundary: present for a
+  suppressed-report run whose progress row carries the `D`/`N` markers
+  (a synthetic composition of two real captures' own shapes, since no
+  `--no-results` run against a deprecation/notice-raising suite was
+  captured), and explicitly ABSENT -- not merely `undefined` -- for a
+  suppressed-report run with no progress counter in it at all. The
+  README's refusal-reason-shape table now scopes its phpunit
+  `no_tests_executed` clause to the baseline-phase refusal alone and
+  points to the paragraph documenting why a mutant-phase `"ambiguous"`
+  phpunit reading still reports that same string rather than
+  `zero_tests_ambiguous` (deliberate, not a gap: splitting the mutant
+  phase the same way baseline was split here is still out of scope),
+  now pinned by its own test. No existing capture changed; no PHPUnit 9
+  tally-parsing semantics changed (tracker
+  ad5b34d7-be9b-497e-a9a7-91519837b7b5).
+
 - `verify` now reports a requested check with no matching `package.json`
   script and no `-x` override as `status: "skipped", reason: "no_script"`
   and returns an overall non-pass, instead of silently accepting a partial
