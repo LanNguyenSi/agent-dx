@@ -449,6 +449,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (54 `prose-slop/em-dash`, 2 `prose-slop/hedging-opener`), all of them
   in one Markdown file that discusses a stray triple-backtick run in
   prose; the block count and both CI pack scans are unchanged.
+- `workflow-slop/audit-gate-shape` now reads the shell a gate step
+  actually runs under (the step's own `shell:`, else its job's
+  `defaults.run.shell`, else the workflow's `defaults.run.shell`) and
+  refuses to certify anything it does not resolve to bash: `pwsh`,
+  `powershell`, `python`, `cmd`, `sh`, any other custom shell command
+  whose program is not bash, a non-literal `${{ ... }}` value, a
+  `shell:` key present but empty, and an absent shell on a job whose
+  `runs-on:` literally names a Windows runner (GitHub's own default
+  there is `pwsh`, not bash) are all refused with a message naming the
+  shell and which of the three levels it came from. Previously the rule
+  analysed every gate step's `run:` block as bash regardless of its
+  actual interpreter, so a `pwsh`/`python`/`cmd` gate whose text happened
+  to resemble a recognised shape, or matched a registered template, could
+  be silently certified while never actually running as the script it
+  was checked as. The check runs before a registered template is even
+  considered, since a template match is an attestation about the script
+  AS BASH TEXT. Certifiable: an absent shell at all three levels (the
+  previous, still-correct default), the literal `bash`, and a custom
+  shell command template whose program is bash regardless of its flags
+  (`bash -e {0}`, GitHub's own default expansion
+  `bash --noprofile --norc -eo pipefail {0}`, or any other combination) --
+  deliberately flag-blind, because neither recognised shape's exit-code
+  guarantee (`R-bare` permits no trailing statement at all; `R-classify`
+  manages `errexit` itself with an explicit `set +e`/`set -e` and an
+  explicit `exit`) depends on the invoking shell's own `-e`/`pipefail`
+  defaults. A non-literal `runs-on:` (an expression or a matrix
+  reference) is a documented residual, not resolved, left certified
+  exactly as an absent shell always was. Program names are matched
+  case-sensitively against GitHub's lower-case built-in keywords, so
+  `Bash`/`BASH` refuse too. README updated with the full decision and a
+  short adoption recipe for registering a reviewed gate block's digest;
+  no fleet rollout, no change to the recognised `R-bare`/`R-classify`
+  shapes, and no edit to any `.github/workflows` file in this repo.
 
 ## [0.3.1] - 2026-08-26
 

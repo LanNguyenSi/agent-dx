@@ -936,6 +936,20 @@ interface StepRunInfo {
    * gate) exit.
    */
   jobContinueOnError?: ScalarWithRange;
+  /** This step's own `shell:` sibling of `run:`, when present. */
+  shell?: ScalarWithRange;
+  /** The enclosing job's `defaults.run.shell`, when present. */
+  jobDefaultShell?: ScalarWithRange;
+  /** The workflow's own `defaults.run.shell`, when present. */
+  workflowDefaultShell?: ScalarWithRange;
+  /**
+   * Whether the enclosing job's `runs-on:` is a literal that names a
+   * Windows runner, a literal that names something else, or a value this
+   * rule does not resolve (see `resolveRunsOn`). Only read when `shell`,
+   * `jobDefaultShell` and `workflowDefaultShell` are all absent: GitHub's
+   * default shell on a Windows runner is `pwsh`, not bash.
+   */
+  jobRunsOn?: RunsOnResolution;
 }
 
 /**
@@ -981,18 +995,98 @@ function runScalarStyle(
 }
 
 /**
+ * A mapping value reached by walking `path` as a chain of keys, each
+ * step requiring the previous value to itself be a mapping (`.items`
+ * present) -- used for `defaults.run.shell` at both the workflow root
+ * and a job mapping. Returns `undefined` at any missing or non-mapping
+ * link (so `defaults:` present without `run:`, or `run:` present without
+ * `shell:`, both read as "not set" rather than throwing), or when the
+ * final value is not a scalar node at all.
+ */
+function findNestedScalar(
+  node: unknown,
+  path: string[],
+): ScalarWithRange | undefined {
+  let current: unknown = node;
+  for (const key of path) {
+    if (!hasItems(current)) return undefined;
+    const pair = current.items.find(
+      (item) => isPairNode(item) && scalarKeyName(item.key) === key,
+    );
+    if (!pair || !isPairNode(pair)) return undefined;
+    current = (pair as { value: unknown }).value;
+  }
+  return isScalarNode(current)
+    ? { value: current.value, range: current.range }
+    : undefined;
+}
+
+/** How a job's `runs-on:` value resolves for the absent-shell check. */
+type RunsOnResolution = "windows" | "other" | "unresolved";
+
+// Matched against each literal `runs-on:` label, case-insensitively (a
+// self-hosted label is free text an operator could spell any way, and
+// over-matching is the safe direction for a `block`-severity gate):
+// `windows-latest`/`windows-2022`/`windows-11-arm` (GitHub-hosted) and a
+// bare `windows` label (`runs-on: [self-hosted, windows]`).
+const WINDOWS_LABEL_RE = /^windows(?:-|$)/i;
+
+function scalarStringValue(node: unknown): string | undefined {
+  return isScalarNode(node) && typeof node.value === "string"
+    ? node.value
+    : undefined;
+}
+
+/**
+ * Whether a job's `runs-on:` is a literal naming a Windows runner, a
+ * literal naming something else, or a value this rule does not resolve
+ * at all: `${{ matrix.os }}`, a label list containing one, or any node
+ * shape other than a scalar or a sequence of scalars. GitHub's own
+ * default shell on a Windows runner is `pwsh`, not bash (Windows runners
+ * default to PowerShell Core, falling back to Windows PowerShell; see
+ * the README), so an absent `shell:` there is not the same certifiable
+ * absence it is on Linux/macOS. `"unresolved"` is a documented residual,
+ * not a refusal: the absent-shell check simply does not fire for it, the
+ * same verdict an unresolved `runs-on` got before this change.
+ */
+function resolveRunsOn(node: unknown): RunsOnResolution {
+  const single = scalarStringValue(node);
+  if (single !== undefined) {
+    if (single.includes("${{")) return "unresolved";
+    return WINDOWS_LABEL_RE.test(single.trim()) ? "windows" : "other";
+  }
+  if (hasItems(node)) {
+    const labels: string[] = [];
+    for (const item of node.items) {
+      const value = scalarStringValue(item);
+      if (value === undefined) return "unresolved";
+      labels.push(value);
+    }
+    if (labels.some((label) => label.includes("${{"))) return "unresolved";
+    return labels.some((label) => WINDOWS_LABEL_RE.test(label.trim()))
+      ? "windows"
+      : "other";
+  }
+  return "unresolved";
+}
+
+/**
  * Every `run:`-carrying step mapping in the document, together with that
- * step's `continue-on-error:` sibling and its enclosing job's
- * `continue-on-error:` (see `StepRunInfo.jobContinueOnError`), when
- * present. Unlike `collectRunScalars` (which only needs the scalar
- * node), these rules also need the *step's* other keys, so it collects
- * at the mapping level: any mapping with a `run:` key not inside a
- * `uses:` step's `with:` input block (same schema-position gating as
- * `collectRunScalars`, for the same reason: a custom action can name an
- * input `run`) is treated as a step. `jobContinueOnError` is threaded
+ * step's `continue-on-error:` and `shell:` siblings and its enclosing
+ * job's `continue-on-error:`, `defaults.run.shell` and `runs-on:` (see
+ * the corresponding `StepRunInfo` fields), plus the workflow's own
+ * `defaults.run.shell`, when present. Unlike `collectRunScalars` (which
+ * only needs the scalar node), these rules also need the *step's* other
+ * keys, so it collects at the mapping level: any mapping with a `run:`
+ * key not inside a `uses:` step's `with:` input block (same
+ * schema-position gating as `collectRunScalars`, for the same reason: a
+ * custom action can name an input `run`) is treated as a step.
+ * `jobContinueOnError`, `jobDefaultShell` and `jobRunsOn` are threaded
  * down from the nearest enclosing mapping that itself carries a `steps:`
- * key (a job mapping), not reset by `with:` gating since a job's own
- * `continue-on-error:` is never inside any step's `with:` block.
+ * key (a job mapping); `workflowDefaultShell` is threaded down from the
+ * mapping that carries a `jobs:` key (the workflow root, reached exactly
+ * once per document). None of these are reset by `with:` gating, since
+ * none of the keys they read are ever inside a step's `with:` block.
  */
 function collectStepRuns(
   fileText: string,
@@ -1000,6 +1094,9 @@ function collectStepRuns(
   out: StepRunInfo[],
   insideWith = false,
   jobContinueOnError?: ScalarWithRange,
+  workflowDefaultShell?: ScalarWithRange,
+  jobDefaultShell?: ScalarWithRange,
+  jobRunsOn?: RunsOnResolution,
 ): void {
   if (!hasItems(node)) return;
   const isUsesStep = node.items.some(
@@ -1007,6 +1104,9 @@ function collectStepRuns(
   );
   const isJobMapping = node.items.some(
     (item) => isPairNode(item) && scalarKeyName(item.key) === "steps",
+  );
+  const isWorkflowMapping = node.items.some(
+    (item) => isPairNode(item) && scalarKeyName(item.key) === "jobs",
   );
   const effectiveJobCoE = isJobMapping
     ? (() => {
@@ -1021,6 +1121,22 @@ function collectStepRuns(
           : undefined;
       })()
     : jobContinueOnError;
+  const effectiveWorkflowDefaultShell = isWorkflowMapping
+    ? findNestedScalar(node, ["defaults", "run", "shell"])
+    : workflowDefaultShell;
+  const effectiveJobDefaultShell = isJobMapping
+    ? findNestedScalar(node, ["defaults", "run", "shell"])
+    : jobDefaultShell;
+  const effectiveJobRunsOn = isJobMapping
+    ? (() => {
+        const runsOnPair = node.items.find(
+          (item) => isPairNode(item) && scalarKeyName(item.key) === "runs-on",
+        );
+        return runsOnPair && isPairNode(runsOnPair)
+          ? resolveRunsOn((runsOnPair as { value: unknown }).value)
+          : "other";
+      })()
+    : (jobRunsOn ?? "other");
   if (!insideWith) {
     const runPair = node.items.find(
       (item) => isPairNode(item) && scalarKeyName(item.key) === "run",
@@ -1034,6 +1150,13 @@ function collectStepRuns(
         coePair && isPairNode(coePair) && isScalarNode(coePair.value)
           ? { value: coePair.value.value, range: coePair.value.range }
           : undefined;
+      const shellPair = node.items.find(
+        (item) => isPairNode(item) && scalarKeyName(item.key) === "shell",
+      );
+      const shell =
+        shellPair && isPairNode(shellPair) && isScalarNode(shellPair.value)
+          ? { value: shellPair.value.value, range: shellPair.value.range }
+          : undefined;
       const range = runPair.value.range;
       const { style, styleLabel } = runScalarStyle(
         runPair.value,
@@ -1045,6 +1168,10 @@ function collectStepRuns(
         styleLabel,
         continueOnError,
         jobContinueOnError: effectiveJobCoE,
+        shell,
+        jobDefaultShell: effectiveJobDefaultShell,
+        workflowDefaultShell: effectiveWorkflowDefaultShell,
+        jobRunsOn: effectiveJobRunsOn,
       });
     }
   }
@@ -1057,9 +1184,21 @@ function collectStepRuns(
         out,
         insideWith || (isUsesStep && keyName === "with"),
         effectiveJobCoE,
+        effectiveWorkflowDefaultShell,
+        effectiveJobDefaultShell,
+        effectiveJobRunsOn,
       );
     } else {
-      collectStepRuns(fileText, item, out, insideWith, effectiveJobCoE);
+      collectStepRuns(
+        fileText,
+        item,
+        out,
+        insideWith,
+        effectiveJobCoE,
+        effectiveWorkflowDefaultShell,
+        effectiveJobDefaultShell,
+        effectiveJobRunsOn,
+      );
     }
   }
 }
@@ -2225,6 +2364,117 @@ function neutralisationSignal(
   return undefined;
 }
 
+// ───────────────────── the gate step's effective shell ─────────────────────
+//
+// `audit-gate-shape` normalises a `run:` block as bash. A `shell: pwsh`
+// (or `python`, `cmd`, `sh`, `powershell`, an unresolved `${{ ... }}`, or
+// an absent shell on a Windows runner) makes that normalisation wrong,
+// not merely uncertified: the same text means something else entirely
+// under a different interpreter, so the same fail-closed treatment the
+// rule already gives a here-doc or a shell function applies here too --
+// this is checked, and refuses, before the shape allowlist and before a
+// registered template is even considered, since a template match is an
+// attestation about the script AS BASH.
+
+/**
+ * The program name a `shell:` custom command template invokes: the raw
+ * value's first whitespace-separated token, with any path stripped to
+ * its final segment and a trailing `.exe` dropped. `bash -e {0}` and
+ * `/usr/bin/bash --noprofile --norc -eo pipefail {0}` both resolve to
+ * `bash`; `bash.exe {0}` does too.
+ *
+ * Deliberately flag-blind: `R-bare` permits no statement after the gate
+ * command at all, and `R-classify` manages `errexit` itself with
+ * explicit `set +e`/`set -e` and an explicit `exit`, so neither
+ * recognised shape's exit-code guarantee depends on whether the
+ * invoking shell's own `-e`/`pipefail` defaults are on or off; a custom
+ * bash template's flags change nothing about that. Compared
+ * case-sensitively: GitHub's own built-in shell keywords are lower-case
+ * (`bash`, `sh`, `pwsh`, `python`, `cmd`, `powershell`), and this rule
+ * has no documented basis for treating a differently-cased program name
+ * as the same interpreter, so `Bash`/`BASH` fail closed like any other
+ * unrecognised value.
+ */
+function shellProgramName(raw: string): string {
+  const token = raw.trim().split(/\s+/)[0] ?? "";
+  const base = token.split(/[\\/]/).pop() ?? "";
+  return base.replace(/\.exe$/i, "");
+}
+
+type ShellLevel = "step" | "job" | "workflow";
+
+function shellLevelPhrase(level: ShellLevel, valueDescription: string): string {
+  switch (level) {
+    case "step":
+      return `the gate step's \`shell:\` is ${valueDescription}`;
+    case "job":
+      return `the gate step's shell is ${valueDescription}, set by its job's \`defaults.run.shell\``;
+    case "workflow":
+      return `the gate step's shell is ${valueDescription}, set by the workflow's \`defaults.run.shell\``;
+  }
+}
+
+/**
+ * The refusal reason for one level of the shell precedence chain
+ * (step, then job `defaults.run.shell`, then workflow
+ * `defaults.run.shell`), or `undefined` when that level is either unset
+ * (fall through to the next level) or set to a certifiable bash value
+ * (the whole chain is settled, certifiable, no refusal).
+ *
+ * A `shell:` key present but null or blank (`shell:` with nothing after
+ * it, or `shell: ""`) is refused at ITS OWN level rather than treated as
+ * unset and falling through: the key was written, so whatever the
+ * author meant by it, it was not left to the next level's default.
+ */
+function nonBashReasonForLevel(
+  level: ShellLevel,
+  shell: ScalarWithRange | undefined,
+): string | undefined {
+  if (!shell) return undefined;
+  const raw = typeof shell.value === "string" ? shell.value : undefined;
+  const trimmed = raw?.trim() ?? "";
+  if (trimmed.length === 0) {
+    return `${shellLevelPhrase(level, "empty")}, which this rule does not analyse as bash`;
+  }
+  if (trimmed.includes("${{")) {
+    return `${shellLevelPhrase(level, `a non-literal \`${trimmed}\` expression`)}, which this rule cannot resolve to bash`;
+  }
+  if (shellProgramName(trimmed) === "bash") return undefined;
+  return `${shellLevelPhrase(level, `\`${trimmed}\``)}, which this rule does not analyse as bash`;
+}
+
+/**
+ * The reason `audit-gate-shape` refuses this step's shell, or
+ * `undefined` when it is certifiable as bash: the step's own `shell:`,
+ * else its job's `defaults.run.shell`, else the workflow's
+ * `defaults.run.shell`, else (nothing set at any of the three levels)
+ * the job's `runs-on`, ONLY when it literally names a Windows runner
+ * (see `resolveRunsOn`) -- an absent shell everywhere else, including an
+ * unresolved `runs-on`, defaults to bash exactly as it did before this
+ * check existed.
+ */
+function nonBashShellReason(step: StepRunInfo): string | undefined {
+  const stepReason = nonBashReasonForLevel("step", step.shell);
+  if (stepReason) return stepReason;
+  if (step.shell) return undefined;
+
+  const jobReason = nonBashReasonForLevel("job", step.jobDefaultShell);
+  if (jobReason) return jobReason;
+  if (step.jobDefaultShell) return undefined;
+
+  const workflowReason = nonBashReasonForLevel(
+    "workflow",
+    step.workflowDefaultShell,
+  );
+  if (workflowReason) return workflowReason;
+  if (step.workflowDefaultShell) return undefined;
+
+  if (step.jobRunsOn === "windows") {
+    return "the gate step has no `shell:` at any level and its job's `runs-on` names a Windows runner, whose default shell is not bash";
+  }
+  return undefined;
+}
+
 // ───────────────────────────── the two rules ─────────────────────────────
 
 interface AuditFinding {
@@ -2402,6 +2652,26 @@ const auditGateShape: Rule = {
         ? statementOffsetAt(entry.gate, 0)
         : entry.step.runRange[0];
       const matched = entry.gate ? entry.gate.trimmed : entry.step.styleLabel;
+
+      // 0. A shell this rule does not analyse as bash refuses before
+      //    everything else, template included: a registered template is
+      //    an attestation about the script AS BASH, which does not apply
+      //    under a different interpreter. No digest is printed (the
+      //    normalised statements were never certified as bash text, so
+      //    registering their hash would not help).
+      const shellReason = nonBashShellReason(entry.step);
+      if (shellReason) {
+        violations.push(
+          makeAuditViolation(
+            auditGateShape,
+            file,
+            offset,
+            matched,
+            shapeViolationMessage(shellReason, undefined, undefined),
+          ),
+        );
+        continue;
+      }
 
       // 1. An unanalysable `run:` scalar style refuses before anything
       //    else, template included: the statement list of a folded or
