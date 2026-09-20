@@ -10,6 +10,10 @@ import type {
 } from "../types.js";
 import { findAllRegex, offsetToLineCol } from "../util/text.js";
 import { DEFAULT_NODE20_ACTIONS } from "../data/node20-actions.js";
+import {
+  DEFAULT_EXECUTED_ACTION_INPUTS,
+  type ExecutedActionInputEntry,
+} from "../data/executed-action-inputs.js";
 
 // ─────────────────────────── file targeting ───────────────────────────
 
@@ -147,6 +151,34 @@ function scalarKeyName(key: unknown): string | undefined {
 }
 
 /**
+ * The non-null, non-empty `uses:` scalar value of `node`'s own mapping, or
+ * `undefined` when `node` carries no `uses:` key, or that key's value is
+ * null (`uses:` with nothing after it) or an empty string (`uses: ""`).
+ *
+ * Fail-closed helper for `collectRunScalars`' and
+ * `collectExecutedInputScalars`' `with:` exemption: a step whose `uses:`
+ * is null or empty is not a step that actually names an action to run, so
+ * it no longer counts as a `uses:` step for that exemption either. Its
+ * `with:` block, if it has one, is then walked like an ordinary mapping
+ * instead of being treated as an action's input block -- a `run:` or an
+ * executed-input match found there is reported like any other, rather
+ * than silently exempted because a malformed `uses:` happened to be
+ * present. A step whose `uses:` is a real, non-empty value (including a
+ * `./local` path or a `docker://` reference this pack cannot resolve to
+ * an `owner/repo`) keeps the ordinary exemption; only the null/empty case
+ * changes behaviour.
+ */
+function usesStepValue(node: { items: unknown[] }): string | undefined {
+  const usesPair = node.items.find(
+    (item) => isPairNode(item) && scalarKeyName(item.key) === "uses",
+  );
+  if (!usesPair || !isPairNode(usesPair)) return undefined;
+  const value = (usesPair as { value: unknown }).value;
+  if (!isScalarWithRange(value)) return undefined;
+  return value.value.trim().length > 0 ? value.value : undefined;
+}
+
+/**
  * Collect every `run:` scalar node in the parsed document, walking every
  * mapping/sequence regardless of nesting depth (a step's `run:`, a
  * composite action's `runs.steps[].run:`, etc.), this rule cares about
@@ -164,13 +196,15 @@ function scalarKeyName(key: unknown): string | undefined {
  *
  * The gate is keyed on *schema position*, not on a mapping key literally
  * spelled `with` at any depth: a `with:` pair only starts an input block
- * when its own containing mapping also carries a `uses:` key, the shape
- * GitHub Actions requires for a step that names an action to run
- * (`isUsesStep` below, computed once per mapping from that mapping's own
- * `items`, before the loop that walks them). A job, a step, or any other
- * mapping key can be *named* `with` without being a `uses:` step's input
- * block; gating on the name alone let such a mapping (e.g. a job literally
- * called `with`) silence every `run:` in its entire subtree.
+ * when its own containing mapping also carries a real (non-null,
+ * non-empty) `uses:` key, the shape GitHub Actions requires for a step
+ * that names an action to run (`isUsesStep` below, computed once per
+ * mapping from that mapping's own `items` via `usesStepValue`, before the
+ * loop that walks them). A job, a step, or any other mapping key can be
+ * *named* `with` without being a `uses:` step's input block; gating on
+ * the name alone let such a mapping (e.g. a job literally called `with`)
+ * silence every `run:` in its entire subtree. A `uses:` key present but
+ * null or empty is fail-closed the same way: see `usesStepValue`.
  */
 function collectRunScalars(
   node: unknown,
@@ -178,9 +212,7 @@ function collectRunScalars(
   insideWith = false,
 ): void {
   if (!hasItems(node)) return;
-  const isUsesStep = node.items.some(
-    (item) => isPairNode(item) && scalarKeyName(item.key) === "uses",
-  );
+  const isUsesStep = usesStepValue(node) !== undefined;
   for (const item of node.items) {
     if (isPairNode(item)) {
       const keyName = scalarKeyName(item.key);
@@ -196,6 +228,115 @@ function collectRunScalars(
     } else {
       collectRunScalars(item, out, insideWith);
     }
+  }
+}
+
+/**
+ * Fold an executed-action-input name the way the Actions runner and
+ * `@actions/core` fold it before an action ever sees a name comparison:
+ * the runner exports a step's `with:` values as `INPUT_<NAME>` using
+ * `Replace(' ', '_').ToUpperInvariant()`, and `core.getInput(name)` reads
+ * that variable via `INPUT_${name.replace(/ /g, "_").toUpperCase()}` --
+ * so `script`, `Script`, `SCRIPT`, and (were the input named with a
+ * space) `my input`/`my_input` are all the same input from the runner's
+ * own point of view. Applied to every name this rule compares -- a
+ * built-in `DEFAULT_EXECUTED_ACTION_INPUTS` entry's `input`, a
+ * `workflow.executedActionInputs`-parsed entry's `input`, and a workflow
+ * step's own `with:` key.
+ *
+ * The body is the expression `@actions/core` itself applies, and it folds
+ * UP on purpose. Unicode case folding is not symmetric: a dotless i or a
+ * long s upper-cases to the ASCII letters of `SCRIPT` but lower-cases to
+ * itself, so a lower-case fold would let `with: scr\u0131pt:` reach
+ * `INPUT_SCRIPT` on the runner while scanning clean here. JavaScript's
+ * `toUpperCase` applies the full case mappings, a superset of the simple
+ * mappings an invariant-culture upper-case applies, so where the two
+ * differ over a mapping both implementations know, this rule matches
+ * more, never less; for a pure-ASCII entry name (the built-in list) no
+ * divergence is reachable at all.
+ */
+function normalizeExecutedInputName(name: string): string {
+  return name.replace(/ /g, "_").toUpperCase();
+}
+
+/**
+ * Every `${{ ... }}` expression location inside a `with:` input this
+ * pack's executed-input list names as code an action executes at runtime
+ * (see `data/executed-action-inputs.ts` and
+ * `workflow.executedActionInputs`) -- for example `actions/github-script`'s
+ * `script` input, which that action runs as a Node.js script body, never
+ * data the action merely reads or forwards.
+ *
+ * Consulted BEFORE `run-expression`'s ordinary `with:` exemption: a
+ * `with:` input on this list is scanned for `${{ ... }}` expressions the
+ * same way a `run:` scalar is (same allowlist via `isAllowedExpression`),
+ * while every OTHER input of the same step, and this same input name on
+ * an action not on the list, stay exempt exactly as before.
+ *
+ * Matching is `owner/repo` only, case-insensitive (`normalizeMajorKey`),
+ * independent of the step's ref (tag, sha, branch): `actions/github-script
+ * @v7`, a sha-pinned ref, and `Actions/Github-Script@main` all resolve to
+ * the same entry. A `docker://` or local `./`/`../` reference, or a
+ * reusable-workflow call, never resolves to an `owner/repo`
+ * (`parseUsesValue` returns `undefined` for all three) and so can never
+ * match, the same scope the default list's own entries are limited to.
+ * The input-name half is matched the same way, case- and
+ * space/underscore-insensitively (`normalizeExecutedInputName`), because
+ * that is how the Actions runner itself folds a `with:` input name before
+ * an action's own code ever reads it: `with: Script:` and `with: SCRIPT:`
+ * on `actions/github-script` are the same input as `with: script:`.
+ *
+ * Gated by the same fail-closed `usesStepValue` `collectRunScalars` uses:
+ * a step whose `uses:` is null or empty is not a real `uses:` step, so
+ * its `with:` block (if present) is not treated as an input block here
+ * either -- nothing under it can match an executed-input entry.
+ */
+function collectExecutedInputScalars(
+  node: unknown,
+  entries: ExecutedActionInputEntry[],
+  out: Array<{
+    value: string;
+    range: [number, number, number];
+    entry: ExecutedActionInputEntry;
+  }>,
+): void {
+  if (!hasItems(node)) return;
+  const usesValue = usesStepValue(node);
+  const parsedUses =
+    usesValue !== undefined ? parseUsesValue(usesValue) : undefined;
+  for (const item of node.items) {
+    if (!isPairNode(item)) {
+      collectExecutedInputScalars(item, entries, out);
+      continue;
+    }
+    const keyName = scalarKeyName(item.key);
+    if (keyName === "with" && parsedUses && hasItems(item.value)) {
+      for (const withItem of item.value.items) {
+        if (!isPairNode(withItem)) continue;
+        const inputName = scalarKeyName(withItem.key);
+        if (inputName === undefined || !isScalarWithRange(withItem.value)) {
+          continue;
+        }
+        const match = entries.find(
+          (entry) =>
+            normalizeMajorKey(entry.uses) ===
+              normalizeMajorKey(parsedUses.ownerRepo) &&
+            normalizeExecutedInputName(entry.input) ===
+              normalizeExecutedInputName(inputName),
+        );
+        if (match) {
+          out.push({
+            value: withItem.value.value,
+            range: withItem.value.range,
+            entry: match,
+          });
+        }
+      }
+      // `with:` input blocks hold scalar inputs only (see the module-level
+      // gating discussion above): nothing further to walk inside one.
+      continue;
+    }
+    collectExecutedInputScalars(item.value, entries, out);
   }
 }
 
@@ -218,6 +359,38 @@ function makeViolation(
     endLine: end.line,
     endColumn: end.column,
     message: `\`\${{ ${expr.trim()} }}\` is interpolated directly into a \`run:\` shell script. Route it through \`env:\` and reference it as \`$NAME\` instead, unless it is one of the documented non-attacker-controllable contexts (see workflow-slop README).`,
+    rationale: rule.rationale,
+    matched,
+  };
+}
+
+/**
+ * The executed-input-specific twin of `makeViolation`: same shape and
+ * same allowlist (`isAllowedExpression`), but the message names the
+ * `uses:`/input pair the expression is executed by instead of `run:`, per
+ * the acceptance requirement that the finding say the input is executed
+ * as code.
+ */
+function makeExecutedInputViolation(
+  rule: Rule,
+  file: FileTarget,
+  index: number,
+  matched: string,
+  expr: string,
+  entry: ExecutedActionInputEntry,
+): Violation {
+  const start = offsetToLineCol(file.text, index);
+  const end = offsetToLineCol(file.text, index + matched.length);
+  return {
+    ruleId: rule.id,
+    pack: rule.pack,
+    severity: rule.defaultSeverity,
+    path: file.path,
+    line: start.line,
+    column: start.column,
+    endLine: end.line,
+    endColumn: end.column,
+    message: `\`\${{ ${expr.trim()} }}\` is passed to \`${entry.uses}\`'s \`${entry.input}\` input, which that action executes as code, not data. Route it through \`env:\` (or the action's own env-reading convention) instead, unless it is one of the documented non-attacker-controllable contexts (see workflow-slop README).`,
     rationale: rule.rationale,
     matched,
   };
@@ -285,18 +458,43 @@ const unparseableWorkflow: Rule = {
 // ─────────────────────────── allowExpressions usage ───────────────────────────
 
 /**
+ * The effective executed-input match list for this scan: the package's
+ * built-in default list plus `config.workflow.executedActionInputs`
+ * (`owner/repo:input` strings, parsed into the same entry shape). Unlike
+ * `resolveNode20Majors`, there is no ignore/subtractive list: an
+ * executed-input entry is either matched by `owner/repo` (ref-independent)
+ * or it is not, and this pack ships only one built-in entry to remove.
+ */
+function resolveExecutedActionInputs(
+  config: ResolvedConfig,
+): ExecutedActionInputEntry[] {
+  const extra = (config.workflow?.executedActionInputs ?? []).map(
+    (raw): ExecutedActionInputEntry => {
+      const colonIndex = raw.indexOf(":");
+      return {
+        uses: raw.slice(0, colonIndex),
+        input: raw.slice(colonIndex + 1),
+        source: "configured via workflow.executedActionInputs",
+      };
+    },
+  );
+  return [...DEFAULT_EXECUTED_ACTION_INPUTS, ...extra];
+}
+
+/**
  * Every distinct expression body (trimmed, as written between `${{` and
- * `}}`) found inside a `run:` scalar in `file`, regardless of whether this
- * pack's allowlist treats it as safe. Used only by
- * `findUnmatchedAllowExpressions` below, kept separate from
+ * `}}`) found inside a `run:` scalar, or inside a `with:` input this
+ * pack's executed-input list treats as executed code, in `file`,
+ * regardless of whether this pack's allowlist treats it as safe. Used
+ * only by `findUnmatchedAllowExpressions` below, kept separate from
  * `runExpression.check` because it needs the full set of expression texts
  * (allowed and flagged alike), not just the ones that end up as
  * violations.
  */
-function collectExpressionTexts(file: {
-  path: string;
-  text: string;
-}): Set<string> {
+function collectExpressionTexts(
+  file: { path: string; text: string },
+  config: ResolvedConfig,
+): Set<string> {
   const result = new Set<string>();
   if (!isWorkflowFile(file)) return result;
   let doc: unknown;
@@ -308,7 +506,17 @@ function collectExpressionTexts(file: {
   const runScalars: Array<{ value: string; range: [number, number, number] }> =
     [];
   collectRunScalars(doc, runScalars);
-  for (const scalar of runScalars) {
+  const executedInputScalars: Array<{
+    value: string;
+    range: [number, number, number];
+    entry: ExecutedActionInputEntry;
+  }> = [];
+  collectExecutedInputScalars(
+    doc,
+    resolveExecutedActionInputs(config),
+    executedInputScalars,
+  );
+  for (const scalar of [...runScalars, ...executedInputScalars]) {
     const [start, end] = scalar.range;
     const raw = file.text.slice(start, end);
     for (const m of findAllRegex(raw, EXPRESSION_RE)) {
@@ -336,7 +544,7 @@ export function findUnmatchedAllowExpressions(
   if (extra.length === 0) return [];
   const seen = new Set<string>();
   for (const file of files) {
-    for (const expr of collectExpressionTexts(file)) seen.add(expr);
+    for (const expr of collectExpressionTexts(file, config)) seen.add(expr);
   }
   return extra.filter((e) => !seen.has(e));
 }
@@ -347,7 +555,7 @@ const runExpression: Rule = {
   defaultSeverity: "block",
   enabledByDefault: true,
   rationale:
-    "GitHub substitutes `${{ ... }}` expressions into the `run:` text before the shell ever parses it. When the expression's value is attacker-influenced (a PR title, a branch/tag name, a step output derived from either), a crafted value breaks out of its intended argument position and the job — often holding write or publish permissions — executes it. The fix is the same every time: assign the value to an `env:` variable and reference it as `$NAME` in the script, where the shell treats it as inert data instead of program text.",
+    "GitHub substitutes `${{ ... }}` expressions into the `run:` text before the shell ever parses it. When the expression's value is attacker-influenced (a PR title, a branch/tag name, a step output derived from either), a crafted value breaks out of its intended argument position and the job — often holding write or publish permissions — executes it. The fix is the same every time: assign the value to an `env:` variable and reference it as `$NAME` in the script, where the shell treats it as inert data instead of program text. The same substitution happens just as literally inside a `with:` input an action's own runtime then executes as code (`actions/github-script`'s `script` input, at minimum) -- a `with:` input is normally this pack's exemption from `run:` scanning exactly because most inputs are inert data, but a listed input is code, so it is scanned before that exemption applies, not after.",
   appliesTo: isWorkflowFile,
   check(ctx: RuleContext): Violation[] {
     const { file, config } = ctx;
@@ -365,6 +573,16 @@ const runExpression: Rule = {
       range: [number, number, number];
     }> = [];
     collectRunScalars(doc, runScalars);
+    const executedInputScalars: Array<{
+      value: string;
+      range: [number, number, number];
+      entry: ExecutedActionInputEntry;
+    }> = [];
+    collectExecutedInputScalars(
+      doc,
+      resolveExecutedActionInputs(config),
+      executedInputScalars,
+    );
 
     const violations: Violation[] = [];
     for (const scalar of runScalars) {
@@ -375,6 +593,24 @@ const runExpression: Rule = {
         if (isAllowedExpression(expr, config)) continue;
         violations.push(
           makeViolation(runExpression, file, start + m.index, m.match, expr),
+        );
+      }
+    }
+    for (const scalar of executedInputScalars) {
+      const [start, end] = scalar.range;
+      const raw = file.text.slice(start, end);
+      for (const m of findAllRegex(raw, EXPRESSION_RE)) {
+        const expr = m.groups[1] ?? "";
+        if (isAllowedExpression(expr, config)) continue;
+        violations.push(
+          makeExecutedInputViolation(
+            runExpression,
+            file,
+            start + m.index,
+            m.match,
+            expr,
+            scalar.entry,
+          ),
         );
       }
     }

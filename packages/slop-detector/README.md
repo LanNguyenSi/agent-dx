@@ -58,7 +58,7 @@ Each pack groups related rules. Enable or disable per repo via `slop.config.yml`
 | `code-slop` (9 rules)      | off, opt in via `--pack`                | try/catch around code that cannot throw, defaults on required-typed params, empty / rethrow catches, `async` without `await`, backcompat shims for unreleased APIs, phantom imports of undeclared packages, stub function bodies, unused exports, single-callsite helpers  |
 | `ui-slop` (6 rules)        | off, opt in via `--pack ui-slop`        | Gradient text, purple+cyan AI palettes, animated layout properties, skipped heading levels, plus opt-in monospace-everywhere and flat type hierarchy (info-level). Scans CSS / SCSS / LESS / HTML / JSX.                                                                   |
 | `placement-slop` (5 rules) | off, opt in via `--pack placement-slop` | Org-, machine-, and point-in-time-bound evidence leaking into reusable instruction files (`SKILL.md`, `AGENTS.md`, `CLAUDE.md`, agent/skill prompt files): home paths, dated evidence, tally phrases (`n=8`, `p=0.016`, `so far`), opaque ids, and configured org markers. <!-- slop-detector:disable-line=placement-slop --> |
-| `workflow-slop` (5 rules)  | off, opt in via `--pack workflow-slop`  | GitHub Actions workflow injection and CI-guard regressions: a `${{ ... }}` expression interpolated directly into a `run:` shell script (unless it is one of the documented non-attacker-controllable contexts); a fail-closed check that a scanned workflow file actually parsed as YAML; a reintroduced Node-20 GitHub Actions major; an `audit.yml` with no certifiable `npm audit --audit-level=...` gate; and an npm-audit gate step whose shape is not one the pack recognises. Scans `.github/workflows/*.yml`/`*.yaml`. |
+| `workflow-slop` (5 rules)  | off, opt in via `--pack workflow-slop`  | GitHub Actions workflow injection and CI-guard regressions: a `${{ ... }}` expression interpolated directly into a `run:` shell script or into a `with:` input a listed action executes as code (`actions/github-script`'s `script`, at minimum), unless it is one of the documented non-attacker-controllable contexts; a fail-closed check that a scanned workflow file actually parsed as YAML; a reintroduced Node-20 GitHub Actions major; an `audit.yml` with no certifiable `npm audit --audit-level=...` gate; and an npm-audit gate step whose shape is not one the pack recognises. Scans `.github/workflows/*.yml`/`*.yaml`. |
 | `review-slop` (3 rules)    | off, opt in via `--pack review-slop`    | Run-local review tokens leaking into reusable content: finding ids (`F1`, `F2a`, or a severity-letter id like `M1`/`H2a` when the same sentence also carries a review-process word), round references (`round 2`, `R3`, `review round 1 fixes`), and workspace-handoff phrases (`per the <workspace> handoffs`). Scans Markdown, TypeScript/JavaScript source comments, test titles, and a commit-message file. |
 
 The six opt-in packs (`comment-slop`, `code-slop`, `ui-slop`, `placement-slop`, `workflow-slop`, `review-slop`) are off by default because their false-positive surface in mixed codebases is wider; opt in with `--pack <id>` or set `packs.<id>: true` in `slop.config.yml`.
@@ -177,11 +177,15 @@ An `allow` match only excuses the span it actually matched, across every rule in
 
 ### `workflow-slop` by example
 
-Opt in with `--pack workflow-slop`. The main rule, `run-expression`, only
-looks at `run:` scalars inside `.github/workflows/*.yml`/`*.yaml` (a
-`${{ ... }}` in `name:`, `if:` or `env:` is never a finding, and neither is
-a `run` key inside a `uses:` step's `with:` input block; a `with:` mapping
-that is not a `uses:` step's input block is still scanned, fail-closed). GitHub substitutes `${{ ... }}`
+Opt in with `--pack workflow-slop`. The main rule, `run-expression`, looks
+at `run:` scalars inside `.github/workflows/*.yml`/`*.yaml`, plus one
+`with:` input the pack's executed-input list names as code an action
+executes at runtime (`actions/github-script`'s `script`, at minimum -- see
+[Executed action inputs](#workflow-slop-executed-action-inputs) below). A
+`${{ ... }}` in `name:`, `if:`, `env:`, or any other `with:` input is
+never a finding, and neither is a `run` key inside a real `uses:` step's
+`with:` input block; a `with:` mapping that is not a `uses:` step's input
+block is still scanned, fail-closed. GitHub substitutes `${{ ... }}`
 expressions into the workflow's YAML text *before* the shell ever sees
 `run:`, so an expression whose value an attacker can influence — a step
 output computed from a PR title, a branch or tag name, an issue body —
@@ -245,6 +249,48 @@ workflow:
 ```
 
 `workflow.allowExpressions` is additive (on top of the built-in allowlist above) and matches by exact, whitespace-trimmed expression text — same shape as `placement.allow`'s per-pack config surface, just without the regex/span matching (each entry is a literal expression body, not a pattern). An entry that matched no `${{ ... }}` expression across the scanned workflow files (a typo, or leftover from a workflow that changed) is surfaced in `CheckSummary.warnings`, the same mechanism an unmatched `placement.instructionGlobs` pattern uses. Write the bare expression body only (`matrix.node`), not the `${{ ... }}` wrapper; a config entry that still carries `${{`/`}}` is rejected at config-load time.
+
+<a id="workflow-slop-executed-action-inputs"></a>
+
+**Executed action inputs: a `with:` input is not always inert data.** `run-expression`'s `with:` exemption above assumes a `with:` input is data an action reads (a file path, a label, a flag): true for most actions, but not for one whose input is itself code that action runs, most notably `actions/github-script`'s `script` input, which that action passes to `new AsyncFunction(...)` and executes as the step's own JavaScript. A `${{ ... }}` inside such an input is exactly as dangerous as one inside `run:`, so this pack consults a data list of `owner/repo` -> input-name pairs (`src/data/executed-action-inputs.ts`, one built-in entry: `actions/github-script` -> `script`) *before* applying the `with:` exemption: an input on the list is scanned exactly like a `run:` scalar (same allowlist, same scalar-style independence), while every other input of the same step, and this same input name on an action not on the list, stay exempt. Matching is `owner/repo` only, case-insensitive, independent of the step's ref (a moving major tag, a pinned sha, a branch), the same match key `node20-action-major` uses minus the version component; a `docker://` or local `./`/`../` reference, or a reusable-workflow call, never resolves to an `owner/repo` and so can never match. The input-name half is matched case-insensitively too, with a literal space folded to an underscore, using the same expression `@actions/core`'s `getInput` applies to build `INPUT_<NAME>` (`name.replace(/ /g, "_").toUpperCase()`): `with: script:`, `with: Script:`, and `with: SCRIPT:` on `actions/github-script` all match the same built-in entry. The fold goes up, not down, because Unicode case folding is not symmetric: a key spelled with a dotless i or a long s upper-cases to `SCRIPT` and is matched, where a lower-case comparison would miss it. A config entry names the input with an underscore where a workflow author might write a literal space; matching folds the two together.
+
+Like every workflow-slop rule, this scan only reads `.github/workflows/*.yml`/`.yaml` (see `WORKFLOW_FILE_RE`): a `script:` input executed by an `actions/github-script` step inside a composite action's own `action.yml` is not covered, even though that file also runs on the same runner. This is a deliberate scope decision, not an oversight -- extending the scan into arbitrary `action.yml` files (found anywhere in a checkout, not confined to a known directory) is a different, currently unimplemented, feature.
+
+```yaml
+# BLOCKED by workflow-slop/run-expression
+- uses: actions/github-script@v7
+  with:
+    script: |
+      const title = "${{ github.event.issue.title }}";
+      github.rest.issues.createComment({ body: `Thanks for filing: ${title}` });
+```
+
+```yaml
+# fixed: routed through env:, read back inside the script
+- uses: actions/github-script@v7
+  env:
+    ISSUE_TITLE: ${{ github.event.issue.title }}
+  with:
+    script: |
+      const title = process.env.ISSUE_TITLE;
+      github.rest.issues.createComment({ body: `Thanks for filing: ${title}` });
+```
+
+The list is extendable per repo, the same shape `node20Majors` uses:
+
+```yaml
+# slop.config.yml
+packs:
+  workflow-slop: true
+
+workflow:
+  executedActionInputs:
+    - "acme/run-code:code"
+```
+
+`workflow.executedActionInputs` entries are `owner/repo:input` (no `@ref`: matching is ref-independent, so a version suffix here is rejected at config-load time), additive on top of the built-in default list. The FIRST colon after `owner/repo` separates it from the input name, so an input name can never itself contain a colon (nor a literal space -- write an underscore instead; matching folds it back to a space-equivalent form, see above). Unlike `node20Majors`/`node20MajorsIgnore` there is no subtractive list, since the package ships only one built-in entry to remove.
+
+**Fail-closed: a `uses:` key present but null or empty is not a `uses:` step.** `run-expression`'s `with:` exemption (and the executed-input match above) both require the containing mapping to carry a real, non-empty `uses:` value -- a step written as `uses:` with nothing after it, or `uses: ""`, no longer counts as a `uses:` step for either. Its `with:` block, if it has one, is then walked like an ordinary mapping instead of an action's input block: a `run:` or an executed-input match found there is reported like any other, rather than silently exempted because a malformed `uses:` happened to be present. A step whose `uses:` is a real, non-empty value (including a `./local` path or a `docker://` reference this pack cannot resolve to an `owner/repo`) keeps the ordinary exemption; only the null/empty case changes behaviour.
 
 **`unparseable-workflow`: a broken workflow file is never scored clean.** `run-expression` walks the YAML tree `yaml`'s parser produced, but that parser does not throw on most syntax errors, it records them and still returns whatever partial tree it managed to build. A workflow file broken partway through (an unterminated quoted scalar, an unbalanced flow collection) can silently drop everything after the break, including a `${{ ... }}` expression this pack exists to catch. The `unparseable-workflow` rule reports one `block`-severity finding whenever a scanned workflow file has a YAML syntax error, naming the file and the first parse error, so a broken file always produces at least one workflow-slop finding instead of a false-clean result.
 
@@ -719,7 +765,7 @@ review:
     - "**/CHANGELOG.md"
 ```
 
-Defaults applied even without a config: `agent-tics` and `prose-slop` packs on; `comment-slop`, `code-slop`, `ui-slop`, `placement-slop`, `workflow-slop`, `review-slop` off; ignores cover `node_modules`, `dist`, `build`, `coverage`, `.git`, lockfiles; `placement.markers`, `placement.instructionGlobs`, `placement.allow`, `workflow.allowExpressions`, `workflow.node20Majors`, `workflow.node20MajorsIgnore`, and `workflow.auditGateTemplates` default to `[]`; `review.allow` defaults to `[]` and `review.allowPaths` defaults to `["**/CHANGELOG.md"]` (see [`review-slop` by example](#review-slop-by-example)).
+Defaults applied even without a config: `agent-tics` and `prose-slop` packs on; `comment-slop`, `code-slop`, `ui-slop`, `placement-slop`, `workflow-slop`, `review-slop` off; ignores cover `node_modules`, `dist`, `build`, `coverage`, `.git`, lockfiles; `placement.markers`, `placement.instructionGlobs`, `placement.allow`, `workflow.allowExpressions`, `workflow.node20Majors`, `workflow.node20MajorsIgnore`, `workflow.auditGateTemplates`, and `workflow.executedActionInputs` default to `[]`; `review.allow` defaults to `[]` and `review.allowPaths` defaults to `["**/CHANGELOG.md"]` (see [`review-slop` by example](#review-slop-by-example)).
 
 The `placement` block only matters once `placement-slop` is enabled (see [`placement-slop` by example](#placement-slop-by-example)):
 
@@ -727,7 +773,7 @@ The `placement` block only matters once `placement-slop` is enabled (see [`place
 - `instructionGlobs`: additive glob patterns, on top of the pack's built-in instruction-file globs (`SKILL.md`, `AGENTS.md`, `CLAUDE.md`, `.claude/agents/**`, `.opencode/agents/**`, `.claude/skills/**`); this only ever widens the built-in set, it can't narrow it. Matched against each scanned file's path relative to the scan root (the same root `entrypointGlobs` uses — see [Marking a src barrel as an entrypoint](#marking-a-src-barrel-as-an-entrypoint)). `check packages/foo`, `check ./packages/foo`, and `check /abs/path/packages/foo` are three spellings of the _same_ directory and resolve a given pattern identically; a single-file target (`check packages/foo/SKILL.md`) resolves the scan root to that file's own parent directory, so it also shares patterns with `check packages/foo`: a pattern is tied to _what directory you're scanning_, not to whether the target was a file or a directory. The consequence: changing the scan target to a genuinely different root (e.g. `check .` from the repo root instead of `check packages/foo`) means every pattern has to be rewritten relative to the new root too. A pattern must not start with `/`, same restriction as `entrypointGlobs`, and a leading `./` is normalized away. A pattern that matches zero scanned files is surfaced in `CheckSummary.warnings`, same mechanism as an unmatched `entrypointGlobs` pattern. For CI, the simplest invariant is `check .` from the repo root paired with a config file: one fixed scan root, so the patterns never need to change with the invocation.
 - `allow`: regex patterns (also rejected at config-load time if they'd match the empty string), matched per line, and only the matched span is excused across every rule in the pack, including `block`-severity ones (the escape hatch for something like a legitimate install URL that carries an org handle). The exclusion is scoped to the matched span, not the whole line: a home path, a date, or a tally phrase elsewhere on the same line as an allowed match still fires. For narrower, single-rule suppression use a per-line disable comment instead (see [Per-line opt-out](#per-line-opt-out)).
 
-The `workflow` block only matters once `workflow-slop` is enabled (see [`workflow-slop` by example](#workflow-slop-by-example)): `allowExpressions` is an additive list of exact, whitespace-trimmed `${{ ... }}` expression bodies treated as safe on top of the pack's built-in allowlist, consumed by `run-expression`. `node20Majors` (additive) and `node20MajorsIgnore` (subtractive, applied after `node20Majors`) are both lists of exact `owner/repo@vN` entries consumed by `node20-action-major`, on top of the pack's built-in default list. `auditGateTemplates` is a list of `{ name, sha256 }` or `{ name, statements }` entries consumed by `audit-gate-shape`, each registering one exact gate block as recognised (see [Registering a gate template](#workflow-slop-by-example)); an entry carrying neither or both of `sha256`/`statements` is rejected at config-load time. All four are empty by default, so none of them widen or narrow what a rule accepts until you configure them.
+The `workflow` block only matters once `workflow-slop` is enabled (see [`workflow-slop` by example](#workflow-slop-by-example)): `allowExpressions` is an additive list of exact, whitespace-trimmed `${{ ... }}` expression bodies treated as safe on top of the pack's built-in allowlist, consumed by `run-expression`. `node20Majors` (additive) and `node20MajorsIgnore` (subtractive, applied after `node20Majors`) are both lists of exact `owner/repo@vN` entries consumed by `node20-action-major`, on top of the pack's built-in default list. `auditGateTemplates` is a list of `{ name, sha256 }` or `{ name, statements }` entries consumed by `audit-gate-shape`, each registering one exact gate block as recognised (see [Registering a gate template](#workflow-slop-by-example)); an entry carrying neither or both of `sha256`/`statements` is rejected at config-load time. `executedActionInputs` is an additive list of exact `owner/repo:input` entries (no `@ref`; matching is ref-independent) consumed by `run-expression` to decide which `with:` inputs are scanned like `run:` scalars before the ordinary `with:` exemption applies, on top of the pack's built-in default list (see [Executed action inputs](#workflow-slop-executed-action-inputs)). All five are empty by default, so none of them widen or narrow what a rule accepts until you configure them.
 
 ## Cross-file rules (experimental)
 

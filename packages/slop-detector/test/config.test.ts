@@ -260,4 +260,72 @@ describe("config", () => {
     );
     expect(() => loadConfig(file)).toThrow(/64-character hex sha256 digest/);
   });
+
+  it("workflow.executedActionInputs defaults to []", () => {
+    expect(defaultConfig().workflow?.executedActionInputs).toEqual([]);
+    expect(mergeConfig({}).workflow?.executedActionInputs).toEqual([]);
+  });
+
+  it("loadConfig accepts a bare workflow.executedActionInputs entry", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      file,
+      `workflow:\n  executedActionInputs:\n    - "acme/run-code:code"\n`,
+    );
+    const cfg = loadConfig(file);
+    expect(cfg.workflow?.executedActionInputs).toEqual(["acme/run-code:code"]);
+  });
+
+  it("loadConfig rejects a workflow.executedActionInputs entry carrying an @ref (matching is ref-independent)", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      file,
+      `workflow:\n  executedActionInputs:\n    - "acme/run-code@v1:code"\n`,
+    );
+    expect(() => loadConfig(file)).toThrow(/ref-independent/);
+  });
+
+  it("loadConfig rejects a workflow.executedActionInputs entry with no owner/repo separator", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      file,
+      `workflow:\n  executedActionInputs:\n    - "run-code:code"\n`,
+    );
+    expect(() => loadConfig(file)).toThrow(/owner\/repo:input/);
+  });
+
+  it("loadConfig rejects a workflow.executedActionInputs entry with no input name", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      file,
+      `workflow:\n  executedActionInputs:\n    - "acme/run-code"\n`,
+    );
+    expect(() => loadConfig(file)).toThrow(/owner\/repo:input/);
+  });
+
+  it("loadConfig rejects a workflow.executedActionInputs entry whose input name carries a colon (the first colon after owner/repo is the separator, so a colon can never be part of the input name)", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      file,
+      `workflow:\n  executedActionInputs:\n    - "acme/run-code:my:input"\n`,
+    );
+    expect(() => loadConfig(file)).toThrow(
+      /the input name cannot itself contain a colon/,
+    );
+  });
+
+  it("loadConfig rejects a workflow.executedActionInputs entry whose input name carries a literal space (written as an underscore instead)", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      file,
+      `workflow:\n  executedActionInputs:\n    - "acme/run-code:my input"\n`,
+    );
+    expect(() => loadConfig(file)).toThrow(/for a literal space/);
+  });
 });

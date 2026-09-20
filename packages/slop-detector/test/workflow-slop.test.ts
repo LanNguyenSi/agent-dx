@@ -401,6 +401,421 @@ describe("workflow-slop/run-expression", () => {
     ).toHaveLength(1);
   });
 
+  // ── executed-input list: consulted BEFORE the with: exemption ───────────
+
+  it("flags a ${{ }} inside actions/github-script's with.script (block scalar), naming the input as executed code", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      // v99: a fictitious major, deliberately off the node20-action-major
+      // default list, so this fixture isolates run-expression's finding.
+      "      - uses: actions/github-script@v99",
+      "        with:",
+      "          script: |",
+      '            const title = "${{ github.event.issue.title }}";',
+      "            console.log(title);",
+    ].join("\n");
+    const v = runViolations(text).filter(
+      (x) => x.ruleId === "workflow-slop/run-expression",
+    );
+    expect(v).toHaveLength(1);
+    expect(v[0].severity).toBe("block");
+    expect(v[0].message).toContain("actions/github-script");
+    expect(v[0].message).toContain("script");
+    expect(v[0].message).toContain("executes as code");
+  });
+
+  it("flags with.script written as a single-line plain scalar", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: actions/github-script@v99",
+      "        with:",
+      "          script: console.log(${{ github.event.issue.title }})",
+    ].join("\n");
+    const v = runViolations(text).filter(
+      (x) => x.ruleId === "workflow-slop/run-expression",
+    );
+    expect(v).toHaveLength(1);
+  });
+
+  it("flags with.script written as a double-quoted scalar", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: actions/github-script@v99",
+      "        with:",
+      '          script: "console.log(${{ github.event.issue.title }})"',
+    ].join("\n");
+    const v = runViolations(text).filter(
+      (x) => x.ruleId === "workflow-slop/run-expression",
+    );
+    expect(v).toHaveLength(1);
+  });
+
+  it("negative control: the documented non-attacker-controllable contexts stay clean inside with.script too", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: actions/github-script@v99",
+      "        with:",
+      "          script: console.log(${{ github.repository }})",
+    ].join("\n");
+    const v = runViolations(text).filter(
+      (x) => x.ruleId === "workflow-slop/run-expression",
+    );
+    expect(v).toHaveLength(0);
+  });
+
+  it("negative control: other with: inputs of the same github-script step stay exempt", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: actions/github-script@v99",
+      "        with:",
+      "          debug: ${{ steps.target.outputs.expected }}",
+      "          script: console.log('safe')",
+    ].join("\n");
+    const v = runViolations(text).filter(
+      (x) => x.ruleId === "workflow-slop/run-expression",
+    );
+    expect(v).toHaveLength(0);
+  });
+
+  it("negative control: with.script of an action not on the executed-input list stays exempt", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: some/other-action@v1",
+      "        with:",
+      "          script: ${{ steps.target.outputs.expected }}",
+    ].join("\n");
+    const v = runViolations(text);
+    expect(v).toHaveLength(0);
+  });
+
+  it("negative control: a local ./ action's with.script never matches (parseUsesValue has no owner/repo for it)", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: ./local-action",
+      "        with:",
+      "          script: ${{ steps.target.outputs.expected }}",
+    ].join("\n");
+    const v = runViolations(text);
+    expect(v).toHaveLength(0);
+  });
+
+  it("negative control: a docker:// action's with.script never matches", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: docker://alpine:3",
+      "        with:",
+      "          script: ${{ steps.target.outputs.expected }}",
+    ].join("\n");
+    const v = runViolations(text);
+    expect(v).toHaveLength(0);
+  });
+
+  it("matches regardless of ref: a sha-pinned github-script with a trailing version comment is still flagged", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: actions/github-script@e69ef5462fd455e02edcaf4dad0af5c3766a0ac # v99",
+      "        with:",
+      "          script: ${{ steps.target.outputs.expected }}",
+    ].join("\n");
+    const v = runViolations(text).filter(
+      (x) => x.ruleId === "workflow-slop/run-expression",
+    );
+    expect(v).toHaveLength(1);
+  });
+
+  it("matches regardless of ref: a moving branch ref is still flagged", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: actions/github-script@main",
+      "        with:",
+      "          script: ${{ steps.target.outputs.expected }}",
+    ].join("\n");
+    const v = runViolations(text).filter(
+      (x) => x.ruleId === "workflow-slop/run-expression",
+    );
+    expect(v).toHaveLength(1);
+  });
+
+  it("matches owner/repo case-insensitively", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: Actions/Github-Script@v99",
+      "        with:",
+      "          script: ${{ steps.target.outputs.expected }}",
+    ].join("\n");
+    const v = runViolations(text).filter(
+      (x) => x.ruleId === "workflow-slop/run-expression",
+    );
+    expect(v).toHaveLength(1);
+  });
+
+  it("workflow.executedActionInputs extends the default list", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: acme/run-code@v1",
+      "        with:",
+      "          code: ${{ steps.target.outputs.expected }}",
+    ].join("\n");
+    const cfg = mergeConfig({
+      workflow: { executedActionInputs: ["acme/run-code:code"] },
+    });
+    const v = checkText(text, WORKFLOW_PATH, {
+      packs: allPacks,
+      config: cfg,
+      packFilter: ["workflow-slop"],
+    }).filter((x) => x.ruleId === "workflow-slop/run-expression");
+    expect(v).toHaveLength(1);
+  });
+
+  it("workflow.executedActionInputs does not widen an unconfigured action", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: acme/other-action@v1",
+      "        with:",
+      "          code: ${{ steps.target.outputs.expected }}",
+    ].join("\n");
+    const cfg = mergeConfig({
+      workflow: { executedActionInputs: ["acme/run-code:code"] },
+    });
+    const v = checkText(text, WORKFLOW_PATH, {
+      packs: allPacks,
+      config: cfg,
+      packFilter: ["workflow-slop"],
+    }).filter((x) => x.ruleId === "workflow-slop/run-expression");
+    expect(v).toHaveLength(0);
+  });
+
+  // ── executed-input name matching is case- and space/underscore-insensitive,
+  // mirroring the Actions runner's own INPUT_<NAME> fold ──────────────────
+
+  it("matches a with: key capitalised as Script (the Actions runner folds with: input names case-insensitively into INPUT_<NAME>)", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: actions/github-script@v99",
+      "        with:",
+      "          Script: console.log(${{ github.event.issue.title }})",
+    ].join("\n");
+    const v = runViolations(text).filter(
+      (x) => x.ruleId === "workflow-slop/run-expression",
+    );
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain("actions/github-script");
+    expect(v[0].message).toContain("executes as code");
+  });
+
+  it("matches a with: key fully upper-cased as SCRIPT the same way", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: actions/github-script@v99",
+      "        with:",
+      "          SCRIPT: console.log(${{ github.event.issue.title }})",
+    ].join("\n");
+    const v = runViolations(text).filter(
+      (x) => x.ruleId === "workflow-slop/run-expression",
+    );
+    expect(v).toHaveLength(1);
+  });
+
+  // The runner and @actions/core fold input names UP. A dotless i and a
+  // long s upper-case to the ASCII letters of SCRIPT but lower-case to
+  // themselves, so a lower-case fold would miss both.
+  for (const [label, key] of [
+    ["a dotless i (U+0131)", "scr\u0131pt"],
+    ["a long s (U+017F)", "\u017Fcript"],
+  ] as const) {
+    it(`matches a with: key spelled with ${label} that upper-cases to SCRIPT`, () => {
+      const text = [
+        "on: push",
+        "jobs:",
+        "  j:",
+        "    steps:",
+        "      - uses: actions/github-script@v99",
+        "        with:",
+        `          ${key}: console.log(\${{ github.event.issue.title }})`,
+      ].join("\n");
+      const v = runViolations(text).filter(
+        (x) => x.ruleId === "workflow-slop/run-expression",
+      );
+      expect(v).toHaveLength(1);
+    });
+  }
+
+  it("does not match a Kelvin sign key (U+212A) against an ASCII-named entry: it lower-cases to k but does not upper-case to K", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: acme/run-code@v1",
+      "        with:",
+      "          to\u212Aen: console.log(${{ github.event.issue.title }})",
+    ].join("\n");
+    const cfg = mergeConfig({
+      workflow: { executedActionInputs: ["acme/run-code:token"] },
+    });
+    const scan = (t: string) =>
+      checkText(t, WORKFLOW_PATH, {
+        packs: allPacks,
+        config: cfg,
+        packFilter: ["workflow-slop"],
+      }).filter((x) => x.ruleId === "workflow-slop/run-expression");
+    expect(scan(text)).toHaveLength(0);
+    // Control: the same step with an ASCII k is reported, so the zero above
+    // comes from the Kelvin sign and not from a dead fixture.
+    expect(scan(text.replace(/\u212A/g, "k"))).toHaveLength(1);
+  });
+
+  it("a config-supplied entry whose case differs from the workflow key still matches (acme/run-code:Code vs a workflow with: code:)", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: acme/run-code@v1",
+      "        with:",
+      "          code: ${{ steps.target.outputs.expected }}",
+    ].join("\n");
+    const cfg = mergeConfig({
+      workflow: { executedActionInputs: ["acme/run-code:Code"] },
+    });
+    const v = checkText(text, WORKFLOW_PATH, {
+      packs: allPacks,
+      config: cfg,
+      packFilter: ["workflow-slop"],
+    }).filter((x) => x.ruleId === "workflow-slop/run-expression");
+    expect(v).toHaveLength(1);
+  });
+
+  it("a space in the workflow with: key matches an underscore in the configured entry (acme/run-code:my_input vs a workflow with: 'my input:')", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: acme/run-code@v1",
+      "        with:",
+      "          my input: ${{ steps.target.outputs.expected }}",
+    ].join("\n");
+    const cfg = mergeConfig({
+      workflow: { executedActionInputs: ["acme/run-code:my_input"] },
+    });
+    const v = checkText(text, WORKFLOW_PATH, {
+      packs: allPacks,
+      config: cfg,
+      packFilter: ["workflow-slop"],
+    }).filter((x) => x.ruleId === "workflow-slop/run-expression");
+    expect(v).toHaveLength(1);
+  });
+
+  // ── scope: only .github/workflows/*.yml|.yaml is scanned; a composite
+  // action's own action.yml is a documented, deliberate blind spot ───────
+
+  it("negative control: a github-script step's with.script inside a composite action's own action.yml is not scanned (workflow-slop only reads .github/workflows/*.yml|.yaml, per WORKFLOW_FILE_RE)", () => {
+    const text = [
+      "runs:",
+      "  using: composite",
+      "  steps:",
+      "    - uses: actions/github-script@v99",
+      "      with:",
+      "        script: console.log(${{ github.event.issue.title }})",
+    ].join("\n");
+    const v = runViolations(text, "action.yml");
+    expect(v).toHaveLength(0);
+  });
+
+  // ── null/empty uses: fail-closed for the with: exemption ────────────────
+
+  it("fail-closed: a step whose uses: is present but null no longer grants the with: exemption (its run: is walked like a plain mapping)", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses:",
+      "        with:",
+      "          run: echo ${{ steps.target.outputs.expected }}",
+    ].join("\n");
+    const v = runViolations(text);
+    expect(
+      v.filter((x) => x.ruleId === "workflow-slop/run-expression"),
+    ).toHaveLength(1);
+  });
+
+  it("fail-closed: a step whose uses: is an empty string no longer grants the with: exemption", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      '      - uses: ""',
+      "        with:",
+      "          run: echo ${{ steps.target.outputs.expected }}",
+    ].join("\n");
+    const v = runViolations(text);
+    expect(
+      v.filter((x) => x.ruleId === "workflow-slop/run-expression"),
+    ).toHaveLength(1);
+  });
+
+  it("negative control: a step with a real, non-empty uses: still grants the with: exemption (unaffected by the fail-closed fix)", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: some/action@v1",
+      "        with:",
+      "          run: echo ${{ steps.target.outputs.expected }}",
+    ].join("\n");
+    const v = runViolations(text);
+    expect(v).toHaveLength(0);
+  });
+
   // ── unparseable-workflow: fail-closed on a broken workflow file ─────────
 
   describe("workflow-slop/unparseable-workflow", () => {

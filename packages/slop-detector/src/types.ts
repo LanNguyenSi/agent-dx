@@ -201,6 +201,19 @@ export interface ResolvedConfig {
      * of its own.
      */
     auditGateTemplates: AuditGateTemplate[];
+    /**
+     * Additional `owner/repo:input` entries treated by
+     * `workflow-slop/run-expression` as a `with:` input a listed action
+     * executes as code (on top of the pack's built-in default list,
+     * `src/data/executed-action-inputs.ts`). A `${{ ... }}` expression
+     * inside a listed input is scanned BEFORE the rule's ordinary
+     * `with:` exemption, the same way a `run:` scalar is: every other
+     * input of the same step, and this input on an action not on the
+     * list, stay exempt. Lets a repo extend the list (a locally vendored
+     * action, a newly reviewed third-party one) without waiting on a
+     * slop-detector release.
+     */
+    executedActionInputs: string[];
   };
   /**
    * Config surface for the `review-slop` pack: run-local review tokens

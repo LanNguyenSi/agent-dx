@@ -152,11 +152,38 @@ const AuditGateTemplateSchema = z
     }),
   );
 
+// `workflow.executedActionInputs` entries are the exact `owner/repo:input`
+// match key `workflow-slop/run-expression` compares a `uses:` step's
+// resolved `owner/repo` plus a `with:` input name against (see
+// `packs/workflow-slop.ts` and `data/executed-action-inputs.ts`). No `@vN`
+// component: unlike `Node20MajorSchema`, this list matches independent of
+// ref, so a version suffix here can never match anything and is rejected
+// at config-load time, the same fail-fast treatment `AllowExpressionSchema`
+// gives a malformed `allowExpressions` entry. The FIRST colon after
+// `owner/repo` is the separator between it and the input name, so an
+// input name can never itself contain a colon (the input half's own
+// character class excludes `:` for exactly that reason -- there would be
+// no way to tell which colon separates from which is part of the name).
+// The input half also excludes a literal space: `workflow-slop/run-expression`
+// folds both names upward with `name.replace(/ /g, "_").toUpperCase()`
+// (`normalizeExecutedInputName`, the expression `@actions/core` applies),
+// so a config entry names the input with an underscore where a workflow
+// author might write a literal space (`acme/run-code:my_input` still
+// matches a workflow step written `with: my input:`), and an ASCII entry
+// matches every ASCII casing of the same key.
+const ExecutedActionInputSchema = z.string().refine(
+  (e) => /^[^/\s:@]+\/[^/\s:@]+:[^\s:@]+$/.test(e),
+  (e) => ({
+    message: `workflow.executedActionInputs entries are "owner/repo:input" (e.g. "actions/github-script:script"), no "@ref" (matching is ref-independent); the first colon after owner/repo separates it from the input name, so the input name cannot itself contain a colon or a space (write "_" for a literal space; matching folds case and space/underscore), got "${e}"`,
+  }),
+);
+
 const WorkflowConfigSchema = z.object({
   allowExpressions: z.array(AllowExpressionSchema).optional(),
   node20Majors: z.array(Node20MajorSchema).optional(),
   node20MajorsIgnore: z.array(Node20MajorSchema).optional(),
   auditGateTemplates: z.array(AuditGateTemplateSchema).optional(),
+  executedActionInputs: z.array(ExecutedActionInputSchema).optional(),
 });
 
 // `review.allowPaths` is matched against a path already made relative to
@@ -258,6 +285,7 @@ export function defaultConfig(): ResolvedConfig {
       node20Majors: [],
       node20MajorsIgnore: [],
       auditGateTemplates: [],
+      executedActionInputs: [],
     },
     review: { allow: [], allowPaths: [...DEFAULT_REVIEW_ALLOW_PATHS] },
   };
@@ -290,6 +318,7 @@ export function mergeConfig(file: ConfigFile): ResolvedConfig {
       node20Majors: file.workflow?.node20Majors ?? [],
       node20MajorsIgnore: file.workflow?.node20MajorsIgnore ?? [],
       auditGateTemplates: file.workflow?.auditGateTemplates ?? [],
+      executedActionInputs: file.workflow?.executedActionInputs ?? [],
     },
     review: {
       allow: file.review?.allow ?? [],
