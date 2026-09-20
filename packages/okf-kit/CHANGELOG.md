@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `sources-fresh` treats a frontmatter `timestamp` string with no UTC
+  designator (`Z`) or numeric offset (e.g. `2026-09-17T07:36:36`)
+  consistently and timezone-invariantly across BOTH of its comparisons
+  (D-016). Previously the two comparisons disagreed: the re-stamp
+  direction check (`compareRestampDirection`) fell back to an
+  any-textual-change escape hatch for such a value (a genuine backwards
+  re-stamp between two designator-less timestamps silently passed as an
+  ordinary re-stamp), while the day-wide staleness comparison
+  (`getTimestampEpoch`) parsed it with `Date.parse` in the machine's
+  local timezone (the same repository content could read STALE on one
+  runner and clean on another, hours apart). Both now go through one
+  UTC-forcing parse (`parseTimestampInstantMs` in `src/util.ts`, shared
+  by `getTimestampEpoch` and `getTimestampEpochMs`): a designator-less
+  value is treated as UTC everywhere `sources-fresh` reads a `timestamp`
+  (Treatment A of the two considered, see below), so a backwards
+  designator-less re-stamp is now reported (`re-stamp moved backwards`)
+  exactly like a `Z`-suffixed one, and the day-wide comparison no longer
+  depends on `TZ`. This does NOT touch `sources-fresh-future`: its
+  clock-skew allowance is minutes wide, too narrow to safely absorb an
+  hours-wide timezone shift, so it keeps skipping a designator-less
+  timestamp with a notice rather than forcing UTC on it (see the
+  README's "Designator-less timestamps" section for why the two rules
+  differ). A native YAML date (`!!timestamp`, no raw string, already
+  resolved to a fixed UTC instant by the YAML parser) was already
+  timezone-invariant and is unaffected. New tests pin timezone
+  invariance under both `TZ=UTC` and `TZ=Asia/Tokyo` for the direction
+  check and, separately, for the day-wide comparison (`test/cli-staleness.test.ts`,
+  subprocess-based, following the existing D-013 pattern), plus a
+  committed-path unit pin (`test/sources-fresh.test.ts`) and unit-level
+  UTC-forcing pins for `getTimestampEpoch`/`getTimestampEpochMs`
+  (`test/util.test.ts`).
+- **Measurement (implementer, this task).** Ran the built CLI
+  (`dist/cli.js check`) over every real `docs/okf` bundle in this
+  repository (test fixtures under `packages/okf-kit/test/fixtures/`
+  excluded as synthetic, not real bundles) -- the only one is
+  `packages/orchestrator-workflow/docs/okf`, whose six docs' frontmatter
+  timestamps are all `Z`-suffixed already (no designator-less stamp
+  currently in this repo's real content). Ran both plain `check --json`
+  and `check --json --require-anchors`, each under `TZ=UTC` and
+  `TZ=Asia/Tokyo`:
+
+  | Config | Treatment A (parse as UTC, chosen) | Treatment B (designator required) |
+  |---|---|---|
+  | `check`, `TZ=UTC` | 0 errors, 0 warnings, 0 notices | 0 errors, 0 warnings, 0 notices |
+  | `check`, `TZ=Asia/Tokyo` | 0 errors, 0 warnings, 0 notices | 0 errors, 0 warnings, 0 notices |
+  | `check --require-anchors`, `TZ=UTC` | 0 errors, 0 warnings, 0 notices | 0 errors, 0 warnings, 0 notices |
+  | `check --require-anchors`, `TZ=Asia/Tokyo` | 0 errors, 0 warnings, 0 notices | 0 errors, 0 warnings, 0 notices |
+
+  Identical under both treatments and both timezones, because the only
+  real bundle in this repository has no designator-less stamp to treat
+  differently; no existing bundle verdict flips either way. Per the
+  task's stated preference, Treatment A (parse as UTC) is adopted:
+  reporting a designator-less re-stamp's direction (rather than
+  excluding it under its own rule id as STALE-eligible, Treatment B)
+  keeps `sources-fresh` a single rule that answers the SAME question
+  ("did this move forward") for every `timestamp` shape it accepts, and
+  it is what closes the backwards-move gap this fix exists for without
+  adding a second finding class for the same value.
+
 ## [0.13.0] - 2026-09-17
 
 ### Changed

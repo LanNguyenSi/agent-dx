@@ -44,6 +44,31 @@ describe("getTimestampEpoch", () => {
     expect(getTimestampEpoch(null)).toBeUndefined();
     expect(getTimestampEpoch(["not", "a", "record"])).toBeUndefined();
   });
+
+  it("parses a designator-less string as UTC, not the process's local timezone (D-016)", () => {
+    // No `Z`, no numeric offset: forced to UTC rather than handed to
+    // `Date.parse` raw, so this is the SAME value regardless of which `TZ`
+    // the process happens to run under -- see the CLI-level pin in
+    // test/cli-staleness.test.ts for the end-to-end proof across two real
+    // `TZ` environments.
+    expect(getTimestampEpoch({ timestamp: "2026-01-01T00:00:00" })).toBe(
+      Math.floor(Date.parse("2026-01-01T00:00:00Z") / 1000),
+    );
+  });
+
+  it("parses a designator-less space-separated (YAML 1.1 canonical) string as UTC too (D-016)", () => {
+    expect(getTimestampEpoch({ timestamp: "2026-01-01 00:00:00" })).toBe(
+      Math.floor(Date.parse("2026-01-01T00:00:00Z") / 1000),
+    );
+  });
+
+  it("still parses a string carrying a numeric offset unchanged, not as UTC (D-016)", () => {
+    // A numeric offset already names a real instant; forcing UTC on TOP of
+    // it would silently discard the offset and misread the instant.
+    expect(getTimestampEpoch({ timestamp: "2026-01-01T00:00:00+02:00" })).toBe(
+      Math.floor(Date.parse("2026-01-01T00:00:00+02:00") / 1000),
+    );
+  });
 });
 
 describe("getTimestampEpochMs", () => {
@@ -84,6 +109,12 @@ describe("getTimestampEpochMs", () => {
     expect(getTimestampEpochMs({ timestamp: 12345 })).toBeUndefined();
     expect(getTimestampEpochMs(undefined)).toBeUndefined();
     expect(getTimestampEpochMs(null)).toBeUndefined();
+  });
+
+  it("parses a designator-less string as UTC, at millisecond resolution (D-016)", () => {
+    expect(getTimestampEpochMs({ timestamp: "2026-01-01T13:00:00" })).toBe(
+      Date.parse("2026-01-01T13:00:00Z"),
+    );
   });
 });
 

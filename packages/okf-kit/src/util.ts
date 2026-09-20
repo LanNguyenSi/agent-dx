@@ -26,6 +26,31 @@ export function getValidSources(parsed: unknown): string[] | undefined {
 }
 
 /**
+ * Parses a frontmatter `timestamp` STRING to milliseconds since the epoch,
+ * forcing UTC interpretation whenever the string carries no UTC designator
+ * (`Z`) or numeric offset (`hasUtcDesignator`, D-016). `Date.parse` resolves
+ * a designator-less string ("2026-01-01T13:00:00") in the machine's LOCAL
+ * timezone by default, which would make every caller that reads a
+ * `timestamp` through this function -- `sources-fresh`'s own day-wide
+ * staleness comparison AND its re-stamp direction comparison
+ * (`compareRestampDirection` in `src/rules/sources-fresh.ts`) -- read the
+ * IDENTICAL frontmatter differently depending on where `okf-kit check`
+ * happens to run. Appending `Z` before parsing makes the resolved instant a
+ * property of the STRING, not of `TZ`, for every comparison in this
+ * package, not just some of them. A string that already carries a
+ * designator is parsed unchanged: `Date.parse` already resolves it
+ * correctly on every machine. See the README's "Staleness (sources-fresh)"
+ * section, "Designator-less timestamps", for the full rationale and the one
+ * case this does NOT cover (a value that is not parseable to an instant at
+ * all).
+ */
+function parseTimestampInstantMs(raw: string): number | undefined {
+  const trimmed = raw.trim();
+  const ms = Date.parse(hasUtcDesignator(trimmed) ? trimmed : `${trimmed}Z`);
+  return Number.isNaN(ms) ? undefined : ms;
+}
+
+/**
  * Returns the frontmatter `timestamp` as a Unix epoch (seconds), or
  * undefined when absent, not a Date/string, or not parseable as a date.
  * Used by sources-fresh to compare against a source path's last-commit
@@ -33,7 +58,9 @@ export function getValidSources(parsed: unknown): string[] | undefined {
  * (core) schema resolves timestamp scalars to strings, but a YAML 1.1
  * `!!timestamp` tag (or a caller constructing frontmatter programmatically)
  * can hand back a native `Date`, and that should be assessed rather than
- * degrade to the no-valid-timestamp notice.
+ * degrade to the no-valid-timestamp notice. A designator-less STRING is
+ * parsed via `parseTimestampInstantMs`, i.e. as UTC, so this epoch never
+ * depends on the machine's local timezone (D-016).
  */
 export function getTimestampEpoch(parsed: unknown): number | undefined {
   if (!isRecord(parsed)) return undefined;
@@ -44,9 +71,8 @@ export function getTimestampEpoch(parsed: unknown): number | undefined {
   }
   if (typeof timestamp !== "string" || timestamp.trim() === "")
     return undefined;
-  const ms = Date.parse(timestamp);
-  if (Number.isNaN(ms)) return undefined;
-  return Math.floor(ms / 1000);
+  const ms = parseTimestampInstantMs(timestamp);
+  return ms === undefined ? undefined : Math.floor(ms / 1000);
 }
 
 /**
@@ -61,7 +87,8 @@ export function getTimestampEpoch(parsed: unknown): number | undefined {
  * thresholds (days, not milliseconds) make the distinction this function
  * exists for immaterial there, so there was no reason to touch them. Read
  * as an instant at millisecond resolution, exactly like `getTimestampEpoch`
- * otherwise -- same `Date` vs. string handling, same undefined cases.
+ * otherwise -- same `Date` vs. string handling, same undefined cases, same
+ * UTC-forcing treatment of a designator-less string (D-016).
  */
 export function getTimestampEpochMs(parsed: unknown): number | undefined {
   if (!isRecord(parsed)) return undefined;
@@ -72,8 +99,7 @@ export function getTimestampEpochMs(parsed: unknown): number | undefined {
   }
   if (typeof timestamp !== "string" || timestamp.trim() === "")
     return undefined;
-  const ms = Date.parse(timestamp);
-  return Number.isNaN(ms) ? undefined : ms;
+  return parseTimestampInstantMs(timestamp);
 }
 
 /**
@@ -82,9 +108,10 @@ export function getTimestampEpochMs(parsed: unknown): number | undefined {
  * `getTimestampEpoch`'s doc comment) returns undefined here too, since a
  * `Date`'s `getTime()` already names one instant on every machine, so
  * there is no raw spelling left for a caller to inspect. Callers:
- * `hasUtcDesignator`'s two gates (`sources-fresh-future`'s clock-skew
- * check and `isDirectionComparable`, D-013), and `describeTimestampValue`,
- * which names each side's raw spelling in the same-instant notice.
+ * `hasUtcDesignator` (`sources-fresh-future`'s clock-skew check, and
+ * `parseTimestampInstantMs`'s UTC-forcing decision, D-016), and
+ * `describeTimestampValue`, which names each side's raw spelling in the
+ * same-instant notice.
  */
 export function getRawTimestampString(parsed: unknown): string | undefined {
   if (!isRecord(parsed)) return undefined;
@@ -102,11 +129,17 @@ export function getRawTimestampString(parsed: unknown): string | undefined {
  * already names a real UTC instant, so nothing beyond recognizing it is
  * needed here.
  *
- * Two callers gate on this predicate: `sources-fresh-future`'s clock-skew
- * check, and `compareRestampDirection`'s re-stamp direction comparison
- * (through `isDirectionComparable`, D-013). Which comparisons the gate
- * covers, which one stays ungated, and why, is written down once: see the
- * README's "Designator gate" paragraph under "Staleness (sources-fresh)".
+ * Two callers consult this predicate, and they respond to the same
+ * ambiguity in two different ways (D-016): `sources-fresh-future`'s
+ * clock-skew check SKIPS a designator-less timestamp entirely (a notice,
+ * not a warning) rather than compare it -- that allowance is minutes wide,
+ * too narrow to safely absorb a multi-hour timezone shift. `sources-fresh`
+ * instead FORCES UTC for it (`parseTimestampInstantMs`), for both its
+ * day-wide staleness comparison and its re-stamp direction comparison
+ * (`compareRestampDirection`) -- its thresholds are day-wide, so treating
+ * the value as UTC everywhere is both consistent and safe. Which rule takes
+ * which approach, and why, is written down once: see the README's
+ * "Designator-less timestamps" paragraph under "Staleness (sources-fresh)".
  */
 export function hasUtcDesignator(raw: string): boolean {
   return /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw.trim());
@@ -122,13 +155,12 @@ export function hasUtcDesignator(raw: string): boolean {
  * places, both of them comparing identities rather than instants:
  *
  *  - as its FALLBACK, when direction cannot be judged at all: either side
- *    unparseable to an instant (`getTimestampEpochMs` returns undefined),
- *    or either side a string the designator gate rejects
- *    (`isDirectionComparable`, D-013). With nothing comparable to order,
- *    the question becomes "did the raw value change", and any textual
- *    change counts as `restamped` -- see that function's doc comment for
- *    the full three-way split.
- *  - when both sides ARE direction-comparable and name the SAME instant,
+ *    unparseable to an instant even after `getTimestampEpochMs` forces UTC
+ *    for a designator-less string (D-016). With nothing comparable to
+ *    order, the question becomes "did the raw value change", and any
+ *    textual change counts as `restamped` -- see that function's doc
+ *    comment for the full three-way split.
+ *  - when both sides DO resolve to an instant and name the SAME one,
  *    to tell a rewrite (a different spelling of that one instant, e.g.
  *    `2026-01-01T00:00:00Z` to `2026-01-01T00:00:00+00:00`, which gets
  *    the D-009 notice) from a byte-identical value (never a re-stamp
