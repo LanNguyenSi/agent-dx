@@ -81,17 +81,30 @@ A citation-sibling-drift guard (also in `test/docs-consistency.test.ts`)
 checks a class the anchor guard above cannot: a citation that resolves and
 anchors correctly on its own but names the wrong sibling among near-identical
 citations. It flags (a) the same `file:range#anchor` cited twice in one
-paragraph, and (b) a string anchor's text also occurring, uncited, at
-another nearby line of the same target while the paragraph cites a sibling
-range of that file; either can be allowlisted in the guard's own test. An
-allowlist entry is accepted only on an independent review classification of
-the hit, never on the reading of whoever wrote or re-pointed the citation,
-and it records both the geometry it was cleared against (the uncited line,
-or the doc line the repeat sits on) and a one-sentence claim a reviewer can
-falsify by reading exactly those two lines; a test re-checks that recorded
-geometry against the current files, so an exemption whose situation changed
-fails instead of quietly covering a different one. The classification
-itself belongs in [log.md](log.md), with the round that produced it.
+paragraph, (b) a string anchor's text also occurring, uncited, WITHIN
+`SIBLING_GUARD_WINDOW` (20) lines of the same target while the paragraph
+cites a sibling range of that file, and (c) a string anchor's text also
+occurring, uncited, MORE than `SIBLING_GUARD_WINDOW` lines away, with no
+sibling-citation precondition (task agent-dx 5801bc29): a lone citation to a
+call site whose anchor text also matches that identifier's own definition
+site, far outside any window a nearby sibling citation would expose, is
+exactly the class rule (b) cannot see. `SIBLING_GUARD_WINDOW` is the shared
+boundary both rules read: rule (b) looks inside it, rule (c) looks outside
+it, so no target line can ever trigger both. Any of the three can be
+allowlisted in the guard's own test. An allowlist entry is accepted only on
+an independent review classification of the hit, never on the reading of
+whoever wrote or re-pointed the citation, and it records both the geometry
+it was cleared against (the uncited line, or the doc line the repeat sits
+on) and a one-sentence claim a reviewer can falsify by reading exactly those
+lines; a test re-checks that recorded geometry against the current files,
+so an exemption whose situation changed fails instead of quietly covering a
+different one. The classification itself belongs in [log.md](log.md), with
+the round that produced it. Rule (c)'s own allowlist entries additionally
+paraphrase rather than quote a target line's exact text whenever that
+target is `test/docs-consistency.test.ts` itself: quoting it verbatim would
+add another occurrence of that text to the very file the guard reads,
+possibly tripping the guard against an unrelated citation into the same
+file (see log.md's agent-dx 5801bc29 entry for the case this caught).
 
 [log.md](log.md) itself is excluded from `ANCHOR_OKF_DOCS` and from both
 guards above, and its bundle-specific path-less continuation citation form

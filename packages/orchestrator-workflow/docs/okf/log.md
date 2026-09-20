@@ -1540,7 +1540,7 @@
   exists on both sides, the unanchored-citation brake's
   (`test/docs-consistency.test.ts:3547#"in-scope citations (sanity: the brake itself did not go blind"`)
   and this round's new floor for the log.md guard
-  (`test/docs-consistency.test.ts:9004#"anchored full citations of docs/okf/log.md"`);
+  (`test/docs-consistency.test.ts:10108#"anchored full citations of docs/okf/log.md"`);
   run `npx vitest run test/docs-consistency.test.ts -t "did not go
   blind"` and read both figures off the passing tests' own names. The
   round-3 entry's and bullet's counts are struck, not corrected.
@@ -1555,15 +1555,15 @@
   a newline inside the anchor by construction, so the text has to be
   re-joined the way the wrap split it, first. Both scanners now consume
   one shared helper
-  (`test/docs-consistency.test.ts:5579#"function citationScanParagraphs("`)
+  (`test/docs-consistency.test.ts:5612#"function citationScanParagraphs("`)
   that joins each paragraph's lines with the single space a hard wrap
   replaced and maps every joined offset back to its physical line, so
   findings, allowlist geometry and failure messages still name real doc
   lines. Pinned both ways by their own fixtures: a wrapped full citation
   with a stale anchor
-  (`test/docs-consistency.test.ts:8852#"is still checked (a stale wrapped anchor fails)"`)
+  (`test/docs-consistency.test.ts:9956#"is still checked (a stale wrapped anchor fails)"`)
   and a wrapped continuation form
-  (`test/docs-consistency.test.ts:8868#"that wraps across a hard line break is still flagged"`),
+  (`test/docs-consistency.test.ts:9972#"that wraps across a hard line break is still flagged"`),
   both of which the round-3 per-line scan passed unseen. Checked rather
   than argued: with the round-2 tree's own `log.md` put in place (`git
   show 0cbded8:packages/orchestrator-workflow/docs/okf/log.md`), this
@@ -1581,7 +1581,7 @@
   excused every citation after it and the guard still reported clean. The
   shared helper above carries the single fence pass and the throw, so
   there is one copy now; an unbalanced-fence fixture
-  (`test/docs-consistency.test.ts:8889#"throws instead of silently excusing every citation"`)
+  (`test/docs-consistency.test.ts:9993#"throws instead of silently excusing every citation"`)
   pins the loud failure, and the computed floor named above pins
   non-vacuity on the real file.
 
@@ -1605,15 +1605,15 @@
   outside the repository and was read and anchor-checked against it; and
   its bespoke bare-name map bound a bare basename to this package's own
   file even where the repository root carries a file of that name. Now
-  (`test/docs-consistency.test.ts:8656#"function resolveLogCitationPath("`):
+  (`test/docs-consistency.test.ts:9760#"function resolveLogCitationPath("`):
   a cited path carrying a `..` segment is rejected before any lookup,
   containment under the repository root is asserted on the fallback
   anyway, and a bare name that collides with a root file is reported
   ambiguous with both candidates named, so the entry has to write the
   path out in full. The collision set is computed from the map and the
   disk, not hand-listed. Fixtures for both
-  (`test/docs-consistency.test.ts:8903#"escaping the repository with a"`,
-  `test/docs-consistency.test.ts:8948#"is reported ambiguous, not silently bound"`).
+  (`test/docs-consistency.test.ts:10007#"escaping the repository with a"`,
+  `test/docs-consistency.test.ts:10052#"is reported ambiguous, not silently bound"`).
   Residual, named rather than closed: the deeper repo-wide basename
   ambiguity okf-kit reports (a basename that exists in more than one
   package, `SKILL.md`) is still bound unconditionally by
@@ -1675,7 +1675,7 @@
   inherited, never written on its own line) while every existing
   assertion stays green on the smaller set. Closed two ways: a
   source-span pin
-  (`test/docs-consistency.test.ts:8519#"resolution sites stay wired to extractSiblingGuardCitations"`)
+  (`test/docs-consistency.test.ts:9623#"resolution sites stay wired to extractSiblingGuardCitations"`)
   asserting each of the three sites'
   own source still calls `extractSiblingGuardCitations(` and carries no
   bare `matchAll(ANCHOR_CITATION_RE)` loop, and a synthetic-doc-set
@@ -1693,12 +1693,12 @@
   excluded from `ANCHOR_OKF_DOCS`, from both guards above, and from
   okf-kit's own citation grammar, nothing reads it. Halt-rule redesign
   (D-037) rather than another rephrase: a third guard,
-  `test/docs-consistency.test.ts:8594#"log.md's own citations resolve, and it carries no path-less continuation citation form"`,
+  `test/docs-consistency.test.ts:9698#"log.md's own citations resolve, and it carries no path-less continuation citation form"`,
   checks `log.md` itself. Its resolver
   (`resolveLogCitationPath`) extends `anchorScopeResolve` with the
   package's own CHANGELOG/README/INSTALL-AGENT and its docs/okf siblings,
   plus a real-file-on-disk fallback. Its checker
-  (`test/docs-consistency.test.ts:8713#"function checkLogCitations("`)
+  (`test/docs-consistency.test.ts:9817#"function checkLogCitations("`)
   enforces two rules: every full, anchored citation must resolve (target
   exists, anchor text somewhere inside the cited range), and any anchored
   path-less continuation form is forbidden outright, since a log entry
@@ -1856,7 +1856,7 @@
   `test/docs-consistency.test.ts:3023#"const ANCHOR_CONTINUATION_CITATION_RE ="`
   (anchor group required, so a bare digit range in ordinary prose is
   never mistaken for a continuation) and `governingPathByParagraph` in
-  `test/docs-consistency.test.ts:5646#"function extractSiblingGuardCitations("`,
+  `test/docs-consistency.test.ts:5679#"function extractSiblingGuardCitations("`,
   resolving a continuation against the nearest preceding full citation's
   own cited path in the same paragraph -- the same BINDING RULE okf-kit's
   own short-form/continuation citations use in `citations-resolve.ts`,
@@ -10717,3 +10717,118 @@ edits, two test pins and Unreleased note are byte-identical to the verified
 implementation after integration; cited source lines are unchanged. Kept the
 bundle prose cleanup and its verification entry, then re-stamped the three
 docs after the integrated source commit.
+
+## 2026-09-20 (citation-sibling-drift guard, rule (c): same-anchor-text
+wrong-site beyond SIBLING_GUARD_WINDOW, task agent-dx 5801bc29)
+
+Closed the residual the guard's own design comment named but did not yet
+check: a citation whose STRING anchor text also occurs, unclaimed, farther
+than `SIBLING_GUARD_WINDOW` (20) lines from its own cited range can be
+re-pointed to that other occurrence, anchor text unchanged, without okf-kit
+or the suite noticing, because rule (b) only looks WITHIN the window and
+only when the same paragraph already cites a sibling range of the same
+file (`hasSibling`). Neither precondition holds for the real example the
+tracker named: `model-preselection.md`'s
+`init.ts:860-863#"composeClaudeAgentVariant("` citation, a lone citation
+in its own paragraph, whose anchor text also matches
+`composeClaudeAgentVariant`'s own function definition 461 lines away at
+`init.ts:399`.
+
+New rule (c) (`findDistantDuplicateAnchors`, `distant-duplicate-anchor`
+finding kind): structurally rule (b)'s own twin, minus the `hasSibling`
+precondition and with the window direction inverted (OUTSIDE `[start -
+SIBLING_GUARD_WINDOW, end + SIBLING_GUARD_WINDOW]` instead of inside it),
+so a hit here and a hit from rule (b) can never both fire on the same
+target line. "Claimed" stays PARAGRAPH-scoped, exactly like rule (b)'s own
+definition; a doc-wide claiming design was tried first and rejected: it let
+an unrelated, same-file citation elsewhere in the document silently absorb
+a genuine re-point (measured against the real
+`init.ts:860-863#"composeClaudeAgentVariant("` citation and the
+`init.ts:399-414#"disallowedTools: Edit, Write, NotebookEdit"` citation
+that happens to cover the same target line for an unrelated reason). The
+finding shape, allowlist entry shape, matching, geometry re-check and
+claim-falsifiability machinery are all reused unchanged from rule (b): a
+`distant-duplicate-anchor` finding carries the identical fields a
+`wrong-sibling-anchor` finding does, so every existing consumer needed only
+a `|| finding.kind === "distant-duplicate-anchor"` branch alongside its
+existing `"wrong-sibling-anchor"` one, not a parallel implementation.
+`findCitationSiblingDrift` now runs all three rules; four new
+bundle-independent fixtures pin rule (c)'s own mechanics, including the
+`composeClaudeAgentVariant`-shaped scenario (a lone, sibling-free citation
+whose anchor also matches its target's definition site) and the
+mirror-image continuation-citation case.
+
+Options measured against the real bundle (paragraph-scoped design, window
+20, all eight `docs/okf` module docs): (i) per-target anchor uniqueness
+(lengthen or narrow each hit's anchor until it is unique file-wide outside
+its own range) touches the citing bundle doc's own hard-wrapped prose for
+every hit, and a changed line LENGTH risks a manual re-wrap that shifts
+every later citation in that same doc, which then needs its own re-point
+and re-verification; not attempted at this volume. (ii) a widened window
+does not apply: `SIBLING_GUARD_WINDOW` is the class's own defining
+boundary ("farther than SIBLING_GUARD_WINDOW"), not a tunable knob for
+this rule specifically, and rule (b) already owns the inside-the-window
+half. (iii) allowlisting touches only `test/docs-consistency.test.ts`
+(a data array), never a bundle doc's own line count, so it carries no
+re-wrap or cross-citation re-point risk at all: the lowest-maintenance
+option, chosen for every hit measured.
+
+Measured 70 real, unclaimed distant-duplicate-anchor hits across the eight
+module docs (the tracker's own audit had counted 82 anchored full citations
+plus four path-less continuations by a different, unmeasured method; this
+guard's own paragraph-scoped, doc-independent claiming counts 70 real hits,
+including the tracker's own named example and its path-less continuation
+sibling at `init.ts:863-863#"composeClaudeAgentVariant("`). All 70 are
+independently reviewed and allowlisted below (kind `distant-duplicate-
+anchor`), each with a geometry-checked, falsifiable claim naming the
+enclosing `it`/`describe` block or the literal line content at both the
+cited and the uncited site: install-fence-mechanics.md 20,
+model-preselection.md 24, operator-install-and-registry.md 7,
+review-gate-and-waivers.md 1, run-state-lifecycle-and-markers.md 6,
+subagent-contracts-superset.md 12 (N=70 total; every entry's doc, real
+target, range and doc line is listed in the allowlist array itself, not
+repeated here).
+
+Fifteen of the 70 hits target `test/docs-consistency.test.ts` itself (this
+file, self-cited from paragraphs elsewhere in the bundle, mostly repeated
+`expect(...)` assertion shapes across mirrored per-role/per-harness test
+blocks). Their claims were written WITHOUT quoting the target line's exact
+text (paraphrasing the enclosing test name instead), per this file's own
+established discipline for self-referential entries (see the allowlist
+array's own header note on why an anchor's literal text is never quoted).
+Two more entries (`review-gate-and-waivers.md`/`run-state-lifecycle-and-
+markers.md`'s `run-base[<repo-basename>] = <sha>` pair, whose OWN target is
+`template-markers.test.ts`, not this file) were caught by the same failure
+mode from the opposite direction during verification: quoting that marker
+text verbatim in their claims added a new, unclaimed occurrence of it to
+THIS file, which an unrelated, pre-existing `run-state-lifecycle-and-
+markers.md` citation into this file's own line 434-435 then tripped
+against. Both were re-written to paraphrase as well. General lesson,
+recorded for the next round that adds allowlist entries: quoting a hit's
+literal text in a `claim` is safe only when the entry's own `real` target
+is not `test/docs-consistency.test.ts`; even then it is unsafe once the
+quoted text happens to equal some OTHER, unrelated citation's own anchor
+into this file, so paraphrasing is the safer default whenever in doubt.
+
+Adding rule (c), its fixtures and the 70-entry allowlist grew
+`test/docs-consistency.test.ts` by roughly 1,150 lines, all inserted before
+line 9004 (the file's own highest pre-existing cited line, from this doc's
+own historical citations). Every citation into this file from `log.md`
+itself past that insertion point went stale as a direct, mechanical
+consequence (not a new class of drift): 12 single-line `#"anchor"`
+citations, all in this doc, re-pointed twice (a first pass computed against
+the guard-and-fixture insertion alone, a second pass after the fixture
+block landed shifted eight of those twelve a second time). No other module
+doc's own citations into this file needed re-pointing: comparing every
+module doc's own maximum cited line into `test/docs-consistency.test.ts`
+against the insertion point showed the next-highest at 4,896
+(subagent-contracts-superset.md), well below it. Re-stamped
+model-preselection.md, review-gate-and-waivers.md,
+run-state-lifecycle-and-markers.md and subagent-contracts-superset.md (the
+four docs whose `sources:` list `test/docs-consistency.test.ts`) after the
+source commit; their own prose and citation ranges into every OTHER source
+are unchanged, only the allowlist-cleared distant-duplicate-anchor hits and
+(for the four docs with self-citations) nothing in their own text moved.
+`index.md`'s Maintenance section gained a rule (c) paragraph; both
+`index.md` and this file carry no `sources:` frontmatter and are excluded
+from `ANCHOR_OKF_DOCS`, so neither is itself re-stamped.
