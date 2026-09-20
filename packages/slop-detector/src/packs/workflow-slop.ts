@@ -2523,8 +2523,9 @@ function isBashOptionCluster(
  *
  * Two forms certify:
  *
- * - A single token (`bash`, or a bare path to it): GitHub's own
- *   built-in shell keyword form, taking no `{0}` placeholder at all.
+ * - The single token `bash`: GitHub's own built-in shell keyword,
+ *   taking no `{0}`. A lone listed path is not that keyword; it falls
+ *   through to the `{0}` checks below and refuses.
  * - Two or more tokens whose LAST token is exactly `{0}` (appearing
  *   nowhere else in the template) and whose every token in between is
  *   one of: `-e`, `-u`, `-x`, a short cluster of those
