@@ -242,12 +242,19 @@ function collectRunScalars(
  * own point of view. Applied to every name this rule compares -- a
  * built-in `DEFAULT_EXECUTED_ACTION_INPUTS` entry's `input`, a
  * `workflow.executedActionInputs`-parsed entry's `input`, and a workflow
- * step's own `with:` key -- so the match in `collectExecutedInputScalars`
- * below is class-correct (every casing/spacing of the same runner-level
- * name), not merely a lowercase special case.
+ * step's own `with:` key.
+ *
+ * The body is the expression `@actions/core` itself applies, and it folds
+ * UP on purpose. Unicode case folding is not symmetric: a dotless i or a
+ * long s upper-cases to the ASCII letters of `SCRIPT` but lower-cases to
+ * itself, so a lower-case fold would let `with: scr\u0131pt:` reach
+ * `INPUT_SCRIPT` on the runner while scanning clean here. JavaScript's
+ * `toUpperCase` applies the full case mappings, a superset of the simple
+ * mappings an invariant-culture upper-case applies, so where the two
+ * differ this rule matches more, never less.
  */
 function normalizeExecutedInputName(name: string): string {
-  return name.replace(/ /g, "_").toLowerCase();
+  return name.replace(/ /g, "_").toUpperCase();
 }
 
 /**

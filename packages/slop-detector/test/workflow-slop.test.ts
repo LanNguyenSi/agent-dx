@@ -661,6 +661,55 @@ describe("workflow-slop/run-expression", () => {
     expect(v).toHaveLength(1);
   });
 
+  // The runner and @actions/core fold input names UP. A dotless i and a
+  // long s upper-case to the ASCII letters of SCRIPT but lower-case to
+  // themselves, so a lower-case fold would miss both.
+  for (const [label, key] of [
+    ["a dotless i (U+0131)", "scr\u0131pt"],
+    ["a long s (U+017F)", "\u017Fcript"],
+  ] as const) {
+    it(`matches a with: key spelled with ${label} that upper-cases to SCRIPT`, () => {
+      const text = [
+        "on: push",
+        "jobs:",
+        "  j:",
+        "    steps:",
+        "      - uses: actions/github-script@v99",
+        "        with:",
+        `          ${key}: console.log(\${{ github.event.issue.title }})`,
+      ].join("\n");
+      const v = runViolations(text).filter(
+        (x) => x.ruleId === "workflow-slop/run-expression",
+      );
+      expect(v).toHaveLength(1);
+    });
+  }
+
+  it("does not match a Kelvin sign key (U+212A) against an ASCII-named entry: it lower-cases to k but does not upper-case to K", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: acme/run-code@v1",
+      "        with:",
+      "          to\u212Aen: console.log(${{ github.event.issue.title }})",
+    ].join("\n");
+    const cfg = mergeConfig({
+      workflow: { executedActionInputs: ["acme/run-code:token"] },
+    });
+    const scan = (t: string) =>
+      checkText(t, WORKFLOW_PATH, {
+        packs: allPacks,
+        config: cfg,
+        packFilter: ["workflow-slop"],
+      }).filter((x) => x.ruleId === "workflow-slop/run-expression");
+    expect(scan(text)).toHaveLength(0);
+    // Control: the same step with an ASCII k is reported, so the zero above
+    // comes from the Kelvin sign and not from a dead fixture.
+    expect(scan(text.replace(/\u212A/g, "k"))).toHaveLength(1);
+  });
+
   it("a config-supplied entry whose case differs from the workflow key still matches (acme/run-code:Code vs a workflow with: code:)", () => {
     const text = [
       "on: push",

@@ -25,11 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unlike `node20Majors`'s `owner/repo@vN` key, there is no version
   component, since the input is executed as code by every published
   version of a listed action. The input-name half is also matched
-  case-insensitively, with a literal space folded to an underscore, the
-  same way the Actions runner itself folds a `with:` input name into its
-  `INPUT_<NAME>` environment variable before `@actions/core`'s
-  `getInput` reads it: `with: script:`, `with: Script:`, and
-  `with: SCRIPT:` on `actions/github-script` all match the same entry.
+  case-insensitively, with a literal space folded to an underscore, by
+  the expression `@actions/core`'s `getInput` itself applies
+  (`name.replace(/ /g, "_").toUpperCase()`): `with: script:`,
+  `with: Script:`, and `with: SCRIPT:` on `actions/github-script` all
+  match the same entry. The fold goes up because Unicode case folding is
+  not symmetric: a key spelled with a dotless i (U+0131) or a long s
+  (U+017F) upper-cases to `SCRIPT`, reaches `INPUT_SCRIPT` on the runner,
+  and is matched here, where a lower-case fold would scan it clean.
   This scan only reads `.github/workflows/*.yml`/`.yaml`, like every
   workflow-slop rule: a listed action's input executed inside a
   composite action's own `action.yml` is a documented, deliberate blind

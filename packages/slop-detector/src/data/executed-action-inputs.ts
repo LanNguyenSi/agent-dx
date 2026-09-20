@@ -16,7 +16,7 @@
  * one major line, so there is no `@vN` component to this list the way
  * `node20-actions.ts` has one. The `input` name below is matched the
  * same way GitHub Actions itself folds a `with:` input name into its
- * `INPUT_<NAME>` environment variable (case-insensitive, a literal space
+ * `INPUT_<NAME>` environment variable (upper-cased, a literal space
  * interchangeable with an underscore; see
  * `normalizeExecutedInputName` in `packs/workflow-slop.ts`), so `script`
  * here also matches a workflow step written `with: Script:` or

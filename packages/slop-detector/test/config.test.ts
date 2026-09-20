@@ -318,4 +318,14 @@ describe("config", () => {
       /the input name cannot itself contain a colon/,
     );
   });
+
+  it("loadConfig rejects a workflow.executedActionInputs entry whose input name carries a literal space (written as an underscore instead)", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      file,
+      `workflow:\n  executedActionInputs:\n    - "acme/run-code:my input"\n`,
+    );
+    expect(() => loadConfig(file)).toThrow(/for a literal space/);
+  });
 });
