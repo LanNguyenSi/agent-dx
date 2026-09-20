@@ -10871,7 +10871,8 @@ note already warned against ("... repeats the byte-identical statement at
 a wholly separate site the citing sentence never names"): rewritten to name
 the enclosing function, test, or describe block at both the cited and the
 uncited site, re-verifying each rewritten verdict by reading both sites
-(one, the install-fence-mechanics.md `effortLine` entry, turned out to
+(one, the install-fence-mechanics.md idempotence entry for
+`test/init.test.ts` lines 129-142 with uncited line 2038, turned out to
 straddle two citations of the SAME test the same bundle sentence already
 names separately by a different anchor, which the rewrite states plainly
 rather than papering over). A mechanical floor

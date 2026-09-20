@@ -5966,9 +5966,9 @@ function findDuplicateCitations(
 // naming the array's own span (exactly the kind of drift-prone number this
 // file's own D31 convention avoids), the span is located by its own
 // literal markers and blanked out of any scan of a target file that
-// contains them -- so nothing written inside the array, present or
-// future, can ever count as a target-file occurrence, no matter which
-// file's content is being scanned or where the array moves inside it.
+// contains them -- so text written inside the array does not count as a
+// target-file occurrence, provided the declaration marker occurs exactly
+// twice in this file (this literal and the array; pinned by a test).
 function stripSelfAllowlistSpan(content: string): string {
   const startMarker = "const SIBLING_GUARD_BUNDLE_ALLOWLIST";
   // lastIndexOf, not indexOf: this function's own source is itself scanned
@@ -8377,7 +8377,7 @@ function siblingGuardClaimIsFalsifiable(
 // floor: reject the one known content-free tail verbatim. It is a floor,
 // not a full content check -- a differently-worded content-free claim
 // would still slip past it -- but it closes the exact regression class
-// review round 2 found (13 of 70 new claims matching this one template)
+// a review found (17 of the 70 new claims carried this literal tail)
 // without risking a false positive on a real, specific claim, since no
 // specific claim in this array or any future one has reason to end with
 // this exact sentence.
@@ -11755,5 +11755,54 @@ describe("run mode in the policy section and the README", () => {
       probes.indexOf("8. **Decide acceptance.**"),
     );
     expect(step).toContain(rule);
+  });
+});
+
+describe("citation-sibling-drift guard: the allowlist array's own span is excluded from target-file scans", () => {
+  // Built by concatenation on purpose: a literal copy of the marker in this
+  // block would itself become the last occurrence in this file and move the
+  // span `stripSelfAllowlistSpan` blanks.
+  const MARKER = ["const SIBLING_GUARD_", "BUNDLE_ALLOWLIST"].join("");
+
+  it("blanks an anchor quoted inside the array span, keeps the same text outside it, and preserves the line count", () => {
+    const synthetic = [
+      'const before = "quoted anchor text";',
+      `${MARKER}: Entry[] = [`,
+      "  {",
+      '    claim: "line 3 cites quoted anchor text",',
+      "  },",
+      "];",
+      'const after = "quoted anchor text";',
+      "",
+    ].join("\n");
+    const stripped = stripSelfAllowlistSpan(synthetic);
+    expect(stripped.split("\n")).toHaveLength(synthetic.split("\n").length);
+    const lines = stripped.split("\n");
+    expect(lines[0]).toContain("quoted anchor text");
+    expect(lines[6]).toContain("quoted anchor text");
+    expect(lines.slice(1, 6).every((l) => l === "")).toBe(true);
+    expect(stripped.match(/quoted anchor text/g)).toHaveLength(2);
+  });
+
+  it("content without the marker is returned unchanged", () => {
+    const plain = 'const x = "quoted anchor text";\n];\n';
+    expect(stripSelfAllowlistSpan(plain)).toBe(plain);
+  });
+
+  it("this file declares the marker exactly twice (the helper's own literal and the array), the precondition the span location rests on", () => {
+    const self = readFileSync(fileURLToPath(import.meta.url), "utf8");
+    expect(self.split(MARKER)).toHaveLength(3);
+    // And the span the helper blanks in this very file is the array: the
+    // stripped content no longer carries any entry's `claim:` key between
+    // the declaration's line and the closing bracket.
+    const stripped = stripSelfAllowlistSpan(self);
+    expect(stripped.split("\n")).toHaveLength(self.split("\n").length);
+    const declLine = self
+      .split("\n")
+      .findIndex(
+        (l) => l.startsWith(`${MARKER}:`) || l.startsWith(`${MARKER} `),
+      );
+    expect(declLine).toBeGreaterThan(-1);
+    expect(stripped.split("\n")[declLine]).toBe("");
   });
 });

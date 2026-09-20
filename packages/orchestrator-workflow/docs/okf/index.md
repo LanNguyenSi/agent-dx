@@ -120,8 +120,8 @@ file (see log.md's agent-dx 5801bc29 entry for the case this caught). Since
 fix-round-2, this is also mechanically enforced, not just a written
 convention: the guard blanks the allowlist array's own line span (located
 by its own markers, not a hand-maintained line number) out of any scan of a
-target file that contains it, so nothing written inside the array can ever
-manufacture a target-file occurrence.
+target file that contains it, so text inside the array does not manufacture
+a target-file occurrence (a test pins the one-declaration precondition).
 
 [log.md](log.md) itself is excluded from `ANCHOR_OKF_DOCS` and from both
 guards above, and its bundle-specific path-less continuation citation form
