@@ -24,10 +24,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case-insensitive, independent of the step's ref (tag, sha, branch) --
   unlike `node20Majors`'s `owner/repo@vN` key, there is no version
   component, since the input is executed as code by every published
-  version of a listed action. Extendable per repo via the new
+  version of a listed action. The input-name half is also matched
+  case-insensitively, with a literal space folded to an underscore, the
+  same way the Actions runner itself folds a `with:` input name into its
+  `INPUT_<NAME>` environment variable before `@actions/core`'s
+  `getInput` reads it: `with: script:`, `with: Script:`, and
+  `with: SCRIPT:` on `actions/github-script` all match the same entry.
+  This scan only reads `.github/workflows/*.yml`/`.yaml`, like every
+  workflow-slop rule: a listed action's input executed inside a
+  composite action's own `action.yml` is a documented, deliberate blind
+  spot, not covered here. Extendable per repo via the new
   `workflow.executedActionInputs` config list (`owner/repo:input`
   entries, additive on top of the default list, rejected at config-load
-  time if written with an `@ref`).
+  time if written with an `@ref`); the FIRST colon after `owner/repo`
+  separates it from the input name, so an input name can never itself
+  contain a colon, and a literal space in an input name must be written
+  as an underscore (matching folds it back).
 - Fail-closed fix in the same rule: a step whose `uses:` key is present
   but null (`uses:` with nothing after it) or an empty string
   (`uses: ""`) no longer counts as a `uses:` step for the `with:`

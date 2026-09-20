@@ -232,6 +232,25 @@ function collectRunScalars(
 }
 
 /**
+ * Fold an executed-action-input name the way the Actions runner and
+ * `@actions/core` fold it before an action ever sees a name comparison:
+ * the runner exports a step's `with:` values as `INPUT_<NAME>` using
+ * `Replace(' ', '_').ToUpperInvariant()`, and `core.getInput(name)` reads
+ * that variable via `INPUT_${name.replace(/ /g, "_").toUpperCase()}` --
+ * so `script`, `Script`, `SCRIPT`, and (were the input named with a
+ * space) `my input`/`my_input` are all the same input from the runner's
+ * own point of view. Applied to every name this rule compares -- a
+ * built-in `DEFAULT_EXECUTED_ACTION_INPUTS` entry's `input`, a
+ * `workflow.executedActionInputs`-parsed entry's `input`, and a workflow
+ * step's own `with:` key -- so the match in `collectExecutedInputScalars`
+ * below is class-correct (every casing/spacing of the same runner-level
+ * name), not merely a lowercase special case.
+ */
+function normalizeExecutedInputName(name: string): string {
+  return name.replace(/ /g, "_").toLowerCase();
+}
+
+/**
  * Every `${{ ... }}` expression location inside a `with:` input this
  * pack's executed-input list names as code an action executes at runtime
  * (see `data/executed-action-inputs.ts` and
@@ -252,6 +271,11 @@ function collectRunScalars(
  * reusable-workflow call, never resolves to an `owner/repo`
  * (`parseUsesValue` returns `undefined` for all three) and so can never
  * match, the same scope the default list's own entries are limited to.
+ * The input-name half is matched the same way, case- and
+ * space/underscore-insensitively (`normalizeExecutedInputName`), because
+ * that is how the Actions runner itself folds a `with:` input name before
+ * an action's own code ever reads it: `with: Script:` and `with: SCRIPT:`
+ * on `actions/github-script` are the same input as `with: script:`.
  *
  * Gated by the same fail-closed `usesStepValue` `collectRunScalars` uses:
  * a step whose `uses:` is null or empty is not a real `uses:` step, so
@@ -288,7 +312,8 @@ function collectExecutedInputScalars(
           (entry) =>
             normalizeMajorKey(entry.uses) ===
               normalizeMajorKey(parsedUses.ownerRepo) &&
-            entry.input === inputName,
+            normalizeExecutedInputName(entry.input) ===
+              normalizeExecutedInputName(inputName),
         );
         if (match) {
           out.push({

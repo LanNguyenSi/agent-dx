@@ -306,4 +306,16 @@ describe("config", () => {
     );
     expect(() => loadConfig(file)).toThrow(/owner\/repo:input/);
   });
+
+  it("loadConfig rejects a workflow.executedActionInputs entry whose input name carries a colon (the first colon after owner/repo is the separator, so a colon can never be part of the input name)", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      file,
+      `workflow:\n  executedActionInputs:\n    - "acme/run-code:my:input"\n`,
+    );
+    expect(() => loadConfig(file)).toThrow(
+      /the input name cannot itself contain a colon/,
+    );
+  });
 });

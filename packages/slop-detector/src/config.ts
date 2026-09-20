@@ -159,11 +159,22 @@ const AuditGateTemplateSchema = z
 // component: unlike `Node20MajorSchema`, this list matches independent of
 // ref, so a version suffix here can never match anything and is rejected
 // at config-load time, the same fail-fast treatment `AllowExpressionSchema`
-// gives a malformed `allowExpressions` entry.
+// gives a malformed `allowExpressions` entry. The FIRST colon after
+// `owner/repo` is the separator between it and the input name, so an
+// input name can never itself contain a colon (the input half's own
+// character class excludes `:` for exactly that reason -- there would be
+// no way to tell which colon separates from which is part of the name).
+// The input half also excludes a literal space: `workflow-slop/run-expression`
+// folds a matched input name case- and space/underscore-insensitively
+// (`normalizeExecutedInputName`, mirroring how the Actions runner itself
+// folds a `with:` input name into `INPUT_<NAME>`), so a config entry
+// names the input with an underscore where a workflow author might write
+// a literal space (`acme/run-code:my_input` still matches a workflow step
+// written `with: my input:`), and any casing matches any other.
 const ExecutedActionInputSchema = z.string().refine(
   (e) => /^[^/\s:@]+\/[^/\s:@]+:[^\s:@]+$/.test(e),
   (e) => ({
-    message: `workflow.executedActionInputs entries are "owner/repo:input" (e.g. "actions/github-script:script"), no "@ref" (matching is ref-independent), got "${e}"`,
+    message: `workflow.executedActionInputs entries are "owner/repo:input" (e.g. "actions/github-script:script"), no "@ref" (matching is ref-independent); the first colon after owner/repo separates it from the input name, so the input name cannot itself contain a colon or a space (write "_" for a literal space; matching folds case and space/underscore), got "${e}"`,
   }),
 );
 

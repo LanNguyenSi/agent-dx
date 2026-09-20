@@ -624,6 +624,101 @@ describe("workflow-slop/run-expression", () => {
     expect(v).toHaveLength(0);
   });
 
+  // ── executed-input name matching is case- and space/underscore-insensitive,
+  // mirroring the Actions runner's own INPUT_<NAME> fold ──────────────────
+
+  it("matches a with: key capitalised as Script (the Actions runner folds with: input names case-insensitively into INPUT_<NAME>)", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: actions/github-script@v99",
+      "        with:",
+      "          Script: console.log(${{ github.event.issue.title }})",
+    ].join("\n");
+    const v = runViolations(text).filter(
+      (x) => x.ruleId === "workflow-slop/run-expression",
+    );
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain("actions/github-script");
+    expect(v[0].message).toContain("executes as code");
+  });
+
+  it("matches a with: key fully upper-cased as SCRIPT the same way", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: actions/github-script@v99",
+      "        with:",
+      "          SCRIPT: console.log(${{ github.event.issue.title }})",
+    ].join("\n");
+    const v = runViolations(text).filter(
+      (x) => x.ruleId === "workflow-slop/run-expression",
+    );
+    expect(v).toHaveLength(1);
+  });
+
+  it("a config-supplied entry whose case differs from the workflow key still matches (acme/run-code:Code vs a workflow with: code:)", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: acme/run-code@v1",
+      "        with:",
+      "          code: ${{ steps.target.outputs.expected }}",
+    ].join("\n");
+    const cfg = mergeConfig({
+      workflow: { executedActionInputs: ["acme/run-code:Code"] },
+    });
+    const v = checkText(text, WORKFLOW_PATH, {
+      packs: allPacks,
+      config: cfg,
+      packFilter: ["workflow-slop"],
+    }).filter((x) => x.ruleId === "workflow-slop/run-expression");
+    expect(v).toHaveLength(1);
+  });
+
+  it("a space in the workflow with: key matches an underscore in the configured entry (acme/run-code:my_input vs a workflow with: 'my input:')", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: acme/run-code@v1",
+      "        with:",
+      "          my input: ${{ steps.target.outputs.expected }}",
+    ].join("\n");
+    const cfg = mergeConfig({
+      workflow: { executedActionInputs: ["acme/run-code:my_input"] },
+    });
+    const v = checkText(text, WORKFLOW_PATH, {
+      packs: allPacks,
+      config: cfg,
+      packFilter: ["workflow-slop"],
+    }).filter((x) => x.ruleId === "workflow-slop/run-expression");
+    expect(v).toHaveLength(1);
+  });
+
+  // ── scope: only .github/workflows/*.yml|.yaml is scanned; a composite
+  // action's own action.yml is a documented, deliberate blind spot ───────
+
+  it("negative control: a github-script step's with.script inside a composite action's own action.yml is not scanned (workflow-slop only reads .github/workflows/*.yml|.yaml, per WORKFLOW_FILE_RE)", () => {
+    const text = [
+      "runs:",
+      "  using: composite",
+      "  steps:",
+      "    - uses: actions/github-script@v99",
+      "      with:",
+      "        script: console.log(${{ github.event.issue.title }})",
+    ].join("\n");
+    const v = runViolations(text, "action.yml");
+    expect(v).toHaveLength(0);
+  });
+
   // ── null/empty uses: fail-closed for the with: exemption ────────────────
 
   it("fail-closed: a step whose uses: is present but null no longer grants the with: exemption (its run: is walked like a plain mapping)", () => {

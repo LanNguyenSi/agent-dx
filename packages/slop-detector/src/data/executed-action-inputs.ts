@@ -14,7 +14,13 @@
  * step's ref (a moving major tag, a pinned sha, a branch): the input is
  * executed as code by every published version of the action, not just
  * one major line, so there is no `@vN` component to this list the way
- * `node20-actions.ts` has one.
+ * `node20-actions.ts` has one. The `input` name below is matched the
+ * same way GitHub Actions itself folds a `with:` input name into its
+ * `INPUT_<NAME>` environment variable (case-insensitive, a literal space
+ * interchangeable with an underscore; see
+ * `normalizeExecutedInputName` in `packs/workflow-slop.ts`), so `script`
+ * here also matches a workflow step written `with: Script:` or
+ * `with: SCRIPT:`.
  *
  * Verification method for every entry below (durable, not point-in-time):
  * read the action's own source (`action.yml` plus the entry script it
