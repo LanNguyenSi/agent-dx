@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `workflow-slop/run-expression` now also scans one `with:` input a data
+  list names as code the action executes, BEFORE the rule's ordinary
+  `with:` exemption applies: previously every `with:` input was treated
+  as inert action data (a file path, a label), which is wrong for an
+  action whose input is itself a script that action runs. The default
+  list (`src/data/executed-action-inputs.ts`) has one entry:
+  `actions/github-script` -> `script`, verified by reading that action's
+  own source (`dist/index.js` passes `with.script` to `new
+  AsyncFunction(...)` and invokes it). A `${{ ... }}` inside a listed
+  input is now flagged with a message naming the input as executed code,
+  scanned through the same allowlist `run:` uses (so the documented
+  non-attacker-controllable contexts stay clean there too); every other
+  `with:` input of the same step, and this input name on an action not on
+  the list, stay exempt as before. Matching is `owner/repo` only,
+  case-insensitive, independent of the step's ref (tag, sha, branch) --
+  unlike `node20Majors`'s `owner/repo@vN` key, there is no version
+  component, since the input is executed as code by every published
+  version of a listed action. Extendable per repo via the new
+  `workflow.executedActionInputs` config list (`owner/repo:input`
+  entries, additive on top of the default list, rejected at config-load
+  time if written with an `@ref`).
+- Fail-closed fix in the same rule: a step whose `uses:` key is present
+  but null (`uses:` with nothing after it) or an empty string
+  (`uses: ""`) no longer counts as a `uses:` step for the `with:`
+  exemption (or for the new executed-input match above). Previously the
+  exemption only checked for the *presence* of a `uses:` key, so a
+  malformed or placeholder `uses:` still silenced everything under its
+  `with:` block, including a `run:` key placed there. A step whose
+  `uses:` is a real, non-empty value (including a `./local` path or a
+  `docker://` reference this pack cannot resolve to an `owner/repo`)
+  keeps the ordinary exemption; only the null/empty case changes.
 - `review-slop` now recognises `reviewed`, `reviews`, and `reviewing` as
   review-process context in the `round-reference` word form, bare `R` token,
   and severity-letter `finding-id` gates. Previously those gates accepted

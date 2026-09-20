@@ -152,11 +152,27 @@ const AuditGateTemplateSchema = z
     }),
   );
 
+// `workflow.executedActionInputs` entries are the exact `owner/repo:input`
+// match key `workflow-slop/run-expression` compares a `uses:` step's
+// resolved `owner/repo` plus a `with:` input name against (see
+// `packs/workflow-slop.ts` and `data/executed-action-inputs.ts`). No `@vN`
+// component: unlike `Node20MajorSchema`, this list matches independent of
+// ref, so a version suffix here can never match anything and is rejected
+// at config-load time, the same fail-fast treatment `AllowExpressionSchema`
+// gives a malformed `allowExpressions` entry.
+const ExecutedActionInputSchema = z.string().refine(
+  (e) => /^[^/\s:@]+\/[^/\s:@]+:[^\s:@]+$/.test(e),
+  (e) => ({
+    message: `workflow.executedActionInputs entries are "owner/repo:input" (e.g. "actions/github-script:script"), no "@ref" (matching is ref-independent), got "${e}"`,
+  }),
+);
+
 const WorkflowConfigSchema = z.object({
   allowExpressions: z.array(AllowExpressionSchema).optional(),
   node20Majors: z.array(Node20MajorSchema).optional(),
   node20MajorsIgnore: z.array(Node20MajorSchema).optional(),
   auditGateTemplates: z.array(AuditGateTemplateSchema).optional(),
+  executedActionInputs: z.array(ExecutedActionInputSchema).optional(),
 });
 
 // `review.allowPaths` is matched against a path already made relative to
@@ -258,6 +274,7 @@ export function defaultConfig(): ResolvedConfig {
       node20Majors: [],
       node20MajorsIgnore: [],
       auditGateTemplates: [],
+      executedActionInputs: [],
     },
     review: { allow: [], allowPaths: [...DEFAULT_REVIEW_ALLOW_PATHS] },
   };
@@ -290,6 +307,7 @@ export function mergeConfig(file: ConfigFile): ResolvedConfig {
       node20Majors: file.workflow?.node20Majors ?? [],
       node20MajorsIgnore: file.workflow?.node20MajorsIgnore ?? [],
       auditGateTemplates: file.workflow?.auditGateTemplates ?? [],
+      executedActionInputs: file.workflow?.executedActionInputs ?? [],
     },
     review: {
       allow: file.review?.allow ?? [],
