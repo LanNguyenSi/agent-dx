@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.38.1] - 2026-09-20
+
 - Rule 1 of `scripts/check-release-changelogs.mjs` now accepts hyphens in
   build-metadata identifiers, so `1.0.0+build-1` can match its release
   heading. Build metadata follows SemVer's identifier grammar: underscores

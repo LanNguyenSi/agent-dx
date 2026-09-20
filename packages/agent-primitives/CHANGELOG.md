@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-20
+
 - `probe`'s phpunit zero-tests reading gains a dedicated, additive
   `RefusalReason`: a baseline whose `phpunitZeroTestsVerdict` reads
   `"ambiguous"` (a mid-suite `exit()`/`die()` with no result report at
