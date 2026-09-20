@@ -30,41 +30,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   never tests that passed, and pinned against the real
   `phpunit-no-results-green.txt`/`phpunit-no-results-red.txt` captures
   (both report `attempted: 2`). The progress-counter pattern itself is
-  now anchored to the whole line, not merely to its end (`^[A-Za-z.]*
+  now anchored to the whole line, not merely to its end (`^[.FEWIRSDN]*
   [ \t]*(\d+) \/ (\d+) \([ \t]*\d+%\)[ \t]*$` in place of a bare
   `\b\d+ \/ \d+ \(\s*\d+%\)\s*$`): a line that merely ENDS in the
   `N / M (P%)` shape (a failure message or fatal-error line reporting
   some unrelated fraction) no longer counts as PHPUnit's own completion
-  evidence, a documented limit this closes. A first version of that
-  anchoring shipped with an enumerated seven-character marker alphabet
-  (`.FEWIRS`, PHPUnit 9's own set) instead of the open letter class
-  above, and went stale immediately against a real PHPUnit 11.5.56
-  capture already in this suite: `phpunit-warnings-deprecations-notices-executed.txt`'s
-  own `WDN ... 3 / 3 (100%)` progress row (a real run raising a
-  warning, a deprecation and a notice, all three genuinely executed)
-  carries PHPUnit 10/11's `D`/`N` markers, outside that alphabet, so the
-  row stopped being recognized as PHPUnit's own completion evidence: a
-  baseline cut off after such a row read `"ambiguous"` where the
-  pre-anchoring pattern read `"not_zero"`, which turned into a probe
-  REFUSAL, and a `--no-results` run with `D`/`N` markers lost its
-  `Summary.attempted` entirely. Measured across every one of this
-  suite's phpunit captures, the enumerated-alphabet pattern and the
-  fixed one agree on every single line except that one row (the
-  alphabet fails to match it; both the pre-anchoring bare pattern and
-  the fixed one match it). Rather than widen the alphabet by two letters
-  and wait for PHPUnit's next printer change, the fix drops the
-  enumeration for a character class open to any ASCII letter plus `.`:
-  every marker measured across both majors fits it, and so does any
-  further single-letter marker a future PHPUnit printer might add,
-  without this detector needing to be told its name; what still keeps a
-  real message or fatal-error line out is the structural shape around
-  the class (nothing else on the line ahead of the padding), not the
-  specific letters the class allows. A new directory-derived positive
-  control test asserts every counter-shaped line across every captured
-  phpunit fixture is matched by this pattern (empty allowlist today,
-  with its own mechanism test proving that allowlist cannot be silently
-  neutralised); reverted to the `.FEWIRS` alphabet, this control fails
-  on exactly the `WDN` row above. Separately, the horizontal padding
+  evidence, a documented limit this closes. The marker prefix is a closed
+  alphabet of the markers measured in real captures: `.FEWIRS` (PHPUnit
+  9.6.36 and 11.5.56) plus `D` and `N` (PHPUnit 11.5.56,
+  `phpunit-warnings-deprecations-notices-executed.txt`'s own
+  `WDN ... 3 / 3 (100%)` row). Two earlier revisions of this same
+  unreleased change were measured and dropped: the seven-character
+  alphabet without `D`/`N` failed to match that real row (a baseline cut
+  off after it read `"ambiguous"` where the pre-anchoring pattern read
+  `"not_zero"`, a probe refusal, and a `--no-results` run lost its
+  `Summary.attempted`); an open letter class matched it but also matched
+  a line of one ordinary word plus the counter (`Aborted 5 / 9 ( 55%)`),
+  turning a report-less output from `"ambiguous"` into `"not_zero"` and
+  letting such a line override `Summary.attempted`. The closed alphabet
+  fails in the safe direction (an unknown marker means a refusal, not a
+  false pass) and cannot go stale unnoticed: a new directory-derived
+  positive control asserts every counter-shaped line across every
+  captured phpunit fixture is matched by this pattern (empty allowlist
+  today, with its own mechanism test proving that allowlist cannot be
+  silently neutralised), and negative cases pin that a single-word line
+  ending in the counter shape is neither completion evidence nor an
+  `attempted` source. Separately, the horizontal padding
   around the counter (`\s*` in the first anchored version) is now
   `[ \t]*`: `\s` also matches a newline, which under this pattern's `m`
   flag let a match starting on a marker line swallow the line break and

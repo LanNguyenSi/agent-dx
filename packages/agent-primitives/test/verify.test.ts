@@ -4438,12 +4438,11 @@ describe("phpunitDetector: PROGRESS_COUNTER_LINE positive control (every counter
   it("every LOOSE_COUNTER_LINE-shaped line in every captured phpunit fixture also matches PROGRESS_COUNTER_LINE, unless allowlisted", () => {
     // Directory-derived, reusing the same exhaustiveness-tested list the
     // disjointness pins above use, so a newly captured fixture is
-    // covered automatically. This is the test that would have caught
-    // the stale `.FEWIRS` alphabet before this change: reverted to that
+    // covered automatically. With `D`/`N` dropped from the marker
     // alphabet, `phpunit-warnings-deprecations-notices-executed.txt`'s
     // `WDN ... 3 / 3 (100%)` row is LOOSE_COUNTER_LINE-shaped but not
-    // PROGRESS_COUNTER_LINE-shaped (the `D`/`N` marker characters are
-    // outside that alphabet), so this assertion fails against it.
+    // PROGRESS_COUNTER_LINE-shaped, so this assertion fails: a capture
+    // carrying a marker the alphabet does not know is caught here.
     const gaps: string[] = [];
     for (const name of CAPTURED_PHPUNIT_FIXTURES) {
       gaps.push(
@@ -4585,11 +4584,10 @@ describe("phpunitDetector: a suppressed result report is not a missing one (PHPU
     // tests, one each raising a warning/deprecation/notice). Both
     // halves are real PHPUnit output; only their combination -- a
     // `--no-results` run against that particular suite -- was never
-    // actually captured. This is exactly the shape the stale `.FEWIRS`
-    // alphabet (round 1 of this change) could not read at all: with
-    // that alphabet `PROGRESS_COUNTER_LINE` never matched the `WDN` row,
-    // so `progressCounterAttempted` returned `undefined` and this
-    // suppressed-report run got no `attempted` field, same as one with
+    // actually captured. Without `D`/`N` in the marker alphabet
+    // `PROGRESS_COUNTER_LINE` does not match the `WDN` row, so
+    // `progressCounterAttempted` returns `undefined` and this
+    // suppressed-report run gets no `attempted` field, same as one with
     // no progress row in it at all.
     const green = readCaptured("phpunit-no-results-green");
     const wdnRow =
@@ -4779,6 +4777,36 @@ describe("phpunitDetector: unreadable-result tightening mutants, each pinned by 
     ].join("\n");
     expect(output).toMatch(/\d+ \/ \d+ \(\s*\d+%\)\s*$/m);
     expect(zeroTests(output)).toBe("ambiguous");
+  });
+
+  it("the marker alphabet is closed: a single ordinary word ahead of the counter is neither completion evidence nor an attempted source (SYNTHETIC)", () => {
+    // A one-word line has no colon, digit or inner space to keep it out,
+    // so only the closed marker alphabet does. With an open letter class
+    // each of these lines reads a report-less output as "not_zero" and
+    // the last one overrides the real row's attempted count.
+    const banner = [
+      "PHPUnit 11.5.56 by Sebastian Bergmann and contributors.",
+      "",
+      "Runtime:       PHP 8.3.33",
+      "",
+    ].join("\n");
+    for (const line of [
+      "Aborted 5 / 9 ( 55%)",
+      "Error 3 / 3 (100%)",
+      "Done. 12 / 12 (100%)",
+      "PHP 1 / 1 (100%)",
+      "progress 2 / 2 (100%)",
+    ]) {
+      expect(PROGRESS_COUNTER_LINE.test(line)).toBe(false);
+      expect(zeroTests(`${banner}\n${line}\n`)).toBe("ambiguous");
+    }
+    const green = readCaptured("phpunit-no-results-green");
+    const parsed = phpunitDetector.parse({
+      output: `${green.replace(/\n*$/, "")}\nbatch 99 / 99 (100%)\n`,
+      command: "vendor/bin/phpunit",
+      exitCode: 0,
+    });
+    expect(parsed.summary.attempted).toBe(2);
   });
 
   it("the counter's padding is horizontal-only: a marker line and the counter line below it do not bleed together into one match across the line break (SYNTHETIC, pins the [ \\t]* fix)", () => {

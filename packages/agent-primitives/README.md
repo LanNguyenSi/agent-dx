@@ -3017,25 +3017,21 @@ unrelated fraction, say) was read as completion evidence it never was.
 It is now anchored to the WHOLE line, from its very start: a genuine
 progress row is nothing but zero or more marker characters, then
 horizontal padding, then the counter, so requiring the line to start
-that way (`^[A-Za-z.]*[ \t]*(\d+) \/ (\d+) \([ \t]*\d+%\)[ \t]*$`) is
+that way (`^[.FEWIRSDN]*[ \t]*(\d+) \/ (\d+) \([ \t]*\d+%\)[ \t]*$`) is
 what tells a real row apart from a line that merely ends in the same
 shape, pinned by a synthetic test (`test/verify.test.ts`; no real
 capture needs more than 63 tests to exercise the row wrap this anchor
-still accepts). The marker prefix is a character class (letters and
-`.`), not an enumerated alphabet: an earlier revision of this pattern
-listed exactly the seven characters PHPUnit 9's printer emits
-(`.FEWIRS`) and went stale the moment a real row carried PHPUnit 11's
-`D` (deprecation) and `N` (notice) markers too (measured real:
-`phpunit-warnings-deprecations-notices-executed.txt`'s `WDN ... 3 / 3
-(100%)` row, PHPUnit 11.5.56), silently falling back to
-`ambiguous`/`generic` for a shape this detector already knew how to
-read. The class is deliberately open to any ASCII letter plus `.`
-rather than a second, still-finite enumeration, since it is the
-structural shape around it (nothing else on the line before the
-padding, no digit, space, colon or other punctuation) that keeps a real
-message or fatal-error line out, not the specific letters allowed
-in the marker run; a future PHPUnit printer adding another single-letter
-marker is read correctly without this file needing to name it. The
+still accepts). The marker prefix is a closed alphabet, the markers
+measured in real captures: `.FEWIRS` under PHPUnit 9.6.36 and 11.5.56,
+plus `D` (deprecation) and `N` (notice) under PHPUnit 11.5.56
+(`phpunit-warnings-deprecations-notices-executed.txt`'s `WDN ... 3 / 3
+(100%)` row). It is closed on purpose: an open letter class would also
+accept a line made of one ordinary word and the counter (`Aborted 5 / 9
+( 55%)`) as completion evidence. A marker the alphabet does not know
+leaves its row unrecognized, so the run reads as not completed (for
+`probe`, a refusal) rather than as a false pass, and a test over every
+captured phpunit fixture fails as soon as a capture with an unknown
+marker is added, so the alphabet cannot go stale unnoticed. The
 padding on both sides of the counter is horizontal only (`[ \t]*`,
 never `\s`, which also matches a newline and let a marker line and the
 counter line below it bleed together into one match under the `m`

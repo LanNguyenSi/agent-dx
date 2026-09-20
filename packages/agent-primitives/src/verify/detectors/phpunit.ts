@@ -156,37 +156,24 @@ const PHPUNIT_BANNER =
  */
 const TIME_MEMORY_LINE = /^Time: \S+, Memory: /m;
 /**
- * The character class a PHPUnit progress marker is drawn from, ahead of
- * the `N / M (P%)` counter on a full row: measured real markers are
- * `.` pass, `F` failure, `E` error, `W` warning, `I` incomplete, `R`
- * risky, `S` skipped (PHPUnit 9.6.36 and 11.5.56 alike), plus `D`
- * deprecation and `N` notice (PHPUnit 11.5.56 only -- captured real:
+ * The closed alphabet a PHPUnit progress marker is drawn from, ahead of
+ * the `N / M (P%)` counter on a full row. Measured real markers: `.`
+ * pass, `F` failure, `E` error, `W` warning, `I` incomplete, `R` risky,
+ * `S` skipped (PHPUnit 9.6.36 and 11.5.56 alike), plus `D` deprecation
+ * and `N` notice (PHPUnit 11.5.56 only, captured real:
  * `phpunit-warnings-deprecations-notices-executed.txt`'s `WDN ... 3 / 3
- * (100%)` row). An earlier version of this pattern enumerated exactly
- * those first seven characters (`.FEWIRS`) and NOT the two added under
- * PHPUnit 10/11: that alphabet went stale the moment a real `D`/`N` row
- * reached it, silently falling back to `generic`/`ambiguous` for a
- * shape this detector was already built to recognize -- a false
- * refusal for `probe` and a missing `Summary.attempted` for `verify`,
- * on every real deprecation- or notice-bearing progress row, not a
- * hypothetical one. This class is deliberately NOT a third enumeration
- * of specific letters either, for the same reason the first one went
- * stale: it accepts any run of ASCII letters plus `.`, which covers
- * every marker measured across both majors captured here and any
- * further single-letter marker a future PHPUnit printer adds, without
- * this file needing to be told its name. What keeps a non-progress line
- * (a failure message, a PHP fatal error) from matching is not this
- * class -- restricting it further would only buy back the same
- * staleness risk -- but the structural shape `PROGRESS_COUNTER_LINE`
- * requires around it: a real message line contains a space, a digit, a
- * colon or other punctuation ahead of any `N / M (P%)`-shaped tail it
- * might happen to end in, none of which this class accepts, so such a
- * line still fails to match the row from its own start (see
- * `PROGRESS_COUNTER_LINE`'s own docblock and
- * `test/verify.test.ts`'s "unreadable-result tightening mutants" cases,
- * which pin exactly that fatal-error shape).
+ * (100%)` row).
+ *
+ * Closed on purpose. An open letter class also accepts a line made of
+ * one ordinary word and the counter (`Aborted 5 / 9 ( 55%)`), which
+ * would count as completion evidence PHPUnit never gave. A marker this
+ * alphabet does not know makes its row unrecognized, so the run reads as
+ * not completed (for `probe`, a refusal), the safe direction; and the
+ * alphabet cannot go stale silently, because `test/verify.test.ts`'s
+ * directory-derived positive control fails as soon as a capture with an
+ * unknown marker is added.
  */
-const PROGRESS_MARKER_CLASS = "A-Za-z.";
+const PROGRESS_MARKER_CLASS = ".FEWIRSDN";
 /**
  * PHPUnit's own progress counter,
  * `^[<marker class>]*[ \t]*(N) \/ (M) \([ \t]*P%\)[ \t]*$`: the `N / M
@@ -214,8 +201,8 @@ const PROGRESS_MARKER_CLASS = "A-Za-z.";
  * -- a documented limit before that change, closed and pinned: see
  * `test/verify.test.ts`'s "unreadable-result tightening mutants" describe
  * block). The progress characters themselves are read but not required
- * to be a SPECIFIC one (`..`, `.F`, `WDN`, any mix of
- * `PROGRESS_MARKER_CLASS`): a suppressed-report run prints exactly the
+ * to be a SPECIFIC one (`..`, `.F`, `WDN`, any mix of the
+ * `PROGRESS_MARKER_CLASS` alphabet): a suppressed-report run prints exactly the
  * same counter whether its tests passed or failed (captured real:
  * `phpunit-no-results-green.txt`'s `..` and
  * `phpunit-no-results-red.txt`'s `.F`, the same `2 / 2 (100%)` tail on
