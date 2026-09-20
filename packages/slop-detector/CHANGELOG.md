@@ -92,6 +92,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   generation, a cache layer) still fires as a known, accepted false
   positive; `review.allow` (or `review.allowPaths`) is the escape
   hatch for such a line, not a smarter gate.
+- `package.json`: a new `exports` subpath, `slop-detector/packs/workflow-slop`,
+  next to the existing pack subpaths; the `yaml` dependency floor moves
+  from `^2.5.0` to `^2.8.3`.
 
 ### Added
 
