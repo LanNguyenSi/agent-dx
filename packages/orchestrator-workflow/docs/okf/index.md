@@ -90,21 +90,38 @@ call site whose anchor text also matches that identifier's own definition
 site, far outside any window a nearby sibling citation would expose, is
 exactly the class rule (b) cannot see. `SIBLING_GUARD_WINDOW` is the shared
 boundary both rules read: rule (b) looks inside it, rule (c) looks outside
-it, so no target line can ever trigger both. Any of the three can be
+it, so no target line can ever trigger both at once. That partition governs
+which rule a duplicate falls into once a citation is a candidate for one of
+them; it is not full joint coverage: a sibling-free citation (rule (b)'s own
+precondition unmet) whose anchor also occurs, unclaimed, WITHIN the window
+is reported by neither rule (fix-round-2, agent-dx 5801bc29, review finding
+L2) -- a known, accepted gap, pinned by a negative-control fixture in the
+guard's own test. Any of the three can be
 allowlisted in the guard's own test. An allowlist entry is accepted only on
 an independent review classification of the hit, never on the reading of
 whoever wrote or re-pointed the citation, and it records both the geometry
 it was cleared against (the uncited line, or the doc line the repeat sits
 on) and a one-sentence claim a reviewer can falsify by reading exactly those
-lines; a test re-checks that recorded geometry against the current files,
-so an exemption whose situation changed fails instead of quietly covering a
-different one. The classification itself belongs in [log.md](log.md), with
+lines, naming what the citing sentence describes and why the cited line, not
+the uncited sibling, is its evidence; a test re-checks that recorded
+geometry against the current files, so an exemption whose situation changed
+fails instead of quietly covering a different one, and a second, separate
+check (fix-round-2, review finding M2) rejects a claim carrying the one
+known content-free template ("... repeats the byte-identical statement at a
+wholly separate site the citing sentence never names") outright, since real
+geometry alone is not the same as a checkable reason. The classification
+itself belongs in [log.md](log.md), with
 the round that produced it. Rule (c)'s own allowlist entries additionally
 paraphrase rather than quote a target line's exact text whenever that
 target is `test/docs-consistency.test.ts` itself: quoting it verbatim would
 add another occurrence of that text to the very file the guard reads,
 possibly tripping the guard against an unrelated citation into the same
-file (see log.md's agent-dx 5801bc29 entry for the case this caught).
+file (see log.md's agent-dx 5801bc29 entry for the case this caught). Since
+fix-round-2, this is also mechanically enforced, not just a written
+convention: the guard blanks the allowlist array's own line span (located
+by its own markers, not a hand-maintained line number) out of any scan of a
+target file that contains it, so nothing written inside the array can ever
+manufacture a target-file occurrence.
 
 [log.md](log.md) itself is excluded from `ANCHOR_OKF_DOCS` and from both
 guards above, and its bundle-specific path-less continuation citation form

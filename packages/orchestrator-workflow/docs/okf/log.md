@@ -1540,7 +1540,7 @@
   exists on both sides, the unanchored-citation brake's
   (`test/docs-consistency.test.ts:3547#"in-scope citations (sanity: the brake itself did not go blind"`)
   and this round's new floor for the log.md guard
-  (`test/docs-consistency.test.ts:10108#"anchored full citations of docs/okf/log.md"`);
+  (`test/docs-consistency.test.ts:10256#"anchored full citations of docs/okf/log.md"`);
   run `npx vitest run test/docs-consistency.test.ts -t "did not go
   blind"` and read both figures off the passing tests' own names. The
   round-3 entry's and bullet's counts are struck, not corrected.
@@ -1555,15 +1555,15 @@
   a newline inside the anchor by construction, so the text has to be
   re-joined the way the wrap split it, first. Both scanners now consume
   one shared helper
-  (`test/docs-consistency.test.ts:5612#"function citationScanParagraphs("`)
+  (`test/docs-consistency.test.ts:5627#"function citationScanParagraphs("`)
   that joins each paragraph's lines with the single space a hard wrap
   replaced and maps every joined offset back to its physical line, so
   findings, allowlist geometry and failure messages still name real doc
   lines. Pinned both ways by their own fixtures: a wrapped full citation
   with a stale anchor
-  (`test/docs-consistency.test.ts:9956#"is still checked (a stale wrapped anchor fails)"`)
+  (`test/docs-consistency.test.ts:10104#"is still checked (a stale wrapped anchor fails)"`)
   and a wrapped continuation form
-  (`test/docs-consistency.test.ts:9972#"that wraps across a hard line break is still flagged"`),
+  (`test/docs-consistency.test.ts:10120#"that wraps across a hard line break is still flagged"`),
   both of which the round-3 per-line scan passed unseen. Checked rather
   than argued: with the round-2 tree's own `log.md` put in place (`git
   show 0cbded8:packages/orchestrator-workflow/docs/okf/log.md`), this
@@ -1581,7 +1581,7 @@
   excused every citation after it and the guard still reported clean. The
   shared helper above carries the single fence pass and the throw, so
   there is one copy now; an unbalanced-fence fixture
-  (`test/docs-consistency.test.ts:9993#"throws instead of silently excusing every citation"`)
+  (`test/docs-consistency.test.ts:10141#"throws instead of silently excusing every citation"`)
   pins the loud failure, and the computed floor named above pins
   non-vacuity on the real file.
 
@@ -1605,15 +1605,15 @@
   outside the repository and was read and anchor-checked against it; and
   its bespoke bare-name map bound a bare basename to this package's own
   file even where the repository root carries a file of that name. Now
-  (`test/docs-consistency.test.ts:9760#"function resolveLogCitationPath("`):
+  (`test/docs-consistency.test.ts:9908#"function resolveLogCitationPath("`):
   a cited path carrying a `..` segment is rejected before any lookup,
   containment under the repository root is asserted on the fallback
   anyway, and a bare name that collides with a root file is reported
   ambiguous with both candidates named, so the entry has to write the
   path out in full. The collision set is computed from the map and the
   disk, not hand-listed. Fixtures for both
-  (`test/docs-consistency.test.ts:10007#"escaping the repository with a"`,
-  `test/docs-consistency.test.ts:10052#"is reported ambiguous, not silently bound"`).
+  (`test/docs-consistency.test.ts:10155#"escaping the repository with a"`,
+  `test/docs-consistency.test.ts:10200#"is reported ambiguous, not silently bound"`).
   Residual, named rather than closed: the deeper repo-wide basename
   ambiguity okf-kit reports (a basename that exists in more than one
   package, `SKILL.md`) is still bound unconditionally by
@@ -1675,7 +1675,7 @@
   inherited, never written on its own line) while every existing
   assertion stays green on the smaller set. Closed two ways: a
   source-span pin
-  (`test/docs-consistency.test.ts:9623#"resolution sites stay wired to extractSiblingGuardCitations"`)
+  (`test/docs-consistency.test.ts:9771#"resolution sites stay wired to extractSiblingGuardCitations"`)
   asserting each of the three sites'
   own source still calls `extractSiblingGuardCitations(` and carries no
   bare `matchAll(ANCHOR_CITATION_RE)` loop, and a synthetic-doc-set
@@ -1693,12 +1693,12 @@
   excluded from `ANCHOR_OKF_DOCS`, from both guards above, and from
   okf-kit's own citation grammar, nothing reads it. Halt-rule redesign
   (D-037) rather than another rephrase: a third guard,
-  `test/docs-consistency.test.ts:9698#"log.md's own citations resolve, and it carries no path-less continuation citation form"`,
+  `test/docs-consistency.test.ts:9846#"log.md's own citations resolve, and it carries no path-less continuation citation form"`,
   checks `log.md` itself. Its resolver
   (`resolveLogCitationPath`) extends `anchorScopeResolve` with the
   package's own CHANGELOG/README/INSTALL-AGENT and its docs/okf siblings,
   plus a real-file-on-disk fallback. Its checker
-  (`test/docs-consistency.test.ts:9817#"function checkLogCitations("`)
+  (`test/docs-consistency.test.ts:9965#"function checkLogCitations("`)
   enforces two rules: every full, anchored citation must resolve (target
   exists, anchor text somewhere inside the cited range), and any anchored
   path-less continuation form is forbidden outright, since a log entry
@@ -1856,7 +1856,7 @@
   `test/docs-consistency.test.ts:3023#"const ANCHOR_CONTINUATION_CITATION_RE ="`
   (anchor group required, so a bare digit range in ordinary prose is
   never mistaken for a continuation) and `governingPathByParagraph` in
-  `test/docs-consistency.test.ts:5679#"function extractSiblingGuardCitations("`,
+  `test/docs-consistency.test.ts:5694#"function extractSiblingGuardCitations("`,
   resolving a continuation against the nearest preceding full citation's
   own cited path in the same paragraph -- the same BINDING RULE okf-kit's
   own short-form/continuation citations use in `citations-resolve.ts`,
@@ -10759,21 +10759,35 @@ whose anchor also matches its target's definition site) and the
 mirror-image continuation-citation case.
 
 Options measured against the real bundle (paragraph-scoped design, window
-20, all eight `docs/okf` module docs): (i) per-target anchor uniqueness
-(lengthen or narrow each hit's anchor until it is unique file-wide outside
-its own range) touches the citing bundle doc's own hard-wrapped prose for
-every hit, and a changed line LENGTH risks a manual re-wrap that shifts
-every later citation in that same doc, which then needs its own re-point
-and re-verification; not attempted at this volume. (ii) a widened window
-does not apply: `SIBLING_GUARD_WINDOW` is the class's own defining
-boundary ("farther than SIBLING_GUARD_WINDOW"), not a tunable knob for
-this rule specifically, and rule (b) already owns the inside-the-window
-half. (iii) allowlisting touches only `test/docs-consistency.test.ts`
-(a data array), never a bundle doc's own line count, so it carries no
-re-wrap or cross-citation re-point risk at all: the lowest-maintenance
-option, chosen for every hit measured.
+20, all six `docs/okf` module docs; `index.md` and this file carry no
+`sources:` and are excluded from `ANCHOR_OKF_DOCS`, so neither is a module
+doc in this count): (i) per-target anchor uniqueness (lengthen or narrow
+each hit's anchor until it is unique file-wide outside its own range)
+touches the citing bundle doc's own hard-wrapped prose for every hit, and a
+changed line LENGTH risks a manual re-wrap that shifts every later citation
+in that same doc, which then needs its own re-point and re-verification;
+measured against the 70 hits below, using the cited line's own full text
+(trimmed) as the candidate longer anchor, 36 of 70 would already be unique
+file-wide in their target that way, but the other 34 repeat even their
+full cited line elsewhere (a shared assertion or push shape), so those
+would additionally need a narrower RANGE, not just a longer anchor;
+not attempted at this volume given the re-wrap risk on the 36 alone.
+(ii) a widened window does not apply: `SIBLING_GUARD_WINDOW` is the class's
+own defining boundary ("farther than SIBLING_GUARD_WINDOW"), not a tunable
+knob for this rule specifically, and rule (b) already owns the
+inside-the-window half. (iii) allowlisting touches only
+`test/docs-consistency.test.ts` (a data array), never a bundle doc's own
+line count, so it carries no re-wrap or cross-citation re-point risk at
+all: the lowest-maintenance option, chosen for every hit measured. Its own
+recurring cost: each entry pins the target file's own absolute line
+numbers (nine distinct source files across the 70 entries), so an
+unrelated edit to any of those nine files that shifts lines can silently
+invalidate an entry's recorded geometry; the "entry no longer matches a
+finding" and "recorded uncited line no longer carries the anchor text"
+sanity checks below exist specifically to surface that drift as a failing
+test rather than a silently stale exemption.
 
-Measured 70 real, unclaimed distant-duplicate-anchor hits across the eight
+Measured 70 real, unclaimed distant-duplicate-anchor hits across the six
 module docs (the tracker's own audit had counted 82 anchored full citations
 plus four path-less continuations by a different, unmeasured method; this
 guard's own paragraph-scoped, doc-independent claiming counts 70 real hits,
@@ -10781,13 +10795,16 @@ including the tracker's own named example and its path-less continuation
 sibling at `init.ts:863-863#"composeClaudeAgentVariant("`). All 70 are
 independently reviewed and allowlisted below (kind `distant-duplicate-
 anchor`), each with a geometry-checked, falsifiable claim naming the
-enclosing `it`/`describe` block or the literal line content at both the
-cited and the uncited site: install-fence-mechanics.md 20,
-model-preselection.md 24, operator-install-and-registry.md 7,
-review-gate-and-waivers.md 1, run-state-lifecycle-and-markers.md 6,
-subagent-contracts-superset.md 12 (N=70 total; every entry's doc, real
-target, range and doc line is listed in the allowlist array itself, not
-repeated here).
+enclosing function/`it`/`describe` block at both the cited and the uncited
+site: install-fence-mechanics.md 19, model-preselection.md 23,
+operator-install-and-registry.md 7, review-gate-and-waivers.md 1,
+run-state-lifecycle-and-markers.md 6, subagent-contracts-superset.md 14
+(N=70 total, re-derived by script -- see the fix-round-2 addendum below for
+the command, its output, and the independent isolated-worktree
+cross-check). Every entry's own doc/kind/real/range/doc-line fields are
+listed in the allowlist array itself
+(`SIBLING_GUARD_BUNDLE_ALLOWLIST`, filtered to `kind:
+"distant-duplicate-anchor"`), not repeated here as 70 rows.
 
 Fifteen of the 70 hits target `test/docs-consistency.test.ts` itself (this
 file, self-cited from paragraphs elsewhere in the bundle, mostly repeated
@@ -10832,3 +10849,46 @@ are unchanged, only the allowlist-cleared distant-duplicate-anchor hits and
 `index.md`'s Maintenance section gained a rule (c) paragraph; both
 `index.md` and this file carry no `sources:` frontmatter and are excluded
 from `ANCHOR_OKF_DOCS`, so neither is itself re-stamped.
+
+Fix-round-2 (review round 1 findings) addendum. The per-doc breakdown above
+(19/23/7/1/6/14) replaces an earlier, hand-typed 20/24/7/1/6/12 that
+mis-stated two doc counts and, together with "the eight module docs"
+phrasing above (also now corrected to six), contradicted this same entry's
+own later statement that `index.md` and this file are excluded from
+`ANCHOR_OKF_DOCS`. Re-derived two ways: a script that walks the array's AST
+and counts `kind: "distant-duplicate-anchor"` entries per `doc` field
+(exact command and output pasted in the implementer's round-2 report, not
+repeated here per this entry's own no-totals convention), and an
+independent isolated-worktree cross-check that neutralises
+`siblingGuardFindingMatchesAllowlist` to always return `false` (so every
+real finding surfaces as "unallowlisted" in the test's own failure output,
+bypassing the array's matching logic entirely) and counts the raw findings
+per doc from that output; both methods agree with each other and with the
+array. Thirteen of the 70 claims (the reviewer's count; a stricter,
+independently re-run census in this round found seventeen matching the
+literal template) were the content-free boilerplate the array's own header
+note already warned against ("... repeats the byte-identical statement at
+a wholly separate site the citing sentence never names"): rewritten to name
+the enclosing function, test, or describe block at both the cited and the
+uncited site, re-verifying each rewritten verdict by reading both sites
+(one, the install-fence-mechanics.md `effortLine` entry, turned out to
+straddle two citations of the SAME test the same bundle sentence already
+names separately by a different anchor, which the rewrite states plainly
+rather than papering over). A mechanical floor
+(`siblingGuardClaimHasSubstance`) now rejects any claim carrying that exact
+boilerplate tail, checked over the live array the same way falsifiability
+already was, pinned by its own bundle-independent fixture (a rejected
+boilerplate claim and an accepted specific claim sharing the same
+geometry). A second mechanical addition
+(`stripSelfAllowlistSpan`) blanks the allowlist array's own line span out
+of any scan of a target file that contains it, closing the fifteen
+self-target entries' residual risk (a future claim quoting a real anchor
+verbatim would otherwise manufacture a new occurrence purely by being
+written down); it locates the span by its own literal markers rather than
+a hand-maintained line number. Both additions are pinned by mutation
+probes (d)/(e) in the round-2 implementation summary. The docblock and
+`index.md` now also state the partition residual: a sibling-free citation
+whose anchor also occurs, unclaimed, WITHIN the window is reported by
+neither rule (b) nor rule (c). Re-stamped the same four docs again (their
+shared source, this file, moved again); see their own frontmatter for the
+exact re-verification timestamp.

@@ -5482,6 +5482,21 @@ describe("the reviewer checklist items mirrored in this table still carry their 
 //       window" around each citation's own range, so no line can ever
 //       trigger both.
 //
+//       That partition governs which of the two rules a duplicate falls
+//       into once a citation is a candidate for one of them; it is not a
+//       claim of full joint coverage. Residual (fix-round-2, agent-dx
+//       5801bc29, review finding L2): a sibling-free citation (no other
+//       citation to that file in the same paragraph, so rule (b)'s own
+//       `hasSibling` precondition fails) whose anchor text also occurs,
+//       unclaimed, WITHIN SIBLING_GUARD_WINDOW of its own range is
+//       reported by NEITHER rule -- (b) never runs on it for want of a
+//       sibling, and (c) only ever looks farther than the window. This is
+//       a known, accepted gap, not an error in the partition statement
+//       above; see the inside-window negative-control fixture below ("an
+//       occurrence inside SIBLING_GUARD_WINDOW is not reported by rule
+//       (c)") for the case pinned against a regression that widens rule
+//       (c) to also cover it.
+//
 // SIBLING_GUARD_WINDOW is 20, widened from the round-1 value of 10 (round 2
 // D-010) once a real bundle case was measured to fall outside it: two
 // genuinely distinct sibling notes sharing identical text 20 lines apart
@@ -5938,6 +5953,40 @@ function findDuplicateCitations(
   return findings;
 }
 
+// Fix-round-2 (agent-dx 5801bc29, review finding L1): 15 entries in the
+// allowlist below target this very file (`test/docs-consistency.test.ts`),
+// so rules (b) and (c) scanning that target also scan the array's own
+// `claim` strings, living in the same file they describe. A claim that
+// quoted a real anchor's exact text verbatim would manufacture a brand
+// new, unclaimed occurrence of that text purely by being written down --
+// the array's own header comment already avoids this by paraphrasing
+// rather than quoting (and `anchorKey` carrying a hash instead of the
+// text, for the same reason), but nothing mechanical enforced it before
+// this round. Rather than a second, hand-maintained line-number citation
+// naming the array's own span (exactly the kind of drift-prone number this
+// file's own D31 convention avoids), the span is located by its own
+// literal markers and blanked out of any scan of a target file that
+// contains them -- so nothing written inside the array, present or
+// future, can ever count as a target-file occurrence, no matter which
+// file's content is being scanned or where the array moves inside it.
+function stripSelfAllowlistSpan(content: string): string {
+  const startMarker = "const SIBLING_GUARD_BUNDLE_ALLOWLIST";
+  // lastIndexOf, not indexOf: this function's own source is itself scanned
+  // when `content` is this file, and its own `startMarker` string literal
+  // is a first, earlier match for its own text -- the real declaration is
+  // always the LAST occurrence, since nothing legitimately repeats it
+  // after the array itself.
+  const startIdx = content.lastIndexOf(startMarker);
+  if (startIdx === -1) return content;
+  const closeMarker = "\n];\n";
+  const closeIdx = content.indexOf(closeMarker, startIdx);
+  if (closeIdx === -1) return content;
+  const spanEnd = closeIdx + closeMarker.length;
+  const span = content.slice(startIdx, spanEnd);
+  const blanked = span.replace(/[^\n]/g, "");
+  return content.slice(0, startIdx) + blanked + content.slice(spanEnd);
+}
+
 // Rule (b).
 function findWrongSiblingAnchors(
   citations: SiblingGuardCitation[],
@@ -5949,7 +5998,7 @@ function findWrongSiblingAnchors(
   const fileLines = (real: string): string[] => {
     let lines = fileLinesCache.get(real);
     if (!lines) {
-      lines = readTargetFile(real).split("\n");
+      lines = stripSelfAllowlistSpan(readTargetFile(real)).split("\n");
       fileLinesCache.set(real, lines);
     }
     return lines;
@@ -6027,7 +6076,7 @@ function findDistantDuplicateAnchors(
   const fileLines = (real: string): string[] => {
     let lines = fileLinesCache.get(real);
     if (!lines) {
-      lines = readTargetFile(real).split("\n");
+      lines = stripSelfAllowlistSpan(readTargetFile(real)).split("\n");
       fileLinesCache.set(real, lines);
     }
     return lines;
@@ -7206,7 +7255,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     paragraphLine: 77,
     uncitedLines: [368],
     claim:
-      "line 488 cites `frontmatter.push(effortLine);`; uncited 368 repeats the byte-identical statement at a wholly separate site the citing sentence never names.",
+      "the sentence describes `effortLine` being passed into `composeOpencodeAgentVariant` as a parameter; line 488 is that function's own effortLine push, while uncited 368 is the byte-identical push inside `composeOpencodeAgent`, the default (non-variant) composer the sentence does not name.",
   },
   {
     doc: "install-fence-mechanics.md",
@@ -7242,7 +7291,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     paragraphLine: 291,
     uncitedLines: [51],
     claim:
-      "line 97 cites `report.conflicted.push(path);`; uncited 51 repeats the byte-identical statement at a wholly separate site the citing sentence never names.",
+      "the sentence describes `upsertMarkerSection`'s own conflict path for a broken or duplicated marker pair; line 97 is that function's `report.conflicted.push`, while uncited 51 is the byte-identical push inside `installFile`, the general kit-file conflict path for a user-edited file, which this sentence does not describe.",
   },
   {
     doc: "install-fence-mechanics.md",
@@ -7254,7 +7303,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     paragraphLine: 312,
     uncitedLines: [92],
     claim:
-      "line 129 cites `routing?: HarnessRouting;`; uncited 92 repeats the byte-identical statement at a wholly separate site the citing sentence never names.",
+      "the sentence describes `Manifest`'s own persisted `routing` field; line 129 is that field's declaration inside the `Manifest` interface, while uncited 92 is the byte-identical declaration inside `InitOptions`, the install-input type the sentence does not name.",
   },
   {
     doc: "install-fence-mechanics.md",
@@ -7302,7 +7351,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     paragraphLine: 336,
     uncitedLines: [2038],
     claim:
-      "line 142 cites the `a second run changes no file` test (`expect(report.updated).toEqual([]);`); uncited 2038 repeats the byte-identical statement at a wholly separate site the citing sentence never names.",
+      "the sentence's first clause describes the plain (non-tiers) second run's no-op, correctly anchored at the `a second run changes no file` test's own `report.updated` assertion (line 142); uncited 2038 is the byte-identical assertion inside the `a second run with tiers=true changes no file (idempotent)` test, which the same bullet's second clause already cites separately, by its own anchor, at test/init.test.ts:2022-2033.",
   },
   {
     doc: "install-fence-mechanics.md",
@@ -7314,7 +7363,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     paragraphLine: 336,
     uncitedLines: [2354],
     claim:
-      "line 2033 cites the `a second run with tiers=true changes no file (idempotent)` test (`expect([...after.keys()].sort()).toEqual([...before.keys()].sort());`); uncited 2354 repeats the byte-identical statement at a wholly separate site the citing sentence never names.",
+      "the sentence describes the `tiers: true` second-run no-op; line 2033 is that assertion inside the `a second run with tiers=true changes no file (idempotent)` test, while uncited 2354 is the byte-identical assertion inside the separate `sets a pin, is a byte-for-byte no-op on repeat...` test, which covers the `pin` option, not tiers, and the sentence does not name.",
   },
   {
     doc: "install-fence-mechanics.md",
@@ -7398,7 +7447,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     paragraphLine: 352,
     uncitedLines: [1148],
     claim:
-      'line 2581 cites the `harnesses-stickiness gate is immune to an all-unknown-names…` test (`expect(result.stdout).toContain("installed for: claude");`); uncited 1148 repeats the byte-identical statement at a wholly separate site the citing sentence never names.',
+      "the sentence describes the harnesses-stickiness F1 regression test asserting a live claude install is not stuck to templates-only; line 2581 is that test's own stdout assertion, while uncited 1148 is the byte-identical assertion inside the unrelated `init --yes runs non-interactively and installs` smoke test in the `cli smoke` describe block, which the sentence does not name.",
   },
   {
     doc: "model-preselection.md",
@@ -7422,7 +7471,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     paragraphLine: 123,
     uncitedLines: [414],
     claim:
-      'line 337 cites `frontmatter.push("disallowedTools: Edit, Write, NotebookEdit");`; uncited 414 repeats the byte-identical statement at a wholly separate site the citing sentence never names.',
+      "the sentence describes `composeClaudeAgent`'s read-only-roles push; line 337 is that function's own push, while uncited 414 is the byte-identical push inside `composeClaudeAgentVariant`, the tier-variant sibling covered separately under \"Composition\" below, which this sentence does not name.",
   },
   {
     doc: "model-preselection.md",
@@ -7434,7 +7483,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     paragraphLine: 132,
     uncitedLines: [414],
     claim:
-      'line 337 cites `frontmatter.push("disallowedTools: Edit, Write, NotebookEdit");`; uncited 414 repeats the byte-identical statement at a wholly separate site the citing sentence never names.',
+      "the sentence names the read-only roles getting `disallowedTools:` right after `effort:` inside `composeClaudeAgent`; line 337 is that function's own push, while uncited 414 is the byte-identical push inside `composeClaudeAgentVariant`, the tier-variant sibling this sentence does not name.",
   },
   {
     doc: "model-preselection.md",
@@ -7458,7 +7507,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     paragraphLine: 154,
     uncitedLines: [491],
     claim:
-      'line 371 cites `frontmatter.push("permission:", " edit: deny");`; uncited 491 repeats the byte-identical statement at a wholly separate site the citing sentence never names.',
+      "the sentence describes `composeOpencodeAgent`'s read-only-roles push (`permission:`/`edit: deny`); line 371 is that function's own push, while uncited 491 is the byte-identical push inside `composeOpencodeAgentVariant`, the tier-variant sibling covered separately under \"Composition\" below, which this sentence does not name.",
   },
   {
     doc: "model-preselection.md",
@@ -7506,7 +7555,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     paragraphLine: 267,
     uncitedLines: [337],
     claim:
-      'line 414 cites `frontmatter.push("disallowedTools: Edit, Write, NotebookEdit");`; uncited 337 repeats the byte-identical statement at a wholly separate site the citing sentence never names.',
+      "the sentence describes `composeClaudeAgentVariant`'s own read-only-roles push; line 414 is that function's own push, while uncited 337 is the byte-identical push inside `composeClaudeAgent`, the default (non-variant) composer covered separately under \"Per-harness frontmatter behavior\" above, which this sentence does not name.",
   },
   {
     doc: "model-preselection.md",
@@ -7518,7 +7567,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     paragraphLine: 271,
     uncitedLines: [371],
     claim:
-      'line 491 cites `frontmatter.push("permission:", " edit: deny");`; uncited 371 repeats the byte-identical statement at a wholly separate site the citing sentence never names.',
+      "the sentence describes `composeOpencodeAgentVariant`'s own read-only-roles push; line 491 is that function's own push, while uncited 371 is the byte-identical push inside `composeOpencodeAgent`, the default (non-variant) composer this sentence does not name.",
   },
   {
     doc: "model-preselection.md",
@@ -7614,7 +7663,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     paragraphLine: 418,
     uncitedLines: [414],
     claim:
-      'line 337 cites `frontmatter.push("disallowedTools: Edit, Write, NotebookEdit");`; uncited 414 repeats the byte-identical statement at a wholly separate site the citing sentence never names.',
+      "the sentence names `composeClaudeAgent` as the function 0.22.0 gave a pinned `effort:` line; line 337 is that function's own read-only-roles push, included in the cited range, while uncited 414 is the byte-identical push inside `composeClaudeAgentVariant`, the tier-variant sibling this sentence does not name.",
   },
   {
     doc: "model-preselection.md",
@@ -7626,7 +7675,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     paragraphLine: 419,
     uncitedLines: [491],
     claim:
-      'line 371 cites `frontmatter.push("permission:", " edit: deny");`; uncited 491 repeats the byte-identical statement at a wholly separate site the citing sentence never names.',
+      "the sentence names `composeOpencodeAgent` as the function 0.22.0 gave a pinned effort line; line 371 is that function's own read-only-roles push, included in the cited range, while uncited 491 is the byte-identical push inside `composeOpencodeAgentVariant`, the tier-variant sibling this sentence does not name.",
   },
   {
     doc: "model-preselection.md",
@@ -7686,7 +7735,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     paragraphLine: 179,
     uncitedLines: [1496],
     claim:
-      "line 1023 cites `const upserted = upsertOperatorTarget(`; uncited 1496 repeats the byte-identical statement at a wholly separate site the citing sentence never names.",
+      "the sentence describes the `apply` command registering its target; line 1023 is `apply`'s own `upsertOperatorTarget` call, while uncited 1496 is the byte-identical call inside the `adopt` command, a different command the sentence does not name.",
   },
   {
     doc: "operator-install-and-registry.md",
@@ -7698,7 +7747,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     paragraphLine: 233,
     uncitedLines: [282],
     claim:
-      "line 966 cites `const report = runInit({`; uncited 282 repeats the byte-identical statement at a wholly separate site the citing sentence never names.",
+      "the sentence describes the pin gate sitting above `apply`'s own `runInit` call; line 966 is `apply`'s own call, while uncited 282 is the byte-identical call inside the plain `init` command, a different command with no pin gate that the sentence does not name.",
   },
   {
     doc: "operator-install-and-registry.md",
@@ -7722,7 +7771,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     paragraphLine: 240,
     uncitedLines: [1155],
     claim:
-      'line 818 cites `"No operator setup found; run `orchestrator-workflow setup` first.",`; uncited 1155 repeats the byte-identical statement at a wholly separate site the citing sentence never names.',
+      "the sentence describes `apply`'s own absent-operator-manifest error path; line 818 is that command's console.error call, while uncited 1155 is the byte-identical message inside `doctor`'s own no-operator-manifest error path, a different command the sentence does not name.",
   },
   {
     doc: "operator-install-and-registry.md",
@@ -7830,7 +7879,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     paragraphLine: 187,
     uncitedLines: [50],
     claim:
-      "line 100 cites the `the existing unkeyed run-base regex still matches exactly o…` test (`const matches = [...goalTemplate.matchAll(runBaseRe)];`); uncited 50 repeats the byte-identical statement at a wholly separate site the citing sentence never names.",
+      "the sentence describes the keyed-marker-noninterference test (`the existing unkeyed run-base regex still matches exactly once...`); lines 99-100 are that test's own assertion, while uncited 50 is the byte-identical assertion inside the earlier, more general `00-goal.md has exactly one run-base marker, defaulting to TODO` test, which predates the keyed marker and does not test non-interference, a test the sentence does not name.",
   },
   {
     doc: "run-state-lifecycle-and-markers.md",
@@ -7960,9 +8009,9 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     end: 4806,
     anchorKey: "2e18ea4a",
     paragraphLine: 511,
-    uncitedLines: [6209],
+    uncitedLines: [6258],
     claim:
-      "line 4806 cites the test that the installed implementer prompt carries the same regression-signal consequence; uncited 6209 is unrelated fixture prose inside the separate shape-3 sibling-guard fixture test that happens to share a short word run with that consequence sentence, which this sentence does not name.",
+      "line 4806 cites the test that the installed implementer prompt carries the same regression-signal consequence; uncited 6258 is unrelated fixture prose inside the separate shape-3 sibling-guard fixture test that happens to share a short word run with that consequence sentence, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
@@ -8310,6 +8359,35 @@ function siblingGuardClaimIsFalsifiable(
   return true;
 }
 
+// Fix-round-2 (agent-dx 5801bc29, review finding M2): every check above
+// verifies that a claim's line/range tokens point at real geometry, but
+// none of them checks that the claim says anything a reviewer could not
+// already infer from the entry's own recorded fields. A content-free
+// template -- "line N cites `X`; uncited M repeats the byte-identical
+// statement at a wholly separate site the citing sentence never names."
+// -- names real lines and satisfies every conjunct above while adding
+// zero information: it restates the mechanical fact that is already true
+// of every distant-duplicate-anchor finding by definition (the anchor
+// text matched twice, that is why the finding exists at all), never
+// saying what the CITING SENTENCE describes or why the cited line, not
+// the uncited sibling, is that sentence's evidence -- the exact shape the
+// array's own docblock (above) requires. `siblingGuardClaimIsFalsifiable`
+// cannot detect this by parsing tokens (a specific claim and a boilerplate
+// one can share the same token shape), so this is a separate, minimal
+// floor: reject the one known content-free tail verbatim. It is a floor,
+// not a full content check -- a differently-worded content-free claim
+// would still slip past it -- but it closes the exact regression class
+// review round 2 found (13 of 70 new claims matching this one template)
+// without risking a false positive on a real, specific claim, since no
+// specific claim in this array or any future one has reason to end with
+// this exact sentence.
+const SIBLING_GUARD_CLAIM_BOILERPLATE_TAIL =
+  "repeats the byte-identical statement at a wholly separate site the citing sentence never names.";
+
+function siblingGuardClaimHasSubstance(claim: string): boolean {
+  return !claim.includes(SIBLING_GUARD_CLAIM_BOILERPLATE_TAIL);
+}
+
 describe("the citation-sibling-drift guard reports zero (unallowlisted) findings on the current bundle", () => {
   const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
   const readRepoFile = (relPath: string): string =>
@@ -8342,6 +8420,22 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
         ),
         `${entry.doc} (${entry.real}:${entry.start}-${entry.end}) claim names ` +
           `none of its own recorded lines or a real sibling citation (own lines: ${siblingGuardEntryOwnLines(entry).join(", ")}): ${entry.claim}`,
+      ).toBe(true);
+    }
+  });
+
+  // Fix-round-2 (agent-dx 5801bc29, review finding M2): geometry-falsifiable
+  // is not the same as content-bearing -- see `siblingGuardClaimHasSubstance`
+  // above. Enforced here, over the real array, so a future content-free
+  // claim of this exact known shape fails the suite the same way a
+  // geometry-unfalsifiable one already does.
+  it("no allowlist entry's claim carries the known content-free boilerplate tail (a real sibling site, restated, is not evidence)", () => {
+    for (const entry of SIBLING_GUARD_BUNDLE_ALLOWLIST) {
+      expect(
+        siblingGuardClaimHasSubstance(entry.claim),
+        `${entry.doc} (${entry.real}:${entry.start}-${entry.end}) claim is the ` +
+          `content-free boilerplate template, naming no enclosing function, ` +
+          `test, or describe block at either site: ${entry.claim}`,
       ).toBe(true);
     }
   });
@@ -8384,6 +8478,60 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
       siblingGuardClaimIsFalsifiable(namesItsOwnLine, noDoc, noResolve),
       "the same length, now naming one of its own recorded lines (20), " +
         "must pass",
+    ).toBe(true);
+  });
+
+  // Fix-round-2 (agent-dx 5801bc29, review finding M2), bundle-independent:
+  // a dedicated fixture for `siblingGuardClaimHasSubstance`, for the same
+  // reason the previous fixture exists for `siblingGuardClaimIsFalsifiable`
+  // -- the real array above no longer contains a boilerplate entry (this
+  // round rewrote all 17), so nothing in it would catch a mutant that
+  // neutralises the new check back to always-true. Both fixture claims
+  // below name the same own lines (12, 20), the same shape
+  // `siblingGuardClaimIsFalsifiable` requires, so this isolates the new
+  // substance check from the geometry checks it sits alongside.
+  it("a claim carrying the known content-free boilerplate tail is rejected even though it names real lines; a specific claim naming both sites' enclosing context is accepted", () => {
+    const boilerplate: SiblingGuardAllowlistEntry = {
+      doc: "fixture-doc.md",
+      kind: "distant-duplicate-anchor",
+      real: "fixture-target.ts",
+      start: 10,
+      end: 12,
+      anchorKey: "deadbeef",
+      paragraphLine: 5,
+      uncitedLines: [20],
+      claim:
+        "line 12 cites `frontmatter.push(fixture);`; uncited 20 repeats the byte-identical statement at a wholly separate site the citing sentence never names.",
+    };
+    const specific: SiblingGuardAllowlistEntry = {
+      ...boilerplate,
+      claim:
+        "the sentence describes fixtureCompose's own read-only-roles push; line 12 is that function's own push, while uncited 20 is the byte-identical push inside fixtureComposeVariant, the tier-variant sibling this sentence does not name.",
+    };
+    const noDoc = "";
+    const noResolve = (): string | undefined => undefined;
+
+    // `siblingGuardClaimIsFalsifiable` alone (the geometry check) passes
+    // BOTH fixtures: the boilerplate claim names the entry's own real
+    // lines (12, 20) just as validly as the specific one does. Substance
+    // is a genuinely separate axis, checked by a sibling function, not by
+    // extending this one.
+    expect(
+      siblingGuardClaimIsFalsifiable(boilerplate, noDoc, noResolve),
+      "the boilerplate claim names real own lines (12, 20), so the geometry check alone must still pass it",
+    ).toBe(true);
+    expect(
+      siblingGuardClaimIsFalsifiable(specific, noDoc, noResolve),
+      "the specific claim names the same own lines as the boilerplate one and must also pass the geometry check",
+    ).toBe(true);
+
+    expect(
+      siblingGuardClaimHasSubstance(boilerplate.claim),
+      "the boilerplate tail alone carries no information beyond the entry's own recorded fields and must be rejected",
+    ).toBe(false);
+    expect(
+      siblingGuardClaimHasSubstance(specific.claim),
+      "a claim naming both sites' enclosing function carries real information and must be accepted",
     ).toBe(true);
   });
 
