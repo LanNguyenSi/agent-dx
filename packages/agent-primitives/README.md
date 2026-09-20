@@ -2406,7 +2406,7 @@ above.
 | `pre_failed` | present | present | `--pre` exited non-zero during the baseline phase |
 | `baseline_failed` | present | present | the baseline test itself exited non-zero, or reported no exit code at all (it timed out, or a signal killed it), or `--pass-regex` was given and its pattern did not match the baseline's own output |
 | `target_changed_during_baseline` | present | present | the baseline run rewrote the target (a formatter, a codegen step) before any mutation |
-| `no_tests_executed` | present | present | the baseline's own output shows a known test runner (vitest, node's built-in `--test`, phpunit) executed nothing, whatever its exit code -- for phpunit, only where the output itself STATES that (its own `No tests executed!` line, or a tally whose executed count derives to zero without depending on a version the output does not state); see the zero-tests paragraphs above |
+| `no_tests_executed` | present | present | the baseline's own output shows a known test runner (vitest, node's built-in `--test`, phpunit) executed nothing, whatever its exit code -- for phpunit, this BASELINE-phase refusal fires only where the output itself STATES that (its own `No tests executed!` line, or a tally whose executed count derives to zero without depending on a version the output does not state); see the zero-tests paragraphs above. A phpunit MUTANT run whose own output is merely unreadable (the `"ambiguous"` shape that gets `zero_tests_ambiguous` at the baseline phase, the row below) still reports this same `no_tests_executed` string, not that one, deliberately: see the "An `exit()`/`die()` call mid-suite is read as an UNREADABLE result" paragraph above for why the two phases read differently here. |
 | `zero_tests_ambiguous` | present | present | phpunit only: the baseline's own output cannot be read for whether any test executed at all -- either its result report is missing altogether (a mid-suite `exit()`/`die()`, banner present but no `OK (`/marker/tally/progress counter/post-run `Time:` line), or it states no PHPUnit version banner and its tally carries a version-dependent count that decides the question with no version to read it against; see the zero-tests paragraphs above |
 | `baseline_evidence_not_matched` | present | present | `--require-baseline-evidence <regex>` was given and did not match the baseline's own output |
 | `pycache_isolation_failed` | present | present | this run has at least one Python (`.py`) target and creating its isolated `PYTHONPYCACHEPREFIX` directory failed (an unwritable or full log directory); see "Python bytecode cache" above |
@@ -3015,12 +3015,34 @@ to a progress row, so any line that merely ENDED in the `N / M (P%)`
 shape (a failure message or a PHP fatal-error line reporting some
 unrelated fraction, say) was read as completion evidence it never was.
 It is now anchored to the WHOLE line, from its very start: a genuine
-progress row is nothing but the seven progress-marker characters
-(`.FEWIRS`) followed by the counter, so requiring the line to start that
-way (`^[.FEWIRS]*\s*(\d+) \/ (\d+) \(\s*\d+%\)\s*$`) is what tells a
-real row apart from a line that merely ends in the same shape, pinned by
-a synthetic test (`test/verify.test.ts`; no real capture needs more than
-63 tests to exercise the row wrap this anchor still accepts).
+progress row is nothing but zero or more marker characters, then
+horizontal padding, then the counter, so requiring the line to start
+that way (`^[A-Za-z.]*[ \t]*(\d+) \/ (\d+) \([ \t]*\d+%\)[ \t]*$`) is
+what tells a real row apart from a line that merely ends in the same
+shape, pinned by a synthetic test (`test/verify.test.ts`; no real
+capture needs more than 63 tests to exercise the row wrap this anchor
+still accepts). The marker prefix is a character class (letters and
+`.`), not an enumerated alphabet: an earlier revision of this pattern
+listed exactly the seven characters PHPUnit 9's printer emits
+(`.FEWIRS`) and went stale the moment a real row carried PHPUnit 11's
+`D` (deprecation) and `N` (notice) markers too (measured real:
+`phpunit-warnings-deprecations-notices-executed.txt`'s `WDN ... 3 / 3
+(100%)` row, PHPUnit 11.5.56), silently falling back to
+`ambiguous`/`generic` for a shape this detector already knew how to
+read. The class is deliberately open to any ASCII letter plus `.`
+rather than a second, still-finite enumeration, since it is the
+structural shape around it (nothing else on the line before the
+padding, no digit, space, colon or other punctuation) that keeps a real
+message or fatal-error line out, not the specific letters allowed
+in the marker run; a future PHPUnit printer adding another single-letter
+marker is read correctly without this file needing to name it. The
+padding on both sides of the counter is horizontal only (`[ \t]*`,
+never `\s`, which also matches a newline and let a marker line and the
+counter line below it bleed together into one match under the `m`
+flag): pinned by a synthetic test asserting the matched text stays on
+the counter's own line, since a bare `.test()` cannot tell a same-line
+match from a two-line one when the counter line alone, with no leading
+markers, is already a valid match by itself.
 
 **`verify` now warns on a hollow phpunit pass, too.** Before this, only
 `probe`'s zero-tests guard (via `phpunitZeroTestsVerdict`) caught a

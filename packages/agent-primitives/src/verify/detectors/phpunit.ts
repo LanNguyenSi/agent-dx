@@ -156,18 +156,44 @@ const PHPUNIT_BANNER =
  */
 const TIME_MEMORY_LINE = /^Time: \S+, Memory: /m;
 /**
- * The seven characters PHPUnit's default progress printer emits, one per
- * test, ahead of the `N / M (P%)` counter on a full row: `.` pass, `F`
- * failure, `E` error, `W` warning, `I` incomplete, `R` risky, `S`
- * skipped (measured identical under 9.6.36 and 11.5.56).
+ * The character class a PHPUnit progress marker is drawn from, ahead of
+ * the `N / M (P%)` counter on a full row: measured real markers are
+ * `.` pass, `F` failure, `E` error, `W` warning, `I` incomplete, `R`
+ * risky, `S` skipped (PHPUnit 9.6.36 and 11.5.56 alike), plus `D`
+ * deprecation and `N` notice (PHPUnit 11.5.56 only -- captured real:
+ * `phpunit-warnings-deprecations-notices-executed.txt`'s `WDN ... 3 / 3
+ * (100%)` row). An earlier version of this pattern enumerated exactly
+ * those first seven characters (`.FEWIRS`) and NOT the two added under
+ * PHPUnit 10/11: that alphabet went stale the moment a real `D`/`N` row
+ * reached it, silently falling back to `generic`/`ambiguous` for a
+ * shape this detector was already built to recognize -- a false
+ * refusal for `probe` and a missing `Summary.attempted` for `verify`,
+ * on every real deprecation- or notice-bearing progress row, not a
+ * hypothetical one. This class is deliberately NOT a third enumeration
+ * of specific letters either, for the same reason the first one went
+ * stale: it accepts any run of ASCII letters plus `.`, which covers
+ * every marker measured across both majors captured here and any
+ * further single-letter marker a future PHPUnit printer adds, without
+ * this file needing to be told its name. What keeps a non-progress line
+ * (a failure message, a PHP fatal error) from matching is not this
+ * class -- restricting it further would only buy back the same
+ * staleness risk -- but the structural shape `PROGRESS_COUNTER_LINE`
+ * requires around it: a real message line contains a space, a digit, a
+ * colon or other punctuation ahead of any `N / M (P%)`-shaped tail it
+ * might happen to end in, none of which this class accepts, so such a
+ * line still fails to match the row from its own start (see
+ * `PROGRESS_COUNTER_LINE`'s own docblock and
+ * `test/verify.test.ts`'s "unreadable-result tightening mutants" cases,
+ * which pin exactly that fatal-error shape).
  */
-const PROGRESS_MARKER_CHARS = ".FEWIRS";
+const PROGRESS_MARKER_CLASS = "A-Za-z.";
 /**
- * PHPUnit's own progress counter, `^[<markers>]*\s*(N) \/ (M) \(\s*P%\)\s*$`:
- * the `N / M (P%)` tail it prints at the right edge of every FULL
- * progress row (measured identical under 9.6.36 and 11.5.56: `..` padded
- * out to `2 / 2 (100%)`, and padded inside the parentheses to `( 33%)`
- * for a one-digit percentage, hence the `\s*` there). Its presence means
+ * PHPUnit's own progress counter,
+ * `^[<marker class>]*[ \t]*(N) \/ (M) \([ \t]*P%\)[ \t]*$`: the `N / M
+ * (P%)` tail it prints at the right edge of every FULL progress row
+ * (measured identical under 9.6.36 and 11.5.56: `..` padded out to `2 /
+ * 2 (100%)`, and padded inside the parentheses to `( 33%)` for a
+ * one-digit percentage, hence the padding there). Its presence means
  * PHPUnit itself stated how many of its tests it had reached by then,
  * which a run that died before finishing its first progress row never
  * does -- the other half of the completion evidence
@@ -176,26 +202,40 @@ const PROGRESS_MARKER_CHARS = ".FEWIRS";
  * the source of `Summary.attempted` for a suppressed-report run whose
  * real tally cannot be read at all.
  *
- * Anchored to the WHOLE line, from its very start (`^[<markers>]*\s*`,
- * not merely `\b` ahead of the digits): a genuine progress row is
- * nothing BUT zero or more of the seven marker characters, then the
- * padding spaces, then the counter, so requiring the line to start that
- * way is what tells a real row apart from a line that merely ENDS in
- * the same shape (a failure message or a PHP fatal-error line reporting
- * some unrelated `N / M (P%)`-shaped fraction, which the earlier `\b`-only
- * anchor could not tell apart from PHPUnit's own row and read as
- * completion evidence it never was -- a documented limit before this
- * change, now closed and pinned: see `test/verify.test.ts`). The
- * progress characters themselves are read but not required to be a
- * SPECIFIC one (`..`, `.F`, `WWW`, any mix): a suppressed-report run
- * prints exactly the same counter whether its tests passed or failed
- * (captured real: `phpunit-no-results-green.txt`'s `..` and
+ * Anchored to the WHOLE line, from its very start (`^[<marker
+ * class>]*[ \t]*`, not merely `\b` ahead of the digits): a genuine
+ * progress row is nothing BUT zero or more `PROGRESS_MARKER_CLASS`
+ * characters, then horizontal padding, then the counter, so requiring
+ * the line to start that way is what tells a real row apart from a line
+ * that merely ENDS in the same shape (a failure message or a PHP
+ * fatal-error line reporting some unrelated `N / M (P%)`-shaped
+ * fraction, which the earlier `\b`-only anchor could not tell apart
+ * from PHPUnit's own row and read as completion evidence it never was
+ * -- a documented limit before that change, closed and pinned: see
+ * `test/verify.test.ts`'s "unreadable-result tightening mutants" describe
+ * block). The progress characters themselves are read but not required
+ * to be a SPECIFIC one (`..`, `.F`, `WDN`, any mix of
+ * `PROGRESS_MARKER_CLASS`): a suppressed-report run prints exactly the
+ * same counter whether its tests passed or failed (captured real:
+ * `phpunit-no-results-green.txt`'s `..` and
  * `phpunit-no-results-red.txt`'s `.F`, the same `2 / 2 (100%)` tail on
  * both), which is also why the counter is read as evidence of
  * COMPLETION only and never turned into a `passed` count: it counts
  * tests PHPUnit reached, not tests that passed, so deriving `passed: 2`
  * from it would read the red capture as green (see `Summary.attempted`,
  * which names it "attempted" for exactly this reason).
+ *
+ * The padding is horizontal only (`[ \t]*`, never `\s`), on both sides
+ * of the counter (ahead of the digits and inside/after the percentage):
+ * `\s` also matches a newline, which under this pattern's `m` flag let a
+ * marker-only line bleed across its own line break into the counter
+ * line below it and still read as one combined row -- pinned by
+ * `test/verify.test.ts`'s dedicated padding case, which checks the
+ * actual matched text stays confined to the counter's own line rather
+ * than merely that `.test()` returns `true` (a bare boolean check cannot
+ * tell a same-line match from a two-line one here, since the counter
+ * line alone, with zero leading marker characters, is already a valid
+ * match on its own).
  *
  * Built from one shared source string (`PROGRESS_COUNTER_LINE_SOURCE`)
  * rather than two independently-typed-out patterns, so the boolean
@@ -206,8 +246,18 @@ const PROGRESS_MARKER_CHARS = ".FEWIRS";
  * output, so the LAST one -- the state nearest completion -- can be
  * read rather than the first).
  */
-const PROGRESS_COUNTER_LINE_SOURCE = `^[${PROGRESS_MARKER_CHARS}]*\\s*(\\d+) \\/ (\\d+) \\(\\s*\\d+%\\)\\s*$`;
-const PROGRESS_COUNTER_LINE = new RegExp(PROGRESS_COUNTER_LINE_SOURCE, "m");
+const PROGRESS_COUNTER_LINE_SOURCE = `^[${PROGRESS_MARKER_CLASS}]*[ \\t]*(\\d+) \\/ (\\d+) \\([ \\t]*\\d+%\\)[ \\t]*$`;
+/**
+ * Exported for `test/verify.test.ts`'s directory-derived positive
+ * control alone (every real `N / M (P%)`-shaped line across every
+ * captured phpunit fixture must match this, sans allowlist): every
+ * production caller in this file uses the same object via the internal
+ * name below, never a second, independently constructed copy.
+ */
+export const PROGRESS_COUNTER_LINE = new RegExp(
+  PROGRESS_COUNTER_LINE_SOURCE,
+  "m",
+);
 const PROGRESS_COUNTER_LINE_GLOBAL = new RegExp(
   PROGRESS_COUNTER_LINE_SOURCE,
   "gm",
