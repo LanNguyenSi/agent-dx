@@ -2837,32 +2837,73 @@ describe("workflow-slop/audit-gate-shape: custom bash shell command template all
     },
   );
 
-  // [template, a substring the refusal message must contain, naming the
-  // offending token].
+  // [template, the exact reason text `bashShellTemplateRefusal` produces,
+  // naming the offending token]. The reason text, not just the bare
+  // offending token, is what the test asserts: the overall message
+  // ALSO always echoes the raw `shell:` value verbatim earlier in its
+  // text (e.g. "...`shell:` is `bash -c true {0}`..."), so a bare-token
+  // assertion like `toContain("-c")` would pass on that echo alone even
+  // if the token-level check that is actually under test were gutted --
+  // it would not discriminate the mutant. The full reason phrase below
+  // is rule-generated prose that is never a substring of the raw
+  // template text itself, so it only matches when the real check fired.
   const REFUSE_TEMPLATES: Array<[string, string]> = [
-    ["bash -c true {0}", "-c"],
-    ["bash -n {0}", "-n"],
-    ["bash --version {0}", "--version"],
-    ["bash -c 'exit 0' {0}", "-c"],
-    ["bash {0} || true", "|| true"],
-    ["bash -e", "{0}"],
-    ["bash -en {0}", "-en"],
-    ["bash -o noexec {0}", "-o noexec"],
-    ["bash +e {0}", "+e"],
-    ["bash {0} {0}", "{0}"],
-    ["bash -e {0} extra", "extra"],
-    ["bash --rcfile x {0}", "--rcfile"],
+    [
+      "bash -c true {0}",
+      "the template's `-c` token is not on the allowed list of no-op bash startup flags",
+    ],
+    [
+      "bash -n {0}",
+      "the template's `-n` token is not on the allowed list of no-op bash startup flags",
+    ],
+    [
+      "bash --version {0}",
+      "the template's `--version` token is not on the allowed list of no-op bash startup flags",
+    ],
+    [
+      "bash -c 'exit 0' {0}",
+      "the template's `-c` token is not on the allowed list of no-op bash startup flags",
+    ],
+    [
+      "bash {0} || true",
+      "the template has trailing text after its `{0}` placeholder (`|| true`)",
+    ],
+    [
+      "bash -e",
+      "the template contains no `{0}` placeholder, so GitHub Actions never hands the gate script to it",
+    ],
+    [
+      "bash -en {0}",
+      "the template's `-en` token is not on the allowed list of no-op bash startup flags",
+    ],
+    [
+      "bash -o noexec {0}",
+      "the template's `-o noexec` option is not one of the allowed `set -o` names (pipefail, errexit, nounset, xtrace)",
+    ],
+    [
+      "bash +e {0}",
+      "the template's `+e` token is not on the allowed list of no-op bash startup flags",
+    ],
+    ["bash {0} {0}", "the template's `{0}` placeholder appears more than once"],
+    [
+      "bash -e {0} extra",
+      "the template has trailing text after its `{0}` placeholder (`extra`)",
+    ],
+    [
+      "bash --rcfile x {0}",
+      "the template's `--rcfile` token is not on the allowed list of no-op bash startup flags",
+    ],
   ];
 
   it.each(REFUSE_TEMPLATES)(
     "refuses the custom bash shell command template `%s`, naming the offending token",
-    (shell, offendingToken) => {
+    (shell, reason) => {
       const text = auditYml(
         gateStep(["npm audit --audit-level=high"], [`shell: ${shell}`]),
       );
       const v = shapeViolations(text);
       expect(v).toHaveLength(1);
-      expect(v[0].message).toContain(offendingToken);
+      expect(v[0].message).toContain(reason);
     },
   );
 
@@ -2874,11 +2915,11 @@ describe("workflow-slop/audit-gate-shape: custom bash shell command template all
   // in play.
   it.each(REFUSE_TEMPLATES.slice(0, 3))(
     "also refuses `%s` over the real fleet fixture with its template registered",
-    (shell, offendingToken) => {
+    (shell, reason) => {
       const text = fleetAuditWithGateShell(shell);
       const v = shapeViolations(text, withFleetTemplate());
       expect(v).toHaveLength(1);
-      expect(v[0].message).toContain(offendingToken);
+      expect(v[0].message).toContain(reason);
     },
   );
 });
