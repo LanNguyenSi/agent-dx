@@ -2812,11 +2812,11 @@ describe("workflow-slop/audit-gate-shape: gate step shell", () => {
 });
 
 describe("workflow-slop/audit-gate-shape: custom bash shell command template allowlist", () => {
-  // `shellProgramName` alone only resolves WHICH program a template
+  // The program token alone only settles WHICH program a template
   // invokes, not whether the rest of the command line actually runs the
   // gate script GitHub hands it as `{0}`: `shell: bash -c true {0}`
   // resolves to `bash` but never touches `{0}` at all. These fixtures
-  // are every certify/refuse case named in the round-2 briefing.
+  // cover the certify and refuse sides of that token-level check.
   const CERTIFY_TEMPLATES = [
     "bash",
     "bash {0}",
@@ -2825,6 +2825,8 @@ describe("workflow-slop/audit-gate-shape: custom bash shell command template all
     "bash --noprofile --norc -eo pipefail {0}",
     "bash -eux -o pipefail {0}",
     "/bin/bash -e {0}",
+    "/usr/bin/bash --noprofile --norc -eo pipefail {0}",
+    "/usr/local/bin/bash {0}",
   ];
 
   it.each(CERTIFY_TEMPLATES)(
@@ -2892,6 +2894,33 @@ describe("workflow-slop/audit-gate-shape: custom bash shell command template all
     [
       "bash --rcfile x {0}",
       "the template's `--rcfile` token is not on the allowed list of no-op bash startup flags",
+    ],
+    [
+      "bash -o {0}",
+      "the template's `-o` option has no following `set -o` name",
+    ],
+    [
+      "bash -eo {0}",
+      "the template's `-eo` option has no following `set -o` name",
+    ],
+    // A program token is bash only when it is the bare name or a listed
+    // absolute path: the runner executes exactly the named file, so a
+    // committed wrapper called `bash` must not certify.
+    [
+      "./bash {0}",
+      "the program `./bash` is neither the bare `bash` nor one of the listed absolute paths",
+    ],
+    [
+      "/tmp/evil/bash -e {0}",
+      "the program `/tmp/evil/bash` is neither the bare `bash` nor one of the listed absolute paths",
+    ],
+    [
+      "bash.exe {0}",
+      "the program `bash.exe` is neither the bare `bash` nor one of the listed absolute paths",
+    ],
+    [
+      "/usr/bin/bash",
+      "the template contains no `{0}` placeholder, so GitHub Actions never hands the gate script to it",
     ],
   ];
 
@@ -2991,6 +3020,27 @@ describe("workflow-slop/audit-gate-shape: runs-on object (runner-group) form", (
       "      - run: npm audit --audit-level=high",
     ].join("\n");
     expect(shapeViolations(text)).toHaveLength(0);
+  });
+});
+
+describe("workflow-slop/audit-gate-shape: a duplicated shell key", () => {
+  it("a step carrying `shell:` twice is never scanned clean: the file is reported as unparseable, whichever value the shell check read", () => {
+    // The shell check reads the first occurrence of a key. A mapping with
+    // the same key twice is invalid YAML, and the pack says so with a
+    // block finding of its own, so `shell: bash` followed by `shell: pwsh`
+    // cannot yield a clean file through the first-occurrence reading.
+    const text = auditYml(
+      gateStep(
+        ["npm audit --audit-level=high"],
+        ["shell: bash", "shell: pwsh"],
+      ),
+    );
+    const unparseable = auditViolations(
+      text,
+      "workflow-slop/unparseable-workflow",
+    );
+    expect(unparseable).toHaveLength(1);
+    expect(unparseable[0].severity).toBe("block");
   });
 });
 

@@ -452,63 +452,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `workflow-slop/audit-gate-shape` now reads the shell a gate step
   actually runs under (the step's own `shell:`, else its job's
   `defaults.run.shell`, else the workflow's `defaults.run.shell`) and
-  refuses to certify anything it does not resolve to bash: `pwsh`,
-  `powershell`, `python`, `cmd`, `sh`, any other custom shell command
-  whose program is not bash, a non-literal `${{ ... }}` value, a
-  `shell:` key present but empty, and an absent shell on a job whose
-  `runs-on:` literally names a Windows runner (GitHub's own default
-  there is `pwsh`, not bash) are all refused with a message naming the
-  shell and which of the three levels it came from. Previously the rule
-  analysed every gate step's `run:` block as bash regardless of its
-  actual interpreter, so a `pwsh`/`python`/`cmd` gate whose text happened
-  to resemble a recognised shape, or matched a registered template, could
-  be silently certified while never actually running as the script it
-  was checked as. The check runs before a registered template is even
-  considered, since a template match is an attestation about the script
-  AS BASH TEXT. Certifiable: an absent shell at all three levels (the
-  previous, still-correct default), the literal `bash`, and a custom
-  shell command template whose program is bash regardless of its flags
-  (`bash -e {0}`, GitHub's own default expansion
-  `bash --noprofile --norc -eo pipefail {0}`, or any other combination) --
-  deliberately flag-blind, because neither recognised shape's exit-code
-  guarantee (`R-bare` permits no trailing statement at all; `R-classify`
-  manages `errexit` itself with an explicit `set +e`/`set -e` and an
-  explicit `exit`) depends on the invoking shell's own `-e`/`pipefail`
-  defaults. A non-literal `runs-on:` (an expression or a matrix
-  reference) is a documented residual, not resolved, left certified
-  exactly as an absent shell always was. Program names are matched
-  case-sensitively against GitHub's lower-case built-in keywords, so
-  `Bash`/`BASH` refuse too. README updated with the full decision and a
-  short adoption recipe for registering a reviewed gate block's digest;
-  no fleet rollout, no change to the recognised `R-bare`/`R-classify`
-  shapes, and no edit to any `.github/workflows` file in this repo.
-  Hardened in a follow-up fix: "flag-blind" above was too permissive --
-  a custom bash template's program name alone (its FIRST token) does not
-  prove the rest of the line ever runs the gate script GitHub hands it
-  as `{0}`, so `bash -c true {0}`, `bash -n {0}`, `bash --version {0}`,
-  and any other custom template whose command line never actually
-  invokes `{0}` as written, previously certified. The check now also
-  validates a custom bash template's trailing tokens against a closed
-  no-op allowlist (`-e`, `-u`, `-x`, singly or clustered; `-o <name>` or
-  a cluster ending in `o` followed by `<name>`, only for
-  `pipefail`/`errexit`/`nounset`/`xtrace`; `--noprofile`; `--norc`), with
-  its LAST token required to be exactly one `{0}`; any other token, no
-  `{0}` at all, more than one `{0}`, or text before/after it, refuses
-  with a message naming the offending token. `bash`, `bash {0}`, `bash
-  -e {0}`, `bash -eo pipefail {0}`, GitHub's own default expansion, and
-  `bash -eux -o pipefail {0}` all still certify unchanged. The same
-  fix-up also covers two gaps the shell check itself had: `runs-on:`
-  given as the documented runner-group object form (`{ group: <name>,
-  labels: [...] }`, block or flow style) now resolves Windows through
-  its literal `labels:`, where it previously fell through to
-  "unresolved" and certified; and a `shell:` present but written as a
-  sequence or a mapping, at any of the three levels, now refuses at that
-  level instead of being silently read as unset and falling through to
-  the next one. A shell refusal's finding also gained its own message
-  tail naming the real remedies (an explicit bash `shell:`, or the
-  reviewed per-line/per-repo opt-out) instead of reusing the
-  shape/template guidance, which cannot clear a shell refusal since that
-  check runs before either is even considered.
+  refuses to certify anything it does not resolve to bash, before the
+  shape allowlist and before a registered template is considered (a
+  template match is an attestation about the script as bash text).
+  Previously every gate step's `run:` block was analysed as bash
+  whatever its interpreter, so a `pwsh`/`python`/`cmd` gate whose text
+  resembled a recognised shape, or matched a registered template, could
+  be certified while never running as the script it was checked as.
+  Certifiable: an absent shell at all three levels; the literal `bash`;
+  and a custom shell command template whose program token is the bare
+  `bash` or one of `/bin/bash`, `/usr/bin/bash`, `/usr/local/bin/bash`,
+  whose last token is the only `{0}`, and whose tokens in between are
+  all on a closed allowlist of options that neither suppress nor replace
+  execution (`-e`, `-u`, `-x`, singly or clustered; `-o <name>` or a
+  cluster ending in `o` followed by `<name>`, for `pipefail`, `errexit`,
+  `nounset`, `xtrace`; `--noprofile`; `--norc`). So `bash {0}`,
+  `bash -e {0}` and GitHub's own expansion
+  `bash --noprofile --norc -eo pipefail {0}` certify, while
+  `bash -c true {0}`, `bash -n {0}`, `bash --version {0}`, `./bash {0}`
+  and `bash.exe {0}` refuse: the runner executes exactly the named file
+  with exactly those arguments, so a first-token or basename match would
+  certify a gate that never runs the audit. A template without `-e` is
+  certifiable because neither recognised shape relies on the invoking
+  shell's `-e`/`pipefail` (`R-bare` permits no trailing statement,
+  `R-classify` manages `errexit` and its `exit` itself); that reasoning
+  does not extend to a registered template. Refused with a message
+  naming the shell, the level it came from and, for a template, the
+  offending token: `pwsh`, `powershell`, `python`, `cmd`, `sh`, any
+  other program, a differently-cased `Bash`, a non-literal `${{ ... }}`
+  value, a `shell:` key present but empty or not a scalar, and an absent
+  shell on a job whose `runs-on:` literally names a Windows runner
+  (label `windows` or `windows-*`, case-insensitive, also through the
+  runner-group object form's literal `labels:`). Residuals, documented
+  in the README: a `runs-on:` given as an expression, a matrix reference
+  or an object without literal labels is not resolved; YAML anchors and
+  merge keys are not followed; `env bash {0}`, `sudo bash {0}` and a
+  bash at an unlisted absolute path refuse although they run bash. A
+  shell refusal carries its own message tail naming the real remedies
+  (an explicit bash `shell:`, or the reviewed per-line or per-repo
+  opt-out). README updated with the decision and a short adoption recipe
+  for registering a reviewed gate block's digest; no change to the
+  recognised `R-bare`/`R-classify` shapes.
 
 ## [0.3.1] - 2026-08-26
 

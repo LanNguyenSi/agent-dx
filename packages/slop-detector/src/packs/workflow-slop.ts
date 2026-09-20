@@ -2421,34 +2421,42 @@ function neutralisationSignal(
 // attestation about the script AS BASH.
 
 /**
- * The program name a `shell:` custom command template invokes: the raw
- * value's first whitespace-separated token, with any path stripped to
- * its final segment and a trailing `.exe` dropped. `bash -e {0}` and
- * `/usr/bin/bash --noprofile --norc -eo pipefail {0}` both resolve to
- * `bash`; `bash.exe {0}` does too.
- *
- * Deliberately flag-blind: `R-bare` permits no statement after the gate
- * command at all, and `R-classify` manages `errexit` itself with
- * explicit `set +e`/`set -e` and an explicit `exit`, so neither
- * recognised shape's exit-code guarantee depends on whether the
- * invoking shell's own `-e`/`pipefail` defaults are on or off; a custom
- * bash template's flags change nothing about that. Compared
- * case-sensitively: GitHub's own built-in shell keywords are lower-case
- * (`bash`, `sh`, `pwsh`, `python`, `cmd`, `powershell`), and this rule
- * has no documented basis for treating a differently-cased program name
- * as the same interpreter, so `Bash`/`BASH` fail closed like any other
- * unrecognised value.
+ * The program tokens this rule accepts as bash: the bare name, which the
+ * runner resolves through PATH, and the three absolute paths a bash
+ * binary conventionally lives at. The list is closed on purpose. A
+ * basename match would also accept `./bash {0}` or `/tmp/x/bash {0}`,
+ * and the runner executes exactly that file with the gate script as its
+ * argument, so a committed wrapper named `bash` would certify while the
+ * audit never runs. Anything else refuses: a differently-cased name
+ * (GitHub's shell keywords are lower-case), `bash.exe`, a relative path,
+ * or an absolute path outside the list.
  */
-function shellProgramName(raw: string): string {
-  const token = raw.trim().split(/\s+/)[0] ?? "";
+const BASH_PROGRAM_TOKENS = new Set([
+  "bash",
+  "/bin/bash",
+  "/usr/bin/bash",
+  "/usr/local/bin/bash",
+]);
+
+/** The first whitespace-separated token of a `shell:` value. */
+function shellProgramToken(raw: string): string {
+  return raw.trim().split(/\s+/)[0] ?? "";
+}
+
+/**
+ * True when the program token's final path segment is `bash` (with or
+ * without `.exe`) although the token itself is not on
+ * `BASH_PROGRAM_TOKENS`: used only to give that refusal its own reason.
+ */
+function looksLikeUnlistedBash(token: string): boolean {
   const base = token.split(/[\\/]/).pop() ?? "";
-  return base.replace(/\.exe$/i, "");
+  return base.replace(/\.exe$/i, "") === "bash";
 }
 
 // ─────────────────── a custom bash shell template's own tokens ───────────────────
 //
-// `shellProgramName` above only resolves WHICH program a template
-// invokes; it is deliberately blind to the rest of the command line, so
+// `BASH_PROGRAM_TOKENS` above only settles WHICH program a template
+// invokes; it says nothing about the rest of the command line, so
 // `shell: bash -c true {0}` or `shell: bash -n {0}` resolved the same as
 // `shell: bash -e {0}` even though neither ever actually runs the gate
 // script GitHub hands it as `{0}` -- `-c` runs a different, fixed
@@ -2506,7 +2514,7 @@ function isBashOptionCluster(
 
 /**
  * Why a custom bash shell command template (a `shell:` value whose
- * program token already resolved to `bash` via `shellProgramName`) is
+ * program token is already on `BASH_PROGRAM_TOKENS`) is
  * NOT certifiable, or `undefined` when it is. Fail-closed by
  * construction: every branch that is not an explicit certify returns a
  * reason naming the offending token, and the final fallthrough inside
@@ -2539,9 +2547,10 @@ function isBashOptionCluster(
  */
 function bashShellTemplateRefusal(trimmed: string): string | undefined {
   const tokens = trimmed.split(/\s+/).filter((token) => token.length > 0);
-  if (tokens.length <= 1) {
-    // The literal `bash` keyword (or a bare path to it), no arguments,
-    // no `{0}`: certifiable exactly like the literal `bash` value.
+  if (tokens.length === 1 && tokens[0] === "bash") {
+    // GitHub's built-in `bash` keyword: no arguments, no `{0}`. A lone
+    // path is not that keyword; the runner rejects it for lacking `{0}`,
+    // and so do the placeholder checks below.
     return undefined;
   }
 
@@ -2629,10 +2638,14 @@ function nonBashReasonForLevel(
   if (trimmed.includes("${{")) {
     return `${shellLevelPhrase(level, `a non-literal \`${trimmed}\` expression`)}, which this rule cannot resolve to bash`;
   }
-  if (shellProgramName(trimmed) === "bash") {
+  const program = shellProgramToken(trimmed);
+  if (BASH_PROGRAM_TOKENS.has(program)) {
     const templateReason = bashShellTemplateRefusal(trimmed);
     if (!templateReason) return undefined;
     return `${shellLevelPhrase(level, `\`${trimmed}\``)}, which this rule does not analyse as bash: ${templateReason}`;
+  }
+  if (looksLikeUnlistedBash(program)) {
+    return `${shellLevelPhrase(level, `\`${trimmed}\``)}, which this rule does not analyse as bash: the program \`${program}\` is neither the bare \`bash\` nor one of the listed absolute paths (${Array.from(BASH_PROGRAM_TOKENS).slice(1).join(", ")}), so a file merely named bash cannot be told apart`;
   }
   return `${shellLevelPhrase(level, `\`${trimmed}\``)}, which this rule does not analyse as bash`;
 }
