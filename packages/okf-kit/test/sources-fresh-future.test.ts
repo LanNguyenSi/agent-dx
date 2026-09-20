@@ -235,6 +235,29 @@ describe("sources-fresh-future", () => {
     expect(findings[0].message).toContain("no UTC designator");
   });
 
+  it("assesses a whitespace-padded designator value, not skipped, since the timestamp string is trimmed before parsing", () => {
+    repo.commitFile(
+      "bundle/doc.md",
+      docContent({
+        type: "concept",
+        // A trailing space after the `Z` used to make this read as "not
+        // assessable" (Date.parse rejects the padding); the parser now
+        // trims before parsing, so this is assessed exactly like its
+        // unpadded `Z`-suffixed form, not skipped like the
+        // designator-less case above.
+        timestamp: "2026-01-02T00:00:00Z ",
+        sources: ["source.ts"],
+      }),
+      "2026-01-01T00:00:00Z",
+    );
+
+    const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+    const findings = sourcesFreshFutureRule.run(ctx);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0].message).toContain("FUTURE-DATED");
+  });
+
   it("assesses a timestamp with a numeric UTC offset instead of Z", () => {
     repo.commitFile(
       "bundle/doc.md",

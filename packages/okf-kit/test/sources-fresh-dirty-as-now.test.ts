@@ -1,5 +1,7 @@
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadBundle } from "../src/bundle.js";
 import { runGit as realRunGit } from "../src/git.js";
@@ -13,6 +15,38 @@ import {
   writeDoc,
   type TmpGitRepo,
 } from "./git-helpers.js";
+import type { RunResult } from "./helpers.js";
+
+const CLI_PATH = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "dist",
+  "cli.js",
+);
+
+/**
+ * Same rationale as `runCliWithTz` in test/cli-staleness.test.ts: a
+ * SUBPROCESS is the only form that actually exercises a second `TZ`, since
+ * Node resolves the process timezone once and caches it.
+ */
+function runCliWithTz(args: string[], tz: string): RunResult {
+  try {
+    const stdout = execFileSync("node", [CLI_PATH, ...args], {
+      encoding: "utf8",
+      env: { ...process.env, TZ: tz },
+      timeout: 30_000,
+    });
+    return { status: 0, stdout, stderr: "" };
+  } catch (err) {
+    const e = err as { status?: number; stdout?: unknown; stderr?: unknown };
+    if (typeof e.stdout !== "string") throw err;
+    return {
+      status: e.status ?? 1,
+      stdout: e.stdout,
+      stderr: typeof e.stderr === "string" ? e.stderr : "",
+    };
+  }
+}
 
 /**
  * `--dirty-as-now` (`ctx.dirtyAsNow`): a source with an uncommitted change
@@ -757,11 +791,12 @@ describe("sources-fresh: --dirty-as-now", () => {
       );
     });
 
-    it("with the flag: HEAD committed as a native YAML date, re-stamped locally to a LATER string with a UTC designator -> direction judged, restamped/clean (D-013)", () => {
+    it("with the flag: HEAD committed as a native YAML date, re-stamped locally to a LATER string with a UTC designator -> direction judged, restamped/clean (D-013, superseded by D-016 for the direction check)", () => {
       // HEAD's committed value carries no raw string at all (a
-      // `!!timestamp`-tagged scalar), so `isDirectionComparable` takes its
-      // "no designator to gate" branch there; the on-disk value has a real
-      // `Z`. Both are direction-comparable, the instants differ, and the
+      // `!!timestamp`-tagged scalar), so it takes the `Date#getTime()`
+      // branch and never the string parse `parseTimestampInstantMs` gates
+      // by designator (D-016); the on-disk value has a real `Z`. Both are
+      // direction-comparable, the instants differ, and the
       // move is FORWARD, so this is an ordinary re-stamp under
       // `--dirty-as-now` -- clean, not a fallback to raw-identity
       // comparison the way a designator-less STRING would be.
@@ -791,7 +826,7 @@ describe("sources-fresh: --dirty-as-now", () => {
       expect(sourcesFreshRule.run(ctx)).toEqual([]);
     });
 
-    it("with the flag: HEAD committed as a native YAML date, re-stamped locally to an EARLIER string with a UTC designator -> direction judged, STALE + backwards warning (D-013)", () => {
+    it("with the flag: HEAD committed as a native YAML date, re-stamped locally to an EARLIER string with a UTC designator -> direction judged, STALE + backwards warning (D-013, superseded by D-016 for the direction check)", () => {
       // The other direction of the same fixture shape: the on-disk value
       // is a real `Z` string EARLIER than HEAD's native-date instant.
       // Direction is still judged (neither side is ambiguous), and it
@@ -837,6 +872,86 @@ describe("sources-fresh: --dirty-as-now", () => {
       expect(backwards?.message).toContain("2025-03-01T00:00:00.000Z");
       expect(backwards?.message).toContain("2025-01-15T00:00:00.000Z");
       expect(backwards?.message).toContain("in the working tree");
+    });
+
+    it("with the flag: a designator-less backwards re-stamp on the working-tree path is reported, identically under TZ=UTC and TZ=Asia/Tokyo (D-016)", () => {
+      // The committed and on-disk values are BOTH designator-less strings
+      // (no `Z`, no offset), so this exercises D-016's UTC-forcing on the
+      // `--dirty-as-now` working-tree path specifically, not just the
+      // committed-history path test/sources-fresh.test.ts already pins
+      // (D-016 line 1170) and not the native-YAML-date case above (D-013).
+      // Before this fix, a designator-less pair fell back to
+      // raw-identity comparison ("did the text change") and any textual
+      // change -- including a genuine backwards move -- passed silently
+      // as an ordinary re-stamp; this fixture is that exact case,
+      // committed forward then re-stamped backward on disk.
+      const cliRepo = createTmpGitRepo();
+      try {
+        cliRepo.commitFile(
+          "source.ts",
+          "export const a = 1;\n",
+          "2025-01-01T00:00:00Z",
+        );
+        cliRepo.commitFile(
+          "bundle/doc.md",
+          docContent({
+            type: "concept",
+            timestamp: "2025-03-01T00:00:00",
+            sources: ["source.ts"],
+          }),
+          "2025-03-01T00:00:00Z",
+        );
+
+        fs.writeFileSync(
+          path.join(cliRepo.dir, "source.ts"),
+          "export const a = 2;\n",
+        );
+        writeDoc(cliRepo.dir, "bundle/doc.md", {
+          type: "concept",
+          timestamp: "2025-01-15T00:00:00",
+          sources: ["source.ts"],
+        });
+
+        const args = [
+          "check",
+          path.join(cliRepo.dir, "bundle"),
+          "--repo-root",
+          cliRepo.dir,
+          "--dirty-as-now",
+          "--json",
+        ];
+        const utc = runCliWithTz(args, "UTC");
+        const tokyo = runCliWithTz(args, "Asia/Tokyo");
+
+        const backwardsMessages: string[] = [];
+        for (const result of [utc, tokyo]) {
+          expect(result.status).toBe(0);
+          const parsed = JSON.parse(result.stdout) as {
+            findings: Array<{
+              ruleId: string;
+              severity: string;
+              message: string;
+            }>;
+          };
+          const backwards = parsed.findings.find((f) =>
+            f.message.includes("moved backwards"),
+          );
+          expect(backwards).toMatchObject({
+            ruleId: "sources-fresh",
+            severity: "warning",
+          });
+          expect(backwards?.message).toContain("in the working tree");
+          backwardsMessages.push(backwards?.message as string);
+        }
+        // Both timezones must report the SAME "moved backwards" instants --
+        // the point of D-016. (The sibling STALE finding's "now" instant is
+        // excluded from this comparison: it legitimately differs by the
+        // wall-clock second between the two subprocess invocations, which
+        // is unrelated to D-016.)
+        expect(backwardsMessages[0]).toBe(backwardsMessages[1]);
+      } finally {
+        cliRepo.cleanup();
+      }
     });
 
     it("with the flag: a doc committed with an unparseable timestamp, re-stamped locally to a valid value, falls back to raw-identity comparison -> restamped/clean (D-004 fallback)", () => {

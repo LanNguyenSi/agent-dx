@@ -42,7 +42,11 @@ export function getValidSources(parsed: unknown): string[] | undefined {
  * correctly on every machine. See the README's "Staleness (sources-fresh)"
  * section, "Designator-less timestamps", for the full rationale and the one
  * case this does NOT cover (a value that is not parseable to an instant at
- * all).
+ * all). The raw string is trimmed before either check: the `Z` this
+ * function appends for a designator-less value must land at the very end,
+ * not after trailing whitespace, so a whitespace-padded value is parsed
+ * the same as its untrimmed form (both `hasUtcDesignator` and `Date.parse`
+ * would otherwise treat the padding as part of the value).
  */
 function parseTimestampInstantMs(raw: string): number | undefined {
   const trimmed = raw.trim();

@@ -740,7 +740,7 @@ describe("okf-kit cli staleness (sources-fresh + repo-root auto-detection)", () 
     }
   });
 
-  it("a native YAML date (`!!timestamp`) has no designator to carry and is judged for direction anyway, identically under both timezones (D-013)", () => {
+  it("a native YAML date (`!!timestamp`) has no designator to carry and is judged for direction anyway, identically under both timezones (D-013, superseded by D-016 for the direction check)", () => {
     // The other side of the same decision: `getRawTimestampString` returns
     // undefined for a native date, and that undefined means "nothing to
     // gate", not "ambiguous" -- the YAML parser already fixed the instant
