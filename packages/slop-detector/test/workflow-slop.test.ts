@@ -1322,6 +1322,18 @@ function shapeMessage(
   return parts.join(" ");
 }
 
+// A shell refusal (the "0." check, before any shape or template is even
+// considered) cannot be cleared by matching a recognised shape or
+// registering a template, so it carries its own tail naming the actual
+// remedies instead of `SHAPE_MESSAGE_TAIL`'s.
+const SHELL_MESSAGE_TAIL =
+  'Set an explicit bash `shell:` on the gate step (or its job\'s or the workflow\'s `defaults.run.shell`), or use the reviewed per-repo exception instead: a `# slop-detector:disable-line=workflow-slop/audit-gate-shape` comment on this line, or `rules: { "workflow-slop/audit-gate-shape": { enabled: false } }` in `slop.config.yml` to disable the rule for the whole repo (see the README\'s "Scope" section).';
+
+/** The full message `audit-gate-shape` reports for a shell refusal. */
+function shellMessage(reason: string): string {
+  return `Unrecognised npm-audit gate shape in this audit workflow: ${reason}. ${SHELL_MESSAGE_TAIL}`;
+}
+
 const MISSING_GATE_MESSAGE =
   "No certifiable npm-audit gate command was found in this audit workflow: no `run:` step's normalised shell statements invoke `npm audit` with `--audit-level=low`, `--audit-level=moderate`, `--audit-level=high`, or `--audit-level=critical`. Text inside a here-doc body is data, not a command, and a `run:` scalar that is not a literal block scalar (`|`) or a single-line plain scalar is not analysed as shell text, so neither counts as a present gate. (This rule only recognises `npm audit`; a `pnpm audit` or a non-npm audit command is out of its scope, see the README.)";
 
@@ -1346,6 +1358,24 @@ const withFleetTemplate = () =>
       ],
     },
   });
+
+/**
+ * The real fleet fixture with `shell: <shell>` injected onto the gate
+ * step, used to prove the shell check runs (and refuses) even over a
+ * block whose template is registered: a registered template is an
+ * attestation about the script AS BASH, so it must never rescue a
+ * non-bash-certifiable shell.
+ */
+function fleetAuditWithGateShell(shell: string): string {
+  const marker = "      - name: npm audit gate (high/critical fail)\n";
+  if (!REAL_FLEET_AUDIT_YML.includes(marker)) {
+    throw new Error("fleet audit fixture: gate step marker not found");
+  }
+  return REAL_FLEET_AUDIT_YML.replace(
+    marker,
+    `${marker}        shell: ${shell}\n`,
+  );
+}
 
 // The canonical `set +e` / capture / restore / verdict shape, reduced to
 // the statements `R-classify` actually requires.
@@ -2396,6 +2426,697 @@ describe("workflow-slop/audit-gate-shape: registered templates and the fleet sha
       '          echo "gate done"',
     ].join("\n");
     expect(shapeViolations(text)).toHaveLength(0);
+  });
+});
+
+describe("workflow-slop/audit-gate-shape: gate step shell", () => {
+  // ACCEPTANCE PROBE p7 (mutant a): a step-level `shell:` naming a
+  // non-bash interpreter is refused, even though the block is an
+  // otherwise-recognised `R-bare` shape. Removing the step-level shell
+  // check must turn this back into a clean verdict.
+  it("acceptance probe p7: a step-level `shell: pwsh` is refused on an otherwise-recognised R-bare gate", () => {
+    const text = auditYml(
+      gateStep(["npm audit --audit-level=high"], ["shell: pwsh"]),
+    );
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shellMessage(
+        "the gate step's `shell:` is `pwsh`, which this rule does not analyse as bash",
+      ),
+    );
+  });
+
+  it.each(["powershell", "python", "cmd", "sh"])(
+    "a step-level `shell: %s` is refused",
+    (shell) => {
+      const text = auditYml(
+        gateStep(["npm audit --audit-level=high"], [`shell: ${shell}`]),
+      );
+      expect(shapeViolations(text)).toEqual([
+        expect.objectContaining({
+          message: shellMessage(
+            `the gate step's \`shell:\` is \`${shell}\`, which this rule does not analyse as bash`,
+          ),
+        }),
+      ]);
+    },
+  );
+
+  it("a custom shell command template whose program is not bash (`perl {0}`) is refused", () => {
+    const text = auditYml(
+      gateStep(["npm audit --audit-level=high"], ["shell: perl {0}"]),
+    );
+    expect(shapeViolations(text)).toEqual([
+      expect.objectContaining({
+        message: shellMessage(
+          "the gate step's `shell:` is `perl {0}`, which this rule does not analyse as bash",
+        ),
+      }),
+    ]);
+  });
+
+  it("mixed-case `shell: Bash` is refused: shell names are matched case-sensitively", () => {
+    const text = auditYml(
+      gateStep(["npm audit --audit-level=high"], ["shell: Bash"]),
+    );
+    expect(shapeViolations(text)).toEqual([
+      expect.objectContaining({
+        message: shellMessage(
+          "the gate step's `shell:` is `Bash`, which this rule does not analyse as bash",
+        ),
+      }),
+    ]);
+  });
+
+  // Contrast the case-SENSITIVE `shell:` program name check just above:
+  // a `runs-on:` LABEL is free text an operator could spell any way, so
+  // it is matched case-INSENSITIVELY (`WINDOWS_LABEL_RE`'s `i` flag),
+  // pinned here next to the shell name's case-sensitivity test.
+  it("an absent shell on a case-varied `runs-on: Windows-Latest` job is refused (case-insensitive label match)", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: Windows-Latest",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shellMessage(
+        "the gate step has no `shell:` at any level and its job's `runs-on` names a Windows runner, whose default shell is not bash",
+      ),
+    );
+  });
+
+  it("a non-literal `shell: ${{ matrix.shell }}` cannot be resolved to bash and is refused", () => {
+    const text = auditYml(
+      gateStep(
+        ["npm audit --audit-level=high"],
+        ["shell: ${{ matrix.shell }}"],
+      ),
+    );
+    expect(shapeViolations(text)).toEqual([
+      expect.objectContaining({
+        message: shellMessage(
+          "the gate step's `shell:` is a non-literal `${{ matrix.shell }}` expression, which this rule cannot resolve to bash",
+        ),
+      }),
+    ]);
+  });
+
+  it("an empty `shell:` (present, nothing after it) is refused rather than falling through", () => {
+    const text = auditYml(
+      gateStep(["npm audit --audit-level=high"], ["shell:"]),
+    );
+    expect(shapeViolations(text)).toEqual([
+      expect.objectContaining({
+        message: shellMessage(
+          "the gate step's `shell:` is empty, which this rule does not analyse as bash",
+        ),
+      }),
+    ]);
+  });
+
+  it("negative control: the literal `shell: bash` is certifiable", () => {
+    const text = auditYml(
+      gateStep(["npm audit --audit-level=high"], ["shell: bash"]),
+    );
+    expect(shapeViolations(text)).toHaveLength(0);
+  });
+
+  it("negative control: a custom bash template without `-e` (`shell: bash {0}`) is certifiable", () => {
+    // R-bare permits no statement after the gate command at all, and
+    // R-classify manages `errexit` itself with explicit `set +e`/`set -e`
+    // and an explicit `exit`; neither shape's exit-code guarantee depends
+    // on the invoking shell's own `-e`/`pipefail` defaults, so a bash
+    // template missing `-e` is certified exactly like the literal `bash`
+    // keyword. See the README for the full decision and reasoning.
+    const text = auditYml(
+      gateStep(["npm audit --audit-level=high"], ["shell: bash {0}"]),
+    );
+    expect(shapeViolations(text)).toHaveLength(0);
+  });
+
+  it("negative control: `shell: bash -e {0}` is certifiable", () => {
+    const text = auditYml(
+      gateStep(["npm audit --audit-level=high"], ["shell: bash -e {0}"]),
+    );
+    expect(shapeViolations(text)).toHaveLength(0);
+  });
+
+  it("negative control: GitHub's own default bash expansion is certifiable", () => {
+    const text = auditYml(
+      gateStep(
+        ["npm audit --audit-level=high"],
+        ["shell: bash --noprofile --norc -eo pipefail {0}"],
+      ),
+    );
+    expect(shapeViolations(text)).toHaveLength(0);
+  });
+
+  it('negative control: a quoted `shell: "bash"` is certifiable (quoting does not change the resolved value)', () => {
+    const text = auditYml(
+      gateStep(["npm audit --audit-level=high"], ['shell: "bash"']),
+    );
+    expect(shapeViolations(text)).toHaveLength(0);
+  });
+
+  it("negative control: surrounding whitespace around the shell value is trimmed before comparison", () => {
+    const text = auditYml(
+      gateStep(["npm audit --audit-level=high"], ['shell: " bash "']),
+    );
+    expect(shapeViolations(text)).toHaveLength(0);
+  });
+
+  // ACCEPTANCE PROBE p8 (mutant b): no step-level `shell:`, but the
+  // enclosing job's `defaults.run.shell` names a non-bash interpreter.
+  // Removing the `defaults.run.shell` fallback must turn this back into
+  // a clean verdict (the step-level check alone would miss it).
+  it("acceptance probe p8: a job-level `defaults.run.shell: pwsh` is refused when the step sets no shell of its own", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    defaults:",
+      "      run:",
+      "        shell: pwsh",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shellMessage(
+        "the gate step's shell is `pwsh`, set by its job's `defaults.run.shell`, which this rule does not analyse as bash",
+      ),
+    );
+  });
+
+  it("the workflow's own `defaults.run.shell: pwsh` is refused when neither the step nor its job set a shell", () => {
+    const text = [
+      "on: push",
+      "defaults:",
+      "  run:",
+      "    shell: pwsh",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shellMessage(
+        "the gate step's shell is `pwsh`, set by the workflow's `defaults.run.shell`, which this rule does not analyse as bash",
+      ),
+    );
+  });
+
+  it("negative control: `defaults:` present without `run:` falls through to the absent-shell check", () => {
+    const text = [
+      "on: push",
+      "defaults:",
+      "  something-else: true",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+    expect(shapeViolations(text)).toHaveLength(0);
+  });
+
+  it("precedence: a step-level `shell: bash` wins over the job's `defaults.run.shell: pwsh`", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    defaults:",
+      "      run:",
+      "        shell: pwsh",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+      "        shell: bash",
+    ].join("\n");
+    expect(shapeViolations(text)).toHaveLength(0);
+  });
+
+  it("precedence: the job's `defaults.run.shell: bash` wins over the workflow's `defaults.run.shell: pwsh`", () => {
+    const text = [
+      "on: push",
+      "defaults:",
+      "  run:",
+      "    shell: pwsh",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    defaults:",
+      "      run:",
+      "        shell: bash",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+    expect(shapeViolations(text)).toHaveLength(0);
+  });
+
+  // The two precedence tests above pin the CERTIFY direction (a bash
+  // value at a nearer level wins over a non-bash value at a farther
+  // one). These pin the REFUSE direction (a non-bash value at a nearer
+  // level wins over a bash value at a farther one), and assert the
+  // level phrase so a precedence regression that reported the wrong
+  // level would still be caught even if the overall verdict (refused)
+  // stayed the same.
+  it("precedence (refuse direction): a step-level `shell: pwsh` overrides the job's `defaults.run.shell: bash`", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    defaults:",
+      "      run:",
+      "        shell: bash",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+      "        shell: pwsh",
+    ].join("\n");
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shellMessage(
+        "the gate step's `shell:` is `pwsh`, which this rule does not analyse as bash",
+      ),
+    );
+  });
+
+  it("precedence (refuse direction): the job's `defaults.run.shell: pwsh` overrides the workflow's `defaults.run.shell: bash`", () => {
+    const text = [
+      "on: push",
+      "defaults:",
+      "  run:",
+      "    shell: bash",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    defaults:",
+      "      run:",
+      "        shell: pwsh",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shellMessage(
+        "the gate step's shell is `pwsh`, set by its job's `defaults.run.shell`, which this rule does not analyse as bash",
+      ),
+    );
+  });
+
+  // ACCEPTANCE PROBE p9 (mutant c): no shell set at any of the three
+  // levels, and the job's `runs-on` literally names a Windows runner.
+  // Removing the Windows-default check must turn this back into a clean
+  // verdict (GitHub's own default shell there is `pwsh`, not bash).
+  it("acceptance probe p9: an absent shell on a literal `runs-on: windows-latest` job is refused", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: windows-latest",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shellMessage(
+        "the gate step has no `shell:` at any level and its job's `runs-on` names a Windows runner, whose default shell is not bash",
+      ),
+    );
+  });
+
+  it("an absent shell on a self-hosted `runs-on: [self-hosted, windows]` job is refused", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: [self-hosted, windows]",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shellMessage(
+        "the gate step has no `shell:` at any level and its job's `runs-on` names a Windows runner, whose default shell is not bash",
+      ),
+    );
+  });
+
+  it("negative control: an absent shell on a literal non-Windows `runs-on` (the existing fixture shape) is certifiable", () => {
+    expect(
+      shapeViolations(auditYml(gateStep(["npm audit --audit-level=high"]))),
+    ).toHaveLength(0);
+  });
+
+  it("documented residual: an absent shell on a non-literal `runs-on: ${{ matrix.os }}` is not resolved and stays certifiable", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    strategy:",
+      "      matrix:",
+      "        os: [ubuntu-latest, windows-latest]",
+      "    runs-on: ${{ matrix.os }}",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+    expect(shapeViolations(text)).toHaveLength(0);
+  });
+
+  it("negative control: a reusable-workflow-call job (`uses:` at job level, no steps) is unaffected", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    uses: ./.github/workflows/audit-reusable.yml",
+    ].join("\n");
+    expect(shapeViolations(text)).toHaveLength(0);
+    expect(missingViolations(text)).toHaveLength(1);
+  });
+});
+
+describe("workflow-slop/audit-gate-shape: custom bash shell command template allowlist", () => {
+  // The program token alone only settles WHICH program a template
+  // invokes, not whether the rest of the command line actually runs the
+  // gate script GitHub hands it as `{0}`: `shell: bash -c true {0}`
+  // resolves to `bash` but never touches `{0}` at all. These fixtures
+  // cover the certify and refuse sides of that token-level check.
+  const CERTIFY_TEMPLATES = [
+    "bash",
+    "bash {0}",
+    "bash -e {0}",
+    "bash -eo pipefail {0}",
+    "bash --noprofile --norc -eo pipefail {0}",
+    "bash -eux -o pipefail {0}",
+    "/bin/bash -e {0}",
+    "/usr/bin/bash --noprofile --norc -eo pipefail {0}",
+    "/usr/local/bin/bash {0}",
+  ];
+
+  it.each(CERTIFY_TEMPLATES)(
+    "certifies the custom bash shell command template `%s`",
+    (shell) => {
+      const text = auditYml(
+        gateStep(["npm audit --audit-level=high"], [`shell: ${shell}`]),
+      );
+      expect(shapeViolations(text)).toHaveLength(0);
+    },
+  );
+
+  // [template, the exact reason text `bashShellTemplateRefusal` produces,
+  // naming the offending token]. The reason text, not just the bare
+  // offending token, is what the test asserts: the overall message
+  // ALSO always echoes the raw `shell:` value verbatim earlier in its
+  // text (e.g. "...`shell:` is `bash -c true {0}`..."), so a bare-token
+  // assertion like `toContain("-c")` would pass on that echo alone even
+  // if the token-level check that is actually under test were gutted --
+  // it would not discriminate the mutant. The full reason phrase below
+  // is rule-generated prose that is never a substring of the raw
+  // template text itself, so it only matches when the real check fired.
+  const REFUSE_TEMPLATES: Array<[string, string]> = [
+    [
+      "bash -c true {0}",
+      "the template's `-c` token is not on the allowed list of no-op bash startup flags",
+    ],
+    [
+      "bash -n {0}",
+      "the template's `-n` token is not on the allowed list of no-op bash startup flags",
+    ],
+    [
+      "bash --version {0}",
+      "the template's `--version` token is not on the allowed list of no-op bash startup flags",
+    ],
+    [
+      "bash -c 'exit 0' {0}",
+      "the template's `-c` token is not on the allowed list of no-op bash startup flags",
+    ],
+    [
+      "bash {0} || true",
+      "the template has trailing text after its `{0}` placeholder (`|| true`)",
+    ],
+    [
+      "bash -e",
+      "the template contains no `{0}` placeholder, so GitHub Actions never hands the gate script to it",
+    ],
+    [
+      "bash -en {0}",
+      "the template's `-en` token is not on the allowed list of no-op bash startup flags",
+    ],
+    [
+      "bash -o noexec {0}",
+      "the template's `-o noexec` option is not one of the allowed `set -o` names (pipefail, errexit, nounset, xtrace)",
+    ],
+    [
+      "bash +e {0}",
+      "the template's `+e` token is not on the allowed list of no-op bash startup flags",
+    ],
+    ["bash {0} {0}", "the template's `{0}` placeholder appears more than once"],
+    [
+      "bash -e {0} extra",
+      "the template has trailing text after its `{0}` placeholder (`extra`)",
+    ],
+    [
+      "bash --rcfile x {0}",
+      "the template's `--rcfile` token is not on the allowed list of no-op bash startup flags",
+    ],
+    [
+      "bash -o {0}",
+      "the template's `-o` option has no following `set -o` name",
+    ],
+    [
+      "bash -eo {0}",
+      "the template's `-eo` option has no following `set -o` name",
+    ],
+    // A program token is bash only when it is the bare name or a listed
+    // absolute path: the runner executes exactly the named file, so a
+    // committed wrapper called `bash` must not certify.
+    [
+      "./bash {0}",
+      "the program `./bash` is neither the bare `bash` nor one of the listed absolute paths",
+    ],
+    [
+      "/tmp/evil/bash -e {0}",
+      "the program `/tmp/evil/bash` is neither the bare `bash` nor one of the listed absolute paths",
+    ],
+    [
+      "bash.exe {0}",
+      "the program `bash.exe` is neither the bare `bash` nor one of the listed absolute paths",
+    ],
+    [
+      "/usr/bin/bash",
+      "the template contains no `{0}` placeholder, so GitHub Actions never hands the gate script to it",
+    ],
+  ];
+
+  it.each(REFUSE_TEMPLATES)(
+    "refuses the custom bash shell command template `%s`, naming the offending token",
+    (shell, reason) => {
+      const text = auditYml(
+        gateStep(["npm audit --audit-level=high"], [`shell: ${shell}`]),
+      );
+      const v = shapeViolations(text);
+      expect(v).toHaveLength(1);
+      expect(v[0].message).toContain(reason);
+    },
+  );
+
+  // The shell check runs, and refuses, before a registered template is
+  // even considered (a template match is an attestation about the
+  // script AS BASH, which does not hold under a shell that never runs
+  // it as written) -- run over the real fleet fixture, template
+  // registered, to prove the bypass does not reopen once a template is
+  // in play.
+  it.each(REFUSE_TEMPLATES.slice(0, 3))(
+    "also refuses `%s` over the real fleet fixture with its template registered",
+    (shell, reason) => {
+      const text = fleetAuditWithGateShell(shell);
+      const v = shapeViolations(text, withFleetTemplate());
+      expect(v).toHaveLength(1);
+      expect(v[0].message).toContain(reason);
+    },
+  );
+});
+
+describe("workflow-slop/audit-gate-shape: runs-on object (runner-group) form", () => {
+  it("the flow-style runner-group object form resolves Windows via its literal `labels:`", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: { group: my-group, labels: [windows-latest] }",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shellMessage(
+        "the gate step has no `shell:` at any level and its job's `runs-on` names a Windows runner, whose default shell is not bash",
+      ),
+    );
+  });
+
+  it("the block-style runner-group object form resolves the same way", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on:",
+      "      group: my-group",
+      "      labels: [windows-latest]",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+    expect(shapeViolations(text)).toHaveLength(1);
+  });
+
+  it("a scalar `labels:` (not a sequence) in the object form also resolves", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: { group: my-group, labels: windows-latest }",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+    expect(shapeViolations(text)).toHaveLength(1);
+  });
+
+  it("negative control: a runner-group object form whose labels are not Windows is certifiable", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: { group: my-group, labels: [ubuntu-latest] }",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+    expect(shapeViolations(text)).toHaveLength(0);
+  });
+
+  it("documented residual: a runner-group object form with no literal `labels:` stays unresolved (certifiable)", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: { group: my-group }",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+    expect(shapeViolations(text)).toHaveLength(0);
+  });
+});
+
+describe("workflow-slop/audit-gate-shape: a duplicated shell key", () => {
+  it("a step carrying `shell:` twice is never scanned clean: the file is reported as unparseable, whichever value the shell check read", () => {
+    // The shell check reads the first occurrence of a key. A mapping with
+    // the same key twice is invalid YAML, and the pack says so with a
+    // block finding of its own, so `shell: bash` followed by `shell: pwsh`
+    // cannot yield a clean file through the first-occurrence reading.
+    const text = auditYml(
+      gateStep(
+        ["npm audit --audit-level=high"],
+        ["shell: bash", "shell: pwsh"],
+      ),
+    );
+    const unparseable = auditViolations(
+      text,
+      "workflow-slop/unparseable-workflow",
+    );
+    expect(unparseable).toHaveLength(1);
+    expect(unparseable[0].severity).toBe("block");
+  });
+});
+
+describe("workflow-slop/audit-gate-shape: non-scalar shell value", () => {
+  it("a step-level `shell:` written as a sequence is refused rather than falling through", () => {
+    const text = auditYml(
+      gateStep(["npm audit --audit-level=high"], ["shell: [bash]"]),
+    );
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shellMessage(
+        "the gate step's `shell:` is not a scalar value, which this rule does not analyse as bash",
+      ),
+    );
+  });
+
+  it("a job-level `defaults.run.shell:` written as a mapping is refused", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    defaults:",
+      "      run:",
+      "        shell: { name: bash }",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shellMessage(
+        "the gate step's shell is not a scalar value, set by its job's `defaults.run.shell`, which this rule does not analyse as bash",
+      ),
+    );
+  });
+
+  it("a workflow-level `defaults.run.shell:` written as a sequence is refused", () => {
+    const text = [
+      "on: push",
+      "defaults:",
+      "  run:",
+      "    shell: [bash, -e]",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shellMessage(
+        "the gate step's shell is not a scalar value, set by the workflow's `defaults.run.shell`, which this rule does not analyse as bash",
+      ),
+    );
+  });
+});
+
+describe("workflow-slop/audit-gate-shape: shell refusal message tail", () => {
+  it("names the real remedies (an explicit bash shell, or the reviewed per-repo exception), not the shape/template tail", () => {
+    const text = auditYml(
+      gateStep(["npm audit --audit-level=high"], ["shell: pwsh"]),
+    );
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain(
+      "# slop-detector:disable-line=workflow-slop/audit-gate-shape",
+    );
+    expect(v[0].message).toContain(
+      '"workflow-slop/audit-gate-shape": { enabled: false }',
+    );
+    expect(v[0].message).not.toContain("R-bare");
+    expect(v[0].message).not.toContain("R-classify");
+    expect(v[0].message).not.toContain("workflow.auditGateTemplates");
   });
 });
 
