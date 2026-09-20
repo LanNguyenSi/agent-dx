@@ -482,6 +482,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   short adoption recipe for registering a reviewed gate block's digest;
   no fleet rollout, no change to the recognised `R-bare`/`R-classify`
   shapes, and no edit to any `.github/workflows` file in this repo.
+  Hardened in a follow-up fix: "flag-blind" above was too permissive --
+  a custom bash template's program name alone (its FIRST token) does not
+  prove the rest of the line ever runs the gate script GitHub hands it
+  as `{0}`, so `bash -c true {0}`, `bash -n {0}`, `bash --version {0}`,
+  and any other custom template whose command line never actually
+  invokes `{0}` as written, previously certified. The check now also
+  validates a custom bash template's trailing tokens against a closed
+  no-op allowlist (`-e`, `-u`, `-x`, singly or clustered; `-o <name>` or
+  a cluster ending in `o` followed by `<name>`, only for
+  `pipefail`/`errexit`/`nounset`/`xtrace`; `--noprofile`; `--norc`), with
+  its LAST token required to be exactly one `{0}`; any other token, no
+  `{0}` at all, more than one `{0}`, or text before/after it, refuses
+  with a message naming the offending token. `bash`, `bash {0}`, `bash
+  -e {0}`, `bash -eo pipefail {0}`, GitHub's own default expansion, and
+  `bash -eux -o pipefail {0}` all still certify unchanged. The same
+  fix-up also covers two gaps the shell check itself had: `runs-on:`
+  given as the documented runner-group object form (`{ group: <name>,
+  labels: [...] }`, block or flow style) now resolves Windows through
+  its literal `labels:`, where it previously fell through to
+  "unresolved" and certified; and a `shell:` present but written as a
+  sequence or a mapping, at any of the three levels, now refuses at that
+  level instead of being silently read as unset and falling through to
+  the next one. A shell refusal's finding also gained its own message
+  tail naming the real remedies (an explicit bash `shell:`, or the
+  reviewed per-line/per-repo opt-out) instead of reusing the
+  shape/template guidance, which cannot clear a shell refusal since that
+  check runs before either is even considered.
 
 ## [0.3.1] - 2026-08-26
 

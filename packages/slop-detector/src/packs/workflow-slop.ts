@@ -900,6 +900,27 @@ function isAuditWorkflowFile(file: FileTarget): boolean {
 type ScalarWithRange = { value: unknown; range: [number, number, number] };
 
 /**
+ * A `shell:` key (this step's own, or a `defaults.run.shell`) whose
+ * value is present but is a sequence or a mapping rather than a plain
+ * scalar (`shell: [bash]`, `shell: { name: bash }`). Distinguished from
+ * `ScalarWithRange` so a level carrying one of these is never silently
+ * read as unset: `nonBashReasonForLevel` refuses at that level instead
+ * of falling through to the next one, the same treatment a present but
+ * empty `shell:` already gets.
+ */
+type NonScalarShellField = { nonScalar: true };
+
+function isNonScalarShellField(value: unknown): value is NonScalarShellField {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { nonScalar?: unknown }).nonScalar === true
+  );
+}
+
+type ShellField = ScalarWithRange | NonScalarShellField;
+
+/**
  * Which YAML scalar style a step's `run:` was written in. Only two
  * styles are analysable as shell text without first undoing YAML's own
  * processing, and both are the styles the fleet's workflows actually
@@ -937,11 +958,11 @@ interface StepRunInfo {
    */
   jobContinueOnError?: ScalarWithRange;
   /** This step's own `shell:` sibling of `run:`, when present. */
-  shell?: ScalarWithRange;
+  shell?: ShellField;
   /** The enclosing job's `defaults.run.shell`, when present. */
-  jobDefaultShell?: ScalarWithRange;
+  jobDefaultShell?: ShellField;
   /** The workflow's own `defaults.run.shell`, when present. */
-  workflowDefaultShell?: ScalarWithRange;
+  workflowDefaultShell?: ShellField;
   /**
    * Whether the enclosing job's `runs-on:` is a literal that names a
    * Windows runner, a literal that names something else, or a value this
@@ -995,18 +1016,21 @@ function runScalarStyle(
 }
 
 /**
- * A mapping value reached by walking `path` as a chain of keys, each
- * step requiring the previous value to itself be a mapping (`.items`
- * present) -- used for `defaults.run.shell` at both the workflow root
- * and a job mapping. Returns `undefined` at any missing or non-mapping
- * link (so `defaults:` present without `run:`, or `run:` present without
- * `shell:`, both read as "not set" rather than throwing), or when the
- * final value is not a scalar node at all.
+ * A `defaults.run.shell` field reached by walking `path` as a chain of
+ * keys, each step requiring the previous value to itself be a mapping
+ * (`.items` present) -- used at both the workflow root and a job
+ * mapping. Returns `undefined` at any missing or non-mapping link (so
+ * `defaults:` present without `run:`, or `run:` present without
+ * `shell:`, both read as "not set" rather than throwing). When the
+ * chain resolves all the way to the `shell:` key, its value is returned
+ * as a `ScalarWithRange` when it is itself a scalar, or as a
+ * `NonScalarShellField` marker when it is present but is a sequence or
+ * a mapping -- present either way, never conflated with "not set".
  */
-function findNestedScalar(
+function findNestedShellField(
   node: unknown,
   path: string[],
-): ScalarWithRange | undefined {
+): ShellField | undefined {
   let current: unknown = node;
   for (const key of path) {
     if (!hasItems(current)) return undefined;
@@ -1018,7 +1042,7 @@ function findNestedScalar(
   }
   return isScalarNode(current)
     ? { value: current.value, range: current.range }
-    : undefined;
+    : { nonScalar: true };
 }
 
 /** How a job's `runs-on:` value resolves for the absent-shell check. */
@@ -1040,14 +1064,17 @@ function scalarStringValue(node: unknown): string | undefined {
 /**
  * Whether a job's `runs-on:` is a literal naming a Windows runner, a
  * literal naming something else, or a value this rule does not resolve
- * at all: `${{ matrix.os }}`, a label list containing one, or any node
- * shape other than a scalar or a sequence of scalars. GitHub's own
- * default shell on a Windows runner is `pwsh`, not bash (Windows runners
- * default to PowerShell Core, falling back to Windows PowerShell; see
- * the README), so an absent `shell:` there is not the same certifiable
- * absence it is on Linux/macOS. `"unresolved"` is a documented residual,
- * not a refusal: the absent-shell check simply does not fire for it, the
- * same verdict an unresolved `runs-on` got before this change.
+ * at all: `${{ matrix.os }}`, a label list containing one, a mapping
+ * (the documented runner-group object form, `runs-on: { group: <name>,
+ * labels: [...] }`) whose `labels:` is itself unresolved or absent, or
+ * any node shape other than a scalar, a sequence of scalars, or that
+ * mapping form. GitHub's own default shell on a Windows runner is
+ * `pwsh`, not bash (Windows runners default to PowerShell Core, falling
+ * back to Windows PowerShell; see the README), so an absent `shell:`
+ * there is not the same certifiable absence it is on Linux/macOS.
+ * `"unresolved"` is a documented residual, not a refusal: the
+ * absent-shell check simply does not fire for it, the same verdict an
+ * unresolved `runs-on` got before this change.
  */
 function resolveRunsOn(node: unknown): RunsOnResolution {
   const single = scalarStringValue(node);
@@ -1056,6 +1083,21 @@ function resolveRunsOn(node: unknown): RunsOnResolution {
     return WINDOWS_LABEL_RE.test(single.trim()) ? "windows" : "other";
   }
   if (hasItems(node)) {
+    if (node.items.some((item) => isPairNode(item))) {
+      // A mapping: the runner-group object form. Only a literal
+      // `labels:` key is resolved, through the same scalar/sequence
+      // logic above; a mapping naming just a `group:` (a runner group
+      // reference GitHub resolves server-side, not a label this rule
+      // can read) or whose `labels:` value this rule cannot itself
+      // resolve stays unresolved, same as any other value this check
+      // cannot trace to a concrete runner OS.
+      const labelsPair = node.items.find(
+        (item) => isPairNode(item) && scalarKeyName(item.key) === "labels",
+      );
+      return labelsPair && isPairNode(labelsPair)
+        ? resolveRunsOn((labelsPair as { value: unknown }).value)
+        : "unresolved";
+    }
     const labels: string[] = [];
     for (const item of node.items) {
       const value = scalarStringValue(item);
@@ -1094,8 +1136,8 @@ function collectStepRuns(
   out: StepRunInfo[],
   insideWith = false,
   jobContinueOnError?: ScalarWithRange,
-  workflowDefaultShell?: ScalarWithRange,
-  jobDefaultShell?: ScalarWithRange,
+  workflowDefaultShell?: ShellField,
+  jobDefaultShell?: ShellField,
   jobRunsOn?: RunsOnResolution,
 ): void {
   if (!hasItems(node)) return;
@@ -1122,10 +1164,10 @@ function collectStepRuns(
       })()
     : jobContinueOnError;
   const effectiveWorkflowDefaultShell = isWorkflowMapping
-    ? findNestedScalar(node, ["defaults", "run", "shell"])
+    ? findNestedShellField(node, ["defaults", "run", "shell"])
     : workflowDefaultShell;
   const effectiveJobDefaultShell = isJobMapping
-    ? findNestedScalar(node, ["defaults", "run", "shell"])
+    ? findNestedShellField(node, ["defaults", "run", "shell"])
     : jobDefaultShell;
   const effectiveJobRunsOn = isJobMapping
     ? (() => {
@@ -1153,9 +1195,11 @@ function collectStepRuns(
       const shellPair = node.items.find(
         (item) => isPairNode(item) && scalarKeyName(item.key) === "shell",
       );
-      const shell =
-        shellPair && isPairNode(shellPair) && isScalarNode(shellPair.value)
-          ? { value: shellPair.value.value, range: shellPair.value.range }
+      const shell: ShellField | undefined =
+        shellPair && isPairNode(shellPair)
+          ? isScalarNode(shellPair.value)
+            ? { value: shellPair.value.value, range: shellPair.value.range }
+            : { nonScalar: true }
           : undefined;
       const range = runPair.value.range;
       const { style, styleLabel } = runScalarStyle(
@@ -2401,6 +2445,146 @@ function shellProgramName(raw: string): string {
   return base.replace(/\.exe$/i, "");
 }
 
+// ─────────────────── a custom bash shell template's own tokens ───────────────────
+//
+// `shellProgramName` above only resolves WHICH program a template
+// invokes; it is deliberately blind to the rest of the command line, so
+// `shell: bash -c true {0}` or `shell: bash -n {0}` resolved the same as
+// `shell: bash -e {0}` even though neither ever actually runs the gate
+// script GitHub hands it as `{0}` -- `-c` runs a different, fixed
+// command instead of `{0}`, and `-n` only syntax-checks it. The class of
+// template this rule certifies is narrower than "first token is bash":
+// its trailing tokens are checked too, one at a time, against a
+// documented allowlist of flags that only enable an `errexit`/`pipefail`
+// style guard or suppress bash's startup files -- never a flag that
+// suppresses, redirects or replaces execution of the script handed to
+// `{0}`.
+
+/**
+ * The closed list of `set -o <name>` option names this rule accepts,
+ * whether spelled as a standalone `-o <name>` token or as the trailing
+ * `o` of a short option cluster (`-eo <name>`): each one only turns on
+ * an execution-tracing or failure-propagation guard, matching the `-e`,
+ * `-u`, `-x` single-letter forms already allowed. `-o noexec` (which
+ * would make the shell parse but never RUN the script) and every other
+ * `set -o` name are refused.
+ */
+const ALLOWED_SET_O_NAMES = new Set([
+  "pipefail",
+  "errexit",
+  "nounset",
+  "xtrace",
+]);
+
+/**
+ * Long-form flags permitted anywhere between a custom bash shell command
+ * template's program token and its trailing `{0}` placeholder, on top
+ * of the short option clusters `isBashOptionCluster` recognises. Both
+ * only suppress bash reading its personal startup files (`~/.bashrc`,
+ * profile scripts); neither changes what gets executed.
+ */
+const ALLOWED_LONG_SHELL_TOKENS = new Set(["--noprofile", "--norc"]);
+
+/**
+ * Whether `token` is a short bash option cluster built only from `-e`,
+ * `-u`, `-x` (any order, any repetition) with an optional trailing `o`
+ * (`-o` alone, or `-eo`, `-eux` followed by `-o`'s cluster form) --
+ * matching GitHub's own default expansion (`-eo pipefail`) and bash's
+ * combined-flag spelling alike. `consumesName` is `true` exactly when
+ * the cluster ends in `o`, telling the caller to also validate (and
+ * consume) the following token as the `set -o` name.
+ */
+function isBashOptionCluster(
+  token: string,
+): { matched: true; consumesName: boolean } | { matched: false } {
+  const match = /^-([eux]*)(o)?$/.exec(token);
+  if (!match || (match[1].length === 0 && match[2] !== "o")) {
+    return { matched: false };
+  }
+  return { matched: true, consumesName: match[2] === "o" };
+}
+
+/**
+ * Why a custom bash shell command template (a `shell:` value whose
+ * program token already resolved to `bash` via `shellProgramName`) is
+ * NOT certifiable, or `undefined` when it is. Fail-closed by
+ * construction: every branch that is not an explicit certify returns a
+ * reason naming the offending token, and the final fallthrough inside
+ * the token loop refuses too, so an unrecognised token can never fall
+ * off the end into a certify.
+ *
+ * Two forms certify:
+ *
+ * - A single token (`bash`, or a bare path to it): GitHub's own
+ *   built-in shell keyword form, taking no `{0}` placeholder at all.
+ * - Two or more tokens whose LAST token is exactly `{0}` (appearing
+ *   nowhere else in the template) and whose every token in between is
+ *   one of: `-e`, `-u`, `-x`, a short cluster of those
+ *   (`isBashOptionCluster`), `-o <name>`/a cluster ending in `o` plus a
+ *   following name (both only when `<name>` is in
+ *   `ALLOWED_SET_O_NAMES`), `--noprofile`, or `--norc`.
+ *
+ * Everything else refuses: no `{0}` at all (`bash -e`), `{0}` appearing
+ * more than once, text after `{0}` (`bash {0} || true`, `bash {0}
+ * extra`), a token that is neither on the allowlist nor a `-o`/cluster
+ * name from the closed list (`-c`, `-n`, `-s`, `-i`, `-l`, `-r`,
+ * `--version`, `--help`, `--rcfile`, `--init-file`, `-O`, a `+`-prefixed
+ * option, a cluster containing any letter besides `e`/`u`/`x`/a trailing
+ * `o`, `-o` with an unrecognised or missing name), and a token
+ * containing a quote character (GitHub execs the template without a
+ * shell, so a quoted argument is passed to the program literally, quote
+ * characters included, and `||`/`;` are likewise plain argv words, not
+ * shell operators -- both refuse as unrecognised tokens rather than
+ * being interpreted).
+ */
+function bashShellTemplateRefusal(trimmed: string): string | undefined {
+  const tokens = trimmed.split(/\s+/).filter((token) => token.length > 0);
+  if (tokens.length <= 1) {
+    // The literal `bash` keyword (or a bare path to it), no arguments,
+    // no `{0}`: certifiable exactly like the literal `bash` value.
+    return undefined;
+  }
+
+  const placeholderIndexes = tokens.reduce<number[]>((acc, token, index) => {
+    if (token === "{0}") acc.push(index);
+    return acc;
+  }, []);
+  if (placeholderIndexes.length === 0) {
+    return "the template contains no `{0}` placeholder, so GitHub Actions never hands the gate script to it";
+  }
+  if (placeholderIndexes.length > 1) {
+    return "the template's `{0}` placeholder appears more than once";
+  }
+  if (placeholderIndexes[0] !== tokens.length - 1) {
+    const trailing = tokens.slice(placeholderIndexes[0] + 1).join(" ");
+    return `the template has trailing text after its \`{0}\` placeholder (\`${trailing}\`)`;
+  }
+
+  const middle = tokens.slice(1, -1);
+  for (let i = 0; i < middle.length; i++) {
+    const token = middle[i];
+    if (token.includes('"') || token.includes("'")) {
+      return `the template's \`${token}\` token is a quoted argument, which GitHub passes to the program literally rather than treating as a shell operator`;
+    }
+    if (ALLOWED_LONG_SHELL_TOKENS.has(token)) continue;
+    const cluster = isBashOptionCluster(token);
+    if (cluster.matched) {
+      if (!cluster.consumesName) continue;
+      const name = middle[i + 1];
+      if (name === undefined) {
+        return `the template's \`${token}\` option has no following \`set -o\` name`;
+      }
+      if (!ALLOWED_SET_O_NAMES.has(name)) {
+        return `the template's \`${token} ${name}\` option is not one of the allowed \`set -o\` names (${Array.from(ALLOWED_SET_O_NAMES).join(", ")})`;
+      }
+      i += 1;
+      continue;
+    }
+    return `the template's \`${token}\` token is not on the allowed list of no-op bash startup flags`;
+  }
+  return undefined;
+}
+
 type ShellLevel = "step" | "job" | "workflow";
 
 function shellLevelPhrase(level: ShellLevel, valueDescription: string): string {
@@ -2425,12 +2609,18 @@ function shellLevelPhrase(level: ShellLevel, valueDescription: string): string {
  * it, or `shell: ""`) is refused at ITS OWN level rather than treated as
  * unset and falling through: the key was written, so whatever the
  * author meant by it, it was not left to the next level's default.
+ * Likewise a `shell:` present but written as a sequence or a mapping
+ * (`shell: [bash]`) is refused at its own level rather than silently
+ * read as unset.
  */
 function nonBashReasonForLevel(
   level: ShellLevel,
-  shell: ScalarWithRange | undefined,
+  shell: ShellField | undefined,
 ): string | undefined {
   if (!shell) return undefined;
+  if (isNonScalarShellField(shell)) {
+    return `${shellLevelPhrase(level, "not a scalar value")}, which this rule does not analyse as bash`;
+  }
   const raw = typeof shell.value === "string" ? shell.value : undefined;
   const trimmed = raw?.trim() ?? "";
   if (trimmed.length === 0) {
@@ -2439,7 +2629,11 @@ function nonBashReasonForLevel(
   if (trimmed.includes("${{")) {
     return `${shellLevelPhrase(level, `a non-literal \`${trimmed}\` expression`)}, which this rule cannot resolve to bash`;
   }
-  if (shellProgramName(trimmed) === "bash") return undefined;
+  if (shellProgramName(trimmed) === "bash") {
+    const templateReason = bashShellTemplateRefusal(trimmed);
+    if (!templateReason) return undefined;
+    return `${shellLevelPhrase(level, `\`${trimmed}\``)}, which this rule does not analyse as bash: ${templateReason}`;
+  }
   return `${shellLevelPhrase(level, `\`${trimmed}\``)}, which this rule does not analyse as bash`;
 }
 
@@ -2619,6 +2813,17 @@ function shapeViolationMessage(
   return parts.join(" ");
 }
 
+// A shell refusal cannot be cleared by matching a recognised shape or
+// registering a template (see the "0." refusal below, which runs
+// before either is even considered), so it names its own remedies
+// instead of `SHAPE_MESSAGE_TAIL`'s shape/template ones.
+const SHELL_MESSAGE_TAIL =
+  'Set an explicit bash `shell:` on the gate step (or its job\'s or the workflow\'s `defaults.run.shell`), or use the reviewed per-repo exception instead: a `# slop-detector:disable-line=workflow-slop/audit-gate-shape` comment on this line, or `rules: { "workflow-slop/audit-gate-shape": { enabled: false } }` in `slop.config.yml` to disable the rule for the whole repo (see the README\'s "Scope" section).';
+
+function shellViolationMessage(reason: string): string {
+  return `Unrecognised npm-audit gate shape in this audit workflow: ${reason}. ${SHELL_MESSAGE_TAIL}`;
+}
+
 const auditGateShape: Rule = {
   id: "workflow-slop/audit-gate-shape",
   pack: "workflow-slop",
@@ -2667,7 +2872,7 @@ const auditGateShape: Rule = {
             file,
             offset,
             matched,
-            shapeViolationMessage(shellReason, undefined, undefined),
+            shellViolationMessage(shellReason),
           ),
         );
         continue;
