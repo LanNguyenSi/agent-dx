@@ -5429,9 +5429,9 @@ describe("the reviewer checklist items mirrored in this table still carry their 
 // the same paragraph, not a property of any one citation read in
 // isolation.
 //
-// Two mechanical rules, applied per paragraph (a paragraph is a maximal run
-// of non-blank doc lines; a citation never spans a line break, so every
-// match is attributed to exactly one paragraph):
+// Three mechanical rules, applied per paragraph (a paragraph is a maximal
+// run of non-blank doc lines; a citation never spans a line break, so
+// every match is attributed to exactly one paragraph):
 //
 //   (a) duplicate-citation: the same resolved `file:range#anchor` (heading
 //       or string form) appears two or more times within one paragraph.
@@ -5453,17 +5453,65 @@ describe("the reviewer checklist items mirrored in this table still carry their 
 //       for a section-level anchor); rule (a) still covers a
 //       heading-anchored duplicate.
 //
+//   (c) distant-duplicate-anchor (agent-dx 5801bc29): a STRING anchor's
+//       own text also occurs, verbatim, on another, unclaimed line of the
+//       same target file MORE than SIBLING_GUARD_WINDOW lines from the
+//       citation's own range. Unlike (b), this rule has NO sibling
+//       precondition -- it runs on every string-anchored citation, alone
+//       in its own paragraph or not -- because the class it closes is
+//       exactly the one where nothing nearby would ever make the
+//       coincidence visible: a single, standalone citation into a
+//       function's call site whose anchor text also matches that same
+//       function's own definition, hundreds of lines away, passes every
+//       other check in this file (okf-kit's own citations-resolve, "last
+//       content line", "<=3 file-wide", "exactly once in range", and rule
+//       (b) itself, whose window never reaches that far and whose
+//       `hasSibling` precondition a standalone citation never satisfies)
+//       while still being silently re-pointable to the wrong site with its
+//       anchor text left unchanged. "Unclaimed" stays PARAGRAPH-scoped,
+//       exactly like rule (b)'s own definition (only the `hasSibling` gate
+//       and the window direction differ): a citation elsewhere in the
+//       document that happens to cover the same target line for an
+//       unrelated reason (a different claim, a different anchor) has not
+//       reviewed THIS anchor's occurrence there, so it must not silence
+//       this rule -- doc-wide claiming was tried and rejected (see
+//       docs/okf/log.md's agent-dx 5801bc29 entry) precisely because it
+//       let an unrelated, same-file citation elsewhere in the document
+//       silently absorb a real re-point. Rules (b) and (c) partition the
+//       target file into "within the window" and "farther than the
+//       window" around each citation's own range, so no line can ever
+//       trigger both.
+//
+//       That partition governs which of the two rules a duplicate falls
+//       into once a citation is a candidate for one of them; it is not a
+//       claim of full joint coverage. Residual (fix-round-2, agent-dx
+//       5801bc29, review finding L2): a sibling-free citation (no other
+//       citation to that file in the same paragraph, so rule (b)'s own
+//       `hasSibling` precondition fails) whose anchor text also occurs,
+//       unclaimed, WITHIN SIBLING_GUARD_WINDOW of its own range is
+//       reported by NEITHER rule -- (b) never runs on it for want of a
+//       sibling, and (c) only ever looks farther than the window. This is
+//       a known, accepted gap, not an error in the partition statement
+//       above; see the inside-window negative-control fixture below ("an
+//       occurrence inside SIBLING_GUARD_WINDOW is not reported by rule
+//       (c)") for the case pinned against a regression that widens rule
+//       (c) to also cover it.
+//
 // SIBLING_GUARD_WINDOW is 20, widened from the round-1 value of 10 (round 2
 // D-010) once a real bundle case was measured to fall outside it: two
 // genuinely distinct sibling notes sharing identical text 20 lines apart
 // (see docs/okf/log.md for the measured hit counts at each window and the
-// re-triage of every additional hit the wider window surfaces). Every hit
-// this window reports against the current bundle is read against its real
-// target file and the citing paragraph, then either fixed (a real
-// mis-pointed citation) or allowlisted below with the specific reason
-// found -- see docs/okf/log.md for the current measured counts, kept out
-// of this comment per this file's own D31 convention of leaving numbers to
-// the log rather than hand-writing them at two sites that can drift apart.
+// re-triage of every additional hit the wider window surfaces). It is also
+// the boundary rule (c) uses to decide "farther than" (see docs/okf/log.md's
+// agent-dx 5801bc29 entry for that rule's own introduction and measured
+// counts).
+// Every hit this window reports against the current bundle is read against
+// its real target file and the citing paragraph, then either fixed (a real
+// mis-pointed citation, or a disambiguated/lengthened anchor) or
+// allowlisted below with the specific reason found -- see docs/okf/log.md
+// for the current measured counts, kept out of this comment per this
+// file's own D31 convention of leaving numbers to the log rather than
+// hand-writing them at two sites that can drift apart.
 //
 // A path-less continuation citation (`:N-M#"..."`, whose path is implied
 // by the preceding FULL citation in the same paragraph) used to never
@@ -5816,7 +5864,40 @@ interface WrongSiblingAnchorFinding {
   citationLine: number;
 }
 
-type SiblingGuardFinding = DuplicateCitationFinding | WrongSiblingAnchorFinding;
+// Rule (c) (agent-dx 5801bc29): same-shape as WrongSiblingAnchorFinding
+// (deliberately -- see `findDistantDuplicateAnchors` below for why it
+// reuses every downstream consumer of that shape: allowlist matching,
+// geometry re-checks, and claim falsifiability all read these fields
+// generically and need no kind-specific branch beyond the few that
+// already switch on "wrong-sibling-anchor" by name), but a DIFFERENT
+// finding: rule (b) only looks WITHIN SIBLING_GUARD_WINDOW of the cited
+// range, and only when the same paragraph already cites another range of
+// the same file (`hasSibling`). Neither precondition holds for the class
+// this rule closes -- a citation whose anchor text also occurs, unclaimed,
+// FARTHER than the window from its own range, with no sibling citation
+// anywhere nearby to make the coincidence visible to rule (b) at all. A
+// standalone citation to a function's call site whose anchor text also
+// matches that function's own definition hundreds of lines away is exactly
+// this shape: nothing about it looks wrong to rule (b), okf-kit, or the
+// "last content line" / "<=3 file-wide" / "exactly once in range" checks
+// above, because every one of them is satisfied by BOTH the real site and
+// the wrong one.
+interface DistantDuplicateAnchorFinding {
+  kind: "distant-duplicate-anchor";
+  paragraphId: number;
+  citedPath: string;
+  real: string;
+  start: number;
+  end: number;
+  anchorText: string;
+  unclaimedLines: number[];
+  citationLine: number;
+}
+
+type SiblingGuardFinding =
+  | DuplicateCitationFinding
+  | WrongSiblingAnchorFinding
+  | DistantDuplicateAnchorFinding;
 
 const SIBLING_GUARD_WINDOW = 20;
 
@@ -5872,6 +5953,40 @@ function findDuplicateCitations(
   return findings;
 }
 
+// Fix-round-2 (agent-dx 5801bc29, review finding L1): 15 entries in the
+// allowlist below target this very file (`test/docs-consistency.test.ts`),
+// so rules (b) and (c) scanning that target also scan the array's own
+// `claim` strings, living in the same file they describe. A claim that
+// quoted a real anchor's exact text verbatim would manufacture a brand
+// new, unclaimed occurrence of that text purely by being written down --
+// the array's own header comment already avoids this by paraphrasing
+// rather than quoting (and `anchorKey` carrying a hash instead of the
+// text, for the same reason), but nothing mechanical enforced it before
+// this round. Rather than a second, hand-maintained line-number citation
+// naming the array's own span (exactly the kind of drift-prone number this
+// file's own D31 convention avoids), the span is located by its own
+// literal markers and blanked out of any scan of a target file that
+// contains them -- so text inside the array is not a target-file
+// occurrence, provided the marker occurs exactly twice here (pinned) and
+// the array's terminator is the first `];` line after it (else: scans more).
+function stripSelfAllowlistSpan(content: string): string {
+  const startMarker = "const SIBLING_GUARD_BUNDLE_ALLOWLIST";
+  // lastIndexOf, not indexOf: this function's own source is itself scanned
+  // when `content` is this file, and its own `startMarker` string literal
+  // is a first, earlier match for its own text -- the real declaration is
+  // always the LAST occurrence, since nothing legitimately repeats it
+  // after the array itself.
+  const startIdx = content.lastIndexOf(startMarker);
+  if (startIdx === -1) return content;
+  const closeMarker = "\n];\n";
+  const closeIdx = content.indexOf(closeMarker, startIdx);
+  if (closeIdx === -1) return content;
+  const spanEnd = closeIdx + closeMarker.length;
+  const span = content.slice(startIdx, spanEnd);
+  const blanked = span.replace(/[^\n]/g, "");
+  return content.slice(0, startIdx) + blanked + content.slice(spanEnd);
+}
+
 // Rule (b).
 function findWrongSiblingAnchors(
   citations: SiblingGuardCitation[],
@@ -5883,7 +5998,7 @@ function findWrongSiblingAnchors(
   const fileLines = (real: string): string[] => {
     let lines = fileLinesCache.get(real);
     if (!lines) {
-      lines = readTargetFile(real).split("\n");
+      lines = stripSelfAllowlistSpan(readTargetFile(real)).split("\n");
       fileLinesCache.set(real, lines);
     }
     return lines;
@@ -5934,6 +6049,76 @@ function findWrongSiblingAnchors(
   return findings;
 }
 
+// Rule (c). Structurally `findWrongSiblingAnchors`'s own twin, with the
+// two changes the class needs: no `hasSibling` precondition (the whole
+// point of this rule is the case where nothing else in the paragraph would
+// ever make the coincidence visible -- a lone, standalone citation is
+// exactly its target, not an edge case to skip), and the window direction
+// inverted to OUTSIDE `[start - window, end + window]` instead of inside
+// it, so a hit here and a hit from rule (b) can never both fire on the
+// same target line. "Claimed" stays PARAGRAPH-scoped, same as rule (b)'s
+// own `sameFile` (deliberately not doc-wide): a citation elsewhere in the
+// document that happens to cover the same target line for an unrelated
+// reason (a different anchor, a different claim) has not reviewed THIS
+// anchor's occurrence there at all, so it must not silence this rule --
+// that is precisely what lets a re-pointed citation's own mutation still
+// surface as a fresh, unallowlisted finding at its new geometry, or empty
+// an existing allowlist entry's own recorded geometry (caught by the
+// "no dead exemption" sanity check further below), rather than being
+// absorbed by an unrelated citation that happens to sit nearby.
+function findDistantDuplicateAnchors(
+  citations: SiblingGuardCitation[],
+  readTargetFile: (realPath: string) => string,
+  window: number,
+): DistantDuplicateAnchorFinding[] {
+  const findings: DistantDuplicateAnchorFinding[] = [];
+  const fileLinesCache = new Map<string, string[]>();
+  const fileLines = (real: string): string[] => {
+    let lines = fileLinesCache.get(real);
+    if (!lines) {
+      lines = stripSelfAllowlistSpan(readTargetFile(real)).split("\n");
+      fileLinesCache.set(real, lines);
+    }
+    return lines;
+  };
+  for (const [paragraphId, list] of groupSiblingGuardCitationsByParagraph(
+    citations,
+  )) {
+    for (const c of list) {
+      if (!c.isStringAnchor || c.anchorText === undefined) continue;
+      const anchorText = c.anchorText;
+      const lines = fileLines(c.real);
+      const sameFile = list.filter((o) => o.real === c.real);
+      const isClaimed = (ln: number): boolean =>
+        sameFile.some((o) => ln >= o.start && ln <= o.end);
+      const lo = c.start - window;
+      const hi = c.end + window;
+      const distantLines: number[] = [];
+      for (let ln = 1; ln <= lines.length; ln++) {
+        if (ln >= lo && ln <= hi) continue;
+        if (isClaimed(ln)) continue;
+        if ((lines[ln - 1] ?? "").includes(anchorText)) {
+          distantLines.push(ln);
+        }
+      }
+      if (distantLines.length > 0) {
+        findings.push({
+          kind: "distant-duplicate-anchor",
+          paragraphId,
+          citedPath: c.citedPath,
+          real: c.real,
+          start: c.start,
+          end: c.end,
+          anchorText,
+          unclaimedLines: distantLines,
+          citationLine: c.line,
+        });
+      }
+    }
+  }
+  return findings;
+}
+
 function findCitationSiblingDrift(
   docText: string,
   resolveRealPath: (citedPath: string) => string | undefined,
@@ -5944,6 +6129,7 @@ function findCitationSiblingDrift(
   return [
     ...findDuplicateCitations(citations),
     ...findWrongSiblingAnchors(citations, readTargetFile, window),
+    ...findDistantDuplicateAnchors(citations, readTargetFile, window),
   ];
 }
 
@@ -5952,6 +6138,13 @@ function formatSiblingGuardFinding(f: SiblingGuardFinding): string {
     return (
       `duplicate-citation: \`${f.citedPath}:${f.start}-${f.end}#${f.anchorRaw ?? ""}\` ` +
       `cited ${f.count} times in one paragraph`
+    );
+  }
+  if (f.kind === "distant-duplicate-anchor") {
+    return (
+      `distant-duplicate-anchor: \`${f.citedPath}:${f.start}-${f.end}#"${f.anchorText}"\` -- ` +
+      `anchor text also occurs, uncited, more than SIBLING_GUARD_WINDOW lines away at ` +
+      `line(s) ${f.unclaimedLines.join(", ")} of ${f.real}`
     );
   }
   return (
@@ -6637,6 +6830,117 @@ describe("citation-sibling-drift guard: fixtures reproduce the three review-batc
   });
 });
 
+// agent-dx 5801bc29: rule (c)'s own fixtures. Shape: a call-site citation
+// whose anchor text also matches that same identifier's DEFINITION site,
+// far enough away that rule (b) never sees it -- the real bundle case this
+// task closes is model-preselection.md's `init.ts:860-863#"composeClaude
+// AgentVariant("` citation against `composeClaudeAgentVariant`'s own
+// definition 461 lines away; these fixtures reproduce the same SHAPE at a
+// much smaller scale, independent of the real bundle.
+describe("citation-sibling-drift guard: rule (c) (distant-duplicate-anchor) fixtures (agent-dx 5801bc29)", () => {
+  const identity = (citedPath: string): string => citedPath;
+
+  // No sibling citation anywhere in the paragraph -- the precondition rule
+  // (b) requires and rule (c) deliberately does not. A lone citation to a
+  // call site whose anchor text ALSO matches the function's own
+  // definition, 40 lines above the window's own reach, is exactly the
+  // undetected class this rule closes: this is the mutation-probe (c)
+  // target (a mutant that neutralises the new uniqueness check, e.g. by
+  // making `findDistantDuplicateAnchors` always return `[]`, turns this
+  // `toBe(true)` red).
+  it("a lone, sibling-free citation whose anchor text also matches its target's definition site, far outside SIBLING_GUARD_WINDOW, is flagged by rule (c)", () => {
+    const target = buildSiblingGuardFixtureFile(70, {
+      5: "function composeFixtureVariant(role) {",
+      64: "  composeFixtureVariant(role);",
+    });
+    const readTarget = (): string => target;
+    const docText =
+      "the installer calls the per-role composer at the call site\n" +
+      '(fixture-lone.ts:64#"composeFixtureVariant(role)").\n';
+    const findings = findCitationSiblingDrift(docText, identity, readTarget);
+    expect(
+      findings.some(
+        (f) =>
+          f.kind === "distant-duplicate-anchor" && f.unclaimedLines[0] === 5,
+      ),
+      "a standalone citation with no sibling in its paragraph must still " +
+        "be checked against the whole target file, not skipped the way " +
+        `rule (b) would skip it: ${formatSiblingGuardFindings(findings)}`,
+    ).toBe(true);
+    // Rule (b) must NOT also fire here: `hasSibling` never holds for a
+    // lone citation, and this is exactly the gap rule (c) exists to close.
+    expect(findings.some((f) => f.kind === "wrong-sibling-anchor")).toBe(false);
+  });
+
+  // Same shape, but the citation is a path-less CONTINUATION (no path of
+  // its own, resolved against the nearest preceding full citation in the
+  // paragraph) -- this is the mutation-probe (b) target class: a bundle
+  // re-point of a continuation citation must be just as visible to rule
+  // (c) as a full citation's re-point is.
+  it("a path-less continuation whose anchor text also matches a distant, unclaimed occurrence is flagged by rule (c)", () => {
+    const target = buildSiblingGuardFixtureFile(70, {
+      5: "function composeFixtureVariant(role) {",
+      64: "  composeFixtureVariant(role);",
+    });
+    const readTarget = (): string => target;
+    const docText =
+      "the installer names the module once, then its call site\n" +
+      '(fixture-lone.ts:1#"module marker"; :64#"composeFixtureVariant(role)").\n';
+    const findings = findCitationSiblingDrift(docText, identity, readTarget);
+    expect(
+      findings.some(
+        (f) =>
+          f.kind === "distant-duplicate-anchor" &&
+          f.start === 64 &&
+          f.unclaimedLines[0] === 5,
+      ),
+      "a path-less continuation must be checked by rule (c) exactly like a " +
+        `full citation is: ${formatSiblingGuardFindings(findings)}`,
+    ).toBe(true);
+  });
+
+  // Negative control: the SAME shape, but the other occurrence sits INSIDE
+  // SIBLING_GUARD_WINDOW of the citation's own range. Rule (c) must stay
+  // silent here (that line belongs to rule (b)'s own territory, not
+  // rule (c)'s) -- pins the "no line can trigger both rules" partition the
+  // design comment above the two rules states.
+  it("an occurrence inside SIBLING_GUARD_WINDOW is not reported by rule (c) (that is rule (b)'s territory)", () => {
+    const target = buildSiblingGuardFixtureFile(30, {
+      5: "function composeFixtureVariant(role) {",
+      15: "  composeFixtureVariant(role);",
+    });
+    const readTarget = (): string => target;
+    const docText =
+      "the installer calls the per-role composer at the call site\n" +
+      '(fixture-near.ts:15#"composeFixtureVariant(role)").\n';
+    const findings = findCitationSiblingDrift(docText, identity, readTarget);
+    expect(
+      findings.filter((f) => f.kind === "distant-duplicate-anchor"),
+      formatSiblingGuardFindings(findings),
+    ).toEqual([]);
+  });
+
+  // Negative control: the distant occurrence IS claimed, by a sibling
+  // citation in the SAME paragraph that already cites it on purpose --
+  // rule (c) must not report a coincidence someone already cited.
+  it("a distant occurrence already claimed by a sibling citation in the same paragraph is not reported by rule (c)", () => {
+    const target = buildSiblingGuardFixtureFile(70, {
+      5: "function composeFixtureVariant(role) {",
+      64: "  composeFixtureVariant(role);",
+    });
+    const readTarget = (): string => target;
+    const docText =
+      'the definition (fixture-claimed.ts:5#"function composeFixtureVariant(role) {") ' +
+      "and the call site\n" +
+      '(fixture-claimed.ts:64#"composeFixtureVariant(role)") are both named.\n';
+    const findings = findCitationSiblingDrift(docText, identity, readTarget);
+    expect(
+      findings.filter((f) => f.kind === "distant-duplicate-anchor"),
+      formatSiblingGuardFindings(findings),
+    ).toEqual([]);
+  });
+});
+
 // Imported here, not moved to the top-of-file import block, for the same
 // reason `import ts from "typescript"` sits at its own point-of-use above:
 // adding it there would shift every existing citation into this file.
@@ -6917,6 +7221,846 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     claim:
       "the sentence names the `--json` subset interface by name; line 121 is that interface's own field declaration, while uncited 107 is the identical field on the superset interface the very same sentence contrasts it against.",
   },
+  {
+    doc: "install-fence-mechanics.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/init.ts",
+    start: 767,
+    end: 767,
+    anchorKey: "3a4a026f",
+    paragraphLine: 37,
+    uncitedLines: [790],
+    claim:
+      'line 767 cites `readAsset(join("templates", name)),`; uncited 790 is instead line 790 in `content: readAsset(join("skill", "references", name)),`, a different site the citing sentence never names.',
+  },
+  {
+    doc: "install-fence-mechanics.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/init.ts",
+    start: 861,
+    end: 863,
+    anchorKey: "d89da8cc",
+    paragraphLine: 53,
+    uncitedLines: [399],
+    claim:
+      "line 863 cites `composeClaudeAgentVariant(`; uncited 399 is instead line 399 in `function composeClaudeAgentVariant(`, a different site the citing sentence never names.",
+  },
+  {
+    doc: "install-fence-mechanics.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/init.ts",
+    start: 472,
+    end: 488,
+    anchorKey: "c0c3cd7c",
+    paragraphLine: 77,
+    uncitedLines: [368],
+    claim:
+      "the sentence describes `effortLine` being passed into `composeOpencodeAgentVariant` as a parameter; line 488 is that function's own effortLine push, while uncited 368 is the byte-identical push inside `composeOpencodeAgent`, the default (non-variant) composer the sentence does not name.",
+  },
+  {
+    doc: "install-fence-mechanics.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/cli-inputs.ts",
+    start: 292,
+    end: 292,
+    anchorKey: "23db3722",
+    paragraphLine: 186,
+    uncitedLines: [172],
+    claim:
+      "line 292 cites `previous.harnessesRecordedEmpty`; uncited 172 is instead line 172 in `* together with `previous.harnessesRecordedEmpty` (which `apply`'s`, a different site the citing sentence never names.",
+  },
+  {
+    doc: "install-fence-mechanics.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/init.test.ts",
+    start: 2548,
+    end: 2581,
+    anchorKey: "08402497",
+    paragraphLine: 198,
+    uncitedLines: [1148, 2152],
+    claim:
+      'line 2581 cites the `harnesses-stickiness gate is immune to an all-unknown-names…` test (`expect(result.stdout).toContain("installed for: claude");`); uncited 1148 and 2152 is instead line 1148 in the `init --yes runs non-interactively and installs` test (`expect(result.stdout).toContain("installed for: claude");`); and line 2152 in the `prints the tiers status in both the \'Found existing install…` test (`expect(second.stdout).toMatch(/installed for: claude.*tiers: true/);`), a different site the citing sentence never names.',
+  },
+  {
+    doc: "install-fence-mechanics.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/writers.ts",
+    start: 91,
+    end: 97,
+    anchorKey: "56ac8f47",
+    paragraphLine: 291,
+    uncitedLines: [51],
+    claim:
+      "the sentence describes `upsertMarkerSection`'s own conflict path for a broken or duplicated marker pair; line 97 is that function's `report.conflicted.push`, while uncited 51 is the byte-identical push inside `installFile`, the general kit-file conflict path for a user-edited file, which this sentence does not describe.",
+  },
+  {
+    doc: "install-fence-mechanics.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/init.ts",
+    start: 119,
+    end: 129,
+    anchorKey: "3e9881f8",
+    paragraphLine: 312,
+    uncitedLines: [92],
+    claim:
+      "the sentence describes `Manifest`'s own persisted `routing` field; line 129 is that field's declaration inside the `Manifest` interface, while uncited 92 is the byte-identical declaration inside `InitOptions`, the install-input type the sentence does not name.",
+  },
+  {
+    doc: "install-fence-mechanics.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/init.test.ts",
+    start: 1157,
+    end: 1176,
+    anchorKey: "be999e8e",
+    paragraphLine: 327,
+    uncitedLines: [554, 1612],
+    claim:
+      'line 1176 cites the `a plain re-run keeps the previously chosen models` test (`).toContain("model: haiku");`); uncited 554 and 1612 is instead line 554 in the `installs all four adapters; opencode agents omit model: whe…` test (`expect(claudeSlicer).toContain("model: haiku");`); and line 1612 in the `tiers=true, claude, full profile: exactly 15 agent files wi…` test (`expect(explorerLow).toContain("model: haiku");`), a different site the citing sentence never names.',
+  },
+  {
+    doc: "install-fence-mechanics.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/init.ts",
+    start: 754,
+    end: 756,
+    anchorKey: "eeab560e",
+    paragraphLine: 335,
+    uncitedLines: [819],
+    claim:
+      "line 756 cites `installedFiles[relativePath] = recorded;`; uncited 819 is instead line 819 in `if (recorded !== undefined) installedFiles[relativePath] = recorded;`, a different site the citing sentence never names.",
+  },
+  {
+    doc: "install-fence-mechanics.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/init.test.ts",
+    start: 322,
+    end: 337,
+    anchorKey: "1c10d762",
+    paragraphLine: 335,
+    uncitedLines: [2311],
+    claim:
+      'line 337 cites the `keeps a user-edited kit file as a conflict and preserves th…` test (`createHash("sha256").update("user edit\\n", "utf8").digest("hex"),`); uncited 2311 is instead line 2311 in the `repo kit-version pin (operator apply support)` test (`createHash("sha256").update(content, "utf8").digest("hex");`), a different site the citing sentence never names.',
+  },
+  {
+    doc: "install-fence-mechanics.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/init.test.ts",
+    start: 129,
+    end: 142,
+    anchorKey: "6b912d8f",
+    paragraphLine: 336,
+    uncitedLines: [2038],
+    claim:
+      "the sentence's first clause describes the plain (non-tiers) second run's no-op, correctly anchored at the `a second run changes no file` test's own `report.updated` assertion (line 142); uncited 2038 is the byte-identical assertion inside the `a second run with tiers=true changes no file (idempotent)` test, which the same bullet's second clause already cites separately, by its own anchor, at test/init.test.ts:2022-2033.",
+  },
+  {
+    doc: "install-fence-mechanics.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/init.test.ts",
+    start: 2022,
+    end: 2033,
+    anchorKey: "d6e57f7c",
+    paragraphLine: 336,
+    uncitedLines: [2354],
+    claim:
+      "the sentence describes the `tiers: true` second-run no-op; line 2033 is that assertion inside the `a second run with tiers=true changes no file (idempotent)` test, while uncited 2354 is the byte-identical assertion inside the separate `sets a pin, is a byte-for-byte no-op on repeat...` test, which covers the `pin` option, not tiers, and the sentence does not name.",
+  },
+  {
+    doc: "install-fence-mechanics.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/init.test.ts",
+    start: 1458,
+    end: 2038,
+    anchorKey: "6b912d8f",
+    paragraphLine: 352,
+    uncitedLines: [118, 142],
+    claim:
+      "line 2038 cites the `a second run with tiers=true changes no file (idempotent)` test (`expect(report.updated).toEqual([]);`); uncited 118 and 142 is instead line 118 in the `creates run state, AGENTS.md section, and claude adapter fi…` test (`expect(report.updated).toEqual([]);`); and line 142 in the `a second run changes no file` test (`expect(report.updated).toEqual([]);`), a different site the citing sentence never names.",
+  },
+  {
+    doc: "install-fence-mechanics.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/init.test.ts",
+    start: 1459,
+    end: 1512,
+    anchorKey: "13baa7b3",
+    paragraphLine: 352,
+    uncitedLines: [109, 355],
+    claim:
+      'line 1512 cites the `a legacy manifest with no tiers field defaults to false and…` test (`"model: sonnet",`); uncited 109 and 355 is instead line 109 in the `creates run state, AGENTS.md section, and claude adapter fi…` test (`expect(slicer).toContain("model: sonnet");`); and line 355 in the `installs the explorer with a read-only posture on both harn…` test (`expect(claudeExplorer).toContain("model: sonnet");`), a different site the citing sentence never names.',
+  },
+  {
+    doc: "install-fence-mechanics.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/init.test.ts",
+    start: 1926,
+    end: 1945,
+    anchorKey: "49a539a9",
+    paragraphLine: 352,
+    uncitedLines: [600],
+    claim:
+      'line 1945 cites the `opencode: a claude-family model behind a non-anthropic prov…` test (`"model: github-copilot/claude-sonnet-4.6",`); uncited 600 is instead line 600 in the `emits model: line when opencodeModels provides a FQ id` test (`expect(explorer).toContain("model: github-copilot/claude-sonnet-4.6");`), a different site the citing sentence never names.',
+  },
+  {
+    doc: "install-fence-mechanics.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/init.test.ts",
+    start: 2022,
+    end: 2038,
+    anchorKey: "6b912d8f",
+    paragraphLine: 352,
+    uncitedLines: [118, 142],
+    claim:
+      "line 2038 cites the `a second run with tiers=true changes no file (idempotent)` test (`expect(report.updated).toEqual([]);`); uncited 118 and 142 is instead line 118 in the `creates run state, AGENTS.md section, and claude adapter fi…` test (`expect(report.updated).toEqual([]);`); and line 142 in the `a second run changes no file` test (`expect(report.updated).toEqual([]);`), a different site the citing sentence never names.",
+  },
+  {
+    doc: "install-fence-mechanics.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/init.test.ts",
+    start: 1040,
+    end: 1074,
+    anchorKey: "df091a00",
+    paragraphLine: 352,
+    uncitedLines: [1018],
+    claim:
+      'line 1074 cites the `opencode + tiers on + unresolved tier-class models (0 varia…` test (`(note) => !note.includes("-low.md") && !note.includes("-high.md"),`); uncited 1018 is instead line 1018 in the `a claude install with tiers on, then a re-run switching to …` test (`expect(report.notes.every((note) => !note.includes(".opencode"))).toB…`), a different site the citing sentence never names.',
+  },
+  {
+    doc: "install-fence-mechanics.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/init.test.ts",
+    start: 1041,
+    end: 1074,
+    anchorKey: "df091a00",
+    paragraphLine: 352,
+    uncitedLines: [1018],
+    claim:
+      'line 1074 cites the `opencode + tiers on + unresolved tier-class models (0 varia…` test (`(note) => !note.includes("-low.md") && !note.includes("-high.md"),`); uncited 1018 is instead line 1018 in the `a claude install with tiers on, then a re-run switching to …` test (`expect(report.notes.every((note) => !note.includes(".opencode"))).toB…`), a different site the citing sentence never names.',
+  },
+  {
+    doc: "install-fence-mechanics.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/init.test.ts",
+    start: 2548,
+    end: 2581,
+    anchorKey: "08402497",
+    paragraphLine: 352,
+    uncitedLines: [1148],
+    claim:
+      "the sentence describes the harnesses-stickiness F1 regression test asserting a live claude install is not stuck to templates-only; line 2581 is that test's own stdout assertion, while uncited 1148 is the byte-identical assertion inside the unrelated `init --yes runs non-interactively and installs` smoke test in the `cli smoke` describe block, which the sentence does not name.",
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/models.ts",
+    start: 80,
+    end: 85,
+    anchorKey: "5633dd3c",
+    paragraphLine: 44,
+    uncitedLines: [174, 187],
+    claim:
+      'line 85 cites `advisor: "opus",`; uncited 174 and 187 is instead line 174 in `advisor: ["high", "xhigh"],`; and line 187 in `advisor: "high",`, a different site the citing sentence never names.',
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/init.ts",
+    start: 326,
+    end: 337,
+    anchorKey: "58938c96",
+    paragraphLine: 123,
+    uncitedLines: [414],
+    claim:
+      "the sentence describes `composeClaudeAgent`'s read-only-roles push; line 337 is that function's own push, while uncited 414 is the byte-identical push inside `composeClaudeAgentVariant`, the tier-variant sibling covered separately under \"Composition\" below, which this sentence does not name.",
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/init.ts",
+    start: 336,
+    end: 337,
+    anchorKey: "58938c96",
+    paragraphLine: 132,
+    uncitedLines: [414],
+    claim:
+      "the sentence names the read-only roles getting `disallowedTools:` right after `effort:` inside `composeClaudeAgent`; line 337 is that function's own push, while uncited 414 is the byte-identical push inside `composeClaudeAgentVariant`, the tier-variant sibling this sentence does not name.",
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/init.test.ts",
+    start: 104,
+    end: 109,
+    anchorKey: "13baa7b3",
+    paragraphLine: 133,
+    uncitedLines: [355, 1512],
+    claim:
+      'line 109 cites the `creates run state, AGENTS.md section, and claude adapter fi…` test (`expect(slicer).toContain("model: sonnet");`); uncited 355 and 1512 is instead line 355 in the `installs the explorer with a read-only posture on both harn…` test (`expect(claudeExplorer).toContain("model: sonnet");`); and line 1512 in the `a legacy manifest with no tiers field defaults to false and…` test (`"model: sonnet",`), a different site the citing sentence never names.',
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/init.ts",
+    start: 351,
+    end: 371,
+    anchorKey: "efde4d0d",
+    paragraphLine: 154,
+    uncitedLines: [491],
+    claim:
+      "the sentence describes `composeOpencodeAgent`'s read-only-roles push (`permission:`/`edit: deny`); line 371 is that function's own push, while uncited 491 is the byte-identical push inside `composeOpencodeAgentVariant`, the tier-variant sibling covered separately under \"Composition\" below, which this sentence does not name.",
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/init.test.ts",
+    start: 2222,
+    end: 2228,
+    anchorKey: "10aeb3a5",
+    paragraphLine: 168,
+    uncitedLines: [1394, 2258],
+    claim:
+      'line 2228 cites the `writes the --opencode-provider hint to STDERR (not stdout) …` test (`expect(result.stdout).not.toContain("--opencode-provider");`); uncited 1394 and 2258 is instead line 1394 in the `a subsequent run with harnesses: [] over a claude install l…` test (`expect(result.stdout).not.toContain("installed for: ");`); and line 2258 in the `--tiers with an empty catalog warns once per unresolved mod…` test (`expect(result.stdout).not.toContain(`Tier model class`);`), a different site the citing sentence never names.',
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/models.ts",
+    start: 182,
+    end: 187,
+    anchorKey: "5633dd3c",
+    paragraphLine: 248,
+    uncitedLines: [85],
+    claim:
+      'line 187 cites `advisor: "high",`; uncited 85 is instead line 85 in `advisor: "opus",`, a different site the citing sentence never names.',
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/init.ts",
+    start: 860,
+    end: 863,
+    anchorKey: "d89da8cc",
+    paragraphLine: 252,
+    uncitedLines: [399],
+    claim:
+      "line 863 cites `composeClaudeAgentVariant(`; uncited 399 is instead line 399 in `function composeClaudeAgentVariant(`, a different site the citing sentence never names.",
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/init.ts",
+    start: 399,
+    end: 414,
+    anchorKey: "58938c96",
+    paragraphLine: 267,
+    uncitedLines: [337],
+    claim:
+      "the sentence describes `composeClaudeAgentVariant`'s own read-only-roles push; line 414 is that function's own push, while uncited 337 is the byte-identical push inside `composeClaudeAgent`, the default (non-variant) composer covered separately under \"Per-harness frontmatter behavior\" above, which this sentence does not name.",
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/init.ts",
+    start: 472,
+    end: 491,
+    anchorKey: "efde4d0d",
+    paragraphLine: 271,
+    uncitedLines: [371],
+    claim:
+      "the sentence describes `composeOpencodeAgentVariant`'s own read-only-roles push; line 491 is that function's own push, while uncited 371 is the byte-identical push inside `composeOpencodeAgent`, the default (non-variant) composer this sentence does not name.",
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/init.test.ts",
+    start: 2241,
+    end: 2262,
+    anchorKey: "bd75126a",
+    paragraphLine: 351,
+    uncitedLines: [1992, 2295],
+    claim:
+      "line 2262 cites the `--tiers with an empty catalog warns once per unresolved mod…` test (`expect(agents.sort()).toEqual([`); uncited 1992 and 2295 is instead line 1992 in the `opencode: an unresolved class model (undefined) renders no …` test (`expect(agents.sort()).toEqual([`); and line 2295 in the `--tiers with fully-qualified --models but still no live cat…` test (`expect(agents.sort()).toEqual([`), a different site the citing sentence never names.",
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/init.ts",
+    start: 863,
+    end: 863,
+    anchorKey: "d89da8cc",
+    paragraphLine: 367,
+    uncitedLines: [399],
+    claim:
+      "line 863 cites `composeClaudeAgentVariant(`; uncited 399 is instead line 399 in `function composeClaudeAgentVariant(`, a different site the citing sentence never names.",
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/init.test.ts",
+    start: 1518,
+    end: 1552,
+    anchorKey: "44b3936a",
+    paragraphLine: 378,
+    uncitedLines: [970, 990],
+    claim:
+      "line 1552 cites the `default agent files are byte-identical whether tiers is on …` test (`tiers: false,`); uncited 970 and 990 is instead line 970 in the `opencode + unresolved tier-class models (0 variant files ev…` test (`tiers: false,`); and line 990 in the `a claude install with tiers on, then a re-run switching to …` test (`tiers: false,`), a different site the citing sentence never names.",
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/cli-inputs.ts",
+    start: 463,
+    end: 463,
+    anchorKey: "7b68d8ec",
+    paragraphLine: 391,
+    uncitedLines: [429],
+    claim:
+      "line 463 cites `warnings.push(`; uncited 429 is instead line 429 in `warnings.push(`Warning: ${w}`);`, a different site the citing sentence never names.",
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/init.test.ts",
+    start: 1853,
+    end: 1871,
+    anchorKey: "c4142751",
+    paragraphLine: 392,
+    uncitedLines: [1800],
+    claim:
+      'line 1871 cites the `opencode: an ollama-resolved class id gets no effort field` test (`expect(implementerHigh).toContain("model: ollama/llama3");`); uncited 1800 is instead line 1800 in the `opencode default files: an Ollama or provider-less resolved…` test (`expect(rendered).toContain("model: ollama/llama3");`), a different site the citing sentence never names.',
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/init.test.ts",
+    start: 1904,
+    end: 1922,
+    anchorKey: "e3586735",
+    paragraphLine: 399,
+    uncitedLines: [1769],
+    claim:
+      'line 1922 cites the `opencode: a non-anthropic, non-ollama resolved class id get…` test (`expect(implementerHigh).toContain("reasoningEffort: high");`); uncited 1769 is instead line 1769 in the `opencode default files: a non-Claude-family provider-qualif…` test (`expect(rendered).toContain("reasoningEffort: high");`), a different site the citing sentence never names.',
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/init.test.ts",
+    start: 1926,
+    end: 1945,
+    anchorKey: "49a539a9",
+    paragraphLine: 402,
+    uncitedLines: [600],
+    claim:
+      'line 1945 cites the `opencode: a claude-family model behind a non-anthropic prov…` test (`"model: github-copilot/claude-sonnet-4.6",`); uncited 600 is instead line 600 in the `emits model: line when opencodeModels provides a FQ id` test (`expect(explorer).toContain("model: github-copilot/claude-sonnet-4.6");`), a different site the citing sentence never names.',
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/init.ts",
+    start: 326,
+    end: 337,
+    anchorKey: "58938c96",
+    paragraphLine: 418,
+    uncitedLines: [414],
+    claim:
+      "the sentence names `composeClaudeAgent` as the function 0.22.0 gave a pinned `effort:` line; line 337 is that function's own read-only-roles push, included in the cited range, while uncited 414 is the byte-identical push inside `composeClaudeAgentVariant`, the tier-variant sibling this sentence does not name.",
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/init.ts",
+    start: 351,
+    end: 371,
+    anchorKey: "efde4d0d",
+    paragraphLine: 419,
+    uncitedLines: [491],
+    claim:
+      "the sentence names `composeOpencodeAgent` as the function 0.22.0 gave a pinned effort line; line 371 is that function's own read-only-roles push, included in the cited range, while uncited 491 is the byte-identical push inside `composeOpencodeAgentVariant`, the tier-variant sibling this sentence does not name.",
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/init.test.ts",
+    start: 1040,
+    end: 1074,
+    anchorKey: "df091a00",
+    paragraphLine: 511,
+    uncitedLines: [1018],
+    claim:
+      'line 1074 cites the `opencode + tiers on + unresolved tier-class models (0 varia…` test (`(note) => !note.includes("-low.md") && !note.includes("-high.md"),`); uncited 1018 is instead line 1018 in the `a claude install with tiers on, then a re-run switching to …` test (`expect(report.notes.every((note) => !note.includes(".opencode"))).toB…`), a different site the citing sentence never names.',
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/init.test.ts",
+    start: 1157,
+    end: 1176,
+    anchorKey: "be999e8e",
+    paragraphLine: 549,
+    uncitedLines: [554, 1612],
+    claim:
+      'line 1176 cites the `a plain re-run keeps the previously chosen models` test (`).toContain("model: haiku");`); uncited 554 and 1612 is instead line 554 in the `installs all four adapters; opencode agents omit model: whe…` test (`expect(claudeSlicer).toContain("model: haiku");`); and line 1612 in the `tiers=true, claude, full profile: exactly 15 agent files wi…` test (`expect(explorerLow).toContain("model: haiku");`), a different site the citing sentence never names.',
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
+    start: 112,
+    end: 112,
+    anchorKey: "1429a7e8",
+    paragraphLine: 607,
+    uncitedLines: [82],
+    claim:
+      "line 112 cites the 'agents-md-section per-role routing bullet lists every role' test; uncited 82 is the same array-equality pattern inside the separate 'INSTALL-AGENT.md write-surface brace lists name every role' test, which this sentence does not name.",
+  },
+  {
+    doc: "model-preselection.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
+    start: 82,
+    end: 82,
+    anchorKey: "1429a7e8",
+    paragraphLine: 611,
+    uncitedLines: [112],
+    claim:
+      "line 82 cites the 'INSTALL-AGENT.md write-surface brace lists name every role' test; uncited 112 is the same array-equality pattern inside the separate 'agents-md-section per-role routing bullet lists every role' test, which this sentence does not name.",
+  },
+  {
+    doc: "operator-install-and-registry.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/cli.ts",
+    start: 1023,
+    end: 1023,
+    anchorKey: "39280272",
+    paragraphLine: 179,
+    uncitedLines: [1496],
+    claim:
+      "the sentence describes the `apply` command registering its target; line 1023 is `apply`'s own `upsertOperatorTarget` call, while uncited 1496 is the byte-identical call inside the `adopt` command, a different command the sentence does not name.",
+  },
+  {
+    doc: "operator-install-and-registry.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/cli.ts",
+    start: 966,
+    end: 966,
+    anchorKey: "6e2a7d4e",
+    paragraphLine: 233,
+    uncitedLines: [282],
+    claim:
+      "the sentence describes the pin gate sitting above `apply`'s own `runInit` call; line 966 is `apply`'s own call, while uncited 282 is the byte-identical call inside the plain `init` command, a different command with no pin gate that the sentence does not name.",
+  },
+  {
+    doc: "operator-install-and-registry.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/cli.ts",
+    start: 811,
+    end: 811,
+    anchorKey: "ff006a49",
+    paragraphLine: 239,
+    uncitedLines: [1167, 1526],
+    claim:
+      'line 811 cites ``Operator manifest at ${join(home, "manifest.json")} is unreadable; b…`; uncited 1167 and 1526 is instead line 1167 in ``Operator manifest at ${manifestPath} is unreadable; back it up and r…`; and line 1526 in ``Operator manifest at ${manifestPath} is unreadable; back it up and r…`, a different site the citing sentence never names.',
+  },
+  {
+    doc: "operator-install-and-registry.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/cli.ts",
+    start: 818,
+    end: 818,
+    anchorKey: "16d2e79a",
+    paragraphLine: 240,
+    uncitedLines: [1155],
+    claim:
+      "the sentence describes `apply`'s own absent-operator-manifest error path; line 818 is that command's console.error call, while uncited 1155 is the byte-identical message inside `doctor`'s own no-operator-manifest error path, a different command the sentence does not name.",
+  },
+  {
+    doc: "operator-install-and-registry.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/cli.ts",
+    start: 76,
+    end: 79,
+    anchorKey: "b74f7510",
+    paragraphLine: 241,
+    uncitedLines: [1385],
+    claim:
+      "line 79 cites `console.error(`Target is not a directory: ${targetDir}`);`; uncited 1385 is instead line 1385 in ``Target is not a directory: ${targetDir}`,`, a different site the citing sentence never names.",
+  },
+  {
+    doc: "operator-install-and-registry.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/doctor.ts",
+    start: 614,
+    end: 622,
+    anchorKey: "ccd2181d",
+    paragraphLine: 295,
+    uncitedLines: [454],
+    claim:
+      "line 622 cites `: 0;`; uncited 454 is instead line 454 in `return Array.isArray(candidate.targets) ? candidate.targets.length : …`, a different site the citing sentence never names.",
+  },
+  {
+    doc: "operator-install-and-registry.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/doctor.ts",
+    start: 614,
+    end: 622,
+    anchorKey: "ccd2181d",
+    paragraphLine: 346,
+    uncitedLines: [454],
+    claim:
+      "line 622 cites `: 0;`; uncited 454 is instead line 454 in `return Array.isArray(candidate.targets) ? candidate.targets.length : …`, a different site the citing sentence never names.",
+  },
+  {
+    doc: "review-gate-and-waivers.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/template-markers.test.ts",
+    start: 57,
+    end: 57,
+    anchorKey: "42832de5",
+    paragraphLine: 209,
+    uncitedLines: [91],
+    claim:
+      'line 57 cites the `00-goal.md carries the run-base marker line byte-exactly, w…` test (`"<!-- solution-acceptance: run-base = TODO -->",`); uncited 91 is instead line 91 in the `the keyed run-base placeholder line sits directly below the…` test (`line.includes("<!-- solution-acceptance: run-base = TODO -->"),`), a different site the citing sentence never names.',
+  },
+  {
+    doc: "run-state-lifecycle-and-markers.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/template-markers.test.ts",
+    start: 55,
+    end: 57,
+    anchorKey: "42832de5",
+    paragraphLine: 70,
+    uncitedLines: [91],
+    claim:
+      'line 57 cites the `00-goal.md carries the run-base marker line byte-exactly, w…` test (`"<!-- solution-acceptance: run-base = TODO -->",`); uncited 91 is instead line 91 in the `the keyed run-base placeholder line sits directly below the…` test (`line.includes("<!-- solution-acceptance: run-base = TODO -->"),`), a different site the citing sentence never names.',
+  },
+  {
+    doc: "run-state-lifecycle-and-markers.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/template-markers.test.ts",
+    start: 55,
+    end: 57,
+    anchorKey: "42832de5",
+    paragraphLine: 92,
+    uncitedLines: [91],
+    claim:
+      'line 57 cites the `00-goal.md carries the run-base marker line byte-exactly, w…` test (`"<!-- solution-acceptance: run-base = TODO -->",`); uncited 91 is instead line 91 in the `the keyed run-base placeholder line sits directly below the…` test (`line.includes("<!-- solution-acceptance: run-base = TODO -->"),`), a different site the citing sentence never names.',
+  },
+  {
+    doc: "run-state-lifecycle-and-markers.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/template-markers.test.ts",
+    start: 71,
+    end: 73,
+    anchorKey: "ea438f34",
+    paragraphLine: 180,
+    uncitedLines: [516],
+    claim:
+      "line 73 cites the test that 00-goal.md carries the keyed run-base placeholder line byte-exactly; uncited 516 repeats the identical marker line at a wholly separate site the citing sentence never names.",
+  },
+  {
+    doc: "run-state-lifecycle-and-markers.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/template-markers.test.ts",
+    start: 88,
+    end: 95,
+    anchorKey: "3cd8bcb0",
+    paragraphLine: 184,
+    uncitedLines: [516],
+    claim:
+      "line 95 cites the test that the keyed run-base placeholder line sits directly below the unkeyed one; uncited 516 repeats the identical marker line at a wholly separate site the citing sentence never names.",
+  },
+  {
+    doc: "run-state-lifecycle-and-markers.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/template-markers.test.ts",
+    start: 99,
+    end: 100,
+    anchorKey: "3c649d56",
+    paragraphLine: 187,
+    uncitedLines: [50],
+    claim:
+      "the sentence describes the keyed-marker-noninterference test (`the existing unkeyed run-base regex still matches exactly once...`); lines 99-100 are that test's own assertion, while uncited 50 is the byte-identical assertion inside the earlier, more general `00-goal.md has exactly one run-base marker, defaulting to TODO` test, which predates the keyed marker and does not test non-interference, a test the sentence does not name.",
+  },
+  {
+    doc: "run-state-lifecycle-and-markers.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/template-markers.test.ts",
+    start: 216,
+    end: 226,
+    anchorKey: "86ae35d5",
+    paragraphLine: 265,
+    uncitedLines: [251, 252],
+    claim:
+      'line 226 cites the `carries a header row with both Severity and Decision columns` test (`expect(cells).toContain("decision");`); uncited 251 and 252 is instead line 251 in the `invites only the reader\'s resolved Decision vocabulary in t…` test (`const decisionCell = cells[cells.indexOf("accepted/defer")];`); and line 252 in the `invites only the reader\'s resolved Decision vocabulary in t…` test (`const tokens = decisionCell`), a different site the citing sentence never names.',
+  },
+  {
+    doc: "subagent-contracts-superset.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/src/models.ts",
+    start: 80,
+    end: 85,
+    anchorKey: "5633dd3c",
+    paragraphLine: 70,
+    uncitedLines: [174, 187],
+    claim:
+      'line 85 cites `advisor: "opus",`; uncited 174 and 187 is instead line 174 in `advisor: ["high", "xhigh"],`; and line 187 in `advisor: "high",`, a different site the citing sentence never names.',
+  },
+  {
+    doc: "subagent-contracts-superset.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
+    start: 1013,
+    end: 1013,
+    anchorKey: "fcc9c9f6",
+    paragraphLine: 156,
+    uncitedLines: [1653, 1693],
+    claim:
+      "line 1013 cites the reviewer-copy byte-identity test for the reproduction field; uncited 1653 and 1693 are the same equality-assertion shape inside the separate findings-block and method_applied/withdrawn-block reviewer-copy tests, which this sentence does not name.",
+  },
+  {
+    doc: "subagent-contracts-superset.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
+    start: 1082,
+    end: 1082,
+    anchorKey: "bd3b4521",
+    paragraphLine: 159,
+    uncitedLines: [1233, 4847],
+    claim:
+      "line 1082 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1233 and 4847 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
+  },
+  {
+    doc: "subagent-contracts-superset.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
+    start: 833,
+    end: 833,
+    anchorKey: "9e1acc22",
+    paragraphLine: 245,
+    uncitedLines: [727, 796],
+    claim:
+      "line 833 cites the test proving no subagent-input field is absent from the slicer output schema; uncited 727 and 796 build the same per-field pattern inside the separate superset-schema test and the excludes-only-immediate-envelope-fields test, which this sentence does not name.",
+  },
+  {
+    doc: "subagent-contracts-superset.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
+    start: 528,
+    end: 528,
+    anchorKey: "4c984746",
+    paragraphLine: 355,
+    uncitedLines: [468],
+    claim:
+      "line 528 cites the test that checks the section heading is present; uncited 468 is the same heading string appearing inside the separate .ai/run-pointer-rule harness-notes test, which this sentence does not name.",
+  },
+  {
+    doc: "subagent-contracts-superset.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
+    start: 1082,
+    end: 1082,
+    anchorKey: "bd3b4521",
+    paragraphLine: 440,
+    uncitedLines: [1233, 4847],
+    claim:
+      "line 1082 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1233 and 4847 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
+  },
+  {
+    doc: "subagent-contracts-superset.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
+    start: 1082,
+    end: 1082,
+    anchorKey: "bd3b4521",
+    paragraphLine: 444,
+    uncitedLines: [1233, 4847],
+    claim:
+      "line 1082 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1233 and 4847 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
+  },
+  {
+    doc: "subagent-contracts-superset.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
+    start: 1122,
+    end: 1122,
+    anchorKey: "1d478a12",
+    paragraphLine: 447,
+    uncitedLines: [1238],
+    claim:
+      "line 1122 cites the test for the installed prompt's not-applicable mutation_probes clause; uncited 1238 is the same containment assertion inside the separate not-applicable commits-clause test, which this sentence does not name.",
+  },
+  {
+    doc: "subagent-contracts-superset.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
+    start: 4788,
+    end: 4788,
+    anchorKey: "ecb73fca",
+    paragraphLine: 507,
+    uncitedLines: [4818],
+    claim:
+      "line 4788 cites the test that step 6 treats a replayed probe that now survives or cannot be applied as a regression signal; uncited 4818 is the same regression-signal sentence quoted again inside the separate workflow-step-6-source test, which this sentence does not name.",
+  },
+  {
+    doc: "subagent-contracts-superset.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
+    start: 4806,
+    end: 4806,
+    anchorKey: "2e18ea4a",
+    paragraphLine: 511,
+    uncitedLines: [6258],
+    claim:
+      "line 4806 cites the test that the installed implementer prompt carries the same regression-signal consequence; uncited 6258 is unrelated fixture prose inside the separate shape-3 sibling-guard fixture test that happens to share a short word run with that consequence sentence, which this sentence does not name.",
+  },
+  {
+    doc: "subagent-contracts-superset.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
+    start: 4846,
+    end: 4846,
+    anchorKey: "a4566152",
+    paragraphLine: 513,
+    uncitedLines: [1127],
+    claim:
+      "line 4846 cites the test that both output contract copies carry a byte-identical mutation_probes block; uncited 1127 is the same boolean-literal phrase inside the separate exact-sub-field-names test earlier in the file, which this sentence does not name.",
+  },
+  {
+    doc: "subagent-contracts-superset.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
+    start: 1238,
+    end: 1238,
+    anchorKey: "1d478a12",
+    paragraphLine: 638,
+    uncitedLines: [1122],
+    claim:
+      "line 1238 cites the test for the installed prompt's not-applicable commits clause; uncited 1122 is the same containment assertion inside the separate not-applicable mutation_probes-clause test, which this sentence does not name.",
+  },
+  {
+    doc: "subagent-contracts-superset.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
+    start: 1233,
+    end: 1233,
+    anchorKey: "bd3b4521",
+    paragraphLine: 643,
+    uncitedLines: [1082, 4847],
+    claim:
+      "line 1233 cites the implementer-copy byte-identity test for the commits field; uncited 1082 and 4847 are the same equality-assertion shape inside the separate mutation_probes-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
+  },
+  {
+    doc: "subagent-contracts-superset.md",
+    kind: "distant-duplicate-anchor",
+    real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
+    start: 1238,
+    end: 1238,
+    anchorKey: "1d478a12",
+    paragraphLine: 646,
+    uncitedLines: [1122],
+    claim:
+      "line 1238 cites the test for the installed prompt's not-applicable commits clause; uncited 1122 is the same containment assertion inside the separate not-applicable mutation_probes-clause test, which this sentence does not name.",
+  },
 ];
 
 function siblingGuardFindingMatchesAllowlist(
@@ -6944,7 +8088,13 @@ function siblingGuardFindingMatchesAllowlist(
   // exempts only the hit it was actually cleared against. A hit that grew
   // a new uncited occurrence, or a repeat that moved to another doc line,
   // no longer matches and fails the per-doc check until it is re-reviewed.
-  if (finding.kind === "wrong-sibling-anchor") {
+  // Rule (c) (agent-dx 5801bc29): a distant-duplicate-anchor finding has
+  // the exact same shape (see the interface's own comment), so it is
+  // matched by the same branch, not a new one.
+  if (
+    finding.kind === "wrong-sibling-anchor" ||
+    finding.kind === "distant-duplicate-anchor"
+  ) {
     const recorded = entry.uncitedLines;
     if (recorded === undefined) return false;
     return (
@@ -6998,7 +8148,10 @@ function siblingGuardEntryGeometryViolation(
   if (citations.length === 0) {
     return `${where} -- the doc no longer carries a citation of that range with the recorded anchorKey ${entry.anchorKey}`;
   }
-  if (entry.kind === "wrong-sibling-anchor") {
+  if (
+    entry.kind === "wrong-sibling-anchor" ||
+    entry.kind === "distant-duplicate-anchor"
+  ) {
     // Round 4 (L2): picks the SPECIFIC citation the entry was reviewed
     // against, by its recorded `paragraphLine`, rather than `citations[0]`
     // (which, before this round, could silently be a same-range,
@@ -7009,11 +8162,11 @@ function siblingGuardEntryGeometryViolation(
     }
     const anchorText = citation.anchorText;
     if (anchorText === undefined) {
-      return `${where} -- recorded as a wrong-sibling-anchor exemption, but the doc's citation carries no string anchor`;
+      return `${where} -- recorded as a ${entry.kind} exemption, but the doc's citation carries no string anchor`;
     }
     const recorded = entry.uncitedLines;
     if (recorded === undefined || recorded.length === 0) {
-      return `${where} -- a wrong-sibling-anchor entry must record the uncited line(s) it was cleared against`;
+      return `${where} -- a ${entry.kind} entry must record the uncited line(s) it was cleared against`;
     }
     const targetLines = readTargetFile(entry.real).split("\n");
     for (const lineNumber of recorded) {
@@ -7206,6 +8359,35 @@ function siblingGuardClaimIsFalsifiable(
   return true;
 }
 
+// Fix-round-2 (agent-dx 5801bc29, review finding M2): every check above
+// verifies that a claim's line/range tokens point at real geometry, but
+// none of them checks that the claim says anything a reviewer could not
+// already infer from the entry's own recorded fields. A content-free
+// template -- "line N cites `X`; uncited M repeats the byte-identical
+// statement at a wholly separate site the citing sentence never names."
+// -- names real lines and satisfies every conjunct above while adding
+// zero information: it restates the mechanical fact that is already true
+// of every distant-duplicate-anchor finding by definition (the anchor
+// text matched twice, that is why the finding exists at all), never
+// saying what the CITING SENTENCE describes or why the cited line, not
+// the uncited sibling, is that sentence's evidence -- the exact shape the
+// array's own docblock (above) requires. `siblingGuardClaimIsFalsifiable`
+// cannot detect this by parsing tokens (a specific claim and a boilerplate
+// one can share the same token shape), so this is a separate, minimal
+// floor: reject the one known content-free tail verbatim. It is a floor,
+// not a full content check -- a differently-worded content-free claim
+// would still slip past it -- but it closes the exact regression class
+// a review found (17 of the 70 new claims carried this literal tail)
+// without risking a false positive on a real, specific claim, since no
+// specific claim in this array or any future one has reason to end with
+// this exact sentence.
+const SIBLING_GUARD_CLAIM_BOILERPLATE_TAIL =
+  "repeats the byte-identical statement at a wholly separate site the citing sentence never names.";
+
+function siblingGuardClaimHasSubstance(claim: string): boolean {
+  return !claim.includes(SIBLING_GUARD_CLAIM_BOILERPLATE_TAIL);
+}
+
 describe("the citation-sibling-drift guard reports zero (unallowlisted) findings on the current bundle", () => {
   const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
   const readRepoFile = (relPath: string): string =>
@@ -7238,6 +8420,22 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
         ),
         `${entry.doc} (${entry.real}:${entry.start}-${entry.end}) claim names ` +
           `none of its own recorded lines or a real sibling citation (own lines: ${siblingGuardEntryOwnLines(entry).join(", ")}): ${entry.claim}`,
+      ).toBe(true);
+    }
+  });
+
+  // Fix-round-2 (agent-dx 5801bc29, review finding M2): geometry-falsifiable
+  // is not the same as content-bearing -- see `siblingGuardClaimHasSubstance`
+  // above. Enforced here, over the real array, so a future content-free
+  // claim of this exact known shape fails the suite the same way a
+  // geometry-unfalsifiable one already does.
+  it("no allowlist entry's claim carries the known content-free boilerplate tail (a real sibling site, restated, is not evidence)", () => {
+    for (const entry of SIBLING_GUARD_BUNDLE_ALLOWLIST) {
+      expect(
+        siblingGuardClaimHasSubstance(entry.claim),
+        `${entry.doc} (${entry.real}:${entry.start}-${entry.end}) claim is the ` +
+          `content-free boilerplate template, naming no enclosing function, ` +
+          `test, or describe block at either site: ${entry.claim}`,
       ).toBe(true);
     }
   });
@@ -7280,6 +8478,60 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
       siblingGuardClaimIsFalsifiable(namesItsOwnLine, noDoc, noResolve),
       "the same length, now naming one of its own recorded lines (20), " +
         "must pass",
+    ).toBe(true);
+  });
+
+  // Fix-round-2 (agent-dx 5801bc29, review finding M2), bundle-independent:
+  // a dedicated fixture for `siblingGuardClaimHasSubstance`, for the same
+  // reason the previous fixture exists for `siblingGuardClaimIsFalsifiable`
+  // -- the real array above no longer contains a boilerplate entry (this
+  // round rewrote all 17), so nothing in it would catch a mutant that
+  // neutralises the new check back to always-true. Both fixture claims
+  // below name the same own lines (12, 20), the same shape
+  // `siblingGuardClaimIsFalsifiable` requires, so this isolates the new
+  // substance check from the geometry checks it sits alongside.
+  it("a claim carrying the known content-free boilerplate tail is rejected even though it names real lines; a specific claim naming both sites' enclosing context is accepted", () => {
+    const boilerplate: SiblingGuardAllowlistEntry = {
+      doc: "fixture-doc.md",
+      kind: "distant-duplicate-anchor",
+      real: "fixture-target.ts",
+      start: 10,
+      end: 12,
+      anchorKey: "deadbeef",
+      paragraphLine: 5,
+      uncitedLines: [20],
+      claim:
+        "line 12 cites `frontmatter.push(fixture);`; uncited 20 repeats the byte-identical statement at a wholly separate site the citing sentence never names.",
+    };
+    const specific: SiblingGuardAllowlistEntry = {
+      ...boilerplate,
+      claim:
+        "the sentence describes fixtureCompose's own read-only-roles push; line 12 is that function's own push, while uncited 20 is the byte-identical push inside fixtureComposeVariant, the tier-variant sibling this sentence does not name.",
+    };
+    const noDoc = "";
+    const noResolve = (): string | undefined => undefined;
+
+    // `siblingGuardClaimIsFalsifiable` alone (the geometry check) passes
+    // BOTH fixtures: the boilerplate claim names the entry's own real
+    // lines (12, 20) just as validly as the specific one does. Substance
+    // is a genuinely separate axis, checked by a sibling function, not by
+    // extending this one.
+    expect(
+      siblingGuardClaimIsFalsifiable(boilerplate, noDoc, noResolve),
+      "the boilerplate claim names real own lines (12, 20), so the geometry check alone must still pass it",
+    ).toBe(true);
+    expect(
+      siblingGuardClaimIsFalsifiable(specific, noDoc, noResolve),
+      "the specific claim names the same own lines as the boilerplate one and must also pass the geometry check",
+    ).toBe(true);
+
+    expect(
+      siblingGuardClaimHasSubstance(boilerplate.claim),
+      "the boilerplate tail alone carries no information beyond the entry's own recorded fields and must be rejected",
+    ).toBe(false);
+    expect(
+      siblingGuardClaimHasSubstance(specific.claim),
+      "a claim naming both sites' enclosing function carries real information and must be accepted",
     ).toBe(true);
   });
 
@@ -10503,5 +11755,57 @@ describe("run mode in the policy section and the README", () => {
       probes.indexOf("8. **Decide acceptance.**"),
     );
     expect(step).toContain(rule);
+  });
+});
+
+describe("citation-sibling-drift guard: the allowlist array's own span is excluded from target-file scans", () => {
+  // Built by concatenation on purpose: a literal copy of the marker in this
+  // block would itself become the last occurrence in this file and move the
+  // span `stripSelfAllowlistSpan` blanks.
+  const MARKER = ["const SIBLING_GUARD_", "BUNDLE_ALLOWLIST"].join("");
+
+  it("blanks an anchor quoted inside the array span, keeps the same text outside it, and preserves the line count", () => {
+    const synthetic = [
+      'const before = "quoted anchor text";',
+      `${MARKER}: Entry[] = [`,
+      "  {",
+      '    claim: "line 3 cites quoted anchor text",',
+      "  },",
+      "];",
+      'const after = "quoted anchor text";',
+      "",
+    ].join("\n");
+    const stripped = stripSelfAllowlistSpan(synthetic);
+    expect(stripped.split("\n")).toHaveLength(synthetic.split("\n").length);
+    const lines = stripped.split("\n");
+    expect(lines[0]).toContain("quoted anchor text");
+    expect(lines[6]).toContain("quoted anchor text");
+    expect(lines.slice(1, 6).every((l) => l === "")).toBe(true);
+    expect(stripped.match(/quoted anchor text/g)).toHaveLength(2);
+  });
+
+  it("content without the marker is returned unchanged", () => {
+    // A line follows the close marker on purpose: without it a helper that
+    // ignores the missing marker reassembles the same string by accident.
+    const plain =
+      'const x = "quoted anchor text";\n];\nconst y = "quoted anchor text";\n';
+    expect(stripSelfAllowlistSpan(plain)).toBe(plain);
+  });
+
+  it("this file declares the marker exactly twice (the helper's own literal and the array), the precondition the span location rests on", () => {
+    const self = readFileSync(fileURLToPath(import.meta.url), "utf8");
+    expect(self.split(MARKER)).toHaveLength(3);
+    // And the span the helper blanks in this very file starts at the
+    // array's declaration: that line is empty in the stripped content and
+    // the line count is kept.
+    const stripped = stripSelfAllowlistSpan(self);
+    expect(stripped.split("\n")).toHaveLength(self.split("\n").length);
+    const declLine = self
+      .split("\n")
+      .findIndex(
+        (l) => l.startsWith(`${MARKER}:`) || l.startsWith(`${MARKER} `),
+      );
+    expect(declLine).toBeGreaterThan(-1);
+    expect(stripped.split("\n")[declLine]).toBe("");
   });
 });
