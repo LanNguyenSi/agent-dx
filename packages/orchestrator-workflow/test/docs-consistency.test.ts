@@ -5966,9 +5966,9 @@ function findDuplicateCitations(
 // naming the array's own span (exactly the kind of drift-prone number this
 // file's own D31 convention avoids), the span is located by its own
 // literal markers and blanked out of any scan of a target file that
-// contains them -- so text written inside the array does not count as a
-// target-file occurrence, provided the declaration marker occurs exactly
-// twice in this file (this literal and the array; pinned by a test).
+// contains them -- so text inside the array is not a target-file
+// occurrence, provided the marker occurs exactly twice here (pinned) and
+// the array's terminator is the first `];` line after it (else: scans more).
 function stripSelfAllowlistSpan(content: string): string {
   const startMarker = "const SIBLING_GUARD_BUNDLE_ALLOWLIST";
   // lastIndexOf, not indexOf: this function's own source is itself scanned
@@ -11785,16 +11785,19 @@ describe("citation-sibling-drift guard: the allowlist array's own span is exclud
   });
 
   it("content without the marker is returned unchanged", () => {
-    const plain = 'const x = "quoted anchor text";\n];\n';
+    // A line follows the close marker on purpose: without it a helper that
+    // ignores the missing marker reassembles the same string by accident.
+    const plain =
+      'const x = "quoted anchor text";\n];\nconst y = "quoted anchor text";\n';
     expect(stripSelfAllowlistSpan(plain)).toBe(plain);
   });
 
   it("this file declares the marker exactly twice (the helper's own literal and the array), the precondition the span location rests on", () => {
     const self = readFileSync(fileURLToPath(import.meta.url), "utf8");
     expect(self.split(MARKER)).toHaveLength(3);
-    // And the span the helper blanks in this very file is the array: the
-    // stripped content no longer carries any entry's `claim:` key between
-    // the declaration's line and the closing bracket.
+    // And the span the helper blanks in this very file starts at the
+    // array's declaration: that line is empty in the stripped content and
+    // the line count is kept.
     const stripped = stripSelfAllowlistSpan(self);
     expect(stripped.split("\n")).toHaveLength(self.split("\n").length);
     const declLine = self
