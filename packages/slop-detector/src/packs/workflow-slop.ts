@@ -251,7 +251,9 @@ function collectRunScalars(
  * `INPUT_SCRIPT` on the runner while scanning clean here. JavaScript's
  * `toUpperCase` applies the full case mappings, a superset of the simple
  * mappings an invariant-culture upper-case applies, so where the two
- * differ this rule matches more, never less.
+ * differ over a mapping both implementations know, this rule matches
+ * more, never less; for a pure-ASCII entry name (the built-in list) no
+ * divergence is reachable at all.
  */
 function normalizeExecutedInputName(name: string): string {
   return name.replace(/ /g, "_").toUpperCase();

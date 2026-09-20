@@ -165,12 +165,12 @@ const AuditGateTemplateSchema = z
 // character class excludes `:` for exactly that reason -- there would be
 // no way to tell which colon separates from which is part of the name).
 // The input half also excludes a literal space: `workflow-slop/run-expression`
-// folds a matched input name case- and space/underscore-insensitively
-// (`normalizeExecutedInputName`, mirroring how the Actions runner itself
-// folds a `with:` input name into `INPUT_<NAME>`), so a config entry
-// names the input with an underscore where a workflow author might write
-// a literal space (`acme/run-code:my_input` still matches a workflow step
-// written `with: my input:`), and any casing matches any other.
+// folds both names upward with `name.replace(/ /g, "_").toUpperCase()`
+// (`normalizeExecutedInputName`, the expression `@actions/core` applies),
+// so a config entry names the input with an underscore where a workflow
+// author might write a literal space (`acme/run-code:my_input` still
+// matches a workflow step written `with: my input:`), and an ASCII entry
+// matches every ASCII casing of the same key.
 const ExecutedActionInputSchema = z.string().refine(
   (e) => /^[^/\s:@]+\/[^/\s:@]+:[^\s:@]+$/.test(e),
   (e) => ({
