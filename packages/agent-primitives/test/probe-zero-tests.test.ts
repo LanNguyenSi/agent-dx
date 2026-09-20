@@ -176,7 +176,14 @@ describe("detectKnownZeroTestsEvidence()", () => {
       "PHPUnit 9.6.36 by Sebastian Bergmann and contributors.\n\nNo tests executed!\n",
       "",
     );
-    expect(evidence).toEqual({ detected: true, via: "phpunit" });
+    // `ambiguous: false`: PHPUnit itself STATED nothing ran (the
+    // `"zero"` verdict), so the baseline-stage caller refuses
+    // `no_tests_executed`, never the dedicated ambiguous reason.
+    expect(evidence).toEqual({
+      detected: true,
+      via: "phpunit",
+      ambiguous: false,
+    });
   });
 
   it("phpunit: a stated zero-count OK summary ('OK (0 tests, 0 assertions)')", () => {
@@ -184,7 +191,11 @@ describe("detectKnownZeroTestsEvidence()", () => {
       "PHPUnit 9.6.36 by Sebastian Bergmann and contributors.\n\nOK (0 tests, 0 assertions)\n",
       "",
     );
-    expect(evidence).toEqual({ detected: true, via: "phpunit" });
+    expect(evidence).toEqual({
+      detected: true,
+      via: "phpunit",
+      ambiguous: false,
+    });
   });
 
   it("phpunit: a real, executed, passing summary is NOT flagged (negative control)", () => {
@@ -216,7 +227,11 @@ describe("detectKnownZeroTestsEvidence()", () => {
       "OK, but incomplete, skipped, or risky tests!\nTests: 2, Assertions: 0, Skipped: 2.\n",
       "",
     );
-    expect(evidence).toEqual({ detected: true, via: "phpunit" });
+    expect(evidence).toEqual({
+      detected: true,
+      via: "phpunit",
+      ambiguous: false,
+    });
   });
 
   it("phpunit: an ERRORS! run (errors and failures together, Errors: printed before Failures:) is NOT flagged", () => {
@@ -232,7 +247,11 @@ describe("detectKnownZeroTestsEvidence()", () => {
       readCaptured("phpunit-warnings"),
       "",
     );
-    expect(evidence).toEqual({ detected: true, via: "phpunit" });
+    expect(evidence).toEqual({
+      detected: true,
+      via: "phpunit",
+      ambiguous: false,
+    });
   });
 
   it("phpunit: a risky test alongside a real one is NOT flagged (a risky test ran)", () => {
@@ -285,9 +304,13 @@ describe("detectKnownZeroTestsEvidence()", () => {
     // `zero_tests_ambiguous` instead of claiming `no_tests_executed`.
     const output = readCaptured("phpunit-exit-mid-suite");
     expect(phpunitZeroTestsVerdict(output).verdict).toBe("ambiguous");
+    // `ambiguous: true`: the baseline-stage caller (`setup.ts`) reads
+    // this to refuse `zero_tests_ambiguous` here instead of
+    // `no_tests_executed` (AC-005 (a)).
     expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
       detected: true,
       via: "phpunit",
+      ambiguous: true,
     });
   });
 
@@ -297,6 +320,7 @@ describe("detectKnownZeroTestsEvidence()", () => {
     expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
       detected: true,
       via: "phpunit",
+      ambiguous: true,
     });
   });
 
@@ -322,6 +346,7 @@ describe("detectKnownZeroTestsEvidence()", () => {
     expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
       detected: true,
       via: "phpunit",
+      ambiguous: true,
     });
   });
 
@@ -331,6 +356,7 @@ describe("detectKnownZeroTestsEvidence()", () => {
     expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
       detected: true,
       via: "phpunit",
+      ambiguous: true,
     });
   });
 
@@ -359,6 +385,7 @@ describe("detectKnownZeroTestsEvidence()", () => {
     expect(detectKnownZeroTestsEvidence(output, "")).toEqual({
       detected: true,
       via: "phpunit",
+      ambiguous: true,
     });
   });
 
@@ -565,6 +592,34 @@ describe("probe(): baseline-stage no_tests_executed refusal", () => {
     expect(result.mutation_probe?.result).toBe("not_run");
     expect(result.mutation_probe?.reason).toBe("no_tests_executed");
     expect(result.mutant).toBeDefined();
+  });
+
+  it("AC-005 (a): a baseline whose phpunit output cannot be read either way (banner, no result report) refuses zero_tests_ambiguous, never no_tests_executed", async () => {
+    // The same mid-suite exit()/die() shape `phpunit-exit-mid-suite.txt`
+    // captures real: banner, one progress dot, nothing else PHPUnit's
+    // own result report requires. `phpunitZeroTestsVerdict` reads this
+    // `"ambiguous"`, never `"zero"` -- nothing here STATES that no test
+    // ran -- so the baseline-stage refusal must name the dedicated
+    // reason instead of overstating it as `no_tests_executed`.
+    const repo = initGitRepo();
+    const result = await probe(
+      baseOptions(repo, {
+        testCommand:
+          "node -e \"console.log('PHPUnit 11.5.56 by Sebastian Bergmann and contributors.'); console.log(''); console.log('Runtime:       PHP 8.3.33'); console.log(''); console.log('.');\"",
+      }),
+    );
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("zero_tests_ambiguous");
+    expect(result.mutation_probe?.result).toBe("not_run");
+    expect(result.mutation_probe?.reason).toBe("zero_tests_ambiguous");
+    expect(result.mutant).toBeDefined();
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("cannot be read for whether any test executed") &&
+          w.includes("phpunit"),
+      ),
+    ).toBe(true);
   });
 });
 
