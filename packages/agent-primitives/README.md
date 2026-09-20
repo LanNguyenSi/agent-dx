@@ -2326,8 +2326,8 @@ exactly which `reason` is which).
 | `status` | string | always | `"killed"`, `"survived"`, `"inconclusive"`, `"usage_error"`, or `"baseline_failed"`. The last is the CLI envelope's own literal status for a failing baseline (the library's `probe()` itself still returns `status: "inconclusive"`, `reason: "baseline_failed"`; the CLI remaps it so a consumer does not also have to read `reason` to tell a failing baseline apart from every other inconclusive outcome). Same exit-code class either way (`cannot-conclude`, exit `2`), so a caller gating on the exit code alone sees no difference. `"killed"`/`"survived"` are always this mutant's actual, measured outcome (see the `--expect` paragraph above) -- under a non-default `--expect`, the exit code follows `mutation_probe.expectation` instead of this field's own word (`0` for `"met"`, `1` for `"violated"`), so a caller gating on the exit code alone still sees `--expect` honored even though `status` itself no longer flips. |
 | `reason` | string | whenever `status` is not a clean verdict | machine-readable cause, e.g. `"baseline_failed"`, `"pre_failed"`, `"restore_failed"`, `"aborted"`, `"target_changed_during_baseline"`, `"mutant_not_applicable"` |
 | `message` | string | top-level usage error only (see above) | the human-readable message commander (or this CLI's own pre-`probe()` check) produced; `reason` is still present alongside it, so a consumer can key off `reason` without also reading `message` |
-| `mutant` | `{ file, line, before, after, form, diff?, deleted? }` | once the mutant has been computed AND this refusal reports it | present for `killed`, `survived`, and every mutant-phase inconclusive reason (`apply_hash_mismatch`, mutant-phase `pre_failed`/`aborted`, `restore_failed`, `worktree_original_tree_modified`, `timeout`); for a refusal from before any mutant run (reported before or during the run's own setup), see the [refusal reason shape](#refusal-reason-shape) table below -- it is present for exactly seven of those reasons (`aborted`, `pre_failed`, `baseline_failed`, `target_changed_during_baseline`, `no_tests_executed`, `baseline_evidence_not_matched`, `pycache_isolation_failed`, all past the dry run that computes the one mutant this run would apply) and absent for every other one. `diff` only for a `-p/--patch` mutant whose change is not fully shown by `before`/`after` alone (see above). `deleted` (boolean) only for a `-p/--patch` mutant whose applied result deletes the target file outright (see the `-p, --patch` paragraph above); absent (never `false`) for every other mutant. A `mutation_probe.result` of `"not_run"` also reaches a `survived`-shaped mutant run whose classify step itself found zero-tests evidence (mutant-side, or the generic byte-identical fallback): there `mutant`/`mutation_probe` are present as usual for a mutant-phase outcome, `status`/`reason` are `"inconclusive"`/`"no_tests_executed"` in place of `"survived"`, and `mutation_probe.result` is forced to `"not_run"` even though the commands did run -- see the zero-tests paragraph above. |
-| `mutation_probe` | `{ mutant, verified_applied_via, result, restored_verified, reason?, expectation? }` | once the mutant has been computed | present for every reason `mutant` covers above (the same seven setup-phase refusals, plus every mutant-phase outcome): `result` is always a string once this object is present, so a consumer reading `mutation_probe.result` does not have to shape-sniff `status` first; `"not_run"` for the seven setup-phase refusals (`aborted`, `pre_failed`, `baseline_failed`, `target_changed_during_baseline`, `no_tests_executed`, `baseline_evidence_not_matched`, `pycache_isolation_failed`), `reason` naming which, and for the mutant-phase zero-tests override described just above. `expectation` (`"met"`/`"violated"`) is present only alongside a `result` of `"killed"` or `"survived"`: whether that actual outcome matched the `--expect` this mutant ran under (see the `--expect` paragraph above); absent for `"not_run"`/`"inconclusive"`, which measured nothing to compare against an expectation. ABSENT (both `result` and `expectation`) for every other setup-phase refusal (see the table below), none of which ever computed a mutant. See the mapping below for an implementer report. |
+| `mutant` | `{ file, line, before, after, form, diff?, deleted? }` | once the mutant has been computed AND this refusal reports it | present for `killed`, `survived`, and every mutant-phase inconclusive reason (`apply_hash_mismatch`, mutant-phase `pre_failed`/`aborted`, `restore_failed`, `worktree_original_tree_modified`, `timeout`); for a refusal from before any mutant run (reported before or during the run's own setup), see the [refusal reason shape](#refusal-reason-shape) table below -- it is present for exactly eight of those reasons (`aborted`, `pre_failed`, `baseline_failed`, `target_changed_during_baseline`, `no_tests_executed`, `zero_tests_ambiguous`, `baseline_evidence_not_matched`, `pycache_isolation_failed`, all past the dry run that computes the one mutant this run would apply) and absent for every other one. `diff` only for a `-p/--patch` mutant whose change is not fully shown by `before`/`after` alone (see above). `deleted` (boolean) only for a `-p/--patch` mutant whose applied result deletes the target file outright (see the `-p, --patch` paragraph above); absent (never `false`) for every other mutant. A `mutation_probe.result` of `"not_run"` also reaches a `survived`-shaped mutant run whose classify step itself found zero-tests evidence (mutant-side, or the generic byte-identical fallback): there `mutant`/`mutation_probe` are present as usual for a mutant-phase outcome, `status`/`reason` are `"inconclusive"`/`"no_tests_executed"` in place of `"survived"`, and `mutation_probe.result` is forced to `"not_run"` even though the commands did run -- see the zero-tests paragraph above. |
+| `mutation_probe` | `{ mutant, verified_applied_via, result, restored_verified, reason?, expectation? }` | once the mutant has been computed | present for every reason `mutant` covers above (the same eight setup-phase refusals, plus every mutant-phase outcome): `result` is always a string once this object is present, so a consumer reading `mutation_probe.result` does not have to shape-sniff `status` first; `"not_run"` for the eight setup-phase refusals (`aborted`, `pre_failed`, `baseline_failed`, `target_changed_during_baseline`, `no_tests_executed`, `zero_tests_ambiguous`, `baseline_evidence_not_matched`, `pycache_isolation_failed`), `reason` naming which, and for the mutant-phase zero-tests override described just above. `expectation` (`"met"`/`"violated"`) is present only alongside a `result` of `"killed"` or `"survived"`: whether that actual outcome matched the `--expect` this mutant ran under (see the `--expect` paragraph above); absent for `"not_run"`/`"inconclusive"`, which measured nothing to compare against an expectation. ABSENT (both `result` and `expectation`) for every other setup-phase refusal (see the table below), none of which ever computed a mutant. See the mapping below for an implementer report. |
 | `baseline` | `{ exitCode, durationMs, logPath, timedOut }` | once the baseline has run | absent for `mutant_not_applicable` and any earlier refusal, and for the baseline-phase `pre_failed`/`aborted` (the baseline itself never ran: the `--pre` ahead of it did); `exitCode` is unchanged by `--pass-regex` -- it is always the baseline's real exit code, kept as data even once the regex, not this field, decides `status`/`reason` (see `--pass-regex` above) |
 | `test` | `{ command, exitCode, durationMs, timedOut, stdoutTail, stderrTail, logPath, env? }` | once the mutant run has happened | `env` only when at least one `--env NAME=VALUE` was given: the overrides this run applied, redacted (see `env` below); `exitCode` is likewise unchanged by `--pass-regex` -- the field that distinguishes a mutant run that crashed (no output on either stream) from a genuine test failure once the regex is what decides `killed`/`survived` |
 | `env` | `Record<string, string>` | whenever at least one `--env NAME=VALUE` was given | echoed once at the run level, independent of which phase actually ran: present on every status including `baseline_failed` and the other baseline-phase refusals, none of which reach a `test` phase to carry their own `test.env`. Both `env` and `test.env` redact a value whose NAME carries `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`/`CREDENTIALS`, or `KEY` as its own `_`-delimited segment (case-insensitive; the segment must sit at the start or end of the name, or between two underscores), replacing it with the literal string `"<redacted>"` and keeping the name visible: `API_TOKEN`, `TOKEN`, `MY_SECRET_VALUE` redact, but `TOKENIZER_MODEL` and `KEYBOARD` do not (the recognized word is a substring of a longer segment, not a segment of its own). Every other value is echoed verbatim (never the whole merged environment). This redaction covers only these two echoes (`env` and `test.env`); it does not, and cannot, redact a secret the test command itself prints -- that value appears verbatim wherever the command's own output does (`test.stdoutTail`/`test.stderrTail` above, and the exec log `test.logPath` links to), the same as it would running that command directly. `--env` is not wired into `--plan` (combining the two is a usage error). |
@@ -2406,11 +2406,12 @@ above.
 | `pre_failed` | present | present | `--pre` exited non-zero during the baseline phase |
 | `baseline_failed` | present | present | the baseline test itself exited non-zero, or reported no exit code at all (it timed out, or a signal killed it), or `--pass-regex` was given and its pattern did not match the baseline's own output |
 | `target_changed_during_baseline` | present | present | the baseline run rewrote the target (a formatter, a codegen step) before any mutation |
-| `no_tests_executed` | present | present | the baseline's own output shows a known test runner (vitest, node's built-in `--test`, phpunit) executed nothing, whatever its exit code -- and, for phpunit only, also where that output cannot be read either way (an unreadable result, or a tally whose reading needs a version banner the output does not carry), which this one reason overstates as "executed nothing"; see the zero-tests paragraphs above |
+| `no_tests_executed` | present | present | the baseline's own output shows a known test runner (vitest, node's built-in `--test`, phpunit) executed nothing, whatever its exit code -- for phpunit, only where the output itself STATES that (its own `No tests executed!` line, or a tally whose executed count derives to zero without depending on a version the output does not state); see the zero-tests paragraphs above |
+| `zero_tests_ambiguous` | present | present | phpunit only: the baseline's own output cannot be read for whether any test executed at all -- either its result report is missing altogether (a mid-suite `exit()`/`die()`, banner present but no `OK (`/marker/tally/progress counter/post-run `Time:` line), or it states no PHPUnit version banner and its tally carries a version-dependent count that decides the question with no version to read it against; see the zero-tests paragraphs above |
 | `baseline_evidence_not_matched` | present | present | `--require-baseline-evidence <regex>` was given and did not match the baseline's own output |
 | `pycache_isolation_failed` | present | present | this run has at least one Python (`.py`) target and creating its isolated `PYTHONPYCACHEPREFIX` directory failed (an unwritable or full log directory); see "Python bytecode cache" above |
 
-The seven `present` rows are exactly the refusals that fire past the dry
+The eight `present` rows are exactly the refusals that fire past the dry
 run: `openRunSetup` computes the one mutant this run would apply (the
 `beforeBaseline` hook) BEFORE the baseline runs, so every refusal from
 that point on already has it to report; every `absent` row above fires
@@ -2915,14 +2916,21 @@ printed beside it carries). `probe` refuses on anything but
 scoring such a run would compare a mutant whose executed count cannot be
 read against the baseline as if it had run and passed, reporting
 `survived`. A refusal costs a probe result; the other collapse buys a
-verdict with a false one. That refusal reports the existing
-`no_tests_executed` reason, which overstates what is known for either
-cause: the run may in fact have executed everything under a PHPUnit 10+
+verdict with a false one. That refusal reports its own dedicated
+`zero_tests_ambiguous` reason (additive to `RefusalReason`, see the
+[refusal reason shape](#refusal-reason-shape) table below), never
+`no_tests_executed`, which stays for what it always meant: PHPUnit
+itself stating that nothing ran. Naming the two apart matters precisely
+because `zero_tests_ambiguous` does NOT claim the run executed nothing
+-- the run may in fact have executed everything under a PHPUnit 10+
 reading, and an unreadable-result run may well have executed and passed
-a test before it was killed. The overstatement is an accepted limit of
-this release, not a description of the reading; a dedicated refusal
-reason for "cannot be read" is a follow-up, since `RefusalReason` is
-part of `probe`'s published result contract.
+a test before it was killed -- it claims only that the question cannot
+be answered from this output. The two ambiguous causes above (a missing
+result report, and a missing version banner) are not split further from
+each other: both map to this one reason (that finer split is out of
+scope for this change), with a `warnings` entry naming the detector that
+fired (`phpunit`) alongside it, the same way every other zero-tests
+refusal's warning does.
 
 **An `exit()`/`die()` call mid-suite is read as an UNREADABLE result,
 not as zero tests.** A test method that calls `exit()`/`die()` (or is
@@ -2944,8 +2952,13 @@ merely unproven. Both the `probe` zero-tests guard above and the
 built on that same function; in `probe`, a mutant run whose own output
 collapses to it reports `mutation_probe.result: "not_run"` with
 `reason: "no_tests_executed"` rather than `"killed"`, since a crashed
-run is not evidence the test discriminates the mutant (that reason's own
-overstatement is the accepted limit named above).
+run is not evidence the test discriminates the mutant. Unlike the
+baseline-stage refusal above, this mutant-phase `reason` is a plain
+string, not `RefusalReason` (a mutant has already been applied by then,
+so `mutant`/`mutation_probe` are unconditionally present regardless of
+which string it names): it still overstates an unreadable mutant run's
+own result the same way the pre-`zero_tests_ambiguous` baseline refusal
+used to, and splitting it the same way is out of scope for this change.
 
 A COMPLETED run whose result report is merely suppressed is excluded by
 its own completion evidence: PHPUnit 10 and up accept `--no-results`,
@@ -2963,19 +2976,28 @@ the same flag on a RED suite prints the identical `2 / 2 (100%)` tail
 with `.F` progress characters (`phpunit-no-results-red.txt`, exit `1`),
 so it counts tests PHPUnit reached, not tests that passed.
 
-Three limits. First, the counter pattern is anchored at the end of a
-line only, not to a progress row: any line that merely ENDS in the
-`N / M (P%)` shape is read as completion evidence. A kill late enough to
-have completed a whole progress row (PHPUnit prints the counter at the
-end of each row, so that needs more than 63 tests) is the expected case,
-but a failure message or a PHP fatal-error line ending in that shape
-has the same effect, and the reading then falls silent (`"not_zero"`)
-instead of reporting the result as unreadable; a row-anchored tightening
-of the pattern is not pinned by the suite either way. Second, the banner
+**`verify`'s summary now carries that same count too, named
+`attempted`.** For a suppressed-report run (or any other phpunit output
+whose real tally cannot be derived at all -- no `OK (`, no `Tests: N,
+Assertions: M` line), `Summary.attempted` holds the LAST `N / M (P%)`
+row's own `N`: the same "tests reached", never "tests passed", reading
+the completion check above already uses, pinned against the real
+`phpunit-no-results-green.txt`/`phpunit-no-results-red.txt` captures
+(both report `attempted: 2`, whether the two tests passed or one
+failed). `passed`/`failed`/`skipped`/`errors`/`warnings` themselves stay
+at the same all-`0` fallback `No tests executed!` already used before
+this field existed -- `attempted` is additive, never folded into any of
+them -- and the field is absent whenever the real tally COULD be
+derived (then the counter, even if also present, says nothing
+`attempted` would add) and absent whenever no counter is in the output
+either (the unreadable-result and `--list-tests` shapes below, which
+still carry no completion evidence of any kind).
+
+Two limits. First, the banner
 is the selection signal, so a banner-only output (`phpunit --version`)
 selects this detector and reads `"ambiguous"`, and with two banners in
 one capture the first one wins the version read for the tally
-categories. Third, inherited from `exec.ts`'s
+categories. Second, inherited from `exec.ts`'s
 own bounded tail (60 lines / 6000 characters, kept from the END of a
 truncated capture): a suite large enough to push even the version banner
 itself -- PHPUnit's very first line -- out of that tail before the
@@ -2987,6 +3009,18 @@ run's shape, never a baseline that already was that shape. A
 names; 9.6 prints `Available test(s):`) has no completion evidence
 either and is reported as unreadable too: over-caution rather than a
 correct description, and the fail-safe direction for both callers.
+
+The counter pattern used to be anchored at the end of a line only, not
+to a progress row, so any line that merely ENDED in the `N / M (P%)`
+shape (a failure message or a PHP fatal-error line reporting some
+unrelated fraction, say) was read as completion evidence it never was.
+It is now anchored to the WHOLE line, from its very start: a genuine
+progress row is nothing but the seven progress-marker characters
+(`.FEWIRS`) followed by the counter, so requiring the line to start that
+way (`^[.FEWIRS]*\s*(\d+) \/ (\d+) \(\s*\d+%\)\s*$`) is what tells a
+real row apart from a line that merely ends in the same shape, pinned by
+a synthetic test (`test/verify.test.ts`; no real capture needs more than
+63 tests to exercise the row wrap this anchor still accepts).
 
 **`verify` now warns on a hollow phpunit pass, too.** Before this, only
 `probe`'s zero-tests guard (via `phpunitZeroTestsVerdict`) caught a

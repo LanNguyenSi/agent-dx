@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `probe`'s phpunit zero-tests reading gains a dedicated, additive
+  `RefusalReason`: a baseline whose `phpunitZeroTestsVerdict` reads
+  `"ambiguous"` (a mid-suite `exit()`/`die()` with no result report at
+  all, or a tally that needs a version banner the output does not carry)
+  now refuses `reason: "zero_tests_ambiguous"` instead of the existing
+  `no_tests_executed`, which keeps its original meaning: an explicit
+  `No tests executed!` line, or a tally whose derived executed count is
+  zero without depending on an absent version. `zero-tests.ts`'s
+  `ZeroTestsEvidence` gained the `ambiguous` field (`true`/`false`,
+  present only on the phpunit branch) that lets `setup.ts` pick the
+  right reason; `REFUSAL_RESULT_SHAPE` carries the new reason with the
+  same `{ mutant: true, mutationProbe: true }` shape every other
+  baseline-phase refusal has, so it needs no change to `index.ts`'s
+  mechanical envelope mapping. Splitting the two `"ambiguous"` causes
+  (an unreadable result vs. a missing version banner) from each other is
+  still out of scope; both map to this one reason. `verify`'s own
+  envelope summary for a phpunit check whose real tally cannot be
+  derived at all (a suppressed-report `--no-results` run chief among
+  them) now also carries `Summary.attempted`: the last `N / M (P%)`
+  progress-counter row's own `N`, documented as tests PHPUnit reached,
+  never tests that passed, and pinned against the real
+  `phpunit-no-results-green.txt`/`phpunit-no-results-red.txt` captures
+  (both report `attempted: 2`). The progress-counter pattern itself is
+  now anchored to the whole line, not merely to its end (`^[.FEWIRS]*\s*
+  (\d+) \/ (\d+) \(\s*\d+%\)\s*$` in place of a bare `\b\d+ \/ \d+
+  \(\s*\d+%\)\s*$`): a line that merely ENDS in the `N / M (P%)` shape
+  (a failure message or fatal-error line reporting some unrelated
+  fraction) no longer counts as PHPUnit's own completion evidence, a
+  documented limit this closes. New tests also pin the previously
+  redundant `ERRORS!`/`WARNINGS!`/`TALLY_LINE` conjuncts of
+  `phpunitResultUnreadable` (each isolated from the other three and from
+  any completion evidence, so mutating any one of them to `true` alone
+  now fails a test, joining the pre-existing `FAILURES!` pin), the
+  `, Memory: ` half of `TIME_MEMORY_LINE` (a time-only line, with no
+  `Memory:`, still reads `"ambiguous"`), and a directory-derived reverse
+  disjointness assertion (`phpunitDetector.matches()` is false for every
+  non-`phpunit-*` fixture under `test/fixtures/captured/`). No existing
+  capture changed; no PHPUnit 9 tally-parsing semantics changed (tracker
+  ad5b34d7-be9b-497e-a9a7-91519837b7b5).
+
 - `verify` now reports a requested check with no matching `package.json`
   script and no `-x` override as `status: "skipped", reason: "no_script"`
   and returns an overall non-pass, instead of silently accepting a partial
