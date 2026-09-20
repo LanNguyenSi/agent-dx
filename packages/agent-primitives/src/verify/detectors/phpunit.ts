@@ -156,29 +156,80 @@ const PHPUNIT_BANNER =
  */
 const TIME_MEMORY_LINE = /^Time: \S+, Memory: /m;
 /**
- * PHPUnit's own progress counter: the `N / M (P%)` tail it prints at the
- * right edge of every FULL progress row (measured identical under
- * 9.6.36 and 11.5.56: `..` padded out to `2 / 2 (100%)`, and padded
- * inside the parentheses to `( 33%)` for a one-digit percentage, hence
- * the `\s*` there). Its presence means PHPUnit itself stated how many
- * of its tests it had reached by then, which a run that died before
- * finishing its first progress row never does -- the other half of the
- * completion evidence `phpunitResultUnreadable` requires to be ABSENT
- * before it reports a run's result as unreadable.
- *
- * Anchored at end of line (`\s*$` under `/m`) rather than matched
- * anywhere in the text: the counter is the tail of its own row, and the
- * progress characters that precede it (`..`, `.F`, `WWW`) are not part
- * of the shape, since a suppressed-report run prints exactly the same
- * counter whether its tests passed or failed (captured real:
- * `phpunit-no-results-green.txt`'s `..` and
- * `phpunit-no-results-red.txt`'s `.F`, the same `2 / 2 (100%)` tail on
- * both). That is also why the counter is read as evidence of
- * COMPLETION only and never turned into a count: it counts tests
- * PHPUnit reached, not tests that passed, so deriving `passed: 2` from
- * it would read the red capture as green.
+ * The seven characters PHPUnit's default progress printer emits, one per
+ * test, ahead of the `N / M (P%)` counter on a full row: `.` pass, `F`
+ * failure, `E` error, `W` warning, `I` incomplete, `R` risky, `S`
+ * skipped (measured identical under 9.6.36 and 11.5.56).
  */
-const PROGRESS_COUNTER_LINE = /\b\d+ \/ \d+ \(\s*\d+%\)\s*$/m;
+const PROGRESS_MARKER_CHARS = ".FEWIRS";
+/**
+ * PHPUnit's own progress counter, `^[<markers>]*\s*(N) \/ (M) \(\s*P%\)\s*$`:
+ * the `N / M (P%)` tail it prints at the right edge of every FULL
+ * progress row (measured identical under 9.6.36 and 11.5.56: `..` padded
+ * out to `2 / 2 (100%)`, and padded inside the parentheses to `( 33%)`
+ * for a one-digit percentage, hence the `\s*` there). Its presence means
+ * PHPUnit itself stated how many of its tests it had reached by then,
+ * which a run that died before finishing its first progress row never
+ * does -- the other half of the completion evidence
+ * `phpunitResultUnreadable` requires to be ABSENT before it reports a
+ * run's result as unreadable, and (via `progressCounterAttempted` below)
+ * the source of `Summary.attempted` for a suppressed-report run whose
+ * real tally cannot be read at all.
+ *
+ * Anchored to the WHOLE line, from its very start (`^[<markers>]*\s*`,
+ * not merely `\b` ahead of the digits): a genuine progress row is
+ * nothing BUT zero or more of the seven marker characters, then the
+ * padding spaces, then the counter, so requiring the line to start that
+ * way is what tells a real row apart from a line that merely ENDS in
+ * the same shape (a failure message or a PHP fatal-error line reporting
+ * some unrelated `N / M (P%)`-shaped fraction, which the earlier `\b`-only
+ * anchor could not tell apart from PHPUnit's own row and read as
+ * completion evidence it never was -- a documented limit before this
+ * change, now closed and pinned: see `test/verify.test.ts`). The
+ * progress characters themselves are read but not required to be a
+ * SPECIFIC one (`..`, `.F`, `WWW`, any mix): a suppressed-report run
+ * prints exactly the same counter whether its tests passed or failed
+ * (captured real: `phpunit-no-results-green.txt`'s `..` and
+ * `phpunit-no-results-red.txt`'s `.F`, the same `2 / 2 (100%)` tail on
+ * both), which is also why the counter is read as evidence of
+ * COMPLETION only and never turned into a `passed` count: it counts
+ * tests PHPUnit reached, not tests that passed, so deriving `passed: 2`
+ * from it would read the red capture as green (see `Summary.attempted`,
+ * which names it "attempted" for exactly this reason).
+ *
+ * Built from one shared source string (`PROGRESS_COUNTER_LINE_SOURCE`)
+ * rather than two independently-typed-out patterns, so the boolean
+ * completion check below and the count extraction in
+ * `progressCounterAttempted` can never drift onto two different shapes:
+ * the non-global `m`-flag form is used for `.test()` (a single boolean
+ * question), the global form for `matchAll` (every row in a long
+ * output, so the LAST one -- the state nearest completion -- can be
+ * read rather than the first).
+ */
+const PROGRESS_COUNTER_LINE_SOURCE = `^[${PROGRESS_MARKER_CHARS}]*\\s*(\\d+) \\/ (\\d+) \\(\\s*\\d+%\\)\\s*$`;
+const PROGRESS_COUNTER_LINE = new RegExp(PROGRESS_COUNTER_LINE_SOURCE, "m");
+const PROGRESS_COUNTER_LINE_GLOBAL = new RegExp(
+  PROGRESS_COUNTER_LINE_SOURCE,
+  "gm",
+);
+
+/**
+ * The attempted-test count PHPUnit's own progress counter last reported,
+ * or `undefined` when no such row is in `output` at all. Takes the LAST
+ * matching row (`matchAll`, not the first `exec`): a long suite prints
+ * this counter once per full row as it goes, so the last one is the
+ * count nearest the run's own end, never an earlier, incomplete one.
+ * Read only as "tests PHPUnit reached", never as "tests that passed"
+ * (see `PROGRESS_COUNTER_LINE`'s own docblock and `Summary.attempted`):
+ * callers never fold this into `passed`.
+ */
+function progressCounterAttempted(output: string): number | undefined {
+  let attempted: number | undefined;
+  for (const match of output.matchAll(PROGRESS_COUNTER_LINE_GLOBAL)) {
+    attempted = Number(match[1]);
+  }
+  return attempted;
+}
 
 /**
  * PHPUnit's own defect-section header, printed once above each group of
@@ -740,11 +791,13 @@ function deriveCountsWith(
  * `RUNNER_JS`, whose mutant variant prints a `FAILURES!`-shaped line
  * with no tally at all): such a fixture's own marker is still a real,
  * deliberate completion signal, not a sign PHPUnit itself was cut off,
- * so it must not be misread as this function's own shape. Measured:
- * only the `FAILURES!` conjunct is pinned by the suite (that fixture);
- * replacing any of the other three with `true` survives the whole suite,
- * so they are redundant, cheap shape checks kept for the same reason,
- * not independently tested ones.
+ * so it must not be misread as this function's own shape. All four
+ * conjuncts are pinned by the suite (`test/verify.test.ts`'s isolated
+ * ERRORS!-alone, WARNINGS!-alone and TALLY_LINE-alone synthetic cases
+ * join the pre-existing FAILURES! fixture): each fixture carries exactly
+ * one of the four shapes and none of the others, no completion evidence
+ * either, so replacing that one conjunct with `true` is the only way to
+ * misread it as unreadable, and the corresponding test catches it.
  */
 function phpunitResultUnreadable(output: string): boolean {
   return (
@@ -1062,7 +1115,8 @@ export const phpunitDetector: Detector = {
     // matched) leaves every count at 0: correct as-is, not a false
     // "nothing failed" claim -- same convention as the vitest detector's
     // "no test files" case.
-    const counts = deriveCounts(output) ?? {
+    const derivedCounts = deriveCounts(output);
+    const counts = derivedCounts ?? {
       total: 0,
       executed: 0,
       passed: 0,
@@ -1071,6 +1125,18 @@ export const phpunitDetector: Detector = {
       skipped: 0,
       warnings: 0,
     };
+    // `Summary.attempted`: only when the real tally could not be
+    // derived at all (a suppressed-report run, `--no-results`, or any
+    // other output with no `OK (`/tally line of its own) AND a progress
+    // counter is in the output to read one from. A run whose real tally
+    // WAS derived never sets this -- the real counts already say
+    // everything this field would, and setting it alongside them would
+    // invite a reader to add it to `passed` instead of reading it as
+    // "attempted, not passed" (see `Summary.attempted`'s own docblock).
+    const attempted =
+      derivedCounts === undefined
+        ? progressCounterAttempted(output)
+        : undefined;
 
     const lines = output.split("\n");
     let collecting = false;
@@ -1233,6 +1299,7 @@ export const phpunitDetector: Detector = {
         skipped: counts.skipped,
         errors: counts.errors,
         warnings: counts.warnings,
+        ...(attempted !== undefined ? { attempted } : {}),
       },
       failures,
       warnings,

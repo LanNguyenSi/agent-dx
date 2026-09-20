@@ -4429,12 +4429,15 @@ describe("phpunitDetector: a suppressed result report is not a missing one (PHPU
     // already uses: this fixture's own `2 / 2 (100%)` counter is
     // deliberately NOT turned into `passed: 2`, since the RED capture
     // below prints the very same counter (see `PROGRESS_COUNTER_LINE`).
+    // It is instead reported as `attempted: 2` (AC-005 (b)): tests
+    // PHPUnit reached, never tests that passed.
     expect(check.summary).toEqual({
       passed: 0,
       failed: 0,
       skipped: 0,
       errors: 0,
       warnings: 0,
+      attempted: 2,
     });
   });
 
@@ -4486,6 +4489,10 @@ describe("phpunitDetector: a suppressed result report is not a missing one (PHPU
     expect(
       result.warnings.some((w) => w.includes("zero_tests_ambiguous:")),
     ).toBe(false);
+    // Same `attempted: 2` as the green capture (AC-005 (b)): the counter
+    // counts tests PHPUnit reached, not tests that passed, so a RED run
+    // reports the identical attempted count as its green twin.
+    expect(check.summary.attempted).toBe(2);
   });
 
   it("(vii) `--no-results --no-progress` and `--no-output` print NOTHING at all, so the output is not phpunit's to read (generic selection, no phpunit claim)", async () => {
@@ -4584,6 +4591,124 @@ describe("phpunitDetector: a suppressed result report is not a missing one (PHPU
       expect(phpunitZeroTestsVerdict(output).reason).toContain(
         "no phpunit summary line",
       );
+    }
+  });
+});
+
+describe("phpunitDetector: AC-005 (d) tightening mutants, each pinned by its own isolated case", () => {
+  it("the progress-counter anchor: a message line that merely ENDS in the N / M (P%) shape is not completion evidence (SYNTHETIC, closes a documented limit)", () => {
+    // Banner present, no OK/marker/tally/`No tests executed!`, no
+    // genuine progress row and no Time/Memory line -- structurally the
+    // same unreadable shape as `phpunit-exit-mid-suite.txt` -- except
+    // for one fatal-error line that happens to END in a counter-shaped
+    // fraction. Before the row-start anchor, PROGRESS_COUNTER_LINE
+    // matched this line too (it only required the digits/slash/percent
+    // tail, anchored at `$` alone) and read the run as `"not_zero"`
+    // instead of `"ambiguous"`, a false claim about a run PHPUnit never
+    // actually finished reporting. The anchored pattern requires the
+    // WHOLE line, from its start, to be nothing but progress-marker
+    // characters ahead of the counter, which this message line is not.
+    const output = [
+      "PHPUnit 11.5.56 by Sebastian Bergmann and contributors.",
+      "",
+      "Runtime:       PHP 8.3.33",
+      "",
+      "Fatal error: Allowed memory size exhausted at 2 / 2 (100%)",
+      "",
+    ].join("\n");
+    expect(output).toMatch(/\d+ \/ \d+ \(\s*\d+%\)\s*$/m);
+    expect(zeroTests(output)).toBe("ambiguous");
+  });
+
+  it("the ERRORS! conjunct alone: present with no accompanying tally and no completion evidence, this run is NOT reported as an unreadable result", () => {
+    // Isolates the `ERRORS_MARKER` check from `TALLY_LINE` (which a real
+    // PHPUnit run always prints alongside a marker, see
+    // `phpunitResultUnreadable`'s own docblock): a synthetic fixture
+    // carrying `ERRORS!` alone is a deliberate completion signal a test
+    // double can construct, not a sign PHPUnit was cut off. Falls
+    // through to `deriveCounts`, which finds no tally either, so the
+    // verdict is `"not_zero"` ("no phpunit summary line"), never
+    // `"ambiguous"`. Mutating this one conjunct to `true` (so its
+    // absence is no longer required) would misread this fixture as
+    // ambiguous, since every other conjunct here is already satisfied.
+    const output = [
+      "PHPUnit 11.5.56 by Sebastian Bergmann and contributors.",
+      "",
+      "ERRORS!",
+      "",
+    ].join("\n");
+    expect(output).toContain("ERRORS!");
+    expect(output).not.toMatch(/Tests: \d+, Assertions: \d+/);
+    expect(zeroTests(output)).toBe("not_zero");
+  });
+
+  it("the WARNINGS! conjunct alone: same isolation, present with no tally and no completion evidence stays NOT unreadable", () => {
+    const output = [
+      "PHPUnit 11.5.56 by Sebastian Bergmann and contributors.",
+      "",
+      "WARNINGS!",
+      "",
+    ].join("\n");
+    expect(output).toContain("WARNINGS!");
+    expect(output).not.toMatch(/Tests: \d+, Assertions: \d+/);
+    expect(zeroTests(output)).toBe("not_zero");
+  });
+
+  it("the TALLY_LINE conjunct alone: a tally line with no marker and no completion evidence stays NOT unreadable", () => {
+    // Defensive shape (a real PHPUnit run never prints a bare tally with
+    // no marker ahead of it either), same isolation idiom as the two
+    // marker-alone cases above: this time `deriveCounts` actually reads
+    // a real (executed: 2) tally, so the verdict is the ordinary
+    // `"not_zero"` an executed count produces, not the "no summary line"
+    // reason the marker-alone cases hit.
+    const output = [
+      "PHPUnit 11.5.56 by Sebastian Bergmann and contributors.",
+      "",
+      "Tests: 2, Assertions: 2.",
+      "",
+    ].join("\n");
+    expect(zeroTests(output)).toBe("not_zero");
+    expect(phpunitZeroTestsVerdict(output).reason).not.toContain(
+      "no phpunit summary line",
+    );
+  });
+
+  it("TIME_MEMORY_LINE's `, Memory: ` half: a time-only line (no Memory:) is NOT completion evidence on its own (SYNTHETIC)", () => {
+    // Contrast with the pre-existing "post-run Time/Memory line alone is
+    // enough completion evidence" test just above, which carries BOTH
+    // halves: PHPUnit never prints `Time:` without `Memory:` on the same
+    // line in any real capture, but a test double that dropped the
+    // second half must not be misread as the real shape either.
+    const output = [
+      "PHPUnit 11.5.56 by Sebastian Bergmann and contributors.",
+      "",
+      "Runtime:       PHP 8.3.33",
+      "",
+      "Time: 00:00.007",
+      "",
+    ].join("\n");
+    expect(output).not.toContain("Memory:");
+    expect(output).not.toMatch(/\d+ \/ \d+ \(/);
+    expect(zeroTests(output)).toBe("ambiguous");
+  });
+
+  it("reverse disjointness: phpunitDetector.matches() is false for every captured fixture that is not one of phpunit's own", () => {
+    // Directory-derived rather than a hand-typed list, so a new
+    // non-phpunit fixture added later is checked automatically: every
+    // `.txt` file under `test/fixtures/captured/` whose name does not
+    // start with `phpunit-` must never be selected as PHPUnit's own
+    // output, including the two other PHP tools captured here
+    // (`phpcs-*`, `phpstan-*`), whose shapes share nothing with
+    // `phpunitDetector`'s own OK/marker/tally/banner checks.
+    const nonPhpunitFixtures = fs
+      .readdirSync(CAPTURED_DIR)
+      .filter((name) => name.endsWith(".txt") && !name.startsWith("phpunit-"));
+    expect(nonPhpunitFixtures.length).toBeGreaterThan(0);
+    for (const name of nonPhpunitFixtures) {
+      const output = fs.readFileSync(path.join(CAPTURED_DIR, name), "utf8");
+      expect(
+        phpunitDetector.matches({ output, command: "", exitCode: 0 }),
+      ).toBe(false);
     }
   });
 });

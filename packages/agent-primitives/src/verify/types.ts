@@ -36,6 +36,22 @@ export interface Summary {
   skipped: number;
   errors: number;
   warnings: number;
+  /** PHPUnit-only, and present only when none of `passed`/`failed`/
+   * `errors`/`skipped`/`warnings` could be derived from this run's own
+   * output at all (no `OK (`, no `Tests: N, Assertions: M` tally line):
+   * the `N` PHPUnit itself last reported in a `N / M (P%)` progress
+   * counter row, i.e. how many tests it had REACHED, not how many
+   * passed (the same counter reads identically on a green and a red
+   * `--no-results` run, see `verify/detectors/phpunit.ts`). Named
+   * `attempted` rather than folded into `passed` for exactly that
+   * reason: a caller must never read this count as tests that passed,
+   * only as tests PHPUnit got to before its result report (suppressed by
+   * `--no-results`, PHPUnit 10+) or the run itself ended. Absent
+   * whenever the real tally could be read (then the counter, if also
+   * present, adds nothing this field would say) and absent whenever no
+   * progress counter is in the output either (an unreadable, ambiguous
+   * result -- see `phpunitZeroTestsVerdict`). */
+  attempted?: number;
 }
 
 /** What a detector is given to decide whether it applies and to parse. */
