@@ -157,17 +157,21 @@ const PHPUNIT_BANNER =
 const TIME_MEMORY_LINE = /^Time: \S+, Memory: /m;
 /**
  * The closed alphabet a PHPUnit progress marker is drawn from, ahead of
- * the `N / M (P%)` counter on a full row. Measured real markers: `.`
- * pass, `F` failure, `E` error, `W` warning, `I` incomplete, `R` risky,
- * `S` skipped (PHPUnit 9.6.36 and 11.5.56 alike), plus `D` deprecation
- * and `N` notice (PHPUnit 11.5.56 only, captured real:
- * `phpunit-warnings-deprecations-notices-executed.txt`'s `WDN ... 3 / 3
+ * the `N / M (P%)` counter on a full row: `.` pass, `F` failure, `E`
+ * error, `W` warning, `I` incomplete, `R` risky, `S` skipped, `D`
+ * deprecation, `N` notice. Measured in this suite's captures: `.`, `F`
+ * and `W` under PHPUnit 9.6.36 and 11.5.56, `E`, `I`, `R` and `S` under
+ * 9.6.36, `D` and `N` under 11.5.56
+ * (`phpunit-warnings-deprecations-notices-executed.txt`'s `WDN ... 3 / 3
  * (100%)` row).
  *
  * Closed on purpose. An open letter class also accepts a line made of
  * one ordinary word and the counter (`Aborted 5 / 9 ( 55%)`), which
- * would count as completion evidence PHPUnit never gave. A marker this
- * alphabet does not know makes its row unrecognized, so the run reads as
+ * would count as completion evidence PHPUnit never gave. A word made
+ * only of marker letters (`FEW 3 / 3 (100%)`) still matches: by shape
+ * and alphabet it is a real row, so this is not proof of origin. A
+ * marker this alphabet does not know makes its row unrecognized, so the
+ * run reads as
  * not completed (for `probe`, a refusal), the safe direction; and the
  * alphabet cannot go stale silently, because `test/verify.test.ts`'s
  * directory-derived positive control fails as soon as a capture with an

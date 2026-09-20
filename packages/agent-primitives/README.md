@@ -3021,13 +3021,17 @@ that way (`^[.FEWIRSDN]*[ \t]*(\d+) \/ (\d+) \([ \t]*\d+%\)[ \t]*$`) is
 what tells a real row apart from a line that merely ends in the same
 shape, pinned by a synthetic test (`test/verify.test.ts`; no real
 capture needs more than 63 tests to exercise the row wrap this anchor
-still accepts). The marker prefix is a closed alphabet, the markers
-measured in real captures: `.FEWIRS` under PHPUnit 9.6.36 and 11.5.56,
-plus `D` (deprecation) and `N` (notice) under PHPUnit 11.5.56
+still accepts). The marker prefix is a closed alphabet, `.FEWIRSDN`.
+Measured in this suite's captures: `.`, `F` and `W` under PHPUnit 9.6.36
+and 11.5.56, `E`, `I`, `R` and `S` under 9.6.36, `D` (deprecation) and
+`N` (notice) under 11.5.56
 (`phpunit-warnings-deprecations-notices-executed.txt`'s `WDN ... 3 / 3
 (100%)` row). It is closed on purpose: an open letter class would also
 accept a line made of one ordinary word and the counter (`Aborted 5 / 9
-( 55%)`) as completion evidence. A marker the alphabet does not know
+( 55%)`) as completion evidence. A word made only of marker letters
+(`FEW 3 / 3 (100%)`) still matches, since by shape and alphabet it is a
+real row: the pattern is not proof of origin. A marker the alphabet
+does not know
 leaves its row unrecognized, so the run reads as not completed (for
 `probe`, a refusal) rather than as a false pass, and a test over every
 captured phpunit fixture fails as soon as a capture with an unknown

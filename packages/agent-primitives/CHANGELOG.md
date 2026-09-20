@@ -30,15 +30,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   never tests that passed, and pinned against the real
   `phpunit-no-results-green.txt`/`phpunit-no-results-red.txt` captures
   (both report `attempted: 2`). The progress-counter pattern itself is
-  now anchored to the whole line, not merely to its end (`^[.FEWIRSDN]*
-  [ \t]*(\d+) \/ (\d+) \([ \t]*\d+%\)[ \t]*$` in place of a bare
+  now anchored to the whole line, not merely to its end
+  (`^[.FEWIRSDN]*[ \t]*(\d+) \/ (\d+) \([ \t]*\d+%\)[ \t]*$` in place of a bare
   `\b\d+ \/ \d+ \(\s*\d+%\)\s*$`): a line that merely ENDS in the
   `N / M (P%)` shape (a failure message or fatal-error line reporting
   some unrelated fraction) no longer counts as PHPUnit's own completion
   evidence, a documented limit this closes. The marker prefix is a closed
-  alphabet of the markers measured in real captures: `.FEWIRS` (PHPUnit
-  9.6.36 and 11.5.56) plus `D` and `N` (PHPUnit 11.5.56,
-  `phpunit-warnings-deprecations-notices-executed.txt`'s own
+  alphabet, `.FEWIRSDN`; measured in this suite's captures are `.`, `F`
+  and `W` under PHPUnit 9.6.36 and 11.5.56, `E`, `I`, `R` and `S` under
+  9.6.36, and `D` and `N` under 11.5.56
+  (`phpunit-warnings-deprecations-notices-executed.txt`'s own
   `WDN ... 3 / 3 (100%)` row). Two earlier revisions of this same
   unreleased change were measured and dropped: the seven-character
   alphabet without `D`/`N` failed to match that real row (a baseline cut

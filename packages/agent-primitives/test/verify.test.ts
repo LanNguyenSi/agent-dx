@@ -4779,7 +4779,7 @@ describe("phpunitDetector: unreadable-result tightening mutants, each pinned by 
     expect(zeroTests(output)).toBe("ambiguous");
   });
 
-  it("the marker alphabet is closed: a single ordinary word ahead of the counter is neither completion evidence nor an attempted source (SYNTHETIC)", () => {
+  it("the marker alphabet is closed: a word carrying a character outside it, ahead of the counter, is neither completion evidence nor an attempted source (SYNTHETIC)", () => {
     // A one-word line has no colon, digit or inner space to keep it out,
     // so only the closed marker alphabet does. With an open letter class
     // each of these lines reads a report-less output as "not_zero" and
@@ -4807,6 +4807,10 @@ describe("phpunitDetector: unreadable-result tightening mutants, each pinned by 
       exitCode: 0,
     });
     expect(parsed.summary.attempted).toBe(2);
+    // The accepted residual, pinned so a change to it is a decision: a
+    // word made only of marker letters is a real row by shape and
+    // alphabet, so it matches. The pattern is not proof of origin.
+    expect(PROGRESS_COUNTER_LINE.test("FEW 3 / 3 (100%)")).toBe(true);
   });
 
   it("the counter's padding is horizontal-only: a marker line and the counter line below it do not bleed together into one match across the line break (SYNTHETIC, pins the [ \\t]* fix)", () => {
