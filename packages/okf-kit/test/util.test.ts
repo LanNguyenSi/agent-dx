@@ -44,6 +44,70 @@ describe("getTimestampEpoch", () => {
     expect(getTimestampEpoch(null)).toBeUndefined();
     expect(getTimestampEpoch(["not", "a", "record"])).toBeUndefined();
   });
+
+  it("parses a designator-less string as UTC, not the process's local timezone (D-016)", () => {
+    // No `Z`, no numeric offset: forced to UTC rather than handed to
+    // `Date.parse` raw, so this is the SAME value regardless of which `TZ`
+    // the process happens to run under -- see the CLI-level pin in
+    // test/cli-staleness.test.ts for the end-to-end proof across two real
+    // `TZ` environments. Compared against the literal epoch (not a
+    // same-process `Date.parse("...Z")` call) so a mutant that drops the
+    // UTC-forcing branch and hands the raw string straight to `Date.parse`
+    // -- which happens to also equal this literal under `TZ=UTC` -- is
+    // still caught by the CLI-level `TZ=Asia/Tokyo` pins; this pin alone
+    // only proves the VALUE is right under whatever `TZ` this process runs
+    // under (verified with `node -e`: 1767225600 ===
+    // Math.floor(Date.parse("2026-01-01T00:00:00Z") / 1000)).
+    expect(getTimestampEpoch({ timestamp: "2026-01-01T00:00:00" })).toBe(
+      1767225600,
+    );
+  });
+
+  it("parses a designator-less space-separated (YAML 1.1 canonical) string as UTC too (D-016)", () => {
+    expect(getTimestampEpoch({ timestamp: "2026-01-01 00:00:00" })).toBe(
+      1767225600,
+    );
+  });
+
+  it("still parses a string carrying a numeric offset unchanged, not as UTC (D-016)", () => {
+    // A numeric offset already names a real instant; forcing UTC on TOP of
+    // it would silently discard the offset and misread the instant.
+    expect(getTimestampEpoch({ timestamp: "2026-01-01T00:00:00+02:00" })).toBe(
+      Math.floor(Date.parse("2026-01-01T00:00:00+02:00") / 1000),
+    );
+  });
+
+  it("trims a trailing-space-padded designator value before parsing (`.trim()` in parseTimestampInstantMs)", () => {
+    // `Date.parse` rejects a value with trailing whitespace after the `Z`
+    // (verified with `node -e`: `Date.parse("2026-01-01T20:00:00Z ")` is
+    // `NaN`), which is why the base behavior before this fix read a
+    // padded value as "not assessable: no valid timestamp". The trim
+    // makes this value parse the same as its unpadded form (literal
+    // verified with `node -e`: 1767297600 ===
+    // Math.floor(Date.parse("2026-01-01T20:00:00Z") / 1000)).
+    expect(getTimestampEpoch({ timestamp: "2026-01-01T20:00:00Z " })).toBe(
+      1767297600,
+    );
+  });
+
+  it("trims a leading-space-padded designator-less value before parsing, still forced to UTC (`.trim()` in parseTimestampInstantMs, D-016)", () => {
+    expect(getTimestampEpoch({ timestamp: " 2026-01-01T00:00:00" })).toBe(
+      1767225600,
+    );
+  });
+
+  it("stays judged for a date-only string (no time part at all)", () => {
+    // "2026-01-01" has no designator to gate on and no time-of-day for
+    // `hasUtcDesignator` to check either, so `parseTimestampInstantMs`
+    // appends `Z` and hands `Date.parse` the string "2026-01-01Z". This
+    // rests on `Date.parse` already resolving a bare date-only ISO string
+    // ("2026-01-01") as UTC midnight by its own spec (unlike a
+    // date-TIME string, which defaults to local time) -- the appended `Z`
+    // here is redundant with that but harmless, since `Date.parse` also
+    // accepts "<date>Z" (literal verified with `node -e`: 1767225600 ===
+    // Math.floor(Date.parse("2026-01-01Z") / 1000)).
+    expect(getTimestampEpoch({ timestamp: "2026-01-01" })).toBe(1767225600);
+  });
 });
 
 describe("getTimestampEpochMs", () => {
@@ -84,6 +148,15 @@ describe("getTimestampEpochMs", () => {
     expect(getTimestampEpochMs({ timestamp: 12345 })).toBeUndefined();
     expect(getTimestampEpochMs(undefined)).toBeUndefined();
     expect(getTimestampEpochMs(null)).toBeUndefined();
+  });
+
+  it("parses a designator-less string as UTC, at millisecond resolution (D-016)", () => {
+    // Literal epoch (verified with `node -e`: 1767272400000 ===
+    // Date.parse("2026-01-01T13:00:00Z")), not a same-process `Date.parse`
+    // call, for the same reason as the `getTimestampEpoch` pins above.
+    expect(getTimestampEpochMs({ timestamp: "2026-01-01T13:00:00" })).toBe(
+      1767272400000,
+    );
   });
 });
 

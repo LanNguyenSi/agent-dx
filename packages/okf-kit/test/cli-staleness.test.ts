@@ -586,14 +586,16 @@ describe("okf-kit cli staleness (sources-fresh + repo-root auto-detection)", () 
     }
   });
 
-  it("the re-stamp direction verdict never depends on the machine's timezone: a stamp with no UTC designator reads identically under TZ=UTC and TZ=Asia/Tokyo (D-013)", () => {
-    // A bare datetime ("2026-01-01T13:00:00", no `Z`, no offset) is parsed
-    // by `Date.parse` in the MACHINE'S timezone. Compared against a
-    // `Z`-suffixed parent value it therefore resolves to 13:00 UTC on a UTC
-    // runner (a forward move) and to 04:00 UTC on a UTC+9 one (a backwards
-    // move) -- the same repository, two opposite verdicts and two opposite
-    // `--strict` exit codes. D-013 takes the raw-identity fallback whenever
-    // either side carries no designator, so no direction is claimed at all.
+  it("the re-stamp direction verdict never depends on the machine's timezone: a stamp with no UTC designator reads identically under TZ=UTC and TZ=Asia/Tokyo (D-016)", () => {
+    // A bare datetime ("2026-01-01T13:00:00", no `Z`, no offset) used to be
+    // parsed by `Date.parse` in the MACHINE'S timezone: compared against a
+    // `Z`-suffixed parent value it resolved to 13:00 UTC on a UTC runner (a
+    // forward move) and to 04:00 UTC on a UTC+9 one (a backwards move) --
+    // the same repository, two opposite verdicts and two opposite
+    // `--strict` exit codes. D-016 forces UTC for a designator-less value
+    // instead, so the direction is judged here (13:00 is genuinely later
+    // than 12:00Z) IDENTICALLY on both machines, rather than falling back
+    // to the pre-D-004 raw-identity comparison.
     //
     // The fixture keeps the day-wide STALENESS comparison far from its own
     // boundary on purpose (the source's commit is a month after the doc's
@@ -636,10 +638,9 @@ describe("okf-kit cli staleness (sources-fresh + repo-root auto-detection)", () 
       expect(freshness(tokyo)).toEqual(freshness(utc));
       expect(tokyo.status).toBe(utc.status);
       // And the invariant verdict is the right one, not merely the same
-      // wrong one twice: with no designator the direction is not judged, so
-      // the changed value falls back to counting as a re-stamp (the
-      // behavior that predates the direction rule) and nothing claims a
-      // move in either direction.
+      // wrong one twice: forced to UTC, 13:00 is genuinely later than
+      // 12:00Z, a real forward move, so this is an ordinary re-stamp and
+      // nothing claims a backwards move or leaves the source STALE.
       expect(
         freshness(utc).filter(
           (f) =>
@@ -653,17 +654,19 @@ describe("okf-kit cli staleness (sources-fresh + repo-root auto-detection)", () 
     }
   });
 
-  it("the OLDER side is gated too: a designator-less value in the FIRST PARENT reads identically under TZ=UTC and TZ=Asia/Tokyo (D-013)", () => {
+  it("the OLDER side is forced to UTC too: a designator-less value in the FIRST PARENT reads identically under TZ=UTC and TZ=Asia/Tokyo (D-016)", () => {
     // Mirror of the test above, with the two sides swapped: here the bare
     // datetime is the value the commit REPLACED (the first parent's), and
-    // the commit's own value carries a `Z`. Ungated, the parent's
-    // "2026-01-01T13:00:00" resolves to 13:00 UTC on a UTC runner (later
-    // than the commit's 12:00Z: a backwards move, STALE plus the backwards
-    // warning, `--strict` exit 1) and to 04:00 UTC on a UTC+9 one (earlier:
-    // a forward move, clean, exit 0) -- the same repository, two opposite
-    // verdicts again. Gating only the NEWER side would leave that half
-    // silently TZ-dependent, which is why both sides go through
-    // `isDirectionComparable`.
+    // the commit's own value carries a `Z`. Read raw, the parent's
+    // "2026-01-01T13:00:00" would resolve to 13:00 UTC on a UTC runner
+    // (later than the commit's 12:00Z: a backwards move, STALE plus the
+    // backwards warning, `--strict` exit 1) and to 04:00 UTC on a UTC+9 one
+    // (earlier: a forward move, clean, exit 0) -- the same repository, two
+    // opposite verdicts. Forcing UTC on only the NEWER side would leave
+    // that half silently TZ-dependent, which is why both sides go through
+    // `parseTimestampInstantMs`: the parent is genuinely LATER (13:00 UTC)
+    // than the commit's own 12:00Z on every machine, so this really is a
+    // backwards move, identically reported under both timezones.
     //
     // As above, the fixture keeps the day-wide STALENESS comparison far
     // from its own boundary (the source's commit is a month after the
@@ -710,25 +713,34 @@ describe("okf-kit cli staleness (sources-fresh + repo-root auto-detection)", () 
 
       expect(freshness(tokyo)).toEqual(freshness(utc));
       expect(tokyo.status).toBe(utc.status);
-      // And the invariant verdict is the right one: with the older side
-      // carrying no designator, no direction is claimed at all, so the
-      // changed value takes the raw-identity fallback and counts as a
-      // re-stamp -- no backwards warning, no STALE, on either machine.
-      expect(
-        freshness(utc).filter(
-          (f) =>
-            f.message.includes("moved backwards") ||
-            f.message.includes("STALE"),
-        ),
-      ).toEqual([]);
-      expect(utc.status).toBe(0);
-      expect(tokyo.status).toBe(0);
+      // And the invariant verdict is the right one: forced to UTC, the
+      // older side (13:00) really is later than the newer side's 12:00Z, a
+      // genuine backwards move, so this gets the same STALE + "moved
+      // backwards" warning a fully `Z`-suffixed pair would, on BOTH
+      // machines -- never the silent pass a designator-less value used to
+      // get.
+      const backwards = freshness(utc).find((f) =>
+        f.message.includes("moved backwards"),
+      );
+      expect(backwards).toMatchObject({
+        ruleId: "sources-fresh",
+        severity: "warning",
+      });
+      expect(backwards?.message).toContain("2026-01-01T13:00:00.000Z");
+      expect(backwards?.message).toContain("2026-01-01T12:00:00.000Z");
+      const stale = freshness(utc).find((f) => f.message.includes("STALE"));
+      expect(stale).toMatchObject({
+        ruleId: "sources-fresh",
+        severity: "warning",
+      });
+      expect(utc.status).toBe(1);
+      expect(tokyo.status).toBe(1);
     } finally {
       repo.cleanup();
     }
   });
 
-  it("a native YAML date (`!!timestamp`) has no designator to carry and is judged for direction anyway, identically under both timezones (D-013)", () => {
+  it("a native YAML date (`!!timestamp`) has no designator to carry and is judged for direction anyway, identically under both timezones (D-013, superseded by D-016 for the direction check)", () => {
     // The other side of the same decision: `getRawTimestampString` returns
     // undefined for a native date, and that undefined means "nothing to
     // gate", not "ambiguous" -- the YAML parser already fixed the instant
@@ -789,6 +801,70 @@ describe("okf-kit cli staleness (sources-fresh + repo-root auto-detection)", () 
       expect(backwards?.message).toContain("2026-02-01T00:00:00.000Z");
       expect(backwards?.message).toContain("2026-01-15T00:00:00.000Z");
       expect(utc.status).toBe(1);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it("the day-wide STALENESS comparison never depends on the machine's timezone either: a designator-less doc timestamp reads identically under TZ=UTC and TZ=Asia/Tokyo (D-016)", () => {
+    // This is the OTHER half of D-016, not the re-stamp direction check
+    // covered by the two tests above: the ordinary `commitEpoch >
+    // timestampEpoch` STALENESS comparison in sourcesFreshRule, which reads
+    // `timestampEpoch` straight from `getTimestampEpoch` with no restamp
+    // path involved at all (the source's only commit lands well after the
+    // doc's, so the co-commit rescue never engages).
+    //
+    // The doc's designator-less "2026-01-01T20:00:00" used to be parsed by
+    // `Date.parse` in the MACHINE's timezone: 20:00 UTC on a UTC runner
+    // (later than the source's 15:00 UTC commit -> clean) but 20:00 Tokyo
+    // time = 11:00 UTC on a UTC+9 one (earlier than 15:00 UTC -> STALE) --
+    // the same repository, one clean and one STALE. D-016 forces UTC for
+    // it instead, so both machines read 20:00 UTC and agree the source
+    // (15:00 UTC) is OLDER than the doc's stamp: clean on both.
+    const repo = createTmpGitRepo();
+    try {
+      repo.commitFiles(
+        [
+          {
+            relPath: "bundle/doc.md",
+            content:
+              "---\ntype: concept\ntimestamp: 2026-01-01T20:00:00\nsources:\n  - source.ts\n---\n\n# Doc\n",
+          },
+          { relPath: "source.ts", content: "export const a = 1;\n" },
+        ],
+        "2026-01-01T00:00:00Z",
+      );
+      repo.commitFile(
+        "source.ts",
+        "export const a = 2;\n",
+        "2026-01-01T15:00:00Z",
+      );
+
+      const args = [
+        "check",
+        path.join(repo.dir, "bundle"),
+        "--repo-root",
+        repo.dir,
+        "--strict",
+        "--json",
+      ];
+      const utc = runCliWithTz(args, "UTC");
+      const tokyo = runCliWithTz(args, "Asia/Tokyo");
+      const freshness = (result: RunResult) =>
+        (JSON.parse(result.stdout) as JsonReport).findings.filter((f) =>
+          f.ruleId.startsWith("sources-fresh"),
+        );
+
+      expect(freshness(tokyo)).toEqual(freshness(utc));
+      expect(tokyo.status).toBe(utc.status);
+      // And the invariant verdict is the right one: forced to UTC, the
+      // doc's 20:00 stamp is genuinely LATER than the source's 15:00Z
+      // commit, so the source is not stale, on either machine.
+      expect(freshness(utc).some((f) => f.message.includes("STALE"))).toBe(
+        false,
+      );
+      expect(utc.status).toBe(0);
+      expect(tokyo.status).toBe(0);
     } finally {
       repo.cleanup();
     }

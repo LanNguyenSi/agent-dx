@@ -7,6 +7,81 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `sources-fresh`'s re-stamp direction check (`compareRestampDirection`,
+  D-013) is now judged by `parseTimestampInstantMs` (D-016) instead of a
+  bare `Date.parse` fallback for a designator-less value; see the Fixed
+  entry below. This can turn an existing `--strict` run red: a
+  designator-less backwards re-stamp that previously passed silently is
+  now reported (`re-stamp moved backwards`).
+
+### Fixed
+
+- `sources-fresh` treats a frontmatter `timestamp` string with no UTC
+  designator (`Z`) or numeric offset (e.g. `2026-09-17T07:36:36`)
+  consistently and timezone-invariantly across BOTH of its comparisons
+  (D-016). Previously the two comparisons disagreed: the re-stamp
+  direction check (`compareRestampDirection`) fell back to an
+  any-textual-change escape hatch for such a value (a genuine backwards
+  re-stamp between two designator-less timestamps silently passed as an
+  ordinary re-stamp), while the day-wide staleness comparison
+  (`getTimestampEpoch`) parsed it with `Date.parse` in the machine's
+  local timezone (the same repository content could read STALE on one
+  runner and clean on another, hours apart). Both now go through one
+  UTC-forcing parse (`parseTimestampInstantMs` in `src/util.ts`, shared
+  by `getTimestampEpoch` and `getTimestampEpochMs`): a designator-less
+  value is treated as UTC everywhere `sources-fresh` reads a `timestamp`
+  (Treatment A of the two considered, see the measurement below), so a
+  backwards designator-less re-stamp is now reported (`re-stamp moved
+  backwards`) exactly like a `Z`-suffixed one, and the day-wide
+  comparison no longer depends on `TZ`. D-016 supersedes D-013 for
+  `sources-fresh`'s direction check (a native YAML date still takes the
+  `Date#getTime()` branch and is unaffected); `sources-fresh-future`'s
+  designator-less skip notice (D-013) is untouched, since its clock-skew
+  allowance is minutes wide, too narrow to safely absorb an hours-wide
+  timezone shift, so it keeps skipping a designator-less timestamp with a
+  notice rather than forcing UTC on it (see the README's "Designator-less
+  timestamps" section for why the two rules differ). `parseTimestampInstantMs`
+  also trims the raw `timestamp` string before parsing (needed so the `Z`
+  it appends for a designator-less value lands at the end, not after
+  trailing whitespace); as a side effect, a whitespace-padded value that
+  previously read as `staleness not assessable: no valid timestamp` is
+  now assessed by both `sources-fresh` and `sources-fresh-future` the
+  same as its untrimmed form. A native YAML date (`!!timestamp`, no raw
+  string, already resolved to a fixed UTC instant by the YAML parser) was
+  already timezone-invariant and is unaffected. New tests pin timezone
+  invariance under both `TZ=UTC` and `TZ=Asia/Tokyo` for the direction
+  check and, separately, for the day-wide comparison
+  (`test/cli-staleness.test.ts`, subprocess-based, following the existing
+  D-013 pattern), plus a committed-path unit pin (`test/sources-fresh.test.ts`),
+  unit-level UTC-forcing and trim pins for `getTimestampEpoch`/
+  `getTimestampEpochMs` (`test/util.test.ts`), and a padded-value pin for
+  `sources-fresh-future` (`test/sources-fresh-future.test.ts`).
+
+  Measured by running the built CLI (`dist/cli.js check`) over every real
+  `docs/okf` bundle in this repository (test fixtures under
+  `packages/okf-kit/test/fixtures/` excluded as synthetic) -- the only
+  one is `packages/orchestrator-workflow/docs/okf`, whose six docs'
+  frontmatter timestamps are all `Z`-suffixed already. Ran both plain
+  `check --json` and `check --json --require-anchors`, each under
+  `TZ=UTC` and `TZ=Asia/Tokyo`:
+
+  | Config | Treatment A (parse as UTC, chosen) | Treatment B (designator required) |
+  |---|---|---|
+  | `check`, `TZ=UTC` | 0 errors, 0 warnings, 0 notices | 0 errors, 0 warnings, 0 notices |
+  | `check`, `TZ=Asia/Tokyo` | 0 errors, 0 warnings, 0 notices | 0 errors, 0 warnings, 0 notices |
+  | `check --require-anchors`, `TZ=UTC` | 0 errors, 0 warnings, 0 notices | 0 errors, 0 warnings, 0 notices |
+  | `check --require-anchors`, `TZ=Asia/Tokyo` | 0 errors, 0 warnings, 0 notices | 0 errors, 0 warnings, 0 notices |
+
+  Identical under both treatments and both timezones: the only real
+  bundle in this repository has no designator-less stamp to treat
+  differently, so no existing bundle verdict flips either way; Treatment
+  A is adopted because it keeps `sources-fresh` a single rule answering
+  the same "did this move forward" question for every `timestamp` shape
+  it accepts, closing the backwards-move gap without a second finding
+  class for the same value.
+
 ## [0.13.0] - 2026-09-17
 
 ### Changed

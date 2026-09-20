@@ -1167,17 +1167,16 @@ describe("sources-fresh", () => {
       );
     });
 
-    it("a five-month BACKWARDS move between two designator-less timestamps stays clean of the backwards warning and the same-instant notice (D-013 fallback)", () => {
-      // Neither value carries a UTC designator, so isDirectionComparable
-      // rejects both and compareRestampDirection falls back to comparing
-      // raw IDENTITY only (pre-D-004 behavior): the values differ, so this
-      // reads as an ordinary `restamped`, and the direction those two
-      // values actually imply (a five-month move BACKWARDS, were it judged)
-      // never surfaces as the "moved backwards" warning or the
-      // same-instant notice -- there is no direction verdict to report
-      // either way, and the source stays clean. This is the committed-path
-      // unit-level pin for the invariant `cli-staleness.test.ts` already
-      // checks holds across two `TZ`s end-to-end.
+    it("a five-month BACKWARDS move between two designator-less timestamps is judged for direction, forced to UTC -> STALE + backwards warning (D-016)", () => {
+      // Neither value carries a UTC designator, but `getTimestampEpochMs`
+      // (via `parseTimestampInstantMs`) now forces UTC for both instead of
+      // falling back to raw-identity comparison: the values genuinely moved
+      // BACKWARDS (June -> January), so this is no longer silently treated
+      // as an ordinary re-stamp -- it gets the same "moved backwards"
+      // warning a designator-carrying pair would (D-004), and the source
+      // stays STALE. This is the committed-path unit-level pin for the
+      // invariant `cli-staleness.test.ts` checks holds across two `TZ`s
+      // end-to-end for the direction check.
       repo.commitFiles(
         [
           {
@@ -1201,7 +1200,23 @@ describe("sources-fresh", () => {
 
       const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
       const findings = sourcesFreshRule.run(ctx);
-      expect(findings).toEqual([]);
+      expect(findings).toHaveLength(2);
+      const stale = findings.find((f) => f.message.includes("STALE"));
+      const backwards = findings.find((f) =>
+        f.message.includes("moved backwards"),
+      );
+      expect(stale).toMatchObject({
+        ruleId: "sources-fresh",
+        severity: "warning",
+      });
+      expect(stale?.message).toContain("source.ts");
+      expect(backwards).toMatchObject({
+        ruleId: "sources-fresh",
+        severity: "warning",
+      });
+      expect(backwards?.message).toContain("2026-06-01T00:00:00.000Z");
+      expect(backwards?.message).toContain("2026-01-01T00:00:00.000Z");
+      expect(backwards?.message).toContain("in the doc's last commit");
     });
 
     it("a forward re-stamp of less than a second still counts as restamped -> passes, at millisecond resolution (D-008)", () => {
