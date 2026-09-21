@@ -1,5 +1,59 @@
 # Bundle log
 
+- 2026-09-21T05:00:12.000Z (agent-dx tracker task
+  7caab6b3-9949-41db-98c5-58985f7dae7f, pandora run
+  2026-09-21-open-pool-batch59): the citation-sibling-drift guard's
+  allowlist geometry re-check (`siblingGuardEntryGeometryViolation`) read
+  a target file's raw content while rules (b)/(c) always stripped the
+  allowlist array's own span first (`stripSelfAllowlistSpan`), so a
+  future recorded `uncitedLines` value inside that span would have
+  silently passed the re-check even though those two rules could never
+  see it there; no real allowlist entry currently sits inside the span,
+  so the disagreement was latent. Routed the re-check through the same
+  accessor by renaming its `readTargetFile` parameter to `readFile` and
+  its local `targetLines` to `lines`, both in place, so the fix stayed a
+  same-line-count edit and no cited line moved. Three tests were appended
+  at the end of the file: a fixture that reproduces the fix with a
+  synthetic allowlist span and an uncited line inside it, a pin for the
+  documented terminator degradation (an early `];` line inside a
+  synthetic array scans more rather than hiding the real tail), and an
+  extension of the declaration-marker pin to every real target file the
+  bundle can resolve a citation into, not just this file. All edits are
+  either same-line-count in-place replacements or pure appends after the
+  file's previous final line, so no existing citation moved. Three
+  mutation probes (`agent-primitives probe --plan`, `--pre 'npm run
+  build'`, whole-file `npx vitest run test/docs-consistency.test.ts`,
+  3/3 tests, 3/3 baseline, 3/3 killed, 3/3 expectation met, 3/3 restored
+  and verified): the shared-accessor bypass at
+  `test/docs-consistency.test.ts:8171#"const lines = stripSelfAllowlistSpan(readFile(entry.real)).split"`
+  killed by the new fixture above; rule (c)'s uniqueness check neutralised
+  at `test/docs-consistency.test.ts:6104#"if (distantLines.length > 0) {"`
+  (mutated to `if (false) {`) killed by the existing rule-(c) fixtures and
+  the no-dead-exemption sanity test; the span exclusion removed at
+  `test/docs-consistency.test.ts:5979#"const startIdx = content.lastIndexOf(startMarker);"`
+  (mutated to force `startIdx = -1`) killed by the existing span-exclusion
+  fixtures. PKG-VERIFY(orchestrator-workflow) green (1293 tests, build,
+  typecheck, typecheck-test, format). The four docs whose `sources` list
+  `test/docs-consistency.test.ts` (`model-preselection.md`,
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`,
+  `subagent-contracts-superset.md`) were re-verified against source commit
+  d24f0452 and re-stamped after it; none of their own citations into this
+  file fall inside the changed or appended lines. Five of this log's own
+  existing citations into the test file were spot-read against the
+  current file and still resolve:
+  `test/docs-consistency.test.ts:4896#"both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order"`,
+  `test/docs-consistency.test.ts:3547#"in-scope citations (sanity: the brake itself did not go blind"`,
+  `test/docs-consistency.test.ts:10256#"anchored full citations of docs/okf/log.md"`,
+  `test/docs-consistency.test.ts:5627#"function citationScanParagraphs("`,
+  and `test/docs-consistency.test.ts:9908#"function resolveLogCitationPath("`;
+  none are path-less continuation forms, since `checkLogCitations` forbids
+  that form in this file outright (`test/docs-consistency.test.ts:10027#"path-less continuation citation form is forbidden in docs/okf/log.md"`)
+  and no bundle doc currently uses a path-less continuation into this
+  file either. `packages/okf-kit/dist/cli.js` (built locally, `--version`
+  0.14.0) `check packages/orchestrator-workflow/docs/okf --json` and the
+  same with `--require-anchors` both reported 0 errors, 0 warnings after
+  the re-stamp.
+
 - 2026-09-19T11:22:53.000Z (agent-dx tracker task 0665044e, pandora run
   2026-09-19-open-pool-astra8): rule 1 of
   `scripts/check-release-changelogs.mjs` now accepts hyphenated SemVer
