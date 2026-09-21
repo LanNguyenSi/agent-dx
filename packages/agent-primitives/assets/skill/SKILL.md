@@ -108,9 +108,10 @@ detectors do not recognize. Nothing detects a filter that selects the
 wrong tests on its own: pin what you expect in
 `--require-baseline-evidence` (a pattern naming the count you expect, for
 example `Tests +4 passed`), or read the baseline's own output (the log at
-`baseline.logPath`) to confirm the tests you expect actually ran. (b) A mutant must still compile under the project's
-build when `--pre` builds: a build failure there is `pre_failed`, an
-inconclusive result, never a verdict. A condition the compiler uses for
+`baseline.logPath`) to confirm the tests you expect actually ran. (b) A
+mutant must still compile under the project's build when `--pre` builds:
+a build failure there is `pre_failed`, an inconclusive result, never a
+verdict. A condition the compiler uses for
 type narrowing is better mutated in its substance (change a comparison
 operator, make a predicate's callback return a constant, change the
 value the branch returns) than replaced outright by a bare literal
