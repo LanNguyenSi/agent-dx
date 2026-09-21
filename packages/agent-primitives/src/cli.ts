@@ -1656,7 +1656,7 @@ program
   )
   .option(
     "--force",
-    "overwrite a conflicting existing skill file instead of reporting conflicted",
+    "overwrite a conflicting or outdated existing skill file instead of reporting it as conflicted/outdated",
   )
   .action((opts: InitCliOptions, command: Command) => {
     const start = Date.now();

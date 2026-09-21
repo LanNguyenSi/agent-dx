@@ -16,6 +16,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   verdict, a common outcome for a literal replacement of a
   type-narrowing condition.
 
+- The skill digest ledger's maintenance convention is now stated
+  explicitly (README's ledger section and `readSkillLedger`'s docblock,
+  `src/init/ledger.ts`): a change to `assets/skill/SKILL.md` appends a
+  pending entry for the version being prepared in the SAME change, and
+  replaces (never joins) that pending entry if the asset changes again
+  before release; a released entry is immutable. `readSkillLedgerSafe`
+  is new: `init` now loads the ledger through it instead of the strict
+  `readSkillLedger`, so a missing, unparsable, or malformed ledger (or a
+  malformed individual entry) degrades the affected target to
+  `conflicted` and records a cause on `InitResult.warnings`, instead of
+  crashing `init`; the release-time completeness test still uses the
+  strict reader. That completeness test (`test/skill-ledger.test.ts`) now
+  also asserts the current asset's digest is the ledger's LAST entry
+  (previously "present anywhere"), that versions are strictly ascending
+  with differing adjacent digests, and that the last entry's version is
+  at least `package.json`'s version. The ledger gains the 0.1.0 entry
+  (no `agent-primitives/v0.1.0` tag exists; digest verified from the
+  published npm tarball, `npm pack agent-primitives@0.1.0`), closing the
+  oldest-install coverage gap. `--force`'s CLI help text now names both
+  `conflicted` and `outdated`; `findLedgerMatch`'s first-match (oldest
+  release wins) semantics are documented. Added a test for the `EEXIST`
+  race branch's `outdated` classification (a ledger-matching file planted
+  between the pre-write lstat and the `O_EXCL` open), previously
+  untested. Anchored by an adversarial review of the initial `outdated`
+  feature below, which reproduced its claims but found the completeness
+  test fired at commit time against a release-time-only maintenance
+  procedure, a runtime crash on a broken ledger, the missing 0.1.0
+  coverage, and the untested race branch.
 - `init` gains an additive target status, `outdated`: a target whose
   existing bytes are byte-identical to an earlier released copy of
   `assets/skill/SKILL.md`, per a new checked-in digest ledger

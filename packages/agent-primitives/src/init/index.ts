@@ -7,7 +7,7 @@ import {
 } from "../probe/containment.js";
 import {
   findLedgerMatch,
-  readSkillLedger,
+  readSkillLedgerSafe,
   type SkillLedgerEntry,
 } from "./ledger.js";
 
@@ -86,8 +86,13 @@ export interface InitResult {
    * as before `outdated` existed. */
   status: InitTargetStatus;
   targets: InitTargetResult[];
-  /** Reserved for non-fatal notes; always empty today. Kept so `init`'s
-   * result shape matches every other subcommand's envelope-facing fields. */
+  /** Non-fatal notes. Populated only when the checked-in digest ledger
+   * (`assets/skill-ledger.json`) could not be fully loaded (missing,
+   * unparsable, wrong shape, or one or more malformed entries): `init`
+   * degrades to treating the ledger as empty (or as missing just those
+   * entries) rather than failing the run, and names the cause here. Empty
+   * otherwise. Kept so `init`'s result shape matches every other
+   * subcommand's envelope-facing fields. */
   warnings: string[];
 }
 
@@ -593,15 +598,22 @@ export function init(options: InitOptions = {}): InitResult {
   const resolvedTargetDir = resolveDeepestExisting(absTargetDir);
   const force = options.force ?? false;
   const content = options.content ?? readPackagedSkill();
-  // Lazy and memoized: `readSkillLedger()` (a real filesystem read, absent
-  // a test-seam override) runs at most once per `init()` call, and only if
-  // some target actually reaches the report-only differing-content branch
-  // that needs it -- never for a target that writes cleanly, is
-  // `unchanged`, or fails pre-validation first.
+  const warnings: string[] = [];
+  // Lazy and memoized: `readSkillLedgerSafe()` (a real filesystem read,
+  // absent a test-seam override) runs at most once per `init()` call, and
+  // only if some target actually reaches the report-only
+  // differing-content branch that needs it -- never for a target that
+  // writes cleanly, is `unchanged`, or fails pre-validation first. It
+  // never throws: a missing or broken ledger degrades to empty (and a
+  // `warnings` entry) rather than failing the run.
   let cachedLedger: SkillLedgerEntry[] | undefined;
   const getLedger = (): readonly SkillLedgerEntry[] => {
     if (options.ledger) return options.ledger;
-    cachedLedger ??= readSkillLedger();
+    if (cachedLedger === undefined) {
+      const loaded = readSkillLedgerSafe();
+      cachedLedger = loaded.entries;
+      if (loaded.warning) warnings.push(loaded.warning);
+    }
     return cachedLedger;
   };
 
@@ -640,5 +652,5 @@ export function init(options: InitOptions = {}): InitResult {
         ? "written"
         : "unchanged";
 
-  return { status, targets, warnings: [] };
+  return { status, targets, warnings };
 }

@@ -2,6 +2,10 @@
   "asset": "assets/skill/SKILL.md",
   "digests": [
     {
+      "version": "0.1.0",
+      "sha256": "c9e3992ecb561da0a4d2528ff606f287812fc06e5843a772453ac88559494f80"
+    },
+    {
       "version": "0.2.0",
       "sha256": "ec701a00c43a1a9ed784a0471e9d5aba0e969bcb2e00dd7f81f756b27b4e2e89"
     },

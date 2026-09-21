@@ -2717,11 +2717,18 @@ exactly like a `conflicted` one and reports it `written`; the two are
 never distinguished once `--force` authorizes the overwrite.
 `InitTargetResult` carries `matchedVersion` (the released version the
 digest matched) only when `status` is `outdated`, so a caller can decide
-`--force` is safe without comparing bytes by hand. `InitTargetStatus` is
-additive: `outdated` sits alongside the original three, none of which
-changed meaning or exit code, and the aggregate `status` (see "Output
-beside the envelope" below) treats it as one notch less severe than
-`conflicted` and one more severe than `written`.
+`--force` is safe without comparing bytes by hand. The lookup is
+first-match: when two ledger entries ever carried the same digest (they
+should not; the completeness test pins adjacent entries to differ),
+`matchedVersion` would name the earlier, lower-versioned one.
+`InitTargetStatus` is additive: `outdated` sits alongside the original
+three, none of which changed meaning or exit code, and the aggregate
+`status` (see "Output beside the envelope" below) treats it as one notch
+less severe than `conflicted` and one more severe than `written`. A
+missing, unreadable, unparsable, or malformed digest ledger never fails
+`init`: it degrades to treating the ledger as empty (or as missing just
+the malformed entries), so an affected target simply reads `conflicted`
+instead of `outdated`, and `InitResult.warnings` names the cause.
 
 Every requested harness's target is validated against
 `--target-dir` before anything is written: containment, a symlink, a
@@ -2789,23 +2796,35 @@ by validation before any write).
 ### The skill digest ledger
 
 `assets/skill-ledger.json` is a checked-in list of `{ version, sha256 }`
-entries, one per `agent-primitives/v<version>` tag that shipped a change
-to `assets/skill/SKILL.md`, each `sha256` the SHA-256 hex digest of that
-tag's copy of the file. `init` reads it to tell a byte-identical copy of
-an earlier release (`outdated`) apart from bytes that match no release at
-all (`conflicted`, e.g. a local edit). It carries no other purpose and is
-never fetched or written at `init` time: `init` performs no network
-access.
+entries, one per published release of `assets/skill/SKILL.md`, each
+`sha256` the SHA-256 hex digest of that release's copy of the file. `init`
+reads it to tell a byte-identical copy of an earlier release (`outdated`)
+apart from bytes that match no release at all (`conflicted`, e.g. a local
+edit). It carries no other purpose and is never fetched or written at
+`init` time: `init` performs no network access. `init` never fails
+because of this file: a missing, unreadable, unparsable, or malformed
+ledger degrades to empty (or drops just the malformed entries), so an
+affected target reads the pre-existing, safe `conflicted` default instead
+of `outdated`, and the run's `warnings` names the cause.
 
-Maintaining the ledger is a release-time, not a build-time, step: whenever
-a release changes `assets/skill/SKILL.md`, the release procedure appends
-one `{ version, sha256 }` entry for the new tag to `assets/skill-ledger.json`
-before publishing, computed with `git show
-agent-primitives/v<x>:packages/agent-primitives/assets/skill/SKILL.md |
-shasum -a 256`. A test fails whenever the digest of the asset actually in
-the tree is missing from the ledger, so a release that changes the asset
-without appending is caught before it ships rather than silently making
-every existing installation `conflicted` again.
+Maintaining the ledger is a release-time, not a build-time, step, and its
+primary case is an in-progress change: whenever a change edits
+`assets/skill/SKILL.md`, that SAME change appends one `{ version, sha256 }`
+entry to `assets/skill-ledger.json`, labelled with the version being
+prepared for the next release, digest computed with `shasum -a 256`
+against the edited asset. If the asset changes again before that version
+ships, the pending entry is replaced in place rather than joined by a
+second one: at most the ledger's last entry may ever be rewritten, and
+only while its own version is still unreleased. An entry for a version
+that has already shipped is immutable; if it is ever recomputed, that is
+done from that version's own release tag, or, for a release with no tag,
+from its published package (`npm pack <name>@<version>`, then hash the
+unpacked `package/assets/skill/SKILL.md`). A test fails whenever the
+digest of the asset actually in the tree is not the ledger's last entry,
+and another pins the entries to strictly ascending version order with
+differing adjacent digests, so a release that changes the asset without
+appending or replacing that last entry is caught before it ships, rather
+than silently making every existing installation `conflicted` again.
 
 ## `drift`
 
