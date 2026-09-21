@@ -11,24 +11,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sequences before any row/line pattern runs against the output (two
   residuals left by agent-dx PR #319, tracker ad5b34d7): real captures
   (`phpunit-pass-colorized.txt`, `phpunit-fail-colorized.txt`, plus
-  their own `--colors=never` twins, `test/fixtures/README.md`) showed
-  PHPUnit colorizing the `OK (...)` line, the
-  `FAILURES!`/`ERRORS!`/`WARNINGS!` marker, each comma-separated tally
-  segment individually, and a non-`.` progress marker, each of which
-  broke this detector's anchored patterns and misread a colorized red
-  run as `summary.failed: 0`. `stripAnsiSgr` is exported for
-  `test/verify.test.ts`'s directory-derived `PROGRESS_COUNTER_LINE`
-  positive control alone. `probe`'s mutant-phase classify step
-  (`step.ts`) now also reports the dedicated `zero_tests_ambiguous`
-  reason for a mutant run whose own phpunit output is unreadable
-  (`phpunitZeroTestsVerdict` reading `"ambiguous"`), the same split
-  `setup.ts`'s baseline-phase refusal already made; `no_tests_executed`
-  stays for a mutant run whose output states an explicit zero. This
-  closes item (c) of tracker 3a0c5242, left open when the baseline-phase
-  split first shipped. The closed marker alphabet, PHPUnit 9 tally
-  parsing, and every other `RefusalReason` are unchanged;
-  `RefusalReason` itself gains no new member (the mutant phase's own
-  `reason` was already a plain string, not a `RefusalReason`).
+  their own `--colors=never` twins, and now also a multi-row capture
+  pair (`phpunit-multirow-colorized.txt`, a 70-case data-provider run
+  with a mid-row skip marker) and a colorized suppressed-report pair
+  (`phpunit-no-results-red-colorized.txt`, PHPUnit 11's `--no-results`),
+  `test/fixtures/README.md`) showed PHPUnit colorizing the `OK (...)`
+  line, the `FAILURES!`/`ERRORS!`/`WARNINGS!` marker, each
+  comma-separated tally segment individually, and a non-`.` progress
+  marker, each of which broke this detector's anchored patterns and
+  misread a colorized red run as `summary.failed: 0`. `stripAnsiSgr` is
+  exported for `test/verify.test.ts`'s directory-derived
+  `PROGRESS_COUNTER_LINE` positive control alone. `probe`'s mutant-phase
+  classify step (`step.ts`) now also reports the dedicated
+  `zero_tests_ambiguous` reason for a mutant run whose own phpunit
+  output is unreadable (`phpunitZeroTestsVerdict` reading
+  `"ambiguous"`), the same split `setup.ts`'s baseline-phase refusal
+  already made; `no_tests_executed` stays for a mutant run whose output
+  states an explicit zero. A consumer matching the mutant phase's
+  `reason`/`mutation_probe.reason` on `no_tests_executed` now also sees
+  `zero_tests_ambiguous` for an unreadable phpunit mutant run and has to
+  accept both. This closes item (c) of tracker 3a0c5242, left open when
+  the baseline-phase split first shipped. `test/probe-refusal-contract.test.ts`
+  is unchanged: the mutant-phase `reason` is a plain string, not a
+  `RefusalReason`, and its pin lives in `test/probe-zero-tests.test.ts`.
+  The closed marker alphabet, PHPUnit 9 tally parsing, and every other
+  `RefusalReason` are unchanged; `RefusalReason` itself gains no new
+  member (the mutant phase's own `reason` was already a plain string,
+  not a `RefusalReason`).
 
 - README's `probe` section and `assets/skill/SKILL.md` document two
   probe traps observed while probing another package: a test runner's

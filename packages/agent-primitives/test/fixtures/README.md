@@ -586,14 +586,19 @@ captured as files:
 
 Same throwaway-composer-project-under-scratch-directory, same
 disposable-Docker-container (`composer:2`, `php:8.3-cli`), same trimming
-convention as the captures above; PHP 8.3.33 (cli), PHPUnit 9.6.36.
-Command for all four: `docker run --rm -v <scratch>:/app -w /app
-composer:2 composer require --dev phpunit/phpunit:^9.6` (exit `0`),
-followed by `docker run --rm -v <scratch>:/app -w /app php:8.3-cli
-vendor/bin/phpunit --colors=<always|never> tests/<File>.php` against a
-two-test `Calc` suite (`testAddsTwoNumbers`, `testAddsNegativeNumbers`,
-both passing) and a two-test `CalcFail` suite (`testAddsTwoNumbers`
-passing, `testAddWrong` asserting `5 === Calc::add(2, 2)` and failing).
+convention as the captures above. The first four (`Calc`/`CalcFail`,
+`MultiRowTest`): PHP 8.3.33 (cli), PHPUnit 9.6.36. Command for those
+four: `docker run --rm -v <scratch>:/app -w /app composer:2 composer
+require --dev phpunit/phpunit:^9.6` (exit `0`), followed by `docker run
+--rm -v <scratch>:/app -w /app php:8.3-cli vendor/bin/phpunit
+--colors=<always|never> tests/<File>.php` against a two-test `Calc`
+suite (`testAddsTwoNumbers`, `testAddsNegativeNumbers`, both passing), a
+two-test `CalcFail` suite (`testAddsTwoNumbers` passing, `testAddWrong`
+asserting `5 === Calc::add(2, 2)` and failing), and a `MultiRowTest`
+class (below). The last pair (`RedTwoTest`, `--no-results`) reuses
+PHPUnit 11.5.56 / PHP 8.3.33 (cli) and the `/work` mount, same command
+shape as the "PHPUnit 11 captures" section below with `composer
+require --dev phpunit/phpunit:^11.5`.
 
 - `phpunit-pass-colorized.txt`: `--colors=always` against the `Calc`
   suite. Exit `0`. `phpunit-pass-colorized-twin.txt` is the SAME
@@ -602,10 +607,40 @@ passing, `testAddWrong` asserting `5 === Calc::add(2, 2)` and failing).
   `ESC [ <params> m` SGR sequence from the colorized capture reproduces
   the twin byte-for-byte (`test/verify.test.ts` pins this equality
   directly, and pins that `phpunitDetector.parse`/`phpunitZeroTestsVerdict`
-  read the two identically).
+  read the two identically). `phpunit-pass-colorized-twin.txt` is byte-
+  identical to `phpunit-pass.txt` above (same suite, same `--colors=never`
+  flag): kept as its own file rather than reused, since it is this
+  colorized capture's own same-session twin and the equality test above
+  asserts against it by that name, not against `phpunit-pass.txt`.
 - `phpunit-fail-colorized.txt`: `--colors=always` against the
   `CalcFail` suite. Exit `1`. `phpunit-fail-colorized-twin.txt` is its
   own `--colors=never` twin, same relationship as above.
+- `phpunit-multirow-colorized.txt`: `--colors=always` against a
+  `MultiRowTest` class (PHPUnit 9.6.36, same disposable-container
+  method), a 70-case `@dataProvider` (`testCounts`) whose progress wraps
+  onto a second row (`65 / 70 ( 92%)` then `70 / 70 (100%)`) and whose
+  case 30 calls `markTestSkipped`, producing a coloured non-`.` `S`
+  marker mid first row. Exit `0` (a skip is not a failure).
+  `phpunit-multirow-colorized-twin.txt` is the same session's
+  `--colors=never` run, same relationship as above. Added because every
+  round-1 colorized capture above was a two-test, single-row run, which
+  left "at least one passing multi-row run" unpinned.
+- `phpunit-no-results-red-colorized.txt`: `--colors=always --no-results`
+  against a `RedTwoTest` class (PHPUnit 11.5.56, `testPasses` passing,
+  `testFails` asserting `5 === 2 + 2` and failing), same disposable-
+  container method and mount (`/work`) as the PHPUnit 11 captures below.
+  Exit `1`. `phpunit-no-results-red-colorized-twin.txt` is the same
+  session's `--colors=never` run, same relationship as above; it is NOT
+  byte-identical to `phpunit-no-results-red.txt` (that capture keeps its
+  own `Time:`/`Memory:` line byte-verbatim per the suppressed-report
+  captures' own convention below, while this twin elides it like every
+  other capture in this section, since the equality this pair pins is
+  colour-stripping, not completion-timing shape). Added because the
+  suppressed-report shape (`summary.attempted` is the only reading) had
+  no colorized capture: before the fix, `progressCounterAttempted` read
+  `attempted: undefined` from the colorized capture's escaped `.`+`F`
+  progress row (`PROGRESS_COUNTER_LINE` is anchored) while the twin
+  still read `attempted: 2`; after the fix both read `attempted: 2`.
 
 Measured (the reason this detector strips ANSI SGR sequences before any
 row/line pattern sees the output, rather than leaving colour out of

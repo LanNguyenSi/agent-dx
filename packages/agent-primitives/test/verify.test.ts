@@ -4544,6 +4544,78 @@ describe("phpunitDetector: --colors=always output (real capture, escape-strippin
     );
   });
 
+  it("a colorized MULTI-ROW run (70-case data provider, a mid-row non-`.` skip marker, exit 0): stripAnsiSgr reproduces its own --colors=never twin byte-for-byte, matches, and parses identically to it", () => {
+    // `phpunit-multirow-colorized.txt`/`-twin.txt` (PHPUnit 9.6.36, real
+    // capture): a 70-case `@dataProvider` run whose progress wraps onto
+    // a second row (`65 / 70 ( 92%)` then `70 / 70 (100%)`) and whose
+    // case 30 calls `markTestSkipped`, coloured `ESC[36;1mSESC[0m` mid
+    // first row -- the reviewer's own measured shape (all four round-1
+    // captures were single-row, two-test runs, which the closed-alphabet
+    // `PROGRESS_COUNTER_LINE` positive control below also exercises for
+    // BOTH counter rows). Exit `0` either way (a skip is not a failure).
+    const colored = readCaptured("phpunit-multirow-colorized");
+    const twin = readCaptured("phpunit-multirow-colorized-twin");
+    expect(stripAnsiSgr(colored)).toBe(twin);
+    expect(colored).toMatch(/65 \/ 70 \(\s*92%\)/);
+    expect(colored).toMatch(/70 \/ 70 \(100%\)/);
+    expect(
+      phpunitDetector.matches({ output: colored, command: "", exitCode: 0 }),
+    ).toBe(true);
+    const parsedColored = phpunitDetector.parse({
+      output: colored,
+      command: "",
+      exitCode: 0,
+    });
+    const parsedTwin = phpunitDetector.parse({
+      output: twin,
+      command: "",
+      exitCode: 0,
+    });
+    expect(parsedColored.summary).toEqual(parsedTwin.summary);
+    expect(parsedColored.failures).toEqual(parsedTwin.failures);
+    expect(parsedColored.summary).toEqual(
+      expect.objectContaining({ passed: 69, skipped: 1, failed: 0 }),
+    );
+    expect(phpunitZeroTestsVerdict(colored)).toEqual(
+      phpunitZeroTestsVerdict(twin),
+    );
+  });
+
+  it("a BANNER-LESS colorized slice (the last four lines of phpunit-fail-colorized.txt: FAILURES! plus tally, no version banner) selects this detector only once stripAnsiSgr has run: the surviving mutant this pins", () => {
+    // Measured: the `stripAnsiSgr` call at the top of
+    // `phpunitDetector.matches` survives the suite above unaided,
+    // because every captured colorized fixture also carries an
+    // uncoloured version banner, which alone already selects this
+    // detector (`PHPUNIT_BANNER`) regardless of whether the FAILURES!
+    // marker/tally below it were ever stripped. Slicing the banner away
+    // removes that second, unconditional signal, so this slice can only
+    // select the detector by actually reading the coloured
+    // `FAILURES!`/`Tests: ...` lines through `stripAnsiSgr` first.
+    const full = readCaptured("phpunit-fail-colorized");
+    const lines = full.split("\n");
+    const sliceStart = lines.findIndex((line) =>
+      line.includes("tests/CalcFailTest.php:15"),
+    );
+    expect(sliceStart).toBeGreaterThan(-1);
+    const slice = lines.slice(sliceStart).join("\n");
+    expect(slice).not.toContain("PHPUnit 9.6.36");
+    expect(slice).toContain("FAILURES!");
+    expect(slice).toContain("Tests: 2");
+    expect(
+      phpunitDetector.matches({ output: slice, command: "", exitCode: 1 }),
+    ).toBe(true);
+    // Without stripping, the anchored `^FAILURES!\s*$`/tally-head
+    // patterns (`FAILURES_MARKER`/`TALLY_LINE` in
+    // `src/verify/detectors/phpunit.ts`, mirrored here since they are
+    // not exported) fail against the raw escaped bytes, and no banner
+    // is left in this slice to fall back on: this is the mutant's own
+    // outcome (`matches` mutated to skip `stripAnsiSgr`), reproduced
+    // directly here rather than only through the probe run.
+    expect(slice).toMatch(/\x1b\[[0-9;]*mFAILURES!\x1b\[[0-9;]*m/);
+    expect(slice).not.toMatch(/^FAILURES!\s*$/m);
+    expect(slice).not.toMatch(/^Tests: \d+, Assertions: \d+/m);
+  });
+
   it("stripAnsiSgr is a no-op on already-plain output (every existing captured fixture is byte-identical before and after)", () => {
     for (const name of CAPTURED_PHPUNIT_FIXTURES) {
       if (name.endsWith("-colorized")) continue;
@@ -4728,6 +4800,34 @@ describe("phpunitDetector: a suppressed result report is not a missing one (PHPU
     // tests PHPUnit reached, not tests that passed, so a RED run
     // reports the identical attempted count as its green twin.
     expect(check.summary.attempted).toBe(2);
+  });
+
+  it("(v) a colorized RED `--no-results` run reads the same `attempted` count as its `--colors=never` twin (real capture, PHPUnit 11.5.56): `summary.attempted` is the only reading a suppressed report leaves, and stripAnsiSgr is what keeps it readable under colour", () => {
+    // `phpunit-no-results-red-colorized.txt`/`-twin.txt`: the same
+    // `RedTwoTest` two-test class (one passing, one failing
+    // `assertSame`) as `phpunit-no-results-red.txt` above, captured
+    // with `--colors=always`/`--colors=never` in the same session (see
+    // `test/fixtures/README.md`). Before this file's `stripAnsiSgr` fix,
+    // the colorized capture's `.` + escaped `F` progress row failed
+    // `PROGRESS_COUNTER_LINE` outright (the escape sequence sits ahead
+    // of the counter), so `progressCounterAttempted` returned
+    // `undefined` for the colorized capture while its twin still read
+    // `attempted: 2` -- the exact regression the mutant below pins.
+    const colored = readCaptured("phpunit-no-results-red-colorized");
+    const twin = readCaptured("phpunit-no-results-red-colorized-twin");
+    expect(stripAnsiSgr(colored)).toBe(twin);
+    const parsedColored = phpunitDetector.parse({
+      output: colored,
+      command: "",
+      exitCode: 1,
+    });
+    const parsedTwin = phpunitDetector.parse({
+      output: twin,
+      command: "",
+      exitCode: 1,
+    });
+    expect(parsedColored.summary.attempted).toBe(2);
+    expect(parsedColored.summary.attempted).toBe(parsedTwin.summary.attempted);
   });
 
   it("(vii) `--no-results --no-progress` and `--no-output` print NOTHING at all, so the output is not phpunit's to read (generic selection, no phpunit claim)", async () => {
