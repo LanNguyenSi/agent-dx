@@ -96,13 +96,16 @@ Two traps recur. (a) A name filter inside the test command belongs to
 the test runner, not to this CLI: `-t` here takes the whole test COMMAND,
 and a runner's own name filter written inside it (vitest's and jest's
 `-t`/`--testNamePattern`) is a regular expression for vitest and jest, so
-a test name containing a metacharacter (`{`, `}`, `(`, `)`, `.`, `+`,
-`*`, `?`) can select the wrong tests or none while the run still exits
-`0`. Escape the metacharacters, or name the whole test file in the
-command instead of filtering by name. A filter that selects nothing is
-refused at the baseline as `no_tests_executed` for the runners the
-zero-tests detectors recognize; one that selects the wrong tests is not
-detected, so read the baseline's own summary to confirm the tests you
+a test name containing a regular-expression metacharacter (`(`, `[`,
+`|`, `.`, `+`, `*`, `?`, `\` and the rest) can select the wrong tests or
+none while the run still exits `0`. Escape the metacharacters, or name
+the whole test file in the command instead of filtering by name. A
+filter that selects nothing is refused at the baseline as
+`no_tests_executed` for the runners the zero-tests detectors recognize
+(vitest, node's `--test`, PHPUnit); for any other runner, jest included,
+`--require-baseline-evidence` is the opt-in safety net. A filter that
+selects the wrong tests is detected by neither, so read the baseline's
+own output (the log at `baseline.logPath`) to confirm the tests you
 expect actually ran. (b) A mutant must still compile under the project's
 build when `--pre` builds: a build failure there is `pre_failed`, an
 inconclusive result, never a verdict. A condition the compiler uses for

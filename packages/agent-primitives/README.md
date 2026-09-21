@@ -1677,36 +1677,6 @@ does not exist on a case-sensitive one (Linux's default, and what CI
 runs on), where the same value is `link_source_not_found` rather than a
 skipped or refused link.
 
-#### Two probe traps
-
-- A name filter inside the test command belongs to the test runner, not
-  to this CLI: `-t`/`--test` here takes the whole test COMMAND, and a
-  runner's own name filter written inside that command (vitest's and
-  jest's `-t`/`--testNamePattern`) is interpreted by the runner. For
-  vitest and jest it is a regular expression, so a test name containing
-  a metacharacter (`{`, `}`, `(`, `)`, `.`, `+`, `*`, `?`) can select the
-  wrong tests, or none at all, while the run still exits `0`. Escape the
-  metacharacters, or name the whole test file in the command instead of
-  filtering by name. A filter that selects NOTHING is already refused at
-  the baseline as `no_tests_executed` for the runners the zero-tests
-  detectors recognize (see the paragraph on a baseline that exits `0`
-  but never actually ran a test, below), and
-  `--require-baseline-evidence` is the safety net for a runner they do
-  not recognize. A filter that selects the WRONG tests is detected by
-  neither, so read the baseline's own summary to confirm that the tests
-  you meant to exercise actually executed.
-- A mutant must still compile under the project's own build whenever
-  `--pre` builds before the test runs: a build failure there is
-  `status: "inconclusive"`, `reason: "pre_failed"`, never a verdict. A
-  condition the compiler uses for type narrowing is a common trigger:
-  replacing it outright with a bare literal (`if (false) {`) can leave
-  the branch using a type the compiler can no longer prove. Mutate the
-  condition's substance instead, so the mutant still type-checks: change
-  a comparison operator (`-M 'n > 0' -w 'n >= 0'`), make a predicate's
-  callback return a constant (`.some(() => false)`), or change the value
-  the branch returns. Negating a narrowing condition is not such a
-  mutant: it can break the narrowing the same way the literal does.
-
 #### Non-JS repositories
 
 `node_modules` and a composer project's `vendor-dir`/`bin-dir` are the
@@ -2308,6 +2278,38 @@ patch, so a FIFO cannot block it and a large file is never loaded) and
 before the containment check, the lock, the in-flight marker or any
 worktree, so a refusal leaves nothing behind and applies the same
 whether `--file` was given explicitly or is derived from the patch.
+
+#### Two probe traps
+
+- A name filter inside the test command belongs to the test runner, not
+  to this CLI: `-t`/`--test` here takes the whole test COMMAND, and a
+  runner's own name filter written inside that command (vitest's and
+  jest's `-t`/`--testNamePattern`) is interpreted by the runner. For
+  vitest and jest it is a regular expression, so a test name containing
+  a regular-expression metacharacter (`(`, `[`, `|`, `.`, `+`, `*`, `?`,
+  `\` and the rest) can select the wrong tests, or none at all, while
+  the run still exits `0`. Escape the metacharacters, or name the whole
+  test file in the command instead of filtering by name. A filter that
+  selects NOTHING is already refused at the baseline as
+  `no_tests_executed` for the runners the zero-tests detectors recognize
+  (vitest, node's `--test`, PHPUnit; see the paragraph on a baseline
+  that exits `0` but never actually ran a test, above), and
+  `--require-baseline-evidence` is the opt-in safety net for any other
+  runner, jest included. A filter that selects the WRONG tests is
+  detected by neither, so read the baseline's own output (the log at
+  `baseline.logPath`) to confirm that the tests you meant to exercise
+  actually executed.
+- A mutant must still compile under the project's own build whenever
+  `--pre` builds before the test runs: a build failure there is
+  `status: "inconclusive"`, `reason: "pre_failed"`, never a verdict. A
+  condition the compiler uses for type narrowing is a common trigger:
+  replacing it outright with a bare literal (`if (false) {`) can leave
+  the branch using a type the compiler can no longer prove. Mutate the
+  condition's substance instead, so the mutant still type-checks: change
+  a comparison operator (`-M 'n > 0' -w 'n >= 0'`), make a predicate's
+  callback return a constant (`.some(() => false)`), or change the value
+  the branch returns. Negating a narrowing condition is not such a
+  mutant: it can break the narrowing the same way the literal does.
 
 ### Result shape
 
