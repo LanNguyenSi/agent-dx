@@ -44,8 +44,14 @@ export function runSlopCheck(input: SlopCheckInput): CheckSummary {
     // util/pattern-anchor.ts:resolvePatternAnchor): decided against the
     // assumed `filename`, so a `configPath` given alongside `text` agrees
     // with the CLI/`path` branch for the same filename and config.
+    // Only a caller-supplied `filename` is a target: the `input.md`
+    // placeholder names no file, and resolving it against the server's
+    // cwd would let the launch directory decide the verdict.
     const filename = input.filename ?? "input.md";
-    const textAnchor = resolvePatternAnchor(input.configPath, filename);
+    const textAnchor =
+      input.filename !== undefined
+        ? resolvePatternAnchor(input.configPath, input.filename)
+        : undefined;
     const violations = checkText(input.text, filename, {
       packs,
       config,

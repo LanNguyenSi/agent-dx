@@ -160,7 +160,12 @@ async function runCheck(
     // what makes `--stdin-path packages/sub/README.md --config
     // slop.config.yml` agree with `check packages/sub/README.md --config
     // slop.config.yml` (see the README's "Path pattern anchor" section).
-    const stdinAnchor = resolvePatternAnchor(opts.config, opts.stdinPath);
+    // Only a NAMED `--stdin-path` is a target: the default placeholder
+    // names no file, and resolving it against the process cwd would let
+    // the working directory decide the verdict.
+    const stdinAnchor = stdinPathExplicit
+      ? resolvePatternAnchor(opts.config, opts.stdinPath)
+      : undefined;
     const violations = checkText(text, opts.stdinPath, {
       packs,
       config,

@@ -191,7 +191,7 @@ const WorkflowConfigSchema = z.object({
 // above) -- a leading "/" can never match that relative path.
 const ReviewAllowPathSchema = z.string().refine((g) => !g.startsWith("/"), {
   message:
-    'review.allowPaths patterns are matched relative to the scan root (or the nearest package.json directory), not as absolute paths: remove the leading "/"',
+    'review.allowPaths patterns are matched relative to the pattern anchor (see the README section "Path pattern anchor"), not as absolute paths: remove the leading "/"',
 });
 
 const ReviewConfigSchema = z.object({

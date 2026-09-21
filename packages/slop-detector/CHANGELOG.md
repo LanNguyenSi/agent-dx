@@ -20,7 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `text` branches now all derive the anchor through the same helper
   (see the README's "Path pattern anchor" section), so an explicit file
   argument, a `--stdin-path` value, and an MCP call are judged exactly as
-  `check .` judges the same target under the same config. Previously a
+  `check .` judges the same target under the same config. Stdin without
+  `--stdin-path`, and MCP `text` without a `filename`, name no target and
+  are never anchored, so the working directory cannot decide their
+  verdict. Previously a
   root-anchored pattern silently stopped matching once a file was passed
   as an explicit CLI argument instead of being reached by walking a
   directory target (measured against several findings across two files

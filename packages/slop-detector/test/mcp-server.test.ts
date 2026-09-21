@@ -86,13 +86,18 @@ describe("slop-detector MCP wiring — tool handler", () => {
       text: "Hello world",
       filename: "msg.md",
       packs: ["prose-slop"],
+      configPath: "/tmp/slop.config.yml",
     })) as {
       content: Array<{ type: string; text: string }>;
       isError?: boolean;
     };
 
     expect(runSlopCheck).toHaveBeenCalledWith(
-      expect.objectContaining({ text: "Hello world", filename: "msg.md" }),
+      expect.objectContaining({
+        text: "Hello world",
+        filename: "msg.md",
+        configPath: "/tmp/slop.config.yml",
+      }),
     );
     expect(renderSummary).toHaveBeenCalledWith(summary);
     expect(result.content[0]?.text).toBe(

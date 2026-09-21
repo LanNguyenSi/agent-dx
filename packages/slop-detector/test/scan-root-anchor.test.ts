@@ -1,4 +1,12 @@
-import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeAll,
+  beforeEach,
+  afterEach,
+} from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -74,13 +82,34 @@ function runCliJson(args: string[], input = ""): CheckSummary {
 // fixture directory has no `node_modules` (see the file header).
 const distCli = path.join(packageRoot, "dist", "cli.js");
 
-// Reading built output means `npm run build` has to precede `npm test` for
-// those tests to see current source: CI's package job builds before it
-// tests, and a mutation probe must pass `--pre 'npm run build'` so the
-// mutant reaches `dist/`. A missing `dist/cli.js` is built once here
-// rather than skipped, so the tests can never quietly go inert.
+// Reading built output means the build has to be at least as new as the
+// source: CI's package job builds before it tests, and a mutation probe
+// passes `--pre 'npm run build'` so the mutant reaches `dist/`. For every
+// other way of running the suite, a missing OR stale `dist/cli.js` (older
+// than the newest file under `src/`) is rebuilt here, so these tests can
+// neither go inert nor pass against previously built code.
+function newestMtimeMs(dir: string): number {
+  let newest = 0;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    const mtime = entry.isDirectory()
+      ? newestMtimeMs(full)
+      : fs.statSync(full).mtimeMs;
+    if (mtime > newest) newest = mtime;
+  }
+  return newest;
+}
+
+function distIsCurrent(): boolean {
+  if (!fs.existsSync(distCli)) return false;
+  return (
+    newestMtimeMs(path.join(packageRoot, "dist")) >=
+    newestMtimeMs(path.join(packageRoot, "src"))
+  );
+}
+
 function ensureBuilt(): void {
-  if (fs.existsSync(distCli)) return;
+  if (distIsCurrent()) return;
   const built = spawnSync("npm", ["run", "build"], {
     cwd: packageRoot,
     encoding: "utf8",
@@ -664,6 +693,35 @@ describe("each entry point's scanRoot and configAnchor option is load-bearing", 
     expect(viaText.violations).toEqual(viaPath.violations);
   });
 
+  it("MCP text without a filename names no target: the placeholder is never anchored, whatever the process cwd", () => {
+    const configPath = writeConfig([
+      "packs:",
+      "  prose-slop: true",
+      "treatAsCode:",
+      "  - packages/sub/input.md",
+    ]);
+    // The placeholder `input.md` resolved against a cwd inside the config
+    // directory would LOOK contained. It names no file the caller chose,
+    // so it must not be anchored: `input.md` stays prose and the em dash
+    // is reported, exactly as before the anchor existed.
+    const cwdSpy = vi
+      .spyOn(process, "cwd")
+      .mockReturnValue(path.join(tmp, "packages", "sub"));
+    try {
+      const viaText = runSlopCheck({
+        text: emDashText,
+        packs: ["prose-slop"],
+        configPath,
+      });
+      expect(viaText.warnCount).toBe(1);
+      expect(viaText.violations.map((v) => v.ruleId)).toEqual([
+        "prose-slop/em-dash",
+      ]);
+    } finally {
+      cwdSpy.mockRestore();
+    }
+  });
+
   it("MCP path: configAnchor carries the anchor, so a root-anchored ignorePaths entry prunes the named file exactly as the directory scan does", () => {
     const configPath = writeConfig([
       "packs:",
@@ -787,6 +845,31 @@ describe("everyday invocation shapes, spelled relative to the config file's dire
     // the repo-root directory scan does not report.
     expect(viaStdin.filesScanned).toBe(1);
     expect(viaStdin.blockCount).toBe(0);
+  });
+
+  it("stdin without --stdin-path names no target: the <stdin> placeholder is never anchored, even from a cwd inside the config directory", () => {
+    fs.writeFileSync(
+      path.join(tmp, "slop.config.yml"),
+      [
+        "packs:",
+        "  prose-slop: true",
+        "treatAsCode:",
+        '  - "packages/sub/<stdin>"',
+      ].join("\n") + "\n",
+    );
+
+    const viaStdin = runBuiltCliJson(
+      ["check", "--pack", "prose-slop", "--config", "../../slop.config.yml"],
+      path.join(tmp, "packages", "sub"),
+      "An em dash \u2014 sits in this prose.\n",
+    );
+
+    // Anchoring the placeholder would relativize `<cwd>/<stdin>` to
+    // `packages/sub/<stdin>`, match the treatAsCode entry, turn the input
+    // into code and silence prose-slop: a verdict decided by the working
+    // directory. With no named target the input stays prose.
+    expect(viaStdin.filesScanned).toBe(1);
+    expect(viaStdin.warnCount).toBe(1);
   });
 
   it("a nested directory target resolves patterns against the config file's directory, not against itself", () => {
