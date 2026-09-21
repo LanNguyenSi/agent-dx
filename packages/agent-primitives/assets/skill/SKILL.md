@@ -92,6 +92,32 @@ was aborted, but leaves a `warnings` entry naming the same stale-build
 risk instead of staying silent. See the README's `--pre` section for the
 exact rule and the `warnings` notice it leaves behind.
 
+Two traps recur. (a) A name filter inside the test command belongs to
+the test runner, not to this CLI: `-t` here takes the whole test COMMAND,
+and a runner's own name filter written inside it (vitest's and jest's
+`-t`/`--testNamePattern`) is a regular expression for vitest and jest, so
+a test name containing a regular-expression metacharacter (`(`, `[`,
+`|`, `.`, `+`, `*`, `?`, `\` and the rest) can select the wrong tests or
+none while the run still exits `0`. Escape the metacharacters, or name
+the whole test file in the command instead of filtering by name. A
+filter that selects nothing is refused at the baseline as
+`no_tests_executed` for the runners the zero-tests detectors recognize
+(vitest, node's `--test`, PHPUnit); `--require-baseline-evidence` is the
+opt-in safety net for any runner, including jest and every other one the
+detectors do not recognize. Nothing detects a filter that selects the
+wrong tests on its own: pin what you expect in
+`--require-baseline-evidence` (a pattern naming the count you expect, for
+example `Tests +4 passed`), or read the baseline's own output (the log at
+`baseline.logPath`) to confirm the tests you expect actually ran. (b) A
+mutant must still compile under the project's build when `--pre` builds:
+a build failure there is `pre_failed`, an inconclusive result, never a
+verdict. A condition the compiler uses for
+type narrowing is better mutated in its substance (change a comparison
+operator, make a predicate's callback return a constant, change the
+value the branch returns) than replaced outright by a bare literal
+(`if (false) {`) or negated, either of which can leave the branch using
+a type the compiler can no longer prove.
+
 A Python (`.py`) target's own `--pre`/test-command run is isolated from
 CPython's bytecode cache automatically: `probe` gives every such
 invocation its own fresh `PYTHONPYCACHEPREFIX` directory, never reused
