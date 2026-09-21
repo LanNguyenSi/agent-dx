@@ -367,11 +367,22 @@ describe("the anchor only applies when the target lies inside the --config file'
       "--config",
       configPath,
     ]);
+    // An ABSOLUTE `--stdin-path`, not a relative one: the CLI's own child
+    // process cwd is fixed at `packageRoot` (see the file header), which
+    // has its own `package.json`, so a relative `--stdin-path` spelled
+    // the same as the pattern would coincidentally relativize to the
+    // same string under the pre-anchor nearest-package.json fallback too
+    // (a false pass that would not discriminate the anchor from a broken
+    // one). The absolute path breaks that coincidence: the nested
+    // `packages/sub/package.json` fixture (see `beforeEach` above) is its
+    // OWN nearest package.json, so the pre-anchor fallback relativizes it
+    // to bare `README.md` (not matching `packages/sub/README.md`) while
+    // the fix relativizes it to the config directory instead.
     const viaStdin = runCliJson(
       [
         "check",
         "--stdin-path",
-        "packages/sub/README.md",
+        target,
         "--pack",
         "review-slop",
         "--config",
