@@ -48,12 +48,15 @@ export function runSlopCheck(input: SlopCheckInput): CheckSummary {
     // placeholder names no file, and resolving it against the server's
     // cwd would let the launch directory decide the verdict.
     // `named` is a usable caller-given name: a non-empty string. Anything
-    // else (absent, null from a JS caller, an empty string) names nothing.
+    // else (absent, null from a JS caller, an empty string) names nothing
+    // and is never anchored. `named` gates the anchor ONLY: the reported
+    // filename keeps its pre-anchor derivation, so an empty string is still
+    // passed through as given.
     const named =
       typeof input.filename === "string" && input.filename.length > 0
         ? input.filename
         : undefined;
-    const filename = named ?? "input.md";
+    const filename = input.filename ?? "input.md";
     const textAnchor =
       named !== undefined
         ? resolvePatternAnchor(input.configPath, named)

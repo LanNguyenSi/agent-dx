@@ -713,13 +713,21 @@ describe("each entry point's scanRoot and configAnchor option is load-bearing", 
     try {
       // Absent, empty and (from a JS caller that ignores the types) null
       // all name nothing: none may be anchored, and none may throw.
-      for (const filename of [undefined, "", null as unknown as string]) {
+      const unnamed: Array<[string | undefined, string]> = [
+        [undefined, "input.md"],
+        ["", ""],
+        [null as unknown as string, "input.md"],
+      ];
+      for (const [filename, reportedPath] of unnamed) {
         const viaText = runSlopCheck({
           text: emDashText,
           filename,
           packs: ["prose-slop"],
           configPath,
         });
+        // The reported path keeps its pre-anchor derivation: the gate
+        // decides the anchor, it does not rename the input.
+        expect(viaText.violations[0]?.path).toBe(reportedPath);
         expect(viaText.warnCount).toBe(1);
         expect(viaText.violations.map((v) => v.ruleId)).toEqual([
           "prose-slop/em-dash",
