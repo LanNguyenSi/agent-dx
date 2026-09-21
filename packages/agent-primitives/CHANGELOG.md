@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   test fired at commit time against a release-time-only maintenance
   procedure, a runtime crash on a broken ledger, the missing 0.1.0
   coverage, and the untested race branch.
+
 - `init` gains an additive target status, `outdated`: a target whose
   existing bytes are byte-identical to an earlier released copy of
   `assets/skill/SKILL.md`, per a new checked-in digest ledger

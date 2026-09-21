@@ -2807,7 +2807,7 @@ ledger degrades to empty (or drops just the malformed entries), so an
 affected target reads the pre-existing, safe `conflicted` default instead
 of `outdated`, and the run's `warnings` names the cause.
 
-Maintaining the ledger is a release-time, not a build-time, step, and its
+The ledger is maintained by hand, not generated at build time, and its
 primary case is an in-progress change: whenever a change edits
 `assets/skill/SKILL.md`, that SAME change appends one `{ version, sha256 }`
 entry to `assets/skill-ledger.json`, labelled with the version being
