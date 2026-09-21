@@ -1,10 +1,10 @@
 import fs from "node:fs";
 import crypto from "node:crypto";
 
-/** One released version of the packaged skill asset
- * (`assets/skill/SKILL.md`), named by the `agent-primitives/v<version>`
- * tag that shipped it, alongside the SHA-256 content digest of the file at
- * that tag. */
+/** One version of the packaged skill asset (`assets/skill/SKILL.md`)
+ * alongside the SHA-256 content digest of the file in that version: a
+ * released version, or, as the ledger's last entry only, the pending
+ * version being prepared. */
 export interface SkillLedgerEntry {
   version: string;
   sha256: string;

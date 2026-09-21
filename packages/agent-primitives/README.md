@@ -2715,7 +2715,7 @@ nothing is ever written to an existing, differing target without
 `--force`, known-safe or not. `--force` overwrites an `outdated` target
 exactly like a `conflicted` one and reports it `written`; the two are
 never distinguished once `--force` authorizes the overwrite.
-`InitTargetResult` carries `matchedVersion` (the released version the
+`InitTargetResult` carries `matchedVersion` (the ledger version the
 digest matched) only when `status` is `outdated`, so a caller can decide
 `--force` is safe without comparing bytes by hand. The lookup is
 first-match: when two ledger entries ever carried the same digest (they
@@ -2796,8 +2796,9 @@ by validation before any write).
 ### The skill digest ledger
 
 `assets/skill-ledger.json` is a checked-in list of `{ version, sha256 }`
-entries, one per published release of `assets/skill/SKILL.md`, each
-`sha256` the SHA-256 hex digest of that release's copy of the file. `init`
+entries: one per published release of `assets/skill/SKILL.md`, plus at
+most one trailing pending entry for the version being prepared, each
+`sha256` the SHA-256 hex digest of that version's copy of the file. `init`
 reads it to tell a byte-identical copy of an earlier release (`outdated`)
 apart from bytes that match no release at all (`conflicted`, e.g. a local
 edit). It carries no other purpose and is never fetched or written at
@@ -2805,14 +2806,19 @@ edit). It carries no other purpose and is never fetched or written at
 because of this file: a missing, unreadable, unparsable, or malformed
 ledger degrades to empty (or drops just the malformed entries), so an
 affected target reads the pre-existing, safe `conflicted` default instead
-of `outdated`, and the run's `warnings` names the cause.
+of `outdated`, and the run's `warnings` names the cause (in the JSON
+envelope and under `warnings:` in the text format).
 
 The ledger is maintained by hand, not generated at build time, and its
 primary case is an in-progress change: whenever a change edits
 `assets/skill/SKILL.md`, that SAME change appends one `{ version, sha256 }`
 entry to `assets/skill-ledger.json`, labelled with the version being
-prepared for the next release, digest computed with `shasum -a 256`
-against the edited asset. If the asset changes again before that version
+prepared for the next release (`package.json`'s version bumped by the
+semver class of the `[Unreleased]` changes), digest computed with
+`shasum -a 256` against the edited asset. If the release is then cut at a
+different version, the release commit relabels the pending entry to the
+version actually shipped before tagging, since a shipped label is what
+`matchedVersion` reports to consumers from then on. If the asset changes again before that version
 ships, the pending entry is replaced in place rather than joined by a
 second one: at most the ledger's last entry may ever be rewritten, and
 only while its own version is still unreleased. An entry for a version
@@ -2825,6 +2831,12 @@ and another pins the entries to strictly ascending version order with
 differing adjacent digests, so a release that changes the asset without
 appending or replacing that last entry is caught before it ships, rather
 than silently making every existing installation `conflicted` again.
+Three rules stay with the maintainer, because no offline test can check
+them: released entries are not re-verified against their tags or
+packages, a second pending entry is not detected, and a pending label
+that is never relabelled to the shipped version is not detected. None of
+them can cause a write (nothing is written without `--force`); each can
+make `matchedVersion` name the wrong version.
 
 ## `drift`
 

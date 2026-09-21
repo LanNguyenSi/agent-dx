@@ -16,56 +16,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   verdict, a common outcome for a literal replacement of a
   type-narrowing condition.
 
-- The skill digest ledger's maintenance convention is now stated
-  explicitly (README's ledger section and `readSkillLedger`'s docblock,
-  `src/init/ledger.ts`): a change to `assets/skill/SKILL.md` appends a
-  pending entry for the version being prepared in the SAME change, and
-  replaces (never joins) that pending entry if the asset changes again
-  before release; a released entry is immutable. `readSkillLedgerSafe`
-  is new: `init` now loads the ledger through it instead of the strict
-  `readSkillLedger`, so a missing, unparsable, or malformed ledger (or a
-  malformed individual entry) degrades the affected target to
-  `conflicted` and records a cause on `InitResult.warnings`, instead of
-  crashing `init`; the release-time completeness test still uses the
-  strict reader. That completeness test (`test/skill-ledger.test.ts`) now
-  also asserts the current asset's digest is the ledger's LAST entry
-  (previously "present anywhere"), that versions are strictly ascending
-  with differing adjacent digests, and that the last entry's version is
-  at least `package.json`'s version. The ledger gains the 0.1.0 entry
-  (no `agent-primitives/v0.1.0` tag exists; digest verified from the
-  published npm tarball, `npm pack agent-primitives@0.1.0`), closing the
-  oldest-install coverage gap. `--force`'s CLI help text now names both
-  `conflicted` and `outdated`; `findLedgerMatch`'s first-match (oldest
-  release wins) semantics are documented. Added a test for the `EEXIST`
-  race branch's `outdated` classification (a ledger-matching file planted
-  between the pre-write lstat and the `O_EXCL` open), previously
-  untested. Anchored by an adversarial review of the initial `outdated`
-  feature below, which reproduced its claims but found the completeness
-  test fired at commit time against a release-time-only maintenance
-  procedure, a runtime crash on a broken ledger, the missing 0.1.0
-  coverage, and the untested race branch.
-
 - `init` gains an additive target status, `outdated`: a target whose
-  existing bytes are byte-identical to an earlier released copy of
-  `assets/skill/SKILL.md`, per a new checked-in digest ledger
-  (`assets/skill-ledger.json`, one `{ version, sha256 }` entry per
-  `agent-primitives/v*` tag that shipped a change to the asset), is now
-  distinguished from `conflicted` (bytes matching no known release, e.g. a
-  local edit); `InitTargetResult` gains an optional `matchedVersion` field
-  naming the matched release, present only on an `outdated` target.
-  `init` still writes nothing to either status without `--force`
-  (report-only was chosen over an automatic upgrade so the no-write-
-  without-`--force` rule stays exception-free); the existing three
-  statuses, their exit codes, and the other init safety properties
-  (symlink refusal, containment checks, no TOCTOU digest gap) are
-  unchanged. A checked-in test fails whenever the ledger is missing the
-  current asset's digest, so a release that changes the asset without
-  appending an entry is caught before it ships. Anchored by a real case
-  observed in a consuming workspace after the 0.7.0 release: `init`
+  existing bytes are byte-identical to an earlier copy of
+  `assets/skill/SKILL.md` recorded in a new checked-in digest ledger
+  (`assets/skill-ledger.json`: one `{ version, sha256 }` entry per
+  published release, 0.1.0 included, its digest taken from the published
+  package because that release has no tag, plus at most one trailing
+  pending entry for the version being prepared) is now distinguished
+  from `conflicted` (bytes matching no ledger entry, e.g. a local edit).
+  `InitTargetResult` gains an optional `matchedVersion` naming the
+  matched ledger version, present only on an `outdated` target; the
+  lookup is first-match. `init` still writes nothing to either status
+  without `--force` (report-only was chosen over an automatic upgrade so
+  that rule keeps no exception), and `--force`'s help text names both
+  statuses. The existing three statuses, their exit codes, and the other
+  init safety properties (symlink refusal, containment checks, the
+  re-validation on the `EEXIST` race branch, now covered by its own
+  `outdated` test) are unchanged. `init` never fails because of the
+  ledger: a missing, unreadable, unparsable or malformed ledger, or a
+  malformed entry, degrades the affected target to `conflicted` and
+  names the cause in `warnings`, which the text format now prints for
+  `init` as it does for the other commands. Ledger maintenance is a
+  convention with mechanical support: a change that edits the asset
+  appends the pending entry in the same change and replaces it if the
+  asset changes again before the release, released entries are
+  immutable, and the release relabels the pending entry to the shipped
+  version; tests pin the current asset's digest as the ledger's LAST
+  entry, strictly ascending versions with differing adjacent digests,
+  and a last version of at least `package.json`'s. Anchored by a real
+  case observed in a consuming workspace after the 0.7.0 release: `init`
   reported `conflicted` for a target that was in fact byte-identical to
-  the 0.4.0 asset, two releases behind, with no way to tell that apart
-  from a local edit short of a manual byte comparison against every
-  release tag.
+  the 0.4.0 asset, with no way to tell that apart from a local edit
+  short of a manual byte comparison against every release tag.
 
 ## [0.7.0] - 2026-09-20
 

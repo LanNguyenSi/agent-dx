@@ -100,9 +100,7 @@ export type {
   InitResult,
   InitTargetResult,
   InitTargetStatus,
-  SkillLedgerEntry,
 } from "./init/index.js";
-export { readSkillLedger } from "./init/ledger.js";
 export { drift } from "./drift/index.js";
 export type {
   DriftCounts,

@@ -1629,11 +1629,16 @@ function renderInitText(result: InitResult): string {
   for (const target of result.targets) {
     const suffix =
       target.status === "outdated" && target.matchedVersion
-        ? ` (matches released ${target.matchedVersion})`
+        ? ` (matches ledger version ${target.matchedVersion})`
         : "";
     lines.push(
       `  [${target.status}] ${target.harness}: ${target.path}${suffix}`,
     );
+  }
+  if (result.warnings.length > 0) {
+    lines.push("");
+    lines.push("warnings:");
+    for (const warning of result.warnings) lines.push(`  - ${warning}`);
   }
   lines.push("");
   return lines.join("\n");
@@ -1679,7 +1684,7 @@ program
           status: "usage_error",
           durationMs: Date.now() - start,
           cwd: global.cwd,
-          warnings: [],
+          warnings: err.warnings,
           logs: [],
           extra: {
             reason: err.reason,

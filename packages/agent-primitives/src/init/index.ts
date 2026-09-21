@@ -51,8 +51,9 @@ export interface InitTargetResult {
   harness: Harness;
   path: string;
   status: InitTargetStatus;
-  /** Present only when `status` is `"outdated"`: the released version
-   * (from the digest ledger) whose packaged asset is byte-identical to
+  /** Present only when `status` is `"outdated"`: the ledger version (a
+   * released one, or the pending one being prepared) whose asset is
+   * byte-identical to
    * what is currently installed at this target, so a caller can decide
    * whether `--force` is safe without comparing bytes by hand. */
   matchedVersion?: string;
@@ -131,6 +132,10 @@ export type InitFsErrorReason =
  * only place that can attach that history. */
 export class InitFsUsageError extends UsageError {
   public targets: InitTargetResult[] = [];
+  /** Warnings the run had already collected when it failed (today: a
+   * degraded skill digest ledger), so the usage-error envelope keeps
+   * them. */
+  public warnings: string[] = [];
 
   constructor(
     message: string,
@@ -637,6 +642,7 @@ export function init(options: InitOptions = {}): InitResult {
     } catch (err) {
       if (err instanceof InitFsUsageError) {
         err.targets = targets.slice();
+        err.warnings = warnings.slice();
       }
       throw err;
     }
