@@ -9,6 +9,7 @@ import {
 } from "../src/index.js";
 import type { InitFsErrorReason as InitFsErrorReasonFromIndex } from "../src/index.js";
 import { UsageError } from "../src/envelope.js";
+import { sha256Hex, type SkillLedgerEntry } from "../src/init/ledger.js";
 
 // Permission bits are meaningless to root (bypasses them entirely), so the
 // EACCES case below only discriminates as a non-root user.
@@ -82,6 +83,78 @@ describe("init", () => {
       "SKILL.md",
     );
     expect(fs.readFileSync(filePath, "utf8")).toBe(CONTENT_A);
+  });
+
+  describe("outdated: a known earlier release vs. an unknown edit", () => {
+    const CONTENT_OLD = "# skill, released version 1.0.0\n";
+    const CONTENT_NEW = "# skill, released version 2.0.0 (current)\n";
+    const LEDGER: SkillLedgerEntry[] = [
+      { version: "1.0.0", sha256: sha256Hex(CONTENT_OLD) },
+      { version: "2.0.0", sha256: sha256Hex(CONTENT_NEW) },
+    ];
+
+    function targetPath(dir: string): string {
+      return path.join(
+        dir,
+        ".claude",
+        "skills",
+        "agent-primitives",
+        "SKILL.md",
+      );
+    }
+
+    it("reports outdated, names the matched version, and leaves the file untouched", () => {
+      const dir = makeTmpDir();
+      const filePath = targetPath(dir);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, CONTENT_OLD);
+
+      const result = init({
+        targetDir: dir,
+        content: CONTENT_NEW,
+        ledger: LEDGER,
+      });
+      expect(result.status).toBe("outdated");
+      expect(result.targets[0]?.status).toBe("outdated");
+      expect(result.targets[0]?.matchedVersion).toBe("1.0.0");
+      expect(fs.readFileSync(filePath, "utf8")).toBe(CONTENT_OLD);
+    });
+
+    it("reports conflicted, not outdated, when the existing bytes match no ledger entry", () => {
+      const dir = makeTmpDir();
+      const filePath = targetPath(dir);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, "# a local edit, not any released version\n");
+
+      const result = init({
+        targetDir: dir,
+        content: CONTENT_NEW,
+        ledger: LEDGER,
+      });
+      expect(result.status).toBe("conflicted");
+      expect(result.targets[0]?.status).toBe("conflicted");
+      expect(result.targets[0]?.matchedVersion).toBeUndefined();
+      expect(fs.readFileSync(filePath, "utf8")).toBe(
+        "# a local edit, not any released version\n",
+      );
+    });
+
+    it("--force overwrites an outdated target and reports written", () => {
+      const dir = makeTmpDir();
+      const filePath = targetPath(dir);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, CONTENT_OLD);
+
+      const result = init({
+        targetDir: dir,
+        content: CONTENT_NEW,
+        ledger: LEDGER,
+        force: true,
+      });
+      expect(result.status).toBe("written");
+      expect(result.targets[0]?.status).toBe("written");
+      expect(fs.readFileSync(filePath, "utf8")).toBe(CONTENT_NEW);
+    });
   });
 
   it("overwrites and reports written when --force resolves a conflict", () => {

@@ -1627,7 +1627,13 @@ function renderInitText(result: InitResult): string {
   lines.push("");
   lines.push("targets:");
   for (const target of result.targets) {
-    lines.push(`  [${target.status}] ${target.harness}: ${target.path}`);
+    const suffix =
+      target.status === "outdated" && target.matchedVersion
+        ? ` (matches released ${target.matchedVersion})`
+        : "";
+    lines.push(
+      `  [${target.status}] ${target.harness}: ${target.path}${suffix}`,
+    );
   }
   lines.push("");
   return lines.join("\n");

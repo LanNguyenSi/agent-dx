@@ -1,0 +1,29 @@
+{
+  "asset": "assets/skill/SKILL.md",
+  "digests": [
+    {
+      "version": "0.2.0",
+      "sha256": "ec701a00c43a1a9ed784a0471e9d5aba0e969bcb2e00dd7f81f756b27b4e2e89"
+    },
+    {
+      "version": "0.3.0",
+      "sha256": "28b67d4f52c4843f1e2ad2d3823bf2d139074cb40cc94e60b3a96164545219dc"
+    },
+    {
+      "version": "0.4.0",
+      "sha256": "91767cef0672f13b5f0ebfacf23c542620d1f491b625c70710dbb5bb9397b8ce"
+    },
+    {
+      "version": "0.5.0",
+      "sha256": "f497089ec183162e7d43daa99520c14793c1abf79d710a8c371e5bec00e7b7a3"
+    },
+    {
+      "version": "0.6.0",
+      "sha256": "cd5497069c3c9ecd83f07a3034468e468c4a926f183bd8db3eeaf02a8be20cdb"
+    },
+    {
+      "version": "0.7.0",
+      "sha256": "24720b542479b20347da567c495d6f9a02a0083e313813382b959b5d0f5105fa"
+    }
+  ]
+}

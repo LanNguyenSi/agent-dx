@@ -32,6 +32,13 @@ const STATUS_CLASS: Record<string, StatusClass> = {
   fail: "finding",
   survived: "finding",
   conflicted: "finding",
+  // `init`'s additive target status: bytes match a released, older copy
+  // of the packaged asset (per the digest ledger) rather than an unknown
+  // edit. Same class and exit code as `conflicted` (still nothing
+  // written by default), distinguished only in the JSON `status`/
+  // `targets[].status` fields so a caller can tell the two apart and
+  // decide `--force` is safe without comparing bytes by hand.
+  outdated: "finding",
   // cannot-conclude class -> exit 2
   usage_error: "cannot-conclude",
   inconclusive: "cannot-conclude",

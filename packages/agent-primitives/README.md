@@ -2693,16 +2693,37 @@ agent-primitives init -H all --force
   to the process cwd). Any missing directory on the way to the target
   (`-t` itself included, and the harness's own skill subdirectory on a
   first run) is created rather than treated as an error.
-- `--force`: overwrite a conflicting existing file instead of reporting
-  it as `conflicted`.
+- `--force`: overwrite a conflicting or outdated existing file instead of
+  reporting it as `conflicted`/`outdated`.
 
 Semantics mirror a standard kit installer's write-if-new-or-unedited
 convention: a target that does not exist yet, or exists with
 byte-identical content, is written (or reported `unchanged`) with no
-further action, exit `0`. A target that exists with different content
-is reported `conflicted`, exit `1`, and left untouched, unless `--force`
-is given, in which case it is overwritten and reported `written`, exit
-`0`. Every requested harness's target is validated against
+further action, exit `0`. A target that exists with different content is
+reported `conflicted`, exit `1`, and left untouched, unless `--force` is
+given, in which case it is overwritten and reported `written`, exit `0`.
+
+A target whose differing bytes are byte-identical to an *earlier*
+released copy of the skill asset, per the checked-in digest ledger
+(`assets/skill-ledger.json`, see below), is reported `outdated` instead
+of `conflicted`, also exit `1`, and also left untouched by default: the
+distinction is informational only, telling a caller "this is a known
+release you simply haven't upgraded to yet, not a local edit" without
+changing what gets written. Report-only was chosen over an automatic
+upgrade so `init`'s write behavior stays a single rule with no exception:
+nothing is ever written to an existing, differing target without
+`--force`, known-safe or not. `--force` overwrites an `outdated` target
+exactly like a `conflicted` one and reports it `written`; the two are
+never distinguished once `--force` authorizes the overwrite.
+`InitTargetResult` carries `matchedVersion` (the released version the
+digest matched) only when `status` is `outdated`, so a caller can decide
+`--force` is safe without comparing bytes by hand. `InitTargetStatus` is
+additive: `outdated` sits alongside the original three, none of which
+changed meaning or exit code, and the aggregate `status` (see "Output
+beside the envelope" below) treats it as one notch less severe than
+`conflicted` and one more severe than `written`.
+
+Every requested harness's target is validated against
 `--target-dir` before anything is written: containment, a symlink, a
 directory or another entry that is not a regular file already sitting
 at the target file path, and, under `--force`, write access to a target
@@ -2753,13 +2774,38 @@ replacement of a differing regular file. The platform check is scoped to
 `init` and runs when `init` is called, so `probe`, `verify`, and `doctor` stay
 usable on such a platform.
 
-Output beside the envelope: `status` (`written`, `unchanged`, or
-`conflicted`, the worst outcome across every requested harness) and
-`targets: [{ harness, path, status }]`, one entry per requested harness.
-A usage-error envelope from a filesystem condition at the target also
-carries `targets`, naming whatever harness or harnesses were already
-installed before the error (empty when the error was caught by
-validation before any write).
+Output beside the envelope: `status` (the worst outcome across every
+requested harness, most to least severe: `conflicted`, `outdated`,
+`written`, `unchanged`) and `targets: [{ harness, path, status,
+matchedVersion? }]`, one entry per requested harness (`matchedVersion`
+present only when that target's own `status` is `outdated`). `conflicted`
+and `outdated` both map to the envelope's `finding` class (exit `1`);
+`written` and `unchanged` map to `ok` (exit `0`), unchanged from before
+`outdated` existed. A usage-error envelope from a filesystem condition at
+the target also carries `targets`, naming whatever harness or harnesses
+were already installed before the error (empty when the error was caught
+by validation before any write).
+
+### The skill digest ledger
+
+`assets/skill-ledger.json` is a checked-in list of `{ version, sha256 }`
+entries, one per `agent-primitives/v<version>` tag that shipped a change
+to `assets/skill/SKILL.md`, each `sha256` the SHA-256 hex digest of that
+tag's copy of the file. `init` reads it to tell a byte-identical copy of
+an earlier release (`outdated`) apart from bytes that match no release at
+all (`conflicted`, e.g. a local edit). It carries no other purpose and is
+never fetched or written at `init` time: `init` performs no network
+access.
+
+Maintaining the ledger is a release-time, not a build-time, step: whenever
+a release changes `assets/skill/SKILL.md`, the release procedure appends
+one `{ version, sha256 }` entry for the new tag to `assets/skill-ledger.json`
+before publishing, computed with `git show
+agent-primitives/v<x>:packages/agent-primitives/assets/skill/SKILL.md |
+shasum -a 256`. A test fails whenever the digest of the asset actually in
+the tree is missing from the ledger, so a release that changes the asset
+without appending is caught before it ships rather than silently making
+every existing installation `conflicted` again.
 
 ## `drift`
 

@@ -16,6 +16,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   verdict, a common outcome for a literal replacement of a
   type-narrowing condition.
 
+- `init` gains an additive target status, `outdated`: a target whose
+  existing bytes are byte-identical to an earlier released copy of
+  `assets/skill/SKILL.md`, per a new checked-in digest ledger
+  (`assets/skill-ledger.json`, one `{ version, sha256 }` entry per
+  `agent-primitives/v*` tag that shipped a change to the asset), is now
+  distinguished from `conflicted` (bytes matching no known release, e.g. a
+  local edit); `InitTargetResult` gains an optional `matchedVersion` field
+  naming the matched release, present only on an `outdated` target.
+  `init` still writes nothing to either status without `--force`
+  (report-only was chosen over an automatic upgrade so the no-write-
+  without-`--force` rule stays exception-free); the existing three
+  statuses, their exit codes, and the other init safety properties
+  (symlink refusal, containment checks, no TOCTOU digest gap) are
+  unchanged. A checked-in test fails whenever the ledger is missing the
+  current asset's digest, so a release that changes the asset without
+  appending an entry is caught before it ships. Anchored by a real case
+  observed in a consuming workspace after the 0.7.0 release: `init`
+  reported `conflicted` for a target that was in fact byte-identical to
+  the 0.4.0 asset, two releases behind, with no way to tell that apart
+  from a local edit short of a manual byte comparison against every
+  release tag.
+
 ## [0.7.0] - 2026-09-20
 
 - `probe`'s phpunit zero-tests reading gains a dedicated, additive
