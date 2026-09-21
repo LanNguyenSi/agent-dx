@@ -1,52 +1,13 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runCli, type RunResult } from "./helpers.js";
+import { runCli, runCliWithTz, type RunResult } from "./helpers.js";
 import { createTmpGitRepo, writeDoc, type TmpGitRepo } from "./git-helpers.js";
 
 interface JsonReport {
   findings: Array<{ ruleId: string; severity: string; message: string }>;
   summary: { errors: number; warnings: number; notices: number };
-}
-
-const CLI_PATH = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "dist",
-  "cli.js",
-);
-
-/**
- * Spawns the built CLI with an explicit `TZ`, so a check's verdict can be
- * compared across two machine timezones inside one test run.
- *
- * A SUBPROCESS is the only form that actually works here: Node resolves the
- * process timezone once and caches it, so assigning `process.env.TZ` inside
- * the already-running test process leaves `Date.parse`'s local-time
- * interpretation on whatever zone the runner started in -- a test written
- * that way would pass under every `TZ` without ever exercising a second
- * one.
- */
-function runCliWithTz(args: string[], tz: string): RunResult {
-  try {
-    const stdout = execFileSync("node", [CLI_PATH, ...args], {
-      encoding: "utf8",
-      env: { ...process.env, TZ: tz },
-      timeout: 30_000,
-    });
-    return { status: 0, stdout, stderr: "" };
-  } catch (err) {
-    const e = err as { status?: number; stdout?: unknown; stderr?: unknown };
-    if (typeof e.stdout !== "string") throw err;
-    return {
-      status: e.status ?? 1,
-      stdout: e.stdout,
-      stderr: typeof e.stderr === "string" ? e.stderr : "",
-    };
-  }
 }
 
 describe("okf-kit cli staleness (sources-fresh + repo-root auto-detection)", () => {

@@ -1,7 +1,5 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadBundle } from "../src/bundle.js";
 import { runGit as realRunGit } from "../src/git.js";
@@ -15,38 +13,7 @@ import {
   writeDoc,
   type TmpGitRepo,
 } from "./git-helpers.js";
-import type { RunResult } from "./helpers.js";
-
-const CLI_PATH = path.join(
-  path.dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "dist",
-  "cli.js",
-);
-
-/**
- * Same rationale as `runCliWithTz` in test/cli-staleness.test.ts: a
- * SUBPROCESS is the only form that actually exercises a second `TZ`, since
- * Node resolves the process timezone once and caches it.
- */
-function runCliWithTz(args: string[], tz: string): RunResult {
-  try {
-    const stdout = execFileSync("node", [CLI_PATH, ...args], {
-      encoding: "utf8",
-      env: { ...process.env, TZ: tz },
-      timeout: 30_000,
-    });
-    return { status: 0, stdout, stderr: "" };
-  } catch (err) {
-    const e = err as { status?: number; stdout?: unknown; stderr?: unknown };
-    if (typeof e.stdout !== "string") throw err;
-    return {
-      status: e.status ?? 1,
-      stdout: e.stdout,
-      stderr: typeof e.stderr === "string" ? e.stderr : "",
-    };
-  }
-}
+import { runCliWithTz } from "./helpers.js";
 
 /**
  * `--dirty-as-now` (`ctx.dirtyAsNow`): a source with an uncommitted change
@@ -789,6 +756,92 @@ describe("sources-fresh: --dirty-as-now", () => {
       expect(sameInstant?.message).toBe(
         're-stamp did not move the timestamp forward: "2025-02-01T00:00:00Z" was rewritten as "2025-02-01T00:00:00.000Z" in the working tree, but both name the same instant (2025-02-01T00:00:00.000Z), so this is not a re-verification',
       );
+    });
+
+    it("with the flag: a re-stamp between a PADDED (trailing space) and an unpadded spelling of the same instant also yields the same-instant notice, identically under TZ=UTC and TZ=Asia/Tokyo", () => {
+      // Sibling of the D-009 test above, through the CLI subprocess instead
+      // of the rule directly, and with a trailing space on the newer side:
+      // without parseTimestampInstantMs's `.trim()`, `Date.parse` rejects
+      // the padded value outright, so `currentEpochMs` for the working-tree
+      // side would be `undefined` and compareRestampDirection would fall
+      // back to the raw-identity comparison, reading this pair as an
+      // ordinary (clean) re-stamp instead of the same-instant notice this
+      // test pins. Run under both TZ=UTC and TZ=Asia/Tokyo (via the CLI
+      // subprocess helper, the only form that actually exercises a second
+      // `TZ`) so a designator-based regression in the trim path cannot hide
+      // behind whichever timezone the test runner happens to start in.
+      const cliRepo = createTmpGitRepo();
+      try {
+        cliRepo.commitFile(
+          "source.ts",
+          "export const a = 1;\n",
+          "2025-01-01T00:00:00Z",
+        );
+        cliRepo.commitFile(
+          "bundle/doc.md",
+          docContent({
+            type: "concept",
+            timestamp: "2025-02-01T00:00:00Z",
+            sources: ["source.ts"],
+          }),
+          "2025-02-01T00:00:00Z",
+        );
+
+        fs.writeFileSync(
+          path.join(cliRepo.dir, "source.ts"),
+          "export const a = 2;\n",
+        );
+        // Locally rewrite the doc's stamp to a PADDED spelling (milliseconds
+        // that round to nothing, plus a trailing space after the `Z`) of the
+        // SAME instant committed at HEAD.
+        fs.writeFileSync(
+          path.join(cliRepo.dir, "bundle/doc.md"),
+          docContent({
+            type: "concept",
+            timestamp: "2025-02-01T00:00:00.000Z ",
+            sources: ["source.ts"],
+          }),
+        );
+
+        const args = [
+          "check",
+          path.join(cliRepo.dir, "bundle"),
+          "--repo-root",
+          cliRepo.dir,
+          "--dirty-as-now",
+          "--json",
+        ];
+        for (const tz of ["UTC", "Asia/Tokyo"]) {
+          const result = runCliWithTz(args, tz);
+          expect(result.status).toBe(0);
+          const parsed = JSON.parse(result.stdout) as {
+            findings: Array<{
+              ruleId: string;
+              severity: string;
+              message: string;
+            }>;
+          };
+          const stale = parsed.findings.find((f) =>
+            f.message.includes("STALE"),
+          );
+          const sameInstant = parsed.findings.find((f) =>
+            f.message.includes("did not move the timestamp forward"),
+          );
+          expect(stale).toMatchObject({
+            ruleId: "sources-fresh",
+            severity: "warning",
+          });
+          expect(sameInstant).toMatchObject({
+            ruleId: "sources-fresh",
+            severity: "notice",
+          });
+          expect(sameInstant?.message).toBe(
+            're-stamp did not move the timestamp forward: "2025-02-01T00:00:00Z" was rewritten as "2025-02-01T00:00:00.000Z " in the working tree, but both name the same instant (2025-02-01T00:00:00.000Z), so this is not a re-verification',
+          );
+        }
+      } finally {
+        cliRepo.cleanup();
+      }
     });
 
     it("with the flag: HEAD committed as a native YAML date, re-stamped locally to a LATER string with a UTC designator -> direction judged, restamped/clean (D-013, superseded by D-016 for the direction check)", () => {
