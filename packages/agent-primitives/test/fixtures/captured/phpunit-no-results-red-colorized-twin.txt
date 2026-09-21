@@ -1,0 +1,8 @@
+PHPUnit 11.5.56 by Sebastian Bergmann and contributors.
+
+Runtime:       PHP 8.3.33
+
+.F                                                                  2 / 2 (100%)
+
+Time: [elided]
+

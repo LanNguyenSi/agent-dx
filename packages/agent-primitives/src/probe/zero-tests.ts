@@ -73,7 +73,10 @@ import { combinedOutput } from "../exec.js";
  * the two apart in its own warning text (`no_tests_executed:` vs.
  * `zero_tests_ambiguous:`) before this change; `probe`'s refusal reason
  * now names the same distinction instead of overstating an ambiguous
- * result as "executed nothing".
+ * result as "executed nothing". `step.ts`'s mutant-phase classify step
+ * reads this same `ambiguous` field to make the identical choice for a
+ * mutant run's own output, past the baseline stage this docblock
+ * otherwise describes.
  */
 
 export type ZeroTestsDetectorName = "vitest" | "node_test" | "phpunit";
@@ -87,8 +90,10 @@ export interface ZeroTestsEvidence {
    * rather than `"zero"` (`false`, PHPUnit itself stated nothing ran).
    * `setup.ts`'s baseline-stage caller reads this to choose between the
    * `"zero_tests_ambiguous"` and `"no_tests_executed"` `RefusalReason`s
-   * (see this module's own docblock above); absent for the vitest and
-   * node_test branches, which have no ambiguous reading to distinguish. */
+   * (see this module's own docblock above); `step.ts`'s mutant-phase
+   * classify step reads it the same way for the mutant run's own
+   * `mutation_probe.reason`; absent for the vitest and node_test
+   * branches, which have no ambiguous reading to distinguish. */
   ambiguous?: boolean;
 }
 

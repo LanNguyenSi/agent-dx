@@ -818,7 +818,20 @@ export async function runMutantAttempt(
       testResult.stderrTail === baselineOutput.stderrTail;
     if (mutantZeroTests.detected || genericFallback) {
       status = "inconclusive";
-      reason = "no_tests_executed";
+      // `mutantZeroTests.ambiguous` is set only on the phpunit branch of
+      // `detectKnownZeroTestsEvidence`, and only `true` for
+      // `phpunitZeroTestsVerdict`'s own `"ambiguous"` reading (a missing
+      // result report, or a missing version banner deciding a
+      // version-dependent tally category) -- never for its `"zero"`
+      // reading, and never set at all for `genericFallback` or the
+      // vitest/node_test branches, so this mirrors the baseline-phase
+      // split `setup.ts` already makes on the very same field (see
+      // `RefusalReason`'s own docblock in `session.ts`): a mutant run
+      // whose phpunit output cannot be read either way is reported as
+      // unreadable, not overstated as a stated zero.
+      reason = mutantZeroTests.ambiguous
+        ? "zero_tests_ambiguous"
+        : "no_tests_executed";
       mutationProbeResult = "not_run";
       warnings.push(
         mutantZeroTests.detected
@@ -832,8 +845,9 @@ export async function runMutantAttempt(
   // of `--expect`, and possibly overridden to `inconclusive` by one of
   // the branches above) matched what `spec.expect` called for. Only
   // meaningful once a real verdict was reached: `aborted`, `timeout`,
-  // and `no_tests_executed` all leave `status` at `inconclusive`, which
-  // measured nothing to compare against an expectation.
+  // `no_tests_executed` and `zero_tests_ambiguous` all leave `status` at
+  // `inconclusive`, which measured nothing to compare against an
+  // expectation.
   const expectation: "met" | "violated" | undefined =
     status === "killed" || status === "survived"
       ? (spec.expect === "fail") === (status === "killed")
@@ -850,7 +864,9 @@ export async function runMutantAttempt(
       verified_applied_via: verifiedAppliedVia,
       result: mutationProbeResult,
       restored_verified: restoredVerified,
-      ...(reason === "no_tests_executed" ? { reason } : {}),
+      ...(reason === "no_tests_executed" || reason === "zero_tests_ambiguous"
+        ? { reason }
+        : {}),
       ...(expectation !== undefined ? { expectation } : {}),
     },
     test: testField,

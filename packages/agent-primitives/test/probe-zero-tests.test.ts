@@ -776,19 +776,19 @@ describe("probe(): mutant-side zero-tests detector (step.ts)", () => {
     ).toBe(true);
   });
 
-  it("a mutant whose own phpunit output is merely UNREADABLE (banner, no result report, the mid-suite exit()/die() shape) still reports no_tests_executed, deliberately not the dedicated zero_tests_ambiguous reason: that split exists only at the baseline phase", async () => {
+  it("a mutant whose own phpunit output is merely UNREADABLE (banner, no result report, the mid-suite exit()/die() shape) reports the dedicated zero_tests_ambiguous reason, never no_tests_executed: the mutant phase now makes the same split the baseline phase already does", async () => {
     // Same distinction the previous case pins for a genuine "zero"
     // reading (PHPUnit's own all-skipped marker), checked here for the
     // OTHER `detectKnownZeroTestsEvidence` origin: `ambiguous: true`
     // (`phpunitZeroTestsVerdict` reading `"ambiguous"`, the
     // `phpunit-exit-mid-suite.txt` shape -- banner present, no `OK (`,
     // no marker, no tally, no progress counter, no post-run `Time:`
-    // line). `setup.ts` reads that flag to pick `zero_tests_ambiguous`
-    // at the BASELINE phase; `step.ts`'s mutant-phase classify step
-    // never reads it at all and always reports the plain
-    // `"no_tests_executed"` string (see `RefusalReason`'s own docblock
-    // and the README's refusal-reason-shape table row) -- out of scope
-    // to split further here.
+    // line). `setup.ts` reads that same flag to pick `zero_tests_ambiguous`
+    // at the BASELINE phase; `step.ts`'s mutant-phase classify step now
+    // reads it too (see the README's refusal-reason-shape table row and
+    // the CHANGELOG entry closing this residual), so a mutant run whose
+    // own phpunit output cannot be read either way is reported as
+    // unreadable, not overstated as a stated zero, at both phases alike.
     const repo = makeTmpDir();
     execFileSync("git", ["init", "-q"], { cwd: repo });
     execFileSync("git", ["config", "user.email", "test@example.com"], {
@@ -818,10 +818,10 @@ describe("probe(): mutant-side zero-tests detector (step.ts)", () => {
       }),
     );
     expect(result.status).toBe("inconclusive");
-    expect(result.reason).toBe("no_tests_executed");
-    expect(result.reason).not.toBe("zero_tests_ambiguous");
+    expect(result.reason).toBe("zero_tests_ambiguous");
+    expect(result.reason).not.toBe("no_tests_executed");
     expect(result.mutation_probe?.result).toBe("not_run");
-    expect(result.mutation_probe?.reason).toBe("no_tests_executed");
+    expect(result.mutation_probe?.reason).toBe("zero_tests_ambiguous");
     expect(
       result.warnings.some((w) =>
         /the mutant run's own output shows no test was actually executed \(phpunit\)/.test(

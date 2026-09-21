@@ -1,6 +1,43 @@
 import type { Detector, DetectorInput, DetectorParseResult } from "../types.js";
 
 /**
+ * Strips PHPUnit's own `--colors=always` SGR escape sequences
+ * (`ESC [ <params> m`, e.g. `\x1b[30;42m`, `\x1b[0m`) from `output` before
+ * any of this detector's row/line patterns see it. Measured on real
+ * captures (`phpunit-pass-colorized.txt`, `phpunit-fail-colorized.txt`;
+ * see `test/fixtures/README.md`): PHPUnit colorizes the `OK (...)` line,
+ * the `FAILURES!`/`ERRORS!`/`WARNINGS!` marker, EACH comma-separated
+ * segment of the `Tests: N, Assertions: M, ...` tally line individually
+ * (its own `ESC...m` pair around every segment, not one pair around the
+ * whole line), and a non-`.` progress marker character (`F`, `E`, `W`,
+ * ...) -- never the version banner, the post-run `Time:`/`Memory:` line,
+ * a numbered entry header, or a `file:line` locator, none of which this
+ * function's callers need protected from a stray escape sequence either
+ * way. `^`/`$`-anchored patterns (`OK_LINE`, `FAILURES_MARKER`,
+ * `TALLY_LINE`, `PROGRESS_COUNTER_LINE`, ...) fail to match a colorized
+ * line unmodified -- the escape sequence sits between the anchor and the
+ * text the pattern expects there -- so every one of this file's line
+ * patterns is applied to output already passed through this function,
+ * never to a caller's raw bytes. Removing the escape sequences leaves
+ * PHPUnit's own wording (and every digit/count in it) byte-identical to
+ * the `--colors=never` shape, since PHPUnit wraps tokens in colour
+ * rather than replacing or reformatting them -- confirmed by comparing a
+ * stripped colorized capture against its `--colors=never` twin. A global
+ * match (not anchored to a line), since the tally line's per-segment
+ * escapes are not confined to the line's own start/end.
+ *
+ * Exported for `test/verify.test.ts`'s directory-derived
+ * `PROGRESS_COUNTER_LINE` positive control alone (so a captured
+ * colorized fixture's row is checked the same way production code
+ * checks it, not against a second, independently written strip
+ * function): every production caller in this file uses this same
+ * function directly.
+ */
+export function stripAnsiSgr(output: string): string {
+  return output.replace(/\x1b\[[0-9;]*m/g, "");
+}
+
+/**
  * PHPUnit 9.6's default (non-TestDox) text reporter, captured from real
  * runs (see `test/fixtures/README.md` for the exact command, tool
  * version, and PHP version used): a green run's `OK (N tests, M
@@ -953,6 +990,12 @@ export interface PhpunitZeroTestsReading {
 export function phpunitZeroTestsVerdict(
   output: string,
 ): PhpunitZeroTestsReading {
+  // Strip `--colors=always` SGR escapes first (see `stripAnsiSgr`'s own
+  // docblock): every pattern this function consults below is anchored
+  // and fails to match a colorized line otherwise. A no-op for
+  // `--colors=never`/uncoloured output (nothing to strip), so this is
+  // safe for every caller regardless of how the output was captured.
+  output = stripAnsiSgr(output);
   if (NO_TESTS_EXECUTED.test(output)) {
     return {
       verdict: "zero",
@@ -1138,7 +1181,10 @@ export const phpunitDetector: Detector = {
    * and removing it drops that fixture to the `generic` fallback.
    */
   matches(input: DetectorInput): boolean {
-    const output = input.output;
+    // Stripped once here (see `stripAnsiSgr`'s own docblock): every
+    // check below is line-anchored and misses a `--colors=always` row
+    // otherwise, a no-op for uncoloured output.
+    const output = stripAnsiSgr(input.output);
     return (
       OK_LINE.test(output) ||
       FAILURES_MARKER.test(output) ||
@@ -1150,7 +1196,10 @@ export const phpunitDetector: Detector = {
     );
   },
   parse(input: DetectorInput): DetectorParseResult {
-    const output = input.output;
+    // Stripped once here too, same reason as `matches` above: every
+    // downstream helper (`deriveCounts`, the entry loop, the tally and
+    // deprecation scans) reads this same local `output`.
+    const output = stripAnsiSgr(input.output);
     const failures: DetectorParseResult["failures"] = [];
     // `No tests executed!` (and any other shape neither summary line
     // matched) leaves every count at 0: correct as-is, not a false

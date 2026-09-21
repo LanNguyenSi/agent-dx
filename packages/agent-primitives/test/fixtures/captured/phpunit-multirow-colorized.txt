@@ -1,0 +1,9 @@
+PHPUnit 9.6.36 by Sebastian Bergmann and contributors.
+
+..............................[36;1mS[0m.................................. 65 / 70 ( 92%)
+.....                                                             70 / 70 (100%)
+
+Time: [elided]
+
+[30;43mOK, but incomplete, skipped, or risky tests![0m
+[30;43mTests: 70[0m[30;43m, Assertions: 69[0m[30;43m, Skipped: 1[0m[30;43m.[0m
