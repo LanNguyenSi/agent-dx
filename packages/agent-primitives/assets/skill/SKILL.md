@@ -68,7 +68,21 @@ failed with it applied, `survived` when it passed), independent of
 `"met"`/`"violated"` value, which says whether that outcome matched it
 -- `result` alone does not.
 `inconclusive` is not a result: fix whatever it names (a failing baseline,
-a mutant that did not apply, a stale marker) and probe again. Pass `--pre`
+a mutant that did not apply, a stale marker) and probe again.
+Two traps recur: (a) a test-name filter (`-t` or a runner-specific
+equivalent) is interpreted by the RUNNER, not matched literally; for
+vitest and jest it is a regular expression, so a name containing a
+metacharacter (`{`, `}`, `(`, `)`, `.`, `+`, `*`, `?`) can silently match
+the wrong tests or none, while the run still exits `0`. Run the whole
+test file instead of filtering by name, and check the baseline's own
+summary, not just its exit code, to confirm the tests you expect
+actually ran. (b) a mutant must still compile under the project's build
+when `--pre` rebuilds: a build failure there is `pre_failed`, an
+inconclusive result, never a verdict, and a condition the compiler uses
+for type narrowing is better mutated in its substance (invert a
+comparison, force a predicate's own result) than replaced outright by a
+bare literal (`if (false) {`), which can leave the branch referencing a
+type the compiler can no longer prove. Pass `--pre`
 whenever the test under probe executes built output rather than the
 source file being mutated, or a real mutant reads back as `survived`
 because it never reached the running code. The same `survived` reading

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- README's `probe` section and `assets/skill/SKILL.md` document two
+  probe traps observed while probing another package: a `-t` test-name
+  filter is a runner-interpreted pattern (a regular expression for
+  vitest/jest) that can silently match zero tests, and a mutant that
+  breaks the project's own build under `--pre` reports `pre_failed`
+  rather than a verdict, a common outcome for a naive literal
+  replacement of a type-narrowing condition.
+
 ## [0.7.0] - 2026-09-20
 
 - `probe`'s phpunit zero-tests reading gains a dedicated, additive

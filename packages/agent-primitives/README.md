@@ -464,6 +464,25 @@ agent-primitives verify -c build,typecheck,lint,test
 agent-primitives doctor
 ```
 
+#### Two probe traps
+
+- A test-name filter (`-t`, `--test-name-pattern`, or a runner-specific
+  equivalent) is interpreted by the RUNNER, not matched as a literal
+  string; for vitest and jest it is a regular expression, so a name
+  containing a metacharacter (`{`, `}`, `(`, `)`, `.`, `+`, `*`, `?`) can
+  match the wrong tests, or none at all, while the run still exits `0`.
+  Prefer running the whole test file over filtering by name, and check
+  the baseline's own summary, not just its exit code, to confirm the
+  tests you meant to exercise actually executed.
+- A mutant must still compile under the project's own build whenever
+  `--pre` rebuilds before the test runs: a build failure there is
+  reported `pre_failed`, an inconclusive result, never a verdict. A
+  condition the compiler uses for type narrowing is a common trigger,
+  since replacing it outright with a bare literal (`if (false) {`) can
+  leave the branch referencing a type the compiler can no longer prove.
+  Mutate the condition's substance instead (invert a comparison, force a
+  predicate call's own result), so the mutant still type-checks.
+
 The third form needs neither `--file` nor `-n`. `--file` is derived from
 the single path the patch touches (resolved against the containment
 root) when the patch touches exactly one. `-n` is not derived at all:
