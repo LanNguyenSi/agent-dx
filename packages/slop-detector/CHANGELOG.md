@@ -48,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   given, rewrite it relative to the config file's directory instead (see
   the README's "Path pattern anchor" section for the one-line migration
   note).
+
 ### Added
 
 - New public API surface: `CheckOptions.configAnchor`, the optional
