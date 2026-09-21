@@ -1,6 +1,6 @@
 # Bundle log
 
-- 2026-09-21T05:00:12.000Z (agent-dx tracker task
+- 2026-09-21T05:21:32.000Z (agent-dx tracker task
   7caab6b3-9949-41db-98c5-58985f7dae7f, pandora run
   2026-09-21-open-pool-batch59): the citation-sibling-drift guard's
   allowlist geometry re-check (`siblingGuardEntryGeometryViolation`) read
@@ -21,9 +21,9 @@
   sibling-drift guard's own resolver (`anchorScopeResolve`) can name, not
   just this file, with a non-empty sanity pin and a synthetic negative
   control (the log guard's wider target set never passes through the
-  helper). All edits are
-  either same-line-count in-place replacements or pure appends after the
-  file's previous final line, so no existing citation moved. Three
+  helper). All edits are either same-line-count in-place replacements
+  or pure appends after the file's previous final line, so no existing
+  citation moved. Three
   mutation probes (`agent-primitives probe --plan`, `--pre 'npm run
   build'`, whole-file `npx vitest run test/docs-consistency.test.ts`,
   3/3 tests, 3/3 baseline, 3/3 killed, 3/3 expectation met, 3/3 restored
@@ -36,12 +36,14 @@
   `test/docs-consistency.test.ts:5979#"const startIdx = content.lastIndexOf(startMarker);"`
   (mutated to force `startIdx = -1`) killed by the existing span-exclusion
   fixtures. PKG-VERIFY(orchestrator-workflow) green, including the new
-  pins (build, typecheck, typecheck-test, format, test). The four docs whose `sources` list
-  `test/docs-consistency.test.ts` (`model-preselection.md`,
+  pins (build, typecheck, typecheck-test, format, test). The four docs
+  whose `sources` list `test/docs-consistency.test.ts`
+  (`model-preselection.md`,
   `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`,
   `subagent-contracts-superset.md`) were re-verified against source commits
-  d24f0452 and 2354958f and re-stamped after the later one; none of their own citations into this
-  file fall inside the changed or appended lines. Five of this log's own
+  d24f0452 and 2354958f and re-stamped after the later one; none of
+  their own citations into this file fall inside the changed or appended
+  lines. Five of this log's own
   existing citations into the test file were spot-read against the
   current file and still resolve:
   `test/docs-consistency.test.ts:4896#"both copies' mutation_probes block has exactly the eleven sub-fields in a fixed order"`,
