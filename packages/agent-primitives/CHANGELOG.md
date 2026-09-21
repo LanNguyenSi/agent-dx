@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-21
+
 - `phpunitDetector` strips PHPUnit's own `--colors=always` SGR escape
   sequences before any row/line pattern runs against the output (two
   residuals left by agent-dx PR #319, tracker ad5b34d7): real captures
