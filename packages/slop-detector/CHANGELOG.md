@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `check <file> [<file>...] --config slop.config.yml` now anchors every
+  scan-root-relative pattern family (`review.allowPaths`,
+  `placement.instructionGlobs`, `entrypointGlobs`) to the `--config`
+  file's own directory instead of each named file's own parent directory,
+  so an explicit file argument is judged exactly as `check .` judges it
+  under the same config (see the README's "Path pattern anchor" section).
+  Previously a root-anchored `review.allowPaths`/`placement.instructionGlobs`
+  entry silently stopped matching once a file was passed as an explicit
+  CLI argument instead of being reached by walking a directory target, an
+  effect measured against three findings across two files in an
+  orchestrator run (`2026-09-20-open-pool-batch58`) that `check .` did not
+  reproduce. `--stdin-path` scanning is unaffected: it keeps its prior
+  nearest-`package.json` fallback, since it carries no `--config`-anchored
+  case.
+
 ## [0.4.0] - 2026-09-20
 
 - `workflow-slop/run-expression` now also scans one `with:` input a data

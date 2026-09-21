@@ -117,6 +117,20 @@ async function runCheck(
   const config = opts.config ? loadConfig(opts.config) : defaultConfig();
   const packFilter = opts.pack && opts.pack.length > 0 ? opts.pack : undefined;
   const packs = packsByFilter(packFilter);
+  // Anchor for every scan-root-relative config pattern family
+  // (`review.allowPaths`, `placement.instructionGlobs`, `entrypointGlobs`,
+  // and any future one): the directory holding `--config`, per the
+  // README's "Path pattern anchor" section. Passing it explicitly to every
+  // `checkPath` call below (file or directory alike) is what makes
+  // `check <file> [<file>...] --config slop.config.yml` judge a file the
+  // same way `check . --config slop.config.yml` does, instead of each
+  // explicit file argument anchoring to its own parent directory. Without
+  // `--config` there's no config file directory to anchor to, so
+  // resolution is left at its prior default (nearest package.json, or the
+  // target's own directory).
+  const configAnchor = opts.config
+    ? path.dirname(path.resolve(opts.config))
+    : undefined;
 
   // "-" (or no positional at all) means stdin. Anything else is a real
   // path list; mixing a real path with `--stdin-path` is a usage error
@@ -179,7 +193,14 @@ async function runCheck(
       const resolved = path.resolve(rawPath);
       if (seen.has(resolved)) continue;
       seen.add(resolved);
-      perPath.push(checkPath(rawPath, { packs, config, packFilter }));
+      perPath.push(
+        checkPath(rawPath, {
+          packs,
+          config,
+          packFilter,
+          scanRoot: configAnchor,
+        }),
+      );
     }
     const violations = perPath.flatMap((s) => s.violations);
     const filesScanned = perPath.reduce((sum, s) => sum + s.filesScanned, 0);
