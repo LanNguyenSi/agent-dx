@@ -11809,7 +11809,7 @@ describe("citation-sibling-drift guard: the allowlist array's own span is exclud
     expect(stripped.split("\n")[declLine]).toBe("");
   });
 
-  // Batch59 T-003 (fix-round-3 residual, agent-dx 5801bc29 review round 2):
+  // agent-dx 7caab6b3 (fix-round-3 residual, agent-dx 5801bc29 review round 2):
   // before this round, `siblingGuardEntryGeometryViolation` read a target
   // file's raw content while rules (b)/(c) (`findWrongSiblingAnchors`,
   // `findDistantDuplicateAnchors`) always read it through this same
@@ -11852,10 +11852,10 @@ describe("citation-sibling-drift guard: the allowlist array's own span is exclud
         "rules (b)/(c)) ever see it -- a raw read would still find the " +
         "anchor text there and silently pass a geometry that no longer " +
         "matches what the guard itself scans",
-    ).toMatch(/no longer carries/);
+    ).toMatch(/no longer carries the citation's own anchor text/);
   });
 
-  // Batch59 T-003, item 2: pins the terminator precondition the function's
+  // agent-dx 7caab6b3, item 2: pins the terminator precondition the function's
   // own header comment documents ("the array's terminator is the first
   // `];` line after it (else: scans more)") -- an early `\n];\n` line
   // inside the intended array degrades to UNDER-stripping (the real tail
@@ -11884,27 +11884,59 @@ describe("citation-sibling-drift guard: the allowlist array's own span is exclud
     expect(stripped).toContain("quoted anchor text after the early terminator");
   });
 
-  // Batch59 T-003, item 3: `stripSelfAllowlistSpan` runs over every target
-  // file the guard reads (it has no way to know which file it is looking
-  // at), but the exactly-twice marker pin above only ever checks THIS
-  // file. Extends the pin bundle-wide: no other real target file the
-  // bundle can resolve a citation into carries the literal declaration
-  // marker, so the span-stripping this helper performs never blanks part
-  // of an unrelated file's real content.
+  // agent-dx 7caab6b3, item 3: `stripSelfAllowlistSpan` runs over every target
+  // file the sibling-drift guard reads (it has no way to know which file it
+  // is looking at), but the exactly-twice marker pin above only ever checks
+  // THIS file. Extends the pin to every target file that guard's own
+  // resolver (`anchorScopeResolve`) can name: none of them carries the
+  // literal declaration marker, so the span-stripping never blanks part of
+  // an unrelated file's real content. The log guard's wider target set
+  // never passes through this helper and is out of scope here.
+  function markerCarriers(
+    realPaths: Iterable<string>,
+    selfReal: string,
+    read: (real: string) => string,
+  ): string[] {
+    const carriers: string[] = [];
+    for (const real of realPaths) {
+      if (real === selfReal) continue;
+      if (read(real).includes(MARKER)) carriers.push(real);
+    }
+    return carriers;
+  }
+
   it("no other target file of the bundle contains the declaration marker", () => {
     const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
     const selfPath = resolvePath(fileURLToPath(import.meta.url));
     const realPaths = new Set(Object.values(anchorScopeResolve()));
-    for (const real of realPaths) {
-      const abs = resolvePath(repoRoot, real);
-      if (abs === selfPath) continue;
-      const content = readFileSync(abs, "utf8");
-      expect(
-        content.includes(MARKER),
-        `${real} unexpectedly contains the declaration marker -- ` +
-          "stripSelfAllowlistSpan runs over every target file the guard " +
-          "reads and would blank part of this file's own real content too",
-      ).toBe(false);
-    }
+    const selfReal = [...realPaths].find(
+      (real) => resolvePath(repoRoot, real) === selfPath,
+    );
+    // Sanity: the enumeration is not vacuous and does include this file,
+    // the one target that legitimately carries the marker.
+    expect(realPaths.size).toBeGreaterThan(20);
+    expect(selfReal, "this test file is not among the targets").toBeDefined();
+    expect(
+      markerCarriers(realPaths, selfReal as string, (real) =>
+        readFileSync(resolvePath(repoRoot, real), "utf8"),
+      ),
+      "stripSelfAllowlistSpan runs over every target file the guard reads " +
+        "and would blank part of these files' own real content too",
+    ).toEqual([]);
+  });
+
+  it("the marker check reports a carrier and exempts only the test file itself (negative control)", () => {
+    const contents: Record<string, string> = {
+      "pkg/self.test.ts": `before\n${MARKER}: X[] = [\n];\nafter`,
+      "pkg/clean.ts": "no marker here",
+      "pkg/carrier.ts": `text ${MARKER} text`,
+    };
+    expect(
+      markerCarriers(
+        Object.keys(contents),
+        "pkg/self.test.ts",
+        (real) => contents[real],
+      ),
+    ).toEqual(["pkg/carrier.ts"]);
   });
 });
