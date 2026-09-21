@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.5.0] - 2026-09-21
 
+### Changed (breaking)
+
 - `check <file> [<file>...] --config slop.config.yml` now anchors every
   path pattern family (`review.allowPaths`, `placement.instructionGlobs`,
   `entrypointGlobs`, `ignorePaths`, `treatAsProse`, `treatAsCode`) to the
@@ -46,6 +48,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   given, rewrite it relative to the config file's directory instead (see
   the README's "Path pattern anchor" section for the one-line migration
   note).
+### Added
+
 - New public API surface: `CheckOptions.configAnchor`, the optional
   config-pattern anchor that `ignorePaths`, `treatAsProse` and
   `treatAsCode` are matched against, alongside the existing `scanRoot`
