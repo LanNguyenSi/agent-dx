@@ -699,6 +699,9 @@ describe("each entry point's scanRoot and configAnchor option is load-bearing", 
       "  prose-slop: true",
       "treatAsCode:",
       "  - packages/sub/input.md",
+      // What an EMPTY filename would relativize to if it were anchored:
+      // `path.resolve("")` is the (mocked) cwd itself.
+      "  - packages/sub",
     ]);
     // The placeholder `input.md` resolved against a cwd inside the config
     // directory would LOOK contained. It names no file the caller chose,
