@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-21
+
 - `check <file> [<file>...] --config slop.config.yml` now anchors every
   path pattern family (`review.allowPaths`, `placement.instructionGlobs`,
   `entrypointGlobs`, `ignorePaths`, `treatAsProse`, `treatAsCode`) to the
