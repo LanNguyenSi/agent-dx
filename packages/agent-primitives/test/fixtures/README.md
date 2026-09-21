@@ -586,9 +586,9 @@ captured as files:
 
 Same throwaway-composer-project-under-scratch-directory, same
 disposable-Docker-container (`composer:2`, `php:8.3-cli`), same trimming
-convention as the captures above. The first four (`Calc`/`CalcFail`,
+convention as the captures above. The first six (`Calc`/`CalcFail`,
 `MultiRowTest`): PHP 8.3.33 (cli), PHPUnit 9.6.36. Command for those
-four: `docker run --rm -v <scratch>:/app -w /app composer:2 composer
+six: `docker run --rm -v <scratch>:/app -w /app composer:2 composer
 require --dev phpunit/phpunit:^9.6` (exit `0`), followed by `docker run
 --rm -v <scratch>:/app -w /app php:8.3-cli vendor/bin/phpunit
 --colors=<always|never> tests/<File>.php` against a two-test `Calc`
@@ -623,8 +623,8 @@ require --dev phpunit/phpunit:^11.5`.
   marker mid first row. Exit `0` (a skip is not a failure).
   `phpunit-multirow-colorized-twin.txt` is the same session's
   `--colors=never` run, same relationship as above. Added because every
-  round-1 colorized capture above was a two-test, single-row run, which
-  left "at least one passing multi-row run" unpinned.
+  other colorized capture above is a two-test, single-row run, which
+  left the multi-row progress wrap unpinned.
 - `phpunit-no-results-red-colorized.txt`: `--colors=always --no-results`
   against a `RedTwoTest` class (PHPUnit 11.5.56, `testPasses` passing,
   `testFails` asserting `5 === 2 + 2` and failing), same disposable-

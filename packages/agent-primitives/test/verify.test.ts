@@ -4549,14 +4549,20 @@ describe("phpunitDetector: --colors=always output (real capture, escape-strippin
     // capture): a 70-case `@dataProvider` run whose progress wraps onto
     // a second row (`65 / 70 ( 92%)` then `70 / 70 (100%)`) and whose
     // case 30 calls `markTestSkipped`, coloured `ESC[36;1mSESC[0m` mid
-    // first row -- the reviewer's own measured shape (all four round-1
-    // captures were single-row, two-test runs, which the closed-alphabet
-    // `PROGRESS_COUNTER_LINE` positive control below also exercises for
-    // BOTH counter rows). Exit `0` either way (a skip is not a failure).
+    // first row. Every other colorized capture here is a single-row,
+    // two-test run, so without this pair the multi-row wrap was unpinned
+    // (the closed-alphabet `PROGRESS_COUNTER_LINE` positive control below
+    // exercises BOTH counter rows). Exit `0` either way (a skip is not a
+    // failure).
     const colored = readCaptured("phpunit-multirow-colorized");
     const twin = readCaptured("phpunit-multirow-colorized-twin");
     expect(stripAnsiSgr(colored)).toBe(twin);
-    expect(colored).toMatch(/65 \/ 70 \(\s*92%\)/);
+    // Structure first, so a re-capture wrapped at another width still
+    // passes: more than one counter row, the last one complete.
+    const counterRows = [
+      ...twin.matchAll(new RegExp(PROGRESS_COUNTER_LINE.source, "gm")),
+    ];
+    expect(counterRows.length).toBeGreaterThan(1);
     expect(colored).toMatch(/70 \/ 70 \(100%\)/);
     expect(
       phpunitDetector.matches({ output: colored, command: "", exitCode: 0 }),
@@ -4828,6 +4834,11 @@ describe("phpunitDetector: a suppressed result report is not a missing one (PHPU
     });
     expect(parsedColored.summary.attempted).toBe(2);
     expect(parsedColored.summary.attempted).toBe(parsedTwin.summary.attempted);
+    // The one coloured shape whose zero-tests verdict turns on the counter
+    // row alone: unstripped it would read differently from its twin.
+    expect(phpunitZeroTestsVerdict(colored)).toEqual(
+      phpunitZeroTestsVerdict(twin),
+    );
   });
 
   it("(vii) `--no-results --no-progress` and `--no-output` print NOTHING at all, so the output is not phpunit's to read (generic selection, no phpunit claim)", async () => {
