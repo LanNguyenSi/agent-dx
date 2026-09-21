@@ -66,7 +66,11 @@ export function runCliWithTz(args: string[], tz: string): RunResult {
  * for the zone it actually resolved (test/helpers.test.ts); every
  * cross-timezone test in this suite only compares two runs with each
  * other, so without that control a helper that stopped forwarding `TZ`
- * would leave them all green.
+ * would leave them all green. The control pins the forwarding HERE, at
+ * the spawn site; `runCliWithTz`'s one-expression delegation is not
+ * separately pinned (no CLI output is zone-sensitive by design), so a
+ * rewrite of `runCliWithTz` that spawns on its own must re-point the
+ * control.
  */
 export function runNodeWithTz(nodeArgs: string[], tz: string): RunResult {
   try {
