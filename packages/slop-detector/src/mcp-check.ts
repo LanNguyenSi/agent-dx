@@ -7,6 +7,7 @@ import fs from "node:fs";
 import { checkPath, checkText, summarize } from "./engine.js";
 import { defaultConfig, loadConfig } from "./config.js";
 import { packsByFilter } from "./packs/registry.js";
+import { resolvePatternAnchor } from "./util/pattern-anchor.js";
 import type { CheckSummary, Severity, Violation } from "./types.js";
 
 export interface SlopCheckInput {
@@ -39,10 +40,33 @@ export function runSlopCheck(input: SlopCheckInput): CheckSummary {
   const packs = packsByFilter(packFilter);
 
   if (input.text !== undefined) {
-    const violations = checkText(input.text, input.filename ?? "input.md", {
+    // Same anchor rule the CLI's stdin branch applies (see
+    // util/pattern-anchor.ts:resolvePatternAnchor): decided against the
+    // assumed `filename`, so a `configPath` given alongside `text` agrees
+    // with the CLI/`path` branch for the same filename and config.
+    // Only a caller-supplied `filename` is a target: the `input.md`
+    // placeholder names no file, and resolving it against the server's
+    // cwd would let the launch directory decide the verdict.
+    // `named` is a usable caller-given name: a non-empty string. Anything
+    // else (absent, null from a JS caller, an empty string) names nothing
+    // and is never anchored. `named` gates the anchor ONLY: the reported
+    // filename keeps its pre-anchor derivation, so an empty string is still
+    // passed through as given.
+    const named =
+      typeof input.filename === "string" && input.filename.length > 0
+        ? input.filename
+        : undefined;
+    const filename = input.filename ?? "input.md";
+    const textAnchor =
+      named !== undefined
+        ? resolvePatternAnchor(input.configPath, named)
+        : undefined;
+    const violations = checkText(input.text, filename, {
       packs,
       config,
       packFilter,
+      scanRoot: textAnchor,
+      configAnchor: textAnchor,
     });
     return summarize(violations, 1);
   }
@@ -50,7 +74,14 @@ export function runSlopCheck(input: SlopCheckInput): CheckSummary {
     if (!fs.existsSync(input.path)) {
       throw new Error(`slop_check: path does not exist: ${input.path}`);
     }
-    return checkPath(input.path, { packs, config, packFilter });
+    const pathAnchor = resolvePatternAnchor(input.configPath, input.path);
+    return checkPath(input.path, {
+      packs,
+      config,
+      packFilter,
+      scanRoot: pathAnchor,
+      configAnchor: pathAnchor,
+    });
   }
   throw new Error("slop_check: one of `text` or `path` is required");
 }

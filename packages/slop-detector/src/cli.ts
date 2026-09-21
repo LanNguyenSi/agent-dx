@@ -7,6 +7,7 @@ import { checkPath, checkText, summarize } from "./engine.js";
 import { defaultConfig, loadConfig } from "./config.js";
 import { allPacks, packsByFilter } from "./packs/registry.js";
 import { renderText } from "./cli-render.js";
+import { resolvePatternAnchor } from "./util/pattern-anchor.js";
 import {
   noStdinContentError,
   readStdin,
@@ -154,10 +155,24 @@ async function runCheck(
         "stdin ended without any non-whitespace content",
       );
     }
+    // Same anchor rule as the file/directory branch below, decided
+    // against `--stdin-path` instead of a real on-disk target: this is
+    // what makes `--stdin-path packages/sub/README.md --config
+    // slop.config.yml` agree with `check packages/sub/README.md --config
+    // slop.config.yml` (see the README's "Path pattern anchor" section).
+    // Only a NAMED `--stdin-path` is a target: the default placeholder
+    // names no file, and resolving it against the process cwd would let
+    // the working directory decide the verdict.
+    const stdinAnchor =
+      stdinPathExplicit && opts.stdinPath.length > 0
+        ? resolvePatternAnchor(opts.config, opts.stdinPath)
+        : undefined;
     const violations = checkText(text, opts.stdinPath, {
       packs,
       config,
       packFilter,
+      scanRoot: stdinAnchor,
+      configAnchor: stdinAnchor,
     });
     summary = summarize(violations, 1);
   } else {
@@ -179,7 +194,23 @@ async function runCheck(
       const resolved = path.resolve(rawPath);
       if (seen.has(resolved)) continue;
       seen.add(resolved);
-      perPath.push(checkPath(rawPath, { packs, config, packFilter }));
+      // Decided per target, not once for the whole invocation: an
+      // out-of-tree or absolute `--config` (e.g. a central config outside
+      // the scanned directory) must leave `check .`'s own verdict alone,
+      // so the anchor only applies when THIS target actually lies inside
+      // the config file's directory (see
+      // util/pattern-anchor.ts:resolvePatternAnchor and the README's
+      // "Path pattern anchor" section).
+      const anchor = resolvePatternAnchor(opts.config, rawPath);
+      perPath.push(
+        checkPath(rawPath, {
+          packs,
+          config,
+          packFilter,
+          scanRoot: anchor,
+          configAnchor: anchor,
+        }),
+      );
     }
     const violations = perPath.flatMap((s) => s.violations);
     const filesScanned = perPath.reduce((sum, s) => sum + s.filesScanned, 0);

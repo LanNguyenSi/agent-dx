@@ -59,12 +59,25 @@ const BINARY_EXT = new Set([
 export function detectFileKind(
   filePath: string,
   config?: ResolvedConfig,
+  /**
+   * The config-pattern anchor from `resolvePatternAnchor` (present only
+   * when a `--config`/`configPath` was given AND `filePath` lies inside
+   * that config's directory). When given, `treatAsProse`/`treatAsCode`
+   * match `filePath` relativized to it, so an absolute or
+   * differently-spelled file argument is judged the same way a directory
+   * scan of the same target judges it. When omitted, both families match
+   * `filePath` exactly as spelled, the pre-existing behavior, preserved
+   * so a caller with no config anchor (or one outside its directory) sees
+   * no change.
+   */
+  anchor?: string,
 ): FileKind {
-  const normalized = filePath.split(path.sep).join("/");
-  if (config?.treatAsProse.some((p) => matchesGlob(normalized, p)))
+  const anchored = anchor
+    ? path.relative(anchor, path.resolve(filePath)).split(path.sep).join("/")
+    : filePath.split(path.sep).join("/");
+  if (config?.treatAsProse.some((p) => matchesGlob(anchored, p)))
     return "prose";
-  if (config?.treatAsCode.some((p) => matchesGlob(normalized, p)))
-    return "code";
+  if (config?.treatAsCode.some((p) => matchesGlob(anchored, p))) return "code";
 
   const ext = path.extname(filePath).toLowerCase();
   if (BINARY_EXT.has(ext)) return "binary";
