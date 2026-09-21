@@ -2822,10 +2822,11 @@ version actually shipped before tagging, since a shipped label is what
 again before that version ships, the pending entry is replaced in place
 rather than joined by a second one: at most the ledger's last entry may
 ever be rewritten, and only while its own version is still unreleased.
-The last entry is pending exactly when its version is above
-`package.json`'s; a release that does not touch the asset leaves the
-ledger untouched, so the last entry may legitimately sit below
-`package.json`'s version. A pending entry is never what `init` reports:
+Outside a release commit, the last entry is pending exactly when its
+version is above `package.json`'s (inside the release commit the
+relabel step is what settles it); a release that does not touch the
+asset leaves the ledger untouched, so the last entry may legitimately
+sit below `package.json`'s version. A pending entry is never what `init` reports:
 its digest is the current asset's, and the ledger is only consulted for
 a target that differs from the current asset. An entry for a version
 that has already shipped is immutable; if it is ever recomputed, that is

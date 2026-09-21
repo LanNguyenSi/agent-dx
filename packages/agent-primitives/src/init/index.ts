@@ -51,9 +51,9 @@ export interface InitTargetResult {
   harness: Harness;
   path: string;
   status: InitTargetStatus;
-  /** Present only when `status` is `"outdated"`: the ledger version (a
-   * released one, or the pending one being prepared) whose asset is
-   * byte-identical to
+  /** Present only when `status` is `"outdated"`: the ledger version
+   * (never the pending one, whose digest is the current asset's) whose
+   * asset is byte-identical to
    * what is currently installed at this target, so a caller can decide
    * whether `--force` is safe without comparing bytes by hand. */
   matchedVersion?: string;
