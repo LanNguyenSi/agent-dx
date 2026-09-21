@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { spawnSync } from "node:child_process";
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -63,6 +63,56 @@ function runCliJson(args: string[], input = ""): CheckSummary {
     throw new Error(`CLI exited ${status} unexpectedly: ${stderr}`);
   }
   return JSON.parse(stdout) as CheckSummary;
+}
+
+// The everyday-shape tests further down spawn the BUILT CLI instead, and
+// point the child process's cwd AT the fixture root, because that is the
+// only way to run the invocation people actually type: every path
+// (`--config slop.config.yml`, the target, a `--stdin-path` value) spelled
+// relative to the config file's own directory. `--import tsx` can't be
+// used there, since it resolves the loader against the process cwd and a
+// fixture directory has no `node_modules` (see the file header).
+const distCli = path.join(packageRoot, "dist", "cli.js");
+
+// Reading built output means `npm run build` has to precede `npm test` for
+// those tests to see current source: CI's package job builds before it
+// tests, and a mutation probe must pass `--pre 'npm run build'` so the
+// mutant reaches `dist/`. A missing `dist/cli.js` is built once here
+// rather than skipped, so the tests can never quietly go inert.
+function ensureBuilt(): void {
+  if (fs.existsSync(distCli)) return;
+  const built = spawnSync("npm", ["run", "build"], {
+    cwd: packageRoot,
+    encoding: "utf8",
+  });
+  if (built.status !== 0) {
+    throw new Error(
+      `npm run build failed (${built.status}): ${built.stderr ?? ""}`,
+    );
+  }
+}
+
+function runBuiltCliJson(
+  args: string[],
+  cwd: string,
+  input = "",
+): CheckSummary {
+  try {
+    const stdout = execFileSync(
+      process.execPath,
+      [distCli, ...args, "--format", "json"],
+      { cwd, encoding: "utf8", input },
+    );
+    return JSON.parse(stdout) as CheckSummary;
+  } catch (err) {
+    // Exit 1 just means "block findings present"; the JSON summary is
+    // still on stdout and is exactly what these tests assert on.
+    const e = err as { status?: number; stdout?: string; stderr?: string };
+    if (e.status === 1 && e.stdout) {
+      return JSON.parse(e.stdout) as CheckSummary;
+    }
+    throw new Error(`built CLI exited ${e.status}: ${e.stderr ?? ""}`);
+  }
 }
 
 let tmp: string;
@@ -209,6 +259,15 @@ describe("config path patterns anchor to the --config file's directory", () => {
   });
 
   it("--stdin-path keeps scanning a commit message and a relative filename after the anchor change", () => {
+    // Scope: this only guards that stdin is still READ and scanned at all
+    // (the criterion's "--stdin-path keeps working" clause). Both
+    // assertions below are `filesScanned === 1`, which does not
+    // discriminate the anchor: they hold with the anchor, without it, and
+    // with any wrong anchor, since a stdin scan always reports exactly one
+    // file. The anchor's effect on the stdin branch is covered by
+    // "--stdin-path agrees with the equivalent file argument" and
+    // "treatAsProse ... --stdin-path" below, and its everyday
+    // repo-relative shape by the built-CLI test at the end of this file.
     const configPath = path.join(tmp, "slop.config.yml");
     fs.writeFileSync(
       configPath,
@@ -516,5 +575,334 @@ describe("the anchor only applies when the target lies inside the --config file'
     expect(viaDir.warnCount).toBe(1);
     expect(viaFile.warnCount).toBe(1);
     expect(viaFile.violations).toEqual(viaDir.violations);
+  });
+});
+
+// Round 3: one test per ENTRY-POINT OPTION SITE, not per behaviour. Four
+// entry points each pass two anchor options into the engine (`scanRoot`,
+// which drives `review.allowPaths`/`placement.instructionGlobs`/
+// `entrypointGlobs`, and `configAnchor`, which drives `ignorePaths`/
+// `treatAsProse`/`treatAsCode`), so there are eight sites at which a
+// dropped option would silently restore the old verdict for one family on
+// one entry point. The tests above cover four of them; the four here cover
+// the rest, each chosen so that neutralising exactly that one option at
+// exactly that one site flips the assertion.
+describe("each entry point's scanRoot and configAnchor option is load-bearing", () => {
+  const reviewText = "F1 landed in review round 2.\n";
+  const emDashText = "This has an em dash — right here.\n";
+
+  function writeConfig(body: string[]): string {
+    const configPath = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(configPath, body.join("\n") + "\n");
+    return configPath;
+  }
+
+  it("MCP text: scanRoot carries the anchor, so a root-anchored review.allowPaths entry excuses the assumed filename", () => {
+    const configPath = writeConfig([
+      "packs:",
+      "  review-slop: true",
+      "review:",
+      "  allowPaths:",
+      "    - packages/sub/README.md",
+    ]);
+    const filename = path.join(tmp, "packages", "sub", "README.md");
+    fs.writeFileSync(filename, reviewText);
+
+    const viaText = runSlopCheck({
+      text: reviewText,
+      filename,
+      packs: ["review-slop"],
+      configPath,
+    });
+    const viaPath = runSlopCheck({
+      path: filename,
+      packs: ["review-slop"],
+      configPath,
+    });
+
+    // Without the anchor on `scanRoot`, `checkText` falls back to the
+    // nearest package.json above `filename` -- the NESTED
+    // `packages/sub/package.json` from `beforeEach` -- which relativizes
+    // the file to bare `README.md`, so the root-anchored pattern stops
+    // matching and both findings in `reviewText` come back.
+    expect(viaText.blockCount).toBe(0);
+    expect(viaText.violations).toEqual(viaPath.violations);
+  });
+
+  it("MCP text: configAnchor carries the anchor, so a root-anchored treatAsProse entry reclassifies the assumed filename", () => {
+    const configPath = writeConfig([
+      "packs:",
+      "  prose-slop: true",
+      "treatAsProse:",
+      "  - packages/sub/notes.ts",
+    ]);
+    const filename = path.join(tmp, "packages", "sub", "notes.ts");
+    fs.writeFileSync(filename, emDashText);
+
+    const viaText = runSlopCheck({
+      text: emDashText,
+      filename,
+      packs: ["prose-slop"],
+      configPath,
+    });
+    const viaPath = runSlopCheck({
+      path: filename,
+      packs: ["prose-slop"],
+      configPath,
+    });
+
+    // `.ts` is "code" by default, and `prose-slop` never applies to code:
+    // the em-dash violation exists only because `treatAsProse` matched,
+    // and it only matches while `configAnchor` relativizes the ABSOLUTE
+    // `filename` to `packages/sub/notes.ts`. Dropped, the pattern is
+    // compared against the absolute path, matches nothing, and the count
+    // falls to 0.
+    expect(viaText.warnCount).toBe(1);
+    expect(viaText.violations.map((v) => v.ruleId)).toEqual([
+      "prose-slop/em-dash",
+    ]);
+    expect(viaText.violations).toEqual(viaPath.violations);
+  });
+
+  it("MCP path: configAnchor carries the anchor, so a root-anchored ignorePaths entry prunes the named file exactly as the directory scan does", () => {
+    const configPath = writeConfig([
+      "packs:",
+      "  review-slop: true",
+      "ignorePaths:",
+      "  - packages/sub/ignored/**",
+    ]);
+    fs.mkdirSync(path.join(tmp, "packages", "sub", "ignored"), {
+      recursive: true,
+    });
+    const target = path.join(tmp, "packages", "sub", "ignored", "bad.md");
+    fs.writeFileSync(target, reviewText);
+
+    const viaPath = runSlopCheck({
+      path: target,
+      packs: ["review-slop"],
+      configPath,
+    });
+    const viaDir = runSlopCheck({
+      path: tmp,
+      packs: ["review-slop"],
+      configPath,
+    });
+
+    // Pruned before it is read, so the file is never counted and its two
+    // findings never appear -- the same outcome walking the whole fixture
+    // produces. Dropping `configAnchor` compares `ignorePaths` against the
+    // absolute path, which the pattern cannot match, so the file is
+    // scanned and both findings come back.
+    expect(viaPath.filesScanned).toBe(0);
+    expect(viaPath.blockCount).toBe(0);
+    expect(viaDir.violations.some((v) => v.path === target)).toBe(false);
+  });
+
+  it("CLI stdin: configAnchor carries the anchor, so a root-anchored treatAsProse entry reclassifies the --stdin-path value", () => {
+    const configPath = writeConfig([
+      "packs:",
+      "  prose-slop: true",
+      "treatAsProse:",
+      "  - packages/sub/notes.ts",
+    ]);
+    const target = path.join(tmp, "packages", "sub", "notes.ts");
+    fs.writeFileSync(target, emDashText);
+
+    const viaStdin = runCliJson(
+      [
+        "check",
+        "--stdin-path",
+        target,
+        "--pack",
+        "prose-slop",
+        "--config",
+        configPath,
+      ],
+      emDashText,
+    );
+    const viaFile = runCliJson([
+      "check",
+      target,
+      "--pack",
+      "prose-slop",
+      "--config",
+      configPath,
+    ]);
+
+    // Same reasoning as the MCP `text` case above: the violation exists
+    // only while the ABSOLUTE `--stdin-path` value is relativized to
+    // `packages/sub/notes.ts` before `treatAsProse` is matched.
+    expect(viaStdin.warnCount).toBe(1);
+    expect(viaStdin.violations.map((v) => v.ruleId)).toEqual([
+      "prose-slop/em-dash",
+    ]);
+    expect(viaFile.warnCount).toBe(1);
+  });
+});
+
+// The two shapes above are spelled with absolute paths, because the tsx
+// runner pins the child's cwd to the package root. These two spawn the
+// built CLI from the fixture root instead, so every path is spelled the
+// way a person or a pre-commit hook spells it: relative to the config
+// file's own directory.
+describe("everyday invocation shapes, spelled relative to the config file's directory", () => {
+  beforeAll(() => {
+    ensureBuilt();
+  }, 180_000);
+
+  it("--stdin-path with a repo-relative path into a nested package is judged by the root-anchored allowPaths entry", () => {
+    const configPath = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      configPath,
+      [
+        "packs:",
+        "  review-slop: true",
+        "review:",
+        "  allowPaths:",
+        "    - packages/sub/README.md",
+      ].join("\n") + "\n",
+    );
+    const content = "F1 landed in review round 2.\n";
+    fs.writeFileSync(path.join(tmp, "packages", "sub", "README.md"), content);
+
+    const viaStdin = runBuiltCliJson(
+      [
+        "check",
+        "--stdin-path",
+        "packages/sub/README.md",
+        "--pack",
+        "review-slop",
+        "--config",
+        "slop.config.yml",
+      ],
+      tmp,
+      content,
+    );
+
+    // This is the invocation the pre-commit habit uses (pipe the file or
+    // the commit message in, name the path relative to the repo root,
+    // point at the repo-root config). Without the anchor it resolves
+    // against the NESTED `packages/sub/package.json`, the root-anchored
+    // allowlist entry stops matching, and the run blocks on two findings
+    // the repo-root directory scan does not report.
+    expect(viaStdin.filesScanned).toBe(1);
+    expect(viaStdin.blockCount).toBe(0);
+  });
+
+  it("a nested directory target resolves patterns against the config file's directory, not against itself", () => {
+    const rootAnchored = path.join(tmp, "root-anchored.yml");
+    fs.writeFileSync(
+      rootAnchored,
+      [
+        "packs:",
+        "  review-slop: true",
+        "review:",
+        "  allowPaths:",
+        "    - packages/sub/README.md",
+      ].join("\n") + "\n",
+    );
+    // The same allowlist entry written relative to the SCANNED
+    // subdirectory: the spelling that worked before `--config` moved the
+    // anchor, and the one the README's migration note tells you to
+    // rewrite.
+    const subAnchored = path.join(tmp, "sub-anchored.yml");
+    fs.writeFileSync(
+      subAnchored,
+      [
+        "packs:",
+        "  review-slop: true",
+        "review:",
+        "  allowPaths:",
+        "    - README.md",
+      ].join("\n") + "\n",
+    );
+    fs.writeFileSync(
+      path.join(tmp, "packages", "sub", "README.md"),
+      "F1 landed in review round 2.\n",
+    );
+
+    const viaRootAnchored = runBuiltCliJson(
+      [
+        "check",
+        "packages/sub",
+        "--pack",
+        "review-slop",
+        "--config",
+        "root-anchored.yml",
+      ],
+      tmp,
+    );
+    const viaSubAnchored = runBuiltCliJson(
+      [
+        "check",
+        "packages/sub",
+        "--pack",
+        "review-slop",
+        "--config",
+        "sub-anchored.yml",
+      ],
+      tmp,
+    );
+
+    expect(viaRootAnchored.blockCount).toBe(0);
+    // The documented breaking direction, asserted rather than only
+    // described: a pattern written relative to the scanned subdirectory
+    // no longer matches once `--config` is given.
+    expect(viaSubAnchored.blockCount).toBe(2);
+  });
+});
+
+// The corpus pre-pass classifies every file a second time, independently
+// of the per-file classification the rules see, to decide what enters the
+// corpus at all. That call needs the same anchor: a file wrongly left in
+// the corpus keeps counting as a consumer of someone else's export, which
+// changes a verdict on a DIFFERENT file than the misclassified one.
+describe("corpus mode applies the anchor when it classifies files", () => {
+  it("a root-anchored treatAsProse entry keeps the named file out of the corpus, so the export it referenced is reported as unused", () => {
+    const configPath = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      configPath,
+      [
+        "packs:",
+        "  code-slop: true",
+        "corpus: true",
+        "rules:",
+        "  code-slop/unused-export:",
+        "    enabled: true",
+        "treatAsProse:",
+        "  - packages/sub/src/consumer.ts",
+      ].join("\n") + "\n",
+    );
+    const indexPath = path.join(tmp, "packages", "sub", "src", "index.ts");
+    fs.writeFileSync(
+      indexPath,
+      "export function helperA() {\n  return 1;\n}\n",
+    );
+    fs.writeFileSync(
+      path.join(tmp, "packages", "sub", "src", "consumer.ts"),
+      'import { helperA } from "./index.js";\n' +
+        "export function useIt() {\n  return helperA();\n}\n",
+    );
+
+    const summary = runCliJson([
+      "check",
+      tmp,
+      "--pack",
+      "code-slop",
+      "--config",
+      configPath,
+    ]);
+    const unused = summary.violations.filter(
+      (v) => v.ruleId === "code-slop/unused-export",
+    );
+
+    // `consumer.ts` is the only file referencing `helperA`. Classified as
+    // prose by the root-anchored pattern it never enters the corpus, so
+    // `helperA` has no consumer and `index.ts` is flagged. Leave the
+    // anchor off that classification and `consumer.ts` stays code, keeps
+    // its reference, and this violation disappears entirely (its own
+    // `useIt` export is not reported either, since the rules still see
+    // `consumer.ts` as prose).
+    expect(unused.map((v) => v.path)).toEqual([indexPath]);
   });
 });
