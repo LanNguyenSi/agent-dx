@@ -102,11 +102,13 @@ none while the run still exits `0`. Escape the metacharacters, or name
 the whole test file in the command instead of filtering by name. A
 filter that selects nothing is refused at the baseline as
 `no_tests_executed` for the runners the zero-tests detectors recognize
-(vitest, node's `--test`, PHPUnit); for any other runner, jest included,
-`--require-baseline-evidence` is the opt-in safety net. A filter that
-selects the wrong tests is detected by neither, so read the baseline's
-own output (the log at `baseline.logPath`) to confirm the tests you
-expect actually ran. (b) A mutant must still compile under the project's
+(vitest, node's `--test`, PHPUnit); `--require-baseline-evidence` is the
+opt-in safety net for any runner, including jest and every other one the
+detectors do not recognize. Nothing detects a filter that selects the
+wrong tests on its own: pin what you expect in
+`--require-baseline-evidence` (a pattern naming the count you expect, for
+example `Tests +4 passed`), or read the baseline's own output (the log at
+`baseline.logPath`) to confirm the tests you expect actually ran. (b) A mutant must still compile under the project's
 build when `--pre` builds: a build failure there is `pre_failed`, an
 inconclusive result, never a verdict. A condition the compiler uses for
 type narrowing is better mutated in its substance (change a comparison

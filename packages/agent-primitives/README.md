@@ -2294,11 +2294,13 @@ whether `--file` was given explicitly or is derived from the patch.
   `no_tests_executed` for the runners the zero-tests detectors recognize
   (vitest, node's `--test`, PHPUnit; see the paragraph on a baseline
   that exits `0` but never actually ran a test, above), and
-  `--require-baseline-evidence` is the opt-in safety net for any other
-  runner, jest included. A filter that selects the WRONG tests is
-  detected by neither, so read the baseline's own output (the log at
-  `baseline.logPath`) to confirm that the tests you meant to exercise
-  actually executed.
+  `--require-baseline-evidence` is the opt-in safety net for any runner,
+  including jest and every other one the detectors do not recognize.
+  Nothing detects a filter that selects the WRONG tests on its own: pin
+  what you expect in `--require-baseline-evidence` (a pattern naming the
+  count you expect, for example `Tests +4 passed`), or read the
+  baseline's own output (the log at `baseline.logPath`) to confirm that
+  the tests you meant to exercise actually executed.
 - A mutant must still compile under the project's own build whenever
   `--pre` builds before the test runs: a build failure there is
   `status: "inconclusive"`, `reason: "pre_failed"`, never a verdict. A
