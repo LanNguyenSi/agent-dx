@@ -762,11 +762,13 @@ describe("sources-fresh: --dirty-as-now", () => {
       // Sibling of the D-009 test above, through the CLI subprocess instead
       // of the rule directly, and with a trailing space on the newer side:
       // without parseTimestampInstantMs's `.trim()`, `Date.parse` rejects
-      // the padded value outright, so `currentEpochMs` for the working-tree
-      // side would be `undefined` and compareRestampDirection would fall
-      // back to the raw-identity comparison, reading this pair as an
-      // ordinary (clean) re-stamp instead of the same-instant notice this
-      // test pins. Run under both TZ=UTC and TZ=Asia/Tokyo (via the CLI
+      // the padded value outright, so the doc's own timestamp is not
+      // parseable at all and sources-fresh degrades to `staleness not
+      // assessable: no valid timestamp`, losing both the STALE warning and
+      // the same-instant notice this test pins. The `.000` is load-bearing
+      // too: a trailing space alone leaves the trimmed timestamp identity
+      // equal to HEAD's, which is no re-stamp and yields no notice. Run
+      // under both TZ=UTC and TZ=Asia/Tokyo (via the CLI
       // subprocess helper, the only form that actually exercises a second
       // `TZ`) so a designator-based regression in the trim path cannot hide
       // behind whichever timezone the test runner happens to start in.

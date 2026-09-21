@@ -13,7 +13,7 @@ const PKG_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
-const CLI = path.join(PKG_ROOT, "dist", "cli.js");
+export const CLI_PATH = path.join(PKG_ROOT, "dist", "cli.js");
 
 export function loadFixture(name: string, repoRoot?: string): BundleContext {
   return loadBundle(path.join(FIXTURES_DIR, name), repoRoot);
@@ -31,7 +31,7 @@ export interface RunResult {
 // cwd-relative behavior (e.g. `init`'s default `docs/okf` target).
 export function runCli(args: string[], cwd: string = PKG_ROOT): RunResult {
   try {
-    const stdout = execFileSync("node", [CLI, ...args], {
+    const stdout = execFileSync("node", [CLI_PATH, ...args], {
       encoding: "utf8",
       cwd,
     });
@@ -52,10 +52,25 @@ export function runCli(args: string[], cwd: string = PKG_ROOT): RunResult {
  * interpretation on whatever zone the runner started in -- a test written
  * that way would pass under every `TZ` without ever exercising a second
  * one.
+ *
+ * Unlike `runCli` it passes no `cwd`: the child inherits the caller's, so
+ * give it absolute paths.
  */
 export function runCliWithTz(args: string[], tz: string): RunResult {
+  return runNodeWithTz([CLI_PATH, ...args], tz);
+}
+
+/**
+ * The single spawn site behind `runCliWithTz`: runs `node <nodeArgs>` with
+ * `TZ` set for the child. Exported so a positive control can ask a child
+ * for the zone it actually resolved (test/helpers.test.ts); every
+ * cross-timezone test in this suite only compares two runs with each
+ * other, so without that control a helper that stopped forwarding `TZ`
+ * would leave them all green.
+ */
+export function runNodeWithTz(nodeArgs: string[], tz: string): RunResult {
   try {
-    const stdout = execFileSync("node", [CLI, ...args], {
+    const stdout = execFileSync("node", nodeArgs, {
       encoding: "utf8",
       env: { ...process.env, TZ: tz },
       timeout: 30_000,
@@ -71,5 +86,3 @@ export function runCliWithTz(args: string[], tz: string): RunResult {
     };
   }
 }
-
-export const CLI_PATH = CLI;
