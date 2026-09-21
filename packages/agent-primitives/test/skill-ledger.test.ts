@@ -68,26 +68,4 @@ describe("skill digest ledger", () => {
       ).not.toBe(prev.sha256);
     }
   });
-
-  it("the last entry's version is package.json's current version or the pending version being prepared; every other entry is lower", () => {
-    const ledger = readSkillLedger();
-    expect(ledger.length).toBeGreaterThan(0);
-    const pkg = JSON.parse(
-      fs.readFileSync(path.join(packageRoot, "package.json"), "utf8"),
-    ) as { version: string };
-    const last = ledger[ledger.length - 1]!;
-    expect(
-      compareSemver(last.version, pkg.version),
-      `the ledger's last entry (${last.version}) must be package.json's ` +
-        `current version (${pkg.version}) or the pending version being ` +
-        "prepared for the next release, never lower",
-    ).toBeGreaterThanOrEqual(0);
-    for (const entry of ledger.slice(0, -1)) {
-      expect(
-        compareSemver(entry.version, last.version),
-        `ledger entry ${entry.version} is not lower than the last entry ` +
-          `(${last.version})`,
-      ).toBeLessThan(0);
-    }
-  });
 });

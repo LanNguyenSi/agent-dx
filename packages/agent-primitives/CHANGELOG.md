@@ -42,8 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   asset changes again before the release, released entries are
   immutable, and the release relabels the pending entry to the shipped
   version; tests pin the current asset's digest as the ledger's LAST
-  entry, strictly ascending versions with differing adjacent digests,
-  and a last version of at least `package.json`'s. Anchored by a real
+  entry and strictly ascending versions with differing adjacent
+  digests; a release that does not touch the asset leaves the ledger
+  untouched. Anchored by a real
   case observed in a consuming workspace after the 0.7.0 release: `init`
   reported `conflicted` for a target that was in fact byte-identical to
   the 0.4.0 asset, with no way to tell that apart from a local edit

@@ -2818,10 +2818,16 @@ semver class of the `[Unreleased]` changes), digest computed with
 `shasum -a 256` against the edited asset. If the release is then cut at a
 different version, the release commit relabels the pending entry to the
 version actually shipped before tagging, since a shipped label is what
-`matchedVersion` reports to consumers from then on. If the asset changes again before that version
-ships, the pending entry is replaced in place rather than joined by a
-second one: at most the ledger's last entry may ever be rewritten, and
-only while its own version is still unreleased. An entry for a version
+`matchedVersion` reports to consumers from then on. If the asset changes
+again before that version ships, the pending entry is replaced in place
+rather than joined by a second one: at most the ledger's last entry may
+ever be rewritten, and only while its own version is still unreleased.
+The last entry is pending exactly when its version is above
+`package.json`'s; a release that does not touch the asset leaves the
+ledger untouched, so the last entry may legitimately sit below
+`package.json`'s version. A pending entry is never what `init` reports:
+its digest is the current asset's, and the ledger is only consulted for
+a target that differs from the current asset. An entry for a version
 that has already shipped is immutable; if it is ever recomputed, that is
 done from that version's own release tag, or, for a release with no tag,
 from its published package (`npm pack <name>@<version>`, then hash the
