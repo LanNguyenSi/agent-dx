@@ -163,9 +163,10 @@ async function runCheck(
     // Only a NAMED `--stdin-path` is a target: the default placeholder
     // names no file, and resolving it against the process cwd would let
     // the working directory decide the verdict.
-    const stdinAnchor = stdinPathExplicit
-      ? resolvePatternAnchor(opts.config, opts.stdinPath)
-      : undefined;
+    const stdinAnchor =
+      stdinPathExplicit && opts.stdinPath.length > 0
+        ? resolvePatternAnchor(opts.config, opts.stdinPath)
+        : undefined;
     const violations = checkText(text, opts.stdinPath, {
       packs,
       config,

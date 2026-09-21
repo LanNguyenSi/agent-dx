@@ -47,10 +47,16 @@ export function runSlopCheck(input: SlopCheckInput): CheckSummary {
     // Only a caller-supplied `filename` is a target: the `input.md`
     // placeholder names no file, and resolving it against the server's
     // cwd would let the launch directory decide the verdict.
-    const filename = input.filename ?? "input.md";
+    // `named` is a usable caller-given name: a non-empty string. Anything
+    // else (absent, null from a JS caller, an empty string) names nothing.
+    const named =
+      typeof input.filename === "string" && input.filename.length > 0
+        ? input.filename
+        : undefined;
+    const filename = named ?? "input.md";
     const textAnchor =
-      input.filename !== undefined
-        ? resolvePatternAnchor(input.configPath, input.filename)
+      named !== undefined
+        ? resolvePatternAnchor(input.configPath, named)
         : undefined;
     const violations = checkText(input.text, filename, {
       packs,

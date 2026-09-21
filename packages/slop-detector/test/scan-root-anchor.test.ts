@@ -708,15 +708,20 @@ describe("each entry point's scanRoot and configAnchor option is load-bearing", 
       .spyOn(process, "cwd")
       .mockReturnValue(path.join(tmp, "packages", "sub"));
     try {
-      const viaText = runSlopCheck({
-        text: emDashText,
-        packs: ["prose-slop"],
-        configPath,
-      });
-      expect(viaText.warnCount).toBe(1);
-      expect(viaText.violations.map((v) => v.ruleId)).toEqual([
-        "prose-slop/em-dash",
-      ]);
+      // Absent, empty and (from a JS caller that ignores the types) null
+      // all name nothing: none may be anchored, and none may throw.
+      for (const filename of [undefined, "", null as unknown as string]) {
+        const viaText = runSlopCheck({
+          text: emDashText,
+          filename,
+          packs: ["prose-slop"],
+          configPath,
+        });
+        expect(viaText.warnCount).toBe(1);
+        expect(viaText.violations.map((v) => v.ruleId)).toEqual([
+          "prose-slop/em-dash",
+        ]);
+      }
     } finally {
       cwdSpy.mockRestore();
     }
@@ -869,6 +874,34 @@ describe("everyday invocation shapes, spelled relative to the config file's dire
     // into code and silence prose-slop: a verdict decided by the working
     // directory. With no named target the input stays prose.
     expect(viaStdin.filesScanned).toBe(1);
+    expect(viaStdin.warnCount).toBe(1);
+  });
+
+  it("an empty --stdin-path names no target either: the cwd it would resolve to is never anchored", () => {
+    fs.writeFileSync(
+      path.join(tmp, "slop.config.yml"),
+      ["packs:", "  prose-slop: true", "treatAsCode:", "  - packages/sub"].join(
+        "\n",
+      ) + "\n",
+    );
+
+    const viaStdin = runBuiltCliJson(
+      [
+        "check",
+        "--stdin-path",
+        "",
+        "--pack",
+        "prose-slop",
+        "--config",
+        "../../slop.config.yml",
+      ],
+      path.join(tmp, "packages", "sub"),
+      "An em dash \u2014 sits in this prose.\n",
+    );
+
+    // `path.resolve("")` is the process cwd. Anchored, it would relativize
+    // to `packages/sub`, match the treatAsCode entry and silence
+    // prose-slop from this one directory only.
     expect(viaStdin.warnCount).toBe(1);
   });
 
