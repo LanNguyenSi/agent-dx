@@ -8,12 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 - README's `probe` section and `assets/skill/SKILL.md` document two
-  probe traps observed while probing another package: a `-t` test-name
-  filter is a runner-interpreted pattern (a regular expression for
-  vitest/jest) that can silently match zero tests, and a mutant that
-  breaks the project's own build under `--pre` reports `pre_failed`
-  rather than a verdict, a common outcome for a naive literal
-  replacement of a type-narrowing condition.
+  probe traps observed while probing another package: a test runner's
+  own name filter written inside the `-t` test command (vitest's and
+  jest's `-t`, a regular expression) can select the wrong tests or
+  none while the run still exits `0`, and a mutant that breaks the
+  project's own build under `--pre` reports `pre_failed` rather than a
+  verdict, a common outcome for a literal replacement of a
+  type-narrowing condition.
 
 ## [0.7.0] - 2026-09-20
 
