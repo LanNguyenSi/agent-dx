@@ -45,6 +45,17 @@ export interface CheckOptions {
    * directory of the first scanned file when omitted.
    */
   scanRoot?: string;
+  /**
+   * The config-pattern anchor from `resolvePatternAnchor`
+   * (util/pattern-anchor.ts): present only when a `--config`/`configPath`
+   * was given AND the checked target lies inside that config's own
+   * directory. Unlike `scanRoot`, this has no nearest-package.json or
+   * `process.cwd()` fallback: `ignorePaths` (`shouldIgnore`) and
+   * `treatAsProse`/`treatAsCode` (`detectFileKind`) match a file's path
+   * exactly as spelled when this is omitted, which is the pre-existing
+   * behavior for the no-config, or config-outside-target-directory, case.
+   */
+  configAnchor?: string;
 }
 
 export function checkText(
@@ -66,7 +77,7 @@ function _checkTextWithCorpus(
   const file: FileTarget = {
     path: filePath,
     text,
-    kind: detectFileKind(filePath, options.config),
+    kind: detectFileKind(filePath, options.config, options.configAnchor),
   };
   if (file.kind === "binary") return [];
 
@@ -175,7 +186,7 @@ export function checkFiles(
   // exports into the corpus. `resolvedScanRoot` is still what
   // `RuleContext.scanRoot` (placement instruction globs) uses below.
   const corpus = wantCorpus
-    ? buildCorpus(files, options.config, options.scanRoot)
+    ? buildCorpus(files, options.config, options.scanRoot, options.configAnchor)
     : undefined;
 
   const violations: Violation[] = [];
@@ -207,7 +218,7 @@ export function checkFiles(
     warnings.push(
       ...corpus.unmatchedEntrypointGlobs.map(
         (glob) =>
-          `entrypointGlobs pattern "${glob}" matched no scanned files — check for a typo, or that it's relative to the scan root (or nearest package.json) rather than to something else`,
+          `entrypointGlobs pattern "${glob}" matched no scanned files — check for a typo, or that it's relative to the pattern anchor (the --config file's directory when one is given and the target is inside it, otherwise the nearest package.json), see the README's "Path pattern anchor" section`,
       ),
     );
   }
@@ -221,7 +232,7 @@ export function checkFiles(
     warnings.push(
       ...unmatched.map(
         (glob) =>
-          `placement.instructionGlobs pattern "${glob}" matched no scanned files — check for a typo, or that it's relative to the scan root (or nearest package.json) rather than to something else`,
+          `placement.instructionGlobs pattern "${glob}" matched no scanned files — check for a typo, or that it's relative to the pattern anchor (the --config file's directory when one is given and the target is inside it, otherwise the nearest package.json), see the README's "Path pattern anchor" section`,
       ),
     );
   }
@@ -246,7 +257,7 @@ export function checkPath(
   rootPath: string,
   options: CheckOptions,
 ): CheckSummary {
-  const files = walkDir(rootPath, options.config);
+  const files = walkDir(rootPath, options.config, options.configAnchor);
   return checkFiles(files, {
     ...options,
     // `resolveScanRoot` collapses `rootPath` (or an explicit
@@ -352,6 +363,7 @@ export function buildCorpus(
   files: string[],
   config: ResolvedConfig,
   scanRoot?: string,
+  configAnchor?: string,
 ): Corpus {
   const exportsByFile = new Map<string, CorpusExportEntry[]>();
   const referencingFilesByName = new Map<string, Set<string>>();
@@ -400,7 +412,7 @@ export function buildCorpus(
     const file: FileTarget = {
       path: filePath,
       text,
-      kind: detectFileKind(filePath, config),
+      kind: detectFileKind(filePath, config, configAnchor),
     };
     if (file.kind !== "code" || !isTypeScriptOrJavaScript(file)) continue;
 
@@ -708,10 +720,14 @@ export function summarize(
   };
 }
 
-function walkDir(rootPath: string, config: ResolvedConfig): string[] {
+function walkDir(
+  rootPath: string,
+  config: ResolvedConfig,
+  anchor?: string,
+): string[] {
   const stat = fs.statSync(rootPath);
   if (stat.isFile()) {
-    return shouldIgnore(rootPath, config, false) ? [] : [rootPath];
+    return shouldIgnore(rootPath, config, false, anchor) ? [] : [rootPath];
   }
   const out: string[] = [];
   const stack: string[] = [rootPath];
@@ -726,7 +742,7 @@ function walkDir(rootPath: string, config: ResolvedConfig): string[] {
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
       const isDir = entry.isDirectory();
-      if (shouldIgnore(full, config, isDir)) continue;
+      if (shouldIgnore(full, config, isDir, anchor)) continue;
       if (isDir) {
         stack.push(full);
       } else if (entry.isFile()) {
@@ -741,8 +757,20 @@ function shouldIgnore(
   filePath: string,
   config: ResolvedConfig,
   isDirectory: boolean,
+  /**
+   * The config-pattern anchor from `resolvePatternAnchor`. When given,
+   * `ignorePaths` matches `filePath` relativized to it, restoring the
+   * `check .` verdict for an explicit file/directory argument spelled
+   * differently (absolute, or relative to a different cwd). When
+   * omitted, `ignorePaths` matches `filePath` exactly as spelled, the
+   * pre-existing behavior.
+   */
+  anchor?: string,
 ): boolean {
-  const normalized = filePath.split(path.sep).join("/");
+  const spelled = filePath.split(path.sep).join("/");
+  const normalized = anchor
+    ? path.relative(anchor, path.resolve(filePath)).split(path.sep).join("/")
+    : spelled;
   const candidates = isDirectory
     ? [normalized, normalized + "/"]
     : [normalized];

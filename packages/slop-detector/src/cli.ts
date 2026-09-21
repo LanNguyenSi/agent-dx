@@ -7,6 +7,7 @@ import { checkPath, checkText, summarize } from "./engine.js";
 import { defaultConfig, loadConfig } from "./config.js";
 import { allPacks, packsByFilter } from "./packs/registry.js";
 import { renderText } from "./cli-render.js";
+import { resolvePatternAnchor } from "./util/pattern-anchor.js";
 import {
   noStdinContentError,
   readStdin,
@@ -117,20 +118,6 @@ async function runCheck(
   const config = opts.config ? loadConfig(opts.config) : defaultConfig();
   const packFilter = opts.pack && opts.pack.length > 0 ? opts.pack : undefined;
   const packs = packsByFilter(packFilter);
-  // Anchor for every scan-root-relative config pattern family
-  // (`review.allowPaths`, `placement.instructionGlobs`, `entrypointGlobs`,
-  // and any future one): the directory holding `--config`, per the
-  // README's "Path pattern anchor" section. Passing it explicitly to every
-  // `checkPath` call below (file or directory alike) is what makes
-  // `check <file> [<file>...] --config slop.config.yml` judge a file the
-  // same way `check . --config slop.config.yml` does, instead of each
-  // explicit file argument anchoring to its own parent directory. Without
-  // `--config` there's no config file directory to anchor to, so
-  // resolution is left at its prior default (nearest package.json, or the
-  // target's own directory).
-  const configAnchor = opts.config
-    ? path.dirname(path.resolve(opts.config))
-    : undefined;
 
   // "-" (or no positional at all) means stdin. Anything else is a real
   // path list; mixing a real path with `--stdin-path` is a usage error
@@ -168,10 +155,18 @@ async function runCheck(
         "stdin ended without any non-whitespace content",
       );
     }
+    // Same anchor rule as the file/directory branch below, decided
+    // against `--stdin-path` instead of a real on-disk target: this is
+    // what makes `--stdin-path packages/sub/README.md --config
+    // slop.config.yml` agree with `check packages/sub/README.md --config
+    // slop.config.yml` (see the README's "Path pattern anchor" section).
+    const stdinAnchor = resolvePatternAnchor(opts.config, opts.stdinPath);
     const violations = checkText(text, opts.stdinPath, {
       packs,
       config,
       packFilter,
+      scanRoot: stdinAnchor,
+      configAnchor: stdinAnchor,
     });
     summary = summarize(violations, 1);
   } else {
@@ -193,12 +188,21 @@ async function runCheck(
       const resolved = path.resolve(rawPath);
       if (seen.has(resolved)) continue;
       seen.add(resolved);
+      // Decided per target, not once for the whole invocation: an
+      // out-of-tree or absolute `--config` (e.g. a central config outside
+      // the scanned directory) must leave `check .`'s own verdict alone,
+      // so the anchor only applies when THIS target actually lies inside
+      // the config file's directory (see
+      // util/pattern-anchor.ts:resolvePatternAnchor and the README's
+      // "Path pattern anchor" section).
+      const anchor = resolvePatternAnchor(opts.config, rawPath);
       perPath.push(
         checkPath(rawPath, {
           packs,
           config,
           packFilter,
-          scanRoot: configAnchor,
+          scanRoot: anchor,
+          configAnchor: anchor,
         }),
       );
     }

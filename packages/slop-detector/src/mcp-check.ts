@@ -7,6 +7,7 @@ import fs from "node:fs";
 import { checkPath, checkText, summarize } from "./engine.js";
 import { defaultConfig, loadConfig } from "./config.js";
 import { packsByFilter } from "./packs/registry.js";
+import { resolvePatternAnchor } from "./util/pattern-anchor.js";
 import type { CheckSummary, Severity, Violation } from "./types.js";
 
 export interface SlopCheckInput {
@@ -39,10 +40,18 @@ export function runSlopCheck(input: SlopCheckInput): CheckSummary {
   const packs = packsByFilter(packFilter);
 
   if (input.text !== undefined) {
-    const violations = checkText(input.text, input.filename ?? "input.md", {
+    // Same anchor rule the CLI's stdin branch applies (see
+    // util/pattern-anchor.ts:resolvePatternAnchor): decided against the
+    // assumed `filename`, so a `configPath` given alongside `text` agrees
+    // with the CLI/`path` branch for the same filename and config.
+    const filename = input.filename ?? "input.md";
+    const textAnchor = resolvePatternAnchor(input.configPath, filename);
+    const violations = checkText(input.text, filename, {
       packs,
       config,
       packFilter,
+      scanRoot: textAnchor,
+      configAnchor: textAnchor,
     });
     return summarize(violations, 1);
   }
@@ -50,7 +59,14 @@ export function runSlopCheck(input: SlopCheckInput): CheckSummary {
     if (!fs.existsSync(input.path)) {
       throw new Error(`slop_check: path does not exist: ${input.path}`);
     }
-    return checkPath(input.path, { packs, config, packFilter });
+    const pathAnchor = resolvePatternAnchor(input.configPath, input.path);
+    return checkPath(input.path, {
+      packs,
+      config,
+      packFilter,
+      scanRoot: pathAnchor,
+      configAnchor: pathAnchor,
+    });
   }
   throw new Error("slop_check: one of `text` or `path` is required");
 }

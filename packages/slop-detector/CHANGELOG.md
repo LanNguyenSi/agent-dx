@@ -8,19 +8,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 - `check <file> [<file>...] --config slop.config.yml` now anchors every
-  scan-root-relative pattern family (`review.allowPaths`,
-  `placement.instructionGlobs`, `entrypointGlobs`) to the `--config`
-  file's own directory instead of each named file's own parent directory,
-  so an explicit file argument is judged exactly as `check .` judges it
-  under the same config (see the README's "Path pattern anchor" section).
-  Previously a root-anchored `review.allowPaths`/`placement.instructionGlobs`
-  entry silently stopped matching once a file was passed as an explicit
-  CLI argument instead of being reached by walking a directory target, an
-  effect measured against three findings across two files in an
-  orchestrator run (`2026-09-20-open-pool-batch58`) that `check .` did not
-  reproduce. `--stdin-path` scanning is unaffected: it keeps its prior
-  nearest-`package.json` fallback, since it carries no `--config`-anchored
-  case.
+  path pattern family (`review.allowPaths`, `placement.instructionGlobs`,
+  `entrypointGlobs`, `ignorePaths`, `treatAsProse`, `treatAsCode`) to the
+  `--config` file's own directory, but only when the checked target
+  actually lies inside that directory; an out-of-tree or central config
+  (for example `check . --config ../shared/slop.config.yml`, or an
+  absolute path to a config outside the scan) leaves the pre-existing
+  per-target resolution unchanged, so `check .`'s own verdict never moves
+  under a config it doesn't sit next to. The CLI's file/directory branch,
+  its `--stdin-path` branch, and the MCP `slop_check` tool's `path` and
+  `text` branches now all derive the anchor through the same helper
+  (see the README's "Path pattern anchor" section), so an explicit file
+  argument, a `--stdin-path` value, and an MCP call are judged exactly as
+  `check .` judges the same target under the same config. Previously a
+  root-anchored pattern silently stopped matching once a file was passed
+  as an explicit CLI argument instead of being reached by walking a
+  directory target (measured against several findings across two files
+  in an orchestrator run that `check .` did not reproduce), the MCP
+  `path`/`text` branches never anchored at all and could disagree with
+  the CLI for the same input, and `ignorePaths`/`treatAsProse`/
+  `treatAsCode` matched a file's path exactly as spelled on the command
+  line rather than relative to the config, so an absolute or
+  differently-spelled argument could be scanned or classified
+  differently than the same file reached by walking a directory.
+  **Breaking:** a directory or file target that lies below the config
+  file's own directory now resolves every pattern relative to that
+  config directory, not relative to the target itself; a pattern written
+  relative to a scanned subdirectory stops matching once `--config` is
+  given, rewrite it relative to the config file's directory instead (see
+  the README's "Path pattern anchor" section for the one-line migration
+  note).
 
 ## [0.4.0] - 2026-09-20
 

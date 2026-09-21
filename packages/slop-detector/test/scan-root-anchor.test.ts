@@ -6,6 +6,7 @@ import path from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CheckSummary } from "../src/types.js";
+import { runSlopCheck } from "../src/mcp-check.js";
 
 // Regression coverage for: `check <file> [<file>...] --config
 // slop.config.yml` must judge a file exactly as `check . --config
@@ -241,5 +242,268 @@ describe("config path patterns anchor to the --config file's directory", () => {
       "Fixes F1 and F2a from review round 2.\n",
     );
     expect(relSummary.filesScanned).toBe(1);
+  });
+});
+
+// Round 2: the anchor from round 1 above was applied unconditionally,
+// which broke `check .`'s own verdict once `--config` pointed OUTSIDE the
+// scanned directory (a central/shared config). The fix is a containment
+// condition (see src/util/pattern-anchor.ts:resolvePatternAnchor): the
+// anchor only applies when the checked target actually lies inside the
+// config file's own directory; otherwise the pre-round-1 per-target
+// resolution applies, unchanged.
+describe("the anchor only applies when the target lies inside the --config file's directory", () => {
+  it("an out-of-tree --config leaves check .'s own verdict unaffected (round-1 regression)", () => {
+    // `scanned/` is the target; `shared/slop.config.yml` lives OUTSIDE it.
+    // `review.allowPaths` is written relative to the SCANNED directory
+    // (the pre-round-1, and still-correct-for-this-case, resolution), so
+    // an unconditional anchor to `shared/` (round 1's bug) breaks the
+    // match and turns a clean scan into two block findings.
+    fs.mkdirSync(path.join(tmp, "shared"), { recursive: true });
+    fs.mkdirSync(path.join(tmp, "scanned", "sub"), { recursive: true });
+    const configPath = path.join(tmp, "shared", "slop.config.yml");
+    fs.writeFileSync(
+      configPath,
+      [
+        "packs:",
+        "  review-slop: true",
+        "review:",
+        "  allowPaths:",
+        "    - sub/allowed.md",
+      ].join("\n") + "\n",
+    );
+    fs.writeFileSync(
+      path.join(tmp, "scanned", "sub", "allowed.md"),
+      "F1 landed in review round 2.\n",
+    );
+    const scannedDir = path.join(tmp, "scanned");
+    // A relative `--config` spelling, resolved against the CLI's own
+    // process cwd (`packageRoot`, see the file header for why the child
+    // process's cwd can't be pointed at the fixture directory) rather
+    // than against the scanned directory: `path.resolve` inside
+    // `resolvePatternAnchor` treats it the same way either way, so this
+    // still exercises the relative-spelling case the design calls for.
+    const relativeConfigFromCliCwd = path.relative(packageRoot, configPath);
+
+    const viaRelativeConfig = runCliJson([
+      "check",
+      scannedDir,
+      "--pack",
+      "review-slop",
+      "--config",
+      relativeConfigFromCliCwd,
+    ]);
+    const viaAbsoluteConfig = runCliJson([
+      "check",
+      scannedDir,
+      "--pack",
+      "review-slop",
+      "--config",
+      configPath,
+    ]);
+
+    // Base (pre-round-1) behavior: the scan root is the scanned directory
+    // itself, `allowPaths: ["sub/allowed.md"]` matches, zero block
+    // findings. Round 1's unconditional anchor broke this to 2.
+    expect(viaRelativeConfig.blockCount).toBe(0);
+    expect(viaAbsoluteConfig.blockCount).toBe(0);
+  });
+
+  it("CLI and MCP agree for a root-anchored allowPaths entry, contained under --config's directory", () => {
+    const configPath = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      configPath,
+      [
+        "packs:",
+        "  review-slop: true",
+        "review:",
+        "  allowPaths:",
+        "    - packages/sub/README.md",
+      ].join("\n") + "\n",
+    );
+    const target = path.join(tmp, "packages", "sub", "README.md");
+    fs.writeFileSync(target, "F1 landed in review round 2.\n");
+
+    const viaCli = runCliJson([
+      "check",
+      target,
+      "--pack",
+      "review-slop",
+      "--config",
+      configPath,
+    ]);
+    const viaMcp = runSlopCheck({
+      path: target,
+      packs: ["review-slop"],
+      configPath,
+    });
+
+    expect(viaCli.blockCount).toBe(0);
+    expect(viaMcp.blockCount).toBe(0);
+    expect(viaMcp.violations).toEqual(viaCli.violations);
+  });
+
+  it("--stdin-path agrees with the equivalent file argument, contained under --config's directory", () => {
+    const configPath = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      configPath,
+      [
+        "packs:",
+        "  review-slop: true",
+        "review:",
+        "  allowPaths:",
+        "    - packages/sub/README.md",
+      ].join("\n") + "\n",
+    );
+    const target = path.join(tmp, "packages", "sub", "README.md");
+    const content = "F1 landed in review round 2.\n";
+    fs.writeFileSync(target, content);
+
+    const viaFile = runCliJson([
+      "check",
+      target,
+      "--pack",
+      "review-slop",
+      "--config",
+      configPath,
+    ]);
+    const viaStdin = runCliJson(
+      [
+        "check",
+        "--stdin-path",
+        "packages/sub/README.md",
+        "--pack",
+        "review-slop",
+        "--config",
+        configPath,
+      ],
+      content,
+    );
+
+    expect(viaFile.blockCount).toBe(0);
+    expect(viaStdin.blockCount).toBe(0);
+  });
+
+  it("ignorePaths: a root-anchored entry excludes a nested file passed as an absolute CLI argument, same as a full-directory scan", () => {
+    const configPath = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      configPath,
+      [
+        "packs:",
+        "  review-slop: true",
+        "ignorePaths:",
+        "  - packages/sub/ignored/**",
+      ].join("\n") + "\n",
+    );
+    fs.mkdirSync(path.join(tmp, "packages", "sub", "ignored"), {
+      recursive: true,
+    });
+    const target = path.join(tmp, "packages", "sub", "ignored", "bad.md");
+    fs.writeFileSync(target, "F1 landed in review round 2.\n");
+
+    const viaFile = runCliJson([
+      "check",
+      target,
+      "--pack",
+      "review-slop",
+      "--config",
+      configPath,
+    ]);
+    const viaDir = runCliJson([
+      "check",
+      tmp,
+      "--pack",
+      "review-slop",
+      "--config",
+      configPath,
+    ]);
+
+    // The single-file scan sees exactly this target: ignored means zero
+    // files scanned and zero block findings for it, matching the fact
+    // that walking the whole directory never picks it up either (its
+    // finding-id content, if scanned, would be a block finding: the
+    // absence of one here IS the assertion that it stayed excluded).
+    expect(viaFile.filesScanned).toBe(0);
+    expect(viaFile.blockCount).toBe(0);
+    expect(viaDir.blockCount).toBe(0);
+    expect(viaDir.violations.some((v) => v.path === target)).toBe(false);
+  });
+
+  it("treatAsCode: a root-anchored entry reclassifies a nested file passed as an absolute CLI argument out of prose-slop, same as a full-directory scan", () => {
+    const configPath = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      configPath,
+      [
+        "packs:",
+        "  prose-slop: true",
+        "treatAsCode:",
+        "  - packages/sub/notes.txt",
+      ].join("\n") + "\n",
+    );
+    const target = path.join(tmp, "packages", "sub", "notes.txt");
+    fs.writeFileSync(target, "This has an em dash — right here.\n");
+
+    const viaFile = runCliJson([
+      "check",
+      target,
+      "--pack",
+      "prose-slop",
+      "--config",
+      configPath,
+    ]);
+    const viaDir = runCliJson([
+      "check",
+      tmp,
+      "--pack",
+      "prose-slop",
+      "--config",
+      configPath,
+    ]);
+
+    // `.txt` defaults to "prose" (would otherwise trip
+    // `prose-slop/em-dash`); `treatAsCode` reclassifies it to "code" so
+    // the rule no longer applies, in both scan shapes alike.
+    expect(viaDir.warnCount).toBe(0);
+    expect(viaFile.warnCount).toBe(0);
+    expect(viaFile.violations).toEqual(viaDir.violations);
+  });
+
+  it("treatAsProse: a root-anchored entry reclassifies a nested file passed as an absolute CLI argument into prose-slop, same as a full-directory scan", () => {
+    const configPath = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      configPath,
+      [
+        "packs:",
+        "  prose-slop: true",
+        "treatAsProse:",
+        "  - packages/sub/notes.ts",
+      ].join("\n") + "\n",
+    );
+    const target = path.join(tmp, "packages", "sub", "notes.ts");
+    fs.writeFileSync(target, "This has an em dash — right here.\n");
+
+    const viaFile = runCliJson([
+      "check",
+      target,
+      "--pack",
+      "prose-slop",
+      "--config",
+      configPath,
+    ]);
+    const viaDir = runCliJson([
+      "check",
+      tmp,
+      "--pack",
+      "prose-slop",
+      "--config",
+      configPath,
+    ]);
+
+    // `.ts` defaults to "code" (prose-slop wouldn't apply at all);
+    // `treatAsProse` reclassifies it to "prose" so `prose-slop/em-dash`
+    // newly applies, in both scan shapes alike.
+    expect(viaDir.warnCount).toBe(1);
+    expect(viaFile.warnCount).toBe(1);
+    expect(viaFile.violations).toEqual(viaDir.violations);
   });
 });
