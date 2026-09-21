@@ -131,7 +131,12 @@ and log.md-mention reasons as step 6 above. Releasing agent-primitives
 follows the same cut shape too: `npm version` in `packages/agent-primitives`,
 a CHANGELOG cut, `node scripts/check-release-changelogs.mjs --base
 origin/master`, then a tag `agent-primitives/v<new-version>`; it also has
-no pin of its own to bump.
+no pin of its own to bump. One step is its own: when
+`assets/skill-ledger.json` ends in a pending entry (its `version` is
+above the package's version before the bump), the release commit makes
+that entry's `version` equal to the version being released; a release
+that did not touch `assets/skill/SKILL.md` leaves the ledger as it is (see
+"The skill digest ledger" in the package README) before tagging.
 
 ### Comparing a release candidate with a published version
 

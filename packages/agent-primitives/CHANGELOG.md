@@ -16,6 +16,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   verdict, a common outcome for a literal replacement of a
   type-narrowing condition.
 
+- `init` gains an additive target status, `outdated`: a target whose
+  existing bytes are byte-identical to an earlier copy of
+  `assets/skill/SKILL.md` recorded in a new checked-in digest ledger
+  (`assets/skill-ledger.json`: one `{ version, sha256 }` entry per
+  published release, 0.1.0 included, its digest taken from the published
+  package because that release has no tag, plus at most one trailing
+  pending entry for the version being prepared) is now distinguished
+  from `conflicted` (bytes matching no ledger entry, e.g. a local edit).
+  `InitTargetResult` gains an optional `matchedVersion` naming the
+  matched ledger version, present only on an `outdated` target; the
+  lookup is first-match. `init` still writes nothing to either status
+  without `--force` (report-only was chosen over an automatic upgrade so
+  that rule keeps no exception), and `--force`'s help text names both
+  statuses. The existing three statuses, their exit codes, and the other
+  init safety properties (symlink refusal, containment checks, the
+  re-validation on the `EEXIST` race branch, now covered by its own
+  `outdated` test) are unchanged. `init` never fails because of the
+  ledger: a missing, unreadable, unparsable or malformed ledger, or a
+  malformed entry, degrades the affected target to `conflicted` and
+  names the cause in `warnings`, which the text format now prints for
+  `init` as it does for the other commands. Ledger maintenance is a
+  convention with mechanical support: a change that edits the asset
+  appends the pending entry in the same change and replaces it if the
+  asset changes again before the release, released entries are
+  immutable, and the release relabels the pending entry to the shipped
+  version; tests pin the current asset's digest as the ledger's LAST
+  entry and strictly ascending versions with differing adjacent
+  digests; a release that does not touch the asset leaves the ledger
+  untouched. Anchored by a real
+  case observed in a consuming workspace after the 0.7.0 release: `init`
+  reported `conflicted` for a target that was in fact byte-identical to
+  the 0.4.0 asset, with no way to tell that apart from a local edit
+  short of a manual byte comparison against every release tag.
+
 ## [0.7.0] - 2026-09-20
 
 - `probe`'s phpunit zero-tests reading gains a dedicated, additive

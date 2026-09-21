@@ -1627,7 +1627,18 @@ function renderInitText(result: InitResult): string {
   lines.push("");
   lines.push("targets:");
   for (const target of result.targets) {
-    lines.push(`  [${target.status}] ${target.harness}: ${target.path}`);
+    const suffix =
+      target.status === "outdated" && target.matchedVersion
+        ? ` (matches ledger version ${target.matchedVersion})`
+        : "";
+    lines.push(
+      `  [${target.status}] ${target.harness}: ${target.path}${suffix}`,
+    );
+  }
+  if (result.warnings.length > 0) {
+    lines.push("");
+    lines.push("warnings:");
+    for (const warning of result.warnings) lines.push(`  - ${warning}`);
   }
   lines.push("");
   return lines.join("\n");
@@ -1650,7 +1661,7 @@ program
   )
   .option(
     "--force",
-    "overwrite a conflicting existing skill file instead of reporting conflicted",
+    "overwrite a conflicting or outdated existing skill file instead of reporting it as conflicted/outdated",
   )
   .action((opts: InitCliOptions, command: Command) => {
     const start = Date.now();
@@ -1673,7 +1684,7 @@ program
           status: "usage_error",
           durationMs: Date.now() - start,
           cwd: global.cwd,
-          warnings: [],
+          warnings: err.warnings,
           logs: [],
           extra: {
             reason: err.reason,

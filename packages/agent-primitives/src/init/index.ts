@@ -5,6 +5,13 @@ import {
   isPathContained,
   resolveDeepestExisting,
 } from "../probe/containment.js";
+import {
+  findLedgerMatch,
+  readSkillLedgerSafe,
+  type SkillLedgerEntry,
+} from "./ledger.js";
+
+export type { SkillLedgerEntry } from "./ledger.js";
 
 /** A harness whose skill directory `init` can write into. */
 export type Harness = "claude" | "codex" | "opencode";
@@ -27,15 +34,29 @@ const HARNESS_REL_PATH: Record<Harness, string> = {
   opencode: path.join(".opencode", "skills", "agent-primitives", "SKILL.md"),
 };
 
-/** One target file's outcome. Values match the status vocabulary the
- * envelope already knows about (`written`/`unchanged` -> ok, `conflicted`
- * -> finding), so no envelope change was needed to add this subcommand. */
-export type InitTargetStatus = "written" | "unchanged" | "conflicted";
+/** One target file's outcome. `outdated` is additive (added alongside the
+ * original three, none of which changed meaning or exit code): the
+ * existing target's bytes are byte-identical to a `assets/skill/SKILL.md`
+ * this package released at an earlier version (per the checked-in ledger,
+ * see `ledger.ts`), rather than to an unknown edit. `init` never writes an
+ * `outdated` target by default; see the envelope-status-mapping note on
+ * `InitResult.status` below and the package README's `init` section for
+ * why report-only was chosen over an automatic upgrade. Values otherwise
+ * match the status vocabulary the envelope already knows about
+ * (`written`/`unchanged` -> ok, `conflicted`/`outdated` -> finding). */
+export type InitTargetStatus =
+  "written" | "unchanged" | "conflicted" | "outdated";
 
 export interface InitTargetResult {
   harness: Harness;
   path: string;
   status: InitTargetStatus;
+  /** Present only when `status` is `"outdated"`: the ledger version
+   * (never the pending one, whose digest is the current asset's) whose
+   * asset is byte-identical to
+   * what is currently installed at this target, so a caller can decide
+   * whether `--force` is safe without comparing bytes by hand. */
+  matchedVersion?: string;
 }
 
 export interface InitOptions {
@@ -50,15 +71,29 @@ export interface InitOptions {
   /** Test seam: skill content to install, in place of the packaged
    * `assets/skill/SKILL.md`. */
   content?: string;
+  /** Test seam: digest ledger entries to check a differing existing
+   * target's bytes against, in place of the checked-in
+   * `assets/skill-ledger.json`. */
+  ledger?: SkillLedgerEntry[];
 }
 
 export interface InitResult {
-  /** `conflicted` if any target conflicted; else `written` if any target
-   * was newly written or overwritten; else `unchanged`. */
+  /** Envelope-status mapping (the worst outcome across every requested
+   * harness, most severe first): `conflicted` if any target conflicted;
+   * else `outdated` if any target is outdated; else `written` if any
+   * target was newly written or overwritten; else `unchanged`.
+   * `conflicted` and `outdated` both map to the envelope's `finding`
+   * class (exit `1`); `written`/`unchanged` map to `ok` (exit `0`), same
+   * as before `outdated` existed. */
   status: InitTargetStatus;
   targets: InitTargetResult[];
-  /** Reserved for non-fatal notes; always empty today. Kept so `init`'s
-   * result shape matches every other subcommand's envelope-facing fields. */
+  /** Non-fatal notes. Populated only when the checked-in digest ledger
+   * (`assets/skill-ledger.json`) could not be fully loaded (missing,
+   * unparsable, wrong shape, or one or more malformed entries): `init`
+   * degrades to treating the ledger as empty (or as missing just those
+   * entries) rather than failing the run, and names the cause here. Empty
+   * otherwise. Kept so `init`'s result shape matches every other
+   * subcommand's envelope-facing fields. */
   warnings: string[];
 }
 
@@ -97,6 +132,10 @@ export type InitFsErrorReason =
  * only place that can attach that history. */
 export class InitFsUsageError extends UsageError {
   public targets: InitTargetResult[] = [];
+  /** Warnings the run had already collected when it failed (today: a
+   * degraded skill digest ledger), so the usage-error envelope keeps
+   * them. */
+  public warnings: string[] = [];
 
   constructor(
     message: string,
@@ -322,11 +361,13 @@ function resolveTargetPath(
  * internal to its own package): a path that does not exist yet, or exists
  * with byte-identical content, is written or reported unchanged with no
  * further action; a path that exists with different content is reported
- * `conflicted` unless `force` is set, in which case it is overwritten and
- * reported `written` (not `updated`: `init`'s own status vocabulary has no
- * third state, per the acceptance contract). What is already at the path
- * comes from `target.existing`, read once during pre-validation behind the
- * type check there, so nothing here reads an entry of unknown type.
+ * `conflicted` (or, when its bytes match a released version in `ledger`,
+ * `outdated`) unless `force` is set, in which case it is overwritten and
+ * reported `written` either way (an outdated target is not distinguished
+ * from a conflicted one once `--force` authorizes the overwrite: both are
+ * being replaced the same way). What is already at the path comes from
+ * `target.existing`, read once during pre-validation behind the type check
+ * there, so nothing here reads an entry of unknown type.
  *
  * `dir` is created (`mkdirSync` with `recursive: true`) unconditionally
  * before anything else, which is also documented behavior: a missing `-t`
@@ -344,12 +385,34 @@ function resolveTargetPath(
  * (mapped to the same named reason, `target_is_a_symlink`, as the
  * pre-validation check).
  */
+/** Classifies a target's differing existing bytes for the report-only
+ * (`!force`) path: `outdated` when the bytes match a released version's
+ * digest in the ledger `getLedger` resolves (a known earlier copy, not a
+ * local edit), else the pre-existing `conflicted`. Never called when
+ * `existing === content` (that path returns `unchanged` before reaching
+ * this), so a match found here always names a version other than the one
+ * about to be installed. `getLedger` is a thunk, not a resolved array, so
+ * the checked-in `assets/skill-ledger.json` (or its `--force`-free
+ * equivalent read cost) is paid only for a target that actually reaches
+ * this branch, never for a target that writes cleanly or fails
+ * pre-validation first. */
+function classifyDiffering(
+  existing: string,
+  getLedger: () => readonly SkillLedgerEntry[],
+): Pick<InitTargetResult, "status" | "matchedVersion"> {
+  const match = findLedgerMatch(existing, getLedger());
+  return match
+    ? { status: "outdated", matchedVersion: match.version }
+    : { status: "conflicted" };
+}
+
 function writeOne(
   target: ValidatedTarget,
   content: string,
   force: boolean,
   absTargetDir: string,
   resolvedTargetDir: string,
+  getLedger: () => readonly SkillLedgerEntry[],
 ): InitTargetResult {
   const { harness, filePath, existing } = target;
   const dir = path.dirname(filePath);
@@ -407,7 +470,11 @@ function writeOne(
         return { harness, path: filePath, status: "unchanged" };
       }
       if (liveExisting !== undefined && !force) {
-        return { harness, path: filePath, status: "conflicted" };
+        return {
+          harness,
+          path: filePath,
+          ...classifyDiffering(liveExisting, getLedger),
+        };
       }
     }
 
@@ -470,7 +537,11 @@ function writeOne(
           return { harness, path: filePath, status: "unchanged" };
         }
         if (!force) {
-          return { harness, path: filePath, status: "conflicted" };
+          return {
+            harness,
+            path: filePath,
+            ...classifyDiffering(racedExisting, getLedger),
+          };
         }
         fd = fs.openSync(
           filePath,
@@ -518,10 +589,11 @@ function writeOne(
  * gap) can still leave a prefix of the requested harnesses written; the
  * thrown `InitFsUsageError` then carries the already-completed `targets`
  * so a caller can see what was installed. The top-level `status` is the
- * worst of the per-target statuses (`conflicted` a finding,
- * `written`/`unchanged` ok), so a caller can gate on the aggregate result
- * alone. Synchronous throughout: every step is a plain filesystem call, so
- * there is nothing here for `async`/`await` to buy.
+ * worst of the per-target statuses (`conflicted` a finding, `outdated` a
+ * finding one notch below it, `written`/`unchanged` ok), so a caller can
+ * gate on the aggregate result alone. Synchronous throughout: every step
+ * is a plain filesystem call, so there is nothing here for `async`/`await`
+ * to buy.
  */
 export function init(options: InitOptions = {}): InitResult {
   assertNoFollowSupported();
@@ -531,6 +603,24 @@ export function init(options: InitOptions = {}): InitResult {
   const resolvedTargetDir = resolveDeepestExisting(absTargetDir);
   const force = options.force ?? false;
   const content = options.content ?? readPackagedSkill();
+  const warnings: string[] = [];
+  // Lazy and memoized: `readSkillLedgerSafe()` (a real filesystem read,
+  // absent a test-seam override) runs at most once per `init()` call, and
+  // only if some target actually reaches the report-only
+  // differing-content branch that needs it -- never for a target that
+  // writes cleanly, is `unchanged`, or fails pre-validation first. It
+  // never throws: a missing or broken ledger degrades to empty (and a
+  // `warnings` entry) rather than failing the run.
+  let cachedLedger: SkillLedgerEntry[] | undefined;
+  const getLedger = (): readonly SkillLedgerEntry[] => {
+    if (options.ledger) return options.ledger;
+    if (cachedLedger === undefined) {
+      const loaded = readSkillLedgerSafe();
+      cachedLedger = loaded.entries;
+      if (loaded.warning) warnings.push(loaded.warning);
+    }
+    return cachedLedger;
+  };
 
   const validated = harnesses.map((harness) =>
     resolveTargetPath(absTargetDir, resolvedTargetDir, harness, force, content),
@@ -540,11 +630,19 @@ export function init(options: InitOptions = {}): InitResult {
   for (const target of validated) {
     try {
       targets.push(
-        writeOne(target, content, force, absTargetDir, resolvedTargetDir),
+        writeOne(
+          target,
+          content,
+          force,
+          absTargetDir,
+          resolvedTargetDir,
+          getLedger,
+        ),
       );
     } catch (err) {
       if (err instanceof InitFsUsageError) {
         err.targets = targets.slice();
+        err.warnings = warnings.slice();
       }
       throw err;
     }
@@ -554,9 +652,11 @@ export function init(options: InitOptions = {}): InitResult {
     (t) => t.status === "conflicted",
   )
     ? "conflicted"
-    : targets.some((t) => t.status === "written")
-      ? "written"
-      : "unchanged";
+    : targets.some((t) => t.status === "outdated")
+      ? "outdated"
+      : targets.some((t) => t.status === "written")
+        ? "written"
+        : "unchanged";
 
-  return { status, targets, warnings: [] };
+  return { status, targets, warnings };
 }

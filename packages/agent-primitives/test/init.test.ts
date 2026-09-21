@@ -9,6 +9,11 @@ import {
 } from "../src/index.js";
 import type { InitFsErrorReason as InitFsErrorReasonFromIndex } from "../src/index.js";
 import { UsageError } from "../src/envelope.js";
+import {
+  readSkillLedgerSafe,
+  sha256Hex,
+  type SkillLedgerEntry,
+} from "../src/init/ledger.js";
 
 // Permission bits are meaningless to root (bypasses them entirely), so the
 // EACCES case below only discriminates as a non-root user.
@@ -82,6 +87,109 @@ describe("init", () => {
       "SKILL.md",
     );
     expect(fs.readFileSync(filePath, "utf8")).toBe(CONTENT_A);
+  });
+
+  describe("outdated: a known earlier release vs. an unknown edit", () => {
+    const CONTENT_OLD = "# skill, released version 1.0.0\n";
+    const CONTENT_NEW = "# skill, released version 2.0.0 (current)\n";
+    const LEDGER: SkillLedgerEntry[] = [
+      { version: "1.0.0", sha256: sha256Hex(CONTENT_OLD) },
+      { version: "2.0.0", sha256: sha256Hex(CONTENT_NEW) },
+    ];
+
+    function targetPath(dir: string): string {
+      return path.join(
+        dir,
+        ".claude",
+        "skills",
+        "agent-primitives",
+        "SKILL.md",
+      );
+    }
+
+    it("reports outdated, names the matched version, and leaves the file untouched", () => {
+      const dir = makeTmpDir();
+      const filePath = targetPath(dir);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, CONTENT_OLD);
+
+      const result = init({
+        targetDir: dir,
+        content: CONTENT_NEW,
+        ledger: LEDGER,
+      });
+      expect(result.status).toBe("outdated");
+      expect(result.targets[0]?.status).toBe("outdated");
+      expect(result.targets[0]?.matchedVersion).toBe("1.0.0");
+      expect(fs.readFileSync(filePath, "utf8")).toBe(CONTENT_OLD);
+    });
+
+    it("reports conflicted, not outdated, when the existing bytes match no ledger entry", () => {
+      const dir = makeTmpDir();
+      const filePath = targetPath(dir);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, "# a local edit, not any released version\n");
+
+      const result = init({
+        targetDir: dir,
+        content: CONTENT_NEW,
+        ledger: LEDGER,
+      });
+      expect(result.status).toBe("conflicted");
+      expect(result.targets[0]?.status).toBe("conflicted");
+      expect(result.targets[0]?.matchedVersion).toBeUndefined();
+      expect(fs.readFileSync(filePath, "utf8")).toBe(
+        "# a local edit, not any released version\n",
+      );
+    });
+
+    it("--force overwrites an outdated target and reports written", () => {
+      const dir = makeTmpDir();
+      const filePath = targetPath(dir);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, CONTENT_OLD);
+
+      const result = init({
+        targetDir: dir,
+        content: CONTENT_NEW,
+        ledger: LEDGER,
+        force: true,
+      });
+      expect(result.status).toBe("written");
+      expect(result.targets[0]?.status).toBe("written");
+      expect(fs.readFileSync(filePath, "utf8")).toBe(CONTENT_NEW);
+    });
+
+    it("EEXIST race: a ledger-matching file planted just before the absent-name open classifies outdated, not conflicted", () => {
+      const dir = makeTmpDir();
+      const filePath = targetPath(dir);
+      const realOpen = fs.openSync;
+      let planted = false;
+      const spy = vi.spyOn(fs, "openSync").mockImplementation(((p, flags) => {
+        if (p === filePath && !planted) {
+          planted = true;
+          // Simulate a race: something else wins the absent-name claim
+          // with a byte-identical copy of a released version, right
+          // after this process's own pre-write observation found
+          // nothing there.
+          fs.writeFileSync(filePath, CONTENT_OLD);
+        }
+        return realOpen(p, flags);
+      }) as typeof fs.openSync);
+      try {
+        const result = init({
+          targetDir: dir,
+          content: CONTENT_NEW,
+          ledger: LEDGER,
+        });
+        expect(result.status).toBe("outdated");
+        expect(result.targets[0]?.status).toBe("outdated");
+        expect(result.targets[0]?.matchedVersion).toBe("1.0.0");
+      } finally {
+        spy.mockRestore();
+      }
+      expect(fs.readFileSync(filePath, "utf8")).toBe(CONTENT_OLD);
+    });
   });
 
   it("overwrites and reports written when --force resolves a conflict", () => {
@@ -1060,6 +1168,121 @@ describe("init", () => {
       expect(typeof barrel.probe).toBe("function");
       expect(typeof barrel.verify).toBe("function");
       expect(typeof barrel.doctor).toBe("function");
+    });
+  });
+
+  describe("the checked-in digest ledger degrades instead of crashing init", () => {
+    function targetPath(dir: string): string {
+      return path.join(
+        dir,
+        ".claude",
+        "skills",
+        "agent-primitives",
+        "SKILL.md",
+      );
+    }
+
+    function mockLedgerReadFileSync(
+      onLedgerRead: () => string,
+    ): ReturnType<typeof vi.spyOn> {
+      const real = fs.readFileSync;
+      return vi.spyOn(fs, "readFileSync").mockImplementation(((
+        p: fs.PathOrFileDescriptor,
+        opts?: unknown,
+      ) => {
+        if (String(p).includes("skill-ledger.json")) return onLedgerRead();
+        return (real as (p: unknown, opts?: unknown) => unknown)(p, opts);
+      }) as typeof fs.readFileSync);
+    }
+
+    it("an absent ledger file degrades a differing target to conflicted, with a warning", () => {
+      const dir = makeTmpDir();
+      const filePath = targetPath(dir);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, "# a local edit\n");
+      const spy = mockLedgerReadFileSync(() => {
+        const err = new Error("ENOENT: no such file") as NodeJS.ErrnoException;
+        err.code = "ENOENT";
+        throw err;
+      });
+      try {
+        const result = init({ targetDir: dir, content: CONTENT_A });
+        expect(result.status).toBe("conflicted");
+        expect(result.targets[0]?.status).toBe("conflicted");
+        expect(
+          result.warnings.some((w) => w.includes("could not be read")),
+        ).toBe(true);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it("a malformed-JSON ledger file degrades a differing target to conflicted, with a warning", () => {
+      const dir = makeTmpDir();
+      const filePath = targetPath(dir);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, "# a local edit\n");
+      const spy = mockLedgerReadFileSync(() => "{ not valid json");
+      try {
+        const result = init({ targetDir: dir, content: CONTENT_A });
+        expect(result.status).toBe("conflicted");
+        expect(result.warnings.some((w) => w.includes("not valid JSON"))).toBe(
+          true,
+        );
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('a ledger file with no "digests" array degrades a differing target to conflicted, with a warning', () => {
+      const dir = makeTmpDir();
+      const filePath = targetPath(dir);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, "# a local edit\n");
+      const spy = mockLedgerReadFileSync(() =>
+        JSON.stringify({ asset: "assets/skill/SKILL.md" }),
+      );
+      try {
+        const result = init({ targetDir: dir, content: CONTENT_A });
+        expect(result.status).toBe("conflicted");
+        expect(result.warnings.some((w) => w.includes('"digests"'))).toBe(true);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it("a malformed individual entry (non-hex sha256) is dropped and never matches", () => {
+      const RELEASED_CONTENT = "# skill, released version 1.0.0\n";
+      const craftedSha = "zz" + "0".repeat(62); // 64 chars, not lowercase hex
+      const raw = JSON.stringify({
+        asset: "assets/skill/SKILL.md",
+        digests: [
+          { version: "1.0.0", sha256: sha256Hex(RELEASED_CONTENT) },
+          { version: "9.9.9", sha256: craftedSha },
+        ],
+      });
+      const spy = mockLedgerReadFileSync(() => raw);
+      try {
+        const loaded = readSkillLedgerSafe();
+        expect(loaded.entries).toEqual([
+          { version: "1.0.0", sha256: sha256Hex(RELEASED_CONTENT) },
+        ]);
+        expect(loaded.warning).toMatch(/dropped 1 malformed entry/);
+
+        // End to end: a target whose existing bytes are literally the
+        // crafted (non-hex) sha256 string is not treated as a match for
+        // the malformed entry -- it is filtered before findLedgerMatch
+        // ever sees it.
+        const dir = makeTmpDir();
+        const filePath = targetPath(dir);
+        fs.mkdirSync(path.dirname(filePath), { recursive: true });
+        fs.writeFileSync(filePath, craftedSha);
+        const result = init({ targetDir: dir, content: CONTENT_A });
+        expect(result.targets[0]?.status).toBe("conflicted");
+        expect(result.targets[0]?.matchedVersion).toBeUndefined();
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 });
