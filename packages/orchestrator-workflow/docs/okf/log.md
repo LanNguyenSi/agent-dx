@@ -17,8 +17,11 @@
   synthetic allowlist span and an uncited line inside it, a pin for the
   documented terminator degradation (an early `];` line inside a
   synthetic array scans more rather than hiding the real tail), and an
-  extension of the declaration-marker pin to every real target file the
-  bundle can resolve a citation into, not just this file. All edits are
+  extension of the declaration-marker pin to every target file the
+  sibling-drift guard's own resolver (`anchorScopeResolve`) can name, not
+  just this file, with a non-empty sanity pin and a synthetic negative
+  control (the log guard's wider target set never passes through the
+  helper). All edits are
   either same-line-count in-place replacements or pure appends after the
   file's previous final line, so no existing citation moved. Three
   mutation probes (`agent-primitives probe --plan`, `--pre 'npm run
@@ -32,12 +35,12 @@
   the no-dead-exemption sanity test; the span exclusion removed at
   `test/docs-consistency.test.ts:5979#"const startIdx = content.lastIndexOf(startMarker);"`
   (mutated to force `startIdx = -1`) killed by the existing span-exclusion
-  fixtures. PKG-VERIFY(orchestrator-workflow) green (1293 tests, build,
-  typecheck, typecheck-test, format). The four docs whose `sources` list
+  fixtures. PKG-VERIFY(orchestrator-workflow) green, including the new
+  pins (build, typecheck, typecheck-test, format, test). The four docs whose `sources` list
   `test/docs-consistency.test.ts` (`model-preselection.md`,
   `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`,
-  `subagent-contracts-superset.md`) were re-verified against source commit
-  d24f0452 and re-stamped after it; none of their own citations into this
+  `subagent-contracts-superset.md`) were re-verified against source commits
+  d24f0452 and 2354958f and re-stamped after the later one; none of their own citations into this
   file fall inside the changed or appended lines. Five of this log's own
   existing citations into the test file were spot-read against the
   current file and still resolve:
