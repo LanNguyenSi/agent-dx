@@ -582,6 +582,49 @@ captured as files:
   which is why no 9.x suppressed-report capture exists in this
   directory.
 
+### `--colors=always` captures (ANSI SGR residual)
+
+Same throwaway-composer-project-under-scratch-directory, same
+disposable-Docker-container (`composer:2`, `php:8.3-cli`), same trimming
+convention as the captures above; PHP 8.3.33 (cli), PHPUnit 9.6.36.
+Command for all four: `docker run --rm -v <scratch>:/app -w /app
+composer:2 composer require --dev phpunit/phpunit:^9.6` (exit `0`),
+followed by `docker run --rm -v <scratch>:/app -w /app php:8.3-cli
+vendor/bin/phpunit --colors=<always|never> tests/<File>.php` against a
+two-test `Calc` suite (`testAddsTwoNumbers`, `testAddsNegativeNumbers`,
+both passing) and a two-test `CalcFail` suite (`testAddsTwoNumbers`
+passing, `testAddWrong` asserting `5 === Calc::add(2, 2)` and failing).
+
+- `phpunit-pass-colorized.txt`: `--colors=always` against the `Calc`
+  suite. Exit `0`. `phpunit-pass-colorized-twin.txt` is the SAME
+  session's `--colors=never` run against the identical source files (a
+  true twin, not merely another green-run fixture): stripping every
+  `ESC [ <params> m` SGR sequence from the colorized capture reproduces
+  the twin byte-for-byte (`test/verify.test.ts` pins this equality
+  directly, and pins that `phpunitDetector.parse`/`phpunitZeroTestsVerdict`
+  read the two identically).
+- `phpunit-fail-colorized.txt`: `--colors=always` against the
+  `CalcFail` suite. Exit `1`. `phpunit-fail-colorized-twin.txt` is its
+  own `--colors=never` twin, same relationship as above.
+
+Measured (the reason this detector strips ANSI SGR sequences before any
+row/line pattern sees the output, rather than leaving colour out of
+scope): PHPUnit's `--colors=always` colorizes the `OK (...)` line, the
+`FAILURES!`/`ERRORS!`/`WARNINGS!` marker, EACH comma-separated segment
+of the `Tests: N, Assertions: M, ...` tally line in its OWN `ESC...m`
+pair (not one pair around the whole line), and a non-`.` progress
+marker character (`F` in `phpunit-fail-colorized.txt`'s `.` + escaped
+`F` progress row) -- never the version banner, the post-run
+`Time:`/`Memory:` line, a numbered entry header, or a `file:line`
+locator. Every one of those colorized shapes sits directly against this
+detector's `^`/`$`-anchored patterns (`OK_LINE`, `FAILURES_MARKER`,
+`TALLY_LINE`, `PROGRESS_COUNTER_LINE`), so an unmodified capture fails
+every one of them and the run's own tally goes unread -- confirmed
+before the fix by parsing `phpunit-fail-colorized.txt` and getting
+`summary.failed: 0` on a run that genuinely failed one test. Colour
+placement was read from these two real captures before the detector was
+touched, not guessed at.
+
 ## `vitest-project/`, `tsc-project/`, `eslint-project/`
 
 Minimal, self-contained projects with one deliberately failing check

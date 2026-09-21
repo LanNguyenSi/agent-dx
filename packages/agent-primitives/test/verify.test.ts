@@ -18,6 +18,7 @@ import {
 import {
   phpunitZeroTestsVerdict,
   PROGRESS_COUNTER_LINE,
+  stripAnsiSgr,
 } from "../src/verify/detectors/phpunit.js";
 import { UsageError } from "../src/envelope.js";
 import type {
@@ -4415,6 +4416,18 @@ const PROGRESS_COUNTER_LINE_ALLOWLIST: Record<string, string> = {};
  * (empty when the fixture is fully covered). Factored out of the
  * directory-driven test below so the synthetic allowlist-mechanism test
  * beneath it exercises the exact same check, not a second copy of it.
+ *
+ * Each line is passed through `stripAnsiSgr` before either check, the
+ * same function `phpunitDetector.matches`/`.parse` and
+ * `phpunitZeroTestsVerdict` apply to a `--colors=always` capture before
+ * consulting `PROGRESS_COUNTER_LINE` themselves: this control proves the
+ * pattern covers a REAL colorized progress row
+ * (`phpunit-fail-colorized.txt`'s `.` + an escaped `F` ahead of the
+ * counter) the same way it already covers every plain one, rather than
+ * checking a pattern the production code never actually runs against
+ * raw colorized bytes. A no-op for every uncoloured fixture (nothing to
+ * strip), so this widens what the control proves without narrowing what
+ * it already checked.
  */
 function progressCounterLineGaps(
   fixtureName: string,
@@ -4422,7 +4435,8 @@ function progressCounterLineGaps(
   allowlist: Readonly<Record<string, string>>,
 ): string[] {
   const gaps: string[] = [];
-  for (const line of output.split("\n")) {
+  for (const rawLine of output.split("\n")) {
+    const line = stripAnsiSgr(rawLine);
     if (!LOOSE_COUNTER_LINE.test(line)) continue;
     if (PROGRESS_COUNTER_LINE.test(line)) continue;
     const key = `${fixtureName}:${line}`;
@@ -4474,6 +4488,68 @@ describe("phpunitDetector: PROGRESS_COUNTER_LINE positive control (every counter
           "synthetic-only: a leading digit before the marker run is not a real PHPUnit shape, exercised here only to prove the allowlist itself is load-bearing",
       }),
     ).toEqual([]);
+  });
+});
+
+describe("phpunitDetector: --colors=always output (real capture, escape-stripping residual)", () => {
+  it("a colorized PASS run (OK line wrapped in one ESC...m pair): stripAnsiSgr reproduces its own --colors=never twin byte-for-byte, matches, and parses identically to it", () => {
+    const colored = readCaptured("phpunit-pass-colorized");
+    // The real `--colors=never` capture of the SAME throwaway project,
+    // same session, same source files: a true twin, not merely another
+    // green-run fixture (see test/fixtures/README.md).
+    const twin = readCaptured("phpunit-pass-colorized-twin");
+    expect(stripAnsiSgr(colored)).toBe(twin);
+    expect(
+      phpunitDetector.matches({ output: colored, command: "", exitCode: 0 }),
+    ).toBe(true);
+    const parsedColored = phpunitDetector.parse({
+      output: colored,
+      command: "",
+      exitCode: 0,
+    });
+    const parsedTwin = phpunitDetector.parse({
+      output: twin,
+      command: "",
+      exitCode: 0,
+    });
+    expect(parsedColored.summary).toEqual(parsedTwin.summary);
+    expect(parsedColored.failures).toEqual(parsedTwin.failures);
+    expect(phpunitZeroTestsVerdict(colored)).toEqual(
+      phpunitZeroTestsVerdict(twin),
+    );
+  });
+
+  it("a colorized FAIL run (FAILURES! marker, each tally segment, and the F progress marker each wrapped in their own ESC...m pair): stripAnsiSgr reproduces its own --colors=never twin byte-for-byte, matches, and parses identically to it", () => {
+    const colored = readCaptured("phpunit-fail-colorized");
+    const twin = readCaptured("phpunit-fail-colorized-twin");
+    expect(stripAnsiSgr(colored)).toBe(twin);
+    expect(
+      phpunitDetector.matches({ output: colored, command: "", exitCode: 1 }),
+    ).toBe(true);
+    const parsedColored = phpunitDetector.parse({
+      output: colored,
+      command: "",
+      exitCode: 1,
+    });
+    const parsedTwin = phpunitDetector.parse({
+      output: twin,
+      command: "",
+      exitCode: 1,
+    });
+    expect(parsedColored.summary).toEqual(parsedTwin.summary);
+    expect(parsedColored.failures).toEqual(parsedTwin.failures);
+    expect(parsedColored.failures[0].name).toBe("CalcFailTest::testAddWrong");
+    expect(phpunitZeroTestsVerdict(colored)).toEqual(
+      phpunitZeroTestsVerdict(twin),
+    );
+  });
+
+  it("stripAnsiSgr is a no-op on already-plain output (every existing captured fixture is byte-identical before and after)", () => {
+    for (const name of CAPTURED_PHPUNIT_FIXTURES) {
+      if (name.endsWith("-colorized")) continue;
+      const output = readCaptured(name);
+      expect(stripAnsiSgr(output)).toBe(output);
+    }
   });
 });
 
