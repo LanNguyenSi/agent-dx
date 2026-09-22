@@ -12290,12 +12290,21 @@ describe("findSameLineAnchorCollapses itself reports and abstains", () => {
     ).toEqual([]);
   });
 
+  // The anchor text is DEFINED here while `isStringAnchor` is false, so the
+  // string-anchor filter is the only thing that rejects these two: with an
+  // undefined anchor text (the shape real extraction produces for a
+  // non-string anchor) the later occurrences precondition would abstain on
+  // its own and this case would pass against a rule whose filter had been
+  // deleted. Round-3 fix review, LOW: the first version of this case set
+  // both fields and pinned nothing. The state is unreachable through
+  // `extractSiblingGuardCitations`, which sets the text iff the anchor is a
+  // string, so the filter is defense in depth; this pins it as such.
   it("abstains for citations carrying no string anchor", () => {
     expect(
       findSameLineAnchorCollapses(
         [
-          cite({ line: 100, isStringAnchor: false, anchorText: undefined }),
-          cite({ line: 102, isStringAnchor: false, anchorText: undefined }),
+          cite({ line: 100, isStringAnchor: false }),
+          cite({ line: 102, isStringAnchor: false }),
         ],
         () => TARGET_WITH_SIBLING,
       ),
