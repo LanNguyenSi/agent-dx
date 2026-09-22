@@ -113,6 +113,11 @@ mutation_probes:
     reason: ""
     restored_verified: ""
     replayed: false | true
+class_closure:
+  kind: enumerated | source | not_applicable
+  command: ""
+  sites:
+    - ""
 risks:
   - severity: low | medium | high
     description: ""

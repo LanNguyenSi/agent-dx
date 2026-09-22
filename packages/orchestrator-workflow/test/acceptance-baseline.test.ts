@@ -40,6 +40,7 @@ const producerKeys = [
   "changed_files",
   "tests",
   "mutation_probes",
+  "class_closure",
   "risks",
   "open_questions",
   "recommendation",

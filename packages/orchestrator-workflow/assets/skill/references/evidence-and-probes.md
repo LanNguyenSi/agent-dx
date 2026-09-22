@@ -222,9 +222,10 @@ directory and the subagents.
    documentation or maintainability findings. This option never closes a
    high/critical or other ineligible finding. Record the concrete verification
    in a `05-review-findings.md` row, keeping its Severity and Decision headers
-   unchanged and setting Decision to `accepted`. Watch for the round-2
-   halt signal across repeated review-fix cycles (see Round-2 halt rule
-   below). By the second round-2 halt signal or the third `fix_required`
+   unchanged and setting Decision to `accepted`. Halt at the first
+   `recurrence: repeated` finding (see Round-2 halt rule below): before any
+   further implementer spawn on that task, name split or redesign in
+   `03-decisions.md`. By the second round-2 halt signal or the third `fix_required`
    review round on the same task, apply the Review-round escalation budget
    (see below) instead of running another round unaided. When a fix round's review meets the trigger of the Fix-regression decision point (defined only in [review and recovery](review-and-recovery.md), not restated here), record the Fix-regression decision point before another fix round starts. At an advisor
    trigger (architectural uncertainty, conflicting

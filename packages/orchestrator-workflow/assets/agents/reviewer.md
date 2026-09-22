@@ -87,7 +87,16 @@ Check, at minimum:
 - Recurrence: when the briefing tells you this is not the task's first
   review round, classify each finding as `new` or `repeated` against the
   earlier rounds you were told about; on a first round every finding is
-  `new` by definition. The orchestrator uses this to detect the
+  `new` by definition. Class match, not site match, decides this: set
+  `repeated` whenever a finding's defect class matches an earlier round's
+  finding, even when this instance sits at a site the earlier round never
+  touched. On any round after the task's first, run your own
+  class-enumeration search independent of the implementer's
+  `class_closure` report: search for the pattern the earlier finding's fix
+  addressed, and compare what your own search returns against the
+  implementer's `class_closure.sites` list (or its `source` closure
+  reason); a site your search finds that the implementer's report omits
+  is itself a finding. The orchestrator uses this to detect the
   review-round escalation budget's trigger. Delta attribution: classify every finding as `introduced_by_delta: yes | no | unknown`; set `no` only after naming the base build and replaying the same reproduction in `reproduction`, and record it in `05-review-findings.md` through the ordinary gate rather than bounded-round halt/escalation guidance (yes/unknown only).
 - GitHub Actions shell replay: for any diff that adds or changes a GitHub
   Actions `run:` step, replay it yourself under the shell the step actually

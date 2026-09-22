@@ -1258,6 +1258,117 @@ describe("commits field ships in the skill and the implementer prompt", () => {
 });
 
 /**
+ * A fix round used to close only the reported instance of a defect class,
+ * not the class itself, so the next review round routinely found the same
+ * class at a different site (batch 48: 8 repeated findings of 32 review
+ * rounds; batch 51: 13 repeated-finding mentions across 22 rounds). This
+ * pins the implementer-side class-enumeration and one-probe-per-finding
+ * obligations, the new `class_closure` output-contract field (byte-identical
+ * between SKILL.md's reference copy and the installed implementer.md
+ * prompt, the same rigor already applied to `mutation_probes` and
+ * `commits`), and the reviewer-side independent enumeration and
+ * class-match recurrence rule.
+ */
+describe("class_closure fix-round obligation ships in the implementer prompt and contract", () => {
+  const skillMd = unwrap(readAsset("skill/SKILL.md"));
+  const implementerMd = unwrap(readAsset("agents/implementer.md"));
+
+  it("the installed implementer prompt states the class-enumeration obligation for any round after the first", () => {
+    expect(implementerMd).toContain(
+      "On any round after the task's first, when the round fixes a review finding, enumerate the defect's class before returning: run a search command for the pattern the finding's fix addresses and list every hit in the report, or state a source-level closure (the fix removes the pattern at its one source, closing the whole class without a search) and say why in `summary`.",
+    );
+  });
+
+  it("the installed implementer prompt states the class_closure field's kind/command/sites semantics", () => {
+    expect(implementerMd).toContain(
+      "Report the result in the output contract's `class_closure` field: `kind: enumerated | source | not_applicable` (`not_applicable` only on the task's first round, when there is no review finding yet to fix), the search `command` that produced the hit list (empty when `kind` is not `enumerated`), and the `sites` list of every hit found (empty when `kind` is not `enumerated`).",
+    );
+  });
+
+  it("the installed implementer prompt states the one-mutation-probe-per-fixed-finding obligation", () => {
+    expect(implementerMd).toContain(
+      "Run one mutation probe per review finding fixed in the round, in addition to any probe the assignment names, and report each one in `mutation_probes`.",
+    );
+  });
+
+  it("the installed implementer prompt treats a fix-round return without class_closure as a misfire", () => {
+    expect(implementerMd).toContain(
+      "A fix-round return without `class_closure` is a misfire per the misfire rule.",
+    );
+  });
+
+  it("both implementer output contracts carry an identical class_closure field (raw, not line-unwrapped)", () => {
+    const extractClassClosureBlock = (raw: string): string => {
+      const match = raw.match(/^class_closure:\n(?: {2}.+\n)*/m);
+      expect(match, "class_closure block not found").toBeTruthy();
+      return (match as RegExpMatchArray)[0];
+    };
+    const skillBlock = extractClassClosureBlock(readAsset("skill/SKILL.md"));
+    const implementerBlock = extractClassClosureBlock(
+      readAsset("agents/implementer.md"),
+    );
+    expect(skillBlock.length).toBeGreaterThan(20);
+    expect(
+      skillBlock,
+      "class_closure block must be byte-identical across both copies",
+    ).toStrictEqual(implementerBlock);
+    expect(skillBlock).toContain("kind: enumerated | source | not_applicable");
+    expect(skillBlock).toContain('command: ""');
+    expect(skillBlock).toContain("sites:");
+  });
+
+  it("class_closure sits after mutation_probes and before risks in both copies", () => {
+    for (const raw of [
+      readAsset("skill/SKILL.md"),
+      readAsset("agents/implementer.md"),
+    ]) {
+      const mutationProbesIndex = raw.indexOf("mutation_probes:");
+      const classClosureIndex = raw.indexOf("class_closure:");
+      const risksIndex = raw.indexOf("risks:");
+      expect(mutationProbesIndex).toBeGreaterThanOrEqual(0);
+      expect(classClosureIndex).toBeGreaterThan(mutationProbesIndex);
+      expect(risksIndex).toBeGreaterThan(classClosureIndex);
+    }
+  });
+
+  it("the reviewer prompt states the independent class-enumeration obligation for round N+1", () => {
+    const reviewerMd = unwrap(readAsset("agents/reviewer.md"));
+    expect(reviewerMd).toContain(
+      "On any round after the task's first, run your own class-enumeration search independent of the implementer's `class_closure` report: search for the pattern the earlier finding's fix addressed, and compare what your own search returns against the implementer's `class_closure.sites` list (or its `source` closure reason); a site your search finds that the implementer's report omits is itself a finding.",
+    );
+  });
+
+  it("the reviewer prompt requires recurrence: repeated whenever the class matches an earlier round's finding, even at a new site", () => {
+    const reviewerMd = unwrap(readAsset("agents/reviewer.md"));
+    expect(reviewerMd).toContain(
+      "Class match, not site match, decides this: set `repeated` whenever a finding's defect class matches an earlier round's finding, even when this instance sits at a site the earlier round never touched.",
+    );
+  });
+
+  it("the Round-2 halt rule cross-references step 8's operational halt", () => {
+    expect(skillMd).toContain(
+      "Step 8 of the detailed workflow states the operational halt: stop before any further implementer spawn on the task and record the split-or-redesign decision in `03-decisions.md`.",
+    );
+  });
+
+  it("the CHANGELOG [Unreleased] entry carries the batch measurement, with no org paths", () => {
+    const changelog = readFileSync(
+      fileURLToPath(new URL("../CHANGELOG.md", import.meta.url)),
+      "utf8",
+    );
+    const unreleasedStart = changelog.indexOf("## [Unreleased]");
+    const nextRelease = changelog.indexOf("\n## [", unreleasedStart + 1);
+    const unreleasedSection = changelog.slice(unreleasedStart, nextRelease);
+    expect(unreleasedSection).toContain("class_closure");
+    expect(unwrap(unreleasedSection)).toContain(
+      "batch 48 saw 8 repeated findings of 32 review rounds, and batch 51 saw 13 repeated-finding mentions across 22 rounds, 7 of those rounds attributable to case-level fixes or inert fixes",
+    );
+    expect(unreleasedSection).not.toMatch(/\.ai\/runs\//);
+    expect(unreleasedSection).not.toMatch(/\/Users\//);
+  });
+});
+
+/**
  * 0.16.0's third contract-compliance fix from the same dogfood: a reviewer
  * return omitted the mandatory `acceptance_recommendation` field, so the
  * orchestrator had to guess a verdict instead of asking the reviewer to
@@ -1392,7 +1503,7 @@ describe("round-2 halt rule ships in the skill", () => {
   it("carries the section heading and step 8's reference to it", () => {
     expect(skillMd).toContain("## Round-2 halt rule");
     expect(skillMd).toContain(
-      "Watch for the round-2 halt signal across repeated review-fix cycles (see Round-2 halt rule below)",
+      "Halt at the first `recurrence: repeated` finding (see Round-2 halt rule below): before any further implementer spawn on that task, name split or redesign in `03-decisions.md`.",
     );
   });
 
@@ -7853,9 +7964,9 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     end: 73,
     anchorKey: "ea438f34",
     paragraphLine: 180,
-    uncitedLines: [516],
+    uncitedLines: [590],
     claim:
-      "line 73 cites the test that 00-goal.md carries the keyed run-base placeholder line byte-exactly; uncited 516 repeats the identical marker line at a wholly separate site the citing sentence never names.",
+      "line 73 cites the test that 00-goal.md carries the keyed run-base placeholder line byte-exactly; uncited 590 repeats the identical marker line at a wholly separate site the citing sentence never names.",
   },
   {
     doc: "run-state-lifecycle-and-markers.md",
@@ -7865,9 +7976,9 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     end: 95,
     anchorKey: "3cd8bcb0",
     paragraphLine: 184,
-    uncitedLines: [516],
+    uncitedLines: [590],
     claim:
-      "line 95 cites the test that the keyed run-base placeholder line sits directly below the unkeyed one; uncited 516 repeats the identical marker line at a wholly separate site the citing sentence never names.",
+      "line 95 cites the test that the keyed run-base placeholder line sits directly below the unkeyed one; uncited 590 repeats the identical marker line at a wholly separate site the citing sentence never names.",
   },
   {
     doc: "run-state-lifecycle-and-markers.md",
@@ -7913,9 +8024,9 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     end: 1013,
     anchorKey: "fcc9c9f6",
     paragraphLine: 156,
-    uncitedLines: [1653, 1693],
+    uncitedLines: [1764, 1804],
     claim:
-      "line 1013 cites the reviewer-copy byte-identity test for the reproduction field; uncited 1653 and 1693 are the same equality-assertion shape inside the separate findings-block and method_applied/withdrawn-block reviewer-copy tests, which this sentence does not name.",
+      "line 1013 cites the reviewer-copy byte-identity test for the reproduction field; uncited 1764 and 1804 are the same equality-assertion shape inside the separate findings-block and method_applied/withdrawn-block reviewer-copy tests, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
@@ -7925,9 +8036,9 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     end: 1082,
     anchorKey: "bd3b4521",
     paragraphLine: 159,
-    uncitedLines: [1233, 4847],
+    uncitedLines: [1233, 4958],
     claim:
-      "line 1082 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1233 and 4847 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
+      "line 1082 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1233 and 4958 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
@@ -7961,9 +8072,9 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     end: 1082,
     anchorKey: "bd3b4521",
     paragraphLine: 440,
-    uncitedLines: [1233, 4847],
+    uncitedLines: [1233, 4958],
     claim:
-      "line 1082 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1233 and 4847 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
+      "line 1082 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1233 and 4958 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
@@ -7973,9 +8084,9 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     end: 1082,
     anchorKey: "bd3b4521",
     paragraphLine: 444,
-    uncitedLines: [1233, 4847],
+    uncitedLines: [1233, 4958],
     claim:
-      "line 1082 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1233 and 4847 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
+      "line 1082 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1233 and 4958 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
@@ -7993,37 +8104,37 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 4788,
-    end: 4788,
+    start: 4899,
+    end: 4899,
     anchorKey: "ecb73fca",
     paragraphLine: 507,
-    uncitedLines: [4818],
+    uncitedLines: [4929],
     claim:
-      "line 4788 cites the test that step 6 treats a replayed probe that now survives or cannot be applied as a regression signal; uncited 4818 is the same regression-signal sentence quoted again inside the separate workflow-step-6-source test, which this sentence does not name.",
+      "line 4899 cites the test that step 6 treats a replayed probe that now survives or cannot be applied as a regression signal; uncited 4929 is the same regression-signal sentence quoted again inside the separate workflow-step-6-source test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 4806,
-    end: 4806,
+    start: 4917,
+    end: 4917,
     anchorKey: "2e18ea4a",
     paragraphLine: 511,
-    uncitedLines: [6258],
+    uncitedLines: [6369],
     claim:
-      "line 4806 cites the test that the installed implementer prompt carries the same regression-signal consequence; uncited 6258 is unrelated fixture prose inside the separate shape-3 sibling-guard fixture test that happens to share a short word run with that consequence sentence, which this sentence does not name.",
+      "line 4917 cites the test that the installed implementer prompt carries the same regression-signal consequence; uncited 6369 is unrelated fixture prose inside the separate shape-3 sibling-guard fixture test that happens to share a short word run with that consequence sentence, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 4846,
-    end: 4846,
+    start: 4957,
+    end: 4957,
     anchorKey: "a4566152",
     paragraphLine: 513,
     uncitedLines: [1127],
     claim:
-      "line 4846 cites the test that both output contract copies carry a byte-identical mutation_probes block; uncited 1127 is the same boolean-literal phrase inside the separate exact-sub-field-names test earlier in the file, which this sentence does not name.",
+      "line 4957 cites the test that both output contract copies carry a byte-identical mutation_probes block; uncited 1127 is the same boolean-literal phrase inside the separate exact-sub-field-names test earlier in the file, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
@@ -8045,9 +8156,9 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     end: 1233,
     anchorKey: "bd3b4521",
     paragraphLine: 643,
-    uncitedLines: [1082, 4847],
+    uncitedLines: [1082, 4958],
     claim:
-      "line 1233 cites the implementer-copy byte-identity test for the commits field; uncited 1082 and 4847 are the same equality-assertion shape inside the separate mutation_probes-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
+      "line 1233 cites the implementer-copy byte-identity test for the commits field; uncited 1082 and 4958 are the same equality-assertion shape inside the separate mutation_probes-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",

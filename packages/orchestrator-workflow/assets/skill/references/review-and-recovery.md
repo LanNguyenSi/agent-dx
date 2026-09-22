@@ -44,7 +44,9 @@ cases. Ship the healthy half on its own verification, and refile the
 removed half as its own task carrying the measurement history that led to
 the split. Acceptance criteria that cannot be satisfied this way go to the
 operator as a merge-hold (hold the change unmerged and hand the decision to
-the operator).
+the operator). Step 8 of the detailed workflow states the operational
+halt: stop before any further implementer spawn on the task and record the
+split-or-redesign decision in `03-decisions.md`.
 
 ## Review-round escalation budget
 

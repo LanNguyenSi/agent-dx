@@ -444,6 +444,80 @@ describe("04-implementation-summary.md Mutation Probes subsection", () => {
 
     expect(columnNames).toEqual(subFieldNames);
   });
+});
+
+/**
+ * A fix round used to close only the reported instance of a defect class
+ * rather than the class itself, so the class routinely recurred at a new
+ * site in a later review round. This pins the added "Class Closure"
+ * subsection, one row per fix round, sitting between the Mutation Probes
+ * subsection (whose own probes a fix round also names) and the Optional
+ * Probe Plan and Result Index, both still between Test Evidence and
+ * Risks / Notes.
+ */
+describe("04-implementation-summary.md Class Closure subsection", () => {
+  const implementationTemplate = readAsset(
+    "templates/04-implementation-summary.md",
+  );
+
+  it("carries a Class Closure subsection", () => {
+    expect(implementationTemplate).toContain("### Class Closure");
+  });
+
+  it("places the Class Closure subsection between Mutation Probes and the Optional Probe Plan and Result Index", () => {
+    const mutationProbesIndex = implementationTemplate.indexOf(
+      "### Mutation Probes",
+    );
+    const classClosureIndex =
+      implementationTemplate.indexOf("### Class Closure");
+    const probePlanIndex = implementationTemplate.indexOf(
+      "### Optional Probe Plan and Result Index",
+    );
+    const risksIndex = implementationTemplate.indexOf("## Risks / Notes");
+    expect(mutationProbesIndex).toBeGreaterThanOrEqual(0);
+    expect(classClosureIndex).toBeGreaterThan(mutationProbesIndex);
+    expect(probePlanIndex).toBeGreaterThan(classClosureIndex);
+    expect(risksIndex).toBeGreaterThan(probePlanIndex);
+  });
+
+  it("carries a header row with Round, Class, Enumeration Command, Sites, and Closure Kind columns", () => {
+    const classClosureIndex =
+      implementationTemplate.indexOf("### Class Closure");
+    expect(classClosureIndex).toBeGreaterThanOrEqual(0);
+    const tableText = implementationTemplate.slice(classClosureIndex);
+    const headerRow = tableText
+      .split(/\r?\n/)
+      .find((line) => line.trim().startsWith("|") && /round/i.test(line));
+    expect(headerRow).toBeDefined();
+    const cells = (headerRow ?? "")
+      .split("|")
+      .slice(1, -1)
+      .map((cell) => cell.trim().toLowerCase());
+    expect(cells).toEqual([
+      "round",
+      "class",
+      "enumeration command",
+      "sites",
+      "closure kind",
+    ]);
+  });
+
+  it("states the closure-kind enum and the blank-command-on-source-closure rule", () => {
+    const classClosureIndex =
+      implementationTemplate.indexOf("### Class Closure");
+    expect(classClosureIndex).toBeGreaterThanOrEqual(0);
+    const sectionText = implementationTemplate
+      .slice(classClosureIndex)
+      .replace(/\s+/g, " ");
+    expect(sectionText).toContain("enumerated | source | not_applicable");
+    expect(sectionText).toContain("blank when `Closure Kind` is `source`");
+  });
+});
+
+describe("04-implementation-summary.md Mutation Probes / Class Closure placement guard", () => {
+  const implementationTemplate = readAsset(
+    "templates/04-implementation-summary.md",
+  );
 
   /**
    * Review round 3 finding (LOW): SKILL.md step 6's Before/After
