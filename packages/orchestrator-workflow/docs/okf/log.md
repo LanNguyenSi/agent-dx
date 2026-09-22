@@ -1,5 +1,23 @@
 # Bundle log
 
+- 2026-09-22T19:42:00.000Z (agent-dx tracker task
+  8ebe430c-6f61-47ad-822c-0a2549cc2baa): the fix-round review found the
+  fourth of those synthetic cases non-discriminating, a LOW of the same
+  class the MEDIUM was about: it set `isStringAnchor: false` and
+  `anchorText: undefined` together, so an undefined anchor made the later
+  occurrences precondition abstain on its own and deleting the
+  string-anchor filter left the suite green. The anchor text is defined
+  now, so that filter is the only thing rejecting the pair, and the
+  surviving mutant is killed. The state is unreachable through
+  `extractSiblingGuardCitations` (it sets the text iff the anchor is a
+  string), so the filter is defense in depth and the case pins it as
+  such. The four docs listing that test file as a source are re-stamped
+  to this entry's timestamp, later than the test commit at
+  2026-09-22T19:39:56Z. Residual recorded by the same review: these
+  synthetic targets carry no allowlist-span marker, so
+  `stripSelfAllowlistSpan`'s effect on the occurrence count is exercised
+  only by the live-bundle test.
+
 - 2026-09-22T19:28:00.000Z (agent-dx tracker task
   8ebe430c-6f61-47ad-822c-0a2549cc2baa): round-3 review follow-up. The
   review found the new same-line-anchor collapse rule itself unpinned, a
