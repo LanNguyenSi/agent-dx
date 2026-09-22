@@ -8099,9 +8099,9 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     end: 1035,
     anchorKey: "fcc9c9f6",
     paragraphLine: 156,
-    uncitedLines: [1833, 1873],
+    uncitedLines: [1839, 1879],
     claim:
-      "line 1035 cites the reviewer-copy byte-identity test for the reproduction field; uncited 1833 and 1873 are the same equality-assertion shape inside the separate findings-block and method_applied/withdrawn-block reviewer-copy tests, which this sentence does not name.",
+      "line 1035 cites the reviewer-copy byte-identity test for the reproduction field; uncited 1839 and 1879 are the same equality-assertion shape inside the separate findings-block and method_applied/withdrawn-block reviewer-copy tests, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
@@ -8111,9 +8111,9 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     end: 1104,
     anchorKey: "bd3b4521",
     paragraphLine: 159,
-    uncitedLines: [1255, 5027],
+    uncitedLines: [1255, 5033],
     claim:
-      "line 1104 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1255 and 5027 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
+      "line 1104 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1255 and 5033 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
@@ -8147,9 +8147,9 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     end: 1104,
     anchorKey: "bd3b4521",
     paragraphLine: 440,
-    uncitedLines: [1255, 5027],
+    uncitedLines: [1255, 5033],
     claim:
-      "line 1104 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1255 and 5027 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
+      "line 1104 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1255 and 5033 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
@@ -8159,9 +8159,9 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     end: 1104,
     anchorKey: "bd3b4521",
     paragraphLine: 444,
-    uncitedLines: [1255, 5027],
+    uncitedLines: [1255, 5033],
     claim:
-      "line 1104 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1255 and 5027 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
+      "line 1104 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1255 and 5033 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
@@ -8179,37 +8179,37 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 4968,
-    end: 4968,
+    start: 4974,
+    end: 4974,
     anchorKey: "ecb73fca",
     paragraphLine: 507,
-    uncitedLines: [4998],
+    uncitedLines: [5004],
     claim:
-      "line 4968 cites the test that step 6 treats a replayed probe that now survives or cannot be applied as a regression signal; uncited 4998 is the same regression-signal sentence quoted again inside the separate workflow-step-6-source test, which this sentence does not name.",
+      "line 4974 cites the test that step 6 treats a replayed probe that now survives or cannot be applied as a regression signal; uncited 5004 is the same regression-signal sentence quoted again inside the separate workflow-step-6-source test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 4986,
-    end: 4986,
+    start: 4992,
+    end: 4992,
     anchorKey: "2e18ea4a",
     paragraphLine: 511,
-    uncitedLines: [6438],
+    uncitedLines: [6444],
     claim:
-      "line 4986 cites the test that the installed implementer prompt carries the same regression-signal consequence; uncited 6438 is unrelated fixture prose inside the separate shape-3 sibling-guard fixture test that happens to share a short word run with that consequence sentence, which this sentence does not name.",
+      "line 4992 cites the test that the installed implementer prompt carries the same regression-signal consequence; uncited 6444 is unrelated fixture prose inside the separate shape-3 sibling-guard fixture test that happens to share a short word run with that consequence sentence, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 5026,
-    end: 5026,
+    start: 5032,
+    end: 5032,
     anchorKey: "a4566152",
     paragraphLine: 513,
     uncitedLines: [1149],
     claim:
-      "line 5026 cites the test that both output contract copies carry a byte-identical mutation_probes block; uncited 1149 is the same boolean-literal phrase inside the separate exact-sub-field-names test earlier in the file, which this sentence does not name.",
+      "line 5032 cites the test that both output contract copies carry a byte-identical mutation_probes block; uncited 1149 is the same boolean-literal phrase inside the separate exact-sub-field-names test earlier in the file, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
@@ -8231,9 +8231,9 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     end: 1255,
     anchorKey: "bd3b4521",
     paragraphLine: 734,
-    uncitedLines: [1104, 5027],
+    uncitedLines: [1104, 5033],
     claim:
-      "line 1255 cites the implementer-copy byte-identity test for the commits field; uncited 1104 and 5027 are the same equality-assertion shape inside the separate mutation_probes-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
+      "line 1255 cites the implementer-copy byte-identity test for the commits field; uncited 1104 and 5033 are the same equality-assertion shape inside the separate mutation_probes-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
