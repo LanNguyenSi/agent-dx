@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-09-21T05:21:32Z
+timestamp: 2026-09-22T07:40:00Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -191,22 +191,22 @@ the seven checks (all but the SKILL.md Run state contract check itself)
 route through one `expectPointerMention` helper that asserts the exact
 phrase "`.ai/run` pointer" rather than the bare, incident-prone substring
 `.ai/run`
-(docs-consistency.test.ts:416-423#"expect(slice).toContain("):
+(docs-consistency.test.ts:438-445#"expect(slice).toContain("):
 SKILL.md Run state documents the `.ai/run` contract with its own specific
-phrases (docs-consistency.test.ts:425-431#"make sure it is ignored") and
+phrases (docs-consistency.test.ts:447-453#"make sure it is ignored") and
 carries the keyed example verbatim
-(docs-consistency.test.ts:434-435#"run-base[<repo-basename>] = <sha>");
+(docs-consistency.test.ts:456-457#"run-base[<repo-basename>] = <sha>");
 step 1 mentions the pointer via the helper
-(docs-consistency.test.ts:445-451#"expectPointerMention(step1)"); each of
+(docs-consistency.test.ts:467-473#"expectPointerMention(step1)"); each of
 the three harness bullets mentions it via the helper, in a loop
-(docs-consistency.test.ts:454-471#"expectPointerMention(bullet)"); the
+(docs-consistency.test.ts:476-493#"expectPointerMention(bullet)"); the
 policy-section bullet carries both facts
-(docs-consistency.test.ts:475-482#"run-base[<repo-basename>]"); and the
+(docs-consistency.test.ts:497-504#"run-base[<repo-basename>]"); and the
 README and both INSTALL-AGENT.md write-surface listings mention the pointer
 via the helper and `.gitignore` by substring
-(docs-consistency.test.ts:485-491#"expectPointerMention(section)";
-docs-consistency.test.ts:495-501#"expectPointerMention(section)";
-docs-consistency.test.ts:505-511#"expectPointerMention(section)").
+(docs-consistency.test.ts:507-513#"expectPointerMention(section)";
+docs-consistency.test.ts:517-523#"expectPointerMention(section)";
+docs-consistency.test.ts:527-533#"expectPointerMention(section)").
 
 ## The verdict markers: acceptance signals, fail CLOSED
 
@@ -224,10 +224,10 @@ SKILL.md's closing instruction: "replace the `TODO` in each
 `<!-- solution-acceptance: ... = TODO -->` marker with the chosen enum
 value. That marker line is the machine-readable signal the harness
 solution-acceptance run-gate reads, so leaving it as `TODO` keeps the run
-non-accepting (fail-closed)" (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:257#"non-accepting (fail-closed)."). A freshly-copied run is
+non-accepting (fail-closed)" (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:258#"non-accepting (fail-closed)."). A freshly-copied run is
 therefore non-accepting by construction; this contract shipped in 0.7.0
 (`CHANGELOG.md:#[0.7.0]`). Consumer is "the harness solution-acceptance
-run-gate" per packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:255#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
+run-gate" per packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:256#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
 does not assert the external gate's internals. Pinned by
 template-markers.test.ts:32-34#"/solution-acceptance:\s*acceptance-recommendation\s*=\s*" (regexes) and template-markers.test.ts:37-38#"const matches = [...handoffTemplate.matchAll(finalStatusRe)];" and template-markers.test.ts:43-44#"const matches = [...reviewTemplate.matchAll(recommendationRe)];" (one marker per
 template, default `TODO`).
@@ -326,12 +326,12 @@ applying this guidance before filling the file: check whether the change
 touched any path a bundle doc claims as a `sources:` entry, and if so either
 update the affected docs (re-verify and re-stamp) or record a follow-up
 task, running the bundle validator when one is available (for example
-`okf-kit check`) (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:245#"validator when one is available (for example"). It is explicitly non-gating: "apply
+`okf-kit check`) (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:246#"validator when one is available (for example"). It is explicitly non-gating: "apply
 this optional guidance" and "Repos without a bundle are unaffected"
-(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:241#"guidance: when the repo carries a curated knowledge"; packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:246#"without a bundle are unaffected"). Since 0.24.0 (placement rule) step 9 also
+(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:242#"guidance: when the repo carries a curated knowledge"; packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:247#"without a bundle are unaffected"). Since 0.24.0 (placement rule) step 9 also
 carries a one-sentence placement check for the orchestrator: before handing
 off, check that no org-, machine- or point-in-time-bound evidence was added
-to a reusable instruction file (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:251#"or the consuming workspace, with a pointer left behind."); the fix is to move the
+to a reusable instruction file (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:252#"or the consuming workspace, with a pointer left behind."); the fix is to move the
 evidence to the changelog, the run files, or the consuming workspace, with a
 pointer left behind. `reviewer.md`'s "Check, at minimum" list carries a
 matching check for the same thing on the implementer side of a run. This is
@@ -341,12 +341,12 @@ hand-mapping terrain, packages/orchestrator-workflow/assets/skill/references/evi
 the loop-closer and cites the motivating evidence: four upkeep sweeps on
 2026-07-16 found 48/24/11/8 stale claims across the four oldest bundles
 (`CHANGELOG.md:#[0.12.0]`). Pinned by
-docs-consistency.test.ts:335-340#"apply this optional guidance: when the repo carries a" (the hook's opening phrase, anchored so a
+docs-consistency.test.ts:357-362#"apply this optional guidance: when the repo carries a" (the hook's opening phrase, anchored so a
 deletion is detected even though "curated knowledge bundle" and
-"docs/okf/" also occur in the Discover-step test), docs-consistency.test.ts:344-346#"whether the change touches paths any bundle doc claims as sources" (source-overlap
-check phrase), docs-consistency.test.ts:350-352#"update the affected docs (re-verify and re-stamp) or record a follow-up task" (both responses named), docs-consistency.test.ts:356-357#"run the bundle validator when one is available" (validator-run
-phrase, `okf-kit check` framed as an example), docs-consistency.test.ts:361-363#"Repos without a bundle are unaffected" (non-gate
-optionality phrase), and docs-consistency.test.ts:366-369#"Outcome: updated | not affected | follow-up filed." (the template section, its outcome
+"docs/okf/" also occur in the Discover-step test), docs-consistency.test.ts:366-368#"whether the change touches paths any bundle doc claims as sources" (source-overlap
+check phrase), docs-consistency.test.ts:372-374#"update the affected docs (re-verify and re-stamp) or record a follow-up task" (both responses named), docs-consistency.test.ts:378-379#"run the bundle validator when one is available" (validator-run
+phrase, `okf-kit check` framed as an example), docs-consistency.test.ts:383-385#"Repos without a bundle are unaffected" (non-gate
+optionality phrase), and docs-consistency.test.ts:388-391#"Outcome: updated | not affected | follow-up filed." (the template section, its outcome
 vocabulary, and that it is marked Optional and bundle-scoped).
 
 ## Where the shapes are pinned, and what belongs to sibling docs
@@ -368,9 +368,9 @@ anything inside it.
 (role enumeration, review-gate wording, instruction trust boundary,
 subagent misfire rule, task-slicer/subagent-contract field superset); only
 its `run-base fill instruction ships in the skill`
-(docs-consistency.test.ts:384-390#"before the first implementation commit") and
+(docs-consistency.test.ts:406-412#"before the first implementation commit") and
 `hand off keeps a curated knowledge bundle current`
-(docs-consistency.test.ts:331-379#"Optional") `describe` blocks are this doc's topic.
+(docs-consistency.test.ts:353-401#"Optional") `describe` blocks are this doc's topic.
 The review-gate decision procedure that produces the values written into
 `acceptance-recommendation`/`final-status` (severities, waiver rules, who
 signs off) is out of scope here; see
@@ -428,13 +428,13 @@ section
 (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:203#"Run files per mode:"),
 because the verification set, the mutation probes, and the baseline coverage
 table live there; `batch` adds an Integration section to the same template
-(packages/orchestrator-workflow/assets/templates/04-implementation-summary.md:127#"## Integration").
+(packages/orchestrator-workflow/assets/templates/04-implementation-summary.md:129#"## Integration").
 The marker line and its explanatory comment deliberately avoid naming both
 tokens of a run-base marker, which the consuming reader would flag as a
 malformed run-base attempt; the pin for that is
-packages/orchestrator-workflow/test/template-markers.test.ts:598#"adds no line that names both tokens of a run-base marker",
+packages/orchestrator-workflow/test/template-markers.test.ts:610#"adds no line that names both tokens of a run-base marker",
 next to the count-and-default pin
-(packages/orchestrator-workflow/test/template-markers.test.ts:581#"has exactly one mode marker, defaulting to delegated").
+(packages/orchestrator-workflow/test/template-markers.test.ts:593#"has exactly one mode marker, defaulting to delegated").
 The section's sentences are pinned as constants in
 `test/run-mode-constants.ts`, and `test/run-mode.test.ts` checks that no
 pointer site restates them.

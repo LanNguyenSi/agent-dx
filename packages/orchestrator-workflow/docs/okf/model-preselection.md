@@ -3,7 +3,7 @@ type: module
 title: Model preselection and routing
 description: How legacy role models and harness-specific role/tier selections flow through the CLI and manifests into agent definitions.
 tags: [models, routing, cli, manifest, per-role, harness-adapters]
-timestamp: 2026-09-21T05:21:32Z
+timestamp: 2026-09-22T07:40:00Z
 sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/routing.ts
@@ -598,20 +598,20 @@ fifth role, the same "did I update every place a role is enumerated" check
 the "Solution-neutral notes" section below describes.
 
 - README's model-preselection table has one row per role
-  (`test/docs-consistency.test.ts:73#"expect(readmeMd).toMatch(new RegExp("`, matches `^\| <role> \|`).
+  (`test/docs-consistency.test.ts:95#"expect(readmeMd).toMatch(new RegExp("`, matches `^\| <role> \|`).
 - `INSTALL-AGENT.md`'s `--models` example names every role
-  (`test/docs-consistency.test.ts:86#"INSTALL-AGENT.md --models example names every role"`, checks for `<role>=<model>` per role).
+  (`test/docs-consistency.test.ts:108#"INSTALL-AGENT.md --models example names every role"`, checks for `<role>=<model>` per role).
 - `INSTALL-AGENT.md`'s manifest example JSON has one `models` key per role
-  (`test/docs-consistency.test.ts:101#"expect(Object.keys(manifest.models).sort()).toEqual(sortedRoles);"`, parses the fenced JSON block and compares sorted keys).
+  (`test/docs-consistency.test.ts:123#"expect(Object.keys(manifest.models).sort()).toEqual(sortedRoles);"`, parses the fenced JSON block and compares sorted keys).
 - `agents-md-section.md`'s "Per-role model preferences (...)" parenthetical
-  lists every role (`test/docs-consistency.test.ts:112#"expect(listed.sort()).toEqual(sortedRoles);"`).
+  lists every role (`test/docs-consistency.test.ts:134#"expect(listed.sort()).toEqual(sortedRoles);"`).
 
 A fifth, adjacent test guards the read-only-role brace lists
 (`agents/{explorer,task-slicer,implementer,reviewer,advisor}.md`) in
-`INSTALL-AGENT.md` (`test/docs-consistency.test.ts:82#"expect(listed.sort()).toEqual(sortedRoles);"`); it is role-enumeration generally, not
+`INSTALL-AGENT.md` (`test/docs-consistency.test.ts:104#"expect(listed.sort()).toEqual(sortedRoles);"`); it is role-enumeration generally, not
 model-specific, but shares the same drift-prevention purpose.
 
-Since 0.19.0, a standalone `describe` (`test/docs-consistency.test.ts:1870#"defaultTier: defaultTierCell.trim(),"`) guards a tier-specific
+Since 0.19.0, a standalone `describe` (`test/docs-consistency.test.ts:1939#"defaultTier: defaultTierCell.trim(),"`) guards a tier-specific
 enumeration site: README's "Effort tiers" role/tier table against
 `ROLE_TIERS` and `DEFAULT_TIER` directly, per role and column
 (tiers-available list order, default-tier value, and a row-count check with
@@ -622,13 +622,13 @@ also covers the advisor row (`ROLE_TIERS.advisor = ["high", "xhigh"]`,
 `DEFAULT_TIER.advisor = "high"`), the test iterating `ROLES` so the new
 per-role assertions came for free from the `models.ts` addition alone, no
 test edit required. Since fix-round-1
-(review finding L4), a second, sibling `describe` (`test/docs-consistency.test.ts:1949#"const def = TIER_DEFS[tier];"`) guards
+(review finding L4), a second, sibling `describe` (`test/docs-consistency.test.ts:2018#"const def = TIER_DEFS[tier];"`) guards
 README's other tier-shaped table, Tier -> model class -> model alias ->
 requested effort, against `TIER_DEFS`/`CLASS_MODELS` directly, the same
 way; before this fix nothing guarded that second table, so it could drift
 from its source maps silently (this table is keyed by `Tier`, not `Role`,
 so it is unaffected by the role count itself). Since fix-round-2 (review finding R2-M1), a
-third, site-specific `describe` (`test/docs-consistency.test.ts:2010#"return readmeMd.slice(startIdx, endIdx);"`)
+third, site-specific `describe` (`test/docs-consistency.test.ts:2079#"return readmeMd.slice(startIdx, endIdx);"`)
 guards the opencode-effort prose in README's "Effort tiers" section
 directly: it isolates that prose block by its own lead-in phrase and the
 next bold lead-in that follows it, then asserts the prose contains the
@@ -640,7 +640,7 @@ claim fails a targeted assertion instead of only showing up as an
 unguarded prose diff.
 
 Since 0.22.0, a fourth, site-specific `describe`
-(`test/docs-consistency.test.ts:2615#"must not sit inside the tiers-gated clause"`) guards the pinned-default-effort
+(`test/docs-consistency.test.ts:2684#"must not sit inside the tiers-gated clause"`) guards the pinned-default-effort
 policy in `agents-md-section.md`'s Scaling delegation bullet list and
 `SKILL.md` step 6: a derivation-based check (not a hand-maintained role
 list, the same discipline the 0.20.0 tier-selection-policy guard above
