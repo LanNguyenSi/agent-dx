@@ -1,5 +1,30 @@
 # Bundle log
 
+- 2026-09-22T19:28:00.000Z (agent-dx tracker task
+  8ebe430c-6f61-47ad-822c-0a2549cc2baa): round-3 review follow-up. The
+  review found the new same-line-anchor collapse rule itself unpinned, a
+  MEDIUM: neutering `findSameLineAnchorCollapses` with an early return
+  left the whole suite green, because running a collector over the real
+  bundle proves the bundle is clean, never that the collector still
+  looks. Four synthetic cases now drive it directly (one fabricated
+  collapse it must report, with the doc lines and the target occurrences
+  in the message; three abstentions pinning its narrowings: a
+  single-occurrence anchor, a cross-paragraph repeat, and a citation with
+  no string anchor), appended at the END of
+  `packages/orchestrator-workflow/test/docs-consistency.test.ts` so no
+  cited line above moves (verified: the diff is one hunk at 12220, and
+  the citations at 10018 and 10533 still read their own `it` lines). A
+  mutation probe applying that early return is now killed by the new
+  positive case; it survived before. The four docs listing that test file
+  as a source (`model-preselection.md`, `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md`,
+  `subagent-contracts-superset.md`) are re-stamped to this entry's
+  timestamp, later than the test commit at 2026-09-22T19:25:16Z. Known
+  residual, recorded rather than closed: the rule sees only the
+  fingerprint of two citations landing on ONE line; a permutation among
+  sibling lines carrying the same anchor, and a single mis-pointed
+  citation in a paragraph, both stay invisible to it.
+
 - 2026-09-22T07:45:00.000Z (agent-dx tracker task
   8ebe430c-6f61-47ad-822c-0a2549cc2baa): a fix-round pass on the
   class-closure feature. Scoped step 8's halt sentence and the Round-2
