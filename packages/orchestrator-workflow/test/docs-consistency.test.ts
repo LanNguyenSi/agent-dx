@@ -1371,7 +1371,13 @@ describe("class_closure fix-round obligation ships in the implementer prompt and
     );
     const subFieldNames = (block: string): string[] =>
       [...block.matchAll(/^\s*(?:- )?(\w+):/gm)].map((m) => m[1]);
-    const expectedOrder = ["class_closure", "kind", "command", "sites", "closed"];
+    const expectedOrder = [
+      "class_closure",
+      "kind",
+      "command",
+      "sites",
+      "closed",
+    ];
     expect(subFieldNames(skillBlock)).toEqual(expectedOrder);
     expect(subFieldNames(implementerBlock)).toEqual(expectedOrder);
   });
