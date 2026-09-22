@@ -118,6 +118,7 @@ class_closure:
   command: ""
   sites:
     - ""
+  closed: true | false
 risks:
   - severity: low | medium | high
     description: ""

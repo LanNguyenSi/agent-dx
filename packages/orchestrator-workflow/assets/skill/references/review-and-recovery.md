@@ -7,7 +7,8 @@ A subagent return is a misfire, not evidence, when its output does not parse
 against its role's output contract, including an implementer return that
 omits the `mutation_probes` field even though the task assignment named
 mutation probes to run, or that omits the `commits` field even though the
-task assignment asked for a commit. When a subagent returns near-instantly
+task assignment asked for a commit, or that omits the `class_closure`
+field on any round after the task's first. When a subagent returns near-instantly
 with no tool activity, treat that as a misfire signal rather than proof:
 check the output against the contract with extra suspicion, and accept it
 only if it is contract-valid and the assignment was answerable from the
@@ -45,8 +46,10 @@ removed half as its own task carrying the measurement history that led to
 the split. Acceptance criteria that cannot be satisfied this way go to the
 operator as a merge-hold (hold the change unmerged and hand the decision to
 the operator). Step 8 of the detailed workflow states the operational
-halt: stop before any further implementer spawn on the task and record the
-split-or-redesign decision in `03-decisions.md`.
+halt: stop at the first `recurrence: repeated` finding whose
+`introduced_by_delta` is `yes` or `unknown`, before any further
+implementer spawn on the task, and record the split-or-redesign decision
+in `03-decisions.md`.
 
 ## Review-round escalation budget
 

@@ -97,11 +97,13 @@ Rules:
   (`not_applicable` only on the task's first round, when there is no
   review finding yet to fix), the search `command` that produced the hit
   list (empty when `kind` is not `enumerated`), and the `sites` list of
-  every hit found (empty when `kind` is not `enumerated`). Run one
-  mutation probe per review finding fixed in the round, in addition to
-  any probe the assignment names, and report each one in
-  `mutation_probes`. A fix-round return without `class_closure` is a
-  misfire per the misfire rule.
+  every hit found (empty when `kind` is not `enumerated`), and `closed:
+  true` when every site the round found (by search or by source-level
+  closure) is fixed this round, `false` when a found site is not; name an
+  unclosed site in `risks` with the reason. Run one mutation probe per
+  review finding fixed in the round, in addition to any probe the
+  assignment names, and report each one in `mutation_probes`. A fix-round
+  return without `class_closure` is a misfire per the misfire rule.
 - A persisted probe-plan reference may stand in for a repeated inline mutant
   definition when it resolves to a path plus immutable revision or hash and the
   mutant locator/index. Resolve it before running; a missing, stale, or
@@ -230,6 +232,7 @@ class_closure:
   command: ""
   sites:
     - ""
+  closed: true | false
 risks:
   - severity: low | medium | high
     description: ""

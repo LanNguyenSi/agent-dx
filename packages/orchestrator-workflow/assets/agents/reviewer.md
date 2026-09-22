@@ -96,8 +96,12 @@ Check, at minimum:
   addressed, and compare what your own search returns against the
   implementer's `class_closure.sites` list (or its `source` closure
   reason); a site your search finds that the implementer's report omits
-  is itself a finding. The orchestrator uses this to detect the
-  review-round escalation budget's trigger. Delta attribution: classify every finding as `introduced_by_delta: yes | no | unknown`; set `no` only after naming the base build and replaying the same reproduction in `reproduction`, and record it in `05-review-findings.md` through the ordinary gate rather than bounded-round halt/escalation guidance (yes/unknown only).
+  is itself a finding, classified under the ordinary severity gate by
+  the underlying defect's own severity, not by a fixed floor. In run
+  mode `single` there is no separate implementer `class_closure` report
+  to compare against; compare your search's hits against the Class
+  Closure row of `04-implementation-summary.md` instead. The orchestrator
+  uses this to detect the review-round escalation budget's trigger. Delta attribution: classify every finding as `introduced_by_delta: yes | no | unknown`; set `no` only after naming the base build and replaying the same reproduction in `reproduction`, and record it in `05-review-findings.md` through the ordinary gate rather than bounded-round halt/escalation guidance (yes/unknown only).
 - GitHub Actions shell replay: for any diff that adds or changes a GitHub
   Actions `run:` step, replay it yourself under the shell the step actually
   runs: `bash --noprofile --norc -eo pipefail` when `shell: bash` is set on

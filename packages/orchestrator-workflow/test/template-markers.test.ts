@@ -502,15 +502,27 @@ describe("04-implementation-summary.md Class Closure subsection", () => {
     ]);
   });
 
-  it("states the closure-kind enum and the blank-command-on-source-closure rule", () => {
+  it("states the closure-kind enum (no not_applicable, since a row exists only for a fix round) and the blank-when-not-enumerated rule", () => {
     const classClosureIndex =
       implementationTemplate.indexOf("### Class Closure");
+    const probePlanIndex = implementationTemplate.indexOf(
+      "### Optional Probe Plan and Result Index",
+    );
     expect(classClosureIndex).toBeGreaterThanOrEqual(0);
+    expect(probePlanIndex).toBeGreaterThan(classClosureIndex);
     const sectionText = implementationTemplate
-      .slice(classClosureIndex)
+      .slice(classClosureIndex, probePlanIndex)
       .replace(/\s+/g, " ");
-    expect(sectionText).toContain("enumerated | source | not_applicable");
-    expect(sectionText).toContain("blank when `Closure Kind` is `source`");
+    expect(sectionText).toContain(
+      "(`enumerated | source`) the implementer reported in `class_closure`",
+    );
+    expect(sectionText).not.toContain("enumerated | source | not_applicable");
+    expect(sectionText).toContain(
+      "blank when `Closure Kind` is not `enumerated`",
+    );
+    expect(sectionText).toContain(
+      "`not_applicable` never appears in this table",
+    );
   });
 });
 
