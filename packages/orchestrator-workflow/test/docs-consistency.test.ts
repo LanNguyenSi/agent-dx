@@ -12217,3 +12217,88 @@ describe("citation-sibling-drift guard: the allowlist array's own span is exclud
     ).toEqual(["pkg/carrier.ts"]);
   });
 });
+
+// The collapse rule's OWN pin (round-3 review, MEDIUM). Running a rule
+// over the real bundle only proves the bundle is clean right now; it
+// cannot tell a working rule from one that answers nothing, which is
+// exactly how a guard goes blind under a later refactor. Neutering
+// `findSameLineAnchorCollapses` (an early `return findings;`) left the
+// whole suite green before these cases existed. Same idiom as the other
+// collectors' synthetic fixtures in this file, and appended at the end so
+// no cited line above moves.
+describe("findSameLineAnchorCollapses itself reports and abstains", () => {
+  const cite = (over: Partial<SiblingGuardCitation>): SiblingGuardCitation => ({
+    citedPath: "test/synthetic.test.ts",
+    real: "packages/orchestrator-workflow/test/synthetic.test.ts",
+    start: 20,
+    end: 20,
+    anchorRaw: '"a shared title"',
+    isStringAnchor: true,
+    anchorText: "a shared title",
+    line: 100,
+    paragraphId: 1,
+    ...over,
+  });
+
+  // The anchor text sits at two lines of the target: the precondition that
+  // makes a repeated citation look like a collapse rather than a repeat.
+  const TARGET_WITH_SIBLING = [
+    "before",
+    'it("a shared title", () => {',
+    "between",
+    'it("a shared title", () => {',
+    "after",
+  ].join("\n");
+
+  // The same anchor at exactly ONE line: nothing for a citation to have
+  // collapsed onto, which is the narrowing the rule's comment defends.
+  const TARGET_SINGLE_OCCURRENCE = [
+    "before",
+    'it("a shared title", () => {',
+    "after",
+  ].join("\n");
+
+  it("reports one collapse when a paragraph cites one target line twice under an anchor that sits at several lines", () => {
+    const findings = findSameLineAnchorCollapses(
+      [cite({ line: 100 }), cite({ line: 102 })],
+      () => TARGET_WITH_SIBLING,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toContain("same-line-anchor collapse");
+    expect(findings[0]).toContain("doc line(s) 100, 102");
+    expect(findings[0]).toContain("2, 4");
+  });
+
+  it("abstains when the anchor text occurs at only one line of the target (a repeat, not a collapse)", () => {
+    expect(
+      findSameLineAnchorCollapses(
+        [cite({ line: 100 }), cite({ line: 102 })],
+        () => TARGET_SINGLE_OCCURRENCE,
+      ),
+    ).toEqual([]);
+  });
+
+  it("abstains across paragraphs: the same line cited from two paragraphs is not a collapse", () => {
+    expect(
+      findSameLineAnchorCollapses(
+        [
+          cite({ line: 100, paragraphId: 1 }),
+          cite({ line: 200, paragraphId: 2 }),
+        ],
+        () => TARGET_WITH_SIBLING,
+      ),
+    ).toEqual([]);
+  });
+
+  it("abstains for citations carrying no string anchor", () => {
+    expect(
+      findSameLineAnchorCollapses(
+        [
+          cite({ line: 100, isStringAnchor: false, anchorText: undefined }),
+          cite({ line: 102, isStringAnchor: false, anchorText: undefined }),
+        ],
+        () => TARGET_WITH_SIBLING,
+      ),
+    ).toEqual([]);
+  });
+});
