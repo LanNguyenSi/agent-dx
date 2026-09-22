@@ -239,10 +239,10 @@ categories, both existing fields, every reference site, and the annotation
 requirement (`packages/orchestrator-workflow/test/docs-consistency.test.ts:4862#"requires reference sites to be annotated in the existing task fields"`).
 
 The scope-boundary wording is pinned independently
-(`packages/orchestrator-workflow/test/docs-consistency.test.ts:963#"not implementation instructions"`).
+(`packages/orchestrator-workflow/test/docs-consistency.test.ts:966#"not implementation instructions"`).
 The check derives the *required* field set from
 the live subagent-input yaml block itself rather than hardcoding it
-(`test/docs-consistency.test.ts:818#"^ {4}${field}:"`): it regex-extracts top-level fields
+(`test/docs-consistency.test.ts:855#"^ {4}${field}:"`): it regex-extracts top-level fields
 across the whole input, including scope fields after `context`, plus only
 immediate `context.*` children; it subtracts the explicit envelope (`role,
 task_id, context, expected_output`), and asserts every remaining name
@@ -255,7 +255,7 @@ fails instead. Supporting checks in the same suite: both slicer-output copies
 the newer fields (`test/docs-consistency.test.ts:897#"cursor = idx;"`); `02-tasks.md`'s
 sections retain the existing scope fields, with a v1 contract block and a
 non-normative criterion-ID checklist
-(`test/docs-consistency.test.ts:897#"cursor = idx;"`;
+(`test/docs-consistency.test.ts:923#"cursor = idx;"`;
 `test/acceptance-baseline.test.ts:272-278#"else assertCriteriaShape(block);"`;
 `test/acceptance-baseline.test.ts:404-409#"original contract, keep the original checklist semantics"`); and `task-slicer.md` must frame
 `allowed_changes`/`forbidden_changes` as scope boundaries for the
@@ -641,7 +641,7 @@ not, with the unclosed site named in `risks` with the reason
 (`packages/orchestrator-workflow/assets/agents/implementer.md:101#"when every site the round found (by search or by source-level"`).
 The round also runs one mutation probe per review finding it fixed, in
 addition to any probe the assignment names
-(`implementer.md:103#"Run one mutation probe per"`).
+(`implementer.md:104#"Run one mutation probe per"`).
 
 An output missing the field on any round after the task's first is a
 misfire (see
@@ -660,7 +660,7 @@ defect's own severity rather than a fixed floor
 (`packages/orchestrator-workflow/assets/agents/reviewer.md:98#"a site your search finds that the implementer's report omits"`).
 In run mode `single`, where there is no separate implementer report, the
 reviewer compares its search against the Class Closure row of
-`04-implementation-summary.md` instead
+`04-implementation-summary.md` plus its Risks / Notes section instead
 (`reviewer.md:101#"there is no separate implementer"`).
 Class match, not site match, decides `recurrence: repeated`: the reviewer
 sets it whenever a finding's defect class matches an earlier round's
@@ -668,15 +668,15 @@ finding, even at a site the earlier round never touched
 (`reviewer.md:90#"Class match, not site match, decides this"`).
 
 Step 8 of the detailed workflow halts at the first `recurrence: repeated`
-finding whose `introduced_by_delta` is `yes` or `unknown`, before any
-further implementer spawn, and names split or redesign in
-`03-decisions.md`
+finding whose class a previous round's fix already addressed and whose
+`introduced_by_delta` is `yes` or `unknown`, before any further implementer
+spawn, and names split or redesign in `03-decisions.md`
 (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:225#"Halt at the first"`);
 the Round-2 halt rule's own cross-reference to step 8 states the identical
 scope
 (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:48#"Step 8 of the detailed workflow states the operational"`),
-both sites pinned through one shared test constant so removing the scope
-from either site fails on its own
+both sites pinned through one shared test constant so dropping either
+clause at either site fails on its own
 (`packages/orchestrator-workflow/test/docs-consistency.test.ts:1420#"built from one shared constant"`).
 Full treatment of the Round-2 halt rule and the escalation budget it
 feeds is out of this doc's lane; see

@@ -47,14 +47,14 @@ parenthetically in the `Description` field without renaming the load-bearing
 `Severity` or `Decision` headers (packages/orchestrator-workflow/assets/templates/05-review-findings.md:16#"| Severity | Category | Description | Suggested Fix | Decision |").
 Only `yes` and `unknown` findings feed the bounded round-2 halt and escalation
 rules; this prevents a reproduced pre-existing issue from consuming the
-delta's bounded-review budget. The halt itself states this scope at both
-sites that carry it: step 8 halts "at the first `recurrence: repeated`
-finding whose `introduced_by_delta` is `yes` or `unknown`"
+delta's bounded-review budget. Attribution is the second of the halt's two
+clauses, and both sites carrying the halt state both: step 8 halts "at the
+first `recurrence: repeated` finding whose class a previous round's fix already addressed and whose `introduced_by_delta` is `yes` or `unknown`"
 (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:225#"Halt at the first"`),
 and the Round-2 halt rule's own cross-reference to step 8 states the
-identical scope
+identical scope, both clauses
 (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:48#"Step 8 of the detailed workflow states the operational"`),
-both built from one shared test constant so removing the scope from
+both built from one shared test constant so dropping either clause at
 either site fails that site's own test
 (`packages/orchestrator-workflow/test/docs-consistency.test.ts:1420#"built from one shared constant"`).
 Full field-shape treatment of the implementer-side `class_closure` field
