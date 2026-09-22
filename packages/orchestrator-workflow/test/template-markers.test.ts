@@ -444,6 +444,92 @@ describe("04-implementation-summary.md Mutation Probes subsection", () => {
 
     expect(columnNames).toEqual(subFieldNames);
   });
+});
+
+/**
+ * A fix round used to close only the reported instance of a defect class
+ * rather than the class itself, so the class routinely recurred at a new
+ * site in a later review round. This pins the added "Class Closure"
+ * subsection, one row per fix round, sitting between the Mutation Probes
+ * subsection (whose own probes a fix round also names) and the Optional
+ * Probe Plan and Result Index, both still between Test Evidence and
+ * Risks / Notes.
+ */
+describe("04-implementation-summary.md Class Closure subsection", () => {
+  const implementationTemplate = readAsset(
+    "templates/04-implementation-summary.md",
+  );
+
+  it("carries a Class Closure subsection", () => {
+    expect(implementationTemplate).toContain("### Class Closure");
+  });
+
+  it("places the Class Closure subsection between Mutation Probes and the Optional Probe Plan and Result Index", () => {
+    const mutationProbesIndex = implementationTemplate.indexOf(
+      "### Mutation Probes",
+    );
+    const classClosureIndex =
+      implementationTemplate.indexOf("### Class Closure");
+    const probePlanIndex = implementationTemplate.indexOf(
+      "### Optional Probe Plan and Result Index",
+    );
+    const risksIndex = implementationTemplate.indexOf("## Risks / Notes");
+    expect(mutationProbesIndex).toBeGreaterThanOrEqual(0);
+    expect(classClosureIndex).toBeGreaterThan(mutationProbesIndex);
+    expect(probePlanIndex).toBeGreaterThan(classClosureIndex);
+    expect(risksIndex).toBeGreaterThan(probePlanIndex);
+  });
+
+  it("carries a header row with Round, Class, Enumeration Command, Sites, and Closure Kind columns", () => {
+    const classClosureIndex =
+      implementationTemplate.indexOf("### Class Closure");
+    expect(classClosureIndex).toBeGreaterThanOrEqual(0);
+    const tableText = implementationTemplate.slice(classClosureIndex);
+    const headerRow = tableText
+      .split(/\r?\n/)
+      .find((line) => line.trim().startsWith("|") && /round/i.test(line));
+    expect(headerRow).toBeDefined();
+    const cells = (headerRow ?? "")
+      .split("|")
+      .slice(1, -1)
+      .map((cell) => cell.trim().toLowerCase());
+    expect(cells).toEqual([
+      "round",
+      "class",
+      "enumeration command",
+      "sites",
+      "closure kind",
+    ]);
+  });
+
+  it("states the closure-kind enum (no not_applicable, since a row exists only for a fix round) and the blank-when-not-enumerated rule", () => {
+    const classClosureIndex =
+      implementationTemplate.indexOf("### Class Closure");
+    const probePlanIndex = implementationTemplate.indexOf(
+      "### Optional Probe Plan and Result Index",
+    );
+    expect(classClosureIndex).toBeGreaterThanOrEqual(0);
+    expect(probePlanIndex).toBeGreaterThan(classClosureIndex);
+    const sectionText = implementationTemplate
+      .slice(classClosureIndex, probePlanIndex)
+      .replace(/\s+/g, " ");
+    expect(sectionText).toContain(
+      "(`enumerated | source`) the implementer reported in `class_closure`",
+    );
+    expect(sectionText).not.toContain("enumerated | source | not_applicable");
+    expect(sectionText).toContain(
+      "blank when `Closure Kind` is not `enumerated`",
+    );
+    expect(sectionText).toContain(
+      "`not_applicable` never appears in this table",
+    );
+  });
+});
+
+describe("04-implementation-summary.md Mutation Probes / Class Closure placement guard", () => {
+  const implementationTemplate = readAsset(
+    "templates/04-implementation-summary.md",
+  );
 
   /**
    * Review round 3 finding (LOW): SKILL.md step 6's Before/After
@@ -530,5 +616,88 @@ describe("run mode marker in 00-goal.md", () => {
         line.includes("solution-acceptance") && line.includes("run-base"),
     );
     expect(both).toHaveLength(2);
+  });
+});
+
+/**
+ * Review finding (LOW): the Class Closure table's header columns were
+ * pinned, but its comment-marker row below them was not, so a marker could
+ * be renamed, dropped or reordered with no test noticing -- and the
+ * pre-existing Mutation Probes marker row carried the identical gap. Both
+ * rows are pinned here, through one shared reader, so the class is closed
+ * rather than the one row the finding named. Like the block above it, this
+ * describe sits at the end of the file so that no line cited from the
+ * knowledge bundle moves.
+ */
+describe("04-implementation-summary.md table marker rows", () => {
+  const implementationTemplate = readAsset(
+    "templates/04-implementation-summary.md",
+  );
+
+  /**
+   * The header cells and the marker cells of the FIRST table under a
+   * subsection heading: rows[0] is the header, rows[1] the separator and
+   * rows[2] the marker row, so a deleted marker row makes rows[2] the next
+   * table's own header and fails the marker-shape check below rather than
+   * silently comparing nothing.
+   */
+  const tableUnder = (
+    heading: string,
+  ): { columns: string[]; markers: string[] } => {
+    const start = implementationTemplate.indexOf(heading);
+    expect(
+      start,
+      `${heading} not found in the template`,
+    ).toBeGreaterThanOrEqual(0);
+    const rows = implementationTemplate
+      .slice(start)
+      .split(/\r?\n/)
+      .filter((line) => line.trim().startsWith("|"));
+    expect(
+      rows.length,
+      `${heading} carries no header/separator/marker table`,
+    ).toBeGreaterThanOrEqual(3);
+    const cells = (row: string): string[] =>
+      row
+        .split("|")
+        .slice(1, -1)
+        .map((cell) => cell.trim());
+    return {
+      columns: cells(rows[0]).map((cell) =>
+        cell.toLowerCase().replace(/ /g, "_"),
+      ),
+      markers: cells(rows[2]).map((cell) => {
+        const marker = cell.match(/^<!--\s*(.+?)\s*-->$/);
+        expect(
+          marker,
+          `${heading}: marker-row cell is not a comment marker: ${cell}`,
+        ).toBeTruthy();
+        return (marker as RegExpMatchArray)[1];
+      }),
+    };
+  };
+
+  for (const heading of ["### Mutation Probes", "### Class Closure"]) {
+    it(`${heading} carries one comment marker per header column, named after that column`, () => {
+      const { columns, markers } = tableUnder(heading);
+      expect(columns.length).toBeGreaterThan(0);
+      expect(markers).toEqual(columns);
+    });
+  }
+
+  it("the Class Closure subsection routes an unclosed site of the row's class to Risks / Notes", () => {
+    const classClosureIndex =
+      implementationTemplate.indexOf("### Class Closure");
+    const probePlanIndex = implementationTemplate.indexOf(
+      "### Optional Probe Plan and Result Index",
+    );
+    expect(classClosureIndex).toBeGreaterThanOrEqual(0);
+    expect(probePlanIndex).toBeGreaterThan(classClosureIndex);
+    const sectionText = implementationTemplate
+      .slice(classClosureIndex, probePlanIndex)
+      .replace(/\s+/g, " ");
+    expect(sectionText).toContain(
+      "An unclosed site of the row's class is named in Risks / Notes with the reason.",
+    );
   });
 });

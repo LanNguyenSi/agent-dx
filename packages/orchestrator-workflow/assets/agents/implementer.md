@@ -87,6 +87,23 @@ Rules:
   `result` alone is not: report it as such (`result` `survived` or
   `not_applicable` with the reason) and resolve it before the next
   reviewer spawn.
+- On any round after the task's first, when the round fixes a review
+  finding, enumerate the defect's class before returning: run a search
+  command for the pattern the finding's fix addresses and list every hit
+  in the report, or state a source-level closure (the fix removes the
+  pattern at its one source, closing the whole class without a search)
+  and say why in `summary`. Report the result in the output contract's
+  `class_closure` field: `kind: enumerated | source | not_applicable`
+  (`not_applicable` only on the task's first round, when there is no
+  review finding yet to fix), the search `command` that produced the hit
+  list (empty when `kind` is not `enumerated`), and the `sites` list of
+  every hit found (empty when `kind` is not `enumerated`), and `closed:
+  true` when every site the round found (by search or by source-level
+  closure) is fixed this round, `false` when a found site is not; name an unclosed site in `risks` with
+  the reason. On the task's first round `kind` is `not_applicable`, `command` and `sites` are empty,
+  and `closed` is `true`, since no site was found to leave open. Run one mutation probe per review
+  finding fixed in the round, in addition to any probe the assignment names, and report each one in
+  `mutation_probes`. A fix-round return without `class_closure` is a misfire per the misfire rule.
 - A persisted probe-plan reference may stand in for a repeated inline mutant
   definition when it resolves to a path plus immutable revision or hash and the
   mutant locator/index. Resolve it before running; a missing, stale, or
@@ -210,6 +227,12 @@ mutation_probes:
     reason: ""
     restored_verified: ""
     replayed: false | true
+class_closure:
+  kind: enumerated | source | not_applicable
+  command: ""
+  sites:
+    - ""
+  closed: true | false
 risks:
   - severity: low | medium | high
     description: ""

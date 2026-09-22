@@ -25,6 +25,11 @@ tests:
   added_or_updated: []
   not_executed_reason: ""
 mutation_probes: []
+class_closure:
+  kind: not_applicable
+  command: ""
+  sites: []
+  closed: true
 risks: []
 open_questions: []
 recommendation: review

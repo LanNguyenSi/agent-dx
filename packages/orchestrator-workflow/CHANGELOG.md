@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- A fix round now closes the defect class instead of the reported
+  instance. `assets/agents/implementer.md` (and every tier variant
+  rendered from it) states, for any round after a task's first, the
+  class-enumeration obligation (a search command plus its hit list in the
+  report, or a source-level closure with the reason) and a
+  one-mutation-probe-per-fixed-finding obligation. The implementer output
+  contract (`assets/skill/references/contracts.md`, mirrored in
+  `assets/agents/implementer.md`) gains a `class_closure` field (`kind:
+  enumerated | source | not_applicable` plus `command`, `sites` and
+  `closed: true | false`, with an unclosed site named in `risks` with the
+  reason); the subagent misfire rule now names the omission of
+  `class_closure` on any round after the task's first as a misfire, the
+  way it already names `mutation_probes` and `commits`.
+  `assets/agents/reviewer.md` gains the matching independent
+  class-enumeration obligation for round N+1 and now requires
+  `recurrence: repeated` whenever a finding's class matches an earlier
+  round's finding, even at a new site. `SKILL.md` step 8
+  (`references/evidence-and-probes.md`) now says the orchestrator halts
+  at the first `recurrence: repeated` finding whose `introduced_by_delta`
+  is `yes` or `unknown` and names split or redesign in `03-decisions.md`
+  before any further implementer spawn; the Round-2 halt rule paragraph in
+  `references/review-and-recovery.md` cross-references that halt at the
+  same scope, both sites pinned through one shared test constant.
+  `assets/templates/04-implementation-summary.md`
+  gains a Class Closure row per fix round (class, enumeration command,
+  sites, closure kind). Anchored by two observed batches: batch 48 saw 8
+  repeated findings of 32 review rounds, and batch 51 saw 13
+  repeated-finding mentions across 22 rounds, 7 of those rounds
+  attributable to case-level fixes or inert fixes rather than a closed
+  class. Anchored by an observed run: this fix-round contract was itself
+  applied in the fix rounds of the run that shipped it, before merge.
+
 ## [0.38.1] - 2026-09-20
 
 - Repository lint, not shipped in the package: rule 1 of

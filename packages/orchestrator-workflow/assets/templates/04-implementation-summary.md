@@ -92,6 +92,21 @@ where it lives in the row's own cell.
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | <!-- round --> | <!-- mutant --> | <!-- file --> | <!-- anchor --> | <!-- before --> | <!-- after --> | <!-- verified_applied_via --> | <!-- result --> | <!-- expectation --> | <!-- reason --> | <!-- restored_verified --> | <!-- replayed --> |
 
+### Class Closure
+
+One row per fix round (any round after the task's first) that fixed a review
+finding: the defect class it closed, the search command run to enumerate other
+sites of that class (blank when `Closure Kind` is not `enumerated`), the sites
+the search found (blank when `Closure Kind` is not `enumerated`), and the
+closure kind (`enumerated | source`) the implementer reported in
+`class_closure`; `not_applicable` never appears in this table, since a row
+exists only for a round that fixed a finding, never for the task's first round.
+An unclosed site of the row's class is named in Risks / Notes with the reason.
+
+| Round | Class | Enumeration Command | Sites | Closure Kind |
+|---|---|---|---|---|
+| <!-- round --> | <!-- class --> | <!-- enumeration_command --> | <!-- sites --> | <!-- closure_kind --> |
+
 ### Optional Probe Plan and Result Index
 
 An optional runner-supported probe plan may be referenced here by relative
