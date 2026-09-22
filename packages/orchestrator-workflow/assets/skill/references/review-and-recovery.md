@@ -46,10 +46,10 @@ removed half as its own task carrying the measurement history that led to
 the split. Acceptance criteria that cannot be satisfied this way go to the
 operator as a merge-hold (hold the change unmerged and hand the decision to
 the operator). Step 8 of the detailed workflow states the operational
-halt: stop at the first `recurrence: repeated` finding whose
-`introduced_by_delta` is `yes` or `unknown`, before any further
-implementer spawn on the task, and record the split-or-redesign decision
-in `03-decisions.md`.
+halt: stop at the first `recurrence: repeated` finding whose class a
+previous round's fix already addressed and whose `introduced_by_delta`
+is `yes` or `unknown`, before any further implementer spawn on the
+task, and record the split-or-redesign decision in `03-decisions.md`.
 
 ## Review-round escalation budget
 

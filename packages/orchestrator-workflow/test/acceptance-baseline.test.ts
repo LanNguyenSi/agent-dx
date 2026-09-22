@@ -803,3 +803,38 @@ describe("generated and legacy installed contracts", () => {
     }
   });
 });
+
+/**
+ * Review finding (LOW): a task's FIRST round has no review finding to fix,
+ * so `class_closure` has nothing to enumerate -- but the shape the field
+ * takes there was never stated, leaving a reader to guess whether `closed`
+ * is `true` (no site was found to leave open) or `false` (nothing was
+ * closed). The shape is stated once, at its normative site
+ * (`assets/agents/implementer.md`), and pinned here beside the illustrative
+ * producer return that has to match it, so prompt and fixture cannot drift
+ * apart. This block sits at the end of the file so that no line cited from
+ * the knowledge bundle moves.
+ */
+describe("class_closure on a task's first round", () => {
+  const firstRoundShape =
+    "On the task's first round `kind` is `not_applicable`, `command` and `sites` are empty, and `closed` is `true`, since no site was found to leave open.";
+
+  it("the implementer prompt states the first-round shape at its normative site", () => {
+    expect(unwrap(readAsset("agents/implementer.md"))).toContain(
+      firstRoundShape,
+    );
+  });
+
+  it("the illustrative implementer return carries exactly that first-round shape", () => {
+    const output = yamlAfter(
+      readFixture("implementer-output.md"),
+      "# Implementer return",
+    );
+    expect(nested(output, "class_closure").split("\n")).toEqual([
+      "  kind: not_applicable",
+      '  command: ""',
+      "  sites: []",
+      "  closed: true",
+    ]);
+  });
+});

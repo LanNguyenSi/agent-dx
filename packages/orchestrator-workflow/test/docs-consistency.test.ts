@@ -70,14 +70,14 @@ function extractClassClosureBlock(raw: string): string {
 }
 
 /**
- * The Round-2 halt rule scopes its halt signal to `introduced_by_delta:
- * yes`/`unknown` findings only. Step 8 and the Round-2 halt rule's
- * cross-reference to it both state that scope in the same words; building
- * both expected strings from this one constant means removing the scope
- * phrase from either site fails that site's own assertion instead of the
- * two sites drifting apart silently.
+ * The halt signal's WHOLE scope, both clauses: a `recurrence: repeated`
+ * finding whose class a previous round's fix already addressed, and whose
+ * `introduced_by_delta` is `yes` or `unknown`. Step 8 and the Round-2 halt
+ * rule's cross-reference build their expected string from this one constant,
+ * so dropping either clause at either site fails that site's own assertion.
  */
-const HALT_SCOPE_PHRASE = "whose `introduced_by_delta` is `yes` or `unknown`";
+const HALT_SCOPE_PHRASE =
+  "whose class a previous round's fix already addressed and whose `introduced_by_delta` is `yes` or `unknown`";
 
 /**
  * Guards the enumeration sites that actually drifted when the explorer role
@@ -1406,7 +1406,7 @@ describe("class_closure fix-round obligation ships in the implementer prompt and
   it("the reviewer prompt states the run-mode single comparison target for the class-enumeration search", () => {
     const reviewerMd = unwrap(readAsset("agents/reviewer.md"));
     expect(reviewerMd).toContain(
-      "In run mode `single` there is no separate implementer `class_closure` report to compare against; compare your search's hits against the Class Closure row of `04-implementation-summary.md` instead.",
+      "In run mode `single` there is no separate implementer `class_closure` report to compare against; compare your search's hits against the Class Closure row of `04-implementation-summary.md` plus its Risks / Notes section instead.",
     );
   });
 
@@ -8119,13 +8119,13 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 818,
-    end: 818,
+    start: 855,
+    end: 855,
     anchorKey: "9e1acc22",
     paragraphLine: 245,
-    uncitedLines: [749, 855],
+    uncitedLines: [749, 818],
     claim:
-      "line 818 cites the test proving no subagent-input field is absent from the slicer output schema; uncited 749 and 855 build the same per-field pattern inside the separate superset-schema test and the excludes-only-immediate-envelope-fields test, which this sentence does not name.",
+      "line 855 is the slicer-output match inside the test proving no subagent-input field is absent from the slicer output schema, the test this sentence describes; uncited 749 is the list-shape helper's own field regex, and uncited 818 is the same match inside the separate excludes-only-immediate-envelope-fields test, neither of which this sentence names.",
   },
   {
     doc: "subagent-contracts-superset.md",
@@ -8246,78 +8246,6 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     uncitedLines: [1144],
     claim:
       "line 1260 cites the test for the installed prompt's not-applicable commits clause; uncited 1144 is the same containment assertion inside the separate not-applicable mutation_probes-clause test, which this sentence does not name.",
-  },
-  {
-    doc: "subagent-contracts-superset.md",
-    kind: "duplicate-citation",
-    real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 963,
-    end: 963,
-    anchorKey: "2828df71",
-    paragraphLine: 242,
-    secondCitationLine: 263,
-    claim:
-      "line 242 opens the paragraph by naming the test that pins the scope-boundary wording independently, then line 263, several sentences later, names the same test again while stating the literal wording it pins as prompt text; both citations point at the one `it` block that both sentences are about, not two different assertions.",
-  },
-  {
-    doc: "subagent-contracts-superset.md",
-    kind: "wrong-sibling-anchor",
-    real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 963,
-    end: 963,
-    anchorKey: "3fa620f3",
-    paragraphLine: 242,
-    uncitedLines: [966],
-    claim:
-      "line 963 cites the `it` block's own title, which states the pinned wording in prose; uncited 966 is that same `it` block's own containment assertion three lines below the title, restating the identical title wording as a string literal, not a different site.",
-  },
-  {
-    doc: "subagent-contracts-superset.md",
-    kind: "wrong-sibling-anchor",
-    real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 963,
-    end: 963,
-    anchorKey: "3fa620f3",
-    paragraphLine: 263,
-    uncitedLines: [966],
-    claim:
-      "line 963 cites the `it` block's own title a second time, from the sentence that names the prompt text it mirrors; uncited 966 is the same block's own assertion three lines below, not a different site.",
-  },
-  {
-    doc: "subagent-contracts-superset.md",
-    kind: "duplicate-citation",
-    real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 897,
-    end: 897,
-    anchorKey: "93e9a8fb",
-    paragraphLine: 255,
-    secondCitationLine: 258,
-    claim:
-      "line 255 and line 258 both name the same `it` block (the surviving-field-order test) from two adjacent sentences describing what it proves, one about the SKILL.md/task-slicer.md copies agreeing, the other about the original field order surviving; neither sentence introduces a second, different assertion to cite.",
-  },
-  {
-    doc: "subagent-contracts-superset.md",
-    kind: "distant-duplicate-anchor",
-    real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 897,
-    end: 897,
-    anchorKey: "b8db03aa",
-    paragraphLine: 255,
-    uncitedLines: [923],
-    claim:
-      "line 897 cites the loop-invariant cursor-advance statement inside the slicer-field-order test; uncited 923 is the identical cursor-advance statement inside the separate 02-tasks.md section-order test's own loop, a different site this sentence does not name.",
-  },
-  {
-    doc: "subagent-contracts-superset.md",
-    kind: "distant-duplicate-anchor",
-    real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 897,
-    end: 897,
-    anchorKey: "b8db03aa",
-    paragraphLine: 258,
-    uncitedLines: [923],
-    claim:
-      "line 897 cites the same loop-invariant cursor-advance statement a second time, from the sentence about 02-tasks.md's own scope fields; uncited 923 is the identical cursor-advance statement inside the separate section-order test's own loop, a different site this sentence does not name.",
   },
 ];
 
@@ -8644,6 +8572,81 @@ const SIBLING_GUARD_CLAIM_BOILERPLATE_TAIL =
 
 function siblingGuardClaimHasSubstance(claim: string): boolean {
   return !claim.includes(SIBLING_GUARD_CLAIM_BOILERPLATE_TAIL);
+}
+
+/**
+ * The collapse class, as one mechanical rule: the same target LINE, cited
+ * with the same anchor text more than once inside one paragraph, while
+ * that anchor text occurs at SEVERAL lines of the target. That is the
+ * fingerprint a re-point leaves when it searches the anchor's text and
+ * takes an occurrence instead of deriving the site first -- and it is the
+ * fingerprint the class left both times it shipped (three citations
+ * collapsed onto one `it` block whose title text also sits at two sibling
+ * `it` blocks; two citations collapsed onto one loop's cursor-advance
+ * statement while a second loop carries the identical statement).
+ *
+ * This exists for `log.md`, which `ANCHOR_OKF_DOCS` excludes, so none of
+ * the three rules above ever looked at it -- and the class's second
+ * occurrence sat in the very log paragraph that records its first. Rule
+ * (a) is this rule without the several-lines precondition; the
+ * precondition is what keeps the check aimed at a COLLAPSE rather than at
+ * a citation repeated for another reason. Measured on the bundle before
+ * this round's corrections: rule (a) run unchanged over log.md reports
+ * three hits, of which only one is a collapse (the corrected trio) and two
+ * are the same single-occurrence target line cited twice in one sentence
+ * under two spellings of its path, with no sibling line anywhere for a
+ * citation to have collapsed onto; widening the pair check to the whole
+ * document instead of one paragraph reports three further groups, all
+ * legitimate repeats from unrelated paragraphs, which would each need an
+ * exemption this file's allowlist reserves for an independent review pass.
+ * With the precondition, and per paragraph, the corrected bundle reports
+ * none, and no exemption is needed.
+ *
+ * Not run over the docs in `ANCHOR_OKF_DOCS`: rule (a) already covers them
+ * more strictly, and several of its hits there are allowlisted repeats
+ * this rule would report a second time, unexempted, under a different
+ * name.
+ */
+function findSameLineAnchorCollapses(
+  citations: SiblingGuardCitation[],
+  readTargetFile: (realPath: string) => string,
+): string[] {
+  const findings: string[] = [];
+  for (const list of groupSiblingGuardCitationsByParagraph(
+    citations,
+  ).values()) {
+    const groups = new Map<string, SiblingGuardCitation[]>();
+    for (const c of list) {
+      if (!c.isStringAnchor || c.anchorText === undefined) continue;
+      const key = `${c.real}:${c.start}-${c.end}#${c.anchorText}`;
+      const group = groups.get(key);
+      if (group) {
+        group.push(c);
+      } else {
+        groups.set(key, [c]);
+      }
+    }
+    for (const group of groups.values()) {
+      if (group.length < 2) continue;
+      const [first] = group;
+      const anchorText = first.anchorText as string;
+      const lines = stripSelfAllowlistSpan(readTargetFile(first.real)).split(
+        "\n",
+      );
+      const occurrences = lines.flatMap((line, index) =>
+        line.includes(anchorText) ? [index + 1] : [],
+      );
+      if (occurrences.length < 2) continue;
+      const docLines = group.map((c) => c.line).join(", ");
+      findings.push(
+        `same-line-anchor collapse: \`${first.citedPath}:${first.start}-${first.end}\` ` +
+          `cited ${group.length} times in one paragraph (doc line(s) ${docLines}) ` +
+          `while its anchor text sits at ${occurrences.length} lines of ` +
+          `${first.real} (${occurrences.join(", ")})`,
+      );
+    }
+  }
+  return findings;
 }
 
 describe("the citation-sibling-drift guard reports zero (unallowlisted) findings on the current bundle", () => {
@@ -10008,6 +10011,22 @@ describe("the citation-sibling-drift guard reports zero (unallowlisted) findings
       );
     });
   }
+
+  // The mechanical guard for the collapse class in log.md, the one bundle
+  // doc every rule above skips; see `findSameLineAnchorCollapses` for the
+  // rule itself and for the measured counts behind its two narrowings.
+  it("log.md: no same-line anchor collapse (one target line cited twice under one anchor whose text sits at several lines of that target)", () => {
+    const citations = extractSiblingGuardCitations(
+      readBundleDoc("log.md"),
+      resolveRealPath,
+    );
+    expect(
+      citations.length,
+      "log.md produced no resolved citations at all, so this check would be vacuous",
+    ).toBeGreaterThan(0);
+    const collapses = findSameLineAnchorCollapses(citations, readRepoFile);
+    expect(collapses, collapses.join("\n")).toEqual([]);
+  });
 });
 
 // agent-tasks b50fd903 review round 2 (MEDIUM 2), closed in round 3: the

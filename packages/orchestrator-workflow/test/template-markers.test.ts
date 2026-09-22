@@ -618,3 +618,86 @@ describe("run mode marker in 00-goal.md", () => {
     expect(both).toHaveLength(2);
   });
 });
+
+/**
+ * Review finding (LOW): the Class Closure table's header columns were
+ * pinned, but its comment-marker row below them was not, so a marker could
+ * be renamed, dropped or reordered with no test noticing -- and the
+ * pre-existing Mutation Probes marker row carried the identical gap. Both
+ * rows are pinned here, through one shared reader, so the class is closed
+ * rather than the one row the finding named. Like the block above it, this
+ * describe sits at the end of the file so that no line cited from the
+ * knowledge bundle moves.
+ */
+describe("04-implementation-summary.md table marker rows", () => {
+  const implementationTemplate = readAsset(
+    "templates/04-implementation-summary.md",
+  );
+
+  /**
+   * The header cells and the marker cells of the FIRST table under a
+   * subsection heading: rows[0] is the header, rows[1] the separator and
+   * rows[2] the marker row, so a deleted marker row makes rows[2] the next
+   * table's own header and fails the marker-shape check below rather than
+   * silently comparing nothing.
+   */
+  const tableUnder = (
+    heading: string,
+  ): { columns: string[]; markers: string[] } => {
+    const start = implementationTemplate.indexOf(heading);
+    expect(
+      start,
+      `${heading} not found in the template`,
+    ).toBeGreaterThanOrEqual(0);
+    const rows = implementationTemplate
+      .slice(start)
+      .split(/\r?\n/)
+      .filter((line) => line.trim().startsWith("|"));
+    expect(
+      rows.length,
+      `${heading} carries no header/separator/marker table`,
+    ).toBeGreaterThanOrEqual(3);
+    const cells = (row: string): string[] =>
+      row
+        .split("|")
+        .slice(1, -1)
+        .map((cell) => cell.trim());
+    return {
+      columns: cells(rows[0]).map((cell) =>
+        cell.toLowerCase().replace(/ /g, "_"),
+      ),
+      markers: cells(rows[2]).map((cell) => {
+        const marker = cell.match(/^<!--\s*(.+?)\s*-->$/);
+        expect(
+          marker,
+          `${heading}: marker-row cell is not a comment marker: ${cell}`,
+        ).toBeTruthy();
+        return (marker as RegExpMatchArray)[1];
+      }),
+    };
+  };
+
+  for (const heading of ["### Mutation Probes", "### Class Closure"]) {
+    it(`${heading} carries one comment marker per header column, named after that column`, () => {
+      const { columns, markers } = tableUnder(heading);
+      expect(columns.length).toBeGreaterThan(0);
+      expect(markers).toEqual(columns);
+    });
+  }
+
+  it("the Class Closure subsection routes an unclosed site of the row's class to Risks / Notes", () => {
+    const classClosureIndex =
+      implementationTemplate.indexOf("### Class Closure");
+    const probePlanIndex = implementationTemplate.indexOf(
+      "### Optional Probe Plan and Result Index",
+    );
+    expect(classClosureIndex).toBeGreaterThanOrEqual(0);
+    expect(probePlanIndex).toBeGreaterThan(classClosureIndex);
+    const sectionText = implementationTemplate
+      .slice(classClosureIndex, probePlanIndex)
+      .replace(/\s+/g, " ");
+    expect(sectionText).toContain(
+      "An unclosed site of the row's class is named in Risks / Notes with the reason.",
+    );
+  });
+});
