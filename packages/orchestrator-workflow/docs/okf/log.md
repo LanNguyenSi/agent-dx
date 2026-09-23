@@ -11185,3 +11185,8 @@ findings; install-fence mechanics, model preselection, review gate and
 waivers, run-state lifecycle and markers, and the subagent contracts
 document were re-stamped at 2026-09-23T15:55:54Z after confirming none of their claims
 depends on the changed lines.
+
+The older-run exclusion of the reviewer's evidence path is now pinned in
+full in `test/init.test.ts` (the pin string was extended in place, so
+no cited line moved); install-fence mechanics and model preselection
+were re-stamped at 2026-09-23T16:06:31Z after confirming neither cites the changed line.
