@@ -222,5 +222,10 @@ describe("documented verification sets", () => {
         "This is the identical approval condition contracts.md's Subagent input contract pins in its own wording.",
       ),
     );
+    expect(compact(evidenceAndProbes)).toContain(
+      compact(
+        "That approval reaches only the frozen snapshot; an unfrozen set, a changed script, or anything else the snapshot does not capture still needs the orchestrator's own explicit approval before acquisition or execution.",
+      ),
+    );
   });
 });
