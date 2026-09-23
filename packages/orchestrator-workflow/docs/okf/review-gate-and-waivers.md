@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-09-22T19:42:00Z
+timestamp: 2026-09-23T06:36:12Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/agents/reviewer.md
@@ -410,12 +410,14 @@ the orchestrator records that entry, states in it why no evidence is
 invalidated, and communicates the corrected wording in the next delegation.
 Who may revise a baseline and what a revision records is unchanged.
 
-Docs-only review default (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:155#"For a review round whose entire delta is a docs-only delta"`):
-"For a review round whose entire delta is a docs-only delta in the sense of step 8's docs-only closure, default to the `-medium` reviewer tier with `review_method: normal` where tier variants are installed".
+Docs-only review default (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:155#"For a review round whose entire delta contains only explanatory documentation"`):
+"For a review round whose entire delta contains only explanatory documentation, comments, or citations and contains no source- or test-file edits and no semantic change to executable commands, configuration, policy, instructions, or behavior, default to the `-medium` reviewer tier with `review_method: normal` where tier variants are installed".
 The sentence declares itself a refinement of the general tier default for
-that one class; a round that touches an instruction, policy, template or
-prompt file keeps the general default. `agents-md-section.md` still states
-only the general default and does not point to this refinement.
+that one class. "A review round that touches an instruction, policy, template
+or prompt file (for example a SKILL.md instruction) keeps the general default,
+whatever the file type, and the minimums named above are unaffected."
+`agents-md-section.md` still states only the general default and does not point
+to this refinement.
 
 Pinned-prose changes (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:119#"## Pinned-prose changes"`)
 cover a change whose acceptance rests on tests that pin documentation
@@ -424,16 +426,25 @@ wording. The reason given is that
 (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:123#"mutant survives exactly when its bytes sit in no assertion"`),
 so rounds that hunt for the next unpinned sentence do not converge. The
 section asks for one normative site per rule, a claim list in the acceptance
-criterion as the pin obligation with omissions named, a briefing that bounds
-the reviewer's prose mutant space to that list, copies bound by one shared
-test constant, and
+criterion as the pin obligation: "Every normative sentence the change adds or
+alters at that site is pinned; one left unpinned is named in the criterion with
+the reason it is not load-bearing." A briefing bounds the reviewer's prose
+mutant space to that list, and "When the briefing bounds the prose mutant space
+to a claim list, respect that bound and put scope notes in `residual_risks`,
+unless an unlisted sentence is shown to be load-bearing." Copies are bound by
+one shared test constant, and
 "Cap test-adequacy review rounds on the change at two."
 (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:140#"Cap test-adequacy review rounds on the change at two."`).
-It defines the capped round, exempts semantic findings from bound and cap,
-and leaves the halt rule, the budget, the decision point and the review gate
-as they are. Step 7 of the workflow points to the section without restating
-it. Pinned by `test/probe-plans-recovery.test.ts`, which asserts the quoted
-clauses against the references, the CHANGELOG bullet and this section.
+"A test-adequacy review round is one whose returned findings are all `tests`
+findings of severity `low` or `medium` about pin gaps on the pinned prose; a
+round returning any other finding is an ordinary round outside the cap." "The
+cap changes neither the Round-2 halt rule, the Review-round escalation budget
+nor the Fix-regression decision point: a test-adequacy review round still
+counts as a negative round where it is one." It exempts semantic findings from
+bound and cap and leaves the review gate as it is. Step 7 of the workflow
+points to the section without restating it. Pinned by
+`test/probe-plans-recovery.test.ts`, which asserts the quoted clauses against
+the references, the CHANGELOG bullet and this section.
 
 ## See also
 

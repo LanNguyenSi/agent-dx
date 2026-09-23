@@ -7,6 +7,7 @@ import { listSkillReferenceNames, readAsset } from "../src/assets.js";
 
 const probes = readAsset("skill/references/evidence-and-probes.md");
 const recovery = readAsset("skill/references/review-and-recovery.md");
+const reviewer = readAsset("agents/reviewer.md");
 const unwrap = (text: string) => text.replace(/\s+/g, " ");
 
 const PACKAGE_DIR = fileURLToPath(new URL("..", import.meta.url));
@@ -196,17 +197,33 @@ describe("fix-regression decision point", () => {
  */
 const BASELINE_REVISION_RULE =
   "Record a baseline revision only when scope or the normative text of a criterion changes, including a change to what its verification checks; a wording precision that leaves the check itself unchanged is a `03-decisions.md` entry, not a revision";
-const DOCS_ONLY_REVIEW_DEFAULT =
-  "For a review round whose entire delta is a docs-only delta in the sense of step 8's docs-only closure, default to the `-medium` reviewer tier with `review_method: normal` where tier variants are installed";
+const DOCS_ONLY_DELTA_CONTENT =
+  "contains only explanatory documentation, comments, or citations";
+const DOCS_ONLY_DELTA_EXCLUSIONS =
+  "contains no source- or test-file edits and no semantic change to executable commands, configuration, policy, instructions, or behavior";
+const DOCS_ONLY_REVIEW_DEFAULT = `For a review round whose entire delta ${DOCS_ONLY_DELTA_CONTENT} and ${DOCS_ONLY_DELTA_EXCLUSIONS}, default to the \`-medium\` reviewer tier with \`review_method: normal\` where tier variants are installed`;
+const DOCS_ONLY_REVIEW_EXCLUSION =
+  "A review round that touches an instruction, policy, template or prompt file (for example a SKILL.md instruction) keeps the general default, whatever the file type, and the minimums named above are unaffected";
 const PROSE_MUTANTS_DO_NOT_CONVERGE =
   "A prose mutant survives exactly when its bytes sit in no assertion";
 const ADEQUACY_ROUND_CAP =
   "Cap test-adequacy review rounds on the change at two.";
+const PIN_OBLIGATION =
+  "Every normative sentence the change adds or alters at that site is pinned; one left unpinned is named in the criterion with the reason it is not load-bearing";
+const ADEQUACY_ROUND_DEFINITION =
+  "A test-adequacy review round is one whose returned findings are all `tests` findings of severity `low` or `medium` about pin gaps on the pinned prose; a round returning any other finding is an ordinary round outside the cap";
+const ADEQUACY_ROUND_COUNTING =
+  "The cap changes neither the Round-2 halt rule, the Review-round escalation budget nor the Fix-regression decision point: a test-adequacy review round still counts as a negative round where it is one";
+const REVIEWER_PROSE_SCOPE =
+  "When the briefing bounds the prose mutant space to a claim list, respect that bound and put scope notes in `residual_risks`, unless an unlisted sentence is shown to be load-bearing";
 const CEREMONY_BULLET =
   "- Three ceremony rules in the skill references, none of which changes the";
 
 describe("baseline revisions and the docs-only review default", () => {
   const workflow = unwrap(probes);
+  const closureStart = probes.indexOf("when the entire unreviewed delta");
+  const closureEnd = probes.indexOf("This option never", closureStart);
+  const docsOnlyClosure = unwrap(probes.slice(closureStart, closureEnd));
 
   it("limits baseline revisions to scope and criterion text, next to who may revise", () => {
     expect(workflow).toContain(
@@ -216,14 +233,18 @@ describe("baseline revisions and the docs-only review default", () => {
 
   it("names the docs-only default without touching the review minimums", () => {
     expect(workflow).toContain(
-      `${DOCS_ONLY_REVIEW_DEFAULT}. This refines the general tier default above for that one class only: there \`-medium\` is the default and a higher tier is the non-default choice recorded with a one-line reason. A review round that touches an instruction, policy, template or prompt file keeps the general default, whatever the file type, and the minimums named above are unaffected.`,
+      `${DOCS_ONLY_REVIEW_DEFAULT}. This refines the general tier default above for that one class only: there \`-medium\` is the default and a higher tier is the non-default choice recorded with a one-line reason. ${DOCS_ONLY_REVIEW_EXCLUSION}.`,
     );
     expect(workflow).toContain(
       "defaulting to the unsuffixed subagent when unsure; record a non-default tier choice with a one-line reason in `03-decisions.md` when the task is non-trivial",
     );
     expect(workflow).toContain(
-      "the entire unreviewed delta contains only explanatory documentation, comments, or citations",
+      "the orchestrator may close a docs-only delta without another reviewer round only when the entire unreviewed delta",
     );
+    expect(docsOnlyClosure).toContain(
+      `the entire unreviewed delta ${DOCS_ONLY_DELTA_CONTENT}`,
+    );
+    expect(docsOnlyClosure).toContain(DOCS_ONLY_DELTA_EXCLUSIONS);
     expect(workflow).toContain(
       "do not pair `adversarial` with the `-medium` reviewer tier",
     );
@@ -265,7 +286,7 @@ describe("pinned-prose changes", () => {
       "Name one normative site per rule when slicing; every other site that states the rule is a copy.",
     );
     expect(section).toContain(
-      "List the load-bearing claims of the normative site in the acceptance criterion, and pin each one as the whole sentence or clause that carries it. That list is the pin obligation. Every normative sentence the change adds or alters at that site is a claim; one left off the list is named in the criterion with the reason it is not load-bearing.",
+      `List the load-bearing claims of the normative site in the acceptance criterion, and pin each one as the whole sentence or clause that carries it. That list is the pin obligation. ${PIN_OBLIGATION}.`,
     );
   });
 
@@ -280,14 +301,12 @@ describe("pinned-prose changes", () => {
 
   it("caps adequacy rounds, exempts semantic findings and leaves the gate alone", () => {
     expect(section).toContain(
-      `${ADEQUACY_ROUND_CAP} A test-adequacy review round is one whose only unresolved findings are \`tests\` findings about pin gaps on the pinned prose; a round with any other unresolved finding is an ordinary round outside the cap. Pin gaps that remain become accepted notes or a follow-up.`,
+      `${ADEQUACY_ROUND_CAP} ${ADEQUACY_ROUND_DEFINITION}. Pin gaps that remain become accepted notes or a follow-up.`,
     );
     expect(section).toContain(
       "Semantic findings are exempt from the bound and from the cap: two sites stating different rules, a contradiction with another rule, and a false claim are defects at whatever severity they deserve.",
     );
-    expect(section).toContain(
-      "The cap changes neither the Round-2 halt rule, the Review-round escalation budget nor the Fix-regression decision point: a capped round still counts as a negative round where it is one.",
-    );
+    expect(section).toContain(`${ADEQUACY_ROUND_COUNTING}.`);
     expect(section).toContain(
       "The review gate is unchanged: a high or critical finding of any category still blocks and is never capped away, and accepting one follows the waiver rules.",
     );
@@ -295,14 +314,23 @@ describe("pinned-prose changes", () => {
       "Anchored by an observed run; see the entry for this rule in the orchestrator-workflow CHANGELOG.",
     );
   });
+
+  it("makes the briefing's prose scope binding explicit for reviewers", () => {
+    expect(unwrap(reviewer)).toContain(`${REVIEWER_PROSE_SCOPE}.`);
+  });
 });
 
 describe("ceremony rule copies stay bound to their normative sites", () => {
   const constants = [
     BASELINE_REVISION_RULE,
     DOCS_ONLY_REVIEW_DEFAULT,
+    DOCS_ONLY_REVIEW_EXCLUSION,
     PROSE_MUTANTS_DO_NOT_CONVERGE,
     ADEQUACY_ROUND_CAP,
+    PIN_OBLIGATION,
+    ADEQUACY_ROUND_DEFINITION,
+    ADEQUACY_ROUND_COUNTING,
+    REVIEWER_PROSE_SCOPE,
   ];
 
   it("the CHANGELOG bullet repeats each rule in the reference's own words", () => {
