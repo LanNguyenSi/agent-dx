@@ -269,9 +269,9 @@ evidence, the reviewer must reproduce it independently (its own runs or
 measurements) and record method, sample size, and result against the
 implementer's claim; a single deterministic check (one test run, `tsc`,
 lint) does not trigger it. The installed `reviewer.md` prompt carries the
-same rule (`reviewer.md:162#"lint) do not trigger this."`), and both output contracts gained a matching
+same rule (`reviewer.md:171#"lint) do not trigger this."`), and both output contracts gained a matching
 `reproduction: {method, sample_size, result, matches_implementer_claim}`
-field (`packages/orchestrator-workflow/assets/skill/references/contracts.md:183#"matches_implementer_claim: matched | mismatched |"`, `reviewer.md:218#"residual_risks:"`); `matches_implementer_claim`
+field (`packages/orchestrator-workflow/assets/skill/references/contracts.md:183#"matches_implementer_claim: matched | mismatched |"`, `reviewer.md:237#"residual_risks:"`); `matches_implementer_claim`
 accepts `not_applicable` so a review that never hits the narrow trigger is
 not forced to fabricate a reproduction record.
 

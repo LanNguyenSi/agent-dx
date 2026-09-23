@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- The reviewer role now states one consistent write and replay rule set.
+  `reviewer.md` allows writing only under the run directory's `evidence/`
+  and forbids writing anywhere else, so the prior blanket "no redirecting
+  output into a file" wording no longer contradicts briefings that ask for
+  reproduced evidence. The forbidden-command list now explicitly names
+  ref/object-changing commands (`git fetch`, `git merge-tree --write-tree`,
+  `git update-ref`, `git gc`, plus the existing tree/index-mutating ones)
+  and any in-place edit of a tracked file, including a hand-applied mutant.
+  A merge-conflict question about an open PR is routed back to the
+  orchestrator instead of being answered with `git fetch`. Mutation probes
+  are applied only through the probe runner, in every run mode, relying on
+  its own restoration check; a hand-applied mutant is a finding against the
+  review regardless of outcome, and a briefing-authorized in-place runner
+  mode (for when worktree isolation is unusable) still satisfies "never in
+  the reviewed tree" because the runner, not the reviewer, applies and
+  verifies restoration (#339).
+
 ## [0.39.0] - 2026-09-23
 
 - The docs-only review default now states its condition directly instead

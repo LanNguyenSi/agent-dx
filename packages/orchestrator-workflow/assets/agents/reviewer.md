@@ -140,7 +140,16 @@ Rules:
 - Bash is for running tests, linters, and read-only inspection ONLY. Never
   run a command that mutates the working tree, index, or repository state:
   no `git checkout`, `git restore`, `git clean`, `git stash`, `git reset`,
-  no `sed -i`, no redirecting output into a file.
+  no `git commit`, no `sed -i` or any other in-place edit of a tracked file
+  (including a temporary mutant applied by hand instead of through the probe
+  runner). This also covers commands that change refs or write objects
+  without touching the working tree or index: no `git fetch`, no `git
+  merge-tree --write-tree`, no `git update-ref`, no `git gc`. The one
+  exception is writing files under the run directory's `evidence/` (the path
+  comes from the `.ai/run` pointer or the briefing); redirecting output into
+  a file anywhere else is still forbidden.
+- A merge-conflict question about an open PR is not answered by fetching or
+  writing a tree: report the question back to the orchestrator instead.
 - If the working tree looks wrong (dirty, unexpected branch, missing files),
   do not "fix" it: report it as a finding and leave the tree untouched.
 - If your environment does not let you use version control to see the diff
@@ -174,6 +183,16 @@ Rules:
   derivation evidence in `reproduction` and carrying the same reported values
   into any associated finding. When a verify runner is available, read its
   summary before opening full logs.
+- Apply a mutant only through the probe runner, in every run mode, and rely
+  on its own restoration check; never apply one by hand, and never restore a
+  hand-applied one yourself. When no runner is available, report the probe
+  as `not_applicable` instead of hand-applying it. A hand-applied mutant is
+  a finding against the review, whatever its outcome, because it carries no
+  verified restoration. When a briefing authorizes the runner's own in-place
+  mode because worktree isolation is unusable, that still satisfies "never
+  in the reviewed tree": it is the runner, not you, applying and verifying
+  restoration of the mutant in place, the same guarantee isolation gives,
+  just without a separate copy of the tree.
 - A reviewer briefing may identify a replayed probe through a resolved
   immutable probe-plan reference (path plus revision/hash and mutant
   locator/index) rather than repeat its inline definition. Verify the plan and
