@@ -99,6 +99,7 @@ tasks:
       reference: ""
       digest: ""
       repository_identity: ""
+      snapshot: ""
     risk: low | medium | high
 recommended_order:
   - T-001

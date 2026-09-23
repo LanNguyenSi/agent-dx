@@ -66,6 +66,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the implementer and reviewer prompts' verification-set rules, now state
   the approval condition in the same wording (#335).
 
+- Before acquisition or execution, implementer.md, reviewer.md, and
+  contracts.md state, in identical wording, that the role compares the
+  frozen snapshot's effective config and scripts, preflight executable
+  identity/definition, and repository identity with the tree it runs in;
+  any mismatch withdraws the approval like a digest mismatch and is
+  reported as a misfire, and a change the task's own diff makes to one of
+  those components is outside the approval. The `verification_set` shape
+  in the subagent input contract and both task-slicer output copies now
+  also carries a `snapshot` sub-field, alongside `digest` and
+  `repository_identity`, naming the run-local path of the frozen snapshot
+  record those compared values are read from; evidence-and-probes.md's
+  Verification sets section defines what counts as a "script" for that
+  comparison and states that the orchestrator records the snapshot at the
+  run-local path it names in the briefing (#335).
+
 ## [0.39.0] - 2026-09-23
 
 - The docs-only review default now states its condition directly instead

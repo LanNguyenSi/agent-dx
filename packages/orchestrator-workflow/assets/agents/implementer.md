@@ -48,10 +48,13 @@ Rules:
   executable identity/definition, and repository identity with the tree the
   role runs in; any mismatch withdraws the approval like a digest mismatch
   and is reported as a misfire, and a change the task's own diff makes to
-  one of those components is outside the approval. Use the frozen run-local
-  snapshot (set path/digest, repository identity/revision and dirty state,
-  effective config/scripts, and preflight executable identity/definition).
-  Report each executor, extra, and raw preflight child
+  one of those components is outside the approval. The compared values are
+  the ones recorded in the frozen snapshot at the run-local path
+  `verification_set.snapshot` names; evidence-and-probes.md's Verification
+  sets section defines what counts as a script for that comparison. Use the
+  frozen run-local snapshot (set path/digest, repository identity/revision
+  and dirty state, effective config/scripts, and preflight executable
+  identity/definition). Report each executor, extra, and raw preflight child
   by `(kind, name, occurrence)`, in order, with cwd and result artifact.
   Preserve a missing-tool preflight limitation even when it has no child
   result. A missing/extra/mismatched/unresolved result is a misfire; a failure

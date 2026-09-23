@@ -65,10 +65,15 @@ Check, at minimum:
   preflight executable identity/definition, and repository identity with the
   tree the role runs in; any mismatch withdraws the approval like a digest
   mismatch and is reported as a misfire, and a change the task's own diff
-  makes to one of those components is outside the approval. Compare the
-  frozen snapshot's set path/digest, repository identity/revision/dirty
-  state, effective config/scripts, and preflight executable
-  identity/definition. Report every ordered `(kind, name, occurrence)`
+  makes to one of those components is outside the approval. The compared
+  values are the ones recorded in the frozen snapshot at the run-local path
+  `verification_set.snapshot` names; evidence-and-probes.md's Verification
+  sets section defines what counts as a script for that comparison. Use the
+  frozen run-local snapshot (set path/digest, repository identity/revision
+  and dirty state, effective config/scripts, and preflight executable
+  identity/definition) to bind every reported result; a revision or
+  dirty-state difference alone does not withdraw the approval. Report every
+  ordered `(kind, name, occurrence)`
   executor, extra, and raw
   preflight child with cwd and result artifact. A missing tool may be a
   limitation with no child, never a pass; disabled required categories are

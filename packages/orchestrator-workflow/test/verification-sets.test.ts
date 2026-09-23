@@ -149,7 +149,7 @@ describe("documented verification sets", () => {
     }
   });
 
-  it("adds digest and repository_identity sub-fields to the verification_set shape in the subagent input contract and both task slicer output copies (issue #335)", () => {
+  it("adds digest, repository_identity, and snapshot sub-fields to the verification_set shape in the subagent input contract and both task slicer output copies (issue #335)", () => {
     const contracts = readRawAsset("skill/references/contracts.md");
     const taskSlicer = readRawAsset("agents/task-slicer.md");
     const inputContractShape = [
@@ -157,6 +157,7 @@ describe("documented verification sets", () => {
       '  reference: ""',
       '  digest: ""',
       '  repository_identity: ""',
+      '  snapshot: ""',
     ].join("\n");
     expect(contracts).toContain(inputContractShape);
     const taskCopyShape = [
@@ -164,9 +165,17 @@ describe("documented verification sets", () => {
       '      reference: ""',
       '      digest: ""',
       '      repository_identity: ""',
+      '      snapshot: ""',
     ].join("\n");
     expect(contracts).toContain(taskCopyShape);
     expect(taskSlicer).toContain(taskCopyShape);
+  });
+
+  it("names verification_set.snapshot as the run-local path of the frozen snapshot record (issue #335)", () => {
+    const contracts = readRawAsset("skill/references/contracts.md");
+    const snapshotField =
+      "`verification_set.snapshot` names the run-local path of the frozen snapshot record.";
+    expect(compact(contracts)).toContain(compact(snapshotField));
   });
 
   it("tells the task slicer and the 02-tasks.md template that the briefing's digest carries the approval (issue #335)", () => {
@@ -187,6 +196,24 @@ describe("documented verification sets", () => {
     for (const doc of [implementer, reviewer, contracts]) {
       expect(compact(doc)).toContain(compact(comparisonRule));
     }
+  });
+
+  it("pins the snapshot-comparand clause naming verification_set.snapshot and the scripts-definition pointer, with identical wording across implementer.md, reviewer.md, and contracts.md (issue #335)", () => {
+    const implementer = readRawAsset("agents/implementer.md");
+    const reviewer = readRawAsset("agents/reviewer.md");
+    const contracts = readRawAsset("skill/references/contracts.md");
+    const comparandClause =
+      "The compared values are the ones recorded in the frozen snapshot at the run-local path `verification_set.snapshot` names; evidence-and-probes.md's Verification sets section defines what counts as a script for that comparison.";
+    for (const doc of [implementer, reviewer, contracts]) {
+      expect(compact(doc)).toContain(compact(comparandClause));
+    }
+  });
+
+  it("binds reviewer.md's reported results to the frozen run-local snapshot and states that a revision or dirty-state difference alone does not withdraw the approval (issue #335)", () => {
+    const reviewer = readRawAsset("agents/reviewer.md");
+    const bindingClause =
+      "Use the frozen run-local snapshot (set path/digest, repository identity/revision and dirty state, effective config/scripts, and preflight executable identity/definition) to bind every reported result; a revision or dirty-state difference alone does not withdraw the approval.";
+    expect(compact(reviewer)).toContain(compact(bindingClause));
   });
 
   it("pins the criterion-4 scoping clauses in contracts.md, implementer.md, and reviewer.md via shared constants (issue #335)", () => {
@@ -219,12 +246,28 @@ describe("documented verification sets", () => {
     );
     expect(compact(evidenceAndProbes)).toContain(
       compact(
-        "This is the identical approval condition contracts.md's Subagent input contract pins in its own wording.",
+        "This is the identical approval condition contracts.md's Subagent input contract pins in its own wording; contracts.md additionally pins the per-role comparison rule that implementer.md and reviewer.md restate before acquisition or execution.",
       ),
     );
     expect(compact(evidenceAndProbes)).toContain(
       compact(
         "That approval reaches only the frozen snapshot; an unfrozen set, a changed script, or anything else the snapshot does not capture still needs the orchestrator's own explicit approval before acquisition or execution.",
+      ),
+    );
+  });
+
+  it("records the frozen snapshot at a run-local path the briefing names, and defines what counts as a script (issue #335)", () => {
+    const evidenceAndProbes = readRawAsset(
+      "skill/references/evidence-and-probes.md",
+    );
+    expect(compact(evidenceAndProbes)).toContain(
+      compact(
+        "Freeze the resolution in the run before execution; the orchestrator records that snapshot at a run-local path it names in the briefing.",
+      ),
+    );
+    expect(compact(evidenceAndProbes)).toContain(
+      compact(
+        "\"Scripts\" here means every package-manager script entry plus every file an extra's or preflight's argv invokes directly; code under test is not a component.",
       ),
     );
   });

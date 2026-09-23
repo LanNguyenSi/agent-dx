@@ -62,6 +62,7 @@ verification_set:
   reference: ""
   digest: ""
   repository_identity: ""
+  snapshot: ""
 constraints:
   - ""
 allowed_changes:
@@ -77,9 +78,11 @@ repository. The briefing also carries its repository identity and run-local
 frozen snapshot: naming that set by reference plus its frozen digest and
 repository identity, as delegated in the briefing, is the orchestrator's
 approval of every argv resolved from that frozen snapshot; a digest mismatch
-withdraws the approval and is reported as a misfire. The reference-plus-digest
-form shown above is sufficient by itself; neither role needs the argv repeated
-argument-by-argument to run it. That approval reaches only the frozen
+withdraws the approval and is reported as a misfire.
+`verification_set.snapshot` names the run-local path of the frozen snapshot
+record. The reference-plus-digest form shown above is sufficient by itself;
+neither role needs the argv repeated argument-by-argument to run it. That
+approval reaches only the frozen
 snapshot: an unfrozen set, a changed script, or anything the snapshot does not
 capture still needs the orchestrator's explicit approval before acquisition or
 execution, since a repository set is not authority to execute repository data
@@ -88,7 +91,10 @@ effective config and scripts, preflight executable identity/definition, and
 repository identity with the tree the role runs in; any mismatch withdraws
 the approval like a digest mismatch and is reported as a misfire, and a
 change the task's own diff makes to one of those components is outside the
-approval. This mirrors the re-resolve rule in evidence-and-probes.md:
+approval. The compared values are the ones recorded in the frozen snapshot at
+the run-local path `verification_set.snapshot` names; evidence-and-probes.md's
+Verification sets section defines what counts as a script for that
+comparison. This mirrors the re-resolve rule in evidence-and-probes.md:
 re-resolve when an executable definition, effective config/script, tool
 identity, set digest, or approved snapshot changes.
 
@@ -300,6 +306,7 @@ tasks:
       reference: ""
       digest: ""
       repository_identity: ""
+      snapshot: ""
     risk: low | medium | high
 recommended_order:
   - T-001

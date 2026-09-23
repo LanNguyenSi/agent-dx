@@ -318,7 +318,9 @@ digest and repository identity is how this approval reaches the implementer
 and reviewer: it is the orchestrator's approval of every argv resolved from
 that frozen snapshot, and a digest mismatch withdraws the approval and is
 reported as a misfire. This is the identical approval condition contracts.md's
-Subagent input contract pins in its own wording. That approval reaches only
+Subagent input contract pins in its own wording; contracts.md additionally
+pins the per-role comparison rule that implementer.md and reviewer.md
+restate before acquisition or execution. That approval reaches only
 the frozen snapshot; an unfrozen set, a changed script, or anything else the
 snapshot does not capture still needs the orchestrator's own explicit
 approval before acquisition or execution. Any optional earlier inventory
@@ -334,10 +336,14 @@ not command discovery or a substitute for inspecting the actual configuration.
 
 Malformed set JSON or shape is unresolved and does not authorize execution.
 
-Freeze the resolution in the run before execution. Its identity includes the
-set reference path and digest, repository identity/revision and dirty state,
-the effective configuration and scripts, the preflight executable path,
-version, digest, and approved definition, plus every resolved extra. Identify
+Freeze the resolution in the run before execution; the orchestrator records
+that snapshot at a run-local path it names in the briefing. Its identity
+includes the set reference path and digest, repository identity/revision and
+dirty state, the effective configuration and scripts, the preflight
+executable path, version, digest, and approved definition, plus every
+resolved extra. "Scripts" here means every package-manager script entry plus
+every file an extra's or preflight's argv invokes directly; code under test
+is not a component. Identify
 each result by `(kind, name, occurrence)` in declared order: duplicate
 `(kind, name)` values are distinct occurrences, never a map entry overwritten
 by name. Bind every result attempt to its checked revision and dirty state. A
