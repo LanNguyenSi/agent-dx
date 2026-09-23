@@ -11232,8 +11232,8 @@ new commit.
 section gained three sentences describing the digest/repository_identity
 fields and the shared authority-model comparison rule, citing
 contracts.md directly. The insertion shifted the doc's own later content
-by seventeen lines, which moved two of its self-citations from
-`log.md` (`:386` and `:503`, re-pointed the same way as the earlier
+by seventeen lines, which moved two `log.md` citations into it (old
+lines 386 and 503, re-pointed the same way as the earlier
 implementer/reviewer/task-slicer/contracts shift) and the
 `SIBLING_GUARD_BUNDLE_ALLOWLIST` entries in
 `test/docs-consistency.test.ts` that record this doc's own paragraph
