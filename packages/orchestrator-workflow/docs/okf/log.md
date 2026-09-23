@@ -11160,3 +11160,17 @@ sources resolves at the new commit. `okf-kit check --require-anchors`
 (0.14.0) reports zero `anchor-*` and zero `sources-fresh` findings on the
 bundle at this state; the `citations-resolve` and `docs-consistency`
 in-repo suites pass unchanged.
+
+A follow-up commit added three pins the write/replay fix had left
+unasserted (the evidence-directory writer-role sentence, the write-a-
+directed-tool clause, and the README's reviewer write-boundary
+paragraph), appended at the end of `test/docs-consistency.test.ts` so no
+existing citation into that file shifted; `citations-resolve` still
+reports zero findings against it. Committing that change moved the
+file's own last-change time forward, which is what `sources-fresh`
+actually compares (not the working-tree mtime at review time), so
+model preselection, review gate and waivers, run-state lifecycle and
+markers, and the subagent contracts document went stale again on
+`test/docs-consistency.test.ts` alone; re-stamped all four at
+2026-09-23T15:32:51Z after confirming no citation into any of their
+listed sources changed.
