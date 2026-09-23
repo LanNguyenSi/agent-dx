@@ -581,7 +581,7 @@ validate native definitions.
 ## Orchestrator-runs-on-session-model policy
 
 The installed `AGENTS.md` policy section carries a `### Models` subsection
-verbatim (`assets/agents-md-section.md:185#"implementer, reviewer, advisor) are recorded in"`):
+verbatim (`assets/agents-md-section.md:198#"implementer, reviewer, advisor) are recorded in"`):
 the orchestrator stays on the session model while exact role/tier routing is
 recorded in the repo manifest and agent definitions. The following bullets
 make upgrades deliberate, retain prior routing as rollback input, and define

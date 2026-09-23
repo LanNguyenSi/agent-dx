@@ -26,10 +26,10 @@ sources:
 Review is never skipped. Core rule: "Non-trivial review goes to a separate
 reviewer subagent... Review itself is never skipped, in any run mode, not even for docs or
 bulk changes"
-(`packages/orchestrator-workflow/assets/agents-md-section.md:28#"changes."`). Scaling
+(`packages/orchestrator-workflow/assets/agents-md-section.md:34#"changes."`). Scaling
 delegation lets a trivial change be reviewed by the orchestrator itself
 instead of a spawned reviewer subagent, but restates the same floor: "Either
-way, review is never skipped" (`agents-md-section.md:51#"way, review is never skipped."`).
+way, review is never skipped" (`agents-md-section.md:58#"way, review is never skipped."`).
 `packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:22#"the apparatus changes. When tier variants are"` carries the
 identical invariant for ceremony-scaling: "Review judgment still applies to
 every change; only the size of the apparatus changes."
@@ -102,8 +102,8 @@ Reviewer findings carry `severity: low | medium | high | critical`
 acceptance: "High or critical reviewer findings block final acceptance until
 fixed or explicitly waived... the gate applies to every review pass,
 including the orchestrator's own review of a trivial change"
-(`agents-md-section.md:103#"trivial change."`). Medium and low are "addressed or consciously
-accepted at the orchestrator's judgment" (`agents-md-section.md:112#"orchestrator's judgment."`); no
+(`agents-md-section.md:112#"trivial change."`). Medium and low are "addressed or consciously
+accepted at the orchestrator's judgment" (`agents-md-section.md:121#"orchestrator's judgment."`); no
 waiver bookkeeping applies to them.
 
 Do not conflate two distinct vocabularies attached to the same review: the
@@ -126,13 +126,13 @@ below.
 ## Waiver rules
 
 - Critical: "waived by the operator. The orchestrator never waives a
-  critical finding on its own" (`agents-md-section.md:106#"never waives a critical finding on its own."`); SKILL.md
+  critical finding on its own" (`agents-md-section.md:115#"never waives a critical finding on its own."`); SKILL.md
   step 8 echoes "critical findings require operator sign-off"
   (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:241#"explicitly waived: critical findings require operator"`).
 - High: "waived by the orchestrator with a recorded rationale"
-  (`agents-md-section.md:108#"rationale."`; `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:242#"findings require the orchestrator to record a"`).
+  (`agents-md-section.md:117#"rationale."`; `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:242#"findings require the orchestrator to record a"`).
 - Deferring counts as waiving, for both severities: "Deferring such a
-  finding counts as a waiver" (`agents-md-section.md:101#"explicitly waived. Deferring such a finding counts as a waiver, and the gate"`). SKILL.md makes
+  finding counts as a waiver" (`agents-md-section.md:110#"explicitly waived. Deferring such a finding counts as a waiver, and the gate"`). SKILL.md makes
   the symmetry explicit: "Deferring a high or critical finding counts as a
   waiver and follows the same rules" (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:243#"or critical finding counts as a waiver and follows the"`). A deferred
   critical still needs operator sign-off; a deferred high still needs an
@@ -147,7 +147,7 @@ below.
   (`03-decisions.md:14#"## Review-round escalation"`) remains unchanged; there
   is no additional waiver schema.
 - Summarized in `06-handoff.md`'s Accepted Waivers section
-  (`agents-md-section.md:110#"the Accepted Waivers section of"`; `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:245#"the Accepted Waivers section of"`), instructed to "Mirror
+  (`agents-md-section.md:119#"the Accepted Waivers section of"`; `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:245#"the Accepted Waivers section of"`), instructed to "Mirror
   03-decisions.md"
   (`packages/orchestrator-workflow/assets/templates/06-handoff.md:21#"<!-- Waived high/critical reviewer findings, or none. Mirror 03-decisions.md. -->"`) via a
   `Finding | Severity | Rationale | Approved By` table
@@ -162,7 +162,7 @@ test-file edits and semantic changes to executable commands, configuration,
 policy, instructions, or behavior; it applies only to low/medium
 documentation or maintainability findings and never to high/critical or any
 other ineligible finding (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:254#"high/critical or other ineligible finding."`;
-`agents-md-section.md:120#"row with its Severity and Decision headers unchanged and Decision"`). This is a closing
+`agents-md-section.md:130#"row with its Severity and Decision headers unchanged and Decision"`). This is a closing
 option after review, not an exception to the review requirement or the waiver
 rules above.
 
@@ -335,7 +335,7 @@ operator merge-hold). A negative round has an `acceptance_recommendation` of
 `fix_required` or `reject`; a misfired review is not a round. A negative round counts only with at least one introduced_by_delta yes/unknown finding; no stays ordinary gate. Which of the three is picked is judgment; that one
 is picked and recorded is not
 (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:79#"Judgment governs which of the three to pick; only that one is chosen and"`).
-`agents-md-section.md:136#"rule's split-or-redesign response, not instead of it."`
+`agents-md-section.md:148#"rule's split-or-redesign response, not instead of it."`
 carries the same rule in short form for repos without the full skill text
 loaded.
 
