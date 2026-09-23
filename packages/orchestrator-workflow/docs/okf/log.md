@@ -11367,3 +11367,10 @@ file changed, and no bundle citation resolves there, so no citation moved;
 CHANGELOG.md is unchanged. Re-stamped review gate and waivers, run-state
 lifecycle and markers, and the subagent contracts document at 2026-09-23T19:25:20Z
 after confirming none of their own citations resolve into the edited range.
+
+The run-internal identifier check (#337) now checks the exit status of its
+awk and grep stages and runs them byte-wise, diffs files marked -diff or
+binary as text, and suppresses signature output in the log scan. Only the
+appended section of evidence-and-probes.md changed, below every cited
+line; review gate and waivers, run-state lifecycle and markers, and the
+subagent contracts document were re-stamped at 2026-09-23T19:39:55Z.
