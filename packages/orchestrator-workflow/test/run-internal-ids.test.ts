@@ -133,19 +133,22 @@ describe("run-internal identifiers section of evidence-and-probes.md", () => {
       "Code, comments, tests, and commit messages reference the ticket or issue and describe the behaviour instead",
     );
     expect(text).toContain(
-      'with `cwd` at the repository root and the run-base recorded in `00-goal.md` for that repository as its only argument. Its argv is `["sh", "-c", <the script below as one string>, "sh", <run-base>]`',
+      'as an extra of kind `command` in the `after_preflight` phase, with `cwd` at the repository root and the run-base recorded in `00-goal.md` for that repository as its only argument. Its argv is `["sh", "-c", <the script below as one string>, "sh", <run-base>]`',
     );
     expect(text).toContain(
-      "Exit `0` means no hit, exit `1` means at least one hit, each printed (a diff hit prefixed by its file path), and exit `2` means the run-base does not resolve to a commit.",
+      "Exit `0` means no hit, exit `1` means at least one hit, each printed (a diff hit prefixed by its file path), and exit `2` means the run-base does not resolve to a commit or a git command failed. The check fails closed: it reads the whole diff and log into memory before scanning them, so a git failure part way through (an unreadable object, for example) exits `2` instead of passing on partial output.",
+    );
+    expect(text).toContain(
+      "It changes to the top level of the repository first, so a `cwd` in a subdirectory scans the same range. The diff options override the external diff, textconv, rename, color, and prefix settings of the user's git configuration, so those settings cannot hide an added line from the scan.",
     );
   });
 
   it("states what the check covers, what it does not, and how a false positive is handled", () => {
     expect(text).toContain(
-      "It covers the lines added between the run-base and `HEAD` outside `.ai/`, and the message of every commit in `run-base..HEAD`.",
+      "It covers the lines added between the run-base and `HEAD` outside the top-level `.ai/` directory, and the message of every commit reachable from `HEAD` and not from the run-base. That range includes upstream work merged into the branch after the run-base, whose added lines and commit messages are scanned as well and can produce hits the branch did not write.",
     );
     expect(text).toContain(
-      "It does not cover uncommitted changes, removed lines, pull request titles or bodies, branch names, or identifiers in any other format.",
+      "It does not cover uncommitted changes, removed lines, binary file content, pull request titles or bodies, branch names, or identifiers in any other format.",
     );
     expect(text).toContain(
       "A hit is a failure of the extra; when the orchestrator confirms a hit is a false positive it records that decision",
@@ -191,8 +194,32 @@ describe("the documented run-internal identifier check", () => {
     git(cwd, "add", "-A");
     git(cwd, "commit", "-q", "-m", message);
   };
-  const runCheck = (cwd: string, base: string) =>
-    spawnSync("sh", ["-c", script, "sh", base], { cwd, encoding: "utf8" });
+  const runCheck = (
+    cwd: string,
+    base: string,
+    env: NodeJS.ProcessEnv = process.env,
+  ) =>
+    spawnSync("sh", ["-c", script, "sh", base], {
+      cwd,
+      encoding: "utf8",
+      env,
+    });
+  const withRepo = (body: (repo: string) => void) => {
+    const repo = mkdtempSync(join(tmpdir(), "ow-run-internal-ids-repo-"));
+    try {
+      git(repo, "init", "-q");
+      body(repo);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  };
+  // Deletes the loose object file behind an object id, so git fails when it
+  // has to read that object.
+  const dropObject = (repo: string, objectId: string) => {
+    rmSync(
+      join(repo, ".git", "objects", objectId.slice(0, 2), objectId.slice(2)),
+    );
+  };
 
   it("passes a clean history, flags added lines and commit messages each on their own, and ignores the run directory", () => {
     const repo = mkdtempSync(join(tmpdir(), "ow-run-internal-ids-repo-"));
@@ -259,5 +286,100 @@ describe("the documented run-internal identifier check", () => {
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }
+  });
+
+  it("does not scan removed lines", () => {
+    withRepo((repo) => {
+      commit(
+        repo,
+        { "notes.md": `keep\nordering from ${decision}\n` },
+        "initial",
+      );
+      const base = git(repo, "rev-parse", "HEAD");
+      commit(repo, { "notes.md": "keep\n" }, "docs: drop a stale note");
+      const removed = runCheck(repo, base);
+      expect(removed.status).toBe(0);
+      expect(removed.stdout).toBe("");
+    });
+  });
+
+  it("scans the whole repository when run from a subdirectory", () => {
+    withRepo((repo) => {
+      commit(repo, { "pkg/index.ts": "export {};\n" }, "initial");
+      const base = git(repo, "rev-parse", "HEAD");
+      commit(
+        repo,
+        { "top.ts": `// split out of ${task}\n` },
+        "refactor: split the helper",
+      );
+      const fromSubdirectory = runCheck(join(repo, "pkg"), base);
+      expect(fromSubdirectory.status).toBe(1);
+      expect(fromSubdirectory.stdout).toBe(`top.ts: // split out of ${task}\n`);
+    });
+  });
+
+  it("finds an added line despite an external diff driver, a textconv filter, and user diff settings", () => {
+    withRepo((repo) => {
+      commit(
+        repo,
+        { "README.md": "fixture\n", "legacy.md": `from ${criterion}\n` },
+        "initial",
+      );
+      const base = git(repo, "rev-parse", "HEAD");
+      git(repo, "config", "diff.scrub.textconv", "sed -e s/./x/g");
+      git(repo, "config", "diff.noprefix", "true");
+      git(repo, "config", "diff.renames", "false");
+      git(repo, "mv", "legacy.md", "kept.md");
+      commit(
+        repo,
+        {
+          ".gitattributes": "*.ts diff=scrub\n",
+          "src/a.ts": `// ordering as agreed in ${decision}\n`,
+        },
+        "refactor: order the helper",
+      );
+      const configured = runCheck(repo, base, {
+        ...process.env,
+        GIT_EXTERNAL_DIFF: "true",
+      });
+      expect(configured.status).toBe(1);
+      expect(configured.stdout).toBe(
+        `src/a.ts: // ordering as agreed in ${decision}\n`,
+      );
+    });
+  });
+
+  it("exits 2 when git cannot read an object in the diff", () => {
+    withRepo((repo) => {
+      commit(repo, { "README.md": "fixture\n" }, "initial");
+      const base = git(repo, "rev-parse", "HEAD");
+      commit(
+        repo,
+        { "src/a.ts": `// survived review ${round}\n` },
+        "feat: add the helper",
+      );
+      dropObject(repo, git(repo, "rev-parse", "HEAD:src/a.ts"));
+      const unreadable = runCheck(repo, base);
+      expect(unreadable.status).toBe(2);
+      expect(unreadable.stdout).toBe("");
+    });
+  });
+
+  it("exits 2 when git cannot walk a commit in the range", () => {
+    withRepo((repo) => {
+      commit(repo, { "README.md": "fixture\n" }, "initial");
+      const base = git(repo, "rev-parse", "HEAD");
+      commit(
+        repo,
+        { "src/a.ts": "export const a = 1;\n" },
+        `feat: add the helper for ${task}`,
+      );
+      const middle = git(repo, "rev-parse", "HEAD");
+      commit(repo, { "src/b.ts": "export const b = 2;\n" }, "feat: add b");
+      dropObject(repo, middle);
+      const unwalkable = runCheck(repo, base);
+      expect(unwalkable.status).toBe(2);
+      expect(unwalkable.stdout).toBe("");
+    });
   });
 });
