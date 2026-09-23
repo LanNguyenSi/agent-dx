@@ -9,18 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A verification set can no longer look green while checking the wrong
   tree. evidence-and-probes.md's Verification sets section now requires,
-  when a run-base marker names a linked worktree, that every literal
-  repository path in the set's argv and cwd is re-resolved to that
-  worktree's root before freezing, and that the frozen snapshot records the
-  resolved paths. The implementer and reviewer prompts, contracts.md, and
-  evidence-and-probes.md state one shared rule: repository identity
-  includes the repository path (the worktree root), not only the revision;
-  a set frozen against another checkout (for example the main checkout
-  while the diff comes from a linked worktree) or a result checked at a
-  revision other than the diff's is a misfire, not a pass, while a
-  difference between the snapshot's recorded revision and the checked
-  revision alone still is not. Tests pin both sentences in the reference
-  files and in every rendered implementer and reviewer variant (#336).
+  when the diff for a repository comes from a linked worktree (however the
+  run-base marker is keyed, or with only the unkeyed marker), that every
+  literal path into that repository in the set's argv and cwd is
+  re-resolved under that worktree's top level before freezing and recorded
+  in the frozen snapshot. The implementer and reviewer prompts,
+  contracts.md, and that section share one rule: in the comparison before
+  acquisition or execution, repository identity means the repository and
+  its path, compared with the worktree the diff comes from; a set frozen
+  against another checkout withdraws the approval and is a misfire, while
+  a revision difference alone does not. Tests pin the re-resolution rule in
+  the Verification sets section and the identity rule in all four sources
+  and in every rendered implementer and reviewer variant (#336).
 
 - Run-internal identifiers (the criterion, task, decision, and review round
   IDs the run files assign) no longer have to be kept out of committed work

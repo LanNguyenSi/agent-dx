@@ -28,9 +28,9 @@ const compact = (text: string) => text.replace(/\s+/g, " ");
 // worktree. These two sentences are the rule's own wording; the identity
 // rule is shared verbatim by every site that states the comparison rule.
 const WORKTREE_RE_RESOLUTION_RULE =
-  "When a run-base marker names a linked worktree, re-resolve every literal repository path in the set's argv and cwd to that worktree's root before freezing, and record the resolved paths in the frozen snapshot; a literal path left pointing at the main checkout checks another tree, not the delta.";
+  "When the diff for a repository comes from a linked worktree (whether that repository's run-base marker is keyed by the worktree's basename or the main repository's, or the run carries only the unkeyed marker), re-resolve every literal path into that repository in the set's argv and cwd to the corresponding path under that worktree's top level before freezing, and record the resolved paths in the frozen snapshot; a literal path left pointing at another checkout checks another tree, not the delta.";
 const REPOSITORY_PATH_IDENTITY_RULE =
-  "Repository identity includes the repository path (the worktree root), not only the revision: compare the snapshot's repository path, and the revision each result was checked at, with the tree the diff comes from; a set frozen against another checkout (for example the main checkout while the diff comes from a linked worktree) or a result checked at a revision other than the diff's is a misfire, not a pass, while a difference between the snapshot's recorded revision and the checked revision alone is not.";
+  "Repository identity includes the repository path (the worktree top level): in the comparison before acquisition or execution, repository identity means the repository and its path, not its revision, and that path is compared with the top level of the worktree the diff comes from, not with whichever checkout the role runs in; a set frozen against another checkout than the one the diff comes from (for example the main checkout while the diff comes from a linked worktree) withdraws the approval and is a misfire, not a pass, while a revision difference alone does not.";
 const packageDir = fileURLToPath(new URL("..", import.meta.url));
 const readme = readFileSync(`${packageDir}/README.md`, "utf8");
 const exampleFence = readme.match(
