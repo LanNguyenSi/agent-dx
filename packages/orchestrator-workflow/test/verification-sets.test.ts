@@ -122,4 +122,156 @@ describe("documented verification sets", () => {
       "Put the independent complete-set outcome in `reproduction.result`",
     );
   });
+
+  it("defines the reference-plus-digest form as the orchestrator's approval of the resolved argv (issue #335)", () => {
+    const approvalCondition =
+      "is the orchestrator's approval of every argv resolved from that frozen snapshot; a digest mismatch withdraws the approval and is reported as a misfire.";
+    expect(compact(skill)).toContain(compact(approvalCondition));
+    expect(compact(skill)).toContain(
+      "The reference-plus-digest form shown above is sufficient by itself; neither role needs the argv repeated argument-by-argument to run it.",
+    );
+    expect(compact(skill)).toContain(
+      "since a repository set is not authority to execute repository data on its own.",
+    );
+  });
+
+  it("states the approval condition with identical wording in implementer.md and reviewer.md (issue #335)", () => {
+    const implementer = readRawAsset("agents/implementer.md");
+    const reviewer = readRawAsset("agents/reviewer.md");
+    const approvalCondition =
+      "A verification set named by reference plus its frozen digest and repository identity is the orchestrator's approval of every argv resolved from that frozen snapshot; a digest mismatch withdraws the approval and is reported as a misfire.";
+    expect(compact(implementer)).toContain(compact(approvalCondition));
+    expect(compact(reviewer)).toContain(compact(approvalCondition));
+    for (const role of [implementer, reviewer]) {
+      expect(compact(role)).toContain(
+        "since a repository set is not authority to execute repository data on its own.",
+      );
+    }
+  });
+
+  it("adds digest, repository_identity, and snapshot sub-fields to the verification_set shape in the subagent input contract and both task slicer output copies (issue #335)", () => {
+    const contracts = readRawAsset("skill/references/contracts.md");
+    const taskSlicer = readRawAsset("agents/task-slicer.md");
+    const inputContractShape = [
+      "verification_set:",
+      '  reference: ""',
+      '  digest: ""',
+      '  repository_identity: ""',
+      '  snapshot: ""',
+    ].join("\n");
+    expect(contracts).toContain(inputContractShape);
+    const taskCopyShape = [
+      "    verification_set:",
+      '      reference: ""',
+      '      digest: ""',
+      '      repository_identity: ""',
+      '      snapshot: ""',
+    ].join("\n");
+    expect(contracts).toContain(taskCopyShape);
+    expect(taskSlicer).toContain(taskCopyShape);
+  });
+
+  it("names verification_set.snapshot as the run-local path of the frozen snapshot record (issue #335)", () => {
+    const contracts = readRawAsset("skill/references/contracts.md");
+    const snapshotField =
+      "`verification_set.snapshot` names the run-local path of the frozen snapshot record.";
+    expect(compact(contracts)).toContain(compact(snapshotField));
+  });
+
+  it("tells the task slicer and the 02-tasks.md template that the briefing's digest carries the approval (issue #335)", () => {
+    const taskSlicer = readRawAsset("agents/task-slicer.md");
+    const tasksTemplate = readRawAsset("templates/02-tasks.md");
+    const digestCarriesApproval =
+      "digest recorded in the briefing is what carries the orchestrator's approval of the resolved argv to the implementer and reviewer.";
+    expect(compact(taskSlicer)).toContain(compact(digestCarriesApproval));
+    expect(compact(tasksTemplate)).toContain(compact(digestCarriesApproval));
+  });
+
+  it("pins the authority-model comparison rule with identical wording across implementer.md, reviewer.md, and contracts.md (issue #335)", () => {
+    const implementer = readRawAsset("agents/implementer.md");
+    const reviewer = readRawAsset("agents/reviewer.md");
+    const contracts = readRawAsset("skill/references/contracts.md");
+    const comparisonRule =
+      "Before acquisition or execution, compare the frozen snapshot's effective config and scripts, preflight executable identity/definition, and repository identity with the tree the role runs in; any mismatch withdraws the approval like a digest mismatch and is reported as a misfire, and a change the task's own diff makes to one of those components is outside the approval.";
+    for (const doc of [implementer, reviewer, contracts]) {
+      expect(compact(doc)).toContain(compact(comparisonRule));
+    }
+  });
+
+  it("pins the snapshot-comparand clause naming verification_set.snapshot and the scripts-definition pointer, with identical wording across implementer.md, reviewer.md, and contracts.md (issue #335)", () => {
+    const implementer = readRawAsset("agents/implementer.md");
+    const reviewer = readRawAsset("agents/reviewer.md");
+    const contracts = readRawAsset("skill/references/contracts.md");
+    const comparandClause =
+      "The compared values are the ones recorded in the frozen snapshot at the run-local path `verification_set.snapshot` names; evidence-and-probes.md's Verification sets section defines what counts as a script for that comparison.";
+    for (const doc of [implementer, reviewer, contracts]) {
+      expect(compact(doc)).toContain(compact(comparandClause));
+    }
+  });
+
+  it("identifies the approved set via the frozen snapshot and binds each result to the checked revision and dirty state, in implementer.md and reviewer.md (issue #335)", () => {
+    const reviewer = readRawAsset("agents/reviewer.md");
+    const bindingClause =
+      "Use the frozen run-local snapshot (set path/digest, repository identity/revision and dirty state, effective config/scripts, and preflight executable identity/definition) to identify the approved set behind every reported result, and bind each result to the revision and dirty state actually checked; a revision or dirty-state difference from the snapshot alone does not withdraw the approval.";
+    expect(compact(reviewer)).toContain(compact(bindingClause));
+    expect(compact(readRawAsset("agents/implementer.md"))).toContain(
+      compact(bindingClause),
+    );
+  });
+
+  it("pins the criterion-4 scoping clauses in contracts.md, implementer.md, and reviewer.md via shared constants (issue #335)", () => {
+    const implementer = readRawAsset("agents/implementer.md");
+    const reviewer = readRawAsset("agents/reviewer.md");
+    const contracts = readRawAsset("skill/references/contracts.md");
+    const reachesOnlyPhrase = "That approval reaches only the frozen snapshot:";
+    for (const doc of [implementer, reviewer, contracts]) {
+      expect(compact(doc)).toContain(compact(reachesOnlyPhrase));
+    }
+    const contractsScopingSentence =
+      "That approval reaches only the frozen snapshot: an unfrozen set, a changed script, or anything the snapshot does not capture still needs the orchestrator's explicit approval before acquisition or execution, since a repository set is not authority to execute repository data on its own.";
+    expect(compact(contracts)).toContain(compact(contractsScopingSentence));
+    const implementerStillRequires =
+      "outside it still requires the orchestrator's explicit approval of the resolved repository configuration and every script/argument, since a repository set is not authority to execute repository data on its own.";
+    expect(compact(implementer)).toContain(compact(implementerStillRequires));
+    const reviewerStillRequires =
+      "outside it still requires confirming the orchestrator approved the resolved effective configuration and scripts, since a repository set is not authority to execute repository data on its own.";
+    expect(compact(reviewer)).toContain(compact(reviewerStillRequires));
+  });
+
+  it("pins evidence-and-probes.md's own digest-mismatch-misfire clause directly, not only through the concatenated skill text (issue #335)", () => {
+    const evidenceAndProbes = readRawAsset(
+      "skill/references/evidence-and-probes.md",
+    );
+    const digestMismatchMisfireClause =
+      "a digest mismatch withdraws the approval and is reported as a misfire.";
+    expect(compact(evidenceAndProbes)).toContain(
+      compact(digestMismatchMisfireClause),
+    );
+    expect(compact(evidenceAndProbes)).toContain(
+      compact(
+        "This is the identical approval condition contracts.md's Subagent input contract pins in its own wording; contracts.md additionally pins the per-role comparison rule that implementer.md and reviewer.md restate before acquisition or execution.",
+      ),
+    );
+    expect(compact(evidenceAndProbes)).toContain(
+      compact(
+        "That approval reaches only the frozen snapshot; an unfrozen set, a changed script, or anything else the snapshot does not capture still needs the orchestrator's own explicit approval before acquisition or execution.",
+      ),
+    );
+  });
+
+  it("records the frozen snapshot at a run-local path the briefing names, and defines what counts as a script (issue #335)", () => {
+    const evidenceAndProbes = readRawAsset(
+      "skill/references/evidence-and-probes.md",
+    );
+    expect(compact(evidenceAndProbes)).toContain(
+      compact(
+        "Freeze the resolution in the run before execution; the orchestrator records that snapshot at a run-local path it names in the briefing.",
+      ),
+    );
+    expect(compact(evidenceAndProbes)).toContain(
+      compact(
+        "\"Scripts\" here means every package-manager script entry plus every file an extra's or preflight's argv or such a script entry invokes directly, and repository configuration files the executed tools load count as effective configuration; code under test is not a component.",
+      ),
+    );
+  });
 });

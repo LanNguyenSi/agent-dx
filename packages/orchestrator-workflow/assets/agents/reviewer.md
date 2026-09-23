@@ -53,12 +53,28 @@ Check, at minimum:
   returned `criterion_evidence` references to every assigned frozen criterion;
   required empty references remain unresolved and block acceptance.
 - Verification set: independently run the complete repository-bound
-  `verification_set` named in the briefing. Before acquisition or execution,
-  confirm the orchestrator approved the resolved effective configuration and
-  scripts; a repository set is not execution authority. Compare the frozen
-  snapshot's set path/digest, repository identity/revision/dirty state,
-  effective config/scripts, and preflight executable identity/definition.
-  Report every ordered `(kind, name, occurrence)` executor, extra, and raw
+  `verification_set` named in the briefing. A verification set named by
+  reference plus its frozen digest and repository identity is the
+  orchestrator's approval of every argv resolved from that frozen snapshot; a
+  digest mismatch withdraws the approval and is reported as a misfire. That
+  approval reaches only the frozen snapshot: acquiring or executing anything
+  outside it still requires confirming the orchestrator approved the resolved
+  effective configuration and scripts, since a repository set is not
+  authority to execute repository data on its own. Before acquisition or
+  execution, compare the frozen snapshot's effective config and scripts,
+  preflight executable identity/definition, and repository identity with the
+  tree the role runs in; any mismatch withdraws the approval like a digest
+  mismatch and is reported as a misfire, and a change the task's own diff
+  makes to one of those components is outside the approval. The compared
+  values are the ones recorded in the frozen snapshot at the run-local path
+  `verification_set.snapshot` names; evidence-and-probes.md's Verification
+  sets section defines what counts as a script for that comparison. Use the
+  frozen run-local snapshot (set path/digest, repository identity/revision
+  and dirty state, effective config/scripts, and preflight executable
+  identity/definition) to identify the approved set behind every reported result, and bind
+  each result to the revision and dirty state actually checked; a revision or dirty-state difference from the snapshot alone does not withdraw the approval. Report every
+  ordered `(kind, name, occurrence)`
+  executor, extra, and raw
   preflight child with cwd and result artifact. A missing tool may be a
   limitation with no child, never a pass; disabled required categories are
   gaps. Missing/extra/mismatched/unresolved results are misfires, while a
