@@ -238,6 +238,9 @@ describe("baseline revisions and the docs-only review default", () => {
     expect(workflow).toContain(
       "defaulting to the unsuffixed subagent when unsure; record a non-default tier choice with a one-line reason in `03-decisions.md` when the task is non-trivial",
     );
+    expect(workflow).toContain(
+      "the orchestrator may close a docs-only delta without another reviewer round only when the entire unreviewed delta",
+    );
     expect(docsOnlyClosure).toContain(
       `the entire unreviewed delta ${DOCS_ONLY_DELTA_CONTENT}`,
     );
