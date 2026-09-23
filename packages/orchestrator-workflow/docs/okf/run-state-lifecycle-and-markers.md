@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-09-23T09:48:19Z
+timestamp: 2026-09-23T10:58:19Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -133,7 +133,7 @@ packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:
 The policy section installed into `AGENTS.md` carries the same two facts in
 one bullet: every touched worktree gets the pointer, and `00-goal.md` gets
 one keyed `run-base[<repo-basename>]` marker per repository for a multi-repo
-run (packages/orchestrator-workflow/assets/agents-md-section.md:190#"marker per repository for multi-repo runs").
+run (packages/orchestrator-workflow/assets/agents-md-section.md:192#"marker per repository for multi-repo runs").
 
 For a run that touches more than one repository, the orchestrator records
 one keyed marker per repository on its own line beside the unkeyed one,
@@ -446,7 +446,7 @@ normative place. The Core rules bullet on implementation now reads
 it names `delegated` as the default and the other two modes in one clause
 each, and ends by pointing to the skill's Run mode section. The Run state
 list of the policy section names the marker beside the keyed run-base marker
-(packages/orchestrator-workflow/assets/agents-md-section.md:190#"marker per repository for multi-repo runs").
+(packages/orchestrator-workflow/assets/agents-md-section.md:192#"marker per repository for multi-repo runs").
 The README has a short "Run modes" section
 (packages/orchestrator-workflow/README.md:539#"## Run modes")
 that links the reference. Both sites are pinned against restating a

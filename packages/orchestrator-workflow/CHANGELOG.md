@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Clarified the review-round tier/model escalation path for `single` and
+  rewrapped the installed policy fence with its cited documentation.
+
 - Mutation-probe verdict reporting now distinguishes runner-supplied,
   result-only, and no-verdict cases without changing the output contract.
   `result: killed` means the probe's test command reacted to the mutant
