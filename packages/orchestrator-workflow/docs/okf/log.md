@@ -11266,8 +11266,8 @@ orchestrator records the snapshot at a run-local path it names in the
 briefing, and defines "scripts" as every package-manager script entry
 plus every file an extra's or preflight's argv invokes directly (code
 under test is not a component); its pointer sentence claiming to carry
-"the identical approval condition" now also says contracts.md
-additionally pins the per-role comparison rule that implementer.md and
+"the identical approval condition" now also says that contracts.md
+pins, in addition, the per-role comparison rule that implementer.md and
 reviewer.md restate, closing the gap where that claim named no
 comparison rule at all. reviewer.md's neighbouring "Compare the frozen
 snapshot's set path/digest, repository identity/revision/dirty state,
@@ -11334,3 +11334,8 @@ kept every line count, so no citation moved; review gate and waivers,
 run-state lifecycle and markers, and the subagent contracts document were
 re-stamped at 2026-09-23T18:25:41Z after confirming their claims about the verification
 set still hold.
+
+The effective-configuration clause of the verification-set scripts
+definition is scoped to repository configuration files (#335), so
+user-global and machine configuration outside the tree stays out of the
+comparison; the same three bundle docs were re-stamped at 2026-09-23T18:35:04Z.
