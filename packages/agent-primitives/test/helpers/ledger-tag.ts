@@ -67,7 +67,9 @@ export function ledgerEntryForTag<T extends { version: string }>(
   version: string,
   ledger: readonly T[],
 ): T | undefined {
-  const exact = ledger.find((entry) => entry.version === version);
+  const exact = ledger.find(
+    (entry) => compareSemver(entry.version, version) === 0,
+  );
   if (exact) return exact;
   return [...ledger]
     .sort((a, b) => compareSemver(a.version, b.version))

@@ -174,9 +174,14 @@ describe("skill ledger release coverage", () => {
   it("matches every reachable release tag and allows only documented untagged entries", (t) => {
     // A shallow clone (Actions' default checkout, fetch-depth 1) reaches at
     // most the checked-out tag, so every earlier tagged release would read
-    // as an untagged ledger entry. Skip visibly instead of failing or
-    // passing on partial history.
+    // as an untagged ledger entry. Locally that skips; on GitHub Actions,
+    // where every checkout running this suite fetches full history, a
+    // shallow checkout means the guard was lost, so it fails instead.
     if (isShallowCheckout()) {
+      expect(
+        process.env.GITHUB_ACTIONS,
+        "release-tag coverage needs full history and tags on GitHub Actions (checkout fetch-depth: 0)",
+      ).not.toBe("true");
       t.skip(
         true,
         "release-tag coverage needs full history and tags; this checkout is shallow",
