@@ -2794,6 +2794,23 @@ describe("reviewer write boundary (issue #339)", () => {
       expect(installed, `${harnessDir}/agents/reviewer.md`).toContain(
         "the briefing's own run-directory path wins",
       );
+      // Issue #339: these three previously survived a weakening/inverting
+      // mutant because nothing pinned their own wording. The symlink clause
+      // closes the evidence-path resolution rule (a symlinked path
+      // component could otherwise route a write outside the run
+      // directory); the mismatch clause closes the fallback when the
+      // briefing and the `.ai/run` pointer disagree; the merge-conflict
+      // sentence closes the routing rule for a question that must not be
+      // answered by fetching or writing a tree.
+      expect(installed, `${harnessDir}/agents/reviewer.md`).toContain(
+        "with no symlinked path component",
+      );
+      expect(installed, `${harnessDir}/agents/reviewer.md`).toContain(
+        "report the mismatch and write nothing",
+      );
+      expect(installed, `${harnessDir}/agents/reviewer.md`).toContain(
+        "A merge-conflict question about an open PR is not answered by fetching or",
+      );
     }
   });
 });

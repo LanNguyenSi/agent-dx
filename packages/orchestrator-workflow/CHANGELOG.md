@@ -38,8 +38,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   must report `restored_verified: true` (a missing or `false` value is a
   finding), the tree must be clean and at the reviewed head, and no other
   agent may be active in that tree at the same time. `evidence/` is now
-  documented as an optional run subdirectory in the run-layout reference
-  (#339).
+  documented as an optional run subdirectory in the run-layout reference,
+  naming the orchestrator, the implementer, and the reviewer as the roles
+  that write into it and stating that the explorer and the advisor, being
+  read-only, never do. The location rule also names, explicitly, that a
+  write a declared check or the probe runner's own default isolation
+  leaves behind is expected wherever that tool places it, not an exception
+  to the rule. The in-place exception's conditions and the run mode
+  `single` duty's `not_applicable` fallback are now pinned at every site
+  that states them (the reviewer prompt, its rendered install variants,
+  and step 7's mirror), alongside the evidence-path symlink and mismatch
+  clauses and the merge-conflict routing sentence. The README's read-only
+  posture section states the reviewer's narrower write boundary the same
+  way (#339).
 
 ## [0.39.0] - 2026-09-23
 

@@ -56,3 +56,47 @@ export const NAMED_PROBE_FORMS =
  */
 export const RUNNER_ONLY_PROBE_RULE =
   "Apply a mutant only through the probe runner, in every run mode, and rely on its own restoration check; never apply one by hand, and never restore a hand-applied one yourself. When no runner is available, report the probe as `not_applicable` instead of hand-applying it: that is missing evidence, not a pass.";
+
+/**
+ * Issue #339: a hand-applied mutant carries no verified restoration, so it
+ * is a finding regardless of the verdict it happened to produce. Bound
+ * separately from RUNNER_ONLY_PROBE_RULE (a different sentence) so an edit
+ * that drops this consequence while leaving the rule itself intact is still
+ * caught.
+ */
+export const HAND_APPLIED_MUTANT_IS_A_FINDING =
+  "A hand-applied mutant is a finding against the review, whatever its outcome, because it carries no verified restoration.";
+
+/**
+ * Issue #339: the bounded in-place exception's own authorization clause
+ * (only the orchestrator's briefing authorizes the runner's in-place mode,
+ * and only the runner itself, never the reviewer by hand, applies the
+ * mutant). Bound to the words common to the reviewer prompt's own bullet
+ * and step 7's mirror of it (the two sites use slightly different phrasing
+ * around "the runner"), so a weakening edit to either site is caught the
+ * same way REVIEWER_DUTY already is.
+ */
+export const IN_PLACE_AUTHORIZATION_CLAUSE =
+  "only the orchestrator's briefing authorizes it, only the runner";
+
+/**
+ * Issue #339: the bounded in-place exception's restoration and isolation
+ * conditions, common wording between the reviewer prompt's own bullet and
+ * step 7's mirror of it: the runner (never the reviewer) must report
+ * `restored_verified: true`, the tree must be clean and at the reviewed
+ * head, and no other agent may be active in it at the same time.
+ */
+export const IN_PLACE_RESTORED_VERIFIED_CLAUSE =
+  "the runner must report `restored_verified: true` for every such probe (a missing or `false` value is a finding), the tree must be clean and at the reviewed head before the runner starts, and no other agent may be active in that tree at the same time";
+
+/**
+ * Issue #339: the run mode `single` duty's own fallback when no probe
+ * runner is available, common wording between the reviewer prompt's duty
+ * span and step 7's mirror of it. Inverting this clause (hand-applying
+ * instead of reporting `not_applicable`) previously survived because
+ * nothing pinned this specific sentence, distinct from the general Bash
+ * rule's own copy of the same words (RUNNER_ONLY_PROBE_RULE covers that
+ * one).
+ */
+export const SINGLE_MODE_NOT_APPLICABLE_CLAUSE =
+  "when no runner is available, report the probe as `not_applicable`";

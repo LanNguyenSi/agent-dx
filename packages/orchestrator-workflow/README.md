@@ -246,6 +246,14 @@ it explicitly, but the role definition itself does not prevent it. A native
 read-only sandbox can block those writes. This residual has bitten in practice (a
 reviewer ran `git checkout` and discarded uncommitted work), which is why the
 prompts now name the forbidden commands instead of just saying "read-only".
+The reviewer's own write boundary is narrower than "read-only": it may write
+to its own scratchpad (a scratch copy or replay of the repository) and to
+the run directory's `evidence/`, and nowhere else. It never writes into the
+reviewed tree, its index, its refs, or its object store: no `git fetch`, no
+`git merge-tree --write-tree`, no `git update-ref`, no `git gc`, on top of
+the working-tree and index mutations already forbidden above. A write a
+declared check or the probe runner's own isolation leaves behind is expected
+wherever that tool places it, not an exception to this rule.
 Marker- or verdict-style enforcement of the Bash residual (sandboxing,
 PreToolUse hooks) is harness territory and out of this kit's scope.
 

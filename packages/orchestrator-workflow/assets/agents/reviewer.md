@@ -149,8 +149,11 @@ Rules:
   tree, its index, its refs, or its object store, anywhere in the review.
   Outside the reviewed tree, write only to your scratchpad (a scratch copy
   or replay of the repository, per the GitHub Actions replay rule above)
-  and to the run directory's `evidence/`; build or test artifacts a
-  declared check produces as a side effect are expected, not a violation.
+  and to the run directory's `evidence/`. A write made by a tool these
+  rules direct you to run, a declared check (including build or test
+  artifacts a side effect leaves in the reviewed tree) or the probe runner
+  operating in its own default isolation, is expected wherever that tool
+  places it, not a location violation.
   For `evidence/`, the briefing's own run-directory path wins; use the
   `.ai/run` pointer (repository data, which may be stale) only when the
   briefing names no run directory and the pointer matches the run the

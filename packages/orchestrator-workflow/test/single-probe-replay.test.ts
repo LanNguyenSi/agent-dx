@@ -10,8 +10,12 @@ import { composeCodexAgent } from "../src/codex.js";
 import { runInit } from "../src/init.js";
 import { DEFAULT_MODELS, DEFAULT_TIER, ROLE_TIERS } from "../src/models.js";
 import {
+  HAND_APPLIED_MUTANT_IS_A_FINDING,
+  IN_PLACE_AUTHORIZATION_CLAUSE,
+  IN_PLACE_RESTORED_VERIFIED_CLAUSE,
   NAMED_PROBE_FORMS,
   RUNNER_ONLY_PROBE_RULE,
+  SINGLE_MODE_NOT_APPLICABLE_CLAUSE,
   SINGLE_REPLAY_RULE,
 } from "./run-mode-constants.js";
 
@@ -68,6 +72,21 @@ describe("single-mode probe replay", () => {
     expect(step7).toContain(
       "A probe given only by id is `not_applicable` and counts as missing evidence, not as a pass, and so does a `single` briefing that names no probe at all.",
     );
+  });
+
+  // Issue #339: the bounded in-place exception's own conditions
+  // (authorization, restored_verified, clean tree, exclusive access) and
+  // the run mode `single` duty's not_applicable fallback are common wording
+  // between the reviewer prompt and step 7's mirror of it; pin both spans
+  // against the same constants so a weakening edit to either site is caught.
+  it("step 7 and the reviewer prompt carry the same in-place exception conditions and single-mode not_applicable fallback", () => {
+    expect(step7).toContain(IN_PLACE_AUTHORIZATION_CLAUSE);
+    expect(step7).toContain(IN_PLACE_RESTORED_VERIFIED_CLAUSE);
+    expect(step7).toContain(SINGLE_MODE_NOT_APPLICABLE_CLAUSE);
+    expect(reviewer).toContain(IN_PLACE_AUTHORIZATION_CLAUSE);
+    expect(reviewer).toContain(IN_PLACE_RESTORED_VERIFIED_CLAUSE);
+    expect(reviewer).toContain(SINGLE_MODE_NOT_APPLICABLE_CLAUSE);
+    expect(reviewer).toContain(HAND_APPLIED_MUTANT_IS_A_FINDING);
   });
 
   it("the rule is stated once: only step 7 carries its opening sentence", () => {
@@ -247,6 +266,76 @@ describe("single-mode probe replay", () => {
           expect(rendered, `${harness}/reviewer${suffix}.md`).toContain(
             RUNNER_ONLY_PROBE_RULE,
           );
+        }
+      }
+    } finally {
+      rmSync(target, { recursive: true, force: true });
+    }
+  });
+
+  // Issue #339: the in-place bounded-exception conditions and the
+  // single-mode not_applicable fallback each previously survived a
+  // weakening/inverting mutant because nothing pinned their own wording
+  // across every install target, the same gap RUNNER_ONLY_PROBE_RULE closed
+  // for the general rule above. Mirrors that test's pattern for the two
+  // constants unique to this narrower span.
+  it("every rendered reviewer variant of every harness carries the in-place exception conditions and the single-mode not_applicable fallback", () => {
+    const codexBodies = [
+      parse(
+        composeCodexAgent("reviewer", { model: "gpt-6-astra", effort: "high" }),
+      ).developer_instructions,
+      ...ROLE_TIERS.reviewer.map(
+        (tier) =>
+          parse(
+            composeCodexAgent(
+              "reviewer",
+              { model: "gpt-6-astra", effort: tier },
+              tier,
+            ),
+          ).developer_instructions,
+      ),
+    ];
+    for (const body of codexBodies) {
+      const text = unwrap(String(body));
+      expect(text).toContain(IN_PLACE_AUTHORIZATION_CLAUSE);
+      expect(text).toContain(IN_PLACE_RESTORED_VERIFIED_CLAUSE);
+      expect(text).toContain(SINGLE_MODE_NOT_APPLICABLE_CLAUSE);
+      expect(text).toContain(HAND_APPLIED_MUTANT_IS_A_FINDING);
+    }
+
+    const target = mkdtempSync(join(tmpdir(), "ow-in-place-exception-"));
+    try {
+      runInit({
+        targetDir: target,
+        harnesses: ["claude", "opencode"],
+        models: { ...DEFAULT_MODELS },
+        opencodeModels: { reviewer: "anthropic/claude-opus-4-8" },
+        opencodeClassModels: {
+          small: "anthropic/claude-haiku-4-5",
+          medium: "anthropic/claude-sonnet-4-6",
+          large: "anthropic/claude-opus-4-8",
+        },
+        tiers: true,
+      });
+      for (const harness of [".claude", ".opencode"]) {
+        for (const tier of ROLE_TIERS.reviewer) {
+          const suffix = tier === DEFAULT_TIER.reviewer ? "" : `-${tier}`;
+          const rendered = unwrap(
+            readFileSync(
+              join(target, harness, "agents", `reviewer${suffix}.md`),
+              "utf8",
+            ),
+          );
+          for (const clause of [
+            IN_PLACE_AUTHORIZATION_CLAUSE,
+            IN_PLACE_RESTORED_VERIFIED_CLAUSE,
+            SINGLE_MODE_NOT_APPLICABLE_CLAUSE,
+            HAND_APPLIED_MUTANT_IS_A_FINDING,
+          ]) {
+            expect(rendered, `${harness}/reviewer${suffix}.md`).toContain(
+              clause,
+            );
+          }
         }
       }
     } finally {
