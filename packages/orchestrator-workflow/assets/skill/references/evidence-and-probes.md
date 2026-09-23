@@ -351,7 +351,7 @@ source edit makes an old result inapplicable to the new state, but does not
 itself require re-resolving an unchanged set; re-resolve when an executable
 definition, effective config/script, tool identity, set digest, or approved
 snapshot changes. An unresolvable reference is stale and invalidates the
-result.
+result. When a run-base marker names a linked worktree, re-resolve every literal repository path in the set's argv and cwd to that worktree's root before freezing, and record the resolved paths in the frozen snapshot; a literal path left pointing at the main checkout checks another tree, not the delta. Repository identity includes the repository path (the worktree root), not only the revision: compare the snapshot's repository path, and the revision each result was checked at, with the tree the diff comes from; a set frozen against another checkout (for example the main checkout while the diff comes from a linked worktree) or a result checked at a revision other than the diff's is a misfire, not a pass, while a difference between the snapshot's recorded revision and the checked revision alone is not.
 
 Both implementer and reviewer run the complete frozen set and report every
 named executor, extra, and raw preflight child occurrence, with cwd and result

@@ -72,7 +72,7 @@ Check, at minimum:
   frozen run-local snapshot (set path/digest, repository identity/revision
   and dirty state, effective config/scripts, and preflight executable
   identity/definition) to identify the approved set behind every reported result, and bind
-  each result to the revision and dirty state actually checked; a revision or dirty-state difference from the snapshot alone does not withdraw the approval. Report every
+  each result to the revision and dirty state actually checked; a revision or dirty-state difference from the snapshot alone does not withdraw the approval. Repository identity includes the repository path (the worktree root), not only the revision: compare the snapshot's repository path, and the revision each result was checked at, with the tree the diff comes from; a set frozen against another checkout (for example the main checkout while the diff comes from a linked worktree) or a result checked at a revision other than the diff's is a misfire, not a pass, while a difference between the snapshot's recorded revision and the checked revision alone is not. Report every
   ordered `(kind, name, occurrence)`
   executor, extra, and raw
   preflight child with cwd and result artifact. A missing tool may be a

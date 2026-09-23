@@ -1,9 +1,15 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { parse } from "@iarna/toml";
 import { describe, expect, it } from "vitest";
 
 import { readAsset as readRawAsset } from "../src/assets.js";
+import { composeCodexAgent } from "../src/codex.js";
+import { runInit } from "../src/init.js";
+import { DEFAULT_MODELS, DEFAULT_TIER, ROLE_TIERS } from "../src/models.js";
 
 const references = [
   "run-state-and-harness.md",
@@ -16,6 +22,15 @@ const skill = [
   ...references.map((name) => readRawAsset(`skill/references/${name}`)),
 ].join("\n\n");
 const compact = (text: string) => text.replace(/\s+/g, " ");
+
+// Issue #336: a set whose literal repository paths point at the main
+// checkout checks another tree than a delta that lives in a linked
+// worktree. These two sentences are the rule's own wording; the identity
+// rule is shared verbatim by every site that states the comparison rule.
+const WORKTREE_RE_RESOLUTION_RULE =
+  "When a run-base marker names a linked worktree, re-resolve every literal repository path in the set's argv and cwd to that worktree's root before freezing, and record the resolved paths in the frozen snapshot; a literal path left pointing at the main checkout checks another tree, not the delta.";
+const REPOSITORY_PATH_IDENTITY_RULE =
+  "Repository identity includes the repository path (the worktree root), not only the revision: compare the snapshot's repository path, and the revision each result was checked at, with the tree the diff comes from; a set frozen against another checkout (for example the main checkout while the diff comes from a linked worktree) or a result checked at a revision other than the diff's is a misfire, not a pass, while a difference between the snapshot's recorded revision and the checked revision alone is not.";
 const packageDir = fileURLToPath(new URL("..", import.meta.url));
 const readme = readFileSync(`${packageDir}/README.md`, "utf8");
 const exampleFence = readme.match(
@@ -273,5 +288,91 @@ describe("documented verification sets", () => {
         "\"Scripts\" here means every package-manager script entry plus every file an extra's or preflight's argv or such a script entry invokes directly, and repository configuration files the executed tools load count as effective configuration; code under test is not a component.",
       ),
     );
+  });
+
+  it("requires re-resolving literal repository paths to a linked worktree before freezing and recording them in the snapshot (issue #336)", () => {
+    const evidenceAndProbes = readRawAsset(
+      "skill/references/evidence-and-probes.md",
+    );
+    const section = compact(
+      evidenceAndProbes.slice(
+        evidenceAndProbes.indexOf("## Verification sets"),
+        evidenceAndProbes.indexOf("# Persisted probe plans"),
+      ),
+    );
+    expect(section).toContain(compact(WORKTREE_RE_RESOLUTION_RULE));
+  });
+
+  it("states the repository-path identity rule with identical wording in implementer.md, reviewer.md, contracts.md, and the Verification sets section (issue #336)", () => {
+    const evidenceAndProbes = readRawAsset(
+      "skill/references/evidence-and-probes.md",
+    );
+    const section = evidenceAndProbes.slice(
+      evidenceAndProbes.indexOf("## Verification sets"),
+      evidenceAndProbes.indexOf("# Persisted probe plans"),
+    );
+    for (const doc of [
+      readRawAsset("agents/implementer.md"),
+      readRawAsset("agents/reviewer.md"),
+      readRawAsset("skill/references/contracts.md"),
+      section,
+    ]) {
+      expect(compact(doc)).toContain(compact(REPOSITORY_PATH_IDENTITY_RULE));
+    }
+  });
+
+  it("carries the repository-path identity rule into every rendered implementer and reviewer variant of every harness (issue #336)", () => {
+    for (const role of ["implementer", "reviewer"] as const) {
+      const codexBodies = [
+        parse(composeCodexAgent(role, { model: "gpt-6-astra", effort: "high" }))
+          .developer_instructions,
+        ...ROLE_TIERS[role].map(
+          (tier) =>
+            parse(
+              composeCodexAgent(
+                role,
+                { model: "gpt-6-astra", effort: tier },
+                tier,
+              ),
+            ).developer_instructions,
+        ),
+      ];
+      for (const body of codexBodies) {
+        expect(compact(String(body))).toContain(REPOSITORY_PATH_IDENTITY_RULE);
+      }
+    }
+    const target = mkdtempSync(join(tmpdir(), "ow-worktree-identity-"));
+    try {
+      runInit({
+        targetDir: target,
+        harnesses: ["claude", "opencode"],
+        models: { ...DEFAULT_MODELS },
+        opencodeModels: { reviewer: "anthropic/claude-opus-4-8" },
+        opencodeClassModels: {
+          small: "anthropic/claude-haiku-4-5",
+          medium: "anthropic/claude-sonnet-4-6",
+          large: "anthropic/claude-opus-4-8",
+        },
+        tiers: true,
+      });
+      for (const harness of [".claude", ".opencode"]) {
+        for (const role of ["implementer", "reviewer"] as const) {
+          for (const tier of ROLE_TIERS[role]) {
+            const suffix = tier === DEFAULT_TIER[role] ? "" : `-${tier}`;
+            const rendered = compact(
+              readFileSync(
+                join(target, harness, "agents", `${role}${suffix}.md`),
+                "utf8",
+              ),
+            );
+            expect(rendered, `${harness}/${role}${suffix}.md`).toContain(
+              REPOSITORY_PATH_IDENTITY_RULE,
+            );
+          }
+        }
+      }
+    } finally {
+      rmSync(target, { recursive: true, force: true });
+    }
   });
 });
