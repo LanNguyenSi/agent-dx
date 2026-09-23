@@ -49,6 +49,16 @@ import {
  * module's import direction).
  */
 
+/** Above this many bytes, the mutant run's full on-disk log (`test.logPath`)
+ * is skipped rather than read into memory for the truncated-tail
+ * `--pass-regex` correction below. The captured tail is short, so that
+ * read runs on most truncated misses of a real suite, and a plan can run
+ * thousands of mutants: the bound caps the per-mutant memory and regex
+ * cost. Skipping keeps the existing caveat (the miss stays unresolved,
+ * never silently read as an unambiguous kill) exactly as if the log
+ * could not be read at all; the bound is not a verdict of its own. */
+const FULL_LOG_READ_BOUND_BYTES = 2 * 1024 * 1024;
+
 /** One mutant of a run: exactly one form plus the verdict it is expected
  * to produce. `expect` is per mutant, so a plan can mix a mutant that
  * must break the test with one that must not. */
@@ -665,12 +675,14 @@ export async function runMutantAttempt(
     // Unlike the miss warning below, this one is not gated on
     // ambiguity: a band code is rare enough per plan that one entry per
     // affected mutant stays readable, and each names the code and the
-    // signal the reader has to check.
-    if (!testPassed && mutantSignalCode !== undefined) {
-      warnings.push(
-        `the mutant run exited with ${String(testResult.exitCode)}, the code a shell reports for a process killed by signal ${String(mutantSignalCode)}; the ${status} verdict may rest on a run that was cut short; see ${testResult.logPath}`,
-      );
-    }
+    // signal the reader has to check. The push itself is deferred to
+    // AFTER the `--pass-regex` block below: that block's own
+    // truncated-tail check can still correct `status` from `killed` to
+    // `survived`, and this warning's `${status}` has to name that FINAL
+    // verdict, not the one read here before the correction had its say
+    // -- a killed-verdict warning attached to a run this same function
+    // goes on to report `survived` would read as contradicting itself.
+    const bandCodeMutantWarning = !testPassed && mutantSignalCode !== undefined;
 
     if (rt.passRegex !== undefined) {
       if (testPassed && testResult.exitCode !== 0) {
@@ -725,30 +737,97 @@ export async function runMutantAttempt(
         // findings (a healthy plan run would otherwise never have an
         // empty `warnings` array at all). Warned only when the miss is
         // actually ambiguous: (1) either side of this run's own captured
-        // tail was truncated, so the pattern may have matched output
-        // this run never even captured; (2) the exit code itself reads
-        // `0` despite the predicate reading "failed" -- the process and
-        // the predicate disagree, worth a second look regardless of
-        // `--expect`; or (3) `--expect pass`, where a miss still means
-        // the mutant was KILLED (the predicate reads FAILING, the same
-        // as under `--expect fail`) but that killed verdict VIOLATES
-        // the expectation -- not the routine "predicate agrees, the
-        // expectation is met" shape at all.
-        // Named explicitly, the same as `--require-baseline-evidence`'s
-        // own miss is on the baseline side, so a caller reading
-        // `warnings` sees which pattern was checked and against what,
-        // rather than only the bare `killed`/`survived` verdict.
-        const ambiguousMiss =
-          testResult.stdoutTruncated ||
-          testResult.stderrTruncated ||
-          testResult.exitCode === 0 ||
-          spec.expect === "pass";
-        if (ambiguousMiss) {
+        // tail was truncated AND checking the full log (below) could not
+        // rule out a match outside the captured tail; (2) the exit code
+        // itself reads `0` despite the predicate reading "failed" -- the
+        // process and the predicate disagree, worth a second look
+        // regardless of `--expect`; or (3) `--expect pass`, where a miss
+        // still means the mutant was KILLED (the predicate reads FAILING,
+        // the same as under `--expect fail`) but that killed verdict
+        // VIOLATES the expectation -- not the routine "predicate agrees,
+        // the expectation is met" shape at all.
+        //
+        // A truncated tail alone is no longer speculation: `exec.ts`
+        // keeps the FULL, untruncated run output on disk at
+        // `testResult.logPath` (stdout and stderr interleaved in the
+        // order the child actually wrote them, the same source
+        // `stdoutTail`/`stderrTail` are themselves drawn from), so
+        // whether the pattern matched outside the captured tail is
+        // checked directly against that file rather than guessed at. A
+        // match there means the full run's own output does satisfy
+        // `--pass-regex`, so the verdict this run actually earned is
+        // SURVIVED, not KILLED -- the full log is authoritative, so the
+        // verdict is corrected instead of merely flagged as uncertain,
+        // and `reportedNoVerdict`'s own timeout/no-verdict handling above
+        // is untouched (this branch only ever runs once a real,
+        // non-null exit code was already read). When the file cannot be
+        // read back (deleted, a disk error mid-flush --
+        // `testResult.logWriteFailed`), the ambiguity is genuinely
+        // unresolved, so the caveat is kept exactly as before.
+        const wasTailTruncated =
+          testResult.stdoutTruncated || testResult.stderrTruncated;
+        let fullLogMatchedOutsideTail = false;
+        let fullLogCheckable = false;
+        // The full log is only ever trusted to rule out a match when it
+        // is known to hold the run's true, complete output. A mid-run
+        // write failure (`testResult.logWriteFailed`) or a stdio race
+        // this package's own flush grace gave up waiting on
+        // (`testResult.outputMayBeIncomplete`, which already gets its
+        // own separate warning via `noteIncompleteOutput` above) both
+        // mean the on-disk file may be missing trailing output the
+        // captured tail never saw either -- reading a merely PARTIAL
+        // file and finding no match there would prove nothing about the
+        // run's real output, so the read is skipped in both cases and
+        // the caveat below is kept exactly as if the file could not be
+        // read at all. A file above `FULL_LOG_READ_BOUND_BYTES` is
+        // skipped the same way, for a different reason: not because it
+        // cannot be trusted, but because reading it is not worth doing
+        // by default (see that constant's own docblock).
+        if (
+          wasTailTruncated &&
+          !testResult.logWriteFailed &&
+          !testResult.outputMayBeIncomplete
+        ) {
+          try {
+            const logStat = fs.statSync(testResult.logPath);
+            if (logStat.size <= FULL_LOG_READ_BOUND_BYTES) {
+              const fullLog = fs.readFileSync(testResult.logPath, "utf8");
+              fullLogCheckable = true;
+              fullLogMatchedOutsideTail = rt.passRegex.test(fullLog);
+            }
+          } catch {
+            fullLogCheckable = false;
+          }
+        }
+        if (fullLogMatchedOutsideTail) {
+          status = "survived";
+          mutationProbeResult = status;
           warnings.push(
-            `--pass-regex (${rt.passRegex.source}) did not match the mutant run's output${truncationNote("mutant run", testResult.stdoutTruncated, testResult.stderrTruncated)}; see ${testResult.logPath}`,
+            `--pass-regex (${rt.passRegex.source}) did not match the mutant run's captured output tail, but the full log at ${testResult.logPath} does match it outside the captured tail; the verdict is corrected from killed to survived`,
           );
+        } else {
+          const truncationUnresolved = wasTailTruncated && !fullLogCheckable;
+          const ambiguousMiss =
+            truncationUnresolved ||
+            testResult.exitCode === 0 ||
+            spec.expect === "pass";
+          if (ambiguousMiss) {
+            warnings.push(
+              `--pass-regex (${rt.passRegex.source}) did not match the mutant run's output${truncationUnresolved ? truncationNote("mutant run", testResult.stdoutTruncated, testResult.stderrTruncated) : ""}; see ${testResult.logPath}`,
+            );
+          }
         }
       }
+    }
+
+    // Pushed here, after `status` has had its last chance to be
+    // corrected above (see `bandCodeMutantWarning`'s own comment): reads
+    // whatever `status` settled on, `killed` or a truncated-tail
+    // correction to `survived`.
+    if (bandCodeMutantWarning && mutantSignalCode !== undefined) {
+      warnings.push(
+        `the mutant run exited with ${String(testResult.exitCode)}, the code a shell reports for a process killed by signal ${String(mutantSignalCode)}; the ${status} verdict may rest on a run that was cut short; see ${testResult.logPath}`,
+      );
     }
 
     // Zero-tests-executed detection, mutant side: the mutant run's OWN
