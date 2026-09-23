@@ -1236,7 +1236,7 @@ describe("commits field ships in the skill and the implementer prompt", () => {
   it("the installed prompt pins the full-sha, in-order semantics, not only the commits: [] clause", () => {
     expect(skillMd).toContain("evidence-and-probes.md workflow step 6");
     expect(implementerMd).toContain("full sha");
-    expect(skillMd).toContain("output-field semantics and commit reporting");
+    expect(skillMd).toContain("commit reporting");
 
     expect(implementerMd).toContain("in order");
   });
@@ -4627,7 +4627,7 @@ describe("roles prefer connected structural search, verify, and mutation-probe r
       "When a mutation-probe runner is available in the session, run probes through it instead of editing files by hand",
     );
     expect(flat(reviewerMd)).toContain(
-      "when a verify runner is available, read its summary before opening full logs",
+      "When a verify runner is available, read its summary before opening full logs",
     );
   });
 
@@ -4636,7 +4636,7 @@ describe("roles prefer connected structural search, verify, and mutation-probe r
       "When a verify runner is available, run it for the checks the acceptance criteria name and report its summary under `tests.executed`",
     );
     expect(flat(implementerMd)).toContain(
-      "run the named probes through it and copy its fields into `mutation_probes`",
+      "When a mutation-probe runner is available, run the named probes through it and copy every supplied `result` and `expectation` verbatim into `mutation_probes`, never substituting your interpretation of its test output.",
     );
   });
 

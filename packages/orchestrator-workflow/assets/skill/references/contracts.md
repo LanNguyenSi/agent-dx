@@ -131,8 +131,27 @@ commits:
 
 Follow [evidence-and-probes.md workflow step 6](evidence-and-probes.md#workflow)
 for implementation evidence, verification, mutation probes, and replay. For
-output-field semantics and commit reporting, follow the installed
-implementer role prompt. Return the selected contract's YAML envelope. `result: killed` means the probe's test command reacted to the mutant under the runner's own pass predicate and `survived` means it did not; `expectation: met` means that outcome is what the probe was expected to show and `violated` means it is not; both are `not_applicable` when no `result` was measured. When the probe runner states a machine-readable verdict, copy whichever of `result` and `expectation` it states from it verbatim, never from your own reading of the test output; when it states only `result`, set `expectation` by comparing that verdict with the probe's declared expectation. Quote the runner's verdict for each probe in `tests.executed`, and say there when `expectation` was set this way, so both fields can be checked against it.
+commit reporting, follow the installed implementer role prompt. Return the
+selected contract's YAML envelope. `result: killed` means the probe's test
+command reacted to the mutant under the runner's pass predicate, or the
+test pass predicate declared in the task assignment or probe plan when no
+runner supplies a verdict; `survived` means it did not. `expectation: met`
+means the measured result matches the expected result declared in the task
+assignment or probe plan, and `violated` means it does not; both fields
+are `not_applicable` when no result was measured. When a mutation-probe
+runner is available, run the named probes through it and copy every
+supplied `result` and `expectation` verbatim into `mutation_probes`, never
+substituting your interpretation of its test output. Quote each supplied
+verdict in `tests.executed`; when it supplies only `result`, derive
+`expectation` from the expected result declared in the task assignment or
+probe plan, and identify that declaration and derivation there. When no
+machine-readable verdict is available, state that explicitly in
+`tests.executed`, identify the declared test pass predicate and expected
+result, and quote the observed baseline and mutant outcomes. Derive
+`result` from those observations only when the baseline passed, mutant
+application was verified, and the mutant test completed under the same
+command and predicate; derive `expectation` by comparing that result with
+the declared expected result, and label both derivations as manual.
 
 ## Reviewer output contract
 

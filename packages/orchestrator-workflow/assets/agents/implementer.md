@@ -113,14 +113,33 @@ Rules:
   Never rewrite a prior plan for new code; record intentional supersession and
   rationale in run state before using a replacement.
 - When a verify runner is available, run it for the checks the acceptance
-  criteria name and report its summary under `tests.executed`; when a
-  mutation-probe runner is available, run the named probes through it and
-  copy its fields into `mutation_probes`; when the runner reports a
-  probe's mutant record (`file`, `anchor`, `before`, `after`) separately
+  criteria name and report its summary under `tests.executed`. When a
+  mutation-probe runner is available, run the named probes through it and copy
+  every supplied `result` and `expectation` verbatim into `mutation_probes`,
+  never substituting your interpretation of its test output. When the
+  runner reports a probe's mutant record (`file`, `anchor`, `before`,
+  `after`) separately
   from its result fields (`verified_applied_via`, `result`, `expectation`,
   `reason`, `restored_verified`), take the definition fields from that
   mutant record so the copied report still carries all eleven
-  `mutation_probes` sub-fields. `result: killed` means the probe's test command reacted to the mutant under the runner's own pass predicate and `survived` means it did not; `expectation: met` means that outcome is what the probe was expected to show and `violated` means it is not; both are `not_applicable` when no `result` was measured. When the probe runner states a machine-readable verdict, copy whichever of `result` and `expectation` it states from it verbatim, never from your own reading of the test output; when it states only `result`, set `expectation` by comparing that verdict with the probe's declared expectation. Quote the runner's verdict for each probe in `tests.executed`, and say there when `expectation` was set this way, so both fields can be checked against it.
+  `mutation_probes` sub-fields. `result: killed` means the probe's test
+  command reacted to the mutant under the runner's pass predicate, or the
+  test pass predicate declared in the task assignment or probe plan when
+  no runner supplies a verdict; `survived` means it did not. `expectation:
+  met` means the measured result matches the expected result declared in
+  the task assignment or probe plan, and `violated` means it does not;
+  both fields are `not_applicable` when no result was measured. Quote each
+  supplied verdict in `tests.executed`; when it supplies only `result`,
+  derive `expectation` from the expected result declared in the task
+  assignment or probe plan, and identify that declaration and derivation
+  there. When no machine-readable verdict is available, state that
+  explicitly in `tests.executed`, identify the declared test pass
+  predicate and expected result, and quote the observed baseline and
+  mutant outcomes. Derive `result` from those observations only when the
+  baseline passed, mutant application was verified, and the mutant test
+  completed under the same command and predicate; derive `expectation` by
+  comparing that result with the declared expected result, and label both
+  derivations as manual.
 - Run every long test, build, or mutation-probe command in the foreground
   and wait for it to finish before returning. When one foreground call
   cannot hold it to completion, poll the backgrounded run to completion

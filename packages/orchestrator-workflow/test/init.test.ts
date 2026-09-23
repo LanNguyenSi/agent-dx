@@ -2725,3 +2725,35 @@ describe("dropped-harness note loop is file-ledger-driven, not previous.harnesse
     ).toBe(true);
   });
 });
+
+describe("probe verdict render paths", () => {
+  const probeVerdictLegend =
+    "`result: killed` means the probe's test command reacted to the mutant under the runner's pass predicate, or the test pass predicate declared in the task assignment or probe plan when no runner supplies a verdict";
+  it.each([
+    "implementer.md",
+    "implementer-low.md",
+    "implementer-high.md",
+    "implementer-xhigh.md",
+  ])("the probe verdict legend renders into %s", (file) => {
+    runInit({ ...defaultOptions(), profile: "full", tiers: true });
+    const rendered = readFileSync(
+      join(target, ".claude", "agents", file),
+      "utf8",
+    );
+    expect(rendered.replace(/\s+/g, " "), file).toContain(probeVerdictLegend);
+  });
+
+  it("the probe verdict legend renders into Codex developer instructions", async () => {
+    const { parse } = await import("@iarna/toml");
+    const { composeCodexAgent } = await import("../src/codex.js");
+    const codex = parse(
+      composeCodexAgent("implementer", {
+        model: "gpt-5.6-terra",
+        effort: "medium",
+      }),
+    );
+    expect(String(codex.developer_instructions).replace(/\s+/g, " ")).toContain(
+      probeVerdictLegend,
+    );
+  });
+});

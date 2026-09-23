@@ -59,7 +59,7 @@ describe("single-mode probe replay", () => {
     );
     expect(step7).toContain("never in the reviewed tree");
     expect(step7).toContain(
-      "whether that verdict matches the recorded `result` and `expectation`; a mismatch is a finding of at least `high` and sets `matches_implementer_claim: mismatched`.",
+      "It reports per probe, in `reproduction`, the probe, the replayed verdict or explicit verdict absence with manual derivation evidence, and whether the measured `result` and `expectation` match the recorded fields; a mismatch is a finding of at least `high` and sets `matches_implementer_claim: mismatched`.",
     );
     expect(step7).toContain(
       "A probe given only by id is `not_applicable` and counts as missing evidence, not as a pass, and so does a `single` briefing that names no probe at all.",

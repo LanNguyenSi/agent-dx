@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Mutation-probe verdict reporting now distinguishes runner-supplied,
+  result-only, and no-verdict cases without changing the output contract.
+  `result: killed` means the probe's test command reacted to the mutant
+  under the runner's pass predicate, or the test pass predicate declared
+  in the task assignment or probe plan when no runner supplies a verdict;
+  `survived` means it did not. `expectation: met` means the measured
+  result matches the expected result declared in the task assignment or
+  probe plan, and `violated` means it does not; both fields are
+  `not_applicable` when no result was measured. When a mutation-probe
+  runner is available, run the named probes through it and copy every
+  supplied `result` and `expectation` verbatim into `mutation_probes`,
+  never substituting your interpretation of its test output. Quote each
+  supplied verdict in `tests.executed`; when it supplies only `result`,
+  derive `expectation` from the expected result declared in the task
+  assignment or probe plan, and identify that declaration and derivation
+  there. When no machine-readable verdict is available, state that
+  explicitly in `tests.executed`, identify the declared test pass
+  predicate and expected result, and quote the observed baseline and
+  mutant outcomes. Derive `result` from those observations only when the
+  baseline passed, mutant application was verified, and the mutant test
+  completed under the same command and predicate; derive `expectation` by
+  comparing that result with the declared expected result, and label both
+  derivations as manual. Before transferring a probe row, compare each
+  copied field with the quoted verdict and each derived field with its
+  stated declaration and evidence. An explicit absence of a
+  machine-readable verdict requires the manual comparison, not resupply of
+  a nonexistent verdict. On a mismatch or missing required evidence,
+  obtain corrected evidence from the implementer or rerun the probe in
+  isolation, record the action in `03-decisions.md`, and keep the row
+  blocked from transfer until the comparison succeeds; if the evidence
+  cannot be obtained, record the unresolved proof rather than repeatedly
+  requesting an unavailable verdict. Never invent a verdict, override a
+  supplied field, or fill an unsupported derivation. Apply the same
+  evidence reporting and comparison to probes you run yourself before
+  recording their rows in `04-implementation-summary.md`. For probes you
+  run, apply the implementer's verdict-copy and manual-derivation rules to
+  your own measurements, reporting the quoted verdict or explicit verdict
+  absence and derivation evidence in `reproduction` and carrying the same
+  reported values into any associated finding. A quoted probe verdict is
+  not a named result of the verification set, so the set's
+  missing-or-extra rule does not apply to it. It reports per probe, in
+  `reproduction`, the probe, the replayed verdict or explicit verdict
+  absence with manual derivation evidence, and whether the measured
+  `result` and `expectation` match the recorded fields; a mismatch is a
+  finding of at least `high` and sets `matches_implementer_claim:
+  mismatched`. The implementer legend renders into every implementer tier
+  and Codex developer instructions; the revised test suite exercises all
+  three cases and the corresponding transfer decisions. Evidence for task
+  cb4ff78f-b0cb-402e-8387-f996f676f964 is recorded in the astra-old-eight
+  run, T-005 implementation report.
+
 - A fix round now closes the defect class instead of the reported
   instance. `assets/agents/implementer.md` (and every tier variant
   rendered from it) states, for any round after a task's first, the
