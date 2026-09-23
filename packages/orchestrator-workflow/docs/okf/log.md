@@ -11401,3 +11401,19 @@ anchor sits on its new line, in the live sites and in the earlier entries
 that quote them. Re-stamped review gate and waivers, run-state lifecycle
 and markers, and the subagent contracts document at 2026-09-23T20:23:20Z after
 confirming none of their own citations resolve into an edited line.
+
+The worktree re-resolution rule and the repository-path identity sentence
+(#336) were reworded after review. Re-resolution now triggers when the
+diff for a repository comes from a linked worktree, however its run-base
+marker is keyed or with only the unkeyed marker, and maps each literal
+path to the corresponding path under that worktree's top level. The
+shared identity sentence now limits repository identity, for the
+comparison before acquisition or execution, to the repository and its
+path compared with the worktree the diff comes from; a revision
+difference alone does not withdraw the approval, and the earlier clause
+about a result checked at another revision was removed. The changelog
+entry kept its line count, so no self-citation in this log moved, and the
+edited sentences stayed on the same appended lines. Re-stamped review
+gate and waivers, run-state lifecycle and markers, and the subagent
+contracts document at 2026-09-23T20:44:03Z after confirming none of their
+own citations resolve into an edited line.
