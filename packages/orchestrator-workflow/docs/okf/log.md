@@ -11112,8 +11112,8 @@ T-005 implementation report holds the verification and mutation evidence.
 The independent review identified a malformed string anchor and source
 freshness warnings that the successful validator process exit did not
 exclude. The anchor now uses a plain substring without nested backticks.
-Reverified install-fence mechanics and model preselection against the
-affected tests and re-stamped both at 2026-09-23T10:17:44Z: the init changes
+Reverified install-fence mechanics, model preselection, and the subagent
+contracts document and re-stamped them at 2026-09-23T10:17:44Z: the init changes
 append probe-verdict render coverage, while the documentation-consistency
 changes update probe wording only. Existing installer and routing behavior,
 assertions, and their line locations remain unchanged. The run records the
