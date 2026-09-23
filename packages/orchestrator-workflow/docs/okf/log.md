@@ -11324,3 +11324,13 @@ line moved, so it still needed a re-stamp. Re-stamped
 `run-state-lifecycle-and-markers.md`, and `model-preselection.md` at
 2026-09-23T18:05:02Z after re-verifying every citation into their listed
 sources resolves at the new commit.
+
+The verification-set wording for #335 now binds each reported result to
+the revision and dirty state actually checked (the frozen snapshot only
+identifies the approved set), in both the implementer and the reviewer
+prompt, and counts files a package-manager script entry invokes as
+scripts and tool configuration as effective configuration. The edits
+kept every line count, so no citation moved; review gate and waivers,
+run-state lifecycle and markers, and the subagent contracts document were
+re-stamped at 2026-09-23T18:25:41Z after confirming their claims about the verification
+set still hold.
