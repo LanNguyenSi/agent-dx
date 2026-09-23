@@ -11311,9 +11311,16 @@ numbers out in words). Every shifted `paragraphLine`/`secondCitationLine`
 was re-derived from the doc's current text, not assumed from the diff.
 `run-state-lifecycle-and-markers.md` lists contracts.md, evidence-and-
 probes.md, and CHANGELOG.md among its sources but cites none of them at
-or after the edited lines, so none of its citations moved. Re-stamped
-`subagent-contracts-superset.md`, `review-gate-and-waivers.md`, and
-`run-state-lifecycle-and-markers.md` at 2026-09-23T17:56:49Z after
-re-verifying every citation into their listed sources resolves at the new
-commit; `model-preselection.md` does not list any of the changed files as
-a source and was left untouched.
+or after the edited lines, so none of its citations moved.
+`model-preselection.md` does not list any of implementer.md, reviewer.md,
+contracts.md, or evidence-and-probes.md as a source, but does list
+`test/docs-consistency.test.ts`, whose allowlist edit above changed its
+mtime; its own citations into that file resolve unchanged, since only
+numeric field values and claim prose moved, not any cited line, but
+`okf-kit check --require-anchors`'s sources-fresh rule flags any listed
+source newer than the doc's own timestamp regardless of whether a cited
+line moved, so it still needed a re-stamp. Re-stamped
+`subagent-contracts-superset.md`, `review-gate-and-waivers.md`,
+`run-state-lifecycle-and-markers.md`, and `model-preselection.md` at
+2026-09-23T18:05:02Z after re-verifying every citation into their listed
+sources resolves at the new commit.
