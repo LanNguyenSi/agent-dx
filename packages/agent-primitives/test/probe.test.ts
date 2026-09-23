@@ -6321,9 +6321,12 @@ describe("probe(): --pass-regex mutant-path miss warning is gated to ambiguous m
   // killed mutant (a healthy N-mutant plan would then never have an
   // empty `warnings` array, and would carry N near-duplicate entries).
   // It now fires only when the miss is actually ambiguous: a truncated
-  // tail, an exit code of 0 disagreeing with the predicate, or a miss
-  // under --expect pass (which means the mutant SURVIVED, not the
-  // "predicate agrees the mutant broke the suite" shape at all).
+  // tail whose full, on-disk log ALSO fails to match (see #338 -- when
+  // the full log DOES match, the verdict is corrected to survived
+  // instead, and no truncation warning is pushed at all), an exit code
+  // of 0 disagreeing with the predicate, or a miss under --expect pass
+  // (which means the mutant SURVIVED, not the "predicate agrees the
+  // mutant broke the suite" shape at all).
 
   function initRepoWithFile(name: string, content: string): { repo: string } {
     const repo = makeTmpDir();
@@ -6370,12 +6373,59 @@ describe("probe(): --pass-regex mutant-path miss warning is gated to ambiguous m
     expect(result.warnings).toEqual([]);
   });
 
-  it("ambiguous case 1/3 -- the mutant run's captured tail was truncated: warns", async () => {
+  it("#338 AC1 -- the captured tail was truncated but the FULL log never matches --pass-regex anywhere: killed, with NO truncation warning (fails on master, which always warns here)", async () => {
+    useLockDir();
+    // Baseline: short, matches, exits 0 -- no baseline-side warnings.
+    // Mutant: prints 70 filler lines that never contain the pattern, then
+    // exits 1 -- more than exec.ts's 60-line tail bound, so the captured
+    // tail is truncated, but the pattern is absent from the run's FULL
+    // output too, not merely scrolled out of the tail. Master (before
+    // #338) cannot tell the two apart and warns on every truncated miss;
+    // this run's full on-disk log settles it: there is genuinely nothing
+    // to be uncertain about.
+    const RUNNER_JS = [
+      "const linesToPrint = 1;",
+      "if (linesToPrint === 1) {",
+      '  console.log("OK (3 tests, 5 assertions)");',
+      "  process.exit(0);",
+      "} else {",
+      "  for (let i = 0; i < 70; i++) console.log(`filler line ${i}`);",
+      "  process.exit(1);",
+      "}",
+      "",
+    ].join("\n");
+    const { repo } = initRepoWithFile("runner.js", RUNNER_JS);
+
+    const result = await probe({
+      file: "runner.js",
+      line: 1,
+      form: "replace",
+      replaceText: "const linesToPrint = 2;",
+      testCommand: "node runner.js",
+      isolation: "inplace",
+      expect: "fail",
+      cwd: repo,
+      logDir: makeTmpDir(),
+      passRegex: /^OK \(/,
+    });
+
+    expect(result.status).toBe("killed");
+    // The captured tail really was cut: the first filler lines scrolled
+    // out of exec.ts's 60-line bound, proving this run exercises the
+    // truncated-tail path at all (the fixture prints 70 lines).
+    expect(result.test?.stdoutTail.includes("filler line 0")).toBe(false);
+    expect(result.warnings).toEqual([]);
+    expect(result.warnings.some((w) => MISS_WARNING.test(w))).toBe(false);
+  });
+
+  it("#338 AC2 -- the captured tail was truncated AND the FULL log DOES match --pass-regex outside it: the verdict is corrected from killed to survived, with a warning naming the correction", async () => {
     useLockDir();
     // Baseline: short, matches, exits 0 -- no baseline-side warnings.
     // Mutant: prints the matching line FIRST, then 70 filler lines, then
     // exits 1 -- more than exec.ts's 60-line tail bound, so the matching
-    // line scrolls out of the captured tail and the regex misses it.
+    // line scrolls out of the CAPTURED tail even though it is present in
+    // the run's full, on-disk output. The full log is authoritative (see
+    // #338), so this is reported survived, not killed.
     const RUNNER_JS = [
       "const linesToPrint = 1;",
       "if (linesToPrint === 1) {",
@@ -6403,19 +6453,24 @@ describe("probe(): --pass-regex mutant-path miss warning is gated to ambiguous m
       passRegex: /^OK \(/,
     });
 
-    expect(result.status).toBe("killed");
-    expect(result.warnings.length).toBeGreaterThan(0);
-    // The truncation note is folded into the same miss warning, so its
-    // presence pins that this case was recognized as the truncated-tail
-    // shape specifically, not one of the other two ambiguous shapes.
+    expect(result.status).toBe("survived");
+    // The captured tail really was cut: the matching "OK (" line scrolled
+    // out of exec.ts's 60-line bound, so the CAPTURED tail alone would
+    // read as a miss -- only the full, on-disk log (checked below via
+    // the warning text) resolves it.
+    expect(result.test?.stdoutTail.includes("OK (")).toBe(false);
+    expect(result.mutation_probe?.result).toBe("survived");
+    expect(result.mutation_probe?.expectation).toBe("violated");
     expect(
       result.warnings.some(
         (w) =>
-          MISS_WARNING.test(w) &&
-          w.includes("truncated") &&
-          w.includes("the mutant run's captured"),
+          w.includes("--pass-regex") &&
+          w.includes("corrected from killed to survived"),
       ),
     ).toBe(true);
+    // Not the plain, uncorrected "did not match" miss wording: this run's
+    // verdict was resolved, not left as an open caveat.
+    expect(result.warnings.some((w) => MISS_WARNING.test(w))).toBe(false);
   });
 
   it("ambiguous case 2/3 -- exit code 0 disagrees with the predicate: warns", async () => {

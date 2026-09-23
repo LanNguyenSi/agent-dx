@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `probe`'s mutant-side `--pass-regex` miss warning no longer speculates
+  about a truncated captured tail: when the captured stdout/stderr tail
+  was cut short, it now checks the run's full, on-disk log
+  (`test.logPath`) instead. When the full log also never matches the
+  pattern, an ordinary `killed` verdict is reported with no truncation
+  caveat at all; when the full log DOES match outside the captured tail,
+  the verdict is corrected from `killed` to `survived` (the full log is
+  authoritative) and the warning names the correction. Fixes agent-dx
+  issue #338.
 - The skill digest ledger now has release-coverage tests: a packed,
   offline install runs `init` against the real 0.4.0 skill asset and
   pins its report-only `outdated` result, while reachable

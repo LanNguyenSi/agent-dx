@@ -1829,14 +1829,18 @@ proves nothing about the suite, whatever happens to sit at its end, so a
 zero-count summary line in such a tail leaves the refusal at
 `baseline_failed` (with the signal named in `warnings`) rather than
 claiming the suite executed nothing. **These detectors, and the generic
-fallback, `--require-baseline-evidence`, and `--pass-regex`, all
+fallback and `--require-baseline-evidence`, all
 described below, only ever see each side's CAPTURED output tail** (the
 same 60-line/6000-character bound every exec result reports as
 `stdoutTruncated`/`stderrTruncated`), never a command's full, untruncated
-output; a summary line, a `--require-baseline-evidence` pattern, or a
-`--pass-regex` pattern that scrolled out of the tail reads as a plain
-miss, not "not present at all" -- see the truncation paragraph below for
-how that is surfaced.
+output; a summary line, or a `--require-baseline-evidence` pattern, that
+scrolled out of the tail reads as a plain miss, not "not present at all"
+-- see the truncation paragraph below for how that is surfaced.
+`--pass-regex`'s own mutant-side verdict is the one exception: a miss
+whose captured tail was truncated is additionally checked against the
+run's full, untruncated log on disk before that miss is accepted -- see
+the `--pass-regex` paragraph below for how that check and its
+correction work.
 
 For a test runner no built-in detector recognizes, a mutant run
 whose own verdict rests on a PASS -- exit code `0` by default, or
@@ -1958,16 +1962,29 @@ miss is the routine, expected outcome under `--expect fail` (the
 predicate agreeing the mutant broke the suite, exactly like every
 killed mutant of an N-mutant plan), so warning on each one would fill
 `warnings` with N near-duplicate entries instead of N findings: there
-the miss warning fires only for an AMBIGUOUS miss -- either side of
-that run's own captured tail was truncated (the pattern may have
-matched output the run never captured), the exit code reads `0` while
-the predicate reads "failed" (the process and the predicate disagree),
-or `--expect pass`, where a miss still means the mutant was
+the miss warning fires only for an AMBIGUOUS miss -- the exit code reads
+`0` while the predicate reads "failed" (the process and the predicate
+disagree), or `--expect pass`, where a miss still means the mutant was
 KILLED (the predicate reads FAILING regardless of `--expect`) but that
 killed verdict VIOLATES the expectation. A textbook kill -- real
 non-matching output,
 a non-zero exit code, an untruncated tail, under `--expect fail` --
 carries no miss warning at all.
+
+A truncated captured tail on the mutant path is no longer speculation
+either: rather than warning that the pattern "may have matched output
+the run never captured," a miss whose captured tail was truncated is
+checked against that run's own full, untruncated log on disk
+(`test.logPath`, the same file every result already points at). When
+the full log also never matches the pattern, the truncation was never
+actually ambiguous, and the miss carries no warning at all (the same as
+a textbook kill). When the full log DOES match outside the captured
+tail, the verdict this run actually earned is `survived`, not `killed`
+-- the full log is authoritative, so the verdict is corrected rather
+than merely flagged, and the warning names the correction. Only when
+the full log itself cannot be read back (the log file was removed, or
+its write failed) does the old, unresolved caveat still apply, worded
+the same way `--require-baseline-evidence`'s own truncated-tail miss is.
 
 `--pass-regex` is independent of `--require-baseline-evidence`: the two
 answer different questions and may be given together, one without the
