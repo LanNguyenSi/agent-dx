@@ -11174,3 +11174,14 @@ markers, and the subagent contracts document went stale again on
 `test/docs-consistency.test.ts` alone; re-stamped all four at
 2026-09-23T15:32:51Z after confirming no citation into any of their
 listed sources changed.
+
+The last pins of the change (#339) added three README, step 7 and
+reviewer assertions to `test/docs-consistency.test.ts`,
+`test/init.test.ts` and `test/single-probe-replay.test.ts` without
+shifting any cited line, qualified the README's redirect wording for the
+reviewer on the same line, and widened two run-state citations to
+include their supporting line. `citations-resolve` reports zero
+findings; install-fence mechanics, model preselection, review gate and
+waivers, run-state lifecycle and markers, and the subagent contracts
+document were re-stamped at 2026-09-23T15:55:54Z after confirming none of their claims
+depends on the changed lines.
