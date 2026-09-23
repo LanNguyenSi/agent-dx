@@ -1395,8 +1395,8 @@
   violated | not_applicable` now, not just `met | violated`, since a
   `not_applicable` probe (the mutant could not be applied, so no `result`
   was measured) has nothing for `met`/`violated` to report
-  (`implementer.md:250#"expectation: met | violated | not_applicable"`,
-  `packages/orchestrator-workflow/assets/skill/references/contracts.md:120#"expectation: met | violated | not_applicable"`).
+  (`implementer.md:255#"expectation: met | violated | not_applicable"`,
+  `packages/orchestrator-workflow/assets/skill/references/contracts.md:129#"expectation: met | violated | not_applicable"`).
   The two `not_applicable` verdicts that used to share one bare label
   (a probe with no reapplicable definition, not a regression, versus a
   replayed probe whose target text is gone, a regression) now each
@@ -1405,18 +1405,18 @@
   fix-round replay rule states the regression signal (step 6, the
   installed prompt's matching bullet, and SKILL.md's output-contract
   prose paragraph)
-  (`implementer.md:86#"no definition recorded"`,
+  (`implementer.md:91#"no definition recorded"`,
   `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:103#"no definition recorded"`). The prompt's
   `expectation` sentence dropped its `--expect` mention (the
   agent-primitives flag name); both copies now say "matched what the
   probe was expected to do", tool-agnostic like the rest of the prompt
   (the flag pointer stays only in `CHANGELOG.md`'s own prose)
-  (`implementer.md:66#"records whether"`,
-  `packages/orchestrator-workflow/assets/agents/implementer.md:66#"records whether"`). The verify/mutation-
+  (`implementer.md:71#"records whether"`,
+  `packages/orchestrator-workflow/assets/agents/implementer.md:71#"records whether"`). The verify/mutation-
   probe-runner bullet (`implementer.md` only, no SKILL.md mirror) now
   says where the definition fields come from when a runner reports a
   probe's mutant record separately from its result fields
-  (`implementer.md:128#"take the definition fields from that"`).
+  (`implementer.md:133#"take the definition fields from that"`).
   The `04-implementation-summary.md` template's Mutation Probes table
   gained a note that Before/After cells hold a single-line excerpt, with
   the full text or diff for a multi-line or patch-form mutant going in
@@ -1522,8 +1522,8 @@
   `assets/agents/implementer.md` and `assets/skill/SKILL.md` (mirrored
   copies) each gained four new sub-fields, `file`, `anchor`, `before`,
   `after`
-  (`implementer.md:60#"anchor, before, after, verified_applied_via, result, expectation,"`,
-  `packages/orchestrator-workflow/assets/agents/implementer.md:60#"anchor, before, after, verified_applied_via, result, expectation,"`),
+  (`implementer.md:65#"anchor, before, after, verified_applied_via, result, expectation,"`,
+  `packages/orchestrator-workflow/assets/agents/implementer.md:65#"anchor, before, after, verified_applied_via, result, expectation,"`),
   so a later round can mechanically reapply the same edit instead of only
   reading prose. Both the fix-round replay-naming sentence (step 6) and
   the reviewer-briefing skip-permission sentence (step 7) now name a
@@ -1531,7 +1531,7 @@
   with only an id and no definition cannot be replayed or skipped and is
   `not_applicable`
   (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:100#"naming each by its mutant definition"`,
-  `implementer.md:83#"naming each by its mutant definition"`,
+  `implementer.md:88#"naming each by its mutant definition"`,
   `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:212#"not merely their id; a probe recorded with only an id and no definition"`).
 
   Same round, orchestrator extension (D-010 of this run): a companion
@@ -1544,8 +1544,8 @@
   implementer.md): a replayed probe whose `expectation` is now `violated`,
   or which can no longer be applied, is the regression signal; `result`
   alone is not
-  (`implementer.md:66#"records whether"`,
-  `packages/orchestrator-workflow/assets/agents/implementer.md:64#"are the exact text swapped there"`). The
+  (`implementer.md:71#"records whether"`,
+  `packages/orchestrator-workflow/assets/agents/implementer.md:69#"are the exact text swapped there"`). The
   `04-implementation-summary.md` template's Mutation Probes table gained
   matching columns
   (`assets/templates/04-implementation-summary.md:91#"| Round | Mutant | File | Anchor | Before | After | Verified Applied Via | Result | Expectation | Reason | Restored Verified | Replayed |"`).
@@ -1569,9 +1569,9 @@
   file (`CHANGELOG.md`'s own 17-line `[Unreleased]` insertion, the one
   live anchored citation into it above); a small number of citations
   landing on a line whose own text changed were re-anchored by hand
-  rather than only re-numbered (`packages/orchestrator-workflow/assets/agents/implementer.md:77#"rather than omitting the field."`,
+  rather than only re-numbered (`packages/orchestrator-workflow/assets/agents/implementer.md:82#"rather than omitting the field."`,
   `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:106#"A replayed probe whose"`,
-  `implementer.md:89#"A replayed probe whose"`). Two pre-existing
+  `implementer.md:94#"A replayed probe whose"`). Two pre-existing
   numeric-only (no string anchor) citations into `implementer.md` in an
   older entry below (implementer.md at historical lines 41-66, implementer.md at historical lines 41-67) were
   left unbumped, per this file's own stated convention that recorded
@@ -11205,3 +11205,23 @@ The older-run exclusion of the reviewer's evidence path is now pinned in
 full in `test/init.test.ts` (the pin string was extended in place, so
 no cited line moved); install-fence mechanics and model preselection
 were re-stamped at 2026-09-23T16:06:31Z after confirming neither cites the changed line.
+
+## 2026-09-23 (agent-dx #335, verification-set authority model and digest fields)
+
+The implementer.md, reviewer.md, task-slicer.md, and contracts.md edits
+that added the `verification_set` digest and repository_identity fields,
+the shared authority-model comparison sentence, and the criterion-4
+scoping-clause pins shifted every citation into implementer.md,
+reviewer.md, task-slicer.md, and contracts.md at or after the edited
+lines. Every shifted citation was re-pointed to the anchor text's own
+current line (a constant per-file offset inside each edited region,
+confirmed against the anchor text actually present at the new line
+rather than assumed from the diff alone), across `docs/okf/log.md`'s
+own self-citations, `review-gate-and-waivers.md`, and
+`subagent-contracts-superset.md`. `run-state-lifecycle-and-markers.md`
+lists contracts.md and evidence-and-probes.md among its sources but
+cites neither past the edited lines, so none of its citations moved.
+Re-stamped review-gate-and-waivers.md, run-state-lifecycle-and-markers.md,
+and subagent-contracts-superset.md at 2026-09-23T17:08:06Z after
+re-verifying every citation into their listed sources resolves at the
+new commit.

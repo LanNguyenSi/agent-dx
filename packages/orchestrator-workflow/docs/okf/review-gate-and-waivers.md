@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-09-23T16:23:01Z
+timestamp: 2026-09-23T17:08:06Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/agents/reviewer.md
@@ -67,7 +67,7 @@ orchestrator decides acceptance after applying the review gate. The new
 reviewer rule makes the boundary explicit: a reviewer recommendation cannot
 become orchestrator acceptance or authorize a critical waiver; only the
 operator may authorize that waiver
-(`packages/orchestrator-workflow/assets/agents/reviewer.md:137#"A reviewer recommendation is not orchestrator acceptance"`). This is a
+(`packages/orchestrator-workflow/assets/agents/reviewer.md:143#"A reviewer recommendation is not orchestrator acceptance"`). This is a
 human/process authority rule, not a Markdown authorization mechanism.
 
 For newly created records, `03-decisions.md` records each decision with a
@@ -98,7 +98,7 @@ them. Unknown provenance is resolved before dependent delegation; missing
 fields never choose the contract.
 
 Reviewer findings carry `severity: low | medium | high | critical`
-(`packages/orchestrator-workflow/assets/skill/references/contracts.md:176#"severity: low | medium | high | critical"`, reviewer output contract). Only high and critical block
+(`packages/orchestrator-workflow/assets/skill/references/contracts.md:185#"severity: low | medium | high | critical"`, reviewer output contract). Only high and critical block
 acceptance: "High or critical reviewer findings block final acceptance until
 fixed or explicitly waived... the gate applies to every review pass,
 including the orchestrator's own review of a trivial change"
@@ -109,7 +109,7 @@ waiver bookkeeping applies to them.
 Do not conflate two distinct vocabularies attached to the same review: the
 per-finding `Decision` column (below) and the whole-review
 `acceptance_recommendation: accept | accept_with_notes | fix_required |
-reject` (`packages/orchestrator-workflow/assets/skill/references/contracts.md:182#"acceptance_recommendation: accept | accept_with_notes |"`; mirrored in the findings template's Acceptance
+reject` (`packages/orchestrator-workflow/assets/skill/references/contracts.md:191#"acceptance_recommendation: accept | accept_with_notes |"`; mirrored in the findings template's Acceptance
 Recommendation section,
 `packages/orchestrator-workflow/assets/templates/05-review-findings.md:32#"accept | accept_with_notes | fix_required | reject"`).
 A review can recommend `fix_required` overall while individual low findings
@@ -118,7 +118,7 @@ rows. Since 0.16.0 the field is hard-mandatory, not just conventionally
 expected: "`acceptance_recommendation` is mandatory: every reviewer return
 must set it. When it is missing, the orchestrator asks the reviewer to
 resupply it instead of inferring one from the findings list"
-(`packages/orchestrator-workflow/assets/skill/references/contracts.md:197-199#"instead of inferring one from the findings list."`; the installed `reviewer.md:142#"never leave it blank or omit it."` prompt carries the mirrored
+(`packages/orchestrator-workflow/assets/skill/references/contracts.md:206-208#"instead of inferring one from the findings list."`; the installed `reviewer.md:148#"never leave it blank or omit it."` prompt carries the mirrored
 second-person rule). Full treatment is out of scope here; see
 [Acceptance-recommendation mandatory rule](#acceptance-recommendation-mandatory-rule-0160)
 below.
@@ -269,9 +269,9 @@ evidence, the reviewer must reproduce it independently (its own runs or
 measurements) and record method, sample size, and result against the
 implementer's claim; a single deterministic check (one test run, `tsc`,
 lint) does not trigger it. The installed `reviewer.md` prompt carries the
-same rule (`reviewer.md:192#"lint) do not trigger this."`), and both output contracts gained a matching
+same rule (`reviewer.md:198#"lint) do not trigger this."`), and both output contracts gained a matching
 `reproduction: {method, sample_size, result, matches_implementer_claim}`
-field (`packages/orchestrator-workflow/assets/skill/references/contracts.md:191#"matches_implementer_claim: matched | mismatched |"`, `reviewer.md:266#"residual_risks:"`); `matches_implementer_claim`
+field (`packages/orchestrator-workflow/assets/skill/references/contracts.md:200#"matches_implementer_claim: matched | mismatched |"`, `reviewer.md:272#"residual_risks:"`); `matches_implementer_claim`
 accepts `not_applicable` so a review that never hits the narrow trigger is
 not forced to fabricate a reproduction record.
 
@@ -293,16 +293,16 @@ live, the misfire rule) are out of scope here; see
 previously forced a reviewer return to set `acceptance_recommendation` at
 all, so the orchestrator could be left inferring a verdict from the findings
 list alone. The field is now hard-mandatory in both output-contract copies:
-`packages/orchestrator-workflow/assets/skill/references/contracts.md:197-199#"instead of inferring one from the findings list."` states it and adds the orchestrator's response when it is
+`packages/orchestrator-workflow/assets/skill/references/contracts.md:206-208#"instead of inferring one from the findings list."` states it and adds the orchestrator's response when it is
 missing: ask the reviewer to resupply it, rather than infer one from the
-findings, and the installed `reviewer.md:142#"never leave it blank or omit it."` prompt carries the mirrored
+findings, and the installed `reviewer.md:148#"never leave it blank or omit it."` prompt carries the mirrored
 second-person rule ("always set it in your output; never leave it blank or
 omit it"). This is distinct from the per-finding `Decision` column and the
 severity ladder above: a reviewer could previously satisfy every other part
 of the contract and still omit the one field that carries its overall
 verdict. 8ab22cb0 adds a mechanical, structure-only check for this same
 requirement: the `validate-review-report` CLI subcommand documented at
-`packages/orchestrator-workflow/assets/skill/references/contracts.md:201#"A structural check for this exact contract ships as a CLI subcommand:"`
+`packages/orchestrator-workflow/assets/skill/references/contracts.md:210#"A structural check for this exact contract ships as a CLI subcommand:"`
 parses a reviewer return and reports a missing or invalid
 `acceptance_recommendation` (or any other required field) as a diagnostic,
 but never judges semantic adequacy or substitutes for this rule's
