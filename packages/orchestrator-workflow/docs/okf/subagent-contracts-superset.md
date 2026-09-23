@@ -891,7 +891,7 @@ verdict or explicit verdict absence and derivation evidence in
 `reproduction` and carrying the same reported values into any associated
 finding."
 The single-mode replay rule carries the corresponding measured fields
-(`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:225#"per probe, in `reproduction`, the probe, the replayed verdict or"`):
+(`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:225#"the probe, the replayed verdict or"`):
 "It reports per probe, in `reproduction`, the probe, the replayed verdict
 or explicit verdict absence with manual derivation evidence, and whether
 the measured `result` and `expectation` match the recorded fields; a
