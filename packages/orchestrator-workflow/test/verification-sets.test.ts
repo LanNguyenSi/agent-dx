@@ -212,8 +212,11 @@ describe("documented verification sets", () => {
   it("binds reviewer.md's reported results to the frozen run-local snapshot and states that a revision or dirty-state difference alone does not withdraw the approval (issue #335)", () => {
     const reviewer = readRawAsset("agents/reviewer.md");
     const bindingClause =
-      "Use the frozen run-local snapshot (set path/digest, repository identity/revision and dirty state, effective config/scripts, and preflight executable identity/definition) to bind every reported result; a revision or dirty-state difference alone does not withdraw the approval.";
+      "Use the frozen run-local snapshot (set path/digest, repository identity/revision and dirty state, effective config/scripts, and preflight executable identity/definition) to identify the approved set behind every reported result, and bind each result to the revision and dirty state actually checked; a revision or dirty-state difference from the snapshot alone does not withdraw the approval.";
     expect(compact(reviewer)).toContain(compact(bindingClause));
+    expect(compact(readRawAsset("agents/implementer.md"))).toContain(
+      compact(bindingClause),
+    );
   });
 
   it("pins the criterion-4 scoping clauses in contracts.md, implementer.md, and reviewer.md via shared constants (issue #335)", () => {
@@ -267,7 +270,7 @@ describe("documented verification sets", () => {
     );
     expect(compact(evidenceAndProbes)).toContain(
       compact(
-        "\"Scripts\" here means every package-manager script entry plus every file an extra's or preflight's argv invokes directly; code under test is not a component.",
+        "\"Scripts\" here means every package-manager script entry plus every file an extra's or preflight's argv or such a script entry invokes directly, and configuration files the executed tools load count as effective configuration; code under test is not a component.",
       ),
     );
   });

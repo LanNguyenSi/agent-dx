@@ -342,7 +342,7 @@ includes the set reference path and digest, repository identity/revision and
 dirty state, the effective configuration and scripts, the preflight
 executable path, version, digest, and approved definition, plus every
 resolved extra. "Scripts" here means every package-manager script entry plus
-every file an extra's or preflight's argv invokes directly; code under test
+every file an extra's or preflight's argv or such a script entry invokes directly, and configuration files the executed tools load count as effective configuration; code under test
 is not a component. Identify
 each result by `(kind, name, occurrence)` in declared order: duplicate
 `(kind, name)` values are distinct occurrences, never a map entry overwritten

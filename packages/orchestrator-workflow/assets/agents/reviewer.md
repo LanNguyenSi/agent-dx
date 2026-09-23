@@ -71,8 +71,8 @@ Check, at minimum:
   sets section defines what counts as a script for that comparison. Use the
   frozen run-local snapshot (set path/digest, repository identity/revision
   and dirty state, effective config/scripts, and preflight executable
-  identity/definition) to bind every reported result; a revision or
-  dirty-state difference alone does not withdraw the approval. Report every
+  identity/definition) to identify the approved set behind every reported result, and bind
+  each result to the revision and dirty state actually checked; a revision or dirty-state difference from the snapshot alone does not withdraw the approval. Report every
   ordered `(kind, name, occurrence)`
   executor, extra, and raw
   preflight child with cwd and result artifact. A missing tool may be a

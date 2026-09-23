@@ -54,7 +54,7 @@ Rules:
   sets section defines what counts as a script for that comparison. Use the
   frozen run-local snapshot (set path/digest, repository identity/revision
   and dirty state, effective config/scripts, and preflight executable
-  identity/definition). Report each executor, extra, and raw preflight child
+  identity/definition) to identify the approved set behind every reported result, and bind each result to the revision and dirty state actually checked; a revision or dirty-state difference from the snapshot alone does not withdraw the approval. Report each executor, extra, and raw preflight child
   by `(kind, name, occurrence)`, in order, with cwd and result artifact.
   Preserve a missing-tool preflight limitation even when it has no child
   result. A missing/extra/mismatched/unresolved result is a misfire; a failure
