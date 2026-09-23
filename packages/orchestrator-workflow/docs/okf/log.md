@@ -11385,3 +11385,19 @@ The run-internal identifier section now describes how a quoted path is
 printed, and its GREP_OPTIONS test uses a grep stand-in so it fails on
 every platform if the check stops clearing the variable; the same three
 bundle docs were re-stamped at 2026-09-23T20:09:25Z.
+
+A verification set must now be re-resolved per linked worktree (#336):
+the Verification sets section of evidence-and-probes.md requires, when a
+run-base marker names a linked worktree, that literal repository paths in
+set argv and cwd are re-resolved to that worktree before freezing and
+recorded in the snapshot, and implementer.md, reviewer.md, contracts.md,
+and that section share one sentence making the repository path part of
+repository identity. Each sentence was appended to an existing line, so no
+citation into those four files moved. The new `[Unreleased]` entry at the
+top of CHANGELOG.md moved everything below it down by fifteen lines, which
+shifted this log's two live self-citations from line 542 to line 557 and
+from line 919 to line 934; both were re-pointed after checking that each
+anchor sits on its new line, in the live sites and in the earlier entries
+that quote them. Re-stamped review gate and waivers, run-state lifecycle
+and markers, and the subagent contracts document at 2026-09-23T20:23:20Z after
+confirming none of their own citations resolve into an edited line.
