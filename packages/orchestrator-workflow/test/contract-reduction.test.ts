@@ -5,7 +5,7 @@ import { readAsset } from "../src/assets.js";
 const contracts = readAsset("skill/references/contracts.md");
 const implementer = readAsset("agents/implementer.md");
 
-it("routes implementer execution to step 6 and field semantics to the installed prompt", () => {
+it("routes implementer execution to step 6 and commit reporting to the installed prompt", () => {
   const start = contracts.indexOf("## Implementer output contract");
   const end = contracts.indexOf("## Reviewer output contract", start);
   const section = contracts.slice(start, end);
@@ -20,7 +20,7 @@ it("routes implementer execution to step 6 and field semantics to the installed 
   const workflow = readAsset(`skill/references/${targetPath}`);
   expect(workflow).toMatch(/^## Workflow$/m);
   expect(section.replace(/\s+/g, " ")).toContain(
-    "For output-field semantics and commit reporting, follow the installed implementer role prompt.",
+    "For commit reporting, follow the installed implementer role prompt.",
   );
   expect(section).toContain("Return the selected contract's YAML envelope.");
   expect(workflow).toContain("6. **Delegate implementation.**");
