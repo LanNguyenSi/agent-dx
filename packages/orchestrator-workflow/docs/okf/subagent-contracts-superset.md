@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-23T10:58:19Z
+timestamp: 2026-09-23T12:21:19Z
 sources:
   - packages/orchestrator-workflow/assets/agents/explorer.md
   - packages/orchestrator-workflow/assets/agents/task-slicer.md
@@ -703,7 +703,7 @@ Closure section prose
 Motivation: two observed batches where a fix round closed only the
 reported instance and the class recurred at a new site in a later review
 round; the counts live in the CHANGELOG entry for this rule, not here
-(`packages/orchestrator-workflow/CHANGELOG.md:#[Unreleased]`).
+(`packages/orchestrator-workflow/CHANGELOG.md:#[0.39.0]`).
 
 ## Commits field
 

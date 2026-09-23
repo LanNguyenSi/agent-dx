@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-09-23
+
+- The docs-only review default now states its condition directly instead
+  of borrowing step 8's closure term: a review round whose entire delta
+  contains only explanatory documentation, comments, or citations, with no
+  source- or test-file edits and no semantic change to executable commands,
+  configuration, policy, instructions, or behavior, defaults to the
+  `-medium` reviewer tier with `review_method: normal`. The pinned-prose
+  cap counts a test-adequacy review round as one whose returned findings are
+  all `low` or `medium` `tests` findings about pin gaps; every normative
+  sentence a change adds or alters at its site is pinned, and one left
+  unpinned is named with the reason it is not load-bearing; a reviewer
+  respects a briefing that bounds the prose mutant space to a claim list
+  (#332).
+
 - Clarified the review-round tier/model escalation path for `single` and
   rewrapped the installed policy fence with its cited documentation.
 
