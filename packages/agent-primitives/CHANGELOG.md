@@ -33,8 +33,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The skill-ledger release-coverage test maps a release tag that left the
   skill asset unchanged to the nearest earlier ledger entry and checks the
   tag's asset against that entry's digest, instead of requiring an entry
-  per tag (which the ledger's own no-duplicate-digest rule forbids).
-
+  per tag (which the ledger's own no-duplicate-digest rule forbids). The
+  mapping and the semver comparison behind it are unit-tested helpers;
+  the comparison now orders a prerelease before its release, ignores
+  build metadata, and rejects a non-semver string instead of comparing
+  it as `NaN`. In a shallow clone the tag-coverage test skips with a
+  stated reason instead of reading every earlier tagged release as an
+  untagged ledger entry.
+- The repository's npm publish workflow (`publish-npm.yml`, shared by
+  every published package) checks out full history and tags
+  (`fetch-depth: 0`), so the ledger test runs against every reachable
+  release tag during `npm test` on a tag push instead of failing on
+  Actions' default single-commit checkout.
 
 ## [0.8.0] - 2026-09-21
 
