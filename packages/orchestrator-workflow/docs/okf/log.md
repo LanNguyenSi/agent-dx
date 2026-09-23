@@ -1335,8 +1335,8 @@
   its current line, 329. Two further citations surfaced by the same
   ambiguity-clearing effect, both into `docs/okf/subagent-contracts-
   superset.md` itself
-  (`docs/okf/subagent-contracts-superset.md:386#"Actions shell replay named in step 6 is a second, explicitly"`
-  and `docs/okf/subagent-contracts-superset.md:503#"reports as killed together with their"`),
+  (`docs/okf/subagent-contracts-superset.md:403#"Actions shell replay named in step 6 is a second, explicitly"`
+  and `docs/okf/subagent-contracts-superset.md:520#"reports as killed together with their"`),
   were re-pointed to their current lines by the same anchor-text search
   as the rest of this round's re-pointing.
   A fifth, unrelated warning (not from the ambiguity-clearing effect: a
@@ -2708,8 +2708,8 @@
   "...reports as killed together with their...") were re-anchored to a
   shorter quote sitting wholly on the anchor's own last line instead of a
   two-line span, per this bundle's own single-line-anchor convention
-  (`docs/okf/subagent-contracts-superset.md:386#"Actions shell replay named in step 6 is a second, explicitly"`,
-  `docs/okf/subagent-contracts-superset.md:503#"reports as killed together with their"`).
+  (`docs/okf/subagent-contracts-superset.md:403#"Actions shell replay named in step 6 is a second, explicitly"`,
+  `docs/okf/subagent-contracts-superset.md:520#"reports as killed together with their"`).
   `okf-kit check --json packages/orchestrator-workflow/docs/okf` went from
   0 errors/0 warnings/23 notices at round-1 HEAD, to warnings introduced
   by this round's own edits (all resolved by the re-derivation pass
@@ -11225,3 +11225,25 @@ Re-stamped review-gate-and-waivers.md, run-state-lifecycle-and-markers.md,
 and subagent-contracts-superset.md at 2026-09-23T17:08:06Z after
 re-verifying every citation into their listed sources resolves at the
 new commit.
+
+## 2026-09-23 (agent-dx #335, verification-set approval rule documented in the bundle)
+
+`subagent-contracts-superset.md`'s "Repository-bound verification sets"
+section gained three sentences describing the digest/repository_identity
+fields and the shared authority-model comparison rule, citing
+contracts.md directly. The insertion shifted the doc's own later content
+by seventeen lines, which moved two of its self-citations from
+`log.md` (`:386` and `:503`, re-pointed the same way as the earlier
+implementer/reviewer/task-slicer/contracts shift) and the
+`SIBLING_GUARD_BUNDLE_ALLOWLIST` entries in
+`test/docs-consistency.test.ts` that record this doc's own paragraph
+geometry (`paragraphLine` and, for the three duplicate-citation entries,
+`secondCitationLine`, plus the matching line numbers spelled out inside
+three `claim` strings). Every shifted `paragraphLine`/`secondCitationLine`
+was re-derived from the doc's current text, not assumed from the diff.
+`model-preselection.md`, `review-gate-and-waivers.md`,
+`run-state-lifecycle-and-markers.md`, and `subagent-contracts-superset.md`
+all list `test/docs-consistency.test.ts` as a source, so editing that
+file's allowlist re-stamped all four at 2026-09-23T17:16:39Z after
+confirming every citation into their listed sources resolves at the new
+commit.

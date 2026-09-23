@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-23T17:08:06Z
+timestamp: 2026-09-23T17:16:39Z
 sources:
   - packages/orchestrator-workflow/assets/agents/explorer.md
   - packages/orchestrator-workflow/assets/agents/task-slicer.md
@@ -80,6 +80,23 @@ is a misfire, not a pass; skipped, waived, or inconclusive results remain
 non-passing evidence. The README's worked `.ai/workflow/verify.json` example
 defines ordered extras around a truthful preflight JSON acquisition: that JSON
 reports results, never discovered shell commands.
+
+Naming a set by reference plus its frozen digest and repository identity, as
+delegated in the briefing, is the orchestrator's approval of every argv
+resolved from that frozen snapshot; a digest mismatch withdraws the approval
+and is reported as a misfire
+(`packages/orchestrator-workflow/assets/skill/references/contracts.md:78#"is the orchestrator's"`).
+The `verification_set` shape in the subagent input contract and both
+task-slicer output copies now carries `digest` and `repository_identity`
+sub-fields alongside `reference` for this reason. That approval reaches only
+the frozen snapshot: before acquisition or execution, implementer.md,
+reviewer.md, and contracts.md state, in identical wording, that the role
+compares the frozen snapshot's effective config and scripts, preflight
+executable identity/definition, and repository identity with the tree it
+runs in; any mismatch withdraws the approval like a digest mismatch and is
+reported as a misfire, and a change the task's own diff makes to one of
+those components is outside the approval
+(`packages/orchestrator-workflow/assets/skill/references/contracts.md:88#"repository identity with the tree the role runs in; any mismatch withdraws"`).
 
 ## Where each contract lives, and what keeps the copies equal
 
