@@ -11417,3 +11417,7 @@ edited sentences stayed on the same appended lines. Re-stamped review
 gate and waivers, run-state lifecycle and markers, and the subagent
 contracts document at 2026-09-23T20:44:03Z after confirming none of their
 own citations resolve into an edited line.
+
+The subagent contracts document now states the #336 path rule and the
+linked-worktree re-resolution in its verification-set paragraph, appended
+to an existing line so no citation into it moved; re-stamped at 2026-09-23T21:03:41Z.
