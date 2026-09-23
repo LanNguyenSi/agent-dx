@@ -416,8 +416,8 @@ exit "$hits"
 ```
 
 Exit `0` means no hit, exit `1` means at least one hit, each printed (a diff
-hit prefixed by its file path, in git's quoted form for a path git quotes),
-and exit `2` means the run-base does not
+hit prefixed by its file path, shown escaped and without its leading `"b`
+for a path git quotes), and exit `2` means the run-base does not
 resolve to a commit or a git, awk, or grep command failed. The check fails
 closed: it reads the whole diff and log into memory and checks the status of
 every stage, so a failure part way through (an unreadable object, or a text
