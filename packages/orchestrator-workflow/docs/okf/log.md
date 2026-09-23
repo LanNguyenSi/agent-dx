@@ -11380,3 +11380,8 @@ section states that binary files produce raw-byte false positives under
 the text diff and that quoted paths keep git's quoting; tests now pin the
 exit status of a failing awk or grep stage. Only the appended section
 changed; the same three bundle docs were re-stamped at 2026-09-23T19:56:13Z.
+
+The run-internal identifier section now describes how a quoted path is
+printed, and its GREP_OPTIONS test uses a grep stand-in so it fails on
+every platform if the check stops clearing the variable; the same three
+bundle docs were re-stamped at 2026-09-23T20:09:25Z.
