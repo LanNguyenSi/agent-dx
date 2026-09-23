@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-09-23
+
 - A verification set can no longer look green while checking the wrong
   tree. evidence-and-probes.md's Verification sets section now requires,
   when the diff for a repository comes from a linked worktree (however the

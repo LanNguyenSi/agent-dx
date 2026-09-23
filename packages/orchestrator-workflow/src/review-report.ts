@@ -654,7 +654,7 @@ interface ExtractedYaml {
  * shorter run length from every offset inside the run, each retry
  * rescanning the lazy body: work quadratic in the run's length, which a
  * single pasted return of a few hundred backticks already turns into
- * seconds (CHANGELOG [Unreleased] names the measurement). Keeping the
+ * seconds (CHANGELOG 0.37.0 names the measurement). Keeping the
  * run whole also makes the "closing run at least as long as the opening
  * one" rule above literal: an opener longer than any closing run in the
  * input is no fence at all, where splitting the run instead matched it
