@@ -215,24 +215,35 @@ describe("the documented run-internal identifier check", () => {
       commit(
         repo,
         {
-          "src/b.ts": `// mandatory from the cut-off date (${criterion})\n`,
+          "src/b.ts": [
+            `// mandatory from the cut-off date (${criterion})`,
+            `// ordering as agreed in ${decision}`,
+            `// split out of ${task}`,
+            `// survived review ${round}`,
+            "",
+          ].join("\n"),
           ".ai/runs/x/02-tasks.md": `${task} stays inside the run directory\n`,
         },
-        `fix: apply the ${decision} ordering from review ${round}`,
+        `fix: apply the ordering from ${decision}`,
       );
       const dirty = runCheck(repo, base);
       expect(dirty.status).toBe(1);
-      expect(dirty.stdout).toContain(
+      for (const line of [
         `src/b.ts: // mandatory from the cut-off date (${criterion})`,
-      );
-      expect(dirty.stdout).toContain(
-        `fix: apply the ${decision} ordering from review ${round}`,
-      );
+        `src/b.ts: // ordering as agreed in ${decision}`,
+        `src/b.ts: // split out of ${task}`,
+        `src/b.ts: // survived review ${round}`,
+        `fix: apply the ordering from ${decision}`,
+      ]) {
+        expect(dirty.stdout).toContain(line);
+      }
       expect(dirty.stdout).not.toContain("run directory");
       expect(dirty.stdout).not.toContain("legacy");
       expect(dirty.stdout).not.toContain("src/a.ts");
 
-      expect(runCheck(repo, "not-a-commit").status).toBe(2);
+      const badBase = runCheck(repo, "not-a-commit");
+      expect(badBase.status).toBe(2);
+      expect(badBase.stdout).toBe("");
     } finally {
       rmSync(repo, { recursive: true, force: true });
     }
