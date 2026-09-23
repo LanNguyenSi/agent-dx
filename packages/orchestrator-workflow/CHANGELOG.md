@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Run-internal identifiers (the criterion, task, decision, and review round
+  IDs the run files assign) no longer have to be kept out of committed work
+  by hand in every briefing. The implementer prompt now forbids writing them
+  into code, comments, tests, or commit messages and asks for the ticket or
+  issue reference and a description of the behaviour instead; the reviewer
+  prompt's maintainability checklist item names them as a finding class.
+  evidence-and-probes.md gains a Run-internal identifiers section that
+  derives each ID format from the template assigning it and documents a
+  shell check (usable as a verification-set extra, with the run-base as its
+  argument) over the lines added since the run-base outside `.ai/` and the
+  commit messages in `run-base..HEAD`, stating its exit codes, what it does
+  not cover, and how a false positive is recorded. A new test runs the
+  documented script, extracted from the reference file, against a fixture
+  repository with and without such identifiers, so the documentation and
+  the command cannot drift apart (#337).
+
 - The reviewer role now states one consistent write and replay rule set,
   with every site (the Rules-section write boundary, the general mutant-
   application bullet, step 7's single-mode replay duty, and the reviewer
