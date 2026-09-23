@@ -11374,3 +11374,9 @@ binary as text, and suppresses signature output in the log scan. Only the
 appended section of evidence-and-probes.md changed, below every cited
 line; review gate and waivers, run-state lifecycle and markers, and the
 subagent contracts document were re-stamped at 2026-09-23T19:39:55Z.
+
+The run-internal identifier check (#337) unsets GREP_OPTIONS, and its
+section states that binary files produce raw-byte false positives under
+the text diff and that quoted paths keep git's quoting; tests now pin the
+exit status of a failing awk or grep stage. Only the appended section
+changed; the same three bundle docs were re-stamped at 2026-09-23T19:56:13Z.
