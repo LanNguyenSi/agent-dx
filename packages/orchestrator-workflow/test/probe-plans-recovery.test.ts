@@ -350,43 +350,110 @@ describe("ceremony rule copies stay bound to their normative sites", () => {
 /**
  * What the two verdict fields of a mutation probe mean, where their values
  * come from, and who checks them. The implementer prompt is the normative
- * site for the field semantics (contracts.md defers to it and carries a
- * verbatim copy for the orchestrator); step 6 of the workflow is the
- * normative site for the orchestrator's cross-check. Rendered tier variants
- * are a named omission: every harness composer in src/init.ts emits the whole
- * asset body as one string, a path the read-only roles exercise positively,
- * so a variant cannot lose a sentence the source file has.
+ * site for the field semantics; contracts.md copies them for the
+ * orchestrator. Step 6 is the normative site for the transfer rules. The
+ * init tests render every implementer tier and the Codex definition, so the
+ * legend cannot be lost between the asset and a generated prompt.
  */
 const PROBE_FIELD_LEGEND =
-  "`result: killed` means the probe's test command reacted to the mutant under the runner's own pass predicate and `survived` means it did not; `expectation: met` means that outcome is what the probe was expected to show and `violated` means it is not; both are `not_applicable` when no `result` was measured.";
+  "`result: killed` means the probe's test command reacted to the mutant under the runner's pass predicate, or the test pass predicate declared in the task assignment or probe plan when no runner supplies a verdict; `survived` means it did not. `expectation: met` means the measured result matches the expected result declared in the task assignment or probe plan, and `violated` means it does not; both fields are `not_applicable` when no result was measured.";
 const PROBE_FIELD_COPY_RULE =
-  "When the probe runner states a machine-readable verdict, copy whichever of `result` and `expectation` it states from it verbatim, never from your own reading of the test output; when it states only `result`, set `expectation` by comparing that verdict with the probe's declared expectation. Quote the runner's verdict for each probe in `tests.executed`, and say there when `expectation` was set this way, so both fields can be checked against it.";
-const PROBE_ROW_CROSS_CHECK =
-  "Before transferring a probe row, compare its `result` and `expectation` with the runner verdict quoted in `tests.executed`; on a mismatch, or when a verdict the runner states is not quoted, resupply it (ask the same implementer for the verdict, respawn one when it is gone, or rerun the probe yourself in isolation), record the resupply in `03-decisions.md`, and treat it as a transfer blocker rather than a misfire, since the return itself parses; never infer either field. A quoted probe verdict is not a named result of the verification set, so the set's missing-or-extra rule does not apply to it.";
+  "When a mutation-probe runner is available, run the named probes through it and copy every supplied `result` and `expectation` verbatim into `mutation_probes`, never substituting your interpretation of its test output.";
+const PROBE_RESULT_ONLY_RULE =
+  "Quote each supplied verdict in `tests.executed`; when it supplies only `result`, derive `expectation` from the expected result declared in the task assignment or probe plan, and identify that declaration and derivation there.";
+const PROBE_ABSENCE_RULE =
+  "When no machine-readable verdict is available, state that explicitly in `tests.executed`, identify the declared test pass predicate and expected result, and quote the observed baseline and mutant outcomes.";
+const PROBE_MANUAL_RULE =
+  "Derive `result` from those observations only when the baseline passed, mutant application was verified, and the mutant test completed under the same command and predicate; derive `expectation` by comparing that result with the declared expected result, and label both derivations as manual.";
+const PROBE_ROW_COMPARISON =
+  "Before transferring a probe row, compare each copied field with the quoted verdict and each derived field with its stated declaration and evidence. An explicit absence of a machine-readable verdict requires the manual comparison, not resupply of a nonexistent verdict.";
+const PROBE_RESUPPLY_RULE =
+  "On a mismatch or missing required evidence, obtain corrected evidence from the implementer or rerun the probe in isolation, record the action in `03-decisions.md`, and keep the row blocked from transfer until the comparison succeeds; if the evidence cannot be obtained, record the unresolved proof rather than repeatedly requesting an unavailable verdict. Never invent a verdict, override a supplied field, or fill an unsupported derivation.";
+const PROBE_OWN_ROWS_RULE =
+  "Apply the same evidence reporting and comparison to probes you run yourself before recording their rows in `04-implementation-summary.md`.";
+const PROBE_REVIEWER_RULE =
+  "For probes you run, apply the implementer's verdict-copy and manual-derivation rules to your own measurements, reporting the quoted verdict or explicit verdict absence and derivation evidence in `reproduction` and carrying the same reported values into any associated finding.";
+const PROBE_SET_SCOPE_RULE =
+  "A quoted probe verdict is not a named result of the verification set, so the set's missing-or-extra rule does not apply to it.";
+const PROBE_SINGLE_REPLAY_RULE =
+  "It reports per probe, in `reproduction`, the probe, the replayed verdict or explicit verdict absence with manual derivation evidence, and whether the measured `result` and `expectation` match the recorded fields; a mismatch is a finding of at least `high` and sets `matches_implementer_claim: mismatched`.";
 const PROBE_VERDICT_BULLET =
-  "- The two verdict fields of a mutation probe now carry a legend, a";
+  "- Mutation-probe verdict reporting now distinguishes";
 
 describe("mutation probe verdict fields", () => {
   const implementerPrompt = unwrap(readAsset("agents/implementer.md"));
   const contracts = unwrap(readAsset("skill/references/contracts.md"));
 
-  it("the implementer prompt defines both fields and where their values come from", () => {
-    expect(implementerPrompt).toContain(
-      `\`mutation_probes\` sub-fields. ${PROBE_FIELD_LEGEND} ${PROBE_FIELD_COPY_RULE}`,
+  const implementerRules = [
+    PROBE_FIELD_LEGEND,
+    PROBE_FIELD_COPY_RULE,
+    PROBE_RESULT_ONLY_RULE,
+    PROBE_ABSENCE_RULE,
+    PROBE_MANUAL_RULE,
+  ];
+  const workflowRules = [
+    PROBE_ROW_COMPARISON,
+    PROBE_RESUPPLY_RULE,
+    PROBE_OWN_ROWS_RULE,
+    PROBE_SET_SCOPE_RULE,
+    PROBE_SINGLE_REPLAY_RULE,
+  ];
+  const allRules = [...implementerRules, ...workflowRules, PROBE_REVIEWER_RULE];
+
+  it("pins every implementer rule at its normative site and contracts copy", () => {
+    for (const rule of implementerRules) {
+      expect(implementerPrompt).toContain(rule);
+      expect(contracts).toContain(rule);
+    }
+  });
+
+  it("pins every workflow rule at its workflow step and verification-set copy", () => {
+    const step6 = unwrap(
+      probes.slice(
+        probes.indexOf("6. **Delegate implementation.**"),
+        probes.indexOf("7. **Delegate review.**"),
+      ),
+    );
+    const step7 = unwrap(
+      probes.slice(
+        probes.indexOf("7. **Delegate review.**"),
+        probes.indexOf("8. **Decide acceptance.**"),
+      ),
+    );
+    for (const rule of workflowRules.filter(
+      (rule) => rule !== PROBE_SINGLE_REPLAY_RULE,
+    )) {
+      expect(step6).toContain(rule);
+    }
+    expect(step7).toContain(PROBE_SINGLE_REPLAY_RULE);
+    expect(sectionOf(probes, "## Verification sets")).toContain(
+      PROBE_SET_SCOPE_RULE,
     );
   });
 
-  it("contracts.md carries the same legend and copy rule for the orchestrator", () => {
-    expect(contracts).toContain(
-      `Return the selected contract's YAML envelope. ${PROBE_FIELD_LEGEND} ${PROBE_FIELD_COPY_RULE}`,
-    );
+  it("pins the reviewer rule at its normative site", () => {
+    expect(unwrap(reviewer)).toContain(PROBE_REVIEWER_RULE);
+    expect(unwrap(reviewer)).toContain(PROBE_SINGLE_REPLAY_RULE);
   });
 
-  it("step 6 has the orchestrator check the fields against the quoted verdict before transfer", () => {
-    expect(unwrap(probes)).toContain(
-      `subsection, with the round it was named in. ${PROBE_ROW_CROSS_CHECK}`,
-    );
-  });
+  it.each([
+    {
+      name: "both supplied fields",
+      producer: [PROBE_FIELD_COPY_RULE, PROBE_RESULT_ONLY_RULE],
+    },
+    {
+      name: "result only",
+      producer: [PROBE_FIELD_COPY_RULE, PROBE_RESULT_ONLY_RULE],
+    },
+    { name: "no verdict", producer: [PROBE_ABSENCE_RULE, PROBE_MANUAL_RULE] },
+  ])(
+    "pins producer evidence and transfer decisions for $name",
+    ({ producer }) => {
+      for (const rule of producer) expect(implementerPrompt).toContain(rule);
+      expect(unwrap(probes)).toContain(PROBE_ROW_COMPARISON);
+      expect(unwrap(probes)).toContain(PROBE_RESUPPLY_RULE);
+    },
+  );
 
   it("names no concrete probe tool", () => {
     for (const text of [implementerPrompt, contracts, unwrap(probes)])
@@ -402,11 +469,7 @@ describe("mutation probe verdict fields", () => {
       ),
       "## Probe verdict fields: legend, copy rule, cross-check",
     );
-    for (const constant of [
-      PROBE_FIELD_LEGEND,
-      PROBE_FIELD_COPY_RULE,
-      PROBE_ROW_CROSS_CHECK,
-    ]) {
+    for (const constant of allRules) {
       expect(bullet).toContain(constant);
       expect(bundleSection).toContain(constant);
     }

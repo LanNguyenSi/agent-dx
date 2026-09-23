@@ -112,7 +112,21 @@ directory and the subagents.
    `03-decisions.md` and consolidate evidence in
    `04-implementation-summary.md`, recording each probe the implementer
    reports as a row in `04-implementation-summary.md`'s Mutation Probes
-   subsection, with the round it was named in. Before transferring a probe row, compare its `result` and `expectation` with the runner verdict quoted in `tests.executed`; on a mismatch, or when a verdict the runner states is not quoted, resupply it (ask the same implementer for the verdict, respawn one when it is gone, or rerun the probe yourself in isolation), record the resupply in `03-decisions.md`, and treat it as a transfer blocker rather than a misfire, since the return itself parses; never infer either field. A quoted probe verdict is not a named result of the verification set, so the set's missing-or-extra rule does not apply to it. Each row's Before/After
+   subsection, with the round it was named in. Before transferring a probe
+   row, compare each copied field with the quoted verdict and each derived
+   field with its stated declaration and evidence. An explicit absence of
+   a machine-readable verdict requires the manual comparison, not resupply
+   of a nonexistent verdict. On a mismatch or missing required evidence,
+   obtain corrected evidence from the implementer or rerun the probe in
+   isolation, record the action in `03-decisions.md`, and keep the row
+   blocked from transfer until the comparison succeeds; if the evidence
+   cannot be obtained, record the unresolved proof rather than repeatedly
+   requesting an unavailable verdict. Never invent a verdict, override a
+   supplied field, or fill an unsupported derivation. Apply the same
+   evidence reporting and comparison to probes you run yourself before
+   recording their rows in `04-implementation-summary.md`. A quoted probe
+   verdict is not a named result of the verification set, so the set's
+   missing-or-extra rule does not apply to it. Each row's Before/After
    cells hold a single-line excerpt; when the mutant's actual before/after
    text is multi-line or contains an unescaped `|`, or the mutant is a
    patch/diff rather than a text swap, the full text or diff goes in the
@@ -198,8 +212,25 @@ directory and the subagents.
    not merely their id; a probe recorded with only an id and no definition
    cannot be skipped this way and is `not_applicable`. The reviewer may
    then skip re-running the ones named by definition.
-   The reviewer output contract itself is unchanged. In run mode `single` that skip permission does not apply: nobody but the orchestrator has seen its probe evidence. A probe counts as named when the briefing gives its full definition or a resolved immutable plan-and-result reference; an id alone does not name a probe. The orchestrator records every probe it ran in one of those two forms in `04-implementation-summary.md` before requesting review, the reviewer briefing states the run mode and names each of those probes, and the reviewer must replay every named orchestrator probe, through the probe runner when one is available and never in the reviewed tree. It reports per probe, in `reproduction`, the probe, the replayed runner verdict, and whether that verdict matches the recorded `result` and `expectation`; a mismatch is a finding of at least `high` and sets `matches_implementer_claim: mismatched`. A probe given only by id is `not_applicable` and counts as missing evidence, not as a pass, and so does a `single` briefing that names no probe at all. Never run mutation probes
-   in place against a worktree a reviewer subagent is concurrently reviewing;
+   The reviewer output contract itself is unchanged. In run mode `single`
+   that skip permission does not apply: nobody but the orchestrator has
+   seen its probe evidence. A probe counts as named when the briefing
+   gives its full definition or a resolved immutable plan-and-result
+   reference; an id alone does not name a probe. The orchestrator records
+   every probe it ran in one of those two forms in
+   `04-implementation-summary.md` before requesting review, the reviewer
+   briefing states the run mode and names each of those probes, and the
+   reviewer must replay every named orchestrator probe, through the probe
+   runner when one is available and never in the reviewed tree. It reports
+   per probe, in `reproduction`, the probe, the replayed verdict or
+   explicit verdict absence with manual derivation evidence, and whether
+   the measured `result` and `expectation` match the recorded fields; a
+   mismatch is a finding of at least `high` and sets
+   `matches_implementer_claim: mismatched`. A probe given only by id is
+   `not_applicable` and counts as missing evidence, not as a pass, and so
+   does a `single` briefing that names no probe at all. Never run mutation
+   probes in place against a worktree a reviewer subagent is concurrently
+   reviewing;
    isolate the probe in a separate worktree or wait until the reviewer has
    returned before probing that tree again. For an explicitly adopted v1 run,
    ask the reviewer to compare the frozen delegated criteria with the
@@ -307,7 +338,8 @@ is an honest failure, not a misfire. `skip`, `acknowledged`, `limitation`, and
 inconclusive results remain non-passes and cannot be silently accepted. When a
 repository has `docs/okf/`, include its bundle check in every set regardless of
 which files changed. This is a documented convention, not an OW execution
-engine or runtime schema validator.
+engine or runtime schema validator. A quoted probe verdict is not a named result
+of the verification set, so the set's missing-or-extra rule does not apply to it.
 
 # Persisted probe plans
 

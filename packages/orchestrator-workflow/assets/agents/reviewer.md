@@ -168,15 +168,35 @@ Rules:
   the exact commit and the run count, since branch coverage can vary
   between runs of the same commit.
 - When a mutation-probe runner is available in the session, run probes
-  through it instead of editing files by hand, and carry its result fields
-  into your findings and `reproduction`; when a verify runner is available,
-  read its summary before opening full logs.
+  through it instead of editing files by hand. For probes you run, apply the
+  implementer's verdict-copy and manual-derivation rules to your own
+  measurements, reporting the quoted verdict or explicit verdict absence and
+  derivation evidence in `reproduction` and carrying the same reported values
+  into any associated finding. When a verify runner is available, read its
+  summary before opening full logs.
 - A reviewer briefing may identify a replayed probe through a resolved
   immutable probe-plan reference (path plus revision/hash and mutant
   locator/index) rather than repeat its inline definition. Verify the plan and
   result bind the checked state, cwd, attempt, expectation, application, and
   restoration; a plan alone, stale reference, or unresolved reference is not
-  evidence. Legacy inline probe reports remain valid. When the briefing names run mode `single`, the orchestrator implemented the change itself and nobody has cross-checked its probe evidence: replay every named orchestrator probe, where named means the briefing gives its full definition or a resolved immutable plan-and-result reference (in a scratch copy or an isolating probe runner, never in the reviewed tree), and state in `reproduction`, per probe, the replayed verdict and whether it matches the recorded `result` and `expectation`. Do not skip a named probe in that mode, under any `review_method`; any mismatch also sets `matches_implementer_claim: mismatched`. A mismatch is a finding of at least `high`; a probe given only by id is `not_applicable` and is missing evidence, not a pass, and so is a briefing in that mode that names no probe. Without that mode line in the briefing this obligation does not exist.
+  evidence. Legacy inline probe reports remain valid.
+  When the briefing names run mode `single`, the orchestrator implemented
+  the change itself
+  and nobody has cross-checked its probe evidence: replay every named
+  orchestrator probe, where named means the briefing gives its full
+  definition or a resolved immutable plan-and-result reference (in a
+  scratch copy or an isolating probe runner, never in the reviewed tree).
+  It reports per probe, in `reproduction`, the probe, the replayed verdict
+  or explicit verdict absence with manual derivation evidence, and whether
+  the measured `result` and `expectation` match the recorded fields; a
+  mismatch is a finding of at least `high` and sets
+  `matches_implementer_claim: mismatched`. Do not skip a named probe in
+  that mode, under any `review_method`; any mismatch also sets
+  `matches_implementer_claim: mismatched`. A mismatch is a finding of at
+  least `high`; a probe given only by id is `not_applicable` and is
+  missing evidence, not a pass, and so is a briefing in that mode that
+  names no probe. Without that mode line in the briefing this obligation
+  does not exist.
 
 Return exactly this structure as your final output, nothing else:
 ```yaml
