@@ -2838,12 +2838,14 @@ and another pins the entries to strictly ascending version order with
 differing adjacent digests, so a release that changes the asset without
 appending or replacing that last entry is caught before it ships, rather
 than silently making every existing installation `conflicted` again.
-Three rules stay with the maintainer, because no offline test can check
-them: released entries are not re-verified against their tags or
-packages, a second pending entry is not detected, and a pending label
-that is never relabelled to the shipped version is not detected. None of
-them can cause a write (nothing is written without `--force`); each can
-make `matchedVersion` name the wrong version.
+One rule stays with the maintainer: whether a published release that has
+no reachable tag belongs in the explicit untagged-release allowlist. The
+release-coverage test compares every reachable tag to its ledger digest,
+rejects a second untagged entry unless it is the trailing pending entry,
+and rejects a tagged release whose pending label was not relabelled.
+None of these rules can cause a write (nothing is written without
+`--force`); a wrong allowlist entry can make `matchedVersion` name the
+wrong version.
 
 ## `drift`
 
