@@ -79,6 +79,17 @@ describe("single-mode probe replay", () => {
   // the run mode `single` duty's not_applicable fallback are common wording
   // between the reviewer prompt and step 7's mirror of it; pin both spans
   // against the same constants so a weakening edit to either site is caught.
+  // Issue #339: a write a declared check or the probe runner's own
+  // isolation leaves behind, wherever that tool places it, is expected, not
+  // a location violation. Closes the gap where the write-boundary bullet's
+  // literal "one exception" reading would forbid build/test artifacts a
+  // declared check produces as a side effect.
+  it("the write-boundary bullet states that a write a directed tool makes is expected wherever that tool places it", () => {
+    expect(reviewer).toContain(
+      "A write made by a tool these rules direct you to run, a declared check (including build or test artifacts a side effect leaves in the reviewed tree) or the probe runner operating in its own default isolation, is expected wherever that tool places it, not a location violation.",
+    );
+  });
+
   it("step 7 and the reviewer prompt carry the same in-place exception conditions and single-mode not_applicable fallback", () => {
     expect(step7).toContain(IN_PLACE_AUTHORIZATION_CLAUSE);
     expect(step7).toContain(IN_PLACE_RESTORED_VERIFIED_CLAUSE);
