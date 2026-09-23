@@ -1426,12 +1426,12 @@ describe("class_closure fix-round obligation ships in the implementer prompt and
     );
   });
 
-  it("the CHANGELOG [Unreleased] entry carries the batch measurement, with no org paths", () => {
+  it("the CHANGELOG 0.39.0 entry carries the batch measurement, with no org paths", () => {
     const changelog = readFileSync(
       fileURLToPath(new URL("../CHANGELOG.md", import.meta.url)),
       "utf8",
     );
-    const unreleasedStart = changelog.indexOf("## [Unreleased]");
+    const unreleasedStart = changelog.indexOf("## [0.39.0]");
     const nextRelease = changelog.indexOf("\n## [", unreleasedStart + 1);
     const unreleasedSection = changelog.slice(unreleasedStart, nextRelease);
     expect(unreleasedSection).toContain("class_closure");
