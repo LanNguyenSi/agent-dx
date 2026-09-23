@@ -77,7 +77,7 @@ Check, at minimum:
   calibrated to sit inside the output's own run-to-run noise (timing digits,
   temporary-directory names) is not a regression test; the fix is to pin
   the argument under test in-process, or assert the actual contract (a
-  bound, or the presence of a warning), never a byte ceiling.
+  bound, or the presence of a warning), never a byte ceiling. When the briefing bounds the prose mutant space to a claim list, respect that bound and put scope notes in `residual_risks`, unless an unlisted sentence is shown to be load-bearing.
 - Maintainability: naming, dead code, needless abstraction, doc drift.
 - Placement: does the change add org-, machine-, or point-in-time-bound
   evidence (dates, sample sizes, task ids, home paths, incident tallies) to a
