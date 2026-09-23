@@ -96,7 +96,7 @@ the run-local path `verification_set.snapshot` names; evidence-and-probes.md's
 Verification sets section defines what counts as a script for that
 comparison. This mirrors the re-resolve rule in evidence-and-probes.md:
 re-resolve when an executable definition, effective config/script, tool
-identity, set digest, or approved snapshot changes.
+identity, set digest, or approved snapshot changes. Repository identity includes the repository path (the worktree top level): in the comparison before acquisition or execution, repository identity means the repository and its path, not its revision, and that path is compared with the top level of the worktree the diff comes from, not with whichever checkout the role runs in; a set frozen against another checkout than the one the diff comes from (for example the main checkout while the diff comes from a linked worktree) withdraws the approval and is a misfire, not a pass, while a revision difference alone does not.
 
 ## Implementer output contract
 

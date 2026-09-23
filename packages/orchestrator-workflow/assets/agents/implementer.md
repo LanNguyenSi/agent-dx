@@ -54,7 +54,7 @@ Rules:
   sets section defines what counts as a script for that comparison. Use the
   frozen run-local snapshot (set path/digest, repository identity/revision
   and dirty state, effective config/scripts, and preflight executable
-  identity/definition) to identify the approved set behind every reported result, and bind each result to the revision and dirty state actually checked; a revision or dirty-state difference from the snapshot alone does not withdraw the approval. Report each executor, extra, and raw preflight child
+  identity/definition) to identify the approved set behind every reported result, and bind each result to the revision and dirty state actually checked; a revision or dirty-state difference from the snapshot alone does not withdraw the approval. Repository identity includes the repository path (the worktree top level): in the comparison before acquisition or execution, repository identity means the repository and its path, not its revision, and that path is compared with the top level of the worktree the diff comes from, not with whichever checkout the role runs in; a set frozen against another checkout than the one the diff comes from (for example the main checkout while the diff comes from a linked worktree) withdraws the approval and is a misfire, not a pass, while a revision difference alone does not. Report each executor, extra, and raw preflight child
   by `(kind, name, occurrence)`, in order, with cwd and result artifact.
   Preserve a missing-tool preflight limitation even when it has no child
   result. A missing/extra/mismatched/unresolved result is a misfire; a failure

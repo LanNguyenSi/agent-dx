@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-23T20:09:25Z
+timestamp: 2026-09-23T21:03:41Z
 sources:
   - packages/orchestrator-workflow/assets/agents/explorer.md
   - packages/orchestrator-workflow/assets/agents/task-slicer.md
@@ -103,7 +103,7 @@ those components is outside the approval
 The compared values are the ones recorded in that snapshot; evidence-and-
 probes.md's Verification sets section defines what counts as a script for
 the comparison
-(`packages/orchestrator-workflow/assets/skill/references/contracts.md:94#"The compared values are the ones recorded in the frozen snapshot at"`).
+(`packages/orchestrator-workflow/assets/skill/references/contracts.md:94#"The compared values are the ones recorded in the frozen snapshot at"`). For that comparison the repository identity is the repository and its path, compared with the top level of the worktree the diff comes from rather than the checkout the role runs in, so a set frozen against another checkout withdraws the approval while a revision difference alone does not (`packages/orchestrator-workflow/assets/skill/references/contracts.md:99#"Repository identity includes the repository path (the worktree top level)"`); when the diff comes from a linked worktree, literal paths in the set are re-resolved under that worktree before freezing (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:354#"When the diff for a repository comes from a linked worktree"`).
 
 ## Where each contract lives, and what keeps the copies equal
 
