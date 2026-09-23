@@ -396,38 +396,47 @@ ids='(^|[^A-Za-z0-9_])((AC|D|T)-[0-9]{3}|R[0-9]+)([^A-Za-z0-9_]|$)'
 top=$(git rev-parse --show-toplevel) || exit 2
 cd "$top" || exit 2
 git rev-parse --verify --quiet "$base^{commit}" >/dev/null || exit 2
-d=$(git diff --no-color --no-ext-diff --no-textconv -M \
+d=$(git diff --no-color --no-ext-diff --no-textconv --text -M \
   --src-prefix=a/ --dst-prefix=b/ "$base" HEAD -- . ':(exclude).ai') || exit 2
-m=$(git log --format=%B "$base..HEAD") || exit 2
-hits=0
-printf '%s\n' "$d" |
-  awk '/^diff --git /{h=1; next}
+m=$(git log --no-show-signature --format=%B "$base..HEAD") || exit 2
+a=$(printf '%s\n' "$d" |
+  LC_ALL=C awk '/^diff --git /{h=1; next}
        h && /^\+\+\+ /{f=substr($0, 7); next}
        /^@@/{h=0; next}
-       !h && /^\+/{print f ": " substr($0, 2)}' |
-  grep -E "$ids" && hits=1
-printf '%s\n' "$m" | grep -E "$ids" && hits=1
+       !h && /^\+/{print f ": " substr($0, 2)}') || exit 2
+hits=0
+for t in "$a" "$m"; do
+  printf '%s\n' "$t" | LC_ALL=C grep -E "$ids"
+  s=$?
+  [ "$s" -eq 0 ] && hits=1
+  [ "$s" -gt 1 ] && exit 2
+done
 exit "$hits"
 ```
 
 Exit `0` means no hit, exit `1` means at least one hit, each printed (a diff
 hit prefixed by its file path), and exit `2` means the run-base does not
-resolve to a commit or a git command failed. The check fails closed: it
-reads the whole diff and log into memory before scanning them, so a git
-failure part way through (an unreadable object, for example) exits `2`
-instead of passing on partial output. It changes to the top level of the
+resolve to a commit or a git, awk, or grep command failed. The check fails
+closed: it reads the whole diff and log into memory and checks the status of
+every stage, so a failure part way through (an unreadable object, or a text
+tool rejecting a byte, for example) exits `2` instead of passing on partial
+output; the text stages run byte-wise (`LC_ALL=C`) so no locale can make
+them reject the input. It changes to the top level of the
 repository first, so a `cwd` in a subdirectory scans the same range. The
-diff options override the external diff, textconv, rename, color, and
-prefix settings of the user's git configuration, so those settings cannot
-hide an added line from the scan.
+diff options override the external diff, textconv, binary, rename, color,
+and prefix settings of the user's git configuration and the repository's
+attributes (`--text` diffs a file marked `-diff` or `binary` as text), and
+the log option suppresses signature output, so those settings cannot hide an
+added line from the scan or add lines to it.
 
 It covers the lines added between the run-base and `HEAD` outside the
 top-level `.ai/` directory, and the message of every commit reachable from
 `HEAD` and not from the run-base. That range includes upstream work merged
 into the branch after the run-base, whose added lines and commit messages
 are scanned as well and can produce hits the branch did not write. It does
-not cover uncommitted changes, removed lines, binary file content, pull
-request titles or bodies, branch names, or identifiers in any other format.
+not cover uncommitted changes, removed lines, an identifier directly next to
+a NUL byte (the shell drops NUL bytes from the captured diff), pull request
+titles or bodies, branch names, or identifiers in any other format.
 The patterns are case-sensitive and can match unrelated tokens, such as a
 product or part name built the same way, and a repository whose own
 documentation discusses these formats (a copy of these templates, for

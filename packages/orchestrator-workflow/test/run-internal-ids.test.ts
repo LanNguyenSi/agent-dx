@@ -136,10 +136,10 @@ describe("run-internal identifiers section of evidence-and-probes.md", () => {
       'as an extra of kind `command` in the `after_preflight` phase, with `cwd` at the repository root and the run-base recorded in `00-goal.md` for that repository as its only argument. Its argv is `["sh", "-c", <the script below as one string>, "sh", <run-base>]`',
     );
     expect(text).toContain(
-      "Exit `0` means no hit, exit `1` means at least one hit, each printed (a diff hit prefixed by its file path), and exit `2` means the run-base does not resolve to a commit or a git command failed. The check fails closed: it reads the whole diff and log into memory before scanning them, so a git failure part way through (an unreadable object, for example) exits `2` instead of passing on partial output.",
+      "Exit `0` means no hit, exit `1` means at least one hit, each printed (a diff hit prefixed by its file path), and exit `2` means the run-base does not resolve to a commit or a git, awk, or grep command failed. The check fails closed: it reads the whole diff and log into memory and checks the status of every stage, so a failure part way through (an unreadable object, or a text tool rejecting a byte, for example) exits `2` instead of passing on partial output; the text stages run byte-wise (`LC_ALL=C`) so no locale can make them reject the input.",
     );
     expect(text).toContain(
-      "It changes to the top level of the repository first, so a `cwd` in a subdirectory scans the same range. The diff options override the external diff, textconv, rename, color, and prefix settings of the user's git configuration, so those settings cannot hide an added line from the scan.",
+      "It changes to the top level of the repository first, so a `cwd` in a subdirectory scans the same range. The diff options override the external diff, textconv, binary, rename, color, and prefix settings of the user's git configuration and the repository's attributes (`--text` diffs a file marked `-diff` or `binary` as text), and the log option suppresses signature output, so those settings cannot hide an added line from the scan or add lines to it.",
     );
   });
 
@@ -148,7 +148,7 @@ describe("run-internal identifiers section of evidence-and-probes.md", () => {
       "It covers the lines added between the run-base and `HEAD` outside the top-level `.ai/` directory, and the message of every commit reachable from `HEAD` and not from the run-base. That range includes upstream work merged into the branch after the run-base, whose added lines and commit messages are scanned as well and can produce hits the branch did not write.",
     );
     expect(text).toContain(
-      "It does not cover uncommitted changes, removed lines, binary file content, pull request titles or bodies, branch names, or identifiers in any other format.",
+      "It does not cover uncommitted changes, removed lines, an identifier directly next to a NUL byte (the shell drops NUL bytes from the captured diff), pull request titles or bodies, branch names, or identifiers in any other format.",
     );
     expect(text).toContain(
       "A hit is a failure of the extra; when the orchestrator confirms a hit is a false positive it records that decision",
@@ -380,6 +380,74 @@ describe("the documented run-internal identifier check", () => {
       const unwalkable = runCheck(repo, base);
       expect(unwalkable.status).toBe(2);
       expect(unwalkable.stdout).toBe("");
+    });
+  });
+
+  it("scans every file after a byte that is not valid UTF-8, under a UTF-8 locale", () => {
+    withRepo((repo) => {
+      commit(repo, { "README.md": "fixture\n" }, "initial");
+      const base = git(repo, "rev-parse", "HEAD");
+      writeFileSync(
+        join(repo, "a1.ts"),
+        Buffer.from([0x2f, 0x2f, 0x20, 0x63, 0x61, 0x66, 0xe9, 0x0a]),
+      );
+      commit(
+        repo,
+        { "z.ts": `// kept as agreed in ${decision}\n` },
+        "feat: add two helpers",
+      );
+      const utf8 = runCheck(repo, base, {
+        ...process.env,
+        LANG: "en_US.UTF-8",
+        LC_ALL: "en_US.UTF-8",
+      });
+      expect(utf8.status).toBe(1);
+      expect(utf8.stdout).toBe(`z.ts: // kept as agreed in ${decision}\n`);
+    });
+  });
+
+  it("finds an added line in a file the repository marks -diff", () => {
+    withRepo((repo) => {
+      commit(repo, { ".gitattributes": "*.ts -diff\n" }, "initial");
+      const base = git(repo, "rev-parse", "HEAD");
+      commit(
+        repo,
+        { "src/a.ts": `// split out of ${task}\n` },
+        "refactor: split the helper",
+      );
+      const unmarked = runCheck(repo, base);
+      expect(unmarked.status).toBe(1);
+      expect(unmarked.stdout).toBe(`src/a.ts: // split out of ${task}\n`);
+    });
+  });
+
+  it("scans the body of a commit message, not only its subject", () => {
+    withRepo((repo) => {
+      commit(repo, { "README.md": "fixture\n" }, "initial");
+      const base = git(repo, "rev-parse", "HEAD");
+      commit(
+        repo,
+        { "src/a.ts": "export const a = 1;\n" },
+        `feat: add the helper\n\nas decided in ${decision}`,
+      );
+      const body = runCheck(repo, base);
+      expect(body.status).toBe(1);
+      expect(body.stdout).toBe(`as decided in ${decision}\n`);
+    });
+  });
+
+  it("reads an added line starting with '++ ' as content, not as a file header", () => {
+    withRepo((repo) => {
+      commit(repo, { "README.md": "fixture\n" }, "initial");
+      const base = git(repo, "rev-parse", "HEAD");
+      commit(
+        repo,
+        { "notes.md": `++ counter from ${round}\nplain line\n` },
+        "docs: add notes",
+      );
+      const content = runCheck(repo, base);
+      expect(content.status).toBe(1);
+      expect(content.stdout).toBe(`notes.md: ++ counter from ${round}\n`);
     });
   });
 });
