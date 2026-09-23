@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-09-23T12:21:19Z
+timestamp: 2026-09-23T15:55:54Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/agents/reviewer.md
@@ -50,7 +50,7 @@ rules; this prevents a reproduced pre-existing issue from consuming the
 delta's bounded-review budget. Attribution is the second of the halt's two
 clauses, and both sites carrying the halt state both: step 8 halts "at the
 first `recurrence: repeated` finding whose class a previous round's fix already addressed and whose `introduced_by_delta` is `yes` or `unknown`"
-(`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:256#"Halt at the first"`),
+(`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:266#"Halt at the first"`),
 and the Round-2 halt rule's own cross-reference to step 8 states the
 identical scope, both clauses
 (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:48#"Step 8 of the detailed workflow states the operational"`),
@@ -128,13 +128,13 @@ below.
 - Critical: "waived by the operator. The orchestrator never waives a
   critical finding on its own" (`agents-md-section.md:115#"never waives a critical finding on its own."`); SKILL.md
   step 8 echoes "critical findings require operator sign-off"
-  (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:241#"explicitly waived: critical findings require operator"`).
+  (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:251#"explicitly waived: critical findings require operator"`).
 - High: "waived by the orchestrator with a recorded rationale"
-  (`agents-md-section.md:117#"rationale."`; `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:242#"findings require the orchestrator to record a"`).
+  (`agents-md-section.md:117#"rationale."`; `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:252#"findings require the orchestrator to record a"`).
 - Deferring counts as waiving, for both severities: "Deferring such a
   finding counts as a waiver" (`agents-md-section.md:110#"explicitly waived. Deferring such a finding counts as a waiver, and the gate"`). SKILL.md makes
   the symmetry explicit: "Deferring a high or critical finding counts as a
-  waiver and follows the same rules" (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:243#"or critical finding counts as a waiver and follows the"`). A deferred
+  waiver and follows the same rules" (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:253#"or critical finding counts as a waiver and follows the"`). A deferred
   critical still needs operator sign-off; a deferred high still needs an
   orchestrator-recorded rationale.
 - Recorded in
@@ -147,7 +147,7 @@ below.
   (`03-decisions.md:14#"## Review-round escalation"`) remains unchanged; there
   is no additional waiver schema.
 - Summarized in `06-handoff.md`'s Accepted Waivers section
-  (`agents-md-section.md:119#"the Accepted Waivers section of"`; `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:245#"the Accepted Waivers section of"`), instructed to "Mirror
+  (`agents-md-section.md:119#"the Accepted Waivers section of"`; `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:255#"the Accepted Waivers section of"`), instructed to "Mirror
   03-decisions.md"
   (`packages/orchestrator-workflow/assets/templates/06-handoff.md:21#"<!-- Waived high/critical reviewer findings, or none. Mirror 03-decisions.md. -->"`) via a
   `Finding | Severity | Rationale | Approved By` table
@@ -161,7 +161,7 @@ explanatory documentation, comments, or citations. It excludes source- and
 test-file edits and semantic changes to executable commands, configuration,
 policy, instructions, or behavior; it applies only to low/medium
 documentation or maintainability findings and never to high/critical or any
-other ineligible finding (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:254#"high/critical or other ineligible finding."`;
+other ineligible finding (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:264#"high/critical or other ineligible finding."`;
 `agents-md-section.md:130#"row with its Severity and Decision headers unchanged and Decision"`). This is a closing
 option after review, not an exception to the review requirement or the waiver
 rules above.
@@ -169,7 +169,7 @@ rules above.
 For an eligible closure, record the concrete verification in a
 `05-review-findings.md` row without changing its Severity or Decision headers,
 and set the row's Decision to `accepted`
-(`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:256#"unchanged and setting Decision to"`; `05-review-findings.md:16#"| Severity | Category | Description | Suggested Fix | Decision |"`).
+(`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:266#"unchanged and setting Decision to"`; `05-review-findings.md:16#"| Severity | Category | Description | Suggested Fix | Decision |"`).
 No reader or template schema changes: the existing Decision legend and all
 high/critical waiver and escalation rules continue to apply. The policy is
 pinned in `test/docs-consistency.test.ts:4887#"docs-only closing deltas stay narrowly bounded"`.
@@ -217,7 +217,7 @@ Two machine-readable markers sit next to the prose gate: `<!--
 solution-acceptance: acceptance-recommendation = TODO -->`
 (`05-review-findings.md:34#"<!-- solution-acceptance: acceptance-recommendation = TODO -->"`) and `<!-- solution-acceptance: final-status =
 TODO -->` (`06-handoff.md:43#"<!-- solution-acceptance: final-status = TODO -->"`). SKILL.md instructs replacing `TODO` with the
-chosen enum value when finalizing each file (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:289#"non-accepting (fail-closed)."`). Left as
+chosen enum value when finalizing each file (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:299#"non-accepting (fail-closed)."`). Left as
 `TODO`, the harness solution-acceptance gate reads the run as non-accepting.
 `packages/orchestrator-workflow/test/template-markers.test.ts:57#"<!-- solution-acceptance: run-base = TODO -->"` pins
 exactly one marker per template, each defaulting to `TODO`. This is a
@@ -269,9 +269,9 @@ evidence, the reviewer must reproduce it independently (its own runs or
 measurements) and record method, sample size, and result against the
 implementer's claim; a single deterministic check (one test run, `tsc`,
 lint) does not trigger it. The installed `reviewer.md` prompt carries the
-same rule (`reviewer.md:162#"lint) do not trigger this."`), and both output contracts gained a matching
+same rule (`reviewer.md:187#"lint) do not trigger this."`), and both output contracts gained a matching
 `reproduction: {method, sample_size, result, matches_implementer_claim}`
-field (`packages/orchestrator-workflow/assets/skill/references/contracts.md:183#"matches_implementer_claim: matched | mismatched |"`, `reviewer.md:218#"residual_risks:"`); `matches_implementer_claim`
+field (`packages/orchestrator-workflow/assets/skill/references/contracts.md:183#"matches_implementer_claim: matched | mismatched |"`, `reviewer.md:261#"residual_risks:"`); `matches_implementer_claim`
 accepts `not_applicable` so a review that never hits the narrow trigger is
 not forced to fabricate a reproduction record.
 
@@ -397,7 +397,7 @@ continuing is a valid outcome, it is no round-2 halt signal, it adds
 nothing to the budget's count, and it never replaces a review round; when
 the same review also fires the Round-2 halt signal, the halt rule governs.
 Step 8 of the workflow points to it without restating the trigger
-(`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:262#"record the Fix-regression decision point"`).
+(`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:272#"record the Fix-regression decision point"`).
 The rule lives only in the skill references; `agents-md-section.md` does
 not carry it, so it needs no AGENTS.md re-install and reaches an existing
 install with the next kit re-install. Pinned by

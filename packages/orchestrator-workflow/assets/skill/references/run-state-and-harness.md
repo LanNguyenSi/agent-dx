@@ -75,12 +75,22 @@ All state for one unit of work lives in a run directory:
   04-implementation-summary.md
   05-review-findings.md
   06-handoff.md
+  evidence/
 ```
 
 Create it at the start of a run by copying `.ai/workflow/templates/` and fill
 the files as the run progresses. The newest run directory is the active one
 unless a `.ai/run` pointer names one (see below);
 older directories are the auditable history. Do not edit past runs.
+
+`evidence/` is an optional subdirectory, not one of the seven templated
+files: nothing copies or requires it. The orchestrator, the implementer, and
+the reviewer write into it (test logs, probe verdicts, reproduction output,
+reviewer-reproduced evidence) when a briefing or an acceptance criterion
+asks for a saved artifact instead of just a report field; the reviewer's
+write-boundary rule names it as the one write-allowed location outside the
+reviewed tree, besides the writer's own scratchpad. The explorer and the
+advisor are read-only roles and never write into it, or anywhere else.
 
 The run directory may live in the workspace's own `.ai/runs/` or in one
 repository's `.ai/runs/`. Either way, bind every repository or worktree the

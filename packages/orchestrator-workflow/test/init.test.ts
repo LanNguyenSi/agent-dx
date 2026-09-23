@@ -2757,3 +2757,60 @@ describe("probe verdict render paths", () => {
     );
   });
 });
+
+describe("reviewer write boundary (issue #339)", () => {
+  it("pins the reviewer's ref/object-write tokens and evidence/ write-boundary phrase", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["claude", "opencode"],
+      models: { ...DEFAULT_MODELS },
+    });
+
+    // Unlike the generic READ_ONLY_ROLES guard in the "read-only roles"
+    // describe above, `git fetch` / `git merge-tree --write-tree` / `git
+    // update-ref` / `git gc` and the evidence/ write boundary are
+    // reviewer-specific: the explorer and advisor don't run probes or
+    // answer merge-conflict questions, so these tokens only exist in the
+    // reviewer prompt. This describe block is appended at file end, not
+    // inlined into the read-only-roles block above, so it doesn't shift
+    // the line numbers every existing docs/okf citation into this file
+    // depends on.
+    for (const harnessDir of [".claude", ".opencode"]) {
+      const installed = readFileSync(
+        join(target, harnessDir, "agents", "reviewer.md"),
+        "utf8",
+      );
+      for (const token of [
+        "`git fetch`",
+        "`git merge-tree --write-tree`",
+        "`git update-ref`",
+        "`git gc`",
+      ]) {
+        expect(installed, `${harnessDir}/agents/reviewer.md`).toContain(token);
+      }
+      expect(installed, `${harnessDir}/agents/reviewer.md`).toContain(
+        "never write into the reviewed",
+      );
+      expect(installed, `${harnessDir}/agents/reviewer.md`).toContain(
+        "the briefing's own run-directory path wins",
+      );
+      // Issue #339: these three previously survived a weakening/inverting
+      // mutant because nothing pinned their own wording. The symlink clause
+      // closes the evidence-path resolution rule (a symlinked path
+      // component could otherwise route a write outside the run
+      // directory); the mismatch clause closes the fallback when the
+      // briefing and the `.ai/run` pointer disagree; the merge-conflict
+      // sentence closes the routing rule for a question that must not be
+      // answered by fetching or writing a tree.
+      expect(installed, `${harnessDir}/agents/reviewer.md`).toContain(
+        "with no symlinked path component, and never under\n  an older run than the one the briefing names.",
+      );
+      expect(installed, `${harnessDir}/agents/reviewer.md`).toContain(
+        "report the mismatch and write nothing",
+      );
+      expect(installed, `${harnessDir}/agents/reviewer.md`).toContain(
+        "A merge-conflict question about an open PR is not answered by fetching or",
+      );
+    }
+  });
+});

@@ -12311,3 +12311,35 @@ describe("findSameLineAnchorCollapses itself reports and abstains", () => {
     ).toEqual([]);
   });
 });
+
+// Issue #339: the README's read-only posture section states the reviewer's
+// own write boundary (scratchpad and evidence/ only, never the reviewed
+// tree/index/refs/object store) instead of leaving the reviewer folded
+// into the generic "read-only" framing the rest of the paragraph uses.
+// Appended at file end, not inlined near the other README checks above, so
+// it doesn't reshuffle the many existing docs/okf citations into this file
+// by line number (the same reasoning test/init.test.ts's own appended
+// write-boundary block already documents).
+describe("README's read-only posture section states the reviewer's narrower write boundary", () => {
+  const readmeMd = readDoc("README.md");
+
+  it("names the reviewer's write-allowed locations and the forbidden ref/object commands", () => {
+    expect(readmeMd).toContain(
+      'The reviewer\'s own write boundary is narrower than "read-only": it may write',
+    );
+    expect(readmeMd).toContain(
+      "the run directory's `evidence/`, and nowhere else.",
+    );
+    expect(readmeMd).toContain(
+      "It never writes into the\nreviewed tree, its index, its refs, or its object store",
+    );
+    for (const token of [
+      "no `git fetch`, no",
+      "`git merge-tree --write-tree`, no",
+      "`git update-ref`, no",
+      "`git gc`,",
+    ]) {
+      expect(readmeMd).toContain(token);
+    }
+  });
+});

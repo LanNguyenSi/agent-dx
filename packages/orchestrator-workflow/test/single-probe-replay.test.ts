@@ -9,7 +9,15 @@ import { readAsset } from "../src/assets.js";
 import { composeCodexAgent } from "../src/codex.js";
 import { runInit } from "../src/init.js";
 import { DEFAULT_MODELS, DEFAULT_TIER, ROLE_TIERS } from "../src/models.js";
-import { NAMED_PROBE_FORMS, SINGLE_REPLAY_RULE } from "./run-mode-constants.js";
+import {
+  HAND_APPLIED_MUTANT_IS_A_FINDING,
+  IN_PLACE_AUTHORIZATION_CLAUSE,
+  IN_PLACE_RESTORED_VERIFIED_CLAUSE,
+  NAMED_PROBE_FORMS,
+  RUNNER_ONLY_PROBE_RULE,
+  SINGLE_MODE_NOT_APPLICABLE_CLAUSE,
+  SINGLE_REPLAY_RULE,
+} from "./run-mode-constants.js";
 
 const unwrap = (text: string) => text.replace(/\s+/g, " ");
 const probes = unwrap(readAsset("skill/references/evidence-and-probes.md"));
@@ -66,6 +74,35 @@ describe("single-mode probe replay", () => {
     );
   });
 
+  // Issue #339: a write a declared check or the probe runner's own
+  // isolation leaves behind, wherever that tool places it, is expected, not
+  // a location violation. Closes the gap where the write-boundary bullet's
+  // literal "one exception" reading would forbid build/test artifacts a
+  // declared check produces as a side effect.
+  it("the write-boundary bullet states that a write a directed tool makes is expected wherever that tool places it", () => {
+    expect(reviewer).toContain(
+      "A write made by a tool these rules direct you to run, a declared check (including build or test artifacts a side effect leaves in the reviewed tree) or the probe runner operating in its own default isolation, is expected wherever that tool places it, not a location violation.",
+    );
+  });
+
+  // Issue #339: the bounded in-place exception's own conditions
+  // (authorization, restored_verified, clean tree, exclusive access) and
+  // the run mode `single` duty's not_applicable fallback are common wording
+  // between the reviewer prompt and step 7's mirror of it; pin both spans
+  // against the same constants so a weakening edit to either site is caught.
+  it("step 7 and the reviewer prompt carry the same in-place exception conditions and single-mode not_applicable fallback", () => {
+    expect(step7).toContain(IN_PLACE_AUTHORIZATION_CLAUSE);
+    expect(step7).toContain(IN_PLACE_RESTORED_VERIFIED_CLAUSE);
+    expect(step7).toContain(SINGLE_MODE_NOT_APPLICABLE_CLAUSE);
+    expect(step7).toContain(
+      `${SINGLE_MODE_NOT_APPLICABLE_CLAUSE}, which is missing evidence, not a pass.`,
+    );
+    expect(reviewer).toContain(IN_PLACE_AUTHORIZATION_CLAUSE);
+    expect(reviewer).toContain(IN_PLACE_RESTORED_VERIFIED_CLAUSE);
+    expect(reviewer).toContain(SINGLE_MODE_NOT_APPLICABLE_CLAUSE);
+    expect(reviewer).toContain(HAND_APPLIED_MUTANT_IS_A_FINDING);
+  });
+
   it("the rule is stated once: only step 7 carries its opening sentence", () => {
     const opening = "that skip permission does not apply";
     expect(probes.split(opening)).toHaveLength(2);
@@ -84,7 +121,7 @@ describe("single-mode probe replay", () => {
     expect(REVIEWER_DUTY).toContain(NAMED_PROBE_FORMS);
     expect(reviewer).toContain(REVIEWER_DUTY);
     expect(reviewer).toContain(
-      "Do not skip a named probe in that mode, under any `review_method`; any mismatch also sets `matches_implementer_claim: mismatched`.",
+      "Do not skip a named probe in that mode, under any `review_method`; a probe that cannot run through the runner is reported `not_applicable`, not skipped; any mismatch also sets `matches_implementer_claim: mismatched`.",
     );
     expect(reviewer).toContain(
       "A mismatch is a finding of at least `high`; a probe given only by id is `not_applicable` and is missing evidence, not a pass, and so is a briefing in that mode that names no probe.",
@@ -188,5 +225,160 @@ describe("single-mode probe replay", () => {
     } finally {
       rmSync(target, { recursive: true, force: true });
     }
+  });
+
+  // Issue #339: a mutant is applied only through the
+  // probe runner, in every run mode; a probe that cannot run through the
+  // runner is `not_applicable` (missing evidence, not a pass), never
+  // hand-applied. Pins the rule's own wording across every rendered
+  // reviewer variant of every harness, the same way the duty test above
+  // does, so a future edit cannot drop the rule from one install target
+  // while leaving it in another.
+  it("every rendered reviewer variant of every harness applies a mutant only through the runner, reporting not_applicable when none is available", () => {
+    const codexBodies = [
+      parse(
+        composeCodexAgent("reviewer", { model: "gpt-6-astra", effort: "high" }),
+      ).developer_instructions,
+      ...ROLE_TIERS.reviewer.map(
+        (tier) =>
+          parse(
+            composeCodexAgent(
+              "reviewer",
+              { model: "gpt-6-astra", effort: tier },
+              tier,
+            ),
+          ).developer_instructions,
+      ),
+    ];
+    for (const body of codexBodies) {
+      expect(unwrap(String(body))).toContain(RUNNER_ONLY_PROBE_RULE);
+    }
+
+    const target = mkdtempSync(join(tmpdir(), "ow-runner-only-probe-"));
+    try {
+      runInit({
+        targetDir: target,
+        harnesses: ["claude", "opencode"],
+        models: { ...DEFAULT_MODELS },
+        opencodeModels: { reviewer: "anthropic/claude-opus-4-8" },
+        opencodeClassModels: {
+          small: "anthropic/claude-haiku-4-5",
+          medium: "anthropic/claude-sonnet-4-6",
+          large: "anthropic/claude-opus-4-8",
+        },
+        tiers: true,
+      });
+      for (const harness of [".claude", ".opencode"]) {
+        for (const tier of ROLE_TIERS.reviewer) {
+          const suffix = tier === DEFAULT_TIER.reviewer ? "" : `-${tier}`;
+          const rendered = unwrap(
+            readFileSync(
+              join(target, harness, "agents", `reviewer${suffix}.md`),
+              "utf8",
+            ),
+          );
+          expect(rendered, `${harness}/reviewer${suffix}.md`).toContain(
+            RUNNER_ONLY_PROBE_RULE,
+          );
+        }
+      }
+    } finally {
+      rmSync(target, { recursive: true, force: true });
+    }
+  });
+
+  // Issue #339: the in-place bounded-exception conditions and the
+  // single-mode not_applicable fallback each previously survived a
+  // weakening/inverting mutant because nothing pinned their own wording
+  // across every install target, the same gap RUNNER_ONLY_PROBE_RULE closed
+  // for the general rule above. Mirrors that test's pattern for the two
+  // constants unique to this narrower span.
+  it("every rendered reviewer variant of every harness carries the in-place exception conditions and the single-mode not_applicable fallback", () => {
+    const codexBodies = [
+      parse(
+        composeCodexAgent("reviewer", { model: "gpt-6-astra", effort: "high" }),
+      ).developer_instructions,
+      ...ROLE_TIERS.reviewer.map(
+        (tier) =>
+          parse(
+            composeCodexAgent(
+              "reviewer",
+              { model: "gpt-6-astra", effort: tier },
+              tier,
+            ),
+          ).developer_instructions,
+      ),
+    ];
+    for (const body of codexBodies) {
+      const text = unwrap(String(body));
+      expect(text).toContain(IN_PLACE_AUTHORIZATION_CLAUSE);
+      expect(text).toContain(IN_PLACE_RESTORED_VERIFIED_CLAUSE);
+      expect(text).toContain(SINGLE_MODE_NOT_APPLICABLE_CLAUSE);
+      expect(text).toContain(HAND_APPLIED_MUTANT_IS_A_FINDING);
+    }
+
+    const target = mkdtempSync(join(tmpdir(), "ow-in-place-exception-"));
+    try {
+      runInit({
+        targetDir: target,
+        harnesses: ["claude", "opencode"],
+        models: { ...DEFAULT_MODELS },
+        opencodeModels: { reviewer: "anthropic/claude-opus-4-8" },
+        opencodeClassModels: {
+          small: "anthropic/claude-haiku-4-5",
+          medium: "anthropic/claude-sonnet-4-6",
+          large: "anthropic/claude-opus-4-8",
+        },
+        tiers: true,
+      });
+      for (const harness of [".claude", ".opencode"]) {
+        for (const tier of ROLE_TIERS.reviewer) {
+          const suffix = tier === DEFAULT_TIER.reviewer ? "" : `-${tier}`;
+          const rendered = unwrap(
+            readFileSync(
+              join(target, harness, "agents", `reviewer${suffix}.md`),
+              "utf8",
+            ),
+          );
+          for (const clause of [
+            IN_PLACE_AUTHORIZATION_CLAUSE,
+            IN_PLACE_RESTORED_VERIFIED_CLAUSE,
+            SINGLE_MODE_NOT_APPLICABLE_CLAUSE,
+            HAND_APPLIED_MUTANT_IS_A_FINDING,
+          ]) {
+            expect(rendered, `${harness}/reviewer${suffix}.md`).toContain(
+              clause,
+            );
+          }
+        }
+      }
+    } finally {
+      rmSync(target, { recursive: true, force: true });
+    }
+  });
+
+  // Issue #339: the site the reviewer previously
+  // contradicted itself at (a conditional "when one is available" framing,
+  // and a "scratch copy" alternative to the runner) must not resurface in
+  // either normative site for probe replay: step 7's single-mode duty
+  // paragraph and the reviewer prompt's own duty span. The GitHub Actions
+  // shell replay rule legitimately uses "scratch copy" elsewhere in both
+  // files (a different context, pinned separately); this check is scoped
+  // to the probe-replay spans only, not the whole file.
+  it("step 7's single-mode duty and the reviewer prompt's duty span carry neither a conditional runner framing nor a scratch-copy alternative for probe replay", () => {
+    const step7 = probes.slice(
+      probes.indexOf("7. **Delegate review.**"),
+      probes.indexOf("8. **Decide acceptance.**"),
+    );
+    const singleModeDuty = step7.slice(step7.indexOf("In run mode `single`"));
+    expect(singleModeDuty).not.toContain("when one is available");
+    expect(singleModeDuty).not.toContain("scratch copy");
+
+    const promptDuty = reviewer.slice(
+      reviewer.indexOf("When the briefing names run mode `single`"),
+      reviewer.indexOf("Return exactly this structure"),
+    );
+    expect(promptDuty).not.toContain("when one is available");
+    expect(promptDuty).not.toContain("scratch copy");
   });
 });

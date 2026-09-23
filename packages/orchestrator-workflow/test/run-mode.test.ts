@@ -88,6 +88,27 @@ describe("run mode section", () => {
   });
 });
 
+// Issue #339: names the roles that write into the run's `evidence/`
+// subdirectory (the orchestrator, the implementer, and the reviewer) and
+// states that the explorer and the advisor, being read-only, never do,
+// closing a gap where the paragraph previously said only "Any role writes
+// into it".
+describe("evidence/ write-boundary roles", () => {
+  const flat = unwrap(runState);
+
+  it("names the orchestrator, the implementer, and the reviewer as the roles that write into evidence/", () => {
+    expect(flat).toContain(
+      "The orchestrator, the implementer, and the reviewer write into it",
+    );
+  });
+
+  it("states that the explorer and the advisor never write into evidence/ or anywhere else", () => {
+    expect(flat).toContain(
+      "The explorer and the advisor are read-only roles and never write into it, or anywhere else.",
+    );
+  });
+});
+
 describe("run mode pointer sites", () => {
   const outsideSection = unwrap(
     runState.slice(0, runState.indexOf(`${HEADING}\n`)),

@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- The reviewer role now states one consistent write and replay rule set,
+  with every site (the Rules-section write boundary, the general mutant-
+  application bullet, step 7's single-mode replay duty, and the reviewer
+  prompt's copy of that duty) agreeing instead of contradicting one
+  another. The write boundary is a location rule, not a single named
+  exception: never write into the reviewed tree, its index, its refs, or
+  its object store; outside it, write only to the writer's own scratchpad
+  or the run's `evidence/`, and build/test artifacts a declared check
+  produces are expected, not a violation. For `evidence/`, the briefing's
+  own run-directory path wins over the `.ai/run` pointer (repository data,
+  which may be stale); the pointer is used only when the briefing names no
+  run directory and matches the run the briefing refers to, otherwise the
+  mismatch is reported and nothing is written, and the resolved path must
+  land under `<run-dir>/evidence/` with no symlinked component. The
+  forbidden-command list still explicitly names ref/object-changing
+  commands (`git fetch`, `git merge-tree --write-tree`, `git update-ref`,
+  `git gc`, plus the existing tree/index-mutating ones) and any in-place
+  edit of a tracked file, including a hand-applied mutant; a merge-conflict
+  question about an open PR is still routed back to the orchestrator
+  instead of being answered with `git fetch`. A mutant is applied only
+  through the probe runner, in every run mode; when no runner is available
+  the probe is reported `not_applicable` (missing evidence, not a pass),
+  never hand-applied, with no "when one is available" fallback or
+  "scratch copy" alternative left standing anywhere in the probe-replay
+  text. A briefing-authorized in-place runner mode (for when worktree
+  isolation is unusable) is now an explicit, bounded exception to "never in
+  the reviewed tree," not a redefinition of it: only the orchestrator's
+  briefing authorizes it, only the runner applies the mutant, the runner
+  must report `restored_verified: true` (a missing or `false` value is a
+  finding), the tree must be clean and at the reviewed head, and no other
+  agent may be active in that tree at the same time. `evidence/` is now
+  documented as an optional run subdirectory in the run-layout reference,
+  naming the orchestrator, the implementer, and the reviewer as the roles
+  that write into it and stating that the explorer and the advisor, being
+  read-only, never do. The location rule also names, explicitly, that a
+  write a declared check or the probe runner's own default isolation
+  leaves behind is expected wherever that tool places it, not an exception
+  to the rule. The in-place exception's conditions and the run mode
+  `single` duty's `not_applicable` fallback are now pinned at every site
+  that states them (the reviewer prompt, its rendered install variants,
+  and step 7's mirror), alongside the evidence-path symlink and mismatch
+  clauses and the merge-conflict routing sentence. The README's read-only
+  posture section states the reviewer's narrower write boundary the same
+  way (#339).
+
 ## [0.39.0] - 2026-09-23
 
 - The docs-only review default now states its condition directly instead
