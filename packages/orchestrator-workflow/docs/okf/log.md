@@ -11133,3 +11133,30 @@ append probe-verdict render coverage, while the documentation-consistency
 changes update probe wording only. Existing installer and routing behavior,
 assertions, and their line locations remain unchanged. The run records the
 structured anchor and freshness findings separately from process exits.
+
+## 2026-09-23 (agent-dx #339, reviewer write and replay rule pins)
+
+The reviewer.md, evidence-and-probes.md, and run-state-and-harness.md edits
+that pinned the in-place exception conditions, the run mode single duty's
+not_applicable fallback, and the evidence-path symlink and mismatch clauses
+shifted every citation into those three files at or after the edited lines,
+and independently confirmed a set of citations into evidence-and-probes.md
+and run-state-and-harness.md, plus one self-citation into CHANGELOG.md and
+two into README.md, that had already drifted out of range before this
+change and were not caught by the in-repo documentation-consistency suite
+(that suite's own kit-source category list does not cover the skill
+reference files or README.md; its coverage is unchanged by this entry).
+Every drifted citation was re-pointed from the anchor text's own current
+line, not by a hand-derived offset, and cross-checked against the doc's
+surrounding sentence where more than one line in the target matched the
+same anchor text (the two ambiguous cases were the three per-harness
+"pointer rule ... applies unchanged" sentences and a repeated CHANGELOG
+self-citation, both resolved by reading which harness bullet or which
+release entry the citing sentence names). Re-stamped install-fence
+mechanics, model preselection, review gate and waivers, run-state lifecycle
+and markers, and the subagent contracts document at
+2026-09-23T15:25:22Z after re-verifying every citation into their listed
+sources resolves at the new commit. `okf-kit check --require-anchors`
+(0.14.0) reports zero `anchor-*` and zero `sources-fresh` findings on the
+bundle at this state; the `citations-resolve` and `docs-consistency`
+in-repo suites pass unchanged.
