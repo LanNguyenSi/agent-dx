@@ -74,11 +74,6 @@ describe("single-mode probe replay", () => {
     );
   });
 
-  // Issue #339: the bounded in-place exception's own conditions
-  // (authorization, restored_verified, clean tree, exclusive access) and
-  // the run mode `single` duty's not_applicable fallback are common wording
-  // between the reviewer prompt and step 7's mirror of it; pin both spans
-  // against the same constants so a weakening edit to either site is caught.
   // Issue #339: a write a declared check or the probe runner's own
   // isolation leaves behind, wherever that tool places it, is expected, not
   // a location violation. Closes the gap where the write-boundary bullet's
@@ -90,10 +85,18 @@ describe("single-mode probe replay", () => {
     );
   });
 
+  // Issue #339: the bounded in-place exception's own conditions
+  // (authorization, restored_verified, clean tree, exclusive access) and
+  // the run mode `single` duty's not_applicable fallback are common wording
+  // between the reviewer prompt and step 7's mirror of it; pin both spans
+  // against the same constants so a weakening edit to either site is caught.
   it("step 7 and the reviewer prompt carry the same in-place exception conditions and single-mode not_applicable fallback", () => {
     expect(step7).toContain(IN_PLACE_AUTHORIZATION_CLAUSE);
     expect(step7).toContain(IN_PLACE_RESTORED_VERIFIED_CLAUSE);
     expect(step7).toContain(SINGLE_MODE_NOT_APPLICABLE_CLAUSE);
+    expect(step7).toContain(
+      `${SINGLE_MODE_NOT_APPLICABLE_CLAUSE}, which is missing evidence, not a pass.`,
+    );
     expect(reviewer).toContain(IN_PLACE_AUTHORIZATION_CLAUSE);
     expect(reviewer).toContain(IN_PLACE_RESTORED_VERIFIED_CLAUSE);
     expect(reviewer).toContain(SINGLE_MODE_NOT_APPLICABLE_CLAUSE);

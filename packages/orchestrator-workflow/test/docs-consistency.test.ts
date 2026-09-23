@@ -12330,6 +12330,9 @@ describe("README's read-only posture section states the reviewer's narrower writ
     expect(readmeMd).toContain(
       "the run directory's `evidence/`, and nowhere else.",
     );
+    expect(readmeMd).toContain(
+      "It never writes into the\nreviewed tree, its index, its refs, or its object store",
+    );
     for (const token of [
       "no `git fetch`, no",
       "`git merge-tree --write-tree`, no",

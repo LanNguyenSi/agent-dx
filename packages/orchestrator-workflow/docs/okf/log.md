@@ -11140,12 +11140,12 @@ The reviewer.md, evidence-and-probes.md, and run-state-and-harness.md edits
 that pinned the in-place exception conditions, the run mode single duty's
 not_applicable fallback, and the evidence-path symlink and mismatch clauses
 shifted every citation into those three files at or after the edited lines,
-and independently confirmed a set of citations into evidence-and-probes.md
-and run-state-and-harness.md, plus one self-citation into CHANGELOG.md and
-two into README.md, that had already drifted out of range before this
-change and were not caught by the in-repo documentation-consistency suite
-(that suite's own kit-source category list does not cover the skill
-reference files or README.md; its coverage is unchanged by this entry).
+and the earlier commits of the same change (#339) had already shifted
+further citations into those files, into CHANGELOG.md, and into
+README.md; none of that drift was on the base branch, and the in-repo
+documentation-consistency suite did not catch it because its kit-source
+category list does not cover the skill reference files or README.md
+(its coverage is unchanged by this entry).
 Every drifted citation was re-pointed from the anchor text's own current
 line, not by a hand-derived offset, and cross-checked against the doc's
 surrounding sentence where more than one line in the target matched the

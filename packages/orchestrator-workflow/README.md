@@ -241,7 +241,7 @@ reviewer inherits the caller's sandbox so temporary/build checks remain
 possible, while its prompt prohibits source edits. In inherited or otherwise
 write-enabled sandboxes, shell-level mutation (`git checkout`,
 `git restore`, `git clean`, `git stash`, `git reset`, `sed -i`, redirecting
-output into a file) is guarded by instruction only: the agent prompts forbid
+output into a file, which the reviewer may do only inside its write boundary below) is guarded by instruction only: the agent prompts forbid
 it explicitly, but the role definition itself does not prevent it. A native
 read-only sandbox can block those writes. This residual has bitten in practice (a
 reviewer ran `git checkout` and discarded uncommitted work), which is why the
