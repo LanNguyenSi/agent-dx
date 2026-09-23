@@ -371,3 +371,48 @@ of the verification set, so the set's missing-or-extra rule does not apply to it
 A persisted probe plan is an optional, runner-supported executable artifact. Its reference carries a path plus immutable revision or hash and mutant locator/index. Assignments and summaries may point to it and a result artifact instead of resending a definition; legacy inline reports remain valid.
 
 A plan alone is never evidence. A result binds plan identity to checked state, cwd, attempt, expectation, applied mutant, and restoration. Missing, stale, or unresolvable references block proof and cannot count as skipped. Never silently rewrite an existing plan for new code to turn red green; record intentional supersession and rationale when a source move requires replacement.
+
+# Run-internal identifiers
+
+Run-internal identifiers are the IDs the run files assign: criterion IDs in
+`00-goal.md` (`AC-` plus three digits), task IDs in `02-tasks.md` (`T-` plus
+three digits), decision IDs in `03-decisions.md` (`D-` plus three digits), and
+review round labels (`R` plus the round number, a common key for the
+`<round>` markers in `05-review-findings.md`). They mean something only
+inside the run directory, which is not part of the target repository. Code,
+comments, tests, and commit messages reference the ticket or issue and
+describe the behaviour instead; implementer.md states this as a rule and
+reviewer.md as a maintainability finding class.
+
+The orchestrator may add the check below to a verification set as an extra,
+with `cwd` at the repository root and the run-base recorded in `00-goal.md` for
+that repository as its only argument. Its argv is `["sh", "-c", <the script
+below as one string>, "sh", <run-base>]`:
+
+```sh
+base="$1"
+ids='(^|[^A-Za-z0-9_])((AC|D|T)-[0-9]{3}|R[0-9]+)([^A-Za-z0-9_]|$)'
+git rev-parse --verify --quiet "$base^{commit}" >/dev/null || exit 2
+hits=0
+git diff --no-color "$base" HEAD -- . ':(exclude).ai' |
+  awk '/^diff --git /{h=1; next}
+       h && /^\+\+\+ /{f=substr($0, 7); next}
+       /^@@/{h=0; next}
+       !h && /^\+/{print f ": " substr($0, 2)}' |
+  grep -E "$ids" && hits=1
+git log --format=%B "$base..HEAD" | grep -E "$ids" && hits=1
+exit "$hits"
+```
+
+Exit `0` means no hit, exit `1` means at least one hit, each printed (a diff
+hit prefixed by its file path), and exit `2` means the run-base does not
+resolve to a commit. It covers the lines added between the run-base and
+`HEAD` outside `.ai/`, and the message of every commit in `run-base..HEAD`.
+It does not cover uncommitted changes, removed lines, pull request titles or
+bodies, branch names, or identifiers in any other format. The patterns are
+case-sensitive and can match unrelated tokens, such as a product or part
+name built the same way, and a repository whose own documentation discusses
+these formats (a copy of these templates, for example) matches as well. A
+hit is a failure of the extra; when the orchestrator confirms a hit is a
+false positive it records that decision, and it may narrow the pathspec with
+further `':(exclude)<path>'` entries when it approves the extra.

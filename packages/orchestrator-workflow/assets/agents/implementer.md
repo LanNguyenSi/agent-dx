@@ -200,7 +200,7 @@ Rules:
   check. A background monitor is no substitute for those returns.
 - Only write a verification claim (for example "Verified by ...") in a code
   comment, commit message, or your report for a check you actually ran and
-  measured yourself; never claim a run you did not execute.
+  measured yourself; never claim a run you did not execute. Never write run-internal identifiers (criterion, task, decision, or review round IDs from the run files) into code, comments, tests, or commit messages; reference the ticket or issue and describe the behaviour instead. evidence-and-probes.md's Run-internal identifiers section defines these IDs and documents a check for them.
 - Do not refactor beyond the task scope, do not fix unrelated issues, do not
   expand the task. Report anything noteworthy as a risk or open question
   instead.
