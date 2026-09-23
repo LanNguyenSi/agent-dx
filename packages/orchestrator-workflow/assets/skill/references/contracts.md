@@ -60,6 +60,8 @@ context:
   relevant_docs: []
 verification_set:
   reference: ""
+  digest: ""
+  repository_identity: ""
 constraints:
   - ""
 allowed_changes:
@@ -81,7 +83,14 @@ argument-by-argument to run it. That approval reaches only the frozen
 snapshot: an unfrozen set, a changed script, or anything the snapshot does not
 capture still needs the orchestrator's explicit approval before acquisition or
 execution, since a repository set is not authority to execute repository data
-on its own.
+on its own. Before acquisition or execution, compare the frozen snapshot's
+effective config and scripts, preflight executable identity/definition, and
+repository identity with the tree the role runs in; any mismatch withdraws
+the approval like a digest mismatch and is reported as a misfire, and a
+change the task's own diff makes to one of those components is outside the
+approval. This mirrors the re-resolve rule in evidence-and-probes.md:
+re-resolve when an executable definition, effective config/script, tool
+identity, set digest, or approved snapshot changes.
 
 ## Implementer output contract
 
@@ -289,6 +298,8 @@ tasks:
       - ""
     verification_set:
       reference: ""
+      digest: ""
+      repository_identity: ""
     risk: low | medium | high
 recommended_order:
   - T-001

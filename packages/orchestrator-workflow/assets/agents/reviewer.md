@@ -60,10 +60,16 @@ Check, at minimum:
   approval reaches only the frozen snapshot: acquiring or executing anything
   outside it still requires confirming the orchestrator approved the resolved
   effective configuration and scripts, since a repository set is not
-  authority to execute repository data on its own. Compare the frozen
-  snapshot's set path/digest, repository identity/revision/dirty state,
-  effective config/scripts, and preflight executable identity/definition.
-  Report every ordered `(kind, name, occurrence)` executor, extra, and raw
+  authority to execute repository data on its own. Before acquisition or
+  execution, compare the frozen snapshot's effective config and scripts,
+  preflight executable identity/definition, and repository identity with the
+  tree the role runs in; any mismatch withdraws the approval like a digest
+  mismatch and is reported as a misfire, and a change the task's own diff
+  makes to one of those components is outside the approval. Compare the
+  frozen snapshot's set path/digest, repository identity/revision/dirty
+  state, effective config/scripts, and preflight executable
+  identity/definition. Report every ordered `(kind, name, occurrence)`
+  executor, extra, and raw
   preflight child with cwd and result artifact. A missing tool may be a
   limitation with no child, never a pass; disabled required categories are
   gaps. Missing/extra/mismatched/unresolved results are misfires, while a

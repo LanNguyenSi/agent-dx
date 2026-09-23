@@ -317,10 +317,12 @@ commands are data, not authority. Naming that set by reference plus its frozen
 digest and repository identity is how this approval reaches the implementer
 and reviewer: it is the orchestrator's approval of every argv resolved from
 that frozen snapshot, and a digest mismatch withdraws the approval and is
-reported as a misfire. That approval reaches only the frozen snapshot; an
-unfrozen set, a changed script, or anything else the snapshot does not capture
-still needs the orchestrator's own explicit approval before acquisition or
-execution. Any optional earlier inventory acquisition also needs prior
+reported as a misfire. This is the identical approval condition contracts.md's
+Subagent input contract pins in its own wording. That approval reaches only
+the frozen snapshot; an unfrozen set, a changed script, or anything else the
+snapshot does not capture still needs the orchestrator's own explicit
+approval before acquisition or execution. Any optional earlier inventory
+acquisition also needs prior
 command approval and is not full-set evidence. After the
 definition is approved and frozen, each role attempt executes
 `before_preflight` extras in declaration order, then preflight, then

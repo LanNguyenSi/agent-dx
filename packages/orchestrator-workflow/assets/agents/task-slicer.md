@@ -46,7 +46,9 @@ Rules:
   selection above to those fields for a recorded original contract.
 - Include a repository-bound `verification_set` reference in every implementer
   and reviewer briefing: its checked-in path, repository identity, and
-  run-local frozen snapshot. The orchestrator approves effective config and
+  run-local frozen snapshot. The digest recorded in the briefing is what
+  carries the orchestrator's approval of the resolved argv to the implementer
+  and reviewer. The orchestrator approves effective config and
   scripts before any preflight acquisition or command execution; the set does
   not grant that authority. Include an ordered bundle check whenever the
   repository has `docs/okf/`, regardless of task scope.
@@ -95,6 +97,8 @@ tasks:
       - ""
     verification_set:
       reference: ""
+      digest: ""
+      repository_identity: ""
     risk: low | medium | high
 recommended_order:
   - T-001

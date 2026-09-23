@@ -38,6 +38,8 @@ acceptance_criteria:
 **Verification Set**
 
 <!-- Checked-in path, repository identity, and run-local frozen snapshot. The
+digest recorded in the briefing is what carries the orchestrator's approval
+of the resolved argv to the implementer and reviewer. The
 orchestrator approves effective config/scripts before any acquisition or
 execution; include an ordered docs/okf bundle check whenever that directory
 exists. -->

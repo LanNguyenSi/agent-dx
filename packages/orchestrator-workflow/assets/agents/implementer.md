@@ -43,10 +43,15 @@ Rules:
   preflight output or running an extra outside it still requires the
   orchestrator's explicit approval of the resolved repository configuration
   and every script/argument, since a repository set is not authority to
-  execute repository data on its own. Use the frozen run-local snapshot (set
-  path/digest, repository identity/revision and dirty state, effective
-  config/scripts, and preflight executable identity/definition). Report each
-  executor, extra, and raw preflight child
+  execute repository data on its own. Before acquisition or execution,
+  compare the frozen snapshot's effective config and scripts, preflight
+  executable identity/definition, and repository identity with the tree the
+  role runs in; any mismatch withdraws the approval like a digest mismatch
+  and is reported as a misfire, and a change the task's own diff makes to
+  one of those components is outside the approval. Use the frozen run-local
+  snapshot (set path/digest, repository identity/revision and dirty state,
+  effective config/scripts, and preflight executable identity/definition).
+  Report each executor, extra, and raw preflight child
   by `(kind, name, occurrence)`, in order, with cwd and result artifact.
   Preserve a missing-tool preflight limitation even when it has no child
   result. A missing/extra/mismatched/unresolved result is a misfire; a failure
