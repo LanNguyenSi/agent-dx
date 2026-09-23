@@ -14,8 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pattern, an ordinary `killed` verdict is reported with no truncation
   caveat at all; when the full log DOES match outside the captured tail,
   the verdict is corrected from `killed` to `survived` (the full log is
-  authoritative) and the warning names the correction. Fixes agent-dx
-  issue #338.
+  authoritative) and the warning names the correction. The full-log read
+  is skipped, and the old, unresolved caveat kept instead, when the log
+  write itself failed mid-run, the run's own stdio capture may be
+  incomplete, or the file is larger than a documented 2&nbsp;MiB bound;
+  the separate 128&nbsp;+&nbsp;N signal-band warning on a mutant run now
+  names this run's FINAL verdict (after any such correction), not the
+  one read before the full-log check had its say. Fixes agent-dx issue
+  #338.
 - The skill digest ledger now has release-coverage tests: a packed,
   offline install runs `init` against the real 0.4.0 skill asset and
   pins its report-only `outdated` result, while reachable

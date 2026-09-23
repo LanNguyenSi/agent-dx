@@ -6207,6 +6207,70 @@ describe("probe(): --pass-regex", () => {
       ).toBe(false);
     }, 20000);
 
+    it("a mutant that is BOTH cut short (137) AND corrected to survived by the truncated-tail check names the FINAL verdict, not the pre-correction one (#338)", async () => {
+      useLockDir();
+      // `fs.writeSync` (not `console.log`), so every line is flushed to
+      // the pipe with a blocking syscall before the immediate SIGKILL
+      // below, whatever Node's own stdout buffering would otherwise
+      // have done: the matching line, then 70 filler lines that push it
+      // out of exec.ts's captured tail, then the self-kill.
+      const RUNNER_JS = [
+        'const fs = require("fs");',
+        "const linesToPrint = 1;",
+        "if (linesToPrint === 1) {",
+        '  fs.writeSync(1, "OK (3 tests, 5 assertions)\\n");',
+        "  process.exit(0);",
+        "} else {",
+        '  fs.writeSync(1, "OK (3 tests, 5 assertions)\\n");',
+        "  for (let i = 0; i < 70; i++) fs.writeSync(1, `filler line ${i}\\n`);",
+        '  process.kill(process.pid, "SIGKILL");',
+        "}",
+        "",
+      ].join("\n");
+      const { repo } = initRepoWith(RUNNER_JS);
+
+      const result = await probe({
+        file: "runner.js",
+        line: 2,
+        form: "replace",
+        replaceText: "const linesToPrint = 2;",
+        testCommand: WRAPPED_TEST_COMMAND,
+        isolation: "inplace",
+        expect: "fail",
+        cwd: repo,
+        logDir: makeTmpDir(),
+        passRegex: /^OK \(/,
+      });
+
+      expect(result.test?.exitCode).toBe(137);
+      // The matching line really did scroll out of the CAPTURED tail
+      // (proving the truncated-tail path fires here at all); the full,
+      // on-disk log still has it, so the verdict is corrected.
+      expect(result.test?.stdoutTail.includes("OK (")).toBe(false);
+      expect(result.status).toBe("survived");
+      expect(result.mutation_probe?.result).toBe("survived");
+      expect(result.mutation_probe?.expectation).toBe("violated");
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes("--pass-regex") &&
+            w.includes("corrected from killed to survived"),
+        ),
+      ).toBe(true);
+      // The band-code warning names the FINAL verdict (survived), not
+      // the one read before the truncated-tail correction ran.
+      expect(
+        result.warnings.some((w) =>
+          /the mutant run exited with 137, the code a shell reports for a process killed by signal 9; the survived verdict may rest on a run that was cut short/.test(
+            w,
+          ),
+        ),
+      ).toBe(true);
+      expect(
+        result.warnings.some((w) => w.includes("the killed verdict may rest")),
+      ).toBe(false);
+    }, 20000);
+
     it("the BASELINE side, default path (no --pass-regex): a baseline killed under a surviving wrapper is `baseline_failed`, with the 137 named as a possibly cut-short run", async () => {
       useLockDir();
       const { repo } = initRepoWith(SELF_KILLING_RUNNER_JS);
@@ -6373,16 +6437,17 @@ describe("probe(): --pass-regex mutant-path miss warning is gated to ambiguous m
     expect(result.warnings).toEqual([]);
   });
 
-  it("#338 AC1 -- the captured tail was truncated but the FULL log never matches --pass-regex anywhere: killed, with NO truncation warning (fails on master, which always warns here)", async () => {
+  it("a truncated tail whose full on-disk log never matches --pass-regex anywhere stays killed, with no truncation warning (#338)", async () => {
     useLockDir();
     // Baseline: short, matches, exits 0 -- no baseline-side warnings.
     // Mutant: prints 70 filler lines that never contain the pattern, then
     // exits 1 -- more than exec.ts's 60-line tail bound, so the captured
     // tail is truncated, but the pattern is absent from the run's FULL
-    // output too, not merely scrolled out of the tail. Master (before
-    // #338) cannot tell the two apart and warns on every truncated miss;
-    // this run's full on-disk log settles it: there is genuinely nothing
-    // to be uncertain about.
+    // output too, not merely scrolled out of the tail. Before this check
+    // existed, a truncated tail alone could not be told apart from a
+    // genuinely absent match and warned on every truncated miss; this
+    // run's full on-disk log settles it: there is genuinely nothing to
+    // be uncertain about.
     const RUNNER_JS = [
       "const linesToPrint = 1;",
       "if (linesToPrint === 1) {",
@@ -6418,14 +6483,14 @@ describe("probe(): --pass-regex mutant-path miss warning is gated to ambiguous m
     expect(result.warnings.some((w) => MISS_WARNING.test(w))).toBe(false);
   });
 
-  it("#338 AC2 -- the captured tail was truncated AND the FULL log DOES match --pass-regex outside it: the verdict is corrected from killed to survived, with a warning naming the correction", async () => {
+  it("a truncated tail whose full on-disk log DOES match --pass-regex outside it corrects the verdict from killed to survived, with a warning naming the correction (#338)", async () => {
     useLockDir();
     // Baseline: short, matches, exits 0 -- no baseline-side warnings.
     // Mutant: prints the matching line FIRST, then 70 filler lines, then
     // exits 1 -- more than exec.ts's 60-line tail bound, so the matching
     // line scrolls out of the CAPTURED tail even though it is present in
-    // the run's full, on-disk output. The full log is authoritative (see
-    // #338), so this is reported survived, not killed.
+    // the run's full, on-disk output. The full log is authoritative, so
+    // this is reported survived, not killed.
     const RUNNER_JS = [
       "const linesToPrint = 1;",
       "if (linesToPrint === 1) {",
@@ -6471,6 +6536,223 @@ describe("probe(): --pass-regex mutant-path miss warning is gated to ambiguous m
     // Not the plain, uncorrected "did not match" miss wording: this run's
     // verdict was resolved, not left as an open caveat.
     expect(result.warnings.some((w) => MISS_WARNING.test(w))).toBe(false);
+  });
+
+  it("a mid-run log write failure keeps the truncation caveat even though the partial log on disk is readable and lacks a match (#338)", async () => {
+    useLockDir();
+    // Same 70-filler-line shape as the "never matches anywhere" case
+    // above, so the mutant run's own full output genuinely has no
+    // match -- but this time the exec layer reports `logWriteFailed`
+    // (a simulated ENOSPC) and only the first few lines of that output
+    // ever reached disk. A full-log read that ignored `logWriteFailed`
+    // would still find no match in the truncated file it grabbed and
+    // wrongly read that as proof the miss is unambiguous; the caveat
+    // has to be kept instead, exactly as if the log could not be read
+    // at all.
+    const RUNNER_JS = [
+      "const linesToPrint = 1;",
+      "if (linesToPrint === 1) {",
+      '  console.log("OK (3 tests, 5 assertions)");',
+      "  process.exit(0);",
+      "} else {",
+      "  for (let i = 0; i < 70; i++) console.log(`filler line ${i}`);",
+      "  process.exit(1);",
+      "}",
+      "",
+    ].join("\n");
+    const { repo } = initRepoWithFile("runner.js", RUNNER_JS);
+
+    const actualExec =
+      await vi.importActual<typeof import("../src/exec.js")>("../src/exec.js");
+    const mockExec = vi.mocked(execCommand);
+    let callCount = 0;
+    mockExec.mockImplementation(
+      async (...args: Parameters<typeof execCommand>) => {
+        callCount += 1;
+        const r = await actualExec.execCommand(...args);
+        // Call 1 is the baseline run; call 2 is the mutant run this
+        // test targets.
+        if (callCount === 2) {
+          const partial = fs
+            .readFileSync(r.logPath, "utf8")
+            .split("\n")
+            .slice(0, 5);
+          fs.writeFileSync(r.logPath, `${partial.join("\n")}\n`);
+          return {
+            ...r,
+            logWriteFailed: true,
+            logWriteError: "ENOSPC (simulated)",
+          };
+        }
+        return r;
+      },
+    );
+
+    try {
+      const result = await probe({
+        file: "runner.js",
+        line: 1,
+        form: "replace",
+        replaceText: "const linesToPrint = 2;",
+        testCommand: "node runner.js",
+        isolation: "inplace",
+        expect: "fail",
+        cwd: repo,
+        logDir: makeTmpDir(),
+        passRegex: /^OK \(/,
+      });
+
+      expect(result.status).toBe("killed");
+      expect(result.test?.stdoutTail.includes("filler line 0")).toBe(false);
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes("--pass-regex") &&
+            w.includes("captured stdout tail was truncated"),
+        ),
+      ).toBe(true);
+    } finally {
+      mockExec.mockImplementation((...args: Parameters<typeof execCommand>) =>
+        actualExec.execCommand(...args),
+      );
+    }
+  });
+
+  it("an unreadable mutant log after a truncated tail keeps the caveat: killed, with the truncation warning (#338)", async () => {
+    useLockDir();
+    // Same 70-filler-line shape again, but this time the on-disk log is
+    // removed out from under the check entirely (deleted between the
+    // mutant run finishing and this correction trying to read it back),
+    // the shape `testResult.logWriteFailed` does NOT cover: the write
+    // itself succeeded, the file is simply gone by the time it is read.
+    const RUNNER_JS = [
+      "const linesToPrint = 1;",
+      "if (linesToPrint === 1) {",
+      '  console.log("OK (3 tests, 5 assertions)");',
+      "  process.exit(0);",
+      "} else {",
+      "  for (let i = 0; i < 70; i++) console.log(`filler line ${i}`);",
+      "  process.exit(1);",
+      "}",
+      "",
+    ].join("\n");
+    const { repo } = initRepoWithFile("runner.js", RUNNER_JS);
+
+    const actualExec =
+      await vi.importActual<typeof import("../src/exec.js")>("../src/exec.js");
+    const mockExec = vi.mocked(execCommand);
+    let callCount = 0;
+    mockExec.mockImplementation(
+      async (...args: Parameters<typeof execCommand>) => {
+        callCount += 1;
+        const r = await actualExec.execCommand(...args);
+        if (callCount === 2) {
+          fs.rmSync(r.logPath, { force: true });
+        }
+        return r;
+      },
+    );
+
+    try {
+      const result = await probe({
+        file: "runner.js",
+        line: 1,
+        form: "replace",
+        replaceText: "const linesToPrint = 2;",
+        testCommand: "node runner.js",
+        isolation: "inplace",
+        expect: "fail",
+        cwd: repo,
+        logDir: makeTmpDir(),
+        passRegex: /^OK \(/,
+      });
+
+      expect(result.status).toBe("killed");
+      expect(result.test?.stdoutTail.includes("filler line 0")).toBe(false);
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes("--pass-regex") &&
+            w.includes("captured stdout tail was truncated"),
+        ),
+      ).toBe(true);
+    } finally {
+      mockExec.mockImplementation((...args: Parameters<typeof execCommand>) =>
+        actualExec.execCommand(...args),
+      );
+    }
+  });
+
+  it("a full mutant log above the documented size bound keeps the caveat even though the untruncated version, if read, would match (#338)", async () => {
+    useLockDir();
+    // Same 70-filler-line shape, but this time the on-disk log is
+    // padded past the documented read-size bound with filler bytes that
+    // END in a genuine match -- proving the bound, not a real absence
+    // of a match, is what keeps the verdict at killed here. Without the
+    // bound, an unbounded read would find that match and (wrongly, for
+    // this test's purpose) correct the verdict to survived.
+    const RUNNER_JS = [
+      "const linesToPrint = 1;",
+      "if (linesToPrint === 1) {",
+      '  console.log("OK (3 tests, 5 assertions)");',
+      "  process.exit(0);",
+      "} else {",
+      "  for (let i = 0; i < 70; i++) console.log(`filler line ${i}`);",
+      "  process.exit(1);",
+      "}",
+      "",
+    ].join("\n");
+    const { repo } = initRepoWithFile("runner.js", RUNNER_JS);
+
+    const actualExec =
+      await vi.importActual<typeof import("../src/exec.js")>("../src/exec.js");
+    const mockExec = vi.mocked(execCommand);
+    let callCount = 0;
+    mockExec.mockImplementation(
+      async (...args: Parameters<typeof execCommand>) => {
+        callCount += 1;
+        const r = await actualExec.execCommand(...args);
+        if (callCount === 2) {
+          // 3 MiB of padding, comfortably over the 2 MiB bound, ending
+          // in a line the pattern DOES match.
+          const padding = `${"x".repeat(1024)}\n`.repeat(3 * 1024);
+          fs.appendFileSync(
+            r.logPath,
+            `${padding}OK (3 tests, 5 assertions)\n`,
+          );
+        }
+        return r;
+      },
+    );
+
+    try {
+      const result = await probe({
+        file: "runner.js",
+        line: 1,
+        form: "replace",
+        replaceText: "const linesToPrint = 2;",
+        testCommand: "node runner.js",
+        isolation: "inplace",
+        expect: "fail",
+        cwd: repo,
+        logDir: makeTmpDir(),
+        passRegex: /^OK \(/,
+      });
+
+      expect(result.status).toBe("killed");
+      expect(result.test?.stdoutTail.includes("filler line 0")).toBe(false);
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes("--pass-regex") &&
+            w.includes("captured stdout tail was truncated"),
+        ),
+      ).toBe(true);
+    } finally {
+      mockExec.mockImplementation((...args: Parameters<typeof execCommand>) =>
+        actualExec.execCommand(...args),
+      );
+    }
   });
 
   it("ambiguous case 2/3 -- exit code 0 disagrees with the predicate: warns", async () => {

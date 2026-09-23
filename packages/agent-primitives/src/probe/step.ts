@@ -49,6 +49,18 @@ import {
  * module's import direction).
  */
 
+/** Above this many bytes, the mutant run's full on-disk log (`test.logPath`)
+ * is skipped rather than read into memory for the truncated-tail
+ * `--pass-regex` correction below: a plan can run thousands of mutants,
+ * and reading a multi-megabyte log per ambiguous miss would make every
+ * plan slower for a check that exists to resolve the RARE truncated-tail
+ * case, not to read every full log by default. Skipping this way keeps
+ * the existing caveat (the miss stays unresolved, never silently read as
+ * an unambiguous kill) exactly as it would be if the log could not be
+ * read at all -- the size bound is a refusal to trust the read, not a
+ * verdict of its own. */
+const FULL_LOG_READ_BOUND_BYTES = 2 * 1024 * 1024;
+
 /** One mutant of a run: exactly one form plus the verdict it is expected
  * to produce. `expect` is per mutant, so a plan can mix a mutant that
  * must break the test with one that must not. */
@@ -665,12 +677,14 @@ export async function runMutantAttempt(
     // Unlike the miss warning below, this one is not gated on
     // ambiguity: a band code is rare enough per plan that one entry per
     // affected mutant stays readable, and each names the code and the
-    // signal the reader has to check.
-    if (!testPassed && mutantSignalCode !== undefined) {
-      warnings.push(
-        `the mutant run exited with ${String(testResult.exitCode)}, the code a shell reports for a process killed by signal ${String(mutantSignalCode)}; the ${status} verdict may rest on a run that was cut short; see ${testResult.logPath}`,
-      );
-    }
+    // signal the reader has to check. The push itself is deferred to
+    // AFTER the `--pass-regex` block below: that block's own
+    // truncated-tail check can still correct `status` from `killed` to
+    // `survived`, and this warning's `${status}` has to name that FINAL
+    // verdict, not the one read here before the correction had its say
+    // -- a killed-verdict warning attached to a run this same function
+    // goes on to report `survived` would read as contradicting itself.
+    const bandCodeMutantWarning = !testPassed && mutantSignalCode !== undefined;
 
     if (rt.passRegex !== undefined) {
       if (testPassed && testResult.exitCode !== 0) {
@@ -756,11 +770,33 @@ export async function runMutantAttempt(
           testResult.stdoutTruncated || testResult.stderrTruncated;
         let fullLogMatchedOutsideTail = false;
         let fullLogCheckable = false;
-        if (wasTailTruncated) {
+        // The full log is only ever trusted to rule out a match when it
+        // is known to hold the run's true, complete output. A mid-run
+        // write failure (`testResult.logWriteFailed`) or a stdio race
+        // this package's own flush grace gave up waiting on
+        // (`testResult.outputMayBeIncomplete`, which already gets its
+        // own separate warning via `noteIncompleteOutput` above) both
+        // mean the on-disk file may be missing trailing output the
+        // captured tail never saw either -- reading a merely PARTIAL
+        // file and finding no match there would prove nothing about the
+        // run's real output, so the read is skipped in both cases and
+        // the caveat below is kept exactly as if the file could not be
+        // read at all. A file above `FULL_LOG_READ_BOUND_BYTES` is
+        // skipped the same way, for a different reason: not because it
+        // cannot be trusted, but because reading it is not worth doing
+        // by default (see that constant's own docblock).
+        if (
+          wasTailTruncated &&
+          !testResult.logWriteFailed &&
+          !testResult.outputMayBeIncomplete
+        ) {
           try {
-            const fullLog = fs.readFileSync(testResult.logPath, "utf8");
-            fullLogCheckable = true;
-            fullLogMatchedOutsideTail = rt.passRegex.test(fullLog);
+            const logStat = fs.statSync(testResult.logPath);
+            if (logStat.size <= FULL_LOG_READ_BOUND_BYTES) {
+              const fullLog = fs.readFileSync(testResult.logPath, "utf8");
+              fullLogCheckable = true;
+              fullLogMatchedOutsideTail = rt.passRegex.test(fullLog);
+            }
           } catch {
             fullLogCheckable = false;
           }
@@ -784,6 +820,16 @@ export async function runMutantAttempt(
           }
         }
       }
+    }
+
+    // Pushed here, after `status` has had its last chance to be
+    // corrected above (see `bandCodeMutantWarning`'s own comment): reads
+    // whatever `status` settled on, `killed` or a truncated-tail
+    // correction to `survived`.
+    if (bandCodeMutantWarning && mutantSignalCode !== undefined) {
+      warnings.push(
+        `the mutant run exited with ${String(testResult.exitCode)}, the code a shell reports for a process killed by signal ${String(mutantSignalCode)}; the ${status} verdict may rest on a run that was cut short; see ${testResult.logPath}`,
+      );
     }
 
     // Zero-tests-executed detection, mutant side: the mutant run's OWN
