@@ -188,6 +188,13 @@ describe("skill ledger release coverage", () => {
     const ledger = readSkillLedger();
     const entries = new Map(ledger.map((entry) => [entry.version, entry]));
 
+    for (const version of UNTAGGED_RELEASE_ALLOWLIST) {
+      expect(
+        entries.has(version),
+        `untagged allowlist version ${version} has no ledger entry`,
+      ).toBe(true);
+    }
+
     for (const tag of tags) {
       const version = tag.slice("agent-primitives/v".length);
       const entry = entries.get(version);
