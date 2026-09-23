@@ -143,11 +143,24 @@ Rules:
   no `git commit`, no `sed -i` or any other in-place edit of a tracked file
   (including a temporary mutant applied by hand instead of through the probe
   runner). This also covers commands that change refs or write objects
-  without touching the working tree or index: no `git fetch`, no `git
-  merge-tree --write-tree`, no `git update-ref`, no `git gc`. The one
-  exception is writing files under the run directory's `evidence/` (the path
-  comes from the `.ai/run` pointer or the briefing); redirecting output into
-  a file anywhere else is still forbidden.
+  without touching the working tree or index: no `git fetch`,
+  no `git merge-tree --write-tree`, no `git update-ref`, no `git gc`. This
+  is a location rule, not a single exception: never write into the reviewed
+  tree, its index, its refs, or its object store, anywhere in the review.
+  Outside the reviewed tree, write only to your scratchpad (a scratch copy
+  or replay of the repository, per the GitHub Actions replay rule above)
+  and to the run directory's `evidence/`; build or test artifacts a
+  declared check produces as a side effect are expected, not a violation.
+  For `evidence/`, the briefing's own run-directory path wins; use the
+  `.ai/run` pointer (repository data, which may be stale) only when the
+  briefing names no run directory and the pointer matches the run the
+  briefing refers to, and otherwise report the mismatch and write nothing.
+  Resolve the real path before writing: it must land under
+  `<run-dir>/evidence/` with no symlinked path component, and never under
+  an older run than the one the briefing names.
+  A briefing may authorize the probe runner's own in-place mode as a
+  bounded exception to "never in the reviewed tree" (see below), not a
+  redefinition of it.
 - A merge-conflict question about an open PR is not answered by fetching or
   writing a tree: report the question back to the orchestrator instead.
 - If the working tree looks wrong (dirty, unexpected branch, missing files),
@@ -177,22 +190,27 @@ Rules:
   the exact commit and the run count, since branch coverage can vary
   between runs of the same commit.
 - When a mutation-probe runner is available in the session, run probes
-  through it instead of editing files by hand. For probes you run, apply the
-  implementer's verdict-copy and manual-derivation rules to your own
-  measurements, reporting the quoted verdict or explicit verdict absence and
-  derivation evidence in `reproduction` and carrying the same reported values
-  into any associated finding. When a verify runner is available, read its
-  summary before opening full logs.
-- Apply a mutant only through the probe runner, in every run mode, and rely
-  on its own restoration check; never apply one by hand, and never restore a
-  hand-applied one yourself. When no runner is available, report the probe
-  as `not_applicable` instead of hand-applying it. A hand-applied mutant is
-  a finding against the review, whatever its outcome, because it carries no
-  verified restoration. When a briefing authorizes the runner's own in-place
-  mode because worktree isolation is unusable, that still satisfies "never
-  in the reviewed tree": it is the runner, not you, applying and verifying
-  restoration of the mutant in place, the same guarantee isolation gives,
-  just without a separate copy of the tree.
+  through it instead of editing files by hand. Apply a mutant only through
+  the probe runner, in every run mode, and rely on its own restoration
+  check; never apply one by hand, and never restore a hand-applied one
+  yourself. When no runner is available, report the probe as
+  `not_applicable` instead of hand-applying it: that is missing evidence,
+  not a pass. A hand-applied mutant is a finding against the review,
+  whatever its outcome, because it carries no verified restoration. For
+  probes you run, apply the implementer's verdict-copy and manual-derivation
+  rules to your own measurements, reporting the quoted verdict or explicit
+  verdict absence and derivation evidence in `reproduction` and carrying the
+  same reported values into any associated finding. When a verify runner is
+  available, read its summary before opening full logs.
+- A briefing may authorize the probe runner's own in-place mode when
+  worktree isolation is unusable. That stays a bounded exception to "never
+  in the reviewed tree," not a redefinition of it: only the orchestrator's
+  briefing authorizes it, only the runner itself applies the mutant (never
+  you by hand), the runner must report `restored_verified: true` for every
+  such probe (a missing or `false` value is a finding), the tree must be
+  clean and at the reviewed head before the runner starts, and no other
+  agent may be active in that tree at the same time (see the concurrency
+  rule in step 7 of the detailed workflow).
 - A reviewer briefing may identify a replayed probe through a resolved
   immutable probe-plan reference (path plus revision/hash and mutant
   locator/index) rather than repeat its inline definition. Verify the plan and
@@ -203,14 +221,17 @@ Rules:
   the change itself
   and nobody has cross-checked its probe evidence: replay every named
   orchestrator probe, where named means the briefing gives its full
-  definition or a resolved immutable plan-and-result reference (in a
-  scratch copy or an isolating probe runner, never in the reviewed tree).
-  It reports per probe, in `reproduction`, the probe, the replayed verdict
+  definition or a resolved immutable plan-and-result reference, through the
+  probe runner only, never in the reviewed tree except under the authorized
+  in-place mode above; when no runner is available, report the probe as
+  `not_applicable`. It reports per probe, in `reproduction`, the probe, the
+  replayed verdict
   or explicit verdict absence with manual derivation evidence, and whether
   the measured `result` and `expectation` match the recorded fields; a
   mismatch is a finding of at least `high` and sets
   `matches_implementer_claim: mismatched`. Do not skip a named probe in
-  that mode, under any `review_method`; any mismatch also sets
+  that mode, under any `review_method`; a probe that cannot run through the
+  runner is reported `not_applicable`, not skipped; any mismatch also sets
   `matches_implementer_claim: mismatched`. A mismatch is a finding of at
   least `high`; a probe given only by id is `not_applicable` and is
   missing evidence, not a pass, and so is a briefing in that mode that

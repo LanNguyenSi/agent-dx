@@ -44,3 +44,15 @@ export const SINGLE_REPLAY_RULE = "replay every named orchestrator probe";
  */
 export const NAMED_PROBE_FORMS =
   "its full definition or a resolved immutable plan-and-result reference";
+
+/**
+ * Issue #339: the reviewer applies a mutant only
+ * through the probe runner, in every run mode, and reports `not_applicable`
+ * (missing evidence, not a pass) rather than hand-applying one when no
+ * runner is available. This constant binds the rule's own wording so every
+ * rendered reviewer variant and the run-mode `single` duty stay consistent
+ * with it instead of drifting into a conditional "when one is available"
+ * framing.
+ */
+export const RUNNER_ONLY_PROBE_RULE =
+  "Apply a mutant only through the probe runner, in every run mode, and rely on its own restoration check; never apply one by hand, and never restore a hand-applied one yourself. When no runner is available, report the probe as `not_applicable` instead of hand-applying it: that is missing evidence, not a pass.";

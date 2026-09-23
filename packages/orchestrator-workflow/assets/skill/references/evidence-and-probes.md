@@ -221,7 +221,16 @@ directory and the subagents.
    `04-implementation-summary.md` before requesting review, the reviewer
    briefing states the run mode and names each of those probes, and the
    reviewer must replay every named orchestrator probe, through the probe
-   runner when one is available and never in the reviewed tree. It reports
+   runner only, never in the reviewed tree; report `not_applicable` when no
+   runner is available, which is missing evidence, not a pass. A briefing
+   may authorize the runner's own in-place mode as a bounded exception to
+   "never in the reviewed tree" when worktree isolation is unusable: only
+   the orchestrator's briefing authorizes it, only the runner applies the
+   mutant, the runner must report `restored_verified: true` for every such
+   probe (a missing or `false` value is a finding), the tree must be clean
+   and at the reviewed head before the runner starts, and no other agent may
+   be active in that tree at the same time (see the concurrency rule below).
+   It reports
    per probe, in `reproduction`, the probe, the replayed verdict or
    explicit verdict absence with manual derivation evidence, and whether
    the measured `result` and `expectation` match the recorded fields; a

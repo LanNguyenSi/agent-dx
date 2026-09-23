@@ -2757,3 +2757,43 @@ describe("probe verdict render paths", () => {
     );
   });
 });
+
+describe("reviewer write boundary (issue #339)", () => {
+  it("pins the reviewer's ref/object-write tokens and evidence/ write-boundary phrase", () => {
+    runInit({
+      targetDir: target,
+      harnesses: ["claude", "opencode"],
+      models: { ...DEFAULT_MODELS },
+    });
+
+    // Unlike the generic READ_ONLY_ROLES guard in the "read-only roles"
+    // describe above, `git fetch` / `git merge-tree --write-tree` / `git
+    // update-ref` / `git gc` and the evidence/ write boundary are
+    // reviewer-specific: the explorer and advisor don't run probes or
+    // answer merge-conflict questions, so these tokens only exist in the
+    // reviewer prompt. This describe block is appended at file end, not
+    // inlined into the read-only-roles block above, so it doesn't shift
+    // the line numbers every existing docs/okf citation into this file
+    // depends on.
+    for (const harnessDir of [".claude", ".opencode"]) {
+      const installed = readFileSync(
+        join(target, harnessDir, "agents", "reviewer.md"),
+        "utf8",
+      );
+      for (const token of [
+        "`git fetch`",
+        "`git merge-tree --write-tree`",
+        "`git update-ref`",
+        "`git gc`",
+      ]) {
+        expect(installed, `${harnessDir}/agents/reviewer.md`).toContain(token);
+      }
+      expect(installed, `${harnessDir}/agents/reviewer.md`).toContain(
+        "never write into the reviewed",
+      );
+      expect(installed, `${harnessDir}/agents/reviewer.md`).toContain(
+        "the briefing's own run-directory path wins",
+      );
+    }
+  });
+});
