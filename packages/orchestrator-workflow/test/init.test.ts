@@ -2803,7 +2803,7 @@ describe("reviewer write boundary (issue #339)", () => {
       // sentence closes the routing rule for a question that must not be
       // answered by fetching or writing a tree.
       expect(installed, `${harnessDir}/agents/reviewer.md`).toContain(
-        "with no symlinked path component, and never under",
+        "with no symlinked path component, and never under\n  an older run than the one the briefing names.",
       );
       expect(installed, `${harnessDir}/agents/reviewer.md`).toContain(
         "report the mismatch and write nothing",
