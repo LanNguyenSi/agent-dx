@@ -70,6 +70,9 @@ split-or-redesign response, not instead of it.
   option is exhausted; under a `full` profile the choice falls to the
   advisor spawn or the merge-hold, under a `minimal` profile (no advisor
   subagent to spawn) it falls straight to the merge-hold.
+  In `single`, tier/model escalation requires a recorded switch to `delegated`.
+  Apply the Run mode switch procedure before assigning the next attempt to an
+  implementer raised according to this tier/model escalation option.
 - **Advisor spawn** (where the advisor is installed, `full` profile):
   send the advisor subagent the question "redesign, split, or hold?" and
   weigh its recommendation before deciding.

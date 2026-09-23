@@ -1,12 +1,14 @@
 <!-- orchestrator-workflow:begin -->
 ## Agentic Coding Workflow
 
-This repository uses an orchestrator-led agent workflow, installed and updated by
+This repository uses an orchestrator-led agent workflow, installed and
+updated by
 [orchestrator-workflow](https://github.com/LanNguyenSi/agent-dx/tree/master/packages/orchestrator-workflow).
 
 The primary agent acts as the orchestrator. It owns the goal, planning, task
-validation, delegation, final acceptance, and the operator handoff. Non-trivial
-review is delegated to a narrow subagent; which agent implements non-trivial work follows from the run mode (Core rules). The full procedure
+validation, delegation, final acceptance, and the operator handoff.
+Non-trivial review is delegated to a narrow subagent; which agent implements
+non-trivial work follows from the run mode (Core rules). The full procedure
 and the subagent I/O contracts live in the `orchestrator-workflow` skill.
 
 ### Core rules
@@ -21,10 +23,14 @@ and the subagent I/O contracts live in the `orchestrator-workflow` skill.
   inline with the same read-only discipline instead.
 - The orchestrator plans features itself. It may delegate task slicing, but it
   validates the sliced tasks before implementation starts.
-- Non-trivial implementation follows the run mode recorded in `00-goal.md`. `delegated`, the default, sends it to narrow implementer subagents, one task
-  per subagent; in `single` the orchestrator implements one coherent workstream itself; `batch` runs implementers in parallel worktrees. The skill's Run mode section defines the modes and how to choose one.
+- Non-trivial implementation follows the run mode recorded in `00-goal.md`.
+  `delegated`, the default, sends it to narrow implementer subagents, one
+  task per subagent; in `single` the orchestrator implements one coherent
+  workstream itself; `batch` runs implementers in parallel worktrees. The
+  skill's Run mode section defines the modes and how to choose one.
 - Non-trivial review goes to a separate reviewer subagent (see Scaling
-  delegation). Review itself is never skipped, in any run mode, not even for docs or bulk
+  delegation). Review itself is never skipped, in any run mode, not even for
+  docs or bulk
   changes.
 - Final acceptance and the final answer to the operator stay with the
   orchestrator.
@@ -41,7 +47,8 @@ default, not a ritual.
   solution; skip it when the change is well understood. Under a `minimal`
   profile there is no explorer subagent to spawn; run this step inline
   instead.
-- Slicing and, in run modes `delegated` and `batch`, implementer subagents are for non-trivial work: multiple files,
+- Slicing and, in run modes `delegated` and `batch`, implementer subagents are
+  for non-trivial work: multiple files,
   real logic, or anything that benefits from decomposition or a fresh context.
   Under a `minimal` profile there is no task-slicer subagent; the orchestrator
   slices inline with the same contract.
@@ -55,7 +62,9 @@ default, not a ritual.
   scripts, hand-edited lockfiles, cross-major overrides, or anything the
   operator flags high-risk; `normal` fits only docs, renames, or batch
   cosmetics; `rigorous` is the default otherwise. Never pair `adversarial`
-  with the `-medium` reviewer tier; tiers themselves are unchanged. A docs-only delta has its own review default; the skill's Delegate review step states it.
+  with the `-medium` reviewer tier; tiers themselves are unchanged. A
+  docs-only delta has its own review default; the skill's Delegate review step
+  states it.
 - When tier variants are installed (manifest `tiers: true`), the orchestrator
   picks the effort tier per task by complexity and risk, at its own judgment.
   The unsuffixed default subagent is the normal case; `-high`/`-xhigh` fit
@@ -111,7 +120,8 @@ trivial change.
 - Medium and low findings are addressed or consciously accepted at the
   orchestrator's judgment.
 - After independent review, the orchestrator may close a docs-only delta
-  without another reviewer round only when its entire unreviewed delta is explanatory
+  without another reviewer round only when its entire unreviewed delta is
+  explanatory
   documentation, comments, or citations; has no source- or test-file edits or
   semantic changes to executable commands, configuration, policy,
   instructions, or behavior; and closes only low/medium documentation or
@@ -128,9 +138,13 @@ trivial change.
   the exhausted tier path falls straight to the merge-hold), or an
   operator merge-hold, and adds a row (task, choice, reason) to
   `03-decisions.md`'s Review-round escalation table, then sets the
-  `review-round-escalation` marker to the most recent choice. A negative round
+  `review-round-escalation` marker to the most recent choice.
+  In `single`, tier/model escalation requires a recorded switch to `delegated`.
+  A negative round
   has an `acceptance_recommendation` of `fix_required` or `reject`; a misfired
-  review is not a round. A negative round counts only with at least one introduced_by_delta yes/unknown finding; no stays ordinary gate. Which of the three is
+  review is not a round. A negative round counts only with at least one
+  introduced_by_delta yes/unknown finding; no stays ordinary gate. Which of the
+  three is
   picked is judgment; that one is picked and recorded is not. Escalating
   never substitutes for a review round and comes in addition to the halt
   rule's split-or-redesign response, not instead of it.
@@ -175,7 +189,8 @@ Workflow state lives under `.ai/`:
   routing selections.
 - Every worktree a run touches carries a `.ai/run` pointer (absolute path of
   the run directory, gitignored) and `00-goal.md` carries one
-  `run-base[<repo-basename>]` marker per repository for multi-repo runs, next to the run's `mode` marker.
+  `run-base[<repo-basename>]` marker per repository for multi-repo runs, next
+  to the run's `mode` marker.
 
 ### Models
 
