@@ -194,7 +194,7 @@ describe("the documented run-internal identifier check", () => {
   const runCheck = (cwd: string, base: string) =>
     spawnSync("sh", ["-c", script, "sh", base], { cwd, encoding: "utf8" });
 
-  it("passes a clean history, flags added lines and commit messages, and ignores the run directory", () => {
+  it("passes a clean history, flags added lines and commit messages each on their own, and ignores the run directory", () => {
     const repo = mkdtempSync(join(tmpdir(), "ow-run-internal-ids-repo-"));
     try {
       git(repo, "init", "-q");
@@ -224,22 +224,34 @@ describe("the documented run-internal identifier check", () => {
           ].join("\n"),
           ".ai/runs/x/02-tasks.md": `${task} stays inside the run directory\n`,
         },
-        `fix: apply the ordering from ${decision}`,
+        "refactor: split the ordering helper",
       );
-      const dirty = runCheck(repo, base);
-      expect(dirty.status).toBe(1);
+      const inCode = runCheck(repo, base);
+      expect(inCode.status).toBe(1);
       for (const line of [
         `src/b.ts: // mandatory from the cut-off date (${criterion})`,
         `src/b.ts: // ordering as agreed in ${decision}`,
         `src/b.ts: // split out of ${task}`,
         `src/b.ts: // survived review ${round}`,
-        `fix: apply the ordering from ${decision}`,
       ]) {
-        expect(dirty.stdout).toContain(line);
+        expect(inCode.stdout).toContain(line);
       }
-      expect(dirty.stdout).not.toContain("run directory");
-      expect(dirty.stdout).not.toContain("legacy");
-      expect(dirty.stdout).not.toContain("src/a.ts");
+      expect(inCode.stdout).not.toContain("run directory");
+      expect(inCode.stdout).not.toContain("legacy");
+      expect(inCode.stdout).not.toContain("src/a.ts");
+      expect(inCode.stdout).not.toContain("refactor:");
+
+      const beforeMessage = git(repo, "rev-parse", "HEAD");
+      commit(
+        repo,
+        { "src/c.ts": "export const order = 1;\n" },
+        `fix: apply the ordering from ${decision}`,
+      );
+      const inMessage = runCheck(repo, beforeMessage);
+      expect(inMessage.status).toBe(1);
+      expect(inMessage.stdout).toBe(
+        `fix: apply the ordering from ${decision}\n`,
+      );
 
       const badBase = runCheck(repo, "not-a-commit");
       expect(badBase.status).toBe(2);
