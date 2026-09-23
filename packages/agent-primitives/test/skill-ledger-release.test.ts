@@ -195,10 +195,21 @@ describe("skill ledger release coverage", () => {
       ).toBe(true);
     }
 
+    // The ledger records each version in which the skill asset changed
+    // (an append with an unchanged digest is rejected by the ledger's own
+    // test), so a release that left the asset alone has no entry of its
+    // own: its asset must equal the nearest earlier entry's.
+    const sortedEntries = [...ledger].sort((a, b) =>
+      compareSemver(a.version, b.version),
+    );
     for (const tag of tags) {
       const version = tag.slice("agent-primitives/v".length);
-      const entry = entries.get(version);
-      expect(entry, `${tag} has no matching ledger entry`).toBeDefined();
+      const entry =
+        entries.get(version) ??
+        sortedEntries
+          .filter((candidate) => compareSemver(candidate.version, version) < 0)
+          .at(-1);
+      expect(entry, `${tag} has no ledger entry at or before it`).toBeDefined();
       const asset = git([
         "show",
         `${tag}:packages/agent-primitives/assets/skill/SKILL.md`,

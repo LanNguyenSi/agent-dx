@@ -30,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `agent-primitives/v*` tags must match their ledger digests. The sole
   untagged published release (0.1.0) is an explicit allowlist entry;
   only a trailing entry later than `package.json` may be pending.
+- The skill-ledger release-coverage test maps a release tag that left the
+  skill asset unchanged to the nearest earlier ledger entry and checks the
+  tag's asset against that entry's digest, instead of requiring an entry
+  per tag (which the ledger's own no-duplicate-digest rule forbids).
+
 
 ## [0.8.0] - 2026-09-21
 
