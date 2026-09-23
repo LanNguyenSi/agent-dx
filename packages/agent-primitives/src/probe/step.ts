@@ -51,14 +51,12 @@ import {
 
 /** Above this many bytes, the mutant run's full on-disk log (`test.logPath`)
  * is skipped rather than read into memory for the truncated-tail
- * `--pass-regex` correction below: a plan can run thousands of mutants,
- * and reading a multi-megabyte log per ambiguous miss would make every
- * plan slower for a check that exists to resolve the RARE truncated-tail
- * case, not to read every full log by default. Skipping this way keeps
- * the existing caveat (the miss stays unresolved, never silently read as
- * an unambiguous kill) exactly as it would be if the log could not be
- * read at all -- the size bound is a refusal to trust the read, not a
- * verdict of its own. */
+ * `--pass-regex` correction below. The captured tail is short, so that
+ * read runs on most truncated misses of a real suite, and a plan can run
+ * thousands of mutants: the bound caps the per-mutant memory and regex
+ * cost. Skipping keeps the existing caveat (the miss stays unresolved,
+ * never silently read as an unambiguous kill) exactly as if the log
+ * could not be read at all; the bound is not a verdict of its own. */
 const FULL_LOG_READ_BOUND_BYTES = 2 * 1024 * 1024;
 
 /** One mutant of a run: exactly one form plus the verdict it is expected

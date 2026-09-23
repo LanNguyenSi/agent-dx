@@ -1987,14 +1987,15 @@ captured tail, the verdict this run actually earned is `survived`, not
 `killed` -- the full log is authoritative, so the verdict is corrected
 rather than merely flagged, and the warning names the correction (a
 mutant run cut short by a signal, see the 128 + N band paragraph below,
-names that FINAL, possibly-corrected verdict too, not the one read
-before this check ran). The read itself is skipped, and the old,
-unresolved caveat kept exactly as before this check existed, in three
+names the verdict after this correction, not the one read before this
+check ran). The read itself is skipped, and the old,
+unresolved caveat kept exactly as before this check existed, in four
 cases: the full log cannot be read back at all (the file was removed),
-its own write failed mid-run (`test.logWriteFailed`-shaped), or the file
-is larger than a documented size bound (a few MiB) this package will
-read into memory for the check -- none of the three leaves an on-disk
-file this check can trust to rule a match out.
+an internal log write failed mid-run, the run's own stdio capture may be
+incomplete (the separate incomplete-output warning), or the file is
+larger than 2 MiB, the size bound this package will read into memory
+for the check -- none of the four leaves an on-disk file this check can
+trust to rule a match out.
 
 `--pass-regex` is independent of `--require-baseline-evidence`: the two
 answer different questions and may be given together, one without the

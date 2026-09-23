@@ -6618,6 +6618,73 @@ describe("probe(): --pass-regex mutant-path miss warning is gated to ambiguous m
     }
   });
 
+  it("output that may be incomplete after the flush grace keeps the truncation caveat even though the log on disk is readable and lacks a match (#338)", async () => {
+    useLockDir();
+    // Same 70-filler-line no-match shape, but the exec layer reports
+    // `outputMayBeIncomplete` (a descendant kept the stdio pipes open
+    // past the flush grace), so the on-disk log may miss output the run
+    // really produced. A no-match there proves nothing, so the caveat
+    // has to be kept, exactly as for a failed log write.
+    const RUNNER_JS = [
+      "const linesToPrint = 1;",
+      "if (linesToPrint === 1) {",
+      '  console.log("OK (3 tests, 5 assertions)");',
+      "  process.exit(0);",
+      "} else {",
+      "  for (let i = 0; i < 70; i++) console.log(`filler line ${i}`);",
+      "  process.exit(1);",
+      "}",
+      "",
+    ].join("\n");
+    const { repo } = initRepoWithFile("runner.js", RUNNER_JS);
+
+    const actualExec =
+      await vi.importActual<typeof import("../src/exec.js")>("../src/exec.js");
+    const mockExec = vi.mocked(execCommand);
+    let callCount = 0;
+    mockExec.mockImplementation(
+      async (...args: Parameters<typeof execCommand>) => {
+        callCount += 1;
+        const r = await actualExec.execCommand(...args);
+        // Call 1 is the baseline run; call 2 is the mutant run this
+        // test targets.
+        if (callCount === 2) {
+          return { ...r, outputMayBeIncomplete: true };
+        }
+        return r;
+      },
+    );
+
+    try {
+      const result = await probe({
+        file: "runner.js",
+        line: 1,
+        form: "replace",
+        replaceText: "const linesToPrint = 2;",
+        testCommand: "node runner.js",
+        isolation: "inplace",
+        expect: "fail",
+        cwd: repo,
+        logDir: makeTmpDir(),
+        passRegex: /^OK \(/,
+      });
+
+      expect(result.status).toBe("killed");
+      expect(result.test?.stdoutTail.includes("filler line 0")).toBe(false);
+      expect(
+        result.warnings.some(
+          (w) =>
+            w.includes("--pass-regex") &&
+            w.includes("captured stdout tail was truncated"),
+        ),
+      ).toBe(true);
+    } finally {
+      mockExec.mockImplementation((...args: Parameters<typeof execCommand>) =>
+        actualExec.execCommand(...args),
+      );
+    }
+  });
+
   it("an unreadable mutant log after a truncated tail keeps the caveat: killed, with the truncation warning (#338)", async () => {
     useLockDir();
     // Same 70-filler-line shape again, but this time the on-disk log is
