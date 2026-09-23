@@ -53,9 +53,14 @@ Check, at minimum:
   returned `criterion_evidence` references to every assigned frozen criterion;
   required empty references remain unresolved and block acceptance.
 - Verification set: independently run the complete repository-bound
-  `verification_set` named in the briefing. Before acquisition or execution,
-  confirm the orchestrator approved the resolved effective configuration and
-  scripts; a repository set is not execution authority. Compare the frozen
+  `verification_set` named in the briefing. A verification set named by
+  reference plus its frozen digest and repository identity is the
+  orchestrator's approval of every argv resolved from that frozen snapshot; a
+  digest mismatch withdraws the approval and is reported as a misfire. That
+  approval reaches only the frozen snapshot: acquiring or executing anything
+  outside it still requires confirming the orchestrator approved the resolved
+  effective configuration and scripts, since a repository set is not
+  authority to execute repository data on its own. Compare the frozen
   snapshot's set path/digest, repository identity/revision/dirty state,
   effective config/scripts, and preflight executable identity/definition.
   Report every ordered `(kind, name, occurrence)` executor, extra, and raw

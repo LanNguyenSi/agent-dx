@@ -122,4 +122,30 @@ describe("documented verification sets", () => {
       "Put the independent complete-set outcome in `reproduction.result`",
     );
   });
+
+  it("defines the reference-plus-digest form as the orchestrator's approval of the resolved argv (issue #335)", () => {
+    const approvalCondition =
+      "is the orchestrator's approval of every argv resolved from that frozen snapshot; a digest mismatch withdraws the approval and is reported as a misfire.";
+    expect(compact(skill)).toContain(compact(approvalCondition));
+    expect(compact(skill)).toContain(
+      "The reference-plus-digest form shown above is sufficient by itself; neither role needs the argv repeated argument-by-argument to run it.",
+    );
+    expect(compact(skill)).toContain(
+      "since a repository set is not authority to execute repository data on its own.",
+    );
+  });
+
+  it("states the approval condition with identical wording in implementer.md and reviewer.md (issue #335)", () => {
+    const implementer = readRawAsset("agents/implementer.md");
+    const reviewer = readRawAsset("agents/reviewer.md");
+    const approvalCondition =
+      "A verification set named by reference plus its frozen digest and repository identity is the orchestrator's approval of every argv resolved from that frozen snapshot; a digest mismatch withdraws the approval and is reported as a misfire.";
+    expect(compact(implementer)).toContain(compact(approvalCondition));
+    expect(compact(reviewer)).toContain(compact(approvalCondition));
+    for (const role of [implementer, reviewer]) {
+      expect(compact(role)).toContain(
+        "since a repository set is not authority to execute repository data on its own.",
+      );
+    }
+  });
 });

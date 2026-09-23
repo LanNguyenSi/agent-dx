@@ -72,8 +72,16 @@ expected_output:
 
 `verification_set.reference` identifies the checked-in set selected for this
 repository. The briefing also carries its repository identity and run-local
-frozen snapshot; those resolved values are evidence metadata, not a new
-authority to execute repository configuration or scripts.
+frozen snapshot: naming that set by reference plus its frozen digest and
+repository identity, as delegated in the briefing, is the orchestrator's
+approval of every argv resolved from that frozen snapshot; a digest mismatch
+withdraws the approval and is reported as a misfire. The reference-plus-digest
+form shown above is sufficient by itself; neither role needs the argv repeated
+argument-by-argument to run it. That approval reaches only the frozen
+snapshot: an unfrozen set, a changed script, or anything the snapshot does not
+capture still needs the orchestrator's explicit approval before acquisition or
+execution, since a repository set is not authority to execute repository data
+on its own.
 
 ## Implementer output contract
 
