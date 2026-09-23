@@ -12,8 +12,8 @@
   `subagent-contracts-superset.md`, and this log's own earlier entries;
   `run-state-lifecycle-and-markers.md`'s citations into the same files
   landed outside the edited passages and needed no re-pointing.
-  `review-gate-and-waivers.md` and `subagent-contracts-superset.md`
-  re-checked and re-stamped.
+  `review-gate-and-waivers.md`, `subagent-contracts-superset.md`, and
+  `run-state-lifecycle-and-markers.md` re-checked and re-stamped.
 
 - 2026-09-23T12:21:19Z (release 0.39.0): the `[Unreleased]` notes moved under
   `## [0.39.0] - 2026-09-23` and gained a line for the docs-only and
