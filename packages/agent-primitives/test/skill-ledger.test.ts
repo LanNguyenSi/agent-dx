@@ -3,21 +3,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { readSkillLedger, sha256Hex } from "../src/init/ledger.js";
+import { compareSemver } from "./helpers/ledger-tag.js";
 
 const packageRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
 );
-
-function compareSemver(a: string, b: string): number {
-  const pa = a.split(".").map(Number);
-  const pb = b.split(".").map(Number);
-  for (let i = 0; i < 3; i++) {
-    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
-    if (diff !== 0) return diff;
-  }
-  return 0;
-}
 
 describe("skill digest ledger", () => {
   it("carries the digest of the asset actually in the tree as the LAST entry (append-or-replace on release)", () => {

@@ -2868,7 +2868,9 @@ appending or replacing that last entry is caught before it ships, rather
 than silently making every existing installation `conflicted` again.
 One rule stays with the maintainer: whether a published release that has
 no reachable tag belongs in the explicit untagged-release allowlist. The
-release-coverage test compares every reachable tag to its ledger digest,
+release-coverage test compares every reachable tag to its own ledger
+digest, or, for a release that left the asset unchanged, to the nearest
+earlier entry's (in a local shallow clone it skips, with the reason in verbose output; on GitHub Actions a shallow checkout fails it),
 rejects a second untagged entry unless it is the trailing pending entry,
 and rejects a tagged release whose pending label was not relabelled.
 None of these rules can cause a write (nothing is written without
