@@ -1,5 +1,15 @@
 # Bundle log
 
+- 2026-09-23T12:21:19Z (release 0.39.0): the `[Unreleased]` notes moved under
+  `## [0.39.0] - 2026-09-23` and gained a line for the docs-only and
+  pinned-prose wording change. Line citations into `CHANGELOG.md` below
+  the new heading were re-pointed; `subagent-contracts-superset.md` now cites
+  the 0.39.0 section instead of `[Unreleased]`. The class_closure pin in
+  `test/docs-consistency.test.ts` reads the 0.39.0 section (a same-line
+  edit, no cited test line moved). `model-preselection.md`,
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and
+  `subagent-contracts-superset.md` re-checked and re-stamped.
+
 - 2026-09-23T11:03:24Z (T-006): added the bounded `single` escalation
   clause, rewrapped the policy fence, and re-pointed cited anchors. The
   reverification results, including citation corrections and earlier
