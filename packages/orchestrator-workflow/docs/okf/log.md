@@ -11355,3 +11355,15 @@ live sites and in the earlier entries that quote them. Re-stamped review
 gate and waivers, run-state lifecycle and markers, and the subagent
 contracts document at 2026-09-23T18:44:37Z after confirming none of their own citations
 resolve into a shifted range or an edited line.
+
+The Run-internal identifiers check in evidence-and-probes.md now fails
+closed (#337): it captures the diff and the log before scanning and exits
+2 when git fails, it overrides the external diff, textconv, rename, color,
+and prefix settings of the user's git configuration, and it changes to the
+repository top level before scanning. The section also names the extra's
+kind and phase and states that upstream work merged into the range is
+scanned. Only lines from the section's second paragraph to the end of the
+file changed, and no bundle citation resolves there, so no citation moved;
+CHANGELOG.md is unchanged. Re-stamped review gate and waivers, run-state
+lifecycle and markers, and the subagent contracts document at 2026-09-23T19:25:20Z
+after confirming none of their own citations resolve into the edited range.
