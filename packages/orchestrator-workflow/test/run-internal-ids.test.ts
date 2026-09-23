@@ -136,7 +136,7 @@ describe("run-internal identifiers section of evidence-and-probes.md", () => {
       'as an extra of kind `command` in the `after_preflight` phase, with `cwd` at the repository root and the run-base recorded in `00-goal.md` for that repository as its only argument. Its argv is `["sh", "-c", <the script below as one string>, "sh", <run-base>]`',
     );
     expect(text).toContain(
-      "Exit `0` means no hit, exit `1` means at least one hit, each printed (a diff hit prefixed by its file path), and exit `2` means the run-base does not resolve to a commit or a git, awk, or grep command failed. The check fails closed: it reads the whole diff and log into memory and checks the status of every stage, so a failure part way through (an unreadable object, or a text tool rejecting a byte, for example) exits `2` instead of passing on partial output; the text stages run byte-wise (`LC_ALL=C`) so no locale can make them reject the input.",
+      "Exit `0` means no hit, exit `1` means at least one hit, each printed (a diff hit prefixed by its file path, in git's quoted form for a path git quotes), and exit `2` means the run-base does not resolve to a commit or a git, awk, or grep command failed. The check fails closed: it reads the whole diff and log into memory and checks the status of every stage, so a failure part way through (an unreadable object, or a text tool rejecting a byte, for example) exits `2` instead of passing on partial output; the text stages run byte-wise (`LC_ALL=C`) so no locale can make them reject the input.",
     );
     expect(text).toContain(
       "It changes to the top level of the repository first, so a `cwd` in a subdirectory scans the same range. The diff options override the external diff, textconv, binary, rename, color, and prefix settings of the user's git configuration and the repository's attributes (`--text` diffs a file marked `-diff` or `binary` as text), and the log option suppresses signature output, so those settings cannot hide an added line from the scan or add lines to it.",
@@ -149,6 +149,9 @@ describe("run-internal identifiers section of evidence-and-probes.md", () => {
     );
     expect(text).toContain(
       "It does not cover uncommitted changes, removed lines, an identifier directly next to a NUL byte (the shell drops NUL bytes from the captured diff), pull request titles or bodies, branch names, or identifiers in any other format.",
+    );
+    expect(text).toContain(
+      "because `--text` also diffs files git detects as binary by content, an added image, font, or archive usually produces hits made of its raw bytes,",
     );
     expect(text).toContain(
       "A hit is a failure of the extra; when the orchestrator confirms a hit is a false positive it records that decision",
@@ -448,6 +451,58 @@ describe("the documented run-internal identifier check", () => {
       const content = runCheck(repo, base);
       expect(content.status).toBe(1);
       expect(content.stdout).toBe(`notes.md: ++ counter from ${round}\n`);
+    });
+  });
+
+  // A text stage that fails must not read as "no hit". Each case puts a
+  // failing stand-in for one tool first on PATH while the range carries an
+  // identifier, so only the stage status can turn the result into exit 2.
+  const withFailingTool = (
+    tool: "awk" | "grep",
+    body: (env: NodeJS.ProcessEnv) => void,
+  ) => {
+    const bin = mkdtempSync(join(tmpdir(), "ow-run-internal-ids-bin-"));
+    try {
+      writeFileSync(join(bin, tool), "#!/bin/sh\necho failing >&2\nexit 2\n", {
+        mode: 0o755,
+      });
+      body({ ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}` });
+    } finally {
+      rmSync(bin, { recursive: true, force: true });
+    }
+  };
+
+  for (const tool of ["awk", "grep"] as const) {
+    it(`exits 2 when ${tool} fails, even though the range carries an identifier`, () => {
+      withRepo((repo) => {
+        commit(repo, { "README.md": "fixture\n" }, "initial");
+        const base = git(repo, "rev-parse", "HEAD");
+        commit(
+          repo,
+          { "src/a.ts": `// split out of ${task}\n` },
+          `refactor: split the helper for ${task}`,
+        );
+        withFailingTool(tool, (env) => {
+          expect(runCheck(repo, base, env).status).toBe(2);
+        });
+      });
+    });
+  }
+
+  it("ignores GREP_OPTIONS in the environment", () => {
+    withRepo((repo) => {
+      commit(repo, { "README.md": "fixture\n" }, "initial");
+      const base = git(repo, "rev-parse", "HEAD");
+      commit(
+        repo,
+        { "src/a.ts": `// split out of ${task}\n` },
+        "refactor: split the helper",
+      );
+      const withOptions = runCheck(repo, base, {
+        ...process.env,
+        GREP_OPTIONS: "-m0",
+      });
+      expect(withOptions.status).toBe(1);
     });
   });
 });

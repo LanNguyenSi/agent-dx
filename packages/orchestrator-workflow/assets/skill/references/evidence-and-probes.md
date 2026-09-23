@@ -392,6 +392,7 @@ below as one string>, "sh", <run-base>]`:
 
 ```sh
 base="$1"
+unset GREP_OPTIONS
 ids='(^|[^A-Za-z0-9_])((AC|D|T)-[0-9]{3}|R[0-9]+)([^A-Za-z0-9_]|$)'
 top=$(git rev-parse --show-toplevel) || exit 2
 cd "$top" || exit 2
@@ -415,7 +416,8 @@ exit "$hits"
 ```
 
 Exit `0` means no hit, exit `1` means at least one hit, each printed (a diff
-hit prefixed by its file path), and exit `2` means the run-base does not
+hit prefixed by its file path, in git's quoted form for a path git quotes),
+and exit `2` means the run-base does not
 resolve to a commit or a git, awk, or grep command failed. The check fails
 closed: it reads the whole diff and log into memory and checks the status of
 every stage, so a failure part way through (an unreadable object, or a text
@@ -438,7 +440,9 @@ not cover uncommitted changes, removed lines, an identifier directly next to
 a NUL byte (the shell drops NUL bytes from the captured diff), pull request
 titles or bodies, branch names, or identifiers in any other format.
 The patterns are case-sensitive and can match unrelated tokens, such as a
-product or part name built the same way, and a repository whose own
+product or part name built the same way; because `--text` also diffs files
+git detects as binary by content, an added image, font, or archive usually
+produces hits made of its raw bytes, and a repository whose own
 documentation discusses these formats (a copy of these templates, for
 example) matches as well. A hit is a failure of the extra; when the
 orchestrator confirms a hit is a false positive it records that decision,
