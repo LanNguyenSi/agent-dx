@@ -765,6 +765,11 @@ jobs:
         working-directory: packages/${{ matrix.package }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          # agent-primitives' ledger test compares every reachable release
+          # tag with its packaged skill asset, so the matrix checkout needs
+          # history and tags rather than Actions' default shallow clone.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v5
         with:

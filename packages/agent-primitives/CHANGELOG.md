@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- The skill digest ledger now has release-coverage tests: a packed,
+  offline install runs `init` against the real 0.4.0 skill asset and
+  pins its report-only `outdated` result, while reachable
+  `agent-primitives/v*` tags must match their ledger digests. The sole
+  untagged published release (0.1.0) is an explicit allowlist entry;
+  only a trailing entry later than `package.json` may be pending.
+
 ## [0.8.0] - 2026-09-21
 
 - `phpunitDetector` strips PHPUnit's own `--colors=always` SGR escape
