@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-09-23
+
 - `probe`'s mutant-side `--pass-regex` miss warning no longer speculates
   about a truncated captured tail: when the captured stdout/stderr tail
   was cut short, it now checks the run's full, on-disk log
