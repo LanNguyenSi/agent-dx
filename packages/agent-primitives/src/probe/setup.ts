@@ -1012,7 +1012,7 @@ export async function openRunSetup(
   // returned: nothing about that refusal disproves a run that was cut
   // short. `pushBaselineFailBandWarning` is called at each such return
   // site with the reason that site actually returns (interpolated the
-  // way `step.ts` does with `${status}` on the mutant side), so the
+  // way `step.ts` names its final verdict on the mutant side), so the
   // warning always names the truth about the result it precedes,
   // rather than a hard-coded `baseline_failed` that a different path
   // (the evidence gate, the zero-tests gate) would carry falsely. Never

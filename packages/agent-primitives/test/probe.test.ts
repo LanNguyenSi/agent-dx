@@ -6271,6 +6271,61 @@ describe("probe(): --pass-regex", () => {
       ).toBe(false);
     }, 20000);
 
+    it("a MUTANT run that is BOTH cut short (137) AND overridden to inconclusive by the zero-tests detector names inconclusive, not killed (#338)", async () => {
+      useLockDir();
+      // A baseline that passes cleanly and reports a real test count, so
+      // the probe reaches the mutant. The mutant prints node's own
+      // built-in test-runner zero-count summary line (`# tests 0`), then
+      // SIGKILLs its OWN process under the same surviving `sh -c`
+      // wrapper as the tests above: the mutant run's exit code lands in
+      // the 128 + N band AND its own output shows no test actually ran,
+      // at once. The zero-tests override runs after the band warning is
+      // computed but used to fire the push before that override had its
+      // say, so the warning named the pre-override `killed` reading even
+      // though the envelope goes on to report `inconclusive`.
+      const { repo } = initRepoWith(
+        'console.log("# tests 3");\nprocess.exit(0);\n',
+      );
+
+      const result = await probe({
+        file: "runner.js",
+        line: 1,
+        form: "replace",
+        replaceText:
+          'console.log("# tests 0"); process.kill(process.pid, "SIGKILL");',
+        testCommand: WRAPPED_TEST_COMMAND,
+        isolation: "inplace",
+        expect: "fail",
+        cwd: repo,
+        logDir: makeTmpDir(),
+      });
+
+      expect(result.test?.exitCode).toBe(137);
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("no_tests_executed");
+      expect(
+        result.warnings.some((w) =>
+          /the mutant run's own output shows no test was actually executed/.test(
+            w,
+          ),
+        ),
+      ).toBe(true);
+      // The band-code warning names the FINAL verdict (inconclusive's
+      // own reason, no_tests_executed), never `killed`: the mutant run
+      // was cut short, but what the envelope actually reports about it
+      // is that no test executed, not that a mutant was killed.
+      expect(
+        result.warnings.some((w) =>
+          /the mutant run exited with 137, the code a shell reports for a process killed by signal 9; the no_tests_executed verdict may rest on a run that was cut short/.test(
+            w,
+          ),
+        ),
+      ).toBe(true);
+      expect(
+        result.warnings.some((w) => w.includes("the killed verdict may rest")),
+      ).toBe(false);
+    }, 20000);
+
     it("the BASELINE side, default path (no --pass-regex): a baseline killed under a surviving wrapper is `baseline_failed`, with the 137 named as a possibly cut-short run", async () => {
       useLockDir();
       const { repo } = initRepoWith(SELF_KILLING_RUNNER_JS);
