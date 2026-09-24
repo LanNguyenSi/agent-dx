@@ -86,11 +86,11 @@ approval reaches only the frozen
 snapshot: an unfrozen set, a changed script, or anything the snapshot does not
 capture still needs the orchestrator's explicit approval before acquisition or
 execution, since a repository set is not authority to execute repository data
-on its own. Before acquisition or execution, compare the frozen snapshot's
-effective config and scripts, preflight executable identity/definition, and
-repository identity with the tree the role runs in; any mismatch withdraws
-the approval like a digest mismatch and is reported as a misfire, and a
-change the task's own diff makes to one of those components is outside the
+on its own. Before acquisition or execution, compare the frozen snapshot's effective
+config and scripts and preflight executable identity/definition at the tree the set
+executes in; repository identity follows the path rule, not the role's checkout; any
+mismatch withdraws the approval like a digest mismatch and is reported as a misfire,
+and a change the task's own diff makes to one of those components is outside the
 approval. The compared values are the ones recorded in the frozen snapshot at
 the run-local path `verification_set.snapshot` names; evidence-and-probes.md's
 Verification sets section defines what counts as a script for that
