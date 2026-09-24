@@ -216,8 +216,6 @@ const ADEQUACY_ROUND_COUNTING =
   "The cap changes neither the Round-2 halt rule, the Review-round escalation budget nor the Fix-regression decision point: a test-adequacy review round still counts as a negative round where it is one";
 const REVIEWER_PROSE_SCOPE =
   "When the briefing bounds the prose mutant space to a claim list, respect that bound and put scope notes in `residual_risks`, unless an unlisted sentence is shown to be load-bearing";
-const CEREMONY_BULLET =
-  "- Three ceremony rules in the skill references, none of which changes the";
 
 describe("baseline revisions and the docs-only review default", () => {
   const workflow = unwrap(probes);
@@ -320,6 +318,10 @@ describe("pinned-prose changes", () => {
   });
 });
 
+// The CHANGELOG's 0.37.0 section is a released entry: it stays as shipped
+// and is not re-checked against later wording precisions (0.39.0 restated
+// this rule's condition without repeating it verbatim). The live copy this
+// suite pins against the reference is the bundle doc's own section below.
 describe("ceremony rule copies stay bound to their normative sites", () => {
   const constants = [
     BASELINE_REVISION_RULE,
@@ -332,11 +334,6 @@ describe("ceremony rule copies stay bound to their normative sites", () => {
     ADEQUACY_ROUND_COUNTING,
     REVIEWER_PROSE_SCOPE,
   ];
-
-  it("the CHANGELOG bullet repeats each rule in the reference's own words", () => {
-    const bullet = changelogBullet(CEREMONY_BULLET);
-    for (const constant of constants) expect(bullet).toContain(constant);
-  });
 
   it("the bundle doc's own section repeats each rule in the reference's own words", () => {
     const bundleSection = sectionOf(
