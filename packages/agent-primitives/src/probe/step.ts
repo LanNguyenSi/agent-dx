@@ -675,13 +675,14 @@ export async function runMutantAttempt(
     // Unlike the miss warning below, this one is not gated on
     // ambiguity: a band code is rare enough per plan that one entry per
     // affected mutant stays readable, and each names the code and the
-    // signal the reader has to check. The push itself is deferred to
-    // AFTER the `--pass-regex` block below: that block's own
-    // truncated-tail check can still correct `status` from `killed` to
-    // `survived`, and this warning's `${status}` has to name that FINAL
-    // verdict, not the one read here before the correction had its say
-    // -- a killed-verdict warning attached to a run this same function
-    // goes on to report `survived` would read as contradicting itself.
+    // signal the reader has to check. The push itself is deferred past
+    // the `--pass-regex` block below AND the zero-tests override after
+    // it: the truncated-tail check can still correct `status` from
+    // `killed` to `survived`, and the zero-tests override can still turn
+    // it into `inconclusive`, so the warning interpolates `verdictName`
+    // (the final `status`, or the final `reason` when inconclusive) --
+    // a killed-verdict warning attached to a run this same function goes
+    // on to report otherwise would read as contradicting itself.
     const bandCodeMutantWarning = !testPassed && mutantSignalCode !== undefined;
 
     if (rt.passRegex !== undefined) {

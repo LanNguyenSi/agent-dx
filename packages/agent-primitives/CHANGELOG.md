@@ -10,11 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `probe`'s mutant-side 128&nbsp;+&nbsp;N signal-band warning is now pushed
   after the zero-tests-executed and generic byte-identical-output
   overrides have had their say, not before: a mutant run whose exit code
-  falls in the band AND whose own output (or a byte-identical comparison
-  with the baseline) shows no test actually ran is reported
-  `inconclusive`/`no_tests_executed`, and the band warning now names that
-  reason instead of the `killed` reading read before the override fired.
-  Fixes agent-dx issue #338.
+  falls in the band AND whose own output shows no test actually ran is
+  reported `inconclusive`/`no_tests_executed`, and the band warning now
+  names that reason instead of the `killed` reading read before the
+  override fired. Follow-up to agent-dx #338, found in the PR #341
+  review.
 
 ## [0.8.1] - 2026-09-23
 

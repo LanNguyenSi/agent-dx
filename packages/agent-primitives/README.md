@@ -2104,8 +2104,9 @@ that the run may have been cut short. On the PASS direction (a
 "matched despite a non-zero exit code" entry every other non-zero code
 gets; on the FAIL direction (the plain exit-code default, a
 `--pass-regex` miss, or a baseline-side refusal such as
-`no_tests_executed` or `baseline_evidence_not_matched`) it is an
-additional entry naming that refusal, since a failing run with an
+`no_tests_executed` or `baseline_evidence_not_matched`, or a mutant run
+the zero-tests detector overrides to `inconclusive`) it is an
+additional entry naming that refusal or reason, since a failing run with an
 out-of-band non-zero code carries no warning at all. The verdict is
 unchanged either way (a killed mutant stays `killed`, a
 matching mutant run stays `survived`); the warning exists so a reader has
