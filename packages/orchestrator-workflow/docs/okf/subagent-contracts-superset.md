@@ -92,14 +92,14 @@ task-slicer output copies now carries `digest`, `repository_identity`, and
 naming the run-local path of the frozen snapshot record
 (`packages/orchestrator-workflow/assets/skill/references/contracts.md:82#"names the run-local path of the frozen snapshot"`).
 That approval reaches only
-the frozen snapshot: before acquisition or execution, implementer.md,
-reviewer.md, and contracts.md state, in identical wording, that the role
-compares the frozen snapshot's effective config and scripts, preflight
-executable identity/definition, and repository identity with the tree it
-runs in; any mismatch withdraws the approval like a digest mismatch and is
-reported as a misfire, and a change the task's own diff makes to one of
-those components is outside the approval
-(`packages/orchestrator-workflow/assets/skill/references/contracts.md:91#"repository identity with the tree the role runs in; any mismatch withdraws"`).
+the frozen snapshot: before acquisition or execution, implementer.md, reviewer.md,
+and contracts.md state, in identical wording, that the role compares the frozen
+snapshot's effective config and scripts and preflight executable
+identity/definition at the tree the set executes in, deferring repository identity
+to the path rule rather than the role's checkout; any mismatch withdraws the
+approval like a digest mismatch and is reported as a misfire, and a change the
+task's own diff makes to one of those components is outside the approval
+(`packages/orchestrator-workflow/assets/skill/references/contracts.md:91#"executes in; repository identity follows the path rule, not the role's checkout; any"`).
 The compared values are the ones recorded in that snapshot; evidence-and-
 probes.md's Verification sets section defines what counts as a script for
 the comparison
