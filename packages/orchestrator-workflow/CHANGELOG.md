@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   clauses stay pinned against the reference files and the docs/okf bundle
   doc, since a released section stays as shipped.
 
+- The shared verification-set comparison sentence in implementer.md,
+  reviewer.md, and contracts.md now compares effective config and scripts,
+  and preflight executable identity/definition, at the tree the
+  verification set executes in, and defers repository identity to the
+  path rule instead of restating it against the role's own checkout. The
+  two rules read as a single rule again instead of two that could be read
+  as disagreeing.
+
 ## [0.40.0] - 2026-09-23
 
 - A verification set can no longer look green while checking the wrong

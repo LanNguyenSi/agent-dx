@@ -207,7 +207,7 @@ describe("documented verification sets", () => {
     const reviewer = readRawAsset("agents/reviewer.md");
     const contracts = readRawAsset("skill/references/contracts.md");
     const comparisonRule =
-      "Before acquisition or execution, compare the frozen snapshot's effective config and scripts, preflight executable identity/definition, and repository identity with the tree the role runs in; any mismatch withdraws the approval like a digest mismatch and is reported as a misfire, and a change the task's own diff makes to one of those components is outside the approval.";
+      "Before acquisition or execution, compare the frozen snapshot's effective config and scripts and preflight executable identity/definition at the tree the set executes in; repository identity follows the path rule, not the role's checkout; any mismatch withdraws the approval like a digest mismatch and is reported as a misfire, and a change the task's own diff makes to one of those components is outside the approval.";
     for (const doc of [implementer, reviewer, contracts]) {
       expect(compact(doc)).toContain(compact(comparisonRule));
     }
