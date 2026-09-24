@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Restored the `0.37.0` section byte for byte to the text released at tag
+  `orchestrator-workflow/v0.37.0`, after a later change had rewritten its
+  wording. The test assertion that read that section was removed; the rule
+  clauses stay pinned against the reference files and the docs/okf bundle
+  doc, since a released section stays as shipped.
+
 ## [0.40.0] - 2026-09-23
 
 - A verification set can no longer look green while checking the wrong
@@ -316,27 +322,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the check itself unchanged is a `03-decisions.md` entry, not a revision";
   the orchestrator records that entry, states in it why no evidence is
   invalidated, and communicates the corrected wording in the next
-  delegation. Step 7 now says: "For a review round whose entire delta contains only explanatory documentation, comments, or citations and contains no source- or test-file edits and no semantic change to executable commands, configuration, policy, instructions, or behavior, default to the `-medium` reviewer tier with `review_method: normal` where tier variants are installed". That refines the general tier default for this one class only. "A review round that touches an instruction, policy, template or prompt file (for example a SKILL.md instruction) keeps the general default, whatever the file type, and the minimums named above are unaffected";
+  delegation. Step 7 now says: "For a review round whose entire delta is a
+  docs-only delta in the sense of step 8's docs-only closure, default to the
+  `-medium` reviewer tier with `review_method: normal` where tier variants
+  are installed". That refines the general tier default for this one class
+  only, a round that touches an instruction, policy, template or prompt file
+  keeps the general default, and the minimum review methods are untouched;
   the AGENTS.md section does not yet point to this refinement.
   `references/review-and-recovery.md` gains a "Pinned-prose changes" section
   for a change whose acceptance rests on tests that pin documentation
   wording: "A prose mutant survives exactly when its bytes sit in no
   assertion", so review rounds that hunt for the next unpinned sentence do
-  not converge. The section asks for one normative site per rule, a claim list in the acceptance criterion as the pin obligation. "Every normative sentence the change adds or alters at that site is pinned; one left unpinned is named in the criterion with the reason it is not load-bearing." A reviewer briefing
-  bounds the prose mutant space to that list, and "When the briefing
-  bounds the
-  prose mutant space to a claim list, respect that bound and put scope notes in
-  `residual_risks`, unless an unlisted sentence is shown to be load-bearing."
-  Copies are bound to the normative site by one shared test constant, and: "Cap
-  test-adequacy review rounds on the change at two." "A test-adequacy review
-  round is one whose returned findings are all `tests` findings of severity
-  `low` or `medium` about pin gaps on the pinned prose; a round returning any
-  other finding is an ordinary round outside the cap." "The cap changes neither
-  the Round-2 halt rule, the Review-round escalation budget nor the
-  Fix-regression decision point: a test-adequacy review round still counts as a
-  negative round where it is one." It exempts semantic findings and leaves the
-  review gate as it is. Step 7 points to the section without
-  restating it. Evidence (issue #300 and the change that added the Fix-regression
+  not converge. The section asks for one normative site per rule, a claim
+  list in the acceptance criterion as the pin obligation (every normative
+  sentence the change adds or alters at that site is a claim, an omission is
+  named with its reason), a reviewer briefing that bounds the prose mutant
+  space to that list, copies bound to the normative site by one shared test
+  constant, and: "Cap test-adequacy review rounds on the change at two." It
+  defines the capped round, exempts semantic findings, and changes neither
+  the Round-2 halt rule, the escalation budget, the Fix-regression decision
+  point nor the review gate. Step 7 points to the section without restating
+  it. Evidence (issue #300 and the change that added the Fix-regression
   decision point; one repository each, not a benchmark): the issue reports
   baseline revisions r1 to r3 for two wording precisions of a verification
   method, and a run in which the top reviewer tier was about half the day's
