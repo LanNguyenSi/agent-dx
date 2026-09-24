@@ -820,16 +820,6 @@ export async function runMutantAttempt(
       }
     }
 
-    // Pushed here, after `status` has had its last chance to be
-    // corrected above (see `bandCodeMutantWarning`'s own comment): reads
-    // whatever `status` settled on, `killed` or a truncated-tail
-    // correction to `survived`.
-    if (bandCodeMutantWarning && mutantSignalCode !== undefined) {
-      warnings.push(
-        `the mutant run exited with ${String(testResult.exitCode)}, the code a shell reports for a process killed by signal ${String(mutantSignalCode)}; the ${status} verdict may rest on a run that was cut short; see ${testResult.logPath}`,
-      );
-    }
-
     // Zero-tests-executed detection, mutant side: the mutant run's OWN
     // output shows a known test runner executed nothing (the same
     // detector `setup.ts` already ran against the baseline). Applies
@@ -916,6 +906,23 @@ export async function runMutantAttempt(
         mutantZeroTests.detected
           ? `the mutant run's own output shows no test was actually executed (${mutantZeroTests.via}); see ${testResult.logPath}`
           : `the baseline and mutant runs produced byte-identical output with no test-summary line either built-in detector recognizes; see ${testResult.logPath}`,
+      );
+    }
+
+    // Pushed here, after `status` (and, when it was overridden, `reason`)
+    // have had their last chance to change above -- the truncated-tail
+    // `--pass-regex` correction, then the zero-tests/generic-fallback
+    // override that can still turn a `killed`/`survived` reading into
+    // `inconclusive`. Naming the verdict this late means the warning
+    // always names what the envelope actually reports, never a reading
+    // a later branch in this same function goes on to overrule; see
+    // `setup.ts`'s own `pushBaselineFailBandWarning`, which follows the
+    // same rule for the baseline side by taking the final reason as a
+    // parameter at each of its return sites.
+    if (bandCodeMutantWarning && mutantSignalCode !== undefined) {
+      const verdictName = status === "inconclusive" ? reason : status;
+      warnings.push(
+        `the mutant run exited with ${String(testResult.exitCode)}, the code a shell reports for a process killed by signal ${String(mutantSignalCode)}; the ${verdictName} verdict may rest on a run that was cut short; see ${testResult.logPath}`,
       );
     }
   }
