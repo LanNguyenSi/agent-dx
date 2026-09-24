@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-09-23T21:10:00Z
+timestamp: 2026-09-24T05:54:19Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/agents/reviewer.md
@@ -447,7 +447,10 @@ counts as a negative round where it is one." It exempts semantic findings from
 bound and cap and leaves the review gate as it is. Step 7 of the workflow
 points to the section without restating it. Pinned by
 `test/probe-plans-recovery.test.ts`, which asserts the quoted clauses against
-the references, the CHANGELOG bullet and this section.
+the references and this section. The CHANGELOG's 0.37.0 entry that first
+shipped these rules stays as released and is not part of that pin; the
+0.39.0 entry summarizes the docs-only condition's tightening without
+repeating it verbatim.
 
 ## See also
 
