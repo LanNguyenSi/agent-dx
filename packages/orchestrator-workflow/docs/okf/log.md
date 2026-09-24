@@ -19,6 +19,13 @@
   `subagent-contracts-superset.md` re-checked and re-stamped (all three
   list `CHANGELOG.md` under `sources:`; none cites the 0.37.0 section by
   line number, so no other citation moved).
+- 2026-09-24T06:05:23Z (agent-dx tracker task 19a63460): `review-gate-and-
+  waivers.md` and `run-state-lifecycle-and-markers.md` also list
+  `reviewer.md`, `contracts.md`, and `CHANGELOG.md` as sources; their own
+  cited lines and version-anchored `CHANGELOG.md` citations still resolve
+  unchanged, so both were re-checked and re-stamped without a content
+  change.
+
 - 2026-09-24T06:01:54Z (agent-dx tracker task 19a63460): `implementer.md`,
   `reviewer.md`, and `contracts.md` still state, in identical wording, the
   shared verification-set comparison sentence, but it now compares
