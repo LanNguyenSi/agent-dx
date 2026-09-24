@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.40.1] - 2026-09-24
+
 - Restored the `0.37.0` section byte for byte to the text released at tag
   `orchestrator-workflow/v0.37.0`, after a later change had rewritten its
   wording. The test assertion that read that section was removed; the rule
