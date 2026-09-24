@@ -191,7 +191,7 @@ describe("fix-regression decision point", () => {
 
 /**
  * Three ceremony rules, each defined at one site. The constants below are
- * the clauses the CHANGELOG bullet and the bundle doc repeat; asserting one
+ * the clauses the reference files state and the bundle doc repeats; asserting one
  * constant against every site keeps the copies from drifting. The claims
  * pinned per rule are the acceptance criterion's claim list for this change.
  */

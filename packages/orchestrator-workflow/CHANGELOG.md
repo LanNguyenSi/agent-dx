@@ -9,9 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Restored the `0.37.0` section byte for byte to the text released at tag
   `orchestrator-workflow/v0.37.0`, after a later change had rewritten its
-  wording. The pin that previously read that section's wording now reads
-  the reference file and the docs/okf bundle doc directly, since a
-  released section stays as shipped.
+  wording. The test assertion that read that section was removed; the rule
+  clauses stay pinned against the reference files and the docs/okf bundle
+  doc, since a released section stays as shipped.
 
 ## [0.40.0] - 2026-09-23
 

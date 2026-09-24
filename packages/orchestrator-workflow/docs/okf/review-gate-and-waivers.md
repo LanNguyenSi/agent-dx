@@ -449,7 +449,7 @@ points to the section without restating it. Pinned by
 `test/probe-plans-recovery.test.ts`, which asserts the quoted clauses against
 the references and this section. The CHANGELOG's 0.37.0 entry that first
 shipped these rules stays as released and is not part of that pin; the
-0.39.0 entry summarizes the docs-only condition's tightening without
+0.39.0 entry summarizes the docs-only and pinned-prose tightening without
 repeating it verbatim.
 
 ## See also
