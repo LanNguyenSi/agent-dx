@@ -1,5 +1,9 @@
 # Bundle log
 
+- 2026-09-24T06:07:04Z (task 61599d23): re-stamped `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md`
+  after a wording fix to the `[Unreleased]` bullet in `CHANGELOG.md` and to
+  the Ceremony rules paragraph; no cited line moved.
 - 2026-09-24T05:54:19Z (task 61599d23): restored the `## [0.37.0]` section
   of `CHANGELOG.md` byte for byte to the text released at tag
   `orchestrator-workflow/v0.37.0`, undoing a wording tightening that #332
