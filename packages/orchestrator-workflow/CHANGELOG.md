@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `bundle-gate-in-ci.md` reference: the could-not-run paragraph now keeps the
+  checker's exit-2 usage error apart from the other causes (a missing command
+  exits 127 and is caught by the status check; a failed install exits 1 and is
+  caught by the report check). The example checks for `jq` first and fails with
+  its own `jq not found` message, escapes `%`, CR and LF in annotation messages
+  (plus `:` and `,` in the `file` property), and the pre-commit recipe removes
+  its temporary report with a `trap` (task 433b78d5).
+
 ## [0.41.0] - 2026-09-25
 
 - New skill reference `bundle-gate-in-ci.md`, linked from the SKILL.md

@@ -131,7 +131,24 @@ describe("bundle gate in CI reference: could-not-run and report placement", () =
   it("fails every stage when the checker could not run", () => {
     pin(
       bundleGate,
-      "Any other outcome means the checker could not run (exit 2 for a usage error such as a missing bundle directory, a failed install, a missing command, or a report that does not parse), and it fails the job at every stage, including stage 1.",
+      "Any other outcome means the checker could not run: an exit status other than 0 or 1, or a report that does not parse. It fails the job at every stage, including stage 1.",
+    );
+  });
+
+  it("keeps the exit-2 usage error apart from the other could-not-run causes", () => {
+    pin(
+      bundleGate,
+      "The checker itself exits 2 for a usage error such as a missing bundle directory. The other could-not-run causes carry other statuses: a missing command exits 127 and is caught by the exit status check; a failed install exits 1 from the package runner (`npx`), the same status as a finding, and is caught only because it leaves no parseable report; a report that does not parse is caught by the report check whatever the status.",
+    );
+    expect(unwrap(bundleGate)).not.toMatch(
+      /exit 2 for a usage error such as[^.]*(failed install|missing command)/,
+    );
+  });
+
+  it("names jq as a prerequisite of the example", () => {
+    pin(
+      bundleGate,
+      "the example below uses `jq`, so it needs `jq` on the runner;",
     );
   });
 
@@ -158,6 +175,56 @@ describe("bundle gate in CI reference: could-not-run and report placement", () =
     expect(recipe).toContain('report="$(mktemp)"');
     expect(recipe).toContain('--dirty-as-now --json > "$report"');
     expect(recipe).not.toMatch(/> *report\.json/);
+  });
+});
+
+/*
+ * Execute the pre-commit recipe under bash -eo pipefail against a stub
+ * okf-kit, with TMPDIR pointed at an empty directory, and check that the
+ * temporary report is gone afterwards, on a clean check and on a failing one.
+ */
+describe("bundle gate in CI pre-commit recipe: temp report cleanup", () => {
+  let root: string;
+
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), "bundle-gate-precommit-"));
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    writeFileSync(
+      join(bin, "okf-kit"),
+      `#!/bin/bash\nprintf '%s' '{"findings":[]}'\nexit "\${STUB_EXIT:-0}"\n`,
+    );
+    chmodSync(join(bin, "okf-kit"), 0o755);
+    writeFileSync(join(root, "hook.sh"), shBlockAfter("### Pre-commit parity"));
+  });
+
+  afterAll(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it.each([
+    [0, 0],
+    [1, 1],
+  ])("checker exit %i: hook exits %i and leaves no temp file", (exit, want) => {
+    const temp = mkdtempSync(join(root, "tmp-"));
+    const work = mkdtempSync(join(root, "work-"));
+    const result = spawnSync(
+      "bash",
+      ["--noprofile", "--norc", "-eo", "pipefail", join(root, "hook.sh")],
+      {
+        cwd: work,
+        env: {
+          PATH: `${join(root, "bin")}${delimiter}${process.env.PATH ?? ""}`,
+          HOME: work,
+          TMPDIR: temp,
+          STUB_EXIT: String(exit),
+        },
+        encoding: "utf8",
+      },
+    );
+    expect(result.status, result.stdout + result.stderr).toBe(want);
+    expect(readdirSync(temp)).toEqual([]);
+    expect(readdirSync(work)).toEqual([]);
   });
 });
 
@@ -222,6 +289,14 @@ const fixtures: Record<string, Finding[]> = {
       message: "cited file missing",
     },
   ],
+  special: [
+    {
+      ruleId: "citations-resolve",
+      severity: "warning",
+      file: "c,d:e.md",
+      message: "100% cited\r\nsecond line",
+    },
+  ],
 };
 
 describe("bundle gate in CI example: stage decisions", () => {
@@ -229,7 +304,13 @@ describe("bundle gate in CI example: stage decisions", () => {
   let bin: string;
   let step: string;
 
+  // Resolved once, so a run with a reduced PATH still finds the shell.
+  let bash = "bash";
+
   beforeAll(() => {
+    bash = spawnSync("bash", ["-c", "command -v bash"], {
+      encoding: "utf8",
+    }).stdout.trim();
     root = mkdtempSync(join(tmpdir(), "bundle-gate-"));
     bin = join(root, "bin");
     mkdirSync(bin);
@@ -253,6 +334,7 @@ describe("bundle gate in CI example: stage decisions", () => {
   function runStep(
     stage: string,
     stub: { report?: string; forceExit?: number; stdout?: string },
+    path?: string,
   ) {
     runCount += 1;
     const dir = join(root, `run-${runCount}`);
@@ -264,7 +346,7 @@ describe("bundle gate in CI example: stage decisions", () => {
     writeFileSync(summary, "");
     const argsLog = join(dir, "args.log");
     const env: NodeJS.ProcessEnv = {
-      PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
+      PATH: path ?? `${bin}${delimiter}${process.env.PATH ?? ""}`,
       HOME: dir,
       OKF_KIT_VERSION: "9.9.9-test",
       BUNDLE: "docs/okf",
@@ -279,7 +361,7 @@ describe("bundle gate in CI example: stage decisions", () => {
     if (stub.forceExit !== undefined)
       env.STUB_FORCE_EXIT = String(stub.forceExit);
     const result = spawnSync(
-      "bash",
+      bash,
       ["--noprofile", "--norc", "-eo", "pipefail", step],
       {
         cwd: work,
@@ -398,6 +480,24 @@ describe("bundle gate in CI example: stage decisions", () => {
       const run = runStep(stage, { forceExit: 2, stdout: report });
       expect(run.status, run.stdout + run.stderr).toBe(2);
       expect(run.stdout).toContain("bundle check could not run (exit 2)");
+    },
+  );
+
+  it("escapes %, CR and LF in the annotation message and the file property", () => {
+    const run = runStep("warn", { report: "special" });
+    expect(run.status, run.stdout + run.stderr).toBe(0);
+    expect(run.stdout).toContain(
+      "::warning file=docs/okf/c%2Cd%3Ae.md::citations-resolve: 100%25 cited%0D%0Asecond line\n",
+    );
+  });
+
+  it.each([["warn"], ["block"], ["strict"]])(
+    "a runner without jq fails stage %s with its own message",
+    (stage) => {
+      const run = runStep(stage, { report: "clean" }, bin);
+      expect(run.status, run.stdout + run.stderr).toBe(2);
+      expect(run.stdout).toContain("bundle check could not run (jq not found)");
+      expect(run.args).toBe("");
     },
   );
 
