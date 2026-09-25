@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { isAbsolute, join, normalize, sep } from "node:path";
+import { isAbsolute, join, normalize, posix, sep } from "node:path";
 
 import {
   PACKAGE_VERSION,
@@ -111,6 +111,33 @@ export interface InitOptions {
    * too, the same as `null`.
    */
   pin?: string | null;
+  /**
+   * Configured knowledge-bundle locations, or `undefined` to carry the
+   * previous manifest's `knowledge` forward unchanged (the same
+   * omitted-means-sticky convention `routing`/`pin` already use). A present
+   * array (including `[]`) replaces the previous value outright and is
+   * validated with {@link validateKnowledgeBundles}: an invalid entry throws
+   * rather than writing a malformed record. Absent (never set on any
+   * install) or `[]` means today's behaviour: `docs/okf/` is the sole,
+   * implicit bundle location every kit site assumes. The CLI has no flag for
+   * this; operators hand-edit the manifest field instead.
+   */
+  knowledge?: KnowledgeBundle[];
+}
+
+/**
+ * One configured knowledge-bundle location. `path` is the bundle directory
+ * (for example `docs/okf`) and `repoRoot` the root of the repository the
+ * bundle's sources live in (`"."` when that is the worktree itself, a
+ * sub-repo's path for a workspace-level bundle whose sources live
+ * elsewhere). Each is resolved against the worktree top level on its own:
+ * `path` is not nested under `repoRoot`. Both are stored normalised
+ * (see {@link checkKnowledgeEntry}) and must not escape the worktree top
+ * level; no check argv lives here (see verification-set docs).
+ */
+export interface KnowledgeBundle {
+  path: string;
+  repoRoot: string;
 }
 
 const SKILL_NAME = "orchestrator-workflow";
@@ -158,6 +185,17 @@ export interface Manifest extends OpencodeModelMaps {
    * recorded" and therefore never sticky.
    */
   harnessesRecordedEmpty?: boolean;
+  /**
+   * Configured knowledge-bundle locations. Absent when never configured on
+   * any install of this repo: every kit site that reads this field then
+   * falls back to the implicit `docs/okf/` default, today's behaviour; an
+   * empty list means the same. When present, an entry that fails
+   * validation (a non-relative or top-level-escaping `path`/`repoRoot`) is
+   * dropped rather than carried forward, the same per-entry degradation
+   * style `files`/`models` above already use for a hand-written or damaged
+   * manifest; `doctor` reports each dropped entry.
+   */
+  knowledge?: KnowledgeBundle[];
 }
 
 function sha256(content: string): string {
@@ -174,6 +212,139 @@ export function isContainedRelativePath(relativePath: string): boolean {
   if (relativePath === "" || isAbsolute(relativePath)) return false;
   const normalized = normalize(relativePath);
   return normalized !== ".." && !normalized.startsWith(`..${sep}`);
+}
+
+/**
+ * Normalises one knowledge-bundle path field (`path` or `repoRoot`) and
+ * returns it, or a reason string when it is not acceptable. Both fields are
+ * worktree-relative, so spellings of the same location compare equal after
+ * this step: POSIX `normalize`, then any trailing `/` stripped (`docs/okf/`,
+ * `./docs/okf` and `docs/okf` all become `docs/okf`). An empty string, an
+ * absolute path, and a path that normalises to a `..` escape are rejected;
+ * `.` (the worktree top level itself) is accepted only when `allowTop` is
+ * set, which is the case for `repoRoot` and not for `path`.
+ */
+function normalizeKnowledgePathField(
+  value: unknown,
+  allowTop: boolean,
+): { value: string } | { reason: string } {
+  if (typeof value !== "string") return { reason: "is not a string" };
+  if (value === "") return { reason: "is empty" };
+  if (isAbsolute(value) || posix.isAbsolute(value)) {
+    return { reason: "is an absolute path" };
+  }
+  let normalized = posix.normalize(value);
+  while (normalized.length > 1 && normalized.endsWith("/")) {
+    normalized = normalized.slice(0, -1);
+  }
+  if (normalized === ".." || normalized.startsWith("../")) {
+    return { reason: "escapes the worktree top level" };
+  }
+  if (normalized === "." && !allowTop) {
+    return { reason: "names the worktree top level itself" };
+  }
+  return { value: normalized };
+}
+
+/**
+ * Checks one raw `knowledge` entry. `path` (the bundle directory) and
+ * `repoRoot` (the root of the repository its sources live in) are each
+ * resolved against the worktree top level, independently of one another, so
+ * a workspace-level bundle whose sources live in a sub-repo is
+ * `{ path: "docs/okf", repoRoot: "sub" }`. `repoRoot` defaults to `"."`
+ * when omitted. Returns the normalised entry, or the reason it is invalid
+ * (naming the offending field) for the caller to throw or report.
+ */
+export function checkKnowledgeEntry(
+  entry: unknown,
+): { bundle: KnowledgeBundle } | { reason: string } {
+  if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+    return { reason: "is not an object" };
+  }
+  const candidate = entry as Record<string, unknown>;
+  const path = normalizeKnowledgePathField(candidate.path, false);
+  if ("reason" in path) return { reason: `path ${path.reason}` };
+  const repoRoot = normalizeKnowledgePathField(
+    candidate.repoRoot === undefined ? "." : candidate.repoRoot,
+    true,
+  );
+  if ("reason" in repoRoot) return { reason: `repoRoot ${repoRoot.reason}` };
+  return { bundle: { path: path.value, repoRoot: repoRoot.value } };
+}
+
+/**
+ * Lists every problem in a raw on-disk `knowledge` value: `[]` when the
+ * field is absent or every entry is valid, one item for a non-array value,
+ * otherwise one item per invalid entry with its index and reason. `doctor`
+ * reports these, since {@link parseKnowledgeBundles} drops such entries on
+ * read and a re-install that rewrites the manifest would remove them from
+ * disk without notice.
+ */
+export function knowledgeEntryProblems(raw: unknown): string[] {
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) {
+    return ["knowledge is not an array and is ignored"];
+  }
+  const problems: string[] = [];
+  raw.forEach((entry: unknown, index: number) => {
+    const checked = checkKnowledgeEntry(entry);
+    if ("reason" in checked) {
+      problems.push(`knowledge[${index}] ${checked.reason} and is ignored`);
+    }
+  });
+  return problems;
+}
+
+/**
+ * Validates an explicitly-supplied `options.knowledge` array for `runInit`
+ * with {@link checkKnowledgeEntry} and returns the normalised entries.
+ * Throws on the first invalid entry -- explicit input refuses to write a
+ * malformed record rather than dropping it (contrast
+ * {@link parseKnowledgeBundles}, which degrades a hand-edited/damaged
+ * on-disk manifest by dropping bad entries instead of throwing).
+ */
+export function validateKnowledgeBundles(
+  knowledge: unknown,
+): KnowledgeBundle[] {
+  if (!Array.isArray(knowledge)) {
+    throw new Error(
+      "options.knowledge must be an array of { path, repoRoot } entries",
+    );
+  }
+  return knowledge.map((entry: unknown, index: number) => {
+    const checked = checkKnowledgeEntry(entry);
+    if ("reason" in checked) {
+      throw new Error(
+        `options.knowledge[${index}] ${checked.reason}; path and repoRoot must be relative paths inside the worktree top level`,
+      );
+    }
+    return checked.bundle;
+  });
+}
+
+/**
+ * Sanitizes a possibly hand-edited or damaged on-disk manifest's raw
+ * `knowledge` field for {@link readInstalledManifest}: an entry that fails
+ * {@link checkKnowledgeEntry} is dropped rather than throwing (the read path
+ * can never crash a re-install on tampered input, the same reasoning
+ * `files`/`models` already document above), and a valid entry is kept in
+ * its normalised spelling. Returns `undefined` when the raw field is absent
+ * or not an array, so the "never configured" and "configured but empty"
+ * states stay distinct the same way `routing`'s own `"routing" in
+ * candidate` check does.
+ */
+function parseKnowledgeBundles(
+  candidate: Record<string, unknown>,
+): KnowledgeBundle[] | undefined {
+  if (!("knowledge" in candidate) || !Array.isArray(candidate.knowledge)) {
+    return undefined;
+  }
+  const result: KnowledgeBundle[] = [];
+  for (const entry of candidate.knowledge as unknown[]) {
+    const checked = checkKnowledgeEntry(entry);
+    if ("bundle" in checked) result.push(checked.bundle);
+  }
+  return result;
 }
 
 /**
@@ -256,6 +427,7 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
   if ("routing" in candidate) {
     routing = parseRouting(candidate.routing);
   }
+  const knowledge = parseKnowledgeBundles(candidate);
 
   // A hand-written or damaged manifest may carry a non-string `pin`; that
   // degrades to "no recorded pin" here (the same per-field-degradation
@@ -272,6 +444,7 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
     profile,
     tiers,
     ...(routing !== undefined ? { routing } : {}),
+    ...(knowledge !== undefined ? { knowledge } : {}),
     ...opencodeMaps,
     files,
     installedAt:
@@ -544,6 +717,16 @@ export function runInit(options: InitOptions): Report {
     updateOpencodeModels: options.opencodeModels !== undefined,
     updateOpencodeClassModels: options.opencodeClassModels !== undefined,
   });
+  // `undefined` carries the previous manifest's `knowledge` forward
+  // unchanged, the same omitted-means-sticky convention `routing`/`pin` use
+  // above; a present array (including `[]`) is validated and replaces the
+  // previous value outright, throwing before any file is written on an
+  // invalid entry rather than persisting a malformed record.
+  const knowledge: KnowledgeBundle[] | undefined =
+    options.knowledge !== undefined
+      ? validateKnowledgeBundles(options.knowledge)
+      : previous?.knowledge;
+
   // Check only rendered selections before the first mutation.
   for (const warning of codexCatalogWarnings(
     routing,
@@ -981,6 +1164,7 @@ export function runInit(options: InitOptions): Report {
     profile,
     tiers,
     routing,
+    ...(knowledge !== undefined ? { knowledge } : {}),
     ...compatibility,
     files: installedFiles,
     ...(pin !== undefined ? { pin } : {}),
@@ -996,6 +1180,9 @@ export function runInit(options: InitOptions): Report {
       profile: previous.profile,
       tiers: previous.tiers,
       ...(previous.routing !== undefined ? { routing: previous.routing } : {}),
+      ...(previous.knowledge !== undefined
+        ? { knowledge: previous.knowledge }
+        : {}),
       ...legacyOpencodeFallbacks(previous),
       files: previous.files,
       ...(previous.pin !== undefined ? { pin: previous.pin } : {}),

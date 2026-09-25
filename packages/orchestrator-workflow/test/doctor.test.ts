@@ -316,6 +316,154 @@ describe("runDoctor: per-target status", () => {
     expect(report.exitCode).toBe(0);
   });
 
+  it("knowledge warning: a configured path missing on disk", () => {
+    const repo = makeRepo();
+    setManifestField(repo, {
+      knowledge: [{ path: "docs/kb", repoRoot: "." }],
+    });
+    registerHome(defaults(), [repo]);
+    const report = runDoctor(home, {});
+    expect(report.targets[0].knowledgeWarnings).toEqual([
+      "missing configured knowledge path: docs/kb",
+    ]);
+    // A warning is informational: it never changes status or the exit code.
+    expect(report.targets[0].status).toBe("clean");
+    expect(report.exitCode).toBe(0);
+  });
+
+  it("knowledge warning: docs/okf exists but a non-empty knowledge list omits it", () => {
+    const repo = makeRepo();
+    mkdirSync(join(repo, "docs", "okf"), { recursive: true });
+    setManifestField(repo, {
+      knowledge: [{ path: "docs/kb", repoRoot: "." }],
+    });
+    mkdirSync(join(repo, "docs", "kb"), { recursive: true });
+    registerHome(defaults(), [repo]);
+    const report = runDoctor(home, {});
+    expect(report.targets[0].knowledgeWarnings).toEqual([
+      "docs/okf/ exists but is not in the configured knowledge list",
+    ]);
+    expect(report.targets[0].status).toBe("clean");
+    expect(report.exitCode).toBe(0);
+  });
+
+  it("knowledge warning: no warning when nothing is configured, when docs/okf is configured, or when every configured path exists", () => {
+    // Case A: no `knowledge` field at all (absent = today's default docs/okf
+    // behaviour); docs/okf need not even exist.
+    const repoA = makeRepo();
+    registerHome(defaults(), [repoA]);
+    expect(runDoctor(home, {}).targets[0].knowledgeWarnings).toBeUndefined();
+
+    // Case B: docs/okf exists and is itself the configured entry.
+    const repoB = makeRepo();
+    mkdirSync(join(repoB, "docs", "okf"), { recursive: true });
+    setManifestField(repoB, {
+      knowledge: [{ path: "docs/okf", repoRoot: "." }],
+    });
+    registerHome(defaults(), [repoB]);
+    expect(runDoctor(home, {}).targets[0].knowledgeWarnings).toBeUndefined();
+
+    // Case C: a configured non-default path that exists on disk, and no
+    // docs/okf directory to warn about omitting.
+    const repoC = makeRepo();
+    mkdirSync(join(repoC, "docs", "kb"), { recursive: true });
+    setManifestField(repoC, {
+      knowledge: [{ path: "docs/kb", repoRoot: "." }],
+    });
+    registerHome(defaults(), [repoC]);
+    expect(runDoctor(home, {}).targets[0].knowledgeWarnings).toBeUndefined();
+  });
+
+  it("knowledge: path and repoRoot each resolve against the worktree top level", () => {
+    // A workspace-level bundle whose sources live in a sub-repo: the bundle
+    // directory is not nested under repoRoot.
+    const repoA = makeRepo();
+    mkdirSync(join(repoA, "docs", "okf"), { recursive: true });
+    mkdirSync(join(repoA, "sub"), { recursive: true });
+    setManifestField(repoA, {
+      knowledge: [{ path: "docs/okf", repoRoot: "sub" }],
+    });
+    registerHome(defaults(), [repoA]);
+    expect(runDoctor(home, {}).targets[0].knowledgeWarnings).toBeUndefined();
+
+    // A bundle outside docs/okf for a sub-repo's sources.
+    const repoB = makeRepo();
+    mkdirSync(join(repoB, ".ai", "knowledge", "app"), { recursive: true });
+    mkdirSync(join(repoB, "app"), { recursive: true });
+    setManifestField(repoB, {
+      knowledge: [{ path: ".ai/knowledge/app", repoRoot: "app" }],
+    });
+    registerHome(defaults(), [repoB]);
+    expect(runDoctor(home, {}).targets[0].knowledgeWarnings).toBeUndefined();
+
+    // The same entry with its repoRoot directory absent warns about the
+    // repoRoot only.
+    rmSync(join(repoB, "app"), { recursive: true, force: true });
+    expect(runDoctor(home, {}).targets[0].knowledgeWarnings).toEqual([
+      "missing configured knowledge repoRoot: app",
+    ]);
+  });
+
+  it("knowledge: 'docs/okf/' and './docs/okf' count as configuring docs/okf", () => {
+    for (const spelling of ["docs/okf/", "./docs/okf"]) {
+      const repo = makeRepo();
+      mkdirSync(join(repo, "docs", "okf"), { recursive: true });
+      setManifestField(repo, {
+        knowledge: [{ path: spelling, repoRoot: "./" }],
+      });
+      registerHome(defaults(), [repo]);
+      expect(
+        runDoctor(home, {}).targets[0].knowledgeWarnings,
+        spelling,
+      ).toBeUndefined();
+    }
+  });
+
+  it("knowledge: an empty list behaves like an absent field (no docs/okf warning)", () => {
+    const repo = makeRepo();
+    mkdirSync(join(repo, "docs", "okf"), { recursive: true });
+    setManifestField(repo, { knowledge: [] });
+    registerHome(defaults(), [repo]);
+    expect(runDoctor(home, {}).targets[0].knowledgeWarnings).toBeUndefined();
+  });
+
+  it("knowledge: each malformed hand-edited entry is reported with its index and reason", () => {
+    const repo = makeRepo();
+    mkdirSync(join(repo, "docs", "kb"), { recursive: true });
+    setManifestField(repo, {
+      knowledge: [
+        { path: "docs/kb" },
+        { path: "/docs/kb" },
+        { path: 42 },
+        { path: "docs/kb", repoRoot: "../outside" },
+        "docs/okf",
+        { path: "." },
+      ],
+    });
+    registerHome(defaults(), [repo]);
+    const report = runDoctor(home, {});
+    expect(report.targets[0].knowledgeWarnings).toEqual([
+      "knowledge[1] path is an absolute path and is ignored",
+      "knowledge[2] path is not a string and is ignored",
+      "knowledge[3] repoRoot escapes the worktree top level and is ignored",
+      "knowledge[4] is not an object and is ignored",
+      "knowledge[5] path names the worktree top level itself and is ignored",
+    ]);
+    expect(report.targets[0].status).toBe("clean");
+
+    // A non-array value is reported once.
+    setManifestField(repo, { knowledge: { path: "docs/kb" } });
+    expect(runDoctor(home, {}).targets[0].knowledgeWarnings).toEqual([
+      "knowledge is not an array and is ignored",
+    ]);
+
+    // Every entry dropped: the malformed ones are still reported.
+    setManifestField(repo, { knowledge: [{ path: "" }] });
+    expect(runDoctor(home, {}).targets[0].knowledgeWarnings).toEqual([
+      "knowledge[0] path is empty and is ignored",
+    ]);
+  });
+
   it("(mutation-probe b) drift takes precedence over divergent when a target is both", () => {
     const repo = makeRepo({ profile: "minimal" });
     registerHome(defaults({ profile: "full" }), [repo]);
@@ -661,6 +809,21 @@ describe("(9) CLI --json", () => {
     expect(parsed.unvalidatedDropped).toBe(0);
   });
 
+  it("carries knowledge warnings under the knowledgeWarnings key", () => {
+    const repo = makeRepo();
+    setManifestField(repo, {
+      knowledge: [{ path: "docs/kb", repoRoot: "." }],
+    });
+    registerHome(defaults(), [repo]);
+    const result = runCli("--json");
+    const parsed = JSON.parse(result.stdout);
+    expect(parsed.targets[0].status).toBe("clean");
+    expect(parsed.targets[0].knowledgeWarnings).toEqual([
+      "missing configured knowledge path: docs/kb",
+    ]);
+    expect(result.status).toBe(0);
+  });
+
   it("on a missing operator manifest, prints the no-operator-manifest error object and exits 2", () => {
     const result = runCli("--json");
     const parsed = JSON.parse(result.stdout);
@@ -685,6 +848,24 @@ describe("CLI human output", () => {
       "No operator setup found; run `orchestrator-workflow setup` first.",
     );
     expect(result.stdout).toBe("");
+  });
+
+  it("prints each knowledge warning as a detail line under a clean status", () => {
+    const repo = makeRepo();
+    mkdirSync(join(repo, "docs", "okf"), { recursive: true });
+    setManifestField(repo, {
+      knowledge: [{ path: "docs/kb", repoRoot: "." }],
+    });
+    registerHome(defaults(), [repo]);
+    const result = runCli();
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(
+      [
+        `clean  ${repo}`,
+        "  knowledge: missing configured knowledge path: docs/kb",
+        "  knowledge: docs/okf/ exists but is not in the configured knowledge list",
+      ].join("\n"),
+    );
   });
 
   it("prints one line per target and a summary line (no --prune)", () => {

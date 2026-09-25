@@ -76,7 +76,8 @@ Rules:
   result. A missing/extra/mismatched/unresolved result is a misfire; a failure
   is reported honestly; `skip`, `acknowledged`, limitation, and inconclusive
   are non-passes. A disabled required category is a gap. Always include the
-  bundle check when the repository has `docs/okf/`, even for unrelated edits.
+  bundle check for each configured knowledge bundle (`knowledge` in
+  `.ai/workflow/manifest.json`; default `docs/okf/`), even for unrelated edits.
   Put every complete-set result in `tests.executed`, preserving the existing
   report envelope for both v1 and original-contract runs.
 - When the task assignment names mutation probes to run, run each one and

@@ -5,7 +5,11 @@ import { join } from "node:path";
 
 import { PACKAGE_VERSION } from "./assets.js";
 import type { Manifest } from "./init.js";
-import { MANIFEST_PATH, readInstalledManifest } from "./init.js";
+import {
+  MANIFEST_PATH,
+  knowledgeEntryProblems,
+  readInstalledManifest,
+} from "./init.js";
 import type { Profile, Role } from "./models.js";
 import { DEFAULT_MODELS, rolesForProfile } from "./models.js";
 import { compareRoutingState } from "./routing-state.js";
@@ -73,6 +77,17 @@ export interface TargetReport {
   driftFiles: string[] | null;
   /** Selected legacy opencode leaves that cannot be compared offline. */
   routingComparisonGaps?: string[];
+  /**
+   * Knowledge-bundle warnings against this target's own filesystem: a
+   * malformed `knowledge` entry dropped on read (index and reason), a
+   * configured `path` or `repoRoot` that is not a directory under the
+   * target's top level, or a non-empty `knowledge` list that omits an
+   * existing `docs/okf/` at the target's root. Omitted when there is none.
+   * Printed as `knowledge:` detail lines in the human output. These
+   * warnings never change `status` or the doctor exit code -- they surface
+   * a documentation-locator drift, not a kit-file install drift.
+   */
+  knowledgeWarnings?: string[];
   /** Human-output-only: the repo's own profile, or null when unknown. */
   repoProfile: Profile | null;
   /** Human-output-only: the operator default profile, for the comparison line. */
@@ -117,6 +132,8 @@ export interface TargetReportJson {
   driftFiles: string[] | null;
   /** Selected legacy opencode leaves that cannot be compared offline. */
   routingComparisonGaps?: string[];
+  /** See {@link TargetReport.knowledgeWarnings}. */
+  knowledgeWarnings?: string[];
   versionLag: boolean;
   reason: string | null;
 }
@@ -131,6 +148,9 @@ export function targetReportToJson(report: TargetReport): TargetReportJson {
     driftFiles: report.driftFiles,
     ...(report.routingComparisonGaps?.length
       ? { routingComparisonGaps: report.routingComparisonGaps }
+      : {}),
+    ...(report.knowledgeWarnings?.length
+      ? { knowledgeWarnings: report.knowledgeWarnings }
       : {}),
     versionLag: report.versionLag,
     reason: report.reason,
@@ -260,6 +280,80 @@ function computeDriftFiles(targetPath: string, manifest: Manifest): string[] {
     }
   }
   return drifted;
+}
+
+/** The kit-wide implicit default knowledge-bundle location every site falls
+ * back to when a target configures no `knowledge` list at all. */
+const DEFAULT_KNOWLEDGE_PATH = "docs/okf";
+
+/** The raw `knowledge` value of a target's manifest file, before
+ * `readInstalledManifest` drops invalid entries; `undefined` when the field
+ * is absent or the file cannot be re-read. */
+function readRawKnowledge(targetPath: string): unknown {
+  try {
+    const parsed: unknown = JSON.parse(
+      readFileSync(join(targetPath, MANIFEST_PATH), "utf8"),
+    );
+    if (typeof parsed !== "object" || parsed === null) return undefined;
+    return (parsed as Record<string, unknown>).knowledge;
+  } catch {
+    return undefined;
+  }
+}
+
+function isDirectoryAt(path: string): boolean {
+  const stat = statOrClassify(path);
+  return stat.kind === "ok" && stat.stat.isDirectory();
+}
+
+/**
+ * Checks a target's configured `knowledge` list against its own filesystem.
+ * Each raw entry `readInstalledManifest` dropped as malformed is reported
+ * with its index and reason. For each kept entry, `path` and `repoRoot` are
+ * resolved against the target's top level independently (the manifest's
+ * model; `path` is not nested under `repoRoot`) and each one that is not a
+ * directory is reported by name. A non-empty list whose normalised `path`s
+ * omit an existing `docs/okf/` at the target's root (the implicit default
+ * every kit site assumes absent a `knowledge` field) is reported once.
+ * Absent or empty `knowledge` is today's default behaviour and never warns
+ * about `docs/okf/`: a repo that never configured `knowledge` is not warned
+ * about lacking an entry for its own default.
+ */
+function computeKnowledgeWarnings(
+  targetPath: string,
+  manifest: Manifest,
+): string[] {
+  const knowledge = manifest.knowledge ?? [];
+  const warnings: string[] = knowledgeEntryProblems(
+    readRawKnowledge(targetPath),
+  );
+  for (const bundle of knowledge) {
+    if (!isDirectoryAt(join(targetPath, bundle.path))) {
+      warnings.push(`missing configured knowledge path: ${bundle.path}`);
+    }
+    if (
+      bundle.repoRoot !== "." &&
+      !isDirectoryAt(join(targetPath, bundle.repoRoot))
+    ) {
+      warnings.push(
+        `missing configured knowledge repoRoot: ${bundle.repoRoot}`,
+      );
+    }
+  }
+  if (knowledge.length > 0) {
+    const docsOkfExists = isDirectoryAt(
+      join(targetPath, DEFAULT_KNOWLEDGE_PATH),
+    );
+    const docsOkfConfigured = knowledge.some(
+      (bundle) => bundle.path === DEFAULT_KNOWLEDGE_PATH,
+    );
+    if (docsOkfExists && !docsOkfConfigured) {
+      warnings.push(
+        `${DEFAULT_KNOWLEDGE_PATH}/ exists but is not in the configured knowledge list`,
+      );
+    }
+  }
+  return warnings;
 }
 
 function baseReport(
@@ -393,6 +487,8 @@ export function inspectTarget(
     ? manifest.pin !== manifest.version
     : manifest.version !== kitVersion;
 
+  const knowledgeWarnings = computeKnowledgeWarnings(target.path, manifest);
+
   let status: TargetStatus;
   if (driftFiles.length > 0) {
     status = "drift";
@@ -419,6 +515,7 @@ export function inspectTarget(
     ...(routingComparison.gaps.length > 0
       ? { routingComparisonGaps: routingComparison.gaps }
       : {}),
+    ...(knowledgeWarnings.length > 0 ? { knowledgeWarnings } : {}),
     repoProfile: manifest.profile,
     operatorProfile: operator.defaults.profile,
     repoTiers: manifest.tiers,

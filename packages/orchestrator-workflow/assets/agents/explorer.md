@@ -14,9 +14,10 @@ Rules:
 
 - Investigate only what is relevant to the stated goal. Do not survey the whole
   repository; follow the question.
-- Before mapping terrain by hand, check whether the repo carries a curated
-  knowledge bundle (for example a `docs/okf/` directory with an `index.md`):
-  if one exists, read its index first and then the relevant docs it points to,
+- Before mapping terrain by hand, check for a curated knowledge bundle (each
+  one configured via `knowledge` in `.ai/workflow/manifest.json`; default
+  `docs/okf/`, typically a directory with an `index.md`): if one exists,
+  read its index first and then the relevant docs it points to,
   treating their claims as leads to verify, not as ground truth. If a semantic
   code-search tool is connected in the session, prefer it over raw grep for
   orientation questions; when a structural code-search tool is available,

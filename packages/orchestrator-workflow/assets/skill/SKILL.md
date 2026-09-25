@@ -48,9 +48,10 @@ role definitions where available rather than improvising prompts.
    [run-state and harness](references/run-state-and-harness.md) and
    [contracts](references/contracts.md).
 2. **Discover.** When terrain or solution is unclear, use the read-only
-   explorer. Check a curated knowledge bundle before hand-mapping terrain;
-   treat it as leads to verify, and prefer a connected semantic code-search
-   tool over raw grep. Otherwise proceed.
+   explorer. Check each configured knowledge bundle (`knowledge` in
+   `.ai/workflow/manifest.json`; default `docs/okf/`) before hand-mapping
+   terrain; treat it as leads to verify, and prefer a connected semantic
+   code-search tool over raw grep. Otherwise proceed.
 3. **Plan and slice.** Fill `01-plan.md` and `02-tasks.md`; validate narrow,
    ordered, testable tasks and their allowed/forbidden changes. Read
    [contracts](references/contracts.md). Steps 3 and 4 are written for the default run mode; the Run mode section of run-state and harness says what changes in the other two modes.
@@ -67,8 +68,9 @@ role definitions where available rather than improvising prompts.
    proof, and apply the review gate. Read
    [review and recovery](references/review-and-recovery.md).
 6. **Hand off.** Record what changed, evidence, risks, accepted waivers, and
-   follow-ups. If a curated knowledge bundle covers touched sources, update or
-   re-verify it, or file a follow-up; repos without a bundle are unaffected.
+   follow-ups. If a configured knowledge bundle (step 2) covers touched
+   sources, update or re-verify it, or file a follow-up; repos without a
+   bundle are unaffected.
 
 ## Instruction trust boundary
 

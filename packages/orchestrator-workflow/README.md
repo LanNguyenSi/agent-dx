@@ -72,9 +72,10 @@ Two effects fall out of this shape:
   and the skeptical review. The ceremony scales to the task: a trivial change
   is done directly, the full flow is for non-trivial work, and a read-only
   explorer maps the terrain first only when the solution is unclear. When
-  available, the explorer prefers a repo's curated knowledge bundle (for
-  example a `docs/okf/` directory) or a connected semantic code-search tool
-  over hand-mapping terrain with grep.
+  available, the explorer prefers each of a repo's configured knowledge
+  bundles (`knowledge` in `.ai/workflow/manifest.json`; default `docs/okf/`)
+  or a connected semantic code-search tool over hand-mapping terrain with
+  grep.
 - **Quality through structure.** Writing and reviewing are separated by
   role and model, task slices are validated before any implementation
   starts, acceptance is decided on evidence (tests executed, findings
@@ -203,8 +204,9 @@ The workflow does not execute or validate this file: the orchestrator first
 approves the resolved effective config and scripts, then records a run-local
 snapshot with the set digest, repository identity, executable identity, and
 every result. Preflight JSON reports check results, not the underlying shell
-commands it discovered. Repositories with `docs/okf/` include their bundle
-check in every set, even when the task did not edit documentation.
+commands it discovered. A repository with a configured knowledge bundle
+(`knowledge` in `.ai/workflow/manifest.json`; default `docs/okf/`) includes
+its bundle check in every set, even when the task did not edit documentation.
 
 ## What gets installed
 
@@ -220,6 +222,30 @@ AGENTS.md             marker-fenced "Agentic Coding Workflow" policy section
 The orchestrator writes a `.ai/run` pointer file in every worktree a run
 touches (a machine-local absolute path, not written by the installer); add
 it to the repository's `.gitignore`.
+
+`manifest.json` may also carry a `knowledge` list of `{ path, repoRoot }`
+entries, for a repo whose knowledge bundle is not at the default location (a
+workspace-level bundle with sources in a sub-repo, a bundle elsewhere, or
+several bundles). `path` is the bundle directory and `repoRoot` (default
+`"."`) the root of the repository the bundle's sources live in. Each is a
+relative path resolved against the worktree top level on its own (`path` is
+not nested under `repoRoot`), so a workspace bundle for a sub-repo's sources
+reads `{ "path": "kb/app", "repoRoot": "app" }`. Entries are stored
+normalised (`./kb/app/` becomes `kb/app`); an empty or absolute path, a
+`path` of `.`, and a path escaping the worktree top level are invalid. The
+CLI has no flag for the field: edit it in the manifest by hand, and every
+re-install preserves it (the programmatic `runInit` option
+`knowledge` writes it and refuses an invalid entry). A hand-edited invalid
+entry is ignored on read and reported by `doctor`. The field carries no
+check argv; the concrete bundle-check command still lives in the
+repository-bound verification set (see Verification sets above), so there
+is one source of argv truth. When `knowledge` in
+`.ai/workflow/manifest.json` is absent or an empty list, the default
+`docs/okf/` applies, today's behaviour. `doctor` prints a `knowledge:`
+detail line (the `knowledgeWarnings` key in `--json`) for a configured
+`path` or `repoRoot` that is not a directory, for each ignored invalid
+entry, and when a non-empty list omits an existing default bundle directory.
+These warnings never change the status or the exit code.
 
 Per selected harness:
 
