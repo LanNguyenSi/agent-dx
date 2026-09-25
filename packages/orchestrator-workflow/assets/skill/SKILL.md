@@ -53,7 +53,9 @@ role definitions where available rather than improvising prompts.
    terrain; treat it as leads to verify, and prefer a connected semantic
    code-search tool over raw grep. Otherwise proceed.
 3. **Plan and slice.** Fill `01-plan.md` and `02-tasks.md`; validate narrow,
-   ordered, testable tasks and their allowed/forbidden changes. Read
+   ordered, testable tasks and their allowed/forbidden changes. List each
+   configured knowledge bundle doc whose sources intersect a task's allowed
+   changes in its `relevant_docs` with the bundle doc marker. Read
    [contracts](references/contracts.md). Steps 3 and 4 are written for the default run mode; the Run mode section of run-state and harness says what changes in the other two modes.
 4. **Implement and prove.** Read the detailed workflow before delegating each
    implementer one narrow task and resolve its repository-bound verification
@@ -68,8 +70,9 @@ role definitions where available rather than improvising prompts.
    proof, and apply the review gate. Read
    [review and recovery](references/review-and-recovery.md).
 6. **Hand off.** Record what changed, evidence, risks, accepted waivers, and
-   follow-ups. If a configured knowledge bundle (step 2) covers touched
-   sources, update or re-verify it, or file a follow-up; repos without a
+   follow-ups. As a safety net for sources the task list missed: if a
+   configured knowledge bundle (step 2) covers touched sources that no task
+   re-stamped, update or re-verify it, or file a follow-up; repos without a
    bundle are unaffected.
 
 ## Instruction trust boundary

@@ -48,6 +48,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the repository-bound verification set. Every kit text site that named
   `docs/okf` as the sole knowledge-bundle locator now names the configured
   list, defaulting to `docs/okf/` (issue #353 part A).
+- Knowledge bundle docs now travel with the task that changes their sources:
+  the task slicer lists every bundle doc whose `sources` intersect a task's
+  `allowed_changes` in the existing `relevant_docs` field with the marker
+  `<doc path> (knowledge bundle; sources: <intersecting sources>)` (defined
+  once in contracts.md) and adds the doc to `allowed_changes`, computing the
+  intersection with a bundle tool when one is available (for example
+  `okf-kit docs-for`) or from each doc's `sources` frontmatter. The
+  implementer reads marked docs first as leads to verify and re-stamps a doc
+  whose source it changes in the same commit as the source change, or in a
+  later commit of the same task; the reviewer verifies the re-stamp and
+  spot-checks one claim per touched bundle doc. The hand-off bundle check is
+  now a safety net for sources the task list missed. No contract field is
+  added (issue #353 part B).
 
 ## [0.40.1] - 2026-09-24
 

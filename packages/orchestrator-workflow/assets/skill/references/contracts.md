@@ -332,6 +332,21 @@ values. The copied criterion records retain `id`, `required`, `text`,
 contract, preserve its original strings and the same 1:1 field mapping with
 the transformation under Contract selection above.
 
+Knowledge bundle docs in `relevant_docs`: for each configured knowledge bundle
+(`knowledge` in `.ai/workflow/manifest.json`; default `docs/okf/`), every
+bundle doc whose `sources` intersect the task's `allowed_changes` is listed in
+`relevant_docs` with the bundle doc marker, written as `<doc path> (knowledge
+bundle; sources: <intersecting sources>)`. The marker is the one annotation
+that identifies a bundle doc entry; the task slicer writes it, and the
+implementer and reviewer recognize bundle docs by it. A source intersects when
+it names a path the task may change, a directory containing one, or a path
+inside a directory the task may change. Compute the
+intersection with a bundle tool when one is available (for example `okf-kit
+docs-for <bundle dir> <path>... --repo-root <repo root>`), or read each bundle
+doc's `sources` frontmatter. Each such doc is also listed in `allowed_changes`,
+so the implementer can re-stamp it. This reuses `relevant_docs`; the contract
+shape is unchanged.
+
 ## Advisor output contract
 
 ```yaml

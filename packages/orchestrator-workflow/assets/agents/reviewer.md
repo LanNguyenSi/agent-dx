@@ -84,6 +84,13 @@ Check, at minimum:
   `.ai/workflow/manifest.json`; default `docs/okf/`), regardless of edit scope.
   Put the independent complete-set outcome in `reproduction.result`, preserving
   the existing report envelope for both v1 and original-contract runs.
+- Knowledge bundle docs: for every `relevant_docs` entry carrying the bundle
+  doc marker `(knowledge bundle; sources: ...)` whose source the diff
+  changes, verify the doc was re-stamped in the same commit as the source
+  change, or in a later commit of the same task (the bundle validator, for
+  example `okf-kit check`, reports no stale-source finding for it), and
+  spot-check one claim per touched bundle doc against the changed code. A
+  missing re-stamp or a claim the code contradicts is a finding.
 - Spec compliance: does the change do what the task contract asked, fully?
 - Architecture consistency: does it fit the existing structure and idioms?
 - Edge cases: empty inputs, error paths, concurrency, encoding, limits.
