@@ -16,16 +16,49 @@ import type { RunGit } from "./types.js";
 const MAX_GIT_OUTPUT_BYTES = 16 * 1024 * 1024;
 
 /**
+ * Environment variables that change how git parses a pathspec. Rules hand
+ * git `:(literal)` pathspecs for `sources` entries; an inherited
+ * GIT_LITERAL_PATHSPECS=1 (set, for example, for hooks run under
+ * `git --literal-pathspecs commit`) would disable that magic and make every
+ * source look untracked. GIT_ICASE_PATHSPECS changes how a `:(literal)`
+ * pathspec matches; GIT_GLOB_PATHSPECS and GIT_NOGLOB_PATHSPECS leave it
+ * alone, but git refuses them combined with each other or with the literal
+ * variable. All four are dropped from the child environment so pathspec
+ * interpretation does not depend on the caller. The global
+ * `--literal-pathspecs` option is not used instead: git refuses it combined
+ * with GIT_GLOB_PATHSPECS.
+ */
+const PATHSPEC_ENV_VARS = [
+  "GIT_LITERAL_PATHSPECS",
+  "GIT_GLOB_PATHSPECS",
+  "GIT_NOGLOB_PATHSPECS",
+  "GIT_ICASE_PATHSPECS",
+] as const;
+
+/**
+ * Copy of `env` without the pathspec-mode variables in PATHSPEC_ENV_VARS.
+ */
+function gitChildEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const childEnv: NodeJS.ProcessEnv = { ...env };
+  for (const name of PATHSPEC_ENV_VARS) {
+    delete childEnv[name];
+  }
+  return childEnv;
+}
+
+/**
  * Default RunGit implementation: shells out to the real `git` binary.
  * stderr is discarded (git's own "fatal: not a git repository" etc. text is
  * an expected, silent signal here, not something to surface), and any
  * failure (non-zero exit, git missing, output past MAX_GIT_OUTPUT_BYTES)
- * resolves to null instead of throwing.
+ * resolves to null instead of throwing. The child runs with gitChildEnv(),
+ * so pathspec parsing ignores the caller's pathspec-mode variables.
  */
 export const runGit: RunGit = (args, cwd) => {
   try {
     return execFileSync("git", args, {
       cwd,
+      env: gitChildEnv(),
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       maxBuffer: MAX_GIT_OUTPUT_BYTES,

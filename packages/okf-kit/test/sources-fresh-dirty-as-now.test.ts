@@ -99,6 +99,41 @@ describe("sources-fresh: --dirty-as-now", () => {
     expect(findings[0].message).toContain("source.ts");
   });
 
+  it("with the flag: a dirty source spelled with a leading slash matches its repo-relative dirty path", () => {
+    repo.commitFile(
+      "src/source.ts",
+      "export const a = 1;\n",
+      "2025-01-01T00:00:00Z",
+    );
+    repo.commitFile(
+      "bundle/doc.md",
+      docContent({
+        type: "concept",
+        timestamp: "2025-06-01T00:00:00Z",
+        sources: ["/src/source.ts"],
+      }),
+      "2025-06-01T00:00:00Z",
+    );
+
+    fs.writeFileSync(
+      path.join(repo.dir, "src/source.ts"),
+      "export const a = 2;\n",
+    );
+
+    const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+    ctx.dirtyAsNow = true;
+    const findings = sourcesFreshRule.run(ctx);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      ruleId: "sources-fresh",
+      severity: "warning",
+      file: "doc.md",
+    });
+    expect(findings[0].message).toContain("STALE");
+    expect(findings[0].message).toContain("/src/source.ts");
+  });
+
   it("with the flag: an untracked (never-committed) source is also treated as dirty-as-now", () => {
     fs.writeFileSync(
       path.join(repo.dir, "untracked-source.ts"),

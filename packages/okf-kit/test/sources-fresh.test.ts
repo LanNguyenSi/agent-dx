@@ -123,6 +123,133 @@ describe("sources-fresh", () => {
     expect(findings[0].message).toContain("untracked");
   });
 
+  it("tracks a leading-slash source repo-relative, so it goes STALE instead of reading as untracked", () => {
+    // `/src/source.ts` is repo-relative everywhere a `sources` entry is
+    // resolved (sources-shape, docs-for). Handing git the raw spelling
+    // made `git log -- /src/source.ts` a filesystem-absolute pathspec
+    // outside the repository: git failed, and a source that exists and is
+    // tracked read as "untracked by git, staleness unknown".
+    repo.commitFile(
+      "src/source.ts",
+      "export const a = 1;\n",
+      "2026-01-01T00:00:00Z",
+    );
+    writeDoc(repo.dir, "bundle/doc.md", {
+      type: "concept",
+      timestamp: "2025-12-01T00:00:00Z",
+      sources: ["/src/source.ts"],
+    });
+
+    const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+    const findings = sourcesFreshRule.run(ctx);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      ruleId: "sources-fresh",
+      severity: "warning",
+      file: "doc.md",
+    });
+    expect(findings[0].message).toContain("STALE");
+    // The finding still names the source as the doc spells it.
+    expect(findings[0].message).toContain("/src/source.ts");
+  });
+
+  it("does not flag a leading-slash source whose last commit predates the doc's timestamp", () => {
+    repo.commitFile(
+      "src/source.ts",
+      "export const a = 1;\n",
+      "2025-01-01T00:00:00Z",
+    );
+    writeDoc(repo.dir, "bundle/doc.md", {
+      type: "concept",
+      timestamp: "2026-01-01T00:00:00Z",
+      sources: ["/src/source.ts"],
+    });
+
+    const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+    expect(sourcesFreshRule.run(ctx)).toEqual([]);
+  });
+
+  it("hands git a literal pathspec: a source with glob characters is not matched against other files", () => {
+    // Under git's default pathspec rules `a[b].ts` is also a wildcard that
+    // matches `ab.ts`, so the later `ab.ts` commit would make the source
+    // look STALE. A `sources` entry names one path, never a pattern.
+    repo.commitFile("a[b].ts", "export const a = 1;\n", "2025-01-01T00:00:00Z");
+    repo.commitFile("ab.ts", "export const b = 1;\n", "2026-01-01T00:00:00Z");
+    writeDoc(repo.dir, "bundle/doc.md", {
+      type: "concept",
+      timestamp: "2025-06-01T00:00:00Z",
+      sources: ["a[b].ts"],
+    });
+
+    const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+    expect(sourcesFreshRule.run(ctx)).toEqual([]);
+  });
+
+  it("hands git the file name literally: a source starting with `:` goes STALE", () => {
+    // Without the `:(literal)` prefix git reads a leading `:` as pathspec
+    // magic, so `:c.ts` looked up `c.ts` (not committed here), matched
+    // nothing, and the source read as untracked instead of STALE.
+    // Committed as `./:c.ts`: the test's own `git add` must not read the
+    // leading `:` as magic either.
+    repo.commitFile("./:c.ts", "export const c = 1;\n", "2026-01-01T00:00:00Z");
+    writeDoc(repo.dir, "bundle/doc.md", {
+      type: "concept",
+      timestamp: "2025-12-01T00:00:00Z",
+      sources: [":c.ts"],
+    });
+
+    const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+    const findings = sourcesFreshRule.run(ctx);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      ruleId: "sources-fresh",
+      severity: "warning",
+      file: "doc.md",
+    });
+    expect(findings[0].message).toContain("STALE");
+    expect(findings[0].message).toContain(":c.ts");
+  });
+
+  it("keeps the literal pathspec when the caller exports GIT_LITERAL_PATHSPECS=1", () => {
+    // An inherited GIT_LITERAL_PATHSPECS=1 (hooks run under
+    // `git --literal-pathspecs commit` see it) disables pathspec magic, so
+    // `:(literal)source.ts` would name a file literally called that, match
+    // nothing, and every source would read as untracked instead of STALE.
+    repo.commitFile(
+      "source.ts",
+      "export const a = 1;\n",
+      "2026-01-01T00:00:00Z",
+    );
+    writeDoc(repo.dir, "bundle/doc.md", {
+      type: "concept",
+      timestamp: "2025-12-01T00:00:00Z",
+      sources: ["source.ts"],
+    });
+
+    const previous = process.env.GIT_LITERAL_PATHSPECS;
+    process.env.GIT_LITERAL_PATHSPECS = "1";
+    try {
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      const findings = sourcesFreshRule.run(ctx);
+
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        ruleId: "sources-fresh",
+        severity: "warning",
+        file: "doc.md",
+      });
+      expect(findings[0].message).toContain("STALE");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.GIT_LITERAL_PATHSPECS;
+      } else {
+        process.env.GIT_LITERAL_PATHSPECS = previous;
+      }
+    }
+  });
+
   it("flags a missing or unparseable timestamp as a notice, not STALE, exactly once per doc", () => {
     repo.commitFile("a.ts", "export const a = 1;\n", "2026-01-01T00:00:00Z");
     repo.commitFile("b.ts", "export const b = 1;\n", "2026-01-01T00:00:00Z");
@@ -1607,7 +1734,7 @@ describe("sources-fresh", () => {
       expect(findings).toHaveLength(3);
 
       const perSourceCalls = calls.filter((args) =>
-        sources.some((s) => args[args.length - 1] === s),
+        sources.some((s) => args[args.length - 1] === `:(literal)${s}`),
       );
       // Per RUN, not per doc: the top-level path frame (`git rev-parse
       // --show-prefix`) is read once and cached on the context, so it is
@@ -1682,7 +1809,9 @@ describe("sources-fresh", () => {
         (args) => args[0] === "rev-parse" && args[1] === "--show-prefix",
       );
       const perSourceCalls = calls.filter((args) =>
-        docs.some(({ source }) => args[args.length - 1] === source),
+        docs.some(
+          ({ source }) => args[args.length - 1] === `:(literal)${source}`,
+        ),
       );
       expect(perRunCalls).toHaveLength(1);
       expect(perSourceCalls).toHaveLength(docs.length);
