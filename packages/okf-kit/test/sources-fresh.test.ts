@@ -186,6 +186,70 @@ describe("sources-fresh", () => {
     expect(sourcesFreshRule.run(ctx)).toEqual([]);
   });
 
+  it("hands git the file name literally: a source starting with `:` goes STALE", () => {
+    // Without the `:(literal)` prefix git reads a leading `:` as pathspec
+    // magic, so `:c.ts` looked up `c.ts` (not committed here), matched
+    // nothing, and the source read as untracked instead of STALE.
+    // Committed as `./:c.ts`: the test's own `git add` must not read the
+    // leading `:` as magic either.
+    repo.commitFile("./:c.ts", "export const c = 1;\n", "2026-01-01T00:00:00Z");
+    writeDoc(repo.dir, "bundle/doc.md", {
+      type: "concept",
+      timestamp: "2025-12-01T00:00:00Z",
+      sources: [":c.ts"],
+    });
+
+    const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+    const findings = sourcesFreshRule.run(ctx);
+
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      ruleId: "sources-fresh",
+      severity: "warning",
+      file: "doc.md",
+    });
+    expect(findings[0].message).toContain("STALE");
+    expect(findings[0].message).toContain(":c.ts");
+  });
+
+  it("keeps the literal pathspec when the caller exports GIT_LITERAL_PATHSPECS=1", () => {
+    // An inherited GIT_LITERAL_PATHSPECS=1 (hooks run under
+    // `git --literal-pathspecs commit` see it) disables pathspec magic, so
+    // `:(literal)source.ts` would name a file literally called that, match
+    // nothing, and every source would read as untracked instead of STALE.
+    repo.commitFile(
+      "source.ts",
+      "export const a = 1;\n",
+      "2026-01-01T00:00:00Z",
+    );
+    writeDoc(repo.dir, "bundle/doc.md", {
+      type: "concept",
+      timestamp: "2025-12-01T00:00:00Z",
+      sources: ["source.ts"],
+    });
+
+    const previous = process.env.GIT_LITERAL_PATHSPECS;
+    process.env.GIT_LITERAL_PATHSPECS = "1";
+    try {
+      const ctx = loadBundle(path.join(repo.dir, "bundle"), repo.dir);
+      const findings = sourcesFreshRule.run(ctx);
+
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        ruleId: "sources-fresh",
+        severity: "warning",
+        file: "doc.md",
+      });
+      expect(findings[0].message).toContain("STALE");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.GIT_LITERAL_PATHSPECS;
+      } else {
+        process.env.GIT_LITERAL_PATHSPECS = previous;
+      }
+    }
+  });
+
   it("flags a missing or unparseable timestamp as a notice, not STALE, exactly once per doc", () => {
     repo.commitFile("a.ts", "export const a = 1;\n", "2026-01-01T00:00:00Z");
     repo.commitFile("b.ts", "export const b = 1;\n", "2026-01-01T00:00:00Z");
