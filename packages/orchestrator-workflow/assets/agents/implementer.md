@@ -30,6 +30,16 @@ Rules:
   residual and blocks acceptance.
 - Touch only the files relevant to the assigned task. Respect the
   allowed_changes and forbidden_changes lists in your task contract.
+- Read every `relevant_docs` entry carrying the bundle doc marker
+  `(knowledge bundle; sources: ...)` first, before mapping the code by hand,
+  as leads to verify, not as ground truth. When the task changes a source
+  such a doc names, re-verify the doc's claims against the changed code and
+  re-stamp it in the same commit as the source change, or in a later commit
+  of the same task, so the re-stamp lands at or after the last source
+  commit; never leave it for the hand-off. For a workspace bundle whose docs
+  live in a different repository than their sources, the re-stamp commit is
+  one in the bundle's repository within the same task. If the doc is outside
+  your allowed_changes, report that as an open question instead of editing it.
 - An outward action (any write to a system outside the local checkout and
   the run directory: pushing a branch or tag; opening, merging, or editing a
   pull request; creating, commenting on, transitioning, editing, or closing

@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-09-25T09:00:23Z
+timestamp: 2026-09-25T09:45:26Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -216,18 +216,18 @@ opposite in posture to run-base:
 - `05-review-findings.md:34#"<!-- solution-acceptance: acceptance-recommendation = TODO -->"`: `<!-- solution-acceptance: acceptance-recommendation = TODO -->`,
   filled from the Acceptance Recommendation enum `accept | accept_with_notes
   | fix_required | reject` (packages/orchestrator-workflow/assets/templates/05-review-findings.md:32#"accept | accept_with_notes | fix_required | reject").
-- `06-handoff.md:61#"<!-- solution-acceptance: final-status = TODO -->"`: `<!-- solution-acceptance: final-status = TODO -->`,
+- `06-handoff.md:63#"<!-- solution-acceptance: final-status = TODO -->"`: `<!-- solution-acceptance: final-status = TODO -->`,
   filled from the Final Status enum `accepted | accepted_with_notes |
-  needs_followup | blocked` (packages/orchestrator-workflow/assets/templates/06-handoff.md:57-59#"accepted | accepted_with_notes | needs_followup | blocked").
+  needs_followup | blocked` (packages/orchestrator-workflow/assets/templates/06-handoff.md:59-61#"accepted | accepted_with_notes | needs_followup | blocked").
 
 SKILL.md's closing instruction: "replace the `TODO` in each
 `<!-- solution-acceptance: ... = TODO -->` marker with the chosen enum
 value. That marker line is the machine-readable signal the harness
 solution-acceptance run-gate reads, so leaving it as `TODO` keeps the run
-non-accepting (fail-closed)" (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:357#"non-accepting (fail-closed)."). A freshly-copied run is
+non-accepting (fail-closed)" (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:366#"non-accepting (fail-closed)."). A freshly-copied run is
 therefore non-accepting by construction; this contract shipped in 0.7.0
 (`CHANGELOG.md:#[0.7.0]`). Consumer is "the harness solution-acceptance
-run-gate" per packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:355#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
+run-gate" per packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:364#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
 does not assert the external gate's internals. Pinned by
 template-markers.test.ts:32-34#"/solution-acceptance:\s*acceptance-recommendation\s*=\s*" (regexes) and template-markers.test.ts:37-38#"const matches = [...handoffTemplate.matchAll(finalStatusRe)];" and template-markers.test.ts:43-44#"const matches = [...reviewTemplate.matchAll(recommendationRe)];" (one marker per
 template, default `TODO`).
@@ -288,7 +288,7 @@ replace the row when transferring findings, or delete it outright for a
 genuine zero-findings review (a header row with no data rows is valid;
 leaving the legend row next to real finding rows is also fine), and
 SKILL.md's step 7 carries the same one-sentence rule
-(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:241#"rows as the template never having been filled in. When"). The runtime half (grounding-mcp's reader treating a
+(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:246#"rows as the template never having been filled in. When"). The runtime half (grounding-mcp's reader treating a
 survived, unaccompanied placeholder row as an explicit format blocker,
 instead of silently reporting zero findings) is a lockstep sibling change in
 the grounding-mcp repo, out of scope for this bundle; this doc, like the
@@ -319,19 +319,25 @@ construction.
 ## The Knowledge Bundle handoff section (0.12.0): the loop-closer
 
 `06-handoff.md` gained an optional `## Knowledge Bundle` section
-(06-handoff.md:27-33#"- <!-- outcome and brief note, or omit this section when the repo carries no bundle -->"): "only applies when the repo carries a curated
+(06-handoff.md:27-35#"- <!-- outcome and brief note, or omit this section when the repo carries no bundle -->"): "only applies when the repo carries a curated
 knowledge bundle (each one configured via `knowledge` in `.ai/workflow/manifest.json`; default `docs/okf/`).
-Outcome: updated | not affected | follow-up filed." SKILL.md's step 9 (Hand off) instructs
+This is the safety net for bundle docs no task re-stamped: a task that
+changes a doc's sources re-stamps it itself. Outcome: updated | not affected |
+follow-up filed." evidence-and-probes.md step 9 (SKILL.md step 6, Hand off) instructs
 applying this guidance before filling the file: check whether the change
 touched any path a bundle doc claims as a `sources:` entry, and if so either
 update the affected docs (re-verify and re-stamp) or record a follow-up
 task, running the bundle validator when one is available (for example
-`okf-kit check`) (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:345#"validator when one is available (for example"). It is explicitly non-gating: "apply
+`okf-kit check`) (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:354#"validator when one is available (for example"). It is explicitly non-gating: "apply
 this optional guidance" and "Repos without a bundle are unaffected"
-(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:340#"guidance: when the repo carries a curated knowledge"; packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:346#"without a bundle are unaffected"). Since 0.24.0 (placement rule) step 9 also
+(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:348#"guidance: when the repo carries a curated knowledge"; packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:355#"without a bundle are unaffected"). Step 9 is a safety net for sources
+the task list missed: bundle docs whose sources a task changes are listed in
+that task's `relevant_docs` at slicing and re-stamped by that task, so the
+hand-off check covers only sources no task re-stamped
+(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:344-346#"hand-off check is a safety net for sources the task list missed. Before"). Since 0.24.0 (placement rule) step 9 also
 carries a one-sentence placement check for the orchestrator: before handing
 off, check that no org-, machine- or point-in-time-bound evidence was added
-to a reusable instruction file (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:351#"or the consuming workspace, with a pointer left behind."); the fix is to move the
+to a reusable instruction file (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:360#"or the consuming workspace, with a pointer left behind."); the fix is to move the
 evidence to the changelog, the run files, or the consuming workspace, with a
 pointer left behind. `reviewer.md`'s "Check, at minimum" list carries a
 matching check for the same thing on the implementer side of a run. This is

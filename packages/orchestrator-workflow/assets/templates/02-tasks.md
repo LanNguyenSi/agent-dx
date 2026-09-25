@@ -52,6 +52,9 @@ whenever one exists. -->
 **Relevant Docs**
 
 - <!-- doc, ADR, or run file the task relies on, or none -->
+- <!-- each knowledge bundle doc whose sources intersect the allowed changes,
+     marked `<doc path> (knowledge bundle; sources: <intersecting sources>)`
+     (contracts.md defines the marker) -->
 
 **Acceptance Criteria**
 

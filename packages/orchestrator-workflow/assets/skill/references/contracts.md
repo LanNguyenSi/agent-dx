@@ -332,6 +332,32 @@ values. The copied criterion records retain `id`, `required`, `text`,
 contract, preserve its original strings and the same 1:1 field mapping with
 the transformation under Contract selection above.
 
+Knowledge bundle docs in `relevant_docs`: for each configured knowledge bundle
+(`knowledge` in `.ai/workflow/manifest.json`; default `docs/okf/`), every
+bundle doc whose `sources` intersect the task's `allowed_changes` is listed in
+`relevant_docs` with the bundle doc marker, written as `<doc path> (knowledge
+bundle; sources: <intersecting sources>)`. The marker is the one annotation
+that identifies a bundle doc entry; the task slicer writes it, and the
+implementer and reviewer recognize bundle docs by it. Resolve each doc's
+`sources` against its bundle's configured `repoRoot` and compare them with the
+`allowed_changes` in that repository. A source intersects when
+it names a path the task may change, a directory containing one, or a path
+inside a directory the task may change; a source that is itself a directory
+matches every path beneath it. Compute the
+intersection with a bundle tool when one is available (for example `okf-kit
+docs-for <bundle dir> <path>... --repo-root <repo root>`), or read each bundle
+doc's `sources` frontmatter. A bundle tool is queried with concrete paths, so
+first expand each directory or glob entry of `allowed_changes` to the tracked
+files it covers (for example `git ls-files -- <entry>`); when reading the
+frontmatter instead, match directory and glob entries against each source
+directly. Each such doc is also listed in `allowed_changes`,
+so the implementer can re-stamp it. When `forbidden_changes` cover such a doc,
+the slicer leaves it out of `allowed_changes` and records an open question for
+the orchestrator instead. For a bundle whose docs live in a different
+repository than its sources (a workspace bundle), the re-stamp commit is one
+in the bundle's repository within the same task. This reuses `relevant_docs`;
+the contract shape is unchanged.
+
 ## Advisor output contract
 
 ```yaml

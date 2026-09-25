@@ -59,6 +59,11 @@ directory and the subagents.
    the task will change, enumerate every file and doc site that references it
    in `relevant_files` or `relevant_docs`, with an annotation for a site the
    task will not edit.
+   Every configured knowledge bundle doc whose `sources` intersect the task's
+   `allowed_changes` goes into `relevant_docs` with the bundle doc marker and
+   into `allowed_changes`, as contracts.md defines, so the task that changes a
+   source re-verifies and re-stamps its doc itself, in the same commit as the
+   source change, or in a later commit of the same task.
 5. **Validate tasks.** Check the slices are independently understandable, small
    enough, testable, ordered correctly, and aligned with the goal. Fix the
    slicing before any implementation starts. For an explicitly adopted v1 run,
@@ -336,11 +341,15 @@ directory and the subagents.
    subagent, if any) by the same complexity-and-risk judgment already used
    for the implementer and reviewer tiers, defaulting to the unsuffixed
    subagent (already effort `high`) when unsure.
-9. **Hand off.** Before filling `06-handoff.md`, apply this optional
+9. **Hand off.** Bundle docs whose sources a task changes are listed in its
+   `relevant_docs` at slicing (step 4) and re-stamped by that task, so this
+   hand-off check is a safety net for sources the task list missed. Before
+   filling `06-handoff.md`, apply this optional
    guidance: when the repo carries a curated knowledge bundle (each one
    configured via `knowledge` in `.ai/workflow/manifest.json`; default
    `docs/okf/`), check whether the change touches
-   paths any bundle doc claims as sources; if so, update the affected docs
+   paths any bundle doc claims as sources that no task re-stamped; if so,
+   update the affected docs
    (re-verify and re-stamp) or record a follow-up task, and run the bundle
    validator when one is available (for example `okf-kit check`). Repos
    without a bundle are unaffected. Then fill `06-handoff.md` and report to the
