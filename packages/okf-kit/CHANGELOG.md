@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `sources-fresh` and `citations-resolve` now resolve a frontmatter `sources` entry through the shared `resolveRepoPath` helper, like `sources-shape` and `docs-for`, so every rule agrees on what a source is. This changes check semantics for a source spelled with a leading slash (`/src/foo.ts`), which is repo-relative everywhere now: `sources-fresh` hands git the repo-relative path instead of the raw spelling, so such a source is tracked (and can go STALE) instead of reading as "untracked by git, staleness unknown", and under `--dirty-as-now` it matches its dirty path; `citations-resolve` resolves a citation matched by such a source to the file inside the repository instead of the filesystem root. `sources-fresh` also passes each source to `git log` as a `:(literal)` pathspec, so glob characters in a source path no longer match other files and a leading `:` is not read as pathspec magic.
+
 ## [0.15.0] - 2026-09-25
 
 ### Added

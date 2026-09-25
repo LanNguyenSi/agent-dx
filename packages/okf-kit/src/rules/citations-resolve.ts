@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { getValidSources } from "../util.js";
+import { getValidSources, resolveRepoPath } from "../util.js";
 import type {
   BundleDoc,
   Finding,
@@ -952,7 +952,12 @@ export function resolveCitation(
     (s) => s === citedPath || s.endsWith("/" + citedPath),
   );
   if (sourceMatches.length === 1) {
-    const candidate = path.resolve(root, sourceMatches[0]);
+    // `resolveRepoPath`, not `path.resolve`: a `sources` entry spelled with
+    // a leading `/` is repo-relative here exactly as in sources-shape,
+    // sources-fresh and docs-for (`path.resolve` would re-root it at the
+    // filesystem root). The outer `path.resolve` only keeps the returned
+    // path absolute, as every other resolution step below returns it.
+    const candidate = path.resolve(resolveRepoPath(root, sourceMatches[0]));
     if (isFile(candidate)) return { path: candidate };
   }
 

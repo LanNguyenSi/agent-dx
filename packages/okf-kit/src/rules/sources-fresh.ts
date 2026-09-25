@@ -9,6 +9,7 @@ import {
   getTimestampIdentity,
   getValidSources,
   hasUtcDesignator,
+  resolveRepoPath,
 } from "../util.js";
 import type {
   BundleContext,
@@ -86,12 +87,21 @@ export const sourcesFreshRule: Rule = {
     // `sources-fresh-future`'s doc-epoch lookup below -- see
     // `commitEpochWithDirtyAsNow`'s doc comment for why this lives in one
     // place instead of being reimplemented per rule.
-    const commitEpochFor = (source: string): number | null =>
-      commitEpochWithDirtyAsNow(ctx, git, repoRoot, source, () => {
-        const cached = commitEpochCache.get(source);
+    //
+    // `repoRelSource` is the entry already resolved by `repoRelativeSource`
+    // (the doc's own spelling, e.g. a leading `/`, is kept only for the
+    // finding text), so the existence check, the dirty-path match and the
+    // `git log` pathspec all name the same path.
+    const commitEpochFor = (repoRelSource: string): number | null =>
+      commitEpochWithDirtyAsNow(ctx, git, repoRoot, repoRelSource, () => {
+        const cached = commitEpochCache.get(repoRelSource);
         if (cached !== undefined) return cached;
-        const epoch = getLastCommitEpoch(git, repoRoot, source);
-        commitEpochCache.set(source, epoch);
+        const epoch = getLastCommitEpoch(
+          git,
+          repoRoot,
+          literalPathspec(repoRelSource),
+        );
+        commitEpochCache.set(repoRelSource, epoch);
         return epoch;
       });
 
@@ -184,9 +194,11 @@ export const sourcesFreshRule: Rule = {
       for (const source of sources) {
         // A missing path on disk is sources-shape's job to report; avoid a
         // duplicate/confusing finding here.
-        if (!fs.existsSync(path.join(repoRoot, source))) continue;
+        if (!fs.existsSync(resolveRepoPath(repoRoot, source))) continue;
 
-        const commitEpoch = commitEpochFor(source);
+        const commitEpoch = commitEpochFor(
+          repoRelativeSource(repoRoot, source),
+        );
         if (commitEpoch === null) {
           findings.push({
             ruleId: RULE_ID,
@@ -411,6 +423,33 @@ function toRepoRelDocPath(
     .relative(repoRoot, path.join(bundleDir, doc.relPath))
     .split(path.sep)
     .join("/");
+}
+
+/**
+ * A `sources` entry resolved the one way every rule resolves it
+ * (`resolveRepoPath`, so a leading `/` is repo-relative), then spelled
+ * relative to `repoRoot` with `/` separators: the form `git` gets as a
+ * pathspec (run with `repoRoot` as its cwd) and the dirty-path match
+ * compares against. Handing git the raw spelling instead made a
+ * leading-slash entry a filesystem-absolute pathspec outside the
+ * repository, so the file existed for the existence check but git could
+ * not track it. The repository root itself (`.`, `./`) comes back as `.`.
+ */
+function repoRelativeSource(repoRoot: string, source: string): string {
+  const rel = path.relative(repoRoot, resolveRepoPath(repoRoot, source));
+  return rel === "" ? "." : rel.split(path.sep).join("/");
+}
+
+/**
+ * `repoRelPath` as a `:(literal)` git pathspec, for a `sources` entry handed to
+ * `git log --`: an entry names one path, so glob characters in it
+ * (`a[b].ts`) must not match other files, and an entry that itself starts
+ * with `:` must not be read as pathspec magic. `--` already keeps it from
+ * being read as a revision or an option. Relative to git's cwd
+ * (`repoRoot`), like a plain pathspec.
+ */
+function literalPathspec(repoRelPath: string): string {
+  return `:(literal)${repoRelPath}`;
 }
 
 /**
