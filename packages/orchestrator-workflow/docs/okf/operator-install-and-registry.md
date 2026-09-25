@@ -3,7 +3,7 @@ type: module
 title: Operator install and target registry
 description: The operator-level home, manifest schema, locked write API, target registry, and the setup/apply/doctor/adopt commands built on top of it.
 tags: [operator, manifest, registry, lock, doctor, adopt, pin, cli]
-timestamp: 2026-09-25T11:31:02Z
+timestamp: 2026-09-25T11:46:54Z
 sources:
   - packages/orchestrator-workflow/src/operator-manifest.ts
   - packages/orchestrator-workflow/src/routing.ts
@@ -225,7 +225,7 @@ CLI layer, a usage error rather than an implicit precedence rule
 resolves the final stored pin the same way for both `init` and `apply`: a
 `string` sets it, `null` clears it, `undefined` (the default, no flag passed)
 carries the previous manifest's pin forward unchanged
-(init.ts:759-766#"normalizedPin === null ? undefined : (normalizedPin ?? previous?.pin);").
+(init.ts:762-769#"normalizedPin === null ? undefined : (normalizedPin ?? previous?.pin);").
 
 Registration happens even when local edits left some files `conflicted` (the
 apply itself still ran). The pin gate returns before the install is ever
@@ -367,7 +367,7 @@ version); `InitOptions.pin` is how a caller sets it: a `string` to set, `null`
 to clear, `undefined` to carry the previous value forward unchanged
 (init.ts:105-113#"pin?: string | null;"). A stored pin that is empty or
 whitespace-only is treated as no pin at all, both on write and on read back
-(init.ts:467-471#"? { pin: candidate.pin.trim() }"). `doctor`'s `versionLag`
+(init.ts:470-474#"? { pin: candidate.pin.trim() }"). `doctor`'s `versionLag`
 computation applies the pin rule precisely: a recorded pin suppresses
 `version-lag` only when the pin equals the repo's own *installed* version;
 that is the expected, deliberate-stay state. When the pin and the installed

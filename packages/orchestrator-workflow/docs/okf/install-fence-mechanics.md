@@ -3,7 +3,7 @@ type: module
 title: Install fence mechanics
 description: How orchestrator-workflow's installer writes, fences, updates, and removes its surface in a target repo.
 tags: [installer, marker-fence, manifest, agents-md, harness-adapters, uninstall]
-timestamp: 2026-09-25T11:31:02Z
+timestamp: 2026-09-25T11:46:54Z
 sources:
   - packages/orchestrator-workflow/src/init.ts
   - packages/orchestrator-workflow/src/codex.ts
@@ -30,17 +30,17 @@ sources:
 
 # Install fence mechanics
 
-`runInit` (src/init.ts:685#"export function runInit(options: InitOptions): Report {") is the single entry point for both a fresh install and a re-run; there is no separate "update" mode, idempotency and upgrade are properties of how each individual write is decided.
+`runInit` (src/init.ts:688#"export function runInit(options: InitOptions): Report {") is the single entry point for both a fresh install and a re-run; there is no separate "update" mode, idempotency and upgrade are properties of how each individual write is decided.
 
 ## What `init` writes
 
-- `.ai/workflow/templates/00-goal.md` through `06-handoff.md`, one per name from `listTemplateNames()` (init.ts:965#"readAsset(join("), plus an empty `.ai/runs/.gitkeep` (init.ts:968#".gitkeep"). See [run-state-lifecycle-and-markers.md](run-state-lifecycle-and-markers.md) for how these templates become run directories.
-- The marker-fenced `## Agentic Coding Workflow` section in `AGENTS.md`, installed whenever at least one harness is selected, regardless of which one (init.ts:970-977#"if (options.harnesses.length > 0) {"): Codex and opencode read `AGENTS.md` natively, Claude Code gets it via an import, so the section is written for any of the three. Since agent-tasks 613316c9 (`--harness none`, templates-only mode), an empty `options.harnesses` skips this write entirely: only `.ai/workflow/**` and `.ai/runs/.gitkeep` (the bullet above) are installed, and AGENTS.md is left untouched, never created from scratch either. See "`--harness none` (templates-only mode)" below.
+- `.ai/workflow/templates/00-goal.md` through `06-handoff.md`, one per name from `listTemplateNames()` (init.ts:968#"readAsset(join("), plus an empty `.ai/runs/.gitkeep` (init.ts:971#".gitkeep"). See [run-state-lifecycle-and-markers.md](run-state-lifecycle-and-markers.md) for how these templates become run directories.
+- The marker-fenced `## Agentic Coding Workflow` section in `AGENTS.md`, installed whenever at least one harness is selected, regardless of which one (init.ts:973-980#"if (options.harnesses.length > 0) {"): Codex and opencode read `AGENTS.md` natively, Claude Code gets it via an import, so the section is written for any of the three. Since agent-tasks 613316c9 (`--harness none`, templates-only mode), an empty `options.harnesses` skips this write entirely: only `.ai/workflow/**` and `.ai/runs/.gitkeep` (the bullet above) are installed, and AGENTS.md is left untouched, never created from scratch either. See "`--harness none` (templates-only mode)" below.
 - Per selected harness (`options.harnesses`), and per role `rolesForProfile(profile)` selects for that harness (0.15.0: `full` installs `{explorer,task-slicer,implementer,reviewer}`, `minimal` installs only `{implementer,reviewer}`; since 0.21.0 `full` also installs `advisor` (`{explorer,task-slicer,implementer,reviewer,advisor}`), the fifth role added purely by extending `ROLES`/`MINIMAL_PROFILE_ROLES` in `src/models.ts`, `rolesForProfile` itself unchanged, `minimal` still filters against the same two-role `MINIMAL_PROFILE_ROLES` set, so advisor is dropped from `minimal` for free, the same way explorer/task-slicer already are; see [model-preselection.md](model-preselection.md) and the manifest's `profile` field below):
-  - **claude**: `.claude/skills/orchestrator-workflow/SKILL.md` and `.claude/agents/{role}.md` for each installed role (init.ts:1048-1052#"options.models[role],"), plus the `CLAUDE.md` import (init.ts:1070#"ensureClaudeImport(report, join(targetDir,").
+  - **claude**: `.claude/skills/orchestrator-workflow/SKILL.md` and `.claude/agents/{role}.md` for each installed role (init.ts:1051-1055#"options.models[role],"), plus the `CLAUDE.md` import (init.ts:1073#"ensureClaudeImport(report, join(targetDir,").
   - **codex**: `.agents/skills/orchestrator-workflow/SKILL.md` plus `.codex/agents/{role}.toml` for each installed role. The TOML contains the exact routed model/effort and canonical role instructions. Explorer/advisor request a read-only sandbox; reviewer inherits the caller's sandbox and prohibits source edits through its prompt.
-  - **opencode**: `.opencode/skills/orchestrator-workflow/SKILL.md` and `.opencode/agents/{role}.md` for each installed role (init.ts:1119-1130#"composeOpencodeAgent(role, modelValue, defaultEffortLine),").
-- `.ai/workflow/manifest.json`, written last, only when the computed desired state differs from what is recorded (init.ts:1176-1227#"${JSON.stringify(manifest, null, 2)}\n").
+  - **opencode**: `.opencode/skills/orchestrator-workflow/SKILL.md` and `.opencode/agents/{role}.md` for each installed role (init.ts:1122-1133#"composeOpencodeAgent(role, modelValue, defaultEffortLine),").
+- `.ai/workflow/manifest.json`, written last, only when the computed desired state differs from what is recorded (init.ts:1179-1230#"${JSON.stringify(manifest, null, 2)}\n").
 
 Since 0.22.0, every **claude** and **opencode** default (unsuffixed) file
 above carries a pinned default effort baked in unconditionally
@@ -50,7 +50,7 @@ default effort (0.22.0)" subsection for the full rule. Separately, since
 0.19.0, when `options.tiers` is on, the **claude** and **opencode**
 bullets above each additionally write one `.{claude,opencode}/agents/<role>-<tier>.md`
 per non-default tier the role has, right after that role's base file
-(init.ts:1059-1061#"composeClaudeAgentVariant("` claude, init.ts:1137-1164#"effortLine," opencode); see
+(init.ts:1062-1064#"composeClaudeAgentVariant("` claude, init.ts:1140-1167#"effortLine," opencode); see
 [model-preselection.md](model-preselection.md)'s "Effort tiers" section for
 the full composition and family-dependent frontmatter rules. Codex follows
 the same role/profile and non-default-tier selection, writing `.toml` files;
@@ -58,7 +58,7 @@ its unsuffixed file always uses the role's default-tier routing leaf.
 
 The opencode side of that rendering carries one extra guard since
 fix-round-1 (review finding M1), hardened again in fix-round-2 (review
-finding R2-L1): before writing an opencode variant, `init.ts:1139-1148#"// (e.g. a low/medium tier on a Claude-family model, or any"` checks
+finding R2-L1): before writing an opencode variant, `init.ts:1142-1151#"// (e.g. a low/medium tier on a Claude-family model, or any"` checks
 whether the variant's class model resolved at all (`variantModelValue !==
 undefined`) and skips the `installKitFile` call (and the manifest ledger
 entry) entirely when it did not resolve, rather than writing a file that
@@ -68,13 +68,13 @@ written silently with no warning anywhere. Fix-round-2 simplified this
 check and its comment: the original fix-round-1 form computed the effort
 line first and gated on `variantModelValue === undefined && effortLine ===
 undefined`, but `opencodeEffortLine` (renamed from `opencodeVariantEffortLine`
-in 0.22.0 since the function now also serves the default file, `init.ts:624-644#"variant: max"`)
+in 0.22.0 since the function now also serves the default file, `init.ts:627-647#"variant: max"`)
 always returns `undefined` when its own `modelValue` argument is `undefined` (it
 short-circuits on that first), so the second clause never added any
 filtering the first did not already provide, an equivalence the reviewer
-proved rather than assumed. `init.ts:1154-1164#"effortLine,"` now computes the effort line only
+proved rather than assumed. `init.ts:1157-1167#"effortLine,"` now computes the effort line only
 *after* the resolved-model check passes, and passes it into
-`composeOpencodeAgentVariant` (`init.ts:660-676#"frontmatter.push(effortLine);"`) as a fourth parameter
+`composeOpencodeAgentVariant` (`init.ts:663-679#"frontmatter.push(effortLine);"`) as a fourth parameter
 instead of that function recomputing it internally, not because the
 composer needs `effortLine` to decide whether to write the file (it does
 not decide that at all; the skip check above depends only on
@@ -103,14 +103,14 @@ docs: `--tiers` gained a commander-negatable counterpart, `--no-tiers`
 (`cli.ts:194-196#"explicitly turn effort-tier subagent variants off, overriding a previously installed --tiers value"`), so a re-run can now explicitly ask for the transition
 instead of only ever being able to turn tiers on. `runInit` now detects the
 transition the same way it detects a `full` -> `minimal` profile downgrade,
-via a dedicated block (`init.ts:850-860#"now untracked after tiers were turned off"`, guarded by
+via a dedicated block (`init.ts:853-863#"now untracked after tiers were turned off"`, guarded by
 `previous && previous.tiers && !tiers`) that, for every role the *current*
 profile still installs, pushes one `report.notes` entry per non-default
 tier's `<role>-<tier>.md` path that is actually present in
 `previous.files`, naming it and how to remove it. The profile-downgrade
 note loop itself also gained a fix-round-1 extension (review finding M3): a
 dropped role's variant files get notes too, not just its base file
-(`init.ts:825-834#"variantPath}: now untracked after the full"`, the sub-loop inside the existing per-dropped-role
+(`init.ts:828-837#"variantPath}: now untracked after the full"`, the sub-loop inside the existing per-dropped-role
 loop); before the fix, dropping a role while tiers were on silently
 orphaned that role's variant files with no note at all, since the original
 downgrade-note loop only knew about `<role>.md`.
@@ -122,7 +122,7 @@ loops decide whether a given path is actually a leftover: neither the
 `options.harnesses` (both note loops' original form) is sufficient, since
 neither one checks whether the previous install actually *wrote* that
 specific file. Both loops now push a note for a candidate path only when
-that exact relative path is a key of `previous.files` (`init.ts:783#"const previousHarnessDirs = (previous?.harnesses ?? [])"`
+that exact relative path is a key of `previous.files` (`init.ts:786#"const previousHarnessDirs = (previous?.harnesses ?? [])"`
 computes `previousHarnessDirs` from `previous.harnesses`, not
 `options.harnesses`, as the shared harness-set input to both loops), so
 `ROLE_TIERS[role]` is now used only to enumerate the *candidate* tier
@@ -169,10 +169,10 @@ any list where `none` is present alongside another entry
 With `harnesses: []`, `runInit` writes only the two bullets already covered
 above under "What `init` writes" that do not live inside a per-harness
 branch: the seven run templates and `.ai/runs/.gitkeep`, plus the manifest
-itself (`harnesses: []`, sorted same as any other value, init.ts:1177#"harnesses: [...options.harnesses].sort(),"). Every per-harness branch
+itself (`harnesses: []`, sorted same as any other value, init.ts:1180#"harnesses: [...options.harnesses].sort(),"). Every per-harness branch
 (`options.harnesses.includes("claude"/"codex"/"opencode")`) and the
 AGENTS.md marker-section write are gated on `options.harnesses.length > 0`
-(init.ts:970-977#"if (options.harnesses.length > 0) {", covered above), so
+(init.ts:973-980#"if (options.harnesses.length > 0) {", covered above), so
 none of them run: no `AGENTS.md`, no `CLAUDE.md`, no `.claude`/`.agents`/`.opencode`
 directory.
 
@@ -186,7 +186,7 @@ nobody asked for: `resolveInitInputs` guards this on two flags together, a
 `previous.harnessesRecordedEmpty` (cli-inputs.ts:292#"previous.harnessesRecordedEmpty"),
 set from whether the raw manifest JSON's `harnesses` field was itself an
 array AND that raw array had zero elements
-(`init.ts:387-392#"rawHarnessesIsArray && rawHarnesses.length === 0;"`):
+(`init.ts:390-395#"rawHarnessesIsArray && rawHarnesses.length === 0;"`):
 a missing/malformed field also sanitizes to `harnesses.length === 0`, and so
 does an array whose every entry fails the known-harness filter (e.g.
 `["cursor"]`, all-unknown names) -- both must fall through to detection
@@ -294,12 +294,12 @@ Net contract: content between the markers is kit-owned and overwritten on every 
 
 ## CLAUDE.md / AGENTS.md relationship
 
-Claude Code reads `CLAUDE.md`, not `AGENTS.md` (writers.ts:119-121#"* imports AGENTS.md so the policy section is loaded there too."). `ensureClaudeImport` (writers.ts:123-144#"${base}\n\n${CLAUDE_IMPORT_LINE}\n"), called only for the `claude` harness (init.ts:1070#"ensureClaudeImport(report, join(targetDir,"):
+Claude Code reads `CLAUDE.md`, not `AGENTS.md` (writers.ts:119-121#"* imports AGENTS.md so the policy section is loaded there too."). `ensureClaudeImport` (writers.ts:123-144#"${base}\n\n${CLAUDE_IMPORT_LINE}\n"), called only for the `claude` harness (init.ts:1073#"ensureClaudeImport(report, join(targetDir,"):
 
 - No `CLAUDE.md`: created verbatim as `CLAUDE_MD_BOILERPLATE`, a heading plus "Project agent instructions live in AGENTS.md." plus the `@AGENTS.md` import line (writers.ts:117#"# CLAUDE.md\n\nProject agent instructions live in AGENTS.md.\n\n${CLAUDE_IMPORT_LINE}\n").
 - `CLAUDE.md` exists: if any line's whitespace-split tokens already include the literal `@AGENTS.md` (writers.ts:130-134#".some((line) => line.split(/\s+/).includes(CLAUDE_IMPORT_LINE));"), nothing is written, an inline mention like `"Rules: see @AGENTS.md first."` already counts (init.test.ts:251-255#"expect(claudeMd).toBe("). Otherwise a blank line plus `@AGENTS.md` is appended once (writers.ts:139-144#"${base}\n\n${CLAUDE_IMPORT_LINE}\n"); a second `init` run does not duplicate it (init.test.ts:238-248#"expect(importCount).toBe(1);").
 
-Codex and opencode need no such import, both read `AGENTS.md` natively (README.md:264#"natively. Subagents get").
+Codex and opencode need no such import, both read `AGENTS.md` natively (README.md:265#"natively. Subagents get").
 
 ## manifest.json: shape and consumers
 
@@ -322,18 +322,18 @@ effective repo and operator routing as part of divergence, alongside files,
 version, pin, profile, tiers, and legacy models. Per-file unreadability remains
 folded into drift rather than aborting the whole target check.
 
-- `readInstalledManifest` (init.ts:369-471#"? { pin: candidate.pin.trim() }") is the sole parser (a stored kit-version pin is trimmed on read, an empty one dropped, and its content is otherwise left to the consuming command to validate) and degrades every field independently rather than failing whole: unknown `kit` yields `undefined` (init.ts:380#"if (candidate.kit !== SKILL_NAME) return undefined;"); non-array/invalid `harnesses` entries dropped (init.ts:392-394#"(HARNESSES as string[]).includes(value as string),"; since round 3/F1, the raw array's own length -- before this filter runs -- is what `harnessesRecordedEmpty` is computed from, see above); invalid model ids dropped per role (init.ts:396-405#"// Invalid model ids are dropped; the role falls back to defaults.", init.test.ts:282-323#"expect(manifest.models.implementer).toBe(" spawns the CLI against a hand-corrupted manifest and asserts it survives); a missing `profile` field (a pre-0.15.0 manifest, which always installed every role) degrades to `"full"` rather than `"minimal"` (init.ts:421-427#": DEFAULT_PROFILE;", init.test.ts:777-806#"should exist under the full-profile fallback" pins this fallback end-to-end against a hand-written manifest so a later re-run cannot silently narrow the installed roles); since 0.19.0, a missing `tiers` field (a pre-0.19.0 manifest, which never rendered variant files) degrades to `false` the same way (init.ts:429-433#"const tiers = typeof candidate.tiers ===", init.test.ts:1463-1508#"explorer.md has no frontmatter block"); `files` keys are filtered through `isContainedRelativePath` (init.ts:416#"&& isContainedRelativePath(key)) {") inside that same pass; a stored `pin` that is an empty or whitespace-only string degrades to no recorded pin the same per-field way; a `knowledge` list (init.ts:443#"const knowledge = parseKnowledgeBundles(candidate);") keeps only the entries `checkKnowledgeEntry` accepts, in their normalised spelling, and drops the rest (init.ts:358#"result.push(checked.bundle);"), while a missing or non-array value yields no `knowledge` field; `doctor` reports each dropped entry, and the read also records each problem (index and reason) in the never-written `knowledgeProblems` field (init.ts:444#"const knowledgeProblems = knowledgeEntryProblems(candidate.knowledge);"), which a re-install that carries the field forward and rewrites the manifest prints as a report note (init.ts:1216#"dropped from the rewritten manifest"). A `path` or `repoRoot` containing a backslash is one of the rejected spellings (init.ts:245#"contains a backslash"), since POSIX normalisation would not see a `..\` escape. `runInit` replaces the field only from its own `knowledge` option and otherwise carries `previous.knowledge` forward unchanged (init.ts:743#": previous?.knowledge;").
-- `init.ts` uses it as the upgrade baseline (`previous`, init.ts:698#"readInstalledManifest(targetDir)").
-- `cli.ts:253-254#", tiers: ${previous.tiers})"` prints "Found existing install" (now including the profile and, since fix-round-1, the `tiers` value too); this print stays in `cli.ts` itself, while the seeding of `harnesses`/`profile`/`models`/`tiers` from that same `previous` manifest was extracted into `resolveInitInputs` (`cli-inputs.ts`, agent-dx task T-003) so a later `apply --target` command can reuse it without duplicating the logic: `cli-inputs.ts:303-342#"fallback.length > 0"` seeds default `harnesses`, `cli-inputs.ts:352#"if (opts.profile) {"` seeds `profile`, `cli-inputs.ts:360#"...DEFAULT_MODELS,"` seeds `models`, and (since 0.19.0) `cli-inputs.ts:386#"const tiers = opts.tiers ?? previous?.tiers ?? false;"` seeds `tiers`, since fix-round-1 via `opts.tiers ?? previous?.tiers ?? false`, the same override-vs-persist rule for all four, still no interactive branch for `tiers` unlike the other three, which is why an `implementer=haiku` choice made once survives an unflagged second `init` (init.test.ts:1161-1180#"model: haiku"). A `full` -> `minimal` downgrade (`previous.profile === "full" && profile !== previous.profile`, init.ts:814-816#"${relativePath}: now untracked after the full -> ${profile} profile downgrade; run", the block grew since fix-round-1 to also note dropped roles' tier-variant files) additionally pushes a note onto `report.notes` naming the now-untracked `task-slicer.md`/`explorer.md` files and how to remove them (init.test.ts:816-847#"expect(existsSync(join(target, claudeExplorer))).toBe(true);" covers the note; init.test.ts:850-869#"expect(again.notes).toEqual([]);" covers its absence on a repeated no-op re-run; init.test.ts:872-887#"task-slicer.md/explorer.md are no longer in the manifest's file" covers that a later `uninstall` still completes without error; init.test.ts:898-935#"The variant files themselves are untouched, only untracked, same as" covers the fix-round-1 tier-variant-file extension specifically, pinning the note count). Since 0.21.0, `droppedRoles` (`rolesForProfile(previous.profile).filter((role) => !rolesForProfile(profile).includes(role))`, init.ts:804-805#"!rolesForProfile(profile).includes(role),") is computed generically from the two profiles' resolved role sets rather than a hardcoded pair, so a `full` -> `minimal` downgrade with the advisor role installed now also names `advisor.md` (and, with tiers on, `advisor-xhigh.md`) with no code change of its own required: the note counts in `init.test.ts:898-921#"expect(report.notes.length).toBe(8);"` moved from 6 to 8 for the base-plus-tiers case (explorer/task-slicer contribute 1+2 notes each, advisor contributes 1+1 since its only non-default tier is `xhigh`) purely from `ROLES` growing by one in `src/models.ts`. Since fix-round-1, `tiers` now has an analogous downgrade-note code path of its own (init.ts:850-860#"now untracked after tiers were turned off"); before the fix it had none. Since fix-round-2 (review finding R2-M2), both of these note code paths, and the tier-variant sub-loop inside the profile-downgrade one (init.ts:825-834#"variantPath}: now untracked after the full", review finding M3's original addition), are ledger-driven rather than enumeration-driven: see "What `init` writes" above for the full mechanics and why the prior `ROLE_TIERS`/`options.harnesses`-driven form produced both phantom and missing notes.
+- `readInstalledManifest` (init.ts:372-474#"? { pin: candidate.pin.trim() }") is the sole parser (a stored kit-version pin is trimmed on read, an empty one dropped, and its content is otherwise left to the consuming command to validate) and degrades every field independently rather than failing whole: unknown `kit` yields `undefined` (init.ts:383#"if (candidate.kit !== SKILL_NAME) return undefined;"); non-array/invalid `harnesses` entries dropped (init.ts:395-397#"(HARNESSES as string[]).includes(value as string),"; since round 3/F1, the raw array's own length -- before this filter runs -- is what `harnessesRecordedEmpty` is computed from, see above); invalid model ids dropped per role (init.ts:399-408#"// Invalid model ids are dropped; the role falls back to defaults.", init.test.ts:282-323#"expect(manifest.models.implementer).toBe(" spawns the CLI against a hand-corrupted manifest and asserts it survives); a missing `profile` field (a pre-0.15.0 manifest, which always installed every role) degrades to `"full"` rather than `"minimal"` (init.ts:424-430#": DEFAULT_PROFILE;", init.test.ts:777-806#"should exist under the full-profile fallback" pins this fallback end-to-end against a hand-written manifest so a later re-run cannot silently narrow the installed roles); since 0.19.0, a missing `tiers` field (a pre-0.19.0 manifest, which never rendered variant files) degrades to `false` the same way (init.ts:432-436#"const tiers = typeof candidate.tiers ===", init.test.ts:1463-1508#"explorer.md has no frontmatter block"); `files` keys are filtered through `isContainedRelativePath` (init.ts:419#"&& isContainedRelativePath(key)) {") inside that same pass; a stored `pin` that is an empty or whitespace-only string degrades to no recorded pin the same per-field way; a `knowledge` list (init.ts:446#"const knowledge = parseKnowledgeBundles(candidate);") keeps only the entries `checkKnowledgeEntry` accepts, in their normalised spelling, and drops the rest (init.ts:361#"result.push(checked.bundle);"), while a missing or non-array value yields no `knowledge` field; `doctor` reports each dropped entry, and the read also records each problem (index and reason) in the never-written `knowledgeProblems` field (init.ts:447#"const knowledgeProblems = knowledgeEntryProblems(candidate.knowledge);"), which a re-install that carries the field forward and rewrites the manifest prints as a report note (init.ts:1219#"dropped from the rewritten manifest"). A `path` or `repoRoot` containing a backslash is one of the rejected spellings (init.ts:247#"contains a backslash"), since POSIX normalisation would not see a `..\` escape. So is any value starting with a Windows drive letter that is not already rejected as absolute (init.ts:251#"is a Windows drive path"), since Windows resolves the drive-relative `C:x` or `C:..` against that drive's current directory, outside the worktree. `runInit` replaces the field only from its own `knowledge` option and otherwise carries `previous.knowledge` forward unchanged (init.ts:746#": previous?.knowledge;").
+- `init.ts` uses it as the upgrade baseline (`previous`, init.ts:701#"readInstalledManifest(targetDir)").
+- `cli.ts:253-254#", tiers: ${previous.tiers})"` prints "Found existing install" (now including the profile and, since fix-round-1, the `tiers` value too); this print stays in `cli.ts` itself, while the seeding of `harnesses`/`profile`/`models`/`tiers` from that same `previous` manifest was extracted into `resolveInitInputs` (`cli-inputs.ts`, agent-dx task T-003) so a later `apply --target` command can reuse it without duplicating the logic: `cli-inputs.ts:303-342#"fallback.length > 0"` seeds default `harnesses`, `cli-inputs.ts:352#"if (opts.profile) {"` seeds `profile`, `cli-inputs.ts:360#"...DEFAULT_MODELS,"` seeds `models`, and (since 0.19.0) `cli-inputs.ts:386#"const tiers = opts.tiers ?? previous?.tiers ?? false;"` seeds `tiers`, since fix-round-1 via `opts.tiers ?? previous?.tiers ?? false`, the same override-vs-persist rule for all four, still no interactive branch for `tiers` unlike the other three, which is why an `implementer=haiku` choice made once survives an unflagged second `init` (init.test.ts:1161-1180#"model: haiku"). A `full` -> `minimal` downgrade (`previous.profile === "full" && profile !== previous.profile`, init.ts:817-819#"${relativePath}: now untracked after the full -> ${profile} profile downgrade; run", the block grew since fix-round-1 to also note dropped roles' tier-variant files) additionally pushes a note onto `report.notes` naming the now-untracked `task-slicer.md`/`explorer.md` files and how to remove them (init.test.ts:816-847#"expect(existsSync(join(target, claudeExplorer))).toBe(true);" covers the note; init.test.ts:850-869#"expect(again.notes).toEqual([]);" covers its absence on a repeated no-op re-run; init.test.ts:872-887#"task-slicer.md/explorer.md are no longer in the manifest's file" covers that a later `uninstall` still completes without error; init.test.ts:898-935#"The variant files themselves are untouched, only untracked, same as" covers the fix-round-1 tier-variant-file extension specifically, pinning the note count). Since 0.21.0, `droppedRoles` (`rolesForProfile(previous.profile).filter((role) => !rolesForProfile(profile).includes(role))`, init.ts:807-808#"!rolesForProfile(profile).includes(role),") is computed generically from the two profiles' resolved role sets rather than a hardcoded pair, so a `full` -> `minimal` downgrade with the advisor role installed now also names `advisor.md` (and, with tiers on, `advisor-xhigh.md`) with no code change of its own required: the note counts in `init.test.ts:898-921#"expect(report.notes.length).toBe(8);"` moved from 6 to 8 for the base-plus-tiers case (explorer/task-slicer contribute 1+2 notes each, advisor contributes 1+1 since its only non-default tier is `xhigh`) purely from `ROLES` growing by one in `src/models.ts`. Since fix-round-1, `tiers` now has an analogous downgrade-note code path of its own (init.ts:853-863#"now untracked after tiers were turned off"); before the fix it had none. Since fix-round-2 (review finding R2-M2), both of these note code paths, and the tier-variant sub-loop inside the profile-downgrade one (init.ts:828-837#"variantPath}: now untracked after the full", review finding M3's original addition), are ledger-driven rather than enumeration-driven: see "What `init` writes" above for the full mechanics and why the prior `ROLE_TIERS`/`options.harnesses`-driven form produced both phantom and missing notes.
 
 ## Re-install / upgrade semantics
 
-`installKitFile` (init.ts:938-958#"installFile(report, path, content, { force });") drives every kit-owned file (templates, skills, per-role agent files, and, since 0.19.0, per-role-per-tier variant files, since the tier-rendering loops call the exact same closure):
+`installKitFile` (init.ts:941-961#"installFile(report, path, content, { force });") drives every kit-owned file (templates, skills, per-role agent files, and, since 0.19.0, per-role-per-tier variant files, since the tier-rendering loops call the exact same closure):
 
 - Path doesn't exist: write, record hash.
-- Path exists and its current sha256 matches the hash recorded in the previous manifest ("unedited"): overwritten with the newly shipped content even without `--force` (init.ts:946-951#"installedFiles[relativePath] = sha256(content);"), this is how a kit version bump propagates (init.test.ts:259-279#"expect(readFileSync(templatePath,").
-- Path exists and differs from shipped, with either a hash mismatch or no recorded hash: kept as-is and reported `conflicted` unless `--force`; the previous hash record is preserved rather than dropped (init.ts:952-954#"installedFiles[relativePath] = recorded;"), so a later upgrade still recognizes the file as edited (init.test.ts:326-341#"createHash(").
-- A plain second run with no drift is a byte-for-byte no-op across every file, including the manifest, which is only rewritten when the computed `desired` object differs from `previous` (init.ts:1176-1227#"${JSON.stringify(manifest, null, 2)}\n", init.test.ts:133-146#"expect(report.updated).toEqual([]);"); since 0.19.0 this no-op also covers a `tiers: true` re-run, `test/init.test.ts:2026-2037#"expect([...after.keys()].sort()).toEqual([...before.keys()].sort());"` pins a second `tiers: true` run changing no file.
+- Path exists and its current sha256 matches the hash recorded in the previous manifest ("unedited"): overwritten with the newly shipped content even without `--force` (init.ts:949-954#"installedFiles[relativePath] = sha256(content);"), this is how a kit version bump propagates (init.test.ts:259-279#"expect(readFileSync(templatePath,").
+- Path exists and differs from shipped, with either a hash mismatch or no recorded hash: kept as-is and reported `conflicted` unless `--force`; the previous hash record is preserved rather than dropped (init.ts:955-957#"installedFiles[relativePath] = recorded;"), so a later upgrade still recognizes the file as edited (init.test.ts:326-341#"createHash(").
+- A plain second run with no drift is a byte-for-byte no-op across every file, including the manifest, which is only rewritten when the computed `desired` object differs from `previous` (init.ts:1179-1230#"${JSON.stringify(manifest, null, 2)}\n", init.test.ts:133-146#"expect(report.updated).toEqual([]);"); since 0.19.0 this no-op also covers a `tiers: true` re-run, `test/init.test.ts:2026-2037#"expect([...after.keys()].sort()).toEqual([...before.keys()].sort());"` pins a second `tiers: true` run changing no file.
 - 0.15.0: a `full` -> `minimal` downgrade is the one case where a plain re-run is *not* silent, see the manifest.json section above for the leftover-files note it prints. Since fix-round-1, `tiers: true` -> `tiers: false` is the same kind of not-silent case, via its own dedicated note block rather than by accreting onto the profile-downgrade one; before the fix it was a structurally identical leftover-files case that printed nothing at all (review finding M2, see "What `init` writes" above).
 
 ## Uninstall: exact removal surface

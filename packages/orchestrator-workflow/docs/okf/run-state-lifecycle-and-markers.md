@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-09-25T11:31:02Z
+timestamp: 2026-09-25T11:46:54Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -454,7 +454,7 @@ each, and ends by pointing to the skill's Run mode section. The Run state
 list of the policy section names the marker beside the keyed run-base marker
 (packages/orchestrator-workflow/assets/agents-md-section.md:247#"marker per repository for multi-repo runs").
 The README has a short "Run modes" section
-(packages/orchestrator-workflow/README.md:576#"## Run modes")
+(packages/orchestrator-workflow/README.md:577#"## Run modes")
 that links the reference. Both sites are pinned against restating a
 definition, a file list, the switch rule or the default's wording by the last
 block of `test/docs-consistency.test.ts`, which imports the constants of
