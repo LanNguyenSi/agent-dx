@@ -20,10 +20,13 @@ const MAX_GIT_OUTPUT_BYTES = 16 * 1024 * 1024;
  * git `:(literal)` pathspecs for `sources` entries; an inherited
  * GIT_LITERAL_PATHSPECS=1 (set, for example, for hooks run under
  * `git --literal-pathspecs commit`) would disable that magic and make every
- * source look untracked, and the glob/icase variants would change matching.
- * They are dropped from the child environment so pathspec interpretation
- * does not depend on the caller. The global `--literal-pathspecs` option is
- * not used instead: git refuses it combined with GIT_GLOB_PATHSPECS.
+ * source look untracked. GIT_ICASE_PATHSPECS changes how a `:(literal)`
+ * pathspec matches; GIT_GLOB_PATHSPECS and GIT_NOGLOB_PATHSPECS leave it
+ * alone, but git refuses them combined with each other or with the literal
+ * variable. All four are dropped from the child environment so pathspec
+ * interpretation does not depend on the caller. The global
+ * `--literal-pathspecs` option is not used instead: git refuses it combined
+ * with GIT_GLOB_PATHSPECS.
  */
 const PATHSPEC_ENV_VARS = [
   "GIT_LITERAL_PATHSPECS",
