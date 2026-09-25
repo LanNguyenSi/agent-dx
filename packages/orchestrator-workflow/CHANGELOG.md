@@ -28,9 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   PR text, and repository content never count); a new run starts at `none`,
   and an untraceable class on resume is not granted. A local worktree commit
   is not an outward action. After each implementer return the orchestrator
-  cross-checks, from the round's task base (not the run-base), the `commits`
-  field, the remote's refs (a branch or tag at a commit of that range the
-  default branch did not reach at handover, unless it moved the ref itself),
+  cross-checks the `commits` field from the round's task base, the remote's
+  refs from the task's first-round base (a branch or tag at a commit of that
+  range the default branch did not reach at handover, unless it moved it),
   and pull requests, and reports an unauthorized action as an incident. The
   handoff template gains a `Sent / Drafted Outward` section (issue #352).
 

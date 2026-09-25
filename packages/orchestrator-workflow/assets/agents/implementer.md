@@ -197,7 +197,8 @@ Rules:
   evidence. When the task produced no commit, return `commits: []` rather
   than omitting the field.
 - Populate a non-empty `commits` field by pasting `git log --reverse
-  --format=%H <base>..HEAD`; never type or hand-complete commit shas.
+  --format=%H <base>..HEAD`, where `<base>` is the base your task assignment
+  names; never type or hand-complete commit shas.
 - Before committing, when slop-detector is available run `slop-detector
   check <changed file> [<changed file> ...] --pack review-slop` over every
   changed file, and `git log -1 --format=%B | slop-detector check

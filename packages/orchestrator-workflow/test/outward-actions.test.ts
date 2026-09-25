@@ -465,10 +465,17 @@ describe("orchestrator mechanical cross-check ships in evidence-and-probes.md", 
     );
   });
 
-  it("starts both comparisons from the round's task base, never from the run-base", () => {
+  it("starts the commits comparison from the round's task base, named in the assignment", () => {
     pin(
       evidenceAndProbes,
-      "Both comparisons below start from the round's task base, the same `<base>` this round's assignment handed the implementer for its `commits` field (the sha the task branch started from on the task's first round, or the previous round's reviewed head on a later round), never from the run-base, whose range also holds earlier rounds, earlier tasks, and upstream work merged after it.",
+      "The `commits` comparison starts from the round's task base, which the orchestrator names in this round's assignment as the implementer's `<base>` (the sha the task branch started from on the task's first round, or the previous round's reviewed head on a later round);",
+    );
+  });
+
+  it("starts the ref check from the task's first-round base, never from the run-base", () => {
+    pin(
+      evidenceAndProbes,
+      "the ref check starts from the task's first-round base, so a ref at an earlier round's commit stays covered. Neither starts from the run-base, whose range also holds earlier tasks and upstream work merged after it.",
     );
   });
 
@@ -495,28 +502,28 @@ describe("orchestrator mechanical cross-check ships in evidence-and-probes.md", 
   it("flags a remote branch or tag at a sha of the round's range the recorded default branch does not reach, unless the orchestrator moved it", () => {
     pin(
       evidenceAndProbes,
-      "List the remote's refs (for example `git ls-remote <remote>`, or the host's equivalent) and flag every branch or tag whose sha, peeled for an annotated tag, lies in the `<task-base>..<task-branch>` range and is not reachable from the remote default branch's sha recorded at handover (for example, every sha that `git rev-list <task-branch> ^<task-base> ^<recorded-default-sha>` lists), unless the orchestrator moved that ref to that sha itself (its own push, or a host-side merge it performed).",
+      "List the remote's refs (for example `git ls-remote <remote>`, or the host's equivalent) and flag every branch or tag whose sha, peeled for an annotated tag, lies in the `<first-round-base>..<task-branch>` range and is not reachable from the remote default branch's sha recorded at this round's handover (for example, every sha that `git rev-list <task-branch> ^<first-round-base> ^<recorded-default-sha>` lists), unless the orchestrator moved that ref to that sha itself (its own push, or a host-side merge it performed).",
     );
   });
 
   it("judges reachability from the recorded sha, so a push to the default branch is still flagged", () => {
     pin(
       evidenceAndProbes,
-      "Reachability is judged from the recorded sha rather than the default branch's current one, so a push of the round's commits to the default branch is still flagged, while upstream work the task branch took in from the recorded default branch is not.",
+      "Reachability is judged from the recorded sha rather than the default branch's current one, so a push of the task's commits to the default branch is still flagged, while upstream work the task branch took in from the recorded default branch is not.",
     );
   });
 
   it("takes in upstream work only up to the recorded sha, since later upstream commits are flagged", () => {
     pin(
       evidenceAndProbes,
-      "A round therefore takes in upstream work only up to its recorded sha: a ref at a commit that reached the default branch after the handover is flagged like one at the round's own commits.",
+      "A round therefore takes in upstream work only up to its recorded sha: a ref at a commit that reached the default branch after the handover is flagged like one at the task's own commits.",
     );
   });
 
   it("errs toward a flag when no default-branch sha was recorded", () => {
     pin(
       evidenceAndProbes,
-      "Without a recorded sha, judge reachability from the task base itself, which errs toward a flag.",
+      "Without a recorded sha, judge reachability from the first-round base itself, which errs toward a flag.",
     );
   });
 
@@ -588,5 +595,14 @@ describe("06-handoff.md has the Sent / Drafted Outward section", () => {
     expect(docImpact).toBeGreaterThan(-1);
     expect(sentDrafted).toBeGreaterThan(docImpact);
     expect(followUps).toBeGreaterThan(sentDrafted);
+  });
+});
+
+describe("implementer takes its commits base from the assignment", () => {
+  it("names the assignment's base for the commits field", () => {
+    pin(
+      readAsset("agents/implementer.md"),
+      "Populate a non-empty `commits` field by pasting `git log --reverse --format=%H <base>..HEAD`, where `<base>` is the base your task assignment names; never type or hand-complete commit shas.",
+    );
   });
 });
