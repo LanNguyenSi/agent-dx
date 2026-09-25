@@ -64,13 +64,20 @@ bundles run clean under the current stage:
 The exit code alone is not the signal for stage 1 or stage 2: `okf-kit check`
 exits 0 when it finds only warnings (STALE and FUTURE-DATED findings are
 warnings) and 1 when it finds an error, so read the JSON report to decide.
-Any other outcome means the checker could not run (exit 2 for a usage error
-such as a missing bundle directory, a failed install, a missing command, or a
-report that does not parse), and it fails the job at every stage, including
-stage 1.
+Any other outcome means the checker could not run: an exit status other than
+0 or 1, or a report that does not parse. It fails the job at every stage,
+including stage 1. The checker itself exits 2 whenever it cannot complete the
+check, for example on a usage error such as a missing bundle directory. The
+other could-not-run causes carry other statuses: a missing command exits 127
+and is caught by the exit status check; a failed install exits 1 from the
+package runner (`npx`), the same status as a finding, and is caught only
+because it leaves no parseable report; a report that does not parse is caught
+by the report check when the status is 0 or 1 (any other status already failed
+the exit status check).
 
 The stage 2 selection, as a `jq` filter over the `--json` report (any JSON
-tool works; the report is `{ "findings": [{ "ruleId", "severity", "file",
+tool works; the example below uses `jq`, so it needs `jq` on the runner; the
+report is `{ "findings": [{ "ruleId", "severity", "file",
 "message" }], ... }`):
 
 ```sh
@@ -121,6 +128,9 @@ jobs:
           REPO_ROOT: ${{ matrix.bundle.repoRoot }}
           STAGE: ${{ inputs.stage }}
         run: |
+          if ! command -v jq > /dev/null; then
+            echo "bundle check could not run (jq not found)"; exit 2
+          fi
           report="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/okf-report.json"
           strict=""
           if [ "$STAGE" = "strict" ]; then strict="--strict"; fi
@@ -135,8 +145,11 @@ jobs:
           if ! jq -e '.findings | type == "array"' "$report" > /dev/null; then
             echo "bundle check could not run (no parseable report)"; exit 2
           fi
-          jq -r --arg b "$BUNDLE" '.findings[]
-            | "::\(.severity) file=\($b)/\(.file)::\(.ruleId): \(.message)"' \
+          jq -r --arg b "$BUNDLE" '
+            def esc: gsub("%"; "%25") | gsub("\r"; "%0D") | gsub("\n"; "%0A");
+            def prop: esc | gsub(":"; "%3A") | gsub(","; "%2C");
+            .findings[]
+            | "::\(.severity) file=\("\($b)/\(.file)" | prop)::\("\(.ruleId): \(.message)" | esc)"' \
             "$report"
           jq -r --arg b "$BUNDLE" '"### Bundle check: \($b)",
             (.findings[] | "- \(.severity) \(.ruleId) \(.file): \(.message)")' \
@@ -158,6 +171,11 @@ jobs:
 
 The annotation command names match the checker's severities (`error`,
 `warning`, `notice`), so each finding lands on its file in the change view.
+The annotation line escapes `%`, carriage return and line feed in the message,
+and additionally `:` and `,` in the `file` property, as the workflow command
+syntax requires, so a message with a line break stays one whole annotation. A
+runner without `jq` fails the job with its own `jq not found` message instead
+of a misleading report error.
 The report goes to the runner's temporary directory, outside the checked-out
 work tree.
 
@@ -168,17 +186,48 @@ committing: it treats every uncommitted change as one virtual commit made now,
 so the local run reports the same `sources-fresh` and `sources-fresh-future`
 verdict CI will report once the commit lands. Without the flag a pre-commit
 run judges an edited source by its last commit and can report clean while CI
-reports STALE after the push. A hook loops over the same bundles as CI:
+reports STALE after the push. A hook loops over the same bundles as CI, with
+one `<bundle> <repoRoot>` pair per configured bundle:
 
 ```sh
 report="$(mktemp)"
-okf-kit check docs/okf --repo-root . --dirty-as-now --json > "$report"
-# apply the same stage decision as CI to "$report"
+trap 'rm -f "$report"' EXIT
+set -- docs/okf .
+while [ "$#" -ge 2 ]; do
+  status=0
+  okf-kit check "$1" --repo-root "$2" --dirty-as-now --json > "$report" \
+    || status=$?
+  if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
+    echo "bundle check could not run for $1 (exit $status)" >&2
+    exit 2
+  fi
+  # apply the same stage decision as CI to "$report" and "$status"
+  [ "$status" -eq 0 ] || exit 1
+  shift 2
+done
+if [ "$#" -ne 0 ]; then
+  echo "bundle list needs <bundle> <repoRoot> pairs" >&2
+  exit 2
+fi
 ```
 
 Write the report outside the work tree: under `--dirty-as-now` a report file
 inside it is itself an uncommitted change and can mark a doc STALE whose
-sources cover that directory.
+sources cover that directory. The `trap` removes the temporary report when
+the hook exits, also when the check fails. Create the report and set the trap
+once, above the loop, and reuse the one file for every bundle: a trap set
+inside the loop is re-armed for the latest report only and leaves the earlier
+ones behind. The `trap` replaces an EXIT trap the hook already set; a hook
+that has one adds the `rm` to that trap instead.
+
+The loop checks each exit status itself, as the CI example does, so the hook
+fails with the checker's verdict whether or not it runs under `set -e`: exit 2
+when the checker exits with a status other than 0 or 1, exit 1 on a failing
+check, exit 2 when the bundle list is not made of whole `<bundle> <repoRoot>`
+pairs, and 0 otherwise. Reading the report belongs to the stage decision at
+the comment. The `set --` line replaces the hook's positional parameters with
+the bundle list; git passes a pre-commit hook none, and a hook that needs its
+own arguments saves them before the loop.
 
 Parity covers the verdict of those two rules, not the stage decision: apply
 the same stage filter locally, and add `--strict` only when CI runs stage 3.

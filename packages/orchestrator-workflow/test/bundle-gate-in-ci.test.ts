@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { basename, delimiter, join } from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -131,7 +131,57 @@ describe("bundle gate in CI reference: could-not-run and report placement", () =
   it("fails every stage when the checker could not run", () => {
     pin(
       bundleGate,
-      "Any other outcome means the checker could not run (exit 2 for a usage error such as a missing bundle directory, a failed install, a missing command, or a report that does not parse), and it fails the job at every stage, including stage 1.",
+      "Any other outcome means the checker could not run: an exit status other than 0 or 1, or a report that does not parse. It fails the job at every stage, including stage 1.",
+    );
+  });
+
+  it("keeps the exit-2 usage error apart from the other could-not-run causes", () => {
+    pin(
+      bundleGate,
+      "The checker itself exits 2 whenever it cannot complete the check, for example on a usage error such as a missing bundle directory. The other could-not-run causes carry other statuses: a missing command exits 127 and is caught by the exit status check; a failed install exits 1 from the package runner (`npx`), the same status as a finding, and is caught only because it leaves no parseable report; a report that does not parse is caught by the report check when the status is 0 or 1 (any other status already failed the exit status check).",
+    );
+    expect(unwrap(bundleGate)).not.toMatch(
+      /exit 2 for a usage error such as[^.]*(failed install|missing command)/,
+    );
+  });
+
+  it("names jq as a prerequisite of the example", () => {
+    pin(
+      bundleGate,
+      "the example below uses `jq`, so it needs `jq` on the runner;",
+    );
+  });
+
+  it("describes the annotation escaping", () => {
+    pin(
+      bundleGate,
+      "The annotation line escapes `%`, carriage return and line feed in the message, and additionally `:` and `,` in the `file` property, as the workflow command syntax requires, so a message with a line break stays one whole annotation.",
+    );
+  });
+
+  it("describes the pre-commit cleanup and where the trap belongs", () => {
+    pin(
+      bundleGate,
+      "The `trap` removes the temporary report when the hook exits, also when the check fails.",
+    );
+    pin(
+      bundleGate,
+      "Create the report and set the trap once, above the loop, and reuse the one file for every bundle: a trap set inside the loop is re-armed for the latest report only and leaves the earlier ones behind.",
+    );
+    pin(
+      bundleGate,
+      "The `trap` replaces an EXIT trap the hook already set; a hook that has one adds the `rm` to that trap instead.",
+    );
+  });
+
+  it("states that the pre-commit loop carries the verdict without set -e", () => {
+    pin(
+      bundleGate,
+      "The loop checks each exit status itself, as the CI example does, so the hook fails with the checker's verdict whether or not it runs under `set -e`: exit 2 when the checker exits with a status other than 0 or 1, exit 1 on a failing check, exit 2 when the bundle list is not made of whole `<bundle> <repoRoot>` pairs, and 0 otherwise. Reading the report belongs to the stage decision at the comment.",
+    );
+    pin(
+      bundleGate,
+      "The `set --` line replaces the hook's positional parameters with the bundle list; git passes a pre-commit hook none, and a hook that needs its own arguments saves them before the loop.",
     );
   });
 
@@ -157,8 +207,162 @@ describe("bundle gate in CI reference: could-not-run and report placement", () =
     const recipe = shBlockAfter("### Pre-commit parity");
     expect(recipe).toContain('report="$(mktemp)"');
     expect(recipe).toContain('--dirty-as-now --json > "$report"');
+    // mktemp and the trap sit above the per-bundle loop, not inside it.
+    const loop = recipe.indexOf("while ");
+    expect(loop, "per-bundle loop not found").toBeGreaterThan(-1);
+    for (const line of [
+      'report="$(mktemp)"',
+      "trap 'rm -f \"$report\"' EXIT",
+    ]) {
+      expect(recipe.indexOf(line), line).toBeGreaterThan(-1);
+      expect(recipe.indexOf(line), line).toBeLessThan(loop);
+    }
     expect(recipe).not.toMatch(/> *report\.json/);
   });
+});
+
+/*
+ * Execute the pre-commit recipe under bash and sh, each with and without -e,
+ * against a stub okf-kit and a stub mktemp that creates its file in an empty
+ * directory (the macOS mktemp ignores TMPDIR). The hook's exit status must
+ * carry the checker's verdict without relying on set -e, and the temporary
+ * report must be gone afterwards, with one and with two configured bundles.
+ */
+describe("bundle gate in CI pre-commit recipe: exit status and temp report cleanup", () => {
+  let root: string;
+
+  // The bundle lists the tests substitute for the recipe's own `set --` line.
+  const bundleLists: Record<string, string> = {
+    one: "set -- docs/okf .\n",
+    two: "set -- docs/okf . docs/b sub\n",
+    odd: "set -- docs/okf . docs/b\n",
+  };
+
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), "bundle-gate-precommit-"));
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    writeFileSync(
+      join(bin, "okf-kit"),
+      `#!/bin/bash\nprintf '%s\\n' "$*" >> "$STUB_CHECK_LOG"\nprintf '%s' '{"findings":[]}'\nexit "\${STUB_EXIT:-0}"\n`,
+    );
+    chmodSync(join(bin, "okf-kit"), 0o755);
+    writeFileSync(
+      join(bin, "mktemp"),
+      `#!/bin/bash\nf="$STUB_TMP/report.$$"\n: > "$f"\nprintf '%s\\n' "$f" >> "$STUB_MKTEMP_LOG"\nprintf '%s\\n' "$f"\n`,
+    );
+    chmodSync(join(bin, "mktemp"), 0o755);
+    const recipe = shBlockAfter("### Pre-commit parity");
+    expect(recipe).toContain(bundleLists.one);
+    for (const [name, list] of Object.entries(bundleLists)) {
+      writeFileSync(
+        join(root, `hook-${name}.sh`),
+        recipe.replace(bundleLists.one ?? "", list),
+      );
+    }
+  });
+
+  afterAll(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  function runHook(shell: string, flags: string[], list: string, exit: number) {
+    const temp = mkdtempSync(join(root, "tmp-"));
+    const work = mkdtempSync(join(root, "work-"));
+    const mktempLog = join(root, `${basename(work)}.mktemp.log`);
+    const checkLog = join(root, `${basename(work)}.check.log`);
+    const result = spawnSync(shell, [...flags, join(root, `hook-${list}.sh`)], {
+      cwd: work,
+      env: {
+        PATH: `${join(root, "bin")}${delimiter}${process.env.PATH ?? ""}`,
+        HOME: work,
+        STUB_TMP: temp,
+        STUB_MKTEMP_LOG: mktempLog,
+        STUB_CHECK_LOG: checkLog,
+        STUB_EXIT: String(exit),
+      },
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    const read = (file: string) => {
+      try {
+        return readFileSync(file, "utf8");
+      } catch {
+        return "";
+      }
+    };
+    return {
+      result,
+      mktemp: read(mktempLog),
+      checked: read(checkLog).trim().split("\n").filter(Boolean),
+      tempFiles: readdirSync(temp),
+      workFiles: readdirSync(work),
+    };
+  }
+
+  const shells: Array<[string, string[]]> = [
+    ["bash", ["--noprofile", "--norc", "-eo", "pipefail"]],
+    ["bash", ["--noprofile", "--norc"]],
+    ["sh", ["-e"]],
+    ["sh", []],
+  ];
+  // [bundle list, checker exit, hook exit, checks run]
+  const outcomes: Array<[string, number, number, number]> = [
+    ["one", 0, 0, 1],
+    ["one", 1, 1, 1],
+    ["one", 2, 2, 1],
+    ["one", 127, 2, 1],
+    ["two", 0, 0, 2],
+    ["two", 1, 1, 1],
+    ["two", 2, 2, 1],
+    ["odd", 0, 2, 1],
+  ];
+  const cases = shells.flatMap(([shell, flags]) =>
+    outcomes.map(
+      ([list, exit, want, checks]) =>
+        [
+          `${shell} ${flags.join(" ")}`.trim(),
+          list,
+          exit,
+          want,
+          checks,
+          shell,
+          flags,
+        ] as const,
+    ),
+  );
+
+  it.each(cases)(
+    "%s: bundle list %s, checker exit %i, hook exits %i after %i check(s) and leaves no temp file",
+    (_label, list, exit, want, checks, shell, flags) => {
+      const run = runHook(shell, [...flags], list, exit);
+      const output = run.result.stdout + run.result.stderr;
+      expect(run.result.status, output).toBe(want);
+      // One report through mktemp for the whole loop, removed at exit.
+      expect(run.mktemp).toMatch(/^[^\n]*report\.\d+\n$/);
+      expect(run.checked).toHaveLength(checks);
+      expect(run.checked[0]).toBe(
+        "check docs/okf --repo-root . --dirty-as-now --json",
+      );
+      if (checks === 2) {
+        expect(run.checked[1]).toBe(
+          "check docs/b --repo-root sub --dirty-as-now --json",
+        );
+      }
+      if (exit !== 0 && exit !== 1) {
+        expect(run.result.stderr).toContain(
+          `bundle check could not run for docs/okf (exit ${exit})`,
+        );
+      }
+      if (list === "odd") {
+        expect(run.result.stderr).toContain(
+          "bundle list needs <bundle> <repoRoot> pairs",
+        );
+      }
+      expect(run.tempFiles).toEqual([]);
+      expect(run.workFiles).toEqual([]);
+    },
+  );
 });
 
 /*
@@ -222,6 +426,14 @@ const fixtures: Record<string, Finding[]> = {
       message: "cited file missing",
     },
   ],
+  special: [
+    {
+      ruleId: "citations-resolve",
+      severity: "warning",
+      file: "c,d:e.md",
+      message: "100% cited\r\nsecond line",
+    },
+  ],
 };
 
 describe("bundle gate in CI example: stage decisions", () => {
@@ -229,7 +441,13 @@ describe("bundle gate in CI example: stage decisions", () => {
   let bin: string;
   let step: string;
 
+  // Resolved once, so a run with a reduced PATH still finds the shell.
+  let bash = "bash";
+
   beforeAll(() => {
+    bash = spawnSync("bash", ["-c", "command -v bash"], {
+      encoding: "utf8",
+    }).stdout.trim();
     root = mkdtempSync(join(tmpdir(), "bundle-gate-"));
     bin = join(root, "bin");
     mkdirSync(bin);
@@ -253,6 +471,7 @@ describe("bundle gate in CI example: stage decisions", () => {
   function runStep(
     stage: string,
     stub: { report?: string; forceExit?: number; stdout?: string },
+    path?: string,
   ) {
     runCount += 1;
     const dir = join(root, `run-${runCount}`);
@@ -264,7 +483,7 @@ describe("bundle gate in CI example: stage decisions", () => {
     writeFileSync(summary, "");
     const argsLog = join(dir, "args.log");
     const env: NodeJS.ProcessEnv = {
-      PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
+      PATH: path ?? `${bin}${delimiter}${process.env.PATH ?? ""}`,
       HOME: dir,
       OKF_KIT_VERSION: "9.9.9-test",
       BUNDLE: "docs/okf",
@@ -279,7 +498,7 @@ describe("bundle gate in CI example: stage decisions", () => {
     if (stub.forceExit !== undefined)
       env.STUB_FORCE_EXIT = String(stub.forceExit);
     const result = spawnSync(
-      "bash",
+      bash,
       ["--noprofile", "--norc", "-eo", "pipefail", step],
       {
         cwd: work,
@@ -398,6 +617,24 @@ describe("bundle gate in CI example: stage decisions", () => {
       const run = runStep(stage, { forceExit: 2, stdout: report });
       expect(run.status, run.stdout + run.stderr).toBe(2);
       expect(run.stdout).toContain("bundle check could not run (exit 2)");
+    },
+  );
+
+  it("escapes %, CR and LF in the annotation message and the file property", () => {
+    const run = runStep("warn", { report: "special" });
+    expect(run.status, run.stdout + run.stderr).toBe(0);
+    expect(run.stdout).toContain(
+      "::warning file=docs/okf/c%2Cd%3Ae.md::citations-resolve: 100%25 cited%0D%0Asecond line\n",
+    );
+  });
+
+  it.each([["warn"], ["block"], ["strict"]])(
+    "a runner without jq fails stage %s with its own message",
+    (stage) => {
+      const run = runStep(stage, { report: "clean" }, bin);
+      expect(run.status, run.stdout + run.stderr).toBe(2);
+      expect(run.stdout).toContain("bundle check could not run (jq not found)");
+      expect(run.args).toBe("");
     },
   );
 
