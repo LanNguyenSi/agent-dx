@@ -193,18 +193,28 @@ directory and the subagents.
    ref's existence as a misfire; and confirm no pull request exists on the
    task branch that the orchestrator did not open itself (for example `gh pr
    list --head <branch>`, or the host's equivalent). A `commits` mismatch,
-   a pull request the orchestrator did not open, or a return that reports
-   an outward action as executed, is a misfire: do not fold it into run
-   state as evidence, and recover it under the subagent misfire rule. A
+   or a return that reports an outward action as executed, is a misfire:
+   do not fold it into run state as evidence, and recover it under the
+   subagent misfire rule. A pull request on the task branch that the
+   orchestrator did not open is, like a flagged ref, a signal to
+   investigate, not a misfire by itself: before treating it as one, the
+   orchestrator establishes who opened it (for example from the pull
+   request's author and the host's audit events, or by asking the
+   operator). When a subagent of the run opened it, or when that cannot be
+   established, it treats the pull request as a misfire and reports it to
+   the operator. A pull request a third party opened is recorded once in
+   `03-decisions.md`, naming its number or URL, and is not treated as a new
+   finding again in a later round. A
    flagged ref is a signal to investigate, not a misfire by itself: before
    treating it as one, the orchestrator establishes who moved the ref (for
    example from the host's push or audit events, or by asking the
    operator). When that cannot be established, it treats the ref as a
    misfire and reports it to the operator. A ref a third party moved, or
    one already recorded as an incident in an earlier round, is recorded
-   once in `03-decisions.md` and is not treated as a new finding again
-   while it stays at that sha; a later move of such a ref is investigated
-   like any other flagged ref. The ref check is a heuristic next to the
+   once in `03-decisions.md`, naming the ref and the sha it was recorded
+   at, and is not treated as a new finding again while it stays at that
+   sha; a later move of such a ref is investigated like any other flagged
+   ref. The ref check is a heuristic next to the
    subagent's mandatory self-report, not a complete detector: for example,
    it cannot see a deleted ref, a rewound default branch, a ref at an
    already public sha, a ref at a commit a rebase dropped from the task
