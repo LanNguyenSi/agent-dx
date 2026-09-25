@@ -257,6 +257,10 @@ describe("00-goal.md carries the outward marker, defaulting to none", () => {
       "A new run starts at none whatever this template says; a class is added only on the operator's explicit instruction in the session, recorded in 03-decisions.md.",
     );
   });
+
+  it("points to the AGENTS.md rule for the definition", () => {
+    pin(goalTemplate, "See AGENTS.md's Outward-facing actions rule. -->");
+  });
 });
 
 describe("run-state-and-harness.md documents the outward marker mechanics", () => {
@@ -273,8 +277,11 @@ describe("run-state-and-harness.md documents the outward marker mechanics", () =
     expect(outwardIdx).toBeLessThan(nextTopLevelIdx);
   });
 
-  it("carries the marker line", () => {
-    expect(runStateAndHarness).toContain("<!-- outward: classes = none -->");
+  it("places the marker line on its own line below the run mode marker and its comment", () => {
+    pin(
+      runStateAndHarness,
+      "`00-goal.md` also carries an `outward` marker on its own line below the run mode marker and its description comment: `<!-- outward: classes = none -->`.",
+    );
   });
 
   it("states the namespace reason for skipping the solution-acceptance prefix, without the retired contrast", () => {
@@ -335,10 +342,10 @@ describe("run-state-and-harness.md documents the outward marker mechanics", () =
 });
 
 describe("implementer contract: outward actions", () => {
-  it("names pushing a branch or tag among the boundary examples", () => {
+  it("states the full boundary definition with every example, as one sentence", () => {
     pin(
       implementerMd,
-      "An outward action (any write to a system outside the local checkout and the run directory: pushing a branch or tag;",
+      "An outward action (any write to a system outside the local checkout and the run directory: pushing a branch or tag; opening, merging, or editing a pull request; creating, commenting on, transitioning, editing, or closing a ticket or issue; deleting a remote branch; triggering CI or a deployment; releasing or publishing a package; publishing a page or artifact; writing to an external tracker, API, or database; sending a message to someone outside the run; see AGENTS.md's Outward-facing actions rule for the full definition) is always orchestrator-only: you never perform one, whatever your task assignment says, even when a class is granted by the run's `00-goal.md` `outward` marker (that marker only waives the orchestrator's own per-action operator confirmation and never authorizes a subagent).",
     );
   });
 
@@ -451,10 +458,72 @@ describe("read-only roles: never perform an outward action, always report one", 
 });
 
 describe("orchestrator mechanical cross-check ships in evidence-and-probes.md", () => {
-  it("compares commits, lists the remote's refs by sha, and checks pull requests", () => {
+  it("runs the cross-check after each implementer return", () => {
     pin(
       evidenceAndProbes,
-      "After each implementer return, mechanically cross-check its self-report against the outward-actions rule (see AGENTS.md's Outward-facing actions section): compare `git rev-list --reverse <run-base>..<task-branch>` (or the host's equivalent) against the returned `commits` field; list the remote's refs (for example `git ls-remote <remote>`, or the host's equivalent) and flag every branch or tag whose sha, peeled for an annotated tag, lies in the `<run-base>..<task-branch>` range and that the orchestrator did not push itself; compare an existing task-branch ref with the sha the orchestrator last pushed there, rather than treating the ref's existence as a misfire; and confirm no pull request exists on the task branch that the orchestrator did not open itself (for example `gh pr list --head <branch>`, or the host's equivalent).",
+      "After each implementer return, mechanically cross-check its self-report against the outward-actions rule (see AGENTS.md's Outward-facing actions section).",
+    );
+  });
+
+  it("starts both comparisons from the round's task base, never from the run-base", () => {
+    pin(
+      evidenceAndProbes,
+      "Both comparisons below start from the round's task base, the same `<base>` this round's assignment handed the implementer for its `commits` field (the sha the task branch started from on the task's first round, or the previous round's reviewed head on a later round), never from the run-base, whose range also holds earlier rounds, earlier tasks, and upstream work merged after it.",
+    );
+  });
+
+  it("no longer takes either range from the run-base", () => {
+    expect(unwrap(evidenceAndProbes)).not.toContain(
+      "<run-base>..<task-branch>",
+    );
+  });
+
+  it("records the task base and the remote default branch's sha at handover", () => {
+    pin(
+      evidenceAndProbes,
+      "When handing a round over, record its task base and the remote default branch's sha at that moment (for example `git rev-parse <remote>/<default-branch>` right after `git fetch <remote>`, or the host's equivalent).",
+    );
+  });
+
+  it("compares the task base range with the returned commits field", () => {
+    pin(
+      evidenceAndProbes,
+      "Compare `git rev-list --reverse <task-base>..<task-branch>` (or the host's equivalent) against the returned `commits` field.",
+    );
+  });
+
+  it("flags a remote branch or tag at a sha of the round's range the recorded default branch does not reach, unless the orchestrator moved it", () => {
+    pin(
+      evidenceAndProbes,
+      "List the remote's refs (for example `git ls-remote <remote>`, or the host's equivalent) and flag every branch or tag whose sha, peeled for an annotated tag, lies in the `<task-base>..<task-branch>` range and is not reachable from the remote default branch's sha recorded at handover (for example, every sha that `git rev-list <task-branch> ^<task-base> ^<recorded-default-sha>` lists), unless the orchestrator moved that ref to that sha itself (its own push, or a host-side merge it performed).",
+    );
+  });
+
+  it("judges reachability from the recorded sha, so a push to the default branch is still flagged", () => {
+    pin(
+      evidenceAndProbes,
+      "Reachability is judged from the recorded sha rather than the default branch's current one, so a push of the round's commits to the default branch is still flagged, while upstream work the task branch took in from the recorded default branch is not.",
+    );
+  });
+
+  it("takes in upstream work only up to the recorded sha, since later upstream commits are flagged", () => {
+    pin(
+      evidenceAndProbes,
+      "A round therefore takes in upstream work only up to its recorded sha: a ref at a commit that reached the default branch after the handover is flagged like one at the round's own commits.",
+    );
+  });
+
+  it("errs toward a flag when no default-branch sha was recorded", () => {
+    pin(
+      evidenceAndProbes,
+      "Without a recorded sha, judge reachability from the task base itself, which errs toward a flag.",
+    );
+  });
+
+  it("compares an existing task-branch ref with the orchestrator's last push and checks pull requests", () => {
+    pin(
+      evidenceAndProbes,
+      "Compare an existing task-branch ref with the sha the orchestrator last pushed there, rather than treating the ref's existence as a misfire; and confirm no pull request exists on the task branch that the orchestrator did not open itself (for example `gh pr list --head <branch>`, or the host's equivalent).",
     );
   });
 
@@ -498,10 +567,17 @@ describe("06-handoff.md has the Sent / Drafted Outward section", () => {
     pin(handoffTemplate, "Omit this section when nothing was sent or drafted.");
   });
 
+  it("applies when the run performed or drafted an outward action", () => {
+    pin(
+      handoffTemplate,
+      "Optional: only applies when this run performed or drafted an outward action (push, pull request, ticket comment/transition/close, release, publish, message).",
+    );
+  });
+
   it("gives an unauthorized-action option in its row template", () => {
     pin(
       handoffTemplate,
-      "or an action performed without authorization (unauthorized)",
+      "action class, what was sent (with confirmation basis), what stayed a draft in the run directory and why, or an action performed without authorization (unauthorized)",
     );
   });
 
