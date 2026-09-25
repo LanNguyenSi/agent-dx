@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { basename, delimiter, join } from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -180,8 +180,9 @@ describe("bundle gate in CI reference: could-not-run and report placement", () =
 
 /*
  * Execute the pre-commit recipe under bash -eo pipefail against a stub
- * okf-kit, with TMPDIR pointed at an empty directory, and check that the
- * temporary report is gone afterwards, on a clean check and on a failing one.
+ * okf-kit and a stub mktemp that creates its file in an empty directory (the
+ * macOS mktemp ignores TMPDIR), and check that the temporary report is gone
+ * afterwards, on a clean check and on a failing one.
  */
 describe("bundle gate in CI pre-commit recipe: temp report cleanup", () => {
   let root: string;
@@ -195,6 +196,11 @@ describe("bundle gate in CI pre-commit recipe: temp report cleanup", () => {
       `#!/bin/bash\nprintf '%s' '{"findings":[]}'\nexit "\${STUB_EXIT:-0}"\n`,
     );
     chmodSync(join(bin, "okf-kit"), 0o755);
+    writeFileSync(
+      join(bin, "mktemp"),
+      `#!/bin/bash\nf="$STUB_TMP/report.$$"\n: > "$f"\nprintf '%s\\n' "$f" >> "$STUB_MKTEMP_LOG"\nprintf '%s\\n' "$f"\n`,
+    );
+    chmodSync(join(bin, "mktemp"), 0o755);
     writeFileSync(join(root, "hook.sh"), shBlockAfter("### Pre-commit parity"));
   });
 
@@ -216,13 +222,18 @@ describe("bundle gate in CI pre-commit recipe: temp report cleanup", () => {
         env: {
           PATH: `${join(root, "bin")}${delimiter}${process.env.PATH ?? ""}`,
           HOME: work,
-          TMPDIR: temp,
+          STUB_TMP: temp,
+          STUB_MKTEMP_LOG: join(work, "..", `${basename(work)}.mktemp.log`),
           STUB_EXIT: String(exit),
         },
         encoding: "utf8",
       },
     );
     expect(result.status, result.stdout + result.stderr).toBe(want);
+    // The recipe did create its report through mktemp, and removed it.
+    expect(
+      readFileSync(join(work, "..", `${basename(work)}.mktemp.log`), "utf8"),
+    ).toMatch(/report\.\d+\n$/);
     expect(readdirSync(temp)).toEqual([]);
     expect(readdirSync(work)).toEqual([]);
   });
