@@ -208,7 +208,7 @@ jobs:
         # Evidence: see packages/orchestrator-workflow/docs/okf/log.md.
         shell: bash
         run: |
-          install_cmd=(npm install -g okf-kit@0.15.0 --no-audit --no-fund)
+          install_cmd=(npm install -g okf-kit@0.16.0 --no-audit --no-fund)
           pin="${install_cmd[3]#*okf-kit@}"
 
           view_out="$(mktemp)"
