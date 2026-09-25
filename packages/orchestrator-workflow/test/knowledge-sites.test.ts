@@ -132,6 +132,17 @@ describe("no kit text site hard-codes docs/okf as the sole knowledge-bundle loca
     });
   }
 
+  it("SKILL.md's Discover step names the configured list", () => {
+    const skill = readFileSync(
+      join(PACKAGE_DIR, "assets", "skill", "SKILL.md"),
+      "utf8",
+    );
+    const discover = sentences(skill).find(({ text }) =>
+      text.includes("before hand-mapping terrain"),
+    );
+    expect(discover?.text).toContain(BACK_REFERENCE);
+  });
+
   it("flags the pre-change wording and accepts the back-reference", () => {
     expect(
       offendingSentences(
