@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-09-25
+
 - Outward cross-check (evidence-and-probes.md, Delegate implementation): a
   pull request on the task branch that the orchestrator did not open is no
   longer a direct misfire; like a flagged ref, the orchestrator first

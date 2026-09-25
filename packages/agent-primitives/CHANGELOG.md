@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-09-25
+
 - `probe`'s mutant-side 128&nbsp;+&nbsp;N signal-band warning is now pushed
   after the zero-tests-executed and generic byte-identical-output
   overrides have had their say, not before: a mutant run whose exit code
