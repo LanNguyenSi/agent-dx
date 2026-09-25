@@ -1,5 +1,13 @@
 # Bundle log
 
+- 2026-09-25T07:47:58Z (task 7e6dd342, flagged-ref wording): in `evidence-and-probes.md`
+  step 6 a flagged remote ref is now a signal to investigate rather than a
+  misfire by itself, and the ref check's limits are stated; the paragraph
+  grew by eight lines and citations below it were re-pointed, every moved
+  anchor re-read. `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md`
+  re-checked and re-stamped; no claim changed.
+
 - 2026-09-25T07:30:14Z (task 7e6dd342, review fix): the outward cross-check paragraph in
   `evidence-and-probes.md` now takes the ref range from the task's
   first-round base (three lines longer) and `implementer.md` names the
