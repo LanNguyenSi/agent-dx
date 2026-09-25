@@ -106,9 +106,9 @@ Check, at minimum:
   (README, ADRs, architecture docs, end-user docs). When it does not, and
   neither the briefing, the implementer's report, nor the run's
   `Documentation Impact` line in `06-handoff.md` gives a reason or a
-  follow-up, that is a medium finding. A handoff whose `Documentation
-  Impact` line is missing, or says `none` without a reason, is a medium
-  finding too. A docs-only change is exempt.
+  follow-up, that is a medium finding; once the handoff is filled, so is
+  a missing `Documentation Impact` line or a `none` without a reason for
+  such a change. A docs-only change is exempt.
 - Recurrence: when the briefing tells you this is not the task's first
   review round, classify each finding as `new` or `repeated` against the
   earlier rounds you were told about; on a first round every finding is

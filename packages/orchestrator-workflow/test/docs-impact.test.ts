@@ -31,16 +31,16 @@ describe("documentation impact in the definition of done", () => {
 
   it("reviewer.md names the trigger, the documentation check and the fallback sources", () => {
     expect(flatReviewer).toContain(
-      "when the change is user-visible (a command, output, configuration, or documented behaviour) or architectural, check whether the diff updates the affected human-facing documentation",
+      "when the change is user-visible (a command, output, configuration, or documented behaviour) or architectural, check whether the diff updates the affected human-facing documentation (README, ADRs, architecture docs, end-user docs).",
     );
     expect(flatReviewer).toContain(
-      "neither the briefing, the implementer's report, nor the run's `Documentation Impact` line in `06-handoff.md` gives a reason or a follow-up, that is a medium finding.",
+      "neither the briefing, the implementer's report, nor the run's `Documentation Impact` line in `06-handoff.md` gives a reason or a follow-up, that is a medium finding;",
     );
   });
 
-  it("reviewer.md flags a missing or unexplained handoff line and exempts docs-only changes", () => {
+  it("reviewer.md flags a missing or unexplained filled handoff line and exempts docs-only changes", () => {
     expect(flatReviewer).toContain(
-      "A handoff whose `Documentation Impact` line is missing, or says `none` without a reason, is a medium finding too.",
+      "once the handoff is filled, so is a missing `Documentation Impact` line or a `none` without a reason for such a change.",
     );
     expect(flatReviewer).toContain("A docs-only change is exempt.");
   });
