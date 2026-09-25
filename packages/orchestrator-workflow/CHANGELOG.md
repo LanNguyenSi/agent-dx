@@ -35,6 +35,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wording change in the prose is caught even when the citation beside it
   quotes the old clause (task e92008cf).
 
+- Hand off (evidence-and-probes.md step 9, SKILL.md step 6): documentation
+  impact (none with a reason, updated paths, or a follow-up) is now named
+  among what the orchestrator records and reports, so the `Documentation
+  Impact` line of `06-handoff.md` is filled by rule rather than only by the
+  template slot; `test/docs-impact.test.ts` pins both clauses (task
+  b4d8f0e9).
+
 ## [0.41.0] - 2026-09-25
 
 - New skill reference `bundle-gate-in-ci.md`, linked from the SKILL.md

@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-09-25T11:50:15Z
+timestamp: 2026-09-25T12:02:54Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -224,10 +224,10 @@ SKILL.md's closing instruction: "replace the `TODO` in each
 `<!-- solution-acceptance: ... = TODO -->` marker with the chosen enum
 value. That marker line is the machine-readable signal the harness
 solution-acceptance run-gate reads, so leaving it as `TODO` keeps the run
-non-accepting (fail-closed)" (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:376#"non-accepting (fail-closed)."). A freshly-copied run is
+non-accepting (fail-closed)" (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:377#"non-accepting (fail-closed)."). A freshly-copied run is
 therefore non-accepting by construction; this contract shipped in 0.7.0
 (`CHANGELOG.md:#[0.7.0]`). Consumer is "the harness solution-acceptance
-run-gate" per packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:374#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
+run-gate" per packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:375#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
 does not assert the external gate's internals. Pinned by
 template-markers.test.ts:32-34#"/solution-acceptance:\s*acceptance-recommendation\s*=\s*" (regexes) and template-markers.test.ts:37-38#"const matches = [...handoffTemplate.matchAll(finalStatusRe)];" and template-markers.test.ts:43-44#"const matches = [...reviewTemplate.matchAll(recommendationRe)];" (one marker per
 template, default `TODO`).
@@ -337,7 +337,7 @@ hand-off check covers only sources no task re-stamped
 (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:354-356#"hand-off check is a safety net for sources the task list missed. Before"). Since 0.24.0 (placement rule) step 9 also
 carries a one-sentence placement check for the orchestrator: before handing
 off, check that no org-, machine- or point-in-time-bound evidence was added
-to a reusable instruction file (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:370#"or the consuming workspace, with a pointer left behind."); the fix is to move the
+to a reusable instruction file (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:371#"or the consuming workspace, with a pointer left behind."); the fix is to move the
 evidence to the changelog, the run files, or the consuming workspace, with a
 pointer left behind. `reviewer.md`'s "Check, at minimum" list carries a
 matching check for the same thing on the implementer side of a run. This is

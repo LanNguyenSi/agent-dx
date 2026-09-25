@@ -364,7 +364,8 @@ directory and the subagents.
    validator when one is available (for example `okf-kit check`). Repos
    without a bundle are unaffected. Then fill `06-handoff.md` and report to the
    operator: what changed, why, how it was verified, known risks, accepted
-   waivers, suggested next step. Before handing off, check that no org-,
+   waivers, documentation impact (none with a reason, updated paths, or a
+   follow-up), suggested next step. Before handing off, check that no org-,
    machine-, or point-in-time-bound evidence was added to a reusable
    instruction file; such evidence belongs in the changelog, the run files,
    or the consuming workspace, with a pointer left behind.
