@@ -1,5 +1,21 @@
 # Bundle log
 
+- 2026-09-25T07:05:45Z (task 7e6dd342, cross-check base fix): the
+  orchestrator's cross-check in `evidence-and-probes.md` step 6 now starts
+  both comparisons from the round's task base instead of the run-base, and
+  flags a remote branch or tag only when its sha lies in that range and is
+  not reachable from the remote default branch's sha recorded at handover,
+  unless the orchestrator moved the ref itself; a round takes in upstream
+  work only up to that sha, and without a recorded sha the check errs
+  toward a flag. The step grew, so citations into the later lines of
+  `evidence-and-probes.md` across `log.md`, `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md`, and `subagent-contracts-superset.md`
+  were re-pointed; no re-pointed claim changed. The outward section of `run-state-lifecycle-and-markers.md` now
+  says only the grant condition is shared verbatim across the three sites
+  and that the pins cover the rule sentences rather than each example on
+  its own. `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`,
+  and `subagent-contracts-superset.md` re-checked and re-stamped.
+
 - 2026-09-25T06:18:59Z (task 7e6dd342, redesign round): the `outward` marker was
   narrowed on the operator's decision. It can now grant only `push-branch`
   and `open-pr`, scoped to the run's own task branches (never a force push,
@@ -1696,7 +1712,7 @@
   `not_applicable`
   (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:100#"naming each by its mutant definition"`,
   `implementer.md:107#"naming each by its mutant definition"`,
-  `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:232#"not merely their id; a probe recorded with only an id and no definition"`).
+  `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:252#"not merely their id; a probe recorded with only an id and no definition"`).
 
   Same round, orchestrator extension (D-010 of this run): a companion
   agent-primitives change makes `probe`'s `result` report the mutant's
@@ -10265,7 +10281,7 @@ this class recurred on (line 295, `,274-275` for "Repos without a bundle
 are unaffected", which at this round's head sits at
 packages/orchestrator-workflow/assets/skill/SKILL.md at historical lines 304,
 re-anchored to its own
-`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:308#"without a bundle are unaffected"`).
+`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:328#"without a bundle are unaffected"`).
 This closes the class: every bare continuation
 in this bundle's non-reserved docs now has its own anchor via a full
 citation (`index.md` and `log.md` are append-only journals and keep their

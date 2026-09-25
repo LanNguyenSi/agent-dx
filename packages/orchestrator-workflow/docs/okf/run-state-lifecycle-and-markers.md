@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-09-25T06:18:59Z
+timestamp: 2026-09-25T07:05:45Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -224,10 +224,10 @@ SKILL.md's closing instruction: "replace the `TODO` in each
 `<!-- solution-acceptance: ... = TODO -->` marker with the chosen enum
 value. That marker line is the machine-readable signal the harness
 solution-acceptance run-gate reads, so leaving it as `TODO` keeps the run
-non-accepting (fail-closed)" (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:319#"non-accepting (fail-closed)."). A freshly-copied run is
+non-accepting (fail-closed)" (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:339#"non-accepting (fail-closed)."). A freshly-copied run is
 therefore non-accepting by construction; this contract shipped in 0.7.0
 (`CHANGELOG.md:#[0.7.0]`). Consumer is "the harness solution-acceptance
-run-gate" per packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:317#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
+run-gate" per packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:337#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
 does not assert the external gate's internals. Pinned by
 template-markers.test.ts:32-34#"/solution-acceptance:\s*acceptance-recommendation\s*=\s*" (regexes) and template-markers.test.ts:37-38#"const matches = [...handoffTemplate.matchAll(finalStatusRe)];" and template-markers.test.ts:43-44#"const matches = [...reviewTemplate.matchAll(recommendationRe)];" (one marker per
 template, default `TODO`).
@@ -288,7 +288,7 @@ replace the row when transferring findings, or delete it outright for a
 genuine zero-findings review (a header row with no data rows is valid;
 leaving the legend row next to real finding rows is also fine), and
 SKILL.md's step 7 carries the same one-sentence rule
-(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:204#"rows as the template never having been filled in. When"). The runtime half (grounding-mcp's reader treating a
+(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:224#"rows as the template never having been filled in. When"). The runtime half (grounding-mcp's reader treating a
 survived, unaccompanied placeholder row as an explicit format blocker,
 instead of silently reporting zero findings) is a lockstep sibling change in
 the grounding-mcp repo, out of scope for this bundle; this doc, like the
@@ -326,12 +326,12 @@ applying this guidance before filling the file: check whether the change
 touched any path a bundle doc claims as a `sources:` entry, and if so either
 update the affected docs (re-verify and re-stamp) or record a follow-up
 task, running the bundle validator when one is available (for example
-`okf-kit check`) (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:307#"validator when one is available (for example"). It is explicitly non-gating: "apply
+`okf-kit check`) (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:327#"validator when one is available (for example"). It is explicitly non-gating: "apply
 this optional guidance" and "Repos without a bundle are unaffected"
-(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:303#"guidance: when the repo carries a curated knowledge"; packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:308#"without a bundle are unaffected"). Since 0.24.0 (placement rule) step 9 also
+(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:323#"guidance: when the repo carries a curated knowledge"; packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:328#"without a bundle are unaffected"). Since 0.24.0 (placement rule) step 9 also
 carries a one-sentence placement check for the orchestrator: before handing
 off, check that no org-, machine- or point-in-time-bound evidence was added
-to a reusable instruction file (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:313#"or the consuming workspace, with a pointer left behind."); the fix is to move the
+to a reusable instruction file (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:333#"or the consuming workspace, with a pointer left behind."); the fix is to move the
 evidence to the changelog, the run files, or the consuming workspace, with a
 pointer left behind. `reviewer.md`'s "Check, at minimum" list carries a
 matching check for the same thing on the implementer side of a run. This is
@@ -505,22 +505,26 @@ resume a class the orchestrator cannot trace to such a record is treated as
 not granted and reported
 (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:159-167#"own judgment."). This closes the paths where a
 widened template, or a marker edited by something other than the operator,
-would otherwise seed a grant. The grant condition, the grammar pointer, and
-the always-orchestrator-only scope are stated with the same wording in the
-generated policy section, `SKILL.md`, and this marker's own subsection of
-run-state-and-harness.md, the same one-normative-place pattern the run mode
-marker above already follows. AGENTS.md's Outward-facing actions section
+would otherwise seed a grant. Only this grant condition is shared verbatim,
+in the generated policy section, `SKILL.md`, and this marker's own
+subsection of run-state-and-harness.md. The value grammar follows the
+one-normative-place pattern of the run mode marker above instead: that
+subsection is its one definition site
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:148#"This subsection is the one definition site of the marker's value grammar."),
+and the policy section and `SKILL.md` each state the orchestrator-only
+scope in their own words. AGENTS.md's Outward-facing actions section
 defines an outward action itself by boundary (any write to a system outside
 the local checkout and the run directory), with the named actions as
 examples of that boundary, not the complete membership test
 (packages/orchestrator-workflow/assets/agents-md-section.md:170-179#"spawned it.").
 Pinned by `test/outward-actions.test.ts`, a sibling to
-`template-markers.test.ts` and `run-mode.test.ts` for this marker: one
-`describe` block per file that carries the rule (the policy section,
-`SKILL.md`, the template, this marker's reference subsection, the
+`template-markers.test.ts` and `run-mode.test.ts` for this marker:
+`describe` blocks covering every file that carries the rule (the policy
+section, `SKILL.md`, the template, this marker's reference subsection, the
 implementer, reviewer, explorer, task-slicer, and advisor prompts, both
 output contracts in `contracts.md`, the orchestrator's mechanical
 cross-check, the misfire rule, and the handoff template), full-sentence pins
-on every normative sentence, a check that the grantable-class sentence in
-`agents-md-section.md` names exactly `push-branch` and `open-pr`, and a
-guard that no retired class token appears in the kit text.
+on the rule sentences (an example list is covered as part of the sentence
+that carries it, not example by example), a check that the grantable-class
+sentence in `agents-md-section.md` names exactly `push-branch` and
+`open-pr`, and a guard that no retired class token appears in the kit text.
