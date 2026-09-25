@@ -1,5 +1,12 @@
 # Bundle log
 
+- 2026-09-25T12:58:25Z (release 0.42.0): the `[Unreleased]` notes moved under
+  `## [0.42.0] - 2026-09-25`. Line citations into `CHANGELOG.md` below
+  the new heading were re-pointed by two lines. No bundle doc cited the
+  `[Unreleased]` heading. `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md`
+  re-checked and re-stamped.
+
 - 2026-09-25T12:15:34Z (task 2348e6f1, knowledge manifest hardening, stored-value
   containment): the absolute, drive-letter and `..` checks for a
   `knowledge` `path` or `repoRoot` now run on the normalised value that is
