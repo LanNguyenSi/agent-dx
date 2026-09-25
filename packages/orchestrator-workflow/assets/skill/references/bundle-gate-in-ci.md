@@ -225,9 +225,9 @@ fails with the checker's verdict whether or not it runs under `set -e`: exit 2
 when the checker exits with a status other than 0 or 1, exit 1 on a failing
 check, exit 2 when the bundle list is not made of whole `<bundle> <repoRoot>`
 pairs, and 0 otherwise. Reading the report belongs to the stage decision at
-the comment. The `set --` line replaces the hook's positional parameters with the bundle list;
-git passes a pre-commit hook none, and a hook that needs its own arguments
-saves them before the loop.
+the comment. The `set --` line replaces the hook's positional parameters with
+the bundle list; git passes a pre-commit hook none, and a hook that needs its
+own arguments saves them before the loop.
 
 Parity covers the verdict of those two rules, not the stage decision: apply
 the same stage filter locally, and add `--strict` only when CI runs stage 3.
