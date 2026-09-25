@@ -1,5 +1,20 @@
 # Bundle log
 
+- 2026-09-25T09:29:37Z (task 7049ee8d, bundle docs in the task contract): the task
+  slicer now lists every bundle doc whose `sources` intersect a task's
+  `allowed_changes` in `relevant_docs` with the bundle doc marker defined in
+  `contracts.md`, the implementer re-stamps such a doc in the same task, the
+  reviewer verifies that re-stamp, and the hand-off bundle check in
+  `evidence-and-probes.md` step 9 and `SKILL.md` step 6 is a safety net.
+  Claims changed: `subagent-contracts-superset.md` gains a section on bundle
+  docs in `relevant_docs`; `run-state-lifecycle-and-markers.md` describes the
+  hand-off check as a safety net. Citations into the shifted
+  `implementer.md`, `reviewer.md`, `task-slicer.md`, `contracts.md`,
+  `evidence-and-probes.md` and `CHANGELOG.md` lines were re-pointed through a
+  line map from the base revision, every moved anchor checked by the bundle
+  validator. Every doc whose `sources` list an edited file was re-checked and
+  re-stamped.
+
 - 2026-09-25T09:00:23Z (task ee0a02ac, knowledge-bundle review fixes): `path` and
   `repoRoot` of a `knowledge` entry now resolve against the worktree top
   level independently, entries are normalised, and `doctor` also reports a
