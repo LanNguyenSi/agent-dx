@@ -1,5 +1,15 @@
 # Bundle log
 
+- 2026-09-25T11:53:56Z (task 433b78d5, pre-commit recipe exit status): the pre-commit recipe
+  in `bundle-gate-in-ci.md` checks each checker status itself (exit 2 when a
+  check could not run, 1 on a failing check, 2 on an odd bundle list), so the
+  hook no longer relies on `set -e`, and the prose says that `set --` replaces
+  the hook's positional parameters; the `CHANGELOG.md` `[Unreleased]` bullet
+  is reworded at the same length. No bundle doc cites the reference or the
+  test file, the two live self-citations into `CHANGELOG.md` still resolve at
+  their lines, and the docs whose `sources` list `CHANGELOG.md` were
+  re-checked and re-stamped.
+
 - 2026-09-25T11:41:14Z (task 433b78d5, bundle gate in CI review fixes): `bundle-gate-in-ci.md`
   says the checker exits 2 whenever it cannot complete the check, that the
   report check runs when the status is 0 or 1, and that the pre-commit recipe
