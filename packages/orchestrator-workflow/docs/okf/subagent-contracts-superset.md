@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-25T11:51:14Z
+timestamp: 2026-09-25T11:56:44Z
 sources:
   - packages/orchestrator-workflow/assets/agents/explorer.md
   - packages/orchestrator-workflow/assets/agents/task-slicer.md
@@ -146,9 +146,9 @@ trivial change.
 - Task-slicer:
   `packages/orchestrator-workflow/assets/skill/references/contracts.md:278#"## Task slicer output contract"`
   (`## Task slicer output contract`) vs.
-  `packages/orchestrator-workflow/assets/agents/task-slicer.md:89#"role: task_slicer"`.
+  `packages/orchestrator-workflow/assets/agents/task-slicer.md:98#"role: task_slicer"`.
 - Advisor (since 0.21.0):
-  `packages/orchestrator-workflow/assets/skill/references/contracts.md:379#"would_change_recommendation_if:"`
+  `packages/orchestrator-workflow/assets/skill/references/contracts.md:393#"would_change_recommendation_if:"`
   (`## Advisor output contract`) vs.
   `packages/orchestrator-workflow/assets/agents/advisor.md:58-76#"open_questions:"`. Direct
   read confirms the two blocks are field-identical (since review round 1,
@@ -935,18 +935,27 @@ new field: every doc of a configured bundle whose `sources` intersect the
 task's `allowed_changes` is listed there with the bundle doc marker
 `<doc path> (knowledge bundle; sources: <intersecting sources>)` and also
 added to `allowed_changes`, and the contract shape stays unchanged
-(`packages/orchestrator-workflow/assets/skill/references/contracts.md:335-359#"shape is unchanged."`;
+(`packages/orchestrator-workflow/assets/skill/references/contracts.md:335-373#"shape is unchanged."`;
 `packages/orchestrator-workflow/assets/agents/task-slicer.md:60-68#"frontmatter; contracts.md defines the marker and the intersection."`;
 `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:62-66#"source change, or in a later commit of the same task."`).
 Each doc's `sources` resolve against its bundle's configured `repoRoot`; a
 bundle tool is queried with concrete paths, so directory and glob entries of
 `allowed_changes` are first expanded to the tracked files they cover, and a
 source that is itself a directory matches every path beneath it
-(`packages/orchestrator-workflow/assets/skill/references/contracts.md:341-353#"directly. Each such doc is also listed in"`).
+(`packages/orchestrator-workflow/assets/skill/references/contracts.md:342-352#"frontmatter instead, match directory and glob entries against each source"`).
+Three entry forms get their own rule: an entry whose expansion is empty (a
+directory the task will create) is passed to the tool itself alongside its
+expansion, or matched against the `sources` frontmatter; a brace glob is
+expanded into its alternatives first, since a pathspec does not expand it and
+a bundle tool takes it literally; and for a workspace bundle each path is
+rebased onto the bundle's `repoRoot`, with the expansion run inside that
+repository, because a workspace-relative path matches nothing there
+(`packages/orchestrator-workflow/assets/skill/references/contracts.md:353-367#"queried against that bundle."`;
+`packages/orchestrator-workflow/assets/agents/task-slicer.md:74-82#"inside that repository (for example"`).
 A doc that `forbidden_changes` cover stays out of `allowed_changes` and
 becomes an open question for the orchestrator, and a workspace bundle's
 re-stamp commit is one in the bundle's repository within the same task
-(`packages/orchestrator-workflow/assets/skill/references/contracts.md:354-358#"in the bundle's repository within the same task. This reuses"`;
+(`packages/orchestrator-workflow/assets/skill/references/contracts.md:368-372#"in the bundle's repository within the same task. This reuses"`;
 `packages/orchestrator-workflow/assets/agents/task-slicer.md:64-74#"path beneath it."`).
 The implementer reads marked docs first as leads to verify and re-stamps a
 doc whose source it changes in the same commit as the source change, or in a
