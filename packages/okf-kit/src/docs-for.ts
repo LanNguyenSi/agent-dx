@@ -58,14 +58,19 @@ export interface DocsForResult {
  * filesystem-absolute, so `check` and `docs-for` agree on what it points
  * at.
  *
- * A given `<path>` argument is resolved the same way when it is itself
- * relative. An ABSOLUTE given path is accepted only when it lies under
- * `repoRoot`, and is then relativized before matching; an absolute path
- * outside `repoRoot` is a usage error (exit 2), not a silent empty result
- * -- `path.resolve`'s ordinary "an absolute second argument wins" behavior
- * would otherwise let a stray absolute path quietly escape `repoRoot` and
- * report no matches instead of failing loudly. Either way, a leading `./`
- * and a trailing slash are normalized away before comparing.
+ * A given `<path>` argument, relative or absolute, is resolved by ONE rule
+ * regardless of spelling: `path.resolve(repoRoot, path)` (a relative
+ * argument joins onto `repoRoot`; an absolute one is used as-is, exactly
+ * as `path.resolve` treats a second absolute argument), normalized (a
+ * leading `./` and a trailing slash disappear), then checked for
+ * containment in `repoRoot`. A path that resolves outside `repoRoot` --
+ * an absolute path elsewhere on disk (including `repoRoot`'s own parent),
+ * or a relative `../` escape -- is a usage error (exit 2), not a silent
+ * empty result: `path.resolve`'s ordinary "an absolute second argument
+ * wins" behavior would otherwise let a stray absolute path quietly escape
+ * `repoRoot` and report no matches instead of failing loudly. `repoRoot`
+ * itself, given directly, is accepted (not an error); it only matches a
+ * `sources` entry that itself resolves to `repoRoot` (`.` or `./`).
  */
 export function runDocsFor(
   bundleDir: string,
@@ -125,29 +130,24 @@ export function runDocsFor(
 }
 
 /**
- * Resolves a given `<path>` CLI argument against `repoRoot`. A
- * relative-spelled argument goes through `resolveRepoPath`, the same
- * `path.join`-based resolution a `sources` entry gets, so `./`- and
- * trailing-slash spellings on either side compare equal. An ABSOLUTE
- * argument is accepted only when `path.relative(repoRoot, given)` stays
- * inside `repoRoot` (does not start with `..`); otherwise this throws a
- * `UsageError` rather than silently reporting no matches.
+ * Resolves a given `<path>` CLI argument against `repoRoot` by the ONE rule
+ * described in `runDocsFor`'s own doc comment: `path.resolve(repoRoot,
+ * given)` regardless of whether `given` is relative or absolute, then
+ * normalized (`stripTrailingSep`). The resolved path must be `repoRoot`
+ * itself, or a strict descendant of it (checked with `isWithinDirectory`,
+ * the SAME containment helper a directory `sources` entry match uses, so a
+ * given path and a directory source are judged "inside" by identical
+ * logic); otherwise this throws a `UsageError` naming the offending path
+ * rather than silently reporting no matches.
  */
 function resolveGivenPath(repoRoot: string, given: string): string {
-  if (path.isAbsolute(given)) {
-    const rel = path.relative(repoRoot, given);
-    if (
-      rel === ".." ||
-      rel.startsWith(".." + path.sep) ||
-      path.isAbsolute(rel)
-    ) {
-      throw new UsageError(
-        `docs-for: absolute path lies outside --repo-root, rejecting rather than silently matching nothing: ${given}`,
-      );
-    }
-    return stripTrailingSep(resolveRepoPath(repoRoot, rel === "" ? "." : rel));
+  const abs = stripTrailingSep(path.resolve(repoRoot, given));
+  if (abs !== repoRoot && !isWithinDirectory(repoRoot, abs)) {
+    throw new UsageError(
+      `docs-for: path lies outside --repo-root, rejecting rather than silently matching nothing: ${given}`,
+    );
   }
-  return stripTrailingSep(resolveRepoPath(repoRoot, given));
+  return abs;
 }
 
 /** Strips a single trailing path separator, leaving the filesystem root (`/`) untouched. */

@@ -237,7 +237,7 @@ program
 program
   .command("docs-for <bundleDir> <paths...>")
   .description(
-    "List every bundle doc whose frontmatter `sources` claims one of the given (repo-root-relative) paths",
+    "List every bundle doc whose frontmatter `sources` claims one of the given paths (relative or absolute, resolved against --repo-root; a path outside it is a usage error)",
   )
   .option(
     "-r, --repo-root <path>",

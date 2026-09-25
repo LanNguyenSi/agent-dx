@@ -99,9 +99,9 @@ describe("runDocsFor", () => {
   });
 });
 
-// Normalization pinning (round 2): a temp bundle per test, so each case can
-// pick the exact `sources` spelling and given-path spelling under test
-// without disturbing the static docs-for-bundle fixture's own assertions.
+// Normalization pinning: a temp bundle per test, so each case can pick the
+// exact `sources` spelling and given-path spelling under test without
+// disturbing the static docs-for-bundle fixture's own assertions.
 describe("runDocsFor path normalization", () => {
   let bundleDir: string;
   let repoRoot: string;
@@ -206,7 +206,7 @@ describe("runDocsFor path normalization", () => {
     ]);
   });
 
-  it("accepts an absolute given path that lies under repoRoot, relativizing it before matching", () => {
+  it("accepts an absolute given path that lies under repoRoot", () => {
     fs.mkdirSync(path.join(repoRoot, "src"), { recursive: true });
     fs.writeFileSync(path.join(repoRoot, "src", "foo.ts"), "export {};\n");
     writeDoc(bundleDir, "exact.md", {
@@ -242,6 +242,80 @@ describe("runDocsFor path normalization", () => {
     } finally {
       fs.rmSync(outside, { recursive: true, force: true });
     }
+  });
+
+  describe("given-path policy: one rule, table-driven", () => {
+    it.each([
+      ["a relative path", () => "src/dir"],
+      ["a ./-prefixed relative path", () => "./src/dir"],
+      ["a relative path with a trailing slash", () => "src/dir/"],
+      [
+        "an absolute path",
+        (repoRoot: string) => path.join(repoRoot, "src", "dir"),
+      ],
+      [
+        "an absolute path with a trailing slash",
+        (repoRoot: string) => path.join(repoRoot, "src", "dir") + path.sep,
+      ],
+      [
+        "an absolute path with a .. segment that stays inside repoRoot",
+        (repoRoot: string) =>
+          `${path.join(repoRoot, "src", "dir")}${path.sep}..${path.sep}dir`,
+      ],
+    ])("matches a directory source exactly for %s", (_label, buildGiven) => {
+      fs.mkdirSync(path.join(repoRoot, "src", "dir"), { recursive: true });
+      writeDoc(bundleDir, "dirsrc.md", {
+        type: "concept",
+        sources: ["src/dir"],
+      });
+
+      const result = runDocsFor(bundleDir, [buildGiven(repoRoot)], {
+        repoRoot,
+      });
+      expect(result.matches).toEqual([
+        { doc: "dirsrc.md", sources: ["src/dir"] },
+      ]);
+    });
+
+    it.each([
+      ["a relative ../ escape", () => "../outside.ts"],
+      [
+        "an absolute path equal to repoRoot's own parent",
+        (repoRoot: string) => path.dirname(repoRoot),
+      ],
+    ])("throws a UsageError for %s", (_label, buildGiven) => {
+      writeDoc(bundleDir, "exact.md", {
+        type: "concept",
+        sources: ["src/foo.ts"],
+      });
+
+      expect(() =>
+        runDocsFor(bundleDir, [buildGiven(repoRoot)], { repoRoot }),
+      ).toThrow(UsageError);
+    });
+
+    it("matches a directory sources entry spelled with a trailing slash against the directory itself, exactly", () => {
+      fs.mkdirSync(path.join(repoRoot, "src", "dir"), { recursive: true });
+      writeDoc(bundleDir, "dirsrc.md", {
+        type: "concept",
+        sources: ["src/dir/"],
+      });
+
+      const result = runDocsFor(bundleDir, ["src/dir"], { repoRoot });
+      expect(result.matches).toEqual([
+        { doc: "dirsrc.md", sources: ["src/dir/"] },
+      ]);
+    });
+
+    it("accepts the repo root itself as a given path, matching nothing when no source resolves to it", () => {
+      writeDoc(bundleDir, "exact.md", {
+        type: "concept",
+        sources: ["src/foo.ts"],
+      });
+
+      const result = runDocsFor(bundleDir, [repoRoot], { repoRoot });
+      expect(result.matches).toEqual([]);
+    });
   });
 
   it("fills repoRoot from an injected runGit stub for a real match, not just the absent-repo-root error path", () => {

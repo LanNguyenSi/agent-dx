@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { FIXTURES_DIR, runCli } from "./helpers.js";
@@ -65,6 +67,24 @@ describe("okf-kit docs-for cli", () => {
   it("exits 2 when no path argument is given (commander's own missing-argument error)", () => {
     const result = runCli(["docs-for", BUNDLE_DIR, "--repo-root", REPO_ROOT]);
     expect(result.status).toBe(2);
+  });
+
+  it("exits 2 for a given path outside --repo-root", () => {
+    const outside = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-kit-docsfor-cli-outside-"),
+    );
+    try {
+      const result = runCli([
+        "docs-for",
+        BUNDLE_DIR,
+        path.join(outside, "src", "foo.ts"),
+        "--repo-root",
+        REPO_ROOT,
+      ]);
+      expect(result.status).toBe(2);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   it("exits 2 on an unknown option", () => {
