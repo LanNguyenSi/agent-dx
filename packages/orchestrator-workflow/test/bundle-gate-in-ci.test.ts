@@ -177,7 +177,7 @@ describe("bundle gate in CI reference: could-not-run and report placement", () =
   it("states that the pre-commit loop carries the verdict without set -e", () => {
     pin(
       bundleGate,
-      "The loop checks each exit status itself, as the CI example does, so the hook fails with the checker's verdict whether or not it runs under `set -e`: exit 2 when a check could not run, exit 1 on a failing check, exit 2 when the bundle list is not made of whole `<bundle> <repoRoot>` pairs, and 0 otherwise.",
+      "The loop checks each exit status itself, as the CI example does, so the hook fails with the checker's verdict whether or not it runs under `set -e`: exit 2 when the checker exits with a status other than 0 or 1, exit 1 on a failing check, exit 2 when the bundle list is not made of whole `<bundle> <repoRoot>` pairs, and 0 otherwise. Reading the report belongs to the stage decision at the comment.",
     );
     pin(
       bundleGate,
@@ -311,6 +311,7 @@ describe("bundle gate in CI pre-commit recipe: exit status and temp report clean
     ["one", 0, 0, 1],
     ["one", 1, 1, 1],
     ["one", 2, 2, 1],
+    ["one", 127, 2, 1],
     ["two", 0, 0, 2],
     ["two", 1, 1, 1],
     ["two", 2, 2, 1],
@@ -348,9 +349,9 @@ describe("bundle gate in CI pre-commit recipe: exit status and temp report clean
           "check docs/b --repo-root sub --dirty-as-now --json",
         );
       }
-      if (exit === 2) {
+      if (exit !== 0 && exit !== 1) {
         expect(run.result.stderr).toContain(
-          "bundle check could not run for docs/okf (exit 2)",
+          `bundle check could not run for docs/okf (exit ${exit})`,
         );
       }
       if (list === "odd") {
