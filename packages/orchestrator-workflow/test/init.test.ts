@@ -11,12 +11,17 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, sep } from "node:path";
+import { join, posix, sep, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { runInit, readInstalledManifest } from "../src/init.js";
+import {
+  checkKnowledgeEntry,
+  knowledgeEntryProblems,
+  readInstalledManifest,
+  runInit,
+} from "../src/init.js";
 import {
   DEFAULT_MODELS,
   DEFAULT_TIER,
@@ -2962,5 +2967,277 @@ describe("knowledge-bundle locations in the manifest", () => {
     expect(readInstalledManifest(target)?.knowledge).toEqual([
       { path: "docs/okf", repoRoot: "." },
     ]);
+    // The manifest was not rewritten, so the entry is still on disk for
+    // `doctor` to report and no dropped-entry note is due.
+    expect(report.notes.filter((note) => note.includes("knowledge"))).toEqual(
+      [],
+    );
+  });
+
+  it("notes each hand-edited invalid entry (index and reason) that a rewriting re-install drops from disk", () => {
+    runInit({
+      ...defaultOptions(),
+      knowledge: [{ path: "docs/okf", repoRoot: "." }],
+    });
+    const manifest = JSON.parse(readFileSync(manifestPath(), "utf8"));
+    manifest.knowledge.push({ path: "../escape", repoRoot: "." });
+    manifest.knowledge.push({ path: "docs/kb", repoRoot: "..\\outside" });
+    writeFileSync(manifestPath(), `${JSON.stringify(manifest, null, 2)}\n`);
+
+    // Switching the profile changes the desired manifest, so it is
+    // rewritten from the sanitized previous value.
+    const report = runInit({ ...defaultOptions(), profile: "minimal" });
+    expect(report.updated).toContain(manifestPath());
+    const written = JSON.parse(readFileSync(manifestPath(), "utf8"));
+    expect(written.knowledge).toEqual([{ path: "docs/okf", repoRoot: "." }]);
+    // The problem list is derived on read and never serialized.
+    expect("knowledgeProblems" in written).toBe(false);
+    const notes = report.notes.filter((note) => note.includes("knowledge"));
+    expect(notes).toEqual([
+      "manifest: knowledge[1] path escapes the worktree top level and is ignored; dropped from the rewritten manifest",
+      "manifest: knowledge[2] repoRoot contains a backslash and is ignored; dropped from the rewritten manifest",
+    ]);
+  });
+
+  it("notes a non-array hand-edited knowledge value that a rewriting re-install drops", () => {
+    runInit(defaultOptions());
+    const manifest = JSON.parse(readFileSync(manifestPath(), "utf8"));
+    manifest.knowledge = "docs/okf";
+    writeFileSync(manifestPath(), `${JSON.stringify(manifest, null, 2)}\n`);
+
+    const report = runInit({ ...defaultOptions(), profile: "minimal" });
+    expect(report.updated).toContain(manifestPath());
+    expect(
+      "knowledge" in JSON.parse(readFileSync(manifestPath(), "utf8")),
+    ).toBe(false);
+    expect(report.notes).toContain(
+      "manifest: knowledge is not an array and is ignored; dropped from the rewritten manifest",
+    );
+  });
+
+  it("does not note dropped entries when the caller replaces knowledge explicitly", () => {
+    runInit(defaultOptions());
+    const manifest = JSON.parse(readFileSync(manifestPath(), "utf8"));
+    manifest.knowledge = [{ path: "../escape", repoRoot: "." }];
+    writeFileSync(manifestPath(), `${JSON.stringify(manifest, null, 2)}\n`);
+
+    const report = runInit({
+      ...defaultOptions(),
+      knowledge: [{ path: "docs/okf", repoRoot: "." }],
+    });
+    expect(report.notes.filter((note) => note.includes("knowledge"))).toEqual(
+      [],
+    );
+  });
+
+  it("refuses every backslash in path and repoRoot, including Windows absolute and mixed escapes", () => {
+    const backslashed = [
+      "..\\outside",
+      "docs\\okf",
+      "C:\\x",
+      "\\\\server\\share",
+      "../docs\\..\\x",
+      "docs/..\\..\\outside",
+    ];
+    for (const value of backslashed) {
+      expect(
+        () =>
+          runInit({
+            ...defaultOptions(),
+            knowledge: [{ path: value, repoRoot: "." }],
+          }),
+        `path ${JSON.stringify(value)}`,
+      ).toThrow(/options\.knowledge\[0\] path contains a backslash/);
+      expect(
+        () =>
+          runInit({
+            ...defaultOptions(),
+            knowledge: [{ path: "docs/okf", repoRoot: value }],
+          }),
+        `repoRoot ${JSON.stringify(value)}`,
+      ).toThrow(/options\.knowledge\[0\] repoRoot contains a backslash/);
+    }
+    expect(existsSync(manifestPath())).toBe(false);
+  });
+
+  it("refuses a forward-slash Windows drive path as absolute", () => {
+    for (const value of ["C:/x", "c:/"]) {
+      expect(
+        () =>
+          runInit({
+            ...defaultOptions(),
+            knowledge: [{ path: value, repoRoot: "." }],
+          }),
+        JSON.stringify(value),
+      ).toThrow(/options\.knowledge\[0\] path is an absolute path/);
+      expect(
+        () =>
+          runInit({
+            ...defaultOptions(),
+            knowledge: [{ path: "docs/okf", repoRoot: value }],
+          }),
+        JSON.stringify(value),
+      ).toThrow(/options\.knowledge\[0\] repoRoot is an absolute path/);
+    }
+  });
+
+  it("drops and reports a hand-edited backslash entry on read", () => {
+    runInit({
+      ...defaultOptions(),
+      knowledge: [{ path: "docs/okf", repoRoot: "." }],
+    });
+    const manifest = JSON.parse(readFileSync(manifestPath(), "utf8"));
+    manifest.knowledge.push({ path: "..\\outside", repoRoot: "." });
+    writeFileSync(manifestPath(), `${JSON.stringify(manifest, null, 2)}\n`);
+    expect(readInstalledManifest(target)?.knowledge).toEqual([
+      { path: "docs/okf", repoRoot: "." },
+    ]);
+    expect(knowledgeEntryProblems(manifest.knowledge)).toEqual([
+      "knowledge[1] path contains a backslash and is ignored",
+    ]);
+  });
+
+  it("refuses a drive-relative Windows path for path and repoRoot", () => {
+    for (const value of ["C:x", "C:..", "c:", "a:b"]) {
+      expect(
+        () =>
+          runInit({
+            ...defaultOptions(),
+            knowledge: [{ path: value, repoRoot: "." }],
+          }),
+        JSON.stringify(value),
+      ).toThrow(/options\.knowledge\[0\] path is a Windows drive path/);
+      expect(
+        () =>
+          runInit({
+            ...defaultOptions(),
+            knowledge: [{ path: "docs/okf", repoRoot: value }],
+          }),
+        JSON.stringify(value),
+      ).toThrow(/options\.knowledge\[0\] repoRoot is a Windows drive path/);
+      expect(knowledgeEntryProblems([{ path: value }])).toEqual([
+        "knowledge[0] path is a Windows drive path and is ignored",
+      ]);
+      expect(
+        knowledgeEntryProblems([{ path: "docs/okf", repoRoot: value }]),
+      ).toEqual([
+        "knowledge[0] repoRoot is a Windows drive path and is ignored",
+      ]);
+    }
+    expect(existsSync(manifestPath())).toBe(false);
+  });
+
+  it("refuses a drive or absolute form that only appears after normalisation", () => {
+    const cases: [string, string][] = [
+      ["./C:x", "is a Windows drive path"],
+      ["a/../C:x", "is a Windows drive path"],
+      ["./C:..", "is a Windows drive path"],
+      ["./c:", "is a Windows drive path"],
+      ["./a:b", "is a Windows drive path"],
+      ["./C:/x", "is an absolute path"],
+      ["docs/../C:/x", "is an absolute path"],
+      // Absolute as written, relative only after normalisation: never
+      // silently reinterpreted.
+      ["C:/../docs", "is an absolute path"],
+      ["C:x/..", "is a Windows drive path"],
+    ];
+    for (const [value, reason] of cases) {
+      expect(
+        () =>
+          runInit({
+            ...defaultOptions(),
+            knowledge: [{ path: value, repoRoot: "." }],
+          }),
+        JSON.stringify(value),
+      ).toThrow(`options.knowledge[0] path ${reason};`);
+      expect(
+        () =>
+          runInit({
+            ...defaultOptions(),
+            knowledge: [{ path: "docs/okf", repoRoot: value }],
+          }),
+        JSON.stringify(value),
+      ).toThrow(`options.knowledge[0] repoRoot ${reason};`);
+      expect(knowledgeEntryProblems([{ path: value }])).toEqual([
+        `knowledge[0] path ${reason} and is ignored`,
+      ]);
+      expect(
+        knowledgeEntryProblems([{ path: "docs/okf", repoRoot: value }]),
+      ).toEqual([`knowledge[0] repoRoot ${reason} and is ignored`]);
+    }
+    expect(existsSync(manifestPath())).toBe(false);
+  });
+
+  it("stores only values it accepts again and that stay inside the worktree", () => {
+    const seeds = [
+      "C:x",
+      "c:x",
+      "C:",
+      "C:..",
+      "a:b",
+      "C:/x",
+      "c:/",
+      "\\\\server\\share",
+      "..\\x",
+      "\u0000",
+      "a\u0000b",
+      "",
+      ".",
+      "..",
+      "a/../..",
+      "docs/a:b",
+      "okf:bundle",
+      "ab:c",
+      "docs/C:x",
+      "c:",
+      "../x",
+      "x",
+      "docs/okf",
+      "C:/../docs",
+      "./C:x",
+      "a/../C:x",
+      "./C:..",
+      "./C:/x",
+      "./c:",
+      "docs/../C:/x",
+      "./a:b",
+    ];
+    const prefixes = ["", "./", "a/../", "docs/../", ".//", "a//../"];
+    const values = new Set<string>();
+    for (const seed of seeds) {
+      for (const prefix of prefixes) {
+        for (const suffix of ["", "/", "//"]) {
+          values.add(`${prefix}${seed}${suffix}`);
+          values.add(`${prefix}${seed.replaceAll("/", "//")}${suffix}`);
+        }
+      }
+    }
+    const inside = (stored: string): boolean => {
+      const win = win32.resolve("D:\\wt", stored);
+      const nix = posix.resolve("/wt", stored);
+      return (
+        (win === "D:\\wt" || win.startsWith("D:\\wt\\")) &&
+        (nix === "/wt" || nix.startsWith("/wt/"))
+      );
+    };
+    let accepted = 0;
+    for (const value of values) {
+      const entries: [string, Record<string, string>][] = [
+        ["path", { path: value }],
+        ["repoRoot", { path: "docs/okf", repoRoot: value }],
+      ];
+      for (const [field, entry] of entries) {
+        const checked = checkKnowledgeEntry(entry);
+        if ("reason" in checked) continue;
+        accepted += 1;
+        const stored =
+          field === "path" ? checked.bundle.path : checked.bundle.repoRoot;
+        const label = `${field} ${JSON.stringify(value)} stored as ${JSON.stringify(stored)}`;
+        expect(checkKnowledgeEntry(checked.bundle), label).toEqual(checked);
+        expect(inside(stored), label).toBe(true);
+      }
+    }
+    // The matrix exercises the acceptance side, not only rejections.
+    expect(accepted).toBeGreaterThan(100);
   });
 });

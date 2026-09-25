@@ -50,6 +50,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `:` and `,` in `file`); the pre-commit recipe loops over bundle pairs with one
   trapped temp report and checks each status itself (task 433b78d5).
 
+- A `knowledge` manifest entry containing a backslash (`..\outside`,
+  `C:\x`, `\\server\share`) or starting with a Windows drive letter
+  (`C:/x`, and the drive-relative `C:x` or `C:..`) is now invalid for `path`
+  and `repoRoot`, as written or after normalisation (`./C:x` and
+  `docs/../C:/x` are invalid too), so every stored entry is accepted again
+  on read and resolves inside the worktree under both POSIX and Windows
+  (`path.win32`) resolution; use `/` as the separator. A
+  re-install that rewrites the manifest and so removes an invalid hand-edited
+  `knowledge` entry (or a non-array value) from disk now prints a note naming
+  its index and reason, instead of dropping it silently (task 2348e6f1).
+
 ## [0.41.0] - 2026-09-25
 
 - New skill reference `bundle-gate-in-ci.md`, linked from the SKILL.md

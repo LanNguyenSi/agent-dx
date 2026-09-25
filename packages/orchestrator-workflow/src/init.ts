@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { isAbsolute, join, normalize, posix, sep } from "node:path";
+import { isAbsolute, join, normalize, posix, sep, win32 } from "node:path";
 
 import {
   PACKAGE_VERSION,
@@ -193,9 +193,17 @@ export interface Manifest extends OpencodeModelMaps {
    * validation (a non-relative or top-level-escaping `path`/`repoRoot`) is
    * dropped rather than carried forward, the same per-entry degradation
    * style `files`/`models` above already use for a hand-written or damaged
-   * manifest; `doctor` reports each dropped entry.
+   * manifest; `doctor` reports each dropped entry, and a re-install that
+   * rewrites the manifest notes each one it removes from disk.
    */
   knowledge?: KnowledgeBundle[];
+  /**
+   * The {@link knowledgeEntryProblems} of the raw on-disk `knowledge` value,
+   * set by `readInstalledManifest` only when there is at least one. Never
+   * written back: `runInit` turns each into a report note when it rewrites
+   * the manifest and so removes the offending value from disk.
+   */
+  knowledgeProblems?: string[];
 }
 
 function sha256(content: string): string {
@@ -215,14 +223,45 @@ export function isContainedRelativePath(relativePath: string): boolean {
 }
 
 /**
+ * The containment problem of one knowledge-bundle path spelling, or
+ * `undefined` when it stays inside the worktree top level: an absolute path
+ * (native, POSIX, or Windows such as `C:/x`), any other value starting with
+ * a Windows drive letter (the drive-relative `C:x`, `C:..` or `C:`, which
+ * Windows resolves against that drive's current directory), or a `..`
+ * escape. The `..` test is only meaningful on a normalised value.
+ */
+function knowledgePathContainmentProblem(value: string): string | undefined {
+  if (isAbsolute(value) || posix.isAbsolute(value) || win32.isAbsolute(value)) {
+    return "is an absolute path";
+  }
+  if (/^[A-Za-z]:/.test(value)) return "is a Windows drive path";
+  if (value === ".." || value.startsWith("../")) {
+    return "escapes the worktree top level";
+  }
+  return undefined;
+}
+
+/**
  * Normalises one knowledge-bundle path field (`path` or `repoRoot`) and
  * returns it, or a reason string when it is not acceptable. Both fields are
  * worktree-relative, so spellings of the same location compare equal after
  * this step: POSIX `normalize`, then any trailing `/` stripped (`docs/okf/`,
- * `./docs/okf` and `docs/okf` all become `docs/okf`). An empty string, an
- * absolute path, and a path that normalises to a `..` escape are rejected;
- * `.` (the worktree top level itself) is accepted only when `allowTop` is
- * set, which is the case for `repoRoot` and not for `path`.
+ * `./docs/okf` and `docs/okf` all become `docs/okf`). An empty string, any
+ * backslash, and every value with a
+ * {@link knowledgePathContainmentProblem} are rejected. The containment
+ * check runs on the normalised value, which is the one that is stored and
+ * later resolved, so a prefix that normalisation removes cannot smuggle a
+ * drive or absolute form past it (`./C:x` and `a/../C:x` store `C:x`,
+ * `docs/../C:/x` stores `C:/x`; all rejected). It also runs on the value as
+ * written, so an absolute or drive path is never silently reinterpreted as
+ * a relative one (`C:/../docs` would normalise to `docs`). An accepted
+ * value's stored form is therefore accepted again unchanged. `.` (the
+ * worktree top level itself) is accepted only when `allowTop` is set, which
+ * is the case for `repoRoot` and not for `path`. The backslash rule is
+ * platform-independent: POSIX normalisation treats `\` as an ordinary
+ * character, so `..\outside` would pass the `..` test here and still resolve
+ * outside the worktree under Windows path semantics; the stored separator
+ * is always `/`.
  */
 function normalizeKnowledgePathField(
   value: unknown,
@@ -230,16 +269,15 @@ function normalizeKnowledgePathField(
 ): { value: string } | { reason: string } {
   if (typeof value !== "string") return { reason: "is not a string" };
   if (value === "") return { reason: "is empty" };
-  if (isAbsolute(value) || posix.isAbsolute(value)) {
-    return { reason: "is an absolute path" };
-  }
+  if (value.includes("\\")) return { reason: "contains a backslash" };
   let normalized = posix.normalize(value);
   while (normalized.length > 1 && normalized.endsWith("/")) {
     normalized = normalized.slice(0, -1);
   }
-  if (normalized === ".." || normalized.startsWith("../")) {
-    return { reason: "escapes the worktree top level" };
-  }
+  const problem =
+    knowledgePathContainmentProblem(value) ??
+    knowledgePathContainmentProblem(normalized);
+  if (problem !== undefined) return { reason: problem };
   if (normalized === "." && !allowTop) {
     return { reason: "names the worktree top level itself" };
   }
@@ -277,8 +315,8 @@ export function checkKnowledgeEntry(
  * field is absent or every entry is valid, one item for a non-array value,
  * otherwise one item per invalid entry with its index and reason. `doctor`
  * reports these, since {@link parseKnowledgeBundles} drops such entries on
- * read and a re-install that rewrites the manifest would remove them from
- * disk without notice.
+ * read; `runInit` reports them as notes when a re-install that carries
+ * `knowledge` forward rewrites the manifest and so removes them from disk.
  */
 export function knowledgeEntryProblems(raw: unknown): string[] {
   if (raw === undefined) return [];
@@ -428,6 +466,7 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
     routing = parseRouting(candidate.routing);
   }
   const knowledge = parseKnowledgeBundles(candidate);
+  const knowledgeProblems = knowledgeEntryProblems(candidate.knowledge);
 
   // A hand-written or damaged manifest may carry a non-string `pin`; that
   // degrades to "no recorded pin" here (the same per-field-degradation
@@ -445,6 +484,7 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
     tiers,
     ...(routing !== undefined ? { routing } : {}),
     ...(knowledge !== undefined ? { knowledge } : {}),
+    ...(knowledgeProblems.length > 0 ? { knowledgeProblems } : {}),
     ...opencodeMaps,
     files,
     installedAt:
@@ -1190,6 +1230,18 @@ export function runInit(options: InitOptions): Report {
   ) {
     report.skipped.push(manifestPath);
   } else {
+    // `previous.knowledge` was sanitized on read, so rewriting the manifest
+    // from it removes each invalid hand-edited entry (or a non-array value)
+    // from disk, after which `doctor` has nothing left to report. Name each
+    // one here instead. An explicit `options.knowledge` replaces the whole
+    // field on purpose and gets no note.
+    if (options.knowledge === undefined) {
+      for (const problem of previous?.knowledgeProblems ?? []) {
+        report.notes.push(
+          `manifest: ${problem}; dropped from the rewritten manifest`,
+        );
+      }
+    }
     const manifest: Manifest = {
       ...desired,
       installedAt: previous?.installedAt || new Date().toISOString(),
