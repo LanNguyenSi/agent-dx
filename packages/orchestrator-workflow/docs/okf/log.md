@@ -1,5 +1,15 @@
 # Bundle log
 
+- 2026-09-25T11:41:14Z (task 433b78d5, bundle gate in CI review fixes): `bundle-gate-in-ci.md`
+  says the checker exits 2 whenever it cannot complete the check, that the
+  report check runs when the status is 0 or 1, and that the pre-commit recipe
+  creates and traps its one temporary report above the per-bundle loop (the
+  trap replaces an EXIT trap the hook already set); the `CHANGELOG.md`
+  `[Unreleased]` bullet is reworded at the same length. No bundle doc cites
+  the reference or the test file, the two live self-citations into
+  `CHANGELOG.md` still resolve at their lines, and the docs whose `sources`
+  list `CHANGELOG.md` were re-checked and re-stamped.
+
 - 2026-09-25T11:22:23Z (task 433b78d5, bundle gate in CI wording): `bundle-gate-in-ci.md`
   separates the checker's exit-2 usage error from the other could-not-run
   causes, checks for `jq`, escapes annotation lines and removes the pre-commit
