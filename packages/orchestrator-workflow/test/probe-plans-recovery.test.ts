@@ -11,7 +11,6 @@ const reviewer = readAsset("agents/reviewer.md");
 const unwrap = (text: string) => text.replace(/\s+/g, " ");
 
 const PACKAGE_DIR = fileURLToPath(new URL("..", import.meta.url));
-const changelog = readFileSync(`${PACKAGE_DIR}/CHANGELOG.md`, "utf8");
 const gateBundleDoc = readFileSync(
   `${PACKAGE_DIR}/docs/okf/review-gate-and-waivers.md`,
   "utf8",
@@ -25,12 +24,20 @@ function sectionOf(source: string, heading: string): string {
   return unwrap(source.slice(start, next === -1 ? undefined : next));
 }
 
-/** One top-level CHANGELOG bullet, so a neighbouring bullet cannot satisfy a pin. */
-function changelogBullet(opening: string): string {
-  const start = changelog.indexOf(opening);
-  expect(start, `CHANGELOG bullet not found: ${opening}`).toBeGreaterThan(-1);
-  const next = changelog.indexOf("\n- ", start + 1);
-  return unwrap(changelog.slice(start, next === -1 ? undefined : next));
+/**
+ * An okf citation parenthetical: a backticked `path:line#"quote"` anchor in
+ * parentheses. Its quote often repeats the very clause the prose beside it
+ * states, so a copy pin must not be able to match inside it.
+ */
+const OKF_CITATION = /\(`[^`\s]+:\d+(?:-\d+)?(?:#"[^`]*")?`\)/g;
+
+/** A bundle doc section with its okf citations removed, so only the prose can satisfy a pin. */
+function bundleProseOf(source: string, heading: string): string {
+  const prose = sectionOf(source, heading).replace(OKF_CITATION, "");
+  expect(prose, `${heading}: an okf citation was left in place`).not.toMatch(
+    /`[^`\s]+:\d+(?:-\d+)?#"/,
+  );
+  return prose;
 }
 
 describe("persisted probe plans and recovery references", () => {
@@ -114,14 +121,11 @@ describe("fix-regression decision point", () => {
     );
   });
 
+  // The CHANGELOG entry that first shipped this rule is a released section;
+  // it stays as shipped and is not pinned against the live wording.
   it("binds the sites that restate the trigger to the section's own words", () => {
     expect(
-      changelogBullet(
-        '- `references/review-and-recovery.md` gains a "Fix-regression decision',
-      ),
-    ).toContain(FIX_REGRESSION_TRIGGER);
-    expect(
-      sectionOf(gateBundleDoc, "## Fix-regression decision point"),
+      bundleProseOf(gateBundleDoc, "## Fix-regression decision point"),
     ).toContain(FIX_REGRESSION_TRIGGER);
   });
 
@@ -336,7 +340,7 @@ describe("ceremony rule copies stay bound to their normative sites", () => {
   ];
 
   it("the bundle doc's own section repeats each rule in the reference's own words", () => {
-    const bundleSection = sectionOf(
+    const bundleSection = bundleProseOf(
       gateBundleDoc,
       "## Ceremony rules: baseline revisions, docs-only review default, pinned prose",
     );
@@ -374,8 +378,6 @@ const PROBE_SET_SCOPE_RULE =
   "A quoted probe verdict is not a named result of the verification set, so the set's missing-or-extra rule does not apply to it.";
 const PROBE_SINGLE_REPLAY_RULE =
   "It reports per probe, in `reproduction`, the probe, the replayed verdict or explicit verdict absence with manual derivation evidence, and whether the measured `result` and `expectation` match the recorded fields; a mismatch is a finding of at least `high` and sets `matches_implementer_claim: mismatched`.";
-const PROBE_VERDICT_BULLET =
-  "- Mutation-probe verdict reporting now distinguishes";
 
 describe("mutation probe verdict fields", () => {
   const implementerPrompt = unwrap(readAsset("agents/implementer.md"));
@@ -457,18 +459,16 @@ describe("mutation probe verdict fields", () => {
       expect(text).not.toContain("agent-primitives");
   });
 
-  it("binds the CHANGELOG bullet and the bundle doc to the same words", () => {
-    const bullet = changelogBullet(PROBE_VERDICT_BULLET);
-    const bundleSection = sectionOf(
+  // The CHANGELOG entry that first shipped these rules is a released section;
+  // it stays as shipped and is not pinned against the live wording.
+  it("binds the bundle doc to the same words", () => {
+    const bundleSection = bundleProseOf(
       readFileSync(
         `${PACKAGE_DIR}/docs/okf/subagent-contracts-superset.md`,
         "utf8",
       ),
       "## Probe verdict fields: legend, copy rule, cross-check",
     );
-    for (const constant of allRules) {
-      expect(bullet).toContain(constant);
-      expect(bundleSection).toContain(constant);
-    }
+    for (const constant of allRules) expect(bundleSection).toContain(constant);
   });
 });
