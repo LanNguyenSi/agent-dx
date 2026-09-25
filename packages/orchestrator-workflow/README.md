@@ -231,12 +231,15 @@ several bundles). `path` is the bundle directory and `repoRoot` (default
 relative path resolved against the worktree top level on its own (`path` is
 not nested under `repoRoot`), so a workspace bundle for a sub-repo's sources
 reads `{ "path": "kb/app", "repoRoot": "app" }`. Entries are stored
-normalised (`./kb/app/` becomes `kb/app`); an empty or absolute path, a
-`path` of `.`, and a path escaping the worktree top level are invalid. The
-CLI has no flag for the field: edit it in the manifest by hand, and every
-re-install preserves it (the programmatic `runInit` option
-`knowledge` writes it and refuses an invalid entry). A hand-edited invalid
-entry is ignored on read and reported by `doctor`. The field carries no
+normalised (`./kb/app/` becomes `kb/app`); an empty or absolute path
+(POSIX, or a Windows form such as `C:/x`), a `path` of `.`, a path escaping
+the worktree top level, and any path containing a backslash are invalid
+(use `/` as the separator on every platform). The CLI has no flag for the
+field: edit it in the manifest by hand, and every re-install preserves its
+valid entries (the programmatic `runInit` option `knowledge` writes it and
+refuses an invalid entry). A hand-edited invalid entry is ignored on read
+and reported by `doctor`; a re-install that rewrites the manifest removes it
+from disk and prints a note naming its index and reason. The field carries no
 check argv; the concrete bundle-check command still lives in the
 repository-bound verification set (see Verification sets above), so there
 is one source of argv truth. When `knowledge` in

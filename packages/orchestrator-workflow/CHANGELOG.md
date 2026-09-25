@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- A `knowledge` manifest entry containing a backslash (`..\outside`,
+  `C:\x`, `\\server\share`) or a Windows drive path such as `C:/x` is now
+  invalid for `path` and `repoRoot`, so no entry can resolve outside the
+  worktree under Windows path semantics; use `/` as the separator. A
+  re-install that rewrites the manifest and so removes an invalid hand-edited
+  `knowledge` entry (or a non-array value) from disk now prints a note naming
+  its index and reason, instead of dropping it silently (task 2348e6f1).
+
 ## [0.41.0] - 2026-09-25
 
 - New skill reference `bundle-gate-in-ci.md`, linked from the SKILL.md

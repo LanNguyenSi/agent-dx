@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { isAbsolute, join, normalize, posix, sep } from "node:path";
+import { isAbsolute, join, normalize, posix, sep, win32 } from "node:path";
 
 import {
   PACKAGE_VERSION,
@@ -193,7 +193,8 @@ export interface Manifest extends OpencodeModelMaps {
    * validation (a non-relative or top-level-escaping `path`/`repoRoot`) is
    * dropped rather than carried forward, the same per-entry degradation
    * style `files`/`models` above already use for a hand-written or damaged
-   * manifest; `doctor` reports each dropped entry.
+   * manifest; `doctor` reports each dropped entry, and a re-install that
+   * rewrites the manifest notes each one it removes from disk.
    */
   knowledge?: KnowledgeBundle[];
 }
@@ -219,10 +220,14 @@ export function isContainedRelativePath(relativePath: string): boolean {
  * returns it, or a reason string when it is not acceptable. Both fields are
  * worktree-relative, so spellings of the same location compare equal after
  * this step: POSIX `normalize`, then any trailing `/` stripped (`docs/okf/`,
- * `./docs/okf` and `docs/okf` all become `docs/okf`). An empty string, an
- * absolute path, and a path that normalises to a `..` escape are rejected;
- * `.` (the worktree top level itself) is accepted only when `allowTop` is
- * set, which is the case for `repoRoot` and not for `path`.
+ * `./docs/okf` and `docs/okf` all become `docs/okf`). An empty string, any
+ * backslash, an absolute path (POSIX, or Windows such as `C:/x`), and a path
+ * that normalises to a `..` escape are rejected; `.` (the worktree top level
+ * itself) is accepted only when `allowTop` is set, which is the case for
+ * `repoRoot` and not for `path`. The backslash rule is platform-independent:
+ * POSIX normalisation treats `\` as an ordinary character, so `..\outside`
+ * would pass the `..` test here and still resolve outside the worktree
+ * under Windows path semantics; the stored separator is always `/`.
  */
 function normalizeKnowledgePathField(
   value: unknown,
@@ -230,7 +235,8 @@ function normalizeKnowledgePathField(
 ): { value: string } | { reason: string } {
   if (typeof value !== "string") return { reason: "is not a string" };
   if (value === "") return { reason: "is empty" };
-  if (isAbsolute(value) || posix.isAbsolute(value)) {
+  if (value.includes("\\")) return { reason: "contains a backslash" };
+  if (isAbsolute(value) || posix.isAbsolute(value) || win32.isAbsolute(value)) {
     return { reason: "is an absolute path" };
   }
   let normalized = posix.normalize(value);
@@ -277,8 +283,8 @@ export function checkKnowledgeEntry(
  * field is absent or every entry is valid, one item for a non-array value,
  * otherwise one item per invalid entry with its index and reason. `doctor`
  * reports these, since {@link parseKnowledgeBundles} drops such entries on
- * read and a re-install that rewrites the manifest would remove them from
- * disk without notice.
+ * read; `runInit` reports them as notes when a re-install that carries
+ * `knowledge` forward rewrites the manifest and so removes them from disk.
  */
 export function knowledgeEntryProblems(raw: unknown): string[] {
   if (raw === undefined) return [];
@@ -345,6 +351,23 @@ function parseKnowledgeBundles(
     if ("bundle" in checked) result.push(checked.bundle);
   }
   return result;
+}
+
+/**
+ * The raw value of one top-level field of the manifest file under
+ * `targetDir`, before {@link readInstalledManifest} sanitizes it; `undefined`
+ * when the file or field is absent or the file cannot be parsed.
+ */
+function readRawManifestField(targetDir: string, field: string): unknown {
+  try {
+    const parsed: unknown = JSON.parse(
+      readFileSync(join(targetDir, MANIFEST_PATH), "utf8"),
+    );
+    if (typeof parsed !== "object" || parsed === null) return undefined;
+    return (parsed as Record<string, unknown>)[field];
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -1190,6 +1213,20 @@ export function runInit(options: InitOptions): Report {
   ) {
     report.skipped.push(manifestPath);
   } else {
+    // `previous.knowledge` was sanitized on read, so rewriting the manifest
+    // from it removes each invalid hand-edited entry (or a non-array value)
+    // from disk, after which `doctor` has nothing left to report. Name each
+    // one here instead. An explicit `options.knowledge` replaces the whole
+    // field on purpose and gets no note.
+    if (previous && options.knowledge === undefined) {
+      for (const problem of knowledgeEntryProblems(
+        readRawManifestField(targetDir, "knowledge"),
+      )) {
+        report.notes.push(
+          `manifest: ${problem}; dropped from the rewritten manifest`,
+        );
+      }
+    }
     const manifest: Manifest = {
       ...desired,
       installedAt: previous?.installedAt || new Date().toISOString(),
