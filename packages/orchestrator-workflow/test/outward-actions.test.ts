@@ -534,10 +534,37 @@ describe("orchestrator mechanical cross-check ships in evidence-and-probes.md", 
     );
   });
 
-  it("treats a mismatch, a foreign pull request, or an outward-action-executed report as a misfire", () => {
+  it("treats a commits mismatch or an outward-action-executed report as a misfire", () => {
     pin(
       evidenceAndProbes,
-      "A `commits` mismatch, a pull request the orchestrator did not open, or a return that reports an outward action as executed, is a misfire: do not fold it into run state as evidence, and recover it under the subagent misfire rule.",
+      "A `commits` mismatch, or a return that reports an outward action as executed, is a misfire: do not fold it into run state as evidence, and recover it under the subagent misfire rule.",
+    );
+  });
+
+  it("no longer counts a pull request the orchestrator did not open as a direct misfire", () => {
+    expect(unwrap(evidenceAndProbes)).not.toContain(
+      "a pull request the orchestrator did not open, or a return that reports",
+    );
+  });
+
+  it("investigates who opened a pull request the orchestrator did not open before it counts", () => {
+    pin(
+      evidenceAndProbes,
+      "A pull request on the task branch that the orchestrator did not open is, like a flagged ref, a signal to investigate, not a misfire by itself: before treating it as one, the orchestrator establishes who opened it (for example from the pull request's author and the host's audit events, or by asking the operator).",
+    );
+  });
+
+  it("treats a pull request a subagent opened, or whose opener cannot be established, as a misfire reported to the operator", () => {
+    pin(
+      evidenceAndProbes,
+      "When a subagent of the run opened it, or when that cannot be established, it treats the pull request as a misfire and reports it to the operator.",
+    );
+  });
+
+  it("records a third party's pull request once, naming it, instead of re-flagging it every round", () => {
+    pin(
+      evidenceAndProbes,
+      "A pull request a third party opened is recorded once in `03-decisions.md`, naming its number or URL, and is not treated as a new finding again in a later round.",
     );
   });
 
@@ -624,10 +651,10 @@ describe("a flagged ref is investigated before it counts", () => {
     );
   });
 
-  it("exempts a noted ref only while it stays at the noted sha", () => {
+  it("exempts a noted ref, recorded with its sha, only while it stays at that sha", () => {
     pin(
       ep,
-      "A ref a third party moved, or one already recorded as an incident in an earlier round, is recorded once in `03-decisions.md` and is not treated as a new finding again while it stays at that sha; a later move of such a ref is investigated like any other flagged ref.",
+      "A ref a third party moved, or one already recorded as an incident in an earlier round, is recorded once in `03-decisions.md`, naming the ref and the sha it was recorded at, and is not treated as a new finding again while it stays at that sha; a later move of such a ref is investigated like any other flagged ref.",
     );
   });
 

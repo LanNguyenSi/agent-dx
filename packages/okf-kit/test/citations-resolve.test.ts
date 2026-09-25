@@ -435,6 +435,63 @@ describe("citations-resolve", () => {
     }
   });
 
+  it("leading-slash source: a `sources` entry spelled `/src/a/shared.ts` is repo-relative and disambiguates a bare-basename citation", () => {
+    // The doc's `sources` entry is the first resolution step for a
+    // citation it matches. A leading slash is repo-relative there, exactly
+    // as sources-shape and docs-for resolve it, never the filesystem root.
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-slashsrc-"),
+    );
+    try {
+      fs.mkdirSync(path.join(tmpRoot, "docs/okf"), { recursive: true });
+      fs.mkdirSync(path.join(tmpRoot, "src/a"), { recursive: true });
+      fs.mkdirSync(path.join(tmpRoot, "src/b"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpRoot, "src/a/shared.ts"),
+        "export const a = 1;\nexport const a2 = 2;\n",
+      );
+      fs.writeFileSync(
+        path.join(tmpRoot, "src/b/shared.ts"),
+        "export const b = 1;\n",
+      );
+      const writeDocWithSource = (source: string): void => {
+        fs.writeFileSync(
+          path.join(tmpRoot, "docs/okf/doc.md"),
+          [
+            "---",
+            "type: reference",
+            "title: Leading-slash source fixture",
+            "sources:",
+            `  - ${source}`,
+            "---",
+            "",
+            "Bare-basename citation of the second line: `shared.ts:2`.",
+            "",
+          ].join("\n"),
+        );
+      };
+
+      writeDocWithSource("/src/a/shared.ts");
+      const findings = citationsResolveRule.run(
+        loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot),
+      );
+      expect(findingFor(findings, "shared.ts:2")).toBeUndefined();
+
+      // Control: the same spelling pointing at the one-line file resolves
+      // there too, so the citation now runs past the end of that file.
+      writeDocWithSource("/src/b/shared.ts");
+      const controlFindings = citationsResolveRule.run(
+        loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot),
+      );
+      const f = findingFor(controlFindings, "shared.ts:2");
+      expect(f).toBeDefined();
+      expect(f?.message).not.toContain("[unresolved-ambiguous]");
+      expect(f?.detail).toBe("resolvedTo: src/b/shared.ts");
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
   // -- unreadable target -----------------------------------------------
 
   const isUnsupportedForChmod =

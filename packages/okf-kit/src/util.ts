@@ -34,11 +34,10 @@ export function getValidSources(parsed: unknown): string[] | undefined {
  * `path.join` treats it as repo-relative, exactly like every other entry,
  * while `path.resolve` would treat the leading slash as an instruction to
  * re-root at the filesystem root, silently escaping `repoRoot` entirely.
- * Shared by two callers: `sources-shape` (existence check) and `docs-for`
- * (reverse lookup, resolving each doc's `sources` entries), so they agree
- * on what a `sources` entry resolves to. `sources-fresh.ts`'s own inline
- * `path.join` calls compute the same thing but are not routed through this
- * helper.
+ * Every place that resolves a `sources` entry goes through this helper
+ * (`sources-shape`, `sources-fresh`, `citations-resolve` and `docs-for`),
+ * so the check rules and the reverse lookup agree on what a `sources`
+ * entry resolves to.
  */
 export function resolveRepoPath(repoRoot: string, source: string): string {
   return path.join(repoRoot, source);

@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Outward cross-check (evidence-and-probes.md, Delegate implementation): a
+  pull request on the task branch that the orchestrator did not open is no
+  longer a direct misfire; like a flagged ref, the orchestrator first
+  establishes who opened it. One a subagent opened, or whose opener cannot
+  be established, is a misfire reported to the operator (one a subagent
+  opened still takes the unauthorized-outward-action path); one a third party
+  opened is recorded once in `03-decisions.md` and not re-flagged every
+  round. A noted ref's record in `03-decisions.md` now names the ref and
+  the sha, so a later round can apply the "while it stays at that sha"
+  condition (task 91dc41e6).
+- The bundle-doc intersection rule in `contracts.md` and `task-slicer.md`
+  covers three more `allowed_changes` forms: an entry whose expansion is empty
+  (a directory the task will create) is passed to the bundle tool itself
+  alongside its expansion, or matched against the `sources` frontmatter; a
+  brace glob is expanded into its alternatives first (a pathspec does not
+  expand it, and a bundle tool takes it literally), or matched against the
+  frontmatter; and for a workspace bundle the paths are rebased onto the
+  bundle's `repoRoot` before querying, with the expansion run inside that
+  repository, since a workspace-relative path silently matches nothing there.
+
+- `test/probe-plans-recovery.test.ts` no longer pins the fix-regression
+  trigger or the probe verdict clauses against released CHANGELOG bullets, so
+  a later wording change never invites editing a released section; both stay
+  pinned against their reference files and bundle doc copies. The bundle doc
+  copy pins now strip okf citation parentheticals before matching, so a
+  wording change in the prose is caught even when the citation beside it
+  quotes the old clause (task e92008cf).
+
+- Hand off (evidence-and-probes.md step 9, SKILL.md step 6): documentation
+  impact (none with a reason, updated paths, or a follow-up) is now named
+  among what the orchestrator records and reports, so the `Documentation
+  Impact` line of `06-handoff.md` is filled by rule rather than only by the
+  template slot; `test/docs-impact.test.ts` pins both clauses (task
+  b4d8f0e9).
+
+- `bundle-gate-in-ci.md` reference: the could-not-run paragraph keeps the
+  checker's exit 2 (it could not complete the check) apart from the other
+  causes (a missing command exits 127, caught by the status check; a failed
+  install exits 1, caught by the report check). The example checks for `jq`
+  first with its own message and escapes `%`, CR and LF in annotations (plus
+  `:` and `,` in `file`); the pre-commit recipe loops over bundle pairs with one
+  trapped temp report and checks each status itself (task 433b78d5).
+
 - A `knowledge` manifest entry containing a backslash (`..\outside`,
   `C:\x`, `\\server\share`) or starting with a Windows drive letter
   (`C:/x`, and the drive-relative `C:x` or `C:..`) is now invalid for `path`
