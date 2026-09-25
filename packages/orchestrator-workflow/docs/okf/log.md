@@ -1,5 +1,14 @@
 # Bundle log
 
+- 2026-09-25T07:30:14Z (task 7e6dd342, review fix): the outward cross-check paragraph in
+  `evidence-and-probes.md` now takes the ref range from the task's
+  first-round base (three lines longer) and `implementer.md` names the
+  assignment's base for the `commits` field (one line longer); citations
+  below both were re-pointed and every moved anchor re-read. No bundle doc
+  describes the cross-check range, so `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md`
+  were re-checked and re-stamped without a claim change.
+
 - 2026-09-25T07:05:45Z (task 7e6dd342, cross-check base fix): the
   orchestrator's cross-check in `evidence-and-probes.md` step 6 now starts
   both comparisons from the round's task base instead of the run-base, and
