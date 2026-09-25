@@ -186,13 +186,21 @@ directory and the subagents.
    with the sha the orchestrator last pushed there, rather than treating the
    ref's existence as a misfire; and confirm no pull request exists on the
    task branch that the orchestrator did not open itself (for example `gh pr
-   list --head <branch>`, or the host's equivalent). A `commits` mismatch, a
-   flagged ref, a pull request the orchestrator did not open, or a return
-   that reports an outward action as executed, is a misfire: do not fold it
-   into run state as evidence, and recover it under the subagent misfire
-   rule. When the check finds an outward action was actually performed (a
-   push, an opened pull request) without authorization, that is more than a
-   misfire to resume past: the orchestrator informs the operator
+   list --head <branch>`, or the host's equivalent). A `commits` mismatch,
+   a pull request the orchestrator did not open, or a return that reports
+   an outward action as executed, is a misfire: do not fold it into run
+   state as evidence, and recover it under the subagent misfire rule. A
+   flagged ref is a signal to investigate, not a misfire by itself: before
+   treating it as one, the orchestrator establishes who moved the ref (for
+   example from the host's push or audit events, or by asking the
+   operator); a ref a third party moved, or one already recorded as an
+   incident in an earlier round, is noted once and not flagged again. The
+   ref check is a heuristic next to the subagent's mandatory self-report,
+   not a complete detector: it cannot see a deleted ref, a rewound default
+   branch, a ref at an already public sha, or a pushed merge or squash of
+   the task branch. When the check finds an outward action was actually
+   performed (a push, an opened pull request) without authorization, that
+   is more than a misfire to resume past: the orchestrator informs the operator
    immediately, records the incident in `03-decisions.md`, and lists it in
    `06-handoff.md`'s Sent / Drafted Outward section as unauthorized.
 7. **Delegate review.** Send the diff to the reviewer subagent, naming in the

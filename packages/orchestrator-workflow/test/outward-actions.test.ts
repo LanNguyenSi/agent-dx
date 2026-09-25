@@ -499,7 +499,7 @@ describe("orchestrator mechanical cross-check ships in evidence-and-probes.md", 
     );
   });
 
-  it("flags a remote branch or tag at a sha of the round's range the recorded default branch does not reach, unless the orchestrator moved it", () => {
+  it("flags a remote branch or tag at a sha of the task's range from the first-round base that the recorded default branch does not reach, unless the orchestrator moved it", () => {
     pin(
       evidenceAndProbes,
       "List the remote's refs (for example `git ls-remote <remote>`, or the host's equivalent) and flag every branch or tag whose sha, peeled for an annotated tag, lies in the `<first-round-base>..<task-branch>` range and is not reachable from the remote default branch's sha recorded at this round's handover (for example, every sha that `git rev-list <task-branch> ^<first-round-base> ^<recorded-default-sha>` lists), unless the orchestrator moved that ref to that sha itself (its own push, or a host-side merge it performed).",
@@ -534,10 +534,10 @@ describe("orchestrator mechanical cross-check ships in evidence-and-probes.md", 
     );
   });
 
-  it("treats a mismatch, a flagged ref, a foreign pull request, or an outward-action-executed report as a misfire", () => {
+  it("treats a mismatch, a foreign pull request, or an outward-action-executed report as a misfire", () => {
     pin(
       evidenceAndProbes,
-      "A `commits` mismatch, a flagged ref, a pull request the orchestrator did not open, or a return that reports an outward action as executed, is a misfire: do not fold it into run state as evidence, and recover it under the subagent misfire rule.",
+      "A `commits` mismatch, a pull request the orchestrator did not open, or a return that reports an outward action as executed, is a misfire: do not fold it into run state as evidence, and recover it under the subagent misfire rule.",
     );
   });
 
@@ -603,6 +603,24 @@ describe("implementer takes its commits base from the assignment", () => {
     pin(
       readAsset("agents/implementer.md"),
       "Populate a non-empty `commits` field by pasting `git log --reverse --format=%H <base>..HEAD`, where `<base>` is the base your task assignment names; never type or hand-complete commit shas.",
+    );
+  });
+});
+
+describe("a flagged ref is investigated before it counts", () => {
+  const ep = readAsset("skill/references/evidence-and-probes.md");
+
+  it("treats a flagged ref as a signal, establishing who moved it first", () => {
+    pin(
+      ep,
+      "A flagged ref is a signal to investigate, not a misfire by itself: before treating it as one, the orchestrator establishes who moved the ref (for example from the host's push or audit events, or by asking the operator); a ref a third party moved, or one already recorded as an incident in an earlier round, is noted once and not flagged again.",
+    );
+  });
+
+  it("states the ref check's limits next to the mandatory self-report", () => {
+    pin(
+      ep,
+      "The ref check is a heuristic next to the subagent's mandatory self-report, not a complete detector: it cannot see a deleted ref, a rewound default branch, a ref at an already public sha, or a pushed merge or squash of the task branch.",
     );
   });
 });
