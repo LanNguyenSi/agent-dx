@@ -197,6 +197,13 @@ export interface Manifest extends OpencodeModelMaps {
    * rewrites the manifest notes each one it removes from disk.
    */
   knowledge?: KnowledgeBundle[];
+  /**
+   * The {@link knowledgeEntryProblems} of the raw on-disk `knowledge` value,
+   * set by `readInstalledManifest` only when there is at least one. Never
+   * written back: `runInit` turns each into a report note when it rewrites
+   * the manifest and so removes the offending value from disk.
+   */
+  knowledgeProblems?: string[];
 }
 
 function sha256(content: string): string {
@@ -299,23 +306,6 @@ export function knowledgeEntryProblems(raw: unknown): string[] {
     }
   });
   return problems;
-}
-
-/**
- * The raw value of one top-level field of the manifest file under
- * `targetDir`, before {@link readInstalledManifest} sanitizes it; `undefined`
- * when the file or field is absent or the file cannot be parsed.
- */
-function readRawManifestField(targetDir: string, field: string): unknown {
-  try {
-    const parsed: unknown = JSON.parse(
-      readFileSync(join(targetDir, MANIFEST_PATH), "utf8"),
-    );
-    if (typeof parsed !== "object" || parsed === null) return undefined;
-    return (parsed as Record<string, unknown>)[field];
-  } catch {
-    return undefined;
-  }
 }
 
 /**
@@ -451,6 +441,7 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
     routing = parseRouting(candidate.routing);
   }
   const knowledge = parseKnowledgeBundles(candidate);
+  const knowledgeProblems = knowledgeEntryProblems(candidate.knowledge);
 
   // A hand-written or damaged manifest may carry a non-string `pin`; that
   // degrades to "no recorded pin" here (the same per-field-degradation
@@ -468,6 +459,7 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
     tiers,
     ...(routing !== undefined ? { routing } : {}),
     ...(knowledge !== undefined ? { knowledge } : {}),
+    ...(knowledgeProblems.length > 0 ? { knowledgeProblems } : {}),
     ...opencodeMaps,
     files,
     installedAt:
@@ -1218,10 +1210,8 @@ export function runInit(options: InitOptions): Report {
     // from disk, after which `doctor` has nothing left to report. Name each
     // one here instead. An explicit `options.knowledge` replaces the whole
     // field on purpose and gets no note.
-    if (previous && options.knowledge === undefined) {
-      for (const problem of knowledgeEntryProblems(
-        readRawManifestField(targetDir, "knowledge"),
-      )) {
+    if (options.knowledge === undefined) {
+      for (const problem of previous?.knowledgeProblems ?? []) {
         report.notes.push(
           `manifest: ${problem}; dropped from the rewritten manifest`,
         );
