@@ -35,7 +35,7 @@ const OKF_CITATION = /\(`[^`\s]+:\d+(?:-\d+)?(?:#"[^`]*")?`\)/g;
 function bundleProseOf(source: string, heading: string): string {
   const prose = sectionOf(source, heading).replace(OKF_CITATION, "");
   expect(prose, `${heading}: an okf citation was left in place`).not.toMatch(
-    /`[^`\s]+:\d+#"/,
+    /`[^`\s]+:\d+(?:-\d+)?#"/,
   );
   return prose;
 }
