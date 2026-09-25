@@ -1,5 +1,24 @@
 # Bundle log
 
+- 2026-09-25T09:45:26Z (task 7049ee8d, bundle docs in the task contract, review fixes):
+  `contracts.md` and `task-slicer.md` now say a bundle tool is queried with
+  concrete paths (directory and glob `allowed_changes` entries are expanded
+  to tracked files first, or matched against the `sources` frontmatter
+  directly), that sources resolve against the bundle's configured
+  `repoRoot`, that a doc `forbidden_changes` cover becomes an open question,
+  and that a workspace bundle's re-stamp commit lands in the bundle's
+  repository; `implementer.md` names that re-stamp commit and the
+  `06-handoff.md` Knowledge Bundle comment names the safety net. Claims
+  changed: `subagent-contracts-superset.md` describes the concrete-path,
+  `repoRoot`, `forbidden_changes` and workspace-bundle rules;
+  `run-state-lifecycle-and-markers.md` quotes the new `06-handoff.md` comment
+  and names the hand-off step as `evidence-and-probes.md` step 9
+  (`SKILL.md` step 6). Citations into the shifted `implementer.md`,
+  `task-slicer.md`, `contracts.md`, `06-handoff.md` and `CHANGELOG.md` lines
+  were re-pointed through a line map from the previous revision, every moved
+  anchor checked by the bundle validator. Every doc whose `sources` list an
+  edited file was re-checked and re-stamped.
+
 - 2026-09-25T09:29:37Z (task 7049ee8d, bundle docs in the task contract): the task
   slicer now lists every bundle doc whose `sources` intersect a task's
   `allowed_changes` in `relevant_docs` with the bundle doc marker defined in
