@@ -1,5 +1,11 @@
 # Bundle log
 
+- 2026-09-25T04:38:36Z (task 62281db6, review fix): the `reviewer.md` Documentation impact
+  bullet was reworded and grew by three lines; citations into `reviewer.md`
+  below it were re-pointed by three lines and every moved anchor re-read.
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and
+  `subagent-contracts-superset.md` re-checked and re-stamped; no claim changed.
+
 - 2026-09-25T04:29:57Z (task 62281db6, issue #355): `reviewer.md` gained a Documentation
   impact checklist bullet, `06-handoff.md` a `## Documentation Impact`
   section, and `CHANGELOG.md` an `[Unreleased]` bullet; citations at or
