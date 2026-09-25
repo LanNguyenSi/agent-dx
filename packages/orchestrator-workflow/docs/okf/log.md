@@ -1,5 +1,10 @@
 # Bundle log
 
+- 2026-09-25T05:08:52Z (task 7e6dd342, follow-up): `install-fence-mechanics.md`
+  lists `agents-md-section.md` under `sources:` without citing a specific
+  line; re-checked against the new Outward-facing actions section (no fence
+  or install-mechanics claim affected) and re-stamped.
+
 - 2026-09-25T05:05:40Z (task 7e6dd342): the new Outward-facing actions rule
   added a section to `agents-md-section.md` and `SKILL.md`, a rule bullet to
   `implementer.md` and `reviewer.md`, an `outward` marker to the `00-goal.md`
