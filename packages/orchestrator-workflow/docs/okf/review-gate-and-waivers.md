@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-09-25T11:35:14Z
+timestamp: 2026-09-25T11:51:14Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/agents/reviewer.md
@@ -217,7 +217,7 @@ Two machine-readable markers sit next to the prose gate: `<!--
 solution-acceptance: acceptance-recommendation = TODO -->`
 (`05-review-findings.md:34#"<!-- solution-acceptance: acceptance-recommendation = TODO -->"`) and `<!-- solution-acceptance: final-status =
 TODO -->` (`06-handoff.md:63#"<!-- solution-acceptance: final-status = TODO -->"`). SKILL.md instructs replacing `TODO` with the
-chosen enum value when finalizing each file (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:376#"non-accepting (fail-closed)."`). Left as
+chosen enum value when finalizing each file (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:377#"non-accepting (fail-closed)."`). Left as
 `TODO`, the harness solution-acceptance gate reads the run as non-accepting.
 `packages/orchestrator-workflow/test/template-markers.test.ts:57#"<!-- solution-acceptance: run-base = TODO -->"` pins
 exactly one marker per template, each defaulting to `TODO`. This is a
