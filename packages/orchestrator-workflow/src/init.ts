@@ -302,6 +302,23 @@ export function knowledgeEntryProblems(raw: unknown): string[] {
 }
 
 /**
+ * The raw value of one top-level field of the manifest file under
+ * `targetDir`, before {@link readInstalledManifest} sanitizes it; `undefined`
+ * when the file or field is absent or the file cannot be parsed.
+ */
+function readRawManifestField(targetDir: string, field: string): unknown {
+  try {
+    const parsed: unknown = JSON.parse(
+      readFileSync(join(targetDir, MANIFEST_PATH), "utf8"),
+    );
+    if (typeof parsed !== "object" || parsed === null) return undefined;
+    return (parsed as Record<string, unknown>)[field];
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Validates an explicitly-supplied `options.knowledge` array for `runInit`
  * with {@link checkKnowledgeEntry} and returns the normalised entries.
  * Throws on the first invalid entry -- explicit input refuses to write a
@@ -351,23 +368,6 @@ function parseKnowledgeBundles(
     if ("bundle" in checked) result.push(checked.bundle);
   }
   return result;
-}
-
-/**
- * The raw value of one top-level field of the manifest file under
- * `targetDir`, before {@link readInstalledManifest} sanitizes it; `undefined`
- * when the file or field is absent or the file cannot be parsed.
- */
-function readRawManifestField(targetDir: string, field: string): unknown {
-  try {
-    const parsed: unknown = JSON.parse(
-      readFileSync(join(targetDir, MANIFEST_PATH), "utf8"),
-    );
-    if (typeof parsed !== "object" || parsed === null) return undefined;
-    return (parsed as Record<string, unknown>)[field];
-  } catch {
-    return undefined;
-  }
 }
 
 /**
