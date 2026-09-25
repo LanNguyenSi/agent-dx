@@ -111,6 +111,32 @@ export interface InitOptions {
    * too, the same as `null`.
    */
   pin?: string | null;
+  /**
+   * Configured knowledge-bundle locations, or `undefined` to carry the
+   * previous manifest's `knowledge` forward unchanged (the same
+   * omitted-means-sticky convention `routing`/`pin` already use). A present
+   * array (including `[]`) replaces the previous value outright and is
+   * validated with {@link validateKnowledgeBundles}: an invalid entry throws
+   * rather than writing a malformed record. Absent (never set on any
+   * install) means today's behaviour: `docs/okf/` is the sole, implicit
+   * bundle location every kit site assumes.
+   */
+  knowledge?: KnowledgeBundle[];
+}
+
+/**
+ * One configured knowledge-bundle location. `path` is the bundle directory
+ * (for example `docs/okf`), relative to `repoRoot`. `repoRoot` is the
+ * worktree-relative root of the repository the bundle's sources live in
+ * (`"."` for the bundle's own repo, a sub-repo's relative path for a
+ * workspace-level bundle whose sources live elsewhere). Both are relative
+ * paths that must not escape the worktree top level (the same containment
+ * rule {@link isContainedRelativePath} already enforces for manifest `files`
+ * keys); no check argv lives here (see verification-set docs).
+ */
+export interface KnowledgeBundle {
+  path: string;
+  repoRoot: string;
 }
 
 const SKILL_NAME = "orchestrator-workflow";
@@ -158,6 +184,16 @@ export interface Manifest extends OpencodeModelMaps {
    * recorded" and therefore never sticky.
    */
   harnessesRecordedEmpty?: boolean;
+  /**
+   * Configured knowledge-bundle locations. Absent when never configured on
+   * any install of this repo: every kit site that reads this field then
+   * falls back to the implicit `docs/okf/` default, today's behaviour. When
+   * present, an entry that fails validation (a non-relative or
+   * top-level-escaping `path`/`repoRoot`) is dropped rather than carried
+   * forward, the same per-entry degradation style `files`/`models` above
+   * already use for a hand-written or damaged manifest.
+   */
+  knowledge?: KnowledgeBundle[];
 }
 
 function sha256(content: string): string {
@@ -174,6 +210,84 @@ export function isContainedRelativePath(relativePath: string): boolean {
   if (relativePath === "" || isAbsolute(relativePath)) return false;
   const normalized = normalize(relativePath);
   return normalized !== ".." && !normalized.startsWith(`..${sep}`);
+}
+
+/**
+ * Validates an explicitly-supplied `options.knowledge` array for `runInit`:
+ * every entry's `path` must be a relative, non-escaping path
+ * ({@link isContainedRelativePath}); `repoRoot` defaults to `"."` when
+ * omitted and, when given, must be `"."` or itself a relative, non-escaping
+ * path. Throws on the first invalid entry -- explicit input refuses to
+ * write a malformed record rather than dropping it (contrast
+ * {@link parseKnowledgeBundles}, which degrades a hand-edited/damaged
+ * on-disk manifest by dropping bad entries instead of throwing).
+ */
+export function validateKnowledgeBundles(
+  knowledge: unknown,
+): KnowledgeBundle[] {
+  if (!Array.isArray(knowledge)) {
+    throw new Error(
+      "options.knowledge must be an array of { path, repoRoot } entries",
+    );
+  }
+  return knowledge.map((entry, index) => {
+    if (typeof entry !== "object" || entry === null) {
+      throw new Error(`options.knowledge[${index}] must be an object`);
+    }
+    const candidate = entry as Record<string, unknown>;
+    const path = candidate.path;
+    if (typeof path !== "string" || !isContainedRelativePath(path)) {
+      throw new Error(
+        `options.knowledge[${index}].path must be a relative path that does not escape the worktree top level`,
+      );
+    }
+    const repoRootRaw = candidate.repoRoot;
+    const repoRoot = repoRootRaw === undefined ? "." : repoRootRaw;
+    if (
+      typeof repoRoot !== "string" ||
+      (repoRoot !== "." && !isContainedRelativePath(repoRoot))
+    ) {
+      throw new Error(
+        `options.knowledge[${index}].repoRoot must be "." or a relative path that does not escape the worktree top level`,
+      );
+    }
+    return { path, repoRoot };
+  });
+}
+
+/**
+ * Sanitizes a possibly hand-edited or damaged on-disk manifest's raw
+ * `knowledge` field for {@link readInstalledManifest}: an entry that fails
+ * the same containment rule {@link validateKnowledgeBundles} enforces is
+ * dropped rather than throwing (the read path can never crash a re-install
+ * on tampered input, the same reasoning `files`/`models` already document
+ * above). Returns `undefined` when the raw field is absent or not an array,
+ * so the "never configured" and "configured but empty" states stay distinct
+ * the same way `routing`'s own `"routing" in candidate` check does.
+ */
+function parseKnowledgeBundles(
+  candidate: Record<string, unknown>,
+): KnowledgeBundle[] | undefined {
+  if (!("knowledge" in candidate) || !Array.isArray(candidate.knowledge)) {
+    return undefined;
+  }
+  const result: KnowledgeBundle[] = [];
+  for (const entry of candidate.knowledge as unknown[]) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const item = entry as Record<string, unknown>;
+    const path = item.path;
+    if (typeof path !== "string" || !isContainedRelativePath(path)) continue;
+    const repoRootRaw = item.repoRoot;
+    const repoRoot = repoRootRaw === undefined ? "." : repoRootRaw;
+    if (
+      typeof repoRoot !== "string" ||
+      (repoRoot !== "." && !isContainedRelativePath(repoRoot))
+    ) {
+      continue;
+    }
+    result.push({ path, repoRoot });
+  }
+  return result;
 }
 
 /**
@@ -256,6 +370,7 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
   if ("routing" in candidate) {
     routing = parseRouting(candidate.routing);
   }
+  const knowledge = parseKnowledgeBundles(candidate);
 
   // A hand-written or damaged manifest may carry a non-string `pin`; that
   // degrades to "no recorded pin" here (the same per-field-degradation
@@ -272,6 +387,7 @@ export function readInstalledManifest(targetDir: string): Manifest | undefined {
     profile,
     tiers,
     ...(routing !== undefined ? { routing } : {}),
+    ...(knowledge !== undefined ? { knowledge } : {}),
     ...opencodeMaps,
     files,
     installedAt:
@@ -544,6 +660,16 @@ export function runInit(options: InitOptions): Report {
     updateOpencodeModels: options.opencodeModels !== undefined,
     updateOpencodeClassModels: options.opencodeClassModels !== undefined,
   });
+  // `undefined` carries the previous manifest's `knowledge` forward
+  // unchanged, the same omitted-means-sticky convention `routing`/`pin` use
+  // above; a present array (including `[]`) is validated and replaces the
+  // previous value outright, throwing before any file is written on an
+  // invalid entry rather than persisting a malformed record.
+  const knowledge: KnowledgeBundle[] | undefined =
+    options.knowledge !== undefined
+      ? validateKnowledgeBundles(options.knowledge)
+      : previous?.knowledge;
+
   // Check only rendered selections before the first mutation.
   for (const warning of codexCatalogWarnings(
     routing,
@@ -981,6 +1107,7 @@ export function runInit(options: InitOptions): Report {
     profile,
     tiers,
     routing,
+    ...(knowledge !== undefined ? { knowledge } : {}),
     ...compatibility,
     files: installedFiles,
     ...(pin !== undefined ? { pin } : {}),
@@ -996,6 +1123,9 @@ export function runInit(options: InitOptions): Report {
       profile: previous.profile,
       tiers: previous.tiers,
       ...(previous.routing !== undefined ? { routing: previous.routing } : {}),
+      ...(previous.knowledge !== undefined
+        ? { knowledge: previous.knowledge }
+        : {}),
       ...legacyOpencodeFallbacks(previous),
       files: previous.files,
       ...(previous.pin !== undefined ? { pin: previous.pin } : {}),

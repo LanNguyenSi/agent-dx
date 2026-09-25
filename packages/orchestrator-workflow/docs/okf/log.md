@@ -1600,7 +1600,7 @@
   violated | not_applicable` now, not just `met | violated`, since a
   `not_applicable` probe (the mutant could not be applied, so no `result`
   was measured) has nothing for `met`/`violated` to report
-  (`implementer.md:275#"expectation: met | violated | not_applicable"`,
+  (`implementer.md:276#"expectation: met | violated | not_applicable"`,
   `packages/orchestrator-workflow/assets/skill/references/contracts.md:135#"expectation: met | violated | not_applicable"`).
   The two `not_applicable` verdicts that used to share one bare label
   (a probe with no reapplicable definition, not a regression, versus a
@@ -1610,25 +1610,25 @@
   fix-round replay rule states the regression signal (step 6, the
   installed prompt's matching bullet, and SKILL.md's output-contract
   prose paragraph)
-  (`implementer.md:110#"no definition recorded"`,
-  `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:103#"no definition recorded"`). The prompt's
+  (`implementer.md:111#"no definition recorded"`,
+  `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:104#"no definition recorded"`). The prompt's
   `expectation` sentence dropped its `--expect` mention (the
   agent-primitives flag name); both copies now say "matched what the
   probe was expected to do", tool-agnostic like the rest of the prompt
   (the flag pointer stays only in `CHANGELOG.md`'s own prose)
-  (`implementer.md:90#"records whether"`,
-  `packages/orchestrator-workflow/assets/agents/implementer.md:90#"records whether"`). The verify/mutation-
+  (`implementer.md:91#"records whether"`,
+  `packages/orchestrator-workflow/assets/agents/implementer.md:91#"records whether"`). The verify/mutation-
   probe-runner bullet (`implementer.md` only, no SKILL.md mirror) now
   says where the definition fields come from when a runner reports a
   probe's mutant record separately from its result fields
-  (`implementer.md:152#"take the definition fields from that"`).
+  (`implementer.md:153#"take the definition fields from that"`).
   The `04-implementation-summary.md` template's Mutation Probes table
   gained a note that Before/After cells hold a single-line excerpt, with
   the full text or diff for a multi-line or patch-form mutant going in
   the implementer report or a fenced block under the table
   (`assets/templates/04-implementation-summary.md:85#"Before/After cells hold a single-line excerpt"`),
   mirrored in SKILL.md step 6
-  (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:129#"Each row's Before/After"`).
+  (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:130#"Each row's Before/After"`).
 
   All of the above are pinned: `test/docs-consistency.test.ts` gained an
   `expectation`-scope pin, a reason-string pin (both copies), an
@@ -1727,17 +1727,17 @@
   `assets/agents/implementer.md` and `assets/skill/SKILL.md` (mirrored
   copies) each gained four new sub-fields, `file`, `anchor`, `before`,
   `after`
-  (`implementer.md:84#"anchor, before, after, verified_applied_via, result, expectation,"`,
-  `packages/orchestrator-workflow/assets/agents/implementer.md:84#"anchor, before, after, verified_applied_via, result, expectation,"`),
+  (`implementer.md:85#"anchor, before, after, verified_applied_via, result, expectation,"`,
+  `packages/orchestrator-workflow/assets/agents/implementer.md:85#"anchor, before, after, verified_applied_via, result, expectation,"`),
   so a later round can mechanically reapply the same edit instead of only
   reading prose. Both the fix-round replay-naming sentence (step 6) and
   the reviewer-briefing skip-permission sentence (step 7) now name a
   probe by its mutant definition, not merely its id; a probe recorded
   with only an id and no definition cannot be replayed or skipped and is
   `not_applicable`
-  (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:100#"naming each by its mutant definition"`,
-  `implementer.md:107#"naming each by its mutant definition"`,
-  `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:268#"not merely their id; a probe recorded with only an id and no definition"`).
+  (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:101#"naming each by its mutant definition"`,
+  `implementer.md:108#"naming each by its mutant definition"`,
+  `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:269#"not merely their id; a probe recorded with only an id and no definition"`).
 
   Same round, orchestrator extension (D-010 of this run): a companion
   agent-primitives change makes `probe`'s `result` report the mutant's
@@ -1749,8 +1749,8 @@
   implementer.md): a replayed probe whose `expectation` is now `violated`,
   or which can no longer be applied, is the regression signal; `result`
   alone is not
-  (`implementer.md:90#"records whether"`,
-  `packages/orchestrator-workflow/assets/agents/implementer.md:88#"are the exact text swapped there"`). The
+  (`implementer.md:91#"records whether"`,
+  `packages/orchestrator-workflow/assets/agents/implementer.md:89#"are the exact text swapped there"`). The
   `04-implementation-summary.md` template's Mutation Probes table gained
   matching columns
   (`assets/templates/04-implementation-summary.md:91#"| Round | Mutant | File | Anchor | Before | After | Verified Applied Via | Result | Expectation | Reason | Restored Verified | Replayed |"`).
@@ -1774,9 +1774,9 @@
   file (`CHANGELOG.md`'s own 17-line `[Unreleased]` insertion, the one
   live anchored citation into it above); a small number of citations
   landing on a line whose own text changed were re-anchored by hand
-  rather than only re-numbered (`packages/orchestrator-workflow/assets/agents/implementer.md:101#"rather than omitting the field."`,
-  `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:106#"A replayed probe whose"`,
-  `implementer.md:113#"A replayed probe whose"`). Two pre-existing
+  rather than only re-numbered (`packages/orchestrator-workflow/assets/agents/implementer.md:102#"rather than omitting the field."`,
+  `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:107#"A replayed probe whose"`,
+  `implementer.md:114#"A replayed probe whose"`). Two pre-existing
   numeric-only (no string anchor) citations into `implementer.md` in an
   older entry below (implementer.md at historical lines 41-66, implementer.md at historical lines 41-67) were
   left unbumped, per this file's own stated convention that recorded
@@ -2389,7 +2389,7 @@
   time elsewhere in the same doc under a different path spelling"). The
   historical lines 423 paragraph's citation of that range is re-pointed to its own,
   different evidence
-  (`packages/orchestrator-workflow/src/init.ts:930-932#"composeOpencodeAgent(role, modelValue, defaultEffortLine),"`,
+  (`packages/orchestrator-workflow/src/init.ts:1056-1058#"composeOpencodeAgent(role, modelValue, defaultEffortLine),"`,
   the effort-line pass-in the sentence actually describes), so the entry
   now covers historical lines 156 only.
   (L1) The "states a falsifiable claim" sanity check tested only
@@ -2410,7 +2410,7 @@
   uncited line 1827 "asserts the absence of the codex-only
   effort field". It does not: `reasoningEffort` (asserted absent at 1827)
   is opencode's own field for a non-Claude-family, non-Ollama provider
-  (`packages/orchestrator-workflow/src/init.ts:462#"reasoningEffort: ${TIER_DEFS[tier].effort}"`);
+  (`packages/orchestrator-workflow/src/init.ts:578#"reasoningEffort: ${TIER_DEFS[tier].effort}"`);
   codex's own equivalent field is `model_reasoning_effort`
   (`packages/orchestrator-workflow/src/codex.ts:50#"model_reasoning_effort = ${tomlString(selection.effort)}"`).
   No compliant anchor exists to widen the citation to cover 1827: the
@@ -2425,10 +2425,10 @@
   sentence about the base-file note cited the sub-loop's own gate/note
   (init.ts at historical lines 630-635). Re-pointed, citation-only: the sub-loop sentence
   now cites
-  `packages/orchestrator-workflow/src/init.ts:627-636#"variantPath}: now untracked after the full"`
+  `packages/orchestrator-workflow/src/init.ts:753-762#"variantPath}: now untracked after the full"`
   (already used for the same sub-loop elsewhere in this doc and in
   `model-preselection.md`); the base-file-note sentence now cites
-  `packages/orchestrator-workflow/src/init.ts:616-618#"${relativePath}: now untracked after the full -> ${profile} profile downgrade; run"`.
+  `packages/orchestrator-workflow/src/init.ts:742-744#"${relativePath}: now untracked after the full -> ${profile} profile downgrade; run"`.
   Known limit, unclosed this round (also recorded in the CHANGELOG
   `[Unreleased]` entry): neither rule catches a citation that resolves
   and anchors cleanly but simply names the WRONG target -- no duplication
@@ -2503,7 +2503,7 @@
   `model-preselection.md` both cited the enclosing per-dropped-role note
   range for a sentence about the tier-variant SUB-loop, whose own note
   sits below it
-  (`packages/orchestrator-workflow/src/init.ts:627-636#"variantPath}: now untracked after the full"`,
+  (`packages/orchestrator-workflow/src/init.ts:753-762#"variantPath}: now untracked after the full"`,
   unique file-wide, anchor on the range's last content line); both entries
   dropped. Then re-ran the guard over the corrected bundle with the
   allowlist bypassed and read every raw hit against its target file and
@@ -3326,7 +3326,7 @@
   installs, and (this fix-round) a full -> minimal downgrade-note block
   inserted before `installKitFile`: `runInit` moved from its old
   src/init.ts at historical lines 178 to 198, and every citation at or after the old
-  init.ts:216 templates-loop shifted by +21 (not a uniform offset applied
+  init.ts:330 templates-loop shifted by +21 (not a uniform offset applied
   blindly: every citation in both docs was checked against a direct read of
   the current file, the same discipline as the 2026-07-18 entries above).
   `test/init.test.ts` citations needed the same treatment for a second,
@@ -10306,7 +10306,7 @@ this class recurred on (line 295, `,274-275` for "Repos without a bundle
 are unaffected", which at this round's head sits at
 packages/orchestrator-workflow/assets/skill/SKILL.md at historical lines 304,
 re-anchored to its own
-`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:344#"without a bundle are unaffected"`).
+`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:346#"without a bundle are unaffected"`).
 This closes the class: every bare continuation
 in this bundle's non-reserved docs now has its own anchor via a full
 citation (`index.md` and `log.md` are append-only journals and keep their
@@ -10558,7 +10558,7 @@ closing delta's finding-set delta against base is zero.
   sentence): round 1 (`8373e59`) inserted a coverage-citation sentence into
   `implementer.md`'s tests-rule bullet, `reviewer.md`'s reproduction-rule
   bullet, and both mirrors in `SKILL.md` step 6
-  (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:92#"not backed by a check it actually ran as"`,
+  (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:93#"not backed by a check it actually ran as"`,
   a retargeted anchor: subagent-contracts-superset.md at historical lines 400 had cited the
   old wording at that spot, `SKILL.md` old line 214, anchored on
   "unverified. On any round after the task's first" (historical, not a
@@ -11140,10 +11140,10 @@ or the suite noticing, because rule (b) only looks WITHIN the window and
 only when the same paragraph already cites a sibling range of the same
 file (`hasSibling`). Neither precondition holds for the real example the
 tracker named: `model-preselection.md`'s
-`init.ts:860-863#"composeClaudeAgentVariant("` citation, a lone citation
+`init.ts:986-989#"composeClaudeAgentVariant("` citation, a lone citation
 in its own paragraph, whose anchor text also matches
 `composeClaudeAgentVariant`'s own function definition 461 lines away at
-`init.ts:399`.
+`init.ts:515`.
 
 New rule (c) (`findDistantDuplicateAnchors`, `distant-duplicate-anchor`
 finding kind): structurally rule (b)'s own twin, minus the `hasSibling`
@@ -11154,8 +11154,8 @@ target line. "Claimed" stays PARAGRAPH-scoped, exactly like rule (b)'s own
 definition; a doc-wide claiming design was tried first and rejected: it let
 an unrelated, same-file citation elsewhere in the document silently absorb
 a genuine re-point (measured against the real
-`init.ts:860-863#"composeClaudeAgentVariant("` citation and the
-`init.ts:399-414#"disallowedTools: Edit, Write, NotebookEdit"` citation
+`init.ts:986-989#"composeClaudeAgentVariant("` citation and the
+`init.ts:515-530#"disallowedTools: Edit, Write, NotebookEdit"` citation
 that happens to cover the same target line for an unrelated reason). The
 finding shape, allowlist entry shape, matching, geometry re-check and
 claim-falsifiability machinery are all reused unchanged from rule (b): a
@@ -11203,7 +11203,7 @@ module docs (the tracker's own audit had counted 82 anchored full citations
 plus four path-less continuations by a different, unmeasured method; this
 guard's own paragraph-scoped, doc-independent claiming counts 70 real hits,
 including the tracker's own named example and its path-less continuation
-sibling at `init.ts:863-863#"composeClaudeAgentVariant("`). All 70 are
+sibling at `init.ts:989-989#"composeClaudeAgentVariant("`). All 70 are
 independently reviewed and allowlisted below (kind `distant-duplicate-
 anchor`), each with a geometry-checked, falsifiable claim naming the
 enclosing function/`it`/`describe` block at both the cited and the uncited

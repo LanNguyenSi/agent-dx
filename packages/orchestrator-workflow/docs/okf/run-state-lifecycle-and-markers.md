@@ -27,7 +27,7 @@ sources:
 One unit of work lives in `.ai/runs/YYYY-MM-DD-<slug>/`, seven files
 `00-goal.md` through `06-handoff.md` (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:76#"  05-review-findings.md").
 The orchestrator creates it by copying `.ai/workflow/templates/`
-(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:81-82#"the files as the run progresses. The newest run"; packages/orchestrator-workflow/README.md:216#"one directory per unit of work, newest = active";
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:81-82#"the files as the run progresses. The newest run"; packages/orchestrator-workflow/README.md:218#"one directory per unit of work, newest = active";
 packages/orchestrator-workflow/INSTALL-AGENT.md:67-68#"(new files)."; packages/orchestrator-workflow/INSTALL-AGENT.md:179-184#"instead: it sources its defaults from the operator"). The newest run
 directory is the active one unless a `.ai/run` pointer names one
 (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:82-83#"pointer names one (see below);", see the pointer section below); older
@@ -159,7 +159,7 @@ read as-is and the verdict layer blocks it, since `<sha>` is not a commit
 sha. Unlike the pointer, this marker line is written into a
 tracked run file, not gitignored: the README and the manual-install doc both
 note the pointer is machine-local and add it to `.gitignore`
-(packages/orchestrator-workflow/README.md:222#"it to the repository's";
+(packages/orchestrator-workflow/README.md:224#"it to the repository's";
 packages/orchestrator-workflow/INSTALL-AGENT.md:68-71#"repository's";
 packages/orchestrator-workflow/INSTALL-AGENT.md:209-211#"repository's").
 
@@ -224,10 +224,10 @@ SKILL.md's closing instruction: "replace the `TODO` in each
 `<!-- solution-acceptance: ... = TODO -->` marker with the chosen enum
 value. That marker line is the machine-readable signal the harness
 solution-acceptance run-gate reads, so leaving it as `TODO` keeps the run
-non-accepting (fail-closed)" (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:355#"non-accepting (fail-closed)."). A freshly-copied run is
+non-accepting (fail-closed)" (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:357#"non-accepting (fail-closed)."). A freshly-copied run is
 therefore non-accepting by construction; this contract shipped in 0.7.0
 (`CHANGELOG.md:#[0.7.0]`). Consumer is "the harness solution-acceptance
-run-gate" per packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:353#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
+run-gate" per packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:355#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
 does not assert the external gate's internals. Pinned by
 template-markers.test.ts:32-34#"/solution-acceptance:\s*acceptance-recommendation\s*=\s*" (regexes) and template-markers.test.ts:37-38#"const matches = [...handoffTemplate.matchAll(finalStatusRe)];" and template-markers.test.ts:43-44#"const matches = [...reviewTemplate.matchAll(recommendationRe)];" (one marker per
 template, default `TODO`).
@@ -288,7 +288,7 @@ replace the row when transferring findings, or delete it outright for a
 genuine zero-findings review (a header row with no data rows is valid;
 leaving the legend row next to real finding rows is also fine), and
 SKILL.md's step 7 carries the same one-sentence rule
-(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:240#"rows as the template never having been filled in. When"). The runtime half (grounding-mcp's reader treating a
+(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:241#"rows as the template never having been filled in. When"). The runtime half (grounding-mcp's reader treating a
 survived, unaccompanied placeholder row as an explicit format blocker,
 instead of silently reporting zero findings) is a lockstep sibling change in
 the grounding-mcp repo, out of scope for this bundle; this doc, like the
@@ -326,18 +326,18 @@ applying this guidance before filling the file: check whether the change
 touched any path a bundle doc claims as a `sources:` entry, and if so either
 update the affected docs (re-verify and re-stamp) or record a follow-up
 task, running the bundle validator when one is available (for example
-`okf-kit check`) (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:343#"validator when one is available (for example"). It is explicitly non-gating: "apply
+`okf-kit check`) (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:345#"validator when one is available (for example"). It is explicitly non-gating: "apply
 this optional guidance" and "Repos without a bundle are unaffected"
-(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:339#"guidance: when the repo carries a curated knowledge"; packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:344#"without a bundle are unaffected"). Since 0.24.0 (placement rule) step 9 also
+(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:340#"guidance: when the repo carries a curated knowledge"; packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:346#"without a bundle are unaffected"). Since 0.24.0 (placement rule) step 9 also
 carries a one-sentence placement check for the orchestrator: before handing
 off, check that no org-, machine- or point-in-time-bound evidence was added
-to a reusable instruction file (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:349#"or the consuming workspace, with a pointer left behind."); the fix is to move the
+to a reusable instruction file (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:351#"or the consuming workspace, with a pointer left behind."); the fix is to move the
 evidence to the changelog, the run files, or the consuming workspace, with a
 pointer left behind. `reviewer.md`'s "Check, at minimum" list carries a
 matching check for the same thing on the implementer side of a run. This is
 the symmetric counterpart to the 0.8.0
 discovery-side rule (the Discover step already checks `docs/okf/` before
-hand-mapping terrain, packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:31#"with an index) before mapping terrain by hand, treating"); the 0.12.0 changelog entry names it
+hand-mapping terrain, packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:32#"with an index) before mapping terrain by hand, treating"); the 0.12.0 changelog entry names it
 the loop-closer and cites the motivating evidence: four upkeep sweeps on
 2026-07-16 found 48/24/11/8 stale claims across the four oldest bundles
 (`CHANGELOG.md:#[0.12.0]`). Pinned by
@@ -448,7 +448,7 @@ each, and ends by pointing to the skill's Run mode section. The Run state
 list of the policy section names the marker beside the keyed run-base marker
 (packages/orchestrator-workflow/assets/agents-md-section.md:247#"marker per repository for multi-repo runs").
 The README has a short "Run modes" section
-(packages/orchestrator-workflow/README.md:547#"## Run modes")
+(packages/orchestrator-workflow/README.md:564#"## Run modes")
 that links the reference. Both sites are pinned against restating a
 definition, a file list, the switch rule or the default's wording by the last
 block of `test/docs-consistency.test.ts`, which imports the constants of

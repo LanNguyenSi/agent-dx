@@ -27,8 +27,8 @@
 ## Knowledge Bundle
 
 <!-- Optional: only applies when the repo carries a curated knowledge bundle
-     (for example a docs/okf/ directory). Outcome: updated | not affected |
-     follow-up filed. -->
+     (each one configured via `knowledge` in `.ai/workflow/manifest.json`;
+     default `docs/okf/`). Outcome: updated | not affected | follow-up filed. -->
 
 - <!-- outcome and brief note, or omit this section when the repo carries no bundle -->
 

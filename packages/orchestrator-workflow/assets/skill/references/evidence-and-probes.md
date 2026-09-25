@@ -27,8 +27,9 @@ directory and the subagents.
    If the task can proceed on reasonable assumptions, proceed without blocking.
 2. **Discover (optional, read-only).** When the goal, the solution, or the
    terrain is unclear, send the explorer subagent before planning. Have it
-   check for a curated knowledge bundle (for example a `docs/okf/` directory
-   with an index) before mapping terrain by hand, treating any claims found
+   check for a curated knowledge bundle (each one configured via `knowledge`
+   in `.ai/workflow/manifest.json`; default `docs/okf/`, typically a
+   directory with an index) before mapping terrain by hand, treating any claims found
    there as leads to verify, not as ground truth, and prefer a connected
    semantic code-search tool over raw grep for orientation questions; when a
    structural code-search tool is available, prefer it over text grep for
@@ -336,8 +337,9 @@ directory and the subagents.
    for the implementer and reviewer tiers, defaulting to the unsuffixed
    subagent (already effort `high`) when unsure.
 9. **Hand off.** Before filling `06-handoff.md`, apply this optional
-   guidance: when the repo carries a curated knowledge bundle (for example a
-   `docs/okf/` directory with an index), check whether the change touches
+   guidance: when the repo carries a curated knowledge bundle (each one
+   configured via `knowledge` in `.ai/workflow/manifest.json`; default
+   `docs/okf/`), check whether the change touches
    paths any bundle doc claims as sources; if so, update the affected docs
    (re-verify and re-stamp) or record a follow-up task, and run the bundle
    validator when one is available (for example `okf-kit check`). Repos
@@ -417,8 +419,9 @@ categories disabled by effective configuration are reported as gaps. A missing,
 extra, mismatched, or unresolved named result is a misfire; a reported failure
 is an honest failure, not a misfire. `skip`, `acknowledged`, `limitation`, and
 inconclusive results remain non-passes and cannot be silently accepted. When a
-repository has `docs/okf/`, include its bundle check in every set regardless of
-which files changed. This is a documented convention, not an OW execution
+repository has a configured knowledge bundle (default `docs/okf/`, see
+`knowledge` in `.ai/workflow/manifest.json`), include its bundle check in
+every set regardless of which files changed. This is a documented convention, not an OW execution
 engine or runtime schema validator. A quoted probe verdict is not a named result
 of the verification set, so the set's missing-or-extra rule does not apply to it.
 

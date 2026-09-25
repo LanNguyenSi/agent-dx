@@ -73,6 +73,16 @@ export interface TargetReport {
   driftFiles: string[] | null;
   /** Selected legacy opencode leaves that cannot be compared offline. */
   routingComparisonGaps?: string[];
+  /**
+   * Knowledge-bundle warnings against this target's own filesystem: a
+   * configured `knowledge` entry whose `path` does not exist under the
+   * target, or a non-empty `knowledge` list that omits an existing
+   * `docs/okf/` at the target's root. Empty/omitted when the target
+   * configures no knowledge bundles or every one checks out clean. These
+   * warnings never change `status` or the doctor exit code -- they surface
+   * a documentation-locator drift, not a kit-file install drift.
+   */
+  knowledgeWarnings?: string[];
   /** Human-output-only: the repo's own profile, or null when unknown. */
   repoProfile: Profile | null;
   /** Human-output-only: the operator default profile, for the comparison line. */
@@ -117,6 +127,8 @@ export interface TargetReportJson {
   driftFiles: string[] | null;
   /** Selected legacy opencode leaves that cannot be compared offline. */
   routingComparisonGaps?: string[];
+  /** See {@link TargetReport.knowledgeWarnings}. */
+  knowledgeWarnings?: string[];
   versionLag: boolean;
   reason: string | null;
 }
@@ -131,6 +143,9 @@ export function targetReportToJson(report: TargetReport): TargetReportJson {
     driftFiles: report.driftFiles,
     ...(report.routingComparisonGaps?.length
       ? { routingComparisonGaps: report.routingComparisonGaps }
+      : {}),
+    ...(report.knowledgeWarnings?.length
+      ? { knowledgeWarnings: report.knowledgeWarnings }
       : {}),
     versionLag: report.versionLag,
     reason: report.reason,
@@ -260,6 +275,53 @@ function computeDriftFiles(targetPath: string, manifest: Manifest): string[] {
     }
   }
   return drifted;
+}
+
+/** The kit-wide implicit default knowledge-bundle location every site falls
+ * back to when a target configures no `knowledge` list at all. */
+const DEFAULT_KNOWLEDGE_PATH = "docs/okf";
+
+/**
+ * Checks a target's configured `knowledge` list against its own filesystem:
+ * a configured entry whose `path` (under `repoRoot`) does not exist is
+ * reported by name, and a non-empty list that omits an existing
+ * `docs/okf/` at the target's root (the implicit default every kit site
+ * assumes absent a `knowledge` field) is reported once. Absent/empty
+ * `knowledge` is today's default behaviour and never warns here, mirroring
+ * `Absent field = today's behaviour` in the manifest's own doc comment: a
+ * repo that never configured `knowledge` is not warned about lacking an
+ * entry for its own default.
+ */
+function computeKnowledgeWarnings(
+  targetPath: string,
+  manifest: Manifest,
+): string[] {
+  const knowledge = manifest.knowledge ?? [];
+  const warnings: string[] = [];
+  for (const bundle of knowledge) {
+    const bundlePath = join(targetPath, bundle.repoRoot, bundle.path);
+    const stat = statOrClassify(bundlePath);
+    if (stat.kind !== "ok" || !stat.stat.isDirectory()) {
+      warnings.push(`missing configured knowledge path: ${bundle.path}`);
+    }
+  }
+  if (knowledge.length > 0) {
+    const docsOkfStat = statOrClassify(
+      join(targetPath, DEFAULT_KNOWLEDGE_PATH),
+    );
+    const docsOkfExists =
+      docsOkfStat.kind === "ok" && docsOkfStat.stat.isDirectory();
+    const docsOkfConfigured = knowledge.some(
+      (bundle) =>
+        bundle.repoRoot === "." && bundle.path === DEFAULT_KNOWLEDGE_PATH,
+    );
+    if (docsOkfExists && !docsOkfConfigured) {
+      warnings.push(
+        `${DEFAULT_KNOWLEDGE_PATH}/ exists but is not in the configured knowledge list`,
+      );
+    }
+  }
+  return warnings;
 }
 
 function baseReport(
@@ -393,6 +455,8 @@ export function inspectTarget(
     ? manifest.pin !== manifest.version
     : manifest.version !== kitVersion;
 
+  const knowledgeWarnings = computeKnowledgeWarnings(target.path, manifest);
+
   let status: TargetStatus;
   if (driftFiles.length > 0) {
     status = "drift";
@@ -419,6 +483,7 @@ export function inspectTarget(
     ...(routingComparison.gaps.length > 0
       ? { routingComparisonGaps: routingComparison.gaps }
       : {}),
+    ...(knowledgeWarnings.length > 0 ? { knowledgeWarnings } : {}),
     repoProfile: manifest.profile,
     operatorProfile: operator.defaults.profile,
     repoTiers: manifest.tiers,

@@ -316,6 +316,64 @@ describe("runDoctor: per-target status", () => {
     expect(report.exitCode).toBe(0);
   });
 
+  it("knowledge warning: a configured path missing on disk", () => {
+    const repo = makeRepo();
+    setManifestField(repo, {
+      knowledge: [{ path: "docs/kb", repoRoot: "." }],
+    });
+    registerHome(defaults(), [repo]);
+    const report = runDoctor(home, {});
+    expect(report.targets[0].knowledgeWarnings).toEqual([
+      "missing configured knowledge path: docs/kb",
+    ]);
+    // A warning is informational: it never changes status or the exit code.
+    expect(report.targets[0].status).toBe("clean");
+    expect(report.exitCode).toBe(0);
+  });
+
+  it("knowledge warning: docs/okf exists but a non-empty knowledge list omits it", () => {
+    const repo = makeRepo();
+    mkdirSync(join(repo, "docs", "okf"), { recursive: true });
+    setManifestField(repo, {
+      knowledge: [{ path: "docs/kb", repoRoot: "." }],
+    });
+    mkdirSync(join(repo, "docs", "kb"), { recursive: true });
+    registerHome(defaults(), [repo]);
+    const report = runDoctor(home, {});
+    expect(report.targets[0].knowledgeWarnings).toEqual([
+      "docs/okf/ exists but is not in the configured knowledge list",
+    ]);
+    expect(report.targets[0].status).toBe("clean");
+    expect(report.exitCode).toBe(0);
+  });
+
+  it("knowledge warning: no warning when nothing is configured, when docs/okf is configured, or when every configured path exists", () => {
+    // Case A: no `knowledge` field at all (absent = today's default docs/okf
+    // behaviour); docs/okf need not even exist.
+    const repoA = makeRepo();
+    registerHome(defaults(), [repoA]);
+    expect(runDoctor(home, {}).targets[0].knowledgeWarnings).toBeUndefined();
+
+    // Case B: docs/okf exists and is itself the configured entry.
+    const repoB = makeRepo();
+    mkdirSync(join(repoB, "docs", "okf"), { recursive: true });
+    setManifestField(repoB, {
+      knowledge: [{ path: "docs/okf", repoRoot: "." }],
+    });
+    registerHome(defaults(), [repoB]);
+    expect(runDoctor(home, {}).targets[0].knowledgeWarnings).toBeUndefined();
+
+    // Case C: a configured non-default path that exists on disk, and no
+    // docs/okf directory to warn about omitting.
+    const repoC = makeRepo();
+    mkdirSync(join(repoC, "docs", "kb"), { recursive: true });
+    setManifestField(repoC, {
+      knowledge: [{ path: "docs/kb", repoRoot: "." }],
+    });
+    registerHome(defaults(), [repoC]);
+    expect(runDoctor(home, {}).targets[0].knowledgeWarnings).toBeUndefined();
+  });
+
   it("(mutation-probe b) drift takes precedence over divergent when a target is both", () => {
     const repo = makeRepo({ profile: "minimal" });
     registerHome(defaults({ profile: "full" }), [repo]);

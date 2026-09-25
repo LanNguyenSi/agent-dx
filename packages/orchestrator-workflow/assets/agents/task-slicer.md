@@ -50,8 +50,9 @@ Rules:
   carries the orchestrator's approval of the resolved argv to the implementer
   and reviewer. The orchestrator approves effective config and
   scripts before any preflight acquisition or command execution; the set does
-  not grant that authority. Include an ordered bundle check whenever the
-  repository has `docs/okf/`, regardless of task scope.
+  not grant that authority. Include an ordered bundle check for each
+  configured knowledge bundle (`knowledge` in `.ai/workflow/manifest.json`;
+  default `docs/okf/`), regardless of task scope.
 - For every identifier, config value, build context, or documented command a
   task will change, enumerate every file and doc site that references it in
   `relevant_files` or `relevant_docs`, with an annotation for a site the task

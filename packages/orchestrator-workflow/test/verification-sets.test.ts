@@ -119,7 +119,9 @@ describe("documented verification sets", () => {
       expect(role).toContain("`(kind, name, occurrence)`");
       expect(compact(role)).toContain("limitation");
       expect(role).toContain("`skip`, `acknowledged`");
-      expect(role).toContain("repository has `docs/okf/`");
+      expect(role).toContain(
+        "each configured knowledge bundle (`knowledge` in\n  `.ai/workflow/manifest.json`; default `docs/okf/`)",
+      );
     }
     expect(compact(skill)).toContain(
       "it does not export the underlying shell commands",

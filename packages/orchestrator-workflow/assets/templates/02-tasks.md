@@ -41,8 +41,9 @@ acceptance_criteria:
 digest recorded in the briefing is what carries the orchestrator's approval
 of the resolved argv to the implementer and reviewer. The
 orchestrator approves effective config/scripts before any acquisition or
-execution; include an ordered docs/okf bundle check whenever that directory
-exists. -->
+execution; include an ordered bundle check for each configured knowledge
+bundle (`knowledge` in `.ai/workflow/manifest.json`; default `docs/okf/`)
+whenever one exists. -->
 
 **Relevant Files / Areas**
 

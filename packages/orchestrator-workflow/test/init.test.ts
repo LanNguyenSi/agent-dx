@@ -2814,3 +2814,101 @@ describe("reviewer write boundary (issue #339)", () => {
     }
   });
 });
+
+describe("knowledge-bundle locations in the manifest", () => {
+  const manifestPath = () => join(target, ".ai", "workflow", "manifest.json");
+
+  it("writes knowledge when given, is a byte-for-byte no-op on repeat, and a re-install omitting it preserves the value", () => {
+    runInit({
+      ...defaultOptions(),
+      knowledge: [{ path: "docs/okf", repoRoot: "." }],
+    });
+    let manifest = JSON.parse(readFileSync(manifestPath(), "utf8"));
+    expect(manifest.knowledge).toEqual([{ path: "docs/okf", repoRoot: "." }]);
+
+    // A second identical call is a byte-for-byte no-op.
+    const before = snapshot(target);
+    const secondReport = runInit({
+      ...defaultOptions(),
+      knowledge: [{ path: "docs/okf", repoRoot: "." }],
+    });
+    const after = snapshot(target);
+    // Same file set (order-independent), no byte-for-byte content drift.
+    expect(new Set(after.keys())).toEqual(new Set(before.keys()));
+    for (const [path, content] of after) {
+      expect(content, path).toBe(before.get(path));
+    }
+    expect(secondReport.updated).toEqual([]);
+    expect(secondReport.skipped).toContain(manifestPath());
+
+    // A re-install that omits `knowledge` entirely carries the previous
+    // value forward unchanged (the round-trip this task's AC1 names).
+    const thirdReport = runInit(defaultOptions());
+    manifest = JSON.parse(readFileSync(manifestPath(), "utf8"));
+    expect(manifest.knowledge).toEqual([{ path: "docs/okf", repoRoot: "." }]);
+    expect(thirdReport.skipped).toContain(manifestPath());
+  });
+
+  it("defaults repoRoot to '.' and writes multiple entries, including a sub-repo bundle", () => {
+    runInit({
+      ...defaultOptions(),
+      knowledge: [
+        { path: "docs/okf" },
+        { path: "docs/kb", repoRoot: "packages/sub-repo" },
+      ] as unknown as { path: string; repoRoot: string }[],
+    });
+    const manifest = JSON.parse(readFileSync(manifestPath(), "utf8"));
+    expect(manifest.knowledge).toEqual([
+      { path: "docs/okf", repoRoot: "." },
+      { path: "docs/kb", repoRoot: "packages/sub-repo" },
+    ]);
+  });
+
+  it("never writes a `knowledge` key when it was never configured", () => {
+    runInit(defaultOptions());
+    const manifest = JSON.parse(readFileSync(manifestPath(), "utf8"));
+    expect("knowledge" in manifest).toBe(false);
+  });
+
+  it("refuses (throws) an explicit invalid entry rather than writing it", () => {
+    expect(() =>
+      runInit({
+        ...defaultOptions(),
+        knowledge: [{ path: "../escape", repoRoot: "." }],
+      }),
+    ).toThrow(/relative path/);
+    expect(() =>
+      runInit({
+        ...defaultOptions(),
+        knowledge: [{ path: "docs/okf", repoRoot: "../escape" }],
+      }),
+    ).toThrow(/relative path/);
+    expect(existsSync(manifestPath())).toBe(false);
+  });
+
+  it("drops a malformed hand-edited knowledge entry on read instead of crashing a re-install", () => {
+    runInit({
+      ...defaultOptions(),
+      knowledge: [{ path: "docs/okf", repoRoot: "." }],
+    });
+    const manifest = JSON.parse(readFileSync(manifestPath(), "utf8"));
+    manifest.knowledge.push({ path: "../escape", repoRoot: "." });
+    writeFileSync(manifestPath(), `${JSON.stringify(manifest, null, 2)}\n`);
+
+    const read = readInstalledManifest(target);
+    expect(read?.knowledge).toEqual([{ path: "docs/okf", repoRoot: "." }]);
+
+    // A re-install that omits `knowledge` computes its desired state from
+    // the already-sanitized `previous.knowledge` (the malformed entry
+    // dropped above), so it matches the sanitized value and the manifest
+    // write is skipped as a no-op -- the same "computed desired state
+    // equals sanitized previous" no-op path every other manifest field
+    // already takes; re-reading the manifest keeps dropping the malformed
+    // entry regardless of whether a write occurred.
+    const report = runInit(defaultOptions());
+    expect(report.skipped).toContain(manifestPath());
+    expect(readInstalledManifest(target)?.knowledge).toEqual([
+      { path: "docs/okf", repoRoot: "." },
+    ]);
+  });
+});

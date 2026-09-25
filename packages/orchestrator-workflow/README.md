@@ -72,9 +72,10 @@ Two effects fall out of this shape:
   and the skeptical review. The ceremony scales to the task: a trivial change
   is done directly, the full flow is for non-trivial work, and a read-only
   explorer maps the terrain first only when the solution is unclear. When
-  available, the explorer prefers a repo's curated knowledge bundle (for
-  example a `docs/okf/` directory) or a connected semantic code-search tool
-  over hand-mapping terrain with grep.
+  available, the explorer prefers each of a repo's configured knowledge
+  bundles (`knowledge` in `.ai/workflow/manifest.json`; default `docs/okf/`)
+  or a connected semantic code-search tool over hand-mapping terrain with
+  grep.
 - **Quality through structure.** Writing and reviewing are separated by
   role and model, task slices are validated before any implementation
   starts, acceptance is decided on evidence (tests executed, findings
@@ -203,8 +204,9 @@ The workflow does not execute or validate this file: the orchestrator first
 approves the resolved effective config and scripts, then records a run-local
 snapshot with the set digest, repository identity, executable identity, and
 every result. Preflight JSON reports check results, not the underlying shell
-commands it discovered. Repositories with `docs/okf/` include their bundle
-check in every set, even when the task did not edit documentation.
+commands it discovered. A repository with a configured knowledge bundle
+(`knowledge` in `.ai/workflow/manifest.json`; default `docs/okf/`) includes
+its bundle check in every set, even when the task did not edit documentation.
 
 ## What gets installed
 
@@ -220,6 +222,21 @@ AGENTS.md             marker-fenced "Agentic Coding Workflow" policy section
 The orchestrator writes a `.ai/run` pointer file in every worktree a run
 touches (a machine-local absolute path, not written by the installer); add
 it to the repository's `.gitignore`.
+
+`manifest.json` may also carry `knowledge: [{ path, repoRoot }]`, configuring
+one or more knowledge-bundle locations for a repo whose bundle is not at the
+default `docs/okf/` (a workspace-level bundle with sources in a sub-repo, a
+bundle outside `docs/okf`, or several bundles). `path` is the bundle
+directory and `repoRoot` (defaulting to `"."`) the worktree-relative root of
+the repository its sources live in; both must be relative paths that stay
+inside the worktree top level. It carries no check argv -- the concrete
+bundle-check command still lives in the repository-bound verification set
+(see Verification sets above), so there is one source of argv truth. The
+field is absent by default, which is today's behaviour (`docs/okf/` is the
+implicit sole locator); `init` writes it only when given and a re-install
+that omits it preserves the previous value unchanged. `doctor` warns when a
+configured path does not exist on disk, and when `docs/okf/` exists but a
+non-empty `knowledge` list does not include it.
 
 Per selected harness:
 

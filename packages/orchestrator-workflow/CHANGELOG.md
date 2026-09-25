@@ -33,6 +33,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   range the default branch did not reach at handover, unless it moved it),
   and pull requests, and reports an unauthorized action as an incident. The
   handoff template gains a `Sent / Drafted Outward` section (issue #352).
+- Knowledge bundles can be configured in the manifest: `knowledge: [{ path,
+  repoRoot }]` in `.ai/workflow/manifest.json` (`repoRoot` defaults to `"."`;
+  both must be relative paths that stay inside the worktree top level).
+  `init` writes it only when given, validates every entry, and a re-install
+  that omits it preserves the previous value unchanged; a malformed entry
+  hand-edited into the manifest is dropped on read rather than crashing.
+  `doctor` warns when a configured path does not exist, and when `docs/okf/`
+  exists but a non-empty `knowledge` list omits it. No check argv lives in
+  the field; the concrete bundle-check command stays in the repository-bound
+  verification set. Every kit text site that named `docs/okf` as the sole
+  knowledge-bundle locator now names the configured list, defaulting to
+  `docs/okf/` (issue #353 part A).
 
 ## [0.40.1] - 2026-09-24
 

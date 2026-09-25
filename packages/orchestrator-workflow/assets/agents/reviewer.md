@@ -80,7 +80,8 @@ Check, at minimum:
   gaps. Missing/extra/mismatched/unresolved results are misfires, while a
   reported failure remains an honest failure. `skip`, `acknowledged`,
   limitation, and inconclusive outcomes are non-passes. Require the bundle
-  check whenever the repository has `docs/okf/`, regardless of edit scope.
+  check for each configured knowledge bundle (`knowledge` in
+  `.ai/workflow/manifest.json`; default `docs/okf/`), regardless of edit scope.
   Put the independent complete-set outcome in `reproduction.result`, preserving
   the existing report envelope for both v1 and original-contract runs.
 - Spec compliance: does the change do what the task contract asked, fully?
