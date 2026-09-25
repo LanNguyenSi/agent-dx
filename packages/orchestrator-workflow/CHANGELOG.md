@@ -11,8 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pull request on the task branch that the orchestrator did not open is no
   longer a direct misfire; like a flagged ref, the orchestrator first
   establishes who opened it. One a subagent opened, or whose opener cannot
-  be established, is a misfire reported to the operator (and an opened one
-  still takes the unauthorized-outward-action path); one a third party
+  be established, is a misfire reported to the operator (one a subagent
+  opened still takes the unauthorized-outward-action path); one a third party
   opened is recorded once in `03-decisions.md` and not re-flagged every
   round. A noted ref's record in `03-decisions.md` now names the ref and
   the sha, so a later round can apply the "while it stays at that sha"
