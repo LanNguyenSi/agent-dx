@@ -1,5 +1,13 @@
 # Bundle log
 
+- 2026-09-25T04:29:57Z (task 62281db6, issue #355): `reviewer.md` gained a Documentation
+  impact checklist bullet, `06-handoff.md` a `## Documentation Impact`
+  section, and `CHANGELOG.md` an `[Unreleased]` bullet; citations at or
+  below each insertion were re-pointed by the inserted line count and every
+  moved anchor re-read at its new line. `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md`
+  re-checked and re-stamped; no claim changed.
+
 - 2026-09-24T06:48:31Z (release 0.40.1): the `[Unreleased]` notes moved under
   `## [0.40.1] - 2026-09-24`. Line citations into `CHANGELOG.md` below
   the new heading were re-pointed by two lines. No bundle doc cited the
