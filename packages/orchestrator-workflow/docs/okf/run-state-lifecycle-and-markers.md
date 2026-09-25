@@ -454,7 +454,7 @@ each, and ends by pointing to the skill's Run mode section. The Run state
 list of the policy section names the marker beside the keyed run-base marker
 (packages/orchestrator-workflow/assets/agents-md-section.md:247#"marker per repository for multi-repo runs").
 The README has a short "Run modes" section
-(packages/orchestrator-workflow/README.md:573#"## Run modes")
+(packages/orchestrator-workflow/README.md:579#"## Run modes")
 that links the reference. Both sites are pinned against restating a
 definition, a file list, the switch rule or the default's wording by the last
 block of `test/docs-consistency.test.ts`, which imports the constants of

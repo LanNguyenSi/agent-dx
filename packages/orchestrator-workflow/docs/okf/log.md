@@ -11368,7 +11368,7 @@ or the suite noticing, because rule (b) only looks WITHIN the window and
 only when the same paragraph already cites a sibling range of the same
 file (`hasSibling`). Neither precondition holds for the real example the
 tracker named: `model-preselection.md`'s
-`init.ts:1043-1046#"composeClaudeAgentVariant("` citation, a lone citation
+`init.ts:1083-1086#"composeClaudeAgentVariant("` citation, a lone citation
 in its own paragraph, whose anchor text also matches
 `composeClaudeAgentVariant`'s own function definition 471 lines away at
 `init.ts:572`.
@@ -11382,8 +11382,8 @@ target line. "Claimed" stays PARAGRAPH-scoped, exactly like rule (b)'s own
 definition; a doc-wide claiming design was tried first and rejected: it let
 an unrelated, same-file citation elsewhere in the document silently absorb
 a genuine re-point (measured against the real
-`init.ts:1043-1046#"composeClaudeAgentVariant("` citation and the
-`init.ts:572-587#"disallowedTools: Edit, Write, NotebookEdit"` citation
+`init.ts:1083-1086#"composeClaudeAgentVariant("` citation and the
+`init.ts:612-627#"disallowedTools: Edit, Write, NotebookEdit"` citation
 that happens to cover the same target line for an unrelated reason). The
 finding shape, allowlist entry shape, matching, geometry re-check and
 claim-falsifiability machinery are all reused unchanged from rule (b): a
@@ -11431,7 +11431,7 @@ module docs (the tracker's own audit had counted 82 anchored full citations
 plus four path-less continuations by a different, unmeasured method; this
 guard's own paragraph-scoped, doc-independent claiming counts 70 real hits,
 including the tracker's own named example and its path-less continuation
-sibling at `init.ts:1046-1046#"composeClaudeAgentVariant("`). All 70 are
+sibling at `init.ts:1086-1086#"composeClaudeAgentVariant("`). All 70 are
 independently reviewed and allowlisted below (kind `distant-duplicate-
 anchor`), each with a geometry-checked, falsifiable claim naming the
 enclosing function/`it`/`describe` block at both the cited and the uncited
