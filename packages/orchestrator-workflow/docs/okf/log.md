@@ -3360,7 +3360,7 @@
   installs, and (this fix-round) a full -> minimal downgrade-note block
   inserted before `installKitFile`: `runInit` moved from its old
   src/init.ts at historical lines 178 to 198, and every citation at or after the old
-  init.ts:387 templates-loop shifted by +21 (not a uniform offset applied
+  init.ts templates loop (then at line 216) shifted by +21 (not a uniform offset applied
   blindly: every citation in both docs was checked against a direct read of
   the current file, the same discipline as the 2026-07-18 entries above).
   `test/init.test.ts` citations needed the same treatment for a second,
@@ -11176,7 +11176,7 @@ file (`hasSibling`). Neither precondition holds for the real example the
 tracker named: `model-preselection.md`'s
 `init.ts:1043-1046#"composeClaudeAgentVariant("` citation, a lone citation
 in its own paragraph, whose anchor text also matches
-`composeClaudeAgentVariant`'s own function definition 461 lines away at
+`composeClaudeAgentVariant`'s own function definition 471 lines away at
 `init.ts:572`.
 
 New rule (c) (`findDistantDuplicateAnchors`, `distant-duplicate-anchor`
