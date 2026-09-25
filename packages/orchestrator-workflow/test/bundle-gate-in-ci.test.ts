@@ -174,6 +174,17 @@ describe("bundle gate in CI reference: could-not-run and report placement", () =
     );
   });
 
+  it("states that the pre-commit loop carries the verdict without set -e", () => {
+    pin(
+      bundleGate,
+      "The loop checks each exit status itself, as the CI example does, so the hook fails with the checker's verdict whether or not it runs under `set -e`: exit 2 when a check could not run, exit 1 on a failing check, exit 2 when the bundle list is not made of whole `<bundle> <repoRoot>` pairs, and 0 otherwise.",
+    );
+    pin(
+      bundleGate,
+      "The `set --` line replaces the hook's positional parameters with the bundle list; git passes a pre-commit hook none, and a hook that needs its own arguments saves them before the loop.",
+    );
+  });
+
   it("carries the pin as an environment value", () => {
     expect(bundleGate).toContain(
       "          OKF_KIT_VERSION: <pinned-version>\n",
@@ -211,14 +222,21 @@ describe("bundle gate in CI reference: could-not-run and report placement", () =
 });
 
 /*
- * Execute the pre-commit recipe, with two configured bundles, under
- * bash -eo pipefail and under sh -e, against a stub okf-kit and a stub mktemp
- * that creates its file in an empty directory (the macOS mktemp ignores
- * TMPDIR), and check that the temporary report is gone afterwards, on a clean
- * check and on a failing one.
+ * Execute the pre-commit recipe under bash and sh, each with and without -e,
+ * against a stub okf-kit and a stub mktemp that creates its file in an empty
+ * directory (the macOS mktemp ignores TMPDIR). The hook's exit status must
+ * carry the checker's verdict without relying on set -e, and the temporary
+ * report must be gone afterwards, with one and with two configured bundles.
  */
-describe("bundle gate in CI pre-commit recipe: temp report cleanup", () => {
+describe("bundle gate in CI pre-commit recipe: exit status and temp report cleanup", () => {
   let root: string;
+
+  // The bundle lists the tests substitute for the recipe's own `set --` line.
+  const bundleLists: Record<string, string> = {
+    one: "set -- docs/okf .\n",
+    two: "set -- docs/okf . docs/b sub\n",
+    odd: "set -- docs/okf . docs/b\n",
+  };
 
   beforeAll(() => {
     root = mkdtempSync(join(tmpdir(), "bundle-gate-precommit-"));
@@ -235,65 +253,113 @@ describe("bundle gate in CI pre-commit recipe: temp report cleanup", () => {
     );
     chmodSync(join(bin, "mktemp"), 0o755);
     const recipe = shBlockAfter("### Pre-commit parity");
-    expect(recipe).toContain("set -- docs/okf .\n");
-    // A hook with two configured bundles, the second in a sub-repo.
-    writeFileSync(
-      join(root, "hook.sh"),
-      recipe.replace("set -- docs/okf .\n", "set -- docs/okf . docs/b sub\n"),
-    );
+    expect(recipe).toContain(bundleLists.one);
+    for (const [name, list] of Object.entries(bundleLists)) {
+      writeFileSync(
+        join(root, `hook-${name}.sh`),
+        recipe.replace(bundleLists.one ?? "", list),
+      );
+    }
   });
 
   afterAll(() => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  function runHook(shell: string, flags: string[], list: string, exit: number) {
+    const temp = mkdtempSync(join(root, "tmp-"));
+    const work = mkdtempSync(join(root, "work-"));
+    const mktempLog = join(root, `${basename(work)}.mktemp.log`);
+    const checkLog = join(root, `${basename(work)}.check.log`);
+    const result = spawnSync(shell, [...flags, join(root, `hook-${list}.sh`)], {
+      cwd: work,
+      env: {
+        PATH: `${join(root, "bin")}${delimiter}${process.env.PATH ?? ""}`,
+        HOME: work,
+        STUB_TMP: temp,
+        STUB_MKTEMP_LOG: mktempLog,
+        STUB_CHECK_LOG: checkLog,
+        STUB_EXIT: String(exit),
+      },
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    const read = (file: string) => {
+      try {
+        return readFileSync(file, "utf8");
+      } catch {
+        return "";
+      }
+    };
+    return {
+      result,
+      mktemp: read(mktempLog),
+      checked: read(checkLog).trim().split("\n").filter(Boolean),
+      tempFiles: readdirSync(temp),
+      workFiles: readdirSync(work),
+    };
+  }
+
   const shells: Array<[string, string[]]> = [
     ["bash", ["--noprofile", "--norc", "-eo", "pipefail"]],
+    ["bash", ["--noprofile", "--norc"]],
     ["sh", ["-e"]],
+    ["sh", []],
+  ];
+  // [bundle list, checker exit, hook exit, checks run]
+  const outcomes: Array<[string, number, number, number]> = [
+    ["one", 0, 0, 1],
+    ["one", 1, 1, 1],
+    ["one", 2, 2, 1],
+    ["two", 0, 0, 2],
+    ["two", 1, 1, 1],
+    ["two", 2, 2, 1],
+    ["odd", 0, 2, 1],
   ];
   const cases = shells.flatMap(([shell, flags]) =>
-    [
-      [0, 0, 2],
-      [1, 1, 1],
-    ].map(
-      ([exit, want, checks]) => [shell, flags, exit, want, checks] as const,
+    outcomes.map(
+      ([list, exit, want, checks]) =>
+        [
+          `${shell} ${flags.join(" ")}`.trim(),
+          list,
+          exit,
+          want,
+          checks,
+          shell,
+          flags,
+        ] as const,
     ),
   );
 
   it.each(cases)(
-    "%s: checker exit %i, hook exits %i after %i check(s) and leaves no temp file",
-    (shell, flags, exit, want, checks) => {
-      const temp = mkdtempSync(join(root, "tmp-"));
-      const work = mkdtempSync(join(root, "work-"));
-      const mktempLog = join(work, "..", `${basename(work)}.mktemp.log`);
-      const checkLog = join(work, "..", `${basename(work)}.check.log`);
-      const result = spawnSync(shell, [...flags, join(root, "hook.sh")], {
-        cwd: work,
-        env: {
-          PATH: `${join(root, "bin")}${delimiter}${process.env.PATH ?? ""}`,
-          HOME: work,
-          STUB_TMP: temp,
-          STUB_MKTEMP_LOG: mktempLog,
-          STUB_CHECK_LOG: checkLog,
-          STUB_EXIT: String(exit),
-        },
-        encoding: "utf8",
-      });
-      expect(result.status, result.stdout + result.stderr).toBe(want);
+    "%s: bundle list %s, checker exit %i, hook exits %i after %i check(s) and leaves no temp file",
+    (_label, list, exit, want, checks, shell, flags) => {
+      const run = runHook(shell, [...flags], list, exit);
+      const output = run.result.stdout + run.result.stderr;
+      expect(run.result.status, output).toBe(want);
       // One report through mktemp for the whole loop, removed at exit.
-      expect(readFileSync(mktempLog, "utf8")).toMatch(/^[^\n]*report\.\d+\n$/);
-      const checked = readFileSync(checkLog, "utf8").trim().split("\n");
-      expect(checked).toHaveLength(checks);
-      expect(checked[0]).toBe(
+      expect(run.mktemp).toMatch(/^[^\n]*report\.\d+\n$/);
+      expect(run.checked).toHaveLength(checks);
+      expect(run.checked[0]).toBe(
         "check docs/okf --repo-root . --dirty-as-now --json",
       );
       if (checks === 2) {
-        expect(checked[1]).toBe(
+        expect(run.checked[1]).toBe(
           "check docs/b --repo-root sub --dirty-as-now --json",
         );
       }
-      expect(readdirSync(temp)).toEqual([]);
-      expect(readdirSync(work)).toEqual([]);
+      if (exit === 2) {
+        expect(run.result.stderr).toContain(
+          "bundle check could not run for docs/okf (exit 2)",
+        );
+      }
+      if (list === "odd") {
+        expect(run.result.stderr).toContain(
+          "bundle list needs <bundle> <repoRoot> pairs",
+        );
+      }
+      expect(run.tempFiles).toEqual([]);
+      expect(run.workFiles).toEqual([]);
     },
   );
 });

@@ -194,10 +194,21 @@ report="$(mktemp)"
 trap 'rm -f "$report"' EXIT
 set -- docs/okf .
 while [ "$#" -ge 2 ]; do
-  okf-kit check "$1" --repo-root "$2" --dirty-as-now --json > "$report"
-  # apply the same stage decision as CI to "$report"
+  status=0
+  okf-kit check "$1" --repo-root "$2" --dirty-as-now --json > "$report" \
+    || status=$?
+  if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
+    echo "bundle check could not run for $1 (exit $status)" >&2
+    exit 2
+  fi
+  # apply the same stage decision as CI to "$report" and "$status"
+  [ "$status" -eq 0 ] || exit 1
   shift 2
 done
+if [ "$#" -ne 0 ]; then
+  echo "bundle list needs <bundle> <repoRoot> pairs" >&2
+  exit 2
+fi
 ```
 
 Write the report outside the work tree: under `--dirty-as-now` a report file
@@ -208,6 +219,14 @@ once, above the loop, and reuse the one file for every bundle: a trap set
 inside the loop is re-armed for the latest report only and leaves the earlier
 ones behind. The `trap` replaces an EXIT trap the hook already set; a hook
 that has one adds the `rm` to that trap instead.
+
+The loop checks each exit status itself, as the CI example does, so the hook
+fails with the checker's verdict whether or not it runs under `set -e`: exit 2
+when a check could not run, exit 1 on a failing check, exit 2 when the bundle
+list is not made of whole `<bundle> <repoRoot>` pairs, and 0 otherwise. The
+`set --` line replaces the hook's positional parameters with the bundle list;
+git passes a pre-commit hook none, and a hook that needs its own arguments
+saves them before the loop.
 
 Parity covers the verdict of those two rules, not the stage decision: apply
 the same stage filter locally, and add `--strict` only when CI runs stage 3.

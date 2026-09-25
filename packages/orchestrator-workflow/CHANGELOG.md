@@ -12,8 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   causes (a missing command exits 127, caught by the status check; a failed
   install exits 1, caught by the report check). The example checks for `jq`
   first with its own message and escapes `%`, CR and LF in annotations (plus
-  `:` and `,` in `file`); the pre-commit recipe loops over the bundles with one
-  temporary report trapped once above the loop (task 433b78d5).
+  `:` and `,` in `file`); the pre-commit recipe loops over bundle pairs with one
+  trapped temp report and checks each status itself (task 433b78d5).
 
 ## [0.41.0] - 2026-09-25
 
