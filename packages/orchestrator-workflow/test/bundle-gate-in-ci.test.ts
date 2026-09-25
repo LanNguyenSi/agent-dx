@@ -357,7 +357,9 @@ describe("bundle gate in CI example: stage decisions", () => {
   it.each(couldNotRun)("checker exit %i fails stage %s", (forceExit, stage) => {
     const run = runStep(stage, { forceExit });
     expect(run.status, run.stdout + run.stderr).toBe(2);
-    expect(run.stdout).toContain("bundle check could not run");
+    expect(run.stdout).toContain(
+      `bundle check could not run (exit ${forceExit})`,
+    );
   });
 
   it.each([["warn"], ["block"], ["strict"]])(
@@ -382,6 +384,20 @@ describe("bundle gate in CI example: stage decisions", () => {
       expect(run.stdout).toContain(
         "bundle check could not run (no parseable report)",
       );
+    },
+  );
+
+  it.each([["warn"], ["block"], ["strict"]])(
+    "exit 2 fails stage %s even when a parseable report was printed",
+    (stage) => {
+      const report = JSON.stringify({
+        bundleDir: "docs/okf",
+        findings: [],
+        summary: {},
+      });
+      const run = runStep(stage, { forceExit: 2, stdout: report });
+      expect(run.status, run.stdout + run.stderr).toBe(2);
+      expect(run.stdout).toContain("bundle check could not run (exit 2)");
     },
   );
 
