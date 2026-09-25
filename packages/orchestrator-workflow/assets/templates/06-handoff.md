@@ -32,6 +32,14 @@
 
 - <!-- outcome and brief note, or omit this section when the repo carries no bundle -->
 
+## Documentation Impact
+
+<!-- Human-facing documentation (README, ADRs, architecture docs, end-user
+     docs) affected by this run. Exactly one of: none (<reason>) |
+     updated: <paths> | follow-up: <task>. -->
+
+- <!-- none (<reason>) | updated: <paths> | follow-up: <task> -->
+
 ## Follow-Ups
 
 - <!-- next steps or none -->

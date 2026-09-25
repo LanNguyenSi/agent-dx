@@ -100,6 +100,15 @@ Check, at minimum:
   reusable instruction file (a skill, an agent prompt, an AGENTS.md section, a
   template)? Report it; the fix is to move the evidence to the changelog, the
   run files, or the consuming workspace and leave a one-line pointer.
+- Documentation impact: when the change is user-visible (a command,
+  output, configuration, or documented behaviour) or architectural,
+  check whether the diff updates the affected human-facing documentation
+  (README, ADRs, architecture docs, end-user docs). When it does not, and
+  neither the briefing, the implementer's report, nor the run's
+  `Documentation Impact` line in `06-handoff.md` gives a reason or a
+  follow-up, that is a medium finding; once the handoff is filled, so is
+  a missing `Documentation Impact` line or a `none` without a reason for
+  such a change. A docs-only change is exempt.
 - Recurrence: when the briefing tells you this is not the task's first
   review round, classify each finding as `new` or `repeated` against the
   earlier rounds you were told about; on a first round every finding is

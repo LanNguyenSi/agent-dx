@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-09-24T06:48:31Z
+timestamp: 2026-09-25T04:44:36Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -216,9 +216,9 @@ opposite in posture to run-base:
 - `05-review-findings.md:34#"<!-- solution-acceptance: acceptance-recommendation = TODO -->"`: `<!-- solution-acceptance: acceptance-recommendation = TODO -->`,
   filled from the Acceptance Recommendation enum `accept | accept_with_notes
   | fix_required | reject` (packages/orchestrator-workflow/assets/templates/05-review-findings.md:32#"accept | accept_with_notes | fix_required | reject").
-- `06-handoff.md:43#"<!-- solution-acceptance: final-status = TODO -->"`: `<!-- solution-acceptance: final-status = TODO -->`,
+- `06-handoff.md:51#"<!-- solution-acceptance: final-status = TODO -->"`: `<!-- solution-acceptance: final-status = TODO -->`,
   filled from the Final Status enum `accepted | accepted_with_notes |
-  needs_followup | blocked` (packages/orchestrator-workflow/assets/templates/06-handoff.md:39-41#"accepted | accepted_with_notes | needs_followup | blocked").
+  needs_followup | blocked` (packages/orchestrator-workflow/assets/templates/06-handoff.md:47-49#"accepted | accepted_with_notes | needs_followup | blocked").
 
 SKILL.md's closing instruction: "replace the `TODO` in each
 `<!-- solution-acceptance: ... = TODO -->` marker with the chosen enum
