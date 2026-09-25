@@ -48,6 +48,15 @@ describe("runDocsFor", () => {
     expect(result.matches).toEqual([]);
   });
 
+  it("does not match a directory source when the given path is its parent directory", () => {
+    // path.relative("src/dir", "src") is exactly "..": the parent lies outside
+    // the directory source, so the docs claiming src/dir must not match.
+    const result = runDocsFor(BUNDLE_DIR, ["src"], {
+      repoRoot: REPO_ROOT,
+    });
+    expect(result.matches).toEqual([]);
+  });
+
   it("returns an empty match list, no error, when no doc claims the given path", () => {
     const result = runDocsFor(BUNDLE_DIR, ["src/nope.ts"], {
       repoRoot: REPO_ROOT,
