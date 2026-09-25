@@ -1,5 +1,12 @@
 # Bundle log
 
+- 2026-09-25T10:30:32Z (release 0.41.0): the `[Unreleased]` notes moved under
+  `## [0.41.0] - 2026-09-25`. Line citations into `CHANGELOG.md` below
+  the new heading were re-pointed by two lines. No bundle doc cited the
+  `[Unreleased]` heading. `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md`
+  re-checked and re-stamped.
+
 - 2026-09-25T10:02:27Z (task e5ec01f3, bundle gate in CI): a new skill reference
   `bundle-gate-in-ci.md` describes running the bundle check in CI and
   before a commit, linked from the `SKILL.md` hand-off step and route list;
