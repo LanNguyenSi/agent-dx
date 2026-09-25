@@ -54,7 +54,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `<doc path> (knowledge bundle; sources: <intersecting sources>)` (defined
   once in contracts.md) and adds the doc to `allowed_changes`, computing the
   intersection with a bundle tool when one is available (for example
-  `okf-kit docs-for`) or from each doc's `sources` frontmatter. The
+  `okf-kit docs-for`) or from each doc's `sources` frontmatter. Sources
+  resolve against the bundle's `repoRoot`, directory and glob entries of
+  `allowed_changes` are expanded to tracked files before a tool query, and a
+  doc that `forbidden_changes` cover becomes an open question instead. The
   implementer reads marked docs first as leads to verify and re-stamps a doc
   whose source it changes in the same commit as the source change, or in a
   later commit of the same task; the reviewer verifies the re-stamp and

@@ -15,6 +15,7 @@ const taskSlicerMd = readAsset("agents/task-slicer.md");
 const implementerMd = readAsset("agents/implementer.md");
 const reviewerMd = readAsset("agents/reviewer.md");
 const tasksTemplate = readAsset("templates/02-tasks.md");
+const handoffTemplate = readAsset("templates/06-handoff.md");
 
 // Collapse line wraps and indentation so a pin matches a whole sentence
 // regardless of where the asset wraps it.
@@ -46,7 +47,7 @@ describe("contracts.md defines the bundle doc entry in relevant_docs", () => {
   it("defines when a source intersects the allowed changes", () => {
     pin(
       contracts,
-      "A source intersects when it names a path the task may change, a directory containing one, or a path inside a directory the task may change.",
+      "A source intersects when it names a path the task may change, a directory containing one, or a path inside a directory the task may change;",
     );
   });
 
@@ -61,6 +62,38 @@ describe("contracts.md defines the bundle doc entry in relevant_docs", () => {
     pin(
       contracts,
       "Each such doc is also listed in `allowed_changes`, so the implementer can re-stamp it.",
+    );
+  });
+
+  it("expands directory and glob entries before querying a bundle tool", () => {
+    pin(
+      contracts,
+      "A bundle tool is queried with concrete paths, so first expand each directory or glob entry of `allowed_changes` to the tracked files it covers (for example `git ls-files -- <entry>`); when reading the frontmatter instead, match directory and glob entries against each source directly.",
+    );
+    pin(
+      contracts,
+      "a source that is itself a directory matches every path beneath it.",
+    );
+  });
+
+  it("resolves sources against the bundle's repoRoot", () => {
+    pin(
+      contracts,
+      "Resolve each doc's `sources` against its bundle's configured `repoRoot` and compare them with the `allowed_changes` in that repository.",
+    );
+  });
+
+  it("names the re-stamp commit for a workspace bundle", () => {
+    pin(
+      contracts,
+      "For a bundle whose docs live in a different repository than its sources (a workspace bundle), the re-stamp commit is one in the bundle's repository within the same task.",
+    );
+  });
+
+  it("does not add a doc that forbidden_changes cover", () => {
+    pin(
+      contracts,
+      "When `forbidden_changes` cover such a doc, the slicer leaves it out of `allowed_changes` and records an open question for the orchestrator instead.",
     );
   });
 
@@ -84,6 +117,20 @@ describe("the task slicer adds intersecting bundle docs at slicing", () => {
     pin(
       taskSlicerMd,
       "Compute the intersection with a bundle tool when one is available (for example `okf-kit docs-for`), or read each bundle doc's `sources` frontmatter; contracts.md defines the marker and the intersection.",
+    );
+  });
+
+  it("task-slicer.md leaves out a doc that forbidden_changes cover", () => {
+    pin(
+      taskSlicerMd,
+      "When `forbidden_changes` cover the doc, leave it out of `allowed_changes` and record an open question for the orchestrator instead.",
+    );
+  });
+
+  it("task-slicer.md queries a bundle tool with concrete paths", () => {
+    pin(
+      taskSlicerMd,
+      "Resolve each doc's `sources` against its bundle's `repoRoot`. A bundle tool takes concrete paths: expand each directory or glob entry of `allowed_changes` to the tracked files it covers first (for example `git ls-files -- <entry>`), or match such entries against the `sources` frontmatter directly; a source that is itself a directory matches every path beneath it.",
     );
   });
 
@@ -124,6 +171,13 @@ describe("the implementer reads and re-stamps listed bundle docs", () => {
     );
   });
 
+  it("re-stamps a workspace bundle doc in the bundle's repository", () => {
+    pin(
+      implementerMd,
+      "For a workspace bundle whose docs live in a different repository than their sources, the re-stamp commit is one in the bundle's repository within the same task.",
+    );
+  });
+
   it("reports a doc outside allowed_changes instead of editing it", () => {
     pin(
       implementerMd,
@@ -160,6 +214,13 @@ describe("the hand-off bundle check is a safety net", () => {
     pin(
       evidenceAndProbes,
       "check whether the change touches paths any bundle doc claims as sources that no task re-stamped;",
+    );
+  });
+
+  it("06-handoff.md's Knowledge Bundle comment names the safety net", () => {
+    pin(
+      handoffTemplate,
+      "This is the safety net for bundle docs no task re-stamped: a task that changes a doc's sources re-stamps it itself.",
     );
   });
 

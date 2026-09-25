@@ -216,9 +216,9 @@ opposite in posture to run-base:
 - `05-review-findings.md:34#"<!-- solution-acceptance: acceptance-recommendation = TODO -->"`: `<!-- solution-acceptance: acceptance-recommendation = TODO -->`,
   filled from the Acceptance Recommendation enum `accept | accept_with_notes
   | fix_required | reject` (packages/orchestrator-workflow/assets/templates/05-review-findings.md:32#"accept | accept_with_notes | fix_required | reject").
-- `06-handoff.md:61#"<!-- solution-acceptance: final-status = TODO -->"`: `<!-- solution-acceptance: final-status = TODO -->`,
+- `06-handoff.md:63#"<!-- solution-acceptance: final-status = TODO -->"`: `<!-- solution-acceptance: final-status = TODO -->`,
   filled from the Final Status enum `accepted | accepted_with_notes |
-  needs_followup | blocked` (packages/orchestrator-workflow/assets/templates/06-handoff.md:57-59#"accepted | accepted_with_notes | needs_followup | blocked").
+  needs_followup | blocked` (packages/orchestrator-workflow/assets/templates/06-handoff.md:59-61#"accepted | accepted_with_notes | needs_followup | blocked").
 
 SKILL.md's closing instruction: "replace the `TODO` in each
 `<!-- solution-acceptance: ... = TODO -->` marker with the chosen enum
@@ -319,9 +319,11 @@ construction.
 ## The Knowledge Bundle handoff section (0.12.0): the loop-closer
 
 `06-handoff.md` gained an optional `## Knowledge Bundle` section
-(06-handoff.md:27-33#"- <!-- outcome and brief note, or omit this section when the repo carries no bundle -->"): "only applies when the repo carries a curated
+(06-handoff.md:27-35#"- <!-- outcome and brief note, or omit this section when the repo carries no bundle -->"): "only applies when the repo carries a curated
 knowledge bundle (each one configured via `knowledge` in `.ai/workflow/manifest.json`; default `docs/okf/`).
-Outcome: updated | not affected | follow-up filed." SKILL.md's step 9 (Hand off) instructs
+This is the safety net for bundle docs no task re-stamped: a task that
+changes a doc's sources re-stamps it itself. Outcome: updated | not affected |
+follow-up filed." evidence-and-probes.md step 9 (SKILL.md step 6, Hand off) instructs
 applying this guidance before filling the file: check whether the change
 touched any path a bundle doc claims as a `sources:` entry, and if so either
 update the affected docs (re-verify and re-stamp) or record a follow-up
