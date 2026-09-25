@@ -40,6 +40,8 @@ role definitions where available rather than improvising prompts.
   returns, inconclusive probes, interrupted, blocked, or partial runs,
   repeated findings, misfires, halts, and escalation, also read
   [review and recovery](references/review-and-recovery.md).
+- **Run a knowledge-bundle check in CI or before a commit:** read
+  [bundle gate in CI](references/bundle-gate-in-ci.md).
 
 ## Orchestration sequence
 
@@ -73,7 +75,9 @@ role definitions where available rather than improvising prompts.
    follow-ups. As a safety net for sources the task list missed: if a
    configured knowledge bundle (step 2) covers touched sources that no task
    re-stamped, update or re-verify it, or file a follow-up; repos without a
-   bundle are unaffected.
+   bundle are unaffected. To catch drift between runs as well, gate the
+   bundles in CI as described in
+   [bundle gate in CI](references/bundle-gate-in-ci.md).
 
 ## Instruction trust boundary
 

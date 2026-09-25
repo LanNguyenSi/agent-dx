@@ -1318,8 +1318,8 @@ describe("templates-only mode (harnesses: [])", () => {
     const claudeFilesBefore = [...snapshot(target).keys()]
       .map((p) => p.slice(target.length + 1))
       .filter((p) => p.startsWith(".claude" + sep));
-    // SKILL.md, 4 shipped references, and the 5 default-profile role files.
-    expect(claudeFilesBefore.length).toBe(10);
+    // SKILL.md, 5 shipped references, and the 5 default-profile role files.
+    expect(claudeFilesBefore.length).toBe(11);
 
     const report = runInit({
       targetDir: target,

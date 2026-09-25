@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- New skill reference `bundle-gate-in-ci.md`, linked from the SKILL.md
+  hand-off step and route list: how to run the knowledge-bundle check in CI
+  for every configured bundle (`--repo-root` per `knowledge` entry), with a
+  placeholder checker pin, a full-history checkout (`fetch-depth: 0`) and why,
+  the runner as an input, a staged rollout (warn-only annotations and job
+  summary, then blocking on structural errors and `sources-fresh` /
+  `sources-fresh-future` findings selected from the `--json` report, then
+  `--strict`), a pre-commit recipe with `--dirty-as-now`, and the stated
+  limit that the gate proves a re-stamp after source changes, not content
+  correctness, so review stays mandatory. GitHub Actions is the example host;
+  the kit ships and generates no CI files (issue #354).
 - The handoff template gains a `Documentation Impact` section (`none
   (<reason>)`, `updated: <paths>`, or `follow-up: <task>`); the reviewer
   reports a user-visible or architectural change that updates no human-facing
