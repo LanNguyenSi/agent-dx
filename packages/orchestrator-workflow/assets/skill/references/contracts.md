@@ -350,7 +350,21 @@ doc's `sources` frontmatter. A bundle tool is queried with concrete paths, so
 first expand each directory or glob entry of `allowed_changes` to the tracked
 files it covers (for example `git ls-files -- <entry>`); when reading the
 frontmatter instead, match directory and glob entries against each source
-directly. Each such doc is also listed in `allowed_changes`,
+directly. An entry whose expansion is empty (for example a directory the task
+will create) is still queried: pass the entry itself alongside the expanded
+paths, since a path that does not exist yet still matches a directory source
+that contains it, or match the entry against the `sources` frontmatter
+directly. A brace glob such as `src/{a,b}.ts` is not expanded by a pathspec
+and is taken literally by a bundle tool, so expand it into its alternatives
+first (for example by the shell) or match it against the `sources` frontmatter
+directly. Query a bundle tool with paths relative to the bundle's `repoRoot`:
+for a workspace bundle whose `repoRoot` is a repository inside the workspace,
+strip that repository's workspace prefix from each `allowed_changes` entry and
+run the expansion inside that repository (for example `git -C <repo root>
+ls-files -- <entry>`), because an expansion prints paths relative to its
+working directory and a workspace-relative path is read as a path beneath the
+`repoRoot` and matches nothing; an entry outside that repository is not
+queried against that bundle. Each such doc is also listed in `allowed_changes`,
 so the implementer can re-stamp it. When `forbidden_changes` cover such a doc,
 the slicer leaves it out of `allowed_changes` and records an open question for
 the orchestrator instead. For a bundle whose docs live in a different
