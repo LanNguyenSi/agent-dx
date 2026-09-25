@@ -71,8 +71,9 @@ role definitions where available rather than improvising prompts.
    authority, recover invalid or incomplete work without converting it into
    proof, and apply the review gate. Read
    [review and recovery](references/review-and-recovery.md).
-6. **Hand off.** Record what changed, evidence, risks, accepted waivers, and
-   follow-ups. As a safety net for sources the task list missed: if a
+6. **Hand off.** Record what changed, evidence, risks, accepted waivers,
+   documentation impact (none with a reason, updated paths, or a follow-up),
+   and follow-ups. As a safety net for sources the task list missed: if a
    configured knowledge bundle (step 2) covers touched sources that no task
    re-stamped, update or re-verify it, or file a follow-up; repos without a
    bundle are unaffected. To catch drift between runs as well, gate the

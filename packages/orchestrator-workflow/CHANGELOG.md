@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   round. A noted ref's record in `03-decisions.md` now names the ref and
   the sha, so a later round can apply the "while it stays at that sha"
   condition (task 91dc41e6).
+- Hand off (evidence-and-probes.md step 9, SKILL.md step 6): documentation
+  impact (none with a reason, updated paths, or a follow-up) is now named
+  among what the orchestrator records and reports, so the `Documentation
+  Impact` line of `06-handoff.md` is filled by rule rather than only by the
+  template slot; `test/docs-impact.test.ts` pins both clauses (task
+  b4d8f0e9).
 
 ## [0.41.0] - 2026-09-25
 
