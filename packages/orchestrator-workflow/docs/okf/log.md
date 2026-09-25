@@ -1,5 +1,13 @@
 # Bundle log
 
+- 2026-09-25T11:22:23Z (task 433b78d5, bundle gate in CI wording): `bundle-gate-in-ci.md`
+  separates the checker's exit-2 usage error from the other could-not-run
+  causes, checks for `jq`, escapes annotation lines and removes the pre-commit
+  temporary report; `CHANGELOG.md` gains its `[Unreleased]` bullet. No bundle
+  doc cites the reference or the test file, and every `CHANGELOG.md` citation
+  in the bundle is heading-anchored to a released section, so no claim changed.
+  The docs whose `sources` list `CHANGELOG.md` were re-checked and re-stamped.
+
 - 2026-09-25T10:30:32Z (release 0.41.0): the `[Unreleased]` notes moved under
   `## [0.41.0] - 2026-09-25`. Line citations into `CHANGELOG.md` below
   the new heading were re-pointed by two lines. No bundle doc cited the
