@@ -123,6 +123,22 @@ describe("Outward-facing actions rule ships in the policy block", () => {
     );
   });
 
+  it("requires the orchestrator's per-action operator confirmation as the base rule", () => {
+    expect(unwrap(agentsMdSection)).toContain(
+      "An outward action needs the orchestrator's operator confirmation per action, unless its class is recorded as durably authorized in `00-goal.md`'s `outward` marker (default `none`)",
+    );
+  });
+
+  it("states outward text is drafted into the run directory first", () => {
+    expect(agentsMdSection).toContain(
+      "Outward text (a comment, a PR description) is drafted into the run\n  directory first;",
+    );
+  });
+
+  it("names pushing a branch or tag among the boundary examples", () => {
+    expect(agentsMdSection).toContain("Examples: pushing a branch or tag;");
+  });
+
   it("points to the 00-goal.md outward marker and its default", () => {
     expect(agentsMdSection).toContain(
       "`00-goal.md`'s `outward` marker (default `none`)",
@@ -163,6 +179,12 @@ describe("Outward-facing actions rule ships in SKILL.md", () => {
       "performing an outward action without authorization is forbidden but reporting one that was performed is mandatory",
     );
   });
+
+  it("states a local commit is not an outward action", () => {
+    expect(unwrap(skillMd)).toContain(
+      "local commit on a task branch inside a worktree is not an outward action, in any run mode; only pushing it is.",
+    );
+  });
 });
 
 describe("00-goal.md carries the outward marker, defaulting to none", () => {
@@ -187,6 +209,10 @@ describe("00-goal.md carries the outward marker, defaulting to none", () => {
 
   it("does not reuse the solution-acceptance prefix for the outward marker", () => {
     expect(goalTemplate).not.toContain("solution-acceptance: outward");
+  });
+
+  it("states the marker's default is none in its description comment", () => {
+    expect(goalTemplate).toContain("Default none.");
   });
 
   it("records that a class is added only on the operator's explicit instruction", () => {
@@ -286,6 +312,12 @@ describe("implementer contract: outward actions", () => {
   it("states a local commit on the task branch is not an outward action", () => {
     expect(implementerMd).toContain(
       "A local commit on your task branch\n  inside your worktree is not an outward action, in any run mode; only\n  pushing it is.",
+    );
+  });
+
+  it("names pushing a branch or tag among the boundary examples", () => {
+    expect(implementerMd).toContain(
+      "the run directory: pushing a branch or tag;",
     );
   });
 
