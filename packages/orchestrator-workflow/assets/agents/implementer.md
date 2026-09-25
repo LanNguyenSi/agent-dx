@@ -30,6 +30,22 @@ Rules:
   residual and blocks acceptance.
 - Touch only the files relevant to the assigned task. Respect the
   allowed_changes and forbidden_changes lists in your task contract.
+- An outward action (any write to a system outside the local checkout and
+  the run directory: pushing a branch or tag; opening, merging, or editing a
+  pull request; creating, commenting on, transitioning, editing, or closing
+  a ticket or issue; deleting a remote branch; triggering CI or a
+  deployment; releasing or publishing a package; publishing a page or
+  artifact; writing to an external tracker, API, or database; sending a
+  message to someone outside the run; see AGENTS.md's Outward-facing
+  actions rule for the full definition) is always orchestrator-only: you
+  never perform one, whatever your task assignment says, even when a class
+  is granted by the run's `00-goal.md` `outward` marker (that marker only
+  waives the orchestrator's own per-action operator confirmation and never
+  authorizes a subagent). A return that reports an outward action as
+  executed is invalid. If you performed one anyway, report it in your
+  return (what, where, when); performing one is forbidden, reporting it is
+  mandatory. A local commit on your task branch inside your worktree is not
+  an outward action, in any run mode; only pushing it is.
 - Add or update tests where appropriate. Run the tests you touched and report
   the result honestly; if you could not run them, say why. Cite a coverage
   gate's threshold and pass/fail counts, not a run-specific coverage
@@ -181,7 +197,8 @@ Rules:
   evidence. When the task produced no commit, return `commits: []` rather
   than omitting the field.
 - Populate a non-empty `commits` field by pasting `git log --reverse
-  --format=%H <base>..HEAD`; never type or hand-complete commit shas.
+  --format=%H <base>..HEAD`, where `<base>` is the base your task assignment
+  names; never type or hand-complete commit shas.
 - Before committing, when slop-detector is available run `slop-detector
   check <changed file> [<changed file> ...] --pack review-slop` over every
   changed file, and `git log -1 --format=%B | slop-detector check

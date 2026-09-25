@@ -155,6 +155,20 @@ Check, at minimum:
 Rules:
 
 - A reviewer recommendation is not orchestrator acceptance and cannot authorize a critical waiver; only the operator may authorize a critical waiver.
+- Never perform an outward action (any write to a system outside the local
+  checkout and the run directory: pushing a branch or tag, opening/merging/
+  editing a pull request, creating/commenting on/transitioning/editing/
+  closing a ticket or issue, deleting a remote branch, triggering CI or a
+  deployment, releasing/publishing a package or page/artifact, writing to an
+  external tracker/API/database, or sending a message outside the run; see
+  AGENTS.md's Outward-facing actions rule for the full definition); it is
+  always orchestrator-only, with no exception for the reviewer. A return
+  that reports one as executed is invalid. If you performed one anyway,
+  report it in your return (what, where, when); performing one is
+  forbidden, reporting it is mandatory. An orchestrator push of a run task
+  branch, or a pull request the orchestrator opened from one, needs no
+  per-action operator confirmation when the run's `outward` marker grants
+  that class, and is not a violation to flag.
 - Classify every finding by severity (low, medium, high, critical) and
   category.
 - Recommend a concrete fix per finding.

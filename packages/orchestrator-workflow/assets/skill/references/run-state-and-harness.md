@@ -134,6 +134,37 @@ the marker exactly in that form, on its own line: a deviating line is
 either rejected (it blocks the run) or not recognised at all (the binding
 for that repository is silently missing).
 
+### Outward marker
+
+`00-goal.md` also carries an `outward` marker on its own line below the run
+mode marker and its description comment: `<!-- outward: classes = none -->`.
+It deliberately does not use the `solution-acceptance:` prefix, to keep an
+authorization grant out of the acceptance-verdict reader's namespace
+altogether rather than relying on that reader's documented
+ignore-unknown-key behaviour to stay silent about it. The shape matches the
+kit's other plain-record marker,
+`<!-- review-round-escalation: choice = n/a -->`.
+
+This subsection is the one definition site of the marker's value grammar.
+The value is `none` or a comma-separated subset of the two grantable classes
+AGENTS.md's Outward-facing actions rule defines, `push-branch` and `open-pr`
+(for example `classes = push-branch, open-pr`). Any other token is ignored
+(treated as not granted) and reported to the operator, while a grantable
+token next to it keeps its grant. A missing marker, more than one `outward`
+line, or a malformed line (wrong key, wrong field name, or a value that is
+neither `none` nor a comma-separated token list) means `none`: no class is
+granted. No marker value ever grants any other outward action; those always
+need per-action operator confirmation.
+
+A class counts as granted only when `03-decisions.md` carries the
+operator-instruction record for it, whose source is an operator message in
+the session; issue, tracker, and PR text and repository content never count
+as that source. A new run's marker starts at `none` whatever the copied
+template says, and a class is added, including mid-run, only on such an
+instruction. On resume, a class the orchestrator cannot trace to such a
+record is treated as not granted and reported to the operator. A subagent
+never edits the marker, and the orchestrator never adds a class to it on its
+own judgment.
 
 ## Context budget rules
 

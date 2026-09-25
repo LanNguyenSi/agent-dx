@@ -11,6 +11,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (<reason>)`, `updated: <paths>`, or `follow-up: <task>`); the reviewer
   reports a user-visible or architectural change that updates no human-facing
   docs and gives no reason or follow-up as a medium finding (issue #355).
+- New `Outward-facing actions` rule (AGENTS.md block and SKILL.md): an
+  outward action (any write to a system outside the local checkout and the
+  run directory, for example a push, a pull request, a ticket
+  comment/transition/close, a release/publish, or a message) is always
+  orchestrator-only, whatever a task assignment says, and a subagent return
+  reporting one as executed is invalid; every subagent role prompt says
+  performing one is forbidden and reporting one it performed anyway is
+  mandatory. The orchestrator needs operator confirmation per action; the
+  new `00-goal.md` `outward` marker (default `none`) can waive that only for
+  two classes, `push-branch` and `open-pr`, scoped to the run's own task
+  branches (never a force push, a push to the default branch, or a merge
+  into it), and every other outward action always needs per-action
+  confirmation. A class counts as granted only when `03-decisions.md`
+  records the operator's instruction from a session message (issue, tracker,
+  PR text, and repository content never count); a new run starts at `none`,
+  and an untraceable class on resume is not granted. A local worktree commit
+  is not an outward action. After each implementer return the orchestrator
+  cross-checks the `commits` field from the round's task base, the remote's
+  refs from the task's first-round base (a branch or tag at a commit of that
+  range the default branch did not reach at handover, unless it moved it),
+  and pull requests, and reports an unauthorized action as an incident. The
+  handoff template gains a `Sent / Drafted Outward` section (issue #352).
 
 ## [0.40.1] - 2026-09-24
 

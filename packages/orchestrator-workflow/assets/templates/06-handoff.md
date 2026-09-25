@@ -40,6 +40,16 @@
 
 - <!-- none (<reason>) | updated: <paths> | follow-up: <task> -->
 
+## Sent / Drafted Outward
+
+<!-- Optional: only applies when this run performed or drafted an outward
+     action (push, pull request, ticket comment/transition/close, release,
+     publish, message). Omit this section when nothing was sent or drafted. -->
+
+- <!-- action class, what was sent (with confirmation basis), what stayed a
+     draft in the run directory and why, or an action performed without
+     authorization (unauthorized) -->
+
 ## Follow-Ups
 
 - <!-- next steps or none -->

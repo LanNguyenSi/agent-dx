@@ -152,6 +152,62 @@ directory and the subagents.
    engine. Only the orchestrator can explicitly revise a baseline, recording
    old/new revisions, affected IDs, authority and reason, invalidated evidence,
    and verified rationale for carrying unchanged evidence forward. Record a baseline revision only when scope or the normative text of a criterion changes, including a change to what its verification checks; a wording precision that leaves the check itself unchanged is a `03-decisions.md` entry, not a revision: the orchestrator records it, states in that entry why no evidence is invalidated, and communicates the corrected wording in the next delegation.
+   After each implementer return, mechanically cross-check its self-report
+   against the outward-actions rule (see AGENTS.md's Outward-facing actions
+   section). The `commits` comparison starts from the round's task base,
+   which the orchestrator names in this round's assignment as the
+   implementer's `<base>` (the sha the task branch started from on the
+   task's first round, or the previous round's reviewed head on a later
+   round); the ref check starts from the task's first-round base, so a ref
+   at an earlier round's commit stays covered. Neither starts from the
+   run-base, whose range also holds earlier tasks and upstream work merged
+   after it. When handing a round over, record its task base and the remote
+   default branch's sha at that moment (for example `git rev-parse
+   <remote>/<default-branch>` right after `git fetch <remote>`, or the
+   host's equivalent). Compare `git rev-list --reverse
+   <task-base>..<task-branch>` (or the host's equivalent) against the
+   returned `commits` field. List the remote's refs (for example `git
+   ls-remote <remote>`, or the host's equivalent) and flag every branch or
+   tag whose sha, peeled for an annotated tag, lies in the
+   `<first-round-base>..<task-branch>` range and is not reachable from the
+   remote default branch's sha recorded at this round's handover (for
+   example, every sha that `git rev-list <task-branch> ^<first-round-base>
+   ^<recorded-default-sha>` lists), unless the orchestrator moved that ref
+   to that sha itself (its own push, or a host-side merge it performed).
+   Reachability is judged from the recorded sha rather than the default
+   branch's current one, so a push of the task's commits to the default
+   branch is still flagged, while upstream work the task branch took in from
+   the recorded default branch is not. A round therefore takes in upstream
+   work only up to its recorded sha: a ref at a commit that reached the
+   default branch after the handover is flagged like one at the task's own
+   commits. Without a recorded sha, judge reachability from the first-round
+   base itself, which errs
+   toward a flag. Compare an existing task-branch ref
+   with the sha the orchestrator last pushed there, rather than treating the
+   ref's existence as a misfire; and confirm no pull request exists on the
+   task branch that the orchestrator did not open itself (for example `gh pr
+   list --head <branch>`, or the host's equivalent). A `commits` mismatch,
+   a pull request the orchestrator did not open, or a return that reports
+   an outward action as executed, is a misfire: do not fold it into run
+   state as evidence, and recover it under the subagent misfire rule. A
+   flagged ref is a signal to investigate, not a misfire by itself: before
+   treating it as one, the orchestrator establishes who moved the ref (for
+   example from the host's push or audit events, or by asking the
+   operator). When that cannot be established, it treats the ref as a
+   misfire and reports it to the operator. A ref a third party moved, or
+   one already recorded as an incident in an earlier round, is recorded
+   once in `03-decisions.md` and is not treated as a new finding again
+   while it stays at that sha; a later move of such a ref is investigated
+   like any other flagged ref. The ref check is a heuristic next to the
+   subagent's mandatory self-report, not a complete detector: for example,
+   it cannot see a deleted ref, a rewound default branch, a ref at an
+   already public sha, a ref at a commit a rebase dropped from the task
+   branch, or a pushed merge or squash of the task branch. When the check
+   finds an outward action was actually performed (a push, an opened pull
+   request) without authorization, that is more than a misfire to resume
+   past: the orchestrator informs the operator immediately, records the
+   incident in `03-decisions.md`, and lists it in `06-handoff.md`'s Sent /
+   Drafted Outward section as unauthorized.
 7. **Delegate review.** Send the diff to the reviewer subagent, naming in the
    briefing the base and head revision the diff was generated from. When tier
    variants are installed, pick the reviewer tier (the installed

@@ -8,7 +8,15 @@ against its role's output contract, including an implementer return that
 omits the `mutation_probes` field even though the task assignment named
 mutation probes to run, or that omits the `commits` field even though the
 task assignment asked for a commit, or that omits the `class_closure`
-field on any round after the task's first. When a subagent returns near-instantly
+field on any round after the task's first, or that reports an outward
+action (see AGENTS.md's Outward-facing actions rule) as executed, since a
+task assignment never authorizes one. Performing an outward action is
+forbidden, but reporting one that was actually performed is still
+mandatory: recovering the return as a misfire (it is not evidence) does not
+excuse the orchestrator from also treating the report itself as an
+incident, informing the operator immediately, recording it in
+`03-decisions.md`, and listing it in `06-handoff.md`'s Sent / Drafted
+Outward section as unauthorized. When a subagent returns near-instantly
 with no tool activity, treat that as a misfire signal rather than proof:
 check the output against the contract with extra suspicion, and accept it
 only if it is contract-valid and the assignment was answerable from the
