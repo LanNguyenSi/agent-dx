@@ -28,7 +28,8 @@ export interface DocsForResult {
 
 /**
  * `okf-kit docs-for <bundleDir> <path>...`: which bundle docs claim a given
- * (repo-root-relative) path as a `sources` entry, directly.
+ * path (relative or absolute, resolved against repoRoot) as a `sources`
+ * entry, directly.
  *
  * Reuses the IDENTICAL `sources` population `sources-shape`/`sources-fresh`
  * assess (`getDocsWithSources`, shape-validated via `getValidSources`): a

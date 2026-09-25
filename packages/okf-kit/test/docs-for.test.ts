@@ -283,6 +283,20 @@ describe("runDocsFor path normalization", () => {
         "an absolute path equal to repoRoot's own parent",
         (repoRoot: string) => path.dirname(repoRoot),
       ],
+      [
+        "an absolute path in a sibling directory sharing repoRoot as a string prefix",
+        (repoRoot: string) => repoRoot + "-sibling" + path.sep + "foo.ts",
+      ],
+      [
+        "a relative escape into a sibling directory sharing repoRoot's name as a prefix",
+        (repoRoot: string) =>
+          ".." +
+          path.sep +
+          path.basename(repoRoot) +
+          "-sibling" +
+          path.sep +
+          "foo.ts",
+      ],
     ])("throws a UsageError for %s", (_label, buildGiven) => {
       writeDoc(bundleDir, "exact.md", {
         type: "concept",
