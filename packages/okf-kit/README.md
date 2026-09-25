@@ -89,6 +89,32 @@ If the bundle is not inside a git work tree (or `git` is unavailable), repo-root
 
 Pass `--repo-root` explicitly to pin a specific root (useful in CI when the bundle and the code it documents live in different checkouts) or to opt out of the ambient repo (point it at the bundle directory itself to disable both checks' access to the rest of the repo).
 
+## Reverse lookup (`docs-for`)
+
+`okf-kit docs-for <bundleDir> <path>...` answers the opposite question from `check`: given one or more paths, which bundle docs claim them as `sources`? Useful for a slicer or CI step that needs to know which knowledge-bundle docs are affected by a set of changed files, without reimplementing frontmatter parsing.
+
+```bash
+# which docs claim src/foo.ts (or a directory it lives under) as a source?
+okf-kit docs-for path/to/bundle src/foo.ts src/bar/
+
+# JSON output for tooling
+okf-kit docs-for path/to/bundle src/foo.ts --json
+
+# explicit repo root, like `check` (auto-detected via `git rev-parse --show-toplevel` when omitted)
+okf-kit docs-for path/to/bundle src/foo.ts --repo-root /path/to/repo
+```
+
+**Population and matching:** `docs-for` looks at the exact same docs `sources-shape`/`sources-fresh` do -- every doc whose frontmatter `sources` is a validly-shaped (non-empty array of non-empty strings) list; a doc with no `sources` key, or a malformed one, contributes no matches (that shape error is `check`'s job to report, not this command's). A given `<path>` argument matches a doc's `sources` entry when, after resolving both against `--repo-root` (exactly as `check` resolves `sources` entries):
+
+- the two paths are identical, or
+- the `sources` entry resolves to a path that is a DIRECTORY on disk, and the given path resolves to that directory itself or anything underneath it.
+
+There is no glob support: a `sources` entry is a plain path everywhere else in this package (`sources-shape`'s existence check is a bare `fs.existsSync`, never glob expansion), so `docs-for` matches nothing wider than what `check` already validates against. A `sources` entry that does not exist on disk (already flagged by `sources-shape`) can only match by exact string equality, never by directory containment, since there is nothing to inspect there.
+
+**Given paths are repo-root-relative**, resolved the same way `--repo-root` and each doc's own `sources` entries are (`path.resolve`), which normalizes a leading `./`, a trailing slash, or a `../`-relative spelling identically on both sides before comparing. A cwd-relative path that happens to differ from its repo-root-relative spelling is not separately supported.
+
+**Output:** text output is one line per matching doc, bundle-relative path (the same convention `check`'s own findings use), followed by the `sources` entries of its that matched (`doc.md: src/foo.ts, src/bar/`); an empty result says so explicitly rather than printing nothing. `--json` gives `{ bundleDir, matches: [{ doc, sources: [...] }] }`, one entry per matching doc, sorted by `doc`, each entry's `sources` deduplicated and sorted. **Exit codes:** 0 whether or not anything matched; 2 for a usage error (unknown/missing bundle directory, no `<path>` arguments given, no repo root determinable).
+
 ## Staleness (sources-fresh)
 
 `sources-fresh` compares each frontmatter `sources` entry's last git commit time against the doc's `timestamp`, and additionally against the doc file's own last commit time: a source committed at or before the doc file's last commit is treated as fresh even when the frontmatter `timestamp` is older, PROVIDED that same commit actually re-stamped the doc. "Re-stamped" is decided by VALUE, not by diff text: okf-kit reads the doc's frontmatter at that commit and in the commit's first parent, parses both, and compares the `timestamp` VALUES as parsed instants, read at millisecond resolution -- the doc did not exist in the parent at all (it was created there), or the commit's value is strictly LATER than the parent's, and it counts as re-stamped. A value that moves to an EARLIER instant is not a re-stamp, and is additionally reported as its own warning (`re-stamp moved backwards`) naming the previous and new instants. A value that is actually REWRITTEN to the SAME instant in a different raw spelling (adding milliseconds that round to nothing, or switching between a quoted string and a native YAML date) is likewise not a re-stamp, and is additionally reported as its own notice naming both raw spellings; an unchanged value (the frontmatter timestamp is byte-identical across the commit, the common case for a co-committed body edit or formatter run) gets neither the warning nor the notice, since it was never a re-stamp attempt at all. Direction is judged whenever BOTH sides resolve to an instant at all, including a `timestamp` string with no UTC designator or numeric offset -- see **Designator-less timestamps** for how that value is made timezone-invariant; only a side that cannot be parsed to an instant at all takes a raw-identity fallback instead. The lookup follows a rename, so `git mv`ing a doc is not a creation, and it reads trees rather than a patch, so a merge commit (including the `refs/pull/N/merge` ref CI checks out) is assessed like any other commit. That keeps squash-merge PRs honest: when a doc re-stamp lands in the same commit as its changed sources, the merge gives every source a commit time later than any pre-merge `timestamp`, which used to make such docs stale-on-arrival. It does NOT extend to a commit that merely happens to also touch the doc file -- a typo fix, a co-committed prose edit, a repo-wide formatter run -- without moving the stamp strictly forward: that commit carries no verification claim, so staleness stands. "Created" is trusted only in a genuinely unshallow repository: in a shallow clone (`git clone --depth`), a commit with an empty parent list can simply be the boundary history was grafted onto, not the doc's real first commit, so this case gets the same not-assessable notice as any other unanswerable re-stamp question rather than an assumed pass (see "CI usage" below for the `fetch-depth: 0` remedy). The rule never blocks a doc that has no `sources`, and it never invents an error where git can't give a real answer:

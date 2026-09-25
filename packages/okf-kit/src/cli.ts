@@ -5,6 +5,11 @@ import process from "node:process";
 import { pathToFileURL } from "node:url";
 import { Command, CommanderError } from "commander";
 import { loadBundle } from "./bundle.js";
+import {
+  renderDocsForJson,
+  renderDocsForText,
+  runDocsFor,
+} from "./docs-for.js";
 import { UsageError } from "./errors.js";
 import { detectRepoRoot } from "./git.js";
 import { formatInitSummary, runInit } from "./init.js";
@@ -217,6 +222,45 @@ program
           : renderText(result.bundleDir, result.findings);
         process.stdout.write(output);
         process.exit(result.exitCode);
+      } catch (err) {
+        if (err instanceof UsageError) {
+          process.stderr.write(`okf-kit: ${err.message}\n`);
+          process.exit(2);
+        }
+        const msg = err instanceof Error ? err.message : String(err);
+        process.stderr.write(`okf-kit: ${msg}\n`);
+        process.exit(2);
+      }
+    },
+  );
+
+program
+  .command("docs-for <bundleDir> <paths...>")
+  .description(
+    "List every bundle doc whose frontmatter `sources` claims one of the given (repo-root-relative) paths",
+  )
+  .option(
+    "-r, --repo-root <path>",
+    "Repo root the given paths and each doc's `sources` entries are resolved against (auto-detected via " +
+      "`git rev-parse --show-toplevel` from the bundle dir when omitted)",
+  )
+  .option("-j, --json", "Output matches as JSON")
+  .exitOverride()
+  .action(
+    (
+      bundleDir: string,
+      paths: string[],
+      opts: { repoRoot?: string; json?: boolean },
+    ) => {
+      try {
+        const result = runDocsFor(bundleDir, paths, {
+          repoRoot: opts.repoRoot,
+        });
+        const output = opts.json
+          ? renderDocsForJson(result)
+          : renderDocsForText(result);
+        process.stdout.write(output);
+        process.exit(0);
       } catch (err) {
         if (err instanceof UsageError) {
           process.stderr.write(`okf-kit: ${err.message}\n`);

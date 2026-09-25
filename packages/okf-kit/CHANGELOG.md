@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `docs-for <bundleDir> <path>...` subcommand: reverse lookup listing every bundle doc whose frontmatter `sources` claims one of the given paths (exact match, or containment under a `sources` entry that is a directory), with human and `--json` output. Reuses `sources-shape`/`sources-fresh`'s existing `sources` parsing and path resolution against `--repo-root`, so both agree on what counts as a source. See the README's "Reverse lookup (`docs-for`)" section.
+
 ## [0.14.0] - 2026-09-20
 
 ### Changed
