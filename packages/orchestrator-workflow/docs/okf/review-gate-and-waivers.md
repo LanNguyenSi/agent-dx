@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-09-25T05:42:46Z
+timestamp: 2026-09-25T06:18:59Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/agents/reviewer.md
@@ -50,7 +50,7 @@ rules; this prevents a reproduced pre-existing issue from consuming the
 delta's bounded-review budget. Attribution is the second of the halt's two
 clauses, and both sites carrying the halt state both: step 8 halts "at the
 first `recurrence: repeated` finding whose class a previous round's fix already addressed and whose `introduced_by_delta` is `yes` or `unknown`"
-(`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:283#"Halt at the first"`),
+(`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:286#"Halt at the first"`),
 and the Round-2 halt rule's own cross-reference to step 8 states the
 identical scope, both clauses
 (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:56#"Step 8 of the detailed workflow states the operational"`),
@@ -98,7 +98,7 @@ them. Unknown provenance is resolved before dependent delegation; missing
 fields never choose the contract.
 
 Reviewer findings carry `severity: low | medium | high | critical`
-(`packages/orchestrator-workflow/assets/skill/references/contracts.md:196#"severity: low | medium | high | critical"`, reviewer output contract). Only high and critical block
+(`packages/orchestrator-workflow/assets/skill/references/contracts.md:200#"severity: low | medium | high | critical"`, reviewer output contract). Only high and critical block
 acceptance: "High or critical reviewer findings block final acceptance until
 fixed or explicitly waived... the gate applies to every review pass,
 including the orchestrator's own review of a trivial change"
@@ -109,7 +109,7 @@ waiver bookkeeping applies to them.
 Do not conflate two distinct vocabularies attached to the same review: the
 per-finding `Decision` column (below) and the whole-review
 `acceptance_recommendation: accept | accept_with_notes | fix_required |
-reject` (`packages/orchestrator-workflow/assets/skill/references/contracts.md:202#"acceptance_recommendation: accept | accept_with_notes |"`; mirrored in the findings template's Acceptance
+reject` (`packages/orchestrator-workflow/assets/skill/references/contracts.md:206#"acceptance_recommendation: accept | accept_with_notes |"`; mirrored in the findings template's Acceptance
 Recommendation section,
 `packages/orchestrator-workflow/assets/templates/05-review-findings.md:32#"accept | accept_with_notes | fix_required | reject"`).
 A review can recommend `fix_required` overall while individual low findings
@@ -118,7 +118,7 @@ rows. Since 0.16.0 the field is hard-mandatory, not just conventionally
 expected: "`acceptance_recommendation` is mandatory: every reviewer return
 must set it. When it is missing, the orchestrator asks the reviewer to
 resupply it instead of inferring one from the findings list"
-(`packages/orchestrator-workflow/assets/skill/references/contracts.md:217-219#"instead of inferring one from the findings list."`; the installed `reviewer.md:171#"never leave it blank or omit it."` prompt carries the mirrored
+(`packages/orchestrator-workflow/assets/skill/references/contracts.md:221-223#"instead of inferring one from the findings list."`; the installed `reviewer.md:176#"never leave it blank or omit it."` prompt carries the mirrored
 second-person rule). Full treatment is out of scope here; see
 [Acceptance-recommendation mandatory rule](#acceptance-recommendation-mandatory-rule-0160)
 below.
@@ -128,13 +128,13 @@ below.
 - Critical: "waived by the operator. The orchestrator never waives a
   critical finding on its own" (`agents-md-section.md:115#"never waives a critical finding on its own."`); SKILL.md
   step 8 echoes "critical findings require operator sign-off"
-  (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:268#"explicitly waived: critical findings require operator"`).
+  (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:271#"explicitly waived: critical findings require operator"`).
 - High: "waived by the orchestrator with a recorded rationale"
-  (`agents-md-section.md:117#"rationale."`; `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:269#"findings require the orchestrator to record a"`).
+  (`agents-md-section.md:117#"rationale."`; `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:272#"findings require the orchestrator to record a"`).
 - Deferring counts as waiving, for both severities: "Deferring such a
   finding counts as a waiver" (`agents-md-section.md:110#"explicitly waived. Deferring such a finding counts as a waiver, and the gate"`). SKILL.md makes
   the symmetry explicit: "Deferring a high or critical finding counts as a
-  waiver and follows the same rules" (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:270#"or critical finding counts as a waiver and follows the"`). A deferred
+  waiver and follows the same rules" (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:273#"or critical finding counts as a waiver and follows the"`). A deferred
   critical still needs operator sign-off; a deferred high still needs an
   orchestrator-recorded rationale.
 - Recorded in
@@ -147,7 +147,7 @@ below.
   (`03-decisions.md:14#"## Review-round escalation"`) remains unchanged; there
   is no additional waiver schema.
 - Summarized in `06-handoff.md`'s Accepted Waivers section
-  (`agents-md-section.md:119#"the Accepted Waivers section of"`; `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:272#"the Accepted Waivers section of"`), instructed to "Mirror
+  (`agents-md-section.md:119#"the Accepted Waivers section of"`; `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:275#"the Accepted Waivers section of"`), instructed to "Mirror
   03-decisions.md"
   (`packages/orchestrator-workflow/assets/templates/06-handoff.md:21#"<!-- Waived high/critical reviewer findings, or none. Mirror 03-decisions.md. -->"`) via a
   `Finding | Severity | Rationale | Approved By` table
@@ -161,7 +161,7 @@ explanatory documentation, comments, or citations. It excludes source- and
 test-file edits and semantic changes to executable commands, configuration,
 policy, instructions, or behavior; it applies only to low/medium
 documentation or maintainability findings and never to high/critical or any
-other ineligible finding (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:281#"high/critical or other ineligible finding."`;
+other ineligible finding (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:284#"high/critical or other ineligible finding."`;
 `agents-md-section.md:130#"row with its Severity and Decision headers unchanged and Decision"`). This is a closing
 option after review, not an exception to the review requirement or the waiver
 rules above.
@@ -169,7 +169,7 @@ rules above.
 For an eligible closure, record the concrete verification in a
 `05-review-findings.md` row without changing its Severity or Decision headers,
 and set the row's Decision to `accepted`
-(`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:283#"unchanged and setting Decision to"`; `05-review-findings.md:16#"| Severity | Category | Description | Suggested Fix | Decision |"`).
+(`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:286#"unchanged and setting Decision to"`; `05-review-findings.md:16#"| Severity | Category | Description | Suggested Fix | Decision |"`).
 No reader or template schema changes: the existing Decision legend and all
 high/critical waiver and escalation rules continue to apply. The policy is
 pinned in `test/docs-consistency.test.ts:4887#"docs-only closing deltas stay narrowly bounded"`.
@@ -179,15 +179,15 @@ pinned in `test/docs-consistency.test.ts:4887#"docs-only closing deltas stay nar
 detailed workflow reference is the transfer instruction: "transfer each finding from the
 reviewer output contract into the table's columns as-is, keeping the
 Severity and Decision headers unchanged, since those two are what the
-orchestrator-workflow completeness reader verifies" (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:197#"those two are what the orchestrator-workflow completeness reader verifies; for every"`).
+orchestrator-workflow completeness reader verifies" (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:200#"those two are what the orchestrator-workflow completeness reader verifies; for every"`).
 Immediately after that quote, detailed workflow reference also carries a 0.13.0 addition
-on the same table's placeholder/legend row (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:201#"rows as the template never having been filled in. When"`): replace it
+on the same table's placeholder/legend row (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:204#"rows as the template never having been filled in. When"`): replace it
 when transferring findings, delete it outright for a genuine zero-findings
 review; full treatment (the mixed-state bypass it closes, the mirrored
 template comment, the reader's literal match) is out of scope here, see
 [run-state-lifecycle-and-markers.md](run-state-lifecycle-and-markers.md).
 Immediately after the placeholder-row rule, step 7 also carries the 0.14.0
-reproduction requirement (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:208#"lint): only claims that could vary run to run trigger"`); full treatment is out of scope
+reproduction requirement (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:211#"lint): only claims that could vary run to run trigger"`); full treatment is out of scope
 here, see [Reproduction requirement](#reproduction-requirement-0140) below.
 The table header is `Severity | Category | Description | Suggested Fix |
 Decision` (`05-review-findings.md:16#"| Severity | Category | Description | Suggested Fix | Decision |"`). Its Decision legend comment
@@ -217,7 +217,7 @@ Two machine-readable markers sit next to the prose gate: `<!--
 solution-acceptance: acceptance-recommendation = TODO -->`
 (`05-review-findings.md:34#"<!-- solution-acceptance: acceptance-recommendation = TODO -->"`) and `<!-- solution-acceptance: final-status =
 TODO -->` (`06-handoff.md:61#"<!-- solution-acceptance: final-status = TODO -->"`). SKILL.md instructs replacing `TODO` with the
-chosen enum value when finalizing each file (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:316#"non-accepting (fail-closed)."`). Left as
+chosen enum value when finalizing each file (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:319#"non-accepting (fail-closed)."`). Left as
 `TODO`, the harness solution-acceptance gate reads the run as non-accepting.
 `packages/orchestrator-workflow/test/template-markers.test.ts:57#"<!-- solution-acceptance: run-base = TODO -->"` pins
 exactly one marker per template, each defaulting to `TODO`. This is a
@@ -264,14 +264,14 @@ rules above do not cover: nothing previously required the reviewer to
 independently verify an implementer's *empirical* claim (a flake rate, a
 benchmark, "n runs green", a timing number) rather than transcribe it into
 the findings table as reported. detailed workflow reference now states it right after
-the placeholder-row rule (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:208#"lint): only claims that could vary run to run trigger"`): when acceptance rests on such
+the placeholder-row rule (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:211#"lint): only claims that could vary run to run trigger"`): when acceptance rests on such
 evidence, the reviewer must reproduce it independently (its own runs or
 measurements) and record method, sample size, and result against the
 implementer's claim; a single deterministic check (one test run, `tsc`,
 lint) does not trigger it. The installed `reviewer.md` prompt carries the
-same rule (`reviewer.md:221#"lint) do not trigger this."`), and both output contracts gained a matching
+same rule (`reviewer.md:226#"lint) do not trigger this."`), and both output contracts gained a matching
 `reproduction: {method, sample_size, result, matches_implementer_claim}`
-field (`packages/orchestrator-workflow/assets/skill/references/contracts.md:211#"matches_implementer_claim: matched | mismatched |"`, `reviewer.md:295#"residual_risks:"`); `matches_implementer_claim`
+field (`packages/orchestrator-workflow/assets/skill/references/contracts.md:215#"matches_implementer_claim: matched | mismatched |"`, `reviewer.md:300#"residual_risks:"`); `matches_implementer_claim`
 accepts `not_applicable` so a review that never hits the narrow trigger is
 not forced to fabricate a reproduction record.
 
@@ -293,16 +293,16 @@ live, the misfire rule) are out of scope here; see
 previously forced a reviewer return to set `acceptance_recommendation` at
 all, so the orchestrator could be left inferring a verdict from the findings
 list alone. The field is now hard-mandatory in both output-contract copies:
-`packages/orchestrator-workflow/assets/skill/references/contracts.md:217-219#"instead of inferring one from the findings list."` states it and adds the orchestrator's response when it is
+`packages/orchestrator-workflow/assets/skill/references/contracts.md:221-223#"instead of inferring one from the findings list."` states it and adds the orchestrator's response when it is
 missing: ask the reviewer to resupply it, rather than infer one from the
-findings, and the installed `reviewer.md:171#"never leave it blank or omit it."` prompt carries the mirrored
+findings, and the installed `reviewer.md:176#"never leave it blank or omit it."` prompt carries the mirrored
 second-person rule ("always set it in your output; never leave it blank or
 omit it"). This is distinct from the per-finding `Decision` column and the
 severity ladder above: a reviewer could previously satisfy every other part
 of the contract and still omit the one field that carries its overall
 verdict. 8ab22cb0 adds a mechanical, structure-only check for this same
 requirement: the `validate-review-report` CLI subcommand documented at
-`packages/orchestrator-workflow/assets/skill/references/contracts.md:221#"A structural check for this exact contract ships as a CLI subcommand:"`
+`packages/orchestrator-workflow/assets/skill/references/contracts.md:225#"A structural check for this exact contract ships as a CLI subcommand:"`
 parses a reviewer return and reports a missing or invalid
 `acceptance_recommendation` (or any other required field) as a diagnostic,
 but never judges semantic adequacy or substitutes for this rule's
@@ -397,7 +397,7 @@ continuing is a valid outcome, it is no round-2 halt signal, it adds
 nothing to the budget's count, and it never replaces a review round; when
 the same review also fires the Round-2 halt signal, the halt rule governs.
 Step 8 of the workflow points to it without restating the trigger
-(`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:289#"record the Fix-regression decision point"`).
+(`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:292#"record the Fix-regression decision point"`).
 The rule lives only in the skill references; `agents-md-section.md` does
 not carry it, so it needs no AGENTS.md re-install and reaches an existing
 install with the next kit re-install. Pinned by
@@ -413,7 +413,7 @@ the orchestrator records that entry, states in it why no evidence is
 invalidated, and communicates the corrected wording in the next delegation.
 Who may revise a baseline and what a revision records is unchanged.
 
-Docs-only review default (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:186#"For a review round whose entire delta contains only explanatory documentation"`):
+Docs-only review default (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:189#"For a review round whose entire delta contains only explanatory documentation"`):
 "For a review round whose entire delta contains only explanatory documentation, comments, or citations and contains no source- or test-file edits and no semantic change to executable commands, configuration, policy, instructions, or behavior, default to the `-medium` reviewer tier with `review_method: normal` where tier variants are installed".
 The sentence declares itself a refinement of the general tier default for
 that one class. "A review round that touches an instruction, policy, template
