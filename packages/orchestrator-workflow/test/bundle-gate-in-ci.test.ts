@@ -1,4 +1,17 @@
-import { describe, expect, it } from "vitest";
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
+
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { readAsset } from "../src/assets.js";
 
@@ -84,5 +97,301 @@ describe("bundle gate in CI reference", () => {
     expect(bundleGate).not.toMatch(/actions\/checkout@v\d/);
     expect(bundleGate).toContain("runs-on: ${{ inputs.runner }}");
     expect(bundleGate).not.toMatch(/runs-on: (?!\$\{\{ inputs\.runner \}\})/);
+  });
+});
+
+/** The `run: |` body of the example's bundle-check step, dedented. */
+function exampleRunBody(): string {
+  const lines = bundleGate.split("\n");
+  const start = lines.findIndex((line) => /^ {8}run: \|$/.test(line));
+  expect(start, "run: | block not found in the example").toBeGreaterThan(-1);
+  const body: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (
+      line.startsWith("```") ||
+      (line.trim() !== "" && !line.startsWith(" ".repeat(10)))
+    ) {
+      break;
+    }
+    body.push(line.slice(10));
+  }
+  return body.join("\n") + "\n";
+}
+
+/** The fenced `sh` block that follows a heading, alone. */
+function shBlockAfter(marker: string): string {
+  const at = bundleGate.indexOf(marker);
+  expect(at, `${marker} not found`).toBeGreaterThan(-1);
+  const open = bundleGate.indexOf("```sh\n", at);
+  const close = bundleGate.indexOf("\n```", open + 6);
+  return bundleGate.slice(open + 6, close);
+}
+
+describe("bundle gate in CI reference: could-not-run and report placement", () => {
+  it("fails every stage when the checker could not run", () => {
+    pin(
+      bundleGate,
+      "Any other outcome means the checker could not run (exit 2 for a usage error such as a missing bundle directory, a failed install, a missing command, or a report that does not parse), and it fails the job at every stage, including stage 1.",
+    );
+  });
+
+  it("carries the pin as an environment value", () => {
+    expect(bundleGate).toContain(
+      "          OKF_KIT_VERSION: <pinned-version>\n",
+    );
+    expect(exampleRunBody()).toContain('"okf-kit@$OKF_KIT_VERSION"');
+  });
+
+  it("keeps the stage 2 filter of the prose and the example identical", () => {
+    const standalone = shBlockAfter("The stage 2 selection");
+    const filter = /jq '([^']*)'/.exec(standalone)?.[1];
+    expect(filter, "stage 2 filter not found").toBeDefined();
+    expect(unwrap(exampleRunBody())).toContain(unwrap(filter ?? "<none>"));
+  });
+
+  it("keeps ${{ }} expressions out of the run body", () => {
+    expect(exampleRunBody()).not.toContain("${{");
+  });
+
+  it("writes the pre-commit report outside the work tree", () => {
+    const recipe = shBlockAfter("### Pre-commit parity");
+    expect(recipe).toContain('report="$(mktemp)"');
+    expect(recipe).toContain('--dirty-as-now --json > "$report"');
+    expect(recipe).not.toMatch(/> *report\.json/);
+  });
+});
+
+/*
+ * Execute the example's run body under the shell GitHub Actions uses for
+ * `shell: bash`, against a stub `npx` that prints a canned report and exits
+ * like the checker: 1 on an error finding, 1 on a warning under --strict,
+ * otherwise 0. STUB_FORCE_EXIT makes it print nothing and exit with that code.
+ */
+const stubNpx = `#!/bin/bash
+printf '%s\\n' "$*" >> "$STUB_ARGS_LOG"
+if [ -n "\${STUB_FORCE_EXIT:-}" ]; then
+  printf '%s' "\${STUB_STDOUT:-}"
+  exit "$STUB_FORCE_EXIT"
+fi
+cat "$STUB_REPORT"
+strict=0
+for arg in "$@"; do [ "$arg" = "--strict" ] && strict=1; done
+if jq -e '[.findings[] | select(.severity == "error")] | length > 0' "$STUB_REPORT" > /dev/null; then exit 1; fi
+if [ "$strict" = 1 ] && jq -e '[.findings[] | select(.severity == "warning")] | length > 0' "$STUB_REPORT" > /dev/null; then exit 1; fi
+exit 0
+`;
+
+type Finding = {
+  ruleId: string;
+  severity: string;
+  file: string;
+  message: string;
+};
+
+const fixtures: Record<string, Finding[]> = {
+  clean: [],
+  stale: [
+    {
+      ruleId: "sources-fresh",
+      severity: "warning",
+      file: "a.md",
+      message: "STALE: src/x.ts changed",
+    },
+  ],
+  future: [
+    {
+      ruleId: "sources-fresh-future",
+      severity: "warning",
+      file: "a.md",
+      message: "FUTURE-DATED: updated after head",
+    },
+  ],
+  structural: [
+    {
+      ruleId: "frontmatter-present",
+      severity: "error",
+      file: "b.md",
+      message: "no frontmatter",
+    },
+  ],
+  advisory: [
+    {
+      ruleId: "citations-resolve",
+      severity: "warning",
+      file: "a.md",
+      message: "cited file missing",
+    },
+  ],
+};
+
+describe("bundle gate in CI example: stage decisions", () => {
+  let root: string;
+  let bin: string;
+  let step: string;
+
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), "bundle-gate-"));
+    bin = join(root, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "npx"), stubNpx);
+    chmodSync(join(bin, "npx"), 0o755);
+    step = join(root, "step.sh");
+    writeFileSync(step, exampleRunBody());
+    for (const [name, findings] of Object.entries(fixtures)) {
+      writeFileSync(
+        join(root, `${name}.json`),
+        JSON.stringify({ bundleDir: "docs/okf", findings, summary: {} }),
+      );
+    }
+  });
+
+  afterAll(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  let runCount = 0;
+  function runStep(
+    stage: string,
+    stub: { report?: string; forceExit?: number; stdout?: string },
+  ) {
+    runCount += 1;
+    const dir = join(root, `run-${runCount}`);
+    const work = join(dir, "work");
+    const temp = join(dir, "temp");
+    mkdirSync(work, { recursive: true });
+    mkdirSync(temp);
+    const summary = join(dir, "summary.md");
+    writeFileSync(summary, "");
+    const argsLog = join(dir, "args.log");
+    const env: NodeJS.ProcessEnv = {
+      PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
+      HOME: dir,
+      OKF_KIT_VERSION: "9.9.9-test",
+      BUNDLE: "docs/okf",
+      REPO_ROOT: ".",
+      STAGE: stage,
+      RUNNER_TEMP: temp,
+      GITHUB_STEP_SUMMARY: summary,
+      STUB_ARGS_LOG: argsLog,
+      STUB_REPORT: stub.report ? join(root, `${stub.report}.json`) : "",
+      STUB_STDOUT: stub.stdout ?? "",
+    };
+    if (stub.forceExit !== undefined)
+      env.STUB_FORCE_EXIT = String(stub.forceExit);
+    const result = spawnSync(
+      "bash",
+      ["--noprofile", "--norc", "-eo", "pipefail", step],
+      {
+        cwd: work,
+        env,
+        encoding: "utf8",
+      },
+    );
+    let args = "";
+    try {
+      args = readFileSync(argsLog, "utf8");
+    } catch {
+      args = "";
+    }
+    return {
+      status: result.status,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      summary: readFileSync(summary, "utf8"),
+      args,
+      workFiles: readdirSync(work),
+    };
+  }
+
+  const decisions: Array<[string, string, number]> = [
+    ["clean", "warn", 0],
+    ["clean", "block", 0],
+    ["clean", "strict", 0],
+    ["stale", "warn", 0],
+    ["stale", "block", 1],
+    ["stale", "strict", 1],
+    ["future", "block", 1],
+    ["structural", "warn", 0],
+    ["structural", "block", 1],
+    ["structural", "strict", 1],
+    ["advisory", "warn", 0],
+    ["advisory", "block", 0],
+    ["advisory", "strict", 1],
+  ];
+
+  it.each(decisions)(
+    "%s report at stage %s exits %i",
+    (report, stage, expected) => {
+      const run = runStep(stage, { report });
+      expect(run.status, run.stdout + run.stderr).toBe(expected);
+      expect(run.summary).toContain("### Bundle check: docs/okf");
+      for (const finding of fixtures[report] ?? []) {
+        expect(run.stdout).toContain(
+          `::${finding.severity} file=docs/okf/${finding.file}::${finding.ruleId}: ${finding.message}`,
+        );
+        expect(run.summary).toContain(
+          `- ${finding.severity} ${finding.ruleId} ${finding.file}:`,
+        );
+      }
+    },
+  );
+
+  it("passes --strict only at stage 3 and takes the version from the environment", () => {
+    expect(runStep("strict", { report: "clean" }).args).toMatch(
+      /^-y okf-kit@9\.9\.9-test check docs\/okf --repo-root \. --json --strict$/m,
+    );
+    expect(runStep("block", { report: "clean" }).args).not.toContain(
+      "--strict",
+    );
+  });
+
+  const couldNotRun: Array<[number, string]> = [
+    [2, "warn"],
+    [2, "block"],
+    [2, "strict"],
+    [127, "warn"],
+    [127, "block"],
+    [127, "strict"],
+  ];
+
+  it.each(couldNotRun)("checker exit %i fails stage %s", (forceExit, stage) => {
+    const run = runStep(stage, { forceExit });
+    expect(run.status, run.stdout + run.stderr).toBe(2);
+    expect(run.stdout).toContain("bundle check could not run");
+  });
+
+  it.each([["warn"], ["block"], ["strict"]])(
+    "an unparseable report fails stage %s even on exit 0",
+    (stage) => {
+      const run = runStep(stage, {
+        forceExit: 0,
+        stdout: "npm notice something\n",
+      });
+      expect(run.status, run.stdout + run.stderr).toBe(2);
+      expect(run.stdout).toContain(
+        "bundle check could not run (no parseable report)",
+      );
+    },
+  );
+
+  it.each([["warn"], ["block"], ["strict"]])(
+    "a failed install (exit 1, empty report) fails stage %s",
+    (stage) => {
+      const run = runStep(stage, { forceExit: 1 });
+      expect(run.status, run.stdout + run.stderr).toBe(2);
+      expect(run.stdout).toContain(
+        "bundle check could not run (no parseable report)",
+      );
+    },
+  );
+
+  it("an unknown stage fails the job", () => {
+    const run = runStep("bogus", { report: "clean" });
+    expect(run.status).toBe(2);
+    expect(run.stdout).toContain("unknown stage: bogus");
+  });
+
+  it("writes the report outside the work tree", () => {
+    expect(runStep("block", { report: "stale" }).workFiles).toEqual([]);
   });
 });

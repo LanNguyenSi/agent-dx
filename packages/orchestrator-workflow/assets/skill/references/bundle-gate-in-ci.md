@@ -27,7 +27,10 @@ workspace bundle whose sources live in a sub-repo.
 Install the checker at a pinned version, written here as the placeholder
 `okf-kit@<pinned-version>`. An unpinned install picks up new rules on their
 release day and turns an unrelated change red. Bump the pin deliberately, in a
-change of its own, after the new version runs clean against the bundles.
+change of its own, after the new version runs clean against the bundles. The
+example carries the pin as an environment value (`OKF_KIT_VERSION`), so a copy
+that still holds the placeholder fails the job instead of running something
+else.
 
 ### Check out the full history
 
@@ -61,8 +64,10 @@ bundles run clean under the current stage:
 The exit code alone is not the signal for stage 1 or stage 2: `okf-kit check`
 exits 0 when it finds only warnings (STALE and FUTURE-DATED findings are
 warnings) and 1 when it finds an error, so read the JSON report to decide.
-Exit 2 is a usage error (for example a bundle directory that does not exist)
-and fails the job at every stage.
+Any other outcome means the checker could not run (exit 2 for a usage error
+such as a missing bundle directory, a failed install, a missing command, or a
+report that does not parse), and it fails the job at every stage, including
+stage 1.
 
 The stage 2 selection, as a `jq` filter over the `--json` report (any JSON
 tool works; the report is `{ "findings": [{ "ruleId", "severity", "file",
@@ -74,7 +79,7 @@ jq '[.findings[]
               or (.severity == "warning"
                   and (.ruleId == "sources-fresh"
                        or .ruleId == "sources-fresh-future")))]
-    | length' report.json
+    | length' "$report"
 ```
 
 A result above 0 fails the job.
@@ -111,26 +116,31 @@ jobs:
       - name: Bundle check
         shell: bash
         env:
+          OKF_KIT_VERSION: <pinned-version>
           BUNDLE: ${{ matrix.bundle.path }}
           REPO_ROOT: ${{ matrix.bundle.repoRoot }}
           STAGE: ${{ inputs.stage }}
         run: |
+          report="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/okf-report.json"
           strict=""
           if [ "$STAGE" = "strict" ]; then strict="--strict"; fi
           set +e
-          npx -y okf-kit@<pinned-version> check "$BUNDLE" \
-            --repo-root "$REPO_ROOT" --json $strict > report.json
+          npx -y "okf-kit@$OKF_KIT_VERSION" check "$BUNDLE" \
+            --repo-root "$REPO_ROOT" --json $strict > "$report"
           status=$?
           set -e
-          if [ "$status" -eq 2 ]; then
-            echo "bundle check could not run (usage error)"; exit 2
+          if [ "$status" -ne 0 ] && [ "$status" -ne 1 ]; then
+            echo "bundle check could not run (exit $status)"; exit 2
+          fi
+          if ! jq -e '.findings | type == "array"' "$report" > /dev/null; then
+            echo "bundle check could not run (no parseable report)"; exit 2
           fi
           jq -r --arg b "$BUNDLE" '.findings[]
             | "::\(.severity) file=\($b)/\(.file)::\(.ruleId): \(.message)"' \
-            report.json
+            "$report"
           jq -r --arg b "$BUNDLE" '"### Bundle check: \($b)",
             (.findings[] | "- \(.severity) \(.ruleId) \(.file): \(.message)")' \
-            report.json >> "$GITHUB_STEP_SUMMARY"
+            "$report" >> "$GITHUB_STEP_SUMMARY"
           case "$STAGE" in
             warn) exit 0 ;;
             block)
@@ -139,7 +149,7 @@ jobs:
                          or (.severity == "warning"
                              and (.ruleId == "sources-fresh"
                                   or .ruleId == "sources-fresh-future")))]
-                | length' report.json)
+                | length' "$report")
               if [ "$blocking" -gt 0 ]; then exit 1; fi ;;
             strict) exit "$status" ;;
             *) echo "unknown stage: $STAGE"; exit 2 ;;
@@ -148,6 +158,8 @@ jobs:
 
 The annotation command names match the checker's severities (`error`,
 `warning`, `notice`), so each finding lands on its file in the change view.
+The report goes to the runner's temporary directory, outside the checked-out
+work tree.
 
 ### Pre-commit parity
 
@@ -159,9 +171,14 @@ run judges an edited source by its last commit and can report clean while CI
 reports STALE after the push. A hook loops over the same bundles as CI:
 
 ```sh
-okf-kit check docs/okf --repo-root . --dirty-as-now --json > report.json
-# apply the same stage decision as CI to report.json
+report="$(mktemp)"
+okf-kit check docs/okf --repo-root . --dirty-as-now --json > "$report"
+# apply the same stage decision as CI to "$report"
 ```
+
+Write the report outside the work tree: under `--dirty-as-now` a report file
+inside it is itself an uncommitted change and can mark a doc STALE whose
+sources cover that directory.
 
 Parity covers the verdict of those two rules, not the stage decision: apply
 the same stage filter locally, and add `--strict` only when CI runs stage 3.
