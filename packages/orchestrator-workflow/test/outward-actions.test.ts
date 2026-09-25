@@ -613,14 +613,28 @@ describe("a flagged ref is investigated before it counts", () => {
   it("treats a flagged ref as a signal, establishing who moved it first", () => {
     pin(
       ep,
-      "A flagged ref is a signal to investigate, not a misfire by itself: before treating it as one, the orchestrator establishes who moved the ref (for example from the host's push or audit events, or by asking the operator); a ref a third party moved, or one already recorded as an incident in an earlier round, is noted once and not flagged again.",
+      "A flagged ref is a signal to investigate, not a misfire by itself: before treating it as one, the orchestrator establishes who moved the ref (for example from the host's push or audit events, or by asking the operator).",
+    );
+  });
+
+  it("treats a ref whose mover cannot be established as a misfire", () => {
+    pin(
+      ep,
+      "When that cannot be established, it treats the ref as a misfire and reports it to the operator.",
+    );
+  });
+
+  it("exempts a noted ref only while it stays at the noted sha", () => {
+    pin(
+      ep,
+      "A ref a third party moved, or one already recorded as an incident in an earlier round, is recorded once in `03-decisions.md` and is not treated as a new finding again while it stays at that sha; a later move of such a ref is investigated like any other flagged ref.",
     );
   });
 
   it("states the ref check's limits next to the mandatory self-report", () => {
     pin(
       ep,
-      "The ref check is a heuristic next to the subagent's mandatory self-report, not a complete detector: it cannot see a deleted ref, a rewound default branch, a ref at an already public sha, or a pushed merge or squash of the task branch.",
+      "The ref check is a heuristic next to the subagent's mandatory self-report, not a complete detector: for example, it cannot see a deleted ref, a rewound default branch, a ref at an already public sha, a ref at a commit a rebase dropped from the task branch, or a pushed merge or squash of the task branch.",
     );
   });
 });

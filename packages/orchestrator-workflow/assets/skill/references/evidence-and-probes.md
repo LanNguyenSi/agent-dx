@@ -193,16 +193,21 @@ directory and the subagents.
    flagged ref is a signal to investigate, not a misfire by itself: before
    treating it as one, the orchestrator establishes who moved the ref (for
    example from the host's push or audit events, or by asking the
-   operator); a ref a third party moved, or one already recorded as an
-   incident in an earlier round, is noted once and not flagged again. The
-   ref check is a heuristic next to the subagent's mandatory self-report,
-   not a complete detector: it cannot see a deleted ref, a rewound default
-   branch, a ref at an already public sha, or a pushed merge or squash of
-   the task branch. When the check finds an outward action was actually
-   performed (a push, an opened pull request) without authorization, that
-   is more than a misfire to resume past: the orchestrator informs the operator
-   immediately, records the incident in `03-decisions.md`, and lists it in
-   `06-handoff.md`'s Sent / Drafted Outward section as unauthorized.
+   operator). When that cannot be established, it treats the ref as a
+   misfire and reports it to the operator. A ref a third party moved, or
+   one already recorded as an incident in an earlier round, is recorded
+   once in `03-decisions.md` and is not treated as a new finding again
+   while it stays at that sha; a later move of such a ref is investigated
+   like any other flagged ref. The ref check is a heuristic next to the
+   subagent's mandatory self-report, not a complete detector: for example,
+   it cannot see a deleted ref, a rewound default branch, a ref at an
+   already public sha, a ref at a commit a rebase dropped from the task
+   branch, or a pushed merge or squash of the task branch. When the check
+   finds an outward action was actually performed (a push, an opened pull
+   request) without authorization, that is more than a misfire to resume
+   past: the orchestrator informs the operator immediately, records the
+   incident in `03-decisions.md`, and lists it in `06-handoff.md`'s Sent /
+   Drafted Outward section as unauthorized.
 7. **Delegate review.** Send the diff to the reviewer subagent, naming in the
    briefing the base and head revision the diff was generated from. When tier
    variants are installed, pick the reviewer tier (the installed
