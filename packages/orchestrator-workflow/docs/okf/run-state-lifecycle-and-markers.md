@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-09-25T04:44:36Z
+timestamp: 2026-09-25T05:05:40Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -128,12 +128,12 @@ Step 1 of the Workflow carries the matching instruction to write the pointer
 in every worktree the run touches
 (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:15#"in every worktree the run touches."), and each of the
 three per-harness bullets under Harness notes repeats that the pointer rule
-applies unchanged regardless of harness (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:162#"applies unchanged.";
-packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:165#"pointer rule from Run state applies unchanged."; packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:180#"pointer rule from Run state applies unchanged.").
+applies unchanged regardless of harness (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:173#"applies unchanged.";
+packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:176#"pointer rule from Run state applies unchanged."; packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:191#"pointer rule from Run state applies unchanged.").
 The policy section installed into `AGENTS.md` carries the same two facts in
 one bullet: every touched worktree gets the pointer, and `00-goal.md` gets
 one keyed `run-base[<repo-basename>]` marker per repository for a multi-repo
-run (packages/orchestrator-workflow/assets/agents-md-section.md:192#"marker per repository for multi-repo runs").
+run (packages/orchestrator-workflow/assets/agents-md-section.md:211#"marker per repository for multi-repo runs").
 
 For a run that touches more than one repository, the orchestrator records
 one keyed marker per repository on its own line beside the unkeyed one,
@@ -216,18 +216,18 @@ opposite in posture to run-base:
 - `05-review-findings.md:34#"<!-- solution-acceptance: acceptance-recommendation = TODO -->"`: `<!-- solution-acceptance: acceptance-recommendation = TODO -->`,
   filled from the Acceptance Recommendation enum `accept | accept_with_notes
   | fix_required | reject` (packages/orchestrator-workflow/assets/templates/05-review-findings.md:32#"accept | accept_with_notes | fix_required | reject").
-- `06-handoff.md:51#"<!-- solution-acceptance: final-status = TODO -->"`: `<!-- solution-acceptance: final-status = TODO -->`,
+- `06-handoff.md:60#"<!-- solution-acceptance: final-status = TODO -->"`: `<!-- solution-acceptance: final-status = TODO -->`,
   filled from the Final Status enum `accepted | accepted_with_notes |
-  needs_followup | blocked` (packages/orchestrator-workflow/assets/templates/06-handoff.md:47-49#"accepted | accepted_with_notes | needs_followup | blocked").
+  needs_followup | blocked` (packages/orchestrator-workflow/assets/templates/06-handoff.md:56-58#"accepted | accepted_with_notes | needs_followup | blocked").
 
 SKILL.md's closing instruction: "replace the `TODO` in each
 `<!-- solution-acceptance: ... = TODO -->` marker with the chosen enum
 value. That marker line is the machine-readable signal the harness
 solution-acceptance run-gate reads, so leaving it as `TODO` keeps the run
-non-accepting (fail-closed)" (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:299#"non-accepting (fail-closed)."). A freshly-copied run is
+non-accepting (fail-closed)" (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:307#"non-accepting (fail-closed)."). A freshly-copied run is
 therefore non-accepting by construction; this contract shipped in 0.7.0
 (`CHANGELOG.md:#[0.7.0]`). Consumer is "the harness solution-acceptance
-run-gate" per packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:297#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
+run-gate" per packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:305#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
 does not assert the external gate's internals. Pinned by
 template-markers.test.ts:32-34#"/solution-acceptance:\s*acceptance-recommendation\s*=\s*" (regexes) and template-markers.test.ts:37-38#"const matches = [...handoffTemplate.matchAll(finalStatusRe)];" and template-markers.test.ts:43-44#"const matches = [...reviewTemplate.matchAll(recommendationRe)];" (one marker per
 template, default `TODO`).
@@ -288,7 +288,7 @@ replace the row when transferring findings, or delete it outright for a
 genuine zero-findings review (a header row with no data rows is valid;
 leaving the legend row next to real finding rows is also fine), and
 SKILL.md's step 7 carries the same one-sentence rule
-(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:184#"rows as the template never having been filled in. When"). The runtime half (grounding-mcp's reader treating a
+(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:192#"rows as the template never having been filled in. When"). The runtime half (grounding-mcp's reader treating a
 survived, unaccompanied placeholder row as an explicit format blocker,
 instead of silently reporting zero findings) is a lockstep sibling change in
 the grounding-mcp repo, out of scope for this bundle; this doc, like the
@@ -326,12 +326,12 @@ applying this guidance before filling the file: check whether the change
 touched any path a bundle doc claims as a `sources:` entry, and if so either
 update the affected docs (re-verify and re-stamp) or record a follow-up
 task, running the bundle validator when one is available (for example
-`okf-kit check`) (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:287#"validator when one is available (for example"). It is explicitly non-gating: "apply
+`okf-kit check`) (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:295#"validator when one is available (for example"). It is explicitly non-gating: "apply
 this optional guidance" and "Repos without a bundle are unaffected"
-(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:283#"guidance: when the repo carries a curated knowledge"; packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:288#"without a bundle are unaffected"). Since 0.24.0 (placement rule) step 9 also
+(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:291#"guidance: when the repo carries a curated knowledge"; packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:296#"without a bundle are unaffected"). Since 0.24.0 (placement rule) step 9 also
 carries a one-sentence placement check for the orchestrator: before handing
 off, check that no org-, machine- or point-in-time-bound evidence was added
-to a reusable instruction file (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:293#"or the consuming workspace, with a pointer left behind."); the fix is to move the
+to a reusable instruction file (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:301#"or the consuming workspace, with a pointer left behind."); the fix is to move the
 evidence to the changelog, the run files, or the consuming workspace, with a
 pointer left behind. `reviewer.md`'s "Check, at minimum" list carries a
 matching check for the same thing on the implementer side of a run. This is
@@ -413,19 +413,19 @@ run-base lines, shipped with its default value instead of a `TODO`
 (packages/orchestrator-workflow/assets/templates/00-goal.md:5#"<!-- solution-acceptance: mode = delegated -->").
 The value is `single`, `delegated`, or `batch`, and a missing or unrecognised
 value means `delegated`
-(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:188#"The marker is a record for the orchestrator, the reviewer,"),
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:199#"The marker is a record for the orchestrator, the reviewer,"),
 so a run created from an older template is a `delegated` run without any
 edit. No reader enforces the marker
-(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:189#"and the operator; no reader enforces it."):
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:200#"and the operator; no reader enforces it."):
 it tells the reviewer and the operator who implemented, and it is what a
 briefing quotes. The three definitions, the selection rule by the shape of
 the work, the run files each mode requires, and the rule that a mode switch
 is a D-ID row and never a new run are stated once, in the reference's last
 section
-(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:183#"## Run mode");
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:194#"## Run mode");
 `SKILL.md` and the reference's Intent only point there. `single` makes
 `01-plan.md` and `02-tasks.md` optional and keeps `04-implementation-summary.md`
-(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:213#"Run files per mode:"),
+(packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:224#"Run files per mode:"),
 because the verification set, the mutation probes, and the baseline coverage
 table live there; `batch` adds an Integration section to the same template
 (packages/orchestrator-workflow/assets/templates/04-implementation-summary.md:129#"## Integration").
@@ -446,7 +446,7 @@ normative place. The Core rules bullet on implementation now reads
 it names `delegated` as the default and the other two modes in one clause
 each, and ends by pointing to the skill's Run mode section. The Run state
 list of the policy section names the marker beside the keyed run-base marker
-(packages/orchestrator-workflow/assets/agents-md-section.md:192#"marker per repository for multi-repo runs").
+(packages/orchestrator-workflow/assets/agents-md-section.md:211#"marker per repository for multi-repo runs").
 The README has a short "Run modes" section
 (packages/orchestrator-workflow/README.md:547#"## Run modes")
 that links the reference. Both sites are pinned against restating a
