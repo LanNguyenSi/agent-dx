@@ -83,6 +83,7 @@ describe("packaged skill references", () => {
     initAll();
     const references = listSkillReferenceNames();
     expect(references).toEqual([
+      "bundle-gate-in-ci.md",
       "contracts.md",
       "evidence-and-probes.md",
       "review-and-recovery.md",
