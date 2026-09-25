@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- The handoff template gains a `Documentation Impact` section (`none
+  (<reason>)`, `updated: <paths>`, or `follow-up: <task>`), and the
+  reviewer reports a user-visible or architectural change whose handoff
+  says `none` without a reason as a medium finding (issue #355).
+
 ## [0.40.1] - 2026-09-24
 
 - Restored the `0.37.0` section byte for byte to the text released at tag
