@@ -1,5 +1,22 @@
 # Bundle log
 
+- 2026-09-25T09:00:23Z (task ee0a02ac, knowledge-bundle review fixes): `path` and
+  `repoRoot` of a `knowledge` entry now resolve against the worktree top
+  level independently, entries are normalised, and `doctor` also reports a
+  missing `repoRoot` and each malformed entry ignored on read, printing
+  every knowledge warning as a `knowledge:` detail line. Claims changed:
+  `operator-install-and-registry.md` describes the `knowledgeWarnings`
+  `--json` key and the detail line; `install-fence-mechanics.md` describes
+  how `readInstalledManifest` and `runInit` handle `knowledge`;
+  `run-state-lifecycle-and-markers.md` quotes the current `06-handoff.md`
+  comment and names the configured list in the Discover-step aside;
+  `subagent-contracts-superset.md` names the configured list for the
+  required bundle check. Citations into the shifted `init.ts`, `doctor.ts`
+  and `cli.ts` lines and the matching allowlist geometry in
+  `test/docs-consistency.test.ts` were re-pointed, every moved anchor
+  re-read. Every doc whose `sources` list an edited file was re-checked and
+  re-stamped.
+
 - 2026-09-25T08:28:29Z (task ee0a02ac, knowledge-bundle manifest field):
   `init.ts` gained a `knowledge` manifest field (type, validation, read/write,
   re-install preservation) and `doctor.ts` gained two warning codes (missing

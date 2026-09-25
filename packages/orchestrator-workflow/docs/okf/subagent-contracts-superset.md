@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-25T08:28:29Z
+timestamp: 2026-09-25T09:00:23Z
 sources:
   - packages/orchestrator-workflow/assets/agents/explorer.md
   - packages/orchestrator-workflow/assets/agents/task-slicer.md
@@ -75,7 +75,7 @@ lane; see [model-preselection.md](model-preselection.md).
 Every implementer and reviewer briefing names one repository-bound
 `verification_set`. It identifies the checked-in set and its immutable resolved
 identity; the role runs every named result in the complete set, including the
-required bundle check for repositories with `docs/okf/`. A missing named check
+required bundle check for each configured knowledge bundle (`knowledge` in `.ai/workflow/manifest.json`; default `docs/okf/`). A missing named check
 is a misfire, not a pass; skipped, waived, or inconclusive results remain
 non-passing evidence. The README's worked `.ai/workflow/verify.json` example
 defines ordered extras around a truthful preflight JSON acquisition: that JSON
