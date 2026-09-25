@@ -5,12 +5,13 @@
 <!-- solution-acceptance: mode = delegated -->
 <!-- Run mode: single | delegated | batch. A missing or unrecognised value means delegated. -->
 <!-- outward: classes = none -->
-<!-- Outward actions durably authorized for this run without per-action
-     operator confirmation: none, or a comma-separated list of action-class
-     tokens (for example push-branch, open-pr), added only on the
-     operator's explicit instruction and recorded in 03-decisions.md.
-     Default none. See AGENTS.md's Outward-facing actions rule for the full
-     token list and definition. -->
+<!-- Outward action classes granted for this run without per-action
+     operator confirmation: none, or a comma-separated subset of
+     push-branch, open-pr (the only grantable classes). Default none.
+     A new run starts at none whatever this template says; a class is
+     added only on the operator's explicit instruction in the session,
+     recorded in 03-decisions.md. See AGENTS.md's Outward-facing
+     actions rule. -->
 
 ## Acceptance Baseline
 

@@ -155,20 +155,23 @@ directory and the subagents.
    After each implementer return, mechanically cross-check its self-report
    against the outward-actions rule (see AGENTS.md's Outward-facing actions
    section): compare `git rev-list --reverse <run-base>..<task-branch>` (or
-   the host's equivalent) against the returned `commits` field, check the
-   remote for the task branch before the orchestrator's own push (for
-   example `git ls-remote --heads <remote> <branch>`, or the host's
-   equivalent), and confirm no pull request exists on the task branch that
-   the orchestrator did not open itself (for example `gh pr list --head
-   <branch>`, or the host's equivalent). A mismatch, a branch already on the
-   remote, or a return that reports an outward action as executed, is a
-   misfire: do not fold it into run state as evidence, and recover it under
-   the subagent misfire rule. When the check finds an outward action was
-   actually performed (a push, an opened pull request) without
-   authorization, that is more than a misfire to resume past: the
-   orchestrator informs the operator immediately, records the incident in
-   `03-decisions.md`, and lists it in `06-handoff.md`'s Sent / Drafted
-   Outward section as unauthorized.
+   the host's equivalent) against the returned `commits` field; list the
+   remote's refs (for example `git ls-remote <remote>`, or the host's
+   equivalent) and flag every branch or tag whose sha, peeled for an
+   annotated tag, lies in the `<run-base>..<task-branch>` range and that the
+   orchestrator did not push itself; compare an existing task-branch ref
+   with the sha the orchestrator last pushed there, rather than treating the
+   ref's existence as a misfire; and confirm no pull request exists on the
+   task branch that the orchestrator did not open itself (for example `gh pr
+   list --head <branch>`, or the host's equivalent). A `commits` mismatch, a
+   flagged ref, a pull request the orchestrator did not open, or a return
+   that reports an outward action as executed, is a misfire: do not fold it
+   into run state as evidence, and recover it under the subagent misfire
+   rule. When the check finds an outward action was actually performed (a
+   push, an opened pull request) without authorization, that is more than a
+   misfire to resume past: the orchestrator informs the operator
+   immediately, records the incident in `03-decisions.md`, and lists it in
+   `06-handoff.md`'s Sent / Drafted Outward section as unauthorized.
 7. **Delegate review.** Send the diff to the reviewer subagent, naming in the
    briefing the base and head revision the diff was generated from. When tier
    variants are installed, pick the reviewer tier (the installed

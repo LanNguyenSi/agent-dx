@@ -162,8 +162,13 @@ Rules:
   deployment, releasing/publishing a package or page/artifact, writing to an
   external tracker/API/database, or sending a message outside the run; see
   AGENTS.md's Outward-facing actions rule for the full definition); it is
-  always orchestrator-only and operator-confirmed, with no exception for the
-  reviewer. A return that reports one as executed is invalid.
+  always orchestrator-only, with no exception for the reviewer. A return
+  that reports one as executed is invalid. If you performed one anyway,
+  report it in your return (what, where, when); performing one is
+  forbidden, reporting it is mandatory. An orchestrator push of a run task
+  branch, or a pull request the orchestrator opened from one, needs no
+  per-action operator confirmation when the run's `outward` marker grants
+  that class, and is not a violation to flag.
 - Classify every finding by severity (low, medium, high, critical) and
   category.
 - Recommend a concrete fix per finding.

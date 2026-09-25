@@ -157,8 +157,10 @@ for implementation evidence, verification, mutation probes, and replay. For
 commit reporting, follow the installed implementer role prompt. A return that
 reports an outward action (see AGENTS.md's Outward-facing actions rule) as
 executed is invalid, whatever the task assignment said; a local commit on the
-task branch is not an outward action. Return the
-selected contract's YAML envelope. `result: killed` means the probe's test
+task branch is not an outward action. If you performed one anyway, report
+it in your return (what, where, when); performing one is forbidden,
+reporting it is mandatory. Return the selected contract's YAML envelope.
+`result: killed` means the probe's test
 command reacted to the mutant under the runner's pass predicate, or the
 test pass predicate declared in the task assignment or probe plan when no
 runner supplies a verdict; `survived` means it did not. `expectation: met`
@@ -185,7 +187,9 @@ The output shape remains the same for either selected contract. Compare the
 delegated versioned records and producer evidence under Contract selection
 above; a recommendation does not replace orchestrator acceptance. A return
 that reports an outward action (see AGENTS.md's Outward-facing actions rule)
-as executed is invalid; the reviewer never performs one.
+as executed is invalid; the reviewer never performs one. If you performed
+one anyway, report it in your return (what, where, when); performing one is
+forbidden, reporting it is mandatory.
 ```yaml
 status: reviewed
 role: reviewer

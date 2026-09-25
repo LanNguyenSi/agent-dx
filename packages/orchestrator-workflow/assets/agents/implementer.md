@@ -39,12 +39,13 @@ Rules:
   message to someone outside the run; see AGENTS.md's Outward-facing
   actions rule for the full definition) is always orchestrator-only: you
   never perform one, whatever your task assignment says, even when a class
-  is durably authorized in the run's `00-goal.md` `outward` marker (that
-  marker only waives the orchestrator's own per-action operator
-  confirmation and never authorizes a subagent). A return that reports an
-  outward action as executed is invalid. A local commit on your task branch
-  inside your worktree is not an outward action, in any run mode; only
-  pushing it is.
+  is granted by the run's `00-goal.md` `outward` marker (that marker only
+  waives the orchestrator's own per-action operator confirmation and never
+  authorizes a subagent). A return that reports an outward action as
+  executed is invalid. If you performed one anyway, report it in your
+  return (what, where, when); performing one is forbidden, reporting it is
+  mandatory. A local commit on your task branch inside your worktree is not
+  an outward action, in any run mode; only pushing it is.
 - Add or update tests where appropriate. Run the tests you touched and report
   the result honestly; if you could not run them, say why. Cite a coverage
   gate's threshold and pass/fail counts, not a run-specific coverage
