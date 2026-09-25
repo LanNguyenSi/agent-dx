@@ -27,6 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bundle's `repoRoot` before querying, with the expansion run inside that
   repository, since a workspace-relative path silently matches nothing there.
 
+- `test/probe-plans-recovery.test.ts` no longer pins the fix-regression
+  trigger or the probe verdict clauses against released CHANGELOG bullets, so
+  a later wording change never invites editing a released section; both stay
+  pinned against their reference files and bundle doc copies. The bundle doc
+  copy pins now strip okf citation parentheticals before matching, so a
+  wording change in the prose is caught even when the citation beside it
+  quotes the old clause (task e92008cf).
+
 - Hand off (evidence-and-probes.md step 9, SKILL.md step 6): documentation
   impact (none with a reason, updated paths, or a follow-up) is now named
   among what the orchestrator records and reports, so the `Documentation

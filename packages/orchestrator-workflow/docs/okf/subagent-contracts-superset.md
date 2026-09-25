@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-25T11:56:44Z
+timestamp: 2026-09-25T12:02:54Z
 sources:
   - packages/orchestrator-workflow/assets/agents/explorer.md
   - packages/orchestrator-workflow/assets/agents/task-slicer.md
@@ -924,8 +924,8 @@ mismatch is a finding of at least `high` and sets
 The contract shape, the enums and the eleven sub-fields are unchanged, and no
 tool is named. `reason` keeps its meaning (required only for
 `not_applicable`). Pinned by `test/probe-plans-recovery.test.ts`, which binds
-all eleven clauses across the prompt, contracts, workflow, CHANGELOG and this
-section, while `test/init.test.ts` renders the legend into each implementer
+all eleven clauses across the prompt, contracts, workflow and this section,
+while `test/init.test.ts` renders the legend into each implementer
 tier and Codex developer instructions.
 
 ## Knowledge bundle docs in `relevant_docs`
