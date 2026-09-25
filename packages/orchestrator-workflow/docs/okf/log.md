@@ -1,5 +1,11 @@
 # Bundle log
 
+- 2026-09-25T05:45:07Z (task 7e6dd342, review fix round, follow-up):
+  `install-fence-mechanics.md` lists `agents-md-section.md` under
+  `sources:` without citing a specific line; re-checked against the
+  round-2 Outward-facing actions rewording (content-only, inside the
+  fence; no fence or install-mechanics claim affected) and re-stamped.
+
 - 2026-09-25T05:42:46Z (task 7e6dd342, review fix round): the Outward-facing
   actions rule was reworked after adversarial review: the marker's value
   grammar gained a canonical action-class token list (one definition site,
