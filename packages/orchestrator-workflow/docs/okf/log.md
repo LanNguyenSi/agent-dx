@@ -1,5 +1,11 @@
 # Bundle log
 
+- 2026-09-25T04:44:36Z (task 62281db6, second review fix): the last sentence of the
+  `reviewer.md` Documentation impact bullet was reworded in place, no line
+  moved. `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`
+  and `subagent-contracts-superset.md` re-checked and re-stamped; no claim
+  changed.
+
 - 2026-09-25T04:38:36Z (task 62281db6, review fix): the `reviewer.md` Documentation impact
   bullet was reworded and grew by three lines; citations into `reviewer.md`
   below it were re-pointed by three lines and every moved anchor re-read.
