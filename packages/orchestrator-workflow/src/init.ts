@@ -223,20 +223,45 @@ export function isContainedRelativePath(relativePath: string): boolean {
 }
 
 /**
+ * The containment problem of one knowledge-bundle path spelling, or
+ * `undefined` when it stays inside the worktree top level: an absolute path
+ * (native, POSIX, or Windows such as `C:/x`), any other value starting with
+ * a Windows drive letter (the drive-relative `C:x`, `C:..` or `C:`, which
+ * Windows resolves against that drive's current directory), or a `..`
+ * escape. The `..` test is only meaningful on a normalised value.
+ */
+function knowledgePathContainmentProblem(value: string): string | undefined {
+  if (isAbsolute(value) || posix.isAbsolute(value) || win32.isAbsolute(value)) {
+    return "is an absolute path";
+  }
+  if (/^[A-Za-z]:/.test(value)) return "is a Windows drive path";
+  if (value === ".." || value.startsWith("../")) {
+    return "escapes the worktree top level";
+  }
+  return undefined;
+}
+
+/**
  * Normalises one knowledge-bundle path field (`path` or `repoRoot`) and
  * returns it, or a reason string when it is not acceptable. Both fields are
  * worktree-relative, so spellings of the same location compare equal after
  * this step: POSIX `normalize`, then any trailing `/` stripped (`docs/okf/`,
  * `./docs/okf` and `docs/okf` all become `docs/okf`). An empty string, any
- * backslash, an absolute path (POSIX, or Windows such as `C:/x`), any other
- * value starting with a Windows drive letter (the drive-relative `C:x`,
- * `C:..` or `C:`, which Windows resolves against that drive's current
- * directory), and a path that normalises to a `..` escape are rejected; `.` (the worktree top level
- * itself) is accepted only when `allowTop` is set, which is the case for
- * `repoRoot` and not for `path`. The backslash rule is platform-independent:
- * POSIX normalisation treats `\` as an ordinary character, so `..\outside`
- * would pass the `..` test here and still resolve outside the worktree
- * under Windows path semantics; the stored separator is always `/`.
+ * backslash, and every value with a
+ * {@link knowledgePathContainmentProblem} are rejected. The containment
+ * check runs on the normalised value, which is the one that is stored and
+ * later resolved, so a prefix that normalisation removes cannot smuggle a
+ * drive or absolute form past it (`./C:x` and `a/../C:x` store `C:x`,
+ * `docs/../C:/x` stores `C:/x`; all rejected). It also runs on the value as
+ * written, so an absolute or drive path is never silently reinterpreted as
+ * a relative one (`C:/../docs` would normalise to `docs`). An accepted
+ * value's stored form is therefore accepted again unchanged. `.` (the
+ * worktree top level itself) is accepted only when `allowTop` is set, which
+ * is the case for `repoRoot` and not for `path`. The backslash rule is
+ * platform-independent: POSIX normalisation treats `\` as an ordinary
+ * character, so `..\outside` would pass the `..` test here and still resolve
+ * outside the worktree under Windows path semantics; the stored separator
+ * is always `/`.
  */
 function normalizeKnowledgePathField(
   value: unknown,
@@ -245,17 +270,14 @@ function normalizeKnowledgePathField(
   if (typeof value !== "string") return { reason: "is not a string" };
   if (value === "") return { reason: "is empty" };
   if (value.includes("\\")) return { reason: "contains a backslash" };
-  if (isAbsolute(value) || posix.isAbsolute(value) || win32.isAbsolute(value)) {
-    return { reason: "is an absolute path" };
-  }
-  if (/^[A-Za-z]:/.test(value)) return { reason: "is a Windows drive path" };
   let normalized = posix.normalize(value);
   while (normalized.length > 1 && normalized.endsWith("/")) {
     normalized = normalized.slice(0, -1);
   }
-  if (normalized === ".." || normalized.startsWith("../")) {
-    return { reason: "escapes the worktree top level" };
-  }
+  const problem =
+    knowledgePathContainmentProblem(value) ??
+    knowledgePathContainmentProblem(normalized);
+  if (problem !== undefined) return { reason: problem };
   if (normalized === "." && !allowTop) {
     return { reason: "names the worktree top level itself" };
   }

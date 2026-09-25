@@ -11,12 +11,13 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, sep } from "node:path";
+import { join, posix, sep, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  checkKnowledgeEntry,
   knowledgeEntryProblems,
   readInstalledManifest,
   runInit,
@@ -3124,5 +3125,119 @@ describe("knowledge-bundle locations in the manifest", () => {
       ]);
     }
     expect(existsSync(manifestPath())).toBe(false);
+  });
+
+  it("refuses a drive or absolute form that only appears after normalisation", () => {
+    const cases: [string, string][] = [
+      ["./C:x", "is a Windows drive path"],
+      ["a/../C:x", "is a Windows drive path"],
+      ["./C:..", "is a Windows drive path"],
+      ["./c:", "is a Windows drive path"],
+      ["./a:b", "is a Windows drive path"],
+      ["./C:/x", "is an absolute path"],
+      ["docs/../C:/x", "is an absolute path"],
+      // Absolute as written, relative only after normalisation: never
+      // silently reinterpreted.
+      ["C:/../docs", "is an absolute path"],
+      ["C:x/..", "is a Windows drive path"],
+    ];
+    for (const [value, reason] of cases) {
+      expect(
+        () =>
+          runInit({
+            ...defaultOptions(),
+            knowledge: [{ path: value, repoRoot: "." }],
+          }),
+        JSON.stringify(value),
+      ).toThrow(`options.knowledge[0] path ${reason};`);
+      expect(
+        () =>
+          runInit({
+            ...defaultOptions(),
+            knowledge: [{ path: "docs/okf", repoRoot: value }],
+          }),
+        JSON.stringify(value),
+      ).toThrow(`options.knowledge[0] repoRoot ${reason};`);
+      expect(knowledgeEntryProblems([{ path: value }])).toEqual([
+        `knowledge[0] path ${reason} and is ignored`,
+      ]);
+      expect(
+        knowledgeEntryProblems([{ path: "docs/okf", repoRoot: value }]),
+      ).toEqual([`knowledge[0] repoRoot ${reason} and is ignored`]);
+    }
+    expect(existsSync(manifestPath())).toBe(false);
+  });
+
+  it("stores only values it accepts again and that stay inside the worktree", () => {
+    const seeds = [
+      "C:x",
+      "c:x",
+      "C:",
+      "C:..",
+      "a:b",
+      "C:/x",
+      "c:/",
+      "\\\\server\\share",
+      "..\\x",
+      "\u0000",
+      "a\u0000b",
+      "",
+      ".",
+      "..",
+      "a/../..",
+      "docs/a:b",
+      "okf:bundle",
+      "ab:c",
+      "docs/C:x",
+      "c:",
+      "../x",
+      "x",
+      "docs/okf",
+      "C:/../docs",
+      "./C:x",
+      "a/../C:x",
+      "./C:..",
+      "./C:/x",
+      "./c:",
+      "docs/../C:/x",
+      "./a:b",
+    ];
+    const prefixes = ["", "./", "a/../", "docs/../", ".//", "a//../"];
+    const values = new Set<string>();
+    for (const seed of seeds) {
+      for (const prefix of prefixes) {
+        for (const suffix of ["", "/", "//"]) {
+          values.add(`${prefix}${seed}${suffix}`);
+          values.add(`${prefix}${seed.replaceAll("/", "//")}${suffix}`);
+        }
+      }
+    }
+    const inside = (stored: string): boolean => {
+      const win = win32.resolve("D:\\wt", stored);
+      const nix = posix.resolve("/wt", stored);
+      return (
+        (win === "D:\\wt" || win.startsWith("D:\\wt\\")) &&
+        (nix === "/wt" || nix.startsWith("/wt/"))
+      );
+    };
+    let accepted = 0;
+    for (const value of values) {
+      const entries: [string, Record<string, string>][] = [
+        ["path", { path: value }],
+        ["repoRoot", { path: "docs/okf", repoRoot: value }],
+      ];
+      for (const [field, entry] of entries) {
+        const checked = checkKnowledgeEntry(entry);
+        if ("reason" in checked) continue;
+        accepted += 1;
+        const stored =
+          field === "path" ? checked.bundle.path : checked.bundle.repoRoot;
+        const label = `${field} ${JSON.stringify(value)} stored as ${JSON.stringify(stored)}`;
+        expect(checkKnowledgeEntry(checked.bundle), label).toEqual(checked);
+        expect(inside(stored), label).toBe(true);
+      }
+    }
+    // The matrix exercises the acceptance side, not only rejections.
+    expect(accepted).toBeGreaterThan(100);
   });
 });

@@ -235,7 +235,9 @@ normalised (`./kb/app/` becomes `kb/app`); an empty or absolute path
 (POSIX, or a Windows form such as `C:/x`), any other path starting with a
 Windows drive letter (the drive-relative `C:x` or `C:..`), a `path` of `.`, a
 path escaping the worktree top level, and any path containing a backslash are
-invalid (use `/` as the separator on every platform). The CLI has no flag for the
+invalid (use `/` as the separator on every platform). The absolute, drive and
+escape rules apply both as written and to the normalised value that is stored,
+so `./C:x` and `docs/../C:/x` are invalid too. The CLI has no flag for the
 field: edit it in the manifest by hand, and every re-install preserves its
 valid entries (the programmatic `runInit` option `knowledge` writes it and
 refuses an invalid entry). A hand-edited invalid entry is ignored on read
