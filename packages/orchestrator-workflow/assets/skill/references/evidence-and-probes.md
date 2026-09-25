@@ -154,12 +154,21 @@ directory and the subagents.
    and verified rationale for carrying unchanged evidence forward. Record a baseline revision only when scope or the normative text of a criterion changes, including a change to what its verification checks; a wording precision that leaves the check itself unchanged is a `03-decisions.md` entry, not a revision: the orchestrator records it, states in that entry why no evidence is invalidated, and communicates the corrected wording in the next delegation.
    After each implementer return, mechanically cross-check its self-report
    against the outward-actions rule (see AGENTS.md's Outward-facing actions
-   section): compare the branch's ahead count (for example from `git status
-   -sb`) against the returned `commits` field, and confirm no pull request
-   was opened on the task branch by a subagent (for example `gh pr list
-   --head <branch>`, or the host's equivalent). A mismatch, or a return that
-   reports an outward action as executed, is a misfire: do not fold it into
-   run state as evidence; recover it under the subagent misfire rule.
+   section): compare `git rev-list --reverse <run-base>..<task-branch>` (or
+   the host's equivalent) against the returned `commits` field, check the
+   remote for the task branch before the orchestrator's own push (for
+   example `git ls-remote --heads <remote> <branch>`, or the host's
+   equivalent), and confirm no pull request exists on the task branch that
+   the orchestrator did not open itself (for example `gh pr list --head
+   <branch>`, or the host's equivalent). A mismatch, a branch already on the
+   remote, or a return that reports an outward action as executed, is a
+   misfire: do not fold it into run state as evidence, and recover it under
+   the subagent misfire rule. When the check finds an outward action was
+   actually performed (a push, an opened pull request) without
+   authorization, that is more than a misfire to resume past: the
+   orchestrator informs the operator immediately, records the incident in
+   `03-decisions.md`, and lists it in `06-handoff.md`'s Sent / Drafted
+   Outward section as unauthorized.
 7. **Delegate review.** Send the diff to the reviewer subagent, naming in the
    briefing the base and head revision the diff was generated from. When tier
    variants are installed, pick the reviewer tier (the installed

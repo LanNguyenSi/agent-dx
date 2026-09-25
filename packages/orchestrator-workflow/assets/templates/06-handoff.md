@@ -46,8 +46,9 @@
      action (push, pull request, ticket comment/transition/close, release,
      publish, message). Omit this section when nothing was sent or drafted. -->
 
-- <!-- action class, what was sent (with confirmation basis), or what stayed
-     a draft in the run directory and why -->
+- <!-- action class, what was sent (with confirmation basis), what stayed a
+     draft in the run directory and why, or an action performed without
+     authorization (unauthorized) -->
 
 ## Follow-Ups
 

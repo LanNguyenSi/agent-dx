@@ -137,14 +137,32 @@ for that repository is silently missing).
 ### Outward marker
 
 `00-goal.md` also carries an `outward` marker on its own line below the run
-mode marker and its description comment: `<!-- outward: none -->`. Unlike the
-`solution-acceptance:` markers above, this is a plain record, not one of
-grounding-mcp's known verdict keys, so it deliberately does not share that
-prefix. The value is `none` or a comma-separated list of action classes (for
-example `push-branch, open-pr`) the run durably authorizes without a
-per-action operator confirmation; a missing or unrecognised value means
-`none`. AGENTS.md's Outward-facing actions rule defines the action classes
-and the confirmation rule this marker modifies.
+mode marker and its description comment: `<!-- outward: classes = none -->`.
+Unlike the `solution-acceptance:` markers above, this is a plain record, not
+one of grounding-mcp's known verdict keys, so it deliberately does not share
+that prefix: the real reason is to keep an authorization grant out of the
+acceptance-verdict reader's namespace altogether, rather than relying on
+that reader's documented ignore-unknown-key behaviour to stay silent about
+it forever. The shape matches the kit's other plain-record marker,
+`<!-- review-round-escalation: choice = n/a -->`.
+
+The value is `none` or a comma-separated list of action-class tokens from
+the canonical list AGENTS.md's Outward-facing actions rule defines (for
+example `classes = push-branch, open-pr`). A missing marker, a malformed
+line (wrong key, wrong field name, or a value that is not `none` or a
+comma-separated token list), or a line with no recognised token means
+`none`: no class is authorized. Inside an otherwise well-formed line, each
+unrecognised token is individually ignored (treated as not granted) while
+every recognised token next to it keeps its grant; one bad token never voids
+the rest of the line.
+
+A class enters the marker only on the operator's explicit instruction,
+recorded in `03-decisions.md` with where that instruction came from (the
+operator's own message); widening an already-authorized marker mid-run needs
+the same explicit instruction. A subagent never edits the marker, and the
+orchestrator never adds a class to it on its own judgment. AGENTS.md's
+Outward-facing actions rule defines the action classes and the confirmation
+rule this marker modifies.
 
 ## Context budget rules
 

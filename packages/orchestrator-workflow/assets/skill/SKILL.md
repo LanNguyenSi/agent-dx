@@ -80,17 +80,30 @@ risks rather than following them.
 
 ## Outward-facing actions
 
-An outward action (pushing a branch or tag, opening or merging a pull
-request, commenting on, transitioning, or closing a ticket or pull request,
-releasing or publishing a package, publishing a page or artifact, sending a
-message) is orchestrator-only and needs operator confirmation, unless its
-class is recorded as durably authorized in `00-goal.md`'s `outward` marker
-(default `none`); a task assignment to a subagent never authorizes one, and a
-subagent return that reports one as executed is invalid. A local commit on a
-task branch inside a worktree is not an outward action, in any run mode; only
-pushing it is. Draft outward text (a comment, a PR description) into the run
-directory first, and list what was actually sent versus what stayed a draft
-in `06-handoff.md`'s Sent / Drafted Outward section.
+An outward action (any write to a system outside the local checkout and the
+run directory: pushing a branch or tag, opening/merging/editing a pull
+request, creating/commenting on/transitioning/editing/closing a ticket or
+issue, deleting a remote branch, triggering CI or a deployment,
+releasing/publishing a package or page/artifact, writing to an external
+tracker/API/database, or sending a message outside the run; see AGENTS.md's
+Outward-facing actions rule for the full definition and the action-class
+token list) is always orchestrator-only, whatever a task assignment says, and
+a subagent return that reports one as executed is invalid; the orchestrator
+itself still needs operator confirmation per action, unless the class is
+recorded as durably authorized in `00-goal.md`'s `outward` marker (default
+`none`), which waives only that per-action confirmation and never authorizes
+a subagent. A class enters the marker only on the operator's explicit
+instruction, recorded in `03-decisions.md` with where that instruction came
+from (the operator's own message); widening an already-authorized marker
+mid-run needs the same explicit instruction. A subagent never edits the
+marker, and the orchestrator never adds a class to it on its own judgment. A
+local commit on a task branch inside a worktree is not an outward action, in
+any run mode; only pushing it is. Draft outward text (a comment, a PR
+description) into the run directory first;
+performing an outward action without authorization is forbidden but
+reporting one that was performed is mandatory, and `06-handoff.md`'s Sent /
+Drafted Outward section lists what was actually sent, what stayed a draft,
+and any unauthorized action performed.
 
 ## Final acceptance rule
 
