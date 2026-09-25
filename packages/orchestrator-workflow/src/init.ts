@@ -228,8 +228,10 @@ export function isContainedRelativePath(relativePath: string): boolean {
  * worktree-relative, so spellings of the same location compare equal after
  * this step: POSIX `normalize`, then any trailing `/` stripped (`docs/okf/`,
  * `./docs/okf` and `docs/okf` all become `docs/okf`). An empty string, any
- * backslash, an absolute path (POSIX, or Windows such as `C:/x`), and a path
- * that normalises to a `..` escape are rejected; `.` (the worktree top level
+ * backslash, an absolute path (POSIX, or Windows such as `C:/x`), any other
+ * value starting with a Windows drive letter (the drive-relative `C:x`,
+ * `C:..` or `C:`, which Windows resolves against that drive's current
+ * directory), and a path that normalises to a `..` escape are rejected; `.` (the worktree top level
  * itself) is accepted only when `allowTop` is set, which is the case for
  * `repoRoot` and not for `path`. The backslash rule is platform-independent:
  * POSIX normalisation treats `\` as an ordinary character, so `..\outside`
@@ -246,6 +248,7 @@ function normalizeKnowledgePathField(
   if (isAbsolute(value) || posix.isAbsolute(value) || win32.isAbsolute(value)) {
     return { reason: "is an absolute path" };
   }
+  if (/^[A-Za-z]:/.test(value)) return { reason: "is a Windows drive path" };
   let normalized = posix.normalize(value);
   while (normalized.length > 1 && normalized.endsWith("/")) {
     normalized = normalized.slice(0, -1);

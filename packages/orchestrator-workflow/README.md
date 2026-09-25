@@ -232,9 +232,10 @@ relative path resolved against the worktree top level on its own (`path` is
 not nested under `repoRoot`), so a workspace bundle for a sub-repo's sources
 reads `{ "path": "kb/app", "repoRoot": "app" }`. Entries are stored
 normalised (`./kb/app/` becomes `kb/app`); an empty or absolute path
-(POSIX, or a Windows form such as `C:/x`), a `path` of `.`, a path escaping
-the worktree top level, and any path containing a backslash are invalid
-(use `/` as the separator on every platform). The CLI has no flag for the
+(POSIX, or a Windows form such as `C:/x`), any other path starting with a
+Windows drive letter (the drive-relative `C:x` or `C:..`), a `path` of `.`, a
+path escaping the worktree top level, and any path containing a backslash are
+invalid (use `/` as the separator on every platform). The CLI has no flag for the
 field: edit it in the manifest by hand, and every re-install preserves its
 valid entries (the programmatic `runInit` option `knowledge` writes it and
 refuses an invalid entry). A hand-edited invalid entry is ignored on read

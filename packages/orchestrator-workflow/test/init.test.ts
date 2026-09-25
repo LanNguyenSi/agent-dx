@@ -2987,9 +2987,10 @@ describe("knowledge-bundle locations in the manifest", () => {
     // rewritten from the sanitized previous value.
     const report = runInit({ ...defaultOptions(), profile: "minimal" });
     expect(report.updated).toContain(manifestPath());
-    expect(JSON.parse(readFileSync(manifestPath(), "utf8")).knowledge).toEqual([
-      { path: "docs/okf", repoRoot: "." },
-    ]);
+    const written = JSON.parse(readFileSync(manifestPath(), "utf8"));
+    expect(written.knowledge).toEqual([{ path: "docs/okf", repoRoot: "." }]);
+    // The problem list is derived on read and never serialized.
+    expect("knowledgeProblems" in written).toBe(false);
     const notes = report.notes.filter((note) => note.includes("knowledge"));
     expect(notes).toEqual([
       "manifest: knowledge[1] path escapes the worktree top level and is ignored; dropped from the rewritten manifest",
@@ -3093,5 +3094,35 @@ describe("knowledge-bundle locations in the manifest", () => {
     expect(knowledgeEntryProblems(manifest.knowledge)).toEqual([
       "knowledge[1] path contains a backslash and is ignored",
     ]);
+  });
+
+  it("refuses a drive-relative Windows path for path and repoRoot", () => {
+    for (const value of ["C:x", "C:..", "c:", "a:b"]) {
+      expect(
+        () =>
+          runInit({
+            ...defaultOptions(),
+            knowledge: [{ path: value, repoRoot: "." }],
+          }),
+        JSON.stringify(value),
+      ).toThrow(/options\.knowledge\[0\] path is a Windows drive path/);
+      expect(
+        () =>
+          runInit({
+            ...defaultOptions(),
+            knowledge: [{ path: "docs/okf", repoRoot: value }],
+          }),
+        JSON.stringify(value),
+      ).toThrow(/options\.knowledge\[0\] repoRoot is a Windows drive path/);
+      expect(knowledgeEntryProblems([{ path: value }])).toEqual([
+        "knowledge[0] path is a Windows drive path and is ignored",
+      ]);
+      expect(
+        knowledgeEntryProblems([{ path: "docs/okf", repoRoot: value }]),
+      ).toEqual([
+        "knowledge[0] repoRoot is a Windows drive path and is ignored",
+      ]);
+    }
+    expect(existsSync(manifestPath())).toBe(false);
   });
 });
