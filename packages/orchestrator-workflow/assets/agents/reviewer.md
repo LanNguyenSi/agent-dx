@@ -102,10 +102,13 @@ Check, at minimum:
   run files, or the consuming workspace and leave a one-line pointer.
 - Documentation impact: when the change is user-visible (a command,
   output, configuration, or documented behaviour) or architectural,
-  check the run's `Documentation Impact` line in `06-handoff.md`, or the
-  implementer's report when the handoff is not written yet. `none`
-  without a reason, while no human-facing documentation was updated, is
-  a medium finding. A docs-only change is exempt.
+  check whether the diff updates the affected human-facing documentation
+  (README, ADRs, architecture docs, end-user docs). When it does not, and
+  neither the briefing, the implementer's report, nor the run's
+  `Documentation Impact` line in `06-handoff.md` gives a reason or a
+  follow-up, that is a medium finding. A handoff whose `Documentation
+  Impact` line is missing, or says `none` without a reason, is a medium
+  finding too. A docs-only change is exempt.
 - Recurrence: when the briefing tells you this is not the task's first
   review round, classify each finding as `new` or `repeated` against the
   earlier rounds you were told about; on a first round every finding is
