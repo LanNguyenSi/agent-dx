@@ -1,8 +1,12 @@
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { UsageError } from "../src/errors.js";
 import { runDocsFor } from "../src/docs-for.js";
+import type { RunGit } from "../src/types.js";
 import { FIXTURES_DIR } from "./helpers.js";
+import { writeDoc } from "./git-helpers.js";
 
 const REPO_ROOT = path.join(FIXTURES_DIR, "docs-for-bundle");
 const BUNDLE_DIR = path.join(REPO_ROOT, "docs");
@@ -83,5 +87,172 @@ describe("runDocsFor", () => {
         runGit: () => null,
       }),
     ).toThrow(UsageError);
+  });
+});
+
+// Normalization pinning (round 2): a temp bundle per test, so each case can
+// pick the exact `sources` spelling and given-path spelling under test
+// without disturbing the static docs-for-bundle fixture's own assertions.
+describe("runDocsFor path normalization", () => {
+  let bundleDir: string;
+  let repoRoot: string;
+
+  beforeEach(() => {
+    repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "okf-kit-docsfor-root-"));
+    bundleDir = path.join(repoRoot, "docs");
+    fs.mkdirSync(bundleDir, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(repoRoot, { recursive: true, force: true });
+  });
+
+  it("resolves a leading-slash sources entry as repo-relative, exactly as check does", () => {
+    // check's sources-shape resolves a sources entry with path.join, which
+    // treats a leading slash as repo-relative, not filesystem-absolute.
+    // docs-for must agree, or the same frontmatter spelling would pass
+    // `check` while never matching `docs-for`.
+    fs.mkdirSync(path.join(repoRoot, "src"), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, "src", "foo.ts"), "export {};\n");
+    writeDoc(bundleDir, "leading-slash.md", {
+      type: "concept",
+      sources: ["/src/foo.ts"],
+    });
+
+    const result = runDocsFor(bundleDir, ["src/foo.ts"], { repoRoot });
+    expect(result.matches).toEqual([
+      { doc: "leading-slash.md", sources: ["/src/foo.ts"] },
+    ]);
+  });
+
+  it("normalizes a ./-prefixed given path the same as its plain spelling", () => {
+    fs.mkdirSync(path.join(repoRoot, "src"), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, "src", "foo.ts"), "export {};\n");
+    writeDoc(bundleDir, "exact.md", {
+      type: "concept",
+      sources: ["src/foo.ts"],
+    });
+
+    const result = runDocsFor(bundleDir, ["./src/foo.ts"], { repoRoot });
+    expect(result.matches).toEqual([
+      { doc: "exact.md", sources: ["src/foo.ts"] },
+    ]);
+  });
+
+  it("normalizes a trailing slash on a given path the same as its plain spelling", () => {
+    fs.mkdirSync(path.join(repoRoot, "src", "dir"), { recursive: true });
+    writeDoc(bundleDir, "dirsrc.md", { type: "concept", sources: ["src/dir"] });
+
+    const result = runDocsFor(bundleDir, ["src/dir/"], { repoRoot });
+    expect(result.matches).toEqual([
+      { doc: "dirsrc.md", sources: ["src/dir"] },
+    ]);
+  });
+
+  it("normalizes a trailing slash on a directory sources entry, containment still matches", () => {
+    fs.mkdirSync(path.join(repoRoot, "src", "dir"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repoRoot, "src", "dir", "nested.ts"),
+      "export {};\n",
+    );
+    writeDoc(bundleDir, "dirsrc.md", {
+      type: "concept",
+      sources: ["src/dir/"],
+    });
+
+    const result = runDocsFor(bundleDir, ["src/dir/nested.ts"], { repoRoot });
+    expect(result.matches).toEqual([
+      { doc: "dirsrc.md", sources: ["src/dir/"] },
+    ]);
+  });
+
+  it("does not match a path underneath a directory-shaped sources entry that does not exist on disk", () => {
+    // A missing sources entry (already flagged by sources-shape) can only
+    // match by exact string equality, never by directory containment --
+    // there is nothing to fs.statSync to know it is a directory at all.
+    writeDoc(bundleDir, "missing.md", {
+      type: "concept",
+      sources: ["src/missingdir"],
+    });
+
+    const result = runDocsFor(bundleDir, ["src/missingdir/foo.ts"], {
+      repoRoot,
+    });
+    expect(result.matches).toEqual([]);
+  });
+
+  it("matches a child path whose own name starts with ..", () => {
+    // isWithinDirectory used to reject any relative path starting with
+    // "..", including a legitimate child file literally named "..b.ts".
+    fs.mkdirSync(path.join(repoRoot, "src", "dir"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repoRoot, "src", "dir", "..b.ts"),
+      "export {};\n",
+    );
+    writeDoc(bundleDir, "dirsrc.md", { type: "concept", sources: ["src/dir"] });
+
+    const result = runDocsFor(bundleDir, ["src/dir/..b.ts"], { repoRoot });
+    expect(result.matches).toEqual([
+      { doc: "dirsrc.md", sources: ["src/dir"] },
+    ]);
+  });
+
+  it("accepts an absolute given path that lies under repoRoot, relativizing it before matching", () => {
+    fs.mkdirSync(path.join(repoRoot, "src"), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, "src", "foo.ts"), "export {};\n");
+    writeDoc(bundleDir, "exact.md", {
+      type: "concept",
+      sources: ["src/foo.ts"],
+    });
+
+    const result = runDocsFor(
+      bundleDir,
+      [path.join(repoRoot, "src", "foo.ts")],
+      { repoRoot },
+    );
+    expect(result.matches).toEqual([
+      { doc: "exact.md", sources: ["src/foo.ts"] },
+    ]);
+  });
+
+  it("rejects an absolute given path that lies outside repoRoot", () => {
+    const outside = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-kit-docsfor-outside-"),
+    );
+    try {
+      writeDoc(bundleDir, "exact.md", {
+        type: "concept",
+        sources: ["src/foo.ts"],
+      });
+
+      expect(() =>
+        runDocsFor(bundleDir, [path.join(outside, "src", "foo.ts")], {
+          repoRoot,
+        }),
+      ).toThrow(UsageError);
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("fills repoRoot from an injected runGit stub for a real match, not just the absent-repo-root error path", () => {
+    const stubRunGit: RunGit = (args) => {
+      if (args[0] === "rev-parse" && args[1] === "--show-toplevel")
+        return repoRoot;
+      return null;
+    };
+    fs.mkdirSync(path.join(repoRoot, "src"), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, "src", "foo.ts"), "export {};\n");
+    writeDoc(bundleDir, "exact.md", {
+      type: "concept",
+      sources: ["src/foo.ts"],
+    });
+
+    const result = runDocsFor(bundleDir, ["src/foo.ts"], {
+      runGit: stubRunGit,
+    });
+    expect(result.matches).toEqual([
+      { doc: "exact.md", sources: ["src/foo.ts"] },
+    ]);
   });
 });

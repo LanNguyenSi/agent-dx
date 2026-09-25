@@ -386,9 +386,11 @@ export const sourcesFreshFutureRule: Rule = {
  * Docs carrying a validly-shaped frontmatter `sources` list (see
  * `getValidSources`), each paired with that list. Shared by both rules in
  * this file: `sources-fresh` and `sources-fresh-future` assess the same
- * doc population, just in opposite time directions.
+ * doc population, just in opposite time directions. Also exported for
+ * `docs-for`'s reverse lookup, so that command's population cannot drift
+ * from what these rules assess.
  */
-function getDocsWithSources(
+export function getDocsWithSources(
   ctx: BundleContext,
 ): Array<{ doc: BundleDoc; sources: string[] }> {
   return ctx.docs

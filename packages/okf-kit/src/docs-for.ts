@@ -3,8 +3,9 @@ import path from "node:path";
 import { loadBundle } from "./bundle.js";
 import { UsageError } from "./errors.js";
 import { detectRepoRoot } from "./git.js";
-import { getValidSources } from "./util.js";
-import type { BundleDoc, RunGit } from "./types.js";
+import { getDocsWithSources } from "./rules/sources-fresh.js";
+import { resolveRepoPath } from "./util.js";
+import type { RunGit } from "./types.js";
 
 export interface DocsForOptions {
   repoRoot?: string;
@@ -29,14 +30,15 @@ export interface DocsForResult {
  * `okf-kit docs-for <bundleDir> <path>...`: which bundle docs claim a given
  * (repo-root-relative) path as a `sources` entry, directly.
  *
- * Reuses the IDENTICAL `sources` population and shape validation
- * `sources-shape`/`sources-fresh` apply (`getValidSources`): a doc with no
- * `sources` key, or a malformed one, contributes no matches here either --
- * that shape error is `sources-shape`'s job to report, not this command's.
+ * Reuses the IDENTICAL `sources` population `sources-shape`/`sources-fresh`
+ * assess (`getDocsWithSources`, shape-validated via `getValidSources`): a
+ * doc with no `sources` key, or a malformed one, contributes no matches
+ * here either -- that shape error is `sources-shape`'s job to report, not
+ * this command's.
  *
  * Matching a `sources` entry against a given path:
- *  - exact match: the given path resolves (against `repoRoot`) to the exact
- *    same path the `sources` entry resolves to.
+ *  - exact match: the given path resolves to the exact same path the
+ *    `sources` entry resolves to.
  *  - directory containment: when the `sources` entry resolves to a path
  *    that is a DIRECTORY on disk, a given path resolving underneath it also
  *    matches -- the same population `sources-fresh` assesses staleness for
@@ -50,10 +52,20 @@ export interface DocsForResult {
  * a bare `fs.existsSync`, never a glob expansion), so `docs-for` matches the
  * same population `check` already validates against and nothing wider.
  *
- * Both the `sources` entries and the given paths are resolved the SAME way
- * (`path.resolve(repoRoot, ...)`), which is what normalizes a leading
- * `./`, a trailing slash, or `../`-relative spelling identically on both
- * sides before comparing.
+ * `sources` entries are resolved EXACTLY as `check`'s `sources-shape` rule
+ * resolves them (`resolveRepoPath`, `path.join(repoRoot, source)`): an
+ * entry spelled with a leading slash (`/src/foo.ts`) is repo-relative, not
+ * filesystem-absolute, so `check` and `docs-for` agree on what it points
+ * at.
+ *
+ * A given `<path>` argument is resolved the same way when it is itself
+ * relative. An ABSOLUTE given path is accepted only when it lies under
+ * `repoRoot`, and is then relativized before matching; an absolute path
+ * outside `repoRoot` is a usage error (exit 2), not a silent empty result
+ * -- `path.resolve`'s ordinary "an absolute second argument wins" behavior
+ * would otherwise let a stray absolute path quietly escape `repoRoot` and
+ * report no matches instead of failing loudly. Either way, a leading `./`
+ * and a trailing slash are normalized away before comparing.
  */
 export function runDocsFor(
   bundleDir: string,
@@ -78,20 +90,15 @@ export function runDocsFor(
   }
   const ctx = loadBundle(resolvedBundleDir, repoRoot, options.runGit);
 
-  const docsWithSources = ctx.docs
-    .map((doc) => ({ doc, sources: getValidSources(doc.frontmatter.parsed) }))
-    .filter(
-      (entry): entry is { doc: BundleDoc; sources: string[] } =>
-        entry.sources !== undefined,
-    );
+  const docsWithSources = getDocsWithSources(ctx);
 
-  const givenAbsPaths = paths.map((p) => path.resolve(repoRoot, p));
+  const givenAbsPaths = paths.map((p) => resolveGivenPath(repoRoot, p));
 
   const matches: DocsForMatch[] = [];
   for (const { doc, sources } of docsWithSources) {
     const matchedSources = new Set<string>();
     for (const source of sources) {
-      const sourceAbs = path.resolve(repoRoot, source);
+      const sourceAbs = stripTrailingSep(resolveRepoPath(repoRoot, source));
       let sourceIsDir = false;
       try {
         sourceIsDir = fs.statSync(sourceAbs).isDirectory();
@@ -117,10 +124,50 @@ export function runDocsFor(
   return { bundleDir: resolvedBundleDir, matches };
 }
 
-/** Whether `target` is `dir` itself or a path underneath it. Both must already be resolved, absolute paths. */
+/**
+ * Resolves a given `<path>` CLI argument against `repoRoot`. A
+ * relative-spelled argument goes through `resolveRepoPath`, the same
+ * `path.join`-based resolution a `sources` entry gets, so `./`- and
+ * trailing-slash spellings on either side compare equal. An ABSOLUTE
+ * argument is accepted only when `path.relative(repoRoot, given)` stays
+ * inside `repoRoot` (does not start with `..`); otherwise this throws a
+ * `UsageError` rather than silently reporting no matches.
+ */
+function resolveGivenPath(repoRoot: string, given: string): string {
+  if (path.isAbsolute(given)) {
+    const rel = path.relative(repoRoot, given);
+    if (
+      rel === ".." ||
+      rel.startsWith(".." + path.sep) ||
+      path.isAbsolute(rel)
+    ) {
+      throw new UsageError(
+        `docs-for: absolute path lies outside --repo-root, rejecting rather than silently matching nothing: ${given}`,
+      );
+    }
+    return stripTrailingSep(resolveRepoPath(repoRoot, rel === "" ? "." : rel));
+  }
+  return stripTrailingSep(resolveRepoPath(repoRoot, given));
+}
+
+/** Strips a single trailing path separator, leaving the filesystem root (`/`) untouched. */
+function stripTrailingSep(p: string): string {
+  return p.length > 1 && p.endsWith(path.sep) ? p.slice(0, -1) : p;
+}
+
+/**
+ * Whether `target` is strictly a descendant of `dir` (not `dir` itself --
+ * callers that also want to match `dir` itself check equality separately
+ * before calling this). Both must already be resolved, absolute paths.
+ */
 function isWithinDirectory(dir: string, target: string): boolean {
   const rel = path.relative(dir, target);
-  return rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel);
+  return (
+    rel !== "" &&
+    rel !== ".." &&
+    !rel.startsWith(".." + path.sep) &&
+    !path.isAbsolute(rel)
+  );
 }
 
 /**

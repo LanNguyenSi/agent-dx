@@ -1,3 +1,5 @@
+import path from "node:path";
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -23,6 +25,22 @@ export function getValidSources(parsed: unknown): string[] | undefined {
     sources.length > 0 &&
     sources.every((s) => typeof s === "string" && s.trim() !== "");
   return isValidShape ? (sources as string[]) : undefined;
+}
+
+/**
+ * Resolves a `sources` frontmatter entry (a plain string, never a glob)
+ * against `repoRoot` the ONE way this package does it everywhere a source
+ * path is turned into a filesystem path: `path.join`, not `path.resolve`.
+ * The difference matters for a source spelled with a leading slash
+ * (`/src/foo.ts`): `path.join` treats it as repo-relative, exactly like
+ * every other entry, while `path.resolve` would treat the leading slash as
+ * an instruction to re-root at the filesystem root, silently escaping
+ * `repoRoot` entirely. Shared by `sources-shape` (existence check) and
+ * `docs-for` (reverse lookup), so both agree on what a `sources` entry
+ * resolves to.
+ */
+export function resolveRepoPath(repoRoot: string, source: string): string {
+  return path.join(repoRoot, source);
 }
 
 /**
