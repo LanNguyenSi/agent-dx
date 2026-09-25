@@ -17,6 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   round. A noted ref's record in `03-decisions.md` now names the ref and
   the sha, so a later round can apply the "while it stays at that sha"
   condition (task 91dc41e6).
+- The bundle-doc intersection rule in `contracts.md` and `task-slicer.md`
+  covers three more `allowed_changes` forms: an entry whose expansion is empty
+  (a directory the task will create) is passed to the bundle tool itself
+  alongside its expansion, or matched against the `sources` frontmatter; a
+  brace glob is expanded into its alternatives first (a pathspec does not
+  expand it, and a bundle tool takes it literally), or matched against the
+  frontmatter; and for a workspace bundle the paths are rebased onto the
+  bundle's `repoRoot` before querying, with the expansion run inside that
+  repository, since a workspace-relative path silently matches nothing there.
 
 ## [0.41.0] - 2026-09-25
 

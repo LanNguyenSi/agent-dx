@@ -76,6 +76,27 @@ describe("contracts.md defines the bundle doc entry in relevant_docs", () => {
     );
   });
 
+  it("still queries an entry whose expansion is empty", () => {
+    pin(
+      contracts,
+      "An entry whose expansion is empty (for example a directory the task will create) is still queried: pass the entry itself alongside the expanded paths, since a path that does not exist yet still matches a directory source that contains it, or match the entry against the `sources` frontmatter directly.",
+    );
+  });
+
+  it("expands a brace glob before querying a bundle tool", () => {
+    pin(
+      contracts,
+      "A brace glob such as `src/{a,b}.ts` is not expanded by a pathspec and is taken literally by a bundle tool, so expand it into its alternatives first (for example by the shell) or match it against the `sources` frontmatter directly.",
+    );
+  });
+
+  it("rebases workspace-relative paths onto the bundle's repoRoot", () => {
+    pin(
+      contracts,
+      "Query a bundle tool with paths relative to the bundle's `repoRoot`: for a workspace bundle whose `repoRoot` is a repository inside the workspace, strip that repository's workspace prefix from each `allowed_changes` entry and run the expansion inside that repository (for example `git -C <repo root> ls-files -- <entry>`), because an expansion prints paths relative to its working directory and a workspace-relative path is read as a path beneath the `repoRoot` and matches nothing; an entry outside that repository is not queried against that bundle.",
+    );
+  });
+
   it("resolves sources against the bundle's repoRoot", () => {
     pin(
       contracts,
@@ -131,6 +152,27 @@ describe("the task slicer adds intersecting bundle docs at slicing", () => {
     pin(
       taskSlicerMd,
       "Resolve each doc's `sources` against its bundle's `repoRoot`. A bundle tool takes concrete paths: expand each directory or glob entry of `allowed_changes` to the tracked files it covers first (for example `git ls-files -- <entry>`), or match such entries against the `sources` frontmatter directly; a source that is itself a directory matches every path beneath it.",
+    );
+  });
+
+  it("task-slicer.md still queries an entry whose expansion is empty", () => {
+    pin(
+      taskSlicerMd,
+      "Pass an entry whose expansion is empty (a directory the task will create) to the tool itself alongside the expanded paths, or match it against the frontmatter directly.",
+    );
+  });
+
+  it("task-slicer.md expands a brace glob first", () => {
+    pin(
+      taskSlicerMd,
+      "Expand a brace glob such as `src/{a,b}.ts` into its alternatives first (for example by the shell), or match it against the frontmatter directly: a pathspec does not expand it and a bundle tool takes it literally.",
+    );
+  });
+
+  it("task-slicer.md rebases paths onto the bundle's repoRoot", () => {
+    pin(
+      taskSlicerMd,
+      "Query a bundle tool with paths relative to the bundle's `repoRoot`: for a workspace bundle, strip the repository's workspace prefix from each entry and run the expansion inside that repository (for example `git -C <repo root> ls-files -- <entry>`).",
     );
   });
 
