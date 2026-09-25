@@ -1,6 +1,5 @@
 import fs from "node:fs";
-import path from "node:path";
-import { getValidSources, hasSourcesKey } from "../util.js";
+import { getValidSources, hasSourcesKey, resolveRepoPath } from "../util.js";
 import type { Finding, Rule } from "../types.js";
 
 const RULE_ID = "sources-shape";
@@ -29,7 +28,7 @@ export const sourcesShapeRule: Rule = {
 
       if (!ctx.repoRoot) continue;
       for (const source of sources) {
-        const target = path.join(ctx.repoRoot, source);
+        const target = resolveRepoPath(ctx.repoRoot, source);
         if (!fs.existsSync(target)) {
           findings.push({
             ruleId: RULE_ID,
