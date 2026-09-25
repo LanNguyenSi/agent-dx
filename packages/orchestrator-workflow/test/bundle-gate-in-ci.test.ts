@@ -138,7 +138,7 @@ describe("bundle gate in CI reference: could-not-run and report placement", () =
   it("keeps the exit-2 usage error apart from the other could-not-run causes", () => {
     pin(
       bundleGate,
-      "The checker itself exits 2 for a usage error such as a missing bundle directory. The other could-not-run causes carry other statuses: a missing command exits 127 and is caught by the exit status check; a failed install exits 1 from the package runner (`npx`), the same status as a finding, and is caught only because it leaves no parseable report; a report that does not parse is caught by the report check whatever the status.",
+      "The checker itself exits 2 whenever it cannot complete the check, for example on a usage error such as a missing bundle directory. The other could-not-run causes carry other statuses: a missing command exits 127 and is caught by the exit status check; a failed install exits 1 from the package runner (`npx`), the same status as a finding, and is caught only because it leaves no parseable report; a report that does not parse is caught by the report check when the status is 0 or 1 (any other status already failed the exit status check).",
     );
     expect(unwrap(bundleGate)).not.toMatch(
       /exit 2 for a usage error such as[^.]*(failed install|missing command)/,
@@ -149,6 +149,28 @@ describe("bundle gate in CI reference: could-not-run and report placement", () =
     pin(
       bundleGate,
       "the example below uses `jq`, so it needs `jq` on the runner;",
+    );
+  });
+
+  it("describes the annotation escaping", () => {
+    pin(
+      bundleGate,
+      "The annotation line escapes `%`, carriage return and line feed in the message, and additionally `:` and `,` in the `file` property, as the workflow command syntax requires, so a message with a line break stays one whole annotation.",
+    );
+  });
+
+  it("describes the pre-commit cleanup and where the trap belongs", () => {
+    pin(
+      bundleGate,
+      "The `trap` removes the temporary report when the hook exits, also when the check fails.",
+    );
+    pin(
+      bundleGate,
+      "Create the report and set the trap once, above the loop, and reuse the one file for every bundle: a trap set inside the loop is re-armed for the latest report only and leaves the earlier ones behind.",
+    );
+    pin(
+      bundleGate,
+      "The `trap` replaces an EXIT trap the hook already set; a hook that has one adds the `rm` to that trap instead.",
     );
   });
 
@@ -174,15 +196,26 @@ describe("bundle gate in CI reference: could-not-run and report placement", () =
     const recipe = shBlockAfter("### Pre-commit parity");
     expect(recipe).toContain('report="$(mktemp)"');
     expect(recipe).toContain('--dirty-as-now --json > "$report"');
+    // mktemp and the trap sit above the per-bundle loop, not inside it.
+    const loop = recipe.indexOf("while ");
+    expect(loop, "per-bundle loop not found").toBeGreaterThan(-1);
+    for (const line of [
+      'report="$(mktemp)"',
+      "trap 'rm -f \"$report\"' EXIT",
+    ]) {
+      expect(recipe.indexOf(line), line).toBeGreaterThan(-1);
+      expect(recipe.indexOf(line), line).toBeLessThan(loop);
+    }
     expect(recipe).not.toMatch(/> *report\.json/);
   });
 });
 
 /*
- * Execute the pre-commit recipe under bash -eo pipefail against a stub
- * okf-kit and a stub mktemp that creates its file in an empty directory (the
- * macOS mktemp ignores TMPDIR), and check that the temporary report is gone
- * afterwards, on a clean check and on a failing one.
+ * Execute the pre-commit recipe, with two configured bundles, under
+ * bash -eo pipefail and under sh -e, against a stub okf-kit and a stub mktemp
+ * that creates its file in an empty directory (the macOS mktemp ignores
+ * TMPDIR), and check that the temporary report is gone afterwards, on a clean
+ * check and on a failing one.
  */
 describe("bundle gate in CI pre-commit recipe: temp report cleanup", () => {
   let root: string;
@@ -193,7 +226,7 @@ describe("bundle gate in CI pre-commit recipe: temp report cleanup", () => {
     mkdirSync(bin);
     writeFileSync(
       join(bin, "okf-kit"),
-      `#!/bin/bash\nprintf '%s' '{"findings":[]}'\nexit "\${STUB_EXIT:-0}"\n`,
+      `#!/bin/bash\nprintf '%s\\n' "$*" >> "$STUB_CHECK_LOG"\nprintf '%s' '{"findings":[]}'\nexit "\${STUB_EXIT:-0}"\n`,
     );
     chmodSync(join(bin, "okf-kit"), 0o755);
     writeFileSync(
@@ -201,42 +234,68 @@ describe("bundle gate in CI pre-commit recipe: temp report cleanup", () => {
       `#!/bin/bash\nf="$STUB_TMP/report.$$"\n: > "$f"\nprintf '%s\\n' "$f" >> "$STUB_MKTEMP_LOG"\nprintf '%s\\n' "$f"\n`,
     );
     chmodSync(join(bin, "mktemp"), 0o755);
-    writeFileSync(join(root, "hook.sh"), shBlockAfter("### Pre-commit parity"));
+    const recipe = shBlockAfter("### Pre-commit parity");
+    expect(recipe).toContain("set -- docs/okf .\n");
+    // A hook with two configured bundles, the second in a sub-repo.
+    writeFileSync(
+      join(root, "hook.sh"),
+      recipe.replace("set -- docs/okf .\n", "set -- docs/okf . docs/b sub\n"),
+    );
   });
 
   afterAll(() => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it.each([
-    [0, 0],
-    [1, 1],
-  ])("checker exit %i: hook exits %i and leaves no temp file", (exit, want) => {
-    const temp = mkdtempSync(join(root, "tmp-"));
-    const work = mkdtempSync(join(root, "work-"));
-    const result = spawnSync(
-      "bash",
-      ["--noprofile", "--norc", "-eo", "pipefail", join(root, "hook.sh")],
-      {
+  const shells: Array<[string, string[]]> = [
+    ["bash", ["--noprofile", "--norc", "-eo", "pipefail"]],
+    ["sh", ["-e"]],
+  ];
+  const cases = shells.flatMap(([shell, flags]) =>
+    [
+      [0, 0, 2],
+      [1, 1, 1],
+    ].map(
+      ([exit, want, checks]) => [shell, flags, exit, want, checks] as const,
+    ),
+  );
+
+  it.each(cases)(
+    "%s: checker exit %i, hook exits %i after %i check(s) and leaves no temp file",
+    (shell, flags, exit, want, checks) => {
+      const temp = mkdtempSync(join(root, "tmp-"));
+      const work = mkdtempSync(join(root, "work-"));
+      const mktempLog = join(work, "..", `${basename(work)}.mktemp.log`);
+      const checkLog = join(work, "..", `${basename(work)}.check.log`);
+      const result = spawnSync(shell, [...flags, join(root, "hook.sh")], {
         cwd: work,
         env: {
           PATH: `${join(root, "bin")}${delimiter}${process.env.PATH ?? ""}`,
           HOME: work,
           STUB_TMP: temp,
-          STUB_MKTEMP_LOG: join(work, "..", `${basename(work)}.mktemp.log`),
+          STUB_MKTEMP_LOG: mktempLog,
+          STUB_CHECK_LOG: checkLog,
           STUB_EXIT: String(exit),
         },
         encoding: "utf8",
-      },
-    );
-    expect(result.status, result.stdout + result.stderr).toBe(want);
-    // The recipe did create its report through mktemp, and removed it.
-    expect(
-      readFileSync(join(work, "..", `${basename(work)}.mktemp.log`), "utf8"),
-    ).toMatch(/report\.\d+\n$/);
-    expect(readdirSync(temp)).toEqual([]);
-    expect(readdirSync(work)).toEqual([]);
-  });
+      });
+      expect(result.status, result.stdout + result.stderr).toBe(want);
+      // One report through mktemp for the whole loop, removed at exit.
+      expect(readFileSync(mktempLog, "utf8")).toMatch(/^[^\n]*report\.\d+\n$/);
+      const checked = readFileSync(checkLog, "utf8").trim().split("\n");
+      expect(checked).toHaveLength(checks);
+      expect(checked[0]).toBe(
+        "check docs/okf --repo-root . --dirty-as-now --json",
+      );
+      if (checks === 2) {
+        expect(checked[1]).toBe(
+          "check docs/b --repo-root sub --dirty-as-now --json",
+        );
+      }
+      expect(readdirSync(temp)).toEqual([]);
+      expect(readdirSync(work)).toEqual([]);
+    },
+  );
 });
 
 /*

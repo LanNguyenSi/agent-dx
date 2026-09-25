@@ -66,12 +66,14 @@ exits 0 when it finds only warnings (STALE and FUTURE-DATED findings are
 warnings) and 1 when it finds an error, so read the JSON report to decide.
 Any other outcome means the checker could not run: an exit status other than
 0 or 1, or a report that does not parse. It fails the job at every stage,
-including stage 1. The checker itself exits 2 for a usage error such as a
-missing bundle directory. The other could-not-run causes carry other statuses:
-a missing command exits 127 and is caught by the exit status check; a failed
-install exits 1 from the package runner (`npx`), the same status as a finding,
-and is caught only because it leaves no parseable report; a report that does
-not parse is caught by the report check whatever the status.
+including stage 1. The checker itself exits 2 whenever it cannot complete the
+check, for example on a usage error such as a missing bundle directory. The
+other could-not-run causes carry other statuses: a missing command exits 127
+and is caught by the exit status check; a failed install exits 1 from the
+package runner (`npx`), the same status as a finding, and is caught only
+because it leaves no parseable report; a report that does not parse is caught
+by the report check when the status is 0 or 1 (any other status already failed
+the exit status check).
 
 The stage 2 selection, as a `jq` filter over the `--json` report (any JSON
 tool works; the example below uses `jq`, so it needs `jq` on the runner; the
@@ -184,19 +186,28 @@ committing: it treats every uncommitted change as one virtual commit made now,
 so the local run reports the same `sources-fresh` and `sources-fresh-future`
 verdict CI will report once the commit lands. Without the flag a pre-commit
 run judges an edited source by its last commit and can report clean while CI
-reports STALE after the push. A hook loops over the same bundles as CI:
+reports STALE after the push. A hook loops over the same bundles as CI, with
+one `<bundle> <repoRoot>` pair per configured bundle:
 
 ```sh
 report="$(mktemp)"
 trap 'rm -f "$report"' EXIT
-okf-kit check docs/okf --repo-root . --dirty-as-now --json > "$report"
-# apply the same stage decision as CI to "$report"
+set -- docs/okf .
+while [ "$#" -ge 2 ]; do
+  okf-kit check "$1" --repo-root "$2" --dirty-as-now --json > "$report"
+  # apply the same stage decision as CI to "$report"
+  shift 2
+done
 ```
 
 Write the report outside the work tree: under `--dirty-as-now` a report file
 inside it is itself an uncommitted change and can mark a doc STALE whose
 sources cover that directory. The `trap` removes the temporary report when
-the hook exits, also when the check fails.
+the hook exits, also when the check fails. Create the report and set the trap
+once, above the loop, and reuse the one file for every bundle: a trap set
+inside the loop is re-armed for the latest report only and leaves the earlier
+ones behind. The `trap` replaces an EXIT trap the hook already set; a hook
+that has one adds the `rm` to that trap instead.
 
 Parity covers the verdict of those two rules, not the stage decision: apply
 the same stage filter locally, and add `--strict` only when CI runs stage 3.
