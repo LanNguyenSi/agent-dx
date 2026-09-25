@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-09-25
+
 - New skill reference `bundle-gate-in-ci.md`, linked from the SKILL.md
   hand-off step and route list: how to run the knowledge-bundle check in CI
   for every configured bundle (`--repo-root` per `knowledge` entry), with a
