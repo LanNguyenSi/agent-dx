@@ -4,6 +4,11 @@
 <!-- solution-acceptance: run-base[<repo-basename>] = <sha> -->
 <!-- solution-acceptance: mode = delegated -->
 <!-- Run mode: single | delegated | batch. A missing or unrecognised value means delegated. -->
+<!-- outward: none -->
+<!-- Outward actions durably authorized for this run without per-action operator
+     confirmation: none, or a comma-separated list of action classes (for
+     example push-branch, open-pr). Default none. See AGENTS.md's
+     Outward-facing actions rule for the full class list. -->
 
 ## Acceptance Baseline
 

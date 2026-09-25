@@ -134,6 +134,17 @@ the marker exactly in that form, on its own line: a deviating line is
 either rejected (it blocks the run) or not recognised at all (the binding
 for that repository is silently missing).
 
+### Outward marker
+
+`00-goal.md` also carries an `outward` marker on its own line below the run
+mode marker and its description comment: `<!-- outward: none -->`. Unlike the
+`solution-acceptance:` markers above, this is a plain record, not one of
+grounding-mcp's known verdict keys, so it deliberately does not share that
+prefix. The value is `none` or a comma-separated list of action classes (for
+example `push-branch, open-pr`) the run durably authorizes without a
+per-action operator confirmation; a missing or unrecognised value means
+`none`. AGENTS.md's Outward-facing actions rule defines the action classes
+and the confirmation rule this marker modifies.
 
 ## Context budget rules
 

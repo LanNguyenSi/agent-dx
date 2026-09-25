@@ -11,6 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (<reason>)`, `updated: <paths>`, or `follow-up: <task>`); the reviewer
   reports a user-visible or architectural change that updates no human-facing
   docs and gives no reason or follow-up as a medium finding (issue #355).
+- New `Outward-facing actions` rule (AGENTS.md block and SKILL.md): an
+  outward action (push, open/merge a pull request, comment on/transition/
+  close a ticket or PR, release/publish, send a message) is
+  orchestrator-only and operator-confirmed unless its class is durably
+  authorized in `00-goal.md`'s new `outward` marker (default `none`); a
+  task assignment never authorizes one, a local worktree commit is not one,
+  and a subagent return reporting one as executed is invalid. The
+  orchestrator cross-checks an implementer's self-report against the
+  branch's ahead count and open pull requests. The handoff template gains a
+  `Sent / Drafted Outward` section (issue #352).
 
 ## [0.40.1] - 2026-09-24
 

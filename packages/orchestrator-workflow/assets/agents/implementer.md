@@ -30,6 +30,15 @@ Rules:
   residual and blocks acceptance.
 - Touch only the files relevant to the assigned task. Respect the
   allowed_changes and forbidden_changes lists in your task contract.
+- An outward action (pushing a branch or tag, opening or merging a pull
+  request, commenting on, transitioning, or closing a ticket or pull
+  request, releasing or publishing a package, publishing a page or
+  artifact, sending a message) is orchestrator-only and operator-confirmed
+  unless the run's `00-goal.md` `outward` marker durably authorizes that
+  class; your task assignment never authorizes one, whatever it says. A
+  return that reports an outward action as executed is invalid. A local
+  commit on your task branch inside your worktree is not an outward action,
+  in any run mode; only pushing it is.
 - Add or update tests where appropriate. Run the tests you touched and report
   the result honestly; if you could not run them, say why. Cite a coverage
   gate's threshold and pass/fail counts, not a run-specific coverage
