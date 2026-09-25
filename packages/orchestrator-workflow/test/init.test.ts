@@ -2886,6 +2886,58 @@ describe("knowledge-bundle locations in the manifest", () => {
     expect(existsSync(manifestPath())).toBe(false);
   });
 
+  it("normalises path spellings on write and on read", () => {
+    runInit({
+      ...defaultOptions(),
+      knowledge: [
+        { path: "docs/okf/", repoRoot: "./" },
+        { path: "./docs/kb", repoRoot: "./sub/" },
+      ],
+    });
+    const manifest = JSON.parse(readFileSync(manifestPath(), "utf8"));
+    expect(manifest.knowledge).toEqual([
+      { path: "docs/okf", repoRoot: "." },
+      { path: "docs/kb", repoRoot: "sub" },
+    ]);
+
+    manifest.knowledge = [{ path: "./docs/okf/", repoRoot: "sub/../sub" }];
+    writeFileSync(manifestPath(), `${JSON.stringify(manifest, null, 2)}\n`);
+    expect(readInstalledManifest(target)?.knowledge).toEqual([
+      { path: "docs/okf", repoRoot: "sub" },
+    ]);
+  });
+
+  it("refuses an empty, top-level, or absolute path", () => {
+    for (const path of ["", ".", "./", "/abs/okf"]) {
+      expect(
+        () =>
+          runInit({
+            ...defaultOptions(),
+            knowledge: [{ path, repoRoot: "." }],
+          }),
+        JSON.stringify(path),
+      ).toThrow(/options\.knowledge\[0\] path/);
+    }
+    expect(() =>
+      runInit({
+        ...defaultOptions(),
+        knowledge: [{ path: "docs/okf", repoRoot: "" }],
+      }),
+    ).toThrow(/options\.knowledge\[0\] repoRoot is empty/);
+    expect(existsSync(manifestPath())).toBe(false);
+  });
+
+  it("writes an explicit empty list and preserves it on a re-install that omits the field", () => {
+    runInit({ ...defaultOptions(), knowledge: [] });
+    expect(JSON.parse(readFileSync(manifestPath(), "utf8")).knowledge).toEqual(
+      [],
+    );
+    runInit(defaultOptions());
+    expect(JSON.parse(readFileSync(manifestPath(), "utf8")).knowledge).toEqual(
+      [],
+    );
+  });
+
   it("drops a malformed hand-edited knowledge entry on read instead of crashing a re-install", () => {
     runInit({
       ...defaultOptions(),

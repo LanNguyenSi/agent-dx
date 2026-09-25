@@ -223,20 +223,29 @@ The orchestrator writes a `.ai/run` pointer file in every worktree a run
 touches (a machine-local absolute path, not written by the installer); add
 it to the repository's `.gitignore`.
 
-`manifest.json` may also carry `knowledge: [{ path, repoRoot }]`, configuring
-one or more knowledge-bundle locations for a repo whose bundle is not at the
-default `docs/okf/` (a workspace-level bundle with sources in a sub-repo, a
-bundle outside `docs/okf`, or several bundles). `path` is the bundle
-directory and `repoRoot` (defaulting to `"."`) the worktree-relative root of
-the repository its sources live in; both must be relative paths that stay
-inside the worktree top level. It carries no check argv -- the concrete
-bundle-check command still lives in the repository-bound verification set
-(see Verification sets above), so there is one source of argv truth. The
-field is absent by default, which is today's behaviour (`docs/okf/` is the
-implicit sole locator); `init` writes it only when given and a re-install
-that omits it preserves the previous value unchanged. `doctor` warns when a
-configured path does not exist on disk, and when `docs/okf/` exists but a
-non-empty `knowledge` list does not include it.
+`manifest.json` may also carry a `knowledge` list of `{ path, repoRoot }`
+entries, for a repo whose knowledge bundle is not at the default location (a
+workspace-level bundle with sources in a sub-repo, a bundle elsewhere, or
+several bundles). `path` is the bundle directory and `repoRoot` (default
+`"."`) the root of the repository the bundle's sources live in. Each is a
+relative path resolved against the worktree top level on its own (`path` is
+not nested under `repoRoot`), so a workspace bundle for a sub-repo's sources
+reads `{ "path": "kb/app", "repoRoot": "app" }`. Entries are stored
+normalised (`./kb/app/` becomes `kb/app`); an empty or absolute path, a
+`path` of `.`, and a path escaping the worktree top level are invalid. The
+CLI has no flag for the field: edit it in the manifest by hand, and every
+re-install preserves it (the programmatic `runInit` option
+`knowledge` writes it and refuses an invalid entry). A hand-edited invalid
+entry is ignored on read and reported by `doctor`. The field carries no
+check argv; the concrete bundle-check command still lives in the
+repository-bound verification set (see Verification sets above), so there
+is one source of argv truth. When `knowledge` in
+`.ai/workflow/manifest.json` is absent or an empty list, the default
+`docs/okf/` applies, today's behaviour. `doctor` prints a `knowledge:`
+detail line (the `knowledgeWarnings` key in `--json`) for a configured
+`path` or `repoRoot` that is not a directory, for each ignored invalid
+entry, and when a non-empty list omits an existing default bundle directory.
+These warnings never change the status or the exit code.
 
 Per selected harness:
 

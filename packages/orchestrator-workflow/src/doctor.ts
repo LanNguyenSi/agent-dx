@@ -5,7 +5,11 @@ import { join } from "node:path";
 
 import { PACKAGE_VERSION } from "./assets.js";
 import type { Manifest } from "./init.js";
-import { MANIFEST_PATH, readInstalledManifest } from "./init.js";
+import {
+  MANIFEST_PATH,
+  knowledgeEntryProblems,
+  readInstalledManifest,
+} from "./init.js";
 import type { Profile, Role } from "./models.js";
 import { DEFAULT_MODELS, rolesForProfile } from "./models.js";
 import { compareRoutingState } from "./routing-state.js";
@@ -75,10 +79,11 @@ export interface TargetReport {
   routingComparisonGaps?: string[];
   /**
    * Knowledge-bundle warnings against this target's own filesystem: a
-   * configured `knowledge` entry whose `path` does not exist under the
-   * target, or a non-empty `knowledge` list that omits an existing
-   * `docs/okf/` at the target's root. Empty/omitted when the target
-   * configures no knowledge bundles or every one checks out clean. These
+   * malformed `knowledge` entry dropped on read (index and reason), a
+   * configured `path` or `repoRoot` that is not a directory under the
+   * target's top level, or a non-empty `knowledge` list that omits an
+   * existing `docs/okf/` at the target's root. Omitted when there is none.
+   * Printed as `knowledge:` detail lines in the human output. These
    * warnings never change `status` or the doctor exit code -- they surface
    * a documentation-locator drift, not a kit-file install drift.
    */
@@ -281,39 +286,66 @@ function computeDriftFiles(targetPath: string, manifest: Manifest): string[] {
  * back to when a target configures no `knowledge` list at all. */
 const DEFAULT_KNOWLEDGE_PATH = "docs/okf";
 
+/** The raw `knowledge` value of a target's manifest file, before
+ * `readInstalledManifest` drops invalid entries; `undefined` when the field
+ * is absent or the file cannot be re-read. */
+function readRawKnowledge(targetPath: string): unknown {
+  try {
+    const parsed: unknown = JSON.parse(
+      readFileSync(join(targetPath, MANIFEST_PATH), "utf8"),
+    );
+    if (typeof parsed !== "object" || parsed === null) return undefined;
+    return (parsed as Record<string, unknown>).knowledge;
+  } catch {
+    return undefined;
+  }
+}
+
+function isDirectoryAt(path: string): boolean {
+  const stat = statOrClassify(path);
+  return stat.kind === "ok" && stat.stat.isDirectory();
+}
+
 /**
- * Checks a target's configured `knowledge` list against its own filesystem:
- * a configured entry whose `path` (under `repoRoot`) does not exist is
- * reported by name, and a non-empty list that omits an existing
- * `docs/okf/` at the target's root (the implicit default every kit site
- * assumes absent a `knowledge` field) is reported once. Absent/empty
- * `knowledge` is today's default behaviour and never warns here, mirroring
- * `Absent field = today's behaviour` in the manifest's own doc comment: a
- * repo that never configured `knowledge` is not warned about lacking an
- * entry for its own default.
+ * Checks a target's configured `knowledge` list against its own filesystem.
+ * Each raw entry `readInstalledManifest` dropped as malformed is reported
+ * with its index and reason. For each kept entry, `path` and `repoRoot` are
+ * resolved against the target's top level independently (the manifest's
+ * model; `path` is not nested under `repoRoot`) and each one that is not a
+ * directory is reported by name. A non-empty list whose normalised `path`s
+ * omit an existing `docs/okf/` at the target's root (the implicit default
+ * every kit site assumes absent a `knowledge` field) is reported once.
+ * Absent or empty `knowledge` is today's default behaviour and never warns
+ * about `docs/okf/`: a repo that never configured `knowledge` is not warned
+ * about lacking an entry for its own default.
  */
 function computeKnowledgeWarnings(
   targetPath: string,
   manifest: Manifest,
 ): string[] {
   const knowledge = manifest.knowledge ?? [];
-  const warnings: string[] = [];
+  const warnings: string[] = knowledgeEntryProblems(
+    readRawKnowledge(targetPath),
+  );
   for (const bundle of knowledge) {
-    const bundlePath = join(targetPath, bundle.repoRoot, bundle.path);
-    const stat = statOrClassify(bundlePath);
-    if (stat.kind !== "ok" || !stat.stat.isDirectory()) {
+    if (!isDirectoryAt(join(targetPath, bundle.path))) {
       warnings.push(`missing configured knowledge path: ${bundle.path}`);
+    }
+    if (
+      bundle.repoRoot !== "." &&
+      !isDirectoryAt(join(targetPath, bundle.repoRoot))
+    ) {
+      warnings.push(
+        `missing configured knowledge repoRoot: ${bundle.repoRoot}`,
+      );
     }
   }
   if (knowledge.length > 0) {
-    const docsOkfStat = statOrClassify(
+    const docsOkfExists = isDirectoryAt(
       join(targetPath, DEFAULT_KNOWLEDGE_PATH),
     );
-    const docsOkfExists =
-      docsOkfStat.kind === "ok" && docsOkfStat.stat.isDirectory();
     const docsOkfConfigured = knowledge.some(
-      (bundle) =>
-        bundle.repoRoot === "." && bundle.path === DEFAULT_KNOWLEDGE_PATH,
+      (bundle) => bundle.path === DEFAULT_KNOWLEDGE_PATH,
     );
     if (docsOkfExists && !docsOkfConfigured) {
       warnings.push(

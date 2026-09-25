@@ -320,8 +320,8 @@ construction.
 
 `06-handoff.md` gained an optional `## Knowledge Bundle` section
 (06-handoff.md:27-33#"- <!-- outcome and brief note, or omit this section when the repo carries no bundle -->"): "only applies when the repo carries a curated
-knowledge bundle (for example a `docs/okf/` directory)... Outcome: updated |
-not affected | follow-up filed." SKILL.md's step 9 (Hand off) instructs
+knowledge bundle (each one configured via `knowledge` in `.ai/workflow/manifest.json`; default `docs/okf/`).
+Outcome: updated | not affected | follow-up filed." SKILL.md's step 9 (Hand off) instructs
 applying this guidance before filling the file: check whether the change
 touched any path a bundle doc claims as a `sources:` entry, and if so either
 update the affected docs (re-verify and re-stamp) or record a follow-up
@@ -448,7 +448,7 @@ each, and ends by pointing to the skill's Run mode section. The Run state
 list of the policy section names the marker beside the keyed run-base marker
 (packages/orchestrator-workflow/assets/agents-md-section.md:247#"marker per repository for multi-repo runs").
 The README has a short "Run modes" section
-(packages/orchestrator-workflow/README.md:564#"## Run modes")
+(packages/orchestrator-workflow/README.md:573#"## Run modes")
 that links the reference. Both sites are pinned against restating a
 definition, a file list, the switch rule or the default's wording by the last
 block of `test/docs-consistency.test.ts`, which imports the constants of

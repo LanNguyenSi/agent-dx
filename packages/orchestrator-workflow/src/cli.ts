@@ -1253,6 +1253,12 @@ function printTargetDetail(
   for (const gap of target.routingComparisonGaps ?? []) {
     console.log(`  Routing comparison incomplete: ${gap}`);
   }
+  // Knowledge-bundle warnings print for every status: they never change
+  // the status line, so without this line a plain `doctor` run would show
+  // `clean` and hide them (they are otherwise only in `--json`).
+  for (const warning of target.knowledgeWarnings ?? []) {
+    console.log(`  knowledge: ${warning}`);
+  }
   const showsVersionLagDetail =
     (target.status === "version-lag" ||
       ((target.status === "divergent" || target.status === "drift") &&
