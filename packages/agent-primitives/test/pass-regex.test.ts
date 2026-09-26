@@ -31,7 +31,7 @@ describe("compilePassRegex()", () => {
     expect(() => compilePassRegex("(")).toThrow(SyntaxError);
   });
 
-  // `(?m)` is not "redundant, not a usage error" the way the README once
+  // `(?m)` is not "redundant, not a usage error" the way the docs once
   // claimed -- JS `RegExp` has no inline-flag syntax at all, so `(?m)` is not
   // valid source and is rejected exactly like any other unparseable pattern,
   // `m` already being always-on notwithstanding.

@@ -482,8 +482,8 @@ export async function openRunSetup(
   // for a LITERAL spelling of the root (`containment.ts`'s
   // `escapingRootMentions`) rather than by tokenising or parsing a
   // shell command; what that scope does and does not cover, and the
-  // residuals it leaves, are stated on that function and in the
-  // README. A `-i worktree` isolation copy lives outside `root` by
+  // residuals it leaves, are stated on that function and in
+  // docs/probe.md. A `-i worktree` isolation copy lives outside `root` by
   // construction UNLESS `--log-dir` itself was pointed inside the
   // repository, so `escapingRootMentions` is given this run's own
   // scratch root (`wtScratchRoot`, resolved the same way
@@ -1123,7 +1123,7 @@ export async function openRunSetup(
     }
 
     // The evidence gate is checked ahead of the pass-regex verdict (see
-    // the README's `--pass-regex`/`--require-baseline-evidence`
+    // docs/probe.md's `--pass-regex`/`--require-baseline-evidence`
     // interaction paragraph): when this baseline would otherwise refuse
     // `baseline_failed` because `--pass-regex` did not match, a
     // `--require-baseline-evidence` miss on the same (non-aborted)

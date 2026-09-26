@@ -17,8 +17,8 @@ import { probe, probePlan, type ProbeOptions } from "../src/probe/index.js";
  * left cached (false red). See `src/probe/pycache.ts` for the fix
  * (every `--pre`/test-command invocation of a run with a Python target
  * gets its own fresh, previously-unused `PYTHONPYCACHEPREFIX`
- * directory) and the README's "Python bytecode cache" section for the
- * trade-off against the two mechanisms not chosen.
+ * directory) and docs/non-js-test-runners.md's "Python bytecode cache"
+ * section for the trade-off against the two mechanisms not chosen.
  */
 
 const tmpDirs: string[] = [];

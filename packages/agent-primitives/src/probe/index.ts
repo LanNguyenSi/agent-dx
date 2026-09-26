@@ -141,7 +141,7 @@ export interface ProbeOptions {
    * regex absent, whatever the exit code says. Independent of
    * `requireBaselineEvidence` above, which stays a gate on the baseline
    * only; the two may be given together, one without the other, or
-   * neither. See the README's `--pass-regex` section for the motivating
+   * neither. See docs/probe.md's `--pass-regex` section for the motivating
    * case (phpunit 9.6 exiting 1 on a green suite over deprecation
    * notices). */
   passRegex?: RegExp;
@@ -271,7 +271,7 @@ export interface LinkSourceRefusal {
  * `worktree`, which disables it): the existence check then runs here
  * instead, since nothing else will, and a missing out-of-root value
  * that `--allow-outside` would otherwise let through silently is
- * refused rather than treated as accepted (see the README's `--link`
+ * refused rather than treated as accepted (see docs/probe.md's `--link`
  * section). When `checkOutsideRootExistence` is `false`, deferring here
  * is what keeps this check from leaking filesystem information about
  * paths outside the repository to the untrusted, file-sourced lanes (a
@@ -1034,8 +1034,8 @@ async function runProbePipeline(
     // the library-caller-only warning instead when the run's own signal
     // is already aborted -- the CLI's own signal handler (`exitOnSignal:
     // true`) calls `process.exit` before this `finally` block is ever
-    // reached, so it never gets here to warn (see the README/SKILL note
-    // on the two distinct reasons a rebuild is skipped).
+    // reached, so it never gets here to warn (see docs/probe.md/SKILL
+    // note on the two distinct reasons a rebuild is skipped).
     {
       const { logPath: rebuildLogPath } = await finalRebuildOrWarn(
         capturedRt,
@@ -1122,7 +1122,7 @@ export interface ProbePlanOptions {
    * value to conflict with. A miss reports the plan's own top-level
    * `status: "inconclusive"`, `reason: "baseline_evidence_not_matched"`,
    * the same unremapped pair `baseline_failed` reports for a plan (see
-   * the README's `--plan` section). */
+   * docs/probe.md's `--plan` section). */
   requireBaselineEvidence?: RegExp;
   /** Opt-in success predicate, the same as `ProbeOptions.passRegex`:
    * unlike `requireBaselineEvidence` above, this one DOES have a plan-file

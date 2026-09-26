@@ -738,12 +738,12 @@ export async function doctor(
   // a same-length mutant probe applies can leave that pair unchanged and
   // reuse stale bytecode (see `pycache.ts`); `probe` itself now isolates
   // every `--pre`/test-command run of a Python target under a fresh
-  // `PYTHONPYCACHEPREFIX` automatically (the README's "Python bytecode
-  // cache" section), so this check is purely informational (the
-  // RESOLUTION, not a hazard the operator must act on) and always
-  // reports `ok: true`: it names whatever cache already exists for a
-  // given target so its presence is visible before a probe run rather
-  // than only inferable after one, and so an operator running the
+  // `PYTHONPYCACHEPREFIX` automatically (docs/non-js-test-runners.md's
+  // "Python bytecode cache" section), so this check is purely
+  // informational (the RESOLUTION, not a hazard the operator must act
+  // on) and always reports `ok: true`: it names whatever cache already
+  // exists for a given target so its presence is visible before a probe
+  // run rather than only inferable after one, and so an operator running the
   // target's OWN test command directly (outside `probe`) knows that
   // cache still applies to THAT run.
   const pyTargets = (options.targets ?? []).filter((t) =>

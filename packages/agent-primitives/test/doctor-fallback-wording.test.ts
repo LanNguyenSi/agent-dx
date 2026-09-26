@@ -17,7 +17,7 @@ import { describe, expect, it } from "vitest";
  *
  * Each surface names the three reasons in its own fallback-reasons
  * parenthetical, and those four parentheticals name the same three
- * reasons without being one identical string: the README's own spells
+ * reasons without being one identical string: docs/doctor.md's own spells
  * the first reason `` `python3` absent from `PATH` `` where the other
  * three spell it `absent from `PATH``, and a CLI option description, two
  * Markdown documents and a TSDoc comment each wrap the list at their own
@@ -303,10 +303,10 @@ const SURFACES: Surface[] = [
       ),
   },
   {
-    name: "README.md (## `doctor`)",
+    name: "docs/doctor.md (# `doctor`)",
     read: () =>
       extractMarkdownSection(
-        fs.readFileSync(path.join(PACKAGE_ROOT, "README.md"), "utf8"),
+        fs.readFileSync(path.join(PACKAGE_ROOT, "docs", "doctor.md"), "utf8"),
         /^#{1,6}\s+`doctor`\s*$/,
       ),
   },
@@ -571,10 +571,10 @@ describe("doctor fallback wording: Markdown section extraction", () => {
   ].join("\n");
 
   it("does not end the section at a prose line that merely starts with a #", () => {
-    // README.md carries exactly this shape today: a line-wrapped issue
-    // reference (`#225 part 2). For every`) sitting at column 0 inside
-    // a section. Read as a level-1 heading it would truncate the
-    // section right there, and every reason after that point would
+    // docs/non-js-test-runners.md carries exactly this shape today: a
+    // line-wrapped issue reference (`#225 part 2). For every`) sitting
+    // at column 0 inside a section. Read as a level-1 heading it would
+    // truncate the section right there, and every reason after that point would
     // read as missing.
     const section = extractMarkdownSection(FIXTURE, /^#{1,6}\s+`doctor`\s*$/);
     expect(section).toContain("#225 part 2");

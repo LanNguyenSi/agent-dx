@@ -4908,8 +4908,8 @@ describe("phpunitDetector: a suppressed result report is not a missing one (PHPU
     // counter at the end of each row) before the kill. Reproducing it
     // for real needs a suite of more than 63 tests, so it is
     // constructed here instead, and the limit it pins is documented in
-    // the README: such a kill falls silent (`"not_zero"`) rather than
-    // being reported as unreadable.
+    // docs/non-js-test-runners.md: such a kill falls silent (`"not_zero"`)
+    // rather than being reported as unreadable.
     const output = [
       "PHPUnit 11.5.56 by Sebastian Bergmann and contributors.",
       "",

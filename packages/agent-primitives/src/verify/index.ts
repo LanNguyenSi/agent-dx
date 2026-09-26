@@ -697,7 +697,8 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
     // zero tests actually ran (an empty/filtered suite, an all-skipped
     // run, or a PHPUnit 9 warnings-only run such as `Tests: 1,
     // Assertions: 0, Warnings: 1.`) still keeps that `pass` status here
-    // -- the status is the verdict, not this warning (see README) -- but
+    // -- the status is the verdict, not this warning (see
+    // docs/non-js-test-runners.md) -- but
     // a reader is told the pass is hollow. Checked against `status`, not
     // the exit code: `--pass-regex` can decide `pass` on a non-zero exit
     // (a green suite that PHPUnit itself exits non-zero for, over a

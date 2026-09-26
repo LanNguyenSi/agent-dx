@@ -8,18 +8,20 @@ import {
 } from "../src/probe/session.js";
 
 /**
- * Parses README.md's "Refusal reason shape" table (under "Result
+ * Parses docs/probe.md's "Refusal reason shape" table (under "Result
  * shape") and asserts it equals `REFUSAL_RESULT_SHAPE`
  * (`src/probe/session.ts`) exactly, in both directions: every reason
  * the code contract carries has a matching row here with the same
  * `mutant`/`mutation_probe` presence, and the table names no reason the
  * code contract does not. Parsed from the real file on disk (never a
  * copy-pasted fixture), so an edit to one without the other fails this
- * test rather than only being caught by a human diff review.
+ * test rather than only being caught by a human diff review. Moved from
+ * README.md to docs/probe.md when the package README was restructured;
+ * the table itself is unchanged.
  */
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const README_PATH = path.join(__dirname, "..", "README.md");
+const README_PATH = path.join(__dirname, "..", "docs", "probe.md");
 
 interface ParsedRow {
   reason: string;
@@ -36,7 +38,7 @@ function parseRefusalReasonShapeTable(readme: string): ParsedRow[] {
   const headingIndex = readme.indexOf("#### Refusal reason shape");
   if (headingIndex === -1) {
     throw new Error(
-      'README.md has no "#### Refusal reason shape" heading; the ' +
+      'docs/probe.md has no "#### Refusal reason shape" heading; the ' +
         "result-shape section may have been renamed or removed",
     );
   }
@@ -118,7 +120,7 @@ function parseRefusalReasonShapeTable(readme: string): ParsedRow[] {
   return rows;
 }
 
-describe('README.md\'s "Refusal reason shape" table matches REFUSAL_RESULT_SHAPE', () => {
+describe('docs/probe.md\'s "Refusal reason shape" table matches REFUSAL_RESULT_SHAPE', () => {
   const readme = fs.readFileSync(README_PATH, "utf8");
   const rows = parseRefusalReasonShapeTable(readme);
 

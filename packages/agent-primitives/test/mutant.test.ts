@@ -3844,7 +3844,7 @@ describe("reconcileEnvelopeDiffTruncation", () => {
 
     it("leaves a prior warning about a DIFFERENT bound intact on the sync path, alongside the new warning naming this call's own bound (task 4af16fdf, round-2 review F2)", () => {
       // A warning from a prior, harsher reduction pass -- the exact
-      // shape the README's "prior, harsher reduction pass" clause
+      // shape docs/probe.md's "prior, harsher reduction pass" clause
       // blesses -- names a DIFFERENT `maxChars` (500) than the one this
       // `reconcileEnvelopeDiffTruncation` call below is invoked with
       // (750). It remains true regardless of what this call's own bound

@@ -972,7 +972,7 @@ describe("probe(): test-command isolation-escape detection", () => {
     // through BOTH symlinks). The scan recognizes a root's
     // as-given spelling and its realpath (`containment.test.ts` pins
     // this directly); a third, unrelated symlink alias pointing at the
-    // same target is a documented residual (README), not covered here.
+    // same target is a documented residual (docs/probe.md), not covered here.
     const real = resolveDeepestExisting(repo);
     const result = await probe(
       baseOptions(link, {

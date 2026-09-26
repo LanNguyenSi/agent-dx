@@ -40,8 +40,8 @@ const HARNESS_REL_PATH: Record<Harness, string> = {
  * this package released at an earlier version (per the checked-in ledger,
  * see `ledger.ts`), rather than to an unknown edit. `init` never writes an
  * `outdated` target by default; see the envelope-status-mapping note on
- * `InitResult.status` below and the package README's `init` section for
- * why report-only was chosen over an automatic upgrade. Values otherwise
+ * `InitResult.status` below and docs/init.md for why report-only was
+ * chosen over an automatic upgrade. Values otherwise
  * match the status vocabulary the envelope already knows about
  * (`written`/`unchanged` -> ok, `conflicted`/`outdated` -> finding). */
 export type InitTargetStatus =

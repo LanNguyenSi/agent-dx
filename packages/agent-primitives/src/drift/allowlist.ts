@@ -189,7 +189,7 @@ function escapeRegExpChar(c: string): string {
  * `**` matches across path segments (including none), a single `*`
  * matches within one segment, `?` matches one character. No brace
  * expansion, no character classes - a prototype-scope subset, documented
- * in the README, sufficient for a path or path-prefix allowlist entry.
+ * in docs/drift.md, sufficient for a path or path-prefix allowlist entry.
  */
 export function globToRegExp(glob: string): RegExp {
   let pattern = "";

@@ -2188,7 +2188,7 @@ describe("probePlan(): zero-tests-executed detection through the shared baseline
     // regex that genuinely does not match must still refuse, at the
     // PLAN's own top level (the unremapped `inconclusive`/
     // `baseline_evidence_not_matched` pair, the same as `baseline_failed`
-    // is for a plan -- see the README's `--plan` section), with every
+    // is for a plan -- see docs/probe.md's `--plan` section), with every
     // mutant reported `not_run`.
     useLockDir();
     const repo = initNodeTestDotRepo(makeTmpDir);

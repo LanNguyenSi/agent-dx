@@ -148,7 +148,7 @@ const NO_TESTS_EXECUTED = /^No tests executed!\s*$/m;
  * truncation: the row's own `N / M (P%)` counter is then in the output,
  * so `phpunitResultUnreadable` no longer recognizes the shape and the
  * reading falls silent (`"not_zero"`) instead of reporting the result
- * as unreadable. Both limits are documented in the README.
+ * as unreadable. Both limits are documented in docs/non-js-test-runners.md.
  *
  * The major version is captured HERE, by this one pattern, and read off
  * it by `phpunitMajorVersion` below -- never by a second, separately
