@@ -21,7 +21,7 @@ node dist/cli.js create my-agent --features=memory,skills
 The package's bin name is `agent-dev` (`npm link` from the package directory puts it on `PATH`); the examples below assume that. Without linking, run `node dist/cli.js <command>` instead.
 
 ```bash
-agent-dev create my-agent --features=memory,triologue,skills
+agent-dev create my-agent --features=memory,skills
 ```
 
 This creates a project with:
@@ -42,7 +42,7 @@ agent-dev add-feature skills
 agent-dev generate-skill release-notes --description "Generate release notes from changelog entries"
 ```
 
-Available feature flags: `memory`, `triologue`, `skills`. Flags are parsed strictly: `memory, skills` works, an unknown feature name fails fast with an error.
+Available feature flags: `memory`, `triologue`, `skills`. The `triologue` feature adds a dependency on `triologue-sdk`, which is not published to npm, so `create` with that feature fails at `npm install` unless the package can be resolved locally (or pass `--no-install`). Flags are parsed strictly: `memory, skills` works, an unknown feature name fails fast with an error.
 
 ## Key features
 

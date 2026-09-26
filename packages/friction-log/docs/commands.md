@@ -1,6 +1,6 @@
 # Command reference
 
-Full flag reference for every `friction-log` subcommand. Run any command with `--help` for the complete flag list.
+Reference for every `friction-log` subcommand and its main flags. Run any command with `--help` for the complete flag list.
 
 | Command | What it does |
 |---------|--------------|

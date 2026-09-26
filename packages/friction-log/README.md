@@ -15,7 +15,7 @@ Two recurring patterns in agent-driven development go unaddressed by most toolin
 - One-command `init`: detects the local environment and writes config, optionally installing the Claude Code Stop-hook
 - Structured `log`, `list`, `search` (FTS5), `export`, and `digest` (aggregations) over a local SQLite store
 - Five pluggable filing sinks: `markdown-file` (default, zero-dependency), `stdout-json`, `github-issues`, `agent-tasks`, `linear`
-- Idempotent `scan` of Claude Code transcripts and `import` of existing markdown notes, both content-hash deduped
+- Idempotent `scan` of Claude Code transcripts (deduped on session, tool, and title) and `import` of existing markdown notes (content-hash deduped)
 - Optional multi-machine `sync-export`: deterministic, config-gated JSON file dump with read-only peer merge into `digest`
 - Auto-linked recurrence detection on repeated (tool, title) matches
 
@@ -41,6 +41,8 @@ node packages/friction-log/dist/cli.js list
 node packages/friction-log/dist/cli.js file 1
 ```
 
+To get a `friction-log` command on PATH (needed for the Stop-hook below), run `npm link` in `packages/friction-log`.
+
 A markdown record lands under `~/.local/share/friction-log/frictions/` with full frontmatter, ready to commit, paste into a chat, or pipe into another tool.
 
 ## Usage
@@ -65,7 +67,7 @@ Wire automatic capture into every Claude Code session with a Stop-hook, then rev
 friction-log bilanz
 ```
 
-See [Command reference](./docs/commands.md) for every subcommand and flag, including manual transcript scanning.
+See [Command reference](./docs/commands.md) for every subcommand, including manual transcript scanning; run any command with `--help` for its complete flag list.
 
 ## Documentation
 

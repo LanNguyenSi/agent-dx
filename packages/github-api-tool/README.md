@@ -14,7 +14,7 @@ A command-line interface for GitHub API operations, designed for AI agents.
 - Pull request operations: list, comment, review, merge
 - Repository info: commits, contributors, repository details
 - Cross-repo standup digest for daily or async updates
-- `--json` output on every command for programmatic use
+- `--json` output on the issue, PR, repo, standup, bug-report, and coverage-check commands for programmatic use
 - Automatic retry with exponential backoff on 5xx/429 responses
 
 ## Install / quick start
