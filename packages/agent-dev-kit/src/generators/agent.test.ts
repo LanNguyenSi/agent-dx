@@ -23,7 +23,6 @@ describe("AgentGenerator", () => {
       description: "Release automation agent",
       features: {
         memory: true,
-        triologue: true,
         skills: true,
       },
       options: {
@@ -72,7 +71,7 @@ describe("AgentGenerator", () => {
     expect(packageJson.scripts.start).toBe("node dist/index.js");
     expect(packageJson.scripts.test).toBe("vitest run");
     expect(packageJson.dependencies.dotenv).toBe("^16.4.0");
-    expect(packageJson.dependencies["triologue-sdk"]).toBe("^0.1.0");
+    expect(packageJson.dependencies).not.toHaveProperty("triologue-sdk");
     expect(packageJson.devDependencies.tsx).toBe("^4.19.3");
     expect(packageJson.devDependencies.typescript).toBe("^5.3.3");
     expect(packageJson.devDependencies.vitest).toBe("^3.2.4");
@@ -82,16 +81,16 @@ describe("AgentGenerator", () => {
       "utf8",
     );
     expect(envExample).toContain("AGENT_NAME=release-helper");
-    expect(envExample).toContain("BYOA_TOKEN=your-token-here");
     expect(envExample).toContain("MEMORY_BACKEND=local");
     expect(envExample).not.toContain("MEMORY_API_KEY");
+    expect(envExample).not.toContain("BYOA_TOKEN");
 
     const mainFile = await readFile(
       path.join(targetDir, "src", "index.ts"),
       "utf8",
     );
     expect(mainFile).toContain("import { config } from 'dotenv';");
-    expect(mainFile).toContain("import { Triologue } from 'triologue-sdk';");
+    expect(mainFile).not.toContain("triologue-sdk");
     expect(mainFile).toContain(
       "import { createMemoryStore } from './memory/index.js';",
     );
@@ -125,7 +124,6 @@ describe("AgentGenerator", () => {
       description: "Simple agent",
       features: {
         memory: false,
-        triologue: false,
         skills: false,
       },
       options: {
@@ -202,7 +200,6 @@ function createConfig(
     description: overrides.description,
     features: overrides.features ?? {
       memory: false,
-      triologue: false,
       skills: false,
     },
     options: overrides.options ?? {

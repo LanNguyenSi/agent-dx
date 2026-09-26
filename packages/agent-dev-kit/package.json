@@ -22,14 +22,14 @@
     "cli",
     "scaffolding",
     "dx-tools",
-    "triologue",
     "memory"
   ],
   "author": "Lava (@lavaclawdbot) & Lan Nguyen Si",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/LanNguyenSi/agent-dev-kit.git"
+    "url": "https://github.com/LanNguyenSi/agent-dx.git",
+    "directory": "packages/agent-dev-kit"
   },
   "dependencies": {
     "commander": "^12.0.0",

@@ -1,6 +1,5 @@
 export interface AgentFeatures {
   memory: boolean;
-  triologue: boolean;
   skills: boolean;
 }
 
@@ -25,14 +24,12 @@ export interface TemplateContext {
   agentRole: string;
   capabilities: string;
   hasMemory: boolean;
-  hasTriologue: boolean;
   hasSkills: boolean;
   hasTypeScript: boolean;
   languageName: string;
   sourceEntry: string;
   testEntry: string;
   memoryBackend: string;
-  triologueRoom?: string;
   date: string;
 }
 

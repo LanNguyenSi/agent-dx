@@ -30,10 +30,6 @@ export class AgentGenerator {
       capabilities.push("Memory");
     }
 
-    if (this.config.features.triologue) {
-      capabilities.push("Triologue");
-    }
-
     if (this.config.features.skills) {
       capabilities.push("Skills");
     }
@@ -43,7 +39,6 @@ export class AgentGenerator {
       agentRole: this.config.description || "AI Agent",
       capabilities: capabilities.join(", "),
       hasMemory: this.config.features.memory,
-      hasTriologue: this.config.features.triologue,
       hasSkills: this.config.features.skills,
       hasTypeScript: this.config.options.typescript,
       languageName: this.config.options.typescript
@@ -181,10 +176,6 @@ export class AgentGenerator {
       dotenv: "^16.4.0",
     };
 
-    if (this.config.features.triologue) {
-      deps["triologue-sdk"] = "^0.1.0";
-    }
-
     return deps;
   }
 
@@ -248,13 +239,6 @@ AGENT_NAME=${this.config.name}
 NODE_ENV=development
 `;
 
-    if (this.config.features.triologue) {
-      content += `\n# Triologue
-BYOA_TOKEN=your-token-here
-TRIOLOGUE_URL=https://opentriologue.ai
-`;
-    }
-
     if (this.config.features.memory) {
       content += `\n# Memory
 MEMORY_BACKEND=local
@@ -283,9 +267,6 @@ MEMORY_BACKEND=local
       "- Core runtime scaffold",
       this.config.features.memory
         ? `- Local memory scaffold in \`${memoryPath}\``
-        : null,
-      this.config.features.triologue
-        ? `- Triologue client wiring in \`${sourceEntry}\``
         : null,
       this.config.features.skills
         ? `- Skills loader and example skill in \`${skillLoaderPath}\``
@@ -354,7 +335,7 @@ npm run dev
 
 ## Notes
 
-${this.config.features.memory ? "- The memory scaffold uses a local in-process store so the project works without extra services.\n" : ""}${this.config.features.skills ? "- The bundled example skill is intended as a starting point for your own SKILL.md-based workflows.\n" : ""}${this.config.features.triologue ? "- Set `BYOA_TOKEN` in `.env` before enabling live Triologue calls.\n" : ""}See [\`.ai/ARCHITECTURE.md\`](.ai/ARCHITECTURE.md) for the generated project overview.
+${this.config.features.memory ? "- The memory scaffold uses a local in-process store so the project works without extra services.\n" : ""}${this.config.features.skills ? "- The bundled example skill is intended as a starting point for your own SKILL.md-based workflows.\n" : ""}See [\`.ai/ARCHITECTURE.md\`](.ai/ARCHITECTURE.md) for the generated project overview.
 
 ## License
 
@@ -403,10 +384,6 @@ ${this.config.metadata?.license || "MIT"}
       );
     }
 
-    if (this.config.features.triologue) {
-      imports.push("import { Triologue } from 'triologue-sdk';");
-    }
-
     const classFields = isTypeScript
       ? [
           "  private name: string;",
@@ -416,9 +393,6 @@ ${this.config.metadata?.license || "MIT"}
           this.config.features.skills
             ? "  private skills: Skill[] = loadSkills();"
             : "",
-          this.config.features.triologue
-            ? "  private triologue?: Triologue;"
-            : "",
         ]
           .filter((line) => line !== "")
           .join("\n")
@@ -426,21 +400,12 @@ ${this.config.metadata?.license || "MIT"}
           "  name;",
           this.config.features.memory ? "  memory = createMemoryStore();" : "",
           this.config.features.skills ? "  skills = loadSkills();" : "",
-          this.config.features.triologue ? "  triologue;" : "",
         ]
           .filter((line) => line !== "")
           .join("\n");
 
     const constructorLines = [
       `    this.name = process.env.AGENT_NAME || '${this.config.name}';`,
-      this.config.features.triologue
-        ? `    if (process.env.BYOA_TOKEN) {
-      this.triologue = new Triologue({
-        baseUrl: process.env.TRIOLOGUE_URL || 'https://opentriologue.ai',
-        token: process.env.BYOA_TOKEN,
-      });
-    }`
-        : "",
     ]
       .filter((line) => line !== "")
       .join("\n");
@@ -448,7 +413,6 @@ ${this.config.metadata?.license || "MIT"}
     const summaryFeatures = [
       "'core runtime'",
       this.config.features.memory ? "'memory'" : "",
-      this.config.features.triologue ? "'triologue'" : "",
       this.config.features.skills ? "'skills'" : "",
     ]
       .filter((value) => value !== "")
@@ -466,11 +430,6 @@ ${this.config.metadata?.license || "MIT"}
         ? `    if (this.skills.length > 0) {
       const preview = await this.skills[0].run('boot');
       console.log(\`Loaded \${this.skills.length} skill(s). Example output: \${preview}\`);
-    }`
-        : "",
-      this.config.features.triologue
-        ? `    if (this.triologue) {
-      console.log('Triologue client configured.');
     }`
         : "",
       "    console.log('Implement your agent workflow here.');",

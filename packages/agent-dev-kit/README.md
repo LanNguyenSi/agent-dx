@@ -1,6 +1,6 @@
 # Agent Dev Kit
 
-CLI scaffolding tool for AI agent projects with optional Memory, Triologue and Skills support.
+CLI scaffolding tool for AI agent projects with optional Memory and Skills support.
 
 ## Overview
 
@@ -31,18 +31,16 @@ This creates a project with:
 - `src/index.test.ts` or `src/index.test.js` as a passing default test
 - `src/memory/` with a local stub store when `memory` is enabled
 - `src/skills/` with a loader, example skill and `SKILL.md` when `skills` is enabled
-- Triologue bootstrap code in the main entrypoint when `triologue` is enabled
 
 Other commands:
 
 ```bash
 agent-dev add-feature memory
-agent-dev add-feature triologue
 agent-dev add-feature skills
 agent-dev generate-skill release-notes --description "Generate release notes from changelog entries"
 ```
 
-Available feature flags: `memory`, `triologue`, `skills`. The `triologue` feature adds a dependency on `triologue-sdk`, which is not published to npm, so `create` with that feature fails at `npm install` unless the package can be resolved locally (or pass `--no-install`). Flags are parsed strictly: `memory, skills` works, an unknown feature name fails fast with an error.
+Available feature flags: `memory`, `skills`. Flags are parsed strictly: `memory, skills` works, an unknown feature name (including a previously removed `triologue` feature) fails fast with an error.
 
 ## Key features
 
