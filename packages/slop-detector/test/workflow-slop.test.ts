@@ -2553,7 +2553,7 @@ describe("workflow-slop/audit-gate-shape: gate step shell", () => {
     // and an explicit `exit`; neither shape's exit-code guarantee depends
     // on the invoking shell's own `-e`/`pipefail` defaults, so a bash
     // template missing `-e` is certified exactly like the literal `bash`
-    // keyword. See the README for the full decision and reasoning.
+    // keyword. See docs/workflow-slop.md for the full decision and reasoning.
     const text = auditYml(
       gateStep(["npm audit --audit-level=high"], ["shell: bash {0}"]),
     );

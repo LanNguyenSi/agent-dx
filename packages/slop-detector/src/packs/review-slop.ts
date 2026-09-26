@@ -33,8 +33,8 @@ function isMarkdownFile(file: FileTarget): boolean {
 }
 
 // A commit message either arrives as `check --stdin-path COMMIT_MSG` (the
-// documented commit-message-mode invocation, see README "review-slop by
-// example") or as a real git hook file (`.git/COMMIT_EDITMSG`, or a
+// documented commit-message-mode invocation, see docs/review-slop.md) or
+// as a real git hook file (`.git/COMMIT_EDITMSG`, or a
 // caller's own `<name>.commitmsg` convention). Matched on the basename so
 // a directory prefix (`.git/COMMIT_EDITMSG`, `tmp/msg.commitmsg`) doesn't
 // matter.
@@ -339,8 +339,8 @@ function checkReviewTokenRule(
 // itself (a Formula 1 reference, a function key) is not otherwise
 // disambiguated from a genuine finding id: that residual imprecision is
 // accepted rather than guessed at with a hand-picked word list, since
-// this pack does not do LLM-judged disambiguation (see the package
-// README's review-slop section for the same note).
+// this pack does not do LLM-judged disambiguation (see docs/review-slop.md
+// for the same note).
 const FINDING_ID = /\bF\d[a-z]?\b(?!-\d)/g;
 
 // The same run-local shorthand, extended to four severity-letter forms
@@ -363,8 +363,8 @@ const FINDING_ID = /\bF\d[a-z]?\b(?!-\d)/g;
 // shares its sentence window, not because the pack understood the
 // sentence was about a chip or a cache. A genuine bug-fix sentence
 // that happens to name one of these letters is therefore a known,
-// accepted false positive -- see the package README's review-slop
-// section and this package's own test suite for a pinned example --
+// accepted false positive -- see docs/review-slop.md and this package's
+// own test suite for a pinned example --
 // and `config.review.allow` (or `allowPaths`) is the escape hatch for
 // it, not a smarter filter.
 const SEVERITY_FINDING_ID = /\b[HMLC]\d[a-z]?\b(?!-\d)/g;

@@ -41,8 +41,8 @@ export function isWorkflowFile(file: { path: string }): boolean {
 
 // Every entry here is a bare `github.*`/`runner.*` context reference this
 // pack treats as NOT attacker-controllable, verified against GitHub's own
-// docs (see packages/slop-detector/README.md "workflow-slop by example"
-// for the exact quotes and the two source URLs). Deliberately exact,
+// docs (see packages/slop-detector/docs/workflow-slop.md for the exact
+// quotes and the two source URLs). Deliberately exact,
 // whole-expression matches only (see `isAllowedExpression` below): this
 // rule does not attempt to parse the GitHub Actions expression grammar
 // (functions, comparisons, string concatenation, ternaries), so a
@@ -683,7 +683,7 @@ function collectUsesRefs(
 // "V" by hand, and this rule's job is catching the major, not validating
 // the tag's exact casing. A trailing prerelease-ish suffix
 // (`-beta`, `-rc.1`) is tolerated and ignored for major resolution
-// ("v4-beta" still resolves to major "v4"): documented in the README as a
+// ("v4-beta" still resolves to major "v4"): documented in docs/workflow-slop.md as a
 // deliberate simplification, not an attempt to parse full semver
 // prerelease/build-metadata grammar.
 const VERSION_REF_RE = /^v?(\d+)(?:\.\d+){0,2}(?:-[0-9A-Za-z.]+)?$/i;
@@ -734,7 +734,7 @@ function parseUsesValue(raw: string): ParsedUses | undefined {
  * end of file) is inspected, so a comment on an unrelated later line can
  * never match. Returns `undefined` (not a violation) when no such
  * comment is present: a bare sha pin with no version annotation is the
- * documented limitation of this rule (see README), not a finding.
+ * documented limitation of this rule (see docs/workflow-slop.md), not a finding.
  */
 function trailingCommentMajor(
   text: string,
@@ -1070,7 +1070,7 @@ function scalarStringValue(node: unknown): string | undefined {
  * any node shape other than a scalar, a sequence of scalars, or that
  * mapping form. GitHub's own default shell on a Windows runner is
  * `pwsh`, not bash (Windows runners default to PowerShell Core, falling
- * back to Windows PowerShell; see the README), so an absent `shell:`
+ * back to Windows PowerShell; see docs/workflow-slop.md), so an absent `shell:`
  * there is not the same certifiable absence it is on Linux/macOS.
  * `"unresolved"` is a documented residual, not a refusal: the
  * absent-shell check simply does not fire for it, the same verdict an
@@ -1253,7 +1253,7 @@ function collectStepRuns(
 // a recognised gate too. Scoped to `npm audit` only (see `isGateCommand`
 // below): a `pnpm audit --audit-level=high` or a non-npm audit command
 // (`pip-audit`, `cargo audit`) is out of these rules' reach, documented
-// in the README rather than guessed at here.
+// in docs/workflow-slop.md rather than guessed at here.
 const AUDIT_GATE_RE = /--audit-level=(low|moderate|high|critical)\b/;
 
 function isGateCommand(raw: string): boolean {
@@ -2741,7 +2741,7 @@ function collectAuditStepBlocks(file: FileTarget): AuditStepBlock[] {
  * cannot be evaluated statically) is not provably `false`, so all three
  * are treated the same. A step- or job-level `if:` that would actually
  * prevent the gate step from running is out of this rule's reach and is
- * not checked here (documented in the README as a limitation).
+ * not checked here (documented in docs/workflow-slop.md as a limitation).
  */
 function continueOnErrorFindings(step: StepRunInfo): AuditFinding[] {
   const findings: AuditFinding[] = [];

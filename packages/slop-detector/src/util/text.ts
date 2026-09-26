@@ -38,7 +38,7 @@ export function findAllRegex(
 
 // Backtick and tilde fences are the two fence styles Markdown (CommonMark
 // / GFM) recognizes; an indented (four-space) code block is deliberately
-// NOT stripped here -- see review-slop's README section for why.
+// NOT stripped here -- see docs/review-slop.md for why.
 //
 // Both the opener and the closer are anchored to the start of a line (with
 // CommonMark's up-to-three spaces of leading indentation), because a fence

@@ -690,7 +690,7 @@ describe("placement-slop: scan-root-relative instructionGlobs (via checkPath)", 
 
   it("matches an additive instructionGlobs pattern the same way for a relative, ./-prefixed, and absolute scan path", () => {
     // `checkPath`'s scanRoot is the exact directory string it's given (see
-    // README's "Marking a src barrel as an entrypoint" for the sibling
+    // docs/configuration.md's "Marking a src barrel as an entrypoint" for the sibling
     // convention on `entrypointGlobs`), so all three invocations here scan
     // `tmp` — the glob is written relative to `tmp`, matching its child
     // `sub/PLAYBOOK.md`. Before this fix, three different string spellings
@@ -996,7 +996,7 @@ describe("placement-slop: a bare '~/' allow entry stays narrow", () => {
 // org's lowercase machine-path convention, see the fixture above) is a
 // bare-substring, case-sensitive match with no automatic URL exclusion:
 // org-marker does not run computeExcludedSpans the way home-path/
-// dated-evidence/tally-phrase/opaque-id do (see README's `allow` section),
+// dated-evidence/tally-phrase/opaque-id do (see docs/configuration.md's `allow` field),
 // so a real, legitimate lowercase GitHub URL for this same org
 // (https://github.com/lannguyensi/...) would otherwise fire org-marker
 // unless a matching lowercase allow entry excuses it explicitly.
