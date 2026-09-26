@@ -7,10 +7,10 @@
 ```yaml
 # config.yml
 sync_export:
-  path: /Users/you/Sync/friction-log/macbook.json   # where THIS machine writes
-  origin: macbook                                    # this machine's label
-  peer_paths:                                        # OTHER machines' files, read-only
-    - /Users/you/Sync/friction-log/mac-mini.json
+  path: /Users/<name>/Sync/friction-log/macbook.json   # where THIS machine writes
+  origin: macbook                                       # this machine's label
+  peer_paths:                                           # OTHER machines' files, read-only
+    - /Users/<name>/Sync/friction-log/mac-mini.json
 ```
 
 `path` and `origin` can also come from `FRICTION_LOG_SYNC_EXPORT_PATH` / `FRICTION_LOG_SYNC_EXPORT_ORIGIN` (env wins over the YAML value when both are set), so the same `config.yml` can be checked into dotfiles and shared across machines while each machine supplies its own path/origin via its shell profile or `.env`. `friction-log init --sync-export-path <path> --sync-export-origin <name> [--sync-export-peer <path> ...]` scaffolds the block non-interactively.

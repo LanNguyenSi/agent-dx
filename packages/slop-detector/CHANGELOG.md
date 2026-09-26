@@ -15,6 +15,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or `docs/workflow-slop.md`), matching where those sections moved.
 - The published package now ships `docs/`, so the README's relative links
   and those runtime pointers resolve in the installed package too.
+- `placement.instructionGlobs` in the agent-dx root `slop.config.yml` now
+  also covers every package's own reference docs (`packages/*/docs/*.md`),
+  closing a gap the package README refresh (#373, #374) left: those docs
+  ship on npm alongside the README and carry the same leak risk, but only
+  `packages/*/README.md` was covered. A single `*` segment never crosses
+  `/`, so this glob reaches a file directly inside a package's own `docs/`
+  directory but not a nested `docs/okf/**` bundle doc, with no separate
+  exclude needed. The only hit this surfaced (`friction-log/docs/
+  sync-export.md`'s `/Users/you/` example, moved there by the same README
+  refresh, previously excused by a `placement.allow: "/Users/you/"` entry
+  removed as dead once that content left `instructionGlobs`' scope) is
+  fixed at its source: rewritten as the angle-bracket placeholder
+  `/Users/<name>/`, which `home-path` already treats as generic, instead
+  of reintroducing the allow entry.
 
 ## [0.5.0] - 2026-09-21
 

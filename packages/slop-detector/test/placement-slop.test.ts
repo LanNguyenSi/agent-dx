@@ -924,6 +924,71 @@ describe("placement-slop: packages/*/README.md rollout (agent-dx #80e4743d)", ()
   });
 });
 
+// ── package reference-doc rollout regression (leak guard scope) ───────────
+//
+// The package README refresh moved large reference sections out of
+// packages/*/README.md into packages/*/docs/*.md, which ships on npm
+// alongside the README and carries the same leak risk, but the
+// `packages/*/README.md` glob above never reached it. A single "*"
+// segment never crosses "/" (globToRegex), so `packages/*/docs/*.md`
+// reaches a file directly inside a package's own docs/ directory but not
+// a nested docs/okf/** bundle doc, without a separate exclude glob.
+
+describe("placement-slop: packages/*/docs/*.md rollout (leak guard scope)", () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-placement-docs-"));
+    fs.mkdirSync(path.join(tmp, "packages", "x", "docs", "okf"), {
+      recursive: true,
+    });
+    const evidenceLine =
+      "As of 2026-08-24 (n=8), the low tier reached accept a median 320 seconds slower.\n";
+    fs.writeFileSync(
+      path.join(tmp, "packages", "x", "docs", "reference.md"),
+      evidenceLine,
+    );
+    fs.writeFileSync(
+      path.join(tmp, "packages", "x", "docs", "okf", "log.md"),
+      evidenceLine,
+    );
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("flags a package doc directly under docs/ but not a nested docs/okf/ bundle doc", () => {
+    const cfg = mergeConfig({
+      packs: { "placement-slop": true },
+      placement: { instructionGlobs: ["packages/*/docs/*.md"] },
+    });
+    const summary = checkPath(tmp, {
+      packs: allPacks,
+      config: cfg,
+      packFilter: ["placement-slop"],
+    });
+
+    const referenceDocPath = path.join(
+      tmp,
+      "packages",
+      "x",
+      "docs",
+      "reference.md",
+    );
+    const okfDocPath = path.join(tmp, "packages", "x", "docs", "okf", "log.md");
+
+    expect(
+      summary.violations.some(
+        (v) =>
+          v.path === referenceDocPath &&
+          v.ruleId === "placement-slop/dated-evidence",
+      ),
+    ).toBe(true);
+    expect(summary.violations.some((v) => v.path === okfDocPath)).toBe(false);
+  });
+});
+
 // ── allow-narrowness: a bare "~/" allow must not excuse a real username ───
 //
 // `placement.allow: ["~/"]` is meant to excuse only the two literal
@@ -1069,6 +1134,7 @@ describe("placement-slop: the actual repo-root slop.config.yml (agent-dx #80e474
     const cfg = loadConfig(repoRootConfigPath);
 
     expect(cfg.placement?.instructionGlobs).toContain("packages/*/README.md");
+    expect(cfg.placement?.instructionGlobs).toContain("packages/*/docs/*.md");
 
     // "Bare" here means the tilde form on its own, with no username or
     // placeholder attached, as opposed to a named-placeholder path such
