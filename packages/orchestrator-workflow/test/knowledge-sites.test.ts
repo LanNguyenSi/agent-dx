@@ -23,12 +23,16 @@ const BACK_REFERENCE = "`knowledge` in `.ai/workflow/manifest.json`";
  * distinctive substring of the allowed sentence.
  */
 const EXAMPLE_ALLOWLIST: Record<string, string[]> = {
-  "README.md": ['"npx", "okf-kit", "check", "docs/okf"'],
+  // Moved from README.md's "Verification sets" section to
+  // docs/verification-sets.md (README-restructure round 2): the JSON
+  // worked example lives there now, not in README.md.
+  "docs/verification-sets.md": ['"npx", "okf-kit", "check", "docs/okf"'],
 };
 
-/** README.md, INSTALL-AGENT.md and every Markdown file under assets/. */
+/** README.md, INSTALL-AGENT.md, docs/verification-sets.md, and every
+ * Markdown file under assets/. */
 function scannedFiles(): string[] {
-  const files = ["README.md", "INSTALL-AGENT.md"];
+  const files = ["README.md", "INSTALL-AGENT.md", "docs/verification-sets.md"];
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, entry.name);

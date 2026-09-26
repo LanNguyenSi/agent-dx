@@ -87,12 +87,12 @@ const HALT_SCOPE_PHRASE =
  */
 describe("docs enumerate every installed role", () => {
   const installAgentMd = readDoc("INSTALL-AGENT.md");
-  const readmeMd = readDoc("README.md");
+  const modelRoutingDoc = readDoc("docs/model-routing-reference.md"); // moved from README.md
   const agentsMdSection = readAsset("agents-md-section.md");
 
-  it("README model-preselection table has one row per role", () => {
+  it("model-preselection table has one row per role", () => {
     for (const role of ROLES) {
-      expect(readmeMd).toMatch(new RegExp(`^\\| ${role} \\|`, "m"));
+      expect(modelRoutingDoc).toMatch(new RegExp(`^\\| ${role} \\|`, "m"));
     }
   });
 
@@ -258,7 +258,7 @@ describe("instruction trust boundary ships in policy, skill, and agent prompts",
 
 describe("read-only posture is documented for exactly the read-only roles", () => {
   const installAgentMd = unwrap(readDoc("INSTALL-AGENT.md"));
-  const readmeMd = unwrap(readDoc("README.md"));
+  const harnessesDoc = unwrap(readDoc("docs/harnesses.md")); // moved from README.md
   const writableRoles = ROLES.filter((role) => !READ_ONLY_ROLES.has(role));
 
   // Each doc names the applicable roles immediately before the tool-restriction
@@ -300,11 +300,11 @@ describe("read-only posture is documented for exactly the read-only roles", () =
     );
   });
 
-  it("README.md scopes the read-only posture to the read-only roles", () => {
+  it("docs/harnesses.md scopes the read-only posture to the read-only roles", () => {
     assertPostureScopedToReadOnly(
-      readmeMd,
+      harnessesDoc,
       /read-only ([-\w ,]+?) also gets?/g,
-      "README.md",
+      "docs/harnesses.md",
     );
   });
 });
@@ -688,15 +688,17 @@ describe("the reviewer prompt forces an immediate first tool call", () => {
  * instead of implying full closure (the residual bit in practice: a reviewer
  * ran `git checkout` and discarded uncommitted work).
  */
-describe("README names the Bash residual honestly", () => {
+describe("docs/harnesses.md names the Bash residual honestly", () => {
   it("states instruction-only guarding for Bash without claiming closure", () => {
-    const readmeMd = unwrap(readDoc("README.md"));
-    expect(readmeMd).toContain("guarded by instruction only");
-    expect(readmeMd).toContain("role definition itself does not prevent it");
-    expect(readmeMd).toContain(
+    const harnessesDoc = unwrap(readDoc("docs/harnesses.md")); // moved from README.md
+    expect(harnessesDoc).toContain("guarded by instruction only");
+    expect(harnessesDoc).toContain(
+      "role definition itself does not prevent it",
+    );
+    expect(harnessesDoc).toContain(
       "A native read-only sandbox can block those writes",
     );
-    expect(readmeMd).toContain("out of this kit's scope");
+    expect(harnessesDoc).toContain("out of this kit's scope");
   });
 });
 
@@ -1909,24 +1911,21 @@ describe("review-method axis ships method_applied/withdrawn identically in both 
  * table (which also has an `explorer`/`task-slicer`/`implementer`/`reviewer`
  * first column, higher up in the same file) is never accidentally matched.
  */
-describe("README tier table enumerates ROLE_TIERS and DEFAULT_TIER exactly", () => {
-  const readmeMd = readDoc("README.md");
+describe("model-routing-reference.md tier table enumerates ROLE_TIERS and DEFAULT_TIER exactly", () => {
+  const modelRoutingDoc = readDoc("docs/model-routing-reference.md"); // moved from README.md's Effort tiers
 
   /** The tier table's own markdown block, isolated from the unrelated
    * model-preselection table earlier in the file (same first column). */
   function tierTableSection(): string {
-    const headerIdx = readmeMd.indexOf(
+    const headerIdx = modelRoutingDoc.indexOf(
       "| Role | Tiers available | Default tier",
     );
-    expect(
-      headerIdx,
-      "README tier table header not found",
-    ).toBeGreaterThanOrEqual(0);
-    const afterHeader = readmeMd.slice(headerIdx);
+    expect(headerIdx, "tier table header not found").toBeGreaterThanOrEqual(0);
+    const afterHeader = modelRoutingDoc.slice(headerIdx);
     const endIdx = afterHeader.indexOf("\n\n");
     expect(
       endIdx,
-      "README tier table did not terminate before a blank line",
+      "tier table did not terminate before a blank line",
     ).toBeGreaterThan(0);
     return afterHeader.slice(0, endIdx);
   }
@@ -1979,19 +1978,19 @@ describe("README tier table enumerates ROLE_TIERS and DEFAULT_TIER exactly", () 
  * line, so it is never confused with either of the two other same-shaped
  * tables earlier in the file.
  */
-describe("README tier-to-model-class table enumerates TIER_DEFS and CLASS_MODELS exactly", () => {
-  const readmeMd = readDoc("README.md");
+describe("model-routing-reference.md tier-to-model-class table enumerates TIER_DEFS and CLASS_MODELS exactly", () => {
+  const modelRoutingDoc = readDoc("docs/model-routing-reference.md"); // moved from README.md's Effort tiers
   const tiersInOrder = Object.keys(TIER_DEFS) as Tier[];
 
   function tierModelClassTableSection(): string {
-    const headerIdx = readmeMd.indexOf(
+    const headerIdx = modelRoutingDoc.indexOf(
       "| Tier | Model class | Model alias | Effort requested |",
     );
     expect(
       headerIdx,
-      "README tier-to-model-class table header not found",
+      "tier-to-model-class table header not found",
     ).toBeGreaterThanOrEqual(0);
-    const afterHeader = readmeMd.slice(headerIdx);
+    const afterHeader = modelRoutingDoc.slice(headerIdx);
     const endIdx = afterHeader.indexOf("\n\n");
     expect(
       endIdx,
@@ -2058,8 +2057,8 @@ describe("README tier-to-model-class table enumerates TIER_DEFS and CLASS_MODELS
  * guards above isolate their own tables, so a regression back to the stale
  * provider-scoped wording fails here rather than silently reappearing.
  */
-describe("README opencode-effort prose uses family terms, not the stale provider-scoped claim (review round 2, R2-M1)", () => {
-  const readmeMd = readDoc("README.md");
+describe("model-routing-reference.md opencode-effort prose uses family terms, not the stale provider-scoped claim (review round 2, R2-M1)", () => {
+  const modelRoutingDoc = readDoc("docs/model-routing-reference.md"); // moved from README.md's Effort tiers
 
   /** The opencode-effort prose block, isolated from the rest of the
    * "Effort tiers" section by its own opening bold lead-in and the next
@@ -2067,22 +2066,22 @@ describe("README opencode-effort prose uses family terms, not the stale provider
    * so a phrase elsewhere in the section can never accidentally satisfy (or
    * fail) these assertions. */
   function opencodeEffortSection(): string {
-    const startIdx = readmeMd.indexOf(
+    const startIdx = modelRoutingDoc.indexOf(
       "**opencode variants key off the resolved model's family",
     );
     expect(
       startIdx,
-      "README opencode-effort prose lead-in not found",
+      "opencode-effort prose lead-in not found",
     ).toBeGreaterThanOrEqual(0);
-    const endIdx = readmeMd.indexOf(
+    const endIdx = modelRoutingDoc.indexOf(
       "**Warning: `CLAUDE_CODE_EFFORT_LEVEL`",
       startIdx,
     );
     expect(
       endIdx,
-      "README opencode-effort prose did not terminate before the CLAUDE_CODE_EFFORT_LEVEL warning",
+      "opencode-effort prose did not terminate before the CLAUDE_CODE_EFFORT_LEVEL warning",
     ).toBeGreaterThan(startIdx);
-    return readmeMd.slice(startIdx, endIdx);
+    return modelRoutingDoc.slice(startIdx, endIdx);
   }
 
   it("carries the family-based framing, not the old provider-dependent one", () => {
@@ -4051,8 +4050,8 @@ describe("every CHANGELOG.md:# heading-section citation is backtick-delimited (r
   });
 });
 
-describe("operator-install CLI surface stays documented in README (fix round 1, L7)", () => {
-  const readmeMd = readDoc("README.md");
+describe("operator-install CLI surface stays documented (fix round 1, L7)", () => {
+  const operatorInstallDoc = readDoc("docs/operator-install.md"); // moved from README.md
   const cliTs = readDoc("src/cli.ts");
   const doctorTs = readDoc("src/doctor.ts");
 
@@ -4110,17 +4109,17 @@ describe("operator-install CLI surface stays documented in README (fix round 1, 
   });
 
   const operatorSection = (() => {
-    const start = readmeMd.indexOf("## Operator-level install");
-    const end = readmeMd.indexOf("## Ownership and re-runs", start);
-    if (start === -1 || end === -1) {
+    const start = operatorInstallDoc.indexOf("# Operator-level install");
+    const end = operatorInstallDoc.length;
+    if (start === -1) {
       throw new Error(
-        "README.md lost the Operator-level install section or its successor heading",
+        "docs/operator-install.md lost its Operator-level install heading",
       );
     }
-    return readmeMd.slice(start, end);
+    return operatorInstallDoc.slice(start, end);
   })();
 
-  it("every setup/apply/doctor/adopt option name appears verbatim inside README's Operator-level install section", () => {
+  it("every setup/apply/doctor/adopt option name appears verbatim inside docs/operator-install.md", () => {
     const missing: string[] = [];
     for (const flag of expectedFlags) {
       const boundaryRe = new RegExp(`(?<![\\w-])${flag}(?![\\w-])`);
@@ -4785,14 +4784,16 @@ describe("the CHANGELOG's release bullet names all three process rules from this
 describe("Codex routing and agent-led installation stay documented", () => {
   const installAgentMd = unwrap(readDoc("INSTALL-AGENT.md"));
   const readmeMd = unwrap(readDoc("README.md"));
+  const harnessesDoc = unwrap(readDoc("docs/harnesses.md")); // moved from README.md
+  const modelRoutingDoc = unwrap(readDoc("docs/model-routing-reference.md")); // moved from README.md
   const skillMd = unwrap(readAsset("skill/SKILL.md"));
   const agentsMdSection = unwrap(readAsset("agents-md-section.md"));
 
   it("documents the native Codex agent surface and its fallback", () => {
-    for (const doc of [readmeMd, installAgentMd, skillMd]) {
+    for (const doc of [harnessesDoc, installAgentMd, skillMd]) {
       expect(doc).toContain("`.codex/agents/");
     }
-    expect(readmeMd).toContain("`model_reasoning_effort`");
+    expect(harnessesDoc).toContain("`model_reasoning_effort`");
     expect(skillMd).toContain("inline and sequentially");
     expect(skillMd).toContain("When a named-agent selector is available");
     expect(skillMd).toContain(
@@ -4805,7 +4806,7 @@ describe("Codex routing and agent-led installation stay documented", () => {
   });
 
   it("keeps Codex reviewer sandbox claims precise", () => {
-    for (const doc of [readmeMd, skillMd]) {
+    for (const doc of [harnessesDoc, skillMd]) {
       expect(doc.toLowerCase()).toContain(
         "reviewer inherits the caller's sandbox",
       );
@@ -4817,8 +4818,8 @@ describe("Codex routing and agent-led installation stay documented", () => {
     for (const doc of [readmeMd, installAgentMd]) {
       expect(doc).toContain("--routing");
       expect(doc).toContain("--codex-catalog");
-      expect(doc).toContain("rollback");
     }
+    expect(modelRoutingDoc).toContain("rollback");
     expect(agentsMdSection).toContain("Preserve recorded routing choices");
     expect(agentsMdSection).toContain(
       "never treat a newer model as an automatic upgrade",
@@ -4848,7 +4849,7 @@ describe("Codex routing and agent-led installation stay documented", () => {
   });
 
   it("does not claim the legacy --models input configures Codex", () => {
-    expect(readmeMd).toContain("It does not configure Codex");
+    expect(modelRoutingDoc).toContain("It does not configure Codex");
     expect(installAgentMd).toContain(
       "`--models` is a backward-compatible input for Claude Code and opencode only; never use it to configure Codex",
     );
@@ -7279,25 +7280,25 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "subagent-contracts-superset.md",
     kind: "duplicate-citation",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1104,
-    end: 1104,
+    start: 1106,
+    end: 1106,
     anchorKey: "03317257",
     paragraphLine: 464,
     secondCitationLine: 468,
     claim:
-      "same opening-citation-then-closing-enumeration convention as the review-gate-consequence entry above, here at :1104/line 468: the closing list walks :1079, :1087, :1092 and ends on the cross-copy equality check the :1104 opening sentence named, leaving no further assertion of that block uncited.",
+      "same opening-citation-then-closing-enumeration convention as the review-gate-consequence entry above, here at :1106/line 468: the closing list walks :1081, :1089, :1094 and ends on the cross-copy equality check the :1106 opening sentence named, leaving no further assertion of that block uncited.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "duplicate-citation",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1260,
-    end: 1260,
+    start: 1262,
+    end: 1262,
     anchorKey: "b19680bb",
     paragraphLine: 753,
     secondCitationLine: 761,
     claim:
-      "same convention again, here at :1260/line 761: the closing list walks :1226, :1232, :1255 and ends on the not-applicable-clause pin the :1260 opening sentence named, leaving no further assertion of that block uncited.",
+      "same convention again, here at :1262/line 761: the closing list walks :1228, :1234, :1257 and ends on the not-applicable-clause pin the :1262 opening sentence named, leaving no further assertion of that block uncited.",
   },
   {
     doc: "install-fence-mechanics.md",
@@ -8095,37 +8096,37 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1035,
-    end: 1035,
+    start: 1037,
+    end: 1037,
     anchorKey: "fcc9c9f6",
     paragraphLine: 180,
-    uncitedLines: [1839, 1879],
+    uncitedLines: [1841, 1881],
     claim:
-      "line 1035 cites the reviewer-copy byte-identity test for the reproduction field; uncited 1839 and 1879 are the same equality-assertion shape inside the separate findings-block and method_applied/withdrawn-block reviewer-copy tests, which this sentence does not name.",
+      "line 1037 cites the reviewer-copy byte-identity test for the reproduction field; uncited 1841 and 1881 are the same equality-assertion shape inside the separate findings-block and method_applied/withdrawn-block reviewer-copy tests, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1104,
-    end: 1104,
+    start: 1106,
+    end: 1106,
     anchorKey: "bd3b4521",
     paragraphLine: 183,
-    uncitedLines: [1255, 5033],
+    uncitedLines: [1257, 5034],
     claim:
-      "line 1104 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1255 and 5033 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
+      "line 1106 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1257 and 5034 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 855,
-    end: 855,
+    start: 857,
+    end: 857,
     anchorKey: "9e1acc22",
     paragraphLine: 269,
-    uncitedLines: [749, 818],
+    uncitedLines: [751, 820],
     claim:
-      "line 855 is the slicer-output match inside the test proving no subagent-input field is absent from the slicer output schema, the test this sentence describes; uncited 749 is the list-shape helper's own field regex, and uncited 818 is the same match inside the separate excludes-only-immediate-envelope-fields test, neither of which this sentence names.",
+      "line 857 is the slicer-output match inside the test proving no subagent-input field is absent from the slicer output schema, the test this sentence describes; uncited 751 is the list-shape helper's own field regex, and uncited 820 is the same match inside the separate excludes-only-immediate-envelope-fields test, neither of which this sentence names.",
   },
   {
     doc: "subagent-contracts-superset.md",
@@ -8143,109 +8144,109 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1104,
-    end: 1104,
+    start: 1106,
+    end: 1106,
     anchorKey: "bd3b4521",
     paragraphLine: 464,
-    uncitedLines: [1255, 5033],
+    uncitedLines: [1257, 5034],
     claim:
-      "line 1104 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1255 and 5033 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
+      "line 1106 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1257 and 5034 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1104,
-    end: 1104,
+    start: 1106,
+    end: 1106,
     anchorKey: "bd3b4521",
     paragraphLine: 468,
-    uncitedLines: [1255, 5033],
+    uncitedLines: [1257, 5034],
     claim:
-      "line 1104 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1255 and 5033 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
+      "line 1106 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1257 and 5034 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1144,
-    end: 1144,
+    start: 1146,
+    end: 1146,
     anchorKey: "1d478a12",
     paragraphLine: 471,
-    uncitedLines: [1260],
+    uncitedLines: [1262],
     claim:
-      "line 1144 cites the test for the installed prompt's not-applicable mutation_probes clause; uncited 1260 is the same containment assertion inside the separate not-applicable commits-clause test, which this sentence does not name.",
+      "line 1146 cites the test for the installed prompt's not-applicable mutation_probes clause; uncited 1262 is the same containment assertion inside the separate not-applicable commits-clause test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 4974,
-    end: 4974,
+    start: 4975,
+    end: 4975,
     anchorKey: "ecb73fca",
     paragraphLine: 531,
-    uncitedLines: [5004],
+    uncitedLines: [5005],
     claim:
-      "line 4974 cites the test that step 6 treats a replayed probe that now survives or cannot be applied as a regression signal; uncited 5004 is the same regression-signal sentence quoted again inside the separate workflow-step-6-source test, which this sentence does not name.",
+      "line 4975 cites the test that step 6 treats a replayed probe that now survives or cannot be applied as a regression signal; uncited 5005 is the same regression-signal sentence quoted again inside the separate workflow-step-6-source test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 4992,
-    end: 4992,
+    start: 4993,
+    end: 4993,
     anchorKey: "2e18ea4a",
     paragraphLine: 535,
-    uncitedLines: [6444],
+    uncitedLines: [6445],
     claim:
-      "line 4992 cites the test that the installed implementer prompt carries the same regression-signal consequence; uncited 6444 is unrelated fixture prose inside the separate shape-3 sibling-guard fixture test that happens to share a short word run with that consequence sentence, which this sentence does not name.",
+      "line 4993 cites the test that the installed implementer prompt carries the same regression-signal consequence; uncited 6445 is unrelated fixture prose inside the separate shape-3 sibling-guard fixture test that happens to share a short word run with that consequence sentence, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 5032,
-    end: 5032,
+    start: 5033,
+    end: 5033,
     anchorKey: "a4566152",
     paragraphLine: 537,
-    uncitedLines: [1149],
+    uncitedLines: [1151],
     claim:
-      "line 5032 cites the test that both output contract copies carry a byte-identical mutation_probes block; uncited 1149 is the same boolean-literal phrase inside the separate exact-sub-field-names test earlier in the file, which this sentence does not name.",
+      "line 5033 cites the test that both output contract copies carry a byte-identical mutation_probes block; uncited 1151 is the same boolean-literal phrase inside the separate exact-sub-field-names test earlier in the file, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1260,
-    end: 1260,
+    start: 1262,
+    end: 1262,
     anchorKey: "1d478a12",
     paragraphLine: 753,
-    uncitedLines: [1144],
+    uncitedLines: [1146],
     claim:
-      "line 1260 cites the test for the installed prompt's not-applicable commits clause; uncited 1144 is the same containment assertion inside the separate not-applicable mutation_probes-clause test, which this sentence does not name.",
+      "line 1262 cites the test for the installed prompt's not-applicable commits clause; uncited 1146 is the same containment assertion inside the separate not-applicable mutation_probes-clause test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1255,
-    end: 1255,
+    start: 1257,
+    end: 1257,
     anchorKey: "bd3b4521",
     paragraphLine: 758,
-    uncitedLines: [1104, 5033],
+    uncitedLines: [1106, 5034],
     claim:
-      "line 1255 cites the implementer-copy byte-identity test for the commits field; uncited 1104 and 5033 are the same equality-assertion shape inside the separate mutation_probes-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
+      "line 1257 cites the implementer-copy byte-identity test for the commits field; uncited 1106 and 5034 are the same equality-assertion shape inside the separate mutation_probes-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1260,
-    end: 1260,
+    start: 1262,
+    end: 1262,
     anchorKey: "1d478a12",
     paragraphLine: 761,
-    uncitedLines: [1144],
+    uncitedLines: [1146],
     claim:
-      "line 1260 cites the test for the installed prompt's not-applicable commits clause; uncited 1144 is the same containment assertion inside the separate not-applicable mutation_probes-clause test, which this sentence does not name.",
+      "line 1262 cites the test for the installed prompt's not-applicable commits clause; uncited 1146 is the same containment assertion inside the separate not-applicable mutation_probes-clause test, which this sentence does not name.",
   },
 ];
 
@@ -12320,17 +12321,17 @@ describe("findSameLineAnchorCollapses itself reports and abstains", () => {
 // it doesn't reshuffle the many existing docs/okf citations into this file
 // by line number (the same reasoning test/init.test.ts's own appended
 // write-boundary block already documents).
-describe("README's read-only posture section states the reviewer's narrower write boundary", () => {
-  const readmeMd = readDoc("README.md");
+describe("docs/harnesses.md states the reviewer's narrower write boundary", () => {
+  const harnessesDoc = readDoc("docs/harnesses.md"); // moved from README.md
 
   it("names the reviewer's write-allowed locations and the forbidden ref/object commands", () => {
-    expect(readmeMd).toContain(
+    expect(harnessesDoc).toContain(
       'The reviewer\'s own write boundary is narrower than "read-only": it may write',
     );
-    expect(readmeMd).toContain(
+    expect(harnessesDoc).toContain(
       "the run directory's `evidence/`, and nowhere else.",
     );
-    expect(readmeMd).toContain(
+    expect(harnessesDoc).toContain(
       "It never writes into the\nreviewed tree, its index, its refs, or its object store",
     );
     for (const token of [
@@ -12339,7 +12340,7 @@ describe("README's read-only posture section states the reviewer's narrower writ
       "`git update-ref`, no",
       "`git gc`,",
     ]) {
-      expect(readmeMd).toContain(token);
+      expect(harnessesDoc).toContain(token);
     }
   });
 });

@@ -12,7 +12,16 @@
     "assets",
     "README.md",
     "INSTALL-AGENT.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "docs/architecture.md",
+    "docs/harnesses.md",
+    "docs/install-reference.md",
+    "docs/model-routing-reference.md",
+    "docs/operator-install.md",
+    "docs/role-profile-reference.md",
+    "docs/run-contracts.md",
+    "docs/validate-review-report.md",
+    "docs/verification-sets.md"
   ],
   "scripts": {
     "build": "tsc",

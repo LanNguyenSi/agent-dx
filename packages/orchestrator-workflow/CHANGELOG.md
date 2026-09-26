@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- README restructured around the package README standard (P1-P9): moved
+  deep reference material (architecture rationale, run contracts, install
+  internals, harness file list and read-only posture, role profile detail,
+  model routing reference, the verification-sets JSON example, and the
+  `validate-review-report` CLI reference) into `docs/*.md`, linked from a
+  new Documentation section. `files` now lists those docs so they ship on
+  npm (`docs/okf/`, the curated knowledge bundle, is not part of the
+  package and stays out of `files`).
+
 ## [0.42.0] - 2026-09-25
 
 - Outward cross-check (evidence-and-probes.md, Delegate implementation): a
