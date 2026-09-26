@@ -5004,8 +5004,9 @@ describe("phpunitDetector: unreadable-result tightening mutants, each pinned by 
     // A bare `\s*` padding matches a newline too, so under the `m` flag
     // a match starting on the marker line could swallow the line break
     // and read the marker line plus the counter line below it as ONE
-    // combined row, even though the docblock, README and CHANGELOG all
-    // describe this pattern as anchored to a single whole line. A
+    // combined row, even though the docblock, docs/non-js-test-runners.md
+    // and CHANGELOG all describe this pattern as anchored to a single
+    // whole line. A
     // boolean `.test()` alone cannot prove this either way here: the
     // counter line by itself, with zero leading marker characters, is
     // already a valid match on its own, so `.test()` on this input

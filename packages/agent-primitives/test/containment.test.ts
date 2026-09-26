@@ -16,8 +16,8 @@ import {
  * path under the root is caught whatever quoting, escaping, `=`-form,
  * wrapper or separator noise surrounds it, and everything that reaches
  * the root without spelling it that way is a residual (the scope
- * statement and the residual list live on the function itself, in the
- * README and in the CHANGELOG entry). These tests pin that contract
+ * statement and the residual list live on the function itself, in
+ * docs/probe.md and in the CHANGELOG entry). These tests pin that contract
  * directly -- which spellings count, where a match ends, what the
  * scratch-root exemption covers -- beneath the full `probe()` harness
  * `probe-refusal-contract.test.ts` and `plan.test.ts` exercise.
@@ -1025,7 +1025,7 @@ describe("escapingRootMentions(): the scratch match's own boundary is closed to 
     const scratchRoot = path.join(root, "l");
     fs.mkdirSync(scratchRoot);
     // Documented over-refusal (this file's `escapingRootMentions`
-    // docblock, README, CHANGELOG): a space is not one of the four
+    // docblock, docs/probe.md, CHANGELOG): a space is not one of the four
     // accepted terminators, so the scratch match is not validated
     // here, and the mention is reported instead of exempted.
     const text = `cd ${scratchRoot} && node t.js`;
