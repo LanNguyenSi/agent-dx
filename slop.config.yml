@@ -106,6 +106,16 @@ placement:
     # mechanical freshness guard. See packages/slop-detector/CHANGELOG.md
     # for the rationale and the corpus measurements behind both decisions.
     - "packages/*/README.md"
+    # Package reference docs: the README refresh moved large reference
+    # sections out of packages/*/README.md into packages/*/docs/*.md,
+    # which is public reference text (shipped on npm where a package's `files` include docs/) with the same leak
+    # risk. A single "*" segment never crosses "/" (see
+    # packages/slop-detector/src/util/file-kind.ts's globToRegex), so this
+    # pattern only reaches a file directly inside a package's own docs/
+    # directory; it does not reach packages/*/docs/okf/** (an extra "okf/"
+    # segment) or any other nested docs subdirectory, so the OKF-bundle
+    # carve-out above stays intact without a separate exclude.
+    - "packages/*/docs/*.md"
     # Repo-root procedure doc: reusable across contributors, same leak
     # risk as a README.
     - "CONTRIBUTING.md"
