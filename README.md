@@ -1,47 +1,10 @@
 # agent-dx
 
-A monorepo workshop for agent-development tooling: CLIs, linters, and playbooks built while shipping AI-agent coding workflows in practice. Two packages ship on npm; the rest are working tools used inside this workshop and its sibling repos.
+A monorepo workshop for agent-development tooling, built while shipping AI-agent coding workflows in practice.
 
-## Shipping on npm
+## Overview
 
-### orchestrator-workflow
-
-Installer for an orchestrator-led agent workflow: a `.ai/` directory for run state, a marker-fenced policy section in `AGENTS.md`, and subagent definitions with preselected models for Claude Code, OpenAI Codex, and opencode.
-
-```bash
-npx orchestrator-workflow init
-```
-
-See [packages/orchestrator-workflow](packages/orchestrator-workflow) for the full install and usage guide.
-
-### okf-kit
-
-Validates knowledge bundles against the Open Knowledge Format (OKF) v0.1 spec: frontmatter shape, reserved files, link resolution, absolute-link warnings, `sources` shape.
-
-```bash
-npx okf-kit check path/to/bundle
-```
-
-See [packages/okf-kit](packages/okf-kit) for the full install and usage guide.
-
-## slop-detector
-
-[`slop-detector`](packages/slop-detector) is the AI-slop linter for PRs: it catches leaked tool-call XML, doubled `## Summary` headings, hedging openers, marketing adjectives, JSDoc on trivial getters, and other agent-generated tells across eight rule packs (`agent-tics`, `prose-slop`, `comment-slop`, `code-slop`, `ui-slop`, `placement-slop`, `workflow-slop`, `review-slop`; some packs are opt-in). It runs in pre-commit, in CI as a status check, or ad-hoc against a path.
-
-Not yet published to npm (the bare `slop-detector` name belongs to an unrelated third-party package), so it runs from a local build:
-
-```bash
-cd packages/slop-detector && npm install && npm run build && cd ../..
-node packages/slop-detector/dist/cli.js check examples/slop-sample.md --explain
-```
-
-Full pack reference, sample output, the scan pipeline, and the rationale (including a data point from running it against 20 recently merged PRs): [packages/slop-detector/README.md](packages/slop-detector/README.md).
-
-CI runs dedicated `placement-guard` and `review-guard` jobs for the repository,
-plus an `OKF bundle prose guard` that blocks em dashes and hedging openers in the
-orchestrator-workflow knowledge bundle. The root review configuration keeps the
-maintained OKF evidence corpus and deliberate rule fixtures out of that
-reusable-content gate.
+`agent-dx` collects the CLIs, linters, and playbooks used to build and review AI-agent coding workflows across this workshop and its sibling repos. It is a folder of independent packages, not an npm workspaces, pnpm, or lerna monorepo: there is no root `package.json` and no shared root `node_modules`. Three packages ship on npm today: orchestrator-workflow, okf-kit, and agent-primitives. The rest are working tools or documentation packages. See [Repo layout and package status](docs/repo-layout.md) for how the packages relate to each other.
 
 ## Packages
 
@@ -49,38 +12,57 @@ reusable-content gate.
 |---------|--------------|-----|
 | [orchestrator-workflow](packages/orchestrator-workflow) | Installer for an orchestrator-led agent workflow: `.ai/` run state, an `AGENTS.md` policy section, and subagent definitions with preselected models for Claude Code, Codex, and opencode. | published |
 | [okf-kit](packages/okf-kit) | CLI that validates OKF v0.1 knowledge bundles: frontmatter shape, reserved files, link resolution, absolute-link warnings, `sources` shape. | published |
-| [slop-detector](packages/slop-detector) | AI-slop linter for PRs: leaked tool-call XML, doubled Summary headings, hedging openers, marketing adjectives, and more across eight rule packs. | not published (name taken; run from a local build) |
 | [agent-primitives](packages/agent-primitives) | Agent-first CLI: bounded JSON envelopes, a mutation-probe runner, a verify runner, and a PATH doctor, plus an `init` command that installs its own skill document into a harness's skill directory. | published |
+| [slop-detector](packages/slop-detector) | AI-slop linter for PRs: catches leaked tool-call XML, doubled Summary headings, hedging openers, marketing adjectives, and other agent-generated tells across eight rule packs. | not published (name taken by an unrelated package; run from a local build) |
 | [agent-dev-kit](packages/agent-dev-kit) | CLI scaffolding for AI agent projects: file layout, hooks, entrypoints. | not published |
 | [friction-log](packages/friction-log) | Capture, query, and infer agent-workflow frictions. SQLite-backed, sink-pluggable, zero-config default. | not published |
-| [github-api-tool](packages/github-api-tool) | TypeScript CLI for GitHub API operations (issues, PRs, commits, standup digests), JSON output for agents calling via `exec`. | private |
 | [git-batch-cli](packages/git-batch-cli) | Run safe batch git operations across all repos under a folder: sync, status, dirty checks, fetch, with `--strict` for automation. | not published |
 | [mcp-token-audit](packages/mcp-token-audit) | Ranks tool calls in Claude Code transcripts by approximate token cost per tool name, with an `mcp__*` share of the total. | not published |
+| [github-api-tool](packages/github-api-tool) | TypeScript CLI for GitHub API operations (issues, PRs, commits, standup digests), JSON output for agents calling via `exec`. | private |
 | [agent-engineering-playbook](packages/agent-engineering-playbook) | Guide for building production-ready AI agent systems. | doc package |
 | [agentic-coding-playbook](packages/agentic-coding-playbook) | Practical playbook for teams using AI agents in coding. | doc package |
 
-## Repo layout
+## Quick start
 
-`agent-dx` is a folder of independent packages, not an npm workspaces / pnpm / lerna monorepo. There is no root `package.json`, no workspace manifest, and no shared root `node_modules`. Each package under `packages/` carries its own `package.json`, install, build, test, and version, so the install pattern for any local-build package is the same one shown above for `slop-detector`:
+Requires Node.js >= 20 (CI runs on Node 22).
+
+Try one of the published CLIs directly:
 
 ```bash
-cd packages/<name> && npm install && npm run build
+npx orchestrator-workflow init
+npx okf-kit check path/to/bundle
 ```
 
-If you only care about one package, work in its directory; nothing at the root needs to be set up first.
+For any other package, clone the repo, then build that one package locally:
 
-## Status
+```bash
+git clone https://github.com/LanNguyenSi/agent-dx
+cd agent-dx/packages/<name>
+npm install
+npm run build
+```
 
-Experimental: each package has its own version, README, and CI. APIs may evolve at minor-version bumps. `orchestrator-workflow` and `okf-kit` are published to npm with tagged releases. `slop-detector` is deliberately unpublished (the bare name on npm belongs to an unrelated package) and ships an MCP server alongside the CLI. `agent-dev-kit`, `friction-log`, `git-batch-cli`, and `mcp-token-audit` are functional CLIs, not yet on npm. `github-api-tool` is marked private in its own `package.json`. `agent-engineering-playbook` and `agentic-coding-playbook` are documentation packages, not code.
+## Usage
 
-## Where this fits
+Example: run the AI-slop linter against a Markdown file from a local build.
 
-`slop-detector` and the workshop around it contribute the authoring-side tooling to the [Project OS](https://github.com/LanNguyenSi/project-pilot) human-agent dev lifecycle. It sits alongside:
+```bash
+cd packages/slop-detector && npm install && npm run build && cd ../..
+node packages/slop-detector/dist/cli.js check examples/slop-sample.md --explain
+```
 
-- [agent-planforge](https://github.com/LanNguyenSi/agent-planforge) plans
-- [agent-tasks](https://github.com/LanNguyenSi/agent-tasks) coordinates
-- [agent-grounding](https://github.com/LanNguyenSi/agent-grounding) verifies (evidence ledger, claim gate, hypothesis tracker)
-- [agent-preflight](https://github.com/LanNguyenSi/agent-preflight) gates pushes
-- [harness](https://github.com/LanNguyenSi/harness) declares + enforces the policy boundary that calls into all of the above
+## Documentation
 
-[scaffoldkit](https://github.com/LanNguyenSi/scaffoldkit) and [agent-planforge](https://github.com/LanNguyenSi/agent-planforge) are standalone tools used by [project-forge](https://github.com/LanNguyenSi/project-forge).
+- [Repo layout and package status](docs/repo-layout.md): why this is not a workspace monorepo, and which packages are published, private, or doc-only.
+- [Where this fits](docs/ecosystem.md): how `slop-detector` and this workshop relate to the sibling Project OS repos.
+- [CI checks on this repository](docs/ci-checks.md): what `placement-guard`, `review-guard`, and the OKF bundle prose guard enforce.
+- Full pack reference, sample output, and the scan pipeline for `slop-detector`: [packages/slop-detector/README.md](packages/slop-detector/README.md).
+- Each package's own README covers its full install, usage, and API.
+
+## Development and contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for issue and PR conventions, the dev setup per package (`npm install`, `npm run build`, `npm test`), and the release process.
+
+## License
+
+MIT, see [LICENSE](LICENSE). Experimental: each package has its own version and CI, and APIs may evolve at minor-version bumps.
