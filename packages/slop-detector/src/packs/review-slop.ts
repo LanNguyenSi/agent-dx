@@ -557,7 +557,7 @@ const handoffPhrase: Rule = {
   defaultSeverity: "warn",
   enabledByDefault: true,
   rationale:
-    "A workspace-handoff phrase (`per the <workspace> handoffs`, e.g. `per the pandora handoffs`) points a reader at a run-local operating layer -- a workspace's own conventions, paths, or governance -- that a package shipped to other repos or orgs has no access to.",
+    "A workspace-handoff phrase (`per the <workspace> handoffs`, e.g. `per the acme-corp handoffs`) points a reader at a run-local operating layer -- a workspace's own conventions, paths, or governance -- that a package shipped to other repos or orgs has no access to.",
   appliesTo: appliesToReviewSurface,
   check(ctx: RuleContext): Violation[] {
     return checkReviewTokenRule(

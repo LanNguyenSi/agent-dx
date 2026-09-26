@@ -53,7 +53,7 @@ or misleading the moment that cycle is over.
   and inside a block comment each ` * ` gutter line starts a new one, so
   a context word on the previous comment line does not count.
 - **`handoff-phrase`** (warn): `per the <workspace> handoffs` (e.g.
-  `per the pandora handoffs`), points a reader at a workspace's own
+  `per the acme-corp handoffs`), points a reader at a workspace's own
   operating layer that a package shipped to other repos has no access
   to.
 
