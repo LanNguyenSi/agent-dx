@@ -79,24 +79,6 @@ function ensureClassField(
   return content.replace(anchor, `${anchor}\n${fieldLine}`);
 }
 
-function ensureConstructorTriologue(content: string): string {
-  if (content.includes("this.triologue = new Triologue")) {
-    return content;
-  }
-
-  const assignmentPattern =
-    /(\s*this\.name = process\.env\.AGENT_NAME \|\| '.*';)/;
-  const match = content.match(assignmentPattern);
-  if (!match) {
-    throw new Error(
-      "Could not update src/index file: expected AGENT_NAME assignment in constructor.",
-    );
-  }
-
-  const block = `\n    if (process.env.BYOA_TOKEN) {\n      this.triologue = new Triologue({\n        baseUrl: process.env.TRIOLOGUE_URL || 'https://opentriologue.ai',\n        token: process.env.BYOA_TOKEN,\n      });\n    }`;
-  return content.replace(assignmentPattern, `${match[1]}${block}`);
-}
-
 function ensureSummaryFeature(content: string, featureLabel: string): string {
   const summaryPattern = /const enabledFeatures = \[([^\]]*)\];/;
   const match = content.match(summaryPattern);
@@ -359,30 +341,6 @@ async function ensureEnvBlock(
   return changed;
 }
 
-async function ensureTriologueDependency(projectDir: string): Promise<boolean> {
-  const packagePath = path.join(projectDir, "package.json");
-  if (!(await fs.pathExists(packagePath))) {
-    throw new Error("Could not find package.json in the current directory.");
-  }
-
-  const packageJson = JSON.parse(await fs.readFile(packagePath, "utf8")) as {
-    dependencies?: Record<string, string>;
-  };
-
-  packageJson.dependencies ??= {};
-  if (packageJson.dependencies["triologue-sdk"]) {
-    return false;
-  }
-
-  packageJson.dependencies["triologue-sdk"] = "^0.1.0";
-  await fs.writeFile(
-    packagePath,
-    `${JSON.stringify(packageJson, null, 2)}\n`,
-    "utf8",
-  );
-  return true;
-}
-
 export async function addFeatureToProject(
   options: AddFeatureOptions,
 ): Promise<AddFeatureResult> {
@@ -459,39 +417,6 @@ export async function addFeatureToProject(
       console.log(\`Loaded \${this.skills.length} skill(s). Example output: \${preview}\`);
     }`,
     );
-  }
-
-  if (feature === "triologue") {
-    indexContent = ensureImport(
-      indexContent,
-      "import { Triologue } from 'triologue-sdk';",
-    );
-    indexContent = ensureClassField(
-      indexContent,
-      extension === "ts" ? "  private name: string;" : "  name;",
-      extension === "ts" ? "  private triologue?: Triologue;" : "  triologue;",
-    );
-    indexContent = ensureConstructorTriologue(indexContent);
-    indexContent = ensureSummaryFeature(indexContent, "'triologue'");
-    indexContent = ensureRunSnippet(
-      indexContent,
-      `    if (this.triologue) {
-      console.log('Triologue client configured.');
-    }`,
-    );
-
-    if (await ensureTriologueDependency(options.projectDir)) {
-      updatedFiles.push(path.join(options.projectDir, "package.json"));
-    }
-
-    if (
-      await ensureEnvBlock(options.projectDir, [
-        "BYOA_TOKEN=your-token-here",
-        "TRIOLOGUE_URL=https://opentriologue.ai",
-      ])
-    ) {
-      updatedFiles.push(path.join(options.projectDir, ".env.example"));
-    }
   }
 
   if (indexContent !== originalIndexContent) {

@@ -23,7 +23,6 @@ describe("addFeatureToProject", () => {
       description: "feature-memory",
       features: {
         memory: false,
-        triologue: false,
         skills: false,
       },
       options: {
@@ -67,13 +66,12 @@ describe("addFeatureToProject", () => {
     expect(envExample).toContain("MEMORY_BACKEND=local");
   });
 
-  it("adds triologue wiring and dependency to a JavaScript project", async () => {
+  it("rejects the removed triologue feature", async () => {
     const projectDir = await createGeneratedProject({
       name: "feature-triologue",
       description: "feature-triologue",
       features: {
         memory: false,
-        triologue: false,
         skills: false,
       },
       options: {
@@ -83,38 +81,14 @@ describe("addFeatureToProject", () => {
       },
     });
 
-    const result = await addFeatureToProject({
-      projectDir,
-      feature: "triologue",
-    });
-
-    expect(result.feature).toBe("triologue");
-    expect(result.alreadyPresent).toBe(false);
-
-    const indexContent = await readFile(
-      path.join(projectDir, "src/index.js"),
-      "utf8",
+    await expect(
+      addFeatureToProject({
+        projectDir,
+        feature: "triologue",
+      }),
+    ).rejects.toThrow(
+      "Unknown feature: triologue. Allowed features: memory, skills.",
     );
-    expect(indexContent).toContain(
-      "import { Triologue } from 'triologue-sdk';",
-    );
-    expect(indexContent).toContain("triologue;");
-    expect(indexContent).toContain("this.triologue = new Triologue({");
-    expect(indexContent).toContain(
-      "const enabledFeatures = ['core runtime', 'triologue'];",
-    );
-
-    const packageJson = JSON.parse(
-      await readFile(path.join(projectDir, "package.json"), "utf8"),
-    ) as { dependencies: Record<string, string> };
-    expect(packageJson.dependencies["triologue-sdk"]).toBe("^0.1.0");
-
-    const envExample = await readFile(
-      path.join(projectDir, ".env.example"),
-      "utf8",
-    );
-    expect(envExample).toContain("BYOA_TOKEN=your-token-here");
-    expect(envExample).toContain("TRIOLOGUE_URL=https://opentriologue.ai");
   });
 
   it("is idempotent when the same feature is added twice", async () => {
@@ -123,7 +97,6 @@ describe("addFeatureToProject", () => {
       description: "feature-idempotent",
       features: {
         memory: false,
-        triologue: false,
         skills: false,
       },
       options: {
@@ -163,7 +136,6 @@ async function createGeneratedProject(
     description: overrides.description,
     features: overrides.features ?? {
       memory: false,
-      triologue: false,
       skills: false,
     },
     options: overrides.options ?? {

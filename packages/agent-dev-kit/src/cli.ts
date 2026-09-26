@@ -28,7 +28,7 @@ program
   .description("Create a new agent project")
   .option(
     "-f, --features <features>",
-    "Comma-separated features: memory,triologue,skills",
+    "Comma-separated features: memory,skills",
   )
   .option("--no-git", "Skip git initialization")
   .option("--no-install", "Skip npm install")
@@ -48,7 +48,6 @@ program
             message: "Select features to include:",
             choices: [
               { name: "🧠 Memory System", value: "memory" },
-              { name: "📡 Triologue Integration", value: "triologue" },
               { name: "🎯 Skills Framework", value: "skills" },
             ],
           },

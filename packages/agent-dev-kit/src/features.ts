@@ -1,6 +1,6 @@
 import type { AgentFeatures } from "./types.js";
 
-export const FEATURE_NAMES = ["memory", "triologue", "skills"] as const;
+export const FEATURE_NAMES = ["memory", "skills"] as const;
 
 export type FeatureName = (typeof FEATURE_NAMES)[number];
 
@@ -9,7 +9,6 @@ const FEATURE_SET = new Set<FeatureName>(FEATURE_NAMES);
 export function createEmptyFeatureSelection(): AgentFeatures {
   return {
     memory: false,
-    triologue: false,
     skills: false,
   };
 }

@@ -9,14 +9,19 @@ describe("parseFeatureFlags", () => {
   it("parses comma-separated values with whitespace and duplicates", () => {
     expect(parseFeatureFlags("memory, skills, memory")).toEqual({
       memory: true,
-      triologue: false,
       skills: true,
     });
   });
 
   it("rejects unknown feature names", () => {
     expect(() => parseFeatureFlags("memory,unknown")).toThrow(
-      "Unknown features: unknown. Allowed features: memory, triologue, skills.",
+      "Unknown features: unknown. Allowed features: memory, skills.",
+    );
+  });
+
+  it("rejects the removed triologue feature", () => {
+    expect(() => parseFeatureFlags("memory,triologue")).toThrow(
+      "Unknown features: triologue. Allowed features: memory, skills.",
     );
   });
 });
