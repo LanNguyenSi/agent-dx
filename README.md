@@ -56,7 +56,7 @@ node packages/slop-detector/dist/cli.js check examples/slop-sample.md --explain
 - [Repo layout and package status](docs/repo-layout.md): why this is not a workspace monorepo, and which packages are published, private, or doc-only.
 - [Where this fits](docs/ecosystem.md): how `slop-detector` and this workshop relate to the sibling Project OS repos.
 - [CI checks on this repository](docs/ci-checks.md): what `placement-guard`, `review-guard`, and the OKF bundle prose guard enforce.
-- Full pack reference, sample output, and the scan pipeline for `slop-detector`: [packages/slop-detector/README.md](packages/slop-detector/README.md).
+- `slop-detector` overview and quick start: [packages/slop-detector/README.md](packages/slop-detector/README.md); full pack reference and the scan pipeline: [packages/slop-detector/docs/rule-packs.md](packages/slop-detector/docs/rule-packs.md) and [packages/slop-detector/docs/integration.md](packages/slop-detector/docs/integration.md).
 - Each package's own README covers its full install, usage, and API.
 
 ## Development and contributing

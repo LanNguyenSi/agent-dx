@@ -15,8 +15,6 @@ review:
     - "packages/slop-detector/src/packs/review-slop.ts"
     # This fixture asserts the literal examples and their allow semantics.
     - "packages/slop-detector/test/review-slop.test.ts"
-    # This package reference documents the literal review-slop examples.
-    - "packages/slop-detector/README.md"
     # Grandfather legacy CLI test titles/comments; excludes this entire file, including future content.
     - "packages/agent-primitives/test/cli.test.ts"
     # Grandfather legacy mutation test titles/comments; excludes this entire file, including future content.
@@ -73,7 +71,8 @@ review:
     - 'clean structural diagnostic; fix-round, review finding L2\)'
     - 'structural diagnostic \(fix-round, review finding L1\)'
     - 'fields the return actually carried \(fix-round, review finding L3\)'
-    # Both package README hits describe stable product vocabulary, not a run.
+    # Both package doc hits (friction-log/docs/design.md, okf-kit/docs/citations.md)
+    # describe stable product vocabulary, not a run.
     - 'M5\+ roadmap'
     - 'rule table above for the exact finding names'
     # The two okf-kit comments use L1 as documented grammar, not a review id.
@@ -138,7 +137,3 @@ placement:
     # "/home/<realname>/" still fire. See CHANGELOG for the measurement
     # behind this entry.
     - "~/"
-    # Same reasoning, for a README that spells the generic placeholder as
-    # the literal word "you" instead of an angle-bracket placeholder.
-    # Exact literal match, cannot match a real username.
-    - "/Users/you/"
