@@ -2391,7 +2391,7 @@ function enforceEnvelopeBudget(
  * length this correction may since have made stale -- but ONLY a prior
  * warning about THIS `maxChars`. A warning stating a length that failed
  * to fit a DIFFERENT, harsher bound from a prior reduction pass (the
- * very shape the README's "prior, harsher reduction pass" clause
+ * very shape docs/probe.md's "prior, harsher reduction pass" clause
  * blesses) remains true regardless of what this call's own `maxChars`
  * is, so it is deliberately left unmatched here: neither
  * `pushBudgetOverrunWarning`'s replace filter nor

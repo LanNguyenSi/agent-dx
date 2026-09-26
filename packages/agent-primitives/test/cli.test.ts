@@ -3207,17 +3207,19 @@ describe("cli: probe", () => {
     );
   });
 
-  it("README.md's --plan exclusivity sentence names exactly PLAN_EXCLUSIVE_OPTIONS's flags: a third hand-mirrored copy pinned against drift", async () => {
-    // README.md carries its own prose mirror of the same flag list
+  it("docs/probe.md's --plan exclusivity sentence names exactly PLAN_EXCLUSIVE_OPTIONS's flags: a third hand-mirrored copy pinned against drift", async () => {
+    // docs/probe.md (moved from README.md when the package README was
+    // restructured) carries its own prose mirror of the same flag list
     // (independent of both cli.ts's array and its generated --help
     // sentence, pinned above). This test reads that sentence back out
-    // of the committed README and asserts its flags match
+    // of the committed doc and asserts its flags match
     // PLAN_EXCLUSIVE_OPTIONS exactly, so a flag added to the array
-    // without updating the README sentence is caught here too.
+    // without updating the doc sentence is caught here too.
     const readmePath = path.join(
       path.dirname(fileURLToPath(import.meta.url)),
       "..",
-      "README.md",
+      "docs",
+      "probe.md",
     );
     const readme = fs.readFileSync(readmePath, "utf8");
     const marker = "`--plan` is mutually exclusive with ";

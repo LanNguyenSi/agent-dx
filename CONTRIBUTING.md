@@ -136,7 +136,9 @@ no pin of its own to bump. One step is its own: when
 above the package's version before the bump), the release commit makes
 that entry's `version` equal to the version being released; a release
 that did not touch `assets/skill/SKILL.md` leaves the ledger as it is (see
-"The skill digest ledger" in the package README) before tagging.
+"The skill digest ledger" in
+[packages/agent-primitives/docs/init.md](packages/agent-primitives/docs/init.md))
+before tagging.
 
 ### Comparing a release candidate with a published version
 

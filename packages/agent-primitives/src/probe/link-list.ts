@@ -8,7 +8,7 @@ import path from "node:path";
  * fine.
  *
  * Every `link` value that reaches `git`/`fs` already does so through an
- * argv array or a direct syscall, never a shell (see the README's
+ * argv array or a direct syscall, never a shell (see docs/probe.md's
  * isolation section), so a `$(...)` or a backtick in one is inert either
  * way. This check is defense in depth on the two sources that come from
  * a FILE rather than being typed on the command line by the person
@@ -159,7 +159,7 @@ export function canonicalDestinationSpelling(destination: string): string {
  * each source's own `values` resolved against its own `base` before
  * comparison (a `--plan` file's and the repo defaults file's `link`
  * entries are relative to the repository root; `--link` is relative to
- * the invocation cwd -- see the README's `--plan` and "repo defaults
+ * the invocation cwd -- see docs/probe.md's `--plan` and "repo defaults
  * file" sections). Groups are folded in the order given; a later
  * group's value that resolves to a path an earlier group already added
  * is dropped, never the other way around, so "later sources add, none
@@ -228,7 +228,7 @@ export function mergeLinkSources(
  * resolved against -- `link.basePhrase`, carried by `mergeLinkSources`
  * from the owning group (`"the invocation cwd"` for `--link`, `"the
  * repository root"` for a `--plan` file's and the defaults file's
- * entries; see the README's `--link` and "Non-JS repositories"
+ * entries; see docs/probe.md's `--link` and "Non-JS repositories"
  * sections). A source that exists but is a FILE, not a directory, is
  * refused the same way, named accordingly. A `stat` that fails for a
  * reason OTHER than "not there" (an ancestor directory locked against

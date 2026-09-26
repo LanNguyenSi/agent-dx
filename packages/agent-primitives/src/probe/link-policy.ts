@@ -46,7 +46,7 @@ export interface LinkCandidate {
  * path an operator typed on the command line (`--link`), which carries
  * neither provenance flag. A directory repository content named
  * (`namedBy`) and one the walk found on disk (`discovered`) are both
- * asked what git tracks; the operator's own is not, and the README's
+ * asked what git tracks; the operator's own is not, and docs/probe.md's
  * rule 3 says what that latitude costs.
  *
  * One exported predicate rather than the condition written out at each

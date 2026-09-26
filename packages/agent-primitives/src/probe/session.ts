@@ -275,9 +275,9 @@ export type RefusalReason =
  * mechanically, one shared lookup rather than a per-call-site flag;
  * `index.ts` reads it a second time, by `mutationProbe`, to decide
  * `mutation_probe`. Checked exhaustively against `probe()`'s own
- * behavior by `test/probe-refusal-contract.test.ts`, and against the
- * README's "Refusal reason shape" table (under "Result shape") by
- * `test/readme-conformance.test.ts`; update all three together with any
+ * behavior by `test/probe-refusal-contract.test.ts`, and against
+ * docs/probe.md's "Refusal reason shape" table (under "Result shape")
+ * by `test/readme-conformance.test.ts`; update all three together with any
  * change here. */
 export const REFUSAL_RESULT_SHAPE: Record<
   RefusalReason,
@@ -1208,7 +1208,7 @@ export interface MutantRuntime {
    * distinguishes a genuine crash (no output at all, an unusual exit
    * code) from a real test failure once the regex alone can no longer
    * tell the two apart (both read as "failed": neither's output matches
-   * the pattern). See the README's `--pass-regex` section for the
+   * the pattern). See docs/probe.md's `--pass-regex` section for the
    * motivating case (phpunit 9.6 exiting 1 on a green suite because of
    * deprecation notices). */
   passRegex?: RegExp;

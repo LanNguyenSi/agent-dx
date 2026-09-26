@@ -624,7 +624,7 @@ function isPathBoundaryAt(text: string, index: number): boolean {
  * general rule this narrowing adopts); the ANSI-C-escape and
  * bare-quoted-mention cases the previous, ender-based rule named as
  * residuals are two instances of this same general over-refusal, not
- * separate cases (README, `escapingRootMentions` below, CHANGELOG).
+ * separate cases (docs/probe.md, `escapingRootMentions` below, CHANGELOG).
  */
 function isScratchPathBoundaryAt(text: string, index: number): boolean {
   const i = skipLineContinuations(text, index);
@@ -912,7 +912,7 @@ function exemptsScratchRoot(root: string, scratchRoot: string): boolean {
  * (`isPathBoundaryAt`) and, where the filesystem folds case, casing
  * are covered; anything that reaches the root without spelling it out
  * in a form this scan models is a residual. The residuals KNOWN
- * TODAY, which is not a claim that they are all of them (the README's
+ * TODAY, which is not a claim that they are all of them (docs/probe.md's
  * `-i worktree` section carries the same list for callers): a path
  * built at run time from a shell variable this tool does not own
  * (`cd "$REPO" && ...`), a command substitution whose own text does

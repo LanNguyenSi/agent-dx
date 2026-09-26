@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- The package README is now a short overview; the command reference
+  moved to `docs/` (doctor, verify, probe, init, drift,
+  non-js-test-runners, output-shape), and the npm package now ships
+  `docs/` so the README links resolve in an installed copy.
+- The shipped skill (`assets/skill/SKILL.md`) points at those package
+  docs by name instead of README sections. Its digest changes, so
+  `init` reports an existing install as `outdated` until it is
+  refreshed.
+
 ## [0.8.2] - 2026-09-25
 
 - `probe`'s mutant-side 128&nbsp;+&nbsp;N signal-band warning is now pushed

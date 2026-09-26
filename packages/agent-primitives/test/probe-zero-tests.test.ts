@@ -371,7 +371,7 @@ describe("detectKnownZeroTestsEvidence()", () => {
     // cannot be read against the baseline as if it had run and passed,
     // and report `survived`. The refusal costs a probe result; the
     // other collapse would buy a verdict with a false one. Documented
-    // in `probe/zero-tests.ts`'s own docblock and in the README.
+    // in `probe/zero-tests.ts`'s own docblock and in docs/probe.md.
     const output = [
       "WWWWWWWWWWWWWWW                    15 / 15 (100%)",
       "",
@@ -785,7 +785,7 @@ describe("probe(): mutant-side zero-tests detector (step.ts)", () => {
     // no marker, no tally, no progress counter, no post-run `Time:`
     // line). `setup.ts` reads that same flag to pick `zero_tests_ambiguous`
     // at the BASELINE phase; `step.ts`'s mutant-phase classify step now
-    // reads it too (see the README's refusal-reason-shape table row and
+    // reads it too (see docs/probe.md's refusal-reason-shape table row and
     // the CHANGELOG entry closing this residual), so a mutant run whose
     // own phpunit output cannot be read either way is reported as
     // unreadable, not overstated as a stated zero, at both phases alike.

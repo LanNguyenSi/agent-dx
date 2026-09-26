@@ -27,9 +27,9 @@ capture:
 
 - vitest 4.1.11
 - typescript 5.9.3 (`tsc`)
-- eslint 10.9.1 (stylish formatter, the CLI default; see the package
-  README's `verify` section for the Node floor this requires to develop
-  against)
+- eslint 10.9.1 (stylish formatter, the CLI default; see
+  [`../../docs/verify.md`](../../docs/verify.md) for the Node floor this
+  requires to develop against)
 
 `vitest-json-filter-match.txt` and `vitest-json-filter-miss.txt` are
 normalized captures from `vitest 4.1.11 --run --reporter=json` against the

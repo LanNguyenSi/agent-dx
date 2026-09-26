@@ -29,7 +29,7 @@ export interface ParsedDiff {
 /**
  * TS/JS top-level or exported declaration: `export? default? declare?
  * abstract? async? (type|interface|class|function[*]|const|let|var|enum)
- * Name`. Prototype scope, documented in the package README: a regex over
+ * Name`. Prototype scope, documented in docs/drift.md: a regex over
  * one diff line, not a parser, so it can be fooled by an unusual line
  * break or a declaration split across lines; it never looks past the
  * identifier name (no attempt to resolve its export path, re-export, or a
@@ -75,7 +75,7 @@ export function basenameNoExt(filePath: string): string {
  * this guard a deleted file's basename floods the report with every
  * ordinary lowercase prose word that happens to also be a filename
  * (`index`, `setup`, `logo`, ...). A prototype-scope heuristic, documented
- * in the README as a known limitation: a short or all-lowercase-no-
+ * in docs/drift.md as a known limitation: a short or all-lowercase-no-
  * separator identifier (`db`, `api`) is never reported this way. */
 function looksLikeIdentifier(basename: string): boolean {
   return basename.length >= 4 && /[A-Z_-]/.test(basename);

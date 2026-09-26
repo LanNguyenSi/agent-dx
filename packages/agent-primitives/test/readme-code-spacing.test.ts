@@ -21,6 +21,22 @@ import { describe, expect, it } from "vitest";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const README_PATH = path.join(__dirname, "..", "README.md");
+const DOCS_DIR = path.join(__dirname, "..", "docs");
+
+/** README.md plus every `docs/*.md` file, each paired with a label used
+ * in its own `it` title, so a run-together introduced in a moved
+ * reference doc is caught the same way one in the README is. */
+function scannedDocFiles(): { label: string; filePath: string }[] {
+  const docsFiles = fs
+    .readdirSync(DOCS_DIR)
+    .filter((name) => name.endsWith(".md"))
+    .sort()
+    .map((name) => ({
+      label: `docs/${name}`,
+      filePath: path.join(DOCS_DIR, name),
+    }));
+  return [{ label: "README.md", filePath: README_PATH }, ...docsFiles];
+}
 
 export interface RunTogether {
   /** 1-based line number where the glued character sits. */
@@ -208,9 +224,11 @@ describe("findRunTogethers()", () => {
   });
 });
 
-describe("packages/agent-primitives/README.md has no inline-code run-togethers", () => {
-  it("finds zero run-togethers outside fenced blocks", () => {
-    const readme = fs.readFileSync(README_PATH, "utf8");
-    expect(findRunTogethers(readme)).toEqual([]);
-  });
+describe("packages/agent-primitives README.md and docs/*.md have no inline-code run-togethers", () => {
+  for (const { label, filePath } of scannedDocFiles()) {
+    it(`finds zero run-togethers outside fenced blocks in ${label}`, () => {
+      const text = fs.readFileSync(filePath, "utf8");
+      expect(findRunTogethers(text)).toEqual([]);
+    });
+  }
 });

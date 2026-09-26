@@ -762,7 +762,7 @@ describe("findComposerLinkDirs", () => {
     expect(found).toEqual([path.join(root, "vendor")]);
   });
 
-  it("does not recurse into a NESTED vendor-dir looking for a vendored package's own composer.json, even though the vendor-dir itself sits several directories below the composer.json naming it (README: 'wherever a composer.json sits ... its vendor-dir and bin-dir ... are symlinked in'; regression for a per-directory-only skip set)", () => {
+  it("does not recurse into a NESTED vendor-dir looking for a vendored package's own composer.json, even though the vendor-dir itself sits several directories below the composer.json naming it (docs/probe.md: 'wherever a composer.json sits ... its vendor-dir and bin-dir ... are symlinked in'; regression for a per-directory-only skip set)", () => {
     const root = makeTmpDir();
     writeComposerProject(root, { vendorDir: "deps/vendor" });
     fs.mkdirSync(path.join(root, "deps", "vendor"), { recursive: true });

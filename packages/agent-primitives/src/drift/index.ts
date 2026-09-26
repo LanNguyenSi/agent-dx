@@ -77,7 +77,7 @@ function isChangelogPath(filePath: string): boolean {
   return /changelog/i.test(filePath.split("/").pop() ?? "");
 }
 
-/** Matches the README's documented rule, `docs/**\/migration*`: a
+/** Matches docs/drift.md's documented rule, `docs/**\/migration*`: a
  * `docs/` path segment (at the start of the path, or after a `/`) with
  * "migration" appearing somewhere in the remainder of the path. A loose
  * `includes("docs/") && includes("migration")` (the prior check) also

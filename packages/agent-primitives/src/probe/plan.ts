@@ -51,10 +51,10 @@ export interface ProbePlanSpec {
    * regardless of where `--cwd` points inside the repo). Merged and
    * deduplicated with `--link` and the repo defaults file by the caller
    * (see `mergeLinkSources` in `link-list.ts`), never overridden by
-   * either -- see the README's `--plan` section. */
+   * either -- see docs/probe.md's `--plan` section. */
   link?: string[];
   /** From `passWhen.regex`: the plan-file equivalent of `--pass-regex
-   * <regex>`, documented as the same thing in the README. A command-line
+   * <regex>`, documented as the same thing in docs/probe.md. A command-line
    * `--pass-regex` wins over this when both are given (`cli.ts`
    * reconciles the two the same way it reconciles `isolation`/`expect`/
    * `timeout`); an invalid pattern here is `plan_invalid`, the same
@@ -190,7 +190,7 @@ function readBounded(fd: number, size: number): string {
  *
  * The commands it carries (`test`, `pre`) are shell commands: this
  * function never treats anything in the file as a command to run, and the
- * trust boundary of the file itself is the caller's (see the README's
+ * trust boundary of the file itself is the caller's (see docs/probe.md's
  * `--plan` section).
  */
 export function parsePlanFile(planPath: string): PlanParseResult {

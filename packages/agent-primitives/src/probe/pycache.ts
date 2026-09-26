@@ -35,9 +35,9 @@ import path from "node:path";
  * exactly the way the ambient default location does today.
  *
  * This is the "isolated cache location" mechanism (not cache
- * invalidation, and not a refusal): see the README's "Python bytecode
- * cache" section for the trade-off against the two mechanisms not
- * chosen, and this package's CHANGELOG for why.
+ * invalidation, and not a refusal): see docs/non-js-test-runners.md's
+ * "Python bytecode cache" section for the trade-off against the two
+ * mechanisms not chosen, and this package's CHANGELOG for why.
  */
 
 /** True when `targetPaths` includes at least one Python source file
