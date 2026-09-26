@@ -15,11 +15,12 @@ specific pack and config:
   `packages/orchestrator-workflow/docs/okf` with the `prose-slop` pack: it
   blocks em dashes and hedging openers in that knowledge bundle.
 
-The root [`slop.config.yml`](../slop.config.yml) and
-[`slop.bundle.config.yml`](../slop.bundle.config.yml) hold the review
-configuration these jobs use, including which paths (the maintained OKF
-evidence corpus, deliberate rule fixtures) are kept out of the
-reusable-content gate.
+The root [`slop.config.yml`](../slop.config.yml) holds the placement and
+review configuration, including which paths (the maintained OKF evidence
+corpus, deliberate rule fixtures) are kept out of the reusable-content gate
+(`review.allowPaths`).
+[`slop.bundle.config.yml`](../slop.bundle.config.yml) raises the em-dash and
+hedging-opener rules to block for the bundle prose guard.
 
 See [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) for the full
 job list, including the build/test/typecheck/lint matrix over the npm

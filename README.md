@@ -4,7 +4,7 @@ A monorepo workshop for agent-development tooling, built while shipping AI-agent
 
 ## Overview
 
-`agent-dx` collects the CLIs, linters, and playbooks used to build and review AI-agent coding workflows across this workshop and its sibling repos. It is a folder of independent packages, not an npm workspaces, pnpm, or lerna monorepo: there is no root `package.json` and no shared root `node_modules`. Two packages ship on npm today; the rest are working tools or documentation packages. See [Repo layout and package status](docs/repo-layout.md) for how the packages relate to each other.
+`agent-dx` collects the CLIs, linters, and playbooks used to build and review AI-agent coding workflows across this workshop and its sibling repos. It is a folder of independent packages, not an npm workspaces, pnpm, or lerna monorepo: there is no root `package.json` and no shared root `node_modules`. Three packages ship on npm today (orchestrator-workflow, okf-kit, agent-primitives); the rest are working tools or documentation packages. See [Repo layout and package status](docs/repo-layout.md) for how the packages relate to each other.
 
 ## Packages
 
