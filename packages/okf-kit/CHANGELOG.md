@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `--require-anchors`, `--prose-line-references`, and `--dirty-as-now` CLI help text now points at the specific `docs/*.md` file that covers each flag, instead of a generic "see README" pointer, matching where the package README's own reference sections moved to. Text-only; no behaviour change.
+- The npm package now ships `docs/` (the reference files the README and the CLI help text link to), so those links resolve in an installed copy.
 
 ## [0.16.0] - 2026-09-25
 
