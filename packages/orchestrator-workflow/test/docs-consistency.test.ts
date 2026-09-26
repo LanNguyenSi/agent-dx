@@ -7275,10 +7275,10 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 580,
     end: 580,
     anchorKey: "47aedb12",
-    paragraphLine: 379,
-    secondCitationLine: 384,
+    paragraphLine: 380,
+    secondCitationLine: 385,
     claim:
-      "the paragraph opens by naming the test that pins the 0.11.0 misfire rule, then closes at line 384 with an enumeration of that same test's clause-level pins (the section heading, both detection signals, the false-positive scoping language, the resume-or-respawn response paired with the non-evidence rule, and the `03-decisions.md` record requirement) whose last item is the review-gate consequence clause the opening citation already named; the enumeration is complete, so the line-384 repeat is the doc's closing-list convention, not a skipped sibling.",
+      "the paragraph opens by naming the test that pins the 0.11.0 misfire rule, then closes at line 385 with an enumeration of that same test's clause-level pins (the section heading, both detection signals, the false-positive scoping language, the resume-or-respawn response paired with the non-evidence rule, and the `03-decisions.md` record requirement) whose last item is the review-gate consequence clause the opening citation already named; the enumeration is complete, so the line-385 repeat is the doc's closing-list convention, not a skipped sibling.",
   },
   {
     doc: "subagent-contracts-superset.md",
@@ -7287,10 +7287,10 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1106,
     end: 1106,
     anchorKey: "03317257",
-    paragraphLine: 465,
-    secondCitationLine: 469,
+    paragraphLine: 466,
+    secondCitationLine: 470,
     claim:
-      "same opening-citation-then-closing-enumeration convention as the review-gate-consequence entry above, here at :1106/line 469: the closing list walks :1081, :1089, :1094 and ends on the cross-copy equality check the :1106 opening sentence named, leaving no further assertion of that block uncited.",
+      "same opening-citation-then-closing-enumeration convention as the review-gate-consequence entry above, here at :1106/line 470: the closing list walks :1081, :1089, :1094 and ends on the cross-copy equality check the :1106 opening sentence named, leaving no further assertion of that block uncited.",
   },
   {
     doc: "subagent-contracts-superset.md",
@@ -7299,10 +7299,10 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1262,
     end: 1262,
     anchorKey: "b19680bb",
-    paragraphLine: 754,
-    secondCitationLine: 762,
+    paragraphLine: 755,
+    secondCitationLine: 763,
     claim:
-      "same convention again, here at :1262/line 762: the closing list walks :1228, :1234, :1257 and ends on the not-applicable-clause pin the :1262 opening sentence named, leaving no further assertion of that block uncited.",
+      "same convention again, here at :1262/line 763: the closing list walks :1228, :1234, :1257 and ends on the not-applicable-clause pin the :1262 opening sentence named, leaving no further assertion of that block uncited.",
   },
   {
     doc: "install-fence-mechanics.md",
@@ -8091,7 +8091,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 80,
     end: 85,
     anchorKey: "5633dd3c",
-    paragraphLine: 71,
+    paragraphLine: 72,
     uncitedLines: [174, 187],
     claim:
       'line 85 cites `advisor: "opus",`; uncited 174 and 187 is instead line 174 in `advisor: ["high", "xhigh"],`; and line 187 in `advisor: "high",`, a different site the citing sentence never names.',
@@ -8103,7 +8103,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1037,
     end: 1037,
     anchorKey: "fcc9c9f6",
-    paragraphLine: 181,
+    paragraphLine: 182,
     uncitedLines: [1841, 1881],
     claim:
       "line 1037 cites the reviewer-copy byte-identity test for the reproduction field; uncited 1841 and 1881 are the same equality-assertion shape inside the separate findings-block and method_applied/withdrawn-block reviewer-copy tests, which this sentence does not name.",
@@ -8115,7 +8115,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1106,
     end: 1106,
     anchorKey: "bd3b4521",
-    paragraphLine: 184,
+    paragraphLine: 185,
     uncitedLines: [1257, 5038],
     claim:
       "line 1106 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1257 and 5038 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
@@ -8127,7 +8127,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 857,
     end: 857,
     anchorKey: "9e1acc22",
-    paragraphLine: 270,
+    paragraphLine: 271,
     uncitedLines: [751, 820],
     claim:
       "line 857 is the slicer-output match inside the test proving no subagent-input field is absent from the slicer output schema, the test this sentence describes; uncited 751 is the list-shape helper's own field regex, and uncited 820 is the same match inside the separate excludes-only-immediate-envelope-fields test, neither of which this sentence names.",
@@ -8139,7 +8139,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 550,
     end: 550,
     anchorKey: "4c984746",
-    paragraphLine: 380,
+    paragraphLine: 381,
     uncitedLines: [490],
     claim:
       "line 550 cites the test that checks the section heading is present; uncited 490 is the same heading string appearing inside the separate .ai/run-pointer-rule harness-notes test, which this sentence does not name.",
@@ -8151,7 +8151,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1106,
     end: 1106,
     anchorKey: "bd3b4521",
-    paragraphLine: 465,
+    paragraphLine: 466,
     uncitedLines: [1257, 5038],
     claim:
       "line 1106 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1257 and 5038 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
@@ -8163,7 +8163,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1106,
     end: 1106,
     anchorKey: "bd3b4521",
-    paragraphLine: 469,
+    paragraphLine: 470,
     uncitedLines: [1257, 5038],
     claim:
       "line 1106 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1257 and 5038 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
@@ -8175,7 +8175,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1146,
     end: 1146,
     anchorKey: "1d478a12",
-    paragraphLine: 472,
+    paragraphLine: 473,
     uncitedLines: [1262],
     claim:
       "line 1146 cites the test for the installed prompt's not-applicable mutation_probes clause; uncited 1262 is the same containment assertion inside the separate not-applicable commits-clause test, which this sentence does not name.",
@@ -8187,7 +8187,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 4979,
     end: 4979,
     anchorKey: "ecb73fca",
-    paragraphLine: 532,
+    paragraphLine: 533,
     uncitedLines: [5009],
     claim:
       "line 4979 cites the test that step 6 treats a replayed probe that now survives or cannot be applied as a regression signal; uncited 5009 is the same regression-signal sentence quoted again inside the separate workflow-step-6-source test, which this sentence does not name.",
@@ -8199,7 +8199,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 4997,
     end: 4997,
     anchorKey: "2e18ea4a",
-    paragraphLine: 536,
+    paragraphLine: 537,
     uncitedLines: [6449],
     claim:
       "line 4997 cites the test that the installed implementer prompt carries the same regression-signal consequence; uncited 6449 is unrelated fixture prose inside the separate shape-3 sibling-guard fixture test that happens to share a short word run with that consequence sentence, which this sentence does not name.",
@@ -8211,7 +8211,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 5037,
     end: 5037,
     anchorKey: "a4566152",
-    paragraphLine: 538,
+    paragraphLine: 539,
     uncitedLines: [1151],
     claim:
       "line 5037 cites the test that both output contract copies carry a byte-identical mutation_probes block; uncited 1151 is the same boolean-literal phrase inside the separate exact-sub-field-names test earlier in the file, which this sentence does not name.",
@@ -8223,7 +8223,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1262,
     end: 1262,
     anchorKey: "1d478a12",
-    paragraphLine: 754,
+    paragraphLine: 755,
     uncitedLines: [1146],
     claim:
       "line 1262 cites the test for the installed prompt's not-applicable commits clause; uncited 1146 is the same containment assertion inside the separate not-applicable mutation_probes-clause test, which this sentence does not name.",
@@ -8235,7 +8235,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1257,
     end: 1257,
     anchorKey: "bd3b4521",
-    paragraphLine: 759,
+    paragraphLine: 760,
     uncitedLines: [1106, 5038],
     claim:
       "line 1257 cites the implementer-copy byte-identity test for the commits field; uncited 1106 and 5038 are the same equality-assertion shape inside the separate mutation_probes-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
@@ -8247,7 +8247,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1262,
     end: 1262,
     anchorKey: "1d478a12",
-    paragraphLine: 762,
+    paragraphLine: 763,
     uncitedLines: [1146],
     claim:
       "line 1262 cites the test for the installed prompt's not-applicable commits clause; uncited 1146 is the same containment assertion inside the separate not-applicable mutation_probes-clause test, which this sentence does not name.",
@@ -12345,6 +12345,68 @@ describe("docs/harnesses.md states the reviewer's narrower write boundary", () =
       "`git gc`,",
     ]) {
       expect(harnessesDoc).toContain(token);
+    }
+  });
+});
+
+// A shipped, fetched-raw doc that names a package README section by heading
+// text can drift silently when the README is restructured: the pointer's
+// prose still reads fine, but the named heading no longer exists (or was
+// renamed) in the README it references. Guards every such pointer in
+// INSTALL-AGENT.md (and the installed assets, which ship the same way) so a
+// renamed or removed README heading turns this test red instead of leaving a
+// dead reference for an agent that fetches INSTALL-AGENT.md raw.
+describe("README section pointers in shipped, fetched-raw agent docs stay valid", () => {
+  const POINTER_PATTERN = /package README's\s+"([^"]+)"\s+section/g;
+
+  /** Every `## `/`### ` (etc.) heading text found in the package README. */
+  function readmeHeadings(): Set<string> {
+    const readme = readDoc("README.md");
+    const headings = new Set<string>();
+    for (const match of readme.matchAll(/^#{1,6}\s+(.+)$/gm)) {
+      headings.add(match[1].trim());
+    }
+    return headings;
+  }
+
+  /**
+   * Every distinct heading text a doc's "package README's ... section"
+   * pointers name, keyed by the doc's display name for the assertion
+   * message. Reused by both the positive check and the inert-regex guard
+   * below.
+   */
+  function pointerTargets(docName: string, raw: string): string[] {
+    return [...raw.matchAll(POINTER_PATTERN)].map((m) => m[1]);
+  }
+
+  const docsToCheck: Array<{ name: string; raw: string }> = [
+    { name: "INSTALL-AGENT.md", raw: readDoc("INSTALL-AGENT.md") },
+  ];
+  for (const assetPath of ["skill/SKILL.md"]) {
+    docsToCheck.push({
+      name: `assets/${assetPath}`,
+      raw: readAsset(assetPath),
+    });
+  }
+
+  it("the phrase pattern actually matches at least one reference (guard against an inert regex)", () => {
+    const totalMatches = docsToCheck.reduce(
+      (sum, doc) => sum + pointerTargets(doc.name, doc.raw).length,
+      0,
+    );
+    expect(totalMatches).toBeGreaterThan(0);
+  });
+
+  it("every named README section heading exists in README.md", () => {
+    const headings = readmeHeadings();
+    for (const doc of docsToCheck) {
+      for (const target of pointerTargets(doc.name, doc.raw)) {
+        expect(
+          headings.has(target),
+          `${doc.name} points at package README's "${target}" section, ` +
+            `but no README.md heading reads "${target}"`,
+        ).toBe(true);
+      }
     }
   });
 });
