@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   docs by name instead of README sections. Its digest changes, so
   `init` reports an existing install as `outdated` until it is
   refreshed.
+- `probe`'s two runtime warnings about the Python bytecode cache now
+  point at `docs/non-js-test-runners.md`'s "Python bytecode cache"
+  section, where that section actually lives, instead of a README
+  section it moved out of.
 
 ## [0.8.2] - 2026-09-25
 

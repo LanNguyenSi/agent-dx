@@ -407,6 +407,16 @@ describe("probe(): CPython bytecode-cache isolation", () => {
             w.includes("skipped"),
         ),
       ).toBe(true);
+      // The warning points at the doc that actually holds the section
+      // (moved out of the README in #381), not a section absent from
+      // README.md.
+      expect(
+        result.warnings.some((w) =>
+          w.includes(
+            'agent-primitives docs/non-js-test-runners.md "Python bytecode cache"',
+          ),
+        ),
+      ).toBe(true);
     },
   );
 
@@ -441,6 +451,14 @@ describe("probe(): CPython bytecode-cache isolation", () => {
         ),
       ).toBe(true);
       expect(result.warnings.some((w) => w.includes("skipped"))).toBe(false);
+      // Same pointer check for the no-override branch's own warning.
+      expect(
+        result.warnings.some((w) =>
+          w.includes(
+            'agent-primitives docs/non-js-test-runners.md "Python bytecode cache"',
+          ),
+        ),
+      ).toBe(true);
     },
   );
 

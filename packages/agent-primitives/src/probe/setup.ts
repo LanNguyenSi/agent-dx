@@ -781,11 +781,11 @@ export async function openRunSetup(
   const pyCacheIsolation = hasPyTarget && callerPycachePrefix === undefined;
   if (hasPyTarget && callerPycachePrefix !== undefined) {
     warnings.push(
-      `--env PYTHONPYCACHEPREFIX=${callerPycachePrefix} was given, so this run's own per-invocation Python bytecode cache isolation is skipped for every --pre/test-command run; every invocation shares that one directory instead, which reintroduces the (mtime, size) shadowing hazard the isolation mechanism otherwise closes unless the caller manages that shared directory themselves (see the README's "Python bytecode cache" section)`,
+      `--env PYTHONPYCACHEPREFIX=${callerPycachePrefix} was given, so this run's own per-invocation Python bytecode cache isolation is skipped for every --pre/test-command run; every invocation shares that one directory instead, which reintroduces the (mtime, size) shadowing hazard the isolation mechanism otherwise closes unless the caller manages that shared directory themselves (see the agent-primitives docs/non-js-test-runners.md "Python bytecode cache" section)`,
     );
   } else if (hasPyTarget) {
     warnings.push(
-      `this run has a Python (.py) target: every --pre/test-command invocation gets its own fresh PYTHONPYCACHEPREFIX directory (see the README's "Python bytecode cache" section); a test command that itself asserts on __pycache__ placement or sys.pycache_prefix runs differently under probe than it would standalone, which surfaces as a red baseline (reason: "baseline_failed"), never a wrong verdict`,
+      `this run has a Python (.py) target: every --pre/test-command invocation gets its own fresh PYTHONPYCACHEPREFIX directory (see the agent-primitives docs/non-js-test-runners.md "Python bytecode cache" section); a test command that itself asserts on __pycache__ placement or sys.pycache_prefix runs differently under probe than it would standalone, which surfaces as a red baseline (reason: "baseline_failed"), never a wrong verdict`,
     );
   }
   const rt: MutantRuntime = {
