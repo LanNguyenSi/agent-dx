@@ -159,7 +159,7 @@ async function runCheck(
     // against `--stdin-path` instead of a real on-disk target: this is
     // what makes `--stdin-path packages/sub/README.md --config
     // slop.config.yml` agree with `check packages/sub/README.md --config
-    // slop.config.yml` (see the README's "Path pattern anchor" section).
+    // slop.config.yml` (see docs/configuration.md#path-pattern-anchor).
     // Only a NAMED `--stdin-path` is a target: the default placeholder
     // names no file, and resolving it against the process cwd would let
     // the working directory decide the verdict.
@@ -199,8 +199,8 @@ async function runCheck(
       // the scanned directory) must leave `check .`'s own verdict alone,
       // so the anchor only applies when THIS target actually lies inside
       // the config file's directory (see
-      // util/pattern-anchor.ts:resolvePatternAnchor and the README's
-      // "Path pattern anchor" section).
+      // util/pattern-anchor.ts:resolvePatternAnchor and
+      // docs/configuration.md#path-pattern-anchor).
       const anchor = resolvePatternAnchor(opts.config, rawPath);
       perPath.push(
         checkPath(rawPath, {

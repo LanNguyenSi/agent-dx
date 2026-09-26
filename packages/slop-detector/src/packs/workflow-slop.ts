@@ -41,8 +41,8 @@ export function isWorkflowFile(file: { path: string }): boolean {
 
 // Every entry here is a bare `github.*`/`runner.*` context reference this
 // pack treats as NOT attacker-controllable, verified against GitHub's own
-// docs (see packages/slop-detector/README.md "workflow-slop by example"
-// for the exact quotes and the two source URLs). Deliberately exact,
+// docs (see packages/slop-detector/docs/workflow-slop.md for the exact
+// quotes and the two source URLs). Deliberately exact,
 // whole-expression matches only (see `isAllowedExpression` below): this
 // rule does not attempt to parse the GitHub Actions expression grammar
 // (functions, comparisons, string concatenation, ternaries), so a

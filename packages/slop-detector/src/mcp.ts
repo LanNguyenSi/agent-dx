@@ -2,8 +2,8 @@
 // stdio MCP server exposing slop-detector's engine as a `slop_check` tool,
 // so agents can scan commit messages, PR bodies, and files for AI-slop
 // without shelling out to the CLI. The pure tool logic lives in
-// `mcp-check.ts`; this file is only the transport wiring. See README.md
-// for the Claude Code / harness registration block.
+// `mcp-check.ts`; this file is only the transport wiring. See
+// docs/integration.md for the Claude Code / harness registration block.
 
 import fs from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";

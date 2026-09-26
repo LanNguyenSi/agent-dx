@@ -227,7 +227,8 @@ const HOME_PATH = /(~\/|\$HOME\/|\/Users\/[^/\s]+\/|\/home\/[^/\s]+\/)/g;
 // leaked machine-bound path, it's the *documentation* of one. A real
 // account name (`/home/node/app`, a container convention) still fires:
 // telling those two apart in general is not a clean heuristic, so the
-// placeholder form is the only carve-out (see README "by example" section).
+// placeholder form is the only carve-out (see docs/rule-packs.md's
+// "placement-slop by example" section).
 function isPlaceholderHomePath(matched: string): boolean {
   return /^\/(?:Users|home)\/<[^>]+>\/$/.test(matched);
 }
