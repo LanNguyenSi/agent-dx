@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- A docs-consistency test now guards every INSTALL-AGENT.md pointer that
+  names a package README section by heading text (currently three, all
+  "Effort tiers"): the guarded heading is confirmed to still exist in
+  README.md, and a companion check confirms the extraction pattern itself
+  still matches at least one reference. `docs/verification-sets.md` is
+  now listed in `docs/okf/subagent-contracts-superset.md`'s `sources`
+  (it was already cited in the doc's prose without being declared).
 - README restructured around a shorter package README standard: moved
   deep reference material (architecture rationale, run contracts, install
   internals, harness file list and read-only posture, role profile detail,

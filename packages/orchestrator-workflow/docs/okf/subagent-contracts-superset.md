@@ -24,6 +24,7 @@ sources:
   - packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md
   - packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md
   - packages/orchestrator-workflow/README.md
+  - packages/orchestrator-workflow/docs/verification-sets.md
 ---
 
 All `path:line` pointers below are repo-root-relative from the agent-dx root.
