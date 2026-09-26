@@ -10,76 +10,14 @@ plan, task validation, acceptance, and the operator handoff. Review is always de
 implementation (see [Run modes](#run-modes)); the subagents return structured YAML
 evidence. Every unit of work leaves an auditable run directory behind.
 
-### Acceptance-baseline adoption
-
-New runs that need a frozen acceptance contract explicitly record
-`Acceptance contract: acceptance-baseline/v1` in `00-goal.md` before planning,
-slicing, or delegation. The same file then carries the canonical
-`acceptance_baseline` identity and full `acceptance_criteria` records; each
-delegated task receives its relevant records unchanged. Existing runs remain
-under their recorded contract: missing v1 fields neither trigger migration nor
-license a guess about a run's provenance. Communicate the recorded selection
-in delegation and resolve unknown provenance before dependent work. A recorded
-original string-list contract keeps its original criterion strings and omits
-only the added baseline and criterion-evidence fields.
-
-For v1, implementers return `acceptance_baseline: { id, revision }` and one
-`criterion_evidence` entry per assigned criterion, with `criterion_id` and
-`evidence_refs`. References resolve from the owning run directory and point
-to producer artifacts with the checked state and result metadata.
-`04-implementation-summary.md` indexes those references; empty references
-remain unresolved, and required unresolved criteria block acceptance. Manual
-evidence stays explicitly manual. Review findings and orchestrator acceptance
-remain separate from this coverage index.
-
-### Decision authority
-
-`03-decisions.md` records decisions with an ID, trigger/evidence, decision,
-accountable authority/source, consequences, and an optional superseded
-decision. It documents real approval evidence; it does not grant authority.
-A reviewer recommendation does not equal orchestrator acceptance, and only
-the operator may authorize a critical waiver.
-
-## Why this shape
-
-```text
-                 Operator
-             goal |    ^ handoff: what changed, how verified,
-                  v    | what remains open
-  explorer  -->  Orchestrator  . . . . .  .ai/runs/<date>-<slug>/
-  optional,      session model             00-goal       04-implementation-summary
-  read-only      plans, validates slices,  01-plan       05-review-findings
-  terrain map    decides acceptance        02-tasks      06-handoff
-                      |                     03-decisions
-     narrow           |    ^ structured     (state lives in files,
-     contracts        v    | YAML evidence   not in chat history)
-        +-------------+-------------+
-        |             |             |
-    task-slicer   implementer   reviewer
-      sonnet        sonnet        opus
-    small,        one narrow    skeptical, severity-rated
-    testable      task, plus    findings, no rewrites
-    slices        tests
-```
-
-Two effects fall out of this shape:
-
-- **Token efficiency.** The orchestrator's context stays small: subagents
-  receive narrow task contracts instead of the whole conversation, return
-  structured YAML evidence instead of transcripts, and durable state lives
-  in run files that survive context compaction. The cheap models do the
-  volume work; the strongest model is spent only on orchestration decisions
-  and the skeptical review. The ceremony scales to the task: a trivial change
-  is done directly, the full flow is for non-trivial work, and a read-only
-  explorer maps the terrain first only when the solution is unclear. When
-  available, the explorer prefers each of a repo's configured knowledge
-  bundles (`knowledge` in `.ai/workflow/manifest.json`; default `docs/okf/`)
-  or a connected semantic code-search tool over hand-mapping terrain with
-  grep.
-- **Quality through structure.** Writing and reviewing are separated by
-  role and model, task slices are validated before any implementation
-  starts, acceptance is decided on evidence (tests executed, findings
-  addressed), and every run leaves an auditable trail in `.ai/runs/`.
+Every unit of work runs under a frozen `00-goal.md` acceptance-baseline
+contract and an authority-tracking `03-decisions.md`; see
+[Run contracts](docs/run-contracts.md) for both. The orchestrator's own
+context stays small by design: subagents get narrow task contracts and
+return structured YAML evidence, not transcripts, while durable state lives
+in run files under `.ai/runs/`; see
+[Architecture: why this shape](docs/architecture.md) for the loop diagram
+and the reasoning behind it.
 
 ## Install
 
@@ -101,10 +39,8 @@ and fallback behavior auditable. The link tracks `master`; pin it to a commit
 SHA for a stable audit.
 
 The compact skill entrypoint and its routed references form one installed
-bundle. On a reinstall, the installer checks the core and every required
-reference for local conflicts before activating a new core; it leaves the
-current coherent bundle intact unless an explicitly authorized `--force` run
-replaces the affected files.
+bundle; see [Install reference](docs/install-reference.md) for what the
+reinstall conflict check does.
 
 ### Manual and advanced CLI installation
 
@@ -135,27 +71,17 @@ npx orchestrator-workflow init --profile minimal --yes
 **Templates-only mode.** `--harness none` (the literal word `none`, on its
 own) installs only `.ai/workflow/**` and `.ai/runs/.gitkeep`: no
 `AGENTS.md`, no `CLAUDE.md`, no harness-specific directory, and a manifest
-recording `harnesses: []`. Use it for a repo that wants the run-state
-templates and the workflow itself, but no per-harness subagent files yet
-(e.g. no harness has been chosen, or the files were dropped by hand).
-`none` combined with a real harness name (`--harness none,claude`) is
-rejected as ambiguous rather than silently picking one. A plain
-**non-interactive** re-run (no `--harness` flag) after a templates-only
-install stays templates-only, for `init` and `apply` alike, even when
-`apply`'s own operator-defaults name a harness or the target has harness
-files on disk from something else; add a harness back with an explicit
-`--harness <list>` on a later run, the same explicit-flag-wins rule
-`--profile`/`--models`/`--tiers` use, applied to the no-harness case. An
-**interactive** re-run is different: it still prompts, with nothing forced
-pre-selected, instead of silently skipping straight back to templates-only
-without asking; deselect every checkbox to stay templates-only. `init` and
-`apply` both pre-check nothing at all on this prompt, and both still
-annotate what is detected on disk with a " (detected)" label; select a
-harness to install it.
+recording `harnesses: []`. `none` combined with a real harness name
+(`--harness none,claude`) is rejected as ambiguous rather than silently
+picking one.
 
 ```bash
 npx orchestrator-workflow init --harness none --yes
 ```
+
+See [Install reference](docs/install-reference.md) for the exact re-run
+rules (a plain non-interactive re-run stays templates-only; an interactive
+one still prompts).
 
 ## Verification sets
 
@@ -226,32 +152,11 @@ it to the repository's `.gitignore`.
 `manifest.json` may also carry a `knowledge` list of `{ path, repoRoot }`
 entries, for a repo whose knowledge bundle is not at the default location (a
 workspace-level bundle with sources in a sub-repo, a bundle elsewhere, or
-several bundles). `path` is the bundle directory and `repoRoot` (default
-`"."`) the root of the repository the bundle's sources live in. Each is a
-relative path resolved against the worktree top level on its own (`path` is
-not nested under `repoRoot`), so a workspace bundle for a sub-repo's sources
-reads `{ "path": "kb/app", "repoRoot": "app" }`. Entries are stored
-normalised (`./kb/app/` becomes `kb/app`); an empty or absolute path
-(POSIX, or a Windows form such as `C:/x`), any other path starting with a
-Windows drive letter (the drive-relative `C:x` or `C:..`), a `path` of `.`, a
-path escaping the worktree top level, and any path containing a backslash are
-invalid (use `/` as the separator on every platform). The absolute, drive and
-escape rules apply both as written and to the normalised value that is stored,
-so `./C:x` and `docs/../C:/x` are invalid too. The CLI has no flag for the
-field: edit it in the manifest by hand, and every re-install preserves its
-valid entries (the programmatic `runInit` option `knowledge` writes it and
-refuses an invalid entry). A hand-edited invalid entry is ignored on read
-and reported by `doctor`; a re-install that rewrites the manifest removes it
-from disk and prints a note naming its index and reason. The field carries no
-check argv; the concrete bundle-check command still lives in the
-repository-bound verification set (see Verification sets above), so there
-is one source of argv truth. When `knowledge` in
-`.ai/workflow/manifest.json` is absent or an empty list, the default
-`docs/okf/` applies, today's behaviour. `doctor` prints a `knowledge:`
-detail line (the `knowledgeWarnings` key in `--json`) for a configured
-`path` or `repoRoot` that is not a directory, for each ignored invalid
-entry, and when a non-empty list omits an existing default bundle directory.
-These warnings never change the status or the exit code.
+several bundles); `doctor` reports an invalid or missing entry. When
+`knowledge` in `.ai/workflow/manifest.json` is absent or an empty list, the
+default `docs/okf/` applies. See
+[Install reference](docs/install-reference.md) for the field's exact path
+rules and validation behavior.
 
 Per selected harness:
 
@@ -305,16 +210,11 @@ not "just implementer". There is no per-role checklist; the two profiles are
 the only supported shapes.
 
 **Advisor (escalation).** The fifth `full`-profile role, `advisor`, is
-read-only and consulted only when the orchestrator hits one of a defined set
-of triggers: architectural uncertainty, requirements that contradict each
-other, multiple valid solution paths where committing to one is expensive to
-reverse, repeated implementation failures on the same task, a review
-deadlock, or a high-risk decision. It is not a standard pipeline step; like
-tier choice, spawning it is the orchestrator's own judgment call. The advisor
-lays out the options with their pros, cons, and risk, and gives a
-recommendation — it recommends, never decides, and never writes code; the
-orchestrator still decides, and a critical risk still goes to the operator.
-`minimal` never installs it, the same as explorer and task-slicer.
+read-only and consulted only at defined escalation triggers (architectural
+uncertainty, a review deadlock, a high-risk decision, and similar); it
+recommends, never decides. `minimal` never installs it, the same as explorer
+and task-slicer. See [Role profile reference](docs/role-profile-reference.md)
+for the full trigger list.
 
 ```bash
 npx orchestrator-workflow init --profile minimal --yes
@@ -326,51 +226,21 @@ value other than `minimal` or `full` with a clear error instead of silently
 falling back to a default.
 
 **Re-runs and profile changes.** A plain re-run (no `--profile` flag) keeps
-the profile recorded in `.ai/workflow/manifest.json` from the previous
-install, the same override-vs-persist rule already used for `--harness` and
-`--models`. Passing `--profile` explicitly always overrides the recorded
-value, immediately switching which per-role files the next run installs and
-updating the manifest to match. Switching profiles follows the same
-precedent already in place for dropping a harness from `--harness` on a
-re-run: files for roles no longer in the profile are simply no longer
-installed or tracked in the manifest; they are not automatically deleted
-from disk. `init` detects a `full` → `minimal` downgrade and prints a note
-naming the now-untracked `task-slicer.md` / `explorer.md` / `advisor.md`
-agent files and how to remove them. For a fully clean switch, run `orchestrator-workflow
-uninstall` first, or remove those files by hand. Uninstalling a `minimal`
-install that has never been downgraded from `full` is always clean on its
-own: it only ever removes what it actually installed, so there is nothing to
-report as missing for the roles that were never written. A `minimal` install
-reached via a `full` → `minimal` downgrade is not clean in that sense: the
-downgrade's now-untracked `task-slicer.md` / `explorer.md` / `advisor.md`
-files are not in the manifest's file ledger, so uninstall leaves them on disk
-without reporting them at all.
+the profile recorded in `.ai/workflow/manifest.json`; passing `--profile`
+explicitly always overrides it, and a `full` to `minimal` downgrade leaves
+the now-untracked role files on disk with a printed note (run
+`orchestrator-workflow uninstall` first for a fully clean switch). See
+[Role profile reference](docs/role-profile-reference.md) for the exact
+override and uninstall-cleanliness rules.
 
 ## Model preselection
 
 Routing is a harness-specific map from role and tier to a complete
-`{model, effort}` selection. Pass a JSON file with `--routing`; the CLI deep
-merges only the leaves you provide and records the resulting effective map in
-`.ai/workflow/manifest.json`. The role's default-tier key configures its
-unsuffixed file; another allowed key configures the corresponding
-`<role>-<tier>` variant when `--tiers` is enabled. For example:
-
-```json
-{
-  "codex": {
-    "implementer": {
-      "medium": { "model": "gpt-5.6-terra", "effort": "medium" },
-      "xhigh": { "model": "gpt-6-astra", "effort": "xhigh" }
-    }
-  }
-}
-```
-
-An omitted `--routing` preserves the exact persisted map on a re-install.
-Changing one leaf leaves the others intact, which makes a previous manifest a
-usable rollback record. Model updates are deliberate per role and tier: the
-installer never interprets a newer model as automatically better and never
-rewrites a preserved choice merely because another model exists.
+`{model, effort}` selection, set with `--routing <json-file>` (deep-merged
+into `.ai/workflow/manifest.json`, so an omitted `--routing` preserves the
+persisted map on a re-install, a usable rollback record). See
+[Model routing reference](docs/model-routing-reference.md) for the JSON
+shape and a worked example.
 
 `--models` remains as the backward-compatible, per-role input for Claude Code
 and opencode. It does not configure Codex. Existing manifests that contain
@@ -389,36 +259,13 @@ orchestrator on `gpt-6-astra` at `high` effort; use `xhigh` for demanding work.
 The installer does not mutate global or fleet Codex configuration to enforce
 that recommendation.
 
-**Codex defaults.** Codex uses native `.codex/agents/*.toml` custom agents.
-The file shape follows the
-[official Codex subagent configuration](https://learn.chatgpt.com/docs/agent-configuration/subagents).
-The shipped routing is:
-
-| Role | Tier | Model | Effort |
-|---|---|---|---|
-| explorer | low | `gpt-5.6-luna` | low |
-| explorer | medium (default) | `gpt-5.6-sol` | medium |
-| explorer | high | `gpt-5.6-sol` | high |
-| task-slicer | low | `gpt-5.6-luna` | low |
-| task-slicer | medium (default) | `gpt-5.6-sol` | medium |
-| task-slicer | high | `gpt-5.6-sol` | high |
-| implementer | low | `gpt-5.6-luna` | low |
-| implementer | medium (default) | `gpt-5.6-terra` | medium |
-| implementer | high | `gpt-5.6-terra` | high |
-| implementer | xhigh | `gpt-6-astra` | xhigh |
-| reviewer | medium | `gpt-5.6-terra` | medium |
-| reviewer | high (default) | `gpt-6-astra` | high |
-| reviewer | xhigh | `gpt-6-astra` | xhigh |
-| advisor | high (default) | `gpt-6-astra` | high |
-| advisor | xhigh | `gpt-6-astra` | xhigh |
-
-When you have a deterministic Codex model catalog, pass it with
-`--codex-catalog <json-file>`. The CLI validates the selected Codex model and
-effort pairs before writing. Without a supplied catalog it performs no online
-entitlement check; offline or account-specific availability remains unknown.
-Use the harness's native capability commands, such as `codex debug models`, to
-refresh a catalog before installation when appropriate. A bundled-capability
-view describes what the binary knows and does not prove account entitlement.
+**Codex defaults.** Codex uses native `.codex/agents/*.toml` custom agents,
+with a per-role, per-tier `{model, effort}` table shipped as the default
+routing. Pass `--codex-catalog <json-file>` for a deterministic model
+catalog; the CLI validates model/effort pairs before writing but performs no
+online entitlement check without one. See
+[Model routing reference](docs/model-routing-reference.md) for the full
+table.
 
 **opencode model resolution.** opencode requires fully-qualified `provider/model-id`
 strings (e.g. `github-copilot/claude-sonnet-4.6`). At install time the CLI
@@ -747,54 +594,33 @@ section (repo root) for the order.
 
 ```bash
 orchestrator-workflow validate-review-report path/to/return.yaml
-orchestrator-workflow validate-review-report - < path/to/return.yaml
-orchestrator-workflow validate-review-report path/to/return.yaml --format json
 ```
 
 Checks a reviewer return's YAML against the reviewer output contract's
-required fields and enums (see the "Reviewer output contract" section of
-`assets/skill/references/contracts.md`, byte-identical to the contract in
-`assets/agents/reviewer.md`), whether the return is fenced in a code
-block (any language tag, or none) or given unfenced, and prints one
-diagnostic per missing or invalid field. Every element of a string-array
-field (`summary`, `missing_tests`, `residual_risks`) must itself be a
-string; a non-string element (a number, a mapping, a boolean, or `null`
--- written as a bare or `~` bullet) is its own diagnostic at
-`<field>[<index>]`. A fenced return ends at the first closing fence that
-starts at column 0, repeats at least as many backticks as the opening
-fence, and carries nothing but whitespace after that run, so neither a
-reviewer quoting a fenced snippet inside a value (a `description` block
-scalar, which YAML indents) nor one wrapping a return in four backticks
-around a snippet fenced at column 0 truncates the return. A return
-with no closing fence satisfying all three is not fenced at all, so its
-whole text reaches the parser; that includes one whose opener is longer
-than every closing run present. When the return carries more than one
-fenced block, the first one whose fence tag's first word is `yaml` or
-`yml` is validated, case-insensitively and counting whitespace-separated
-attributes (`yaml title=x` counts; `yaml,title=x` does not, its first
-word being the whole string), falling back to the first fence only when
-none carries that word; a warning names any earlier fence skipped this
-way. This preference can validate a later worked example instead of an
-earlier, real but unfenced return: a reviewer who leaves their own return
-unfenced and then quotes a `yaml`-tagged example afterward has that
-example validated instead, which the emitted warning also names.
-`--format json` prints the same diagnostics as a single JSON object
-instead of human-readable text. It exits `0` when the return is
-structurally valid, `1` when it is structurally invalid (a required field
-is missing or its value falls outside its enum, or the input is
-unparsable, empty, or not a mapping), and `2` for a usage error (an
-unreadable file, an unrecognized `--format` value, a missing `<file>`
-argument, an unknown option, or an excess positional argument).
-`--format json` governs the validation verdict only: a commander parsing
-error (missing argument, unknown option, excess arguments) or an
-unrecognized `--format` value itself still prints plain text to stderr
-with nothing on stdout, regardless of `--format`; the one exception is an
-unreadable file, which does emit the JSON envelope on stdout. This check
-is structural only: it never judges semantic adequacy, cannot waive a
-finding, and passing it is never orchestrator acceptance. The
-required-field set it checks is hand-maintained in `src/review-report.ts`
-and pinned against the contract block itself by
-`test/docs-consistency.test.ts`, so a contract edit without a matching
-schema edit fails the suite instead of drifting silently; every field
-listed there is dispatched to its own checker, so an entry added to the
-list without a checker fails to typecheck rather than passing unchecked.
+required fields and enums, structurally only (it never judges semantic
+adequacy or waives a finding). See
+[`validate-review-report` CLI reference](docs/validate-review-report.md) for
+every flag, exit code, and fence-detection edge case.
+
+## Documentation
+
+- [Architecture: why this shape](docs/architecture.md): the orchestrator/subagent loop diagram and rationale.
+- [Run contracts](docs/run-contracts.md): the acceptance-baseline contract and `03-decisions.md`'s decision-authority rules.
+- [Install reference](docs/install-reference.md): the agent-led install's conflict check, templates-only re-run rules, and the `knowledge` manifest field.
+- [Role profile reference](docs/role-profile-reference.md): the advisor's escalation triggers and profile/tier re-run behavior.
+- [Model routing reference](docs/model-routing-reference.md): the `--routing` JSON shape and the Codex default routing table.
+- [`validate-review-report` CLI reference](docs/validate-review-report.md): every flag, exit code, and fence-detection edge case.
+- [Curated knowledge bundle](docs/okf/index.md): the OKF-format reference docs for this package's own contracts and mechanics (the default location named by `knowledge` in `.ai/workflow/manifest.json`).
+- [agentic-coding-playbook](../agentic-coding-playbook): the extended role prompts and organizational guidance this kit's skill references.
+
+## Development
+
+This package lives in the [agent-dx](https://github.com/LanNguyenSi/agent-dx)
+monorepo. `npm test` (vitest) and `npm run typecheck` run from
+`packages/orchestrator-workflow`; see the repository root's
+`CONTRIBUTING.md` for the full contributor workflow, including the
+"Releasing okf-kit" order referenced above.
+
+## License
+
+MIT.

@@ -3,7 +3,7 @@ type: module
 title: Model preselection and routing
 description: How legacy role models and harness-specific role/tier selections flow through the CLI and manifests into agent definitions.
 tags: [models, routing, cli, manifest, per-role, harness-adapters]
-timestamp: 2026-09-25T12:15:34Z
+timestamp: 2026-09-26T05:55:31Z
 sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/routing.ts
@@ -42,7 +42,7 @@ for how `--profile` scopes which roles get an actual subagent file: since
 (`src/models.ts:42#"const MINIMAL_PROFILE_ROLES: ReadonlySet<Role> = new"`) simply not naming it, no new profile logic needed.
 
 Defaults (`src/models.ts:80-85#"advisor:"`, documented in
-`README.md:385#"escalations happen precisely when the situation is hard, so it shares the reviewer's strongest-model default"`):
+`README.md:255#"escalations happen precisely when the situation is hard, so it shares the reviewer's strongest-model default"`):
 
 | Role | Default | Rationale (README) |
 |---|---|---|
@@ -157,7 +157,7 @@ below.
   and emitted right after `model:` when the model was resolved; see "Pinned
   default effort (0.22.0)" below for the dispatch rule. Nested-path providers
   such as `openrouter/anthropic/claude-...` are never alias-auto-resolved and
-  must be passed as fully-qualified `--models` entries (`README.md:438#"reviewer=openrouter/anthropic/claude-opus-4.8"`,
+  must be passed as fully-qualified `--models` entries (`README.md:285#"reviewer=openrouter/anthropic/claude-opus-4.8"`,
   confirmed by `test/init.test.ts:530-553#"expect(slicer).not.toContain("`, `openrouter/some-model` passes
   through unchanged). Confirmed end-to-end when the `opencode` binary is
   absent: every role's file omits `model:` (`test/init.test.ts:2213-2221#"${role}.md must not contain model:"`,
@@ -445,7 +445,7 @@ roles get no effort field at all, matching the pre-0.22.0 byte shape on
 that axis) plus the legacy-frontmatter and two-target byte-identity tests
 cited above. `README.md`'s "Effort tiers" section gained a new "Every
 default file carries its own pinned effort, independent of `--tiers`"
-paragraph stating the same rule (`README.md:464#"effort deterministic and independent of the caller's session."`), and the CHANGELOG
+paragraph stating the same rule (`README.md:311#"effort deterministic and independent of the caller's session."`), and the CHANGELOG
 0.22.0 entry leads with this behavior change since it is user-visible and
 session-effort-dependent, not just an additive feature. `agents-md-section.md`'s
 Scaling delegation bullet list gained a dedicated bullet (deliberately

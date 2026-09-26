@@ -1,5 +1,19 @@
 # Bundle log
 
+- 2026-09-26T05:55:31Z (README restructure): `packages/orchestrator-workflow/README.md`
+  shrank from 800 to 626 lines; the acceptance-baseline/decision-authority
+  intro, the architecture diagram, the JSON routing example, the Codex
+  defaults table, the knowledge-manifest field rules, the advisor/re-run
+  detail, and the `validate-review-report` reference moved to new files
+  under `packages/orchestrator-workflow/docs/`. Every claim these citations
+  point at is unchanged prose, only its line number moved, except where
+  noted. Re-pointed: `install-fence-mechanics.md`'s `README.md:267` citation
+  to line 172; `model-preselection.md`'s `README.md:385`, `:438` and `:464`
+  citations to lines 255, 285 and 311; `run-state-lifecycle-and-markers.md`'s
+  `README.md:218`, `:224` and `:579` citations to lines 144, 150 and 426.
+  `subagent-contracts-superset.md` carries no line citation into `README.md`
+  and needed no re-point. All four re-checked and re-stamped.
+
 - 2026-09-25T12:58:25Z (release 0.42.0): the `[Unreleased]` notes moved under
   `## [0.42.0] - 2026-09-25`. Line citations into `CHANGELOG.md` below
   the new heading were re-pointed by two lines. No bundle doc cited the
