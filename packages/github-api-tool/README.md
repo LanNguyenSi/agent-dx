@@ -2,189 +2,60 @@
 
 A command-line interface for GitHub API operations, designed for AI agents.
 
-> **Internal tool — not published to npm.** This CLI is used from source within this repo and is intentionally not a published package (`private: true`). Build and run it from the repo (`npm run build`) rather than installing from npm.
+> **Internal tool, not published to npm.** This CLI is used from source within this repo (`private: true`). Build and run it from the repo (`npm run build`) rather than installing from npm.
 
-## Features
+## Overview
 
-✅ **Issue Management:** Create, list, assign, comment, close  
-✅ **Pull Request Operations:** List, comment, review, merge  
-✅ **Repository Info:** Commits, contributors, repository details  
-✅ **Standup Digest:** Daily commit overview across multiple repos  
-✅ **JSON Output Mode:** Machine-readable output for programmatic use  
-✅ **Error Handling:** Automatic retry with exponential backoff  
-✅ **Type-Safe:** Full TypeScript implementation with strict mode
+`github` wraps Octokit behind a scriptable CLI: issue and pull-request management, repository info, and a cross-repo standup digest, all with a `--json` mode for programmatic use and automatic retry with exponential backoff on transient failures.
 
-## Installation
+## Key features
+
+- Issue management: create, list, assign, comment, close
+- Pull request operations: list, comment, review, merge
+- Repository info: commits, contributors, repository details
+- Cross-repo standup digest for daily or async updates
+- `--json` output on every command for programmatic use
+- Automatic retry with exponential backoff on 5xx/429 responses
+
+## Install / quick start
 
 ```bash
 npm install
 npm run build
-npm link  # Make 'github' command globally available
+npm link  # make the 'github' command globally available
 ```
 
-## Configuration
-
-Set your GitHub Personal Access Token:
+Set a GitHub Personal Access Token, either way:
 
 ```bash
 github config set-token <your-github-pat>
-```
-
-Or use environment variable:
-
-```bash
+# or
 export GITHUB_TOKEN=<your-github-pat>
 ```
 
-### Required Token Scopes
-
-- `repo` - Full repository access (for issues, PRs, commits)
-- `read:org` - Read organization data (for contributors)
+Required token scopes: `repo` (issues, PRs, commits) and `read:org` (contributors).
 
 ## Usage
 
-### Issue Commands
-
 ```bash
-# Create issue
-github issue create --repo owner/repo --title "Bug: Login fails" --body "Description here" --labels bug,priority:high
-
-# List open issues
-github issue list --repo owner/repo --state open
-
-# List issues with specific labels
-github issue list --repo owner/repo --labels bug,security
-
-# Assign issue
-github issue assign --repo owner/repo --issue 42 --assignee octocat
-
-# Comment on issue
-github issue comment --repo owner/repo --issue 42 --body "Fixed in PR #43"
-
-# Close issue
-github issue close --repo owner/repo --issue 42
+github issue list --repo owner/repo --state open --json
 ```
 
-### Pull Request Commands
+See [Command reference](./docs/commands.md) for every command, the agent-integration pattern, the source layout, and error handling.
 
-```bash
-# List open PRs
-github pr list --repo owner/repo --state open
+## Documentation
 
-# Comment on PR
-github pr comment --repo owner/repo --pr 43 --body "LGTM! 🔥"
-
-# Approve PR
-github pr review --repo owner/repo --pr 43 --event APPROVE --body "Excellent work!"
-
-# Request changes
-github pr review --repo owner/repo --pr 43 --event REQUEST_CHANGES --body "Please fix type errors"
-
-# Merge PR
-github pr merge --repo owner/repo --pr 43 --method squash
-```
-
-### Repository Commands
-
-```bash
-# List recent commits
-github repo commits --repo owner/repo --limit 10
-
-# List contributors
-github repo contributors --repo owner/repo
-
-# Get repository info
-github repo info --repo owner/repo
-```
-
-### Standup Digest
-
-Show all commits across repos for a given time range, ideal for daily standups or async team updates.
-
-```bash
-# All repos for the last day (default)
-github standup -o your-org
-
-# Last 7 days
-github standup -o your-org -d 7
-
-# Specific repos only
-github standup -o your-org -r repo-a repo-b
-
-# Filter by author
-github standup -o your-org --author octocat
-
-# JSON output for scripting
-github standup -o your-org -d 3 --json
-```
-
-### JSON Output Mode
-
-Add `--json` flag to any command for machine-readable output:
-
-```bash
-github issue list --repo owner/repo --json
-github pr list --repo owner/repo --json --state open
-github repo commits --repo owner/repo --json
-```
-
-## Agent Integration
-
-This tool is designed to be used by AI agents via the `exec` tool.
-
-Example agent usage:
-
-```typescript
-// Create issue from code review
-exec(`github issue create --repo owner/repo --title "Security: SSRF vulnerability" --body "Found in auth.ts line 42" --labels security --assignee octocat --json`);
-
-// List open issues
-const result = exec(`github issue list --repo owner/repo --state open --json`);
-const issues = JSON.parse(result.stdout);
-
-// Approve PR after review
-exec(`github pr review --repo owner/repo --pr 43 --event APPROVE --body "Security review passed. All 50+ checkpoints validated."`);
-```
-
-See `SKILL.md` for detailed Skill documentation.
-
-## Architecture
-
-```
-src/
-├── index.ts           # CLI entry point
-├── github.ts          # GitHub API client (Octokit wrapper)
-├── commands/
-│   ├── issues.ts      # Issue commands
-│   ├── prs.ts         # PR commands
-│   ├── repos.ts       # Repository commands
-│   ├── standup.ts     # Standup digest command
-│   ├── bug-report.ts  # Bug report command
-│   └── coverage-check.ts  # Coverage check command
-└── utils/
-    ├── config.ts      # Token/config management
-    └── output.ts      # Formatted output (JSON/table)
-```
-
-## Error Handling
-
-- **Network Errors:** Automatic retry (3 attempts) with exponential backoff
-- **Auth Errors:** Clear error message with setup instructions
-- **Rate Limiting:** Respects GitHub rate limits (built into Octokit)
-- **Invalid Input:** Validates repository format, event types, merge methods
+- [Command reference](./docs/commands.md): issue, PR, repository, standup, bug-report, and coverage-check commands, JSON mode, agent integration, source layout, error handling
+- [SKILL.md](./SKILL.md): agent skill documentation
+- [ENGINEERING.md](./ENGINEERING.md): engineering standards this package follows
 
 ## Development
 
 ```bash
-# Build
 npm run build
-
-# Watch mode (auto-rebuild on changes)
-npm run watch
-
-# Test CLI locally
+npm run watch   # auto-rebuild on changes
+npm test
 node dist/index.js --help
-node dist/index.js issue list --repo owner/repo
 ```
 
 ## License
