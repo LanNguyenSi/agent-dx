@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-09-25T12:58:25Z
+timestamp: 2026-09-26T08:25:19Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/agents/reviewer.md
@@ -56,7 +56,7 @@ identical scope, both clauses
 (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:56#"Step 8 of the detailed workflow states the operational"`),
 both built from one shared test constant so dropping either clause at
 either site fails that site's own test
-(`packages/orchestrator-workflow/test/docs-consistency.test.ts:1420#"built from one shared constant"`).
+(`packages/orchestrator-workflow/test/docs-consistency.test.ts:1422#"built from one shared constant"`).
 Full field-shape treatment of the implementer-side `class_closure` field
 that produces `recurrence: repeated`'s class match is out of this doc's
 lane; see
@@ -172,7 +172,7 @@ and set the row's Decision to `accepted`
 (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:338#"unchanged and setting Decision to"`; `05-review-findings.md:16#"| Severity | Category | Description | Suggested Fix | Decision |"`).
 No reader or template schema changes: the existing Decision legend and all
 high/critical waiver and escalation rules continue to apply. The policy is
-pinned in `test/docs-consistency.test.ts:4887#"docs-only closing deltas stay narrowly bounded"`.
+pinned in `test/docs-consistency.test.ts:4892#"docs-only closing deltas stay narrowly bounded"`.
 
 ## The Decision legend in 05-review-findings.md
 
@@ -312,7 +312,7 @@ Motivated by the same 16-round dogfood as the mutation-probes hardening in
 [subagent-contracts-superset.md](subagent-contracts-superset.md#mutation-probes-requirement-0160)
 (`CHANGELOG.md:#[0.16.0]#"as a hard-mandatory"`, agent-tasks task 16637a96): one reviewer round in
 that dogfood omitted `acceptance_recommendation` entirely.
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:1469#"the orchestrator asks the reviewer to resupply it"` pins
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:1471#"the orchestrator asks the reviewer to resupply it"` pins
 the rule in both the installed prompt and `SKILL.md`'s reference copy.
 
 ## Review-round escalation budget

@@ -5,9 +5,11 @@ pilot bundle of the agent-dx monorepo; granularity is per-package by the
 2026-07-16 decision). These docs capture cross-file semantics and invariants
 that no single source file states on its own: how the run-state markers,
 subagent contracts, review gate, installer fence, and model preselection
-interlock. For feature-level reference, see the package `README.md` and
-`INSTALL-AGENT.md` two levels up; these docs deliberately do not duplicate
-them.
+interlock. For feature-level reference, see the package `README.md`,
+`INSTALL-AGENT.md`, and the reference docs under `docs/*.md` two levels up
+(architecture, install, harnesses, model routing, operator install, role
+profile, run contracts, verification sets, and the `validate-review-report`
+CLI); these docs deliberately do not duplicate them.
 
 ## Modules
 

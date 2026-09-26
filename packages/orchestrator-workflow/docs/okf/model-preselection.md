@@ -3,7 +3,7 @@ type: module
 title: Model preselection and routing
 description: How legacy role models and harness-specific role/tier selections flow through the CLI and manifests into agent definitions.
 tags: [models, routing, cli, manifest, per-role, harness-adapters]
-timestamp: 2026-09-25T12:15:34Z
+timestamp: 2026-09-26T08:25:19Z
 sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/routing.ts
@@ -17,6 +17,7 @@ sources:
   - packages/orchestrator-workflow/src/detect.ts
   - packages/orchestrator-workflow/src/operator-manifest.ts
   - packages/orchestrator-workflow/README.md
+  - packages/orchestrator-workflow/docs/model-routing-reference.md
   - packages/orchestrator-workflow/INSTALL-AGENT.md
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/test/docs-consistency.test.ts
@@ -42,9 +43,9 @@ for how `--profile` scopes which roles get an actual subagent file: since
 (`src/models.ts:42#"const MINIMAL_PROFILE_ROLES: ReadonlySet<Role> = new"`) simply not naming it, no new profile logic needed.
 
 Defaults (`src/models.ts:80-85#"advisor:"`, documented in
-`README.md:385#"escalations happen precisely when the situation is hard, so it shares the reviewer's strongest-model default"`):
+`packages/orchestrator-workflow/docs/model-routing-reference.md:20#"escalations happen precisely when the situation is hard, so it shares the reviewer's strongest-model default"`):
 
-| Role | Default | Rationale (README) |
+| Role | Default | Rationale (docs/model-routing-reference.md) |
 |---|---|---|
 | explorer | `sonnet` | read-only terrain mapping is broad reading, not deep reasoning |
 | task-slicer | `sonnet` | structured decomposition, no deep reasoning needed |
@@ -157,7 +158,7 @@ below.
   and emitted right after `model:` when the model was resolved; see "Pinned
   default effort (0.22.0)" below for the dispatch rule. Nested-path providers
   such as `openrouter/anthropic/claude-...` are never alias-auto-resolved and
-  must be passed as fully-qualified `--models` entries (`README.md:438#"reviewer=openrouter/anthropic/claude-opus-4.8"`,
+  must be passed as fully-qualified `--models` entries (`packages/orchestrator-workflow/docs/model-routing-reference.md:103#"reviewer=openrouter/anthropic/claude-opus-4.8"`,
   confirmed by `test/init.test.ts:530-553#"expect(slicer).not.toContain("`, `openrouter/some-model` passes
   through unchanged). Confirmed end-to-end when the `opencode` binary is
   absent: every role's file omits `model:` (`test/init.test.ts:2213-2221#"${role}.md must not contain model:"`,
@@ -208,8 +209,10 @@ explorer, task-slicer, and implementer; Sol at the explorer/task-slicer
 medium defaults and high variants; Terra at implementer medium/high and
 reviewer medium; Astra at implementer xhigh, reviewer high/xhigh, and advisor
 high/xhigh. Effort matches the routing tier. The orchestrator itself stays on
-the session model; the README recommends Astra/high normally and xhigh for
-demanding sessions without changing global configuration.
+the session model;
+`packages/orchestrator-workflow/docs/model-routing-reference.md:22-23#"for demanding work."`
+recommends Astra/high normally and xhigh for demanding sessions without
+changing global configuration.
 
 The effective routing is persisted in the repo manifest. Reinstalls preserve
 its exact leaves, operator setup stores routing with its other defaults,
@@ -351,13 +354,14 @@ Code variants are unaffected).`, stating both the real rendering effect and
 the real harness scope; `test/init.test.ts:2246-2267#"expect(agents.sort()).toEqual(["` asserts the full
 wording verbatim (a review-round-2 strengthening of the fix-round-1 tests,
 which had only asserted the model class name appeared somewhere in
-stderr). README's opencode-effort prose and the CHANGELOG 0.19.0 entry
-carried the same two stale claims (the pre-M4 provider-keyed framing and
-this pre-fix-round-1 "model: will be omitted" phrasing); both were
-corrected in the same fix-round-2 pass, and
-`test/docs-consistency.test.ts`'s new "README opencode-effort prose uses
-family terms" `describe` (review finding R2-M1) guards the README half of
-that correction against regressing back to either stale claim.
+stderr). `docs/model-routing-reference.md`'s opencode-effort prose (moved
+out of README.md) and the CHANGELOG 0.19.0 entry carried the same two stale
+claims (the pre-M4 provider-keyed framing and this pre-fix-round-1 "model:
+will be omitted" phrasing); both were corrected in the same fix-round-2
+pass, and `test/docs-consistency.test.ts`'s
+"model-routing-reference.md opencode-effort prose uses family terms" `describe`
+(review finding R2-M1) guards that prose against regressing back to either
+stale claim.
 
 **Rendering (`init.ts:1123-1189#"effortLine,"`).** For each harness and each role
 `rolesForProfile(profile)` selects, `runInit` writes the base file exactly
@@ -443,9 +447,10 @@ variant-exclusive; its own dispatch logic is unchanged. Test coverage:
 `variant: high` on an anthropic-resolved model, the three medium-default
 roles get no effort field at all, matching the pre-0.22.0 byte shape on
 that axis) plus the legacy-frontmatter and two-target byte-identity tests
-cited above. `README.md`'s "Effort tiers" section gained a new "Every
+cited above. `docs/model-routing-reference.md`'s "Effort tiers" section
+(moved from README.md) gained a new "Every
 default file carries its own pinned effort, independent of `--tiers`"
-paragraph stating the same rule (`README.md:464#"effort deterministic and independent of the caller's session."`), and the CHANGELOG
+paragraph stating the same rule (`packages/orchestrator-workflow/docs/model-routing-reference.md:129#"effort deterministic and independent of the caller's session."`), and the CHANGELOG
 0.22.0 entry leads with this behavior change since it is user-visible and
 session-effort-dependent, not just an additive feature. `agents-md-section.md`'s
 Scaling delegation bullet list gained a dedicated bullet (deliberately
@@ -518,9 +523,11 @@ unchanged by this feature), so idempotence, conflict detection, and
 `uninstall` (see [install-fence-mechanics.md](install-fence-mechanics.md))
 all cover them automatically with no tier-specific removal code.
 
-README documents `--tiers`/`--no-tiers`, the role/tier table, the tier ->
-model class/effort table, and the opencode effort behavior in its own
-"Effort tiers" section, including a warning that `CLAUDE_CODE_EFFORT_LEVEL`
+`docs/model-routing-reference.md` documents `--tiers`/`--no-tiers`, the
+role/tier table, the tier -> model class/effort table, and the opencode
+effort behavior in its own "Effort tiers" section (linked from a short
+README subsection of the same name), including a warning that
+`CLAUDE_CODE_EFFORT_LEVEL`
 (a harness environment variable, wire-verified 2026-08-19 to override
 frontmatter `effort:` on every installed agent when set) beats the
 frontmatter `effort:` this feature adds, plus (since fix-round-1) the
@@ -597,8 +604,8 @@ red on the advisor addition until each listed doc was updated to name the
 fifth role, the same "did I update every place a role is enumerated" check
 the "Solution-neutral notes" section below describes.
 
-- README's model-preselection table has one row per role
-  (`test/docs-consistency.test.ts:95#"expect(readmeMd).toMatch(new RegExp("`, matches `^\| <role> \|`).
+- `docs/model-routing-reference.md`'s model-preselection table (moved from README.md) has one row per role
+  (`test/docs-consistency.test.ts:95#"expect(modelRoutingDoc).toMatch(new RegExp("`, matches `^\| <role> \|`).
 - `INSTALL-AGENT.md`'s `--models` example names every role
   (`test/docs-consistency.test.ts:108#"INSTALL-AGENT.md --models example names every role"`, checks for `<role>=<model>` per role).
 - `INSTALL-AGENT.md`'s manifest example JSON has one `models` key per role
@@ -611,9 +618,10 @@ A fifth, adjacent test guards the read-only-role brace lists
 `INSTALL-AGENT.md` (`test/docs-consistency.test.ts:104#"expect(listed.sort()).toEqual(sortedRoles);"`); it is role-enumeration generally, not
 model-specific, but shares the same drift-prevention purpose.
 
-Since 0.19.0, a standalone `describe` (`test/docs-consistency.test.ts:1945#"defaultTier: defaultTierCell.trim(),"`) guards a tier-specific
-enumeration site: README's "Effort tiers" role/tier table against
-`ROLE_TIERS` and `DEFAULT_TIER` directly, per role and column
+Since 0.19.0, a standalone `describe` (`test/docs-consistency.test.ts:1947#"defaultTier: defaultTierCell.trim(),"`) guards a tier-specific
+enumeration site: `docs/model-routing-reference.md`'s "Effort tiers"
+role/tier table (moved from README.md) against `ROLE_TIERS` and
+`DEFAULT_TIER` directly, per role and column
 (tiers-available list order, default-tier value, and a row-count check with
 no extras or omissions), so a tier added to or removed from either
 `models.ts` map without a matching table edit fails loudly the same way a
@@ -622,14 +630,15 @@ also covers the advisor row (`ROLE_TIERS.advisor = ["high", "xhigh"]`,
 `DEFAULT_TIER.advisor = "high"`), the test iterating `ROLES` so the new
 per-role assertions came for free from the `models.ts` addition alone, no
 test edit required. Since fix-round-1
-(review finding L4), a second, sibling `describe` (`test/docs-consistency.test.ts:2024#"const def = TIER_DEFS[tier];"`) guards
-README's other tier-shaped table, Tier -> model class -> model alias ->
-requested effort, against `TIER_DEFS`/`CLASS_MODELS` directly, the same
+(review finding L4), a second, sibling `describe` (`test/docs-consistency.test.ts:2026#"const def = TIER_DEFS[tier];"`) guards
+`docs/model-routing-reference.md`'s other tier-shaped table (moved from
+README.md), Tier -> model class -> model alias -> requested effort, against
+`TIER_DEFS`/`CLASS_MODELS` directly, the same
 way; before this fix nothing guarded that second table, so it could drift
 from its source maps silently (this table is keyed by `Tier`, not `Role`,
 so it is unaffected by the role count itself). Since fix-round-2 (review finding R2-M1), a
-third, site-specific `describe` (`test/docs-consistency.test.ts:2085#"return readmeMd.slice(startIdx, endIdx);"`)
-guards the opencode-effort prose in README's "Effort tiers" section
+third, site-specific `describe` (`test/docs-consistency.test.ts:2087#"return modelRoutingDoc.slice(startIdx, endIdx);"`)
+guards the opencode-effort prose, moved to `docs/model-routing-reference.md`'s "Effort tiers" section,
 directly: it isolates that prose block by its own lead-in phrase and the
 next bold lead-in that follows it, then asserts the prose contains the
 family-based framing ("Claude-family") and does not contain either of the
@@ -640,7 +649,7 @@ claim fails a targeted assertion instead of only showing up as an
 unguarded prose diff.
 
 Since 0.22.0, a fourth, site-specific `describe`
-(`test/docs-consistency.test.ts:2690#"must not sit inside the tiers-gated clause"`) guards the pinned-default-effort
+(`test/docs-consistency.test.ts:2692#"must not sit inside the tiers-gated clause"`) guards the pinned-default-effort
 policy in `agents-md-section.md`'s Scaling delegation bullet list and
 `SKILL.md` step 6: a derivation-based check (not a hand-maintained role
 list, the same discipline the 0.20.0 tier-selection-policy guard above

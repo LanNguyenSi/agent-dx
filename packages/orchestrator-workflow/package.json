@@ -12,7 +12,8 @@
     "assets",
     "README.md",
     "INSTALL-AGENT.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "docs/*.md"
   ],
   "scripts": {
     "build": "tsc",

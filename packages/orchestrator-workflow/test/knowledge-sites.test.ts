@@ -23,22 +23,29 @@ const BACK_REFERENCE = "`knowledge` in `.ai/workflow/manifest.json`";
  * distinctive substring of the allowed sentence.
  */
 const EXAMPLE_ALLOWLIST: Record<string, string[]> = {
-  "README.md": ['"npx", "okf-kit", "check", "docs/okf"'],
+  // Moved from README.md's "Verification sets" section to
+  // docs/verification-sets.md: the JSON worked example lives there now,
+  // not in README.md.
+  "docs/verification-sets.md": ['"npx", "okf-kit", "check", "docs/okf"'],
 };
 
-/** README.md, INSTALL-AGENT.md and every Markdown file under assets/. */
+/** README.md, INSTALL-AGENT.md, every Markdown file directly under docs/
+ * (the docs/okf/ bundle itself is exempt: its prose is the back-reference's
+ * own definition site), and every Markdown file under assets/. */
 function scannedFiles(): string[] {
   const files = ["README.md", "INSTALL-AGENT.md"];
-  const walk = (dir: string): void => {
+  const walk = (dir: string, recurse: boolean): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       const full = join(dir, entry.name);
-      if (entry.isDirectory()) walk(full);
-      else if (entry.name.endsWith(".md")) {
+      if (entry.isDirectory()) {
+        if (recurse) walk(full, recurse);
+      } else if (entry.name.endsWith(".md")) {
         files.push(relative(PACKAGE_DIR, full));
       }
     }
   };
-  walk(join(PACKAGE_DIR, "assets"));
+  walk(join(PACKAGE_DIR, "docs"), false); // false: docs/okf/ is exempt
+  walk(join(PACKAGE_DIR, "assets"), true);
   return files.sort();
 }
 
@@ -113,6 +120,8 @@ describe("no kit text site hard-codes docs/okf as the sole knowledge-bundle loca
     const files = scannedFiles();
     for (const expected of [
       "README.md",
+      "docs/architecture.md",
+      "docs/install-reference.md",
       "assets/skill/SKILL.md",
       "assets/templates/06-handoff.md",
       "assets/skill/references/evidence-and-probes.md",

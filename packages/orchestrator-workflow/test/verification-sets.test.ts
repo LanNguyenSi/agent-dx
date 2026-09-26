@@ -32,12 +32,18 @@ const WORKTREE_RE_RESOLUTION_RULE =
 const REPOSITORY_PATH_IDENTITY_RULE =
   "Repository identity includes the repository path (the worktree top level): in the comparison before acquisition or execution, repository identity means the repository and its path, not its revision, and that path is compared with the top level of the worktree the diff comes from, not with whichever checkout the role runs in; a set frozen against another checkout than the one the diff comes from (for example the main checkout while the diff comes from a linked worktree) withdraws the approval and is a misfire, not a pass, while a revision difference alone does not.";
 const packageDir = fileURLToPath(new URL("..", import.meta.url));
-const readme = readFileSync(`${packageDir}/README.md`, "utf8");
-const exampleFence = readme.match(
-  /## Verification sets\n[\s\S]*?```json\n([\s\S]*?)\n```/,
+// Moved from README.md to docs/verification-sets.md; the only fenced JSON
+// block in that file is the worked example, so no heading anchor is needed
+// to disambiguate it from another table.
+const verificationSetsDoc = readFileSync(
+  `${packageDir}/docs/verification-sets.md`,
+  "utf8",
 );
+const exampleFence = verificationSetsDoc.match(/```json\n([\s\S]*?)\n```/);
 if (!exampleFence) {
-  throw new Error("README verification-set JSON example is missing");
+  throw new Error(
+    "docs/verification-sets.md verification-set JSON example is missing",
+  );
 }
 const example = JSON.parse(exampleFence[1]) as {
   format: string;
@@ -52,7 +58,7 @@ const example = JSON.parse(exampleFence[1]) as {
 };
 
 describe("documented verification sets", () => {
-  it("parses the README worked example with one preflight executor and ordered extras", () => {
+  it("parses the docs/verification-sets.md worked example with one preflight executor and ordered extras", () => {
     expect(example.format).toBe("orchestrator-workflow-verification-set/v1");
     expect(example.preflight).toMatchObject({
       kind: "preflight",

@@ -87,12 +87,12 @@ const HALT_SCOPE_PHRASE =
  */
 describe("docs enumerate every installed role", () => {
   const installAgentMd = readDoc("INSTALL-AGENT.md");
-  const readmeMd = readDoc("README.md");
+  const modelRoutingDoc = readDoc("docs/model-routing-reference.md"); // moved from README.md
   const agentsMdSection = readAsset("agents-md-section.md");
 
-  it("README model-preselection table has one row per role", () => {
+  it("model-preselection table has one row per role", () => {
     for (const role of ROLES) {
-      expect(readmeMd).toMatch(new RegExp(`^\\| ${role} \\|`, "m"));
+      expect(modelRoutingDoc).toMatch(new RegExp(`^\\| ${role} \\|`, "m"));
     }
   });
 
@@ -258,7 +258,7 @@ describe("instruction trust boundary ships in policy, skill, and agent prompts",
 
 describe("read-only posture is documented for exactly the read-only roles", () => {
   const installAgentMd = unwrap(readDoc("INSTALL-AGENT.md"));
-  const readmeMd = unwrap(readDoc("README.md"));
+  const harnessesDoc = unwrap(readDoc("docs/harnesses.md")); // moved from README.md
   const writableRoles = ROLES.filter((role) => !READ_ONLY_ROLES.has(role));
 
   // Each doc names the applicable roles immediately before the tool-restriction
@@ -300,11 +300,11 @@ describe("read-only posture is documented for exactly the read-only roles", () =
     );
   });
 
-  it("README.md scopes the read-only posture to the read-only roles", () => {
+  it("docs/harnesses.md scopes the read-only posture to the read-only roles", () => {
     assertPostureScopedToReadOnly(
-      readmeMd,
+      harnessesDoc,
       /read-only ([-\w ,]+?) also gets?/g,
-      "README.md",
+      "docs/harnesses.md",
     );
   });
 });
@@ -688,15 +688,17 @@ describe("the reviewer prompt forces an immediate first tool call", () => {
  * instead of implying full closure (the residual bit in practice: a reviewer
  * ran `git checkout` and discarded uncommitted work).
  */
-describe("README names the Bash residual honestly", () => {
+describe("docs/harnesses.md names the Bash residual honestly", () => {
   it("states instruction-only guarding for Bash without claiming closure", () => {
-    const readmeMd = unwrap(readDoc("README.md"));
-    expect(readmeMd).toContain("guarded by instruction only");
-    expect(readmeMd).toContain("role definition itself does not prevent it");
-    expect(readmeMd).toContain(
+    const harnessesDoc = unwrap(readDoc("docs/harnesses.md")); // moved from README.md
+    expect(harnessesDoc).toContain("guarded by instruction only");
+    expect(harnessesDoc).toContain(
+      "role definition itself does not prevent it",
+    );
+    expect(harnessesDoc).toContain(
       "A native read-only sandbox can block those writes",
     );
-    expect(readmeMd).toContain("out of this kit's scope");
+    expect(harnessesDoc).toContain("out of this kit's scope");
   });
 });
 
@@ -1898,7 +1900,7 @@ describe("review-method axis ships method_applied/withdrawn identically in both 
  * 0.19.0 adds `--tiers`: `models.ts` gains `ROLE_TIERS` (which effort tiers
  * each role gets a variant file for) and `DEFAULT_TIER` (the tier a role's
  * plain, unsuffixed file already corresponds to, so no variant is ever
- * rendered for it). README's new "Effort tiers" section carries a table of
+ * rendered for it). model-routing-reference.md's "Effort tiers" section carries a table of
  * that same data for humans; nothing previously guarded the two staying in
  * sync. This pins the table against `ROLE_TIERS`/`DEFAULT_TIER` directly
  * (not a hardcoded expected string), so a tier added to or removed from
@@ -1909,24 +1911,21 @@ describe("review-method axis ships method_applied/withdrawn identically in both 
  * table (which also has an `explorer`/`task-slicer`/`implementer`/`reviewer`
  * first column, higher up in the same file) is never accidentally matched.
  */
-describe("README tier table enumerates ROLE_TIERS and DEFAULT_TIER exactly", () => {
-  const readmeMd = readDoc("README.md");
+describe("model-routing-reference.md tier table enumerates ROLE_TIERS and DEFAULT_TIER exactly", () => {
+  const modelRoutingDoc = readDoc("docs/model-routing-reference.md"); // moved from README.md's Effort tiers
 
   /** The tier table's own markdown block, isolated from the unrelated
    * model-preselection table earlier in the file (same first column). */
   function tierTableSection(): string {
-    const headerIdx = readmeMd.indexOf(
+    const headerIdx = modelRoutingDoc.indexOf(
       "| Role | Tiers available | Default tier",
     );
-    expect(
-      headerIdx,
-      "README tier table header not found",
-    ).toBeGreaterThanOrEqual(0);
-    const afterHeader = readmeMd.slice(headerIdx);
+    expect(headerIdx, "tier table header not found").toBeGreaterThanOrEqual(0);
+    const afterHeader = modelRoutingDoc.slice(headerIdx);
     const endIdx = afterHeader.indexOf("\n\n");
     expect(
       endIdx,
-      "README tier table did not terminate before a blank line",
+      "tier table did not terminate before a blank line",
     ).toBeGreaterThan(0);
     return afterHeader.slice(0, endIdx);
   }
@@ -1938,7 +1937,10 @@ describe("README tier table enumerates ROLE_TIERS and DEFAULT_TIER exactly", () 
     const match = tierTableSection().match(
       new RegExp(`^\\| ${role} \\| ([^|]+) \\| ([^|]+) \\|$`, "m"),
     );
-    expect(match, `README tier table row for "${role}" not found`).toBeTruthy();
+    expect(
+      match,
+      `model-routing-reference.md tier table row for "${role}" not found`,
+    ).toBeTruthy();
     const [, tiersCell, defaultTierCell] = match as RegExpMatchArray;
     return {
       tiers: tiersCell.split(",").map((tier) => tier.trim()),
@@ -1979,23 +1981,23 @@ describe("README tier table enumerates ROLE_TIERS and DEFAULT_TIER exactly", () 
  * line, so it is never confused with either of the two other same-shaped
  * tables earlier in the file.
  */
-describe("README tier-to-model-class table enumerates TIER_DEFS and CLASS_MODELS exactly", () => {
-  const readmeMd = readDoc("README.md");
+describe("model-routing-reference.md tier-to-model-class table enumerates TIER_DEFS and CLASS_MODELS exactly", () => {
+  const modelRoutingDoc = readDoc("docs/model-routing-reference.md"); // moved from README.md's Effort tiers
   const tiersInOrder = Object.keys(TIER_DEFS) as Tier[];
 
   function tierModelClassTableSection(): string {
-    const headerIdx = readmeMd.indexOf(
+    const headerIdx = modelRoutingDoc.indexOf(
       "| Tier | Model class | Model alias | Effort requested |",
     );
     expect(
       headerIdx,
-      "README tier-to-model-class table header not found",
+      "tier-to-model-class table header not found",
     ).toBeGreaterThanOrEqual(0);
-    const afterHeader = readmeMd.slice(headerIdx);
+    const afterHeader = modelRoutingDoc.slice(headerIdx);
     const endIdx = afterHeader.indexOf("\n\n");
     expect(
       endIdx,
-      "README tier-to-model-class table did not terminate before a blank line",
+      "model-routing-reference.md tier-to-model-class table did not terminate before a blank line",
     ).toBeGreaterThan(0);
     return afterHeader.slice(0, endIdx);
   }
@@ -2010,7 +2012,7 @@ describe("README tier-to-model-class table enumerates TIER_DEFS and CLASS_MODELS
     );
     expect(
       match,
-      `README tier-to-model-class row for "${tier}" not found`,
+      `model-routing-reference.md tier-to-model-class row for "${tier}" not found`,
     ).toBeTruthy();
     const [, modelClassCell, aliasCell, effortCell] = match as RegExpMatchArray;
     return {
@@ -2058,8 +2060,8 @@ describe("README tier-to-model-class table enumerates TIER_DEFS and CLASS_MODELS
  * guards above isolate their own tables, so a regression back to the stale
  * provider-scoped wording fails here rather than silently reappearing.
  */
-describe("README opencode-effort prose uses family terms, not the stale provider-scoped claim (review round 2, R2-M1)", () => {
-  const readmeMd = readDoc("README.md");
+describe("model-routing-reference.md opencode-effort prose uses family terms, not the stale provider-scoped claim (review round 2, R2-M1)", () => {
+  const modelRoutingDoc = readDoc("docs/model-routing-reference.md"); // moved from README.md's Effort tiers
 
   /** The opencode-effort prose block, isolated from the rest of the
    * "Effort tiers" section by its own opening bold lead-in and the next
@@ -2067,22 +2069,22 @@ describe("README opencode-effort prose uses family terms, not the stale provider
    * so a phrase elsewhere in the section can never accidentally satisfy (or
    * fail) these assertions. */
   function opencodeEffortSection(): string {
-    const startIdx = readmeMd.indexOf(
+    const startIdx = modelRoutingDoc.indexOf(
       "**opencode variants key off the resolved model's family",
     );
     expect(
       startIdx,
-      "README opencode-effort prose lead-in not found",
+      "opencode-effort prose lead-in not found",
     ).toBeGreaterThanOrEqual(0);
-    const endIdx = readmeMd.indexOf(
+    const endIdx = modelRoutingDoc.indexOf(
       "**Warning: `CLAUDE_CODE_EFFORT_LEVEL`",
       startIdx,
     );
     expect(
       endIdx,
-      "README opencode-effort prose did not terminate before the CLAUDE_CODE_EFFORT_LEVEL warning",
+      "opencode-effort prose did not terminate before the CLAUDE_CODE_EFFORT_LEVEL warning",
     ).toBeGreaterThan(startIdx);
-    return readmeMd.slice(startIdx, endIdx);
+    return modelRoutingDoc.slice(startIdx, endIdx);
   }
 
   it("carries the family-based framing, not the old provider-dependent one", () => {
@@ -4051,8 +4053,8 @@ describe("every CHANGELOG.md:# heading-section citation is backtick-delimited (r
   });
 });
 
-describe("operator-install CLI surface stays documented in README (fix round 1, L7)", () => {
-  const readmeMd = readDoc("README.md");
+describe("operator-install CLI surface stays documented (fix round 1, L7)", () => {
+  const operatorInstallDoc = readDoc("docs/operator-install.md"); // moved from README.md
   const cliTs = readDoc("src/cli.ts");
   const doctorTs = readDoc("src/doctor.ts");
 
@@ -4110,17 +4112,17 @@ describe("operator-install CLI surface stays documented in README (fix round 1, 
   });
 
   const operatorSection = (() => {
-    const start = readmeMd.indexOf("## Operator-level install");
-    const end = readmeMd.indexOf("## Ownership and re-runs", start);
-    if (start === -1 || end === -1) {
+    const start = operatorInstallDoc.indexOf("# Operator-level install");
+    const end = operatorInstallDoc.length;
+    if (start === -1) {
       throw new Error(
-        "README.md lost the Operator-level install section or its successor heading",
+        "docs/operator-install.md lost its Operator-level install heading",
       );
     }
-    return readmeMd.slice(start, end);
+    return operatorInstallDoc.slice(start, end);
   })();
 
-  it("every setup/apply/doctor/adopt option name appears verbatim inside README's Operator-level install section", () => {
+  it("every setup/apply/doctor/adopt option name appears verbatim inside docs/operator-install.md", () => {
     const missing: string[] = [];
     for (const flag of expectedFlags) {
       const boundaryRe = new RegExp(`(?<![\\w-])${flag}(?![\\w-])`);
@@ -4150,19 +4152,19 @@ describe("operator-install CLI surface stays documented in README (fix round 1, 
     const end = operatorSection.indexOf("**`adopt", start);
     if (start === -1 || end === -1) {
       throw new Error(
-        "README.md lost the doctor paragraph lead-in or the adopt lead-in after it",
+        "docs/operator-install.md lost the doctor paragraph lead-in or the adopt lead-in after it",
       );
     }
     const statusSentenceEnd = operatorSection.indexOf(". It exits", start);
     if (statusSentenceEnd === -1 || statusSentenceEnd > end) {
       throw new Error(
-        'README.md doctor paragraph lost its status sentence (ending in ". It exits")',
+        'docs/operator-install.md doctor paragraph lost its status sentence (ending in ". It exits")',
       );
     }
     return operatorSection.slice(start, statusSentenceEnd);
   })();
 
-  it("every TargetStatus member appears inside README's doctor status sentence", () => {
+  it("every TargetStatus member appears inside docs/operator-install.md's doctor status sentence", () => {
     const missing: string[] = [];
     for (const status of TARGET_STATUSES) {
       if (!doctorParagraph.includes(`\`${status}\``)) {
@@ -4785,14 +4787,16 @@ describe("the CHANGELOG's release bullet names all three process rules from this
 describe("Codex routing and agent-led installation stay documented", () => {
   const installAgentMd = unwrap(readDoc("INSTALL-AGENT.md"));
   const readmeMd = unwrap(readDoc("README.md"));
+  const harnessesDoc = unwrap(readDoc("docs/harnesses.md")); // moved from README.md
+  const modelRoutingDoc = unwrap(readDoc("docs/model-routing-reference.md")); // moved from README.md
   const skillMd = unwrap(readAsset("skill/SKILL.md"));
   const agentsMdSection = unwrap(readAsset("agents-md-section.md"));
 
   it("documents the native Codex agent surface and its fallback", () => {
-    for (const doc of [readmeMd, installAgentMd, skillMd]) {
+    for (const doc of [harnessesDoc, installAgentMd, skillMd]) {
       expect(doc).toContain("`.codex/agents/");
     }
-    expect(readmeMd).toContain("`model_reasoning_effort`");
+    expect(harnessesDoc).toContain("`model_reasoning_effort`");
     expect(skillMd).toContain("inline and sequentially");
     expect(skillMd).toContain("When a named-agent selector is available");
     expect(skillMd).toContain(
@@ -4805,7 +4809,7 @@ describe("Codex routing and agent-led installation stay documented", () => {
   });
 
   it("keeps Codex reviewer sandbox claims precise", () => {
-    for (const doc of [readmeMd, skillMd]) {
+    for (const doc of [harnessesDoc, skillMd]) {
       expect(doc.toLowerCase()).toContain(
         "reviewer inherits the caller's sandbox",
       );
@@ -4817,8 +4821,9 @@ describe("Codex routing and agent-led installation stay documented", () => {
     for (const doc of [readmeMd, installAgentMd]) {
       expect(doc).toContain("--routing");
       expect(doc).toContain("--codex-catalog");
-      expect(doc).toContain("rollback");
     }
+    expect(modelRoutingDoc).toContain("rollback");
+    expect(installAgentMd).toContain("rollback");
     expect(agentsMdSection).toContain("Preserve recorded routing choices");
     expect(agentsMdSection).toContain(
       "never treat a newer model as an automatic upgrade",
@@ -4848,7 +4853,7 @@ describe("Codex routing and agent-led installation stay documented", () => {
   });
 
   it("does not claim the legacy --models input configures Codex", () => {
-    expect(readmeMd).toContain("It does not configure Codex");
+    expect(modelRoutingDoc).toContain("It does not configure Codex");
     expect(installAgentMd).toContain(
       "`--models` is a backward-compatible input for Claude Code and opencode only; never use it to configure Codex",
     );
@@ -7270,34 +7275,34 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 580,
     end: 580,
     anchorKey: "47aedb12",
-    paragraphLine: 378,
-    secondCitationLine: 383,
+    paragraphLine: 379,
+    secondCitationLine: 384,
     claim:
-      "the paragraph opens by naming the test that pins the 0.11.0 misfire rule, then closes at line 383 with an enumeration of that same test's clause-level pins (the section heading, both detection signals, the false-positive scoping language, the resume-or-respawn response paired with the non-evidence rule, and the `03-decisions.md` record requirement) whose last item is the review-gate consequence clause the opening citation already named; the enumeration is complete, so the line-383 repeat is the doc's closing-list convention, not a skipped sibling.",
+      "the paragraph opens by naming the test that pins the 0.11.0 misfire rule, then closes at line 384 with an enumeration of that same test's clause-level pins (the section heading, both detection signals, the false-positive scoping language, the resume-or-respawn response paired with the non-evidence rule, and the `03-decisions.md` record requirement) whose last item is the review-gate consequence clause the opening citation already named; the enumeration is complete, so the line-384 repeat is the doc's closing-list convention, not a skipped sibling.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "duplicate-citation",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1104,
-    end: 1104,
+    start: 1106,
+    end: 1106,
     anchorKey: "03317257",
-    paragraphLine: 464,
-    secondCitationLine: 468,
+    paragraphLine: 465,
+    secondCitationLine: 469,
     claim:
-      "same opening-citation-then-closing-enumeration convention as the review-gate-consequence entry above, here at :1104/line 468: the closing list walks :1079, :1087, :1092 and ends on the cross-copy equality check the :1104 opening sentence named, leaving no further assertion of that block uncited.",
+      "same opening-citation-then-closing-enumeration convention as the review-gate-consequence entry above, here at :1106/line 469: the closing list walks :1081, :1089, :1094 and ends on the cross-copy equality check the :1106 opening sentence named, leaving no further assertion of that block uncited.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "duplicate-citation",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1260,
-    end: 1260,
+    start: 1262,
+    end: 1262,
     anchorKey: "b19680bb",
-    paragraphLine: 753,
-    secondCitationLine: 761,
+    paragraphLine: 754,
+    secondCitationLine: 762,
     claim:
-      "same convention again, here at :1260/line 761: the closing list walks :1226, :1232, :1255 and ends on the not-applicable-clause pin the :1260 opening sentence named, leaving no further assertion of that block uncited.",
+      "same convention again, here at :1262/line 762: the closing list walks :1228, :1234, :1257 and ends on the not-applicable-clause pin the :1262 opening sentence named, leaving no further assertion of that block uncited.",
   },
   {
     doc: "install-fence-mechanics.md",
@@ -7306,7 +7311,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 990,
     end: 990,
     anchorKey: "3a4a026f",
-    paragraphLine: 37,
+    paragraphLine: 38,
     uncitedLines: [1010],
     claim:
       "the sentence describes the per-template asset read driven by `listTemplateNames()`; line 990 is the read of a templates-directory asset, while uncited 1010 reads the skill asset for a different install step the sentence never mentions.",
@@ -7318,7 +7323,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 202,
     end: 208,
     anchorKey: "67834189",
-    paragraphLine: 291,
+    paragraphLine: 292,
     uncitedLines: [200],
     claim:
       "the sentence claims an inline marker mention survives a re-run; line 208 is the assertion that it did survive, while uncited 200 is the test's own input string, which writes the mention before the run and asserts nothing.",
@@ -7330,7 +7335,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 971,
     end: 976,
     anchorKey: "33e8e25a",
-    paragraphLine: 334,
+    paragraphLine: 335,
     uncitedLines: [984],
     claim:
       "the sentence is explicitly about the path-exists-and-unedited branch; line 976 records the hash inside that branch's own `if`, while uncited 984 is the path-does-not-exist branch's record, which the sentence's own wording excludes.",
@@ -7342,7 +7347,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 134,
     end: 147,
     anchorKey: "6b912d8f",
-    paragraphLine: 336,
+    paragraphLine: 337,
     uncitedLines: [123],
     claim:
       "the sentence claims a plain SECOND run is a byte-for-byte no-op; line 147 is the idempotence block's second-run assertion, while uncited 123 is the same assertion inside an earlier first-install test, which says nothing about a second run.",
@@ -7354,7 +7359,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 141,
     end: 150,
     anchorKey: "0bf37874",
-    paragraphLine: 343,
+    paragraphLine: 344,
     uncitedLines: [155, 160],
     claim:
       "the sentence names the containment re-check made before the unlink; line 150 is that guard's own loop exit, while uncited 155 and 160 exit the same loop for a missing file and a non-regular file, two guards this sentence does not describe (the anchor is a bare loop keyword, so it is the cited RANGE, not the anchor, that identifies the branch here).",
@@ -7366,10 +7371,10 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1147,
     end: 1151,
     anchorKey: "8cd81eb8",
-    paragraphLine: 156,
+    paragraphLine: 157,
     uncitedLines: [1155],
     claim:
-      "the :156 sentence names the effort-line computation call and the model argument it is computed from; line 1151 is that argument, while uncited 1155 passes the computed local into the agent-composition call that the separately cited `init.ts:1153-1155` sentence describes.",
+      "the :157 sentence names the effort-line computation call and the model argument it is computed from; line 1151 is that argument, while uncited 1155 passes the computed local into the agent-composition call that the separately cited `init.ts:1153-1155` sentence describes.",
   },
   {
     doc: "model-preselection.md",
@@ -7378,7 +7383,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1502,
     end: 1518,
     anchorKey: "5ea9652d",
-    paragraphLine: 376,
+    paragraphLine: 380,
     uncitedLines: [1498],
     claim:
       "the sentence names the content assertion pinning the five-line default frontmatter; line 1518 is the asserted array element, while uncited 1498 is a comment above the test restating the same literal in prose.",
@@ -7390,7 +7395,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1821,
     end: 1854,
     anchorKey: "d90f95bc",
-    paragraphLine: 392,
+    paragraphLine: 396,
     uncitedLines: [1855],
     claim:
       "the sentence names only the Claude-family variant-suffix outcomes; line 1854 asserts the low tier gets no `variant:` line, which is what the sentence needs, while uncited 1855 asserts the absence of `reasoningEffort`, opencode's own field for a non-Claude-family, non-Ollama provider (`src/init.ts:540`), not a codex field (codex's own equivalent is `model_reasoning_effort`, `src/codex.ts:50`) -- not part of what this sentence claims (the Ollama-side outcome it does name is cited separately, at a different range).",
@@ -7414,7 +7419,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 990,
     end: 990,
     anchorKey: "3a4a026f",
-    paragraphLine: 37,
+    paragraphLine: 38,
     uncitedLines: [1013],
     claim:
       'line 990 cites `readAsset(join("templates", name)),`; uncited 1013 is instead line 1013 in `content: readAsset(join("skill", "references", name)),`, a different site the citing sentence never names.',
@@ -7426,7 +7431,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1084,
     end: 1086,
     anchorKey: "d89da8cc",
-    paragraphLine: 53,
+    paragraphLine: 54,
     uncitedLines: [612],
     claim:
       "line 1086 cites `composeClaudeAgentVariant(`; uncited 612 is instead line 612 in `function composeClaudeAgentVariant(`, a different site the citing sentence never names.",
@@ -7438,7 +7443,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 685,
     end: 701,
     anchorKey: "c0c3cd7c",
-    paragraphLine: 77,
+    paragraphLine: 78,
     uncitedLines: [581],
     claim:
       "the sentence describes `effortLine` being passed into `composeOpencodeAgentVariant` as a parameter; line 701 is that function's own effortLine push, while uncited 581 is the byte-identical push inside `composeOpencodeAgent`, the default (non-variant) composer the sentence does not name.",
@@ -7450,7 +7455,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 292,
     end: 292,
     anchorKey: "23db3722",
-    paragraphLine: 186,
+    paragraphLine: 187,
     uncitedLines: [172],
     claim:
       "line 292 cites `previous.harnessesRecordedEmpty`; uncited 172 is instead line 172 in `* together with `previous.harnessesRecordedEmpty` (which `apply`'s`, a different site the citing sentence never names.",
@@ -7462,7 +7467,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 2553,
     end: 2586,
     anchorKey: "08402497",
-    paragraphLine: 198,
+    paragraphLine: 199,
     uncitedLines: [1153, 2157],
     claim:
       'line 2586 cites the `harnesses-stickiness gate is immune to an all-unknown-names…` test (`expect(result.stdout).toContain("installed for: claude");`); uncited 1153 and 2157 is instead line 1153 in the `init --yes runs non-interactively and installs` test (`expect(result.stdout).toContain("installed for: claude");`); and line 2157 in the `prints the tiers status in both the \'Found existing install…` test (`expect(second.stdout).toMatch(/installed for: claude.*tiers: true/);`), a different site the citing sentence never names.',
@@ -7474,7 +7479,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 91,
     end: 97,
     anchorKey: "56ac8f47",
-    paragraphLine: 291,
+    paragraphLine: 292,
     uncitedLines: [51],
     claim:
       "the sentence describes `upsertMarkerSection`'s own conflict path for a broken or duplicated marker pair; line 97 is that function's `report.conflicted.push`, while uncited 51 is the byte-identical push inside `installFile`, the general kit-file conflict path for a user-edited file, which this sentence does not describe.",
@@ -7486,7 +7491,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 146,
     end: 156,
     anchorKey: "3e9881f8",
-    paragraphLine: 312,
+    paragraphLine: 313,
     uncitedLines: [92],
     claim:
       "the sentence describes `Manifest`'s own persisted `routing` field; line 156 is that field's declaration inside the `Manifest` interface, while uncited 92 is the byte-identical declaration inside `InitOptions`, the install-input type the sentence does not name.",
@@ -7498,7 +7503,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1162,
     end: 1181,
     anchorKey: "be999e8e",
-    paragraphLine: 327,
+    paragraphLine: 328,
     uncitedLines: [559, 1617],
     claim:
       'line 1181 cites the `a plain re-run keeps the previously chosen models` test (`).toContain("model: haiku");`); uncited 559 and 1617 is instead line 559 in the `installs all four adapters; opencode agents omit model: whe…` test (`expect(claudeSlicer).toContain("model: haiku");`); and line 1617 in the `tiers=true, claude, full profile: exactly 15 agent files wi…` test (`expect(explorerLow).toContain("model: haiku");`), a different site the citing sentence never names.',
@@ -7510,7 +7515,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 977,
     end: 979,
     anchorKey: "eeab560e",
-    paragraphLine: 335,
+    paragraphLine: 336,
     uncitedLines: [1042],
     claim:
       "line 979 cites `installedFiles[relativePath] = recorded;`; uncited 1042 is instead line 1042 in `if (recorded !== undefined) installedFiles[relativePath] = recorded;`, a different site the citing sentence never names.",
@@ -7522,7 +7527,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 327,
     end: 342,
     anchorKey: "1c10d762",
-    paragraphLine: 335,
+    paragraphLine: 336,
     uncitedLines: [2316],
     claim:
       'line 342 cites the `keeps a user-edited kit file as a conflict and preserves th…` test (`createHash("sha256").update("user edit\\n", "utf8").digest("hex"),`); uncited 2316 is instead line 2316 in the `repo kit-version pin (operator apply support)` test (`createHash("sha256").update(content, "utf8").digest("hex");`), a different site the citing sentence never names.',
@@ -7534,7 +7539,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 134,
     end: 147,
     anchorKey: "6b912d8f",
-    paragraphLine: 336,
+    paragraphLine: 337,
     uncitedLines: [2043],
     claim:
       "the sentence's first clause describes the plain (non-tiers) second run's no-op, correctly anchored at the `a second run changes no file` test's own `report.updated` assertion (line 147); uncited 2043 is the byte-identical assertion inside the `a second run with tiers=true changes no file (idempotent)` test, which the same bullet's second clause already cites separately, by its own anchor, at test/init.test.ts:2027-2038.",
@@ -7546,7 +7551,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 2027,
     end: 2038,
     anchorKey: "d6e57f7c",
-    paragraphLine: 336,
+    paragraphLine: 337,
     uncitedLines: [2359],
     claim:
       "the sentence describes the `tiers: true` second-run no-op; line 2038 is that assertion inside the `a second run with tiers=true changes no file (idempotent)` test, while uncited 2359 is the byte-identical assertion inside the separate `sets a pin, is a byte-for-byte no-op on repeat...` test, which covers the `pin` option, not tiers, and the sentence does not name.",
@@ -7558,7 +7563,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1463,
     end: 2043,
     anchorKey: "6b912d8f",
-    paragraphLine: 352,
+    paragraphLine: 353,
     uncitedLines: [123, 147],
     claim:
       "line 2043 cites the `a second run with tiers=true changes no file (idempotent)` test (`expect(report.updated).toEqual([]);`); uncited 123 and 147 is instead line 123 in the `creates run state, AGENTS.md section, and claude adapter fi…` test (`expect(report.updated).toEqual([]);`); and line 147 in the `a second run changes no file` test (`expect(report.updated).toEqual([]);`), a different site the citing sentence never names.",
@@ -7570,7 +7575,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1464,
     end: 1517,
     anchorKey: "13baa7b3",
-    paragraphLine: 352,
+    paragraphLine: 353,
     uncitedLines: [114, 360],
     claim:
       'line 1517 cites the `a legacy manifest with no tiers field defaults to false and…` test (`"model: sonnet",`); uncited 114 and 360 is instead line 114 in the `creates run state, AGENTS.md section, and claude adapter fi…` test (`expect(slicer).toContain("model: sonnet");`); and line 360 in the `installs the explorer with a read-only posture on both harn…` test (`expect(claudeExplorer).toContain("model: sonnet");`), a different site the citing sentence never names.',
@@ -7582,7 +7587,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1931,
     end: 1950,
     anchorKey: "49a539a9",
-    paragraphLine: 352,
+    paragraphLine: 353,
     uncitedLines: [605],
     claim:
       'line 1950 cites the `opencode: a claude-family model behind a non-anthropic prov…` test (`"model: github-copilot/claude-sonnet-4.6",`); uncited 605 is instead line 605 in the `emits model: line when opencodeModels provides a FQ id` test (`expect(explorer).toContain("model: github-copilot/claude-sonnet-4.6");`), a different site the citing sentence never names.',
@@ -7594,7 +7599,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 2027,
     end: 2043,
     anchorKey: "6b912d8f",
-    paragraphLine: 352,
+    paragraphLine: 353,
     uncitedLines: [123, 147],
     claim:
       "line 2043 cites the `a second run with tiers=true changes no file (idempotent)` test (`expect(report.updated).toEqual([]);`); uncited 123 and 147 is instead line 123 in the `creates run state, AGENTS.md section, and claude adapter fi…` test (`expect(report.updated).toEqual([]);`); and line 147 in the `a second run changes no file` test (`expect(report.updated).toEqual([]);`), a different site the citing sentence never names.",
@@ -7606,7 +7611,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1045,
     end: 1079,
     anchorKey: "df091a00",
-    paragraphLine: 352,
+    paragraphLine: 353,
     uncitedLines: [1023],
     claim:
       'line 1079 cites the `opencode + tiers on + unresolved tier-class models (0 varia…` test (`(note) => !note.includes("-low.md") && !note.includes("-high.md"),`); uncited 1023 is instead line 1023 in the `a claude install with tiers on, then a re-run switching to …` test (`expect(report.notes.every((note) => !note.includes(".opencode"))).toB…`), a different site the citing sentence never names.',
@@ -7618,7 +7623,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1046,
     end: 1079,
     anchorKey: "df091a00",
-    paragraphLine: 352,
+    paragraphLine: 353,
     uncitedLines: [1023],
     claim:
       'line 1079 cites the `opencode + tiers on + unresolved tier-class models (0 varia…` test (`(note) => !note.includes("-low.md") && !note.includes("-high.md"),`); uncited 1023 is instead line 1023 in the `a claude install with tiers on, then a re-run switching to …` test (`expect(report.notes.every((note) => !note.includes(".opencode"))).toB…`), a different site the citing sentence never names.',
@@ -7630,7 +7635,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 2553,
     end: 2586,
     anchorKey: "08402497",
-    paragraphLine: 352,
+    paragraphLine: 353,
     uncitedLines: [1153],
     claim:
       "the sentence describes the harnesses-stickiness F1 regression test asserting a live claude install is not stuck to templates-only; line 2586 is that test's own stdout assertion, while uncited 1153 is the byte-identical assertion inside the unrelated `init --yes runs non-interactively and installs` smoke test in the `cli smoke` describe block, which the sentence does not name.",
@@ -7642,7 +7647,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 80,
     end: 85,
     anchorKey: "5633dd3c",
-    paragraphLine: 44,
+    paragraphLine: 45,
     uncitedLines: [174, 187],
     claim:
       'line 85 cites `advisor: "opus",`; uncited 174 and 187 is instead line 174 in `advisor: ["high", "xhigh"],`; and line 187 in `advisor: "high",`, a different site the citing sentence never names.',
@@ -7654,7 +7659,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 539,
     end: 550,
     anchorKey: "58938c96",
-    paragraphLine: 123,
+    paragraphLine: 124,
     uncitedLines: [627],
     claim:
       "the sentence describes `composeClaudeAgent`'s read-only-roles push; line 550 is that function's own push, while uncited 627 is the byte-identical push inside `composeClaudeAgentVariant`, the tier-variant sibling covered separately under \"Composition\" below, which this sentence does not name.",
@@ -7666,7 +7671,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 549,
     end: 550,
     anchorKey: "58938c96",
-    paragraphLine: 132,
+    paragraphLine: 133,
     uncitedLines: [627],
     claim:
       "the sentence names the read-only roles getting `disallowedTools:` right after `effort:` inside `composeClaudeAgent`; line 550 is that function's own push, while uncited 627 is the byte-identical push inside `composeClaudeAgentVariant`, the tier-variant sibling this sentence does not name.",
@@ -7678,7 +7683,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 109,
     end: 114,
     anchorKey: "13baa7b3",
-    paragraphLine: 133,
+    paragraphLine: 134,
     uncitedLines: [360, 1517],
     claim:
       'line 114 cites the `creates run state, AGENTS.md section, and claude adapter fi…` test (`expect(slicer).toContain("model: sonnet");`); uncited 360 and 1517 is instead line 360 in the `installs the explorer with a read-only posture on both harn…` test (`expect(claudeExplorer).toContain("model: sonnet");`); and line 1517 in the `a legacy manifest with no tiers field defaults to false and…` test (`"model: sonnet",`), a different site the citing sentence never names.',
@@ -7690,7 +7695,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 564,
     end: 584,
     anchorKey: "efde4d0d",
-    paragraphLine: 154,
+    paragraphLine: 155,
     uncitedLines: [704],
     claim:
       "the sentence describes `composeOpencodeAgent`'s read-only-roles push (`permission:`/`edit: deny`); line 584 is that function's own push, while uncited 704 is the byte-identical push inside `composeOpencodeAgentVariant`, the tier-variant sibling covered separately under \"Composition\" below, which this sentence does not name.",
@@ -7702,7 +7707,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 2227,
     end: 2233,
     anchorKey: "10aeb3a5",
-    paragraphLine: 168,
+    paragraphLine: 169,
     uncitedLines: [1399, 2263],
     claim:
       'line 2233 cites the `writes the --opencode-provider hint to STDERR (not stdout) …` test (`expect(result.stdout).not.toContain("--opencode-provider");`); uncited 1399 and 2263 is instead line 1399 in the `a subsequent run with harnesses: [] over a claude install l…` test (`expect(result.stdout).not.toContain("installed for: ");`); and line 2263 in the `--tiers with an empty catalog warns once per unresolved mod…` test (`expect(result.stdout).not.toContain(`Tier model class`);`), a different site the citing sentence never names.',
@@ -7714,7 +7719,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 182,
     end: 187,
     anchorKey: "5633dd3c",
-    paragraphLine: 248,
+    paragraphLine: 251,
     uncitedLines: [85],
     claim:
       'line 187 cites `advisor: "high",`; uncited 85 is instead line 85 in `advisor: "opus",`, a different site the citing sentence never names.',
@@ -7726,7 +7731,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1083,
     end: 1086,
     anchorKey: "d89da8cc",
-    paragraphLine: 252,
+    paragraphLine: 255,
     uncitedLines: [612],
     claim:
       "line 1086 cites `composeClaudeAgentVariant(`; uncited 612 is instead line 612 in `function composeClaudeAgentVariant(`, a different site the citing sentence never names.",
@@ -7738,7 +7743,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 612,
     end: 627,
     anchorKey: "58938c96",
-    paragraphLine: 267,
+    paragraphLine: 270,
     uncitedLines: [550],
     claim:
       "the sentence describes `composeClaudeAgentVariant`'s own read-only-roles push; line 627 is that function's own push, while uncited 550 is the byte-identical push inside `composeClaudeAgent`, the default (non-variant) composer covered separately under \"Per-harness frontmatter behavior\" above, which this sentence does not name.",
@@ -7750,7 +7755,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 685,
     end: 704,
     anchorKey: "efde4d0d",
-    paragraphLine: 271,
+    paragraphLine: 274,
     uncitedLines: [584],
     claim:
       "the sentence describes `composeOpencodeAgentVariant`'s own read-only-roles push; line 704 is that function's own push, while uncited 584 is the byte-identical push inside `composeOpencodeAgent`, the default (non-variant) composer this sentence does not name.",
@@ -7762,7 +7767,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 2246,
     end: 2267,
     anchorKey: "bd75126a",
-    paragraphLine: 351,
+    paragraphLine: 354,
     uncitedLines: [1997, 2300],
     claim:
       "line 2267 cites the `--tiers with an empty catalog warns once per unresolved mod…` test (`expect(agents.sort()).toEqual([`); uncited 1997 and 2300 is instead line 1997 in the `opencode: an unresolved class model (undefined) renders no …` test (`expect(agents.sort()).toEqual([`); and line 2300 in the `--tiers with fully-qualified --models but still no live cat…` test (`expect(agents.sort()).toEqual([`), a different site the citing sentence never names.",
@@ -7774,7 +7779,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1086,
     end: 1086,
     anchorKey: "d89da8cc",
-    paragraphLine: 367,
+    paragraphLine: 371,
     uncitedLines: [612],
     claim:
       "line 1086 cites `composeClaudeAgentVariant(`; uncited 612 is instead line 612 in `function composeClaudeAgentVariant(`, a different site the citing sentence never names.",
@@ -7786,7 +7791,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1523,
     end: 1557,
     anchorKey: "44b3936a",
-    paragraphLine: 378,
+    paragraphLine: 382,
     uncitedLines: [975, 995],
     claim:
       "line 1557 cites the `default agent files are byte-identical whether tiers is on …` test (`tiers: false,`); uncited 975 and 995 is instead line 975 in the `opencode + unresolved tier-class models (0 variant files ev…` test (`tiers: false,`); and line 995 in the `a claude install with tiers on, then a re-run switching to …` test (`tiers: false,`), a different site the citing sentence never names.",
@@ -7798,7 +7803,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 463,
     end: 463,
     anchorKey: "7b68d8ec",
-    paragraphLine: 391,
+    paragraphLine: 395,
     uncitedLines: [429],
     claim:
       "line 463 cites `warnings.push(`; uncited 429 is instead line 429 in `warnings.push(`Warning: ${w}`);`, a different site the citing sentence never names.",
@@ -7810,7 +7815,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1858,
     end: 1876,
     anchorKey: "c4142751",
-    paragraphLine: 392,
+    paragraphLine: 396,
     uncitedLines: [1805],
     claim:
       'line 1876 cites the `opencode: an ollama-resolved class id gets no effort field` test (`expect(implementerHigh).toContain("model: ollama/llama3");`); uncited 1805 is instead line 1805 in the `opencode default files: an Ollama or provider-less resolved…` test (`expect(rendered).toContain("model: ollama/llama3");`), a different site the citing sentence never names.',
@@ -7822,7 +7827,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1909,
     end: 1927,
     anchorKey: "e3586735",
-    paragraphLine: 399,
+    paragraphLine: 403,
     uncitedLines: [1774],
     claim:
       'line 1927 cites the `opencode: a non-anthropic, non-ollama resolved class id get…` test (`expect(implementerHigh).toContain("reasoningEffort: high");`); uncited 1774 is instead line 1774 in the `opencode default files: a non-Claude-family provider-qualif…` test (`expect(rendered).toContain("reasoningEffort: high");`), a different site the citing sentence never names.',
@@ -7834,7 +7839,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1931,
     end: 1950,
     anchorKey: "49a539a9",
-    paragraphLine: 402,
+    paragraphLine: 406,
     uncitedLines: [605],
     claim:
       'line 1950 cites the `opencode: a claude-family model behind a non-anthropic prov…` test (`"model: github-copilot/claude-sonnet-4.6",`); uncited 605 is instead line 605 in the `emits model: line when opencodeModels provides a FQ id` test (`expect(explorer).toContain("model: github-copilot/claude-sonnet-4.6");`), a different site the citing sentence never names.',
@@ -7846,7 +7851,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 539,
     end: 550,
     anchorKey: "58938c96",
-    paragraphLine: 418,
+    paragraphLine: 422,
     uncitedLines: [627],
     claim:
       "the sentence names `composeClaudeAgent` as the function 0.22.0 gave a pinned `effort:` line; line 550 is that function's own read-only-roles push, included in the cited range, while uncited 627 is the byte-identical push inside `composeClaudeAgentVariant`, the tier-variant sibling this sentence does not name.",
@@ -7858,7 +7863,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 564,
     end: 584,
     anchorKey: "efde4d0d",
-    paragraphLine: 419,
+    paragraphLine: 423,
     uncitedLines: [704],
     claim:
       "the sentence names `composeOpencodeAgent` as the function 0.22.0 gave a pinned effort line; line 584 is that function's own read-only-roles push, included in the cited range, while uncited 704 is the byte-identical push inside `composeOpencodeAgentVariant`, the tier-variant sibling this sentence does not name.",
@@ -7870,7 +7875,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1045,
     end: 1079,
     anchorKey: "df091a00",
-    paragraphLine: 511,
+    paragraphLine: 516,
     uncitedLines: [1023],
     claim:
       'line 1079 cites the `opencode + tiers on + unresolved tier-class models (0 varia…` test (`(note) => !note.includes("-low.md") && !note.includes("-high.md"),`); uncited 1023 is instead line 1023 in the `a claude install with tiers on, then a re-run switching to …` test (`expect(report.notes.every((note) => !note.includes(".opencode"))).toB…`), a different site the citing sentence never names.',
@@ -7882,7 +7887,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1162,
     end: 1181,
     anchorKey: "be999e8e",
-    paragraphLine: 549,
+    paragraphLine: 556,
     uncitedLines: [559, 1617],
     claim:
       'line 1181 cites the `a plain re-run keeps the previously chosen models` test (`).toContain("model: haiku");`); uncited 559 and 1617 is instead line 559 in the `installs all four adapters; opencode agents omit model: whe…` test (`expect(claudeSlicer).toContain("model: haiku");`); and line 1617 in the `tiers=true, claude, full profile: exactly 15 agent files wi…` test (`expect(explorerLow).toContain("model: haiku");`), a different site the citing sentence never names.',
@@ -7894,7 +7899,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 134,
     end: 134,
     anchorKey: "1429a7e8",
-    paragraphLine: 607,
+    paragraphLine: 614,
     uncitedLines: [104],
     claim:
       "line 134 cites the 'agents-md-section per-role routing bullet lists every role' test; uncited 104 is the same array-equality pattern inside the separate 'INSTALL-AGENT.md write-surface brace lists name every role' test, which this sentence does not name.",
@@ -7906,7 +7911,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 104,
     end: 104,
     anchorKey: "1429a7e8",
-    paragraphLine: 611,
+    paragraphLine: 618,
     uncitedLines: [134],
     claim:
       "line 104 cites the 'INSTALL-AGENT.md write-surface brace lists name every role' test; uncited 134 is the same array-equality pattern inside the separate 'agents-md-section per-role routing bullet lists every role' test, which this sentence does not name.",
@@ -8086,7 +8091,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 80,
     end: 85,
     anchorKey: "5633dd3c",
-    paragraphLine: 70,
+    paragraphLine: 71,
     uncitedLines: [174, 187],
     claim:
       'line 85 cites `advisor: "opus",`; uncited 174 and 187 is instead line 174 in `advisor: ["high", "xhigh"],`; and line 187 in `advisor: "high",`, a different site the citing sentence never names.',
@@ -8095,37 +8100,37 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1035,
-    end: 1035,
+    start: 1037,
+    end: 1037,
     anchorKey: "fcc9c9f6",
-    paragraphLine: 180,
-    uncitedLines: [1839, 1879],
+    paragraphLine: 181,
+    uncitedLines: [1841, 1881],
     claim:
-      "line 1035 cites the reviewer-copy byte-identity test for the reproduction field; uncited 1839 and 1879 are the same equality-assertion shape inside the separate findings-block and method_applied/withdrawn-block reviewer-copy tests, which this sentence does not name.",
+      "line 1037 cites the reviewer-copy byte-identity test for the reproduction field; uncited 1841 and 1881 are the same equality-assertion shape inside the separate findings-block and method_applied/withdrawn-block reviewer-copy tests, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1104,
-    end: 1104,
+    start: 1106,
+    end: 1106,
     anchorKey: "bd3b4521",
-    paragraphLine: 183,
-    uncitedLines: [1255, 5033],
+    paragraphLine: 184,
+    uncitedLines: [1257, 5038],
     claim:
-      "line 1104 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1255 and 5033 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
+      "line 1106 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1257 and 5038 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 855,
-    end: 855,
+    start: 857,
+    end: 857,
     anchorKey: "9e1acc22",
-    paragraphLine: 269,
-    uncitedLines: [749, 818],
+    paragraphLine: 270,
+    uncitedLines: [751, 820],
     claim:
-      "line 855 is the slicer-output match inside the test proving no subagent-input field is absent from the slicer output schema, the test this sentence describes; uncited 749 is the list-shape helper's own field regex, and uncited 818 is the same match inside the separate excludes-only-immediate-envelope-fields test, neither of which this sentence names.",
+      "line 857 is the slicer-output match inside the test proving no subagent-input field is absent from the slicer output schema, the test this sentence describes; uncited 751 is the list-shape helper's own field regex, and uncited 820 is the same match inside the separate excludes-only-immediate-envelope-fields test, neither of which this sentence names.",
   },
   {
     doc: "subagent-contracts-superset.md",
@@ -8134,7 +8139,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 550,
     end: 550,
     anchorKey: "4c984746",
-    paragraphLine: 379,
+    paragraphLine: 380,
     uncitedLines: [490],
     claim:
       "line 550 cites the test that checks the section heading is present; uncited 490 is the same heading string appearing inside the separate .ai/run-pointer-rule harness-notes test, which this sentence does not name.",
@@ -8143,109 +8148,109 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1104,
-    end: 1104,
+    start: 1106,
+    end: 1106,
     anchorKey: "bd3b4521",
-    paragraphLine: 464,
-    uncitedLines: [1255, 5033],
+    paragraphLine: 465,
+    uncitedLines: [1257, 5038],
     claim:
-      "line 1104 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1255 and 5033 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
+      "line 1106 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1257 and 5038 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1104,
-    end: 1104,
+    start: 1106,
+    end: 1106,
     anchorKey: "bd3b4521",
-    paragraphLine: 468,
-    uncitedLines: [1255, 5033],
+    paragraphLine: 469,
+    uncitedLines: [1257, 5038],
     claim:
-      "line 1104 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1255 and 5033 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
+      "line 1106 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1257 and 5038 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1144,
-    end: 1144,
+    start: 1146,
+    end: 1146,
     anchorKey: "1d478a12",
-    paragraphLine: 471,
-    uncitedLines: [1260],
+    paragraphLine: 472,
+    uncitedLines: [1262],
     claim:
-      "line 1144 cites the test for the installed prompt's not-applicable mutation_probes clause; uncited 1260 is the same containment assertion inside the separate not-applicable commits-clause test, which this sentence does not name.",
+      "line 1146 cites the test for the installed prompt's not-applicable mutation_probes clause; uncited 1262 is the same containment assertion inside the separate not-applicable commits-clause test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 4974,
-    end: 4974,
+    start: 4979,
+    end: 4979,
     anchorKey: "ecb73fca",
-    paragraphLine: 531,
-    uncitedLines: [5004],
+    paragraphLine: 532,
+    uncitedLines: [5009],
     claim:
-      "line 4974 cites the test that step 6 treats a replayed probe that now survives or cannot be applied as a regression signal; uncited 5004 is the same regression-signal sentence quoted again inside the separate workflow-step-6-source test, which this sentence does not name.",
+      "line 4979 cites the test that step 6 treats a replayed probe that now survives or cannot be applied as a regression signal; uncited 5009 is the same regression-signal sentence quoted again inside the separate workflow-step-6-source test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 4992,
-    end: 4992,
+    start: 4997,
+    end: 4997,
     anchorKey: "2e18ea4a",
-    paragraphLine: 535,
-    uncitedLines: [6444],
+    paragraphLine: 536,
+    uncitedLines: [6449],
     claim:
-      "line 4992 cites the test that the installed implementer prompt carries the same regression-signal consequence; uncited 6444 is unrelated fixture prose inside the separate shape-3 sibling-guard fixture test that happens to share a short word run with that consequence sentence, which this sentence does not name.",
+      "line 4997 cites the test that the installed implementer prompt carries the same regression-signal consequence; uncited 6449 is unrelated fixture prose inside the separate shape-3 sibling-guard fixture test that happens to share a short word run with that consequence sentence, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 5032,
-    end: 5032,
+    start: 5037,
+    end: 5037,
     anchorKey: "a4566152",
-    paragraphLine: 537,
-    uncitedLines: [1149],
+    paragraphLine: 538,
+    uncitedLines: [1151],
     claim:
-      "line 5032 cites the test that both output contract copies carry a byte-identical mutation_probes block; uncited 1149 is the same boolean-literal phrase inside the separate exact-sub-field-names test earlier in the file, which this sentence does not name.",
+      "line 5037 cites the test that both output contract copies carry a byte-identical mutation_probes block; uncited 1151 is the same boolean-literal phrase inside the separate exact-sub-field-names test earlier in the file, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1260,
-    end: 1260,
+    start: 1262,
+    end: 1262,
     anchorKey: "1d478a12",
-    paragraphLine: 753,
-    uncitedLines: [1144],
+    paragraphLine: 754,
+    uncitedLines: [1146],
     claim:
-      "line 1260 cites the test for the installed prompt's not-applicable commits clause; uncited 1144 is the same containment assertion inside the separate not-applicable mutation_probes-clause test, which this sentence does not name.",
+      "line 1262 cites the test for the installed prompt's not-applicable commits clause; uncited 1146 is the same containment assertion inside the separate not-applicable mutation_probes-clause test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1255,
-    end: 1255,
+    start: 1257,
+    end: 1257,
     anchorKey: "bd3b4521",
-    paragraphLine: 758,
-    uncitedLines: [1104, 5033],
+    paragraphLine: 759,
+    uncitedLines: [1106, 5038],
     claim:
-      "line 1255 cites the implementer-copy byte-identity test for the commits field; uncited 1104 and 5033 are the same equality-assertion shape inside the separate mutation_probes-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
+      "line 1257 cites the implementer-copy byte-identity test for the commits field; uncited 1106 and 5038 are the same equality-assertion shape inside the separate mutation_probes-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1260,
-    end: 1260,
+    start: 1262,
+    end: 1262,
     anchorKey: "1d478a12",
-    paragraphLine: 761,
-    uncitedLines: [1144],
+    paragraphLine: 762,
+    uncitedLines: [1146],
     claim:
-      "line 1260 cites the test for the installed prompt's not-applicable commits clause; uncited 1144 is the same containment assertion inside the separate not-applicable mutation_probes-clause test, which this sentence does not name.",
+      "line 1262 cites the test for the installed prompt's not-applicable commits clause; uncited 1146 is the same containment assertion inside the separate not-applicable mutation_probes-clause test, which this sentence does not name.",
   },
 ];
 
@@ -8460,8 +8465,8 @@ const SIBLING_GUARD_CLAIM_RANGE_RE = /(?<![\w./]):(\d+)(?:-(\d+))?\b/g;
 // `single` marks a bare `:N` token written with no `-M` (as opposed to a
 // `:N-M` range): the 12 real claims use this shape both for an own
 // single-point range (`:1082` where start === end === 1082) and, at least
-// once, as shorthand for a doc line (`:156` for `paragraphLine: 156`,
-// read the way "the :156 sentence" reads in prose) -- so a single-number
+// once, as shorthand for a doc line (`:157` for `paragraphLine: 157`,
+// read the way "the :157 sentence" reads in prose) -- so a single-number
 // token additionally falls back to the entry's own recorded lines, the
 // same set rule (b) checks `line N`/`uncited N` against, before falling
 // back to the doc's own citation scan. A dashed `:N-M` token has no such
@@ -12320,17 +12325,17 @@ describe("findSameLineAnchorCollapses itself reports and abstains", () => {
 // it doesn't reshuffle the many existing docs/okf citations into this file
 // by line number (the same reasoning test/init.test.ts's own appended
 // write-boundary block already documents).
-describe("README's read-only posture section states the reviewer's narrower write boundary", () => {
-  const readmeMd = readDoc("README.md");
+describe("docs/harnesses.md states the reviewer's narrower write boundary", () => {
+  const harnessesDoc = readDoc("docs/harnesses.md"); // moved from README.md
 
   it("names the reviewer's write-allowed locations and the forbidden ref/object commands", () => {
-    expect(readmeMd).toContain(
+    expect(harnessesDoc).toContain(
       'The reviewer\'s own write boundary is narrower than "read-only": it may write',
     );
-    expect(readmeMd).toContain(
+    expect(harnessesDoc).toContain(
       "the run directory's `evidence/`, and nowhere else.",
     );
-    expect(readmeMd).toContain(
+    expect(harnessesDoc).toContain(
       "It never writes into the\nreviewed tree, its index, its refs, or its object store",
     );
     for (const token of [
@@ -12339,7 +12344,7 @@ describe("README's read-only posture section states the reviewer's narrower writ
       "`git update-ref`, no",
       "`git gc`,",
     ]) {
-      expect(readmeMd).toContain(token);
+      expect(harnessesDoc).toContain(token);
     }
   });
 });
