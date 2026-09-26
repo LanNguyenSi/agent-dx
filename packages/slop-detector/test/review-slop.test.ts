@@ -648,7 +648,7 @@ describe("review-slop", () => {
   describe("handoff-phrase (Markdown)", () => {
     it("fires (warn) on a workspace-handoff phrase", () => {
       const v = checkText(
-        "Read per the pandora handoffs before starting.",
+        "Read per the acme-corp handoffs before starting.",
         "docs/NOTES.md",
         baseOpts(),
       );
@@ -671,7 +671,7 @@ describe("review-slop", () => {
 
   describe("severities", () => {
     it("finding-id and round-reference default to block, handoff-phrase to warn", () => {
-      const text = "F1 landed in review round 2, per the pandora handoffs.";
+      const text = "F1 landed in review round 2, per the acme-corp handoffs.";
       const v = checkText(text, "docs/NOTES.md", baseOpts());
       expect(
         v.find((x) => x.ruleId === "review-slop/finding-id")?.severity,
@@ -727,7 +727,7 @@ describe("review-slop", () => {
     });
 
     it("a non-TS/JS code file (e.g. .py) is not scanned", () => {
-      const text = "# F1 round 2 per the pandora handoffs";
+      const text = "# F1 round 2 per the acme-corp handoffs";
       const v = checkText(text, "src/fix.py", baseOpts());
       expect(v).toHaveLength(0);
     });
@@ -1041,7 +1041,7 @@ describe("review-slop", () => {
   describe("off by default", () => {
     it("review-slop does not run without --pack review-slop", () => {
       const v = checkText(
-        "F1 landed in round 2, per the pandora handoffs.",
+        "F1 landed in round 2, per the acme-corp handoffs.",
         "docs/NOTES.md",
         { packs: allPacks, config: defaultConfig() },
       );

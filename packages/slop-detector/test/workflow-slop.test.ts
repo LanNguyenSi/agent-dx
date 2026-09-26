@@ -1354,7 +1354,7 @@ const withFleetTemplate = () =>
   mergeConfig({
     workflow: {
       auditGateTemplates: [
-        { name: "pandora-canonical-audit-gate", sha256: FLEET_TEMPLATE_SHA256 },
+        { name: "acme-canonical-audit-gate", sha256: FLEET_TEMPLATE_SHA256 },
       ],
     },
   });

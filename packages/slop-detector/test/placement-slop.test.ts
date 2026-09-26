@@ -29,7 +29,7 @@ describe("placement-slop", () => {
 
   it("(b) fires opaque-id on a blinded task id", () => {
     const text =
-      "blinded reviews, agent-tasks task 7f38899d): implementer-low reached accept";
+      "blinded reviews, agent-tasks task 0badc0de): implementer-low reached accept";
     const v = checkText(text, "x/SKILL.md", baseOpts());
     expect(
       v.find((x) => x.ruleId === "placement-slop/opaque-id"),
@@ -47,7 +47,7 @@ describe("placement-slop", () => {
 
   it("(d) fires home-path on a literal ~/ path", () => {
     const text =
-      "(`DEPSIGHT_TOKEN` in `~/git/pandora/.env`, minted on the Settings page)";
+      "(`DEPSIGHT_TOKEN` in `~/git/acme-corp/.env`, minted on the Settings page)";
     const v = checkText(text, "x/SKILL.md", baseOpts());
     expect(
       v.find((x) => x.ruleId === "placement-slop/home-path"),
@@ -64,9 +64,9 @@ describe("placement-slop", () => {
   it("(ii) negative control: the same four fixture lines in README.md (not an instruction file) produce 0 violations", () => {
     const text = [
       "`implementer-low` (2026-08-24 A/B measurement, n=8: implementer-low reached accept a median 320 seconds slower, p=0.016, with 9 high-plus-critical review findings against 1",
-      "blinded reviews, agent-tasks task 7f38899d): implementer-low reached accept",
+      "blinded reviews, agent-tasks task 0badc0de): implementer-low reached accept",
       "whose outcome was recorded (four so far) has resolved on the first resume attempt",
-      "(`DEPSIGHT_TOKEN` in `~/git/pandora/.env`, minted on the Settings page)",
+      "(`DEPSIGHT_TOKEN` in `~/git/acme-corp/.env`, minted on the Settings page)",
     ].join("\n");
     const v = checkText(text, "README.md", baseOpts());
     expect(v.filter((x) => x.pack === "placement-slop")).toHaveLength(0);
@@ -270,9 +270,9 @@ describe("placement-slop", () => {
 
     it("an allow span spanning the shared path suppresses home-path directly, not just via org-marker (R3 #1)", () => {
       const allowHomePath = mergeConfig({
-        placement: { allow: ["~/git/pandora/\\.env"] },
+        placement: { allow: ["~/git/acme-corp/\\.env"] },
       });
-      const text = "see instructions in ~/git/pandora/.env for setup";
+      const text = "see instructions in ~/git/acme-corp/.env for setup";
       const v = checkText(text, "x/SKILL.md", {
         packs: allPacks,
         config: allowHomePath,
@@ -949,24 +949,24 @@ describe("placement-slop: a bare '~/' allow entry stays narrow", () => {
 
   it("still fires on /Users/<name>/ sharing a line with a ~/ idiom", () => {
     const v = checkText(
-      "Use ~/git for scratch clones; the real one lives at /Users/lannguyensi/git/pandora.",
+      "Use ~/git for scratch clones; the real one lives at /Users/alice/git/acme-corp.",
       "x/SKILL.md",
       opts,
     );
     const hit = v.find((x) => x.ruleId === "placement-slop/home-path");
     expect(hit).toBeDefined();
-    expect(hit?.matched).toBe("/Users/lannguyensi/");
+    expect(hit?.matched).toBe("/Users/alice/");
   });
 
   it("still fires on /home/<name>/ sharing a line with a ~/ idiom", () => {
     const v = checkText(
-      "Prefer ~/git over the container path /home/lannguyensi/git for this.",
+      "Prefer ~/git over the container path /home/alice/git for this.",
       "x/SKILL.md",
       opts,
     );
     const hit = v.find((x) => x.ruleId === "placement-slop/home-path");
     expect(hit).toBeDefined();
-    expect(hit?.matched).toBe("/home/lannguyensi/");
+    expect(hit?.matched).toBe("/home/alice/");
   });
 
   it("still fires on $HOME/ sharing a line with a ~/ idiom", () => {
