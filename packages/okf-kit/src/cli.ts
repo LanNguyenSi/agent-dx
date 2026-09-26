@@ -65,7 +65,7 @@ export interface CheckOptions {
    * commit time from that same shared instant, so a pre-commit run reports
    * the verdict CI will report once the commit lands -- for either rule.
    * Stored on `ctx.dirtyAsNow`; see its jsdoc in `src/types.ts` (the
-   * canonical description of the model) and the README's "Uncommitted
+   * canonical description of the model) and docs/staleness.md's "Uncommitted
    * edits (`--dirty-as-now`)" section.
    */
   dirtyAsNow?: boolean;
@@ -148,7 +148,7 @@ program
   .option(
     "--require-anchors",
     "citations-resolve: also require every in-repo full citation to carry a #anchor, and check " +
-      "a string anchor lands uniquely on the last line of its range (opt-in, see README)",
+      "a string anchor lands uniquely on the last line of its range (opt-in, see docs/citations.md)",
   )
   .option(
     "--require-anchors-allow <patterns...>",
@@ -158,7 +158,7 @@ program
   .option(
     "--prose-line-references",
     "prose-line-references: flag a drifted, unresolvable, or ambiguous prose-embedded line " +
-      'reference outside citations-resolve\'s own backtick grammar, e.g. "lines 129-132" (opt-in, see README)',
+      'reference outside citations-resolve\'s own backtick grammar, e.g. "lines 129-132" (opt-in, see docs/prose-line-references.md)',
   )
   .option(
     "--prose-line-references-strict",
@@ -174,7 +174,7 @@ program
     "--dirty-as-now",
     "sources-fresh + sources-fresh-future: model every uncommitted change (modified, staged, or " +
       "untracked) -- a `sources` path and the doc itself alike -- as one virtual commit made right " +
-      "now, so a pre-commit run matches what CI reports after the commit lands (opt-in, see README)",
+      "now, so a pre-commit run matches what CI reports after the commit lands (opt-in, see docs/staleness.md)",
   )
   .exitOverride()
   .action(

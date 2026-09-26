@@ -20,8 +20,8 @@ import { runCliWithTz } from "./helpers.js";
  * has no "last commit" that reflects its current content yet, so a plain
  * `check` run (which only sees committed history) can under-report
  * staleness that CI will report once the edit is committed -- the exact gap
- * behind the "re-stamp, commit, then measure" discipline (see the README's
- * "Staleness (sources-fresh)" section). These tests build a fixture where a
+ * behind the "re-stamp, commit, then measure" discipline (see
+ * docs/staleness.md). These tests build a fixture where a
  * source was committed BEFORE the doc's `timestamp` (so it is fresh by
  * committed history alone), then dirty the source on disk without
  * committing: the flag is the only thing that turns that dirty edit into a
@@ -641,9 +641,9 @@ describe("sources-fresh: --dirty-as-now", () => {
    * (`restampedByOwnLastCommit`): a doc re-stamped LOCALLY (uncommitted)
    * must rescue a dirty source under `--dirty-as-now` exactly like a real
    * re-stamp committed together with the source does without the flag --
-   * otherwise the README's own recommended remedy ("commit both, matching
-   * CI") could not turn a `--dirty-as-now --strict` failure clean. Without
-   * this rescue, a doc bumped to "now" on disk still read STALE against a
+   * otherwise docs/staleness.md's own recommended remedy ("commit both,
+   * matching CI") could not turn a `--dirty-as-now --strict` failure clean.
+   * Without this rescue, a doc bumped to "now" on disk still read STALE against a
    * dirty source's own `--dirty-as-now` substitution because a few seconds
    * elapse between writing the bump and running `check`.
    */

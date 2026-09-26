@@ -57,10 +57,10 @@ export function resolveRepoPath(repoRoot: string, source: string): string {
  * property of the STRING, not of `TZ`, for every comparison in this
  * package, not just some of them. A string that already carries a
  * designator is parsed unchanged: `Date.parse` already resolves it
- * correctly on every machine. See the README's "Staleness (sources-fresh)"
- * section, "Designator-less timestamps", for the full rationale and the one
- * case this does NOT cover (a value that is not parseable to an instant at
- * all). The raw string is trimmed before either check: the `Z` this
+ * correctly on every machine. See docs/staleness.md's "Designator-less
+ * timestamps" section for the full rationale and the one case this does
+ * NOT cover (a value that is not parseable to an instant at all). The raw
+ * string is trimmed before either check: the `Z` this
  * function appends for a designator-less value must land at the very end,
  * not after trailing whitespace, so a whitespace-padded value is parsed
  * the same as its untrimmed form (both `hasUtcDesignator` and `Date.parse`
@@ -160,8 +160,8 @@ export function getRawTimestampString(parsed: unknown): string | undefined {
  * day-wide staleness comparison and its re-stamp direction comparison
  * (`compareRestampDirection`) -- its thresholds are day-wide, so treating
  * the value as UTC everywhere is both consistent and safe. Which rule takes
- * which approach, and why, is written down once: see the README's
- * "Designator-less timestamps" paragraph under "Staleness (sources-fresh)".
+ * which approach, and why, is written down once: see docs/staleness.md's
+ * "Designator-less timestamps" paragraph.
  */
 export function hasUtcDesignator(raw: string): boolean {
   return /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw.trim());
@@ -202,7 +202,7 @@ export function hasUtcDesignator(raw: string): boolean {
  * as a changed identity here. Deliberately NOT normalized to an epoch:
  * this is an identity test ("did the raw value change"), not a
  * chronological one. Whether the new value is CORRECT is a separate
- * question this function deliberately does not answer (see the README's
+ * question this function deliberately does not answer (see docs/staleness.md's
  * known limitations).
  */
 export function getTimestampIdentity(parsed: unknown): string | undefined {

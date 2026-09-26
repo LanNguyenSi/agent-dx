@@ -282,7 +282,7 @@ describe("okf-kit cli staleness (sources-fresh + repo-root auto-detection)", () 
   });
 
   /**
-   * The recommended pre-commit recipe (README "Uncommitted edits
+   * The recommended pre-commit recipe (docs/staleness.md "Uncommitted edits
    * (--dirty-as-now)"): `check --dirty-as-now --strict` pinned end-to-end
    * through the BUILT CLI, exit codes only -- not the finding list, which
    * the unit-level tests in sources-fresh-dirty-as-now.test.ts already

@@ -310,7 +310,7 @@ export const sourcesFreshRule: Rule = {
  * Deliberately assessed for the SAME population as `sources-fresh` (docs
  * with a validly-shaped `sources` list and a repo root available): a
  * `timestamp` only has "last verified against sources" semantics for a doc
- * that declares `sources` (see the package README's authoring guidance), so
+ * that declares `sources` (see docs/init.md's "Authoring guidance"), so
  * a sourceless doc is out of scope for both freshness rules, not just this
  * one. It shares `sources-fresh`'s "staleness unknown" posture for the two
  * cases that make a real answer impossible: no repo root (silently defers
@@ -333,7 +333,7 @@ export const sourcesFreshRule: Rule = {
 export const sourcesFreshFutureRule: Rule = {
   id: FUTURE_RULE_ID,
   description:
-    "A doc's frontmatter `timestamp` must not be later than the doc file's own last commit time by more than a clock-skew allowance (default 10 minutes, `--future-skew-minutes`); catches a local time mistakenly written with a `Z`/UTC suffix. Skipped (notice) for a timestamp with no explicit UTC designator (`Z`) or numeric offset, since that parses in the local timezone and cannot be compared reliably against a minutes-wide allowance. Assessed for the same docs as `sources-fresh` (a `sources` list and a repo root); see the README's \"Staleness (sources-fresh)\" section for how the two rules relate.",
+    "A doc's frontmatter `timestamp` must not be later than the doc file's own last commit time by more than a clock-skew allowance (default 10 minutes, `--future-skew-minutes`); catches a local time mistakenly written with a `Z`/UTC suffix. Skipped (notice) for a timestamp with no explicit UTC designator (`Z`) or numeric offset, since that parses in the local timezone and cannot be compared reliably against a minutes-wide allowance. Assessed for the same docs as `sources-fresh` (a `sources` list and a repo root); see docs/staleness.md for how the two rules relate.",
   run(ctx) {
     const findings: Finding[] = [];
 
@@ -1026,8 +1026,8 @@ function describeTimestampValue(parsed: unknown, epochMs: number): string {
  * `getTimestampEpochMs` (via `parseTimestampInstantMs` in `src/util.ts`)
  * forces UTC for it, so it resolves to the SAME instant on every machine
  * and IS judged for direction like any other comparable value (D-016). See
- * the README's "Staleness (sources-fresh)" section, "Designator-less
- * timestamps", for the full rationale.
+ * docs/staleness.md's "Designator-less timestamps" section for the full
+ * rationale.
  */
 function compareRestampDirection(
   currentParsed: unknown,

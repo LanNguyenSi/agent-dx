@@ -647,7 +647,7 @@ export const CITATION_RE =
  * position so the two can never be confused by shape alone.
  *
  * Backtick-delimited, unlike the line-range form above (which does not
- * require backticks -- see the "Anchor syntax note" in the README). This
+ * require backticks -- see the "Anchor syntax note" in docs/citations.md). This
  * is a deliberate, narrower grammar for this form specifically: a bare
  * `path#heading` (the grammar this form used in an earlier round) is
  * indistinguishable from an ordinary Markdown link's target, which
@@ -1803,7 +1803,7 @@ function collectContinuationAtoms(content: string): Atom[] {
  * citation -- e.g. "the exposed ports, :80-443, stayed open" -- still
  * binds to the paragraph's last full citation and can produce a false
  * warning. This was not observed anywhere in the 137-file corpus this
- * gate was measured against; see the README and CHANGELOG.
+ * gate was measured against; see the CHANGELOG.
  */
 type ShortFormMatch = {
   index: number;
@@ -1971,9 +1971,9 @@ function computeInlineCodeSpans(content: string): Array<[number, number]> {
 
 /**
  * Char spans of every Markdown table row in `content`: a line whose
- * trimmed form starts and ends with `|`. Decision (documented in the
- * README): a short-form citation inside a table cell is never recognised,
- * the same way one inside a code span is not -- excluded here rather than
+ * trimmed form starts and ends with `|`. Decision (documented in
+ * docs/citations.md): a short-form citation inside a table cell is never
+ * recognised, the same way one inside a code span is not -- excluded here rather than
  * left to the plausibility gate, since a table cell's content is prose-like
  * and can otherwise carry a range shape the gate would not reject (e.g.
  * `| col (5-9) |`).
