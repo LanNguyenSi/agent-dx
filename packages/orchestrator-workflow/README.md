@@ -184,12 +184,12 @@ mechanics (including the `CLAUDE_CODE_EFFORT_LEVEL` environment override).
 
 ### Effort tiers
 
-Every installed agent file carries its own pinned default effort (`medium`
-for explorer, task-slicer, and implementer; `high` for reviewer and
-advisor), independent of `--tiers`. `--tiers` additionally renders one
-`<role>-<tier>.md`/`.toml` variant file per non-default tier. See [Model
-routing reference: Effort tiers](docs/model-routing-reference.md#effort-tiers)
-for the full role/tier table and the per-harness frontmatter shape.
+The per-role default effort (`medium` for explorer, task-slicer, and
+implementer; `high` for reviewer and advisor) is pinned in each agent file
+on Claude Code and Codex; on opencode it depends on the resolved model.
+See [Model routing reference: Effort tiers](docs/model-routing-reference.md#effort-tiers)
+for the full role/tier table, the per-harness frontmatter shape, and the
+tier variants `--tiers` renders.
 
 ## Run modes
 
@@ -269,7 +269,7 @@ every flag, exit code, and fence-detection edge case.
 
 This package lives in the [agent-dx](https://github.com/LanNguyenSi/agent-dx)
 monorepo, alongside the sibling agentic-coding-playbook package (see
-Documentation below). `npm test` (vitest) and `npm run typecheck` run from
+Documentation above). `npm test` (vitest) and `npm run typecheck` run from
 `packages/orchestrator-workflow`; see the repository root's
 `CONTRIBUTING.md` for the full contributor workflow, including the
 "Releasing okf-kit" order (`test/docs-consistency.test.ts` pins the

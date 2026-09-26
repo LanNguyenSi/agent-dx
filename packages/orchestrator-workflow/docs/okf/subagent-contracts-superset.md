@@ -78,7 +78,7 @@ Every implementer and reviewer briefing names one repository-bound
 identity; the role runs every named result in the complete set, including the
 required bundle check for each configured knowledge bundle (`knowledge` in `.ai/workflow/manifest.json`; default `docs/okf/`). A missing named check
 is a misfire, not a pass; skipped, waived, or inconclusive results remain
-non-passing evidence. The README's worked `.ai/workflow/verify.json` example
+non-passing evidence. The worked `.ai/workflow/verify.json` example in `docs/verification-sets.md`
 defines ordered extras around a truthful preflight JSON acquisition: that JSON
 reports results, never discovered shell commands.
 
