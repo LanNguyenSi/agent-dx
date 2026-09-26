@@ -29,7 +29,7 @@ the three commands as-is. The PHPUnit-specific corollary lives in
 `probe`'s zero-tests guard, below.
 
 `verify`'s own opt-in escape from this exit-code assumption, per check,
-is `--pass-regex name=regex` (see docs/verify.md's `--pass-regex` option): a
+is `--pass-regex name=regex` (see [verify.md](verify.md)'s `--pass-regex` option): a
 green PHPUnit 9.6 suite that exits non-zero purely over a deprecation
 notice is exactly the shape it exists for, mirroring the escape `probe`
 already had via its own `--pass-regex`/`passWhen.regex`.
@@ -40,8 +40,9 @@ all-skipped/no-test-files shapes and node `--test`'s zero-count summary
 now also recognizes PHPUnit's own `No tests executed!` line and any run
 whose executed count is zero: the stated total less every tally category
 that did not execute (Skipped and Incomplete always; plain `Warnings`
-too under PHPUnit 9, read off the run's own version banner -- see docs/verify.md's
-"Three more default candidates cover PHP" passage), which covers an all-skipped
+too under PHPUnit 9, read off the run's own version banner -- see
+[verify.md](verify.md)'s "Three more default candidates cover PHP"
+passage), which covers an all-skipped
 run, a PHPUnit 9 warnings-only run, and a stated `OK (0 tests, 0
 assertions)` (defensive -- not observed from a real capture; PHPUnit
 9.6.36 prints `No tests executed!` for an empty suite instead). A red
@@ -52,7 +53,7 @@ is a PHPUnit 10/11 warnings-only run, since the version-aware reading
 also counts that as executed. A baseline (or mutant run) that exits `0`
 with nothing actually executed is `status: "inconclusive"`, `reason:
 "no_tests_executed"`, never read as a real pass, exactly like the
-vitest/node cases documented in docs/probe.md.
+vitest/node cases documented in [probe.md](probe.md).
 
 **The zero-tests reading is three-valued**: `phpunitZeroTestsVerdict`
 returns `"zero"` (nothing executed), `"not_zero"` (no evidence that
@@ -246,7 +247,7 @@ naming a real summary line), not this warning.
 
 **The pass predicate** (`--pass-regex`/`passWhen.regex`) is implemented on
 both `probe` and `verify`; each documents its own option in its own
-section (`probe`'s own in docs/probe.md; `verify`'s own is the paragraph
+section (`probe`'s own in [probe.md](probe.md); `verify`'s own is the paragraph
 right above naming `--pass-regex`, not this one). A composer
 `vendor-dir`/`bin-dir` link rule remains its own pending task (issue
 #225 part 2). For every
@@ -341,8 +342,9 @@ mechanism does not silently mis-report `killed`/`survived`, it makes the
 baseline itself fail before any mutant is even applied. Because that
 failure can otherwise look like an unrelated test bug, every run with a
 Python target pushes one `warnings` entry naming the injected
-`PYTHONPYCACHEPREFIX` variable up front (see docs/output-shape.md for
-where `warnings` lands in the envelope), so a red baseline on such a run
+`PYTHONPYCACHEPREFIX` variable up front (see
+[output-shape.md](output-shape.md) for where `warnings` lands in the
+envelope), so a red baseline on such a run
 is diagnosable from the envelope alone.
 
 A caller's own `--env PYTHONPYCACHEPREFIX=...` names a specific, shared

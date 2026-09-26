@@ -1,12 +1,10 @@
 # `probe`
 
-Runs one mutation probe and reports whether the target test discriminates the mutant. Part of the [agent-primitives](../README.md) CLI.
-
 Runs one mutation probe: mutate a line (or apply a patch), confirm the
 unmutated test passes first (the baseline; there is no `--no-baseline`,
 because a probe whose test was never shown to pass unmutated is not a
 probe), run the test against the mutant, restore the file, and classify
-the result.
+the result. Part of the [agent-primitives](../README.md) CLI.
 
 `killed`/`survived` always report the mutated run's ACTUAL, measured
 outcome, independent of `--expect`: `killed` means the mutated run's
@@ -1530,8 +1528,8 @@ unparseable pattern (on the command line, or in a plan file's
 `m` flag: `^`/`$` anchor to each LINE of the combined stdout+stderr
 buffer, not only to the buffer's very first/last character, so a real
 runner that prints something ahead of its own summary line (phpunit's
-own version banner, before the green `OK (...)` line the README's own
-recipe above matches) still matches. `(?m)` is NOT a redundant-but-
+own version banner, before the green `OK (...)` line the recipe above
+matches) still matches. `(?m)` is NOT a redundant-but-
 harmless no-op here: it is not valid JS `RegExp` source at all (there
 is no inline-flag syntax to parse it as), so it is rejected as a usage
 error like any other unparseable pattern -- the `m` flag is simply
@@ -2054,7 +2052,7 @@ above.
 | `no_tests_executed` | present | present | the baseline's own output shows a known test runner (vitest, node's built-in `--test`, phpunit) executed nothing, whatever its exit code -- for phpunit, this BASELINE-phase refusal fires only where the output itself STATES that (its own `No tests executed!` line, or a tally whose executed count derives to zero without depending on a version the output does not state); see the zero-tests paragraphs above. A phpunit MUTANT run whose own output is merely unreadable (the `"ambiguous"` shape, the row below) reports `zero_tests_ambiguous` instead, the same split the baseline phase already makes on the identical field: see the "An `exit()`/`die()` call mid-suite is read as an UNREADABLE result" paragraph above. |
 | `zero_tests_ambiguous` | present | present | phpunit only: the baseline's own output cannot be read for whether any test executed at all -- either its result report is missing altogether (a mid-suite `exit()`/`die()`, banner present but no `OK (`/marker/tally/progress counter/post-run `Time:` line), or it states no PHPUnit version banner and its tally carries a version-dependent count that decides the question with no version to read it against; see the zero-tests paragraphs above. This table covers the BASELINE-phase refusal only (`RefusalReason`, `REFUSAL_RESULT_SHAPE`); a MUTANT run whose own phpunit output reads the same way reports the identical `zero_tests_ambiguous` string as `mutation_probe.reason`, a plain string there rather than a `RefusalReason` (see the mutant-phase zero-tests paragraph below) |
 | `baseline_evidence_not_matched` | present | present | `--require-baseline-evidence <regex>` was given and did not match the baseline's own output |
-| `pycache_isolation_failed` | present | present | this run has at least one Python (`.py`) target and creating its isolated `PYTHONPYCACHEPREFIX` directory failed (an unwritable or full log directory); see docs/non-js-test-runners.md's "Python bytecode cache" entry |
+| `pycache_isolation_failed` | present | present | this run has at least one Python (`.py`) target and creating its isolated `PYTHONPYCACHEPREFIX` directory failed (an unwritable or full log directory); see [non-js-test-runners.md](non-js-test-runners.md)'s "Python bytecode cache" entry |
 
 The eight `present` rows are exactly the refusals that fire past the dry
 run: `openRunSetup` computes the one mutant this run would apply (the

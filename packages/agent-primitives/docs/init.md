@@ -1,10 +1,9 @@
 # `init`
 
-Installs this package's own skill document into a harness's skill directory. Part of the [agent-primitives](../README.md) CLI.
-
 Installs this package's own skill document into a harness's skill
 directory, so an agent working in the target repository is told when to
 reach for `probe`, `verify`, and `doctor` (see `assets/skill/SKILL.md`).
+Part of the [agent-primitives](../README.md) CLI.
 
 ```bash
 agent-primitives init

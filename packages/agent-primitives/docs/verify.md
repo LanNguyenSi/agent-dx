@@ -1,9 +1,8 @@
 # `verify`
 
-Runs named checks and reports a compact, bounded summary instead of raw tool output. Part of the [agent-primitives](../README.md) CLI.
-
 Runs a fixed set of named checks (`build`, `typecheck`, `lint`, `test` by
 default) and reports a compact, bounded summary instead of raw tool output.
+Part of the [agent-primitives](../README.md) CLI.
 
 ```bash
 agent-primitives verify
@@ -155,7 +154,7 @@ there). A prerelease banner (`PHPUnit 11.0.0-RC1`) is read at its own
 major too. Output whose banner is not present at all (front-truncated
 away) keeps the PHPUnit 9 reading for the summary, as the fail-safe
 default, but is NOT read as a verdict about whether anything ran: see
-the zero-tests reading under `probe` below.
+[probe.md](probe.md)'s zero-tests reading.
 `Deprecations`/`Notices` and their two-word `PHPUnit `-prefixed
 counterparts are read (so a two-word one no longer breaks the whole
 tally line's match) but deliberately spent nowhere on any PHPUnit
@@ -199,8 +198,9 @@ reporters are the measured exception: both still print the run's marker
 line and its `Tests: N, Assertions: M, ...` tally unchanged, so
 `phpunit` is still selected and every summary count is right under them;
 what they drop is the numbered `N) Class::method` entries, so `failures`
-comes back empty. See docs/non-js-test-runners.md for the exit-code
-assumption these three inherit like every other check here.
+comes back empty. See [non-js-test-runners.md](non-js-test-runners.md)
+for the exit-code assumption these three inherit like every other
+check here.
 No reporter flags are injected: whichever of these shapes a check's own
 script happens to print is parsed as-is; a check that emits more than
 one shape at once (a `pretest` build followed by `vitest`, say) is
@@ -215,9 +215,8 @@ colorized output (only SGR sequences are stripped; none of these three
 tools' default text output emits cursor-movement or other non-SGR
 escape sequences). eslint 10
 (a devDependency, used only for this package's own lint check and for the
-`eslint` detector's fixtures) requires Node `^20.19.0 || ^22.13.0 ||
-
-> =24`, narrower than the `>=20` this package itself requires; that floor
+`eslint` detector's fixtures) requires Node `^20.19.0 || ^22.13.0 || >=24`,
+narrower than the `>=20` this package itself requires; that floor
 applies to developing this package, not to a caller running the built CLI.
 Whatever the detector, a check that ends `fail` or `error` with zero
 parsed failures always gets one synthetic failure entry (naming `timedOut`, or the exit code, plus the output tail) instead of shipping an
@@ -270,5 +269,5 @@ guessing at it: the check that was running becomes `status: "error"` with
 a failure naming the abort (never a synthesized `exit code null`
 finding), every check queued behind it is left unstarted and named in a
 warning, and the result carries `reason: "aborted"`. The CLI prints none
-of that on a signal (see docs/probe.md's signal handling).
+of that on a signal (see [probe.md](probe.md)'s signal handling).
 

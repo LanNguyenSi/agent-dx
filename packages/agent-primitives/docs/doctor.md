@@ -21,7 +21,7 @@ named in that check's own detail. A `git-version` check reads the
 installed git against what `probe -i worktree` relies on: it is ok from
 git 2.36 on, and below that a warning names what the probe does on that
 git (below 2.35 the worktree sync cannot run at all; between 2.35 and
-2.36 the worktree listing falls back to its newline-separated form; see docs/probe.md's isolation section). The `stale-worktree` check reads the same
+2.36 the worktree listing falls back to its newline-separated form; see [probe.md](probe.md)'s isolation section). The `stale-worktree` check reads the same
 listing, with the same fallback; when the listing cannot run in any
 form, a warning says that a leftover registered worktree cannot be
 reported, rather than the check reading as clean. A scratch worktree a
@@ -39,8 +39,8 @@ them, naming whatever CPython bytecode cache already exists for that
 target, and naming why whenever `python3` cannot be asked or does not
 answer and it falls back to a co-located `__pycache__` guess (`python3`
 absent from `PATH`, resolving nothing, or doctor's aggregate spawn
-deadline already spent); see docs/non-js-test-runners.md's "Python
-bytecode cache" entry for what the check reports and why it is
+deadline already spent); see [non-js-test-runners.md](non-js-test-runners.md)'s
+"Python bytecode cache" entry for what the check reports and why it is
 informational.
 
 ```bash
