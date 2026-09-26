@@ -7,10 +7,10 @@
   detail, and the `validate-review-report` reference moved to new files
   under `packages/orchestrator-workflow/docs/`. Every claim these citations
   point at is unchanged prose, only its line number moved, except where
-  noted. Re-pointed: `install-fence-mechanics.md`'s `README.md:267` citation
-  to line 172; `model-preselection.md`'s `README.md:385`, `:438` and `:464`
-  citations to lines 255, 285 and 311; `run-state-lifecycle-and-markers.md`'s
-  `README.md:218`, `:224` and `:579` citations to lines 144, 150 and 426.
+  noted. Re-pointed (old line number, new line number, one pair per
+  citation): `install-fence-mechanics.md` (267, 172);
+  `model-preselection.md` (385, 255), (438, 285), (464, 311);
+  `run-state-lifecycle-and-markers.md` (218, 144), (224, 150), (579, 426).
   `subagent-contracts-superset.md` carries no line citation into `README.md`
   and needed no re-point. All four re-checked and re-stamped.
 
