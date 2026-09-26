@@ -98,7 +98,7 @@ As of 2026-08-24 (n=8), the low tier reached accept a median 320 seconds slower,
 
 <!-- placement-slop/opaque-id (warn) -->
 <!-- slop-detector:disable-next-line=placement-slop -->
-See agent-tasks task deadbeef for the write-up.
+See agent-tasks task 0badc0de for the write-up.
 
 <!-- placement-slop/org-marker (block), with placement.markers: ["example-org"] -->
 

@@ -29,7 +29,7 @@ describe("placement-slop", () => {
 
   it("(b) fires opaque-id on a blinded task id", () => {
     const text =
-      "blinded reviews, agent-tasks task deadbeef): implementer-low reached accept";
+      "blinded reviews, agent-tasks task 0badc0de): implementer-low reached accept";
     const v = checkText(text, "x/SKILL.md", baseOpts());
     expect(
       v.find((x) => x.ruleId === "placement-slop/opaque-id"),
@@ -64,7 +64,7 @@ describe("placement-slop", () => {
   it("(ii) negative control: the same four fixture lines in README.md (not an instruction file) produce 0 violations", () => {
     const text = [
       "`implementer-low` (2026-08-24 A/B measurement, n=8: implementer-low reached accept a median 320 seconds slower, p=0.016, with 9 high-plus-critical review findings against 1",
-      "blinded reviews, agent-tasks task deadbeef): implementer-low reached accept",
+      "blinded reviews, agent-tasks task 0badc0de): implementer-low reached accept",
       "whose outcome was recorded (four so far) has resolved on the first resume attempt",
       "(`DEPSIGHT_TOKEN` in `~/git/acme-corp/.env`, minted on the Settings page)",
     ].join("\n");
