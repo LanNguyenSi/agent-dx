@@ -1,5 +1,44 @@
 # Bundle log
 
+- 2026-09-26T08:10:00Z (README restructure, third pass): restores the
+  INSTALL-AGENT.md `rollback` assertion the second pass's retarget
+  dropped, and widens `knowledge-sites.test.ts`'s scan from a hardcoded
+  file list to every `docs/*.md` file (`docs/okf/` exempt) so a moved
+  `docs/okf` back-reference in `docs/architecture.md` or
+  `docs/install-reference.md` is caught again. Adds back a short
+  "Effort tiers" subsection under README's "Model preselection" (2-3
+  lines linking to `docs/model-routing-reference.md#effort-tiers`) so
+  INSTALL-AGENT.md's and `role-profile-reference.md`'s pointers into a
+  README "Effort tiers" section stay true; `role-profile-reference.md`
+  is re-pointed at the moved section directly instead. Corrects two
+  README overclaims: the acceptance-baseline contract is opt-in, not
+  universal, and Codex's reviewer inherits the caller's sandbox (its
+  prompt prohibits source edits) rather than being sandboxed like
+  explorer and advisor. `model-preselection.md`, `subagent-contracts-superset.md`,
+  and `docs/okf/index.md` had their remaining stale "README" claims
+  reworded to name `docs/model-routing-reference.md`, `docs/harnesses.md`,
+  or `docs/*.md` generally, wherever the second pass's move made the
+  old wording inaccurate; `model-preselection.md` gained
+  `docs/model-routing-reference.md` in its `sources:` list and
+  `install-fence-mechanics.md` gained `docs/harnesses.md`, closing the
+  gap the second pass's own log entry flagged. Every citation and
+  `SIBLING_GUARD_BUNDLE_ALLOWLIST` entry affected by a `sources:`
+  insertion or a prose edit in `docs-consistency.test.ts`,
+  `model-preselection.md`, `subagent-contracts-superset.md`, or
+  `run-state-lifecycle-and-markers.md` was re-pointed to its shifted
+  line, including three README citations in
+  `run-state-lifecycle-and-markers.md` that moved once the README
+  itself was trimmed further (a Node.js prerequisite line, a "Key
+  features" list, a condensed overview, and moved contributor-only
+  sections). `package.json`'s `files` list now reads `docs/*.md` in
+  place of nine explicit paths (`docs/okf/` stays excluded); a few
+  stray text defects (a dropped ASCII dash, a comma splice, a
+  mis-scoped intro line) were also fixed in `validate-review-report.md`,
+  `role-profile-reference.md`, and `verification-sets.md`, and stale
+  README mentions in `docs-consistency.test.ts` and `init.test.ts` test
+  titles and comments were renamed to the doc files those tests
+  actually read.
+
 - 2026-09-26T06:49:29Z (README restructure, second pass): `packages/orchestrator-workflow/README.md`
   shrank further, from 626 to 291 lines, to meet the package README
   standard's roughly-150-250-line target. Moved out: the entire
