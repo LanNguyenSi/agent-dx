@@ -108,7 +108,7 @@ placement:
     - "packages/*/README.md"
     # Package reference docs: the README refresh moved large reference
     # sections out of packages/*/README.md into packages/*/docs/*.md,
-    # which ships on npm alongside the README and carries the same leak
+    # which is public reference text (shipped on npm where a package's `files` include docs/) with the same leak
     # risk. A single "*" segment never crosses "/" (see
     # packages/slop-detector/src/util/file-kind.ts's globToRegex), so this
     # pattern only reaches a file directly inside a package's own docs/

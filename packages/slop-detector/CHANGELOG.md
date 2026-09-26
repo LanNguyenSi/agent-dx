@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `placement.instructionGlobs` in the agent-dx root `slop.config.yml` now
   also covers every package's own reference docs (`packages/*/docs/*.md`),
   closing a gap the package README refresh (#373, #374) left: those docs
-  ship on npm alongside the README and carry the same leak risk, but only
+  are public reference text (shipped on npm where a package's `files` include `docs/`) with the same leak risk, but only
   `packages/*/README.md` was covered. A single `*` segment never crosses
   `/`, so this glob reaches a file directly inside a package's own `docs/`
   directory but not a nested `docs/okf/**` bundle doc, with no separate
