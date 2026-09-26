@@ -48,7 +48,7 @@ Run `slop-detector list-rules` for the full rule catalogue with severities and r
 ## Documentation
 
 - [Rule pack reference](docs/rule-packs.md): the full pack table, plus `ui-slop` and `placement-slop` worked examples.
-- [workflow-slop rule pack](docs/workflow-slop.md): "workflow-slop by example", GitHub Actions expression-injection and CI-guard rules, scope and limitations.
+- [workflow-slop rule pack](docs/workflow-slop.md): GitHub Actions expression-injection and CI-guard rules, worked examples, scope and limitations.
 - [review-slop rule pack](docs/review-slop.md): run-local review-token rules, in depth.
 - [Configuration reference](docs/configuration.md): full `slop.config.yml` schema, severity overrides, the "Path pattern anchor" rule (and its migration note), the cross-file corpus pre-pass, and per-line opt-out.
 - [Integration reference](docs/integration.md): sample output, the scan pipeline, pre-commit/CI recipes, the MCP server, exit codes, and the roadmap.

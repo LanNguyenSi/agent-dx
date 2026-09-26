@@ -870,7 +870,7 @@ describe("placement-slop: scan-root-relative instructionGlobs (via checkPath)", 
   });
 });
 
-// ── monorepo package-README rollout regression (agent-tasks 80e4743d) ─────
+// ── monorepo package-README rollout regression ─────────────────────────
 //
 // A `packages/*/README.md` instructionGlobs entry is meant to widen
 // coverage to every package's own README while leaving the monorepo's
@@ -878,7 +878,7 @@ describe("placement-slop: scan-root-relative instructionGlobs (via checkPath)", 
 // doc). Fixture-root test since the glob is scan-root-relative: a
 // `checkText` call has no real directory tree to relativize against.
 
-describe("placement-slop: packages/*/README.md rollout (agent-dx #80e4743d)", () => {
+describe("placement-slop: packages/*/README.md rollout scopes to package READMEs, not the repo root", () => {
   let tmp: string;
 
   beforeEach(() => {
@@ -1052,7 +1052,7 @@ describe("placement-slop: lowercase org-marker vs. a lowercase GitHub URL allow"
 // own `loadConfig`, resolved relative to this test file rather than to
 // `process.cwd()` (which vitest may or may not set to the repo root).
 
-describe("placement-slop: the actual repo-root slop.config.yml (agent-dx #80e4743d)", () => {
+describe("placement-slop: the actual repo-root slop.config.yml stays in sync with the pack's test fixtures", () => {
   const repoRootConfigPath = path.join(
     path.dirname(fileURLToPath(import.meta.url)),
     "..",
