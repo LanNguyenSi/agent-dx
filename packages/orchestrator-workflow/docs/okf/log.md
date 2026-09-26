@@ -1,5 +1,17 @@
 # Bundle log
 
+- 2026-09-26T08:25:19Z (README restructure, follow-up): `subagent-contracts-superset.md`
+  now names `docs/verification-sets.md` for the worked `verify.json`
+  example, which the previous entry reported as reworded but was not.
+  README's "Effort tiers" subsection is six lines, not two or three, and
+  `role-profile-reference.md` points at
+  `docs/model-routing-reference.md#effort-tiers` directly; README keeps
+  the subsection so INSTALL-AGENT.md's pointers resolve. The five docs
+  stamped with a time later than their own commit are re-stamped at this
+  verification time; their claims were re-read against the README change
+  (effort-tiers wording, Development pointer), which leaves every cited
+  line and anchor in place.
+
 - 2026-09-26T08:10:00Z (README restructure, third pass): restores the
   INSTALL-AGENT.md `rollback` assertion the second pass's retarget
   dropped, and widens `knowledge-sites.test.ts`'s scan from a hardcoded
