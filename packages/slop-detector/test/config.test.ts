@@ -328,4 +328,38 @@ describe("config", () => {
     );
     expect(() => loadConfig(file)).toThrow(/for a literal space/);
   });
+
+  // The pattern-anchor pointer moved out of README.md into
+  // docs/configuration.md; these three schemas each report the same
+  // "leading /" rejection and must each point at the doc that now holds
+  // the "Path pattern anchor" section, not the retired README location.
+  it("loadConfig rejects an entrypointGlobs pattern with a leading slash and points at docs/configuration.md's pattern anchor section", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(file, `entrypointGlobs:\n  - "/src/index.ts"\n`);
+    expect(() => loadConfig(file)).toThrow(
+      /see docs\/configuration\.md.*Path pattern anchor/,
+    );
+  });
+
+  it("loadConfig rejects a placement.instructionGlobs pattern with a leading slash and points at docs/configuration.md's pattern anchor section", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      file,
+      `placement:\n  instructionGlobs:\n    - "/AGENTS.md"\n`,
+    );
+    expect(() => loadConfig(file)).toThrow(
+      /see docs\/configuration\.md.*Path pattern anchor/,
+    );
+  });
+
+  it("loadConfig rejects a review.allowPaths pattern with a leading slash and points at docs/configuration.md's pattern anchor section", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(file, `review:\n  allowPaths:\n    - "/test/**"\n`);
+    expect(() => loadConfig(file)).toThrow(
+      /see docs\/configuration\.md.*Path pattern anchor/,
+    );
+  });
 });

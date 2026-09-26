@@ -218,7 +218,7 @@ export function checkFiles(
     warnings.push(
       ...corpus.unmatchedEntrypointGlobs.map(
         (glob) =>
-          `entrypointGlobs pattern "${glob}" matched no scanned files — check for a typo, or that it's relative to the pattern anchor (see the README section "Path pattern anchor")`,
+          `entrypointGlobs pattern "${glob}" matched no scanned files: check for a typo, or that it's relative to the pattern anchor (see docs/configuration.md, "Path pattern anchor")`,
       ),
     );
   }
@@ -232,7 +232,7 @@ export function checkFiles(
     warnings.push(
       ...unmatched.map(
         (glob) =>
-          `placement.instructionGlobs pattern "${glob}" matched no scanned files — check for a typo, or that it's relative to the pattern anchor (see the README section "Path pattern anchor")`,
+          `placement.instructionGlobs pattern "${glob}" matched no scanned files: check for a typo, or that it's relative to the pattern anchor (see docs/configuration.md, "Path pattern anchor")`,
       ),
     );
   }

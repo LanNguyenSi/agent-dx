@@ -33,7 +33,7 @@ const RuleOverrideSchema = z.object({
 // Reject it at parse time instead of letting it silently match nothing.
 const EntrypointGlobSchema = z.string().refine((g) => !g.startsWith("/"), {
   message:
-    'entrypointGlobs patterns are matched relative to the pattern anchor (see the README section "Path pattern anchor"), not as absolute paths: remove the leading "/"',
+    'entrypointGlobs patterns are matched relative to the pattern anchor (see docs/configuration.md, "Path pattern anchor"), not as absolute paths: remove the leading "/"',
 });
 
 // `placement.markers` and `placement.allow` are regex pattern strings the
@@ -84,7 +84,7 @@ const RegexPatternSchema = z
 // a leading "/" can never match that relative path.
 const InstructionGlobSchema = z.string().refine((g) => !g.startsWith("/"), {
   message:
-    'placement.instructionGlobs patterns are matched relative to the pattern anchor (see the README section "Path pattern anchor"), not as absolute paths: remove the leading "/"',
+    'placement.instructionGlobs patterns are matched relative to the pattern anchor (see docs/configuration.md, "Path pattern anchor"), not as absolute paths: remove the leading "/"',
 });
 
 const PlacementConfigSchema = z.object({
@@ -191,7 +191,7 @@ const WorkflowConfigSchema = z.object({
 // above) -- a leading "/" can never match that relative path.
 const ReviewAllowPathSchema = z.string().refine((g) => !g.startsWith("/"), {
   message:
-    'review.allowPaths patterns are matched relative to the pattern anchor (see the README section "Path pattern anchor"), not as absolute paths: remove the leading "/"',
+    'review.allowPaths patterns are matched relative to the pattern anchor (see docs/configuration.md, "Path pattern anchor"), not as absolute paths: remove the leading "/"',
 });
 
 const ReviewConfigSchema = z.object({

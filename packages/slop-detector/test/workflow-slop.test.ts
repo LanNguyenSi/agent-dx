@@ -37,6 +37,7 @@ describe("workflow-slop/run-expression", () => {
     expect(v).toHaveLength(1);
     expect(v[0].ruleId).toBe("workflow-slop/run-expression");
     expect(v[0].severity).toBe("block");
+    expect(v[0].message).toContain("(see docs/workflow-slop.md)");
   });
 
   it("flags a step-output expression inside a block-scalar (|) run:", () => {
@@ -425,6 +426,7 @@ describe("workflow-slop/run-expression", () => {
     expect(v[0].message).toContain("actions/github-script");
     expect(v[0].message).toContain("script");
     expect(v[0].message).toContain("executes as code");
+    expect(v[0].message).toContain("(see docs/workflow-slop.md)");
   });
 
   it("flags with.script written as a single-line plain scalar", () => {
@@ -1327,7 +1329,7 @@ function shapeMessage(
 // registering a template, so it carries its own tail naming the actual
 // remedies instead of `SHAPE_MESSAGE_TAIL`'s.
 const SHELL_MESSAGE_TAIL =
-  'Set an explicit bash `shell:` on the gate step (or its job\'s or the workflow\'s `defaults.run.shell`), or use the reviewed per-repo exception instead: a `# slop-detector:disable-line=workflow-slop/audit-gate-shape` comment on this line, or `rules: { "workflow-slop/audit-gate-shape": { enabled: false } }` in `slop.config.yml` to disable the rule for the whole repo (see the README\'s "Scope" section).';
+  'Set an explicit bash `shell:` on the gate step (or its job\'s or the workflow\'s `defaults.run.shell`), or use the reviewed per-repo exception instead: a `# slop-detector:disable-line=workflow-slop/audit-gate-shape` comment on this line, or `rules: { "workflow-slop/audit-gate-shape": { enabled: false } }` in `slop.config.yml` to disable the rule for the whole repo (see docs/workflow-slop.md\'s "Scope" section).';
 
 /** The full message `audit-gate-shape` reports for a shell refusal. */
 function shellMessage(reason: string): string {
@@ -1335,7 +1337,7 @@ function shellMessage(reason: string): string {
 }
 
 const MISSING_GATE_MESSAGE =
-  "No certifiable npm-audit gate command was found in this audit workflow: no `run:` step's normalised shell statements invoke `npm audit` with `--audit-level=low`, `--audit-level=moderate`, `--audit-level=high`, or `--audit-level=critical`. Text inside a here-doc body is data, not a command, and a `run:` scalar that is not a literal block scalar (`|`) or a single-line plain scalar is not analysed as shell text, so neither counts as a present gate. (This rule only recognises `npm audit`; a `pnpm audit` or a non-npm audit command is out of its scope, see the README.)";
+  "No certifiable npm-audit gate command was found in this audit workflow: no `run:` step's normalised shell statements invoke `npm audit` with `--audit-level=low`, `--audit-level=moderate`, `--audit-level=high`, or `--audit-level=critical`. Text inside a here-doc body is data, not a command, and a `run:` scalar that is not a literal block scalar (`|`) or a single-line plain scalar is not analysed as shell text, so neither counts as a present gate. (This rule only recognises `npm audit`; a `pnpm audit` or a non-npm audit command is out of its scope, see docs/workflow-slop.md.)";
 
 // The fleet's canonical gate block, byte-identical (after normalisation)
 // in all ten fleet audit.yml files at the revision this fixture was taken

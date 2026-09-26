@@ -358,7 +358,7 @@ function makeViolation(
     column: start.column,
     endLine: end.line,
     endColumn: end.column,
-    message: `\`\${{ ${expr.trim()} }}\` is interpolated directly into a \`run:\` shell script. Route it through \`env:\` and reference it as \`$NAME\` instead, unless it is one of the documented non-attacker-controllable contexts (see workflow-slop README).`,
+    message: `\`\${{ ${expr.trim()} }}\` is interpolated directly into a \`run:\` shell script. Route it through \`env:\` and reference it as \`$NAME\` instead, unless it is one of the documented non-attacker-controllable contexts (see docs/workflow-slop.md).`,
     rationale: rule.rationale,
     matched,
   };
@@ -390,7 +390,7 @@ function makeExecutedInputViolation(
     column: start.column,
     endLine: end.line,
     endColumn: end.column,
-    message: `\`\${{ ${expr.trim()} }}\` is passed to \`${entry.uses}\`'s \`${entry.input}\` input, which that action executes as code, not data. Route it through \`env:\` (or the action's own env-reading convention) instead, unless it is one of the documented non-attacker-controllable contexts (see workflow-slop README).`,
+    message: `\`\${{ ${expr.trim()} }}\` is passed to \`${entry.uses}\`'s \`${entry.input}\` input, which that action executes as code, not data. Route it through \`env:\` (or the action's own env-reading convention) instead, unless it is one of the documented non-attacker-controllable contexts (see docs/workflow-slop.md).`,
     rationale: rule.rationale,
     matched,
   };
@@ -2786,7 +2786,7 @@ function makeAuditViolation(
 }
 
 const MISSING_GATE_MESSAGE =
-  "No certifiable npm-audit gate command was found in this audit workflow: no `run:` step's normalised shell statements invoke `npm audit` with `--audit-level=low`, `--audit-level=moderate`, `--audit-level=high`, or `--audit-level=critical`. Text inside a here-doc body is data, not a command, and a `run:` scalar that is not a literal block scalar (`|`) or a single-line plain scalar is not analysed as shell text, so neither counts as a present gate. (This rule only recognises `npm audit`; a `pnpm audit` or a non-npm audit command is out of its scope, see the README.)";
+  "No certifiable npm-audit gate command was found in this audit workflow: no `run:` step's normalised shell statements invoke `npm audit` with `--audit-level=low`, `--audit-level=moderate`, `--audit-level=high`, or `--audit-level=critical`. Text inside a here-doc body is data, not a command, and a `run:` scalar that is not a literal block scalar (`|`) or a single-line plain scalar is not analysed as shell text, so neither counts as a present gate. (This rule only recognises `npm audit`; a `pnpm audit` or a non-npm audit command is out of its scope, see docs/workflow-slop.md.)";
 
 const auditGateMissing: Rule = {
   id: "workflow-slop/audit-gate-missing",
@@ -2832,7 +2832,7 @@ function shapeViolationMessage(
 // before either is even considered), so it names its own remedies
 // instead of `SHAPE_MESSAGE_TAIL`'s shape/template ones.
 const SHELL_MESSAGE_TAIL =
-  'Set an explicit bash `shell:` on the gate step (or its job\'s or the workflow\'s `defaults.run.shell`), or use the reviewed per-repo exception instead: a `# slop-detector:disable-line=workflow-slop/audit-gate-shape` comment on this line, or `rules: { "workflow-slop/audit-gate-shape": { enabled: false } }` in `slop.config.yml` to disable the rule for the whole repo (see the README\'s "Scope" section).';
+  'Set an explicit bash `shell:` on the gate step (or its job\'s or the workflow\'s `defaults.run.shell`), or use the reviewed per-repo exception instead: a `# slop-detector:disable-line=workflow-slop/audit-gate-shape` comment on this line, or `rules: { "workflow-slop/audit-gate-shape": { enabled: false } }` in `slop.config.yml` to disable the rule for the whole repo (see docs/workflow-slop.md\'s "Scope" section).';
 
 function shellViolationMessage(reason: string): string {
   return `Unrecognised npm-audit gate shape in this audit workflow: ${reason}. ${SHELL_MESSAGE_TAIL}`;

@@ -1033,3 +1033,74 @@ describe("corpus mode applies the anchor when it classifies files", () => {
     expect(unused.map((v) => v.path)).toEqual([indexPath]);
   });
 });
+
+// The "Path pattern anchor" section moved out of README.md into
+// docs/configuration.md; both zero-match warnings below must point
+// readers at that doc, not the retired README location.
+describe("zero-match glob warnings point at the pattern anchor's current doc", () => {
+  it("entrypointGlobs: a pattern matching no scanned files points at docs/configuration.md", () => {
+    const configPath = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      configPath,
+      [
+        "packs:",
+        "  code-slop: true",
+        "corpus: true",
+        "entrypointGlobs:",
+        "  - packages/sub/src/does-not-exist.ts",
+      ].join("\n") + "\n",
+    );
+    const target = path.join(tmp, "packages", "sub", "src", "index.ts");
+    fs.writeFileSync(target, "export function helperA() { return 1; }\n");
+
+    const summary = runCliJson([
+      "check",
+      tmp,
+      "--pack",
+      "code-slop",
+      "--config",
+      configPath,
+    ]);
+
+    expect(summary.warnings ?? []).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          'see docs/configuration.md, "Path pattern anchor"',
+        ),
+      ]),
+    );
+  });
+
+  it("placement.instructionGlobs: a pattern matching no scanned files points at docs/configuration.md", () => {
+    const configPath = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(
+      configPath,
+      [
+        "packs:",
+        "  placement-slop: true",
+        "placement:",
+        "  instructionGlobs:",
+        "    - packages/sub/DOES-NOT-EXIST.md",
+      ].join("\n") + "\n",
+    );
+    const target = path.join(tmp, "packages", "sub", "PLAYBOOK.md");
+    fs.writeFileSync(target, "# Playbook\n\nNo markers here.\n");
+
+    const summary = runCliJson([
+      "check",
+      tmp,
+      "--pack",
+      "placement-slop",
+      "--config",
+      configPath,
+    ]);
+
+    expect(summary.warnings ?? []).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          'see docs/configuration.md, "Path pattern anchor"',
+        ),
+      ]),
+    );
+  });
+});
