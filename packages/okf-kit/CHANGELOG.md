@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `--require-anchors`, `--prose-line-references`, and `--dirty-as-now` CLI help text now points at the specific `docs/*.md` file that covers each flag, instead of a generic "see README" pointer, matching where the package README's own reference sections moved to. Text-only; no behaviour change.
+
 ## [0.16.0] - 2026-09-25
 
 ### Changed

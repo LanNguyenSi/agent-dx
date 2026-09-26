@@ -62,8 +62,9 @@ describe("okf-kit cli init", () => {
       const initResult = runCli(["init", bundleDir]);
       expect(initResult.status).toBe(0);
 
-      // No --repo-root: this is the README's central promise, that a
-      // freshly scaffolded bundle inside a real git repo is red-first
+      // No --repo-root: this is docs/init.md's "Placeholder sources are
+      // intentional" promise, that a freshly scaffolded bundle inside a
+      // real git repo is red-first
       // (auto-detected repo root, unresolved placeholders flagged) until
       // the placeholders are replaced with real paths.
       const checkResult = runCli(["check", bundleDir, "--json"]);

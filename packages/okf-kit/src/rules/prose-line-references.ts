@@ -42,14 +42,14 @@ const RULE_ID = "prose-line-references";
  * that never passes `--prose-line-references` gets byte-identical `check`
  * output to before this rule existed.
  *
- * Extraction grammar (conservative, see the README's "Prose line references
- * (opt-in, `--prose-line-references`)" section for the authoritative
- * writeup): `line N`, `lines N-M`, `lines N-M` with an en-dash/em-dash, and
+ * Extraction grammar (conservative, see docs/prose-line-references.md for
+ * the authoritative writeup): `line N`, `lines N-M`, `lines N-M` with an
+ * en-dash/em-dash, and
  * `lines N to M` (`LINE_REF_RE`). Deliberately NOT matched:
  *   - `L N` / `L1` -- not observed in the corpus this rule was measured
  *     against (see the CHANGELOG entry), and far more ambiguous than
  *     `line N` (`L1` already means "review finding 1" in this package's own
- *     README authoring convention for `citations-resolve`'s short-form
+ *     docs/init.md authoring convention for `citations-resolve`'s short-form
  *     citations).
  *   - `<file>:N` outside backticks -- already matched by
  *     `citations-resolve`'s own `CITATION_RE`, which has no backtick
@@ -86,7 +86,7 @@ const RULE_ID = "prose-line-references";
  * fenced code, indented code, and table rows only -- deliberately NOT
  * `computeInlineCodeSpans`. A bare backtick-wrapped filename
  * (`` `src/cli.ts` ``) is the normal, encouraged way to name a file in this
- * package's own prose (see the README's authoring guidance), so excluding
+ * package's own prose (see docs/init.md's authoring guidance), so excluding
  * inline code from mention detection the way `citations-resolve` excludes
  * it from short-form citation matching would make this rule unable to bind
  * against the overwhelming majority of real file mentions in a bundle.
