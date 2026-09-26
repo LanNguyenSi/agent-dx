@@ -15,8 +15,6 @@ review:
     - "packages/slop-detector/src/packs/review-slop.ts"
     # This fixture asserts the literal examples and their allow semantics.
     - "packages/slop-detector/test/review-slop.test.ts"
-    # This package reference documents the literal review-slop examples.
-    - "packages/slop-detector/README.md"
     # Grandfather legacy CLI test titles/comments; excludes this entire file, including future content.
     - "packages/agent-primitives/test/cli.test.ts"
     # Grandfather legacy mutation test titles/comments; excludes this entire file, including future content.
@@ -138,7 +136,3 @@ placement:
     # "/home/<realname>/" still fire. See CHANGELOG for the measurement
     # behind this entry.
     - "~/"
-    # Same reasoning, for a README that spells the generic placeholder as
-    # the literal word "you" instead of an angle-bracket placeholder.
-    # Exact literal match, cannot match a real username.
-    - "/Users/you/"
