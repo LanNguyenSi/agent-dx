@@ -37,6 +37,7 @@ describe("workflow-slop/run-expression", () => {
     expect(v).toHaveLength(1);
     expect(v[0].ruleId).toBe("workflow-slop/run-expression");
     expect(v[0].severity).toBe("block");
+    expect(v[0].message).toContain("(see docs/workflow-slop.md)");
   });
 
   it("flags a step-output expression inside a block-scalar (|) run:", () => {
@@ -425,6 +426,7 @@ describe("workflow-slop/run-expression", () => {
     expect(v[0].message).toContain("actions/github-script");
     expect(v[0].message).toContain("script");
     expect(v[0].message).toContain("executes as code");
+    expect(v[0].message).toContain("(see docs/workflow-slop.md)");
   });
 
   it("flags with.script written as a single-line plain scalar", () => {

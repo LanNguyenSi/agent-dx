@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for the pattern anchor, the workflow-slop rules, or the audit-gate scope
   now name the doc that actually holds that content (`docs/configuration.md`
   or `docs/workflow-slop.md`), matching where those sections moved.
+- The published package now ships `docs/`, so the README's relative links
+  and those runtime pointers resolve in the installed package too.
 
 ## [0.5.0] - 2026-09-21
 
