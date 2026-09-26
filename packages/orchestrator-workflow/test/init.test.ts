@@ -1882,8 +1882,8 @@ describe("tier variants (`--tiers`)", () => {
     // opencodeEffortLine only looks up a provider by splitting on the
     // first "/"; an id with none resolves to `provider === undefined`, the
     // same no-effort-field outcome as Ollama, but via a distinct code path
-    // (not the Ollama string check) that the README's "Every other
-    // non-Claude-family model" bullet previously implied did not exist.
+    // (not the Ollama string check) that model-routing-reference.md's "Every
+    // other non-Claude-family model" bullet previously implied did not exist.
     runInit({
       targetDir: target,
       harnesses: ["opencode"],

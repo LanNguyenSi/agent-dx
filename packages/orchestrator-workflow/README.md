@@ -1,25 +1,32 @@
 # orchestrator-workflow
 
 Installs an orchestrator-led agent workflow into any repository: one `.ai/`
-directory for run state, one marker-fenced policy section in `AGENTS.md`, and
-subagent definitions with preselected models for the harnesses you actually
-use (Claude Code, OpenAI Codex, opencode).
+directory for run state, one marker-fenced policy section in `AGENTS.md`,
+and per-role subagent definitions with preselected models for the harnesses
+you actually use (Claude Code, OpenAI Codex, opencode).
 
-The workflow itself: the primary agent acts as the orchestrator. It owns goal,
-plan, task validation, acceptance, and the operator handoff. Review is always delegated to narrow subagents, and by default so is
-implementation (see [Run modes](#run-modes)); the subagents return structured YAML
-evidence. Every unit of work leaves an auditable run directory behind.
+The primary agent acts as the orchestrator: it owns goal, plan, task
+validation, acceptance, and the operator handoff. Review is always
+delegated to narrow subagents, and by default so is implementation (see
+[Run modes](#run-modes)); subagents return structured YAML evidence, not
+transcripts, and every unit of work leaves an auditable run directory
+behind. See [Architecture: why this shape](docs/architecture.md) for the
+loop diagram and the reasoning, and [Run contracts](docs/run-contracts.md)
+for the optional frozen acceptance-baseline contract and the
+decision-authority record every run keeps.
 
-Every unit of work runs under a frozen `00-goal.md` acceptance-baseline
-contract and an authority-tracking `03-decisions.md`; see
-[Run contracts](docs/run-contracts.md) for both. The orchestrator's own
-context stays small by design: subagents get narrow task contracts and
-return structured YAML evidence, not transcripts, while durable state lives
-in run files under `.ai/runs/`; see
-[Architecture: why this shape](docs/architecture.md) for the loop diagram
-and the reasoning behind it.
+## Key features
+
+- Orchestrator-led workflow: one agent plans and decides; narrow subagents implement and review.
+- Per-harness subagent definitions with preselected, pinned per-role models and effort (Claude Code, Codex, opencode).
+- An auditable `.ai/runs/` directory per unit of work, with an optional frozen acceptance-baseline contract.
+- Agent-led or manual CLI install, both idempotent and conflict-safe on re-run.
+- Operator-level install for projecting routing and profile defaults onto many repositories.
+- A `validate-review-report` CLI to structurally check reviewer YAML returns.
 
 ## Install
+
+Requires Node.js >= 20.
 
 ### Recommended: agent-led installation
 
@@ -86,11 +93,11 @@ one still prompts).
 ## Verification sets
 
 A repository may check in `.ai/workflow/verify.json` to name the complete
-verification set for an implementer or reviewer briefing: one preflight
-executor plus ordered extras (build, package tests, a knowledge-bundle
-check). The workflow itself never executes or validates this file; the
-orchestrator approves the resolved config and records every result. See
-[Verification sets](docs/verification-sets.md) for the worked JSON example.
+verification set (a preflight executor plus ordered extras) for an
+implementer or reviewer briefing; the workflow itself never executes or
+validates this file, only the orchestrator does, recording every result.
+See [Verification sets](docs/verification-sets.md) for the worked JSON
+example.
 
 ## What gets installed
 
@@ -108,9 +115,7 @@ touches (a machine-local absolute path, not written by the installer); add
 it to the repository's `.gitignore`.
 
 `manifest.json` may also carry a `knowledge` list of `{ path, repoRoot }`
-entries, for a repo whose knowledge bundle is not at the default location (a
-workspace-level bundle with sources in a sub-repo, a bundle elsewhere, or
-several bundles); `doctor` reports an invalid or missing entry. When
+entries for a repo whose bundle is not at the default location; when
 `knowledge` in `.ai/workflow/manifest.json` is absent or an empty list, the
 default `docs/okf/` applies. See
 [Install reference](docs/install-reference.md) for the field's exact path
@@ -120,10 +125,12 @@ Per selected harness, the installer writes the compact `SKILL.md` entrypoint,
 its `references/` files, and one subagent definition per role
 (`.claude/agents/`, `.codex/agents/`, or `.opencode/agents/`). Each harness's
 read-only posture (explorer, reviewer, and advisor) is tool-level where the
-harness supports it and instruction-only for shell-level mutation otherwise.
-See [Harnesses](docs/harnesses.md) for the exact per-harness file list and
-the honest read-only-posture writeup, including the reviewer's own narrower
-write boundary.
+harness supports it. Codex's reviewer inherits the caller's sandbox instead
+(its prompt prohibits source edits, so temporary/build checks stay
+possible), and wherever a sandbox is writable, shell-level mutation is
+guarded by instruction only, not enforced. See [Harnesses](docs/harnesses.md)
+for the exact per-harness file list and the honest read-only-posture
+writeup, including the reviewer's own narrower write boundary.
 
 ## Role profile
 
@@ -156,11 +163,9 @@ which profile to install — defaulting to `full`. `--profile` rejects any
 value other than `minimal` or `full` with a clear error instead of silently
 falling back to a default.
 
-**Re-runs and profile changes.** A plain re-run (no `--profile` flag) keeps
-the profile recorded in `.ai/workflow/manifest.json`; passing `--profile`
-explicitly always overrides it, and a `full` to `minimal` downgrade leaves
-the now-untracked role files on disk with a printed note (run
-`orchestrator-workflow uninstall` first for a fully clean switch). See
+**Re-runs and profile changes.** A plain re-run keeps the recorded profile;
+`--profile` explicitly overrides it, and a `full` to `minimal` downgrade
+leaves the now-untracked role files on disk with a printed note. See
 [Role profile reference](docs/role-profile-reference.md) for the exact
 override and uninstall-cleanliness rules.
 
@@ -176,6 +181,15 @@ per non-default tier. See [Model routing reference](docs/model-routing-reference
 for the default-model table, the `--routing` JSON shape, the Codex default
 routing table, opencode model resolution, and the full effort-tiers
 mechanics (including the `CLAUDE_CODE_EFFORT_LEVEL` environment override).
+
+### Effort tiers
+
+Every installed agent file carries its own pinned default effort (`medium`
+for explorer, task-slicer, and implementer; `high` for reviewer and
+advisor), independent of `--tiers`. `--tiers` additionally renders one
+`<role>-<tier>.md`/`.toml` variant file per non-default tier. See [Model
+routing reference: Effort tiers](docs/model-routing-reference.md#effort-tiers)
+for the full role/tier table and the per-harness frontmatter shape.
 
 ## Run modes
 
@@ -202,24 +216,14 @@ pin, and the registry/locking model).
 
 ## Ownership and re-runs
 
-`init` is idempotent: a second run changes nothing. `apply` installs
-through that same `runInit` path and is subject to the same
-conflict/`--force`/ownership rules; on the repository side it changes
-nothing either, but it refreshes this target's entry in the operator
-manifest on every run. The rules:
-
-- `AGENTS.md` and `CLAUDE.md` belong to you. The installer only appends its
-  fenced section or the import line, and on re-run replaces only the content
-  between its own markers. A broken or duplicated marker fence is reported as
-  a conflict and left alone.
-- Templates, skills, and subagent definitions are kit-owned. The manifest
-  records a hash of each file as installed, so a re-run after a kit upgrade
-  updates files you never touched and reports files you edited as conflicts
-  instead of overwriting them; `--force` overwrites those too.
-- `.ai/workflow/manifest.json` is the kit's state file. It records the applied
-  version, harnesses, role profile, models, the `--tiers` flag, the optional
-  kit-version pin, and file hashes, and is rewritten whenever that state
-  changes; do not edit it by hand.
+`init` is idempotent: a second run changes nothing. `AGENTS.md`/`CLAUDE.md`
+belong to you (the installer only touches its own fenced section or import
+line); templates, skills, and subagent definitions are kit-owned and
+conflict-checked by file hash; `.ai/workflow/manifest.json` is the kit's
+state file. `apply` installs through the same path and is subject to the
+same rules, refreshing this target's entry in the operator manifest on
+every run. See [Install reference](docs/install-reference.md) for the
+exact per-file ownership rules.
 
 ## Uninstall
 
@@ -234,23 +238,6 @@ import line are taken out; either file is deleted only when nothing but
 init's own boilerplate remains. Kit directories are pruned only when empty,
 and run history under `.ai/runs/` is always kept. Interactive runs ask for
 confirmation; non-interactive runs require `--yes`.
-
-## Relation to agentic-coding-playbook
-
-This kit ships the orchestration layer: who coordinates whom, where state
-lives, and the I/O contracts between roles. The extended role prompts and the
-organizational guidance (when to use agents at all, review depth, risk tiers)
-live in the sibling package
-[agentic-coding-playbook](../agentic-coding-playbook), which the skill
-references.
-
-## okf-kit version pin
-
-`test/docs-consistency.test.ts` pins the `okf-kit@<version>` this repo's own
-`.github/workflows/` install against the sibling `packages/okf-kit`
-package's version, so a release of `okf-kit` must bump those pins in the
-same commit as the version cut; see `CONTRIBUTING.md`'s "Releasing okf-kit"
-section (repo root) for the order.
 
 ## Reviewer-report validation
 
@@ -275,16 +262,19 @@ every flag, exit code, and fence-detection edge case.
 - [Model routing reference](docs/model-routing-reference.md): the default-model table, the `--routing` JSON shape, the Codex default routing table, opencode model resolution, and the effort-tiers mechanics.
 - [Operator-level install](docs/operator-install.md): the full `setup`/`apply`/`doctor`/`adopt` command reference.
 - [`validate-review-report` CLI reference](docs/validate-review-report.md): every flag, exit code, and fence-detection edge case.
-- [Curated knowledge bundle](docs/okf/index.md): the OKF-format reference docs for this package's own contracts and mechanics (the default location named by `knowledge` in `.ai/workflow/manifest.json`).
+- [Curated knowledge bundle](docs/okf/index.md): the OKF-format reference docs for this package's own contracts and mechanics, at `docs/okf/`, the default location a repository falls back to when `knowledge` in `.ai/workflow/manifest.json` is unset.
 - [agentic-coding-playbook](../agentic-coding-playbook): the extended role prompts and organizational guidance this kit's skill references.
 
 ## Development
 
 This package lives in the [agent-dx](https://github.com/LanNguyenSi/agent-dx)
-monorepo. `npm test` (vitest) and `npm run typecheck` run from
+monorepo, alongside the sibling agentic-coding-playbook package (see
+Documentation below). `npm test` (vitest) and `npm run typecheck` run from
 `packages/orchestrator-workflow`; see the repository root's
 `CONTRIBUTING.md` for the full contributor workflow, including the
-"Releasing okf-kit" order referenced above.
+"Releasing okf-kit" order (`test/docs-consistency.test.ts` pins the
+`okf-kit@<version>` this repo's CI installs against the sibling
+`packages/okf-kit` package's version).
 
 ## License
 

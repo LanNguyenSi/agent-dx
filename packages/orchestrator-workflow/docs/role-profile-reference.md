@@ -13,7 +13,7 @@ paths where committing to one is expensive to reverse, repeated
 implementation failures on the same task, a review deadlock, or a high-risk
 decision. It is not a standard pipeline step; like tier choice, spawning it
 is the orchestrator's own judgment call. The advisor lays out the options
-with their pros, cons, and risk, and gives a recommendation, it recommends,
+with their pros, cons, and risk, and gives a recommendation; it recommends,
 never decides, and never writes code; the orchestrator still decides, and a
 critical risk still goes to the operator. `minimal` never installs it, the
 same as explorer and task-slicer.
@@ -43,5 +43,6 @@ manifest's file ledger, so uninstall leaves them on disk without reporting
 them at all.
 
 The same override-vs-persist and downgrade-note rules apply to `--tiers`
-(rendering the additional `<role>-<tier>.md` variant files); see the
-README's Effort tiers section.
+(rendering the additional `<role>-<tier>.md` variant files); see [Model
+routing reference: Effort tiers](model-routing-reference.md#effort-tiers)
+for the full role/tier table.

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- README restructured around the package README standard (P1-P9): moved
+- README restructured around a shorter package README standard: moved
   deep reference material (architecture rationale, run contracts, install
   internals, harness file list and read-only posture, role profile detail,
   model routing reference, the verification-sets JSON example, and the

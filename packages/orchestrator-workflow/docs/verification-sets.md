@@ -1,6 +1,7 @@
 # Verification sets
 
-See the [package README](../README.md) for the rest of the CLI surface.
+See the [package README](../README.md) for how this file fits into an
+implementer or reviewer briefing.
 
 A repository may check in `.ai/workflow/verify.json` to name the complete
 verification set for an implementer or reviewer briefing. This generic worked

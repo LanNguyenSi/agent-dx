@@ -2,9 +2,9 @@
 
 Details behind the install commands in the [package README](../README.md):
 what the agent-led installer's conflict check does, the exact rules for
-`--harness none` (templates-only mode) on a re-run, and the optional
+`--harness none` (templates-only mode) on a re-run, the optional
 `knowledge` manifest field for a repository whose bundle is not at the
-default location.
+default location, and the file-ownership rules a re-run follows.
 
 ## Agent-led installation: bundle and conflict handling
 
@@ -71,3 +71,24 @@ detail line (the `knowledgeWarnings` key in `--json`) for a configured
 `path` or `repoRoot` that is not a directory, for each ignored invalid
 entry, and when a non-empty list omits an existing default bundle directory.
 These warnings never change the status or the exit code.
+
+## Ownership and re-runs
+
+`init` is idempotent: a second run changes nothing. `apply` installs
+through that same `runInit` path and is subject to the same
+conflict/`--force`/ownership rules; on the repository side it changes
+nothing either, but it refreshes this target's entry in the operator
+manifest on every run. The rules:
+
+- `AGENTS.md` and `CLAUDE.md` belong to you. The installer only appends its
+  fenced section or the import line, and on re-run replaces only the content
+  between its own markers. A broken or duplicated marker fence is reported as
+  a conflict and left alone.
+- Templates, skills, and subagent definitions are kit-owned. The manifest
+  records a hash of each file as installed, so a re-run after a kit upgrade
+  updates files you never touched and reports files you edited as conflicts
+  instead of overwriting them; `--force` overwrites those too.
+- `.ai/workflow/manifest.json` is the kit's state file. It records the applied
+  version, harnesses, role profile, models, the `--tiers` flag, the optional
+  kit-version pin, and file hashes, and is rewritten whenever that state
+  changes; do not edit it by hand.

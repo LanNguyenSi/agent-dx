@@ -16,7 +16,7 @@ block (any language tag, or none) or given unfenced, and prints one
 diagnostic per missing or invalid field. Every element of a string-array
 field (`summary`, `missing_tests`, `residual_risks`) must itself be a
 string; a non-string element (a number, a mapping, a boolean, or `null`
-, written as a bare or `~` bullet) is its own diagnostic at
+(written as a bare or `~` bullet)) is its own diagnostic at
 `<field>[<index>]`. A fenced return ends at the first closing fence that
 starts at column 0, repeats at least as many backticks as the opening
 fence, and carries nothing but whitespace after that run, so neither a

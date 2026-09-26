@@ -26,6 +26,7 @@ sources:
   - packages/orchestrator-workflow/test/doctor.test.ts
   - packages/orchestrator-workflow/INSTALL-AGENT.md
   - packages/orchestrator-workflow/README.md
+  - packages/orchestrator-workflow/docs/harnesses.md
 ---
 
 # Install fence mechanics
