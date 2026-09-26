@@ -930,7 +930,7 @@ describe("everyday invocation shapes, spelled relative to the config file's dire
     );
     // The same allowlist entry written relative to the SCANNED
     // subdirectory: the spelling that worked before `--config` moved the
-    // anchor, and the one the README's migration note tells you to
+    // anchor, and the one the migration note in docs/configuration.md tells you to
     // rewrite.
     const subAnchored = path.join(tmp, "sub-anchored.yml");
     fs.writeFileSync(

@@ -163,6 +163,6 @@ Run `npm run build` first so `dist/mcp.js` exists.
 - M1: `agent-tics` + `prose-slop` packs, CLI, config loader, per-line disables.
 - M2: `comment-slop` + `code-slop` packs (TypeScript AST via `@typescript-eslint/parser`). Both off by default; opt in via config or `--pack`. Within-file analysis only for all rules except the two experimental cross-file rules (`code-slop/unused-export`, `code-slop/single-callsite-helper`), which require the corpus pre-pass (see [Cross-file rules](configuration.md#cross-file-rules-experimental)).
 - M3: `ui-slop` v1 pack with 4 default-on warn rules (gradient text, purple+cyan palette, animated layout properties, skipped heading levels) and 2 default-off info rules (monospace-everywhere, flat type hierarchy). Regex-driven over CSS plus tag-shape scan for headings, no new dependencies. Tailwind class strings, JSX inline `style={{...}}` literals, headless-browser contrast/WCAG rules, GitHub Action wrapper, and LLM-judged rules remain on the M3 backlog.
-- `placement-slop`, `workflow-slop`, and `review-slop` shipped after M3; see [CHANGELOG.md](../CHANGELOG.md) for the full version history.
+- `placement-slop`, `workflow-slop`, and `review-slop` shipped after M3; see [CHANGELOG.md](../CHANGELOG.md) for release notes from 0.3.1 on.
 
 Track progress at [agent-dx](https://github.com/LanNguyenSi/agent-dx) issues and tasks.
