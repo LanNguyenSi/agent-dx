@@ -1,5 +1,7 @@
 # Scaffold a bundle (`init`)
 
+`okf-kit init` creates a new bundle directory with an `index.md`, a `log.md`, and one template per doc type.
+
 ```bash
 # scaffold docs/okf (the default target, relative to the current directory)
 okf-kit init

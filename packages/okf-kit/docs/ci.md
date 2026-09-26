@@ -7,7 +7,7 @@
   with:
     fetch-depth: 0
 - name: OKF bundle check
-  run: npx okf-kit@0.16.0 check path/to/bundle
+  run: npx okf-kit@<version> check path/to/bundle  # the exact version, see the README's "Use in CI" example
 ```
 
 Pin the version: an unpinned `npx okf-kit` picks up new rules on their release day, which turns an unrelated PR red.

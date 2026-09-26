@@ -64,6 +64,18 @@ okf-kit docs-for path/to/bundle src/foo.ts
 
 See [Scaffold a bundle](docs/init.md) and [Reverse lookup](docs/docs-for.md) for the full command reference, including flags and output formats.
 
+### Use in CI
+
+Pin the exact version and use a full (non-shallow) checkout; [CI usage](docs/ci.md) explains why:
+
+```yaml
+- uses: actions/checkout@v5
+  with:
+    fetch-depth: 0
+- name: OKF bundle check
+  run: npx okf-kit@0.16.0 check path/to/bundle
+```
+
 ## Documentation
 
 - [Check catalog](docs/check-catalog.md): all 9 rules, repo-root auto-detection, exit codes.
@@ -80,16 +92,6 @@ See [Scaffold a bundle](docs/init.md) and [Reverse lookup](docs/docs-for.md) for
 npm install
 npm run build
 npm test
-```
-
-CI (`.github/workflows/ci.yml`) pins an exact `okf-kit` version for its own bundle checks:
-
-```yaml
-- uses: actions/checkout@v5
-  with:
-    fetch-depth: 0
-- name: OKF bundle check
-  run: npx okf-kit@0.16.0 check path/to/bundle
 ```
 
 See [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md) for issue and PR conventions, and the release process (including `CONTRIBUTING.md`'s "Releasing okf-kit" section for bumping this repo's own `okf-kit@<version>` pins).
