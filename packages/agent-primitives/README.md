@@ -78,7 +78,8 @@ file, and reports whether the test caught it (`killed`) or missed it
 - [`drift`](docs/drift.md): the identifier-drift guard for docs and
   comments.
 - [Non-JS test runners](docs/non-js-test-runners.md): PHP and other
-  non-Node test runner support.
+  non-Node test runner support, including the "Python bytecode cache"
+  section a `probe` warning points to.
 - [Output shape](docs/output-shape.md): the JSON envelope, global flags,
   and the `-m/--max-chars` reduction algorithm.
 
