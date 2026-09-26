@@ -12348,3 +12348,62 @@ describe("docs/harnesses.md states the reviewer's narrower write boundary", () =
     }
   });
 });
+
+// A shipped, fetched-raw doc that names a package README section by heading
+// text can drift silently when the README is restructured: the pointer's
+// prose still reads fine, but the named heading no longer exists (or was
+// renamed) in the README it references. Guards every such pointer in
+// INSTALL-AGENT.md (and the installed assets, which ship the same way) so a
+// renamed or removed README heading turns this test red instead of leaving a
+// dead reference for an agent that fetches INSTALL-AGENT.md raw.
+describe("README section pointers in shipped, fetched-raw agent docs stay valid", () => {
+  const POINTER_PATTERN = /package README's\s+"([^"]+)"\s+section/g;
+
+  /** Every `## `/`### ` (etc.) heading text found in the package README. */
+  function readmeHeadings(): Set<string> {
+    const readme = readDoc("README.md");
+    const headings = new Set<string>();
+    for (const match of readme.matchAll(/^#{1,6}\s+(.+)$/gm)) {
+      headings.add(match[1].trim());
+    }
+    return headings;
+  }
+
+  /**
+   * Every distinct heading text a doc's "package README's ... section"
+   * pointers name, keyed by the doc's display name for the assertion
+   * message. Reused by both the positive check and the inert-regex guard
+   * below.
+   */
+  function pointerTargets(docName: string, raw: string): string[] {
+    return [...raw.matchAll(POINTER_PATTERN)].map((m) => m[1]);
+  }
+
+  const docsToCheck: Array<{ name: string; raw: string }> = [
+    { name: "INSTALL-AGENT.md", raw: readDoc("INSTALL-AGENT.md") },
+  ];
+  for (const assetPath of ["skill/SKILL.md"]) {
+    docsToCheck.push({ name: `assets/${assetPath}`, raw: readAsset(assetPath) });
+  }
+
+  it("the phrase pattern actually matches at least one reference (guard against an inert regex)", () => {
+    const totalMatches = docsToCheck.reduce(
+      (sum, doc) => sum + pointerTargets(doc.name, doc.raw).length,
+      0,
+    );
+    expect(totalMatches).toBeGreaterThan(0);
+  });
+
+  it("every named README section heading exists in README.md", () => {
+    const headings = readmeHeadings();
+    for (const doc of docsToCheck) {
+      for (const target of pointerTargets(doc.name, doc.raw)) {
+        expect(
+          headings.has(target),
+          `${doc.name} points at package README's "${target}" section, ` +
+            `but no README.md heading reads "${target}"`,
+        ).toBe(true);
+      }
+    }
+  });
+});
