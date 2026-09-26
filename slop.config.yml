@@ -71,7 +71,8 @@ review:
     - 'clean structural diagnostic; fix-round, review finding L2\)'
     - 'structural diagnostic \(fix-round, review finding L1\)'
     - 'fields the return actually carried \(fix-round, review finding L3\)'
-    # Both package README hits describe stable product vocabulary, not a run.
+    # Both package doc hits (friction-log/docs/design.md, okf-kit/docs/citations.md)
+    # describe stable product vocabulary, not a run.
     - 'M5\+ roadmap'
     - 'rule table above for the exact finding names'
     # The two okf-kit comments use L1 as documented grammar, not a review id.

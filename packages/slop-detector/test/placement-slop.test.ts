@@ -1071,9 +1071,9 @@ describe("placement-slop: the actual repo-root slop.config.yml (agent-dx #80e474
     expect(cfg.placement?.instructionGlobs).toContain("packages/*/README.md");
 
     // "Bare" here means the tilde form on its own, with no username or
-    // placeholder attached, as opposed to e.g. "/Users/you/", which is
-    // also a home-idiom allow entry but names a specific placeholder, not
-    // a bare shorthand. Only one entry should start with "~" at all, and
+    // placeholder attached, as opposed to a named-placeholder path such
+    // as "/Users/you/", which names a specific placeholder rather than a
+    // bare shorthand. Only one entry should start with "~" at all, and
     // it should be the exact narrow "~/" this rollout was measured
     // against, not some wider variant (a bare "~", a "~.*" pattern, ...)
     // that would silently widen what the allow excuses.
