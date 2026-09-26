@@ -1973,8 +1973,7 @@ function computeInlineCodeSpans(content: string): Array<[number, number]> {
  * Char spans of every Markdown table row in `content`: a line whose
  * trimmed form starts and ends with `|`. Decision (documented in
  * docs/citations.md): a short-form citation inside a table cell is never
- * recognised,
- * the same way one inside a code span is not -- excluded here rather than
+ * recognised, the same way one inside a code span is not -- excluded here rather than
  * left to the plausibility gate, since a table cell's content is prose-like
  * and can otherwise carry a range shape the gate would not reject (e.g.
  * `| col (5-9) |`).

@@ -59,7 +59,8 @@ export function resolveRepoPath(repoRoot: string, source: string): string {
  * designator is parsed unchanged: `Date.parse` already resolves it
  * correctly on every machine. See docs/staleness.md's "Designator-less
  * timestamps" section for the full rationale and the one case this does
- * NOT cover (a value that is not parseable to an instant at all). The raw string is trimmed before either check: the `Z` this
+ * NOT cover (a value that is not parseable to an instant at all). The raw
+ * string is trimmed before either check: the `Z` this
  * function appends for a designator-less value must land at the very end,
  * not after trailing whitespace, so a whitespace-padded value is parsed
  * the same as its untrimmed form (both `hasUtcDesignator` and `Date.parse`
