@@ -5,7 +5,7 @@
   in the doc's own prose, the gap the earlier "README restructure,
   follow-up" entry below flagged as deferred). The insertion shifts every
   line at or below the `sources:` block by one; `SIBLING_GUARD_BUNDLE_ALLOWLIST`'s
-  `paragraphLine`/`secondCitationLine` values for this doc and the two
+  `paragraphLine`/`secondCitationLine` values for this doc and the three
   claim strings that spell one of those line numbers out in prose are
   re-pointed to match, and this log's own pair of self-citations into this
   doc's evidence-and-probes cross-references move by the same one-line
