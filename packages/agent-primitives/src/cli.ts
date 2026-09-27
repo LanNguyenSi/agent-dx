@@ -1360,6 +1360,17 @@ async function runProbePlanCommand(
     extra: {
       ...(result.reason !== undefined ? { reason: result.reason } : {}),
       ...(result.env !== undefined ? { env: result.env } : {}),
+      // A short, fixed-vocabulary string (`"met"`/`"violated"`), the
+      // same shape `env`/`reason` already carry unreduced in practice --
+      // no `keepWhole` entry is added for it: `capString` only shortens
+      // a string past `maxString` (thousands of characters at the
+      // default scale), never drops a short one, and `capObject`'s own
+      // key-count cap sits far above the handful of keys this envelope's
+      // `extra` ever carries, so this field is never the one a reduction
+      // reaches for.
+      ...(result.expectation !== undefined
+        ? { expectation: result.expectation }
+        : {}),
       plan: {
         ...(result.baseline !== undefined ? { baseline: result.baseline } : {}),
         results: result.results,

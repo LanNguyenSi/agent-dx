@@ -205,12 +205,17 @@ invocation cwd:
 `-t` or `--pre` (the plan supplies those); `-i`, `--expect` and
 `--timeout` override the plan's own value when given, and `--link` and
 `--allow-outside`, which a plan file cannot set at all, are command-line
-only. Exit `0` only when every mutant's expectation was met, `1` when the
-plan concluded with an expectation violated, `2` when it could not
-conclude -- a failing
-baseline, a restore that could not be verified (nothing further is
-applied and the remaining mutants are reported `not_run`), or a wrong
-invocation. Past about eight mutants the envelope no longer fits the
+only. `--env` IS accepted with `--plan`, applied to the shared baseline
+and every mutant's own run, the same as the single form. Exit `0` only
+when every mutant's expectation was met, `1` when the plan concluded
+with an expectation violated, `2` when it could not conclude -- a
+failing baseline, a restore that could not be verified (nothing further
+is applied and the remaining mutants are reported `not_run`), or a wrong
+invocation. The plan's own top-level `status` and exit code reflect that
+expectation aggregate, not a raw survived count: read `expectation`
+(`"met"`/`"violated"`) for the plan's own verdict; per-mutant outcomes
+are in `results[i].status`/`mutation_probe.result`. Past about eight
+mutants the envelope no longer fits the
 default `-m 8000` and is reduced to it (`truncated: true`, entries
 losing their `test` phase, the tail of `results` replaced by a marker):
 raise `-m` or read the full result at the `result-full-*.json` path in

@@ -2041,6 +2041,15 @@ describe("cli: probe", () => {
       planPath,
       "--env",
       "PROBE_MARKER=1",
+      // A credential-shaped name, the same as the single form's own
+      // redaction test above, but exercised through `--plan`: this run
+      // targets `probePlan`'s own `redactEnvOverrides(opts.env)` call
+      // (a plan-only code path the single form's test above never
+      // reaches), proving the plan's top-level `env` echo and each
+      // mutant's `test.env` redact it too, not only echo whatever was
+      // asked for verbatim.
+      "--env",
+      "API_TOKEN=s3cr3t",
     ]);
     const parsedWithEnv = JSON.parse(withEnv.stdout);
     // The command never reads the mutated file, only PROBE_MARKER, so a
@@ -2052,11 +2061,22 @@ describe("cli: probe", () => {
     expect(parsedWithEnv.plan.results[0].status).toBe("survived");
     expect(parsedWithEnv.plan.results[0].test.env).toEqual({
       PROBE_MARKER: "1",
+      API_TOKEN: "<redacted>",
     });
     // The run-level echo mirrors what was requested, the same as the
     // single form's own top-level `env` -- a sibling of `plan`, not
     // inside it.
-    expect(parsedWithEnv.env).toEqual({ PROBE_MARKER: "1" });
+    expect(parsedWithEnv.env).toEqual({
+      PROBE_MARKER: "1",
+      API_TOKEN: "<redacted>",
+    });
+    // The raw secret never appears anywhere in the serialized envelope
+    // (not just in the two fields checked by name above): a redaction
+    // that missed a third echo, or that redacted the run-level `env` but
+    // not `test.env` (or vice versa), would still leave this assertion
+    // green if it only checked field equality against a value that
+    // happened not to be the raw secret.
+    expect(withEnv.stdout).not.toContain("s3cr3t");
   });
 
   it("--require-baseline-evidence combined with --plan is allowed and threaded through to the plan's own shared baseline", async () => {

@@ -22,15 +22,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `probe --plan` now accepts `--env NAME=VALUE`: applied to the shared
   baseline and every mutant's own run, the same as the single form, and
   echoed once at the plan's own top level (a sibling of `plan`, not
-  inside it). It used to be refused outright alongside `--plan` ("a plan
-  has no wiring for it"); it now does. Documented a pre-existing, already
-  intended reading some readers still find surprising: a `--plan`'s own
-  top-level `status` reports whether any mutant's expectation was
-  violated, not whether any mutant literally survived -- an
-  `--expect pass` mutant that survives (the routine, expected case) is
-  `results[i].status: "survived"`, `mutation_probe.expectation: "met"`,
-  and still contributes to the plan's own `status: "killed"`. New tests
-  pin both the `--env` behavior and this exact single-mutant shape.
+  inside it), redacted the same way the single form's own `env`/`test.env`
+  are. It used to be refused outright alongside `--plan` ("a plan has no
+  wiring for it"); it now does.
+- `probe --plan`'s own result gains a top-level `expectation`
+  (`"met"`/`"violated"`), a sibling of `plan`, present once the plan has
+  concluded. It mirrors the plan's own `status` (already an expectation
+  aggregate, not the mutants' raw `killed`/`survived` outcome) in
+  unambiguous words that do not reuse `killed`/`survived`: a dogfood run
+  once misread the plan's own top-level `status: "killed"` as "the mutant
+  was caught," when the mutant in question was `results[i].status:
+  "survived"`, `mutation_probe.expectation: "met"` under `--expect pass`
+  (the routine, expected case) -- the field itself was already correct,
+  spelled in a reused vocabulary a reader who has not read the docs can
+  misread; `expectation` gives the same verdict a plainer, additive
+  reading. New tests pin both the `--env` behavior (including its
+  redaction) and the top-level `expectation`/`status` pair, for a
+  survived-under-`--expect-pass` mutant and a killed-under-`--expect-pass`
+  one alike.
 
 ## [0.8.2] - 2026-09-25
 

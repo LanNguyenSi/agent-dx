@@ -29,10 +29,18 @@ suite reacted to something it was not supposed to react to).
 to compare against an expectation. `--expect` still decides the exit
 code (`0` for a met expectation, `1` for a violated one; see below), the
 same exit code it always decided -- only the human-readable
-`killed`/`survived` label no longer flips meaning under it. A `--plan`
-mutant's own `expect` (or the plan's, or `--expect` on the command line;
-see below) decides which expectation its own `killed`/`survived` is
-measured against, mutant by mutant.
+`killed`/`survived` label no longer flips meaning under it. That "no
+longer flips" claim is about THIS mutant's own `status` (a single probe's
+top-level one, and, under `--plan`, each entry's own
+`results[i].status`): a `--plan` mutant's own `expect` (or the plan's, or
+`--expect` on the command line; see below) decides which expectation its
+own `killed`/`survived` is measured against, mutant by mutant, but that
+per-mutant word itself still never flips. It does NOT describe a plan's
+OWN top-level `status`: that field is already an expectation aggregate,
+not a raw per-mutant outcome, and it DOES flip between `killed` and
+`survived` depending on `--expect` -- see the `--plan` section below, and
+its own top-level `expectation` field for the same verdict spelled
+without reusing the `killed`/`survived` words at all.
 
 ```bash
 agent-primitives probe --file src/foo.js -n 12 -r 'return false;' \
@@ -1976,6 +1984,7 @@ exactly which `reason` is which).
 | `baseline` | `{ exitCode, durationMs, logPath, timedOut }` | once the baseline has run | absent for `mutant_not_applicable` and any earlier refusal, and for the baseline-phase `pre_failed`/`aborted` (the baseline itself never ran: the `--pre` ahead of it did); `exitCode` is unchanged by `--pass-regex` -- it is always the baseline's real exit code, kept as data even once the regex, not this field, decides `status`/`reason` (see `--pass-regex` above) |
 | `test` | `{ command, exitCode, durationMs, timedOut, stdoutTail, stderrTail, logPath, env? }` | once the mutant run has happened | `env` only when at least one `--env NAME=VALUE` was given: the overrides this run applied, redacted (see `env` below); `exitCode` is likewise unchanged by `--pass-regex` -- the field that distinguishes a mutant run that crashed (no output on either stream) from a genuine test failure once the regex is what decides `killed`/`survived` |
 | `env` | `Record<string, string>` | whenever at least one `--env NAME=VALUE` was given | echoed once at the run level, independent of which phase actually ran: present on every status including `baseline_failed` and the other baseline-phase refusals, none of which reach a `test` phase to carry their own `test.env`. Both `env` and `test.env` redact a value whose NAME carries `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`/`CREDENTIALS`, or `KEY` as its own `_`-delimited segment (case-insensitive; the segment must sit at the start or end of the name, or between two underscores), replacing it with the literal string `"<redacted>"` and keeping the name visible: `API_TOKEN`, `TOKEN`, `MY_SECRET_VALUE` redact, but `TOKENIZER_MODEL` and `KEYBOARD` do not (the recognized word is a substring of a longer segment, not a segment of its own). Every other value is echoed verbatim (never the whole merged environment). This redaction covers only these two echoes (`env` and `test.env`); it does not, and cannot, redact a secret the test command itself prints -- that value appears verbatim wherever the command's own output does (`test.stdoutTail`/`test.stderrTail` above, and the exec log `test.logPath` links to), the same as it would running that command directly. Under `--plan`, this same `env` row appears on the plan's own top-level envelope (`plan`'s sibling, not inside it), applied to the shared baseline and every mutant's own run, echoed once the same way. |
+| `expectation` | `"met"` \| `"violated"` | `--plan` only, once the plan has concluded (`status` is `killed` or `survived`) | the plan's own verdict as an expectation aggregate, in the same words `mutation_probe.expectation` uses for one mutant: `"met"` when every mutant's own expectation was met, `"violated"` when at least one was, mirroring `summary.met`/`summary.violated` (see the `--plan` section below). Absent when the plan did not conclude (`status: "inconclusive"`, whatever the `reason`): nothing was aggregated. The single-probe form carries no top-level `expectation` of its own -- its one verdict already sits in `mutation_probe.expectation`, so there is nothing separate to aggregate. |
 | `isolation` | `{ mode, path, linked, linkedNamedBy, syncedTrackedFiles, syncedUntrackedFiles }` | always, for this envelope (see the top-level-usage-error carve-out above, which has no `isolation` at all) | `path` is the worktree directory for `worktree`, `null` for `inplace`; `linked` lists the absolute source-tree paths the copy resolves through a symlink (every link this run created, plus a destination the untracked-file copy had already recreated as the very same symlink, which the link step leaves as synced) -- every entry in it names a source that was checked to exist as a directory when the run started (an auto-discovered candidate is only ever a candidate once it already exists, and `--link`/a `--plan` file's/the defaults file's `link` are refused up front, `reason: "link_source_not_found"`, when their source does not, see "Non-JS repositories" above); that check runs once, so a source removed between it and the link actually being created is not re-checked and can still end up a dangling link -- `linkedNamedBy` is one `{ path, namedBy }` entry per link REPOSITORY CONTENT asked for (a composer `config` value, a `--plan` file's `link`, the defaults file's `link`), carrying the same phrase a refusal of that candidate would have carried, and empty for a copy whose links all came from `--link` or from the auto-discovery walk; every `path` in it appears in `linked` too; `syncedTrackedFiles`/`syncedUntrackedFiles` are counts, `0` for both on a clean tree and for every `inplace` run |
 | `totalDurationMs` | number | always, for this envelope (see the top-level-usage-error carve-out above, and `--plan`, whose own envelope carries no `totalDurationMs` at all) | wall-clock time of the whole `probe()` call, every branch (a normal return, a refusal before any mutant ran, or the emergency-restore path); the same field name and meaning `verify`'s own result carries |
 
@@ -2196,8 +2205,10 @@ Output: the envelope carries `plan: { baseline, results, summary }`
 instead of the single probe's top-level `mutant`/`mutation_probe`/`test`,
 plus its own top-level `env` (a sibling of `plan`, not inside it) whenever
 at least one `--env` was given, the same echo the single form carries at
-its own top level (see the `env` row of the result-shape table above).
-`baseline` is the one baseline phase every mutant was measured against.
+its own top level (see the `env` row of the result-shape table above),
+and its own top-level `expectation` (`"met"`/`"violated"`, another
+sibling of `plan`), present once the plan has concluded (see the
+`expectation` row of the result-shape table above). `baseline` is the one baseline phase every mutant was measured against.
 `results` has one entry per plan mutant, in plan order, carrying `index`,
 `file`, `expect`, `status` (`killed`, `survived`, `inconclusive` or
 `not_run` -- this mutant's own actual, measured outcome, independent of
@@ -2219,7 +2230,12 @@ what actually explains a plan-level `status: "survived"` when it
 disagrees with them. Note that the plan's own `status` word is an
 expectation aggregate (`killed` means every expectation was met,
 `survived` means at least one was violated), not the mutants' outcome
-vocabulary, which lives in `summary.killed`/`summary.survived`.
+vocabulary, which lives in `summary.killed`/`summary.survived`. The
+top-level `expectation` field names the same aggregate without reusing
+those two overloaded words: read it, not `status` alone, when the plan's
+own verdict needs to be unambiguous to a reader who has not already read
+this paragraph -- present exactly when `status` is `killed`/`survived`
+(a concluded plan), absent when it is `inconclusive`.
 
 A failing baseline is one difference from the single-mutant form worth
 naming explicitly: the single probe's CLI envelope remaps it to a

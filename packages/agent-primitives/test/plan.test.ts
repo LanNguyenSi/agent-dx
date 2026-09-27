@@ -2395,13 +2395,17 @@ describe("probePlan(): the plan's own top-level status is an expectation aggrega
     expect(result.results[0].mutation_probe?.expectation).toBe("met");
     // The plan's own top-level `status` reports whether any mutant's
     // expectation was VIOLATED, not whether any mutant's own outcome
-    // was literally `survived` (see `summarize`'s own docblock and
-    // `PlanSummaryField`'s `met`/`violated` pair in index.ts): a reader
-    // who expects it to mirror `results[0].status` misreads this exact
-    // shape, the one a dogfood run once reported as a mismatch. Pinning
-    // it here catches a naive "fix" that switches this branch back to
-    // the raw `summary.survived` count.
+    // was literally `survived` (see the comment above `violatedCount` and
+    // `PlanSummaryField`'s `met`/`violated` pair in index.ts, and
+    // `docs/probe.md`'s `--plan` Output paragraph): a reader who expects
+    // it to mirror `results[0].status` misreads this exact shape, the
+    // one a dogfood run once reported as a mismatch. Pinning it here
+    // catches a naive "fix" that switches this branch back to the raw
+    // `summary.survived` count. The additive top-level `expectation`
+    // field spells the same aggregate in the unambiguous `met`/`violated`
+    // words instead of reusing `killed`/`survived`.
     expect(result.status).toBe("killed");
+    expect(result.expectation).toBe("met");
     expect(result.reason).toBeUndefined();
     expect(result.summary).toMatchObject({
       total: 1,
@@ -2411,6 +2415,40 @@ describe("probePlan(): the plan's own top-level status is an expectation aggrega
       not_run: 0,
       met: 1,
       violated: 0,
+    });
+  });
+
+  it("one mutant the suite catches under --expect pass: results[0].status is killed/violated, and the plan's own top-level status and expectation are both survived/violated", async () => {
+    useLockDir();
+    const repo = initRepo().repo;
+
+    const result = await probePlan(
+      planOptions(repo, [replaceMutant(2, "  return false;")], {
+        expect: "pass",
+      }),
+    );
+
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0].status).toBe("killed");
+    expect(result.results[0].mutation_probe?.expectation).toBe("violated");
+    // The mirror image of the test above: the one mutant this plan ran
+    // violated its own `--expect pass`, so the plan's own top-level
+    // `status` reads `"survived"` (a finding, exit 1) even though the
+    // per-mutant, raw-outcome word for the same mutant is `"killed"`.
+    // `expectation` spells the same verdict without reusing that word:
+    // reads `"violated"` here, the aggregate `summary.violated` also
+    // pins.
+    expect(result.status).toBe("survived");
+    expect(result.expectation).toBe("violated");
+    expect(result.reason).toBeUndefined();
+    expect(result.summary).toMatchObject({
+      total: 1,
+      killed: 1,
+      survived: 0,
+      inconclusive: 0,
+      not_run: 0,
+      met: 0,
+      violated: 1,
     });
   });
 });

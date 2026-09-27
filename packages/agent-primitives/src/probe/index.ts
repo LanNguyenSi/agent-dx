@@ -1209,6 +1209,23 @@ export interface ProbePlanResult {
   baseline?: ExecPhaseField;
   results: PlanMutantResult[];
   summary: PlanSummaryField;
+  /** The plan's own verdict as an expectation aggregate, in the same
+   * vocabulary `mutation_probe.expectation` uses for one mutant: `"met"`
+   * once the plan concluded (`status` is `killed` or `survived`) and
+   * every mutant's own expectation was met (`violated` count 0, the same
+   * count `status` itself is derived from below), `"violated"` once the
+   * plan concluded and at least one mutant's expectation was violated.
+   * Absent when the plan did not conclude (`status: "inconclusive"`,
+   * whatever the `reason`): nothing was aggregated. This is additive,
+   * not a replacement for `status`: `status`'s own word already carries
+   * the aggregate (see the invariant note on `violatedCount` below), but
+   * spells it in the raw per-mutant vocabulary (`killed`/`survived`)
+   * that a reader who has not yet read this module's own comments can
+   * misread as the raw, unaggregated outcome -- the exact misreading a
+   * dogfood run once reported. `expectation` names the same aggregate in
+   * the unambiguous `met`/`violated` words instead, so a caller can read
+   * the plan's own verdict without also carrying the `status` caveat. */
+  expectation?: "met" | "violated";
   isolation: IsolationField;
   /** Exec log paths the plan's own setup produced (the worktree sync);
    * a mutant's own logs stay on its result. */
@@ -1733,6 +1750,13 @@ async function runProbePlanPipeline(
     ).length;
     let status: ProbeStatus;
     let reason: string | undefined = terminal;
+    // Set only alongside a concluded `status` (`killed`/`survived`):
+    // the same `violatedCount` that decides `status` itself, spelled in
+    // the unambiguous `met`/`violated` words instead of the raw
+    // `killed`/`survived` ones `status` reuses for its own aggregate
+    // (see `ProbePlanResult.expectation`'s own docblock for why that
+    // reuse is worth a separate, unambiguous field).
+    let expectation: "met" | "violated" | undefined;
     if (terminal !== undefined) {
       status = "inconclusive";
     } else if (summary.inconclusive > 0 || summary.not_run > 0) {
@@ -1740,12 +1764,15 @@ async function runProbePlanPipeline(
       reason = "mutant_inconclusive";
     } else if (violatedCount > 0) {
       status = "survived";
+      expectation = "violated";
     } else {
       status = "killed";
+      expectation = "met";
     }
     return {
       status,
       ...(reason !== undefined ? { reason } : {}),
+      ...(expectation !== undefined ? { expectation } : {}),
       warnings,
       baseline,
       results,
