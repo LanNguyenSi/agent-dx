@@ -1,5 +1,16 @@
 # Bundle log
 
+- 2026-09-27T05:08:20Z (README-pointer guard, per-doc coverage): the
+  inert-regex check in `test/docs-consistency.test.ts` now requires at least
+  one pointer match in each scanned doc instead of summing matches across
+  all of them (SKILL.md, scanned as a precaution with no pointer today, is
+  exempt), and the pattern's comment now says its whitespace class spans
+  line breaks. The edit sits near the end of the test file, after every
+  line this bundle cites in it; `model-preselection.md`,
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and
+  `subagent-contracts-superset.md` list the file under `sources` and were
+  re-verified and re-stamped.
+
 - 2026-09-27T04:32:00Z (README-pointer guard, round 2): the README section
   pointer guard now also scans `docs/operator-install.md` and
   `docs/model-routing-reference.md` (both pointed at a README section
