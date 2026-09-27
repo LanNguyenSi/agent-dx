@@ -172,7 +172,7 @@ describe("the task slicer adds intersecting bundle docs at slicing", () => {
   it("task-slicer.md rebases paths onto the bundle's repoRoot", () => {
     pin(
       taskSlicerMd,
-      "Query a bundle tool with paths relative to the bundle's `repoRoot`: for a workspace bundle, strip the repository's workspace prefix from each entry and run the expansion inside that repository (for example `git -C <repo root> ls-files -- <entry>`).",
+      "Query a bundle tool with paths relative to the bundle's `repoRoot`: for a workspace bundle, strip the repository's workspace prefix from each entry and run the expansion inside that repository (for example `git -C <repo root> ls-files -- <entry>`); an entry outside that repository is not queried against that bundle.",
     );
   });
 

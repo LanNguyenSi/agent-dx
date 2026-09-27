@@ -200,11 +200,19 @@ directory and the subagents.
    investigate, not a misfire by itself: before treating it as one, the
    orchestrator establishes who opened it (for example from the pull
    request's author and the host's audit events, or by asking the
-   operator). When a subagent of the run opened it, or when that cannot be
-   established, it treats the pull request as a misfire and reports it to
-   the operator. A pull request a third party opened is recorded once in
-   `03-decisions.md`, naming its number or URL, and is not treated as a new
-   finding again in a later round. A
+   operator). The pull request's author field identifies the host account
+   that opened it, not the agent that acted through it; when subagents use
+   the orchestrator's or operator's own host account, the author alone
+   does not establish a third party, so the orchestrator either confirms
+   the opener with the operator or otherwise treats the opener as not
+   established. When a subagent of the run opened it, or when that cannot
+   be established, it treats the pull request as a misfire and reports it
+   to the operator. A pull request a third party opened is recorded once
+   in `03-decisions.md`, naming its number or URL, and is not treated as a
+   new finding again in a later round. A pull request already recorded as
+   an incident under this rule is not treated as a new misfire again while
+   it stays open at the recorded head sha; a later push to it is
+   investigated like a newly opened pull request. A
    flagged ref is a signal to investigate, not a misfire by itself: before
    treating it as one, the orchestrator establishes who moved the ref (for
    example from the host's push or audit events, or by asking the

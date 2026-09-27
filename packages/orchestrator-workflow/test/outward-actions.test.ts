@@ -554,6 +554,13 @@ describe("orchestrator mechanical cross-check ships in evidence-and-probes.md", 
     );
   });
 
+  it("treats a shared-account PR author as insufficient by itself to establish a third party", () => {
+    pin(
+      evidenceAndProbes,
+      "The pull request's author field identifies the host account that opened it, not the agent that acted through it; when subagents use the orchestrator's or operator's own host account, the author alone does not establish a third party, so the orchestrator either confirms the opener with the operator or otherwise treats the opener as not established.",
+    );
+  });
+
   it("treats a pull request a subagent opened, or whose opener cannot be established, as a misfire reported to the operator", () => {
     pin(
       evidenceAndProbes,
@@ -565,6 +572,13 @@ describe("orchestrator mechanical cross-check ships in evidence-and-probes.md", 
     pin(
       evidenceAndProbes,
       "A pull request a third party opened is recorded once in `03-decisions.md`, naming its number or URL, and is not treated as a new finding again in a later round.",
+    );
+  });
+
+  it("exempts a recorded pull request, including one a subagent opened, only while it stays open at the recorded head", () => {
+    pin(
+      evidenceAndProbes,
+      "A pull request already recorded as an incident under this rule is not treated as a new misfire again while it stays open at the recorded head sha; a later push to it is investigated like a newly opened pull request.",
     );
   });
 

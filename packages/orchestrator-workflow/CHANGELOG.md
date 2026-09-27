@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Outward cross-check (evidence-and-probes.md, Delegate implementation): a
+  pull request's author field identifies the host account that opened it,
+  not the agent that acted through it, so a subagent using the
+  orchestrator's or operator's own account no longer reads as a third
+  party by author alone; the orchestrator confirms with the operator or
+  treats the opener as not established instead. A pull request already
+  recorded as an incident under this rule, including one a subagent
+  opened, is exempt from re-misfiring again while it stays open at the
+  recorded head sha, matching the existing treatment of a noted ref.
+  task-slicer.md's bundle-tool rebase sentence now also carries
+  contracts.md's outside-repository clause, so an `allowed_changes` entry
+  outside the bundle's repository is never queried against that bundle.
 - A docs-consistency test now guards every INSTALL-AGENT.md pointer that
   names a package README section by heading text (currently three, all
   "Effort tiers"): the guarded heading is confirmed to still exist in

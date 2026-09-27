@@ -2134,7 +2134,7 @@
   `not_applicable`
   (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:106#"naming each by its mutant definition"`,
   `implementer.md:118#"naming each by its mutant definition"`,
-  `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:284#"not merely their id; a probe recorded with only an id and no definition"`).
+  `packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:292#"not merely their id; a probe recorded with only an id and no definition"`).
 
   Same round, orchestrator extension (D-010 of this run): a companion
   agent-primitives change makes `probe`'s `result` report the mutant's
@@ -10710,7 +10710,7 @@ this class recurred on (line 295, `,274-275` for "Repos without a bundle
 are unaffected", which at this round's head sits at
 packages/orchestrator-workflow/assets/skill/SKILL.md at historical lines 304,
 re-anchored to its own
-`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:365#"without a bundle are unaffected"`).
+`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:373#"without a bundle are unaffected"`).
 This closes the class: every bare continuation
 in this bundle's non-reserved docs now has its own anchor via a full
 citation (`index.md` and `log.md` are append-only journals and keep their
