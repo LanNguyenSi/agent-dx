@@ -1,5 +1,29 @@
 # Bundle log
 
+- 2026-09-27T05:29:09Z: `evidence-and-probes.md`'s Delegate implementation
+  step now records a pull request the run's own subagent opened, or whose
+  opener could not be established, as an incident naming its number or
+  URL (the closing incident sentence names the pushed ref and its sha or
+  the pull request's number or URL), and bounds the re-flag: until the
+  operator closes it or an operator decision about it is recorded, each
+  later round re-flags it as a misfire that refers to the existing
+  incident decision by its D-ID, the round's return is still judged on its
+  own merits, and a further outward action on that pull request by a
+  subagent or an unestablished actor is a new incident.
+  `review-and-recovery.md`'s misfire rule gained the matching D-ID
+  sentence after its review-gate sentence, so no line this bundle cites
+  in it changed content. `task-slicer.md`'s outside-repository clause is
+  rewrapped so its last line reads "queried against that bundle.", and
+  `subagent-contracts-superset.md` now cites the three entry forms at
+  that file's full rule range with that line as anchor and names the
+  outside-repository clause in its own text. `CHANGELOG.md`'s
+  `[Unreleased]` bullet is rewritten to describe the net change. Every
+  line-anchored citation into these files, in this log and in the three
+  docs, is re-pointed by content in the source commit;
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`, and
+  `subagent-contracts-superset.md` were re-verified against the new
+  content and re-stamped.
+
 - 2026-09-27T05:10:13Z (re-stamp after rebase): the outward cross-check and
   task-slicer edits were rebased onto the README-pointer guard change, which
   gave their source commits new commit times without changing content;
