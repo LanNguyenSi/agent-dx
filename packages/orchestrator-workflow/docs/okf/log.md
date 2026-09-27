@@ -1,5 +1,12 @@
 # Bundle log
 
+- 2026-09-27T05:10:13Z (re-stamp after rebase): the outward cross-check and
+  task-slicer edits were rebased onto the README-pointer guard change, which
+  gave their source commits new commit times without changing content;
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and
+  `subagent-contracts-superset.md` were re-checked against the rebased
+  sources (every anchored citation still resolves) and re-stamped.
+
 - 2026-09-27T04:56:00Z: `evidence-and-probes.md`'s Delegate implementation
   step broadens its shared-account clause from the orchestrator's or
   operator's own account to any account the run's subagents can act
