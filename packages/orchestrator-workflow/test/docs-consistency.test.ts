@@ -12361,10 +12361,10 @@ describe("docs/harnesses.md states the reviewer's narrower write boundary", () =
 describe("README section pointers in shipped, fetched-raw agent docs stay valid", () => {
   // Matches both the bare `package README's "X" section` phrasing and the
   // `[package README](../README.md)'s "X" section` markdown-link phrasing
-  // (the optional `](...)'` group), and lets `\s+` stand in for the plain
-  // space between "package" and "README" too, since a doc's prose can wrap
-  // the words "package" and "README" across a line break inside the link
-  // text without changing what the pointer means.
+  // (the optional `](...)'` group). `\s+` accepts any run of whitespace,
+  // line breaks included, between the words, so a doc's prose can wrap
+  // "package" and "README" across a line break inside the link text; the
+  // quoted section name still bounds what a match can span.
   const POINTER_PATTERN =
     /package\s+README(?:\]\([^)]*\))?'s\s+"([^"]+)"\s+section/g;
 
@@ -12425,7 +12425,10 @@ describe("README section pointers in shipped, fetched-raw agent docs stay valid"
     return [...raw.matchAll(POINTER_PATTERN)].map((m) => m[1]);
   }
 
-  const docsToCheck: Array<{ name: string; raw: string }> = [
+  // `scanOnly` marks a doc scanned as a precaution that carries no README
+  // pointer today; every other doc must yield at least one match below, so
+  // a doc whose pointer stops matching the pattern fails by name.
+  const docsToCheck: Array<{ name: string; raw: string; scanOnly?: true }> = [
     { name: "INSTALL-AGENT.md", raw: readDoc("INSTALL-AGENT.md") },
     {
       name: "docs/install-reference.md",
@@ -12444,15 +12447,14 @@ describe("README section pointers in shipped, fetched-raw agent docs stay valid"
     docsToCheck.push({
       name: `assets/${assetPath}`,
       raw: readAsset(assetPath),
+      scanOnly: true,
     });
   }
 
-  it("the phrase pattern actually matches at least one reference (guard against an inert regex)", () => {
-    const totalMatches = docsToCheck.reduce(
-      (sum, doc) => sum + pointerTargets(doc.raw).length,
-      0,
-    );
-    expect(totalMatches).toBeGreaterThan(0);
+  it("the phrase pattern matches at least one reference in every scanned doc (guard against an inert regex)", () => {
+    for (const doc of docsToCheck.filter((d) => !d.scanOnly)) {
+      expect(pointerTargets(doc.raw).length, doc.name).toBeGreaterThan(0);
+    }
   });
 
   it("every named README section heading exists in README.md", () => {
