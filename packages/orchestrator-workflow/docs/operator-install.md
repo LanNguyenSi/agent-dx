@@ -107,4 +107,4 @@ concurrent orchestrator-workflow commands on the same machine cannot
 corrupt each other's state.
 
 `apply` shares the file-ownership rules `init` uses; see the [package
-README](../README.md)'s Ownership and re-runs section.
+README](../README.md)'s "Ownership and re-runs" section.
