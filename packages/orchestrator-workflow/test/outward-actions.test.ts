@@ -554,6 +554,13 @@ describe("orchestrator mechanical cross-check ships in evidence-and-probes.md", 
     );
   });
 
+  it("treats a shared-account PR author as insufficient by itself to establish a third party", () => {
+    pin(
+      evidenceAndProbes,
+      "The pull request's author field identifies the host account that opened it, not the agent that acted through it; when the author is an account the run's subagents can act through (for example the orchestrator's or operator's own host account, or a shared bot or service account), the author alone does not establish a third party, so the orchestrator either confirms the opener with the operator or otherwise treats the opener as not established.",
+    );
+  });
+
   it("treats a pull request a subagent opened, or whose opener cannot be established, as a misfire reported to the operator", () => {
     pin(
       evidenceAndProbes,
@@ -568,10 +575,62 @@ describe("orchestrator mechanical cross-check ships in evidence-and-probes.md", 
     );
   });
 
+  it("records a subagent pull request as an incident naming its number or URL", () => {
+    pin(
+      evidenceAndProbes,
+      "A pull request the run's own subagent opened, or whose opener could not be established, is recorded as an incident as the end of this step describes, naming its number or URL.",
+    );
+  });
+
+  it("keeps re-flagging a recorded subagent pull request until the operator closes it or decides, referring to the existing incident decision", () => {
+    pin(
+      evidenceAndProbes,
+      "While it stays open, until the operator closes it or an operator decision about it is recorded in `03-decisions.md`, it is not exempt: the orchestrator re-checks it in every later round, re-flags it as a misfire, records each re-flag in `03-decisions.md` as a misfire that refers to the existing incident decision by its D-ID instead of as a new incident decision, and reports it to the operator again and asks the operator to close it or decide.",
+    );
+  });
+
+  it("still evaluates a later round's return on its own merits despite a recorded pull request", () => {
+    pin(
+      evidenceAndProbes,
+      "The re-flag concerns only the pull request's continued existence, not the round's return: the implementer return is still evaluated on its own merits, so the recorded pull request alone does not make that return a misfire.",
+    );
+  });
+
+  it("treats a further outward action on a recorded pull request as a new incident", () => {
+    pin(
+      evidenceAndProbes,
+      "Any further outward action on that pull request that a subagent of the run performed, or whose actor cannot be established (for example an edit of its title or body, a change of its base branch, marking it ready for review, an approval, enabling auto-merge, a push to its branch, or reopening it), whether a return reports it or the host's events show it, is a new incident, recorded and listed in `06-handoff.md` like any other.",
+    );
+  });
+
+  it("review-and-recovery.md records a re-flagged pull request against its existing incident decision", () => {
+    pin(
+      reviewAndRecovery,
+      "A pull request that step 6 of the [detailed workflow](evidence-and-probes.md) re-flags in a later round is recorded as a misfire that refers to its existing incident decision by its D-ID, not as a new incident decision. The round's return is still evaluated on its own merits, so the re-flag alone is no reason to resume or respawn the subagent.",
+    );
+  });
+
+  it("carries no head-sha exemption for a recorded pull request in step 6's pull request text", () => {
+    const step6 = unwrap(evidenceAndProbes).match(
+      /6\. \*\*Delegate implementation\.\*\*(.*?)7\. \*\*Delegate review\.\*\*/,
+    );
+    expect(step6).not.toBeNull();
+    const prText = (step6?.[1] ?? "").match(
+      /A pull request on the task branch that the orchestrator did not open(.*?)A flagged ref is a signal to investigate/,
+    );
+    expect(prText).not.toBeNull();
+    // Any sha- or head-keyed wording, and any "exempt" other than "not
+    // exempt", would reintroduce an exemption in some paraphrase.
+    const text = prText?.[1] ?? "";
+    expect(text).not.toMatch(/\bsha\b/i);
+    expect(text).not.toMatch(/\bhead\b/i);
+    expect(text).not.toMatch(/(?<!not )\bexempt\b/i);
+  });
+
   it("routes a detected unauthorized outward action to the operator and 03-decisions.md, not just the misfire rule", () => {
     pin(
       evidenceAndProbes,
-      "When the check finds an outward action was actually performed (a push, an opened pull request) without authorization, that is more than a misfire to resume past: the orchestrator informs the operator immediately, records the incident in `03-decisions.md`, and lists it in `06-handoff.md`'s Sent / Drafted Outward section as unauthorized.",
+      "When the check finds an outward action was actually performed (a push, an opened pull request) without authorization, that is more than a misfire to resume past: the orchestrator informs the operator immediately, records the incident in `03-decisions.md`, naming the pushed ref and its sha or the pull request's number or URL, and lists it in `06-handoff.md`'s Sent / Drafted Outward section as unauthorized.",
     );
   });
 });

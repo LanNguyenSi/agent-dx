@@ -39,6 +39,11 @@ explicitly constrained respawn produced a contract-valid review; treat a
 watchdog stall as outside this preference. Record every misfire in
 `03-decisions.md`. This matters most for review: a misfired review is not a
 review and never satisfies the review gate, since review is never skipped.
+A pull request that step 6 of the [detailed workflow](evidence-and-probes.md)
+re-flags in a later round is recorded as a misfire that refers to its
+existing incident decision by its D-ID, not as a new incident decision. The
+round's return is still evaluated on its own merits, so the re-flag alone is
+no reason to resume or respawn the subagent.
 
 ## Round-2 halt rule
 

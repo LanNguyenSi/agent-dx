@@ -200,11 +200,36 @@ directory and the subagents.
    investigate, not a misfire by itself: before treating it as one, the
    orchestrator establishes who opened it (for example from the pull
    request's author and the host's audit events, or by asking the
-   operator). When a subagent of the run opened it, or when that cannot be
-   established, it treats the pull request as a misfire and reports it to
-   the operator. A pull request a third party opened is recorded once in
-   `03-decisions.md`, naming its number or URL, and is not treated as a new
-   finding again in a later round. A
+   operator). The pull request's author field identifies the host account
+   that opened it, not the agent that acted through it; when the author is
+   an account the run's subagents can act through (for example the
+   orchestrator's or operator's own host account, or a shared bot or
+   service account), the author alone does not establish a third party, so
+   the orchestrator either confirms the opener with the operator or
+   otherwise treats the opener as not established. When a subagent of the
+   run opened it, or when that cannot be established, it treats the pull
+   request as a misfire and reports it to the operator. A pull request a
+   third party opened is recorded once in `03-decisions.md`, naming its
+   number or URL, and is not treated as a new finding again in a later
+   round. A pull request the run's own subagent opened, or whose opener
+   could not be established, is recorded as an incident as the end of this
+   step describes, naming its number or URL. While it stays open, until the
+   operator closes it or an operator decision about it is recorded in
+   `03-decisions.md`, it is not exempt: the orchestrator re-checks it in
+   every later round, re-flags it as a misfire, records each re-flag in
+   `03-decisions.md` as a misfire that refers to the existing incident
+   decision by its D-ID instead of as a new incident decision, and reports
+   it to the operator again and asks the operator to close it or decide. The
+   re-flag concerns only the pull request's continued existence, not the
+   round's return: the implementer return is still evaluated on its own
+   merits, so the recorded pull request alone does not make that return a
+   misfire. Any further outward action on that pull request that a subagent
+   of the run performed, or whose actor cannot be established (for example
+   an edit of its title or body, a change of its base branch, marking it
+   ready for review, an approval, enabling auto-merge, a push to its branch,
+   or reopening it), whether a return reports it or the host's events show
+   it, is a new incident, recorded and listed in `06-handoff.md` like any
+   other. A
    flagged ref is a signal to investigate, not a misfire by itself: before
    treating it as one, the orchestrator establishes who moved the ref (for
    example from the host's push or audit events, or by asking the
@@ -222,7 +247,8 @@ directory and the subagents.
    finds an outward action was actually performed (a push, an opened pull
    request) without authorization, that is more than a misfire to resume
    past: the orchestrator informs the operator immediately, records the
-   incident in `03-decisions.md`, and lists it in `06-handoff.md`'s Sent /
+   incident in `03-decisions.md`, naming the pushed ref and its sha or the
+   pull request's number or URL, and lists it in `06-handoff.md`'s Sent /
    Drafted Outward section as unauthorized.
 7. **Delegate review.** Send the diff to the reviewer subagent, naming in the
    briefing the base and head revision the diff was generated from. When tier
