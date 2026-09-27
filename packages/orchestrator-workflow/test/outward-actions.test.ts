@@ -575,6 +575,13 @@ describe("orchestrator mechanical cross-check ships in evidence-and-probes.md", 
     );
   });
 
+  it("treats a further outward action on a recorded third-party pull request as a new incident", () => {
+    pin(
+      evidenceAndProbes,
+      "Any further outward action on that pull request that a subagent of the run performed, or whose actor cannot be established (for example an edit of its title or body, a change of its base branch, marking it ready for review, an approval, enabling auto-merge, a push to its branch, or reopening it), whether a return reports it or the host's events show it, is a new incident, recorded and listed in `06-handoff.md` like any other. A pull request the run's own subagent opened, or whose opener could not be established, is recorded as an incident as the end of this step describes",
+    );
+  });
+
   it("records a subagent pull request as an incident naming its number or URL", () => {
     pin(
       evidenceAndProbes,
