@@ -606,7 +606,7 @@ describe("orchestrator mechanical cross-check ships in evidence-and-probes.md", 
   it("review-and-recovery.md records a re-flagged pull request against its existing incident decision", () => {
     pin(
       reviewAndRecovery,
-      "A pull request that step 6 of the [detailed workflow](evidence-and-probes.md) re-flags in a later round is recorded as a misfire that refers to its existing incident decision by its D-ID, not as a new incident decision.",
+      "A pull request that step 6 of the [detailed workflow](evidence-and-probes.md) re-flags in a later round is recorded as a misfire that refers to its existing incident decision by its D-ID, not as a new incident decision. The round's return is still evaluated on its own merits, so the re-flag alone is no reason to resume or respawn the subagent.",
     );
   });
 
@@ -619,7 +619,12 @@ describe("orchestrator mechanical cross-check ships in evidence-and-probes.md", 
       /A pull request on the task branch that the orchestrator did not open(.*?)A flagged ref is a signal to investigate/,
     );
     expect(prText).not.toBeNull();
-    expect(prText?.[1] ?? "").not.toMatch(/recorded head|head sha/i);
+    // Any sha- or head-keyed wording, and any "exempt" other than "not
+    // exempt", would reintroduce an exemption in some paraphrase.
+    const text = prText?.[1] ?? "";
+    expect(text).not.toMatch(/\bsha\b/i);
+    expect(text).not.toMatch(/\bhead\b/i);
+    expect(text).not.toMatch(/(?<!not )\bexempt\b/i);
   });
 
   it("routes a detected unauthorized outward action to the operator and 03-decisions.md, not just the misfire rule", () => {
