@@ -1619,6 +1619,7 @@ describe("probePlan(): a mutant that cannot be applied is inconclusive on its ow
     expect(result.results[1].status).toBe("killed");
     expect(result.status).toBe("inconclusive");
     expect(result.reason).toBe("mutant_inconclusive");
+    expect(result.expectation).toBeUndefined();
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   }, 30000);
 });
@@ -2116,11 +2117,9 @@ describe("probe() and probePlan(): the same mutant and expectation produce the s
   }, 30000);
 });
 
-// --- `--require-baseline-evidence` threaded through
-// `probePlan`'s own setup (task 273b3851, review round 2). A plan runs
-// every mutant against ONE shared baseline, so unlike `--env` (still
-// refused under `--plan`, see PLAN_EXCLUSIVE_OPTIONS in cli.ts) there is
-// no second source for this value to conflict with. Mirrors
+// --- `--require-baseline-evidence` threaded through `probePlan`'s own
+// setup. A plan runs every mutant against ONE shared baseline, so there
+// is no second source for this value to conflict with. Mirrors
 // `test/probe-zero-tests.test.ts`'s "generic byte-identical fallback,
 // --require-baseline-evidence opt-out" describe block, for the plan
 // path. -----------------------------------------------------------------
@@ -2371,5 +2370,123 @@ describe("probePlan(): --pass-regex, threaded through the shared baseline and ev
     expect(result.baseline?.exitCode).toBe(1);
     expect(result.status).toBe("killed");
     expect(result.results[0].status).toBe("killed");
+  });
+});
+
+describe("probePlan(): the plan's own top-level status is an expectation aggregate, not the raw per-mutant outcome", () => {
+  it("one mutant the suite does not catch under --expect pass: results[0].status is survived/met, but the plan's own top-level status is killed", async () => {
+    useLockDir();
+    const repo = initRepo().repo;
+
+    const result = await probePlan(
+      planOptions(
+        repo,
+        [
+          replaceMutant(
+            7,
+            "module.exports = { isPositive, isNegative, extra: 1 };",
+          ),
+        ],
+        { expect: "pass" },
+      ),
+    );
+
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0].status).toBe("survived");
+    expect(result.results[0].mutation_probe?.expectation).toBe("met");
+    // The plan's own top-level `status` reports whether any mutant's
+    // expectation was VIOLATED, not whether any mutant's own outcome
+    // was literally `survived` (see the comment above `violatedCount` and
+    // `PlanSummaryField`'s `met`/`violated` pair in index.ts, and
+    // `docs/probe.md`'s `--plan` Output paragraph): a reader who expects
+    // it to mirror `results[0].status` misreads this exact shape, the
+    // one a dogfood run once reported as a mismatch. Pinning it here
+    // catches a naive "fix" that switches this branch back to the raw
+    // `summary.survived` count. The additive top-level `expectation`
+    // field spells the same aggregate in the unambiguous `met`/`violated`
+    // words instead of reusing `killed`/`survived`.
+    expect(result.status).toBe("killed");
+    expect(result.expectation).toBe("met");
+    expect(result.reason).toBeUndefined();
+    expect(result.summary).toMatchObject({
+      total: 1,
+      killed: 0,
+      survived: 1,
+      inconclusive: 0,
+      not_run: 0,
+      met: 1,
+      violated: 0,
+    });
+  });
+
+  it("one mutant the suite catches under --expect pass: results[0].status is killed/violated, and the plan's own top-level status and expectation are both survived/violated", async () => {
+    useLockDir();
+    const repo = initRepo().repo;
+
+    const result = await probePlan(
+      planOptions(repo, [replaceMutant(2, "  return false;")], {
+        expect: "pass",
+      }),
+    );
+
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0].status).toBe("killed");
+    expect(result.results[0].mutation_probe?.expectation).toBe("violated");
+    // The mirror image of the test above: the one mutant this plan ran
+    // violated its own `--expect pass`, so the plan's own top-level
+    // `status` reads `"survived"` (a finding, exit 1) even though the
+    // per-mutant, raw-outcome word for the same mutant is `"killed"`.
+    // `expectation` spells the same verdict without reusing that word:
+    // reads `"violated"` here, the aggregate `summary.violated` also
+    // pins.
+    expect(result.status).toBe("survived");
+    expect(result.expectation).toBe("violated");
+    expect(result.reason).toBeUndefined();
+    expect(result.summary).toMatchObject({
+      total: 1,
+      killed: 1,
+      survived: 0,
+      inconclusive: 0,
+      not_run: 0,
+      met: 0,
+      violated: 1,
+    });
+  });
+});
+
+describe("probePlan(): --env NAME=VALUE reaches the baseline and every mutant, the same as the single form", () => {
+  const ENV_TEST_COMMAND =
+    "node -e \"process.exit(process.env.PROBE_MARKER === '1' ? 0 : 1)\"";
+
+  it("without --env the shared baseline fails; with it, the same command passes and the override is echoed at the plan's own top level and each mutant's test.env", async () => {
+    useLockDir();
+
+    const withoutEnv = await probePlan(
+      planOptions(initRepo().repo, [replaceMutant(2, "  return n >= 0;")], {
+        testCommand: ENV_TEST_COMMAND,
+      }),
+    );
+    expect(withoutEnv.status).toBe("inconclusive");
+    expect(withoutEnv.reason).toBe("baseline_failed");
+    expect(withoutEnv.results.map((r) => r.status)).toEqual(["not_run"]);
+
+    const withEnv = await probePlan(
+      planOptions(initRepo().repo, [replaceMutant(2, "  return n >= 0;")], {
+        testCommand: ENV_TEST_COMMAND,
+        env: { PROBE_MARKER: "1" },
+      }),
+    );
+    // The command never reads fixture.js, only PROBE_MARKER, so a real
+    // verdict (not baseline_failed) proves the baseline itself saw the
+    // override; "survived" is the correct verdict for a mutant this
+    // command cannot react to (default --expect fail, so this is also a
+    // finding).
+    expect(withEnv.status).toBe("survived");
+    expect(withEnv.results[0].status).toBe("survived");
+    expect(withEnv.results[0].test?.env).toEqual({ PROBE_MARKER: "1" });
+    // Echoed once at the plan's own top level too, a sibling of
+    // `results`/`summary`, the same as the single form's own top-level
+    // `env`.
+    expect(withEnv.env).toEqual({ PROBE_MARKER: "1" });
   });
 });

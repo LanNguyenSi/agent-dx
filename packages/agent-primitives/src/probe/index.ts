@@ -1114,15 +1114,23 @@ export interface ProbePlanOptions {
   allowOutside?: boolean;
   cwd: string;
   logDir: string;
+  /** `--env NAME=VALUE` overrides (unmerged), command-line only (a plan
+   * file has no key for this): applied to the baseline and to every
+   * mutant's own run, the same as `ProbeOptions.env` for the single
+   * form, since `openRunSetup` and the exec calls it seeds are the
+   * identical shared code either way (see `probePlan`'s own docblock,
+   * invariant I6). Omitted or empty leaves the test process's
+   * environment as `process.env`. */
+  env?: Record<string, string>;
   /** Opt-in `--require-baseline-evidence <regex>`, the same as
-   * `ProbeOptions.requireBaselineEvidence`: unlike `env` (which a plan
-   * has no wiring for at all), this checks the plan's own ONE shared
-   * baseline before the first mutant is applied -- there is only one
-   * baseline for the whole plan, so there is no second source for this
-   * value to conflict with. A miss reports the plan's own top-level
-   * `status: "inconclusive"`, `reason: "baseline_evidence_not_matched"`,
-   * the same unremapped pair `baseline_failed` reports for a plan (see
-   * docs/probe.md's `--plan` section). */
+   * `ProbeOptions.requireBaselineEvidence`: this checks the plan's own
+   * ONE shared baseline before the first mutant is applied -- there is
+   * only one baseline for the whole plan, so there is no second source
+   * for this value to conflict with. A miss reports the plan's own
+   * top-level `status: "inconclusive"`, `reason:
+   * "baseline_evidence_not_matched"`, the same unremapped pair
+   * `baseline_failed` reports for a plan (see docs/probe.md's `--plan`
+   * section). */
   requireBaselineEvidence?: RegExp;
   /** Opt-in success predicate, the same as `ProbeOptions.passRegex`:
    * unlike `requireBaselineEvidence` above, this one DOES have a plan-file
@@ -1189,11 +1197,35 @@ export interface ProbePlanResult {
   status: ProbeStatus;
   reason?: string;
   warnings: string[];
+  /** The `--env NAME=VALUE` overrides this plan was given (redacted by
+   * `redactEnvOverrides`), present whenever at least one was given --
+   * the same as `ProbeResult.env` for the single form, set once by the
+   * exported `probePlan` wrapper from `opts.env` directly, so a caller
+   * sees the overrides it asked for even on a run whose baseline never
+   * got far enough to apply a mutant at all. */
+  env?: Record<string, string>;
   /** The one baseline every mutant of this plan was measured against;
    * absent when the plan never reached it. */
   baseline?: ExecPhaseField;
   results: PlanMutantResult[];
   summary: PlanSummaryField;
+  /** The plan's own verdict as an expectation aggregate, in the same
+   * vocabulary `mutation_probe.expectation` uses for one mutant: `"met"`
+   * once the plan concluded (`status` is `killed` or `survived`) and
+   * every mutant's own expectation was met (`violated` count 0, the same
+   * count `status` itself is derived from below), `"violated"` once the
+   * plan concluded and at least one mutant's expectation was violated.
+   * Absent when the plan did not conclude (`status: "inconclusive"`,
+   * whatever the `reason`): nothing was aggregated. This is additive,
+   * not a replacement for `status`: `status`'s own word already carries
+   * the aggregate (see the invariant note on `violatedCount` below), but
+   * spells it in the raw per-mutant vocabulary (`killed`/`survived`)
+   * that a reader who has not yet read this module's own comments can
+   * misread as the raw, unaggregated outcome -- the exact misreading a
+   * dogfood run once reported. `expectation` names the same aggregate in
+   * the unambiguous `met`/`violated` words instead, so a caller can read
+   * the plan's own verdict without also carrying the `status` caveat. */
+  expectation?: "met" | "violated";
   isolation: IsolationField;
   /** Exec log paths the plan's own setup produced (the worktree sync);
    * a mutant's own logs stay on its result. */
@@ -1251,7 +1283,7 @@ function summarize(results: PlanMutantResult[]): PlanSummaryField {
  *   again (they had: a target the baseline rewrote left its backup
  *   behind here and not there).
  */
-export async function probePlan(
+async function runProbePlanPipeline(
   opts: ProbePlanOptions,
 ): Promise<ProbePlanResult> {
   const warnings: string[] = [];
@@ -1514,6 +1546,7 @@ export async function probePlan(
       gitApplyTimeoutMs,
       testCommand: opts.testCommand,
       preCommand: opts.preCommand,
+      env: opts.env,
       requireBaselineEvidence: opts.requireBaselineEvidence,
       passRegex: opts.passRegex,
       exitOnSignal: opts.exitOnSignal ?? false,
@@ -1717,6 +1750,13 @@ export async function probePlan(
     ).length;
     let status: ProbeStatus;
     let reason: string | undefined = terminal;
+    // Set only alongside a concluded `status` (`killed`/`survived`):
+    // the same `violatedCount` that decides `status` itself, spelled in
+    // the unambiguous `met`/`violated` words instead of the raw
+    // `killed`/`survived` ones `status` reuses for its own aggregate
+    // (see `ProbePlanResult.expectation`'s own docblock for why that
+    // reuse is worth a separate, unambiguous field).
+    let expectation: "met" | "violated" | undefined;
     if (terminal !== undefined) {
       status = "inconclusive";
     } else if (summary.inconclusive > 0 || summary.not_run > 0) {
@@ -1724,12 +1764,15 @@ export async function probePlan(
       reason = "mutant_inconclusive";
     } else if (violatedCount > 0) {
       status = "survived";
+      expectation = "violated";
     } else {
       status = "killed";
+      expectation = "met";
     }
     return {
       status,
       ...(reason !== undefined ? { reason } : {}),
+      ...(expectation !== undefined ? { expectation } : {}),
       warnings,
       baseline,
       results,
@@ -1884,4 +1927,24 @@ export async function probePlan(
     }
     if (emergencyResult) return emergencyResult;
   }
+}
+
+/**
+ * Runs a `--plan` batch: see `runProbePlanPipeline` above for the
+ * pipeline itself; this wrapper only adds the `env` echo, the same as
+ * `probe()` adds it over `runProbePipeline` for the single form -- every
+ * `runProbePlanPipeline` return point (the normal completion, every
+ * `refuse()` call, and the `finally` block's emergency-restore path)
+ * gets it from this one place instead of repeating it at each of those.
+ */
+export async function probePlan(
+  opts: ProbePlanOptions,
+): Promise<ProbePlanResult> {
+  const result = await runProbePlanPipeline(opts);
+  return {
+    ...result,
+    ...(opts.env !== undefined && Object.keys(opts.env).length > 0
+      ? { env: redactEnvOverrides(opts.env) }
+      : {}),
+  };
 }

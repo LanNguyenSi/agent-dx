@@ -1994,18 +1994,89 @@ describe("cli: probe", () => {
     expect(parsed.status).toBe("usage_error");
   });
 
-  it("--env combined with --plan is still a usage error: a plan has no wiring for it", async () => {
-    const planPath = path.join(makeTmpDir(), "plan.json");
+  it("--env combined with --plan is applied to the baseline and every mutant, the same as the single form (agent-dx follow-up: --env used to be refused outright alongside --plan)", async () => {
+    const repo = initRepo();
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [
+        "function isPositive(n) {",
+        "  return n > 0;",
+        "}",
+        "module.exports = { isPositive };",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repo);
+    const testCommand =
+      "node -e \"process.exit(process.env.PROBE_MARKER === '1' ? 0 : 1)\"";
+    const planPath = path.join(repo, "plan.json");
     fs.writeFileSync(
       planPath,
       JSON.stringify({
-        test: "true",
-        mutants: [{ file: "x.js", line: 1, replace: "y" }],
+        test: testCommand,
+        isolation: "inplace",
+        mutants: [{ file: "fixture.js", line: 2, replace: "  return false;" }],
       }),
     );
-    const run = await spawnCli(["probe", "--plan", planPath, "--env", "X=1"]);
-    expect(run.code).toBe(2);
-    expect(JSON.parse(run.stdout).status).toBe("usage_error");
+
+    // Without --env the baseline itself never sees PROBE_MARKER, so it
+    // fails before any mutant is applied -- proving the flag is what
+    // makes the difference below, not a fixture accident.
+    const withoutEnv = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--plan",
+      planPath,
+    ]);
+    const parsedWithoutEnv = JSON.parse(withoutEnv.stdout);
+    expect(parsedWithoutEnv.status).toBe("inconclusive");
+    expect(parsedWithoutEnv.reason).toBe("baseline_failed");
+
+    const withEnv = await spawnCli([
+      "-C",
+      repo,
+      "probe",
+      "--plan",
+      planPath,
+      "--env",
+      "PROBE_MARKER=1",
+      // A credential-shaped name, the same as the single form's own
+      // redaction test above, but exercised through `--plan`: this run
+      // targets `probePlan`'s own `redactEnvOverrides(opts.env)` call
+      // (a plan-only code path the single form's test above never
+      // reaches), proving the plan's top-level `env` echo and each
+      // mutant's `test.env` redact it too, not only echo whatever was
+      // asked for verbatim.
+      "--env",
+      "API_TOKEN=s3cr3t",
+    ]);
+    const parsedWithEnv = JSON.parse(withEnv.stdout);
+    // The command never reads the mutated file, only PROBE_MARKER, so a
+    // real verdict (not baseline_failed) proves the baseline saw the
+    // override; "survived" is the correct verdict for a mutant this
+    // command cannot react to (default --expect fail, so this is also a
+    // finding, exit 1).
+    expect(parsedWithEnv.status).toBe("survived");
+    expect(parsedWithEnv.plan.results[0].status).toBe("survived");
+    expect(parsedWithEnv.plan.results[0].test.env).toEqual({
+      PROBE_MARKER: "1",
+      API_TOKEN: "<redacted>",
+    });
+    // The run-level echo mirrors what was requested, the same as the
+    // single form's own top-level `env` -- a sibling of `plan`, not
+    // inside it.
+    expect(parsedWithEnv.env).toEqual({
+      PROBE_MARKER: "1",
+      API_TOKEN: "<redacted>",
+    });
+    // The raw secret never appears anywhere in the serialized envelope
+    // (not just in the two fields checked by name above): a redaction
+    // that missed a third echo, or that redacted the run-level `env` but
+    // not `test.env` (or vice versa), would still leave this assertion
+    // green if it only checked field equality against a value that
+    // happened not to be the raw secret.
+    expect(withEnv.stdout).not.toContain("s3cr3t");
   });
 
   it("--require-baseline-evidence combined with --plan is allowed and threaded through to the plan's own shared baseline", async () => {
@@ -2154,7 +2225,7 @@ describe("cli: probe", () => {
     expect(parsed.reason).toBeUndefined();
   });
 
-  it("--pass-regex is allowed alongside --plan (unlike --env); plan.passWhen.regex is the plan-file equivalent, and a command-line --pass-regex wins when both are given", async () => {
+  it("--pass-regex is allowed alongside --plan; plan.passWhen.regex is the plan-file equivalent, and a command-line --pass-regex wins when both are given", async () => {
     const repo = initRepo();
     fs.writeFileSync(path.join(repo, "runner.js"), RUNNER_JS);
     commitAll(repo);
