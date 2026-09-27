@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-09-27T05:29:09Z
+timestamp: 2026-09-27T05:40:47Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/agents/reviewer.md
@@ -53,7 +53,7 @@ first `recurrence: repeated` finding whose class a previous round's fix already 
 (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:364#"Halt at the first"`),
 and the Round-2 halt rule's own cross-reference to step 8 states the
 identical scope, both clauses
-(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:59#"Step 8 of the detailed workflow states the operational"`),
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:61#"Step 8 of the detailed workflow states the operational"`),
 both built from one shared test constant so dropping either clause at
 either site fails that site's own test
 (`packages/orchestrator-workflow/test/docs-consistency.test.ts:1422#"built from one shared constant"`).
@@ -245,7 +245,7 @@ findings-table header convention and the Decision-legend vocabulary above.
 Added in 0.11.0 after a live incident: a reviewer subagent spawn returned in
 5 seconds with 0 tool uses, handing back harness boilerplate instead of the
 reviewer output contract (`CHANGELOG.md:#[0.11.0]`). The Subagent misfire rule
-closes with the review-specific consequence: "a misfired review is not a
+states the review-specific consequence: "a misfired review is not a
 review and never satisfies the review gate, since review is never skipped"
 (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:41#"review and never satisfies the review gate, since"`), pinned by
 `packages/orchestrator-workflow/test/docs-consistency.test.ts:580#"never satisfies the review gate"`. Since
@@ -323,24 +323,24 @@ single defect-class recurrence within one task, but nothing previously
 forced a choice once that stopping, or `fix_required` review rounds, kept
 recurring on the same task. This budget applies in addition to the halt
 rule's split-or-redesign response, not instead of it:
-`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:65#"## Review-round escalation budget"` triggers "by the second
+`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:67#"## Review-round escalation budget"` triggers "by the second
 round-2 halt signal on the same task, or by the third `fix_required`
 review round on the same task, whichever comes first", at which point the
 orchestrator picks one of three named escalations
-(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:78#"**Tier or model escalation**"`,
-`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:87#"**Advisor spawn**"`, `packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:90#"**Merge-hold**"`: raise
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:80#"**Tier or model escalation**"`,
+`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:89#"**Advisor spawn**"`, `packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:92#"**Merge-hold**"`: raise
 the implementer to at least `-xhigh` where installed or to the strongest
 available model, an advisor spawn asked "redesign, split, or hold?", or an
 operator merge-hold). A negative round has an `acceptance_recommendation` of
 `fix_required` or `reject`; a misfired review is not a round. A negative round counts only with at least one introduced_by_delta yes/unknown finding; no stays ordinary gate. Which of the three is picked is judgment; that one
 is picked and recorded is not
-(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:93#"Judgment governs which of the three to pick; only that one is chosen and"`).
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:95#"Judgment governs which of the three to pick; only that one is chosen and"`).
 `agents-md-section.md:150#"rule's split-or-redesign response, not instead of it."`
 carries the same rule in short form for repos without the full skill text
 loaded.
 
 The `single` branch is defined in the normative tier-or-model option
-(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:78#"**Tier or model escalation**"`); the policy fence carries only its bound clause.
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:80#"**Tier or model escalation**"`); the policy fence carries only its bound clause.
 
 The choice is recorded in `03-decisions.md`'s new named section
 (`03-decisions.md:14#"## Review-round escalation"`), a one-row-per-task
@@ -376,11 +376,11 @@ here, see
 The halt rule and the budget both need something to repeat (a defect
 class, or negative rounds). A third, earlier rule covers a fix round whose
 review shows that the fix itself broke something, without any repetition
-yet (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:104#"## Fix-regression decision point"`):
+yet (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:106#"## Fix-regression decision point"`):
 the trigger, in the review of a fix round, is at least one `high` or
 `critical` finding that the previous round's review did not report, with
 `introduced_by_delta: yes`
-(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:107#"reports at least one"`);
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:109#"reports at least one"`);
 the qualifier is read off the findings of the two reviews, not off
 `recurrence`, so a `recurrence: repeated` finding the previous round did
 not report still triggers it. `unknown` and `no` do not trigger it;
@@ -390,9 +390,9 @@ orchestrator names in one sentence why the fix could introduce the defect
 (the structural cause, or the statement that there is none) and records one of
 four outcomes in `03-decisions.md`: continue with the stated reason,
 redesign, split, or hold
-(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:121#"record one of four outcomes as a decision in"`);
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:123#"record one of four outcomes as a decision in"`);
 an advisor spawn is optional. It is a decision point and not a halt
-(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:125#"This is a decision point, not a halt"`):
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:127#"This is a decision point, not a halt"`):
 continuing is a valid outcome, it is no round-2 halt signal, it adds
 nothing to the budget's count, and it never replaces a review round; when
 the same review also fires the Round-2 halt signal, the halt rule governs.
@@ -422,11 +422,11 @@ whatever the file type, and the minimums named above are unaffected."
 `agents-md-section.md` still states only the general default and does not point
 to this refinement.
 
-Pinned-prose changes (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:133#"## Pinned-prose changes"`)
+Pinned-prose changes (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:135#"## Pinned-prose changes"`)
 cover a change whose acceptance rests on tests that pin documentation
 wording. The reason given is that
 "A prose mutant survives exactly when its bytes sit in no assertion"
-(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:137#"mutant survives exactly when its bytes sit in no assertion"`),
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:139#"mutant survives exactly when its bytes sit in no assertion"`),
 so rounds that hunt for the next unpinned sentence do not converge. The
 section asks for one normative site per rule, a claim list in the acceptance
 criterion as the pin obligation: "Every normative sentence the change adds or
@@ -437,7 +437,7 @@ to a claim list, respect that bound and put scope notes in `residual_risks`,
 unless an unlisted sentence is shown to be load-bearing." Copies are bound by
 one shared test constant, and
 "Cap test-adequacy review rounds on the change at two."
-(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:154#"Cap test-adequacy review rounds on the change at two."`).
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:156#"Cap test-adequacy review rounds on the change at two."`).
 "A test-adequacy review round is one whose returned findings are all `tests`
 findings of severity `low` or `medium` about pin gaps on the pinned prose; a
 round returning any other finding is an ordinary round outside the cap." "The

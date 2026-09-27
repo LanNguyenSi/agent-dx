@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-09-27T05:29:09Z
+timestamp: 2026-09-27T05:40:47Z
 sources:
   - packages/orchestrator-workflow/assets/agents/explorer.md
   - packages/orchestrator-workflow/assets/agents/task-slicer.md
@@ -700,7 +700,7 @@ spawn, and names split or redesign in `03-decisions.md`
 (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:364#"Halt at the first"`);
 the Round-2 halt rule's own cross-reference to step 8 states the identical
 scope
-(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:59#"Step 8 of the detailed workflow states the operational"`),
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:61#"Step 8 of the detailed workflow states the operational"`),
 both sites pinned through one shared test constant so dropping either
 clause at either site fails on its own
 (`packages/orchestrator-workflow/test/docs-consistency.test.ts:1422#"built from one shared constant"`).

@@ -1,5 +1,16 @@
 # Bundle log
 
+- 2026-09-27T05:40:47Z (misfire rule, return judged on its merits):
+  `review-and-recovery.md`'s Subagent misfire rule gained a sentence after
+  the re-flag sentence (a re-flagged pull request alone is no reason to
+  resume or respawn), which shifts every later line in that file by two;
+  citations into it after that point in `review-gate-and-waivers.md` and
+  `subagent-contracts-superset.md` are re-pointed by the same offset and
+  re-verified by anchor. `review-gate-and-waivers.md` no longer says the
+  misfire rule closes with the review-specific consequence, since the rule
+  now continues after it. The three docs listing that file under `sources`
+  are re-stamped.
+
 - 2026-09-27T05:29:09Z: `evidence-and-probes.md`'s Delegate implementation
   step now records a pull request the run's own subagent opened, or whose
   opener could not be established, as an incident naming its number or
