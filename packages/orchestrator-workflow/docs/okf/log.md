@@ -2,19 +2,21 @@
 
 - 2026-09-27T04:32:00Z (README-pointer guard, round 2): the README section
   pointer guard now also scans `docs/operator-install.md` and
-  `docs/model-routing-reference.md` (both used the
-  `[package README](../README.md)'s X section` markdown-link form, rewritten
-  to the quoted phrase, and the guard's phrase pattern is extended to match
-  both the bare and the link form); `extractHeadings` is rewritten from a
-  delimiter split to a line scanner handling `~~~` fences, a longer fence
-  wrapping an inner ``` block, and an indented fence; `docs/install-reference.md`
-  gained a rewrap fix unrelated to line count. `test/docs-consistency.test.ts`
-  grew only inside the README-pointer-guard `describe` block, at the end of
-  the file, after every citation site any bundle doc holds into it, so no
-  existing `test/docs-consistency.test.ts:N#"..."` citation shifted.
+  `docs/model-routing-reference.md` (both pointed at a README section
+  through a markdown link to README.md rather than the guard's plain
+  phrase, rewritten to the quoted phrase, and the guard's phrase pattern
+  is extended to match both the plain and the linked form); `extractHeadings`
+  is rewritten from a delimiter split to a line scanner handling `~~~`
+  fences, a longer fence wrapping an inner ``` block, and an indented
+  fence; `docs/install-reference.md` gained a rewrap fix unrelated to line
+  count. `test/docs-consistency.test.ts` grew only inside the
+  README-pointer-guard `describe` block, at the end of the file, after
+  every citation site any bundle doc holds into it, so no existing
+  citation into that file shifted.
   `CHANGELOG.md` gained 11 net lines inside its existing `[Unreleased]`
   bullet; the two version-anchored citations into it in this bundle
-  (`CHANGELOG.md:#[...]` form) are line-independent and unaffected, and this
+  (the version-heading-anchored form, e.g. `CHANGELOG.md:#[0.42.0]`) are
+  line-independent and unaffected, and this
   log's own pair of raw-line self-citations into that file's "The
   implementer" and "Citation scanning is paragraph-joined" bullets are
   re-pointed by the same +11 offset (verified by content, not arithmetic
