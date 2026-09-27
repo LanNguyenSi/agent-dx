@@ -1186,17 +1186,18 @@ function resolveMutantForm(opts: ProbeCliOptions): MutantChoice {
 /** The single-mutant options `--plan` refuses outright: the plan file
  * itself carries the mutants and the command they share, so accepting
  * one of these beside it would mean two sources for the same value with
- * no honest precedence between them. `--env` sits here rather than
- * beside `--link`/`--allow-outside` below: a plan run has no wiring for
- * it today, and refusing the combination outright keeps a caller from
- * silently having it ignored. `--require-baseline-evidence` is NOT in
- * this set: a plan runs every mutant against ONE shared
- * baseline, so there is no second source for this value to conflict
- * with -- it is threaded straight through to `probePlan`'s own setup,
- * the same as `--link`/`--allow-outside` below. The run-shaping options
- * (`-i`, `--expect`, `--timeout`, `--link`, `--allow-outside`) are NOT in
- * this set either: they override the plan's own value when given (see
- * `runProbePlanCommand`'s own docblock for that precedence). */
+ * no honest precedence between them. `--env` is NOT in this set (it
+ * used to be, when a plan run had no wiring for it at all): it is
+ * command-line only, the same as `--link`/`--allow-outside` below --
+ * threaded straight through to `probePlan`'s own setup, applied to the
+ * baseline and every mutant, since a plan file has no key for it to
+ * conflict with. `--require-baseline-evidence` is NOT in this set
+ * either, for the same reason: a plan runs every mutant against ONE
+ * shared baseline, so there is no second source for this value to
+ * conflict with. The run-shaping options (`-i`, `--expect`, `--timeout`,
+ * `--link`, `--allow-outside`) are NOT in this set either: they override
+ * the plan's own value when given (see `runProbePlanCommand`'s own
+ * docblock for that precedence). */
 export const PLAN_EXCLUSIVE_OPTIONS: readonly {
   flag: string;
   key: keyof ProbeCliOptions;
@@ -1209,7 +1210,6 @@ export const PLAN_EXCLUSIVE_OPTIONS: readonly {
   { flag: "-p/--patch", key: "patch" },
   { flag: "-t/--test", key: "test" },
   { flag: "--pre", key: "pre" },
-  { flag: "--env", key: "env" },
 ];
 
 /** The short form of a `PLAN_EXCLUSIVE_OPTIONS` flag (`-n/--line` ->
@@ -1220,8 +1220,8 @@ function shortFlag(flag: string): string {
   return flag.split("/")[0];
 }
 
-/** "--file, -n, -r, -M, -w, -p, -t, --pre and --env": the `--plan`
- * help sentence's list of mutually exclusive flags, derived from
+/** "--file, -n, -r, -M, -w, -p, -t and --pre": the `--plan` help
+ * sentence's list of mutually exclusive flags, derived from
  * `PLAN_EXCLUSIVE_OPTIONS` so a flag added there without updating this
  * sentence is impossible rather than a drift a reviewer has to catch. */
 const PLAN_EXCLUSIVE_FLAG_LIST = ((): string => {
@@ -1318,6 +1318,7 @@ async function runProbePlanCommand(
       isolation,
       expect,
       timeoutMs,
+      env: opts.env,
       // The plan's own `link` stays SEPARATE from `--link` all the way
       // into `probePlan`, which merges all three sources itself in one
       // place ("defaults file, then plan, then CLI"): the plan's
@@ -1358,6 +1359,7 @@ async function runProbePlanCommand(
     ],
     extra: {
       ...(result.reason !== undefined ? { reason: result.reason } : {}),
+      ...(result.env !== undefined ? { env: result.env } : {}),
       plan: {
         ...(result.baseline !== undefined ? { baseline: result.baseline } : {}),
         results: result.results,

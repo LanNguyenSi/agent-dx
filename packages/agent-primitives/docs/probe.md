@@ -1384,9 +1384,11 @@ the only guard here: `--env` still passes the real value to the child
 process either way, and a credential under a name it does not recognize
 is echoed in the clear -- do not pass one through `--env` under a name
 this pattern would miss. No `=` at all, or an empty name before it, is a
-usage error rather than a silently dropped variable. Not available under
-`--plan`: combined with `--plan` it is refused outright as a usage
-error, the same way every other single-mutant-only option is.
+usage error rather than a silently dropped variable. Available under
+`--plan` too, command-line only (a plan file has no key for it): applied
+to the shared baseline and every mutant's own run, the same as the
+single form, since both go through the same setup code either way -- see
+`--plan`'s own section below for where its `env` echo lands.
 
 A baseline that exits `0` but never actually ran a test is never read as
 a real pass: both the baseline (before any mutant is even applied) and,
@@ -1483,8 +1485,8 @@ leading `^`), or use the explicit line-start workaround `(?:^|\n)OK \(`
 when the summary must begin a line. For example:
 `--require-baseline-evidence '(?:^|\n)OK \('`. Available under `--plan`: a plan
 runs every mutant against ONE shared baseline, so there is no
-two-sources conflict for this flag to referee (unlike `--env`, which
-stays refused there); like `--link` and `--allow-outside` there is no
+two-sources conflict for this flag to referee; like `--link`,
+`--allow-outside` and `--env` there is no
 plan-file key for it, so it is command-line only, and it gates the
 plan's own baseline the same way it gates a single probe's -- a miss is
 the plan's own top-level `status: "inconclusive"`, `reason:
@@ -1973,7 +1975,7 @@ exactly which `reason` is which).
 | `mutation_probe` | `{ mutant, verified_applied_via, result, restored_verified, reason?, expectation? }` | once the mutant has been computed | present for every reason `mutant` covers above (the same eight setup-phase refusals, plus every mutant-phase outcome): `result` is always a string once this object is present, so a consumer reading `mutation_probe.result` does not have to shape-sniff `status` first; `"not_run"` for the eight setup-phase refusals (`aborted`, `pre_failed`, `baseline_failed`, `target_changed_during_baseline`, `no_tests_executed`, `zero_tests_ambiguous`, `baseline_evidence_not_matched`, `pycache_isolation_failed`), `reason` naming which, and for the mutant-phase zero-tests override described just above. `expectation` (`"met"`/`"violated"`) is present only alongside a `result` of `"killed"` or `"survived"`: whether that actual outcome matched the `--expect` this mutant ran under (see the `--expect` paragraph above); absent for `"not_run"`/`"inconclusive"`, which measured nothing to compare against an expectation. ABSENT (both `result` and `expectation`) for every other setup-phase refusal (see the table below), none of which ever computed a mutant. See the mapping below for an implementer report. |
 | `baseline` | `{ exitCode, durationMs, logPath, timedOut }` | once the baseline has run | absent for `mutant_not_applicable` and any earlier refusal, and for the baseline-phase `pre_failed`/`aborted` (the baseline itself never ran: the `--pre` ahead of it did); `exitCode` is unchanged by `--pass-regex` -- it is always the baseline's real exit code, kept as data even once the regex, not this field, decides `status`/`reason` (see `--pass-regex` above) |
 | `test` | `{ command, exitCode, durationMs, timedOut, stdoutTail, stderrTail, logPath, env? }` | once the mutant run has happened | `env` only when at least one `--env NAME=VALUE` was given: the overrides this run applied, redacted (see `env` below); `exitCode` is likewise unchanged by `--pass-regex` -- the field that distinguishes a mutant run that crashed (no output on either stream) from a genuine test failure once the regex is what decides `killed`/`survived` |
-| `env` | `Record<string, string>` | whenever at least one `--env NAME=VALUE` was given | echoed once at the run level, independent of which phase actually ran: present on every status including `baseline_failed` and the other baseline-phase refusals, none of which reach a `test` phase to carry their own `test.env`. Both `env` and `test.env` redact a value whose NAME carries `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`/`CREDENTIALS`, or `KEY` as its own `_`-delimited segment (case-insensitive; the segment must sit at the start or end of the name, or between two underscores), replacing it with the literal string `"<redacted>"` and keeping the name visible: `API_TOKEN`, `TOKEN`, `MY_SECRET_VALUE` redact, but `TOKENIZER_MODEL` and `KEYBOARD` do not (the recognized word is a substring of a longer segment, not a segment of its own). Every other value is echoed verbatim (never the whole merged environment). This redaction covers only these two echoes (`env` and `test.env`); it does not, and cannot, redact a secret the test command itself prints -- that value appears verbatim wherever the command's own output does (`test.stdoutTail`/`test.stderrTail` above, and the exec log `test.logPath` links to), the same as it would running that command directly. `--env` is not wired into `--plan` (combining the two is a usage error). |
+| `env` | `Record<string, string>` | whenever at least one `--env NAME=VALUE` was given | echoed once at the run level, independent of which phase actually ran: present on every status including `baseline_failed` and the other baseline-phase refusals, none of which reach a `test` phase to carry their own `test.env`. Both `env` and `test.env` redact a value whose NAME carries `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`/`CREDENTIALS`, or `KEY` as its own `_`-delimited segment (case-insensitive; the segment must sit at the start or end of the name, or between two underscores), replacing it with the literal string `"<redacted>"` and keeping the name visible: `API_TOKEN`, `TOKEN`, `MY_SECRET_VALUE` redact, but `TOKENIZER_MODEL` and `KEYBOARD` do not (the recognized word is a substring of a longer segment, not a segment of its own). Every other value is echoed verbatim (never the whole merged environment). This redaction covers only these two echoes (`env` and `test.env`); it does not, and cannot, redact a secret the test command itself prints -- that value appears verbatim wherever the command's own output does (`test.stdoutTail`/`test.stderrTail` above, and the exec log `test.logPath` links to), the same as it would running that command directly. Under `--plan`, this same `env` row appears on the plan's own top-level envelope (`plan`'s sibling, not inside it), applied to the shared baseline and every mutant's own run, echoed once the same way. |
 | `isolation` | `{ mode, path, linked, linkedNamedBy, syncedTrackedFiles, syncedUntrackedFiles }` | always, for this envelope (see the top-level-usage-error carve-out above, which has no `isolation` at all) | `path` is the worktree directory for `worktree`, `null` for `inplace`; `linked` lists the absolute source-tree paths the copy resolves through a symlink (every link this run created, plus a destination the untracked-file copy had already recreated as the very same symlink, which the link step leaves as synced) -- every entry in it names a source that was checked to exist as a directory when the run started (an auto-discovered candidate is only ever a candidate once it already exists, and `--link`/a `--plan` file's/the defaults file's `link` are refused up front, `reason: "link_source_not_found"`, when their source does not, see "Non-JS repositories" above); that check runs once, so a source removed between it and the link actually being created is not re-checked and can still end up a dangling link -- `linkedNamedBy` is one `{ path, namedBy }` entry per link REPOSITORY CONTENT asked for (a composer `config` value, a `--plan` file's `link`, the defaults file's `link`), carrying the same phrase a refusal of that candidate would have carried, and empty for a copy whose links all came from `--link` or from the auto-discovery walk; every `path` in it appears in `linked` too; `syncedTrackedFiles`/`syncedUntrackedFiles` are counts, `0` for both on a clean tree and for every `inplace` run |
 | `totalDurationMs` | number | always, for this envelope (see the top-level-usage-error carve-out above, and `--plan`, whose own envelope carries no `totalDurationMs` at all) | wall-clock time of the whole `probe()` call, every branch (a normal return, a refusal before any mutant ran, or the emergency-restore path); the same field name and meaning `verify`'s own result carries |
 
@@ -2162,7 +2164,7 @@ marker, the baseline or any worktree, so a plan that cannot run leaves
 nothing behind.
 
 `--plan` is mutually exclusive with `--file`, `-n`, `-r`, `-M`, `-w`,
-`-p`, `-t`, `--pre` and `--env`: the plan file supplies all of those, and a
+`-p`, `-t` and `--pre`: the plan file supplies all of those, and a
 command line naming one beside `--plan` is a `usage_error` naming the
 conflicting option. The run-shaping options are accepted instead of
 refused, under one rule: a value given on the command line wins over the
@@ -2171,7 +2173,10 @@ three a plan file can set -- `-i` (`isolation`), `--expect` (`expect`)
 and `--timeout` (`timeout`); a mutant's own `expect` wins over both,
 since it is the only one of them that is per mutant rather than per run.
 `--allow-outside` has no plan key at all: for a plan it is command-line
-only and there is nothing for it to override. `--link` is different:
+only and there is nothing for it to override. `--env` is the same shape:
+no plan key (a plan file cannot set it at all), command-line only, and
+applied to the baseline and every mutant's own run, the same as the
+single form -- see its own paragraph above. `--link` is different:
 a plan's own `link` (see above) is not a run-shaping
 override at all, so the CLI/plan precedence rule above does not apply to
 it -- instead it is merged and deduplicated with `--link`'s own values
@@ -2179,8 +2184,8 @@ it -- instead it is merged and deduplicated with `--link`'s own values
 same as for a single probe), in that order: defaults file, then plan,
 then `--link`, each source only ever adding a path, never removing one
 an earlier source already named. `--require-baseline-evidence` keeps the
-older shape: no plan key, command-line only, and (unlike `--env`) not
-refused under `--plan` -- see its own paragraph above. `--pass-regex` is
+older shape too: no plan key, command-line only, not refused under
+`--plan` -- see its own paragraph above. `--pass-regex` is
 different again: it DOES have a plan key (`passWhen.regex`), so it
 follows the `-i`/`--expect`/`--timeout` precedence instead -- a
 command-line `--pass-regex` wins over the plan file's own
@@ -2188,7 +2193,10 @@ command-line `--pass-regex` wins over the plan file's own
 only; see its own paragraph above for what it does once resolved.
 
 Output: the envelope carries `plan: { baseline, results, summary }`
-instead of the single probe's top-level `mutant`/`mutation_probe`/`test`.
+instead of the single probe's top-level `mutant`/`mutation_probe`/`test`,
+plus its own top-level `env` (a sibling of `plan`, not inside it) whenever
+at least one `--env` was given, the same echo the single form carries at
+its own top level (see the `env` row of the result-shape table above).
 `baseline` is the one baseline phase every mutant was measured against.
 `results` has one entry per plan mutant, in plan order, carrying `index`,
 `file`, `expect`, `status` (`killed`, `survived`, `inconclusive` or
