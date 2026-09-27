@@ -1,5 +1,18 @@
 # Bundle log
 
+- 2026-09-27T04:28:00Z: `evidence-and-probes.md`'s Delegate implementation
+  step gained the shared-account PR-author clarification and the
+  recorded-incident re-misfire exemption, `task-slicer.md`'s bundle-tool
+  rebase sentence gained the outside-repository clause, and `CHANGELOG.md`
+  gained an `[Unreleased]` entry for both, each shifting later lines in
+  its own file. `review-gate-and-waivers.md`, `subagent-contracts-superset.md`,
+  and `run-state-lifecycle-and-markers.md` list one or more of those three
+  files in `sources:`; each was re-verified against the new content (none
+  of their cited claims fall inside the changed text) and re-stamped.
+  This bundle's own citations into the three changed files, in this log
+  and in the three re-stamped docs, are re-pointed to the new line numbers
+  or ranges in the same commit as the source edits.
+
 - 2026-09-27T05:08:20Z (README-pointer guard, per-doc coverage): the
   inert-regex check in `test/docs-consistency.test.ts` now requires at least
   one pointer match in each scanned doc instead of summing matches across
