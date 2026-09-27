@@ -1,5 +1,17 @@
 # Bundle log
 
+- 2026-09-27T14:24:00Z (third-party PR carve-out re-worded): the third-party
+  pull request carve-out sentence added in the entry below was word for
+  word identical to the recorded-subagent-PR carve-out a few lines below
+  it, so a pin distinguishing the two sentences in
+  `test/outward-actions.test.ts` could no longer discriminate a mutant on
+  either copy. `evidence-and-probes.md`'s step 6 third-party sentence now
+  names its subject ("a recorded third-party pull request") instead of
+  the ambiguous "that pull request"; the pin is updated to match. The
+  edit replaces the same number of lines it removes, so no citation into
+  the file shifts. The three docs listing `evidence-and-probes.md` under
+  `sources` are re-stamped.
+
 - 2026-09-27T14:05:20Z (third-party PR carve-out): `evidence-and-probes.md`'s
   step 6 third-party pull request sentence gained a carve-out sentence
   mirroring the recorded-subagent-PR rule's own: a further outward action
