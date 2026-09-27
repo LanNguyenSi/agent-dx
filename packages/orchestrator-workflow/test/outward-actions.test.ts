@@ -557,7 +557,7 @@ describe("orchestrator mechanical cross-check ships in evidence-and-probes.md", 
   it("treats a shared-account PR author as insufficient by itself to establish a third party", () => {
     pin(
       evidenceAndProbes,
-      "The pull request's author field identifies the host account that opened it, not the agent that acted through it; when subagents use the orchestrator's or operator's own host account, the author alone does not establish a third party, so the orchestrator either confirms the opener with the operator or otherwise treats the opener as not established.",
+      "The pull request's author field identifies the host account that opened it, not the agent that acted through it; when the author is an account the run's subagents can act through (for example the orchestrator's or operator's own host account, or a shared bot or service account), the author alone does not establish a third party, so the orchestrator either confirms the opener with the operator or otherwise treats the opener as not established.",
     );
   });
 
@@ -575,10 +575,10 @@ describe("orchestrator mechanical cross-check ships in evidence-and-probes.md", 
     );
   });
 
-  it("exempts a recorded pull request, including one a subagent opened, only while it stays open at the recorded head", () => {
+  it("keeps re-flagging a recorded subagent pull request every round while it stays open, without a new incident row", () => {
     pin(
       evidenceAndProbes,
-      "A pull request already recorded as an incident under this rule is not treated as a new misfire again while it stays open at the recorded head sha; a later push to it is investigated like a newly opened pull request.",
+      "A pull request the run's own subagent opened, or whose opener could not be established, is not exempt once it is recorded this way: it keeps being flagged as a misfire and re-checked in every later round while it stays open, whatever push happens to it; the orchestrator does not record a new incident row for the same pull request already recorded by number or URL, but it still reports it to the operator again each round and asks the operator to close it or decide.",
     );
   });
 

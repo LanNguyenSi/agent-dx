@@ -201,18 +201,23 @@ directory and the subagents.
    orchestrator establishes who opened it (for example from the pull
    request's author and the host's audit events, or by asking the
    operator). The pull request's author field identifies the host account
-   that opened it, not the agent that acted through it; when subagents use
-   the orchestrator's or operator's own host account, the author alone
-   does not establish a third party, so the orchestrator either confirms
-   the opener with the operator or otherwise treats the opener as not
-   established. When a subagent of the run opened it, or when that cannot
-   be established, it treats the pull request as a misfire and reports it
-   to the operator. A pull request a third party opened is recorded once
-   in `03-decisions.md`, naming its number or URL, and is not treated as a
-   new finding again in a later round. A pull request already recorded as
-   an incident under this rule is not treated as a new misfire again while
-   it stays open at the recorded head sha; a later push to it is
-   investigated like a newly opened pull request. A
+   that opened it, not the agent that acted through it; when the author is
+   an account the run's subagents can act through (for example the
+   orchestrator's or operator's own host account, or a shared bot or
+   service account), the author alone does not establish a third party, so
+   the orchestrator either confirms the opener with the operator or
+   otherwise treats the opener as not established. When a subagent of the
+   run opened it, or when that cannot be established, it treats the pull
+   request as a misfire and reports it to the operator. A pull request a
+   third party opened is recorded once in `03-decisions.md`, naming its
+   number or URL, and is not treated as a new finding again in a later
+   round. A pull request the run's own subagent opened, or whose opener
+   could not be established, is not exempt once it is recorded this way: it
+   keeps being flagged as a misfire and re-checked in every later round
+   while it stays open, whatever push happens to it; the orchestrator does
+   not record a new incident row for the same pull request already
+   recorded by number or URL, but it still reports it to the operator
+   again each round and asks the operator to close it or decide. A
    flagged ref is a signal to investigate, not a misfire by itself: before
    treating it as one, the orchestrator establishes who moved the ref (for
    example from the host's push or audit events, or by asking the
