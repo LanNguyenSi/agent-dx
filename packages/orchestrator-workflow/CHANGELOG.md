@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still matches at least one reference. `docs/verification-sets.md` is
   now listed in `docs/okf/subagent-contracts-superset.md`'s `sources`
   (it was already cited in the doc's prose without being declared).
+- The README section pointer guard now also scans `docs/install-reference.md`
+  (its pointer used an unquoted form the guard's phrase pattern missed, now
+  rewritten to the quoted `package README's "X" section` form); heading
+  extraction now ignores `#` lines inside fenced code blocks so a quoted
+  example can no longer be mistaken for a real README heading; and the
+  guard's helper functions dropped an unused parameter and corrected two
+  comments that misstated which docs are scanned.
 - README restructured around a shorter package README standard: moved
   deep reference material (architecture rationale, run contracts, install
   internals, harness file list and read-only posture, role profile detail,

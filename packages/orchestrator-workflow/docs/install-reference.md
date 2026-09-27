@@ -62,8 +62,8 @@ valid entries (the programmatic `runInit` option `knowledge` writes it and
 refuses an invalid entry). A hand-edited invalid entry is ignored on read
 and reported by `doctor`; a re-install that rewrites the manifest removes it
 from disk and prints a note naming its index and reason. The field carries no
-check argv; the concrete bundle-check command still lives in the
-repository-bound verification set (see the README's Verification sets
+check argv; the concrete bundle-check command still lives in the repository-
+bound verification set (see the package README's "Verification sets"
 section), so there is one source of argv truth. When `knowledge` in
 `.ai/workflow/manifest.json` is absent or an empty list, the default
 `docs/okf/` applies, today's behaviour. `doctor` prints a `knowledge:`
