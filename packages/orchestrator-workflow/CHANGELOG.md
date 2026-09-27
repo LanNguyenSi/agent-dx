@@ -14,17 +14,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shared bot or service account) no longer reads as a third party by
   author alone; the orchestrator confirms with the operator or treats the
   opener as not established instead. A pull request the run's own
-  subagent opened, or whose opener could not be established, is never
-  exempt once recorded: it keeps being flagged as a misfire and re-checked
-  every later round while it stays open, unlike the ref-recording
-  treatment; the orchestrator does not add a new incident row for the same
-  pull request already recorded by number or URL, but it still reports it
-  to the operator again each round and asks the operator to close it or
-  decide. task-slicer.md's bundle-tool rebase sentence now also carries
-  contracts.md's outside-repository clause, so an `allowed_changes` entry
-  outside the bundle's repository is never queried against that bundle;
-  its subagent-contracts-superset.md citation now spans the sentence's
-  full range.
+  subagent opened, or whose opener could not be established, is recorded
+  as an incident naming its number or URL (the closing incident sentence
+  now names the pushed ref and its sha or the pull request's number or
+  URL) and has no exemption: until the operator closes it or decides, it is
+  re-checked and re-flagged every later round, each re-flag recorded in
+  `03-decisions.md` as a misfire referring to the existing incident
+  decision by its D-ID, and reported to the operator again. The re-flag
+  covers only the pull request's continued existence: the round's
+  implementer return is still judged on its own merits, and any further
+  outward action on that pull request by a subagent or an unestablished
+  actor is a new incident. review-and-recovery.md's misfire rule carries
+  the matching D-ID reference. task-slicer.md's bundle-tool rebase
+  sentence now also carries contracts.md's outside-repository clause, so
+  an `allowed_changes` entry outside the bundle's repository is never
+  queried against that bundle; its subagent-contracts-superset.md
+  citation now spans the rule's full range.
 - A docs-consistency test now guards every INSTALL-AGENT.md pointer that
   names a package README section by heading text (currently three, all
   "Effort tiers"): the guarded heading is confirmed to still exist in
