@@ -3,9 +3,9 @@
 - 2026-09-27T14:24:00Z (third-party PR carve-out re-worded): the third-party
   pull request carve-out sentence added in the entry below was word for
   word identical to the recorded-subagent-PR carve-out a few lines below
-  it, so a pin distinguishing the two sentences in
-  `test/outward-actions.test.ts` could no longer discriminate a mutant on
-  either copy. `evidence-and-probes.md`'s step 6 third-party sentence now
+  it, so the older subagent-PR pin in `test/outward-actions.test.ts` also
+  matched the new copy and no longer caught a mutant on the subagent-PR
+  copy. `evidence-and-probes.md`'s step 6 third-party sentence now
   names its subject ("a recorded third-party pull request") instead of
   the ambiguous "that pull request"; the pin is updated to match. The
   edit replaces the same number of lines it removes, so no citation into
