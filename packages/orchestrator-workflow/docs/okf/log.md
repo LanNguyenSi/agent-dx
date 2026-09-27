@@ -1,5 +1,25 @@
 # Bundle log
 
+- 2026-09-27T04:56:00Z: `evidence-and-probes.md`'s Delegate implementation
+  step broadens its shared-account clause from the orchestrator's or
+  operator's own account to any account the run's subagents can act
+  through, and removes the recorded-incident re-misfire exemption: a pull
+  request the run's own subagent opened, or whose opener could not be
+  established, now keeps being flagged as a misfire and re-checked every
+  later round while it stays open, without a new incident row for the
+  same pull request already recorded by number or URL. `CHANGELOG.md`'s
+  `[Unreleased]` entry is rewritten to match and no longer claims parity
+  with the ref-recording treatment; its own shift moves the two
+  self-citations this log carries into it. `subagent-contracts-superset.md`'s
+  citation into `task-slicer.md`'s outside-repository sentence now spans
+  the sentence's full range instead of stopping short of it.
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`, and
+  `subagent-contracts-superset.md` list `evidence-and-probes.md` and/or
+  `CHANGELOG.md` in `sources:`; each was re-verified against the new
+  content (none of their cited claims fall inside the changed text) and
+  re-stamped. This bundle's own citations into the shifted lines, in this
+  log and in those three docs, are re-pointed to the new line numbers or
+  ranges in the same commit as the source edits.
 - 2026-09-27T04:28:00Z: `evidence-and-probes.md`'s Delegate implementation
   step gained the shared-account PR-author clarification and the
   recorded-incident re-misfire exemption, `task-slicer.md`'s bundle-tool
