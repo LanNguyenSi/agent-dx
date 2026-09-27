@@ -211,9 +211,16 @@ directory and the subagents.
    request as a misfire and reports it to the operator. A pull request a
    third party opened is recorded once in `03-decisions.md`, naming its
    number or URL, and is not treated as a new finding again in a later
-   round. A pull request the run's own subagent opened, or whose opener
-   could not be established, is recorded as an incident as the end of this
-   step describes, naming its number or URL. While it stays open, until the
+   round.
+   Any further outward action on a recorded third-party pull request that a
+   subagent of the run performed, or whose actor cannot be established (for
+   example an edit of its title or body, a change of its base branch, marking
+   it ready for review, an approval, enabling auto-merge, a push to its branch,
+   or reopening it), whether a return reports it or the host's events show it,
+   is a new incident, recorded and listed in `06-handoff.md` like any other. A
+   pull request the run's own subagent opened, or whose opener could not be
+   established, is recorded as an incident as the end of this step describes,
+   naming its number or URL. While it stays open, until the
    operator closes it or an operator decision about it is recorded in
    `03-decisions.md`, it is not exempt: the orchestrator re-checks it in
    every later round, re-flags it as a misfire, records each re-flag in

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Outward cross-check (evidence-and-probes.md, Delegate implementation): the
+  third-party pull request sentence no longer lets a later outward action
+  hide behind the "recorded once" dedup. Any further outward action on a
+  pull request already recorded as a third party's (a title/body edit, a
+  base retarget, marking it ready for review, an approval, enabling
+  auto-merge, a push to its branch, or reopening it) that a subagent of
+  the run performed, or whose actor cannot be established, is a new
+  incident, recorded and listed in `06-handoff.md` like any other. This
+  mirrors the carve-out the recorded-subagent-PR rule and the flagged-ref
+  rule already carry. Pin in `test/outward-actions.test.ts`. okf bundle
+  citations re-pointed and docs re-stamped.
 - Outward cross-check (evidence-and-probes.md, Delegate implementation): a
   pull request's author field identifies the host account that opened it,
   not the agent that acted through it, so any account the run's subagents
