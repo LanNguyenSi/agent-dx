@@ -12353,28 +12353,60 @@ describe("docs/harnesses.md states the reviewer's narrower write boundary", () =
 // text can drift silently when the README is restructured: the pointer's
 // prose still reads fine, but the named heading no longer exists (or was
 // renamed) in the README it references. Guards every such pointer in
-// INSTALL-AGENT.md, docs/install-reference.md, and assets/skill/SKILL.md
-// (together with the reference docs it inlines) so a renamed or removed
+// INSTALL-AGENT.md, docs/install-reference.md, docs/operator-install.md,
+// docs/model-routing-reference.md, and assets/skill/SKILL.md (together with
+// the reference docs it inlines) so a renamed or removed
 // README heading turns this test red instead of leaving a dead reference
 // for an agent that fetches one of these docs raw.
 describe("README section pointers in shipped, fetched-raw agent docs stay valid", () => {
-  const POINTER_PATTERN = /package README's\s+"([^"]+)"\s+section/g;
+  // Matches both the bare `package README's "X" section` phrasing and the
+  // `[package README](../README.md)'s "X" section` markdown-link phrasing
+  // (the optional `](...)'` group), and lets `\s+` stand in for the plain
+  // space between "package" and "README" too, since a doc's prose can wrap
+  // the words "package" and "README" across a line break inside the link
+  // text without changing what the pointer means.
+  const POINTER_PATTERN =
+    /package\s+README(?:\]\([^)]*\))?'s\s+"([^"]+)"\s+section/g;
 
   /**
    * Every `## `/`### ` (etc.) heading text found in `raw`, ignoring `#`
    * lines inside fenced code blocks (a shell comment or a markdown example
-   * quoted in a fence is not a heading). Splitting on the fence delimiter
-   * line yields alternating outside/inside segments starting outside, so
-   * the even-indexed ones are the text actually rendered as prose.
+   * quoted in a fence is not a heading). A line scanner, not a delimiter
+   * split: a fence opens on a line of three or more backticks or three or
+   * more tildes (optionally indented up to 3 spaces) and closes only on a
+   * later line using the SAME fence character, at least as long as the
+   * opening run, with nothing but trailing whitespace after it. This
+   * handles a ``` fence, a ~~~ fence, a longer fence (four or more
+   * backticks) wrapping an inner ``` block (the inner fence's different,
+   * shorter run never closes the outer one, so lines inside the inner
+   * block stay excluded too), an indented fence, and an unclosed fence,
+   * which simply runs to end of file (no heading after it counts).
    */
   function extractHeadings(raw: string): Set<string> {
-    const outsideFences = raw
-      .split(/^```.*$/m)
-      .filter((_, index) => index % 2 === 0)
-      .join("\n");
     const headings = new Set<string>();
-    for (const match of outsideFences.matchAll(/^#{1,6}\s+(.+)$/gm)) {
-      headings.add(match[1].trim());
+    let fence: { char: "`" | "~"; len: number } | null = null;
+    for (const line of raw.split("\n")) {
+      if (fence) {
+        const closeMatch = line.match(/^ {0,3}(`+|~+)\s*$/);
+        if (
+          closeMatch &&
+          closeMatch[1][0] === fence.char &&
+          closeMatch[1].length >= fence.len
+        ) {
+          fence = null;
+        }
+        continue;
+      }
+      const openMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
+      if (openMatch) {
+        fence = {
+          char: openMatch[1][0] as "`" | "~",
+          len: openMatch[1].length,
+        };
+        continue;
+      }
+      const heading = line.match(/^#{1,6}\s+(.+)$/);
+      if (heading) headings.add(heading[1].trim());
     }
     return headings;
   }
@@ -12398,6 +12430,14 @@ describe("README section pointers in shipped, fetched-raw agent docs stay valid"
     {
       name: "docs/install-reference.md",
       raw: readDoc("docs/install-reference.md"),
+    },
+    {
+      name: "docs/operator-install.md",
+      raw: readDoc("docs/operator-install.md"),
+    },
+    {
+      name: "docs/model-routing-reference.md",
+      raw: readDoc("docs/model-routing-reference.md"),
     },
   ];
   for (const assetPath of ["skill/SKILL.md"]) {
@@ -12452,5 +12492,74 @@ describe("README section pointers in shipped, fetched-raw agent docs stay valid"
     ].join("\n");
     expect(extractHeadings(fixtureReadme).has("Effort tiers")).toBe(false);
     expect(extractHeadings(fixtureReadme).has("Model preselection")).toBe(true);
+  });
+
+  /**
+   * A `~~~` fence is as common as ``` in Markdown; the old delimiter split
+   * only recognized backticks, so this case goes red if the scanner's
+   * `~{3,}` alternative is reverted (the fence-open check narrowed back to
+   * backticks only).
+   */
+  it("a heading text that appears only inside a ~~~ fence does not count as a real heading", () => {
+    const fixtureReadme = [
+      "## Model preselection",
+      "",
+      "~~~",
+      "# Effort tiers",
+      "not a real heading, just quoted in an example",
+      "~~~",
+      "",
+      "## Run modes",
+    ].join("\n");
+    expect(extractHeadings(fixtureReadme).has("Effort tiers")).toBe(false);
+    expect(extractHeadings(fixtureReadme).has("Run modes")).toBe(true);
+  });
+
+  /**
+   * A four-backtick fence can wrap an inner ``` block (documenting a
+   * fenced example inside a fenced example); the inner fence's own open
+   * and close lines must not be mistaken for the outer fence's close, and
+   * a `#` line after the inner block closes but before the outer fence
+   * closes is still inside the outer fence, so it must not count as a
+   * heading either. This case goes red if the scanner is reverted to
+   * close on any fence line regardless of run length (so the inner ```
+   * close line is wrongly read as closing the outer fence).
+   */
+  it("a heading text inside an inner ``` block nested in an outer 4-backtick fence does not count as a real heading", () => {
+    const fixtureReadme = [
+      "## Model preselection",
+      "",
+      "````markdown",
+      "```bash",
+      "echo hi",
+      "```",
+      "# Effort tiers",
+      "not a real heading, still inside the outer fence",
+      "````",
+      "",
+      "## Run modes",
+    ].join("\n");
+    expect(extractHeadings(fixtureReadme).has("Effort tiers")).toBe(false);
+    expect(extractHeadings(fixtureReadme).has("Run modes")).toBe(true);
+  });
+
+  /**
+   * A fence delimiter indented 1-3 spaces still opens/closes a fence per
+   * the CommonMark rule; this case goes red if the scanner's leading
+   * `{0,3}` allowance is reverted to require a delimiter at column 0.
+   */
+  it("a heading text inside a fence indented 1-3 spaces does not count as a real heading", () => {
+    const fixtureReadme = [
+      "## Model preselection",
+      "",
+      "   ```",
+      "# Effort tiers",
+      "not a real heading, the fence is indented",
+      "   ```",
+      "",
+      "## Run modes",
+    ].join("\n");
+    expect(extractHeadings(fixtureReadme).has("Effort tiers")).toBe(false);
+    expect(extractHeadings(fixtureReadme).has("Run modes")).toBe(true);
   });
 });

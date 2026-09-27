@@ -14,13 +14,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still matches at least one reference. `docs/verification-sets.md` is
   now listed in `docs/okf/subagent-contracts-superset.md`'s `sources`
   (it was already cited in the doc's prose without being declared).
-- The README section pointer guard now also scans `docs/install-reference.md`
-  (its pointer used an unquoted form the guard's phrase pattern missed, now
-  rewritten to the quoted `package README's "X" section` form); heading
-  extraction now ignores `#` lines inside fenced code blocks so a quoted
-  example can no longer be mistaken for a real README heading; and the
-  guard's helper functions dropped an unused parameter and corrected two
-  comments that misstated which docs are scanned.
+- The README section pointer guard now also scans `docs/install-reference.md`,
+  `docs/operator-install.md`, and `docs/model-routing-reference.md` (their
+  pointers used an unquoted form or the `[package README](../README.md)'s`
+  markdown-link form that the guard's phrase pattern missed; rewritten to the
+  quoted `package README's "X" section` form, and the pattern extended to
+  match both the bare and the link form, and to tolerate the words "package"
+  and "README" wrapping across a line break inside the link text). Heading
+  extraction is now a line scanner rather than a delimiter split: a fence
+  opens on a line of three or more backticks or three or more tildes
+  (indented up to 3 spaces) and closes only on a later line of the same
+  fence character, at least as long, with nothing but trailing whitespace
+  after it, so a `~~~` fence, a longer fence wrapping an inner ``` block, an
+  indented fence, and an unclosed fence (which now runs to end of file) are
+  all handled; a quoted `#` example inside any of them can no longer be
+  mistaken for a real README heading. The guard's helper functions dropped
+  an unused parameter and corrected two comments that misstated which docs
+  are scanned. A line-wrap in `docs/install-reference.md` that split
+  "repository-bound" across the line break is also fixed.
 - README restructured around a shorter package README standard: moved
   deep reference material (architecture rationale, run contracts, install
   internals, harness file list and read-only posture, role profile detail,

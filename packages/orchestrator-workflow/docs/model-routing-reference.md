@@ -2,7 +2,7 @@
 
 The default per-role model table, the full `--routing` JSON shape, the Codex
 default routing table, opencode model resolution, and the effort-tiers
-mechanics behind the [package README](../README.md)'s Model preselection
+mechanics behind the [package README](../README.md)'s "Model preselection"
 section.
 
 ## Default model routing
