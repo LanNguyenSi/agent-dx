@@ -1619,6 +1619,7 @@ describe("probePlan(): a mutant that cannot be applied is inconclusive on its ow
     expect(result.results[1].status).toBe("killed");
     expect(result.status).toBe("inconclusive");
     expect(result.reason).toBe("mutant_inconclusive");
+    expect(result.expectation).toBeUndefined();
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   }, 30000);
 });
