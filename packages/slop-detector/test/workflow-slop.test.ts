@@ -3780,6 +3780,34 @@ describe("workflow-slop/audit-gate-shape: a key this rule cannot name on the rea
       reason:
         "the job's `runs-on:` contains an alias this rule cannot resolve or a key it cannot name",
     },
+    {
+      level: "runs-on sequence value",
+      key: "windows-latest",
+      body: [
+        "jobs:",
+        "  audit:",
+        "    runs-on: [ubuntu-latest, *K]",
+        "    steps:",
+        gate,
+      ],
+      reason:
+        "the job's `runs-on:` contains an alias this rule cannot resolve or a key it cannot name",
+    },
+    {
+      level: "runs-on labels value",
+      key: "windows-latest",
+      body: [
+        "jobs:",
+        "  audit:",
+        "    runs-on:",
+        "      group: g",
+        "      labels: *K",
+        "    steps:",
+        gate,
+      ],
+      reason:
+        "the job's `runs-on:` contains an alias this rule cannot resolve or a key it cannot name",
+    },
   ];
 
   for (const c of cases) {
