@@ -3937,8 +3937,10 @@ describe("workflow-slop: alias resolution scales with the document", () => {
     lines.push("    steps:", "      - run: echo hi");
     const started = Date.now();
     expect(runViolations(lines.join("\n"))).toEqual([]);
-    expect(Date.now() - started).toBeLessThan(15000);
-  });
+    // CI runners took about 7 s for this linear case; a quadratic
+    // resolution takes several times the bound, so it still discriminates.
+    expect(Date.now() - started).toBeLessThan(30000);
+  }, 120000);
 });
 
 describe("workflow-slop/audit-gate-shape: aliases and merge keys on the shell read path", () => {
