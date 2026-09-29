@@ -151,6 +151,405 @@ function scalarKeyName(key: unknown): string | undefined {
 }
 
 /**
+ * True when a mapping key is present but has no name `scalarKeyName` can
+ * read: an alias left unresolved (see `unsupported-yaml-construct`) or a
+ * mapping or sequence used as a key (written with `?`, or an alias that
+ * resolves to one). Such a key can stand for any key a rule reads
+ * (`run:`, `uses:`, `with:`, `shell:`, `runs-on:`), so a read that treats
+ * it as absent must not certify or scan clean. A scalar key always has a
+ * name: under the YAML 1.2 core schema a scalar that is not a string is
+ * a null, a boolean or a number, which cannot spell any of those keys.
+ */
+function isUnnameableKey(key: unknown): boolean {
+  return typeof key === "object" && key !== null && !isScalarNode(key);
+}
+
+/** True when `node` is a mapping with an unnameable key directly in it. */
+function hasUnnameableKey(node: { items: unknown[] }): boolean {
+  return node.items.some(
+    (item) => isPairNode(item) && isUnnameableKey(item.key),
+  );
+}
+
+/**
+ * True when anything inside `node` (at any depth) is an alias left
+ * unresolved or an unnameable key: a value built from such parts cannot
+ * be read as the value GitHub Actions sees.
+ */
+function containsUnreadablePart(node: unknown): boolean {
+  if (isAliasNode(node)) return true;
+  if (!hasItems(node)) return false;
+  return node.items.some((item) =>
+    isPairNode(item)
+      ? isUnnameableKey(item.key) || containsUnreadablePart(item.value)
+      : containsUnreadablePart(item),
+  );
+}
+
+// ───────────────────── YAML anchors, aliases, merge keys ─────────────────────
+//
+// GitHub Actions accepts YAML anchors and aliases in workflow files
+// (changelog entry "Actions: YAML anchors and non-public workflow templates";
+// "Reusing workflow configurations" documents the `&`
+// and `*` syntax). It documents nothing about merge keys, and the workflow
+// parser it runs (`actions/runner` `YamlObjectReader`, and the
+// `actions/languageservices` reader that mirrors it) handles anchors and
+// aliases but has no merge-key handling: a `<<` key stays an ordinary key
+// named `<<`. So the two constructs are treated by what each source says:
+//
+//   - an alias is resolved before any structural read, so every read below
+//     (executed inputs, `uses:` detection, `shell:`/`defaults:`/`runs-on:`
+//     resolution) sees the anchored value it stands for;
+//   - a merge key is NOT merged. It is reported by
+//     `workflow-slop/unsupported-yaml-construct`, and an audit gate whose
+//     shell, `runs-on` or `continue-on-error` read passes through a merge
+//     key is refused rather than certified (see `StepRunInfo.unreadable`).
+//
+// An alias this pack cannot resolve (no anchor of that name precedes it, the
+// anchor is one of the alias's own ancestors, or resolving every alias would
+// expand past `MAX_EXPANDED_NODES`) is left as an alias node and reported by
+// the same rule, so it never scans clean either. So is an anchor name that is
+// defined more than once in a file: YAML resolves an alias to the definition
+// that precedes it, but an alias nested inside another anchored node can be
+// resolved at a different time by a replaying parser (the runner's reader
+// looks a name up when it replays an anchored node, not where the alias is
+// written), and the two readings can supply different values. The pack picks
+// neither: it reports each redefinition and resolves no alias to that name,
+// so a read that depends on one refuses instead of certifying.
+//
+// Aliases are resolved from one table built in a single pre-order pass over
+// the unmutated document, so the work is linear in the document plus the
+// expansion the budget bounds.
+
+/** Upper bound on nodes visited while expanding aliases (alias bombs). */
+const MAX_EXPANDED_NODES = 200_000;
+
+interface AliasIssue {
+  offset: number;
+  message: string;
+  matched: string;
+}
+
+interface MergeKeyHit {
+  offset: number;
+}
+
+interface LoadedWorkflowDocument {
+  contents: unknown;
+  mergeKeys: MergeKeyHit[];
+  aliasIssues: AliasIssue[];
+  /** Every mapping key that is (or an alias to) a mapping or sequence. */
+  collectionKeys: AliasIssue[];
+}
+
+function isAliasNode(node: unknown): node is { source: string } {
+  return YAML.isAlias(node);
+}
+
+function aliasOffset(node: unknown): number {
+  const range = (node as { range?: unknown }).range;
+  return Array.isArray(range) && typeof range[0] === "number" ? range[0] : 0;
+}
+
+/**
+ * What an alias stands for, worked out in one pre-order pass over the
+ * unmutated document (an alias is still an alias node there, so no spliced
+ * node can shadow a definition): `targets` maps each alias node to the node
+ * of the last anchor of its name that precedes it, and `redefined` holds the
+ * names defined more than once, which are never resolved.
+ */
+interface AliasTable {
+  targets: Map<unknown, unknown>;
+  redefined: Set<string>;
+}
+
+function buildAliasTable(root: unknown, issues: AliasIssue[]): AliasTable {
+  const anchors = new Map<string, unknown>();
+  const defined = new Map<string, number>();
+  const table: AliasTable = { targets: new Map(), redefined: new Set() };
+  const walk = (node: unknown): void => {
+    if (typeof node !== "object" || node === null) return;
+    if (isAliasNode(node)) {
+      table.targets.set(node, anchors.get(node.source));
+      return;
+    }
+    const anchor = (node as { anchor?: unknown }).anchor;
+    if (typeof anchor === "string" && anchor !== "") {
+      const count = (defined.get(anchor) ?? 0) + 1;
+      defined.set(anchor, count);
+      if (count > 1) {
+        table.redefined.add(anchor);
+        issues.push({
+          offset: aliasOffset(node),
+          matched: `&${anchor}`,
+          message: `The YAML anchor \`&${anchor}\` is defined more than once in this file. YAML resolves an alias to the definition that precedes it, but a parser that replays anchored nodes can resolve an alias nested inside one to a different definition, so this pack resolves no alias to this name and a result for this file cannot be trusted clean. Give each anchor a unique name.`,
+        });
+      }
+      anchors.set(anchor, node);
+    }
+    if (!hasItems(node)) return;
+    for (const item of node.items) {
+      if (isPairNode(item)) {
+        walk(item.key);
+        walk(item.value);
+      } else {
+        walk(item);
+      }
+    }
+  };
+  walk(root);
+  return table;
+}
+
+/**
+ * Pass one of alias expansion: walk the tree through every alias (without
+ * changing it) to learn which aliases cannot be resolved and whether full
+ * expansion stays inside the node budget. Returns the set of aliases to
+ * leave alone, or `undefined` when the budget is exceeded (nothing is
+ * expanded then).
+ */
+function planAliasExpansion(
+  doc: YAML.Document.Parsed,
+  table: AliasTable,
+  issues: AliasIssue[],
+): Set<unknown> | undefined {
+  const leave = new Set<unknown>();
+  const reported = new Set<unknown>();
+  let budget = MAX_EXPANDED_NODES;
+  const report = (alias: unknown, name: string, why: string) => {
+    if (reported.has(alias)) return;
+    reported.add(alias);
+    leave.add(alias);
+    issues.push({
+      offset: aliasOffset(alias),
+      matched: `*${name}`,
+      message: `The YAML alias \`*${name}\` cannot be resolved (${why}), so this pack cannot read the value it stands for and a result for this file cannot be trusted clean. GitHub Actions rejects such an alias as well.`,
+    });
+  };
+  const visit = (node: unknown, ancestors: Set<unknown>): boolean => {
+    if (typeof node !== "object" || node === null) return true;
+    if (--budget < 0) return false;
+    if (isAliasNode(node)) {
+      if (table.redefined.has(node.source)) {
+        // Reported once, at the redefinition, by `buildAliasTable`.
+        leave.add(node);
+        return true;
+      }
+      const target = table.targets.get(node);
+      if (typeof target !== "object" || target === null) {
+        report(node, node.source, "no anchor of that name precedes it");
+        return true;
+      }
+      if (ancestors.has(target)) {
+        report(node, node.source, "it refers to a node that contains it");
+        return true;
+      }
+      return visit(target, ancestors);
+    }
+    if (!hasItems(node)) return true;
+    ancestors.add(node);
+    for (const item of node.items) {
+      const ok = isPairNode(item)
+        ? visit(item.key, ancestors) && visit(item.value, ancestors)
+        : visit(item, ancestors);
+      if (!ok) return false;
+    }
+    ancestors.delete(node);
+    return true;
+  };
+  if (visit(doc.contents, new Set())) return leave;
+  return undefined;
+}
+
+/**
+ * Pass two: replace every resolvable alias node by the node it stands for
+ * (shared, not copied, so its ranges still point at the anchor site) and
+ * record every `<<` key on the way. Each mapping/sequence is visited once.
+ * Targets come from the table built over the unmutated document, never from
+ * the tree being changed.
+ */
+function applyAliasExpansion(
+  root: unknown,
+  table: AliasTable,
+  leave: Set<unknown> | undefined,
+  mergeKeys: MergeKeyHit[],
+): void {
+  const seen = new Set<unknown>();
+  const replace = (child: unknown): unknown => {
+    if (leave === undefined || !isAliasNode(child) || leave.has(child)) {
+      return child;
+    }
+    const target = table.targets.get(child);
+    return typeof target === "object" && target !== null ? target : child;
+  };
+  const walk = (node: unknown): void => {
+    if (!hasItems(node) || seen.has(node)) return;
+    seen.add(node);
+    const items = node.items as unknown[];
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (isPairNode(item)) {
+        const pair = item as { key: unknown; value: unknown };
+        const written = pair.key;
+        pair.key = replace(pair.key);
+        pair.value = replace(pair.value);
+        // The key is read after replacement: an alias standing for the
+        // scalar `<<` is a merge key as well.
+        if (scalarKeyName(pair.key) === "<<") {
+          mergeKeys.push({ offset: aliasOffset(written) });
+        }
+        walk(pair.key);
+        walk(pair.value);
+      } else {
+        items[i] = replace(item);
+        walk(items[i]);
+      }
+    }
+  };
+  walk(root);
+}
+
+/**
+ * Parse a workflow file and resolve its YAML aliases in place (see the
+ * section comment above). May throw, like `YAML.parseDocument`; callers
+ * keep their own try/catch.
+ */
+function loadWorkflowDocument(text: string): LoadedWorkflowDocument {
+  const doc = YAML.parseDocument(text, {});
+  const aliasIssues: AliasIssue[] = [];
+  const mergeKeys: MergeKeyHit[] = [];
+  const table = buildAliasTable(doc.contents, aliasIssues);
+  const leave = planAliasExpansion(doc, table, aliasIssues);
+  if (leave === undefined) {
+    aliasIssues.push({
+      offset: 0,
+      matched: "*",
+      message: `Resolving this file's YAML aliases would visit more than ${MAX_EXPANDED_NODES} nodes, so none of them were resolved and a result for this file cannot be trusted clean.`,
+    });
+  }
+  const collectionKeys = findCollectionKeys(text, doc.contents, table);
+  applyAliasExpansion(doc.contents, table, leave, mergeKeys);
+  if (table.redefined.size > 0) placeAtAnchorTokens(text, aliasIssues);
+  return { contents: doc.contents, mergeKeys, aliasIssues, collectionKeys };
+}
+
+/**
+ * Move each redefinition finding from the start of the anchored node's
+ * content (for a block mapping that is its first key, often a line below
+ * the anchor) to the `&name` token itself, so the finding and a
+ * `# slop-detector:disable-line=` comment for it sit on the anchor's line.
+ * The token is the last anchor token of that name at or before the node's
+ * start: only node properties (a tag, a comment, line breaks) may sit
+ * between a node's anchor and its content, never another anchor.
+ */
+function placeAtAnchorTokens(text: string, issues: AliasIssue[]): void {
+  const tokens = new Map<string, number[]>();
+  const stack: unknown[] = [...new YAML.Parser().parse(text)];
+  while (stack.length > 0) {
+    const token = stack.pop();
+    if (Array.isArray(token)) {
+      stack.push(...token);
+      continue;
+    }
+    if (typeof token !== "object" || token === null) continue;
+    const t = token as { type?: unknown; source?: unknown; offset?: unknown };
+    if (
+      t.type === "anchor" &&
+      typeof t.source === "string" &&
+      typeof t.offset === "number"
+    ) {
+      const offsets = tokens.get(t.source) ?? [];
+      offsets.push(t.offset);
+      tokens.set(t.source, offsets);
+    }
+    for (const value of Object.values(token)) {
+      if (typeof value === "object" && value !== null) stack.push(value);
+    }
+  }
+  for (const issue of issues) {
+    if (!issue.matched.startsWith("&")) continue;
+    let best: number | undefined;
+    for (const offset of tokens.get(issue.matched) ?? []) {
+      if (offset <= issue.offset && (best === undefined || offset > best)) {
+        best = offset;
+      }
+    }
+    if (best !== undefined) issue.offset = best;
+  }
+}
+
+/**
+ * Every pair whose key is a mapping or sequence: one written as a
+ * collection (a `?` key), reported at the key, or an alias standing for
+ * one, reported at the alias. Walks the unmutated document once, before
+ * alias expansion, so an aliased subtree is not walked again at every
+ * alias site. An alias to a redefined name is left out: it is never
+ * resolved, and its redefinition is reported already.
+ */
+function findCollectionKeys(
+  text: string,
+  root: unknown,
+  table: AliasTable,
+): AliasIssue[] {
+  const hits: AliasIssue[] = [];
+  const stack: unknown[] = [root];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (!hasItems(node)) continue;
+    for (const item of node.items) {
+      if (!isPairNode(item)) {
+        stack.push(item);
+        continue;
+      }
+      const key = item.key;
+      const standsFor =
+        isAliasNode(key) && !table.redefined.has(key.source)
+          ? table.targets.get(key)
+          : key;
+      if (hasItems(standsFor)) {
+        const offset = aliasOffset(key);
+        hits.push({
+          offset,
+          matched: isAliasNode(key) ? `*${key.source}` : text.charAt(offset),
+          message: COLLECTION_KEY_MESSAGE,
+        });
+      }
+      stack.push(key, item.value);
+    }
+  }
+  return hits;
+}
+
+function loadWorkflowContents(text: string): unknown {
+  return loadWorkflowDocument(text).contents;
+}
+
+/**
+ * One entry per distinct key. Alias expansion shares a node between its
+ * anchor site and every alias site, so a walk reaches the same scalar more
+ * than once; its findings are reported once, at the scalar's own range.
+ */
+function uniqueBy<T>(items: T[], keyOf: (item: T) => string): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = keyOf(item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** True when `node` is a mapping with a `<<` key directly in it. */
+function hasMergeKey(node: unknown): boolean {
+  return (
+    hasItems(node) &&
+    node.items.some(
+      (item) => isPairNode(item) && scalarKeyName(item.key) === "<<",
+    )
+  );
+}
+
+/**
  * The non-null, non-empty `uses:` scalar value of `node`'s own mapping, or
  * `undefined` when `node` carries no `uses:` key, or that key's value is
  * null (`uses:` with nothing after it) or an empty string (`uses: ""`).
@@ -455,6 +854,60 @@ const unparseableWorkflow: Rule = {
   },
 };
 
+// ─────────────────────── unsupported-yaml-construct ───────────────────────
+
+const MERGE_KEY_MESSAGE =
+  "A YAML merge key (`<<`) is not merged by GitHub Actions: its documentation covers anchors and aliases only, and the workflow parser has no merge-key handling. This pack does not merge it either, so the keys it would supply (a `uses:`, a `with:` input, `defaults:`, `shell:`, `runs-on:`) are read as absent and a result for this file cannot be trusted clean. Write the mapping out, or use an alias for the whole value (`key: *anchor`).";
+
+const COLLECTION_KEY_MESSAGE =
+  "A mapping key that is itself a mapping or a sequence (written with `?`, or supplied through an alias that stands for one) has no name this pack can read, so a key it stands for (a `run:`, a `uses:`, a `with:` input, `shell:`, `runs-on:`) is read as absent and a result for this file cannot be trusted clean. Write the key as a plain name.";
+
+const unsupportedYamlConstruct: Rule = {
+  id: "workflow-slop/unsupported-yaml-construct",
+  pack: "workflow-slop",
+  defaultSeverity: "block",
+  enabledByDefault: true,
+  rationale:
+    "GitHub Actions accepts YAML anchors and aliases in workflow files, and this pack resolves an alias to the value it stands for before it reads a mapping (executed inputs, `uses:` detection, `shell:`, `defaults:`, `runs-on:`). Three constructs it cannot read that way: a `<<` merge key, which GitHub does not merge, an alias it cannot resolve (no anchor of that name precedes it, it refers to a node that contains it, its anchor name is defined more than once in the file, or resolving every alias in the file would visit an unreasonable number of nodes), and a mapping key that is itself a mapping or a sequence. A mapping whose keys arrive through any of them is read as if they were absent, in a way indistinguishable from a genuinely clean file, so each is reported with a block finding of its own instead of scanning clean.",
+  appliesTo: isWorkflowFile,
+  check(ctx: RuleContext): Violation[] {
+    const { file } = ctx;
+    let loaded: LoadedWorkflowDocument;
+    try {
+      loaded = loadWorkflowDocument(file.text);
+    } catch {
+      return [];
+    }
+    const at = (
+      offset: number,
+      matched: string,
+      message: string,
+    ): Violation => {
+      const start = offsetToLineCol(file.text, offset);
+      return {
+        ruleId: unsupportedYamlConstruct.id,
+        pack: unsupportedYamlConstruct.pack,
+        severity: unsupportedYamlConstruct.defaultSeverity,
+        path: file.path,
+        line: start.line,
+        column: start.column,
+        message,
+        rationale: unsupportedYamlConstruct.rationale,
+        matched,
+      };
+    };
+    return [
+      ...loaded.mergeKeys.map((hit) => at(hit.offset, "<<", MERGE_KEY_MESSAGE)),
+      ...loaded.collectionKeys.map((hit) =>
+        at(hit.offset, hit.matched, hit.message),
+      ),
+      ...loaded.aliasIssues.map((issue) =>
+        at(issue.offset, issue.matched, issue.message),
+      ),
+    ].sort((a, b) => a.line - b.line || a.column - b.column);
+  },
+};
+
 // ─────────────────────────── allowExpressions usage ───────────────────────────
 
 /**
@@ -499,7 +952,7 @@ function collectExpressionTexts(
   if (!isWorkflowFile(file)) return result;
   let doc: unknown;
   try {
-    doc = YAML.parseDocument(file.text, {}).contents;
+    doc = loadWorkflowContents(file.text);
   } catch {
     return result;
   }
@@ -561,7 +1014,7 @@ const runExpression: Rule = {
     const { file, config } = ctx;
     let doc: unknown;
     try {
-      doc = YAML.parseDocument(file.text, {}).contents;
+      doc = loadWorkflowContents(file.text);
     } catch {
       // Not valid YAML (or YAML.parseDocument threw for some other
       // reason): nothing this rule can safely inspect. Not this rule's
@@ -585,7 +1038,7 @@ const runExpression: Rule = {
     );
 
     const violations: Violation[] = [];
-    for (const scalar of runScalars) {
+    for (const scalar of uniqueBy(runScalars, (s) => String(s.range[0]))) {
       const [start, end] = scalar.range;
       const raw = file.text.slice(start, end);
       for (const m of findAllRegex(raw, EXPRESSION_RE)) {
@@ -596,7 +1049,10 @@ const runExpression: Rule = {
         );
       }
     }
-    for (const scalar of executedInputScalars) {
+    for (const scalar of uniqueBy(
+      executedInputScalars,
+      (s) => `${s.range[0]}:${s.entry.uses}:${s.entry.input}`,
+    )) {
       const [start, end] = scalar.range;
       const raw = file.text.slice(start, end);
       for (const m of findAllRegex(raw, EXPRESSION_RE)) {
@@ -813,7 +1269,7 @@ const node20ActionMajor: Rule = {
     const { file, config } = ctx;
     let doc: unknown;
     try {
-      doc = YAML.parseDocument(file.text, {}).contents;
+      doc = loadWorkflowContents(file.text);
     } catch {
       return [];
     }
@@ -823,7 +1279,7 @@ const node20ActionMajor: Rule = {
     const activeMajors = resolveNode20Majors(config);
 
     const violations: Violation[] = [];
-    for (const ref of usesRefs) {
+    for (const ref of uniqueBy(usesRefs, (r) => String(r.range[0]))) {
       const parsed = parseUsesValue(ref.value);
       if (!parsed) continue;
       if (parsed.major) {
@@ -971,6 +1427,18 @@ interface StepRunInfo {
    * default shell on a Windows runner is `pwsh`, not bash.
    */
   jobRunsOn?: RunsOnResolution;
+  /**
+   * Places on this step's shell / `runs-on` / `continue-on-error` read
+   * path that this rule could not read: a mapping on the path (the
+   * workflow, the job, `defaults`, `defaults.run`, the step) carrying a
+   * `<<` merge key or a key this rule cannot name (`isUnnameableKey`), or
+   * a value on it (including anything inside `runs-on:`) that is an alias
+   * which could not be resolved. Either way the value the key or alias
+   * stands for is read as absent, which for a `block` gate is the false-clean direction, so
+   * `audit-gate-shape` refuses a step with any entry here instead of
+   * certifying it. Empty for every readable step.
+   */
+  unreadable: string[];
 }
 
 /**
@@ -1030,15 +1498,42 @@ function runScalarStyle(
 function findNestedShellField(
   node: unknown,
   path: string[],
+  where: string,
+  unreadable: string[],
 ): ShellField | undefined {
   let current: unknown = node;
-  for (const key of path) {
+  for (let depth = 0; depth < path.length; depth++) {
+    const key = path[depth];
+    if (isAliasNode(current)) {
+      unreadable.push(
+        `${where}'s \`defaults\` chain passes through an alias this rule cannot resolve`,
+      );
+      return undefined;
+    }
     if (!hasItems(current)) return undefined;
+    if (hasMergeKey(current)) {
+      unreadable.push(
+        `${where}'s \`defaults\` chain passes through a mapping carrying a \`<<\` merge key`,
+      );
+    }
+    // Depth 0 is the workflow or job mapping itself, checked by
+    // `collectStepRuns` as a mapping on the step's path.
+    if (depth > 0 && hasUnnameableKey(current)) {
+      unreadable.push(
+        `${where}'s \`${path.slice(0, depth).join(".")}\` mapping has a key this rule cannot name`,
+      );
+    }
     const pair = current.items.find(
       (item) => isPairNode(item) && scalarKeyName(item.key) === key,
     );
     if (!pair || !isPairNode(pair)) return undefined;
     current = (pair as { value: unknown }).value;
+  }
+  if (isAliasNode(current)) {
+    unreadable.push(
+      `${where}'s \`defaults.run.shell\` is an alias this rule cannot resolve`,
+    );
+    return undefined;
   }
   return isScalarNode(current)
     ? { value: current.value, range: current.range }
@@ -1139,6 +1634,7 @@ function collectStepRuns(
   workflowDefaultShell?: ShellField,
   jobDefaultShell?: ShellField,
   jobRunsOn?: RunsOnResolution,
+  inheritedUnreadable: string[] = [],
 ): void {
   if (!hasItems(node)) return;
   const isUsesStep = node.items.some(
@@ -1150,6 +1646,62 @@ function collectStepRuns(
   const isWorkflowMapping = node.items.some(
     (item) => isPairNode(item) && scalarKeyName(item.key) === "jobs",
   );
+  // What this mapping adds to the step's unreadable read path: a merge key
+  // in a workflow or job mapping, an unresolved alias standing for one of
+  // the values read from it, and (below) the `defaults.run.shell` chain.
+  const ownUnreadable: string[] = [];
+  const levelName = isWorkflowMapping ? "the workflow" : "the job";
+  if ((isWorkflowMapping || isJobMapping) && hasMergeKey(node)) {
+    ownUnreadable.push(`${levelName} mapping carries a \`<<\` merge key`);
+  }
+  // A key this rule cannot name, in any mapping on the step's path (the
+  // workflow, the job, the step, or one enclosing them), can stand for
+  // `jobs:`, `steps:`, `defaults:`, `runs-on:`, `shell:` or
+  // `continue-on-error:`, which would otherwise read as absent.
+  const isStepMapping =
+    !insideWith &&
+    node.items.some(
+      (item) => isPairNode(item) && scalarKeyName(item.key) === "run",
+    );
+  if (hasUnnameableKey(node)) {
+    const owner = isWorkflowMapping
+      ? "the workflow"
+      : isJobMapping
+        ? "the job"
+        : isStepMapping
+          ? "the step"
+          : "a mapping enclosing the step";
+    ownUnreadable.push(
+      `${owner} mapping has a key this rule cannot name (an alias it cannot resolve, or a mapping or sequence used as a key)`,
+    );
+  }
+  const unresolvedValue = (key: string, where: string): void => {
+    const pair = node.items.find(
+      (item) => isPairNode(item) && scalarKeyName(item.key) === key,
+    );
+    if (pair && isPairNode(pair) && isAliasNode(pair.value)) {
+      ownUnreadable.push(
+        `${where}'s \`${key}:\` is an alias this rule cannot resolve`,
+      );
+    }
+  };
+  if (isJobMapping) {
+    unresolvedValue("continue-on-error", levelName);
+    unresolvedValue("runs-on", levelName);
+    const runsOn = node.items.find(
+      (item) => isPairNode(item) && scalarKeyName(item.key) === "runs-on",
+    );
+    if (
+      runsOn &&
+      isPairNode(runsOn) &&
+      hasItems(runsOn.value) &&
+      containsUnreadablePart(runsOn.value)
+    ) {
+      ownUnreadable.push(
+        `${levelName}'s \`runs-on:\` contains an alias this rule cannot resolve or a key it cannot name`,
+      );
+    }
+  }
   const effectiveJobCoE = isJobMapping
     ? (() => {
         const jobCoePair = node.items.find(
@@ -1164,11 +1716,25 @@ function collectStepRuns(
       })()
     : jobContinueOnError;
   const effectiveWorkflowDefaultShell = isWorkflowMapping
-    ? findNestedShellField(node, ["defaults", "run", "shell"])
+    ? findNestedShellField(
+        node,
+        ["defaults", "run", "shell"],
+        "the workflow",
+        ownUnreadable,
+      )
     : workflowDefaultShell;
   const effectiveJobDefaultShell = isJobMapping
-    ? findNestedShellField(node, ["defaults", "run", "shell"])
+    ? findNestedShellField(
+        node,
+        ["defaults", "run", "shell"],
+        "the job",
+        ownUnreadable,
+      )
     : jobDefaultShell;
+  const effectiveUnreadable =
+    ownUnreadable.length > 0
+      ? [...inheritedUnreadable, ...ownUnreadable]
+      : inheritedUnreadable;
   const effectiveJobRunsOn = isJobMapping
     ? (() => {
         const runsOnPair = node.items.find(
@@ -1192,6 +1758,23 @@ function collectStepRuns(
         coePair && isPairNode(coePair) && isScalarNode(coePair.value)
           ? { value: coePair.value.value, range: coePair.value.range }
           : undefined;
+      const stepUnreadable = [...effectiveUnreadable];
+      if (hasMergeKey(node)) {
+        stepUnreadable.push("the step mapping carries a `<<` merge key");
+      }
+      for (const key of ["shell", "continue-on-error"]) {
+        const aliasPair = node.items.find(
+          (item) =>
+            isPairNode(item) &&
+            scalarKeyName(item.key) === key &&
+            isAliasNode(item.value),
+        );
+        if (aliasPair) {
+          stepUnreadable.push(
+            `the step's \`${key}:\` is an alias this rule cannot resolve`,
+          );
+        }
+      }
       const shellPair = node.items.find(
         (item) => isPairNode(item) && scalarKeyName(item.key) === "shell",
       );
@@ -1216,6 +1799,7 @@ function collectStepRuns(
         jobDefaultShell: effectiveJobDefaultShell,
         workflowDefaultShell: effectiveWorkflowDefaultShell,
         jobRunsOn: effectiveJobRunsOn,
+        unreadable: stepUnreadable,
       });
     }
   }
@@ -1231,6 +1815,7 @@ function collectStepRuns(
         effectiveWorkflowDefaultShell,
         effectiveJobDefaultShell,
         effectiveJobRunsOn,
+        effectiveUnreadable,
       );
     } else {
       collectStepRuns(
@@ -1242,6 +1827,7 @@ function collectStepRuns(
         effectiveWorkflowDefaultShell,
         effectiveJobDefaultShell,
         effectiveJobRunsOn,
+        effectiveUnreadable,
       );
     }
   }
@@ -2712,7 +3298,7 @@ interface AuditStepBlock {
 function collectAuditStepBlocks(file: FileTarget): AuditStepBlock[] {
   let doc: unknown;
   try {
-    doc = YAML.parseDocument(file.text, {}).contents;
+    doc = loadWorkflowContents(file.text);
   } catch {
     return [];
   }
@@ -2834,6 +3420,10 @@ function shapeViolationMessage(
 const SHELL_MESSAGE_TAIL =
   'Set an explicit bash `shell:` on the gate step (or its job\'s or the workflow\'s `defaults.run.shell`), or use the reviewed per-repo exception instead: a `# slop-detector:disable-line=workflow-slop/audit-gate-shape` comment on this line, or `rules: { "workflow-slop/audit-gate-shape": { enabled: false } }` in `slop.config.yml` to disable the rule for the whole repo (see docs/workflow-slop.md\'s "Scope" section).';
 
+function unreadableMessage(reasons: string[]): string {
+  return `Unrecognised npm-audit gate shape in this audit workflow: ${reasons.join("; ")}, so this rule cannot tell which \`shell:\`, \`runs-on\` or \`continue-on-error\` applies to the gate step and does not certify it. GitHub Actions does not merge \`<<\` keys; write the mapping out, or use an alias for the whole value (\`key: *anchor\`) whose anchor precedes it and whose name is defined once, and write every key as a plain name. Otherwise the reviewed per-repo exception applies: a \`# slop-detector:disable-line=workflow-slop/audit-gate-shape\` comment on this line, or \`rules: { "workflow-slop/audit-gate-shape": { enabled: false } }\` in \`slop.config.yml\`.`;
+}
+
 function shellViolationMessage(reason: string): string {
   return `Unrecognised npm-audit gate shape in this audit workflow: ${reason}. ${SHELL_MESSAGE_TAIL}`;
 }
@@ -2871,6 +3461,24 @@ const auditGateShape: Rule = {
         ? statementOffsetAt(entry.gate, 0)
         : entry.step.runRange[0];
       const matched = entry.gate ? entry.gate.trimmed : entry.step.styleLabel;
+
+      // 0a. A shell, `runs-on` or `continue-on-error` that arrives through a
+      //     merge key or an alias this rule cannot resolve is read as
+      //     absent, which would certify the gate. Refuse instead, before
+      //     the shell chain below trusts a value that may not be the
+      //     effective one.
+      if (entry.step.unreadable.length > 0) {
+        violations.push(
+          makeAuditViolation(
+            auditGateShape,
+            file,
+            offset,
+            matched,
+            unreadableMessage(entry.step.unreadable),
+          ),
+        );
+        continue;
+      }
 
       // 0. A shell this rule does not analyse as bash refuses before
       //    everything else, template included: a registered template is
@@ -2966,7 +3574,12 @@ const auditGateShape: Rule = {
         ),
       );
     }
-    return violations;
+    // A step or job shared through an alias is one mapping reached twice:
+    // report the same finding once.
+    return uniqueBy(
+      violations,
+      (v) => `${v.line}:${v.column}:${v.ruleId}:${v.message}`,
+    );
   },
 };
 
@@ -2978,6 +3591,7 @@ export const workflowSlopPack: PackDefinition = {
     "GitHub Actions workflow injection and CI-guard regressions: a `${{ ... }}` expression interpolated directly into a `run:` shell script (unless one of the documented non-attacker-controllable contexts), a reintroduced Node-20 action major, an audit.yml with no certifiable npm-audit gate, and an npm-audit gate step whose shape is not one this pack recognises. Off by default; opt in via `--pack workflow-slop` or `packs.workflow-slop: true`.",
   rules: [
     unparseableWorkflow,
+    unsupportedYamlConstruct,
     runExpression,
     node20ActionMajor,
     auditGateMissing,

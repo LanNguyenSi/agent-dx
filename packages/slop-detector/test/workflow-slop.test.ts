@@ -3173,3 +3173,1203 @@ describe("workflow-slop/audit-gate-shape: multiple gate steps", () => {
     ).toHaveLength(1);
   });
 });
+
+// ───────────── YAML anchors, aliases and merge keys ─────────────
+//
+// GitHub Actions accepts anchors and aliases and has no merge-key handling,
+// so an alias is resolved before any structural read and a merge key is
+// reported (and never certifies an audit gate). An anchor name defined more
+// than once is reported and no alias to it is resolved.
+
+const YAML_RULE = "workflow-slop/unsupported-yaml-construct";
+const RUN_RULE = "workflow-slop/run-expression";
+const NODE20_RULE = "workflow-slop/node20-action-major";
+
+const violationsOf = (text: string, ruleId: string, filePath = WORKFLOW_PATH) =>
+  runViolations(text, filePath).filter((v) => v.ruleId === ruleId);
+
+describe("workflow-slop: alias resolution before the executed-input and uses reads", () => {
+  it("scans a `with:` mapping supplied whole through an alias (`with: *w`) as the executed action's inputs", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - uses: some-org/other-action@v1",
+      "        with: &w",
+      "          script: console.log('${{ github.event.issue.title }}')",
+      "      - uses: actions/github-script@v8",
+      "        with: *w",
+    ].join("\n");
+    const v = violationsOf(text, RUN_RULE);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain("`actions/github-script`'s `script` input");
+    // The scalar lives at its anchor site, so that is where it is reported.
+    expect(v[0].line).toBe(8);
+  });
+
+  it("reports one finding when the same anchored input reaches two executed steps", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: actions/github-script@v8",
+      "        with: &w",
+      "          script: console.log('${{ github.head_ref }}')",
+      "      - uses: actions/github-script@v8",
+      "        with: *w",
+    ].join("\n");
+    expect(violationsOf(text, RUN_RULE)).toHaveLength(1);
+  });
+
+  it("scans an executed input whose value is an aliased scalar (`script: *s`)", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: some-org/other-action@v1",
+      "        with:",
+      "          note: &s console.log('${{ github.ref_name }}')",
+      "      - uses: actions/github-script@v8",
+      "        with:",
+      "          script: *s",
+    ].join("\n");
+    expect(violationsOf(text, RUN_RULE)).toHaveLength(1);
+  });
+
+  it("recognises a `uses:` step whose `uses:` value is an alias, so its `with:` is an input block", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: &act actions/github-script@v8",
+      "        with:",
+      "          script: |",
+      "            core.info('ok')",
+      "      - uses: *act",
+      "        with:",
+      "          run: echo ${{ github.ref }}",
+    ].join("\n");
+    // `run` here is an input name of the action, not a shell script: the
+    // aliased `uses:` must still be seen as a `uses:` step for the exemption.
+    expect(violationsOf(text, RUN_RULE)).toHaveLength(0);
+  });
+
+  it("scans a `run:` scalar supplied through an alias, once, at the anchor", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: some-org/other-action@v1",
+      "        with:",
+      "          note: &cmd echo ${{ github.ref }}",
+      "      - run: *cmd",
+      "      - run: *cmd",
+    ].join("\n");
+    // The anchor sits in an exempt `with:` block, so the reads through
+    // `run:` are what report it; two aliases of one scalar, one finding.
+    const v = violationsOf(text, RUN_RULE);
+    expect(v).toHaveLength(1);
+    expect(v[0].line).toBe(7);
+  });
+
+  it("reports a Node-20 `uses:` supplied through an alias once, at its anchor", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  a:",
+      "    steps:",
+      "      - uses: some-org/other-action@v1",
+      "        with:",
+      "          pin: &old actions/github-script@v7",
+      "      - uses: *old",
+      "  b:",
+      "    steps:",
+      "      - uses: *old",
+    ].join("\n");
+    // The anchor sits in an exempt `with:` block, so only the alias reads
+    // reach it; two aliases of one scalar, one finding.
+    const v = violationsOf(text, NODE20_RULE);
+    expect(v).toHaveLength(1);
+    expect(v[0].line).toBe(7);
+  });
+
+  it("resolves no alias to an anchor name defined twice: the redefinition is reported and the Node-20 read is not certified on either definition", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: some-org/other-action@v1",
+      "        with:",
+      "          pin: &a actions/checkout@v6",
+      "      - uses: *a",
+      "      - uses: some-org/other-action@v1",
+      "        with:",
+      "          pin: &a actions/github-script@v7",
+      "      - uses: *a",
+    ].join("\n");
+    const v = violationsOf(text, YAML_RULE);
+    expect(v).toHaveLength(1);
+    expect(v[0].severity).toBe("block");
+    expect(v[0].line).toBe(11);
+    expect(v[0].matched).toBe("&a");
+    expect(v[0].message).toContain(
+      "The YAML anchor `&a` is defined more than once in this file",
+    );
+    // No alias to the name was resolved, so the aliased `uses:` values are
+    // not read as either definition.
+    expect(violationsOf(text, NODE20_RULE)).toEqual([]);
+  });
+
+  it("does not report a file that only uses resolvable aliases", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    env: &e",
+      "      A: b",
+      "    steps:",
+      "      - run: echo hi",
+      "        env: *e",
+    ].join("\n");
+    expect(runViolations(text)).toEqual([]);
+  });
+});
+
+describe("workflow-slop/unsupported-yaml-construct", () => {
+  it("reports a `<<` merge key with a block finding at the key, and says GitHub does not merge it", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - &base",
+      "        uses: actions/github-script@v8",
+      "      - <<: *base",
+      "        with:",
+      "          script: console.log('${{ github.event.issue.title }}')",
+    ].join("\n");
+    const v = violationsOf(text, YAML_RULE);
+    expect(v).toHaveLength(1);
+    expect(v[0].severity).toBe("block");
+    expect(v[0].line).toBe(7);
+    expect(v[0].column).toBe(9);
+    expect(v[0].matched).toBe("<<");
+    expect(v[0].message).toBe(
+      "A YAML merge key (`<<`) is not merged by GitHub Actions: its documentation covers anchors and aliases only, and the workflow parser has no merge-key handling. This pack does not merge it either, so the keys it would supply (a `uses:`, a `with:` input, `defaults:`, `shell:`, `runs-on:`) are read as absent and a result for this file cannot be trusted clean. Write the mapping out, or use an alias for the whole value (`key: *anchor`).",
+    );
+  });
+
+  it("reports each merge key of a file, in source order, wherever the mapping sits", () => {
+    const text = [
+      "on: push",
+      "x: &m",
+      "  k: v",
+      "env:",
+      "  <<: *m",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - run: echo",
+      "        env:",
+      "          <<: [*m]",
+    ].join("\n");
+    const v = violationsOf(text, YAML_RULE);
+    expect(v.map((x) => x.line)).toEqual([5, 11]);
+  });
+
+  it("does not report a mapping key that merely contains the text", () => {
+    const text = ["on: push", "env:", "  A<<B: x", "  '<': y"].join("\n");
+    expect(violationsOf(text, YAML_RULE)).toEqual([]);
+  });
+
+  it("reports an alias whose anchor was never defined", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - run: echo",
+      "        env: *missing",
+    ].join("\n");
+    const v = violationsOf(text, YAML_RULE);
+    expect(v).toHaveLength(1);
+    expect(v[0].severity).toBe("block");
+    expect(v[0].line).toBe(6);
+    expect(v[0].matched).toBe("*missing");
+    expect(v[0].message).toContain(
+      "The YAML alias `*missing` cannot be resolved (no anchor of that name precedes it)",
+    );
+  });
+
+  it("reports an alias that refers to a node containing it, without hanging", () => {
+    const text = ["on: push", "x: &loop", "  - *loop"].join("\n");
+    const v = violationsOf(text, YAML_RULE);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain(
+      "The YAML alias `*loop` cannot be resolved (it refers to a node that contains it)",
+    );
+  });
+
+  it("refuses to expand an alias bomb, reports it once and finishes", () => {
+    const lines = ["on: push", "l0: &l0 [a, a, a, a, a, a, a, a, a]"];
+    for (let i = 1; i <= 9; i++) {
+      lines.push(
+        `l${i}: &l${i} [${Array(9)
+          .fill(`*l${i - 1}`)
+          .join(", ")}]`,
+      );
+    }
+    const started = Date.now();
+    const v = violationsOf(lines.join("\n"), YAML_RULE);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain(
+      "Resolving this file's YAML aliases would visit more than 200000 nodes, so none of them were resolved",
+    );
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+
+  it("reports a key that is an alias standing for the scalar `<<`", () => {
+    const text = [
+      "on: push",
+      "env:",
+      '  K: &m "<<"',
+      "jobs:",
+      "  a:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - run: echo hi",
+      "        *m : {x: 1}",
+    ].join("\n");
+    const v = violationsOf(text, YAML_RULE);
+    expect(v).toHaveLength(1);
+    expect(v[0].line).toBe(9);
+    expect(v[0].matched).toBe("<<");
+  });
+
+  it("does not apply to a file outside .github/workflows", () => {
+    const text = ["x: &a 1", "y:", "  <<: *a"].join("\n");
+    expect(violationsOf(text, YAML_RULE, "docs/example.yml")).toEqual([]);
+  });
+});
+
+describe("workflow-slop: an anchor name defined more than once", () => {
+  it("reports an injection reached through a shadowed anchor and an alias nested in an earlier alias", () => {
+    const text = [
+      "on: issues",
+      "jobs:",
+      "  j:",
+      "    runs-on: ubuntu-latest",
+      "    env:",
+      '      SAFE: &R "echo hello"',
+      "      WRAP: &B {v: *R}",
+      '      EVIL: &R "echo ${{ github.event.issue.title }}"',
+      "      AGAIN: *B",
+      "    steps:",
+      "      - run: *R",
+    ].join("\n");
+    const v = violationsOf(text, YAML_RULE);
+    expect(v.map((x) => [x.line, x.matched])).toEqual([[8, "&R"]]);
+  });
+
+  it("reports the redefinition when the executed scalar is written at the later definition", () => {
+    const text = [
+      "on: issues",
+      "jobs:",
+      "  j:",
+      "    runs-on: ubuntu-latest",
+      "    env:",
+      '      SAFE: &R "echo hello"',
+      '      EVIL: &R "echo ${{ github.event.issue.title }}"',
+      "    steps:",
+      "      - run: *R",
+    ].join("\n");
+    expect(violationsOf(text, YAML_RULE)).toHaveLength(1);
+  });
+
+  it("does not certify a gate whose shell alias names a redefined anchor", () => {
+    const text = [
+      "on: push",
+      "env:",
+      "  A: &SH bash",
+      "  B: &W {x: *SH}",
+      "  C: &SH pwsh",
+      "  D: *W",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+      "        shell: *SH",
+    ].join("\n");
+    const shape = shapeViolations(text);
+    expect(shape).toHaveLength(1);
+    expect(shape[0].message).toContain("alias this rule cannot resolve");
+    expect(
+      violationsOf(text, YAML_RULE, AUDIT_PATH).map((x) => x.line),
+    ).toEqual([5]);
+  });
+
+  it("reports a redefinition that the nested-alias replay reads differently from YAML", () => {
+    const text = [
+      "on: issues",
+      "env:",
+      '  BASE: &R "echo hi"',
+      "jobs:",
+      "  a:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - &S",
+      "        run: *R",
+      "  b:",
+      "    runs-on: ubuntu-latest",
+      "    env:",
+      '      X: &R "echo ${{ github.event.issue.title }}"',
+      "    steps:",
+      "      - *S",
+    ].join("\n");
+    const v = violationsOf(text, YAML_RULE);
+    expect(v.map((x) => [x.line, x.matched])).toEqual([[13, "&R"]]);
+  });
+
+  it("does not report distinct anchor names or a name used by aliases only", () => {
+    const text = [
+      "on: push",
+      "env:",
+      "  A: &a 1",
+      "  B: &b 2",
+      "  C: *a",
+      "  D: *a",
+      "  E: *b",
+    ].join("\n");
+    expect(violationsOf(text, YAML_RULE)).toEqual([]);
+  });
+});
+
+describe("workflow-slop: the redefinition finding sits on the anchor token", () => {
+  it("reports a redefined block mapping at its `&name` token, not at its first key", () => {
+    const text = [
+      "on: push",
+      "env:",
+      "  A: &M",
+      "    y: 1",
+      "  B: &M",
+      "    y: 2",
+    ].join("\n");
+    const v = violationsOf(text, YAML_RULE);
+    expect(v.map((x) => [x.line, x.column, x.matched])).toEqual([[5, 6, "&M"]]);
+  });
+
+  it("lets a disable comment on the anchor line silence the redefinition finding", () => {
+    const text = [
+      "on: push",
+      "env:",
+      "  A: &M",
+      "    y: 1",
+      "  B: &M # slop-detector:disable-line=workflow-slop/unsupported-yaml-construct",
+      "    y: 2",
+    ].join("\n");
+    expect(violationsOf(text, YAML_RULE)).toEqual([]);
+  });
+});
+
+describe("workflow-slop: an anchor and an alias in the same pair", () => {
+  it("resolves a value alias to the anchor on its own key (`&k shell: *k` is `shell: shell`)", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - {run: npm audit --audit-level=high, &k shell: *k}",
+    ].join("\n");
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shellMessage(
+        "the gate step's `shell:` is `shell`, which this rule does not analyse as bash",
+      ),
+    );
+    expect(auditViolations(text, YAML_RULE)).toEqual([]);
+  });
+
+  it("reports a key alias whose anchor sits on its own value (`*k : &k run`) as unresolvable", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - {*k : &k run}",
+    ].join("\n");
+    const v = auditViolations(text, YAML_RULE);
+    expect(v.map((x) => [x.line, x.column, x.matched])).toEqual([
+      [6, 10, "*k"],
+    ]);
+    expect(v[0].message).toContain("no anchor of that name precedes it");
+  });
+});
+
+describe("workflow-slop/audit-gate-shape: a key this rule cannot name on the read path", () => {
+  const DISABLE =
+    " # slop-detector:disable-line=workflow-slop/unsupported-yaml-construct";
+  // `*K` names a redefined anchor, so it stays an alias node: a YAML
+  // parser reads it as the last `&K` (`name`), this rule cannot name it.
+  const withKey = (name: string, body: string[], disable: boolean) =>
+    [
+      "on: push",
+      "env:",
+      `  A: &K ${name}x`,
+      `  B: &K ${name}${disable ? DISABLE : ""}`,
+      ...body,
+    ].join("\n");
+  const gate = "      - run: npm audit --audit-level=high";
+  const cases: Array<{
+    level: string;
+    key: string;
+    body: string[];
+    reason: string;
+  }> = [
+    {
+      level: "step shell",
+      key: "shell",
+      body: [
+        "jobs:",
+        "  audit:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        gate,
+        "        *K : pwsh",
+      ],
+      reason: "the step mapping has a key this rule cannot name",
+    },
+    {
+      level: "step continue-on-error",
+      key: "continue-on-error",
+      body: [
+        "jobs:",
+        "  audit:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        gate,
+        "        *K : true",
+      ],
+      reason: "the step mapping has a key this rule cannot name",
+    },
+    {
+      level: "job continue-on-error",
+      key: "continue-on-error",
+      body: [
+        "jobs:",
+        "  audit:",
+        "    runs-on: ubuntu-latest",
+        "    *K : true",
+        "    steps:",
+        gate,
+      ],
+      reason: "the job mapping has a key this rule cannot name",
+    },
+    {
+      level: "job runs-on",
+      key: "runs-on",
+      body: [
+        "jobs:",
+        "  audit:",
+        "    *K : windows-latest",
+        "    steps:",
+        gate,
+      ],
+      reason: "the job mapping has a key this rule cannot name",
+    },
+    {
+      level: "workflow defaults",
+      key: "defaults",
+      body: [
+        "*K :",
+        "  run:",
+        "    shell: pwsh",
+        "jobs:",
+        "  audit:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        gate,
+      ],
+      reason: "the workflow mapping has a key this rule cannot name",
+    },
+    {
+      level: "workflow jobs",
+      key: "jobs",
+      body: [
+        "defaults:",
+        "  run:",
+        "    shell: pwsh",
+        "*K :",
+        "  audit:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        gate,
+      ],
+      reason:
+        "a mapping enclosing the step mapping has a key this rule cannot name",
+    },
+    {
+      level: "job defaults",
+      key: "run",
+      body: [
+        "jobs:",
+        "  audit:",
+        "    runs-on: ubuntu-latest",
+        "    defaults:",
+        "      *K :",
+        "        shell: pwsh",
+        "    steps:",
+        gate,
+      ],
+      reason: "the job's `defaults` mapping has a key this rule cannot name",
+    },
+    {
+      level: "job defaults.run",
+      key: "shell",
+      body: [
+        "jobs:",
+        "  audit:",
+        "    runs-on: ubuntu-latest",
+        "    defaults:",
+        "      run:",
+        "        *K : pwsh",
+        "    steps:",
+        gate,
+      ],
+      reason:
+        "the job's `defaults.run` mapping has a key this rule cannot name",
+    },
+    {
+      level: "workflow defaults.run",
+      key: "shell",
+      body: [
+        "defaults:",
+        "  run:",
+        "    *K : pwsh",
+        "jobs:",
+        "  audit:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        gate,
+      ],
+      reason:
+        "the workflow's `defaults.run` mapping has a key this rule cannot name",
+    },
+    {
+      level: "runs-on mapping",
+      key: "labels",
+      body: [
+        "jobs:",
+        "  audit:",
+        "    runs-on:",
+        "      group: g",
+        "      *K : [windows-latest]",
+        "    steps:",
+        gate,
+      ],
+      reason:
+        "the job's `runs-on:` contains an alias this rule cannot resolve or a key it cannot name",
+    },
+    {
+      level: "runs-on sequence value",
+      key: "windows-latest",
+      body: [
+        "jobs:",
+        "  audit:",
+        "    runs-on: [ubuntu-latest, *K]",
+        "    steps:",
+        gate,
+      ],
+      reason:
+        "the job's `runs-on:` contains an alias this rule cannot resolve or a key it cannot name",
+    },
+    {
+      level: "runs-on labels value",
+      key: "windows-latest",
+      body: [
+        "jobs:",
+        "  audit:",
+        "    runs-on:",
+        "      group: g",
+        "      labels: *K",
+        "    steps:",
+        gate,
+      ],
+      reason:
+        "the job's `runs-on:` contains an alias this rule cannot resolve or a key it cannot name",
+    },
+  ];
+
+  for (const c of cases) {
+    it(`refuses the gate when the ${c.level} key is an alias it cannot resolve, with or without the construct finding disabled`, () => {
+      for (const disable of [false, true]) {
+        const text = withKey(c.key, c.body, disable);
+        const v = shapeViolations(text);
+        expect(v, `disable=${disable}`).toHaveLength(1);
+        expect(v[0].message, `disable=${disable}`).toContain(c.reason);
+        expect(
+          auditViolations(text, YAML_RULE).map((x) => x.line),
+          `disable=${disable}`,
+        ).toEqual(disable ? [] : [4]);
+      }
+    });
+  }
+
+  it("refuses a gate whose step carries a key written as a collection, and reports the key", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      gate,
+      "        ? [shell]",
+      "        : pwsh",
+    ].join("\n");
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain(
+      "the step mapping has a key this rule cannot name",
+    );
+    expect(
+      auditViolations(text, YAML_RULE).map((x) => [
+        x.line,
+        x.column,
+        x.matched,
+      ]),
+    ).toEqual([[7, 11, "["]]);
+  });
+
+  it("certifies a gate whose key alias resolves to `shell:` with a bash value, and refuses a pwsh one as pwsh", () => {
+    const body = (value: string) =>
+      [
+        "on: push",
+        "env:",
+        "  A: &K shell",
+        "jobs:",
+        "  audit:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        gate,
+        `        *K : ${value}`,
+      ].join("\n");
+    expect(shapeViolations(body("bash"))).toEqual([]);
+    const v = shapeViolations(body("pwsh"));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shellMessage(
+        "the gate step's `shell:` is `pwsh`, which this rule does not analyse as bash",
+      ),
+    );
+  });
+});
+
+describe("workflow-slop/unsupported-yaml-construct: a mapping key that is a collection", () => {
+  it("reports a `?` key written as a sequence in place of `run:`, instead of scanning clean", () => {
+    const text = [
+      "on: issues",
+      "jobs:",
+      "  j:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - ? [run]",
+      "        : echo ${{ github.event.issue.title }}",
+    ].join("\n");
+    const v = violationsOf(text, YAML_RULE);
+    expect(v.map((x) => [x.line, x.column, x.matched])).toEqual([[6, 11, "["]]);
+    expect(v[0].severity).toBe("block");
+    expect(v[0].message).toContain("has no name this pack can read");
+  });
+
+  it("reports a key alias that stands for a collection at the alias", () => {
+    const text = [
+      "on: issues",
+      "x: &C [script]",
+      "jobs:",
+      "  j:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - uses: actions/github-script@v8",
+      "        with:",
+      "          *C : console.log('${{ github.event.issue.title }}')",
+    ].join("\n");
+    expect(
+      violationsOf(text, YAML_RULE).map((x) => [x.line, x.column, x.matched]),
+    ).toEqual([[9, 11, "*C"]]);
+  });
+
+  it("does not report plain, quoted, null or numeric scalar keys", () => {
+    const text = [
+      "on: push",
+      "env:",
+      '  "quoted": 1',
+      "  1: 2",
+      "  true: 3",
+      "  ? a",
+      "  : 4",
+      "jobs:",
+      "  j:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - run: echo hi",
+    ].join("\n");
+    expect(violationsOf(text, YAML_RULE)).toEqual([]);
+  });
+});
+
+describe("workflow-slop: alias resolution scales with the document", () => {
+  it("resolves thousands of anchors and aliases in one file within a generous bound", () => {
+    const n = 5000;
+    const lines = ["on: push", "env:"];
+    for (let i = 0; i < n; i++) lines.push(`  A${i}: &a${i} v${i}`);
+    lines.push("jobs:", "  j:", "    runs-on: ubuntu-latest", "    env:");
+    for (let i = 0; i < n; i++) lines.push(`      B${i}: *a${i}`);
+    lines.push("    steps:", "      - run: echo hi");
+    const started = Date.now();
+    expect(runViolations(lines.join("\n"))).toEqual([]);
+    // CI runners took about 7 s for this linear case; a quadratic
+    // resolution takes several times the bound, so it still discriminates.
+    expect(Date.now() - started).toBeLessThan(30000);
+  }, 120000);
+});
+
+describe("workflow-slop/audit-gate-shape: aliases and merge keys on the shell read path", () => {
+  it("resolves an alias used directly as a step `shell:` value, and refuses the non-bash value it stands for", () => {
+    const text = [
+      "on: push",
+      "x: &sh pwsh",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - shell: *sh",
+      "        run: npm audit --audit-level=high",
+    ].join("\n");
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shellMessage(
+        "the gate step's `shell:` is `pwsh`, which this rule does not analyse as bash",
+      ),
+    );
+  });
+
+  it("certifies an alias `shell:` whose value is bash", () => {
+    const text = [
+      "on: push",
+      "x: &sh bash",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - shell: *sh",
+      "        run: npm audit --audit-level=high",
+    ].join("\n");
+    expect(shapeViolations(text)).toEqual([]);
+    expect(auditViolations(text, YAML_RULE)).toEqual([]);
+  });
+
+  it("resolves a job `defaults:` mapping supplied through an alias the same way", () => {
+    const pwsh = [
+      "on: push",
+      "x: &d",
+      "  run:",
+      "    shell: pwsh",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    defaults: *d",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+    const v = shapeViolations(pwsh);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shellMessage(
+        "the gate step's shell is `pwsh`, set by its job's `defaults.run.shell`, which this rule does not analyse as bash",
+      ),
+    );
+    expect(shapeViolations(pwsh.replace("shell: pwsh", "shell: bash"))).toEqual(
+      [],
+    );
+  });
+
+  it("resolves a workflow-level `defaults:` supplied through an alias", () => {
+    const text = [
+      "on: push",
+      "x: &d",
+      "  run:",
+      "    shell: pwsh",
+      "defaults: *d",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain(
+      "set by the workflow's `defaults.run.shell`",
+    );
+  });
+
+  it("resolves a Windows `runs-on:` supplied through an alias", () => {
+    const text = [
+      "on: push",
+      "x: &os windows-latest",
+      "jobs:",
+      "  audit:",
+      "    runs-on: *os",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain("names a Windows runner");
+  });
+
+  it("resolves a job `continue-on-error:` supplied through an alias", () => {
+    const text = [
+      "on: push",
+      "x: &c true",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    continue-on-error: *c",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain(
+      "`continue-on-error` on the gate step's enclosing job is set to `true`",
+    );
+  });
+
+  it("reports a step shared between two jobs through an alias once", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  a:",
+      "    runs-on: ubuntu-latest",
+      "    steps: &steps",
+      "      - shell: pwsh",
+      "        run: npm audit --audit-level=high",
+      "  b:",
+      "    runs-on: ubuntu-latest",
+      "    steps: *steps",
+    ].join("\n");
+    expect(shapeViolations(text)).toHaveLength(1);
+  });
+
+  it("never certifies a `shell:` that arrives through a merge key, whatever it merges", () => {
+    for (const shell of ["pwsh", "bash"]) {
+      const text = [
+        "on: push",
+        "x: &d",
+        "  run:",
+        `    shell: ${shell}`,
+        "jobs:",
+        "  audit:",
+        "    runs-on: ubuntu-latest",
+        "    defaults:",
+        "      <<: *d",
+        "    steps:",
+        "      - run: npm audit --audit-level=high",
+      ].join("\n");
+      const v = shapeViolations(text);
+      expect(v, shell).toHaveLength(1);
+      expect(v[0].message).toContain(
+        "the job's `defaults` chain passes through a mapping carrying a `<<` merge key, so this rule cannot tell which `shell:`, `runs-on` or `continue-on-error` applies to the gate step and does not certify it.",
+      );
+      expect(auditViolations(text, YAML_RULE), shell).toHaveLength(1);
+    }
+  });
+
+  it("neither spelling of a `pwsh` default scans clean: the alias is read as pwsh, the merge key is refused", () => {
+    const viaAlias = [
+      "on: push",
+      "x: &d",
+      "  run:",
+      "    shell: pwsh",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    defaults: *d",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+    const viaMerge = viaAlias.replace(
+      "defaults: *d",
+      "defaults:\n      <<: *d",
+    );
+    const all = (text: string) =>
+      auditViolations(text, SHAPE_RULE).length +
+      auditViolations(text, YAML_RULE).length;
+    expect(all(viaAlias)).toBeGreaterThan(0);
+    expect(all(viaMerge)).toBeGreaterThan(0);
+  });
+
+  it("refuses a gate under a workflow mapping carrying a merge key", () => {
+    const text = [
+      "x: &m",
+      "  name: y",
+      "<<: *m",
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain(
+      "the workflow mapping carries a `<<` merge key",
+    );
+  });
+
+  it("refuses a gate under a job mapping carrying a merge key", () => {
+    const text = [
+      "on: push",
+      "x: &m",
+      "  name: y",
+      "jobs:",
+      "  audit:",
+      "    <<: *m",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain("the job mapping carries a `<<` merge key");
+  });
+
+  it("refuses a gate step mapping carrying a merge key", () => {
+    const text = [
+      "on: push",
+      "x: &m",
+      "  name: y",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - <<: *m",
+      "        run: npm audit --audit-level=high",
+    ].join("\n");
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain("the step mapping carries a `<<` merge key");
+  });
+
+  it("refuses a `shell:` alias it cannot resolve, and the alias is reported on its own", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - shell: *nope",
+      "        run: npm audit --audit-level=high",
+    ].join("\n");
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain(
+      "the step's `shell:` is an alias this rule cannot resolve",
+    );
+    expect(auditViolations(text, YAML_RULE)).toHaveLength(1);
+  });
+
+  it("refuses a job `runs-on:` and `continue-on-error:` alias it cannot resolve", () => {
+    for (const key of ["runs-on", "continue-on-error"]) {
+      const text = [
+        "on: push",
+        "jobs:",
+        "  audit:",
+        ...(key === "runs-on"
+          ? ["    runs-on: *nope"]
+          : ["    runs-on: ubuntu-latest", "    continue-on-error: *nope"]),
+        "    steps:",
+        "      - run: npm audit --audit-level=high",
+      ].join("\n");
+      const v = shapeViolations(text);
+      expect(v, key).toHaveLength(1);
+      expect(v[0].message, key).toContain(
+        `the job's \`${key}:\` is an alias this rule cannot resolve`,
+      );
+    }
+  });
+
+  it("refuses a `defaults.run.shell` alias it cannot resolve at job level", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    defaults:",
+      "      run:",
+      "        shell: *nope",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain(
+      "the job's `defaults.run.shell` is an alias this rule cannot resolve",
+    );
+  });
+});
+
+// ───────────── previously unpinned behaviour of the shell and input reads ─────────────
+
+describe("workflow-slop/audit-gate-shape: bash path refusals at the defaults levels", () => {
+  const defaultsAt = (level: "job" | "workflow", shell: string): string => {
+    const defaults = ["defaults:", "  run:", `    shell: ${shell}`];
+    const indent = (lines: string[], by: string) =>
+      lines.map((l) => `${by}${l}`);
+    return [
+      "on: push",
+      ...(level === "workflow" ? defaults : []),
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      ...(level === "job" ? indent(defaults, "    ") : []),
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+  };
+  const UNLISTED =
+    "the program `/opt/homebrew/bin/bash` is neither the bare `bash` nor one of the listed absolute paths (/bin/bash, /usr/bin/bash, /usr/local/bin/bash), so a file merely named bash cannot be told apart";
+
+  it("refuses an unlisted bash path in the job's `defaults.run.shell`", () => {
+    const v = shapeViolations(defaultsAt("job", "/opt/homebrew/bin/bash {0}"));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shellMessage(
+        `the gate step's shell is \`/opt/homebrew/bin/bash {0}\`, set by its job's \`defaults.run.shell\`, which this rule does not analyse as bash: ${UNLISTED}`,
+      ),
+    );
+  });
+
+  it("refuses an unlisted bash path in the workflow's `defaults.run.shell`", () => {
+    const v = shapeViolations(
+      defaultsAt("workflow", "/opt/homebrew/bin/bash {0}"),
+    );
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shellMessage(
+        `the gate step's shell is \`/opt/homebrew/bin/bash {0}\`, set by the workflow's \`defaults.run.shell\`, which this rule does not analyse as bash: ${UNLISTED}`,
+      ),
+    );
+  });
+
+  it.each(["/bin/bash", "/usr/local/bin/bash"])(
+    "refuses the lone path `%s` (no `{0}`) at step, job and workflow level",
+    (shell) => {
+      const reason =
+        "the template contains no `{0}` placeholder, so GitHub Actions never hands the gate script to it";
+      const stepText = auditYml(
+        gateStep(["npm audit --audit-level=high"], [`shell: ${shell}`]),
+      );
+      const step = shapeViolations(stepText);
+      expect(step).toHaveLength(1);
+      expect(step[0].message).toBe(
+        shellMessage(
+          `the gate step's \`shell:\` is \`${shell}\`, which this rule does not analyse as bash: ${reason}`,
+        ),
+      );
+      const job = shapeViolations(defaultsAt("job", shell));
+      expect(job).toHaveLength(1);
+      expect(job[0].message).toBe(
+        shellMessage(
+          `the gate step's shell is \`${shell}\`, set by its job's \`defaults.run.shell\`, which this rule does not analyse as bash: ${reason}`,
+        ),
+      );
+      const workflow = shapeViolations(defaultsAt("workflow", shell));
+      expect(workflow).toHaveLength(1);
+      expect(workflow[0].message).toBe(
+        shellMessage(
+          `the gate step's shell is \`${shell}\`, set by the workflow's \`defaults.run.shell\`, which this rule does not analyse as bash: ${reason}`,
+        ),
+      );
+    },
+  );
+});
+
+describe("workflow-slop/unparseable-workflow: a duplicated runs-on key", () => {
+  it("reports a job carrying `runs-on:` twice as unparseable, so the first-occurrence read cannot scan it clean", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    runs-on: windows-latest",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+    const v = auditViolations(text, "workflow-slop/unparseable-workflow");
+    expect(v).toHaveLength(1);
+    expect(v[0].severity).toBe("block");
+    expect(v[0].line).toBe(5);
+    expect(v[0].message).toContain("Map keys must be unique");
+  });
+});
+
+describe("workflow-slop/run-expression: executed-input name fold over-matches", () => {
+  it("matches a `with:` key whose upper-casing equals the configured name (`ßcript` against `sscript`)", () => {
+    // Full case mapping upper-cases `ß` to `SS`, so both names fold to
+    // `SSCRIPT`. The over-match direction is the safe one for a block rule.
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: acme/run-code@v1",
+      "        with:",
+      "          ßcript: ${{ github.event.issue.title }}",
+    ].join("\n");
+    const config = mergeConfig({
+      workflow: { executedActionInputs: ["acme/run-code:sscript"] },
+    });
+    const v = checkText(text, WORKFLOW_PATH, {
+      packs: allPacks,
+      config,
+      packFilter: ["workflow-slop"],
+    }).filter((x) => x.ruleId === RUN_RULE);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain("`acme/run-code`'s `sscript` input");
+  });
+
+  it("does not match a different name that folds differently", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  j:",
+      "    steps:",
+      "      - uses: acme/run-code@v1",
+      "        with:",
+      "          scripts: ${{ github.event.issue.title }}",
+    ].join("\n");
+    const config = mergeConfig({
+      workflow: { executedActionInputs: ["acme/run-code:sscript"] },
+    });
+    const v = checkText(text, WORKFLOW_PATH, {
+      packs: allPacks,
+      config,
+      packFilter: ["workflow-slop"],
+    }).filter((x) => x.ruleId === RUN_RULE);
+    expect(v).toHaveLength(0);
+  });
+});

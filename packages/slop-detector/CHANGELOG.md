@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `workflow-slop/unsupported-yaml-construct` (block, on by default with the
+  pack): a `<<` merge key, a YAML alias the pack cannot resolve (no anchor
+  of that name precedes it, it refers to a node that contains it, or
+  resolving every alias in the file would visit more than 200000 nodes), an
+  anchor name defined more than once in a file, or a mapping key that is
+  itself a mapping or a sequence, is reported instead of scanning clean.
+  YAML resolves an alias to the definition that precedes it, but a parser
+  that replays anchored nodes can resolve an alias nested inside another
+  anchored node to a different definition, so a redefined name is reported
+  at the `&name` token of each later definition and no alias to it is
+  resolved. `audit-gate-shape` refuses, instead of certifying, a gate whose
+  shell, `runs-on` or `continue-on-error` read passes through an unresolved
+  alias or a key it cannot name (such an alias or a collection used as a key
+  in the workflow, job, `defaults`, `defaults.run` or step mapping, or
+  inside `runs-on:`), even where the new rule's finding is disabled. The
+  pack now has six rules and the package 48.
+
+### Fixed
+
+- `workflow-slop` resolves YAML aliases before any structural read. GitHub
+  Actions accepts anchors and aliases (its changelog entry "Actions: YAML
+  anchors and non-public workflow templates" and the "Reusing workflow
+  configurations" page), so an executed `with:` input supplied through
+  `with: *w`, a `uses:` supplied through `uses: *act`, and a `shell:`,
+  `defaults:`, `runs-on:` or `continue-on-error:` supplied through an alias
+  were previously skipped or read as absent (`audit-gate-shape` certified a
+  gate whose `defaults:` alias carried `shell: pwsh`, while an alias used
+  directly as a `shell:` value refused as "not a scalar value"). They now
+  read as the value they stand for, from one anchor table built in a single
+  pass, so the work stays linear in the size of the file; a finding on
+  aliased content is reported once, at the anchor (a disable comment on the
+  anchor line therefore applies to every alias site).
+- A `<<` merge key is not merged (GitHub documents no merge-key support and
+  its workflow parser has no merge-key handling), and it no longer reads as
+  absent: `audit-gate-shape` refuses a gate whose shell, `runs-on` or
+  `continue-on-error` read passes through a merge key or an unresolvable
+  alias instead of certifying it, and the new rule reports the key.
+- New fixtures pin behaviour that had none: an unlisted bash path at job and
+  workflow `defaults.run.shell`, the lone-path refusal for `/bin/bash` and
+  `/usr/local/bin/bash`, a duplicated `runs-on:` key reported as
+  `unparseable-workflow`, and the over-match direction of the executed-input
+  name fold (`ßcript` against a configured `sscript`).
+
 ### Changed
 
 - Runtime messages and findings that pointed readers to "the README section"
