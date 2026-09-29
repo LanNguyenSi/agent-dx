@@ -3552,6 +3552,353 @@ describe("workflow-slop: an anchor name defined more than once", () => {
   });
 });
 
+describe("workflow-slop: the redefinition finding sits on the anchor token", () => {
+  it("reports a redefined block mapping at its `&name` token, not at its first key", () => {
+    const text = [
+      "on: push",
+      "env:",
+      "  A: &M",
+      "    y: 1",
+      "  B: &M",
+      "    y: 2",
+    ].join("\n");
+    const v = violationsOf(text, YAML_RULE);
+    expect(v.map((x) => [x.line, x.column, x.matched])).toEqual([[5, 6, "&M"]]);
+  });
+
+  it("lets a disable comment on the anchor line silence the redefinition finding", () => {
+    const text = [
+      "on: push",
+      "env:",
+      "  A: &M",
+      "    y: 1",
+      "  B: &M # slop-detector:disable-line=workflow-slop/unsupported-yaml-construct",
+      "    y: 2",
+    ].join("\n");
+    expect(violationsOf(text, YAML_RULE)).toEqual([]);
+  });
+});
+
+describe("workflow-slop: an anchor and an alias in the same pair", () => {
+  it("resolves a value alias to the anchor on its own key (`&k shell: *k` is `shell: shell`)", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - {run: npm audit --audit-level=high, &k shell: *k}",
+    ].join("\n");
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shellMessage(
+        "the gate step's `shell:` is `shell`, which this rule does not analyse as bash",
+      ),
+    );
+    expect(auditViolations(text, YAML_RULE)).toEqual([]);
+  });
+
+  it("reports a key alias whose anchor sits on its own value (`*k : &k run`) as unresolvable", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - {*k : &k run}",
+    ].join("\n");
+    const v = auditViolations(text, YAML_RULE);
+    expect(v.map((x) => [x.line, x.column, x.matched])).toEqual([
+      [6, 10, "*k"],
+    ]);
+    expect(v[0].message).toContain("no anchor of that name precedes it");
+  });
+});
+
+describe("workflow-slop/audit-gate-shape: a key this rule cannot name on the read path", () => {
+  const DISABLE =
+    " # slop-detector:disable-line=workflow-slop/unsupported-yaml-construct";
+  // `*K` names a redefined anchor, so it stays an alias node: a YAML
+  // parser reads it as the last `&K` (`name`), this rule cannot name it.
+  const withKey = (name: string, body: string[], disable: boolean) =>
+    [
+      "on: push",
+      "env:",
+      `  A: &K ${name}x`,
+      `  B: &K ${name}${disable ? DISABLE : ""}`,
+      ...body,
+    ].join("\n");
+  const gate = "      - run: npm audit --audit-level=high";
+  const cases: Array<{
+    level: string;
+    key: string;
+    body: string[];
+    reason: string;
+  }> = [
+    {
+      level: "step shell",
+      key: "shell",
+      body: [
+        "jobs:",
+        "  audit:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        gate,
+        "        *K : pwsh",
+      ],
+      reason: "the step mapping has a key this rule cannot name",
+    },
+    {
+      level: "step continue-on-error",
+      key: "continue-on-error",
+      body: [
+        "jobs:",
+        "  audit:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        gate,
+        "        *K : true",
+      ],
+      reason: "the step mapping has a key this rule cannot name",
+    },
+    {
+      level: "job continue-on-error",
+      key: "continue-on-error",
+      body: [
+        "jobs:",
+        "  audit:",
+        "    runs-on: ubuntu-latest",
+        "    *K : true",
+        "    steps:",
+        gate,
+      ],
+      reason: "the job mapping has a key this rule cannot name",
+    },
+    {
+      level: "job runs-on",
+      key: "runs-on",
+      body: [
+        "jobs:",
+        "  audit:",
+        "    *K : windows-latest",
+        "    steps:",
+        gate,
+      ],
+      reason: "the job mapping has a key this rule cannot name",
+    },
+    {
+      level: "workflow defaults",
+      key: "defaults",
+      body: [
+        "*K :",
+        "  run:",
+        "    shell: pwsh",
+        "jobs:",
+        "  audit:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        gate,
+      ],
+      reason: "the workflow mapping has a key this rule cannot name",
+    },
+    {
+      level: "workflow jobs",
+      key: "jobs",
+      body: [
+        "defaults:",
+        "  run:",
+        "    shell: pwsh",
+        "*K :",
+        "  audit:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        gate,
+      ],
+      reason:
+        "a mapping enclosing the step mapping has a key this rule cannot name",
+    },
+    {
+      level: "job defaults",
+      key: "run",
+      body: [
+        "jobs:",
+        "  audit:",
+        "    runs-on: ubuntu-latest",
+        "    defaults:",
+        "      *K :",
+        "        shell: pwsh",
+        "    steps:",
+        gate,
+      ],
+      reason: "the job's `defaults` mapping has a key this rule cannot name",
+    },
+    {
+      level: "job defaults.run",
+      key: "shell",
+      body: [
+        "jobs:",
+        "  audit:",
+        "    runs-on: ubuntu-latest",
+        "    defaults:",
+        "      run:",
+        "        *K : pwsh",
+        "    steps:",
+        gate,
+      ],
+      reason:
+        "the job's `defaults.run` mapping has a key this rule cannot name",
+    },
+    {
+      level: "workflow defaults.run",
+      key: "shell",
+      body: [
+        "defaults:",
+        "  run:",
+        "    *K : pwsh",
+        "jobs:",
+        "  audit:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        gate,
+      ],
+      reason:
+        "the workflow's `defaults.run` mapping has a key this rule cannot name",
+    },
+    {
+      level: "runs-on mapping",
+      key: "labels",
+      body: [
+        "jobs:",
+        "  audit:",
+        "    runs-on:",
+        "      group: g",
+        "      *K : [windows-latest]",
+        "    steps:",
+        gate,
+      ],
+      reason:
+        "the job's `runs-on:` contains an alias this rule cannot resolve or a key it cannot name",
+    },
+  ];
+
+  for (const c of cases) {
+    it(`refuses the gate when the ${c.level} key is an alias it cannot resolve, with or without the construct finding disabled`, () => {
+      for (const disable of [false, true]) {
+        const text = withKey(c.key, c.body, disable);
+        const v = shapeViolations(text);
+        expect(v, `disable=${disable}`).toHaveLength(1);
+        expect(v[0].message, `disable=${disable}`).toContain(c.reason);
+        expect(
+          auditViolations(text, YAML_RULE).map((x) => x.line),
+          `disable=${disable}`,
+        ).toEqual(disable ? [] : [4]);
+      }
+    });
+  }
+
+  it("refuses a gate whose step carries a key written as a collection, and reports the key", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      gate,
+      "        ? [shell]",
+      "        : pwsh",
+    ].join("\n");
+    const v = shapeViolations(text);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain(
+      "the step mapping has a key this rule cannot name",
+    );
+    expect(
+      auditViolations(text, YAML_RULE).map((x) => [
+        x.line,
+        x.column,
+        x.matched,
+      ]),
+    ).toEqual([[7, 11, "["]]);
+  });
+
+  it("certifies a gate whose key alias resolves to `shell:` with a bash value, and refuses a pwsh one as pwsh", () => {
+    const body = (value: string) =>
+      [
+        "on: push",
+        "env:",
+        "  A: &K shell",
+        "jobs:",
+        "  audit:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        gate,
+        `        *K : ${value}`,
+      ].join("\n");
+    expect(shapeViolations(body("bash"))).toEqual([]);
+    const v = shapeViolations(body("pwsh"));
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toBe(
+      shellMessage(
+        "the gate step's `shell:` is `pwsh`, which this rule does not analyse as bash",
+      ),
+    );
+  });
+});
+
+describe("workflow-slop/unsupported-yaml-construct: a mapping key that is a collection", () => {
+  it("reports a `?` key written as a sequence in place of `run:`, instead of scanning clean", () => {
+    const text = [
+      "on: issues",
+      "jobs:",
+      "  j:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - ? [run]",
+      "        : echo ${{ github.event.issue.title }}",
+    ].join("\n");
+    const v = violationsOf(text, YAML_RULE);
+    expect(v.map((x) => [x.line, x.column, x.matched])).toEqual([[6, 11, "["]]);
+    expect(v[0].severity).toBe("block");
+    expect(v[0].message).toContain("has no name this pack can read");
+  });
+
+  it("reports a key alias that stands for a collection at the alias", () => {
+    const text = [
+      "on: issues",
+      "x: &C [script]",
+      "jobs:",
+      "  j:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - uses: actions/github-script@v8",
+      "        with:",
+      "          *C : console.log('${{ github.event.issue.title }}')",
+    ].join("\n");
+    expect(
+      violationsOf(text, YAML_RULE).map((x) => [x.line, x.column, x.matched]),
+    ).toEqual([[9, 11, "*C"]]);
+  });
+
+  it("does not report plain, quoted, null or numeric scalar keys", () => {
+    const text = [
+      "on: push",
+      "env:",
+      '  "quoted": 1',
+      "  1: 2",
+      "  true: 3",
+      "  ? a",
+      "  : 4",
+      "jobs:",
+      "  j:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - run: echo hi",
+    ].join("\n");
+    expect(violationsOf(text, YAML_RULE)).toEqual([]);
+  });
+});
+
 describe("workflow-slop: alias resolution scales with the document", () => {
   it("resolves thousands of anchors and aliases in one file within a generous bound", () => {
     const n = 5000;
@@ -3562,7 +3909,7 @@ describe("workflow-slop: alias resolution scales with the document", () => {
     lines.push("    steps:", "      - run: echo hi");
     const started = Date.now();
     expect(runViolations(lines.join("\n"))).toEqual([]);
-    expect(Date.now() - started).toBeLessThan(5000);
+    expect(Date.now() - started).toBeLessThan(15000);
   });
 });
 

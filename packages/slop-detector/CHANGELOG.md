@@ -10,16 +10,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `workflow-slop/unsupported-yaml-construct` (block, on by default with the
-  pack): a `<<` merge key, or a YAML alias the pack cannot resolve (no
-  anchor of that name precedes it, it refers to a node that contains it, or
-  resolving every alias in the file would visit more than 200000 nodes), or
-  an anchor name defined more than once in a file, is reported instead of
-  scanning clean. YAML resolves an alias to the definition that precedes it,
-  but a parser that replays anchored nodes can resolve an alias nested inside
-  another anchored node to a different definition, so a redefined name is
-  reported at each later definition and no alias to it is resolved; a gate
-  that reads through one refuses instead of certifying. The pack now has six rules and the
-  package 48.
+  pack): a `<<` merge key, a YAML alias the pack cannot resolve (no anchor
+  of that name precedes it, it refers to a node that contains it, or
+  resolving every alias in the file would visit more than 200000 nodes), an
+  anchor name defined more than once in a file, or a mapping key that is
+  itself a mapping or a sequence, is reported instead of scanning clean.
+  YAML resolves an alias to the definition that precedes it, but a parser
+  that replays anchored nodes can resolve an alias nested inside another
+  anchored node to a different definition, so a redefined name is reported
+  at the `&name` token of each later definition and no alias to it is
+  resolved. `audit-gate-shape` refuses, instead of certifying, a gate whose
+  shell, `runs-on` or `continue-on-error` read passes through an unresolved
+  alias or a key it cannot name (such an alias or a collection used as a key
+  in the workflow, job, `defaults`, `defaults.run` or step mapping, or
+  inside `runs-on:`), even where the new rule's finding is disabled. The
+  pack now has six rules and the package 48.
 
 ### Fixed
 
