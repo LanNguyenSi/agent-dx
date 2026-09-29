@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `workflow-slop/unsupported-yaml-construct` (block, on by default with the
+  pack): a `<<` merge key, or a YAML alias the pack cannot resolve (no
+  anchor of that name precedes it, it refers to a node that contains it, or
+  resolving every alias in the file would visit more than 200000 nodes), is
+  reported instead of scanning clean. The pack now has six rules and the
+  package 48.
+
+### Fixed
+
+- `workflow-slop` resolves YAML aliases before any structural read. GitHub
+  Actions accepts anchors and aliases (its changelog entry "Actions: YAML
+  anchors and non-public workflow templates" and the "Reusing workflow
+  configurations" page), so an executed `with:` input supplied through
+  `with: *w`, a `uses:` supplied through `uses: *act`, and a `shell:`,
+  `defaults:`, `runs-on:` or `continue-on-error:` supplied through an alias
+  were previously skipped or read as absent (`audit-gate-shape` certified a
+  gate whose `defaults:` alias carried `shell: pwsh`, while an alias used
+  directly as a `shell:` value refused as "not a scalar value"). They now
+  read as the value they stand for; a finding on aliased content is
+  reported once, at the anchor.
+- A `<<` merge key is not merged (GitHub documents no merge-key support and
+  its workflow parser has no merge-key handling), and it no longer reads as
+  absent: `audit-gate-shape` refuses a gate whose shell, `runs-on` or
+  `continue-on-error` read passes through a merge key or an unresolvable
+  alias instead of certifying it, and the new rule reports the key.
+- New fixtures pin behaviour that had none: an unlisted bash path at job and
+  workflow `defaults.run.shell`, the lone-path refusal for `/bin/bash` and
+  `/usr/local/bin/bash`, a duplicated `runs-on:` key reported as
+  `unparseable-workflow`, and the over-match direction of the executed-input
+  name fold (`ßcript` against a configured `sscript`).
+
 ### Changed
 
 - Runtime messages and findings that pointed readers to "the README section"
