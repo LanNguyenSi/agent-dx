@@ -3178,7 +3178,8 @@ describe("workflow-slop/audit-gate-shape: multiple gate steps", () => {
 //
 // GitHub Actions accepts anchors and aliases and has no merge-key handling,
 // so an alias is resolved before any structural read and a merge key is
-// reported (and never certifies an audit gate).
+// reported (and never certifies an audit gate). An anchor name defined more
+// than once is reported and no alias to it is resolved.
 
 const YAML_RULE = "workflow-slop/unsupported-yaml-construct";
 const RUN_RULE = "workflow-slop/run-expression";
@@ -3298,7 +3299,7 @@ describe("workflow-slop: alias resolution before the executed-input and uses rea
     expect(v[0].line).toBe(7);
   });
 
-  it("resolves an alias to the anchor that precedes it when the name is defined twice, the way the runner replays it", () => {
+  it("resolves no alias to an anchor name defined twice: the redefinition is reported and the Node-20 read is not certified on either definition", () => {
     const text = [
       "on: push",
       "jobs:",
@@ -3313,9 +3314,17 @@ describe("workflow-slop: alias resolution before the executed-input and uses rea
       "          pin: &a actions/github-script@v7",
       "      - uses: *a",
     ].join("\n");
-    const v = violationsOf(text, NODE20_RULE);
+    const v = violationsOf(text, YAML_RULE);
     expect(v).toHaveLength(1);
+    expect(v[0].severity).toBe("block");
     expect(v[0].line).toBe(11);
+    expect(v[0].matched).toBe("&a");
+    expect(v[0].message).toContain(
+      "The YAML anchor `&a` is defined more than once in this file",
+    );
+    // No alias to the name was resolved, so the aliased `uses:` values are
+    // not read as either definition.
+    expect(violationsOf(text, NODE20_RULE)).toEqual([]);
   });
 
   it("does not report a file that only uses resolvable aliases", () => {
@@ -3426,9 +3435,134 @@ describe("workflow-slop/unsupported-yaml-construct", () => {
     expect(Date.now() - started).toBeLessThan(5000);
   });
 
+  it("reports a key that is an alias standing for the scalar `<<`", () => {
+    const text = [
+      "on: push",
+      "env:",
+      '  K: &m "<<"',
+      "jobs:",
+      "  a:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - run: echo hi",
+      "        *m : {x: 1}",
+    ].join("\n");
+    const v = violationsOf(text, YAML_RULE);
+    expect(v).toHaveLength(1);
+    expect(v[0].line).toBe(9);
+    expect(v[0].matched).toBe("<<");
+  });
+
   it("does not apply to a file outside .github/workflows", () => {
     const text = ["x: &a 1", "y:", "  <<: *a"].join("\n");
     expect(violationsOf(text, YAML_RULE, "docs/example.yml")).toEqual([]);
+  });
+});
+
+describe("workflow-slop: an anchor name defined more than once", () => {
+  it("reports an injection reached through a shadowed anchor and an alias nested in an earlier alias", () => {
+    const text = [
+      "on: issues",
+      "jobs:",
+      "  j:",
+      "    runs-on: ubuntu-latest",
+      "    env:",
+      '      SAFE: &R "echo hello"',
+      "      WRAP: &B {v: *R}",
+      '      EVIL: &R "echo ${{ github.event.issue.title }}"',
+      "      AGAIN: *B",
+      "    steps:",
+      "      - run: *R",
+    ].join("\n");
+    const v = violationsOf(text, YAML_RULE);
+    expect(v.map((x) => [x.line, x.matched])).toEqual([[8, "&R"]]);
+  });
+
+  it("reports the redefinition when the executed scalar is written at the later definition", () => {
+    const text = [
+      "on: issues",
+      "jobs:",
+      "  j:",
+      "    runs-on: ubuntu-latest",
+      "    env:",
+      '      SAFE: &R "echo hello"',
+      '      EVIL: &R "echo ${{ github.event.issue.title }}"',
+      "    steps:",
+      "      - run: *R",
+    ].join("\n");
+    expect(violationsOf(text, YAML_RULE)).toHaveLength(1);
+  });
+
+  it("does not certify a gate whose shell alias names a redefined anchor", () => {
+    const text = [
+      "on: push",
+      "env:",
+      "  A: &SH bash",
+      "  B: &W {x: *SH}",
+      "  C: &SH pwsh",
+      "  D: *W",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+      "        shell: *SH",
+    ].join("\n");
+    const shape = shapeViolations(text);
+    expect(shape).toHaveLength(1);
+    expect(shape[0].message).toContain("alias this rule cannot resolve");
+    expect(
+      violationsOf(text, YAML_RULE, AUDIT_PATH).map((x) => x.line),
+    ).toEqual([5]);
+  });
+
+  it("reports a redefinition that the nested-alias replay reads differently from YAML", () => {
+    const text = [
+      "on: issues",
+      "env:",
+      '  R1: &R "echo hi"',
+      "jobs:",
+      "  a:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - &S",
+      "        run: *R",
+      "  b:",
+      "    runs-on: ubuntu-latest",
+      "    env:",
+      '      X: &R "echo ${{ github.event.issue.title }}"',
+      "    steps:",
+      "      - *S",
+    ].join("\n");
+    const v = violationsOf(text, YAML_RULE);
+    expect(v.map((x) => [x.line, x.matched])).toEqual([[13, "&R"]]);
+  });
+
+  it("does not report distinct anchor names or a name used by aliases only", () => {
+    const text = [
+      "on: push",
+      "env:",
+      "  A: &a 1",
+      "  B: &b 2",
+      "  C: *a",
+      "  D: *a",
+      "  E: *b",
+    ].join("\n");
+    expect(violationsOf(text, YAML_RULE)).toEqual([]);
+  });
+});
+
+describe("workflow-slop: alias resolution scales with the document", () => {
+  it("resolves thousands of anchors and aliases in one file within a generous bound", () => {
+    const n = 5000;
+    const lines = ["on: push", "env:"];
+    for (let i = 0; i < n; i++) lines.push(`  A${i}: &a${i} v${i}`);
+    lines.push("jobs:", "  j:", "    runs-on: ubuntu-latest", "    env:");
+    for (let i = 0; i < n; i++) lines.push(`      B${i}: *a${i}`);
+    lines.push("    steps:", "      - run: echo hi");
+    const started = Date.now();
+    expect(runViolations(lines.join("\n"))).toEqual([]);
+    expect(Date.now() - started).toBeLessThan(5000);
   });
 });
 

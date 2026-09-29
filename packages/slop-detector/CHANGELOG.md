@@ -12,8 +12,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `workflow-slop/unsupported-yaml-construct` (block, on by default with the
   pack): a `<<` merge key, or a YAML alias the pack cannot resolve (no
   anchor of that name precedes it, it refers to a node that contains it, or
-  resolving every alias in the file would visit more than 200000 nodes), is
-  reported instead of scanning clean. The pack now has six rules and the
+  resolving every alias in the file would visit more than 200000 nodes), or
+  an anchor name defined more than once in a file, is reported instead of
+  scanning clean. YAML resolves an alias to the definition that precedes it,
+  but a parser that replays anchored nodes can resolve an alias nested inside
+  another anchored node to a different definition, so a redefined name is
+  reported at each later definition and no alias to it is resolved; a gate
+  that reads through one refuses instead of certifying. The pack now has six rules and the
   package 48.
 
 ### Fixed
@@ -27,8 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   were previously skipped or read as absent (`audit-gate-shape` certified a
   gate whose `defaults:` alias carried `shell: pwsh`, while an alias used
   directly as a `shell:` value refused as "not a scalar value"). They now
-  read as the value they stand for; a finding on aliased content is
-  reported once, at the anchor.
+  read as the value they stand for, from one anchor table built in a single
+  pass, so the work stays linear in the size of the file; a finding on
+  aliased content is reported once, at the anchor (a disable comment on the
+  anchor line therefore applies to every alias site).
 - A `<<` merge key is not merged (GitHub documents no merge-key support and
   its workflow parser has no merge-key handling), and it no longer reads as
   absent: `audit-gate-shape` refuses a gate whose shell, `runs-on` or

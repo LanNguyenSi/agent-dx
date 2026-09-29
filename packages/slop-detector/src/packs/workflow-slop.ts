@@ -163,7 +163,7 @@ function scalarKeyName(key: unknown): string | undefined {
 //
 //   - an alias is resolved before any structural read, so every read below
 //     (executed inputs, `uses:` detection, `shell:`/`defaults:`/`runs-on:`
-//     resolution) sees the anchored value exactly as GitHub would;
+//     resolution) sees the anchored value it stands for;
 //   - a merge key is NOT merged. It is reported by
 //     `workflow-slop/unsupported-yaml-construct`, and an audit gate whose
 //     shell, `runs-on` or `continue-on-error` read passes through a merge
@@ -172,7 +172,18 @@ function scalarKeyName(key: unknown): string | undefined {
 // An alias this pack cannot resolve (no anchor of that name precedes it, the
 // anchor is one of the alias's own ancestors, or resolving every alias would
 // expand past `MAX_EXPANDED_NODES`) is left as an alias node and reported by
-// the same rule, so it never scans clean either.
+// the same rule, so it never scans clean either. So is an anchor name that is
+// defined more than once in a file: YAML resolves an alias to the definition
+// that precedes it, but an alias nested inside another anchored node can be
+// resolved at a different time by a replaying parser (the runner's reader
+// looks a name up when it replays an anchored node, not where the alias is
+// written), and the two readings can supply different values. The pack picks
+// neither: it reports each redefinition and resolves no alias to that name,
+// so a read that depends on one refuses instead of certifying.
+//
+// Aliases are resolved from one table built in a single pre-order pass over
+// the unmutated document, so the work is linear in the document plus the
+// expansion the budget bounds.
 
 /** Upper bound on nodes visited while expanding aliases (alias bombs). */
 const MAX_EXPANDED_NODES = 200_000;
@@ -202,15 +213,54 @@ function aliasOffset(node: unknown): number {
   return Array.isArray(range) && typeof range[0] === "number" ? range[0] : 0;
 }
 
-function resolveAliasNode(
-  alias: { source: string },
-  doc: YAML.Document.Parsed,
-): unknown {
-  try {
-    return (alias as YAML.Alias).resolve(doc);
-  } catch {
-    return undefined;
-  }
+/**
+ * What an alias stands for, worked out in one pre-order pass over the
+ * unmutated document (an alias is still an alias node there, so no spliced
+ * node can shadow a definition): `targets` maps each alias node to the node
+ * of the last anchor of its name that precedes it, and `redefined` holds the
+ * names defined more than once, which are never resolved.
+ */
+interface AliasTable {
+  targets: Map<unknown, unknown>;
+  redefined: Set<string>;
+}
+
+function buildAliasTable(root: unknown, issues: AliasIssue[]): AliasTable {
+  const anchors = new Map<string, unknown>();
+  const defined = new Map<string, number>();
+  const table: AliasTable = { targets: new Map(), redefined: new Set() };
+  const walk = (node: unknown): void => {
+    if (typeof node !== "object" || node === null) return;
+    if (isAliasNode(node)) {
+      table.targets.set(node, anchors.get(node.source));
+      return;
+    }
+    const anchor = (node as { anchor?: unknown }).anchor;
+    if (typeof anchor === "string" && anchor !== "") {
+      const count = (defined.get(anchor) ?? 0) + 1;
+      defined.set(anchor, count);
+      if (count > 1) {
+        table.redefined.add(anchor);
+        issues.push({
+          offset: aliasOffset(node),
+          matched: `&${anchor}`,
+          message: `The YAML anchor \`&${anchor}\` is defined more than once in this file. YAML resolves an alias to the definition that precedes it, but a parser that replays anchored nodes can resolve an alias nested inside one to a different definition, so this pack resolves no alias to this name and a result for this file cannot be trusted clean. Give each anchor a unique name.`,
+        });
+      }
+      anchors.set(anchor, node);
+    }
+    if (!hasItems(node)) return;
+    for (const item of node.items) {
+      if (isPairNode(item)) {
+        walk(item.key);
+        walk(item.value);
+      } else {
+        walk(item);
+      }
+    }
+  };
+  walk(root);
+  return table;
 }
 
 /**
@@ -222,6 +272,7 @@ function resolveAliasNode(
  */
 function planAliasExpansion(
   doc: YAML.Document.Parsed,
+  table: AliasTable,
   issues: AliasIssue[],
 ): Set<unknown> | undefined {
   const leave = new Set<unknown>();
@@ -241,7 +292,12 @@ function planAliasExpansion(
     if (typeof node !== "object" || node === null) return true;
     if (--budget < 0) return false;
     if (isAliasNode(node)) {
-      const target = resolveAliasNode(node, doc);
+      if (table.redefined.has(node.source)) {
+        // Reported once, at the redefinition, by `buildAliasTable`.
+        leave.add(node);
+        return true;
+      }
+      const target = table.targets.get(node);
       if (typeof target !== "object" || target === null) {
         report(node, node.source, "no anchor of that name precedes it");
         return true;
@@ -271,10 +327,12 @@ function planAliasExpansion(
  * Pass two: replace every resolvable alias node by the node it stands for
  * (shared, not copied, so its ranges still point at the anchor site) and
  * record every `<<` key on the way. Each mapping/sequence is visited once.
+ * Targets come from the table built over the unmutated document, never from
+ * the tree being changed.
  */
 function applyAliasExpansion(
   root: unknown,
-  doc: YAML.Document.Parsed,
+  table: AliasTable,
   leave: Set<unknown> | undefined,
   mergeKeys: MergeKeyHit[],
 ): void {
@@ -283,7 +341,7 @@ function applyAliasExpansion(
     if (leave === undefined || !isAliasNode(child) || leave.has(child)) {
       return child;
     }
-    const target = resolveAliasNode(child, doc);
+    const target = table.targets.get(child);
     return typeof target === "object" && target !== null ? target : child;
   };
   const walk = (node: unknown): void => {
@@ -294,11 +352,14 @@ function applyAliasExpansion(
       const item = items[i];
       if (isPairNode(item)) {
         const pair = item as { key: unknown; value: unknown };
-        if (scalarKeyName(pair.key) === "<<") {
-          mergeKeys.push({ offset: aliasOffset(pair.key) });
-        }
+        const written = pair.key;
         pair.key = replace(pair.key);
         pair.value = replace(pair.value);
+        // The key is read after replacement: an alias standing for the
+        // scalar `<<` is a merge key as well.
+        if (scalarKeyName(pair.key) === "<<") {
+          mergeKeys.push({ offset: aliasOffset(written) });
+        }
         walk(pair.key);
         walk(pair.value);
       } else {
@@ -319,7 +380,8 @@ function loadWorkflowDocument(text: string): LoadedWorkflowDocument {
   const doc = YAML.parseDocument(text, {});
   const aliasIssues: AliasIssue[] = [];
   const mergeKeys: MergeKeyHit[] = [];
-  const leave = planAliasExpansion(doc, aliasIssues);
+  const table = buildAliasTable(doc.contents, aliasIssues);
+  const leave = planAliasExpansion(doc, table, aliasIssues);
   if (leave === undefined) {
     aliasIssues.push({
       offset: 0,
@@ -327,7 +389,7 @@ function loadWorkflowDocument(text: string): LoadedWorkflowDocument {
       message: `Resolving this file's YAML aliases would visit more than ${MAX_EXPANDED_NODES} nodes, so none of them were resolved and a result for this file cannot be trusted clean.`,
     });
   }
-  applyAliasExpansion(doc.contents, doc, leave, mergeKeys);
+  applyAliasExpansion(doc.contents, table, leave, mergeKeys);
   return { contents: doc.contents, mergeKeys, aliasIssues };
 }
 
@@ -676,7 +738,7 @@ const unsupportedYamlConstruct: Rule = {
   defaultSeverity: "block",
   enabledByDefault: true,
   rationale:
-    "GitHub Actions accepts YAML anchors and aliases in workflow files, and this pack resolves an alias to the value it stands for before it reads a mapping (executed inputs, `uses:` detection, `shell:`, `defaults:`, `runs-on:`). Two constructs it cannot read that way: a `<<` merge key, which GitHub does not merge, and an alias it cannot resolve (no anchor of that name precedes it, it refers to a node that contains it, or resolving every alias in the file would visit an unreasonable number of nodes). A mapping whose keys arrive through either one is read as if they were absent, in a way indistinguishable from a genuinely clean file, so each is reported with a block finding of its own instead of scanning clean.",
+    "GitHub Actions accepts YAML anchors and aliases in workflow files, and this pack resolves an alias to the value it stands for before it reads a mapping (executed inputs, `uses:` detection, `shell:`, `defaults:`, `runs-on:`). Two constructs it cannot read that way: a `<<` merge key, which GitHub does not merge, and an alias it cannot resolve (no anchor of that name precedes it, it refers to a node that contains it, its anchor name is defined more than once in the file, or resolving every alias in the file would visit an unreasonable number of nodes). A mapping whose keys arrive through either one is read as if they were absent, in a way indistinguishable from a genuinely clean file, so each is reported with a block finding of its own instead of scanning clean.",
   appliesTo: isWorkflowFile,
   check(ctx: RuleContext): Violation[] {
     const { file } = ctx;
