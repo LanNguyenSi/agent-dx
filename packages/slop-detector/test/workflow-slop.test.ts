@@ -3520,7 +3520,7 @@ describe("workflow-slop: an anchor name defined more than once", () => {
     const text = [
       "on: issues",
       "env:",
-      '  R1: &R "echo hi"',
+      '  BASE: &R "echo hi"',
       "jobs:",
       "  a:",
       "    runs-on: ubuntu-latest",
