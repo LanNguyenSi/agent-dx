@@ -3,16 +3,47 @@ export interface LineCol {
   column: number;
 }
 
-export function offsetToLineCol(text: string, offset: number): LineCol {
-  let line = 1;
-  let lastNewline = -1;
-  for (let i = 0; i < offset && i < text.length; i++) {
-    if (text[i] === "\n") {
-      line++;
-      lastNewline = i;
-    }
+// Every finding builder resolves offsets through this helper, so the cost of
+// a finding must not depend on how far into the file it sits. The positions
+// of the newlines are collected once per text and each offset is then a
+// binary search, which keeps a file with many findings linear in its size
+// plus its findings. The one-entry cache is keyed by the text itself: the
+// packs build all findings of a file before moving to the next one.
+let cachedText: string | undefined;
+let cachedNewlines: number[] = [];
+
+function newlinePositions(text: string): number[] {
+  if (cachedText === text) return cachedNewlines;
+  const positions: number[] = [];
+  let i = text.indexOf("\n");
+  while (i !== -1) {
+    positions.push(i);
+    i = text.indexOf("\n", i + 1);
   }
-  return { line, column: offset - lastNewline };
+  cachedText = text;
+  cachedNewlines = positions;
+  return positions;
+}
+
+/**
+ * 1-based line and column of a UTF-16 string offset. The column counts
+ * string indexes from the last newline before the offset (so it is 1 at a
+ * line start), and an offset past the end of the text keeps counting past
+ * it.
+ */
+export function offsetToLineCol(text: string, offset: number): LineCol {
+  const newlines = newlinePositions(text);
+  // Newlines strictly before min(offset, text.length): lower bound.
+  const limit = Math.min(offset, text.length);
+  let lo = 0;
+  let hi = newlines.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (newlines[mid] < limit) lo = mid + 1;
+    else hi = mid;
+  }
+  const lastNewline = lo > 0 ? newlines[lo - 1] : -1;
+  return { line: lo + 1, column: offset - lastNewline };
 }
 
 export function findAllRegex(
