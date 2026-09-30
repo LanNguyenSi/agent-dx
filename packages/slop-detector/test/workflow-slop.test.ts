@@ -2368,7 +2368,9 @@ describe("workflow-slop/audit-gate-shape: YAML 1.1 values and non-string labels"
   });
 
   it("refuses a boolean `continue-on-error` written under a tag or an anchor unless the text is a core-schema false", () => {
-    // `!!bool off` and `!!bool no` load as text; the tag does not make them false.
+    // In a 1.2 file `!!bool off` and `!!bool no` load as text; under the 1.1
+    // header they load as false. The source text is not a core-schema false
+    // either way, so both are refused.
     for (const value of ["!!bool off", "!!bool no", "!!int 0"]) {
       expect(shapeViolations(stepDoc(V11, value)), value).toHaveLength(1);
       expect(shapeViolations(stepDoc([], value)), value).toHaveLength(1);
@@ -2433,6 +2435,20 @@ describe("workflow-slop/audit-gate-shape: YAML 1.1 values and non-string labels"
       for (const [header, list] of lists) {
         const v = shapeViolations(runsOnDoc(header, list), cfg);
         expect(v, `${label} ${header.length} ${list}`).toHaveLength(1);
+        expect(v[0].message).toBe(shellMessage(WINDOWS_REASON));
+      }
+    }
+  });
+
+  it("refuses a gate with no shell whose Windows label is padded with whitespace", () => {
+    for (const [label, cfg] of both) {
+      for (const runsOn of [
+        "[self-hosted, ' windows ']",
+        "[1, ' windows ']",
+        "' windows-latest '",
+      ]) {
+        const v = shapeViolations(runsOnDoc([], runsOn), cfg);
+        expect(v, `${label} ${runsOn}`).toHaveLength(1);
         expect(v[0].message).toBe(shellMessage(WINDOWS_REASON));
       }
     }

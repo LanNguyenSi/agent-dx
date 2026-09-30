@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `workflow-slop/audit-gate-shape` no longer certifies a gate whose
   `continue-on-error` a `%YAML 1.1` directive resolves to false without
-  being written false: `off`, `no` and `n` (any case) on the step or its job
+  being written false: `off`, `no` and `n` (lower, Title or UPPER case) on the step or its job
   are now reported, as they already were in a 1.2 file. The rule clears a
   value only when its source text is `false`, `False` or `FALSE`, because
   whether GitHub Actions applies the 1.1 rules to such a file is not
