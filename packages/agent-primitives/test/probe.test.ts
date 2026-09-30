@@ -4819,7 +4819,17 @@ describe("probe(): the emergency restore is the last write to the target", () =>
       path.join(shimDir, "git"),
       [
         "#!/bin/sh",
-        "if [ -d .git ]; then",
+        // Only the `git apply` that writes the target: any other git call
+        // from the repository root, and a `--numstat`/`--check` dry run,
+        // passes straight through, so both markers belong to that apply.
+        "is_apply=0",
+        'for a in "$@"; do',
+        '  case "$a" in',
+        "    apply) is_apply=1 ;;",
+        "    --numstat|--check|--stat|-R|--reverse) is_apply=0; break ;;",
+        "  esac",
+        "done",
+        'if [ -d .git ] && [ "$is_apply" = 1 ]; then',
         `  printf running > ${JSON.stringify(applyStarted)}`,
         "  sleep 2",
         `  ${JSON.stringify(realGit)} "$@"`,
