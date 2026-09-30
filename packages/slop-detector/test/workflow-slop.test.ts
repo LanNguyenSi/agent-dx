@@ -5268,4 +5268,159 @@ describe("workflow-slop: a merge key that yaml reads as a symbol", () => {
       expect(found[0].message, key).toContain("is not text");
     }
   });
+
+  // The reason wording says which kind of key made the mapping unreadable.
+  // A mapping carrying both kinds prints the alias-or-collection wording,
+  // whatever the key order.
+  const ALIAS_OR_COLLECTION =
+    "has a key this rule cannot name (an alias it cannot resolve, or a mapping or sequence used as a key)";
+  const MERGE_OR_NON_TEXT =
+    "has a key this rule cannot name (a YAML merge key, or a date or binary value used as a key)";
+  const stepWith = (keyLines: string[]) =>
+    [
+      "%YAML 1.1",
+      "---",
+      "on: push",
+      "b: &b",
+      "  shell: pwsh",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      gate,
+      ...keyLines,
+    ].join("\n");
+
+  it("words the reason for a merge symbol key, for a collection key, and for a mapping with both", () => {
+    const only = (keyLines: string[]) => shapeViolations(stepWith(keyLines));
+    const symbol = only(["        <<: *b"]);
+    expect(symbol).toHaveLength(1);
+    expect(symbol[0].message).toContain(
+      `the step mapping ${MERGE_OR_NON_TEXT}`,
+    );
+    expect(symbol[0].message).not.toContain(ALIAS_OR_COLLECTION);
+
+    const collection = only(["        ? [shell]", "        : pwsh"]);
+    expect(collection).toHaveLength(1);
+    expect(collection[0].message).toContain(
+      `the step mapping ${ALIAS_OR_COLLECTION}`,
+    );
+    expect(collection[0].message).not.toContain(MERGE_OR_NON_TEXT);
+
+    for (const keyLines of [
+      ["        <<: *b", "        ? [shell]", "        : pwsh"],
+      ["        ? [shell]", "        : pwsh", "        <<: *b"],
+    ]) {
+      const both = only(keyLines);
+      expect(both, keyLines.join("|")).toHaveLength(1);
+      expect(both[0].message, keyLines.join("|")).toContain(
+        `the step mapping ${ALIAS_OR_COLLECTION}`,
+      );
+      expect(both[0].message, keyLines.join("|")).not.toContain(
+        MERGE_OR_NON_TEXT,
+      );
+    }
+  });
+
+  // A `!!merge` tag can sit on any key text: the finding quotes the key as
+  // it is written, at the same position, and the gate is refused.
+  const taggedKeys: Array<{
+    name: string;
+    header: string[];
+    lines: string[];
+    column: number;
+    matched: string;
+  }> = [
+    {
+      name: "`!!merge shell: pwsh`",
+      header: [],
+      lines: ["        !!merge shell: pwsh"],
+      column: 17,
+      matched: "shell",
+    },
+    {
+      name: "`!!merge x:`",
+      header: [],
+      lines: ["        !!merge x: *b"],
+      column: 17,
+      matched: "x",
+    },
+    {
+      name: "an empty `? !!merge` key",
+      header: [],
+      lines: ["        ? !!merge", "        : *b"],
+      column: 18,
+      matched: "!!merge",
+    },
+    {
+      name: "the verbatim merge tag",
+      header: [],
+      lines: ["        !<tag:yaml.org,2002:merge> <<: *b"],
+      column: 36,
+      matched: "<<",
+    },
+    {
+      name: "a `%TAG`-remapped merge tag",
+      header: ["%TAG !m! tag:yaml.org,2002:", "---"],
+      lines: ["        !m!merge <<: *b"],
+      column: 18,
+      matched: "<<",
+    },
+  ];
+  for (const t of taggedKeys) {
+    it(`quotes ${t.name} as written and refuses the gate`, () => {
+      const text = [
+        ...t.header,
+        "on: push",
+        "b: &b",
+        "  shell: pwsh",
+        "jobs:",
+        "  audit:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        gate,
+        ...t.lines,
+      ].join("\n");
+      expect(shapeViolations(text)).toHaveLength(1);
+      const found = auditViolations(text, YAML_RULE);
+      expect(
+        found.map((x) => [x.line, x.column, x.matched]),
+        t.name,
+      ).toEqual([[t.header.length + 9, t.column, t.matched]]);
+      expect(found[0].message).toContain("A YAML merge key");
+      const off = mergeConfig({ rules: { [YAML_RULE]: { enabled: false } } });
+      expect(shapeViolations(text, off)).toHaveLength(1);
+    });
+  }
+
+  it("refuses the gate for an alias key that resolves to a `!!merge` scalar", () => {
+    const text = [
+      "on: push",
+      "b: &b",
+      "  shell: pwsh",
+      "m: &m !!merge <<",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      gate,
+      "        *m : *b",
+    ].join("\n");
+    expect(shapeViolations(text)).toHaveLength(1);
+    const off = mergeConfig({ rules: { [YAML_RULE]: { enabled: false } } });
+    expect(shapeViolations(text, off)).toHaveLength(1);
+    expect(
+      auditViolations(text, YAML_RULE).map((x) => [x.line, x.matched]),
+    ).toEqual([[10, "<<"]]);
+  });
+
+  it("names the non-text key in the rule rationale", () => {
+    const text = stepWith(["        2001-01-01: x"]);
+    const found = auditViolations(text, YAML_RULE);
+    expect(found).toHaveLength(1);
+    expect(found[0].rationale).toContain("Five constructs");
+    expect(found[0].rationale).toContain(
+      "a scalar key whose value is not text",
+    );
+  });
 });

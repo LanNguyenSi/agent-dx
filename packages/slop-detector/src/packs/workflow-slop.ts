@@ -194,6 +194,19 @@ function isMergeSymbolKey(key: unknown): boolean {
 }
 
 /**
+ * The text a merge-key finding quotes. An alias key is `<<`, as it always
+ * was; a scalar key is its source text (a `!!merge` tag can sit on any
+ * text, as in `!!merge shell: pwsh`, so it is not always `<<`), or the tag
+ * when the key is empty (`? !!merge`).
+ */
+function mergeKeyMatched(written: unknown, key: unknown, text: string): string {
+  if (isAliasNode(written)) return "<<";
+  const range = (key as { range?: number[] }).range;
+  const source = range === undefined ? "" : text.slice(range[0], range[1]);
+  return source === "" ? "!!merge" : source;
+}
+
+/**
  * Mappings that carry the same key twice once their alias keys are
  * resolved (`shell: bash` then `*K : pwsh`, with `K` anchoring `shell`),
  * marked once per mapping by `applyAliasExpansion`. YAML's own duplicate
@@ -309,6 +322,8 @@ interface AliasIssue {
 
 interface MergeKeyHit {
   offset: number;
+  /** The text the finding quotes (see `mergeKeyMatched`). */
+  matched: string;
 }
 
 interface LoadedWorkflowDocument {
@@ -504,7 +519,10 @@ function applyAliasExpansion(
         // `!!merge` tag, so a symbol key is a merge key too; any other
         // scalar whose value is not text is reported as such.
         if (scalarKeyName(pair.key) === "<<" || isMergeSymbolKey(pair.key)) {
-          mergeKeys.push({ offset: aliasOffset(written) });
+          mergeKeys.push({
+            offset: aliasOffset(written),
+            matched: mergeKeyMatched(written, pair.key, text),
+          });
         } else if (isNonTextScalarKey(pair.key)) {
           const range = (pair.key as { range: number[] }).range;
           nonTextKeys.push({
@@ -1025,7 +1043,7 @@ const unsupportedYamlConstruct: Rule = {
   defaultSeverity: "block",
   enabledByDefault: true,
   rationale:
-    "GitHub Actions accepts YAML anchors and aliases in workflow files, and this pack resolves an alias to the value it stands for before it reads a mapping (executed inputs, `uses:` detection, `shell:`, `defaults:`, `runs-on:`). Four constructs it cannot read that way: a `<<` merge key, which GitHub does not merge, an alias it cannot resolve (no anchor of that name precedes it, it refers to a node that contains it, its anchor name is defined more than once in the file, or resolving every alias in the file would visit an unreasonable number of nodes), a mapping key that is itself a mapping or a sequence, and an alias key that resolves to a name its mapping already has (YAML's duplicate-key check does not see through an alias key). A mapping whose keys arrive through one of the first three is read as if they were absent, and a mapping carrying a key twice is read at the key's first occurrence, which need not be the value GitHub Actions uses; either way the result is indistinguishable from a genuinely clean file, so each is reported with a block finding of its own instead of scanning clean.",
+    "GitHub Actions accepts YAML anchors and aliases in workflow files, and this pack resolves an alias to the value it stands for before it reads a mapping (executed inputs, `uses:` detection, `shell:`, `defaults:`, `runs-on:`). Five constructs it cannot read that way: a `<<` merge key, which GitHub does not merge (a `%YAML 1.1` directive or a `!!merge` tag makes the YAML parser read a key as a merge symbol, whatever its text), an alias it cannot resolve (no anchor of that name precedes it, it refers to a node that contains it, its anchor name is defined more than once in the file, or resolving every alias in the file would visit an unreasonable number of nodes), a mapping key that is itself a mapping or a sequence, a scalar key whose value is not text (a date, or a binary value, as a `%YAML 1.1` directive or a tag such as `!!binary` gives), and an alias key that resolves to a name its mapping already has (YAML's duplicate-key check does not see through an alias key). A mapping whose keys arrive through one of the first four is read as if they were absent, and a mapping carrying a key twice is read at the key's first occurrence, which need not be the value GitHub Actions uses; either way the result is indistinguishable from a genuinely clean file, so each is reported with a block finding of its own instead of scanning clean.",
   appliesTo: isWorkflowFile,
   check(ctx: RuleContext): Violation[] {
     const { file } = ctx;
@@ -1054,7 +1072,9 @@ const unsupportedYamlConstruct: Rule = {
       };
     };
     return [
-      ...loaded.mergeKeys.map((hit) => at(hit.offset, "<<", MERGE_KEY_MESSAGE)),
+      ...loaded.mergeKeys.map((hit) =>
+        at(hit.offset, hit.matched, MERGE_KEY_MESSAGE),
+      ),
       ...loaded.collectionKeys.map((hit) =>
         at(hit.offset, hit.matched, hit.message),
       ),

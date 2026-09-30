@@ -41,8 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `audit-gate-shape` even where `unsupported-yaml-construct` is disabled.
   The merge symbol is reported by `unsupported-yaml-construct` like any
   `<<` key, and a date or binary key is reported by it too, with its own
-  message. Plain `yes`, `on` and numeric keys of a `%YAML 1.1` file are
-  unaffected.
+  message. A key a `!!merge` tag makes a merge symbol (`!!merge shell:`) is
+  quoted as written in the finding, at the same position, not as `<<`. The
+  rule's rationale now lists the date or binary key. Plain `yes`, `on` and
+  numeric keys of a `%YAML 1.1` file are unaffected.
 - `workflow-slop`: a mapping that carries the same key twice once its alias
   keys are resolved (`shell: bash` followed by `*K : pwsh`, with `K`
   anchoring `shell`, in either order, or two alias keys resolving to the
