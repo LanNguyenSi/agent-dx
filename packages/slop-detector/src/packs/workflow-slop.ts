@@ -1557,6 +1557,18 @@ function isAuditWorkflowFile(file: FileTarget): boolean {
 type ScalarWithRange = { value: unknown; range: [number, number, number] };
 
 /**
+ * A `continue-on-error:` scalar together with its source text (the file
+ * text at the scalar's own range, quotes included). The parsed `value`
+ * depends on the YAML version and tags in force (a `%YAML 1.1` directive
+ * reads `off`, `no` and `n` as boolean `false`, where a 1.2 file reads
+ * them as text), and which of those GitHub Actions applies is not
+ * established, so the audit path clears a `continue-on-error` from what is
+ * written, never from what a schema resolved it to (see
+ * `continueOnErrorFindings`).
+ */
+type ContinueOnErrorField = ScalarWithRange & { source: string };
+
+/**
  * A `shell:` key (this step's own, or a `defaults.run.shell`) whose
  * value is present but is a sequence or a mapping rather than a plain
  * scalar (`shell: [bash]`, `shell: { name: bash }`). Distinguished from
@@ -1604,7 +1616,7 @@ interface StepRunInfo {
   style: RunScalarStyle;
   /** Human-readable name of the scalar style, for a refusal message. */
   styleLabel: string;
-  continueOnError?: ScalarWithRange;
+  continueOnError?: ContinueOnErrorField;
   /**
    * The `continue-on-error:` of this step's *enclosing job* (the
    * `jobs.<job_id>` mapping, identified by its own `steps:` key), when
@@ -1613,7 +1625,7 @@ interface StepRunInfo {
    * that stays green regardless of what any of its steps (including the
    * gate) exit.
    */
-  jobContinueOnError?: ScalarWithRange;
+  jobContinueOnError?: ContinueOnErrorField;
   /** This step's own `shell:` sibling of `run:`, when present. */
   shell?: ShellField;
   /** The enclosing job's `defaults.run.shell`, when present. */
@@ -1770,7 +1782,8 @@ function scalarStringValue(node: unknown): string | undefined {
  * (the documented runner-group object form, `runs-on: { group: <name>,
  * labels: [...] }`) whose `labels:` is itself unresolved or absent, or
  * any node shape other than a scalar, a sequence of scalars, or that
- * mapping form. GitHub's own default shell on a Windows runner is
+ * mapping form. A list holding such an item is still `"windows"` when
+ * another item is a literal Windows label. GitHub's own default shell on a Windows runner is
  * `pwsh`, not bash (Windows runners default to PowerShell Core, falling
  * back to Windows PowerShell; see docs/workflow-slop.md), so an absent `shell:`
  * there is not the same certifiable absence it is on Linux/macOS.
@@ -1800,16 +1813,26 @@ function resolveRunsOn(node: unknown): RunsOnResolution {
         ? resolveRunsOn((labelsPair as { value: unknown }).value)
         : "unresolved";
     }
-    const labels: string[] = [];
+    // A literal Windows label decides the list whatever the other items
+    // are: a non-string label (a number, a `%YAML 1.1` boolean such as
+    // `on`, a null), an expression, a nested collection or an alias this
+    // rule cannot read makes the list unresolved only when no item names
+    // Windows, since giving up first certified a Windows runner as bash.
+    let unresolved = false;
     for (const item of node.items) {
       const value = scalarStringValue(item);
-      if (value === undefined) return "unresolved";
-      labels.push(value);
+      if (value === undefined) {
+        if (!isScalarNode(item) && resolveRunsOn(item) === "windows") {
+          return "windows";
+        }
+        unresolved = true;
+      } else if (value.includes("${{")) {
+        unresolved = true;
+      } else if (WINDOWS_LABEL_RE.test(value.trim())) {
+        return "windows";
+      }
     }
-    if (labels.some((label) => label.includes("${{"))) return "unresolved";
-    return labels.some((label) => WINDOWS_LABEL_RE.test(label.trim()))
-      ? "windows"
-      : "other";
+    return unresolved ? "unresolved" : "other";
   }
   return "unresolved";
 }
@@ -1837,7 +1860,7 @@ function collectStepRuns(
   node: unknown,
   out: StepRunInfo[],
   insideWith = false,
-  jobContinueOnError?: ScalarWithRange,
+  jobContinueOnError?: ContinueOnErrorField,
   workflowDefaultShell?: ShellField,
   jobDefaultShell?: ShellField,
   jobRunsOn?: RunsOnResolution,
@@ -1920,7 +1943,14 @@ function collectStepRuns(
         return jobCoePair &&
           isPairNode(jobCoePair) &&
           isScalarNode(jobCoePair.value)
-          ? { value: jobCoePair.value.value, range: jobCoePair.value.range }
+          ? {
+              value: jobCoePair.value.value,
+              range: jobCoePair.value.range,
+              source: fileText.slice(
+                jobCoePair.value.range[0],
+                jobCoePair.value.range[1],
+              ),
+            }
           : undefined;
       })()
     : jobContinueOnError;
@@ -1965,7 +1995,14 @@ function collectStepRuns(
       );
       const continueOnError =
         coePair && isPairNode(coePair) && isScalarNode(coePair.value)
-          ? { value: coePair.value.value, range: coePair.value.range }
+          ? {
+              value: coePair.value.value,
+              range: coePair.value.range,
+              source: fileText.slice(
+                coePair.value.range[0],
+                coePair.value.range[1],
+              ),
+            }
           : undefined;
       const stepUnreadable = [...effectiveUnreadable];
       if (hasMergeKey(node)) {
@@ -3591,27 +3628,42 @@ function collectAuditStepBlocks(file: FileTarget): AuditStepBlock[] {
   });
 }
 
+// The YAML 1.2 core-schema spellings of boolean false.
+const CORE_SCHEMA_FALSE_RE = /^(?:false|False|FALSE)$/;
+
 /**
  * `continue-on-error` findings for one gate step: checked on the step
  * itself and on its enclosing job (see `StepRunInfo.jobContinueOnError`).
- * Flags any value that is not literally `false` (boolean `false` or the
- * string `"false"`): a literal `true`, the string `"true"`, or an
- * unresolved `${{ ... }}` expression (which parses as a plain string and
- * cannot be evaluated statically) is not provably `false`, so all three
- * are treated the same. A step- or job-level `if:` that would actually
+ * Flags any value that is not literally `false`: the string `"false"`, or
+ * a boolean `false` whose source text is a core-schema false (`false`,
+ * `False`, `FALSE`). A literal `true`, the string `"true"`, an unresolved
+ * `${{ ... }}` expression (which parses as a plain string and cannot be
+ * evaluated statically) and a boolean `false` written any other way
+ * (`off`, `no`, `n`, which a `%YAML 1.1` directive resolves to `false`
+ * and a 1.2 file reads as text) are not provably `false`, so all are
+ * treated the same. The source text decides, not the resolved value,
+ * because which schema GitHub Actions applies to a `%YAML 1.1` file is
+ * not established: reading what is written stays correct under either
+ * answer, where a list of the 1.1 spellings would miss the next one and
+ * refusing every 1.1 document would refuse a valid `continue-on-error:
+ * false` in one. A step- or job-level `if:` that would actually
  * prevent the gate step from running is out of this rule's reach and is
  * not checked here (documented in docs/workflow-slop.md as a limitation).
  */
 function continueOnErrorFindings(step: StepRunInfo): AuditFinding[] {
   const findings: AuditFinding[] = [];
   const check = (
-    coe: ScalarWithRange | undefined,
+    coe: ContinueOnErrorField | undefined,
     scope: "the gate step" | "the gate step's enclosing job",
   ) => {
     if (!coe) return;
-    if (coe.value === false || coe.value === "false") return;
+    if (coe.value === "false") return;
+    if (coe.value === false && CORE_SCHEMA_FALSE_RE.test(coe.source)) return;
+    // A value that is not text is named by what is written (`off`, `no`),
+    // not by what a schema resolved it to (`false`), which would read as
+    // "set to `false`, which cannot be proven false".
     const rendered =
-      typeof coe.value === "string" ? coe.value : String(coe.value);
+      typeof coe.value === "string" ? coe.value : coe.source.trim();
     findings.push({
       offset: coe.range[0],
       matched: `continue-on-error: ${rendered}`,

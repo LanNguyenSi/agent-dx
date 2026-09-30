@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `workflow-slop/audit-gate-shape` no longer certifies a gate whose
+  `continue-on-error` a `%YAML 1.1` directive resolves to false without
+  being written false: `off`, `no` and `n` (lower, Title or UPPER case) on the step or its job
+  are now reported, as they already were in a 1.2 file. The rule clears a
+  value only when its source text is `false`, `False` or `FALSE`, because
+  whether GitHub Actions applies the 1.1 rules to such a file is not
+  established. The finding names the value as written (`off`) instead of the
+  resolved `false`.
+- `workflow-slop/audit-gate-shape` now refuses a gate with no `shell:` whose
+  `runs-on:` list holds a literal Windows label next to a label that is not
+  a string (`[self-hosted, windows, 1]`, a `%YAML 1.1` boolean such as `on`,
+  a null, an expression or a nested list). That list was left unresolved and
+  certified as bash, while `[self-hosted, windows]` was refused.
 - `workflow-slop/unsupported-yaml-construct`: the `matched` text of a
   merge-key or non-text-key finding quoted the key's whole source range, so
   a key written over many lines (`? !!merge |` with a block scalar, a

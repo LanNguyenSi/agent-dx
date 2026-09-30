@@ -2280,6 +2280,230 @@ describe("workflow-slop/audit-gate-shape: continue-on-error", () => {
   });
 });
 
+// A value the YAML version in force resolves to a boolean, or a `runs-on`
+// label that is not text, must never be read as the safe case: the audit
+// path clears a `continue-on-error` from its source text and lets a literal
+// Windows label decide a mixed `runs-on` list. Each fixture is checked with
+// the construct finding on (the default) and off, since the refusal is the
+// shape rule's own.
+describe("workflow-slop/audit-gate-shape: YAML 1.1 values and non-string labels", () => {
+  const constructOff = mergeConfig({
+    rules: { [YAML_RULE]: { enabled: false } },
+  });
+  const both = [
+    ["default config", defaultConfig()],
+    ["construct finding disabled", constructOff],
+  ] as const;
+  const GATE = "npm audit --audit-level=high";
+  const coeMessage = (scope: string, rendered: string) =>
+    `\`continue-on-error\` on ${scope} is set to \`${rendered}\`, which cannot be proven false: the job may stay green regardless of the \`npm audit --audit-level=...\` gate's exit status.`;
+  const WINDOWS_REASON =
+    "the gate step has no `shell:` at any level and its job's `runs-on` names a Windows runner, whose default shell is not bash";
+
+  const stepDoc = (header: string[], value: string) =>
+    [
+      ...header,
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - name: gate",
+      `        continue-on-error: ${value}`,
+      "        run: |",
+      `          ${GATE}`,
+    ].join("\n");
+  const jobDoc = (header: string[], value: string) =>
+    [
+      ...header,
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      `    continue-on-error: ${value}`,
+      "    steps:",
+      "      - run: |",
+      `          ${GATE}`,
+    ].join("\n");
+  const V11 = ["%YAML 1.1", "---"];
+
+  it("refuses a step `continue-on-error` that a `%YAML 1.1` directive resolves to false but that is not written false", () => {
+    for (const [label, cfg] of both) {
+      for (const value of ["off", "no", "n", "Off", "NO", "N"]) {
+        const v = shapeViolations(stepDoc(V11, value), cfg);
+        expect(v, `${label} ${value}`).toHaveLength(1);
+        expect(v[0].message, `${label} ${value}`).toBe(
+          coeMessage("the gate step", value),
+        );
+        expect(v[0].matched).toBe(`continue-on-error: ${value}`);
+      }
+    }
+  });
+
+  it("refuses a job `continue-on-error` that a `%YAML 1.1` directive resolves to false but that is not written false", () => {
+    for (const [label, cfg] of both) {
+      for (const value of ["off", "no", "n", "Off"]) {
+        const v = shapeViolations(jobDoc(V11, value), cfg);
+        expect(v, `${label} ${value}`).toHaveLength(1);
+        expect(v[0].message, `${label} ${value}`).toBe(
+          coeMessage("the gate step's enclosing job", value),
+        );
+      }
+    }
+  });
+
+  it("refuses a 1.1 spelling of true and the same words in a 1.2 file", () => {
+    for (const header of [V11, []]) {
+      for (const value of ["on", "yes", "y", "off", "no", "0", "~", "null"]) {
+        expect(
+          shapeViolations(stepDoc(header, value)),
+          `${header.length} ${value}`,
+        ).toHaveLength(1);
+        expect(
+          shapeViolations(jobDoc(header, value)),
+          `${header.length} ${value}`,
+        ).toHaveLength(1);
+      }
+    }
+  });
+
+  it("refuses a boolean `continue-on-error` written under a tag or an anchor unless the text is a core-schema false", () => {
+    // In a 1.2 file `!!bool off` and `!!bool no` load as text; under the 1.1
+    // header they load as false. The source text is not a core-schema false
+    // either way, so both are refused.
+    for (const value of ["!!bool off", "!!bool no", "!!int 0"]) {
+      expect(shapeViolations(stepDoc(V11, value)), value).toHaveLength(1);
+      expect(shapeViolations(stepDoc([], value)), value).toHaveLength(1);
+    }
+    // An anchored `false` is still written false.
+    expect(shapeViolations(stepDoc(V11, "&f false"))).toEqual([]);
+    expect(shapeViolations(stepDoc([], "!!bool false"))).toEqual([]);
+  });
+
+  it("still certifies a `continue-on-error` written as a core-schema false, in a 1.1 or a 1.2 file", () => {
+    for (const header of [V11, []]) {
+      for (const value of ["false", "False", "FALSE", '"false"', "'false'"]) {
+        expect(
+          shapeViolations(stepDoc(header, value)),
+          `${header.length} step ${value}`,
+        ).toEqual([]);
+        expect(
+          shapeViolations(jobDoc(header, value)),
+          `${header.length} job ${value}`,
+        ).toEqual([]);
+      }
+    }
+  });
+
+  it("names a resolved value by its source text and keeps the message for a written `true`", () => {
+    const v = shapeViolations(stepDoc(V11, "yes"));
+    expect(v[0].message).toBe(coeMessage("the gate step", "yes"));
+    const t = shapeViolations(stepDoc([], "true"));
+    expect(t[0].message).toBe(coeMessage("the gate step", "true"));
+  });
+
+  const runsOnDoc = (header: string[], runsOn: string) =>
+    [
+      ...header,
+      "on: push",
+      "jobs:",
+      "  audit:",
+      `    runs-on: ${runsOn}`,
+      "    steps:",
+      "      - run: |",
+      `          ${GATE}`,
+    ].join("\n");
+
+  it("refuses a gate with no shell whose `runs-on` list mixes a non-string label with a literal Windows label", () => {
+    const lists: Array<[string[], string]> = [
+      [[], "[self-hosted, windows, 1]"],
+      [[], "[1, windows]"],
+      [[], "[windows, 1.5]"],
+      [V11, "[self-hosted, windows, on]"],
+      [V11, "[on, windows-latest]"],
+      [V11, "[self-hosted, windows, no]"],
+      [[], "[~, windows]"],
+      [[], "[self-hosted, null, windows]"],
+      [[], "[self-hosted, true, Windows-2022]"],
+      [[], "[self-hosted, [windows]]"],
+      [[], "[self-hosted, [1, windows]]"],
+      [[], "[self-hosted, { labels: [windows] }]"],
+      [[], "[self-hosted, windows, '${{ matrix.os }}']"],
+      [[], "['${{ matrix.os }}', windows]"],
+    ];
+    for (const [label, cfg] of both) {
+      for (const [header, list] of lists) {
+        const v = shapeViolations(runsOnDoc(header, list), cfg);
+        expect(v, `${label} ${header.length} ${list}`).toHaveLength(1);
+        expect(v[0].message).toBe(shellMessage(WINDOWS_REASON));
+      }
+    }
+  });
+
+  it("refuses a gate with no shell whose Windows label is padded with whitespace", () => {
+    for (const [label, cfg] of both) {
+      for (const runsOn of [
+        "[self-hosted, ' windows ']",
+        "[1, ' windows ']",
+        "' windows-latest '",
+      ]) {
+        const v = shapeViolations(runsOnDoc([], runsOn), cfg);
+        expect(v, `${label} ${runsOn}`).toHaveLength(1);
+        expect(v[0].message).toBe(shellMessage(WINDOWS_REASON));
+      }
+    }
+  });
+
+  it("refuses the same mixed lists in the block sequence and the runner-group `labels:` forms", () => {
+    const block = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on:",
+      "      - self-hosted",
+      "      - 1",
+      "      - windows",
+      "    steps:",
+      "      - run: |",
+      `          ${GATE}`,
+    ].join("\n");
+    expect(shapeViolations(block)).toHaveLength(1);
+    expect(
+      shapeViolations(runsOnDoc([], "{ group: g, labels: [windows, 1] }")),
+    ).toHaveLength(1);
+  });
+
+  it("leaves a list with no literal Windows label unresolved and certifiable, as before", () => {
+    for (const list of [
+      "[self-hosted, linux, 1]",
+      "[self-hosted, on]",
+      "[1, 2]",
+      "[self-hosted, '${{ matrix.os }}']",
+      "[self-hosted, [linux]]",
+      "[ubuntu-latest]",
+      "ubuntu-latest",
+      "[self-hosted, linux, x64]",
+    ]) {
+      expect(shapeViolations(runsOnDoc([], list)), list).toEqual([]);
+    }
+    expect(shapeViolations(runsOnDoc(V11, "[self-hosted, on]"))).toEqual([]);
+  });
+
+  it("negative control: an explicit bash shell still certifies a mixed Windows list", () => {
+    const text = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: [self-hosted, windows, 1]",
+      "    steps:",
+      "      - shell: bash",
+      "        run: |",
+      `          ${GATE}`,
+    ].join("\n");
+    expect(shapeViolations(text)).toEqual([]);
+  });
+});
+
 describe("workflow-slop/audit-gate-shape: registered templates and the fleet shape", () => {
   it("the package ships no org template: the real fleet gate block is reported without one", () => {
     const v = shapeViolations(REAL_FLEET_AUDIT_YML);
