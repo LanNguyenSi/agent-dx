@@ -4050,7 +4050,7 @@ describe("probe(): the emergency restore is the last write to the target", () =>
     // Two writers, each aimed at one half of the guarantee.
     //
     // The test command itself TRAPS SIGTERM and SIGINT, so only SIGKILL
-    // can end it, and it writes the target 1.5s in. A signal path that
+    // can end it, and it writes the target 1.8s in. A signal path that
     // sends SIGTERM and exits leaves it running (the escalation timer
     // dies with the process that scheduled it), and it then writes over
     // the restored file. Its heartbeat is the descendant-is-gone proof.
@@ -4100,7 +4100,7 @@ describe("probe(): the emergency restore is the last write to the target", () =>
         "setTimeout(() => {",
         "  fs.writeFileSync('fixture.js', 'POISON_FROM_TEST_CHILD\\n');",
         "  process.exit(0);",
-        "}, 1500);",
+        "}, 1800);",
         "",
       ].join("\n"),
     );
@@ -4132,7 +4132,16 @@ describe("probe(): the emergency restore is the last write to the target", () =>
       ],
       {
         cwd: repo,
-        env: { ...process.env, AGENT_PRIMITIVES_LOCK_DIR: lockDir },
+        env: {
+          ...process.env,
+          AGENT_PRIMITIVES_LOCK_DIR: lockDir,
+          // Shorter than the test command's 1.8s write, so a signal path
+          // that fails to kill the trapping command gives up waiting,
+          // restores and exits BEFORE that write lands, and the test
+          // sees the poison. At the default bound it would restore
+          // after the write and the survivor would go unnoticed.
+          AGENT_PRIMITIVES_SIGNAL_SETTLE_BOUND_MS: "800",
+        },
         stdio: "ignore",
       },
     );
@@ -4166,10 +4175,10 @@ describe("probe(): the emergency restore is the last write to the target", () =>
       ? fs.readFileSync(heartbeat, "utf8")
       : "";
     // The signal lands about 350ms after the test command starts, so
-    // waiting 1.7s covers the surviving command's 1.5s write with margin
+    // waiting 2s covers the surviving command's 1.8s write with margin
     // (and its 100ms heartbeat many times over). The wait is kept short
     // on purpose: it is the bulk of this test's runtime.
-    await sleep(1700);
+    await sleep(2000);
     expect(
       fs.existsSync(heartbeat) ? fs.readFileSync(heartbeat, "utf8") : "",
     ).toBe(countAtExit);
@@ -4801,6 +4810,11 @@ describe("probe(): the emergency restore is the last write to the target", () =>
           ...process.env,
           PATH: `${shimDir}${path.delimiter}${process.env.PATH ?? ""}`,
           AGENT_PRIMITIVES_LOCK_DIR: lockDir,
+          // Shorter than the shim's 1s sleep, so an apply that is not
+          // killed makes the handler give up waiting and restore BEFORE
+          // the apply lands, and the test sees the mutated target. At the
+          // default bound it would wait the apply out and restore after.
+          AGENT_PRIMITIVES_SIGNAL_SETTLE_BOUND_MS: "500",
         },
         stdio: "ignore",
       },
