@@ -246,7 +246,8 @@ function containsUnreadablePart(node: unknown): boolean {
 // reported by the same rule as well, and the mapping is marked so the
 // shell / `runs-on` / `continue-on-error` read refuses it: YAML's own
 // duplicate-key check skips alias keys, and every read here matches a key by
-// name at its first occurrence.
+// name at its first occurrence. `audit-gate-shape` also refuses every gate
+// in a file carrying such a duplicate anywhere, off the gate's read path too.
 //
 // An alias this pack cannot resolve (no anchor of that name precedes it, the
 // anchor is one of the alias's own ancestors, or resolving every alias would
@@ -962,7 +963,7 @@ const unsupportedYamlConstruct: Rule = {
   defaultSeverity: "block",
   enabledByDefault: true,
   rationale:
-    "GitHub Actions accepts YAML anchors and aliases in workflow files, and this pack resolves an alias to the value it stands for before it reads a mapping (executed inputs, `uses:` detection, `shell:`, `defaults:`, `runs-on:`). Three constructs it cannot read that way: a `<<` merge key, which GitHub does not merge, an alias it cannot resolve (no anchor of that name precedes it, it refers to a node that contains it, its anchor name is defined more than once in the file, or resolving every alias in the file would visit an unreasonable number of nodes), a mapping key that is itself a mapping or a sequence, and an alias key that resolves to a name its mapping already has (YAML's duplicate-key check does not see through an alias key). A mapping whose keys arrive through any of them is read as if they were absent, in a way indistinguishable from a genuinely clean file, so each is reported with a block finding of its own instead of scanning clean.",
+    "GitHub Actions accepts YAML anchors and aliases in workflow files, and this pack resolves an alias to the value it stands for before it reads a mapping (executed inputs, `uses:` detection, `shell:`, `defaults:`, `runs-on:`). Four constructs it cannot read that way: a `<<` merge key, which GitHub does not merge, an alias it cannot resolve (no anchor of that name precedes it, it refers to a node that contains it, its anchor name is defined more than once in the file, or resolving every alias in the file would visit an unreasonable number of nodes), a mapping key that is itself a mapping or a sequence, and an alias key that resolves to a name its mapping already has (YAML's duplicate-key check does not see through an alias key). A mapping whose keys arrive through one of the first three is read as if they were absent, and a mapping carrying a key twice is read at the key's first occurrence, which need not be the value GitHub Actions uses; either way the result is indistinguishable from a genuinely clean file, so each is reported with a block finding of its own instead of scanning clean.",
   appliesTo: isWorkflowFile,
   check(ctx: RuleContext): Violation[] {
     const { file } = ctx;
@@ -1534,7 +1535,10 @@ interface StepRunInfo {
    * `runs-on:`) that is an alias which could not be resolved. Either way the value the key or alias
    * stands for is read as absent, which for a `block` gate is the false-clean direction, so
    * `audit-gate-shape` refuses a step with any entry here instead of
-   * certifying it. Empty for every readable step.
+   * certifying it. `collectAuditStepBlocks` also adds one entry to every
+   * step of a file that carries a key written twice once its alias keys
+   * are resolved anywhere, on the step's path or not
+   * (`aliasDuplicateFileReason`). Empty for every readable step.
    */
   unreadable: string[];
 }
@@ -3388,6 +3392,26 @@ interface AuditFinding {
  * raw text mentions the gate, so a gate rewritten as a folded scalar is
  * reported rather than skipped.
  */
+/**
+ * The reason every gate step of a file is refused when the file carries a
+ * key written twice once its alias keys are resolved, anywhere in the file
+ * (a step's `env:`, another job), or `undefined` when it carries none. The
+ * step's own read path already refuses a duplicate on it; one elsewhere
+ * says the file is not the one GitHub Actions reads either, and that
+ * refusal must not depend on `unsupported-yaml-construct` being enabled.
+ */
+function aliasDuplicateFileReason(
+  text: string,
+  duplicateKeys: AliasIssue[],
+): string | undefined {
+  if (duplicateKeys.length === 0) return undefined;
+  const sites = duplicateKeys.map(
+    (hit) =>
+      `\`${hit.matched}\` at line ${offsetToLineCol(text, hit.offset).line}`,
+  );
+  return `the file has a mapping carrying a key twice once its YAML aliases are resolved (${sites.join(", ")})`;
+}
+
 interface AuditStepBlock {
   step: StepRunInfo;
   block: NormalizedBlock;
@@ -3397,15 +3421,17 @@ interface AuditStepBlock {
 }
 
 function collectAuditStepBlocks(file: FileTarget): AuditStepBlock[] {
-  let doc: unknown;
+  let loaded: LoadedWorkflowDocument;
   try {
-    doc = loadWorkflowContents(file.text);
+    loaded = loadWorkflowDocument(file.text);
   } catch {
     return [];
   }
   const steps: StepRunInfo[] = [];
-  collectStepRuns(file.text, doc, steps);
+  collectStepRuns(file.text, loaded.contents, steps);
+  const fileReason = aliasDuplicateFileReason(file.text, loaded.duplicateKeys);
   return steps.map((step) => {
+    if (fileReason !== undefined) step.unreadable.push(fileReason);
     const raw = file.text.slice(step.runRange[0], step.runRange[1]);
     const block = normalizeRunBlock(raw, step.runRange[0], step.style);
     const gate = findGateStatement(block.statements);

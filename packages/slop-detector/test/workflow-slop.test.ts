@@ -4647,3 +4647,180 @@ describe("workflow-slop: a key written twice once alias keys are resolved", () =
     expect(runViolations(text)).toEqual([]);
   });
 });
+
+describe("workflow-slop: an alias-key duplicate matches keys by resolved value, not by how they are written", () => {
+  const WRITTEN_TWICE =
+    "has a key written twice once its YAML aliases are resolved";
+  const constructOff = mergeConfig({
+    rules: { [YAML_RULE]: { enabled: false } },
+  });
+  // Four spellings of one key name: plain, single-quoted, double-quoted
+  // with an escape for its second character, and `!!str`-tagged.
+  const forms = (name: string): Array<[string, string]> => [
+    ["plain", name],
+    ["single-quoted", `'${name}'`],
+    [
+      "escaped double-quoted",
+      `"${name[0]}\\x${name.charCodeAt(1).toString(16)}${name.slice(2)}"`,
+    ],
+    ["tagged", `!!str ${name}`],
+  ];
+  const levels = [
+    {
+      level: "step",
+      name: "shell",
+      before: [
+        "jobs:",
+        "  audit:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        "      - run: npm audit --audit-level=high",
+      ],
+      plain: (key: string) => `        ${key}: bash`,
+      alias: "        *X : pwsh",
+      after: [] as string[],
+      reason: `the step mapping ${WRITTEN_TWICE}`,
+    },
+    {
+      level: "job",
+      name: "runs-on",
+      before: ["jobs:", "  audit:"],
+      plain: (key: string) => `    ${key}: ubuntu-latest`,
+      alias: "    *X : windows-latest",
+      after: ["    steps:", "      - run: npm audit --audit-level=high"],
+      reason: `the job mapping ${WRITTEN_TWICE}`,
+    },
+  ];
+
+  for (const l of levels) {
+    for (const [keyForm, key] of forms(l.name)) {
+      for (const [anchorForm, anchor] of forms(l.name)) {
+        for (const aliasFirst of [false, true]) {
+          it(`refuses a ${l.level} whose ${keyForm} \`${l.name}\` key repeats an alias to a ${anchorForm} anchor (${aliasFirst ? "alias first" : "plain first"})`, () => {
+            const pair = aliasFirst
+              ? [l.alias, l.plain(key)]
+              : [l.plain(key), l.alias];
+            const lines = [
+              "on: push",
+              "env:",
+              `  A: &X ${anchor}`,
+              ...l.before,
+              ...pair,
+              ...l.after,
+            ];
+            const text = lines.join("\n");
+            expect(
+              auditViolations(text, "workflow-slop/unparseable-workflow"),
+            ).toEqual([]);
+            expect(
+              auditViolations(text, YAML_RULE).map((x) => [x.line, x.matched]),
+            ).toEqual([[lines.indexOf(l.alias) + 1, "*X"]]);
+            for (const config of [defaultConfig(), constructOff]) {
+              const refusals = shapeViolations(text, config).filter((x) =>
+                x.message.includes(l.reason),
+              );
+              expect(refusals).toHaveLength(1);
+            }
+          });
+        }
+      }
+    }
+  }
+});
+
+describe("workflow-slop/audit-gate-shape: an alias-key duplicate off the gate's read path", () => {
+  const constructOff = mergeConfig({
+    rules: { [YAML_RULE]: { enabled: false } },
+  });
+  const fileReason = (sites: string) =>
+    `the file has a mapping carrying a key twice once its YAML aliases are resolved (${sites})`;
+  const job = [
+    "jobs:",
+    "  audit:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: npm audit --audit-level=high",
+  ];
+  const fixtures: Array<{ name: string; lines: string[]; sites: string }> = [
+    {
+      name: "a mapping in the workflow env that no gate reads",
+      lines: [
+        "on: push",
+        "env:",
+        "  A: &X shell",
+        "  D: { run: { shell: bash, *X : pwsh } }",
+        ...job,
+      ],
+      sites: "`*X` at line 4",
+    },
+    {
+      name: "another job's `uses:`",
+      lines: [
+        "on: push",
+        "env:",
+        "  A: &U uses",
+        ...job,
+        "  c:",
+        "    uses: ./.github/workflows/a.yml",
+        "    *U : ./.github/workflows/b.yml",
+      ],
+      sites: "`*U` at line 11",
+    },
+    {
+      name: "the gate step's own `env:`",
+      lines: [
+        "on: push",
+        "env:",
+        "  A: &E FOO",
+        ...job,
+        "        env:",
+        "          FOO: a",
+        "          *E : b",
+      ],
+      sites: "`*E` at line 11",
+    },
+  ];
+
+  for (const f of fixtures) {
+    it(`refuses every gate of a file whose duplicate sits in ${f.name}, with the construct finding enabled or disabled`, () => {
+      const text = f.lines.join("\n");
+      expect(auditViolations(text, YAML_RULE)).toHaveLength(1);
+      expect(auditViolations(text, YAML_RULE, constructOff)).toEqual([]);
+      for (const config of [defaultConfig(), constructOff]) {
+        const v = shapeViolations(text, config);
+        expect(v).toHaveLength(1);
+        expect(v[0].message).toContain(fileReason(f.sites));
+      }
+    });
+  }
+
+  it("names every duplicate of the file and refuses each gate", () => {
+    const text = [
+      "on: push",
+      "env:",
+      "  A: &X shell",
+      "  D: { run: { shell: bash, *X : pwsh } }",
+      "  E: { shell: bash, *X : cmd }",
+      ...job,
+      "  second:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+    ].join("\n");
+    const v = shapeViolations(text, constructOff);
+    expect(v.map((x) => x.line)).toEqual([10, 14]);
+    for (const x of v) {
+      expect(x.message).toContain(fileReason("`*X` at line 4, `*X` at line 5"));
+    }
+  });
+
+  it("certifies the same files once the duplicate is removed", () => {
+    for (const f of fixtures) {
+      const text = f.lines
+        .filter((line) => !/^\s*\*[A-Z] :/.test(line))
+        .map((line) => line.replace(/, \*X : pwsh/, ""))
+        .join("\n");
+      expect(shapeViolations(text), f.name).toEqual([]);
+    }
+  });
+});

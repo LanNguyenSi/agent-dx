@@ -37,8 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   alias key with a block finding, and `audit-gate-shape` refuses a gate
   whose read path passes through such a mapping (the workflow, the job, a
   mapping enclosing the step, `defaults`, `defaults.run`, the step, or
-  anything inside `runs-on:`), even where that finding is disabled. The
-  check runs once per mapping during alias expansion. Two plain keys of the
+  anything inside `runs-on:`), even where that finding is disabled. A
+  duplicate of that kind anywhere else in an audit workflow (a step's
+  `env:`, another job) refuses every gate in the file the same way, naming
+  the line of each alias key involved. The check runs once per mapping
+  during alias expansion. Keys are compared by their resolved value, so a
+  plain `shell` matches an alias to `'shell'`, `"s\x68ell"` or
+  `!!str shell`. Two plain keys of the
   same name are still reported by `unparseable-workflow`, as before.
 - `workflow-slop` resolves YAML aliases before any structural read. GitHub
   Actions accepts anchors and aliases (its changelog entry "Actions: YAML
