@@ -20,7 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `!!merge` tag; under a `%YAML 1.1` directive only a plain `<<` is.
 - `slop-detector check -f json` piped into another process was cut at the
   pipe buffer, because the process exited right after the write. It now
-  sets the exit code and lets stdout drain, so a large report arrives whole.
+  sets the exit code and lets stdout drain, so a large report arrives whole. A reader that closes early (`| head -c 10`)
+  ends the run with the verdict's exit code and no stream-error stack.
 
 ## [0.6.0] - 2026-09-30
 

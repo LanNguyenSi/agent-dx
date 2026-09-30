@@ -5429,7 +5429,7 @@ describe("workflow-slop: a merge key that yaml reads as a symbol", () => {
     // No `%YAML 1.1` directive: the `!!merge` and `!!binary` tags alone make
     // the keys unreadable. The quoted range of a tagged scalar starts after
     // the tag, at its value.
-    const keyed = (keyLines: string[]) =>
+    const keyed = (keyLines: string[], eol = "\n") =>
       auditViolations(
         [
           "on: push",
@@ -5440,8 +5440,9 @@ describe("workflow-slop: a merge key that yaml reads as a symbol", () => {
           "    runs-on: ubuntu-latest",
           "    steps:",
           "      - run: npm audit --audit-level=high",
-          ...keyLines,
-        ].join("\n"),
+        ]
+          .join("\n")
+          .concat("\n", keyLines.join(eol)),
         YAML_RULE,
       );
 
@@ -5479,6 +5480,42 @@ describe("workflow-slop: a merge key that yaml reads as a symbol", () => {
       expect(matched).toBe(`"${"x".repeat(CAP - 1)}\u2026`);
       expect(matched.length).toBe(CAP + 1);
     });
+
+    it("quotes a key of exactly the cap as written, and cuts one character more", () => {
+      const exact = keyed([
+        `        ? !!merge "${"x".repeat(CAP - 2)}"`,
+        "        : *b",
+      ]);
+      expect(exact).toHaveLength(1);
+      expect(exact[0].matched).toBe(`"${"x".repeat(CAP - 2)}"`);
+      expect(exact[0].matched?.length).toBe(CAP);
+      const over = keyed([
+        `        ? !!merge "${"x".repeat(CAP - 1)}"`,
+        "        : *b",
+      ]);
+      expect(over).toHaveLength(1);
+      expect(over[0].matched).toBe(`"${"x".repeat(CAP - 1)}\u2026`);
+    });
+
+    it.each([
+      { name: "CRLF", eol: "\r\n" },
+      { name: "CR-only", eol: "\r" },
+    ])(
+      "quotes a single line for a multi-line key with $name line endings",
+      ({ eol }) => {
+        const found = keyed(
+          [
+            '        ? !!merge "first line of the key',
+            '          second line of the key"',
+            "        : *b",
+          ],
+          eol,
+        );
+        expect(found).toHaveLength(1);
+        expect(found[0].matched).toBe('"first line of the key\u2026');
+        expect(found[0].line).toBe(9);
+      },
+    );
 
     it("quotes a short one-line key as written, without an ellipsis", () => {
       const found = keyed(["        !!merge x: *b"]);

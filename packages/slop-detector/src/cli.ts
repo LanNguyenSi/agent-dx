@@ -15,6 +15,16 @@ import {
 } from "./stdin.js";
 import type { CheckSummary } from "./types.js";
 
+// A reader that closes early (`... | head -c 10`) makes the next stdout
+// write fail with EPIPE. That is the reader's choice, not a failure of
+// this run, so exit with the verdict code (0 when none is set yet) instead
+// of letting the unhandled stream error print a stack and exit 1. Any other
+// stdout error is still fatal.
+process.stdout.on("error", (err: NodeJS.ErrnoException) => {
+  if (err.code === "EPIPE") process.exit(process.exitCode ?? 0);
+  throw err;
+});
+
 const program = new Command();
 
 program

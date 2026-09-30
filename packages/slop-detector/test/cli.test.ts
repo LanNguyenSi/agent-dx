@@ -1,15 +1,18 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureBuilt } from "./built-cli.js";
 
 // Exercises the real CLI end to end: `node --import tsx src/cli.ts`,
-// not the built `dist/cli.js`, so the suite doesn't depend on a prior
-// `npm run build` having run. `--import tsx` is the same mechanism the
-// package's own `npm run dev` script already uses.
+// not the built `dist/cli.js`, so most of the suite doesn't depend on a
+// prior `npm run build` having run. `--import tsx` is the same mechanism
+// the package's own `npm run dev` script already uses. The pipe tests at the
+// end spawn the built `dist/cli.js` and rebuild it first when it is missing
+// or stale (`./built-cli.ts`).
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const cliEntry = path.join(packageRoot, "src", "cli.ts");
 
@@ -378,6 +381,10 @@ describe("the argv shapes the orchestrator-workflow implementer prompt prescribe
 describe("cli check -f json into a pipe", () => {
   const builtEntry = path.join(packageRoot, "dist", "cli.js");
 
+  beforeAll(() => {
+    ensureBuilt();
+  }, 180_000);
+
   function runBuiltIntoPipe(
     args: string[],
   ): Promise<{ stdout: string; status: number | null }> {
@@ -414,5 +421,48 @@ describe("cli check -f json into a pipe", () => {
     const parsed = JSON.parse(stdout);
     expect(parsed.violations.length).toBeGreaterThanOrEqual(count);
     expect(status).toBe(1);
+  }, 30_000);
+
+  // A reader that closes right after its first chunk (`| head -c 10`) is not
+  // a failure of the scan: the CLI exits with the verdict code and prints no
+  // stream-error stack.
+  it("exits with the verdict code and no stack when the reader closes early", async () => {
+    const file = path.join(tmp, "big-epipe.md");
+    fs.writeFileSync(file, "F1 landed in review round 2.\n".repeat(1000));
+    const configPath = path.join(tmp, "warn.yml");
+    fs.writeFileSync(
+      configPath,
+      "rules:\n  review-slop/finding-id:\n    severity: warn\n  review-slop/round-reference:\n    severity: warn\n",
+    );
+    const result = await new Promise<{
+      stderr: string;
+      status: number | null;
+    }>((resolve, reject) => {
+      const child = spawn(
+        process.execPath,
+        [
+          builtEntry,
+          "check",
+          file,
+          "--pack",
+          "review-slop",
+          "-c",
+          configPath,
+          "-f",
+          "json",
+        ],
+        { cwd: packageRoot, stdio: ["ignore", "pipe", "pipe"] },
+      );
+      const errChunks: Buffer[] = [];
+      child.stderr.on("data", (c: Buffer) => errChunks.push(c));
+      child.stdout.once("data", () => child.stdout.destroy());
+      child.on("error", reject);
+      child.on("close", (status) =>
+        resolve({ stderr: Buffer.concat(errChunks).toString("utf8"), status }),
+      );
+    });
+    expect(result.stderr).not.toContain("EPIPE");
+    expect(result.stderr).not.toContain("node:events");
+    expect(result.status).toBe(0);
   }, 30_000);
 });
