@@ -15,6 +15,9 @@ import { ensureBuilt } from "./built-cli.js";
 // or stale (`./built-cli.ts`).
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const cliEntry = path.join(packageRoot, "src", "cli.ts");
+// The early-close stress test took about 6 s for its 100 runs on an idle
+// macOS machine; the limit leaves a wide margin for a loaded one.
+const STRESS_TIMEOUT_MS = 180_000;
 
 function runCli(
   args: string[],
@@ -424,20 +427,28 @@ describe("cli check -f json into a pipe", () => {
   }, 30_000);
 
   // A reader that closes right after its first chunk (`| head -c 10`) is not
-  // a failure of the scan: the CLI exits with the verdict code and prints no
-  // stream-error stack.
-  it("exits with the verdict code and no stack when the reader closes early", async () => {
-    const file = path.join(tmp, "big-epipe.md");
-    fs.writeFileSync(file, "F1 landed in review round 2.\n".repeat(1000));
+  // a failure of the scan: the CLI exits with the verdict code and prints
+  // nothing on stderr. Which errno the write to the gone reader raises
+  // (EPIPE, ENOTCONN, ECONNRESET) depends on the platform and on what the
+  // reader is; a Node parent gets a socketpair on macOS, so this spawn shape
+  // is the one that exercises that family.
+  const warnConfig = () => {
     const configPath = path.join(tmp, "warn.yml");
     fs.writeFileSync(
       configPath,
       "rules:\n  review-slop/finding-id:\n    severity: warn\n  review-slop/round-reference:\n    severity: warn\n",
     );
-    const result = await new Promise<{
-      stderr: string;
-      status: number | null;
-    }>((resolve, reject) => {
+    return configPath;
+  };
+
+  function runEarlyClose(
+    configPath: string | null,
+  ): Promise<{ stderr: string; status: number | null }> {
+    const file = path.join(tmp, "big-early-close.md");
+    if (!fs.existsSync(file)) {
+      fs.writeFileSync(file, "F1 landed in review round 2.\n".repeat(1000));
+    }
+    return new Promise((resolve, reject) => {
       const child = spawn(
         process.execPath,
         [
@@ -446,8 +457,7 @@ describe("cli check -f json into a pipe", () => {
           file,
           "--pack",
           "review-slop",
-          "-c",
-          configPath,
+          ...(configPath === null ? [] : ["-c", configPath]),
           "-f",
           "json",
         ],
@@ -461,8 +471,67 @@ describe("cli check -f json into a pipe", () => {
         resolve({ stderr: Buffer.concat(errChunks).toString("utf8"), status }),
       );
     });
-    expect(result.stderr).not.toContain("EPIPE");
-    expect(result.stderr).not.toContain("node:events");
+  }
+
+  it("exits 0 with empty stderr when the reader closes early on a warn verdict", async () => {
+    const result = await runEarlyClose(warnConfig());
+    expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
+  }, 30_000);
+
+  it("exits 1 with empty stderr when the reader closes early on a block verdict", async () => {
+    const result = await runEarlyClose(null);
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(1);
+  }, 30_000);
+
+  // The errno of a write to a gone reader is a race between the reader's
+  // close and the child's write, so one clean run proves little: every one of
+  // the runs must be clean, in batches so that the load varies.
+  it(
+    "stays clean over repeated early closes",
+    async () => {
+      const configPath = warnConfig();
+      const runs = 100;
+      const batch = 10;
+      const bad: string[] = [];
+      for (let done = 0; done < runs; done += batch) {
+        const results = await Promise.all(
+          Array.from({ length: batch }, () => runEarlyClose(configPath)),
+        );
+        for (const r of results) {
+          if (r.status !== 0 || r.stderr !== "") {
+            bad.push(`status=${r.status} stderr=${r.stderr.slice(0, 200)}`);
+          }
+        }
+      }
+      expect(bad).toEqual([]);
+    },
+    STRESS_TIMEOUT_MS,
+  );
+
+  // A stdout error that is not the reader going away is a failure of this
+  // run: one stderr line naming the code, no stack, exit 2. A descriptor
+  // opened read-only and handed over as stdout makes every write fail with
+  // EBADF on Linux and macOS alike, with no test-only hook in the CLI.
+  it("reports a non-reader stdout error on one stderr line and exits 2", async () => {
+    const file = path.join(tmp, "small.md");
+    fs.writeFileSync(file, "F1 landed in review round 2.\n");
+    const readOnly = path.join(tmp, "read-only-stdout.txt");
+    fs.writeFileSync(readOnly, "");
+    const fd = fs.openSync(readOnly, "r");
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [builtEntry, "check", file, "--pack", "review-slop", "-f", "json"],
+        { cwd: packageRoot, encoding: "utf8", stdio: ["ignore", fd, "pipe"] },
+      );
+      expect(result.status).toBe(2);
+      expect(result.stderr.trimEnd().split("\n")).toEqual([
+        "slop-detector: could not write the report to stdout (EBADF)",
+      ]);
+    } finally {
+      fs.closeSync(fd);
+    }
   }, 30_000);
 });

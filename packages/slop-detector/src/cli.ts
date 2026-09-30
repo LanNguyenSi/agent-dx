@@ -8,6 +8,7 @@ import { defaultConfig, loadConfig } from "./config.js";
 import { allPacks, packsByFilter } from "./packs/registry.js";
 import { renderText } from "./cli-render.js";
 import { resolvePatternAnchor } from "./util/pattern-anchor.js";
+import { classifyStdoutError } from "./stdout-error.js";
 import {
   noStdinContentError,
   readStdin,
@@ -15,14 +16,16 @@ import {
 } from "./stdin.js";
 import type { CheckSummary } from "./types.js";
 
-// A reader that closes early (`... | head -c 10`) makes the next stdout
-// write fail with EPIPE. That is the reader's choice, not a failure of
-// this run, so exit with the verdict code (0 when none is set yet) instead
-// of letting the unhandled stream error print a stack and exit 1. Any other
-// stdout error is still fatal.
+// A failed write to stdout is handled by kind, see ./stdout-error.ts: a
+// reader that went away ends the run with the verdict code and no output,
+// any other error is one stderr line and exit 2. The handler lives here, in
+// the CLI entry point only, so nothing that imports the checks inherits it.
 process.stdout.on("error", (err: NodeJS.ErrnoException) => {
-  if (err.code === "EPIPE") process.exit(process.exitCode ?? 0);
-  throw err;
+  const outcome = classifyStdoutError(err, process.exitCode);
+  if (outcome.stderrLine !== null) {
+    process.stderr.write(outcome.stderrLine + "\n");
+  }
+  process.exit(outcome.exitCode);
 });
 
 const program = new Command();

@@ -20,8 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `!!merge` tag; under a `%YAML 1.1` directive only a plain `<<` is.
 - `slop-detector check -f json` piped into another process was cut at the
   pipe buffer, because the process exited right after the write. It now
-  sets the exit code and lets stdout drain, so a large report arrives whole. A reader that closes early (`| head -c 10`)
-  ends the run with the verdict's exit code and no stream-error stack.
+  sets the exit code and lets stdout drain, so a large report arrives whole.
+- A failed write of the report to stdout is now handled by kind. If the
+  reader went away (`| head -c 10`; the write fails with `EPIPE`,
+  `ENOTCONN` or `ECONNRESET` depending on the platform and the reader), the
+  run ends with its verdict's exit code and prints nothing. Any other error
+  (a full disk, a bad descriptor) prints one line naming the error code on
+  stderr, without a stack, and exits 2, since the report was not delivered.
 
 ## [0.6.0] - 2026-09-30
 
