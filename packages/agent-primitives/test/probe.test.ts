@@ -4811,6 +4811,10 @@ describe("probe(): the emergency restore is the last write to the target", () =>
     }).trim();
     const shimDir = makeTmpDir();
     const applyStarted = path.join(repo, "apply-started.txt");
+    // Written only when the real apply ran to completion. The apply is
+    // killed as a process group, so a killed apply never writes it: the
+    // test can tell an apply the signal stopped from one it merely outran.
+    const applyFinished = path.join(repo, "apply-finished.txt");
     fs.writeFileSync(
       path.join(shimDir, "git"),
       [
@@ -4818,6 +4822,10 @@ describe("probe(): the emergency restore is the last write to the target", () =>
         "if [ -d .git ]; then",
         `  printf running > ${JSON.stringify(applyStarted)}`,
         "  sleep 2",
+        `  ${JSON.stringify(realGit)} "$@"`,
+        "  rc=$?",
+        `  printf done > ${JSON.stringify(applyFinished)}`,
+        "  exit $rc",
         "fi",
         `exec ${JSON.stringify(realGit)} "$@"`,
         "",
@@ -4874,6 +4882,13 @@ describe("probe(): the emergency restore is the last write to the target", () =>
     // Fail fast, with a clear message, if the CLI already ran to the end:
     // otherwise the wait below would hang until the test timeout.
     watch.assertStillRunning();
+    // The signal must land while the real apply is still in flight;
+    // otherwise this run never exercises the abort path.
+    if (fs.existsSync(applyFinished)) {
+      throw new Error(
+        "the real git apply finished before the signal was sent; the shim delay was too short for this machine",
+      );
+    }
     child.kill("SIGTERM");
     await watch.exited;
 
@@ -4885,6 +4900,8 @@ describe("probe(): the emergency restore is the last write to the target", () =>
     // waiting 2s outlasts the shim's 2s sleep with margin.
     await sleep(2000);
     expect(fs.readFileSync(absFile, "utf8")).toBe(before);
+    // The apply was killed, not merely outrun by the restore.
+    expect(fs.existsSync(applyFinished)).toBe(false);
     expect(readMarkerFor(fs.realpathSync(absFile))).toBeUndefined();
     expect(fs.readdirSync(lockDir).filter((f) => f.endsWith(".lock"))).toEqual(
       [],
