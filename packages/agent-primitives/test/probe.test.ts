@@ -1,4 +1,9 @@
-import { execFileSync, spawn, spawnSync } from "node:child_process";
+import {
+  execFileSync,
+  spawn,
+  spawnSync,
+  type ChildProcess,
+} from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -4038,6 +4043,33 @@ function writeSingleLinePatch(patchPath: string): void {
   );
 }
 
+// Tracks a spawned CLI's exit from spawn time, so a test can tell "the
+// CLI already finished" from "the CLI is still running" at the moment it
+// sends a signal. Registering the listener only after the signal would
+// hang until the test timeout whenever the CLI had already exited.
+function watchExit(child: ChildProcess): {
+  exited: Promise<void>;
+  assertStillRunning: () => void;
+} {
+  let done = false;
+  const exited = new Promise<void>((resolve) => {
+    child.on("exit", () => {
+      done = true;
+      resolve();
+    });
+  });
+  return {
+    exited,
+    assertStillRunning: () => {
+      if (done) {
+        throw new Error(
+          "the CLI finished before the signal was sent; the fixture delay was too short for this machine",
+        );
+      }
+    },
+  };
+}
+
 describe("probe(): the emergency restore is the last write to the target", () => {
   it("a signalled CLI probe whose test command traps SIGTERM and SIGINT leaves no descendant alive and leaves the target at its original content, even against a writer that outruns the restore", async () => {
     const lockDir = useLockDir();
@@ -4050,7 +4082,7 @@ describe("probe(): the emergency restore is the last write to the target", () =>
     // Two writers, each aimed at one half of the guarantee.
     //
     // The test command itself TRAPS SIGTERM and SIGINT, so only SIGKILL
-    // can end it, and it writes the target 3s in. A signal path that
+    // can end it, and it writes the target 2s in. A signal path that
     // sends SIGTERM and exits leaves it running (the escalation timer
     // dies with the process that scheduled it), and it then writes over
     // the restored file. Its heartbeat is the descendant-is-gone proof.
@@ -4100,7 +4132,7 @@ describe("probe(): the emergency restore is the last write to the target", () =>
         "setTimeout(() => {",
         "  fs.writeFileSync('fixture.js', 'POISON_FROM_TEST_CHILD\\n');",
         "  process.exit(0);",
-        "}, 3000);",
+        "}, 2000);",
         "",
       ].join("\n"),
     );
@@ -4132,10 +4164,21 @@ describe("probe(): the emergency restore is the last write to the target", () =>
       ],
       {
         cwd: repo,
-        env: { ...process.env, AGENT_PRIMITIVES_LOCK_DIR: lockDir },
+        env: {
+          ...process.env,
+          AGENT_PRIMITIVES_LOCK_DIR: lockDir,
+          // Shorter than the test command's 2s write, so a signal path
+          // that fails to kill the trapping command gives up waiting,
+          // restores and exits BEFORE that write lands, and the test
+          // sees the poison. At the default bound it would restore
+          // after the write and the survivor would go unnoticed.
+          AGENT_PRIMITIVES_SIGNAL_SETTLE_BOUND_MS: "800",
+        },
         stdio: "ignore",
       },
     );
+
+    const watch = watchExit(child);
 
     // Readiness: the mutant-phase test is really running (and its
     // watcher spawned), not merely scheduled.
@@ -4148,8 +4191,11 @@ describe("probe(): the emergency restore is the last write to the target", () =>
     }
     await sleep(150);
 
+    // Fail fast, with a clear message, if the CLI already ran to the end:
+    // otherwise the wait below would hang until the test timeout.
+    watch.assertStillRunning();
     child.kill("SIGTERM");
-    await new Promise<void>((resolve) => child.on("exit", () => resolve()));
+    await watch.exited;
 
     // The restore was the last write: neither the out-of-group watcher's
     // write (which lands while the run is settling) nor anything else is
@@ -4165,7 +4211,11 @@ describe("probe(): the emergency restore is the last write to the target", () =>
     const countAtExit = fs.existsSync(heartbeat)
       ? fs.readFileSync(heartbeat, "utf8")
       : "";
-    await sleep(4000);
+    // The signal lands about 160-200ms after the test command reports
+    // ready, so waiting 2s covers a surviving command's 2s write with
+    // margin (and its 100ms heartbeat many times over). The signal may be
+    // delayed by about 1.8s before the command's own write would beat it.
+    await sleep(2000);
     expect(
       fs.existsSync(heartbeat) ? fs.readFileSync(heartbeat, "utf8") : "",
     ).toBe(countAtExit);
@@ -4761,13 +4811,31 @@ describe("probe(): the emergency restore is the last write to the target", () =>
     }).trim();
     const shimDir = makeTmpDir();
     const applyStarted = path.join(repo, "apply-started.txt");
+    // Written only when the real apply ran to completion. The apply is
+    // killed as a process group, so a killed apply never writes it: the
+    // test can tell an apply the signal stopped from one it merely outran.
+    const applyFinished = path.join(repo, "apply-finished.txt");
     fs.writeFileSync(
       path.join(shimDir, "git"),
       [
         "#!/bin/sh",
-        "if [ -d .git ]; then",
+        // Only the `git apply` that writes the target: any other git call
+        // from the repository root, and a `--numstat`/`--check` dry run,
+        // passes straight through, so both markers belong to that apply.
+        "is_apply=0",
+        'for a in "$@"; do',
+        '  case "$a" in',
+        "    apply) is_apply=1 ;;",
+        "    --numstat|--check|--stat|-R|--reverse) is_apply=0; break ;;",
+        "  esac",
+        "done",
+        'if [ -d .git ] && [ "$is_apply" = 1 ]; then',
         `  printf running > ${JSON.stringify(applyStarted)}`,
-        "  sleep 3",
+        "  sleep 2",
+        `  ${JSON.stringify(realGit)} "$@"`,
+        "  rc=$?",
+        `  printf done > ${JSON.stringify(applyFinished)}`,
+        "  exit $rc",
         "fi",
         `exec ${JSON.stringify(realGit)} "$@"`,
         "",
@@ -4797,10 +4865,17 @@ describe("probe(): the emergency restore is the last write to the target", () =>
           ...process.env,
           PATH: `${shimDir}${path.delimiter}${process.env.PATH ?? ""}`,
           AGENT_PRIMITIVES_LOCK_DIR: lockDir,
+          // Shorter than the shim's 2s sleep, so an apply that is not
+          // killed makes the handler give up waiting and restore BEFORE
+          // the apply lands, and the test sees the mutated target. At the
+          // default bound it would wait the apply out and restore after.
+          AGENT_PRIMITIVES_SIGNAL_SETTLE_BOUND_MS: "500",
         },
         stdio: "ignore",
       },
     );
+
+    const watch = watchExit(child);
 
     // Readiness: the real apply is in flight (the shim is sleeping).
     const deadline = Date.now() + 25000;
@@ -4814,15 +4889,29 @@ describe("probe(): the emergency restore is the last write to the target", () =>
     // removed until the apply has settled and the restore is verified.
     expect(readMarkerFor(fs.realpathSync(absFile))).toBeDefined();
 
+    // Fail fast, with a clear message, if the CLI already ran to the end:
+    // otherwise the wait below would hang until the test timeout.
+    watch.assertStillRunning();
+    // The signal must land while the real apply is still in flight;
+    // otherwise this run never exercises the abort path.
+    if (fs.existsSync(applyFinished)) {
+      throw new Error(
+        "the real git apply finished before the signal was sent; the shim delay was too short for this machine",
+      );
+    }
     child.kill("SIGTERM");
-    await new Promise<void>((resolve) => child.on("exit", () => resolve()));
+    await watch.exited;
 
     expect(fs.readFileSync(absFile, "utf8")).toBe(before);
     // Past the shim's own delay: an apply that was not killed with the
     // process would run to completion here and mutate the target with
     // nothing left to restore it.
-    await sleep(4000);
+    // The signal lands within about 100ms of the apply starting, so
+    // waiting 2s outlasts the shim's 2s sleep with margin.
+    await sleep(2000);
     expect(fs.readFileSync(absFile, "utf8")).toBe(before);
+    // The apply was killed, not merely outrun by the restore.
+    expect(fs.existsSync(applyFinished)).toBe(false);
     expect(readMarkerFor(fs.realpathSync(absFile))).toBeUndefined();
     expect(fs.readdirSync(lockDir).filter((f) => f.endsWith(".lock"))).toEqual(
       [],
