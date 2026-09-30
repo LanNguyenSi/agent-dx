@@ -4050,7 +4050,7 @@ describe("probe(): the emergency restore is the last write to the target", () =>
     // Two writers, each aimed at one half of the guarantee.
     //
     // The test command itself TRAPS SIGTERM and SIGINT, so only SIGKILL
-    // can end it, and it writes the target 3s in. A signal path that
+    // can end it, and it writes the target 1.5s in. A signal path that
     // sends SIGTERM and exits leaves it running (the escalation timer
     // dies with the process that scheduled it), and it then writes over
     // the restored file. Its heartbeat is the descendant-is-gone proof.
@@ -4100,7 +4100,7 @@ describe("probe(): the emergency restore is the last write to the target", () =>
         "setTimeout(() => {",
         "  fs.writeFileSync('fixture.js', 'POISON_FROM_TEST_CHILD\\n');",
         "  process.exit(0);",
-        "}, 3000);",
+        "}, 1500);",
         "",
       ].join("\n"),
     );
@@ -4165,7 +4165,11 @@ describe("probe(): the emergency restore is the last write to the target", () =>
     const countAtExit = fs.existsSync(heartbeat)
       ? fs.readFileSync(heartbeat, "utf8")
       : "";
-    await sleep(4000);
+    // The signal lands about 350ms after the test command starts, so
+    // waiting 1.7s covers the surviving command's 1.5s write with margin
+    // (and its 100ms heartbeat many times over). The wait is kept short
+    // on purpose: it is the bulk of this test's runtime.
+    await sleep(1700);
     expect(
       fs.existsSync(heartbeat) ? fs.readFileSync(heartbeat, "utf8") : "",
     ).toBe(countAtExit);
@@ -4767,7 +4771,7 @@ describe("probe(): the emergency restore is the last write to the target", () =>
         "#!/bin/sh",
         "if [ -d .git ]; then",
         `  printf running > ${JSON.stringify(applyStarted)}`,
-        "  sleep 3",
+        "  sleep 1",
         "fi",
         `exec ${JSON.stringify(realGit)} "$@"`,
         "",
@@ -4821,7 +4825,9 @@ describe("probe(): the emergency restore is the last write to the target", () =>
     // Past the shim's own delay: an apply that was not killed with the
     // process would run to completion here and mutate the target with
     // nothing left to restore it.
-    await sleep(4000);
+    // The signal lands within about 100ms of the apply starting, so
+    // waiting 1.5s outlasts the shim's 1s sleep with margin.
+    await sleep(1500);
     expect(fs.readFileSync(absFile, "utf8")).toBe(before);
     expect(readMarkerFor(fs.realpathSync(absFile))).toBeUndefined();
     expect(fs.readdirSync(lockDir).filter((f) => f.endsWith(".lock"))).toEqual(
