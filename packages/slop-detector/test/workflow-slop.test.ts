@@ -4972,9 +4972,9 @@ describe("workflow-slop/audit-gate-shape: the file-level refusal scales with gat
     const total = v.reduce((sum, x) => sum + x.message.length, 0);
     expect(total).toBeLessThan(n * 2000);
     expect(v[0].message).toContain(`and ${n - 3} more`);
-    // About 7 to 8.5 s on a developer machine, where the per-gate line
-    // lookup of each finding dominates; the bound allows five times that
-    // for slower CI runners.
+    // About 1 s on a developer machine (7 to 8.5 s before finding
+    // positions came from a line index); the bound stays generous for
+    // slower CI runners.
     expect(elapsed).toBeLessThan(45000);
   }, 120000);
 });

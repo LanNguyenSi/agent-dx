@@ -28,6 +28,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A finding's line and column are read from one index of the newline
+  positions per file (a binary search per offset) instead of a scan from
+  the start of the file per finding, so a file with many findings costs
+  its size plus its findings rather than their product. Every pack builds
+  its positions through the same helper, so this applies to all of them; a
+  `workflow-slop` file with 20000 `run:` findings took about 20 s and now
+  takes well under a second on a development machine. Positions are
+  unchanged, including CRLF, a BOM, an offset at a line start or past the
+  end of the text, and multi-byte characters (the column still counts
+  UTF-16 string indexes).
 - `workflow-slop`: a `<<` merge key that `yaml` reads as a merge symbol
   never certifies an audit gate. Under a `%YAML 1.1` directive (and under a
   `!!merge` tag in a YAML 1.2 file) `yaml` parses `<<` as a scalar whose
