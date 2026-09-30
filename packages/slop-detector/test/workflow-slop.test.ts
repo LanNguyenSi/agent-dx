@@ -4439,7 +4439,7 @@ describe("workflow-slop: a key written twice once alias keys are resolved", () =
       reason: `the workflow mapping ${WRITTEN_TWICE}`,
     },
     {
-      level: "workflow jobs mapping",
+      level: "workflow job id",
       name: "audit",
       before: ["jobs:"],
       plain: ["  audit:", "    runs-on: ubuntu-latest", "    steps:", gate],
@@ -4453,7 +4453,7 @@ describe("workflow-slop: a key written twice once alias keys are resolved", () =
       reason: `a mapping enclosing the step mapping ${WRITTEN_TWICE}`,
     },
     {
-      level: "workflow defaults.run key",
+      level: "workflow defaults run",
       name: "run",
       before: ["defaults:"],
       plain: ["  run:", "    shell: bash"],
@@ -4471,7 +4471,7 @@ describe("workflow-slop: a key written twice once alias keys are resolved", () =
       reason: `the workflow's \`defaults.run\` mapping ${WRITTEN_TWICE}`,
     },
     {
-      level: "job defaults.run key",
+      level: "job defaults run",
       name: "run",
       before: [...job, "    defaults:"],
       plain: ["      run:", "        shell: bash"],
