@@ -156,7 +156,9 @@ Run `npm run build` first so `dist/mcp.js` exists.
 | ---- | --------------------------------------------------------------------------------------- |
 | 0    | No `block`-severity violations. `warn` and `info` are reported but do not fail the run. |
 | 1    | At least one `block`-severity violation.                                                |
-| 2    | CLI invocation error (missing config, unreadable path).                                 |
+| 2    | CLI invocation error (missing config, unreadable path), or the report could not be written to stdout for a reason other than a closed reader (a full disk, a bad descriptor). |
+
+A reader that closes early (`slop-detector check . -f json | head -c 10`) does not change the exit code: the run still ends with 0 or 1 by its verdict.
 
 ## Roadmap
 

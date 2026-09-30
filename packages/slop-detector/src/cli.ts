@@ -8,12 +8,25 @@ import { defaultConfig, loadConfig } from "./config.js";
 import { allPacks, packsByFilter } from "./packs/registry.js";
 import { renderText } from "./cli-render.js";
 import { resolvePatternAnchor } from "./util/pattern-anchor.js";
+import { classifyStdoutError } from "./stdout-error.js";
 import {
   noStdinContentError,
   readStdin,
   stdinFirstByteTimeoutMs,
 } from "./stdin.js";
 import type { CheckSummary } from "./types.js";
+
+// A failed write to stdout is handled by kind, see ./stdout-error.ts: a
+// reader that went away ends the run with the verdict code and no output,
+// any other error is one stderr line and exit 2. The handler lives here, in
+// the CLI entry point only, so nothing that imports the checks inherits it.
+process.stdout.on("error", (err: NodeJS.ErrnoException) => {
+  const outcome = classifyStdoutError(err, process.exitCode);
+  if (outcome.stderrLine !== null) {
+    process.stderr.write(outcome.stderrLine + "\n");
+  }
+  process.exit(outcome.exitCode);
+});
 
 const program = new Command();
 
@@ -224,7 +237,10 @@ async function runCheck(
   } else {
     process.stdout.write(renderText(summary, opts.explain ?? false));
   }
-  process.exit(summary.blockCount > 0 ? 1 : 0);
+  // Set the exit code and return instead of calling `process.exit`: a
+  // large payload written to a pipe is flushed asynchronously, and an
+  // immediate exit cuts it at the pipe buffer.
+  process.exitCode = summary.blockCount > 0 ? 1 : 0;
 }
 
 function normalizeOpts(raw: unknown): CheckOpts {
