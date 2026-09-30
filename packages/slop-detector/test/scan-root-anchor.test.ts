@@ -43,6 +43,19 @@ import { runSlopCheck } from "../src/mcp-check.js";
 // regardless of whether it is spelled ".", "./", or given as an absolute
 // path (see engine.ts), so this still exercises the same anchor logic
 // `check .` from the fixture root would.
+// Per-test timeout for this file. Most tests spawn the CLI (some twice: a
+// file-argument run plus the full-directory run it is compared with), and
+// each `node --import tsx` start costs roughly 0.3 s before any scanning.
+// Measured on a 12-core dev machine over five runs each: idle max 0.64 s per
+// test, with 12 CPU-saturating processes running alongside max 1.21 s. The
+// vitest default of 5 s is only about 4x that loaded max, and the CI runner
+// measured about 5x slower than the dev machine, so a mutation-probe run
+// beside the suite timed four of these tests out. 30 s is about 25x the
+// loaded max and 5x the CI-scaled loaded max with room for a probe-run
+// pile-up, while a genuinely hung child process still fails within half a
+// minute. It is set for this file only, not for the suite.
+vi.setConfig({ testTimeout: 30_000 });
+
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const cliEntry = path.join(packageRoot, "src", "cli.ts");
 
