@@ -7,10 +7,12 @@
 // the platform and on what the reader is: EPIPE for a pipe(2) pipe (a shell
 // pipeline), ENOTCONN for the socketpair a Node parent gets from
 // `spawn(..., { stdio: "pipe" })` on macOS, ECONNRESET for a socket peer
-// that reset the connection. Any other error means the report was not
-// delivered for a reason of this run's own (a full disk, a bad descriptor),
-// so it is reported on one stderr line and the run exits 2, the code the CLI
-// already uses for a failure that is not a verdict.
+// that reset the connection. A pty whose master closed reports EIO, which a
+// device error also raises, so it stays a failure (and a controlling
+// terminal ends the run with SIGHUP first). Any other error means the report
+// was not delivered for a reason of this run's own (a full disk, a bad
+// descriptor), so it is reported on one stderr line and the run exits 2, the
+// code the CLI already uses for a failure that is not a verdict.
 export const STDOUT_READER_GONE_CODES: ReadonlySet<string> = new Set([
   "EPIPE",
   "ENOTCONN",

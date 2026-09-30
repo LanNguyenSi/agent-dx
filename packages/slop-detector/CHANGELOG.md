@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   run ends with its verdict's exit code and prints nothing. Any other error
   (a full disk, a bad descriptor) prints one line naming the error code on
   stderr, without a stack, and exits 2, since the report was not delivered.
+  A pty whose other end closed reports `EIO`, which a device error also
+  raises, so it counts as such a failure.
 
 ## [0.6.0] - 2026-09-30
 
