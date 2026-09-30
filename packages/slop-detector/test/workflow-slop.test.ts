@@ -5165,6 +5165,11 @@ describe("workflow-slop: a merge key that yaml reads as a symbol", () => {
             found.map((x) => [x.line, x.column, x.matched]),
             label,
           ).toEqual(disable ? [] : [[line, column, "<<"]]);
+          if (!disable) {
+            expect(found[0].message, label).toContain(
+              "A YAML merge key (`<<`) is not merged by GitHub Actions",
+            );
+          }
         }
       });
 
