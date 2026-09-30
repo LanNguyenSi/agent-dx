@@ -151,24 +151,59 @@ function scalarKeyName(key: unknown): string | undefined {
 }
 
 /**
- * True when a mapping key is present but has no name `scalarKeyName` can
- * read: an alias left unresolved (see `unsupported-yaml-construct`) or a
- * mapping or sequence used as a key (written with `?`, or an alias that
- * resolves to one). Such a key can stand for any key a rule reads
- * (`run:`, `uses:`, `with:`, `shell:`, `runs-on:`), so a read that treats
- * it as absent must not certify or scan clean. A scalar key always has a
- * name: under the YAML 1.2 core schema a scalar that is not a string is
- * a null, a boolean or a number, which cannot spell any of those keys.
+ * True when a scalar key's value is text a rule could match by name: a
+ * string, or a null, boolean or number (which cannot spell any key a rule
+ * reads). Anything else yaml can produce for a scalar key is not: a symbol
+ * (a merge key: `<<` under a `%YAML 1.1` directive, or under a `!!merge`
+ * tag in any version), a date, a binary value, a bigint.
  */
-function isUnnameableKey(key: unknown): boolean {
-  return typeof key === "object" && key !== null && !isScalarNode(key);
+function isPlainKeyValue(value: unknown): boolean {
+  return (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  );
 }
 
-/** True when `node` is a mapping with an unnameable key directly in it. */
-function hasUnnameableKey(node: { items: unknown[] }): boolean {
-  return node.items.some(
-    (item) => isPairNode(item) && isUnnameableKey(item.key),
-  );
+/**
+ * True when a mapping key is present but has no name `scalarKeyName` can
+ * read: an alias left unresolved (see `unsupported-yaml-construct`), a
+ * mapping or sequence used as a key (written with `?`, or an alias that
+ * resolves to one), or a scalar whose value is not plain text
+ * (`isPlainKeyValue`). Such a key can stand for any key a rule reads
+ * (`run:`, `uses:`, `with:`, `shell:`, `runs-on:`), and a merge key
+ * supplies whole mappings, so a read that treats it as absent must not
+ * certify or scan clean. The rule is "anything but a plain scalar value is
+ * unnameable", not a list of the values a YAML version can produce, so a
+ * schema this pack does not know about stays on the refusing side.
+ */
+function isUnnameableKey(key: unknown): boolean {
+  if (typeof key !== "object" || key === null) return false;
+  return !isScalarNode(key) || !isPlainKeyValue(key.value);
+}
+
+/** True when `key` is a scalar whose value is not plain text. */
+function isNonTextScalarKey(key: unknown): boolean {
+  return isScalarNode(key) && !isPlainKeyValue(key.value);
+}
+
+/** True when `key` is a scalar yaml read as a merge key (a symbol value). */
+function isMergeSymbolKey(key: unknown): boolean {
+  return isScalarNode(key) && typeof key.value === "symbol";
+}
+
+/**
+ * The text a merge-key finding quotes. An alias key is `<<`, as it always
+ * was; a scalar key is its source text (a `!!merge` tag can sit on any
+ * text, as in `!!merge shell: pwsh`, so it is not always `<<`), or the tag
+ * when the key is empty (`? !!merge`).
+ */
+function mergeKeyMatched(written: unknown, key: unknown, text: string): string {
+  if (isAliasNode(written)) return "<<";
+  const range = (key as { range?: number[] }).range;
+  const source = range === undefined ? "" : text.slice(range[0], range[1]);
+  return source === "" ? "!!merge" : source;
 }
 
 /**
@@ -197,8 +232,19 @@ function hasAliasDuplicateKey(node: unknown): boolean {
  * written twice once its alias keys are resolved.
  */
 function unreadableKeyReason(node: { items: unknown[] }): string | undefined {
-  if (hasUnnameableKey(node)) {
-    return "has a key this rule cannot name (an alias it cannot resolve, or a mapping or sequence used as a key)";
+  // One classification per key: a key that is not a scalar (an alias left
+  // unresolved, a collection) takes the first wording, and a scalar whose
+  // value is not plain text takes the second only when no such key is there.
+  let nonText = false;
+  for (const item of node.items) {
+    if (!isPairNode(item) || !isUnnameableKey(item.key)) continue;
+    if (!isNonTextScalarKey(item.key)) {
+      return "has a key this rule cannot name (an alias it cannot resolve, or a mapping or sequence used as a key)";
+    }
+    nonText = true;
+  }
+  if (nonText) {
+    return "has a key this rule cannot name (a YAML merge key, or a date or binary value used as a key)";
   }
   if (hasAliasDuplicateKey(node)) {
     return "has a key written twice once its YAML aliases are resolved";
@@ -276,6 +322,8 @@ interface AliasIssue {
 
 interface MergeKeyHit {
   offset: number;
+  /** The text the finding quotes (see `mergeKeyMatched`). */
+  matched: string;
 }
 
 interface LoadedWorkflowDocument {
@@ -286,6 +334,8 @@ interface LoadedWorkflowDocument {
   collectionKeys: AliasIssue[];
   /** Every alias key that repeats a key of its mapping once resolved. */
   duplicateKeys: AliasIssue[];
+  /** Every scalar key whose value is not text (a date, a binary value). */
+  nonTextKeys: AliasIssue[];
 }
 
 function isAliasNode(node: unknown): node is { source: string } {
@@ -439,6 +489,8 @@ function applyAliasExpansion(
   leave: Set<unknown> | undefined,
   mergeKeys: MergeKeyHit[],
   duplicateKeys: AliasIssue[],
+  nonTextKeys: AliasIssue[],
+  text: string,
 ): void {
   const seen = new Set<unknown>();
   const replace = (child: unknown): unknown => {
@@ -462,9 +514,24 @@ function applyAliasExpansion(
         pair.key = replace(pair.key);
         pair.value = replace(pair.value);
         // The key is read after replacement: an alias standing for the
-        // scalar `<<` is a merge key as well.
-        if (scalarKeyName(pair.key) === "<<") {
-          mergeKeys.push({ offset: aliasOffset(written) });
+        // scalar `<<` is a merge key as well. yaml reads `<<` as a symbol
+        // (which it merges) under a `%YAML 1.1` directive and under a
+        // `!!merge` tag, so a symbol key is a merge key too; any other
+        // scalar whose value is not text is reported as such.
+        if (scalarKeyName(pair.key) === "<<" || isMergeSymbolKey(pair.key)) {
+          mergeKeys.push({
+            offset: aliasOffset(written),
+            matched: mergeKeyMatched(written, pair.key, text),
+          });
+        } else if (isNonTextScalarKey(pair.key)) {
+          const range = (pair.key as { range: number[] }).range;
+          nonTextKeys.push({
+            offset: aliasOffset(written),
+            matched: isAliasNode(written)
+              ? `*${written.source}`
+              : text.slice(range[0], range[1]),
+            message: NON_TEXT_KEY_MESSAGE,
+          });
         }
         const identity = scalarKeyIdentity(pair.key);
         if (identity !== undefined) {
@@ -504,6 +571,7 @@ function loadWorkflowDocument(text: string): LoadedWorkflowDocument {
   const aliasIssues: AliasIssue[] = [];
   const mergeKeys: MergeKeyHit[] = [];
   const duplicateKeys: AliasIssue[] = [];
+  const nonTextKeys: AliasIssue[] = [];
   const table = buildAliasTable(doc.contents, aliasIssues);
   const leave = planAliasExpansion(doc, table, aliasIssues);
   if (leave === undefined) {
@@ -514,7 +582,15 @@ function loadWorkflowDocument(text: string): LoadedWorkflowDocument {
     });
   }
   const collectionKeys = findCollectionKeys(text, doc.contents, table);
-  applyAliasExpansion(doc.contents, table, leave, mergeKeys, duplicateKeys);
+  applyAliasExpansion(
+    doc.contents,
+    table,
+    leave,
+    mergeKeys,
+    duplicateKeys,
+    nonTextKeys,
+    text,
+  );
   if (table.redefined.size > 0) placeAtAnchorTokens(text, aliasIssues);
   return {
     contents: doc.contents,
@@ -522,6 +598,7 @@ function loadWorkflowDocument(text: string): LoadedWorkflowDocument {
     aliasIssues,
     collectionKeys,
     duplicateKeys,
+    nonTextKeys,
   };
 }
 
@@ -957,13 +1034,16 @@ const COLLECTION_KEY_MESSAGE =
 const DUPLICATE_KEY_MESSAGE =
   "A mapping key supplied through a YAML alias resolves to a name the same mapping already has, so the mapping carries that key twice. YAML rejects a key written twice, but its duplicate-key check does not see through an alias key, and this pack reads a key at its first occurrence, so a key it reads (a `run:`, a `uses:`, `shell:`, `runs-on:`, `continue-on-error:`) may not carry the value GitHub Actions uses and a result for this file cannot be trusted clean. Write each key once.";
 
+const NON_TEXT_KEY_MESSAGE =
+  "A mapping key that is a YAML date or binary value (a scalar whose value is not text, as a YAML 1.1 document or a tag such as `!!binary` gives) has no name this pack can read, so a key it stands for (a `run:`, a `uses:`, a `with:` input, `shell:`, `runs-on:`) is read as absent and a result for this file cannot be trusted clean. Write the key as a plain name.";
+
 const unsupportedYamlConstruct: Rule = {
   id: "workflow-slop/unsupported-yaml-construct",
   pack: "workflow-slop",
   defaultSeverity: "block",
   enabledByDefault: true,
   rationale:
-    "GitHub Actions accepts YAML anchors and aliases in workflow files, and this pack resolves an alias to the value it stands for before it reads a mapping (executed inputs, `uses:` detection, `shell:`, `defaults:`, `runs-on:`). Four constructs it cannot read that way: a `<<` merge key, which GitHub does not merge, an alias it cannot resolve (no anchor of that name precedes it, it refers to a node that contains it, its anchor name is defined more than once in the file, or resolving every alias in the file would visit an unreasonable number of nodes), a mapping key that is itself a mapping or a sequence, and an alias key that resolves to a name its mapping already has (YAML's duplicate-key check does not see through an alias key). A mapping whose keys arrive through one of the first three is read as if they were absent, and a mapping carrying a key twice is read at the key's first occurrence, which need not be the value GitHub Actions uses; either way the result is indistinguishable from a genuinely clean file, so each is reported with a block finding of its own instead of scanning clean.",
+    "GitHub Actions accepts YAML anchors and aliases in workflow files, and this pack resolves an alias to the value it stands for before it reads a mapping (executed inputs, `uses:` detection, `shell:`, `defaults:`, `runs-on:`). Five constructs it cannot read that way: a `<<` merge key, which GitHub does not merge (a `%YAML 1.1` directive or a `!!merge` tag makes the YAML parser read a key as a merge symbol, whatever its text), an alias it cannot resolve (no anchor of that name precedes it, it refers to a node that contains it, its anchor name is defined more than once in the file, or resolving every alias in the file would visit an unreasonable number of nodes), a mapping key that is itself a mapping or a sequence, a scalar key whose value is not text (a date, or a binary value, as a `%YAML 1.1` directive or a tag such as `!!binary` gives), and an alias key that resolves to a name its mapping already has (YAML's duplicate-key check does not see through an alias key). A mapping whose keys arrive through one of the first four is read as if they were absent, and a mapping carrying a key twice is read at the key's first occurrence, which need not be the value GitHub Actions uses; either way the result is indistinguishable from a genuinely clean file, so each is reported with a block finding of its own instead of scanning clean.",
   appliesTo: isWorkflowFile,
   check(ctx: RuleContext): Violation[] {
     const { file } = ctx;
@@ -992,11 +1072,16 @@ const unsupportedYamlConstruct: Rule = {
       };
     };
     return [
-      ...loaded.mergeKeys.map((hit) => at(hit.offset, "<<", MERGE_KEY_MESSAGE)),
+      ...loaded.mergeKeys.map((hit) =>
+        at(hit.offset, hit.matched, MERGE_KEY_MESSAGE),
+      ),
       ...loaded.collectionKeys.map((hit) =>
         at(hit.offset, hit.matched, hit.message),
       ),
       ...loaded.duplicateKeys.map((hit) =>
+        at(hit.offset, hit.matched, hit.message),
+      ),
+      ...loaded.nonTextKeys.map((hit) =>
         at(hit.offset, hit.matched, hit.message),
       ),
       ...loaded.aliasIssues.map((issue) =>

@@ -28,6 +28,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `workflow-slop`: a `<<` merge key that `yaml` reads as a merge symbol
+  never certifies an audit gate. Under a `%YAML 1.1` directive (and under a
+  `!!merge` tag in a YAML 1.2 file) `yaml` parses `<<` as a scalar whose
+  value is a symbol and merges it, so the key had no name the pack could
+  read yet was not counted as unnameable: `audit-gate-shape` certified a
+  gate whose `shell: pwsh` arrived through `<<: *b` (at the step, job,
+  workflow, `defaults` or `defaults.run` level, or inside `runs-on:`), and
+  `unsupported-yaml-construct` did not report the key. A scalar key is now
+  nameable only when its value is a string, a null, a boolean or a number,
+  so a merge symbol, a date or a binary value used as a key is refused by
+  `audit-gate-shape` even where `unsupported-yaml-construct` is disabled.
+  The merge symbol is reported by `unsupported-yaml-construct` like any
+  `<<` key, and a date or binary key is reported by it too, with its own
+  message. A key a `!!merge` tag makes a merge symbol (`!!merge shell:`) is
+  quoted as written in the finding, at the same position, not as `<<`. The
+  rule's rationale now lists the date or binary key. Plain `yes`, `on` and
+  numeric keys of a `%YAML 1.1` file are unaffected.
 - `workflow-slop`: a mapping that carries the same key twice once its alias
   keys are resolved (`shell: bash` followed by `*K : pwsh`, with `K`
   anchoring `shell`, in either order, or two alias keys resolving to the
