@@ -28,6 +28,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `workflow-slop`: a mapping that carries the same key twice once its alias
+  keys are resolved (`shell: bash` followed by `*K : pwsh`, with `K`
+  anchoring `shell`, in either order, or two alias keys resolving to the
+  same name) was certified by `audit-gate-shape` and scanned clean: YAML's
+  duplicate-key check does not see through an alias key, and the gate's reads
+  take the first occurrence. `unsupported-yaml-construct` now reports the
+  alias key with a block finding, and `audit-gate-shape` refuses a gate
+  whose read path passes through such a mapping (the workflow, the job, a
+  mapping enclosing the step, `defaults`, `defaults.run`, the step, or
+  anything inside `runs-on:`), even where that finding is disabled. The
+  check runs once per mapping during alias expansion. Two plain keys of the
+  same name are still reported by `unparseable-workflow`, as before.
 - `workflow-slop` resolves YAML aliases before any structural read. GitHub
   Actions accepts anchors and aliases (its changelog entry "Actions: YAML
   anchors and non-public workflow templates" and the "Reusing workflow

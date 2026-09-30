@@ -4373,3 +4373,277 @@ describe("workflow-slop/run-expression: executed-input name fold over-matches", 
     expect(v).toHaveLength(0);
   });
 });
+
+describe("workflow-slop: a key written twice once alias keys are resolved", () => {
+  const DISABLE =
+    " # slop-detector:disable-line=workflow-slop/unsupported-yaml-construct";
+  const gate = "      - run: npm audit --audit-level=high";
+  const job = ["jobs:", "  audit:", "    runs-on: ubuntu-latest"];
+  const WRITTEN_TWICE =
+    "has a key written twice once its YAML aliases are resolved";
+  // `name` is the key the mapping carries twice; `plain` writes it by name
+  // (its first line starts with `<indent><name>:`), `alias` writes it as
+  // `*X`, and `X` (and `Y`) anchor that name in `env:`.
+  const cases: Array<{
+    level: string;
+    name: string;
+    before: string[];
+    plain: string[];
+    alias: string[];
+    after: string[];
+    reason: string;
+  }> = [
+    {
+      level: "step shell",
+      name: "shell",
+      before: [...job, "    steps:", gate],
+      plain: ["        shell: bash"],
+      alias: ["        *X : pwsh"],
+      after: [],
+      reason: `the step mapping ${WRITTEN_TWICE}`,
+    },
+    {
+      level: "step continue-on-error",
+      name: "continue-on-error",
+      before: [...job, "    steps:", gate],
+      plain: ["        continue-on-error: false"],
+      alias: ["        *X : true"],
+      after: [],
+      reason: `the step mapping ${WRITTEN_TWICE}`,
+    },
+    {
+      level: "job runs-on",
+      name: "runs-on",
+      before: ["jobs:", "  audit:"],
+      plain: ["    runs-on: ubuntu-latest"],
+      alias: ["    *X : windows-latest"],
+      after: ["    steps:", gate],
+      reason: `the job mapping ${WRITTEN_TWICE}`,
+    },
+    {
+      level: "job continue-on-error",
+      name: "continue-on-error",
+      before: job,
+      plain: ["    continue-on-error: false"],
+      alias: ["    *X : true"],
+      after: ["    steps:", gate],
+      reason: `the job mapping ${WRITTEN_TWICE}`,
+    },
+    {
+      level: "workflow defaults",
+      name: "defaults",
+      before: [],
+      plain: ["defaults:", "  run:", "    shell: bash"],
+      alias: ["*X :", "  run:", "    shell: pwsh"],
+      after: [...job, "    steps:", gate],
+      reason: `the workflow mapping ${WRITTEN_TWICE}`,
+    },
+    {
+      level: "workflow jobs mapping",
+      name: "audit",
+      before: ["jobs:"],
+      plain: ["  audit:", "    runs-on: ubuntu-latest", "    steps:", gate],
+      alias: [
+        "  *X :",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        "      - run: echo hi",
+      ],
+      after: [],
+      reason: `a mapping enclosing the step mapping ${WRITTEN_TWICE}`,
+    },
+    {
+      level: "workflow defaults.run key",
+      name: "run",
+      before: ["defaults:"],
+      plain: ["  run:", "    shell: bash"],
+      alias: ["  *X :", "    shell: pwsh"],
+      after: [...job, "    steps:", gate],
+      reason: `the workflow's \`defaults\` mapping ${WRITTEN_TWICE}`,
+    },
+    {
+      level: "workflow defaults.run.shell",
+      name: "shell",
+      before: ["defaults:", "  run:"],
+      plain: ["    shell: bash"],
+      alias: ["    *X : pwsh"],
+      after: [...job, "    steps:", gate],
+      reason: `the workflow's \`defaults.run\` mapping ${WRITTEN_TWICE}`,
+    },
+    {
+      level: "job defaults.run key",
+      name: "run",
+      before: [...job, "    defaults:"],
+      plain: ["      run:", "        shell: bash"],
+      alias: ["      *X :", "        shell: pwsh"],
+      after: ["    steps:", gate],
+      reason: `the job's \`defaults\` mapping ${WRITTEN_TWICE}`,
+    },
+    {
+      level: "job defaults.run.shell",
+      name: "shell",
+      before: [...job, "    defaults:", "      run:"],
+      plain: ["        shell: bash"],
+      alias: ["        *X : pwsh"],
+      after: ["    steps:", gate],
+      reason: `the job's \`defaults.run\` mapping ${WRITTEN_TWICE}`,
+    },
+    {
+      level: "runs-on mapping",
+      name: "labels",
+      before: ["jobs:", "  audit:", "    runs-on:", "      group: g"],
+      plain: ["      labels: [ubuntu-latest]"],
+      alias: ["      *X : [windows-latest]"],
+      after: ["    steps:", gate],
+      reason:
+        "the job's `runs-on:` contains an alias this rule cannot resolve or a key it cannot name, or a mapping carrying a key twice once aliases are resolved",
+    },
+  ];
+  const orders = ["plain first", "alias first", "two aliases"] as const;
+
+  const build = (
+    c: (typeof cases)[number],
+    order: (typeof orders)[number],
+    disable: boolean,
+  ): { text: string; reportedLine: number } => {
+    const alias = [
+      `${c.alias[0]}${disable ? DISABLE : ""}`,
+      ...c.alias.slice(1),
+    ];
+    const plain =
+      order === "two aliases"
+        ? [c.plain[0].replace(`${c.name}:`, "*Y :"), ...c.plain.slice(1)]
+        : c.plain;
+    const pair =
+      order === "alias first" ? [...alias, ...plain] : [...plain, ...alias];
+    const lines = [
+      "on: push",
+      "env:",
+      `  A: &X ${c.name}`,
+      `  B: &Y ${c.name}`,
+      ...c.before,
+      ...pair,
+      ...c.after,
+    ];
+    return {
+      text: lines.join("\n"),
+      reportedLine: lines.indexOf(alias[0]) + 1,
+    };
+  };
+
+  for (const c of cases) {
+    for (const order of orders) {
+      it(`refuses the gate when the ${c.level} key is written twice (${order}), with or without the construct finding disabled`, () => {
+        for (const disable of [false, true]) {
+          const { text, reportedLine } = build(c, order, disable);
+          // A `continue-on-error: true` read first is reported on its own
+          // as well; the refusal is the finding this test is about.
+          const refusals = shapeViolations(text).filter((x) =>
+            x.message.includes(c.reason),
+          );
+          expect(refusals, `disable=${disable}`).toHaveLength(1);
+          expect(
+            auditViolations(text, YAML_RULE).map((x) => [x.line, x.matched]),
+            `disable=${disable}`,
+          ).toEqual(disable ? [] : [[reportedLine, "*X"]]);
+          expect(
+            auditViolations(text, "workflow-slop/unparseable-workflow"),
+          ).toEqual([]);
+        }
+      });
+    }
+  }
+
+  it("reports the alias key at its own position with a message naming the duplicate", () => {
+    const text = [
+      "on: push",
+      "env:",
+      "  A: &X shell",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      gate,
+      "        shell: bash",
+      "        *X : pwsh",
+    ].join("\n");
+    const v = auditViolations(text, YAML_RULE);
+    expect(v.map((x) => [x.line, x.column, x.matched, x.severity])).toEqual([
+      [10, 9, "*X", "block"],
+    ]);
+    expect(v[0].message).toContain(
+      "resolves to a name the same mapping already has",
+    );
+  });
+
+  it("reports the duplicate in any workflow file, not only an audit workflow", () => {
+    const text = [
+      "on: push",
+      "env:",
+      "  A: &U uses",
+      "jobs:",
+      "  build:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - uses: ./local",
+      "        *U : actions/checkout@v4",
+    ].join("\n");
+    expect(
+      runViolations(text)
+        .filter((x) => x.ruleId === YAML_RULE)
+        .map((x) => [x.line, x.matched]),
+    ).toEqual([[9, "*U"]]);
+  });
+
+  it("leaves two plain keys of the same name to unparseable-workflow, as before", () => {
+    for (const pair of [
+      ["        shell: bash", "        shell: pwsh"],
+      ["        continue-on-error: false", "        continue-on-error: true"],
+    ]) {
+      const text = [...["on: push"], ...job, "    steps:", gate, ...pair].join(
+        "\n",
+      );
+      expect(
+        auditViolations(text, "workflow-slop/unparseable-workflow"),
+      ).toHaveLength(1);
+      expect(auditViolations(text, YAML_RULE)).toEqual([]);
+    }
+    const runsOn = [
+      "on: push",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    runs-on: windows-latest",
+      "    steps:",
+      gate,
+    ].join("\n");
+    expect(
+      auditViolations(runsOn, "workflow-slop/unparseable-workflow"),
+    ).toHaveLength(1);
+    expect(auditViolations(runsOn, YAML_RULE)).toEqual([]);
+  });
+
+  it("certifies an alias key used once per mapping, and a mapping shared by two aliases", () => {
+    const text = [
+      "on: push",
+      "env:",
+      "  A: &X shell",
+      "  D: &d { run: { shell: bash } }",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    defaults: *d",
+      "    steps:",
+      gate,
+      "        *X : bash",
+      "  other:",
+      "    runs-on: ubuntu-latest",
+      "    defaults: *d",
+      "    steps:",
+      gate,
+      "        *X : bash",
+    ].join("\n");
+    expect(shapeViolations(text)).toEqual([]);
+    expect(runViolations(text)).toEqual([]);
+  });
+});

@@ -172,13 +172,50 @@ function hasUnnameableKey(node: { items: unknown[] }): boolean {
 }
 
 /**
+ * Mappings that carry the same key twice once their alias keys are
+ * resolved (`shell: bash` then `*K : pwsh`, with `K` anchoring `shell`),
+ * marked once per mapping by `applyAliasExpansion`. YAML's own duplicate
+ * key check does not see through an alias key, and every read here looks a
+ * key up by name at its first occurrence, so such a mapping cannot be read
+ * as the mapping GitHub Actions sees. Keyed by node identity, so each
+ * parsed document marks only its own nodes.
+ */
+const aliasDuplicateKeyMappings = new WeakSet<object>();
+
+/** True when `node` is a mapping `aliasDuplicateKeyMappings` marks. */
+function hasAliasDuplicateKey(node: unknown): boolean {
+  return (
+    typeof node === "object" &&
+    node !== null &&
+    aliasDuplicateKeyMappings.has(node)
+  );
+}
+
+/**
+ * Why a mapping on a read path cannot be read by key name, or `undefined`
+ * when it can: a key this rule cannot name (`isUnnameableKey`), or a key
+ * written twice once its alias keys are resolved.
+ */
+function unreadableKeyReason(node: { items: unknown[] }): string | undefined {
+  if (hasUnnameableKey(node)) {
+    return "has a key this rule cannot name (an alias it cannot resolve, or a mapping or sequence used as a key)";
+  }
+  if (hasAliasDuplicateKey(node)) {
+    return "has a key written twice once its YAML aliases are resolved";
+  }
+  return undefined;
+}
+
+/**
  * True when anything inside `node` (at any depth) is an alias left
- * unresolved or an unnameable key: a value built from such parts cannot
- * be read as the value GitHub Actions sees.
+ * unresolved, an unnameable key, or a mapping carrying a key twice once
+ * its alias keys are resolved: a value built from such parts cannot be
+ * read as the value GitHub Actions sees.
  */
 function containsUnreadablePart(node: unknown): boolean {
   if (isAliasNode(node)) return true;
   if (!hasItems(node)) return false;
+  if (hasAliasDuplicateKey(node)) return true;
   return node.items.some((item) =>
     isPairNode(item)
       ? isUnnameableKey(item.key) || containsUnreadablePart(item.value)
@@ -204,6 +241,12 @@ function containsUnreadablePart(node: unknown): boolean {
 //     `workflow-slop/unsupported-yaml-construct`, and an audit gate whose
 //     shell, `runs-on` or `continue-on-error` read passes through a merge
 //     key is refused rather than certified (see `StepRunInfo.unreadable`).
+//
+// A resolvable alias key that resolves to a name its mapping already has is
+// reported by the same rule as well, and the mapping is marked so the
+// shell / `runs-on` / `continue-on-error` read refuses it: YAML's own
+// duplicate-key check skips alias keys, and every read here matches a key by
+// name at its first occurrence.
 //
 // An alias this pack cannot resolve (no anchor of that name precedes it, the
 // anchor is one of the alias's own ancestors, or resolving every alias would
@@ -240,6 +283,8 @@ interface LoadedWorkflowDocument {
   aliasIssues: AliasIssue[];
   /** Every mapping key that is (or an alias to) a mapping or sequence. */
   collectionKeys: AliasIssue[];
+  /** Every alias key that repeats a key of its mapping once resolved. */
+  duplicateKeys: AliasIssue[];
 }
 
 function isAliasNode(node: unknown): node is { source: string } {
@@ -362,17 +407,37 @@ function planAliasExpansion(
 }
 
 /**
+ * The identity of a scalar mapping key, for the duplicate check: its value
+ * together with the value's type (the string `1` and the number 1 are
+ * different keys). `undefined` for any other key (an alias left
+ * unresolved, or a collection), which `isUnnameableKey` covers instead.
+ */
+function scalarKeyIdentity(key: unknown): string | undefined {
+  if (!isScalarNode(key)) return undefined;
+  const value = (key as { value?: unknown }).value;
+  return `${value === null ? "null" : typeof value}:${String(value)}`;
+}
+
+/**
  * Pass two: replace every resolvable alias node by the node it stands for
  * (shared, not copied, so its ranges still point at the anchor site) and
  * record every `<<` key on the way. Each mapping/sequence is visited once.
  * Targets come from the table built over the unmutated document, never from
  * the tree being changed.
+ *
+ * On the same visit, each mapping's resolved key names are collected in one
+ * set: a key written as an alias that resolves to a name the mapping already
+ * has (or a plain key repeating a name an alias key supplied earlier) marks
+ * the mapping in `aliasDuplicateKeyMappings` and is recorded in
+ * `duplicateKeys`, at the alias. Two plain keys of the same name are left to
+ * YAML, which rejects them (`unparseable-workflow`).
  */
 function applyAliasExpansion(
   root: unknown,
   table: AliasTable,
   leave: Set<unknown> | undefined,
   mergeKeys: MergeKeyHit[],
+  duplicateKeys: AliasIssue[],
 ): void {
   const seen = new Set<unknown>();
   const replace = (child: unknown): unknown => {
@@ -386,6 +451,8 @@ function applyAliasExpansion(
     if (!hasItems(node) || seen.has(node)) return;
     seen.add(node);
     const items = node.items as unknown[];
+    // Resolved key identity -> the key as written at its first occurrence.
+    const firstWritten = new Map<string, unknown>();
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       if (isPairNode(item)) {
@@ -397,6 +464,23 @@ function applyAliasExpansion(
         // scalar `<<` is a merge key as well.
         if (scalarKeyName(pair.key) === "<<") {
           mergeKeys.push({ offset: aliasOffset(written) });
+        }
+        const identity = scalarKeyIdentity(pair.key);
+        if (identity !== undefined) {
+          const earlier = firstWritten.get(identity);
+          if (earlier === undefined) {
+            firstWritten.set(identity, written);
+          } else if (isAliasNode(written) || isAliasNode(earlier)) {
+            aliasDuplicateKeyMappings.add(node);
+            const alias = (isAliasNode(written) ? written : earlier) as {
+              source: string;
+            };
+            duplicateKeys.push({
+              offset: aliasOffset(alias),
+              matched: `*${alias.source}`,
+              message: DUPLICATE_KEY_MESSAGE,
+            });
+          }
         }
         walk(pair.key);
         walk(pair.value);
@@ -418,6 +502,7 @@ function loadWorkflowDocument(text: string): LoadedWorkflowDocument {
   const doc = YAML.parseDocument(text, {});
   const aliasIssues: AliasIssue[] = [];
   const mergeKeys: MergeKeyHit[] = [];
+  const duplicateKeys: AliasIssue[] = [];
   const table = buildAliasTable(doc.contents, aliasIssues);
   const leave = planAliasExpansion(doc, table, aliasIssues);
   if (leave === undefined) {
@@ -428,9 +513,15 @@ function loadWorkflowDocument(text: string): LoadedWorkflowDocument {
     });
   }
   const collectionKeys = findCollectionKeys(text, doc.contents, table);
-  applyAliasExpansion(doc.contents, table, leave, mergeKeys);
+  applyAliasExpansion(doc.contents, table, leave, mergeKeys, duplicateKeys);
   if (table.redefined.size > 0) placeAtAnchorTokens(text, aliasIssues);
-  return { contents: doc.contents, mergeKeys, aliasIssues, collectionKeys };
+  return {
+    contents: doc.contents,
+    mergeKeys,
+    aliasIssues,
+    collectionKeys,
+    duplicateKeys,
+  };
 }
 
 /**
@@ -862,13 +953,16 @@ const MERGE_KEY_MESSAGE =
 const COLLECTION_KEY_MESSAGE =
   "A mapping key that is itself a mapping or a sequence (written with `?`, or supplied through an alias that stands for one) has no name this pack can read, so a key it stands for (a `run:`, a `uses:`, a `with:` input, `shell:`, `runs-on:`) is read as absent and a result for this file cannot be trusted clean. Write the key as a plain name.";
 
+const DUPLICATE_KEY_MESSAGE =
+  "A mapping key supplied through a YAML alias resolves to a name the same mapping already has, so the mapping carries that key twice. YAML rejects a key written twice, but its duplicate-key check does not see through an alias key, and this pack reads a key at its first occurrence, so a key it reads (a `run:`, a `uses:`, `shell:`, `runs-on:`, `continue-on-error:`) may not carry the value GitHub Actions uses and a result for this file cannot be trusted clean. Write each key once.";
+
 const unsupportedYamlConstruct: Rule = {
   id: "workflow-slop/unsupported-yaml-construct",
   pack: "workflow-slop",
   defaultSeverity: "block",
   enabledByDefault: true,
   rationale:
-    "GitHub Actions accepts YAML anchors and aliases in workflow files, and this pack resolves an alias to the value it stands for before it reads a mapping (executed inputs, `uses:` detection, `shell:`, `defaults:`, `runs-on:`). Three constructs it cannot read that way: a `<<` merge key, which GitHub does not merge, an alias it cannot resolve (no anchor of that name precedes it, it refers to a node that contains it, its anchor name is defined more than once in the file, or resolving every alias in the file would visit an unreasonable number of nodes), and a mapping key that is itself a mapping or a sequence. A mapping whose keys arrive through any of them is read as if they were absent, in a way indistinguishable from a genuinely clean file, so each is reported with a block finding of its own instead of scanning clean.",
+    "GitHub Actions accepts YAML anchors and aliases in workflow files, and this pack resolves an alias to the value it stands for before it reads a mapping (executed inputs, `uses:` detection, `shell:`, `defaults:`, `runs-on:`). Three constructs it cannot read that way: a `<<` merge key, which GitHub does not merge, an alias it cannot resolve (no anchor of that name precedes it, it refers to a node that contains it, its anchor name is defined more than once in the file, or resolving every alias in the file would visit an unreasonable number of nodes), a mapping key that is itself a mapping or a sequence, and an alias key that resolves to a name its mapping already has (YAML's duplicate-key check does not see through an alias key). A mapping whose keys arrive through any of them is read as if they were absent, in a way indistinguishable from a genuinely clean file, so each is reported with a block finding of its own instead of scanning clean.",
   appliesTo: isWorkflowFile,
   check(ctx: RuleContext): Violation[] {
     const { file } = ctx;
@@ -899,6 +993,9 @@ const unsupportedYamlConstruct: Rule = {
     return [
       ...loaded.mergeKeys.map((hit) => at(hit.offset, "<<", MERGE_KEY_MESSAGE)),
       ...loaded.collectionKeys.map((hit) =>
+        at(hit.offset, hit.matched, hit.message),
+      ),
+      ...loaded.duplicateKeys.map((hit) =>
         at(hit.offset, hit.matched, hit.message),
       ),
       ...loaded.aliasIssues.map((issue) =>
@@ -1431,9 +1528,10 @@ interface StepRunInfo {
    * Places on this step's shell / `runs-on` / `continue-on-error` read
    * path that this rule could not read: a mapping on the path (the
    * workflow, the job, `defaults`, `defaults.run`, the step) carrying a
-   * `<<` merge key or a key this rule cannot name (`isUnnameableKey`), or
-   * a value on it (including anything inside `runs-on:`) that is an alias
-   * which could not be resolved. Either way the value the key or alias
+   * `<<` merge key, a key this rule cannot name (`isUnnameableKey`), or a
+   * key written twice once its alias keys are resolved (the lookups read
+   * the first occurrence), or a value on it (including anything inside
+   * `runs-on:`) that is an alias which could not be resolved. Either way the value the key or alias
    * stands for is read as absent, which for a `block` gate is the false-clean direction, so
    * `audit-gate-shape` refuses a step with any entry here instead of
    * certifying it. Empty for every readable step.
@@ -1518,9 +1616,10 @@ function findNestedShellField(
     }
     // Depth 0 is the workflow or job mapping itself, checked by
     // `collectStepRuns` as a mapping on the step's path.
-    if (depth > 0 && hasUnnameableKey(current)) {
+    const keyReason = depth > 0 ? unreadableKeyReason(current) : undefined;
+    if (keyReason !== undefined) {
       unreadable.push(
-        `${where}'s \`${path.slice(0, depth).join(".")}\` mapping has a key this rule cannot name`,
+        `${where}'s \`${path.slice(0, depth).join(".")}\` mapping ${keyReason}`,
       );
     }
     const pair = current.items.find(
@@ -1663,7 +1762,11 @@ function collectStepRuns(
     node.items.some(
       (item) => isPairNode(item) && scalarKeyName(item.key) === "run",
     );
-  if (hasUnnameableKey(node)) {
+  // A key written twice once aliases are resolved is refused the same way:
+  // the lookups below read its first occurrence, which may not be the one
+  // GitHub Actions uses.
+  const keyReason = unreadableKeyReason(node);
+  if (keyReason !== undefined) {
     const owner = isWorkflowMapping
       ? "the workflow"
       : isJobMapping
@@ -1671,9 +1774,7 @@ function collectStepRuns(
         : isStepMapping
           ? "the step"
           : "a mapping enclosing the step";
-    ownUnreadable.push(
-      `${owner} mapping has a key this rule cannot name (an alias it cannot resolve, or a mapping or sequence used as a key)`,
-    );
+    ownUnreadable.push(`${owner} mapping ${keyReason}`);
   }
   const unresolvedValue = (key: string, where: string): void => {
     const pair = node.items.find(
@@ -1698,7 +1799,7 @@ function collectStepRuns(
       containsUnreadablePart(runsOn.value)
     ) {
       ownUnreadable.push(
-        `${levelName}'s \`runs-on:\` contains an alias this rule cannot resolve or a key it cannot name`,
+        `${levelName}'s \`runs-on:\` contains an alias this rule cannot resolve or a key it cannot name, or a mapping carrying a key twice once aliases are resolved`,
       );
     }
   }
