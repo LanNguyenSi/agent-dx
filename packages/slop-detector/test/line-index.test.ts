@@ -70,11 +70,13 @@ describe("offsetToLineCol", () => {
     // Distinct string objects with equal content share the index too.
     const text = ["one", "two", "three"].join("\n");
     const copy = ["one", "two", "three"].join("\n");
+    // Prime the cache with another text so the first lookup below must build.
+    offsetToLineCol("unrelated\ntext", 3);
     const before = lineIndexBuildCount();
     for (let i = 0; i < 500; i++) {
       offsetToLineCol(i % 2 === 0 ? text : copy, i % text.length);
     }
-    expect(lineIndexBuildCount() - before).toBeLessThanOrEqual(1);
+    expect(lineIndexBuildCount() - before).toBe(1);
   });
 });
 
