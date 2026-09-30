@@ -11,9 +11,20 @@ export interface LineCol {
 // packs build all findings of a file before moving to the next one.
 let cachedText: string | undefined;
 let cachedNewlines: number[] = [];
+let indexBuilds = 0;
+
+/**
+ * How many times a line index was built since the process started. Exists
+ * so a test can assert that repeated lookups on one text reuse the index
+ * instead of timing the difference; nothing in the packs reads it.
+ */
+export function lineIndexBuildCount(): number {
+  return indexBuilds;
+}
 
 function newlinePositions(text: string): number[] {
   if (cachedText === text) return cachedNewlines;
+  indexBuilds++;
   const positions: number[] = [];
   let i = text.indexOf("\n");
   while (i !== -1) {

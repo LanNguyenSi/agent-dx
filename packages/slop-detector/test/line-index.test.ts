@@ -2,7 +2,10 @@ import { describe, it, expect } from "vitest";
 import { checkText } from "../src/engine.js";
 import { defaultConfig } from "../src/config.js";
 import { allPacks } from "../src/packs/registry.js";
-import { offsetToLineCol } from "../src/util/text.js";
+import { lineIndexBuildCount, offsetToLineCol } from "../src/util/text.js";
+
+const BOUND_MS = 8000;
+const TIMEOUT_MS = 60000;
 
 // The scan the index replaced, kept as the oracle for the positions.
 function scanOffsetToLineCol(text: string, offset: number) {
@@ -26,9 +29,9 @@ describe("offsetToLineCol", () => {
     "only newlines": "\n\n\n",
     CRLF: "one\r\ntwo\r\n\r\nfour",
     "lone CR": "one\rtwo\nthree",
-    BOM: "﻿on: push\njobs:\n  j: {}\n",
+    BOM: "\uFEFFon: push\njobs:\n  j: {}\n",
     "multi-byte and surrogate pairs":
-      "café \u{1F600}x\n\u{1F468}‍\u{1F469} y\n中文",
+      "café \u{1F600}x\n\u{1F468}\u200D\u{1F469} y\n中文",
     "lone surrogate": "a\uD83Db\nc",
   };
 
@@ -45,16 +48,33 @@ describe("offsetToLineCol", () => {
   }
 
   it("answers correctly when two different texts alternate", () => {
-    const a = "a\nbb\nccc";
-    const b = "xxxx\ny";
-    for (let offset = 0; offset <= 8; offset++) {
-      expect(offsetToLineCol(a, offset)).toEqual(
-        scanOffsetToLineCol(a, offset),
-      );
-      expect(offsetToLineCol(b, offset)).toEqual(
-        scanOffsetToLineCol(b, offset),
-      );
+    // The last pair has the same length but different newline positions,
+    // so a cache keyed by anything short of the content would answer wrong.
+    const pairs: Array<[string, string]> = [
+      ["a\nbb\nccc", "xxxx\ny"],
+      ["ab\ncd\nef", "abc\nd\nef"],
+    ];
+    for (const [a, b] of pairs) {
+      for (let offset = 0; offset <= a.length + 1; offset++) {
+        expect(offsetToLineCol(a, offset), `a@${offset}`).toEqual(
+          scanOffsetToLineCol(a, offset),
+        );
+        expect(offsetToLineCol(b, offset), `b@${offset}`).toEqual(
+          scanOffsetToLineCol(b, offset),
+        );
+      }
     }
+  });
+
+  it("builds the index once for many lookups on one text", () => {
+    // Distinct string objects with equal content share the index too.
+    const text = ["one", "two", "three"].join("\n");
+    const copy = ["one", "two", "three"].join("\n");
+    const before = lineIndexBuildCount();
+    for (let i = 0; i < 500; i++) {
+      offsetToLineCol(i % 2 === 0 ? text : copy, i % text.length);
+    }
+    expect(lineIndexBuildCount() - before).toBeLessThanOrEqual(1);
   });
 });
 
@@ -81,6 +101,7 @@ describe("finding positions scale with file size plus findings", () => {
         lines.push("      - run: echo ${{ inputs.version }}");
       }
       const text = lines.join("\n");
+      const buildsBefore = lineIndexBuildCount();
       const started = Date.now();
       const findings = checkText(text, ".github/workflows/publish.yml", {
         packs: allPacks,
@@ -91,11 +112,11 @@ describe("finding positions scale with file size plus findings", () => {
       expect(findings).toHaveLength(n);
       expect(findings[n - 1].line).toBe(5 + n);
       expect(findings[n - 1].column).toBe(19);
+      // Deterministic form of the same contract: 20000 findings reuse the
+      // index of the one file instead of rebuilding it per finding.
+      expect(lineIndexBuildCount() - buildsBefore).toBeLessThanOrEqual(5);
       expect(elapsed).toBeLessThan(BOUND_MS);
     },
     TIMEOUT_MS,
   );
 });
-
-const BOUND_MS = 8000;
-const TIMEOUT_MS = 60000;
