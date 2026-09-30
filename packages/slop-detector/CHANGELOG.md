@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `workflow-slop/unsupported-yaml-construct`: the `matched` text of a
+  merge-key or non-text-key finding quoted the key's whole source range, so
+  a key written over many lines (`? !!merge |` with a block scalar, a
+  multi-line quoted key) put an unbounded multi-line blob in the output. It
+  is now the key's first line, cut to 80 characters, with an ellipsis when
+  anything was dropped. Positions and verdicts are unchanged.
+- The rule's rationale (shown by `--explain`) now states the YAML 1.1 case
+  accurately: a key is read as a merge symbol whatever its text only with a
+  `!!merge` tag; under a `%YAML 1.1` directive only a plain `<<` is.
+- `slop-detector check -f json` piped into another process was cut at the
+  pipe buffer, because the process exited right after the write. It now
+  sets the exit code and lets stdout drain, so a large report arrives whole.
+
 ## [0.6.0] - 2026-09-30
 
 ### Added

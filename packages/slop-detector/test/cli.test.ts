@@ -369,3 +369,50 @@ describe("the argv shapes the orchestrator-workflow implementer prompt prescribe
     expect(status).toBe(1);
   });
 });
+
+// A payload larger than the pipe buffer, written to a real pipe whose reader
+// starts late, is delivered whole: the CLI must not exit before its stdout
+// has drained. Runs the built `dist/cli.js`, since the cut-off comes from the
+// process exiting right after the write, which `--import tsx` also does but
+// which the shipped entry point is the contract for.
+describe("cli check -f json into a pipe", () => {
+  const builtEntry = path.join(packageRoot, "dist", "cli.js");
+
+  function runBuiltIntoPipe(
+    args: string[],
+  ): Promise<{ stdout: string; status: number | null }> {
+    return new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [builtEntry, ...args], {
+        cwd: packageRoot,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      const chunks: Buffer[] = [];
+      // Hold the reader back so the child fills the pipe buffer first.
+      child.stdout.pause();
+      setTimeout(() => child.stdout.resume(), 500);
+      child.stdout.on("data", (c: Buffer) => chunks.push(c));
+      child.on("error", reject);
+      child.on("close", (status) =>
+        resolve({ stdout: Buffer.concat(chunks).toString("utf8"), status }),
+      );
+    });
+  }
+
+  it("delivers the full JSON output when it exceeds 64 KiB", async () => {
+    const file = path.join(tmp, "big.md");
+    const count = 1000;
+    fs.writeFileSync(file, "F1 landed in review round 2.\n".repeat(count));
+    const { stdout, status } = await runBuiltIntoPipe([
+      "check",
+      file,
+      "--pack",
+      "review-slop",
+      "-f",
+      "json",
+    ]);
+    expect(Buffer.byteLength(stdout)).toBeGreaterThan(65536);
+    const parsed = JSON.parse(stdout);
+    expect(parsed.violations.length).toBeGreaterThanOrEqual(count);
+    expect(status).toBe(1);
+  }, 30_000);
+});

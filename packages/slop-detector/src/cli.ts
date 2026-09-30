@@ -224,7 +224,10 @@ async function runCheck(
   } else {
     process.stdout.write(renderText(summary, opts.explain ?? false));
   }
-  process.exit(summary.blockCount > 0 ? 1 : 0);
+  // Set the exit code and return instead of calling `process.exit`: a
+  // large payload written to a pipe is flushed asynchronously, and an
+  // immediate exit cuts it at the pipe buffer.
+  process.exitCode = summary.blockCount > 0 ? 1 : 0;
 }
 
 function normalizeOpts(raw: unknown): CheckOpts {

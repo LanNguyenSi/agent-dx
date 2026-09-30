@@ -193,17 +193,35 @@ function isMergeSymbolKey(key: unknown): boolean {
   return isScalarNode(key) && typeof key.value === "symbol";
 }
 
+/** The longest a `matched` quoted from a key's source range may be. */
+const KEY_MATCHED_CAP = 80;
+
+/**
+ * The text a finding quotes for a key written in the source: the first
+ * line only, cut to `KEY_MATCHED_CAP` characters, with an ellipsis when
+ * anything (a further line, or the rest of a long line) was dropped. A key
+ * can span any number of lines (`? !!merge |` with a block scalar, or a
+ * multi-line quoted scalar), and the finding's position is the key's start,
+ * so quoting its whole source range would only bloat the output.
+ */
+function boundedKeyMatched(source: string): string {
+  const firstLine = source.split(/\r\n|[\n\r\u2028\u2029]/, 1)[0];
+  if (firstLine.length <= KEY_MATCHED_CAP && firstLine.length === source.length)
+    return source;
+  return `${firstLine.slice(0, KEY_MATCHED_CAP)}\u2026`;
+}
+
 /**
  * The text a merge-key finding quotes. An alias key is `<<`, as it always
  * was; a scalar key is its source text (a `!!merge` tag can sit on any
  * text, as in `!!merge shell: pwsh`, so it is not always `<<`), or the tag
- * when the key is empty (`? !!merge`).
+ * when the key is empty (`? !!merge`). Bounded by `boundedKeyMatched`.
  */
 function mergeKeyMatched(written: unknown, key: unknown, text: string): string {
   if (isAliasNode(written)) return "<<";
   const range = (key as { range?: number[] }).range;
   const source = range === undefined ? "" : text.slice(range[0], range[1]);
-  return source === "" ? "!!merge" : source;
+  return source === "" ? "!!merge" : boundedKeyMatched(source);
 }
 
 /**
@@ -529,7 +547,7 @@ function applyAliasExpansion(
             offset: aliasOffset(written),
             matched: isAliasNode(written)
               ? `*${written.source}`
-              : text.slice(range[0], range[1]),
+              : boundedKeyMatched(text.slice(range[0], range[1])),
             message: NON_TEXT_KEY_MESSAGE,
           });
         }
@@ -1043,7 +1061,7 @@ const unsupportedYamlConstruct: Rule = {
   defaultSeverity: "block",
   enabledByDefault: true,
   rationale:
-    "GitHub Actions accepts YAML anchors and aliases in workflow files, and this pack resolves an alias to the value it stands for before it reads a mapping (executed inputs, `uses:` detection, `shell:`, `defaults:`, `runs-on:`). Five constructs it cannot read that way: a `<<` merge key, which GitHub does not merge (a `%YAML 1.1` directive or a `!!merge` tag makes the YAML parser read a key as a merge symbol, whatever its text), an alias it cannot resolve (no anchor of that name precedes it, it refers to a node that contains it, its anchor name is defined more than once in the file, or resolving every alias in the file would visit an unreasonable number of nodes), a mapping key that is itself a mapping or a sequence, a scalar key whose value is not text (a date, or a binary value, as a `%YAML 1.1` directive or a tag such as `!!binary` gives), and an alias key that resolves to a name its mapping already has (YAML's duplicate-key check does not see through an alias key). A mapping whose keys arrive through one of the first four is read as if they were absent, and a mapping carrying a key twice is read at the key's first occurrence, which need not be the value GitHub Actions uses; either way the result is indistinguishable from a genuinely clean file, so each is reported with a block finding of its own instead of scanning clean.",
+    "GitHub Actions accepts YAML anchors and aliases in workflow files, and this pack resolves an alias to the value it stands for before it reads a mapping (executed inputs, `uses:` detection, `shell:`, `defaults:`, `runs-on:`). Five constructs it cannot read that way: a `<<` merge key, which GitHub does not merge (the YAML parser reads a key as a merge symbol when it carries a `!!merge` tag, whatever its text, and under a `%YAML 1.1` directive when it is a plain `<<`), an alias it cannot resolve (no anchor of that name precedes it, it refers to a node that contains it, its anchor name is defined more than once in the file, or resolving every alias in the file would visit an unreasonable number of nodes), a mapping key that is itself a mapping or a sequence, a scalar key whose value is not text (a date, or a binary value, as a `%YAML 1.1` directive or a tag such as `!!binary` gives), and an alias key that resolves to a name its mapping already has (YAML's duplicate-key check does not see through an alias key). A mapping whose keys arrive through one of the first four is read as if they were absent, and a mapping carrying a key twice is read at the key's first occurrence, which need not be the value GitHub Actions uses; either way the result is indistinguishable from a genuinely clean file, so each is reported with a block finding of its own instead of scanning clean.",
   appliesTo: isWorkflowFile,
   check(ctx: RuleContext): Violation[] {
     const { file } = ctx;

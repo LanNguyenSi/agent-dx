@@ -5414,6 +5414,95 @@ describe("workflow-slop: a merge key that yaml reads as a symbol", () => {
     ).toEqual([[10, "<<"]]);
   });
 
+  it("states the YAML 1.1 merge-key case accurately in the rule rationale", () => {
+    const text = stepWith(["        2001-01-01: x"]);
+    const found = auditViolations(text, YAML_RULE);
+    expect(found).toHaveLength(1);
+    expect(found[0].rationale).toContain(
+      "the YAML parser reads a key as a merge symbol when it carries a `!!merge` tag, whatever its text, and under a `%YAML 1.1` directive when it is a plain `<<`",
+    );
+    expect(found[0].rationale).not.toContain("whatever its text)");
+  });
+
+  describe("matched text of a key written over many lines", () => {
+    const CAP = 80;
+    // No `%YAML 1.1` directive: the `!!merge` and `!!binary` tags alone make
+    // the keys unreadable. The quoted range of a tagged scalar starts after
+    // the tag, at its value.
+    const keyed = (keyLines: string[]) =>
+      auditViolations(
+        [
+          "on: push",
+          "b: &b",
+          "  shell: pwsh",
+          "jobs:",
+          "  audit:",
+          "    runs-on: ubuntu-latest",
+          "    steps:",
+          "      - run: npm audit --audit-level=high",
+          ...keyLines,
+        ].join("\n"),
+        YAML_RULE,
+      );
+
+    it("quotes only the first line, capped, for a `? !!merge |` block key", () => {
+      const body = Array.from(
+        { length: 5000 },
+        (_, i) => `          line ${i} of the block`,
+      );
+      const found = keyed(["        ? !!merge |", ...body, "        : *b"]);
+      expect(found).toHaveLength(1);
+      const matched = found[0].matched ?? "";
+      expect(matched).toBe("|\u2026");
+      expect(found[0].line).toBe(9);
+      expect(found[0].column).toBe(19);
+    });
+
+    it("quotes a single line for a multi-line quoted `!!merge` key", () => {
+      const found = keyed([
+        '        ? !!merge "first line of the key',
+        '          second line of the key"',
+        "        : *b",
+      ]);
+      expect(found).toHaveLength(1);
+      expect(found[0].matched).toBe('"first line of the key\u2026');
+      expect(found[0].line).toBe(9);
+    });
+
+    it("caps a single very long line for the same key", () => {
+      const found = keyed([
+        `        ? !!merge "${"x".repeat(400)}"`,
+        "        : *b",
+      ]);
+      expect(found).toHaveLength(1);
+      const matched = found[0].matched ?? "";
+      expect(matched).toBe(`"${"x".repeat(CAP - 1)}\u2026`);
+      expect(matched.length).toBe(CAP + 1);
+    });
+
+    it("quotes a short one-line key as written, without an ellipsis", () => {
+      const found = keyed(["        !!merge x: *b"]);
+      expect(found.map((v) => v.matched)).toEqual(["x"]);
+    });
+
+    it("bounds the non-text key branch: a multi-line `!!binary` block key", () => {
+      const body = Array.from({ length: 2000 }, (_, i) => `          QUJD${i}`);
+      const found = keyed(["        ? !!binary |", ...body, "        : x"]);
+      expect(found).toHaveLength(1);
+      expect(found[0].matched).toBe("|\u2026");
+      expect(found[0].line).toBe(9);
+    });
+
+    it("bounds the non-text key branch: a long quoted `!!binary` key", () => {
+      const found = keyed([
+        `        ? !!binary "${"QUJD".repeat(100)}"`,
+        "        : x",
+      ]);
+      expect(found).toHaveLength(1);
+      expect(found[0].matched).toBe(`"${"QUJD".repeat(19)}QUJ\u2026`);
+    });
+  });
+
   it("names the non-text key in the rule rationale", () => {
     const text = stepWith(["        2001-01-01: x"]);
     const found = auditViolations(text, YAML_RULE);
