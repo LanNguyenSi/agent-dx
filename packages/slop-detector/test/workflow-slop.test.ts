@@ -4733,7 +4733,7 @@ describe("workflow-slop/audit-gate-shape: an alias-key duplicate off the gate's 
     rules: { [YAML_RULE]: { enabled: false } },
   });
   const fileReason = (sites: string) =>
-    `the file has a mapping carrying a key twice once its YAML aliases are resolved (${sites})`;
+    `the file has a mapping carrying a key twice once its YAML aliases are resolved, or an alias this rule could not resolve (${sites})`;
   const job = [
     "jobs:",
     "  audit:",
@@ -4823,4 +4823,158 @@ describe("workflow-slop/audit-gate-shape: an alias-key duplicate off the gate's 
       expect(shapeViolations(text), f.name).toEqual([]);
     }
   });
+
+  it("words the file-level refusal as a file the rule cannot read as GitHub Actions does, not as an unknown shell", () => {
+    const [v] = shapeViolations(fixtures[0].lines.join("\n"), constructOff);
+    expect(v.message).toContain(
+      "so this rule cannot trust that it reads this file the way GitHub Actions does (GitHub Actions may use the other value of a key written twice, and rejects an alias it cannot resolve) and does not certify it. Write each key of a mapping once, and give every alias an anchor of a unique name that precedes it, with few enough aliases to resolve.",
+    );
+    expect(v.message).not.toContain("cannot tell which");
+    expect(v.message).not.toContain("does not merge");
+  });
+
+  it("gives both sentences when the gate's own read path is unreadable as well", () => {
+    const text = [
+      "on: push",
+      "env:",
+      "  A: &X shell",
+      "jobs:",
+      "  audit:",
+      "    runs-on: ubuntu-latest",
+      "    steps:",
+      "      - run: npm audit --audit-level=high",
+      "        shell: bash",
+      "        *X : pwsh",
+    ].join("\n");
+    const [v] = shapeViolations(text, constructOff);
+    expect(v.message).toContain(
+      "cannot tell which `shell:`, `runs-on` or `continue-on-error` applies to the gate step, cannot trust that it reads this file the way GitHub Actions does",
+    );
+    expect(v.message).toContain("GitHub Actions does not merge `<<` keys");
+    expect(v.message).toContain("Write each key of a mapping once");
+  });
+
+  it("names the first three sites in file order and counts the rest", () => {
+    const text = [
+      "on: push",
+      "env:",
+      "  A: &X FOO",
+      "  B: { FOO: a, *X : b }",
+      "  C: { FOO: a, *X : b }",
+      "  D: *later",
+      "  E: { FOO: a, *X : b }",
+      "  F: { FOO: a, *X : b }",
+      "  G: &later g",
+      ...job,
+    ].join("\n");
+    const v = shapeViolations(text, constructOff);
+    expect(v).toHaveLength(1);
+    expect(v[0].message).toContain(
+      fileReason(
+        "`*X` at line 4, `*X` at line 5, `*later` at line 6 and 2 more",
+      ),
+    );
+  });
+});
+
+describe("workflow-slop/audit-gate-shape: an alias this rule could not resolve, off the gate's read path", () => {
+  const constructOff = mergeConfig({
+    rules: { [YAML_RULE]: { enabled: false } },
+  });
+  const job = [
+    "jobs:",
+    "  audit:",
+    "    runs-on: ubuntu-latest",
+    "    steps:",
+    "      - run: npm audit --audit-level=high",
+  ];
+  const bomb = ["  L0: &l0 [a, a, a, a, a, a, a, a, a]"];
+  for (let i = 1; i <= 9; i++) {
+    bomb.push(
+      `  L${i}: &l${i} [${Array(9)
+        .fill(`*l${i - 1}`)
+        .join(", ")}]`,
+    );
+  }
+  const fixtures: Array<{ name: string; lines: string[]; site: string }> = [
+    {
+      name: "an alias key whose anchor follows it",
+      lines: [
+        "on: push",
+        "env:",
+        "  FOO: a",
+        "  *X : b",
+        "  B: &X FOO",
+        ...job,
+      ],
+      site: "`*X` at line 4",
+    },
+    {
+      name: "an alias that refers to a node containing it",
+      lines: ["on: push", "env:", "  A: &L", "    - *L", ...job],
+      site: "`*L` at line 4",
+    },
+    {
+      name: "an alias key whose anchor name is defined twice",
+      lines: [
+        "on: push",
+        "env:",
+        "  A: &X FOO",
+        "  FOO: a",
+        "  *X : b",
+        "  B: &X BAR",
+        ...job,
+      ],
+      site: "`&X` at line 6",
+    },
+    {
+      name: "aliases beyond the resolution budget",
+      lines: ["on: push", "env:", ...bomb, ...job],
+      site: "aliases beyond the resolution budget at line 1",
+    },
+  ];
+
+  for (const f of fixtures) {
+    it(`refuses the gate of a file with ${f.name}, with the construct finding enabled or disabled`, () => {
+      const text = f.lines.join("\n");
+      expect(auditViolations(text, YAML_RULE).length).toBeGreaterThan(0);
+      expect(auditViolations(text, YAML_RULE, constructOff)).toEqual([]);
+      for (const config of [defaultConfig(), constructOff]) {
+        const v = shapeViolations(text, config);
+        expect(v).toHaveLength(1);
+        expect(v[0].message).toContain(
+          `the file has a mapping carrying a key twice once its YAML aliases are resolved, or an alias this rule could not resolve (${f.site})`,
+        );
+      }
+    });
+  }
+});
+
+describe("workflow-slop/audit-gate-shape: the file-level refusal scales with gates and sites", () => {
+  it("refuses 4000 gates of a file with 4000 off-path duplicates within a generous bound, with a message length linear in the gates", () => {
+    const n = 4000;
+    const lines = ["on: push", "env:", "  A: &X FOO"];
+    for (let i = 0; i < n; i++) lines.push(`  E${i}: { FOO: a, *X : b }`);
+    lines.push("jobs:", "  audit:", "    runs-on: ubuntu-latest", "    steps:");
+    for (let i = 0; i < n; i++) {
+      lines.push("      - run: npm audit --audit-level=high");
+    }
+    const constructOff = mergeConfig({
+      rules: { [YAML_RULE]: { enabled: false } },
+    });
+    const started = Date.now();
+    const v = shapeViolations(lines.join("\n"), constructOff);
+    const elapsed = Date.now() - started;
+    expect(v).toHaveLength(n);
+    // Each message names at most three sites, so the sum stays near
+    // n x one message (about 1 KB); listing every site in every message
+    // would put it above 300 MB.
+    const total = v.reduce((sum, x) => sum + x.message.length, 0);
+    expect(total).toBeLessThan(n * 2000);
+    expect(v[0].message).toContain(`and ${n - 3} more`);
+    // About 7 to 8.5 s on a developer machine, where the per-gate line
+    // lookup of each finding dominates; the bound allows five times that
+    // for slower CI runners.
+    expect(elapsed).toBeLessThan(45000);
+  }, 120000);
 });

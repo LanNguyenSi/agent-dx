@@ -1536,9 +1536,10 @@ interface StepRunInfo {
    * stands for is read as absent, which for a `block` gate is the false-clean direction, so
    * `audit-gate-shape` refuses a step with any entry here instead of
    * certifying it. `collectAuditStepBlocks` also adds one entry to every
-   * step of a file that carries a key written twice once its alias keys
-   * are resolved anywhere, on the step's path or not
-   * (`aliasDuplicateFileReason`). Empty for every readable step.
+   * step of a file that carries, anywhere, on the step's path or not, a
+   * key written twice once its alias keys are resolved or an alias the
+   * loader left unresolved (`unreadableAliasFileReason`). Empty for every
+   * readable step.
    */
   unreadable: string[];
 }
@@ -3382,6 +3383,61 @@ interface AuditFinding {
   message: string;
 }
 
+/** How many alias sites the file-level refusal reason names by line. */
+const FILE_REASON_SITE_LIMIT = 3;
+
+/**
+ * The reason every gate step of a file is refused when the file carries,
+ * anywhere (a step's `env:`, another job), an alias construct this rule
+ * cannot read the way GitHub Actions does, or `undefined` when it carries
+ * none: a key written twice once its alias keys are resolved
+ * (`duplicateKeys`), or an alias the loader left unresolved (every
+ * `aliasIssues` record: no anchor of that name precedes it, it refers to a
+ * node that contains it, its anchor name is defined more than once, or
+ * resolving the file's aliases exceeds the node budget), since an alias
+ * key left unresolved may be such a duplicate in YAML's own reading. The
+ * step's own read path already refuses these on it; this refusal must not
+ * depend on `unsupported-yaml-construct` being enabled.
+ *
+ * Built once per file and shared by every gate step, so its length does
+ * not grow with the number of sites: it names the first
+ * `FILE_REASON_SITE_LIMIT` sites in file order (picked in one pass) and
+ * counts the rest, and their line numbers come from one forward pass over
+ * the text up to the last named site.
+ */
+function unreadableAliasFileReason(
+  text: string,
+  loaded: LoadedWorkflowDocument,
+): string | undefined {
+  const hits = [...loaded.duplicateKeys, ...loaded.aliasIssues];
+  if (hits.length === 0) return undefined;
+  const first: AliasIssue[] = [];
+  for (const hit of hits) {
+    let at = first.length;
+    while (at > 0 && first[at - 1].offset > hit.offset) at--;
+    if (at >= FILE_REASON_SITE_LIMIT) continue;
+    first.splice(at, 0, hit);
+    if (first.length > FILE_REASON_SITE_LIMIT) first.pop();
+  }
+  let line = 1;
+  let scanned = 0;
+  const sites = first.map((hit) => {
+    const end = Math.min(hit.offset, text.length);
+    for (; scanned < end; scanned++) {
+      if (text.charCodeAt(scanned) === 10) line++;
+    }
+    const what =
+      hit.matched === "*"
+        ? "aliases beyond the resolution budget"
+        : `\`${hit.matched}\``;
+    return `${what} at line ${line}`;
+  });
+  const more = hits.length - sites.length;
+  const listed =
+    more > 0 ? `${sites.join(", ")} and ${more} more` : sites.join(", ");
+  return `the file has a mapping carrying a key twice once its YAML aliases are resolved, or an alias this rule could not resolve (${listed})`;
+}
+
 /**
  * One step of an audit workflow, with its run block already normalised.
  * `certifiableGate` is the shared answer to "does this step invoke the
@@ -3392,32 +3448,18 @@ interface AuditFinding {
  * raw text mentions the gate, so a gate rewritten as a folded scalar is
  * reported rather than skipped.
  */
-/**
- * The reason every gate step of a file is refused when the file carries a
- * key written twice once its alias keys are resolved, anywhere in the file
- * (a step's `env:`, another job), or `undefined` when it carries none. The
- * step's own read path already refuses a duplicate on it; one elsewhere
- * says the file is not the one GitHub Actions reads either, and that
- * refusal must not depend on `unsupported-yaml-construct` being enabled.
- */
-function aliasDuplicateFileReason(
-  text: string,
-  duplicateKeys: AliasIssue[],
-): string | undefined {
-  if (duplicateKeys.length === 0) return undefined;
-  const sites = duplicateKeys.map(
-    (hit) =>
-      `\`${hit.matched}\` at line ${offsetToLineCol(text, hit.offset).line}`,
-  );
-  return `the file has a mapping carrying a key twice once its YAML aliases are resolved (${sites.join(", ")})`;
-}
-
 interface AuditStepBlock {
   step: StepRunInfo;
   block: NormalizedBlock;
   gate?: NormalizedStatement;
   certifiableGate: boolean;
   rawMentionsGate: boolean;
+  /**
+   * The file-level entry of `step.unreadable`
+   * (`unreadableAliasFileReason`), kept apart so the refusal message can
+   * tell it from a reason on the step's own read path.
+   */
+  fileReason?: string;
 }
 
 function collectAuditStepBlocks(file: FileTarget): AuditStepBlock[] {
@@ -3429,7 +3471,7 @@ function collectAuditStepBlocks(file: FileTarget): AuditStepBlock[] {
   }
   const steps: StepRunInfo[] = [];
   collectStepRuns(file.text, loaded.contents, steps);
-  const fileReason = aliasDuplicateFileReason(file.text, loaded.duplicateKeys);
+  const fileReason = unreadableAliasFileReason(file.text, loaded);
   return steps.map((step) => {
     if (fileReason !== undefined) step.unreadable.push(fileReason);
     const raw = file.text.slice(step.runRange[0], step.runRange[1]);
@@ -3441,6 +3483,7 @@ function collectAuditStepBlocks(file: FileTarget): AuditStepBlock[] {
       gate,
       certifiableGate: step.style !== "other" && gate !== undefined,
       rawMentionsGate: isGateCommand(raw),
+      fileReason,
     };
   });
 }
@@ -3547,8 +3590,28 @@ function shapeViolationMessage(
 const SHELL_MESSAGE_TAIL =
   'Set an explicit bash `shell:` on the gate step (or its job\'s or the workflow\'s `defaults.run.shell`), or use the reviewed per-repo exception instead: a `# slop-detector:disable-line=workflow-slop/audit-gate-shape` comment on this line, or `rules: { "workflow-slop/audit-gate-shape": { enabled: false } }` in `slop.config.yml` to disable the rule for the whole repo (see docs/workflow-slop.md\'s "Scope" section).';
 
-function unreadableMessage(reasons: string[]): string {
-  return `Unrecognised npm-audit gate shape in this audit workflow: ${reasons.join("; ")}, so this rule cannot tell which \`shell:\`, \`runs-on\` or \`continue-on-error\` applies to the gate step and does not certify it. GitHub Actions does not merge \`<<\` keys; write the mapping out, or use an alias for the whole value (\`key: *anchor\`) whose anchor precedes it and whose name is defined once, and write every key as a plain name. Otherwise the reviewed per-repo exception applies: a \`# slop-detector:disable-line=workflow-slop/audit-gate-shape\` comment on this line, or \`rules: { "workflow-slop/audit-gate-shape": { enabled: false } }\` in \`slop.config.yml\`.`;
+function unreadableMessage(reasons: string[], fileReason?: string): string {
+  const onPath = reasons.some((reason) => reason !== fileReason);
+  const inFile = fileReason !== undefined && reasons.includes(fileReason);
+  const why: string[] = [];
+  const fix: string[] = [];
+  if (onPath) {
+    why.push(
+      "cannot tell which `shell:`, `runs-on` or `continue-on-error` applies to the gate step",
+    );
+    fix.push(
+      "GitHub Actions does not merge `<<` keys; write the mapping out, or use an alias for the whole value (`key: *anchor`) whose anchor precedes it and whose name is defined once, and write every key as a plain name.",
+    );
+  }
+  if (inFile) {
+    why.push(
+      "cannot trust that it reads this file the way GitHub Actions does (GitHub Actions may use the other value of a key written twice, and rejects an alias it cannot resolve)",
+    );
+    fix.push(
+      "Write each key of a mapping once, and give every alias an anchor of a unique name that precedes it, with few enough aliases to resolve.",
+    );
+  }
+  return `Unrecognised npm-audit gate shape in this audit workflow: ${reasons.join("; ")}, so this rule ${why.length > 1 ? `${why.join(", ")},` : why[0]} and does not certify it. ${fix.join(" ")} Otherwise the reviewed per-repo exception applies: a \`# slop-detector:disable-line=workflow-slop/audit-gate-shape\` comment on this line, or \`rules: { "workflow-slop/audit-gate-shape": { enabled: false } }\` in \`slop.config.yml\`.`;
 }
 
 function shellViolationMessage(reason: string): string {
@@ -3601,7 +3664,7 @@ const auditGateShape: Rule = {
             file,
             offset,
             matched,
-            unreadableMessage(entry.step.unreadable),
+            unreadableMessage(entry.step.unreadable, entry.fileReason),
           ),
         );
         continue;

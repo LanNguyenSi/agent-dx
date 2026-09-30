@@ -39,8 +39,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mapping enclosing the step, `defaults`, `defaults.run`, the step, or
   anything inside `runs-on:`), even where that finding is disabled. A
   duplicate of that kind anywhere else in an audit workflow (a step's
-  `env:`, another job) refuses every gate in the file the same way, naming
-  the line of each alias key involved. The check runs once per mapping
+  `env:`, another job), and any alias the pack could not resolve there (no
+  preceding anchor, a self-containing alias, an anchor name defined twice,
+  or a file over the alias resolution budget), refuses every gate in the
+  file the same way; the message says the file cannot be read the way
+  GitHub Actions reads it and names at most the first three sites by line,
+  so its length does not grow with the number of sites. The check runs once per mapping
   during alias expansion. Keys are compared by their resolved value, so a
   plain `shell` matches an alias to `'shell'`, `"s\x68ell"` or
   `!!str shell`. Two plain keys of the
