@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `workflow-slop/audit-gate-shape` now accepts an explicitly tagged boolean
+  whose decoded text is a core-schema false (including quoted case variants
+  and YAML escapes) for a gate step's or job's `continue-on-error`. A sequence
+  or mapping at either level now
+  produces its own refusal instead of being read as absent, even when the
+  separate YAML construct finding is disabled.
 - `workflow-slop/audit-gate-shape` no longer certifies a gate whose
   `continue-on-error` a `%YAML 1.1` directive resolves to false without
   being written false: `off`, `no` and `n` (lower, Title or UPPER case) on the step or its job
