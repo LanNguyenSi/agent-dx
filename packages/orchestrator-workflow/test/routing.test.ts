@@ -2,10 +2,20 @@ import { describe, expect, it } from "vitest";
 
 import {
   defaultCodexRouting,
+  codexModelsRoutingPatch,
   mergeRouting,
   parseRouting,
   validateCodexCatalog,
 } from "../src/routing.js";
+import { defaultCodexRouting as exportedDefaultCodexRouting } from "../src/index.js";
+
+const exportedImplementerMedium =
+  exportedDefaultCodexRouting().codex.implementer.medium;
+const exportedImplementerMediumModel: string = exportedImplementerMedium.model;
+const exportedImplementerMediumEffort: "medium" =
+  exportedImplementerMedium.effort;
+void exportedImplementerMediumModel;
+void exportedImplementerMediumEffort;
 
 describe("parseRouting", () => {
   it("parses sparse routing patches without adding omitted defaults", () => {
@@ -124,23 +134,23 @@ describe("defaultCodexRouting", () => {
     expect(defaultCodexRouting()).toEqual({
       codex: {
         explorer: {
-          low: { model: "gpt-5.6-luna", effort: "low" },
-          medium: { model: "gpt-5.6-sol", effort: "medium" },
-          high: { model: "gpt-5.6-sol", effort: "high" },
+          low: { model: "gpt-6-luna", effort: "low" },
+          medium: { model: "gpt-6.1-sol", effort: "medium" },
+          high: { model: "gpt-6.1-sol", effort: "high" },
         },
         "task-slicer": {
-          low: { model: "gpt-5.6-luna", effort: "low" },
-          medium: { model: "gpt-5.6-sol", effort: "medium" },
-          high: { model: "gpt-5.6-sol", effort: "high" },
+          low: { model: "gpt-6.1-sol", effort: "low" },
+          medium: { model: "gpt-6.1-sol", effort: "medium" },
+          high: { model: "gpt-6.1-sol", effort: "high" },
         },
         implementer: {
-          low: { model: "gpt-5.6-luna", effort: "low" },
-          medium: { model: "gpt-5.6-terra", effort: "medium" },
-          high: { model: "gpt-5.6-terra", effort: "high" },
+          low: { model: "gpt-6-luna", effort: "low" },
+          medium: { model: "gpt-6.1-sol", effort: "medium" },
+          high: { model: "gpt-6.1-sol", effort: "high" },
           xhigh: { model: "gpt-6-astra", effort: "xhigh" },
         },
         reviewer: {
-          medium: { model: "gpt-5.6-terra", effort: "medium" },
+          medium: { model: "gpt-6.1-sol", effort: "medium" },
           high: { model: "gpt-6-astra", effort: "high" },
           xhigh: { model: "gpt-6-astra", effort: "xhigh" },
         },
@@ -150,6 +160,45 @@ describe("defaultCodexRouting", () => {
         },
       },
     });
+  });
+});
+
+describe("codexModelsRoutingPatch", () => {
+  it("updates only leaves associated with explicitly supplied aliases", () => {
+    expect(codexModelsRoutingPatch({ balanced: "gpt-example" })).toEqual({
+      codex: {
+        explorer: {
+          medium: { model: "gpt-example", effort: "medium" },
+          high: { model: "gpt-example", effort: "high" },
+        },
+        "task-slicer": {
+          low: { model: "gpt-example", effort: "low" },
+          medium: { model: "gpt-example", effort: "medium" },
+          high: { model: "gpt-example", effort: "high" },
+        },
+        implementer: {
+          medium: { model: "gpt-example", effort: "medium" },
+          high: { model: "gpt-example", effort: "high" },
+        },
+        reviewer: { medium: { model: "gpt-example", effort: "medium" } },
+      },
+    });
+  });
+
+  it.each([
+    {},
+    { unknown: "gpt-example" },
+    { small: " bad" },
+    { balanced: "small" },
+    { balanced: "balanced" },
+    { balanced: "strong" },
+    JSON.parse('{"__proto__":"gpt-example"}'),
+  ])("rejects malformed alias maps", (value) => {
+    if (Object.keys(value).length === 0) {
+      expect(codexModelsRoutingPatch(value)).toEqual({ codex: {} });
+    } else {
+      expect(() => codexModelsRoutingPatch(value)).toThrow();
+    }
   });
 });
 

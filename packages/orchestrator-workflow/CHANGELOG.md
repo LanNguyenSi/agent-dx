@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-10-01
+
+- Codex routing now resolves packaged `small`, `balanced`, and `strong` model
+  aliases; task-slicer defaults to balanced Sol at every tier, while only
+  explorer-low and implementer-low use small Luna.
 - Outward cross-check (evidence-and-probes.md, Delegate implementation): the
   third-party pull request sentence no longer lets a later outward action
   hide behind the "recorded once" dedup. Any further outward action on a

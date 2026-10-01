@@ -94,7 +94,7 @@ const leaf = (model: string) => ({ model, effort: "high" as const });
 const minimalCatalog = {
   models: [
     {
-      slug: "gpt-5.6-terra",
+      slug: "gpt-6.1-sol",
       supported_reasoning_levels: [{ effort: "medium" }],
     },
     { slug: "gpt-6-astra", supported_reasoning_levels: [{ effort: "high" }] },
@@ -102,6 +102,130 @@ const minimalCatalog = {
 };
 
 describe("routing command flags", () => {
+  it("resolves sparse Codex aliases below explicit routing and preserves omitted pins", () => {
+    const aliases = jsonFile("codex-aliases", { balanced: "gpt-alias" });
+    const explicit = jsonFile("explicit-routing", {
+      codex: {
+        implementer: { medium: { model: "gpt-explicit", effort: "high" } },
+      },
+    });
+    ok(
+      "init",
+      target,
+      "--harness",
+      "codex",
+      "--profile",
+      "minimal",
+      "--codex-models",
+      aliases,
+      "--routing",
+      explicit,
+    );
+    expect(
+      readInstalledManifest(target)?.routing?.codex?.implementer?.medium,
+    ).toEqual({ model: "gpt-explicit", effort: "high" });
+    expect(
+      readInstalledManifest(target)?.routing?.codex?.reviewer?.medium?.model,
+    ).toBe("gpt-alias");
+    const before = readFileSync(join(target, MANIFEST_PATH), "utf8");
+    ok("init", target);
+    expect(readFileSync(join(target, MANIFEST_PATH), "utf8")).toBe(before);
+  });
+
+  it("rejects invalid Codex aliases before writing a target", () => {
+    const aliases = jsonFile("invalid-codex-aliases", {
+      unknown: "gpt-example",
+    });
+    const result = run(
+      "init",
+      target,
+      "--harness",
+      "codex",
+      "--codex-models",
+      aliases,
+    );
+    expect(result.status).toBe(2);
+    expect(existsSync(join(target, MANIFEST_PATH))).toBe(false);
+  });
+
+  it.each(["small", "balanced", "strong"])(
+    "rejects reserved alias value %s before writing a target",
+    (model) => {
+      const aliases = jsonFile("reserved-codex-alias", { balanced: model });
+      const result = run(
+        "init",
+        target,
+        "--harness",
+        "codex",
+        "--codex-models",
+        aliases,
+      );
+      expect(result.status).toBe(2);
+      expect(existsSync(join(target, MANIFEST_PATH))).toBe(false);
+    },
+  );
+
+  it("uses aliases in setup and apply without replacing omitted legacy pins", () => {
+    const balanced = jsonFile("balanced-alias", { balanced: "gpt-balanced" });
+    const small = jsonFile("small-alias", { small: "gpt-small" });
+    ok(
+      "setup",
+      "--harness",
+      "codex",
+      "--profile",
+      "full",
+      "--codex-models",
+      balanced,
+    );
+    expect(
+      JSON.parse(readFileSync(join(home, "manifest.json"), "utf8")).defaults
+        .routing.codex.implementer.medium.model,
+    ).toBe("gpt-balanced");
+    const legacy = jsonFile("legacy-routing", {
+      codex: { advisor: { high: { model: "gpt-5.6-terra", effort: "high" } } },
+    });
+    ok("init", target, "--harness", "codex", "--routing", legacy);
+    ok("apply", "--target", target, "--codex-models", small);
+    expect(
+      readInstalledManifest(target)?.routing?.codex?.implementer?.low?.model,
+    ).toBe("gpt-small");
+    expect(
+      readInstalledManifest(target)?.routing?.codex?.advisor?.high?.model,
+    ).toBe("gpt-5.6-terra");
+  });
+
+  it("validates resolved alias selections against the supplied catalog", () => {
+    const aliases = jsonFile("catalog-alias", { balanced: "gpt-catalog" });
+    const catalog = jsonFile("catalog", {
+      models: [
+        {
+          slug: "gpt-catalog",
+          supported_reasoning_levels: [
+            { effort: "low" },
+            { effort: "medium" },
+            { effort: "high" },
+          ],
+        },
+        {
+          slug: "gpt-6-astra",
+          supported_reasoning_levels: [{ effort: "high" }],
+        },
+      ],
+    });
+    ok(
+      "init",
+      target,
+      "--harness",
+      "codex",
+      "--profile",
+      "minimal",
+      "--codex-models",
+      aliases,
+      "--codex-catalog",
+      catalog,
+    );
+  });
+
   it("init applies sparse patches, keeps previous selections, and never queries model CLIs", () => {
     const implementer = jsonFile("impl", {
       codex: { implementer: { medium: leaf("gpt-pinned-impl") } },
@@ -260,7 +384,7 @@ describe("routing command flags", () => {
     ok("apply", "--target", target, "--sync");
     expect(
       readInstalledManifest(target)?.routing?.codex?.implementer?.medium?.model,
-    ).toBe("gpt-5.6-terra");
+    ).toBe("gpt-6.1-sol");
     expect(
       readInstalledManifest(target)?.routing?.codex?.reviewer?.high?.model,
     ).toBe("gpt-operator-review");

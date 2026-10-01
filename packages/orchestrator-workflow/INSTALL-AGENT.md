@@ -155,7 +155,7 @@ steps in the repository you were asked to install into.
    npx orchestrator-workflow init --yes \
      --harness <claude,codex,opencode> \
      --profile <minimal|full> \
-     [--models "explorer=<model>,task-slicer=<model>,implementer=<model>,reviewer=<model>,advisor=<model>"] \
+     [--models "explorer=<model>,task-slicer=<model>,implementer=<model>,reviewer=<model>,advisor=<model>"] [--codex-models <codex-model-aliases.json>] \
      [--routing <routing.json>] \
      [--codex-catalog <codex-catalog.json>] \
      [--tiers | --no-tiers]
@@ -313,3 +313,8 @@ steps in the repository you were asked to install into.
    role/tier; whether variants were rendered; the prior routing to use for a
    rollback; the commands actually run; any offline capability or entitlement
    gap; and conflicts left in place.
+
+`--codex-models` accepts a sparse object keyed by the internal Codex aliases
+`small`, `balanced`, and `strong`. It deliberately replaces both model and
+tier-standard effort on matching leaves, so use `--routing` to preserve or
+select a custom effort; omitted aliases preserve existing selections.

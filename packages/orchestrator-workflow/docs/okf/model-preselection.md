@@ -3,7 +3,7 @@ type: module
 title: Model preselection and routing
 description: How legacy role models and harness-specific role/tier selections flow through the CLI and manifests into agent definitions.
 tags: [models, routing, cli, manifest, per-role, harness-adapters]
-timestamp: 2026-09-27T05:08:20Z
+timestamp: 2026-10-01T05:33:42Z
 sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/routing.ts
@@ -158,7 +158,7 @@ below.
   and emitted right after `model:` when the model was resolved; see "Pinned
   default effort (0.22.0)" below for the dispatch rule. Nested-path providers
   such as `openrouter/anthropic/claude-...` are never alias-auto-resolved and
-  must be passed as fully-qualified `--models` entries (`packages/orchestrator-workflow/docs/model-routing-reference.md:103#"reviewer=openrouter/anthropic/claude-opus-4.8"`,
+  must be passed as fully-qualified `--models` entries (`packages/orchestrator-workflow/docs/model-routing-reference.md:113#"reviewer=openrouter/anthropic/claude-opus-4.8"`,
   confirmed by `test/init.test.ts:530-553#"expect(slicer).not.toContain("`, `openrouter/some-model` passes
   through unchanged). Confirmed end-to-end when the `opencode` binary is
   absent: every role's file omits `model:` (`test/init.test.ts:2213-2221#"${role}.md must not contain model:"`,
@@ -185,10 +185,10 @@ as the edit guard. Only the orchestrator delegates.
 
 `routing` is a sparse `harness -> role -> tier -> {model, effort}` map. Every
 selection leaf is complete, while omitted leaves survive a deep merge.
-`--routing <json-file>` adds the explicit final patch for `init`, `setup`, or
-`apply`; its role default-tier key selects the unsuffixed file. `--models`
-remains backward compatible for Claude Code and opencode only and never
-selects Codex models.
+`--codex-models <json-file>` supplies sparse internal aliases before the
+explicit final `--routing <json-file>` patch for `init`, `setup`, or `apply`;
+the explicit leaf wins for custom effort. Omitted aliases preserve leaves;
+`--models` remains for Claude Code and opencode only; generated TOML and manifests contain resolved IDs.
 
 At the library boundary, `InitOptions.routingMode` defaults to `patch`, so a
 sparse `runInit` input preserves unrelated prior leaves. The CLI resolves its
@@ -205,10 +205,10 @@ means legacy resolution is unknown; updates and doctor retain this distinction
 `routing-state.ts:111-117#"delete result.opencode?.[role]?.[tier];"`).
 
 Codex begins with a complete deterministic default map: Luna at low for
-explorer, task-slicer, and implementer; Sol at the explorer/task-slicer
-medium defaults and high variants; Terra at implementer medium/high and
-reviewer medium; Astra at implementer xhigh, reviewer high/xhigh, and advisor
-high/xhigh. Effort matches the routing tier. The orchestrator itself stays on
+explorer and implementer; balanced Sol at task-slicer low, explorer,
+task-slicer, and implementer medium/high, plus reviewer medium; Astra at implementer xhigh, reviewer
+high/xhigh, and advisor high/xhigh. Effort matches the routing tier. The
+orchestrator itself stays on
 the session model;
 `packages/orchestrator-workflow/docs/model-routing-reference.md:22-23#"for demanding work."`
 recommends Astra/high normally and xhigh for demanding sessions without
@@ -450,7 +450,7 @@ that axis) plus the legacy-frontmatter and two-target byte-identity tests
 cited above. `docs/model-routing-reference.md`'s "Effort tiers" section
 (moved from README.md) gained a new "Every
 default file carries its own pinned effort, independent of `--tiers`"
-paragraph stating the same rule (`packages/orchestrator-workflow/docs/model-routing-reference.md:129#"effort deterministic and independent of the caller's session."`), and the CHANGELOG
+paragraph stating the same rule (`packages/orchestrator-workflow/docs/model-routing-reference.md:139#"effort deterministic and independent of the caller's session."`), and the CHANGELOG
 0.22.0 entry leads with this behavior change since it is user-visible and
 session-effort-dependent, not just an additive feature. `agents-md-section.md`'s
 Scaling delegation bullet list gained a dedicated bullet (deliberately
@@ -478,7 +478,7 @@ way to express an explicit "turn it off" short of hand-editing the
 manifest, since commander only ever set `opts.tiers` to `true` or left it
 `undefined`: there was no negated flag to produce `false`. commander's
 negatable-option pairing (`--tiers` / `--no-tiers` declared under the same
-`"tiers"` option name, `cli.ts:194-196#"explicitly turn effort-tier subagent variants off, overriding a previously installed --tiers value"`) resolves `opts.tiers` to `true`
+`"tiers"` option name, `cli.ts:199-201#"explicitly turn effort-tier subagent variants off, overriding a previously installed --tiers value"`) resolves `opts.tiers` to `true`
 when `--tiers` is passed, `false` when `--no-tiers` is passed, and
 `undefined` when neither is passed; verified end-to-end against the
 installed commander version rather than assuming the pairing behavior:

@@ -878,7 +878,7 @@ describe("routing input and interactive harness selection", () => {
         ),
     ).toEqual(["harnesses", "profile"]);
     expect(result.routing.codex?.implementer?.medium?.model).toBe(
-      "gpt-5.6-terra",
+      "gpt-6.1-sol",
     );
   });
 
@@ -905,7 +905,7 @@ describe("routing input and interactive harness selection", () => {
     ).toEqual(["harnesses", "profile", "choice", "choice"]);
     expect(result.routing.claude?.implementer?.medium?.model).toBe("haiku");
     expect(result.routing.codex?.implementer?.medium?.model).toBe(
-      "gpt-5.6-terra",
+      "gpt-6.1-sol",
     );
   });
 
