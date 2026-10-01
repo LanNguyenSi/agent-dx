@@ -2395,6 +2395,64 @@ describe("workflow-slop/audit-gate-shape: YAML 1.1 values and non-string labels"
     }
   });
 
+  it("certifies an explicitly tagged core-schema boolean false at step and job level", () => {
+    for (const [label, cfg] of both) {
+      for (const value of [
+        '!!bool "false"',
+        '!!bool "False"',
+        '!!bool "FALSE"',
+        "!!bool 'false'",
+        "!!bool 'False'",
+        "!!bool 'FALSE'",
+        '!!bool "f\\u0061lse"',
+      ]) {
+        expect(
+          shapeViolations(stepDoc([], value), cfg),
+          `${label} step ${value}`,
+        ).toEqual([]);
+        expect(
+          shapeViolations(jobDoc([], value), cfg),
+          `${label} job ${value}`,
+        ).toEqual([]);
+      }
+    }
+  });
+
+  it("still refuses explicitly tagged YAML 1.1 false spellings outside the core schema", () => {
+    for (const [label, cfg] of both) {
+      for (const value of ['!!bool "off"', "!!bool 'no'"]) {
+        const stepViolations = shapeViolations(stepDoc(V11, value), cfg);
+        expect(stepViolations, `${label} step ${value}`).toHaveLength(1);
+        expect(stepViolations[0].message).toBe(
+          coeMessage("the gate step", value.slice(7)),
+        );
+        const jobViolations = shapeViolations(jobDoc(V11, value), cfg);
+        expect(jobViolations, `${label} job ${value}`).toHaveLength(1);
+        expect(jobViolations[0].message).toBe(
+          coeMessage("the gate step's enclosing job", value.slice(7)),
+        );
+      }
+    }
+  });
+
+  it("refuses sequence and mapping continue-on-error values at step and job level", () => {
+    for (const [label, cfg] of both) {
+      for (const value of ["[true]", "{}"]) {
+        for (const [scope, text] of [
+          ["the gate step", stepDoc([], value)],
+          ["the gate step's enclosing job", jobDoc([], value)],
+        ] as const) {
+          const violations = shapeViolations(text, cfg);
+          expect(violations, `${label} ${scope} ${value}`).toHaveLength(1);
+          expect(violations[0].message).toBe(
+            `\`continue-on-error\` on ${scope} is a sequence or mapping, which cannot be proven false: the job may stay green regardless of the \`npm audit --audit-level=...\` gate's exit status.`,
+          );
+          expect(violations[0].matched).toBe(`continue-on-error: ${value}`);
+        }
+      }
+    }
+  });
+
   it("names a resolved value by its source text and keeps the message for a written `true`", () => {
     const v = shapeViolations(stepDoc(V11, "yes"));
     expect(v[0].message).toBe(coeMessage("the gate step", "yes"));
