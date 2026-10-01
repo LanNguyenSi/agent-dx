@@ -10,6 +10,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { renderSummary, runSlopCheck } from "./mcp-check.js";
+import { classifyStdoutError } from "./stdout-error.js";
 
 // Single source of truth for the version string emitted by both the MCP
 // `name+version` handshake and the `--version` CLI short-circuit. Read
@@ -94,6 +95,15 @@ async function main(): Promise<void> {
   // check) must not hang waiting for an MCP initialize request that never
   // arrives — short-circuit before opening the stdio transport.
   if (process.argv.includes("--version") || process.argv.includes("-v")) {
+    // Only the version shortcut writes to stdout outside the MCP transport.
+    // A version probe's reader may close before this asynchronous write lands.
+    process.stdout.once("error", (err: NodeJS.ErrnoException) => {
+      const outcome = classifyStdoutError(err, 0);
+      if (outcome.stderrLine !== null) {
+        process.stderr.write(outcome.stderrLine + "\n");
+      }
+      process.exit(outcome.exitCode);
+    });
     process.stdout.write(`${PACKAGE_VERSION}\n`);
     return;
   }
