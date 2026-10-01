@@ -60,7 +60,7 @@ describe("routing installer integration", () => {
     );
     expect(defaultAgent).toMatchObject({
       name: "implementer",
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       model_reasoning_effort: "medium",
     });
     expect(tierAgent).toMatchObject({
@@ -73,7 +73,7 @@ describe("routing installer integration", () => {
       readFileSync(join(directory, ".ai", "workflow", "manifest.json"), "utf8"),
     );
     expect(manifest.routing.codex.implementer.medium).toEqual({
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       effort: "medium",
     });
     expect(manifest.files[".codex/agents/implementer.toml"]).toBeTruthy();
@@ -207,7 +207,7 @@ describe("routing persistence and validation", () => {
     expect(
       readInstalledManifest(directory)?.routing?.codex?.implementer?.medium
         ?.model,
-    ).toBe("gpt-5.6-terra");
+    ).toBe("gpt-6.1-sol");
     expect(
       readInstalledManifest(directory)?.routing?.codex?.reviewer?.high?.model,
     ).toBe("gpt-operator");
@@ -325,7 +325,7 @@ describe("routing persistence and validation", () => {
     const catalog = {
       models: [
         {
-          slug: "gpt-5.6-terra",
+          slug: "gpt-6.1-sol",
           supported_reasoning_levels: [{ effort: "medium" }],
         },
         {

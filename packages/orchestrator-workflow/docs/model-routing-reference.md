@@ -37,7 +37,7 @@ unsuffixed file; another allowed key configures the corresponding
 {
   "codex": {
     "implementer": {
-      "medium": { "model": "gpt-5.6-terra", "effort": "medium" },
+      "medium": { "model": "gpt-6.1-sol", "effort": "medium" },
       "xhigh": { "model": "gpt-6-astra", "effort": "xhigh" }
     }
   }
@@ -59,17 +59,17 @@ The shipped routing is:
 
 | Role | Tier | Model | Effort |
 |---|---|---|---|
-| explorer | low | `gpt-5.6-luna` | low |
-| explorer | medium (default) | `gpt-5.6-sol` | medium |
-| explorer | high | `gpt-5.6-sol` | high |
-| task-slicer | low | `gpt-5.6-luna` | low |
-| task-slicer | medium (default) | `gpt-5.6-sol` | medium |
-| task-slicer | high | `gpt-5.6-sol` | high |
-| implementer | low | `gpt-5.6-luna` | low |
-| implementer | medium (default) | `gpt-5.6-terra` | medium |
-| implementer | high | `gpt-5.6-terra` | high |
+| explorer | low | `gpt-6-luna` | low |
+| explorer | medium (default) | `gpt-6.1-sol` | medium |
+| explorer | high | `gpt-6.1-sol` | high |
+| task-slicer | low | `gpt-6.1-sol` | low |
+| task-slicer | medium (default) | `gpt-6.1-sol` | medium |
+| task-slicer | high | `gpt-6.1-sol` | high |
+| implementer | low | `gpt-6-luna` | low |
+| implementer | medium (default) | `gpt-6.1-sol` | medium |
+| implementer | high | `gpt-6.1-sol` | high |
 | implementer | xhigh | `gpt-6-astra` | xhigh |
-| reviewer | medium | `gpt-5.6-terra` | medium |
+| reviewer | medium | `gpt-6.1-sol` | medium |
 | reviewer | high (default) | `gpt-6-astra` | high |
 | reviewer | xhigh | `gpt-6-astra` | xhigh |
 | advisor | high (default) | `gpt-6-astra` | high |
@@ -82,6 +82,16 @@ entitlement check; offline or account-specific availability remains unknown.
 Use the harness's native capability commands, such as `codex debug models`, to
 refresh a catalog before installation when appropriate. A bundled-capability
 view describes what the binary knows and does not prove account entitlement.
+
+The bundled `assets/codex-models.json` maps the internal aliases `small`,
+`balanced`, and `strong` to the shipped concrete IDs. These aliases are
+installer inputs only: native agent files and manifests always record the
+resolved concrete ID. To migrate only selected classes, pass a sparse JSON
+file through `--codex-models <json-file>`, for example
+`{"balanced":"gpt-example"}`. It creates complete routing leaves with each
+matching tier's standard effort; it does not alter omitted aliases or a plain
+reinstall. An explicit `--routing` leaf is applied afterward and has highest
+precedence, including when a custom effort must be retained.
 
 ## opencode model resolution
 

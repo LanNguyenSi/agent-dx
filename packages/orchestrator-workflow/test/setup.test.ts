@@ -51,7 +51,7 @@ describe("setup", () => {
       models: DEFAULT_MODELS,
     });
     expect(manifest.defaults.routing.codex.implementer.medium).toEqual({
-      model: "gpt-5.6-terra",
+      model: "gpt-6.1-sol",
       effort: "medium",
     });
     expect(manifest.defaults.routing.claude.reviewer.high).toEqual({

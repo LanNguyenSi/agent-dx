@@ -32,9 +32,15 @@ export type { Report } from "./writers.js";
 export { PACKAGE_VERSION } from "./assets.js";
 export {
   defaultCodexRouting,
+  codexModelsRoutingPatch,
   mergeRouting,
+  parseCodexModels,
   parseRouting,
   validateCodexCatalog,
 } from "./routing.js";
-export type { HarnessRouting, ModelSelection } from "./routing.js";
+export type {
+  CodexModelAlias,
+  HarnessRouting,
+  ModelSelection,
+} from "./routing.js";
 export { composeCodexAgent } from "./codex.js";

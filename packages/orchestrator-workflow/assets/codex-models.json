@@ -1,0 +1,5 @@
+{
+  "small": "gpt-6-luna",
+  "balanced": "gpt-6.1-sol",
+  "strong": "gpt-6-astra"
+}

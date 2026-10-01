@@ -14,7 +14,7 @@ import type { Harness } from "./detect.js";
 import { DEFAULT_MODELS, PROFILES } from "./models.js";
 import { MANIFEST_PATH, readInstalledManifest, runInit } from "./init.js";
 import type { Manifest } from "./init.js";
-import { mergeRouting, parseRouting } from "./routing.js";
+import { codexModelsRoutingPatch, mergeRouting, parseRouting } from "./routing.js";
 import {
   codexCatalogWarnings,
   legacyOpencodeFallbacks,
@@ -174,7 +174,7 @@ program
     "--models <spec>",
     'per-role model overrides, e.g. "implementer=sonnet,reviewer=opus"',
   )
-  .option("--routing <json-file>", "harness/role/tier routing patch JSON")
+  .option("--routing <json-file>", "harness/role/tier routing patch JSON").option("--codex-models <json-file>", "sparse Codex model alias map JSON")
   .option(
     "--codex-catalog <json-file>",
     "optional offline Codex capability catalog JSON to validate before writing",
@@ -203,7 +203,7 @@ program
         force?: boolean;
         harness?: string;
         models?: string;
-        routing?: string;
+        routing?: string; codexModels?: string;
         codexCatalog?: string;
         profile?: string;
         opencodeProvider?: string;
@@ -216,7 +216,7 @@ program
       let routing: HarnessRouting | undefined;
       let codexCatalog: unknown;
       try {
-        routing = routingOption(opts.routing);
+        routing = mergeRouting(codexModelsOption(opts.codexModels), routingOption(opts.routing));
         codexCatalog = opts.codexCatalog
           ? readJsonOption(opts.codexCatalog, "--codex-catalog")
           : undefined;
@@ -321,7 +321,7 @@ program
     "--models <spec>",
     'per-role model overrides, e.g. "implementer=sonnet,reviewer=opus"',
   )
-  .option("--routing <json-file>", "harness/role/tier routing patch JSON")
+  .option("--routing <json-file>", "harness/role/tier routing patch JSON").option("--codex-models <json-file>", "sparse Codex model alias map JSON")
   .option(
     "--codex-catalog <json-file>",
     "optional offline Codex capability catalog JSON to validate before saving",
@@ -347,7 +347,7 @@ program
       yes?: boolean;
       harness?: string;
       models?: string;
-      routing?: string;
+      routing?: string; codexModels?: string;
       codexCatalog?: string;
       profile?: string;
       opencodeProvider?: string;
@@ -358,7 +358,7 @@ program
       let routingPatch: HarnessRouting | undefined;
       let codexCatalog: unknown;
       try {
-        routingPatch = routingOption(opts.routing);
+        routingPatch = mergeRouting(codexModelsOption(opts.codexModels), routingOption(opts.routing));
         codexCatalog = opts.codexCatalog
           ? readJsonOption(opts.codexCatalog, "--codex-catalog")
           : undefined;
@@ -710,7 +710,7 @@ program
     "--models <spec>",
     'per-role model overrides, e.g. "implementer=sonnet,reviewer=opus"',
   )
-  .option("--routing <json-file>", "harness/role/tier routing patch JSON")
+  .option("--routing <json-file>", "harness/role/tier routing patch JSON").option("--codex-models <json-file>", "sparse Codex model alias map JSON")
   .option(
     "--codex-catalog <json-file>",
     "optional offline Codex capability catalog JSON to validate before writing",
@@ -754,7 +754,7 @@ program
       force?: boolean;
       harness?: string;
       models?: string;
-      routing?: string;
+      routing?: string; codexModels?: string;
       codexCatalog?: string;
       profile?: string;
       opencodeProvider?: string;
@@ -767,7 +767,7 @@ program
       let routingPatch: HarnessRouting | undefined;
       let codexCatalog: unknown;
       try {
-        routingPatch = routingOption(opts.routing);
+        routingPatch = mergeRouting(codexModelsOption(opts.codexModels), routingOption(opts.routing));
         codexCatalog = opts.codexCatalog
           ? readJsonOption(opts.codexCatalog, "--codex-catalog")
           : undefined;
@@ -1736,3 +1736,9 @@ program.parseAsync(process.argv).catch((error: unknown) => {
   console.error(error instanceof Error ? error.message : error);
   process.exitCode = 1;
 });
+
+function codexModelsOption(path: string | undefined): HarnessRouting | undefined {
+  return path === undefined
+    ? undefined
+    : codexModelsRoutingPatch(readJsonOption(path, "--codex-models"));
+}

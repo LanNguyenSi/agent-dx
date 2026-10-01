@@ -1,4 +1,5 @@
 import { HARNESSES } from "./detect.js";
+import { readAsset } from "./assets.js";
 import { ROLE_TIERS, ROLES } from "./models.js";
 
 import type { Harness } from "./detect.js";
@@ -8,6 +9,14 @@ export interface ModelSelection {
   model: string;
   effort: Tier;
 }
+
+export type CodexModelAlias = "small" | "balanced" | "strong";
+
+const CODEX_MODEL_ALIASES: readonly CodexModelAlias[] = [
+  "small",
+  "balanced",
+  "strong",
+];
 
 /**
  * A sparse harness-specific model-routing patch. Later layers supplied to
@@ -104,6 +113,60 @@ function assertModelId(
     );
   }
   return model;
+}
+
+function assertConcreteCodexModelId(model: unknown, location: string): string {
+  const value = assertModelId(model, "codex", location);
+  if (CODEX_MODEL_ALIASES.includes(value as CodexModelAlias)) {
+    throw new Error(`${location}.model must not use an internal Codex alias`);
+  }
+  return value;
+}
+
+function loadBundledCodexModels(): Record<CodexModelAlias, string> {
+  let value: unknown;
+  try {
+    value = JSON.parse(readAsset("codex-models.json"));
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Could not read bundled Codex model aliases: ${reason}`);
+  }
+  if (!isRecord(value)) {
+    throw new Error("Bundled Codex model aliases must be an object");
+  }
+  assertSafeKeys(value, "bundled Codex model aliases");
+  const result = {} as Record<CodexModelAlias, string>;
+  for (const alias of CODEX_MODEL_ALIASES) {
+    if (!(alias in value)) {
+      throw new Error(`Bundled Codex model aliases must contain "${alias}"`);
+    }
+    result[alias] = assertConcreteCodexModelId(
+      value[alias],
+      `bundled Codex model alias "${alias}"`,
+    );
+  }
+  for (const key of Object.keys(value)) {
+    assertKnownKey(key, CODEX_MODEL_ALIASES, "bundled Codex model alias");
+  }
+  return result;
+}
+
+export function parseCodexModels(
+  value: unknown,
+): Partial<Record<CodexModelAlias, string>> {
+  if (!isRecord(value)) {
+    throw new Error("Codex model aliases must be an object");
+  }
+  assertSafeKeys(value, "Codex model aliases");
+  const result: Partial<Record<CodexModelAlias, string>> = {};
+  for (const [alias, model] of Object.entries(value)) {
+    assertKnownKey(alias, CODEX_MODEL_ALIASES, "Codex model alias");
+    result[alias] = assertConcreteCodexModelId(
+      model,
+      `Codex model alias "${alias}"`,
+    );
+  }
+  return result;
 }
 
 function parseSelection(
@@ -213,41 +276,78 @@ export function mergeRouting(
   return result;
 }
 
-const CODEX_DEFAULTS = {
+const CODEX_DEFAULT_ALIASES = {
   explorer: {
-    low: { model: "gpt-5.6-luna", effort: "low" },
-    medium: { model: "gpt-5.6-sol", effort: "medium" },
-    high: { model: "gpt-5.6-sol", effort: "high" },
+    low: "small",
+    medium: "balanced",
+    high: "balanced",
   },
   "task-slicer": {
-    low: { model: "gpt-5.6-luna", effort: "low" },
-    medium: { model: "gpt-5.6-sol", effort: "medium" },
-    high: { model: "gpt-5.6-sol", effort: "high" },
+    low: "balanced",
+    medium: "balanced",
+    high: "balanced",
   },
   implementer: {
-    low: { model: "gpt-5.6-luna", effort: "low" },
-    medium: { model: "gpt-5.6-terra", effort: "medium" },
-    high: { model: "gpt-5.6-terra", effort: "high" },
-    xhigh: { model: "gpt-6-astra", effort: "xhigh" },
+    low: "small",
+    medium: "balanced",
+    high: "balanced",
+    xhigh: "strong",
   },
   reviewer: {
-    medium: { model: "gpt-5.6-terra", effort: "medium" },
-    high: { model: "gpt-6-astra", effort: "high" },
-    xhigh: { model: "gpt-6-astra", effort: "xhigh" },
+    medium: "balanced",
+    high: "strong",
+    xhigh: "strong",
   },
   advisor: {
-    high: { model: "gpt-6-astra", effort: "high" },
-    xhigh: { model: "gpt-6-astra", effort: "xhigh" },
+    high: "strong",
+    xhigh: "strong",
   },
-} satisfies Record<Role, Partial<Record<Tier, ModelSelection>>>;
+} satisfies Record<Role, Partial<Record<Tier, CodexModelAlias>>>;
+
+function codexRoutingForAliases(
+  models: Partial<Record<CodexModelAlias, string>>,
+): HarnessRouting {
+  const routing: HarnessRouting = { codex: {} };
+  for (const role of ROLES) {
+    for (const tier of ROLE_TIERS[role]) {
+      const alias = (
+        CODEX_DEFAULT_ALIASES[role] as Partial<Record<Tier, CodexModelAlias>>
+      )[tier];
+      if (alias === undefined) continue;
+      const model = models[alias];
+      if (model === undefined) continue;
+      routing.codex![role] ??= {};
+      routing.codex![role]![tier] = { model, effort: tier };
+    }
+  }
+  return routing;
+}
+
+export function codexModelsRoutingPatch(value: unknown): HarnessRouting {
+  return codexRoutingForAliases(parseCodexModels(value));
+}
+
+type CodexDefaultRoleRouting<
+  AliasRouting extends Partial<Record<Tier, CodexModelAlias>>,
+> = {
+  [TierName in keyof AliasRouting]: TierName extends Tier
+    ? { model: string; effort: TierName }
+    : never;
+};
 
 export type CodexDefaultRouting = HarnessRouting & {
-  codex: typeof CODEX_DEFAULTS;
+  codex: {
+    [RoleName in Role]: CodexDefaultRoleRouting<
+      (typeof CODEX_DEFAULT_ALIASES)[RoleName]
+    >;
+  };
 };
 
 /** Returns a fresh complete Codex routing layer, including each default tier. */
 export function defaultCodexRouting(): CodexDefaultRouting {
-  return mergeRouting({ codex: CODEX_DEFAULTS }) as CodexDefaultRouting;
+  return codexRoutingForAliases(
+    loadBundledCodexModels(),
+  ) as CodexDefaultRouting;
 }
 
 interface CatalogModel {

@@ -22,7 +22,7 @@ orchestrator-workflow apply --target /path/to/repo
 touches no repository. A flag always wins; a flag-less re-run keeps the
 previously stored values; a first-ever `setup` falls back to `claude` /
 `full` / the kit's default routing / tiers off. `setup` takes the same
-option flags as `init` (`--harness`, `--profile`, `--models`, `--routing`,
+option flags as `init` (`--harness`, `--profile`, `--models`, `--codex-models`, `--routing`,
 `--codex-catalog`, `--tiers` / `--no-tiers`, `--opencode-provider`, `--yes`).
 The defaults live in
 `<operator home>/manifest.json`, where the operator home is
@@ -49,7 +49,7 @@ profile, tiers, legacy models, and routing: the operator's defaults then win ove
 the target already had recorded. A target pinned to a kit version other
 than the one being applied is skipped rather than touched (see the pin
 rule below). `apply` also takes the same install options as `init` (`--harness`,
-`--profile`, `--models`, `--routing`, `--codex-catalog`, `--tiers` /
+`--profile`, `--models`, `--codex-models`, `--routing`, `--codex-catalog`, `--tiers` /
 `--no-tiers`, `--opencode-provider`, `--force`, `--yes`), which feed the
 precedence rule above. An explicit routing file is the highest-precedence
 deep patch; leaves it omits retain their resolved baseline values.
@@ -108,3 +108,6 @@ corrupt each other's state.
 
 `apply` shares the file-ownership rules `init` uses; see the [package
 README](../README.md)'s "Ownership and re-runs" section.
+
+A sparse `--codex-models` file supplies only the internal Codex aliases it
+intends to migrate and remains below an explicit routing leaf.
