@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `slop-detector-mcp --version` now exits cleanly when its stdout reader
+  closes before the version write, without installing an error handler while
+  the MCP stdio transport serves requests.
 - `workflow-slop/audit-gate-shape` now accepts an explicitly tagged boolean
   whose decoded text is a core-schema false (including quoted case variants
   and YAML escapes) for a gate step's or job's `continue-on-error`. A sequence

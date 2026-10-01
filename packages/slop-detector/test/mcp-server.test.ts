@@ -54,7 +54,10 @@ vi.mock("../src/mcp-check.js", () => ({
 import { runSlopCheck, renderSummary } from "../src/mcp-check.js";
 
 describe("slop-detector MCP wiring — tool handler", () => {
+  let stdoutErrorListenersBefore: number;
+
   beforeEach(async () => {
+    stdoutErrorListenersBefore = process.stdout.listenerCount("error");
     // Import the MCP server module; it registers the tool and calls main().
     // The mocked transport resolves immediately so there's no hang.
     await import("../src/mcp.js");
@@ -63,6 +66,13 @@ describe("slop-detector MCP wiring — tool handler", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("does not install a stdout error handler while serving MCP", () => {
+    expect(box.connectSpy).toHaveBeenCalled();
+    expect(process.stdout.listenerCount("error")).toBe(
+      stdoutErrorListenersBefore,
+    );
   });
 
   it("registers a slop_check tool (handler is captured)", () => {
