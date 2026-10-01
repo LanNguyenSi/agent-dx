@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.43.1] - 2026-10-01
+
+- Give the multi-subprocess dormant Opencode sync regression its existing
+  30-second integration-test timeout, preventing publish-runner scheduling
+  variance from tripping Vitest's five-second default.
+
 ## [0.43.0] - 2026-10-01
 
 - Codex routing now resolves packaged `small`, `balanced`, and `strong` model

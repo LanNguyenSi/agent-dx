@@ -856,6 +856,7 @@ describe("dormant recorded opencode choices", () => {
       ).toContain("model: local-large");
       expect(existsSync(catalogCalls)).toBe(false);
     },
+    30_000,
   );
 });
 
