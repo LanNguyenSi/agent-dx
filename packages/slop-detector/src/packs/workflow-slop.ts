@@ -1557,8 +1557,10 @@ function isAuditWorkflowFile(file: FileTarget): boolean {
 type ScalarWithRange = { value: unknown; range: [number, number, number] };
 
 /**
- * A `continue-on-error:` scalar together with its source text (the file
- * text at the scalar's own range, quotes included). The parsed `value`
+ * A `continue-on-error:` value together with its source text (the file
+ * text at the node's own range, quotes included). A present sequence or
+ * mapping gets a marker so it cannot be mistaken for an absent value.
+ * The parsed scalar `value`
  * depends on the YAML version and tags in force (a `%YAML 1.1` directive
  * reads `off`, `no` and `n` as boolean `false`, where a 1.2 file reads
  * them as text), and which of those GitHub Actions applies is not
@@ -1566,7 +1568,42 @@ type ScalarWithRange = { value: unknown; range: [number, number, number] };
  * written, never from what a schema resolved it to (see
  * `continueOnErrorFindings`).
  */
-type ContinueOnErrorField = ScalarWithRange & { source: string };
+type ContinueOnErrorField =
+  | (ScalarWithRange & {
+      source: string;
+      decodedSource?: unknown;
+      tag?: unknown;
+    })
+  | {
+      nonScalar: true;
+      source: string;
+      range: [number, number, number];
+    };
+
+function readContinueOnErrorField(
+  pair: unknown,
+  fileText: string,
+): ContinueOnErrorField | undefined {
+  if (!isPairNode(pair)) return undefined;
+  const node = pair.value;
+  if (isScalarNode(node)) {
+    return {
+      value: node.value,
+      range: node.range,
+      source: fileText.slice(node.range[0], node.range[1]),
+      decodedSource: (node as { source?: unknown }).source,
+      tag: (node as { tag?: unknown }).tag,
+    };
+  }
+  if (!hasItems(node)) return undefined;
+  const range = (node as { range?: unknown }).range;
+  if (!Array.isArray(range) || range.length < 2) return undefined;
+  return {
+    nonScalar: true,
+    range: range as [number, number, number],
+    source: fileText.slice(range[0], range[1]),
+  };
+}
 
 /**
  * A `shell:` key (this step's own, or a `defaults.run.shell`) whose
@@ -1940,18 +1977,7 @@ function collectStepRuns(
           (item) =>
             isPairNode(item) && scalarKeyName(item.key) === "continue-on-error",
         );
-        return jobCoePair &&
-          isPairNode(jobCoePair) &&
-          isScalarNode(jobCoePair.value)
-          ? {
-              value: jobCoePair.value.value,
-              range: jobCoePair.value.range,
-              source: fileText.slice(
-                jobCoePair.value.range[0],
-                jobCoePair.value.range[1],
-              ),
-            }
-          : undefined;
+        return readContinueOnErrorField(jobCoePair, fileText);
       })()
     : jobContinueOnError;
   const effectiveWorkflowDefaultShell = isWorkflowMapping
@@ -1993,17 +2019,7 @@ function collectStepRuns(
         (item) =>
           isPairNode(item) && scalarKeyName(item.key) === "continue-on-error",
       );
-      const continueOnError =
-        coePair && isPairNode(coePair) && isScalarNode(coePair.value)
-          ? {
-              value: coePair.value.value,
-              range: coePair.value.range,
-              source: fileText.slice(
-                coePair.value.range[0],
-                coePair.value.range[1],
-              ),
-            }
-          : undefined;
+      const continueOnError = readContinueOnErrorField(coePair, fileText);
       const stepUnreadable = [...effectiveUnreadable];
       if (hasMergeKey(node)) {
         stepUnreadable.push("the step mapping carries a `<<` merge key");
@@ -3634,9 +3650,10 @@ const CORE_SCHEMA_FALSE_RE = /^(?:false|False|FALSE)$/;
 /**
  * `continue-on-error` findings for one gate step: checked on the step
  * itself and on its enclosing job (see `StepRunInfo.jobContinueOnError`).
- * Flags any value that is not literally `false`: the string `"false"`, or
- * a boolean `false` whose source text is a core-schema false (`false`,
- * `False`, `FALSE`). A literal `true`, the string `"true"`, an unresolved
+ * Clears the string `"false"`, a boolean `false` whose source text is a
+ * core-schema false (`false`, `False`, `FALSE`), or an explicitly tagged
+ * boolean whose decoded source is one of those spellings. A literal `true`,
+ * the string `"true"`, an unresolved
  * `${{ ... }}` expression (which parses as a plain string and cannot be
  * evaluated statically) and a boolean `false` written any other way
  * (`off`, `no`, `n`, which a `%YAML 1.1` directive resolves to `false`
@@ -3657,8 +3674,23 @@ function continueOnErrorFindings(step: StepRunInfo): AuditFinding[] {
     scope: "the gate step" | "the gate step's enclosing job",
   ) => {
     if (!coe) return;
+    if ("nonScalar" in coe) {
+      findings.push({
+        offset: coe.range[0],
+        matched: `continue-on-error: ${coe.source.trim()}`,
+        message: `\`continue-on-error\` on ${scope} is a sequence or mapping, which cannot be proven false: the job may stay green regardless of the \`npm audit --audit-level=...\` gate's exit status.`,
+      });
+      return;
+    }
     if (coe.value === "false") return;
     if (coe.value === false && CORE_SCHEMA_FALSE_RE.test(coe.source)) return;
+    if (
+      coe.value === false &&
+      coe.tag === "tag:yaml.org,2002:bool" &&
+      typeof coe.decodedSource === "string" &&
+      CORE_SCHEMA_FALSE_RE.test(coe.decodedSource)
+    )
+      return;
     // A value that is not text is named by what is written (`off`, `no`),
     // not by what a schema resolved it to (`false`), which would read as
     // "set to `false`, which cannot be proven false".
