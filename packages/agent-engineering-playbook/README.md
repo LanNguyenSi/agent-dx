@@ -53,6 +53,7 @@ This maps to a spec-driven / context-driven / eval-driven model: specs guide the
 - **Checklists:** [phase-assessment](checklists/phase-assessment.md), [project-start](checklists/project-start.md), [code-review](checklists/code-review.md), [pre-production](checklists/pre-production.md), [security-review](checklists/security-review.md)
 - **Templates:** see the [templates/](templates/) directory (task, PR, ADR, README, SECURITY, threat model, runbook, service ownership, data classification, access review, exception register, compliance mapping, postmortem, AI directory)
 - **Verification references:** [Verification handoff contract](references/verification-handoff.md), [First implementation slice](references/verification-handoff-first-slice.md)
+- **Draft quality references:** [Agent-oriented design principles](references/agent-oriented-design-principles.md), [Static analysis for agentic development](references/static-analysis-for-agentic-development.md) — working hypotheses and decision criteria; existing standards and gates remain in force.
 - **Case studies:** [Event booking system](case-studies/event-booking-system.md)
 - **Machine-readable model:** [models/adoption-model.json](models/adoption-model.json)
 - [Hardening pass history](docs/hardening-history.md): what the last major revision changed and why
