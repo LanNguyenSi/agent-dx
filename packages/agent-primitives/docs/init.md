@@ -174,7 +174,11 @@ no reachable tag belongs in the explicit untagged-release allowlist. The
 release-coverage test compares every reachable tag to its own ledger
 digest, or, for a release that left the asset unchanged, to the nearest
 earlier entry's (in a local shallow clone it skips, with the reason in verbose output; on GitHub Actions a shallow checkout fails it),
-rejects a second untagged entry unless it is the trailing pending entry,
+allows a trailing untagged entry above the package version as pending,
+or at the exact package version before tagging only when its digest
+matches the current skill asset and the changelog has that version's
+dated release heading. It rejects other untagged entries outside the
+explicit allowlist,
 and rejects a tagged release whose pending label was not relabelled.
 None of these rules can cause a write (nothing is written without
 `--force`); a wrong allowlist entry can make `matchedVersion` name the

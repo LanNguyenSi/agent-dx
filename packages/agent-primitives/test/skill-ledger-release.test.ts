@@ -6,7 +6,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { readSkillLedger } from "../src/init/ledger.js";
-import { compareSemver, ledgerEntryForTag } from "./helpers/ledger-tag.js";
+import {
+  compareSemver,
+  isAllowedUntaggedTail,
+  ledgerEntryForTag,
+} from "./helpers/ledger-tag.js";
 
 const packageRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -16,8 +20,8 @@ const repositoryRoot = path.resolve(packageRoot, "..", "..");
 const tmpDirs: string[] = [];
 
 // 0.1.0 was published before this package started creating release tags. A
-// pending entry is permitted separately below only when it is after the
-// package's current version; the released allowlist must stay explicit.
+// pending or pre-tag release entry is permitted separately below; the
+// historical released allowlist must stay explicit.
 const UNTAGGED_RELEASE_ALLOWLIST = ["0.1.0"];
 
 function makeTmpDir(): string {
@@ -224,15 +228,27 @@ describe("skill ledger release coverage", () => {
       tags.map((tag) => tag.slice("agent-primitives/v".length)),
     );
     const packageVersion = currentPackageVersion();
+    const currentAssetDigest = sha256(
+      fs.readFileSync(path.join(packageRoot, "assets/skill/SKILL.md"), "utf8"),
+    );
+    const changelog = fs.readFileSync(
+      path.join(packageRoot, "CHANGELOG.md"),
+      "utf8",
+    );
     for (const [index, entry] of ledger.entries()) {
-      const isPending =
-        index === ledger.length - 1 &&
-        compareSemver(entry.version, packageVersion) > 0;
+      const isAllowedTail = isAllowedUntaggedTail(
+        entry,
+        index,
+        ledger.length,
+        packageVersion,
+        currentAssetDigest,
+        changelog,
+      );
       expect(
         taggedVersions.has(entry.version) ||
           UNTAGGED_RELEASE_ALLOWLIST.includes(entry.version) ||
-          isPending,
-        `untagged ledger entry ${entry.version} is neither the trailing pending entry nor in UNTAGGED_RELEASE_ALLOWLIST`,
+          isAllowedTail,
+        `untagged ledger entry ${entry.version} is neither an allowed trailing entry nor in UNTAGGED_RELEASE_ALLOWLIST`,
       ).toBe(true);
     }
   });
@@ -306,5 +322,51 @@ describe("compareSemver", () => {
   it("rejects a string that is not semver", () => {
     expect(() => compareSemver("0.9", "0.9.0")).toThrow(/not a semver/);
     expect(() => compareSemver("0.9.0", "v0.9.0")).toThrow(/not a semver/);
+  });
+});
+
+describe("isAllowedUntaggedTail", () => {
+  const entry = { version: "0.8.3", sha256: "current" };
+  const heading = "## [0.8.3] - 2026-10-02";
+  const allowed = (
+    candidate = entry,
+    index = 1,
+    changelog = heading,
+    digest = "current",
+  ) => isAllowedUntaggedTail(candidate, index, 2, "0.8.3", digest, changelog);
+
+  it("allows the exact pre-tag release candidate", () => {
+    expect(allowed()).toBe(true);
+  });
+
+  it("keeps an ahead trailing pending entry allowed", () => {
+    expect(
+      allowed({ version: "0.8.4", sha256: "pending" }, 1, "", "different"),
+    ).toBe(true);
+  });
+
+  it("rejects an older untagged entry", () => {
+    expect(allowed({ ...entry, version: "0.8.2" })).toBe(false);
+  });
+
+  it("rejects a middle entry even for the current or pending version", () => {
+    expect(allowed(entry, 0)).toBe(false);
+    expect(allowed({ ...entry, version: "0.8.4" }, 0)).toBe(false);
+  });
+
+  it("rejects missing, undated, or mismatched release headings", () => {
+    for (const changelog of [
+      "",
+      "## [Unreleased]",
+      "## [0.8.3]",
+      "## [0.8.2] - 2026-10-02",
+      "## [0x8x3] - 2026-10-02",
+    ]) {
+      expect(allowed(entry, 1, changelog)).toBe(false);
+    }
+  });
+
+  it("rejects a current release candidate with a different asset digest", () => {
+    expect(allowed(entry, 1, heading, "different")).toBe(false);
   });
 });

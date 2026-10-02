@@ -76,3 +76,29 @@ export function ledgerEntryForTag<T extends { version: string }>(
     .filter((entry) => compareSemver(entry.version, version) < 0)
     .at(-1);
 }
+
+/** Permit only the final pending entry or a documented pre-tag release. */
+export function isAllowedUntaggedTail(
+  entry: { version: string; sha256: string },
+  index: number,
+  ledgerLength: number,
+  packageVersion: string,
+  currentAssetDigest: string,
+  changelog: string,
+): boolean {
+  if (index !== ledgerLength - 1) return false;
+  const comparison = compareSemver(entry.version, packageVersion);
+  if (comparison > 0) return true;
+  if (comparison !== 0) return false;
+  return (
+    entry.version === packageVersion &&
+    entry.sha256 === currentAssetDigest &&
+    changelog
+      .split(/\r?\n/)
+      .some((line) =>
+        new RegExp(
+          `^## \\[${packageVersion.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\] - \\d{4}-\\d{2}-\\d{2}$`,
+        ).test(line),
+      )
+  );
+}
