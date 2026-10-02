@@ -2,6 +2,10 @@
 
 Quality assurance is the system of controls that turns engineering intent into release confidence.
 
+The draft reference [Static Analysis for Agentic Development](../references/static-analysis-for-agentic-development.md)
+distinguishes defect checks, explicit invariants, investigation signals, and
+formatting. It proposes evaluation criteria without changing existing gates.
+
 ## Quality Gates
 
 ### Gate 1: Ready To Build

@@ -2,6 +2,10 @@
 
 Good enterprise products do not emerge from style preferences. They emerge from design choices that reduce risk, preserve changeability, and make failure visible.
 
+The draft reference [Agent-Oriented Design Principles](../references/agent-oriented-design-principles.md)
+explores DRY, YAGNI, KISS, and SOLID through agent change reliability and
+verification cost. Its hypotheses do not replace the guidance or gates in force.
+
 ## Primary Principles
 
 ### Design For Change
