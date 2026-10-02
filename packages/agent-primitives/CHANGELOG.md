@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-10-02
+
 - CLI `verify`, `probe`, and `probe --plan` save complete result artifacts
   even when the internal stdout cap does not reduce the result, so evidence
   can be recovered after downstream output clipping. Artifact write failures
