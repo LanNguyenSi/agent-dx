@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.8.3] - 2026-10-02
 
+- The skill-ledger release guard permits the final current-version entry
+  before tagging when its digest matches the shipped asset and its dated
+  changelog heading is present. Historical tag digest checks remain intact.
+
 - CLI `verify`, `probe`, and `probe --plan` save complete result artifacts
   even when the internal stdout cap does not reduce the result, so evidence
   can be recovered after downstream output clipping. Artifact write failures
