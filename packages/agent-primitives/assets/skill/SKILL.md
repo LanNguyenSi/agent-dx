@@ -159,8 +159,16 @@ automatically either way).
 
 - JSON on stdout by default; one bounded result object per invocation.
 - Exit codes: `0` ok, `1` a finding, `2` the run could not conclude.
-- `truncated` and `logs` mark and locate anything the bound cut; the full,
-  untruncated result lives at the path(s) in `logs`.
+- CLI `verify`, `probe`, and `probe --plan` always save the complete
+  pre-envelope-reduction result to `result-full-*.json` in `logs` when
+  the log destination is writable, even with `truncated: false`.
+  `truncated` describes the tool's own reduction; it cannot detect a
+  surrounding tool clipping stdout. Read the artifact for complete
+  evidence after clipping. A write failure warns and advertises no
+  result artifact. Files follow the existing log lifecycle, with no
+  automatic cleanup or indefinite retention; use `--log-dir` on durable
+  storage and manage retention when temp-directory cleanup would lose
+  needed evidence. See `docs/output-shape.md` for bounds and storage.
 - `status: "usage_error"` means the invocation itself was wrong (a bad
   flag, a missing argument), never a finding about the code under test.
 

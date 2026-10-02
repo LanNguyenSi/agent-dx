@@ -198,6 +198,66 @@ describe("buildEnvelope: hard bound", () => {
     expect(exitCode).toBe(0);
   });
 
+  it("recovers complete evidence after outer clipping", () => {
+    const logDir = makeTmpDir();
+    const tail = "distinctive-evidence-tail";
+    const { envelope, exitCode } = buildEnvelope({
+      version: "0.1.0",
+      command: "probe",
+      status: "killed",
+      durationMs: 5,
+      cwd: "/tmp",
+      logDir,
+      persistFullResult: true,
+      maxChars: 100_000,
+      warnings: ["fixture warning retained"],
+      extra: {
+        mutation_probe: {
+          result: "killed",
+          restored_verified: "sha256 matched",
+        },
+        padding: "x".repeat(4000),
+        tail,
+      },
+    });
+    expect(exitCode).toBe(0);
+    expect(envelope.truncated).toBe(false);
+    const displayed = JSON.stringify(envelope);
+    expect(displayed.length).toBeLessThan(100_000);
+    const clipped = displayed.slice(0, 2000);
+    expect(clipped).not.toContain(tail);
+    const artifact = (envelope.logs as string[])[0];
+    expect(clipped).toContain(artifact);
+    const recovered = JSON.parse(fs.readFileSync(artifact, "utf8"));
+    expect(recovered.status).toBe("killed");
+    expect(recovered.warnings).toEqual(["fixture warning retained"]);
+    expect(recovered.mutation_probe).toEqual(envelope.mutation_probe);
+    expect(recovered.tail).toBe(tail);
+  });
+
+  it("reports a deterministic persistence failure without advertising an artifact", () => {
+    const parent = makeTmpDir();
+    const file = path.join(parent, "file");
+    fs.writeFileSync(file, "not a directory");
+    const { envelope, exitCode } = buildEnvelope({
+      version: "0.1.0",
+      command: "verify",
+      status: "fail",
+      durationMs: 5,
+      cwd: "/tmp",
+      logDir: path.join(file, "logs"),
+      persistFullResult: true,
+      extra: { verdict: "failure" },
+    });
+    expect(exitCode).toBe(1);
+    expect(envelope.status).toBe("fail");
+    expect(envelope.truncated).toBe(false);
+    expect(envelope.logs).toEqual([]);
+    expect(envelope.warnings).toEqual([
+      expect.stringContaining("full result not written"),
+    ]);
+  });
+
   it("caps a synthetic result carrying a 5 MB single-line tail so the serialized envelope stays under maxChars, marks truncated, and records the full-result path", () => {
     const logDir = makeTmpDir();
     const hugeTail = "x".repeat(5 * 1024 * 1024);

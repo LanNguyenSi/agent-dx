@@ -67,3 +67,33 @@ it never reaches this hint), and an invalid `-f`/`--format` value that
 looks like a path adds a hint that `-f` is the global `--format` and
 `probe`'s file option is `--file`.
 
+## Complete result artifacts
+
+CLI `verify`, `probe`, and `probe --plan` write a complete pre-envelope-reduction
+JSON result to `result-full-<run-id>.json` in the log directory even when the
+result fits `--max-chars`. Its path appears in `logs` near the start of the
+returned envelope. Each CLI invocation has a fresh run id, so invocations
+sharing a log directory keep separate artifacts. The saved result is rendered
+before its own path is added to `logs`; it does not link to itself. Existing
+verify failure caps still use `verify-full-<run-id>.json` for uncapped checks.
+Read that artifact too when the failure cap removed entries before envelope
+construction.
+
+`truncated` describes agent-primitives' own reduction, including command-level
+caps. It cannot detect a surrounding tool clipping stdout. A result with
+`truncated: false` may still be clipped downstream; use the result artifact
+for complete evidence when the transport omitted fields. Artifact paths and
+write-failure warnings count toward the envelope bound. A failed write emits
+an explicit warning, advertises no result artifact, and preserves the command's
+verdict and exit semantics. Nonserializable library payloads retain their
+existing warning and cannot be saved as complete JSON. Parser errors emitted
+as `command: "unknown"` have no completed verify/probe result to persist.
+
+Artifacts contain the same redacted result fields as the envelope, before
+size reduction, and may be larger than stdout. This adds one disk write per
+completed invocation. Files follow the existing log lifecycle: no automatic
+cleanup or indefinite retention is promised. Temp-directory artifacts can be
+removed by the OS; choose `--log-dir` on durable storage and manage retention
+when evidence must survive temporary storage cleanup. Other commands and
+library callers keep their existing persistence behavior unless a library
+caller explicitly enables `persistFullResult`.

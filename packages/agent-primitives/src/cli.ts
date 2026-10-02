@@ -921,6 +921,7 @@ program
     const { envelope, exitCode } = buildEnvelope({
       version: VERSION,
       command: "verify",
+      persistFullResult: true,
       status: result.status,
       durationMs: Date.now() - start,
       cwd: global.cwd,
@@ -1275,6 +1276,7 @@ async function runProbePlanCommand(
     const { envelope, exitCode } = buildEnvelope({
       version: VERSION,
       command: "probe",
+      persistFullResult: true,
       status: "usage_error",
       durationMs: Date.now() - start,
       cwd: global.cwd,
@@ -1341,6 +1343,7 @@ async function runProbePlanCommand(
   const { envelope, exitCode } = buildEnvelope({
     version: VERSION,
     command: "probe",
+    persistFullResult: true,
     status: result.status,
     durationMs: Date.now() - start,
     cwd: global.cwd,
@@ -1567,6 +1570,7 @@ program
     const { envelope, exitCode: statusExitCode } = buildEnvelope({
       version: VERSION,
       command: "probe",
+      persistFullResult: true,
       status: envelopeStatus,
       durationMs: Date.now() - start,
       cwd: global.cwd,

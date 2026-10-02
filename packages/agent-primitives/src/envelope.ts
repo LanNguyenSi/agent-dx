@@ -97,6 +97,8 @@ export interface EnvelopeInput {
   status: string;
   durationMs: number;
   cwd: string;
+  /** Persist serializable complete results even when no reduction is needed. */
+  persistFullResult?: boolean;
   warnings?: string[];
   /** Pre-existing log paths (e.g. exec log files) to keep in `logs`. */
   logs?: string[];
@@ -724,7 +726,7 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
     return { envelope, exitCode: exitCodeForStatus(input.status) };
   }
 
-  if (currentLen <= maxChars) {
+  if (currentLen <= maxChars && !input.persistFullResult) {
     return { envelope, exitCode: exitCodeForStatus(input.status) };
   }
 
@@ -732,7 +734,6 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
   // does not claim to contain itself.
   const fullResultJson = JSON.stringify(envelope, null, 2);
 
-  base.truncated = true;
   // The full-result log path is appended to `logs` BEFORE the reduction
   // runs (not after): appending it later, once the envelope has already
   // been reduced to fit exactly, would grow it back past maxChars by
@@ -760,6 +761,12 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
       warnings.push(`full result not written to ${input.logDir}: ${detail}`);
     }
   }
+
+  // Include the artifact path or write warning in the bound before returning.
+  if (serializedLength(envelope) <= maxChars) {
+    return { envelope, exitCode: exitCodeForStatus(input.status) };
+  }
+  base.truncated = true;
 
   // The skeleton (fixed fields only) is never cut, so it is a hard floor
   // on what the reduction can achieve: aim for max(maxChars,
