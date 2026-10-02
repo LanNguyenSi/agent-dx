@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- CLI `verify`, `probe`, and `probe --plan` save complete result artifacts
+  even when the internal stdout cap does not reduce the result, so evidence
+  can be recovered after downstream output clipping. Artifact write failures
+  warn without changing verdicts; log retention remains caller-managed.
+
 - The package README is now a short overview; the command reference
   moved to `docs/` (doctor, verify, probe, init, drift,
   non-js-test-runners, output-shape), and the npm package now ships

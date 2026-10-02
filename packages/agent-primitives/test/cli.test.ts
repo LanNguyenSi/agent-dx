@@ -152,6 +152,156 @@ describe("cli test environment", () => {
 });
 
 describe("cli", () => {
+  it("verify text exposes the complete result artifact", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "-f",
+      "text",
+      "verify",
+      "-c",
+      "",
+      "-x",
+      'fixture=node -e "process.exit(0)"',
+    ]);
+    expect(run.code).toBe(0);
+    expect(run.stdout).toContain("status: pass");
+    expect(run.stdout).toContain("[pass] fixture");
+    const artifact = fs
+      .readdirSync(logDir)
+      .find((name) => name.startsWith("result-full-"));
+    expect(artifact).toBeDefined();
+    const artifactPath = path.join(logDir, artifact!);
+    expect(run.stdout).toContain(artifactPath);
+    expect(JSON.parse(fs.readFileSync(artifactPath, "utf8")).status).toBe(
+      "pass",
+    );
+    expect(run.stdout.length).toBeLessThanOrEqual(8000);
+  });
+
+  it("verify text reports persistence failure without duplicating existing warnings", async () => {
+    const cwd = makeTmpDir();
+    const file = path.join(cwd, "file");
+    fs.writeFileSync(file, "not a directory");
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      path.join(file, "logs"),
+      "-f",
+      "text",
+      "verify",
+      "-c",
+      "missing",
+    ]);
+    expect(run.code).toBe(2);
+    expect(run.stdout).toContain("status: error");
+    expect(run.stdout).toContain("[skipped] missing");
+    expect(run.stdout).toContain("full result not written");
+    expect(run.stdout).toContain("ENOTDIR");
+    expect(run.stdout).not.toContain("result-full-");
+    expect(run.stdout.match(/missing: no_script:/g)).toHaveLength(1);
+    expect(run.stdout.match(/full result not written/g)).toHaveLength(1);
+    expect(run.stdout.length).toBeLessThanOrEqual(8000);
+  });
+
+  it("warns on deterministic result persistence failure and preserves verify exit semantics", async () => {
+    const cwd = makeTmpDir();
+    const file = path.join(cwd, "file");
+    fs.writeFileSync(file, "not a directory");
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      path.join(file, "logs"),
+      "verify",
+      "-c",
+      "",
+    ]);
+    expect(run.code).toBe(2);
+    const envelope = JSON.parse(run.stdout);
+    expect(envelope.status).toBe("error");
+    expect(envelope.reason).toBe("nothing_verified");
+    expect(envelope.truncated).toBe(false);
+    expect(envelope.logs).toEqual([]);
+    expect(envelope.warnings).toContainEqual(
+      expect.stringContaining("full result not written"),
+    );
+  });
+
+  it("persists complete under-budget results for verify, probe and probe --plan across distinct invocations", async () => {
+    const repo = makeTmpDir();
+    const logs = makeTmpDir();
+    const git = (args: string[]) => execFileSync("git", args, { cwd: repo });
+    git(["init", "-q"]);
+    git(["config", "user.email", "test@example.com"]);
+    git(["config", "user.name", "test"]);
+    fs.writeFileSync(path.join(repo, "fixture.js"), "module.exports = true;\n");
+    git(["add", "."]);
+    git(["commit", "-qm", "fixture"]);
+    const test = "node -e \"process.exit(require('./fixture.js') ? 0 : 1)\"";
+    const plan = path.join(repo, "plan.json");
+    fs.writeFileSync(
+      plan,
+      JSON.stringify({
+        test,
+        mutants: [
+          { file: "fixture.js", line: 1, replace: "module.exports = false;" },
+        ],
+      }),
+    );
+    const invocations = [
+      ["verify", "-c", "", "-x", 'fixture=node -e "process.exit(0)"'],
+      [
+        "probe",
+        "--file",
+        "fixture.js",
+        "-n",
+        "1",
+        "-r",
+        "module.exports = false;",
+        "-t",
+        test,
+      ],
+      ["probe", "--plan", plan],
+    ];
+    const artifacts: string[] = [];
+    for (const args of invocations) {
+      const run = await spawnCli([
+        "-C",
+        repo,
+        "-l",
+        logs,
+        "-m",
+        "100000",
+        ...args,
+      ]);
+      expect(run.code).toBe(0);
+      const envelope = JSON.parse(run.stdout);
+      expect(envelope.truncated).toBe(false);
+      const artifact = envelope.logs.find((entry: string) =>
+        path.basename(entry).startsWith("result-full-"),
+      );
+      expect(artifact).toBeDefined();
+      artifacts.push(artifact);
+      const saved = JSON.parse(fs.readFileSync(artifact, "utf8"));
+      expect(saved.status).toBe(envelope.status);
+      expect(saved.command).toBe(envelope.command);
+      expect(saved.warnings).toEqual(envelope.warnings);
+      if (args[0] === "verify") expect(saved.checks).toEqual(envelope.checks);
+      else if (args.includes("--plan"))
+        expect(saved.plan).toEqual(envelope.plan);
+      else expect(saved.mutation_probe).toEqual(envelope.mutation_probe);
+    }
+    expect(new Set(artifacts).size).toBe(3);
+    for (const artifact of artifacts)
+      expect(fs.existsSync(artifact)).toBe(true);
+  });
+
   it("prints parseable JSON with status: usage_error on stdout and exits 2 for a mistyped flag", async () => {
     const run = await spawnCli(["doctor", "--no-such-flag"]);
     expect(run.code).toBe(2);
@@ -2070,6 +2220,17 @@ describe("cli: probe", () => {
       PROBE_MARKER: "1",
       API_TOKEN: "<redacted>",
     });
+    const savedPath = parsedWithEnv.logs.find((entry: string) =>
+      path.basename(entry).startsWith("result-full-"),
+    );
+    expect(savedPath).toBeDefined();
+    const saved = JSON.parse(fs.readFileSync(savedPath, "utf8"));
+    expect(saved.env).toEqual(parsedWithEnv.env);
+    expect(saved.plan.results[0].test.env).toEqual(
+      parsedWithEnv.plan.results[0].test.env,
+    );
+    expect(fs.readFileSync(savedPath, "utf8")).not.toContain("s3cr3t");
+
     // The raw secret never appears anywhere in the serialized envelope
     // (not just in the two fields checked by name above): a redaction
     // that missed a third echo, or that redacted the run-level `env` but
@@ -2382,6 +2543,22 @@ describe("cli: probe", () => {
     };
     expect(parsed.env).toEqual(expectedRedacted);
     expect(parsed.test.env).toEqual(expectedRedacted);
+    const savedPath = parsed.logs.find((entry: string) =>
+      path.basename(entry).startsWith("result-full-"),
+    );
+    expect(savedPath).toBeDefined();
+    const saved = JSON.parse(fs.readFileSync(savedPath, "utf8"));
+    expect(saved.env).toEqual(expectedRedacted);
+    expect(saved.test.env).toEqual(expectedRedacted);
+    for (const secret of [
+      "super-secret",
+      "npm-secret",
+      "aws-secret",
+      "hunter2",
+    ]) {
+      expect(fs.readFileSync(savedPath, "utf8")).not.toContain(secret);
+      expect(run.stdout).not.toContain(secret);
+    }
   });
 
   it("exactly one mutant form is required: none given is usage_error, exit 2", async () => {
@@ -4268,10 +4445,12 @@ describe("cli: probe --plan", () => {
     }
     // One baseline, then one run per mutant.
     expect(runsIn(repo)).toBe(3);
-    // Top-level `logs` carries only the baseline log (no worktree setup
-    // logs for `isolation: inplace`); per-mutant logs live on
-    // `plan.results[i]` instead, asserted above.
-    expect(parsed.logs).toEqual([parsed.plan.baseline.logPath]);
+    // Top-level logs retain the baseline and complete result artifact;
+    // per-mutant logs stay on plan.results[i].
+    expect(parsed.logs).toEqual([
+      parsed.plan.baseline.logPath,
+      expect.stringMatching(/result-full-.+\.json$/),
+    ]);
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
   }, 30000);
 

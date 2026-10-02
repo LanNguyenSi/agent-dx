@@ -921,6 +921,7 @@ program
     const { envelope, exitCode } = buildEnvelope({
       version: VERSION,
       command: "verify",
+      persistFullResult: true,
       status: result.status,
       durationMs: Date.now() - start,
       cwd: global.cwd,
@@ -945,7 +946,7 @@ program
       envelope,
       exitCode,
       { format: global.format, maxChars: global.maxChars },
-      () => renderVerifyText(result),
+      () => renderVerifyText(result, envelope),
     );
   });
 
@@ -1001,7 +1002,10 @@ export function writeFullVerifyResult(
   envelopePatch.truncated = true;
 }
 
-function renderVerifyText(result: VerifyResult): string {
+function renderVerifyText(
+  result: VerifyResult,
+  envelope?: Record<string, unknown>,
+): string {
   const lines: string[] = [];
   lines.push(`status: ${result.status}`);
   lines.push("");
@@ -1017,10 +1021,17 @@ function renderVerifyText(result: VerifyResult): string {
   }
   lines.push("");
   lines.push(`totalDurationMs: ${result.totalDurationMs}`);
-  if (result.warnings.length > 0) {
+  const logs = (envelope?.logs ?? []) as string[];
+  if (logs.length > 0) {
+    lines.push("");
+    lines.push("logs:");
+    for (const log of logs) lines.push(`  - ${log}`);
+  }
+  const warnings = (envelope?.warnings ?? result.warnings) as string[];
+  if (warnings.length > 0) {
     lines.push("");
     lines.push("warnings:");
-    for (const warning of result.warnings) lines.push(`  - ${warning}`);
+    for (const warning of warnings) lines.push(`  - ${warning}`);
   }
   lines.push("");
   return lines.join("\n");
@@ -1275,6 +1286,7 @@ async function runProbePlanCommand(
     const { envelope, exitCode } = buildEnvelope({
       version: VERSION,
       command: "probe",
+      persistFullResult: true,
       status: "usage_error",
       durationMs: Date.now() - start,
       cwd: global.cwd,
@@ -1341,6 +1353,7 @@ async function runProbePlanCommand(
   const { envelope, exitCode } = buildEnvelope({
     version: VERSION,
     command: "probe",
+    persistFullResult: true,
     status: result.status,
     durationMs: Date.now() - start,
     cwd: global.cwd,
@@ -1567,6 +1580,7 @@ program
     const { envelope, exitCode: statusExitCode } = buildEnvelope({
       version: VERSION,
       command: "probe",
+      persistFullResult: true,
       status: envelopeStatus,
       durationMs: Date.now() - start,
       cwd: global.cwd,
