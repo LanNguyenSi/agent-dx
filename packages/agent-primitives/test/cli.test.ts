@@ -152,6 +152,63 @@ describe("cli test environment", () => {
 });
 
 describe("cli", () => {
+  it("verify text exposes the complete result artifact", async () => {
+    const cwd = makeTmpDir();
+    const logDir = makeTmpDir();
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      logDir,
+      "-f",
+      "text",
+      "verify",
+      "-c",
+      "",
+      "-x",
+      'fixture=node -e "process.exit(0)"',
+    ]);
+    expect(run.code).toBe(0);
+    expect(run.stdout).toContain("status: pass");
+    expect(run.stdout).toContain("[pass] fixture");
+    const artifact = fs
+      .readdirSync(logDir)
+      .find((name) => name.startsWith("result-full-"));
+    expect(artifact).toBeDefined();
+    const artifactPath = path.join(logDir, artifact!);
+    expect(run.stdout).toContain(artifactPath);
+    expect(JSON.parse(fs.readFileSync(artifactPath, "utf8")).status).toBe(
+      "pass",
+    );
+    expect(run.stdout.length).toBeLessThanOrEqual(8000);
+  });
+
+  it("verify text reports persistence failure without duplicating existing warnings", async () => {
+    const cwd = makeTmpDir();
+    const file = path.join(cwd, "file");
+    fs.writeFileSync(file, "not a directory");
+    const run = await spawnCli([
+      "-C",
+      cwd,
+      "-l",
+      path.join(file, "logs"),
+      "-f",
+      "text",
+      "verify",
+      "-c",
+      "missing",
+    ]);
+    expect(run.code).toBe(2);
+    expect(run.stdout).toContain("status: error");
+    expect(run.stdout).toContain("[skipped] missing");
+    expect(run.stdout).toContain("full result not written");
+    expect(run.stdout).toContain("ENOTDIR");
+    expect(run.stdout).not.toContain("result-full-");
+    expect(run.stdout.match(/missing: no_script:/g)).toHaveLength(1);
+    expect(run.stdout.match(/full result not written/g)).toHaveLength(1);
+    expect(run.stdout.length).toBeLessThanOrEqual(8000);
+  });
+
   it("warns on deterministic result persistence failure and preserves verify exit semantics", async () => {
     const cwd = makeTmpDir();
     const file = path.join(cwd, "file");
