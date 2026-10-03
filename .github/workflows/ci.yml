@@ -200,9 +200,8 @@ jobs:
         # registry/network error, never "unpublished": fail loudly rather
         # than guess. Each path prints one line naming which branch ran.
         # This fallback branch is agent-dx-specific: only this repo builds
-        # okf-kit from its own tree (see okf-staleness.yml's header
-        # comment, which is the pattern other repos with a docs/okf bundle
-        # copy).
+        # okf-kit from its own tree (other repos with a docs/okf bundle are
+        # generated from packages/okf-kit/templates/okf-staleness.yml).
         #
         # Evidence: see packages/orchestrator-workflow/docs/okf/log.md.
         shell: bash

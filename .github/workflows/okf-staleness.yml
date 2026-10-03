@@ -18,7 +18,7 @@ name: OKF staleness
 # Warn-only drift watch for the docs/okf knowledge bundle: surfaces STALE
 # curated docs (source files that changed after the doc's verification
 # timestamp) on every PR without ever blocking a merge. Deliberately a
-# separate workflow: ci.yml is reused via workflow_call and must stay a
+# separate workflow: the repo's blocking CI must stay a
 # blocking gate, this one never is. Never mark this check as required in
 # branch protection: a PR that removes or renames docs/okf goes red here
 # by design (tool-error posture, exit 2), and warn-only must stay
@@ -81,10 +81,10 @@ jobs:
         # than guess. Each path prints one line naming which branch ran.
         # This fallback branch is agent-dx-specific: only agent-dx builds
         # okf-kit from its own tree (it ships the okf-kit package itself);
-        # a repo that only consumes okf-kit and copies this file as the
-        # canonical warn-only pattern should keep the published-pin branch
-        # and drop the fallback branch, since it has no packages/okf-kit
-        # tree to build from.
+        # a repo that only consumes okf-kit and is generated from
+        # packages/okf-kit/templates/okf-staleness.yml keeps the
+        # published-pin branch and drops the fallback branch, since it has
+        # no packages/okf-kit tree to build from.
         #
         # Evidence: see packages/orchestrator-workflow/docs/okf/log.md.
         shell: bash

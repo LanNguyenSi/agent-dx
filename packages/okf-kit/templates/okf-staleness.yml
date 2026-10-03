@@ -11,7 +11,7 @@ name: OKF staleness
 # Warn-only drift watch for the docs/okf knowledge bundle: surfaces STALE
 # curated docs (source files that changed after the doc's verification
 # timestamp) on every PR without ever blocking a merge. Deliberately a
-# separate workflow: ci.yml is reused via workflow_call and must stay a
+# separate workflow: the repo's blocking CI must stay a
 # blocking gate, this one never is. Never mark this check as required in
 # branch protection: a PR that removes or renames docs/okf goes red here
 # by design (tool-error posture, exit 2), and warn-only must stay
