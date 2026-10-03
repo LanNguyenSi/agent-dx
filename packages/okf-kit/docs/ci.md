@@ -13,3 +13,9 @@
 Pin the version: an unpinned `npx okf-kit` picks up new rules on their release day, which turns an unrelated PR red.
 
 Releasing a new okf-kit version to npm must also bump the `npm install -g okf-kit@<version>` pins this repo's own `orchestrator-workflow` package carries in `.github/workflows/`, in the same release commit; see `CONTRIBUTING.md`'s "Releasing okf-kit" section for the order.
+
+## Warn-only staleness workflow template
+
+`templates/okf-staleness.yml` (shipped in the npm package, so `node_modules/okf-kit/templates/okf-staleness.yml` in an install) is the canonical warn-only GitHub Actions workflow for a repo that carries a bundle: a full checkout, an exact `npm install -g okf-kit@<version>` pin, a check that the CLI prints a version, and `okf-kit check --json --require-anchors` whose exit code 0 or 1 is reported in the job summary and annotations while the job stays green, and any other exit code (a tool or usage error) fails the job red. Never mark it as a required check.
+
+Copy it to `.github/workflows/okf-staleness.yml` and change only the two lines marked `REPO-SPECIFIC`: the `pull_request` `branches:` entry (the repo's default branch) and `BUNDLE_PATH` (the bundle directory). The header names the template as its source; a repo that must deviate (for example one that builds okf-kit from its own tree when the pin is not on npm yet) documents the deviation in a comment at the deviating spot. The pin in the template is a starting value: move it deliberately, record each move in the bundle's `log.md` with the old and the new version's measured verdict (`okf-kit check` counts), and re-sync every consuming repo's copy from the template at the new pin.
