@@ -50,7 +50,9 @@
  * The shipped template packages/okf-kit/templates/okf-staleness.yml is
  * rewritten in the same pass (its install pin and its "pinned to okf-kit
  * <version>" header sentence), so the template names the release that
- * ships it. A missing template, or one without both pins, exits non-zero.
+ * ships it. This repo's own generated copy .github/workflows/okf-staleness.yml
+ * gets the same header rewrite. A missing template, or one without exactly one
+ * install pin and exactly one header, exits non-zero before anything is written.
  *
  * Every workflow file is read before any file is written, so a
  * genuinely missing or unreadable file never leaves a partial bump
@@ -94,6 +96,8 @@ const REQUIRED_FILES = ["ci.yml", "okf-staleness.yml"];
 // deliberately not matched.
 const TEMPLATE_REL = "packages/okf-kit/templates/okf-staleness.yml";
 const TEMPLATE_PATH = join(REPO_ROOT, ...TEMPLATE_REL.split("/"));
+// This repo's own generated copy of the template, re-synced on each bump.
+const GENERATED_COPY = "okf-staleness.yml";
 const TEMPLATE_HEADER_RE =
   /(pinned to okf-kit\s+#?\s*)(\d+\.\d+\.\d+(?:-[\w.-]+)?)/g;
 
@@ -239,26 +243,45 @@ function main() {
   let totalPins = 0;
   for (const { file, filePath, content, label } of reads) {
     const occurrences = [];
-    const rewritten = content.replace(PIN_RE, (match, oldVersion) => {
+    let rewritten = content.replace(PIN_RE, (match, oldVersion) => {
       occurrences.push(oldVersion);
       return match.replace(`okf-kit@${oldVersion}`, `okf-kit@${targetVersion}`);
     });
     totalPins += occurrences.length;
+    // This repo's own generated copy of the template carries the same header
+    // sentence; it is re-synced with the pin. Not counted as a workflow pin.
+    if (file === GENERATED_COPY) {
+      rewritten = rewritten.replace(
+        TEMPLATE_HEADER_RE,
+        (_m, lead) => `${lead}${targetVersion}`,
+      );
+    }
     rewrites.push({ file, filePath, content, rewritten, occurrences, label });
   }
 
   // The template is rewritten in the same pass but is not part of the
-  // workflow "zero pins" accounting; it has its own check below.
-  const templateOccurrences = [];
+  // workflow "zero pins" accounting; it has its own check, evaluated before
+  // any write. Install pins and header sentences are counted separately and
+  // exactly one of each is required.
+  const templateInstallPins = [];
+  const templateHeaderPins = [];
   const templateRewritten = templateContent
     .replace(PIN_RE, (match, oldVersion) => {
-      templateOccurrences.push(oldVersion);
+      templateInstallPins.push(oldVersion);
       return match.replace(`okf-kit@${oldVersion}`, `okf-kit@${targetVersion}`);
     })
     .replace(TEMPLATE_HEADER_RE, (_m, lead, oldVersion) => {
-      templateOccurrences.push(oldVersion);
+      templateHeaderPins.push(oldVersion);
       return `${lead}${targetVersion}`;
     });
+  const templateOccurrences = [...templateInstallPins, ...templateHeaderPins];
+  if (templateInstallPins.length !== 1 || templateHeaderPins.length !== 1) {
+    process.stderr.write(
+      `bump-okf-kit-pin: expected exactly one install pin and exactly one "pinned to okf-kit" header in ${TEMPLATE_REL}, found ${templateInstallPins.length} install pin(s) and ${templateHeaderPins.length} header(s); nothing written\n`,
+    );
+    process.exitCode = 1;
+    return;
+  }
   rewrites.push({
     file: null,
     filePath: TEMPLATE_PATH,
@@ -282,14 +305,6 @@ function main() {
         writeFileSync(r.filePath, r.rewritten, "utf8");
       }
     }
-  }
-
-  if (templateOccurrences.length < 2) {
-    process.stderr.write(
-      `bump-okf-kit-pin: expected the install pin and the "pinned to okf-kit" header in ${TEMPLATE_REL}, found ${templateOccurrences.length} pin(s)\n`,
-    );
-    process.exitCode = 1;
-    return;
   }
 
   if (totalPins === 0) {

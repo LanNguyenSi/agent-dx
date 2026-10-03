@@ -59,6 +59,8 @@ function ciYml(version: string): string {
 function staleYml(version: string): string {
   return [
     "name: okf-staleness",
+    "# Generated copy of the template, pinned to okf-kit",
+    `# ${version} below. Re-sync when the pin moves.`,
     "on: [schedule]",
     "jobs:",
     "  check:",
@@ -91,6 +93,7 @@ function scaffoldRepo(
     version: string;
     skipCi?: boolean;
     skipTemplate?: boolean;
+    templateContent?: string;
     noPinInCi?: boolean;
     ciContent?: string;
     extraWorkflow?: { name: string; content: string };
@@ -114,7 +117,7 @@ function scaffoldRepo(
   if (!opts.skipTemplate) {
     writeFileSync(
       join(dir, ...TEMPLATE_REL),
-      templateYml(opts.version),
+      opts.templateContent ?? templateYml(opts.version),
       "utf8",
     );
   }
@@ -198,6 +201,78 @@ describe.runIf(HAS_REPO_SCRIPT)("bump-okf-kit-pin.mjs", () => {
       templateYml("0.9.0")
         .replace("# 0.9.0 below", "# 0.9.1 below")
         .replace("okf-kit@0.9.0", "okf-kit@0.9.1"),
+    );
+  });
+
+  it("re-syncs the header sentence of the generated workflow copy with its pin", () => {
+    scaffoldRepo(dir, { version: "0.9.0" });
+
+    const result = runScript(dir, ["0.9.1"]);
+
+    expect(result.status).toBe(0);
+    expect(readWorkflow(dir, "okf-staleness.yml")).toBe(staleYml("0.9.1"));
+  });
+
+  it("exits non-zero naming the template when it has an install pin but no header, and writes nothing", () => {
+    const noHeader = templateYml("0.9.0").replace(
+      "pinned to okf-kit",
+      "pinned elsewhere",
+    );
+    scaffoldRepo(dir, { version: "0.9.0", templateContent: noHeader });
+    const ciBefore = readWorkflow(dir, "ci.yml");
+
+    const result = runScript(dir, ["0.9.1"]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "packages/okf-kit/templates/okf-staleness.yml",
+    );
+    expect(readFileSync(join(dir, ...TEMPLATE_REL), "utf8")).toBe(noHeader);
+    expect(readWorkflow(dir, "ci.yml")).toBe(ciBefore);
+  });
+
+  it("exits non-zero naming the template when it has a header but no install pin, and writes nothing", () => {
+    const noInstall = templateYml("0.9.0").replace(
+      "npm install -g okf-kit@0.9.0",
+      "echo skipped",
+    );
+    scaffoldRepo(dir, { version: "0.9.0", templateContent: noInstall });
+    const ciBefore = readWorkflow(dir, "ci.yml");
+
+    const result = runScript(dir, ["0.9.1"]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "packages/okf-kit/templates/okf-staleness.yml",
+    );
+    expect(readFileSync(join(dir, ...TEMPLATE_REL), "utf8")).toBe(noInstall);
+    expect(readWorkflow(dir, "ci.yml")).toBe(ciBefore);
+  });
+
+  it("exits non-zero naming the template when it has two install pins and no header", () => {
+    const twoInstalls = templateYml("0.9.0").replace(
+      "# 0.9.0 below. Do not hand-edit.",
+      "# below. npm install -g okf-kit@0.9.0",
+    );
+    scaffoldRepo(dir, { version: "0.9.0", templateContent: twoInstalls });
+
+    const result = runScript(dir, ["0.9.1"]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "packages/okf-kit/templates/okf-staleness.yml",
+    );
+  });
+
+  it("exits non-zero naming the template when it has one install pin and two headers", () => {
+    const twoHeaders = templateYml("0.9.0") + "# pinned to okf-kit 0.9.0\n";
+    scaffoldRepo(dir, { version: "0.9.0", templateContent: twoHeaders });
+
+    const result = runScript(dir, ["0.9.1"]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "packages/okf-kit/templates/okf-staleness.yml",
     );
   });
 
