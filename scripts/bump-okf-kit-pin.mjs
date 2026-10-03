@@ -47,6 +47,11 @@
  * prose example, not release-workflow config, checked by a separate
  * docs-consistency assertion.
  *
+ * The shipped template packages/okf-kit/templates/okf-staleness.yml is
+ * rewritten in the same pass (its install pin and its "pinned to okf-kit
+ * <version>" header sentence), so the template names the release that
+ * ships it. A missing template, or one without both pins, exits non-zero.
+ *
  * Every workflow file is read before any file is written, so a
  * genuinely missing or unreadable file never leaves a partial bump
  * behind (some files rewritten, others not). Exits non-zero, naming the
@@ -80,6 +85,17 @@ const SEMVER_RE = /^\d+\.\d+\.\d+(?:-[\w.-]+)?$/;
 // as a floor so a release that accidentally strips both files' pins is
 // still caught by name, not just by the "zero pins anywhere" check.
 const REQUIRED_FILES = ["ci.yml", "okf-staleness.yml"];
+
+// The shipped okf-staleness template carries the same pin twice: the
+// `npm install -g okf-kit@<version>` line (matched by PIN_RE) and the header
+// sentence "pinned to okf-kit <version>" (wrapped over a comment line break).
+// Both move with the release so the template never names a version other than
+// the one that ships it. Prose such as "ships in the release after 0.16.0" is
+// deliberately not matched.
+const TEMPLATE_REL = "packages/okf-kit/templates/okf-staleness.yml";
+const TEMPLATE_PATH = join(REPO_ROOT, ...TEMPLATE_REL.split("/"));
+const TEMPLATE_HEADER_RE =
+  /(pinned to okf-kit\s+#?\s*)(\d+\.\d+\.\d+(?:-[\w.-]+)?)/g;
 
 function usageErrorExit(message) {
   process.stderr.write(
@@ -169,7 +185,12 @@ function main() {
     const filePath = join(WORKFLOWS_DIR, file);
     try {
       const content = readFileSync(filePath, "utf8");
-      reads.push({ file, filePath, content });
+      reads.push({
+        file,
+        filePath,
+        content,
+        label: `.github/workflows/${file}`,
+      });
     } catch (err) {
       readErrors.push(
         `.github/workflows/${file}: ${err.code === "ENOENT" ? "not found" : err.message}`,
@@ -179,6 +200,17 @@ function main() {
 
   if (readErrors.length > 0) {
     process.stderr.write(`bump-okf-kit-pin: ${readErrors.join(", ")}\n`);
+    process.exitCode = 1;
+    return;
+  }
+
+  let templateContent;
+  try {
+    templateContent = readFileSync(TEMPLATE_PATH, "utf8");
+  } catch (err) {
+    process.stderr.write(
+      `bump-okf-kit-pin: ${TEMPLATE_REL}: ${err.code === "ENOENT" ? "not found" : err.message}\n`,
+    );
     process.exitCode = 1;
     return;
   }
@@ -205,20 +237,41 @@ function main() {
   // rewritten" expectation.
   const rewrites = [];
   let totalPins = 0;
-  for (const { file, filePath, content } of reads) {
+  for (const { file, filePath, content, label } of reads) {
     const occurrences = [];
     const rewritten = content.replace(PIN_RE, (match, oldVersion) => {
       occurrences.push(oldVersion);
       return match.replace(`okf-kit@${oldVersion}`, `okf-kit@${targetVersion}`);
     });
     totalPins += occurrences.length;
-    rewrites.push({ file, filePath, content, rewritten, occurrences });
+    rewrites.push({ file, filePath, content, rewritten, occurrences, label });
   }
+
+  // The template is rewritten in the same pass but is not part of the
+  // workflow "zero pins" accounting; it has its own check below.
+  const templateOccurrences = [];
+  const templateRewritten = templateContent
+    .replace(PIN_RE, (match, oldVersion) => {
+      templateOccurrences.push(oldVersion);
+      return match.replace(`okf-kit@${oldVersion}`, `okf-kit@${targetVersion}`);
+    })
+    .replace(TEMPLATE_HEADER_RE, (_m, lead, oldVersion) => {
+      templateOccurrences.push(oldVersion);
+      return `${lead}${targetVersion}`;
+    });
+  rewrites.push({
+    file: null,
+    filePath: TEMPLATE_PATH,
+    content: templateContent,
+    rewritten: templateRewritten,
+    occurrences: templateOccurrences,
+    label: TEMPLATE_REL,
+  });
 
   for (const r of rewrites) {
     for (const oldVersion of r.occurrences) {
       console.log(
-        `.github/workflows/${r.file}: okf-kit@${oldVersion} -> okf-kit@${targetVersion}`,
+        `${r.label}: okf-kit@${oldVersion} -> okf-kit@${targetVersion}`,
       );
     }
   }
@@ -229,6 +282,14 @@ function main() {
         writeFileSync(r.filePath, r.rewritten, "utf8");
       }
     }
+  }
+
+  if (templateOccurrences.length < 2) {
+    process.stderr.write(
+      `bump-okf-kit-pin: expected the install pin and the "pinned to okf-kit" header in ${TEMPLATE_REL}, found ${templateOccurrences.length} pin(s)\n`,
+    );
+    process.exitCode = 1;
+    return;
   }
 
   if (totalPins === 0) {
