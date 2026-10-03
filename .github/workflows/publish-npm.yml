@@ -131,7 +131,7 @@ jobs:
         # workflow publish-npm.yml) — no NPM_TOKEN secret involved. Every
         # published package (orchestrator-workflow, okf-kit, agent-primitives)
         # needs its own separate Trusted Publisher entry pointing at this file.
-        run: npm install -g npm@11 --no-audit --no-fund
+        run: npm install -g npm@^11.5.1 --no-audit --no-fund
 
       - name: Publish
         env:
@@ -164,6 +164,15 @@ jobs:
             # give the registry a moment to settle before checking.
             sleep 5
             if npm view "${pkg}@${VERSION}" version > /dev/null 2>&1; then
+              # The tarball exists, but that does not prove the --provenance
+              # attestation landed (a partially completed publish). Decided once, fleet-wide:
+              # an empty dist.attestations here is an error, not a warning, so a version
+              # published without provenance is never announced green.
+              attestations=$(npm view "${pkg}@${VERSION}" dist.attestations 2>/dev/null || true)
+              if [ -z "${attestations}" ]; then
+                echo "::error::${pkg}@${VERSION} is on the registry but has no provenance attestation (dist.attestations is empty) after a failed publish. Check the Sigstore/Rekor error in the publish log above, then deprecate this version and publish a fixed one; do not treat it as released." >&2
+                exit 1
+              fi
               echo "::notice::${pkg}@${VERSION} reached the registry despite a non-zero publish exit; treating as success."
               exit 0
             fi
