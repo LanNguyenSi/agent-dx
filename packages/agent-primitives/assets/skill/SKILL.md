@@ -5,8 +5,8 @@ description: Use before searching a codebase, before claiming a check passed, wh
 
 # agent-primitives
 
-`agent-primitives` is a CLI with four subcommands: `probe`, `verify`,
-`doctor`, `init`. Every invocation prints one bounded JSON result object on
+`agent-primitives` is a CLI with seven subcommands: `probe`, `verify`,
+`doctor`, `init`, `drift`, `snapshot`, `delta`. Every invocation prints one bounded JSON result object on
 stdout by default (`-f text` for a human-readable rendering instead) and
 uses a stable exit-code contract: `0` ok, `1` a real finding, `2` the run
 could not conclude, including a usage error. Run `agent-primitives
@@ -276,3 +276,15 @@ additionally carries `summary.attempted`, PHPUnit's own progress-counter
 count -- attempted, never passed. A composer `vendor-dir`/`bin-dir` link
 rule remains its own pending task (issue #225 part 2). See the
 agent-primitives package's docs/non-js-test-runners.md for the full detail.
+
+## 8. Checkout observations
+
+Use `snapshot --output <external-path>` before work and `delta --since
+<external-path>` afterward to compare the same checkout's index and raw-byte
+fingerprints. The full snapshot artifact is separate from bounded stdout.
+Artifact/log paths must be outside the checkout and Git metadata directories;
+existing artifacts are never overwritten. Delta exits `0` unchanged, `1`
+changed, `2` cannot conclude. A result provides no attribution or permission
+to reuse prior test evidence. See package docs/snapshot.md and docs/delta.md
+for unsupported states and best-effort observation limits. Use `drift --base
+<rev> --head <rev>` for identifier references in prose; see docs/drift.md.
