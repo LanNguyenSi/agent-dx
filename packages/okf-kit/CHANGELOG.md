@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-03
+
 ### Added
 
 - `templates/okf-staleness.yml`: the canonical warn-only `okf-staleness.yml` GitHub Actions workflow for a repo that carries an OKF bundle (exact pin, `--require-anchors`, exit-code contract that stays green on findings and fails red on a tool error). Only the default-branch line and the `BUNDLE_PATH` line are marked `REPO-SPECIFIC`; consuming repos copy it, set those two lines, and re-sync on each pin bump instead of calling it a "canonical pattern, keep in sync". The npm package ships `templates/`. See [CI usage](docs/ci.md).
