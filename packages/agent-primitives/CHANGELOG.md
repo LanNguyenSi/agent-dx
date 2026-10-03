@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Add read-only `snapshot` and `delta` commands and library APIs for versioned
+  checkout/index/content fingerprints, external artifact persistence, and
+  deterministic same-checkout comparison with explicit unsupported-state errors.
+
 ## [0.8.3] - 2026-10-02
 
 - The skill-ledger release guard permits the final current-version entry

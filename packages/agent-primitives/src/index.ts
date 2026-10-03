@@ -112,3 +112,5 @@ export type {
   RemovedIdentifier,
   RemovedIdentifierKind,
 } from "./drift/index.js";
+
+export * from "./snapshot/index.js";

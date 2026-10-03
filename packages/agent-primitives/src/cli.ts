@@ -44,6 +44,14 @@ import {
   type InitResult,
 } from "./init/index.js";
 import { drift, type DriftResult } from "./drift/index.js";
+import {
+  captureSnapshot,
+  compareSnapshots,
+  persistSnapshot,
+  readSnapshot,
+  outsideCheckout,
+} from "./snapshot/index.js";
+import { checkoutIdentity } from "./snapshot/git.js";
 
 function readVersion(): string {
   try {
@@ -1852,6 +1860,85 @@ program
     );
   });
 
+async function runObservation(
+  kind: "snapshot" | "delta",
+  opts: { output?: string; since?: string },
+  command: Command,
+): Promise<void> {
+  const start = Date.now();
+  const raw = command.optsWithGlobals<GlobalOptions>();
+  const fallback = bestEffortGlobal(raw);
+  let result: Record<string, unknown>;
+  let status = "error";
+  let safeLogDir: string | undefined;
+  try {
+    const global = resolveGlobal(raw);
+    const identity = checkoutIdentity(global.cwd);
+    safeLogDir = outsideCheckout(global.logDir, identity, global.cwd);
+    if (kind === "snapshot") {
+      if (opts.output) outsideCheckout(opts.output, identity, global.cwd);
+      const artifact = captureSnapshot(global.cwd);
+      const saved = persistSnapshot(artifact, {
+        ...global,
+        logDir: safeLogDir,
+        output: opts.output,
+      });
+      result = {
+        artifactPath: saved.artifactPath,
+        checkout: artifact.checkout,
+        head: artifact.head,
+        branch: artifact.branch,
+        counts: {
+          index: artifact.index.length,
+          workingTree: artifact.workingTree.length,
+          untracked: artifact.untracked.length,
+        },
+      };
+      status = "ok";
+    } else {
+      const baseline = readSnapshot(path.resolve(global.cwd, opts.since!));
+      result = { ...compareSnapshots(baseline, captureSnapshot(global.cwd)) };
+      status = String(result.status);
+      delete result.status;
+    }
+  } catch (err) {
+    result = {
+      message: err instanceof Error ? err.message : String(err),
+      reason: "cannot_conclude",
+    };
+    // Error reporting never writes logs, even when the supplied path was unsafe.
+    safeLogDir = undefined;
+  }
+  const { envelope, exitCode } = buildEnvelope({
+    version: VERSION,
+    command: kind,
+    status,
+    durationMs: Date.now() - start,
+    cwd: fallback.cwd,
+    extra: result,
+    maxChars: fallback.maxChars,
+    logDir: safeLogDir,
+  });
+  emit(
+    envelope,
+    exitCode,
+    { format: fallback.format, maxChars: fallback.maxChars },
+    () => JSON.stringify(envelope, null, 2) + "\n",
+  );
+}
+program
+  .command("snapshot")
+  .description(
+    "Capture read-only checkout fingerprints in a full artifact outside checkout",
+  )
+  .option("--output <path>", "new artifact path outside checkout")
+  .action((opts, command) => runObservation("snapshot", opts, command));
+program
+  .command("delta")
+  .description("Compare a saved snapshot with the same checkout now")
+  .requiredOption("--since <path>", "saved snapshot artifact")
+  .action((opts, command) => runObservation("delta", opts, command));
+
 // CommanderError codes that represent a genuine, successful exit (--help,
 // --version) rather than a usage error, and must therefore pass their exit
 // code straight through instead of being remapped to 2.
@@ -1915,6 +2002,7 @@ export function mapTopLevelError(
   err: unknown,
   global: ResolvedGlobal,
   start: number,
+  writeErrorLog = true,
 ): EnvelopeOutput {
   const durationMs = Date.now() - start;
   if (err instanceof CommanderError || err instanceof UsageError) {
@@ -1930,7 +2018,7 @@ export function mapTopLevelError(
       logs: [],
       extra: { reason, message: withOptionHint(err.message) },
       maxChars: global.maxChars,
-      logDir: global.logDir,
+      logDir: writeErrorLog ? global.logDir : undefined,
     });
   }
   const message = err instanceof Error ? err.message : String(err);
@@ -1944,7 +2032,7 @@ export function mapTopLevelError(
     logs: [],
     extra: { reason: "error", message },
     maxChars: global.maxChars,
-    logDir: global.logDir,
+    logDir: writeErrorLog ? global.logDir : undefined,
   });
 }
 
@@ -1985,7 +2073,14 @@ if (isMainModule) {
       return;
     }
     const global = bestEffortGlobal(program.opts<GlobalOptions>());
-    const { envelope, exitCode } = mapTopLevelError(err, global, start);
+    const { envelope, exitCode } = mapTopLevelError(
+      err,
+      global,
+      start,
+      !process.argv
+        .slice(2)
+        .some((arg) => arg === "snapshot" || arg === "delta"),
+    );
     emit(envelope, exitCode, {
       format: global.format,
       maxChars: global.maxChars,

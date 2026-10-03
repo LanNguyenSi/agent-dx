@@ -1,7 +1,7 @@
 # agent-primitives
 
 Agent-first CLI primitives for narrow subagents: a mutation-probe runner, a
-verify runner, a PATH doctor, and an identifier-drift guard, each returning
+verify runner, a PATH doctor, an identifier-drift guard, and checkout snapshot/delta, each returning
 one bounded JSON result instead of raw tool output.
 
 ## Overview
@@ -32,6 +32,8 @@ for teams shipping with AI agents.
   directory.
 - `drift`: finds prose and comments that still cite an identifier a change
   deleted or renamed.
+- `snapshot` / `delta`: save checkout/index/content fingerprints to a full
+  external artifact and compare the same checkout later.
 - Non-Node repositories are supported: PHP (PHPUnit, PHPStan,
   PHP_CodeSniffer) output is recognized by `verify` and `probe` alongside
   vitest, tsc, and eslint.
@@ -77,6 +79,8 @@ file, and reports whether the test caught it (`killed`) or missed it
 - [`init`](docs/init.md): install the package's skill into a harness.
 - [`drift`](docs/drift.md): the identifier-drift guard for docs and
   comments.
+- [`snapshot`](docs/snapshot.md): read-only checkout fingerprints.
+- [`delta`](docs/delta.md): compare the same checkout with a saved snapshot.
 - [Non-JS test runners](docs/non-js-test-runners.md): PHP and other
   non-Node test runner support, including the "Python bytecode cache"
   section a `probe` warning points to.
