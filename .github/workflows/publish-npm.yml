@@ -143,15 +143,27 @@ jobs:
           # Idempotency: a re-run (workflow_dispatch, or "Re-run failed jobs")
           # can land on a version a prior attempt already published.
           if npm view "${pkg}@${VERSION}" version > /dev/null 2>&1; then
+            # The version is present, but a prior attempt may have landed the
+            # tarball without its --provenance attestation, and a re-run cannot
+            # add one: apply the same attestation check as the retry loop below.
+            if ! attestations=$(npm view "${pkg}@${VERSION}" dist.attestations 2>/dev/null); then
+              echo "::error::could not read dist.attestations for ${pkg}@${VERSION} (registry error); verify manually with npm view ${pkg}@${VERSION} dist.attestations before deprecating anything." >&2
+              exit 1
+            fi
+            if [ -z "${attestations}" ]; then
+              echo "::error::${pkg}@${VERSION} is on the registry without a provenance attestation (dist.attestations is empty); this re-run cannot fix it. Deprecate this version and publish a fixed one; do not treat it as released." >&2
+              exit 1
+            fi
             echo "::notice::${pkg}@${VERSION} is already on the registry; nothing to publish."
             exit 0
           fi
 
           # Sigstore Rekor occasionally returns a transient TLOG_CREATE_ENTRY
           # 409 (npm/cli#6892) that fails --provenance even though the tarball
-          # is fine. Retry up to 3 times with backoff, and treat "already
-          # published" as success in case a failed attempt actually reached
-          # the registry.
+          # is fine. Retry up to 3 times with exponential backoff, and treat
+          # "already published" as success only when the version also carries
+          # its dist.attestations, in case a failed attempt actually reached
+          # the registry (a version without the attestation is an error).
           max=3
           attempt=1
           while true; do
@@ -165,10 +177,14 @@ jobs:
             sleep 5
             if npm view "${pkg}@${VERSION}" version > /dev/null 2>&1; then
               # The tarball exists, but that does not prove the --provenance
-              # attestation landed (a partially completed publish). Decided once, fleet-wide:
-              # an empty dist.attestations here is an error, not a warning, so a version
-              # published without provenance is never announced green.
-              attestations=$(npm view "${pkg}@${VERSION}" dist.attestations 2>/dev/null || true)
+              # attestation landed (a partially completed publish). Decided
+              # once, fleet-wide: an empty dist.attestations here is an error,
+              # not a warning, so a version published without provenance is
+              # never announced green.
+              if ! attestations=$(npm view "${pkg}@${VERSION}" dist.attestations 2>/dev/null); then
+                echo "::error::could not read dist.attestations for ${pkg}@${VERSION} (registry error); verify manually with npm view ${pkg}@${VERSION} dist.attestations before deprecating anything." >&2
+                exit 1
+              fi
               if [ -z "${attestations}" ]; then
                 echo "::error::${pkg}@${VERSION} is on the registry but has no provenance attestation (dist.attestations is empty) after a failed publish. Check the Sigstore/Rekor error in the publish log above, then deprecate this version and publish a fixed one; do not treat it as released." >&2
                 exit 1
