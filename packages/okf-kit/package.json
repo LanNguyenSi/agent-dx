@@ -9,6 +9,7 @@
   "files": [
     "dist",
     "docs",
+    "templates",
     "README.md",
     "CHANGELOG.md"
   ],

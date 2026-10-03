@@ -84,7 +84,7 @@ Pin the exact version and use a full (non-shallow) checkout; [CI usage](docs/ci.
 - [Staleness (`sources-fresh`)](docs/staleness.md): the re-stamp rule, designator-less timestamps, squash-merge interaction, `--dirty-as-now`, `sources-fresh-future`.
 - [Citation resolution (`citations-resolve`)](docs/citations.md): every finding id, anchor forms, continuation and short-form citations, `--require-anchors`.
 - [Prose line references](docs/prose-line-references.md): the opt-in `--prose-line-references` check for line numbers written outside `citations-resolve`'s own grammar.
-- [CI usage](docs/ci.md): shallow-clone caveats, the pinned-version rationale, and the release-time pin bump.
+- [CI usage](docs/ci.md): shallow-clone caveats, the pinned-version rationale, the release-time pin bump, and the `templates/okf-staleness.yml` warn-only workflow template.
 
 ## Development
 
