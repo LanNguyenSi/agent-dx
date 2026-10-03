@@ -299,14 +299,8 @@ function main() {
     }
   }
 
-  if (!dryRun) {
-    for (const r of rewrites) {
-      if (r.rewritten !== r.content) {
-        writeFileSync(r.filePath, r.rewritten, "utf8");
-      }
-    }
-  }
-
+  // Global "nothing to bump" error: checked before any write so the
+  // template is never half-bumped when no workflow carries a pin.
   if (totalPins === 0) {
     process.stderr.write(
       'bump-okf-kit-pin: no "npm install -g okf-kit@<version>" or "npx ' +
@@ -314,6 +308,14 @@ function main() {
     );
     process.exitCode = 1;
     return;
+  }
+
+  if (!dryRun) {
+    for (const r of rewrites) {
+      if (r.rewritten !== r.content) {
+        writeFileSync(r.filePath, r.rewritten, "utf8");
+      }
+    }
   }
 
   const missingPins = REQUIRED_FILES.filter((name) => {

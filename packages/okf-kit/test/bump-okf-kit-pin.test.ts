@@ -516,10 +516,20 @@ describe.runIf(HAS_REPO_SCRIPT)("bump-okf-kit-pin.mjs", () => {
       "utf8",
     );
 
+    const templatePath = join(
+      dir,
+      "packages",
+      "okf-kit",
+      "templates",
+      "okf-staleness.yml",
+    );
+    const templateBefore = readFileSync(templatePath, "utf8");
+
     const result = runScript(dir, ["0.9.1"]);
 
     expect(result.status).not.toBe(0);
     expect(result.stderr).toContain("pin found");
+    expect(readFileSync(templatePath, "utf8")).toBe(templateBefore);
   });
 
   it("exits non-zero and names the file when a target workflow has no pin line to rewrite", () => {
