@@ -264,6 +264,19 @@ describe.runIf(HAS_REPO_SCRIPT)("bump-okf-kit-pin.mjs", () => {
     );
   });
 
+  it("exits non-zero naming the template when it has two install pins and one header", () => {
+    const twoInstalls =
+      templateYml("0.9.0") + "        run: npm install -g okf-kit@0.9.0\n";
+    scaffoldRepo(dir, { version: "0.9.0", templateContent: twoInstalls });
+
+    const result = runScript(dir, ["0.9.1"]);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "packages/okf-kit/templates/okf-staleness.yml",
+    );
+  });
+
   it("exits non-zero naming the template when it has one install pin and two headers", () => {
     const twoHeaders = templateYml("0.9.0") + "# pinned to okf-kit 0.9.0\n";
     scaffoldRepo(dir, { version: "0.9.0", templateContent: twoHeaders });
