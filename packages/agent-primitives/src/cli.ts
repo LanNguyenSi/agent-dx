@@ -1868,13 +1868,26 @@ async function runObservation(
   const start = Date.now();
   const raw = command.optsWithGlobals<GlobalOptions>();
   const fallback = bestEffortGlobal(raw);
+  let global: ResolvedGlobal;
+  try {
+    global = resolveGlobal(raw);
+  } catch (err) {
+    const { envelope, exitCode } = mapTopLevelError(
+      err,
+      fallback,
+      start,
+      false,
+    );
+    emit(envelope, exitCode, fallback);
+    return;
+  }
   let result: Record<string, unknown>;
   let status = "error";
   let safeLogDir: string | undefined;
   try {
-    const global = resolveGlobal(raw);
     const identity = checkoutIdentity(global.cwd);
-    safeLogDir = outsideCheckout(global.logDir, identity, global.cwd);
+    const observationLogDir = path.resolve(process.cwd(), global.logDir);
+    safeLogDir = outsideCheckout(observationLogDir, identity, global.cwd);
     if (kind === "snapshot") {
       if (opts.output) outsideCheckout(opts.output, identity, global.cwd);
       const artifact = captureSnapshot(global.cwd);

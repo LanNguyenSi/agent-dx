@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   captureSnapshot,
@@ -12,7 +12,7 @@ import {
   MAX_ARTIFACT_BYTES,
 } from "../src/snapshot/index.js";
 import { decode } from "../src/snapshot/git.js";
-import { spawnCli } from "./helpers/spawn-cli.js";
+import { spawnCli, CLI_PATH, buildSpawnEnv } from "./helpers/spawn-cli.js";
 const roots: string[] = [];
 function temp() {
   const d = fs.realpathSync(
@@ -283,6 +283,129 @@ describe("snapshot persistence and validation", () => {
       ]);
       expect(failure.code).toBe(2);
       expect(fs.existsSync(path.join(r, "logs"))).toBe(false);
+    }
+  });
+});
+
+describe("observation commands share global option semantics", () => {
+  it("preserves format-conflict and invalid-cwd usage errors without writing logs", async () => {
+    const r = repo();
+    const logDir = path.join(r, "logs");
+    for (const args of [["snapshot"], ["delta", "--since", "missing"]]) {
+      const conflict = await spawnCli([
+        "-C",
+        r,
+        "-l",
+        logDir,
+        "--json",
+        "-f",
+        "text",
+        ...args,
+      ]);
+      expect(conflict.code).toBe(2);
+      expect(JSON.parse(conflict.stdout)).toMatchObject({
+        status: "usage_error",
+        reason: "format_conflict",
+        logs: [],
+      });
+      const badCwd = await spawnCli([
+        "-C",
+        path.join(r, "missing"),
+        "-l",
+        logDir,
+        ...args,
+      ]);
+      expect(badCwd.code).toBe(2);
+      expect(JSON.parse(badCwd.stdout)).toMatchObject({
+        status: "usage_error",
+        reason: "usage_error",
+        logs: [],
+      });
+      const tiny = await spawnCli([
+        "-C",
+        path.join(r, "missing"),
+        "-l",
+        logDir,
+        "-m",
+        "1",
+        ...args,
+      ]);
+      expect(tiny.code).toBe(2);
+      expect(fs.existsSync(logDir)).toBe(false);
+    }
+  });
+  it("resolves flag and environment log paths from invocation cwd while artifact inputs stay relative to -C", () => {
+    const parent = temp();
+    const r = path.join(parent, "repo");
+    fs.mkdirSync(r);
+    git(r, "init", "-q");
+    const run = (args: string[], env: NodeJS.ProcessEnv = {}) =>
+      spawnSync(process.execPath, [CLI_PATH, "-C", "repo", ...args], {
+        cwd: parent,
+        env: buildSpawnEnv(env),
+        encoding: "utf8",
+      });
+    const baseline = path.join(parent, "before.json");
+    for (const options of [
+      { args: ["-l", "./flaglogs"], env: {}, name: "flaglogs" },
+      {
+        args: [],
+        env: { AGENT_PRIMITIVES_LOG_DIR: "./envlogs" },
+        name: "envlogs",
+      },
+      {
+        args: ["-l", path.join(parent, "absolute")],
+        env: {},
+        name: "absolute",
+      },
+    ]) {
+      const snap = run([...options.args, "snapshot"], options.env);
+      expect(snap.status, snap.stdout + snap.stderr).toBe(0);
+      const result = JSON.parse(snap.stdout);
+      expect(result.status).toBe("ok");
+      expect(path.dirname(result.artifactPath)).toBe(
+        path.join(parent, options.name),
+      );
+      expect(fs.existsSync(path.join(r, options.name))).toBe(false);
+      if (!fs.existsSync(baseline)) {
+        const output = run(
+          [...options.args, "snapshot", "--output", "../before.json"],
+          options.env,
+        );
+        expect(output.status, output.stdout + output.stderr).toBe(0);
+        expect(JSON.parse(output.stdout).artifactPath).toBe(baseline);
+      }
+      const delta = run(
+        [...options.args, "delta", "--since", "../before.json"],
+        options.env,
+      );
+      expect(delta.status, delta.stdout + delta.stderr).toBe(0);
+      expect(JSON.parse(delta.stdout)).toMatchObject({
+        status: "ok",
+        changed: false,
+      });
+    }
+    for (const command of [
+      ["snapshot"],
+      ["delta", "--since", "../before.json"],
+    ]) {
+      for (const options of [
+        { args: ["-l", "./repo/unsafe-flag"], env: {} },
+        { args: [], env: { AGENT_PRIMITIVES_LOG_DIR: "./repo/unsafe-env" } },
+      ]) {
+        const rejected = run([...options.args, ...command], options.env);
+        expect(rejected.status).toBe(2);
+        expect(JSON.parse(rejected.stdout)).toMatchObject({
+          status: "error",
+          reason: "cannot_conclude",
+          logs: [],
+        });
+        expect(
+          run([...options.args, "-m", "1", ...command], options.env).status,
+        ).toBe(2);
+        expect(fs.existsSync(path.join(r, "unsafe-flag"))).toBe(false);
+        expect(fs.existsSync(path.join(r, "unsafe-env"))).toBe(false);
+      }
     }
   });
 });
