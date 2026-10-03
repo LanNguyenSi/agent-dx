@@ -12,7 +12,7 @@
 
 Pin the version: an unpinned `npx okf-kit` picks up new rules on their release day, which turns an unrelated PR red.
 
-Releasing a new okf-kit version to npm must also bump the `npm install -g okf-kit@<version>` pins this repo's own `orchestrator-workflow` package carries in `.github/workflows/`, in the same release commit; see `CONTRIBUTING.md`'s "Releasing okf-kit" section for the order.
+Releasing a new okf-kit version to npm must also bump the `npm install -g okf-kit@<version>` pins this repo's own `orchestrator-workflow` package carries in `.github/workflows/`, in the same release commit. `scripts/bump-okf-kit-pin.mjs` rewrites those pins and also the install pin and the "pinned to okf-kit" header sentence in `templates/okf-staleness.yml`, so the shipped template always names the release that ships it (it exits non-zero, before writing anything, if the template is missing or lacks exactly one of each); see `CONTRIBUTING.md`'s "Releasing okf-kit" section for the order.
 
 ## Warn-only staleness workflow template
 

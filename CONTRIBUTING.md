@@ -76,7 +76,10 @@ the same release commit, in this order:
    path/to/bundle` CI example to `<new-version>` by hand.
 4. `node scripts/bump-okf-kit-pin.mjs` from the repo root (reads the new
    version from `packages/okf-kit/package.json` and rewrites every
-   `okf-kit@<version>` pin, in either form, under `.github/workflows/`;
+   `okf-kit@<version>` pin, in either form, under `.github/workflows/`, plus the
+   install pin and the "pinned to okf-kit" header in
+   `packages/okf-kit/templates/okf-staleness.yml` (and the same header in
+   `.github/workflows/okf-staleness.yml`);
    pass `--dry-run` to preview the rewrite without writing any file, and
    an explicit version argument to target a version other than
    `package.json`'s current one). It rejects an unrecognized flag or a
@@ -84,7 +87,9 @@ the same release commit, in this order:
    naming the file, if `.github/workflows/ci.yml` or
    `.github/workflows/okf-staleness.yml` is missing entirely or has no
    pin line to rewrite, or if zero pins are found anywhere under
-   `.github/workflows/`. This script covers only the workflow pins, not
+   `.github/workflows/`, or if the template is missing or does not carry
+   exactly one install pin and exactly one "pinned to okf-kit" header (checked
+   before anything is written). This script covers only the workflow and template pins, not
    the README example in step 3: the README pin is a prose example, not
    release-workflow config.
 5. `npx vitest run test/docs-consistency.test.ts` in
