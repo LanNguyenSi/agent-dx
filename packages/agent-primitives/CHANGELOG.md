@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-03
+
 - Add read-only `snapshot` and `delta` commands and library APIs for versioned
   checkout/index/content fingerprints, external artifact persistence, and
   deterministic same-checkout comparison with explicit unsupported-state errors.
