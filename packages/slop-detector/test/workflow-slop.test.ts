@@ -755,20 +755,38 @@ describe("workflow-slop/run-expression", () => {
     expect(v).toHaveLength(1);
   });
 
-  // ── scope: the executed-input (`with:`) scan stays workflow-only; a
-  // composite action's own action.yml is scanned for `run:` but not for
-  // executed inputs (current scope limit, tracked as a follow-up) ─────────
+  // ── scope: the executed-input (`with:`) scan covers a composite action's
+  // own action.yml the same way it covers a workflow file ──────────────────
 
-  it("negative control: a github-script step's with.script inside a composite action's own action.yml is not scanned (the executed-input scan is workflow-only)", () => {
+  it("flags a github-script step's with.script inside a composite action's own action.yml (the executed-input scan covers action.yml)", () => {
     const text = [
       "runs:",
       "  using: composite",
       "  steps:",
       "    - uses: actions/github-script@v99",
       "      with:",
-      "        script: console.log(${{ github.event.issue.title }})",
+      "        script: console.log(${{ inputs.x }})",
     ].join("\n");
-    const v = runViolations(text, "action.yml");
+    const v = runViolations(text, "action.yml").filter(
+      (x) => x.ruleId === "workflow-slop/run-expression",
+    );
+    expect(v).toHaveLength(1);
+  });
+
+  it("leaves an env:-routed github-script step inside a composite action's action.yml clean", () => {
+    const text = [
+      "runs:",
+      "  using: composite",
+      "  steps:",
+      "    - uses: actions/github-script@v99",
+      "      env:",
+      "        X: ${{ inputs.x }}",
+      "      with:",
+      "        script: console.log(process.env.X)",
+    ].join("\n");
+    const v = runViolations(text, "action.yml").filter(
+      (x) => x.ruleId === "workflow-slop/run-expression",
+    );
     expect(v).toHaveLength(0);
   });
 
@@ -5920,7 +5938,7 @@ describe("workflow-slop/run-expression in composite actions", () => {
     }
   });
 
-  it("warns when an allowExpressions entry only matches an executed input that is not scanned in a composite action's action.yml", () => {
+  it("treats an allowExpressions entry matched only by an executed input in a composite action's action.yml as used (no warning)", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-composite-"));
     try {
       const file = path.join(tmp, "action.yml");
@@ -5948,12 +5966,8 @@ describe("workflow-slop/run-expression in composite actions", () => {
         packFilter: ["workflow-slop"],
       });
       expect(
-        summary.warnings?.some((w) =>
-          w.includes(
-            'allowExpressions entry "inputs.x" matched no scanned run: expression',
-          ),
-        ),
-      ).toBe(true);
+        (summary.warnings ?? []).some((w) => w.includes("allowExpressions")),
+      ).toBe(false);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
@@ -6064,5 +6078,66 @@ describe("workflow-slop/run-expression in composite actions", () => {
       '    - "${{ inputs.x }}"',
     ].join("\n");
     expect(runExpressionViolations(dockerAction, "action.yml")).toHaveLength(0);
+  });
+});
+
+describe("workflow-slop/node20-action-major in composite action metadata files", () => {
+  const node20Violations = (text: string, filePath: string) =>
+    runViolations(text, filePath).filter(
+      (v) => v.ruleId === "workflow-slop/node20-action-major",
+    );
+
+  it("flags a Node-20 major in a composite action's runs.steps[].uses", () => {
+    const text = [
+      "name: setup",
+      "description: setup",
+      "runs:",
+      "  using: composite",
+      "  steps:",
+      "    - uses: actions/checkout@v4",
+      "    - shell: bash",
+      "      run: echo ok",
+    ].join("\n");
+    expect(node20Violations(text, "action.yml")).toHaveLength(1);
+    expect(
+      node20Violations(text, ".github/actions/setup/action.yaml"),
+    ).toHaveLength(1);
+  });
+
+  it("leaves a composite action using a newer major clean", () => {
+    const text = [
+      "runs:",
+      "  using: composite",
+      "  steps:",
+      "    - uses: actions/checkout@v99",
+    ].join("\n");
+    expect(node20Violations(text, "action.yml")).toHaveLength(0);
+  });
+
+  it("leaves a node action.yml without uses: steps clean (runs.using: node20 itself is not flagged)", () => {
+    const text = [
+      "name: node-action",
+      "description: a node action",
+      "runs:",
+      "  using: node20",
+      "  main: index.js",
+    ].join("\n");
+    expect(node20Violations(text, "action.yml")).toHaveLength(0);
+  });
+
+  it("leaves a docker action.yml without uses: steps clean", () => {
+    const text = [
+      "name: docker-action",
+      "description: a docker action",
+      "runs:",
+      "  using: docker",
+      "  image: Dockerfile",
+    ].join("\n");
+    expect(node20Violations(text, "action.yml")).toHaveLength(0);
+  });
+
+  it("still ignores a non-action YAML file outside the scanned set", () => {
+    const text = ["steps:", "  - uses: actions/checkout@v4"].join("\n");
+    expect(node20Violations(text, "docs/example.yml")).toHaveLength(0);
   });
 });

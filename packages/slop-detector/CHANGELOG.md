@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `workflow-slop/run-expression` now scans executed `with:` inputs (for
+  example `actions/github-script`'s `script`) inside a composite action's
+  `action.yml`/`action.yaml`, not only in workflow files, and
+  `workflow.allowExpressions` usage counting follows the same file set.
+  `workflow-slop/node20-action-major` now also reads a composite action's
+  `runs.steps[].uses`. Repositories running `--pack workflow-slop` may see
+  new findings in their composite actions.
+
 ## [0.7.0] - 2026-10-04
 
 ### Added

@@ -1188,9 +1188,10 @@ function collectExpressionTexts(
     range: [number, number, number];
     entry: ExecutedActionInputEntry;
   }> = [];
-  // Same file-kind gate as `runExpression.check`: an executed input inside
-  // an `action.yml` is never scanned, so it must not count as a match.
-  if (isWorkflowFile(file)) {
+  // Same file set as `runExpression.check` (workflow files and composite
+  // action metadata files), so an executed input counts as a match exactly
+  // where it is scanned.
+  if (isRunScannedFile(file)) {
     collectExecutedInputScalars(
       doc,
       resolveExecutedActionInputs(config),
@@ -1259,13 +1260,10 @@ const runExpression: Rule = {
       range: [number, number, number];
       entry: ExecutedActionInputEntry;
     }> = [];
-    // Executed-input (`with:`) scanning stays confined to workflow files:
-    // this pack's list names third-party actions whose input its own runtime
-    // executes, and the documented blind spot for those inputs inside a
-    // composite action's own `action.yml` is a separate feature (see
-    // docs/workflow-slop.md). The `run:` scan above covers both file kinds,
-    // which is why only this one call is gated.
-    if (isWorkflowFile(file)) {
+    // Executed-input (`with:`) scanning covers the same file set as the
+    // `run:` scan above: a composite action's `runs.steps[]` runs a
+    // `with:` input of a listed action as code just like a workflow step.
+    if (isRunScannedFile(file)) {
       collectExecutedInputScalars(
         doc,
         resolveExecutedActionInputs(config),
@@ -1500,7 +1498,7 @@ const node20ActionMajor: Rule = {
   enabledByDefault: true,
   rationale:
     "A fleet-wide sweep moved every workflow off the actions/runtimes still pinned to the deprecated Node-20 actions major, but nothing stopped a later workflow edit from reintroducing one (copy-pasting a step from an old gist, an unreviewed dependency bump). This rule flags a `uses:` value whose `owner/repo@major` is on the Node-20 list, so the regression is caught at review time instead of silently landing again. The list is data (`workflow.node20Majors`/`workflow.node20MajorsIgnore` in slop.config.yml, on top of the package's built-in default), not hardcoded logic, so a newly discovered or newly fixed major does not need a package release. A docker-container action (`runs.using: docker`) or a composite action is never Node-20 by itself and is intentionally never on the default list, even when it commonly sits next to Node-20 actions in the same job.",
-  appliesTo: isWorkflowFile,
+  appliesTo: isRunScannedFile,
   check(ctx: RuleContext): Violation[] {
     const { file, config } = ctx;
     let doc: unknown;
