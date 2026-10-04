@@ -4,7 +4,7 @@ Opt in with `--pack workflow-slop`. Scans workflow files under `.github/workflow
 
 
 Opt in with `--pack workflow-slop`. The main rule, `run-expression`, looks
-at `run:` scalars inside `.github/workflows/*.yml`/`*.yaml` and `action.yml`/`action.yaml`, plus one
+at `run:` scalars inside `.github/workflows/*.yml`/`*.yaml` and `action.yml`/`action.yaml`, plus, in workflow files only, one
 `with:` input the pack's executed-input list names as code an action
 executes at runtime (`actions/github-script`'s `script`, at minimum -- see
 [Executed action inputs](#workflow-slop-executed-action-inputs) below). A
