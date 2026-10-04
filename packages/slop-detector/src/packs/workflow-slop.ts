@@ -37,6 +37,29 @@ export function isWorkflowFile(file: { path: string }): boolean {
   return WORKFLOW_FILE_RE.test(normalized);
 }
 
+// A composite action's metadata file is named `action.yml`/`action.yaml` and
+// can live in any directory (`action.yml` at the repository root,
+// `deploy/action.yml`, `.github/actions/setup/action.yaml`), so only the last
+// path segment is matched. Matched on the raw `file.path` like
+// `WORKFLOW_FILE_RE`, forward-slash normalized for the same reason.
+const ACTION_METADATA_FILE_RE = /(?:^|\/)action\.ya?ml$/;
+
+// Exported for the same reasons as `isWorkflowFile`. A composite action's
+// `runs.steps[].run` is executed by GitHub the same way a workflow step's
+// `run:` is: `${{ ... }}` is substituted into the shell text before the shell
+// ever parses it, so the script-injection surface is identical and the
+// `run:`-scanning rules have to see these files too.
+export function isActionMetadataFile(file: { path: string }): boolean {
+  const normalized = file.path.split("\\").join("/");
+  return ACTION_METADATA_FILE_RE.test(normalized);
+}
+
+// The file set the rules that scan executed shell text cover: workflow files
+// plus composite action metadata files (see above).
+export function isRunScannedFile(file: { path: string }): boolean {
+  return isWorkflowFile(file) || isActionMetadataFile(file);
+}
+
 // ─────────────────────────── expression allowlist ───────────────────────────
 
 // Every entry here is a bare `github.*`/`runner.*` context reference this
@@ -1011,7 +1034,7 @@ const unparseableWorkflow: Rule = {
   enabledByDefault: true,
   rationale:
     "yaml's parseDocument does not throw on most YAML syntax errors: it records them on `doc.errors` and still returns whatever partial tree it managed to build, which `run-expression` then walks without knowing it is incomplete. A workflow file broken partway through can drop everything after the break from that partial tree, so an unsafe `${{ ... }}` expression sitting after the break is never seen, in a way indistinguishable from a genuinely clean file. Reporting the parse error itself closes that gap: a broken workflow file always produces at least one workflow-slop finding, instead of a false-clean result.",
-  appliesTo: isWorkflowFile,
+  appliesTo: isRunScannedFile,
   check(ctx: RuleContext): Violation[] {
     const { file } = ctx;
     let parsed: ReturnType<typeof YAML.parseDocument>;
@@ -1062,7 +1085,7 @@ const unsupportedYamlConstruct: Rule = {
   enabledByDefault: true,
   rationale:
     "GitHub Actions accepts YAML anchors and aliases in workflow files, and this pack resolves an alias to the value it stands for before it reads a mapping (executed inputs, `uses:` detection, `shell:`, `defaults:`, `runs-on:`). Five constructs it cannot read that way: a `<<` merge key, which GitHub does not merge (the YAML parser reads a key as a merge symbol when it carries a `!!merge` tag, whatever its text, and under a `%YAML 1.1` directive when it is a plain `<<`), an alias it cannot resolve (no anchor of that name precedes it, it refers to a node that contains it, its anchor name is defined more than once in the file, or resolving every alias in the file would visit an unreasonable number of nodes), a mapping key that is itself a mapping or a sequence, a scalar key whose value is not text (a date, or a binary value, as a `%YAML 1.1` directive or a tag such as `!!binary` gives), and an alias key that resolves to a name its mapping already has (YAML's duplicate-key check does not see through an alias key). A mapping whose keys arrive through one of the first four is read as if they were absent, and a mapping carrying a key twice is read at the key's first occurrence, which need not be the value GitHub Actions uses; either way the result is indistinguishable from a genuinely clean file, so each is reported with a block finding of its own instead of scanning clean.",
-  appliesTo: isWorkflowFile,
+  appliesTo: isRunScannedFile,
   check(ctx: RuleContext): Violation[] {
     const { file } = ctx;
     let loaded: LoadedWorkflowDocument;
@@ -1150,7 +1173,7 @@ function collectExpressionTexts(
   config: ResolvedConfig,
 ): Set<string> {
   const result = new Set<string>();
-  if (!isWorkflowFile(file)) return result;
+  if (!isRunScannedFile(file)) return result;
   let doc: unknown;
   try {
     doc = loadWorkflowContents(file.text);
@@ -1165,11 +1188,15 @@ function collectExpressionTexts(
     range: [number, number, number];
     entry: ExecutedActionInputEntry;
   }> = [];
-  collectExecutedInputScalars(
-    doc,
-    resolveExecutedActionInputs(config),
-    executedInputScalars,
-  );
+  // Same file-kind gate as `runExpression.check`: an executed input inside
+  // an `action.yml` is never scanned, so it must not count as a match.
+  if (isWorkflowFile(file)) {
+    collectExecutedInputScalars(
+      doc,
+      resolveExecutedActionInputs(config),
+      executedInputScalars,
+    );
+  }
   for (const scalar of [...runScalars, ...executedInputScalars]) {
     const [start, end] = scalar.range;
     const raw = file.text.slice(start, end);
@@ -1210,7 +1237,7 @@ const runExpression: Rule = {
   enabledByDefault: true,
   rationale:
     "GitHub substitutes `${{ ... }}` expressions into the `run:` text before the shell ever parses it. When the expression's value is attacker-influenced (a PR title, a branch/tag name, a step output derived from either), a crafted value breaks out of its intended argument position and the job — often holding write or publish permissions — executes it. The fix is the same every time: assign the value to an `env:` variable and reference it as `$NAME` in the script, where the shell treats it as inert data instead of program text. The same substitution happens just as literally inside a `with:` input an action's own runtime then executes as code (`actions/github-script`'s `script` input, at minimum) -- a `with:` input is normally this pack's exemption from `run:` scanning exactly because most inputs are inert data, but a listed input is code, so it is scanned before that exemption applies, not after.",
-  appliesTo: isWorkflowFile,
+  appliesTo: isRunScannedFile,
   check(ctx: RuleContext): Violation[] {
     const { file, config } = ctx;
     let doc: unknown;
@@ -1232,11 +1259,19 @@ const runExpression: Rule = {
       range: [number, number, number];
       entry: ExecutedActionInputEntry;
     }> = [];
-    collectExecutedInputScalars(
-      doc,
-      resolveExecutedActionInputs(config),
-      executedInputScalars,
-    );
+    // Executed-input (`with:`) scanning stays confined to workflow files:
+    // this pack's list names third-party actions whose input its own runtime
+    // executes, and the documented blind spot for those inputs inside a
+    // composite action's own `action.yml` is a separate feature (see
+    // docs/workflow-slop.md). The `run:` scan above covers both file kinds,
+    // which is why only this one call is gated.
+    if (isWorkflowFile(file)) {
+      collectExecutedInputScalars(
+        doc,
+        resolveExecutedActionInputs(config),
+        executedInputScalars,
+      );
+    }
 
     const violations: Violation[] = [];
     for (const scalar of uniqueBy(runScalars, (s) => String(s.range[0]))) {

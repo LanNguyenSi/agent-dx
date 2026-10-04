@@ -17,7 +17,7 @@ import { effectiveSeverity, isRuleEnabled } from "./config.js";
 import { detectFileKind, globToRegex } from "./util/file-kind.js";
 import {
   findUnmatchedAllowExpressions,
-  isWorkflowFile,
+  isRunScannedFile,
 } from "./packs/workflow-slop.js";
 import { buildDisableMap } from "./util/disable-comments.js";
 import {
@@ -197,7 +197,7 @@ export function checkFiles(
   let scanned = 0;
   for (const filePath of files) {
     const text = fs.readFileSync(filePath, "utf8");
-    if (isWorkflowFile({ path: filePath })) {
+    if (isRunScannedFile({ path: filePath })) {
       workflowFiles.push({ path: filePath, text });
     }
     violations.push(
@@ -245,7 +245,7 @@ export function checkFiles(
     warnings.push(
       ...unmatched.map(
         (expr) =>
-          `workflow.allowExpressions entry "${expr}" matched no scanned run: expression, check for a typo, extra whitespace, or that the file is actually under .github/workflows/`,
+          `workflow.allowExpressions entry "${expr}" matched no scanned run: expression, check for a typo, extra whitespace, or that the file is actually a workflow file under .github/workflows/ or a composite action's action.yml`,
       ),
     );
   }

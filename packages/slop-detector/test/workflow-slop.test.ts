@@ -2,9 +2,10 @@ import { describe, it, expect } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { checkText, checkFiles } from "../src/engine.js";
+import { checkText, checkFiles, checkPath } from "../src/engine.js";
 import { defaultConfig, mergeConfig } from "../src/config.js";
 import { allPacks } from "../src/packs/registry.js";
+import { isActionMetadataFile } from "../src/packs/workflow-slop.js";
 
 const WORKFLOW_PATH = ".github/workflows/publish.yml";
 
@@ -754,10 +755,11 @@ describe("workflow-slop/run-expression", () => {
     expect(v).toHaveLength(1);
   });
 
-  // ── scope: only .github/workflows/*.yml|.yaml is scanned; a composite
-  // action's own action.yml is a documented, deliberate blind spot ───────
+  // ── scope: the executed-input (`with:`) scan stays workflow-only; a
+  // composite action's own action.yml is scanned for `run:` but not for
+  // executed inputs (current scope limit, tracked as a follow-up) ─────────
 
-  it("negative control: a github-script step's with.script inside a composite action's own action.yml is not scanned (workflow-slop only reads .github/workflows/*.yml|.yaml, per WORKFLOW_FILE_RE)", () => {
+  it("negative control: a github-script step's with.script inside a composite action's own action.yml is not scanned (the executed-input scan is workflow-only)", () => {
     const text = [
       "runs:",
       "  using: composite",
@@ -5830,5 +5832,237 @@ describe("workflow-slop: a merge key that yaml reads as a symbol", () => {
     expect(found[0].rationale).toContain(
       "a scalar key whose value is not text",
     );
+  });
+});
+
+describe("workflow-slop/run-expression in composite actions", () => {
+  const UNSAFE_COMPOSITE = [
+    "name: deploy",
+    "inputs:",
+    "  force:",
+    "    description: force deploy",
+    "runs:",
+    "  using: composite",
+    "  steps:",
+    "    - shell: bash",
+    "      run: ./deploy.sh --force=${{ inputs.force }}",
+  ].join("\n");
+
+  const SAFE_COMPOSITE = [
+    "name: deploy",
+    "inputs:",
+    "  force:",
+    "    description: force deploy",
+    "runs:",
+    "  using: composite",
+    "  steps:",
+    "    - shell: bash",
+    "      env:",
+    "        FORCE: ${{ inputs.force }}",
+    '      run: ./deploy.sh --force="$FORCE"',
+  ].join("\n");
+
+  function runExpressionViolations(text: string, filePath: string) {
+    return runViolations(text, filePath).filter(
+      (v) => v.ruleId === "workflow-slop/run-expression",
+    );
+  }
+
+  it("flags an expression in a composite action's runs.steps[].run (root action.yml)", () => {
+    const v = runExpressionViolations(UNSAFE_COMPOSITE, "action.yml");
+    expect(v).toHaveLength(1);
+    expect(v[0].matched).toContain("inputs.force");
+  });
+
+  it("flags the same expression in a nested action.yaml", () => {
+    const v = runExpressionViolations(
+      UNSAFE_COMPOSITE,
+      ".github/actions/deploy/action.yaml",
+    );
+    expect(v).toHaveLength(1);
+  });
+
+  it("leaves the env:-routed composite action run: clean", () => {
+    expect(runExpressionViolations(SAFE_COMPOSITE, "action.yml")).toHaveLength(
+      0,
+    );
+  });
+
+  it("does not scan a yaml file that is not an action metadata file", () => {
+    expect(runViolations(UNSAFE_COMPOSITE, "docs/my-action.yml")).toHaveLength(
+      0,
+    );
+  });
+
+  it("names an action metadata file by its last path segment only", () => {
+    expect(isActionMetadataFile({ path: "action.yml" })).toBe(true);
+    expect(isActionMetadataFile({ path: "a/b/action.yaml" })).toBe(true);
+    expect(isActionMetadataFile({ path: "a\\b\\action.yml" })).toBe(true);
+    expect(isActionMetadataFile({ path: "my-action.yml" })).toBe(false);
+    expect(isActionMetadataFile({ path: "action.yml.bak" })).toBe(false);
+    expect(isActionMetadataFile({ path: "action.json" })).toBe(false);
+  });
+
+  it("finds the composite action finding through a directory scan", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-composite-"));
+    try {
+      const dir = path.join(tmp, ".github", "actions", "deploy");
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, "action.yml"), UNSAFE_COMPOSITE);
+      const summary = checkPath(tmp, baseOpts());
+      expect(
+        summary.violations.filter(
+          (v) => v.ruleId === "workflow-slop/run-expression",
+        ),
+      ).toHaveLength(1);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("warns when an allowExpressions entry only matches an executed input that is not scanned in a composite action's action.yml", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-composite-"));
+    try {
+      const file = path.join(tmp, "action.yml");
+      fs.writeFileSync(
+        file,
+        [
+          "name: deploy",
+          "inputs:",
+          "  x:",
+          "    description: x",
+          "runs:",
+          "  using: composite",
+          "  steps:",
+          "    - uses: actions/github-script@v7",
+          "      with:",
+          '        script: console.log("${{ inputs.x }}")',
+        ].join("\n"),
+      );
+      const cfg = mergeConfig({
+        workflow: { allowExpressions: ["inputs.x"] },
+      });
+      const summary = checkFiles([file], {
+        packs: allPacks,
+        config: cfg,
+        packFilter: ["workflow-slop"],
+      });
+      expect(
+        summary.warnings?.some((w) =>
+          w.includes(
+            'allowExpressions entry "inputs.x" matched no scanned run: expression',
+          ),
+        ),
+      ).toBe(true);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("treats an allowExpressions entry matched by a composite action's run: as used (no violation, no warning)", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-composite-"));
+    try {
+      const file = path.join(tmp, "action.yml");
+      fs.writeFileSync(
+        file,
+        [
+          "name: deploy",
+          "inputs:",
+          "  force:",
+          "    description: force deploy",
+          "runs:",
+          "  using: composite",
+          "  steps:",
+          "    - shell: bash",
+          "      run: ./deploy.sh --force=${{ inputs.force }}",
+        ].join("\n"),
+      );
+      const cfg = mergeConfig({
+        workflow: { allowExpressions: ["inputs.force"] },
+      });
+      const summary = checkFiles([file], {
+        packs: allPacks,
+        config: cfg,
+        packFilter: ["workflow-slop"],
+      });
+      expect(
+        summary.violations.filter(
+          (v) => v.ruleId === "workflow-slop/run-expression",
+        ),
+      ).toHaveLength(0);
+      expect(
+        (summary.warnings ?? []).some((w) => w.includes("inputs.force")),
+      ).toBe(false);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("reports exactly one unparseable-workflow finding for a malformed action.yml", () => {
+    const text = [
+      "name: deploy",
+      "runs:",
+      "  using: composite",
+      "  steps:",
+      "    - shell: bash",
+      "      run: echo hi",
+      "   bad: [unclosed",
+    ].join("\n");
+    const v = runViolations(text, "action.yml");
+    expect(
+      v.filter((x) => x.ruleId === "workflow-slop/unparseable-workflow"),
+    ).toHaveLength(1);
+  });
+
+  it("reports an unsupported-yaml-construct finding for a `%YAML 1.1` merge key in an action.yml", () => {
+    const text = [
+      "%YAML 1.1",
+      "---",
+      "base: &base",
+      "  shell: bash",
+      "runs:",
+      "  using: composite",
+      "  steps:",
+      "    - <<: *base",
+      "      run: echo hi",
+    ].join("\n");
+    const v = runViolations(text, "action.yml");
+    expect(
+      v.filter((x) => x.ruleId === "workflow-slop/unsupported-yaml-construct")
+        .length,
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it("leaves a node action's action.yml clean of run-expression findings", () => {
+    const nodeAction = [
+      "name: node-action",
+      "description: a node action",
+      "inputs:",
+      "  x:",
+      "    default: ${{ github.token }}",
+      "runs:",
+      "  using: node20",
+      "  main: index.js",
+      "outputs:",
+      "  y:",
+      "    value: ${{ steps.s.outputs.y }}",
+    ].join("\n");
+    expect(runExpressionViolations(nodeAction, "action.yml")).toHaveLength(0);
+  });
+
+  it("leaves a docker action's action.yml clean of run-expression findings", () => {
+    const dockerAction = [
+      "name: docker-action",
+      "description: a docker action",
+      "inputs:",
+      "  x:",
+      "    description: x",
+      "runs:",
+      "  using: docker",
+      "  image: Dockerfile",
+      "  args:",
+      '    - "${{ inputs.x }}"',
+    ].join("\n");
+    expect(runExpressionViolations(dockerAction, "action.yml")).toHaveLength(0);
   });
 });
