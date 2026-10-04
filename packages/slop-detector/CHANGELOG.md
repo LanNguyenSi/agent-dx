@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Composite action metadata files are now scanned for the `run:` injection
+  shape: `workflow-slop/run-expression`,
+  `workflow-slop/unparseable-workflow` and
+  `workflow-slop/unsupported-yaml-construct` also read an `action.yml` or
+  `action.yaml` in any directory, including the repository root, because
+  GitHub executes a composite action's `runs.steps[].run` exactly as it
+  executes a workflow step's `run:`. `workflow-slop/node20-action-major`
+  still only scans workflow files, and so does `run-expression`'s
+  executed-input (`with:`) scan, which stays a documented blind spot inside
+  an `action.yml`.
+
 ### Fixed
 
 - `slop-detector-mcp --version` now exits cleanly when its stdout reader

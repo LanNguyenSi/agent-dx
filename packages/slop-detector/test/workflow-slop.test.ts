@@ -5,6 +5,7 @@ import path from "node:path";
 import { checkText, checkFiles } from "../src/engine.js";
 import { defaultConfig, mergeConfig } from "../src/config.js";
 import { allPacks } from "../src/packs/registry.js";
+import { isActionMetadataFile } from "../src/packs/workflow-slop.js";
 
 const WORKFLOW_PATH = ".github/workflows/publish.yml";
 
@@ -5830,5 +5831,88 @@ describe("workflow-slop: a merge key that yaml reads as a symbol", () => {
     expect(found[0].rationale).toContain(
       "a scalar key whose value is not text",
     );
+  });
+});
+
+describe("workflow-slop/run-expression in composite actions", () => {
+  const UNSAFE_COMPOSITE = [
+    "name: deploy",
+    "inputs:",
+    "  force:",
+    "    description: force deploy",
+    "runs:",
+    "  using: composite",
+    "  steps:",
+    "    - shell: bash",
+    "      run: ./deploy.sh --force=${{ inputs.force }}",
+  ].join("\n");
+
+  const SAFE_COMPOSITE = [
+    "name: deploy",
+    "inputs:",
+    "  force:",
+    "    description: force deploy",
+    "runs:",
+    "  using: composite",
+    "  steps:",
+    "    - shell: bash",
+    "      env:",
+    "        FORCE: ${{ inputs.force }}",
+    '      run: ./deploy.sh --force="$FORCE"',
+  ].join("\n");
+
+  function runExpressionViolations(text: string, filePath: string) {
+    return runViolations(text, filePath).filter(
+      (v) => v.ruleId === "workflow-slop/run-expression",
+    );
+  }
+
+  it("flags an expression in a composite action's runs.steps[].run (root action.yml)", () => {
+    const v = runExpressionViolations(UNSAFE_COMPOSITE, "action.yml");
+    expect(v).toHaveLength(1);
+    expect(v[0].matched).toContain("inputs.force");
+  });
+
+  it("flags the same expression in a nested action.yaml", () => {
+    const v = runExpressionViolations(
+      UNSAFE_COMPOSITE,
+      ".github/actions/deploy/action.yaml",
+    );
+    expect(v).toHaveLength(1);
+  });
+
+  it("leaves the env:-routed composite action run: clean", () => {
+    expect(runExpressionViolations(SAFE_COMPOSITE, "action.yml")).toHaveLength(
+      0,
+    );
+  });
+
+  it("does not scan a yaml file that is not an action metadata file", () => {
+    expect(runViolations(UNSAFE_COMPOSITE, "docs/my-action.yml")).toHaveLength(
+      0,
+    );
+  });
+
+  it("names an action metadata file by its last path segment only", () => {
+    expect(isActionMetadataFile({ path: "action.yml" })).toBe(true);
+    expect(isActionMetadataFile({ path: "a/b/action.yaml" })).toBe(true);
+    expect(isActionMetadataFile({ path: "a\\b\\action.yml" })).toBe(true);
+    expect(isActionMetadataFile({ path: "my-action.yml" })).toBe(false);
+    expect(isActionMetadataFile({ path: "action.yml.bak" })).toBe(false);
+    expect(isActionMetadataFile({ path: "action.json" })).toBe(false);
+  });
+
+  it("finds the composite action finding through a directory scan", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-composite-"));
+    const dir = path.join(tmp, "some", "dir");
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, "action.yml");
+    fs.writeFileSync(file, UNSAFE_COMPOSITE);
+    const summary = checkFiles([file], baseOpts());
+    expect(
+      summary.violations.filter(
+        (v) => v.ruleId === "workflow-slop/run-expression",
+      ),
+    ).toHaveLength(1);
   });
 });
