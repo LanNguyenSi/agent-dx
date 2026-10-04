@@ -42,6 +42,8 @@ npm install
 npm run build
 ```
 
+`git-batch-cli` is plain JavaScript and has no build step: run `npm install && npm link` in its directory instead.
+
 ## Usage
 
 Example: run the AI-slop linter against a Markdown file from a local build.

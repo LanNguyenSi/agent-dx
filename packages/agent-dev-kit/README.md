@@ -49,10 +49,6 @@ Available feature flags: `memory`, `skills`. Flags are parsed strictly: `memory,
 - `.env.example` only contains variables the generated scaffold actually uses
 - Git initialization skips the first commit cleanly when `user.name` or `user.email` is missing
 
-## Documentation
-
-- [tasks/README.md](./tasks/README.md): implemented task backlog
-
 ## Development
 
 ```bash
