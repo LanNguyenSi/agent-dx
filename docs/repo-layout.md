@@ -10,6 +10,8 @@ pattern is the same for every local-build package:
 cd packages/<name> && npm install && npm run build
 ```
 
+`git-batch-cli` is plain JavaScript and has no build step: run `npm install && npm link` in its directory instead.
+
 If you only care about one package, work in its directory; nothing at the
 root needs to be set up first.
 

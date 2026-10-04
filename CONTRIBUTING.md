@@ -18,7 +18,7 @@ Thanks for your interest. This is a TypeScript monorepo of small, independent to
 
 The monorepo is mixed:
 
-- **npm packages** (`slop-detector`, `github-api-tool`, `git-batch-cli`, `agent-dev-kit`, `friction-log`, `orchestrator-workflow`, `okf-kit`, `mcp-token-audit`, `agent-primitives`):
+- **npm packages** (`slop-detector`, `github-api-tool`, `agent-dev-kit`, `friction-log`, `orchestrator-workflow`, `okf-kit`, `mcp-token-audit`, `agent-primitives`):
 
   ```bash
   git clone https://github.com/LanNguyenSi/agent-dx
@@ -27,6 +27,8 @@ The monorepo is mixed:
   npm run build
   npm test
   ```
+
+- **`git-batch-cli`** is plain JavaScript without a build step: `cd agent-dx/packages/git-batch-cli && npm install && npm test`.
 
 - **Doc-only packages** (`agentic-coding-playbook`, `agent-engineering-playbook`): no install step, just edit Markdown.
 
