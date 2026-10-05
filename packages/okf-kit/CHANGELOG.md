@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-10-05
+
 ### Changed
 
-- The `templates/okf-staleness.yml` pin (install line and header) is now rewritten to the release version by `scripts/bump-okf-kit-pin.mjs` at each release cut, so it no longer needs a manual bump. The script also re-syncs the header of this repo's generated copy `.github/workflows/okf-staleness.yml` and fails before writing when the template lacks exactly one install pin and one header.
+- The `templates/okf-staleness.yml` pin (install line and header) is now rewritten to the release version by `scripts/bump-okf-kit-pin.mjs` at each release cut, so it no longer needs a manual bump. The script also re-syncs the header of this repo's generated copy `.github/workflows/okf-staleness.yml` and fails before writing when the template lacks exactly one install pin and one header. For consumers: the template shipped in 0.17.0 still pinned okf-kit 0.16.0; the 0.17.1 template pins the release that ships it.
 
 ## [0.17.0] - 2026-10-03
 
