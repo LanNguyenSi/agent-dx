@@ -3,7 +3,7 @@ name: OKF staleness
 # GENERATED FROM THE OKF-KIT TEMPLATE `templates/okf-staleness.yml` of the
 # okf-kit package (LanNguyenSi/agent-dx, packages/okf-kit; the template
 # first ships in the okf-kit release after 0.16.0), pinned to okf-kit
-# 0.17.0 below. Do not hand-edit this file outside the lines marked
+# 0.17.1 below. Do not hand-edit this file outside the lines marked
 # "REPO-SPECIFIC": re-sync it from the template whenever the pin moves.
 # A repo that deviates documents the deviation in a comment block at the
 # deviating spot, next to the REPO-SPECIFIC marker.
@@ -60,7 +60,7 @@ jobs:
         # alone here. Move this pin deliberately, never as an automatic
         # upgrade, and record each move in the bundle's log.md together with
         # the old and the new version's measured verdict on this bundle.
-        run: npm install -g okf-kit@0.17.0 --no-audit --no-fund
+        run: npm install -g okf-kit@0.17.1 --no-audit --no-fund
 
       - name: Assert CLI is alive (output, not exit code)
         shell: bash
