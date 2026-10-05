@@ -830,3 +830,10 @@ jobs:
             echo "test:ci not defined, falling back to npm test"
             npm test --if-present
           fi
+
+      # agent-dev-kit only: the CLI scaffold smoke test (create into a temp
+      # dir, assert the expected files). Needs the built dist/cli.js.
+      - name: Scaffold smoke test
+        if: matrix.package == 'agent-dev-kit'
+        shell: bash
+        run: bash scripts/smoke-scaffold.sh
