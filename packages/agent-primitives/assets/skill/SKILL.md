@@ -292,8 +292,9 @@ for unsupported states and best-effort observation limits. Use `drift --base
 ## 9. Commit hygiene
 
 Before every commit run `hygiene --base <rev> --staged`, and before handing
-back run `hygiene --base <rev>`. It refuses backup files (`*-e`, `*-E`,
-`*.bak`, `*.orig`, `*~`), flags a file you were asked only to extend that
-loses most of its lines (`--extend-only <path>`), and flags a changed test
-file with fewer test cases than before. Exit `0` ok, `1` a finding, `2` it
-could not conclude. See the agent-primitives package's docs/hygiene.md.
+back run `hygiene --base <rev>`. It refuses backup files (the BSD `sed -i`
+flag-as-suffix family `*-e`, `*-E`, `*-n`, `*-r`, `*-s`, plus `*.bak`,
+`*.orig`, `*~`), flags a file you were asked only to extend that loses more
+than `--max-delete-percent` of its lines (default 20%; `--extend-only
+<path>`), and flags a changed test file with fewer test cases than before.
+Exit `0` ok, `1` a finding, `2` it could not conclude. See the agent-primitives package's docs/hygiene.md.

@@ -46,8 +46,9 @@ argument or revision is a usage error (exit `2`).
   loses more than
   `--max-delete-percent` (default `20`) of its base line count. A deleted
   file counts as 100%. A path that does not exist at `--base` is skipped with a
-  warning. When the removed-line count cannot be measured (a binary file,
-  or no numstat row, for example a mode-only change), the path is not
+  warning. When the removed-line count cannot be measured (for example a
+  binary file, which numstat reports as `-` instead of a count, or no
+  numstat row at all), the path is not
   checked and a warning says so. Carries `baseLines`, `removedLines` and `removedPercent`.
 - `test_cases_dropped`: a changed test file (a path under `test/`,
   `tests/` or `__tests__/`, or named `*.test.<ext>` or `*.spec.<ext>` with
