@@ -63,10 +63,29 @@ function commitAll(repo: string, msg = "change"): void {
 
 describe("helpers", () => {
   it("matches the four backup basename patterns and nothing else", () => {
-    for (const p of ["a.md-E", "x/y.bak", "z.orig", "doc.md~", "file-E"]) {
+    for (const p of [
+      "a.md-E",
+      "a.md-e",
+      "a.md-n",
+      "a.md-r",
+      "a.md-s",
+      "x/y.bak",
+      "z.orig",
+      "doc.md~",
+      "file-E",
+    ]) {
       expect(isBackupPath(p)).toBe(true);
     }
-    for (const p of ["a.md", "x/backup.ts", "ORIGIN", "E", "dir-E/file.md"]) {
+    for (const p of [
+      "a.md",
+      "x/backup.ts",
+      "ORIGIN",
+      "E",
+      "dir-E/file.md",
+      "dir-e/file.md",
+      "a.md-ee",
+      "a.md-x",
+    ]) {
       expect(isBackupPath(p)).toBe(false);
     }
   });
@@ -126,6 +145,48 @@ describe("hygiene", () => {
       "docs/d.md~",
     ]);
     expect(r.counts.backupFiles).toBe(4);
+  });
+
+  it("refuses the BSD flag-as-suffix leftovers of sed -i -e and sed -i -E", () => {
+    const repo = initRepo();
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    write(repo, "docs/a.md-e", "x\n");
+    write(repo, "docs/b.md-E", "x\n");
+    git(repo, ["add", "-A"]);
+    const r = hygiene({ cwd: repo, base, staged: true });
+    expect(r.status).toBe("fail");
+    expect(r.findings.map((f) => f.path).sort()).toEqual([
+      "docs/a.md-e",
+      "docs/b.md-E",
+    ]);
+  });
+
+  it("does not report a tracked file that already had a backup-style name and is only modified", () => {
+    const repo = initRepo();
+    write(repo, "test/fixture.orig", "one\ntwo\n");
+    write(repo, "notes.md-e", "kept\n");
+    commitAll(repo, "tracked fixtures");
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    write(repo, "test/fixture.orig", "one\ntwo\nthree\n");
+    write(repo, "notes.md-e", "kept\nmore\n");
+    commitAll(repo, "modify fixtures");
+    expect(hygiene({ cwd: repo, base }).status).toBe("ok");
+    git(repo, ["mv", "test/fixture.orig", "test/moved.orig"]);
+    commitAll(repo, "rename between backup-style names");
+    expect(hygiene({ cwd: repo, base }).status).toBe("ok");
+  });
+
+  it("reports a file renamed onto a backup-style name", () => {
+    const repo = initRepo();
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    git(repo, ["mv", "src/a.ts", "src/a.ts~"]);
+    commitAll(repo, "rename to backup name");
+    const r = hygiene({ cwd: repo, base });
+    expect(r.status).toBe("fail");
+    expect(r.findings[0]).toMatchObject({
+      kind: "backup_file",
+      path: "src/a.ts~",
+    });
   });
 
   it("refuses a staged backup file before commit, but not an unstaged one", () => {
@@ -191,6 +252,72 @@ describe("hygiene", () => {
       maxDeletePercent: 19,
     });
     expect(over.status).toBe("fail");
+  });
+
+  it("measures extend-only files whose names git C-quotes (non-ASCII, quote character)", () => {
+    const repo = initRepo();
+    const names = [
+      "docs/caf\u00e9.md",
+      'docs/q"uote.md',
+      "docs/back\\slash.md",
+    ];
+    for (const n of names) write(repo, n, numbered("entry", 50));
+    commitAll(repo, "add quoted names");
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    for (const n of names) write(repo, n, "entry new\n");
+    commitAll(repo, "rewrite");
+    const r = hygiene({ cwd: repo, base, extendOnly: names });
+    expect(r.status).toBe("fail");
+    expect(r.findings.map((f) => f.path).sort()).toEqual([...names].sort());
+    for (const f of r.findings) expect(f.removedPercent).toBe(100);
+    expect(r.warnings).toEqual([]);
+  });
+
+  it("passes an extend-only rename that keeps the content, flags a rename that rewrites it", () => {
+    const repo = initRepo();
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    git(repo, ["mv", "docs/log.md", "docs/log2.md"]);
+    commitAll(repo, "rename");
+    expect(
+      hygiene({ cwd: repo, base, extendOnly: ["docs/log.md"] }).status,
+    ).toBe("ok");
+    write(repo, "docs/log2.md", "entry new\n");
+    commitAll(repo, "rewrite");
+    const r = hygiene({ cwd: repo, base, extendOnly: ["docs/log.md"] });
+    expect(r.findings[0]).toMatchObject({
+      kind: "extend_only_rewrite",
+      removedPercent: 100,
+    });
+  });
+
+  it("warns instead of passing silently when the removed lines cannot be measured", () => {
+    const repo = initRepo();
+    write(repo, "bin.dat", "a\0b\n".repeat(20));
+    commitAll(repo, "binary");
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    write(repo, "bin.dat", "c\0d\n");
+    commitAll(repo, "rewrite binary");
+    const r = hygiene({ cwd: repo, base, extendOnly: ["bin.dat"] });
+    expect(r.status).toBe("ok");
+    expect(r.warnings.join("\n")).toContain("could not measure");
+    expect(r.warnings.join("\n")).toContain("bin.dat");
+  });
+
+  it("warns for an extend-only path that does not exist at the base", () => {
+    const repo = initRepo();
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    write(repo, "docs/new.md", "x\n");
+    commitAll(repo);
+    const r = hygiene({
+      cwd: repo,
+      base,
+      extendOnly: ["docs/new.md", "typo.md"],
+    });
+    expect(r.status).toBe("ok");
+    expect(r.warnings).toEqual([
+      expect.stringContaining("docs/new.md does not exist at"),
+      expect.stringContaining("typo.md does not exist at"),
+    ]);
   });
 
   it("does not flag a heavy rewrite of a file not listed as extend-only", () => {
@@ -316,5 +443,24 @@ describe("hygiene CLI", () => {
     expect(JSON.parse(run.stdout).findings[0].kind).toBe("extend_only_rewrite");
     const usage = await spawnCli(["-C", repo, "hygiene", "--base", "zzzz"]);
     expect(usage.code).toBe(2);
+  });
+
+  it("resolves a relative --extend-only-file against the -C directory", async () => {
+    const repo = initRepo();
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    write(repo, "docs/log.md", "entry new\n");
+    write(repo, "extend-only.txt", "docs/log.md\n");
+    commitAll(repo);
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "hygiene",
+      "--base",
+      base,
+      "--extend-only-file",
+      "extend-only.txt",
+    ]);
+    expect(run.code).toBe(1);
+    expect(JSON.parse(run.stdout).findings[0].kind).toBe("extend_only_rewrite");
   });
 });

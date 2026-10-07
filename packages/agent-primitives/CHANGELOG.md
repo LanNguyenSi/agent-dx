@@ -12,7 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configurable share (default 20%) of a file listed as extend-only, and flags
   changed test files whose test-case count dropped. Meant as a step an
   implementer runs before committing and before handing back; see
-  `docs/hygiene.md`.
+  `docs/hygiene.md`. The backup check covers the BSD flag-as-suffix
+  leftovers of `sed -i -e` and `sed -i -E` (`*-e`, `*-E`, plus `*-n`,
+  `*-r`, `*-s`) and reports only files that newly acquire such a name; the
+  extend-only measurement reads `git diff --numstat -z`, so paths git
+  C-quotes are measured, and an unmeasurable or absent extend-only path
+  warns instead of passing silently. The shipped skill
+  (`assets/skill/SKILL.md`) now lists `hygiene` and points at
+  `docs/hygiene.md`; its digest changes, so `init` reports an existing
+  install as `outdated` until it is refreshed with `--force`.
 
 ## [0.9.0] - 2026-10-03
 

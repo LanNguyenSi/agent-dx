@@ -1925,7 +1925,10 @@ program
     if (opts.extendOnlyFile !== undefined) {
       let text: string;
       try {
-        text = fs.readFileSync(path.resolve(opts.extendOnlyFile), "utf8");
+        text = fs.readFileSync(
+          path.resolve(global.cwd, opts.extendOnlyFile),
+          "utf8",
+        );
       } catch (err) {
         throw new UsageError(
           `hygiene: cannot read --extend-only-file ${opts.extendOnlyFile}: ${err instanceof Error ? err.message : String(err)}`,

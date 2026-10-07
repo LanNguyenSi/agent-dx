@@ -52,10 +52,12 @@ export interface HygieneResult {
   warnings: string[];
 }
 
-/** Basename patterns of editor and `sed -i` leftovers: `*-E` (BSD sed
- * given `-i -E`, where `-E` becomes the backup suffix), `*.bak`, `*.orig`,
- * `*~`. */
-const BACKUP_BASENAME = /(-E|\.bak|\.orig|~)$/;
+/** Basename patterns of editor and `sed -i` leftovers. BSD sed takes the
+ * argument after `-i` as the backup suffix, so `sed -i -E ...` or
+ * `sed -i -e ...` writes `<file>-E` or `<file>-e`. The flag-as-suffix
+ * family covers every sed option letter an agent plausibly writes right
+ * after `-i`: `-e`, `-E`, `-n`, `-r`, `-s`. Plus `*.bak`, `*.orig`, `*~`. */
+const BACKUP_BASENAME = /(-[eEnrs]|\.bak|\.orig|~)$/;
 
 export function isBackupPath(filePath: string): boolean {
   const base = filePath.split("/").pop() ?? filePath;
@@ -116,6 +118,43 @@ function parseNameStatus(out: string): ChangedFile[] {
     }
   }
   return files;
+}
+
+/** Rows of `git diff --numstat -z`: `added\tremoved\tpath\0`, or for a
+ * rename `added\tremoved\t\0old\0new\0`. A binary file counts as `-`. */
+interface NumstatRow {
+  added: number | undefined;
+  removed: number | undefined;
+  oldPath: string;
+  newPath: string;
+}
+
+function parseNumstat(out: string): NumstatRow[] {
+  const parts = out.split("\0");
+  const rows: NumstatRow[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const m = /^(\d+|-)\t(\d+|-)\t(.*)$/s.exec(parts[i] ?? "");
+    if (m === null) continue;
+    const num = (v: string | undefined): number | undefined =>
+      v === undefined || v === "-" ? undefined : Number(v);
+    if (m[3] === "") {
+      rows.push({
+        added: num(m[1]),
+        removed: num(m[2]),
+        oldPath: parts[i + 1] ?? "",
+        newPath: parts[i + 2] ?? "",
+      });
+      i += 2;
+    } else {
+      rows.push({
+        added: num(m[1]),
+        removed: num(m[2]),
+        oldPath: m[3] ?? "",
+        newPath: m[3] ?? "",
+      });
+    }
+  }
+  return rows;
 }
 
 function lineCount(content: string): number {
@@ -183,23 +222,37 @@ export function hygiene(options: HygieneOptions): HygieneResult {
 
   const findings: HygieneFinding[] = [];
 
+  // Only a file that newly acquires a backup-style name is a finding: an
+  // added file, or a rename/copy from a name that did not match. A tracked
+  // file that already carried such a name at the base and is merely modified
+  // is the repository's own file, not a leftover of this change.
   for (const file of changed) {
-    if (file.status === "D") continue;
-    if (isBackupPath(file.newPath)) {
-      findings.push({
-        kind: "backup_file",
-        path: file.newPath,
-        detail: `backup or editor leftover matching *-E, *.bak, *.orig or *~ (${file.status === "A" ? "added" : "changed"} by the range)`,
-      });
+    if (!["A", "R", "C"].includes(file.status)) continue;
+    if (!isBackupPath(file.newPath)) continue;
+    if (
+      (file.status === "R" || file.status === "C") &&
+      isBackupPath(file.oldPath)
+    ) {
+      continue;
     }
+    findings.push({
+      kind: "backup_file",
+      path: file.newPath,
+      detail: `backup or editor leftover matching *-e, *-E, *-n, *-r, *-s, *.bak, *.orig or *~ (${file.status === "A" ? "added" : file.status === "R" ? "renamed to this name" : "copied to this name"} by the range)`,
+    });
   }
 
   const byOld = new Map(changed.map((f) => [normalizePath(f.oldPath), f]));
   for (const target of extendOnly) {
+    const baseContent = showBase(target);
+    if (baseContent === undefined) {
+      warnings.push(
+        `extend-only path ${target} does not exist at ${options.base}; skipped`,
+      );
+      continue;
+    }
     const file = byOld.get(target);
     if (file === undefined) continue;
-    const baseContent = showBase(file.oldPath);
-    if (baseContent === undefined) continue;
     const baseLines = lineCount(baseContent);
     if (baseLines === 0) continue;
     const headContent = file.status === "D" ? "" : showHead(file.newPath);
@@ -207,20 +260,30 @@ export function hygiene(options: HygieneOptions): HygieneResult {
       warnings.push(`could not read ${file.newPath} at ${head}`);
       continue;
     }
-    const numstat = runGit(gitRoot, [
-      "diff",
-      "--no-color",
-      "--no-renames",
-      "--numstat",
-      ...rangeArgs,
-      "--",
-      file.oldPath,
-      ...(file.newPath !== file.oldPath ? [file.newPath] : []),
-    ]);
     let removed = 0;
-    for (const row of numstat.stdout.split("\n")) {
-      const m = /^(\d+)\t(\d+)\t(.*)$/.exec(row);
-      if (m !== null && m[3] === file.oldPath) removed += Number(m[2]);
+    if (file.status !== "D") {
+      const numstat = runGit(gitRoot, [
+        "diff",
+        "--no-color",
+        "-z",
+        "-M",
+        "--numstat",
+        ...rangeArgs,
+        "--",
+        file.oldPath,
+        ...(file.newPath !== file.oldPath ? [file.newPath] : []),
+      ]);
+      const row =
+        numstat.error === undefined && numstat.status === 0
+          ? parseNumstat(numstat.stdout).find((r) => r.oldPath === file.oldPath)
+          : undefined;
+      if (row?.removed === undefined) {
+        warnings.push(
+          `could not measure removed lines of extend-only path ${file.oldPath} (no numstat row, or a binary file); not checked`,
+        );
+        continue;
+      }
+      removed = row.removed;
     }
     if (file.status === "D") removed = baseLines;
     const pct = Math.round((removed / baseLines) * 1000) / 10;
