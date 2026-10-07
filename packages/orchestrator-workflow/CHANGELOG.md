@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- The implementer prompt (every tier variant, rendered from the one asset)
+  gains a commit hygiene rule: run a hygiene check before each commit and
+  before returning (a runner the briefing names, else by hand from
+  `git status --porcelain`, `git diff --cached --stat <base>` before a commit
+  and `git diff --stat <base>..HEAD` before returning), naming each
+  extend-only file, so staged or committed backup files (`*-E`, `*-e`,
+  `*.bak`, `*.orig`, `*~`), a mostly-deleted extend-only file and a changed test file with fewer test
+  cases block the commit or the return. The prompt stays tool-agnostic; the
+  mechanical check is the `agent-primitives hygiene` command, not a hook the
+  kit installs into other repositories. Pin in
+  `test/commit-hygiene-rule.test.ts`.
+
 ## [0.43.1] - 2026-10-01
 
 - Give the multi-subprocess dormant Opencode sync regression its existing

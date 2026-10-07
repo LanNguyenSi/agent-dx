@@ -45,6 +45,11 @@ import {
 } from "./init/index.js";
 import { drift, type DriftResult } from "./drift/index.js";
 import {
+  DEFAULT_MAX_DELETE_PERCENT,
+  hygiene,
+  type HygieneResult,
+} from "./hygiene/index.js";
+import {
   captureSnapshot,
   compareSnapshots,
   persistSnapshot,
@@ -1857,6 +1862,116 @@ program
       exitCode,
       { format: global.format, maxChars: global.maxChars },
       () => renderDriftText(result),
+    );
+  });
+
+interface HygieneCliOptions {
+  base: string;
+  head?: string;
+  staged?: boolean;
+  extendOnly: string[];
+  extendOnlyFile?: string;
+  maxDeletePercent: string;
+}
+
+function renderHygieneText(result: HygieneResult): string {
+  const lines: string[] = [`status: ${result.status}`, ""];
+  for (const f of result.findings) {
+    lines.push(`${f.kind}: ${f.path}: ${f.detail}`);
+  }
+  lines.push("");
+  lines.push(
+    `${String(result.counts.files)} changed file(s), ${String(result.findings.length)} finding(s)`,
+  );
+  if (result.warnings.length > 0) {
+    lines.push("");
+    lines.push("warnings:");
+    for (const warning of result.warnings) lines.push(`  - ${warning}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+program
+  .command("hygiene")
+  .description(
+    "Refuse backup files (*-E, *.bak, *.orig, *~) and flag wholesale rewrites of extend-only files and dropped test cases in a git range or the index",
+  )
+  .requiredOption("--base <rev>", "base revision the task started from")
+  .option("--head <rev>", "head revision (default HEAD)")
+  .option(
+    "--staged",
+    "compare --base against the git index instead of a commit (run before git commit)",
+  )
+  .option(
+    "--extend-only <path>",
+    "root-relative path the task may only extend (repeatable)",
+    collectAllow,
+    [] as string[],
+  )
+  .option(
+    "--extend-only-file <file>",
+    "file listing extend-only paths, one per line; blank lines and # comments ignored",
+  )
+  .option(
+    "--max-delete-percent <n>",
+    "flag an extend-only file that loses more than this percent of its base lines",
+    String(DEFAULT_MAX_DELETE_PERCENT),
+  )
+  .action(async (opts: HygieneCliOptions, command: Command) => {
+    const start = Date.now();
+    const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
+    const extendOnly = [...opts.extendOnly];
+    if (opts.extendOnlyFile !== undefined) {
+      let text: string;
+      try {
+        text = fs.readFileSync(
+          path.resolve(global.cwd, opts.extendOnlyFile),
+          "utf8",
+        );
+      } catch (err) {
+        throw new UsageError(
+          `hygiene: cannot read --extend-only-file ${opts.extendOnlyFile}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      for (const raw of text.split("\n")) {
+        const line = raw.trim();
+        if (line.length > 0 && !line.startsWith("#")) extendOnly.push(line);
+      }
+    }
+    const result = hygiene({
+      cwd: global.cwd,
+      base: opts.base,
+      head: opts.head,
+      staged: Boolean(opts.staged),
+      extendOnly,
+      maxDeletePercent: Number(opts.maxDeletePercent),
+    });
+    const { envelope, exitCode } = buildEnvelope({
+      version: VERSION,
+      command: "hygiene",
+      status: result.status,
+      durationMs: Date.now() - start,
+      cwd: global.cwd,
+      warnings: result.warnings,
+      logs: [],
+      extra: {
+        base: result.base,
+        head: result.head,
+        max_delete_percent: result.maxDeletePercent,
+        extend_only: result.extendOnly,
+        findings: result.findings,
+        counts: result.counts,
+      },
+      keepWhole: ["counts"],
+      maxChars: global.maxChars,
+      logDir: global.logDir,
+    });
+    emit(
+      envelope,
+      exitCode,
+      { format: global.format, maxChars: global.maxChars },
+      () => renderHygieneText(result),
     );
   });
 

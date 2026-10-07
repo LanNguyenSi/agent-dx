@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-10-01T05:54:27Z
+timestamp: 2026-10-07T08:13:04Z
 sources:
   - packages/orchestrator-workflow/assets/agents/explorer.md
   - packages/orchestrator-workflow/assets/agents/task-slicer.md
@@ -134,7 +134,7 @@ trivial change.
   (`## Explorer output contract`) vs.
   `packages/orchestrator-workflow/assets/agents/explorer.md:54-76#"recommendation:"`.
 - Implementer: `packages/orchestrator-workflow/assets/skill/references/contracts.md:101#"## Implementer output contract"`
-  vs. `packages/orchestrator-workflow/assets/agents/implementer.md:258#"role: implementer"`.
+  vs. `packages/orchestrator-workflow/assets/agents/implementer.md:275#"role: implementer"`.
   Both copies gained a `mutation_probes` field in 0.16.0; see
   [Mutation probes requirement](#mutation-probes-requirement-0160) below.
   Both copies also gained a `commits` field; see
@@ -449,7 +449,7 @@ rule's prose, mirroring the gap the 0.14.0 reproduction trigger closed for
 step 7 in the log entry above, but left open here until this pass.
 
 Both output-contract copies carry the field (`mutant, verified_applied_via,
-result, restored_verified`, `packages/orchestrator-workflow/assets/skill/references/contracts.md:137#"restored_verified:"` and `implementer.md:288#"restored_verified:"`)
+result, restored_verified`, `packages/orchestrator-workflow/assets/skill/references/contracts.md:137#"restored_verified:"` and `implementer.md:305#"restored_verified:"`)
 at 0.16.0 (later grown to eleven sub-fields; see Mutation probe definition
 fields and expectation split below).
 The installed prompt's matching bullet
@@ -512,7 +512,7 @@ Both output-contract copies gained a fifth `mutation_probes` sub-field,
 replayed this round: `true`), added identically
 (`packages/orchestrator-workflow/assets/skill/references/contracts.md:138#"replayed: false | true"`
 and
-`packages/orchestrator-workflow/assets/agents/implementer.md:289#"replayed: false | true"`),
+`packages/orchestrator-workflow/assets/agents/implementer.md:306#"replayed: false | true"`),
 the same byte-for-byte-block rigor already applied to the `mutation_probes`
 and `commits` fields above. Step 7 no longer grants the reviewer a
 skip permission directly (the reviewer never reads SKILL.md, so that
@@ -654,7 +654,7 @@ in `summary`
 The result is reported in the implementer output contract's
 `class_closure` field, added to both copies identically
 (`packages/orchestrator-workflow/assets/skill/references/contracts.md:139#"class_closure:"`
-and `packages/orchestrator-workflow/assets/agents/implementer.md:290#"class_closure:"`,
+and `packages/orchestrator-workflow/assets/agents/implementer.md:307#"class_closure:"`,
 byte-identical block, sitting after `mutation_probes` and before `risks`
 in both, the same rigor already applied to `mutation_probes` and
 `commits` above): `kind: enumerated | source | not_applicable`
@@ -735,7 +735,7 @@ round; the counts live in the CHANGELOG entry for this rule, not here
 
 The implementer output contract gained a `commits` field, added to both
 copies identically (`packages/orchestrator-workflow/assets/skill/references/contracts.md:151#"commits:"`
-and `packages/orchestrator-workflow/assets/agents/implementer.md:258#"role: implementer"`,
+and `packages/orchestrator-workflow/assets/agents/implementer.md:275#"role: implementer"`,
 byte-identical block, the same rigor already applied to `mutation_probes`
 above). It lists the full sha of every commit the implementer produced on
 the task branch, in order (worded in substance in the installed prompt's rule bullet,
@@ -782,6 +782,26 @@ Reworded to name a `check` invocation that takes one-or-more paths
 to lead with the PATH-installed form rather than a repository-vendored
 path, and to state that only exit `0` or `1` is a result while exit `2`
 is a usage error rather than a clean check.
+
+The prompt also carries a commit hygiene rule bullet directly after the
+slop-detector one
+(`packages/orchestrator-workflow/assets/agents/implementer.md:226#"Run a commit hygiene check before every commit and again before"`):
+the implementer runs a hygiene runner when the briefing names one, over the
+staged changes before a commit and over the committed range before
+returning, naming every extend-only file from the assignment, and otherwise
+checks by hand: `git status --porcelain` and `git diff --cached --stat
+<base>` before a commit, `git diff --stat <base>..HEAD` before returning. A
+backup file (`*-E`, `*-e`, `*.bak`, `*.orig`, `*~`), an extend-only file that
+loses a large share of its lines (the runner's threshold) or a changed test
+file with fewer test cases blocks the commit or the return. The sed advice
+is cross-platform: BSD needs `sed -i ''`, GNU needs `sed -i`, and a bare
+`sed -i -E` or `sed -i -e` on macOS leaves a flag-named backup.
+Like the other runner guidance the prompt names no product or binary
+(`test/docs-consistency.test.ts` pins that for the implementer prompt); the
+concrete command is `agent-primitives hygiene`, documented in that
+package, and the briefing carries it. The rule sits in the one
+`implementer.md`, from which every tier variant is rendered, so no variant
+carries a separate copy.
 
 ## Review-method axis: method_applied and withdrawn
 

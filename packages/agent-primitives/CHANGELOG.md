@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Add the `hygiene` command: refuses backup files (`*-E`, `*.bak`, `*.orig`,
+  `*~`) in a git range or the index, flags a commit that deletes more than a
+  configurable share (default 20%) of a file listed as extend-only, and flags
+  changed test files whose test-case count dropped. Meant as a step an
+  implementer runs before committing and before handing back; see
+  `docs/hygiene.md`. The backup check covers the BSD flag-as-suffix
+  leftovers of `sed -i -e` and `sed -i -E` (`*-e`, `*-E`, plus `*-n`,
+  `*-r`, `*-s`) and reports only files that newly acquire such a name; the
+  extend-only measurement reads `git diff --numstat -z` with
+  `--literal-pathspecs`, so paths git C-quotes and paths that look like
+  pathspec magic (a leading `:`) are measured, and an unmeasurable or absent extend-only path
+  warns instead of passing silently. The shipped skill
+  (`assets/skill/SKILL.md`) now lists `hygiene` and points at
+  `docs/hygiene.md`; its digest changes, so `init` reports an existing
+  install as `outdated` until it is refreshed with `--force`.
+
 ## [0.9.0] - 2026-10-03
 
 - Add read-only `snapshot` and `delta` commands and library APIs for versioned
