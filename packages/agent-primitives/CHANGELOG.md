@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Add the `hygiene` command: refuses backup files (`*-E`, `*.bak`, `*.orig`,
+  `*~`) in a git range or the index, flags a commit that deletes more than a
+  configurable share (default 20%) of a file listed as extend-only, and flags
+  changed test files whose test-case count dropped. Meant as a step an
+  implementer runs before committing and before handing back; see
+  `docs/hygiene.md`.
+
 ## [0.9.0] - 2026-10-03
 
 - Add read-only `snapshot` and `delta` commands and library APIs for versioned
