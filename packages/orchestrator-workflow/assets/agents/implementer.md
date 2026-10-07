@@ -228,15 +228,18 @@ Rules:
   command), run it against the base your task assignment names: over the
   staged changes before a commit, over the committed range before returning,
   naming every file the assignment says you only extend. Without one, do the
-  same by hand from `git status --porcelain` and `git diff --stat
-  <base>..HEAD`. The check refuses staged or committed backup files (`*-E`,
-  `*.bak`, `*.orig`, `*~`) and flags a file you were asked to extend that
-  loses most of its lines, and a changed test file that has fewer test cases
-  than before. A finding blocks the commit or the return: remove the backup
-  file, restore the dropped content, extend the file instead of replacing
-  it; a drop that is intended is named in `risks` with its reason. Edit in
-  place with the edit tool or `sed -i ''`; a bare `sed -i -E` on macOS
-  treats `-E` as the backup suffix and leaves a `<file>-E` copy behind.
+  same by hand: before a commit read `git status --porcelain` and `git diff
+  --cached --stat <base>`, before returning `git diff --stat <base>..HEAD`.
+  The check refuses staged or committed backup files (`*-E`, `*-e`, `*.bak`,
+  `*.orig`, `*~`) and flags a file you were asked to extend that loses a
+  large share of its lines (the runner's threshold), and a changed test file
+  that has fewer test cases than before. A finding blocks the commit or the
+  return: remove the backup file, restore the dropped content, extend the
+  file instead of replacing it; a drop that is intended is named in `risks`
+  with its reason. Edit in place with the edit tool; with `sed`, BSD needs
+  `sed -i ''` and GNU needs `sed -i`, and a bare `sed -i -E` or `sed -i -e`
+  on macOS treats the flag as the backup suffix and leaves a `<file>-E` or
+  `<file>-e` copy behind.
 - Verification plans, probe plans, and repeat tallies run in the foreground,
   and the implementer reports their returns in the same turn as the last
   check. A background monitor is no substitute for those returns.
