@@ -278,9 +278,9 @@ describe("hygiene", () => {
     const base = git(repo, ["rev-parse", "HEAD"]).trim();
     git(repo, ["mv", "docs/log.md", "docs/log2.md"]);
     commitAll(repo, "rename");
-    expect(
-      hygiene({ cwd: repo, base, extendOnly: ["docs/log.md"] }).status,
-    ).toBe("ok");
+    const kept = hygiene({ cwd: repo, base, extendOnly: ["docs/log.md"] });
+    expect(kept.status).toBe("ok");
+    expect(kept.warnings).toEqual([]);
     write(repo, "docs/log2.md", "entry new\n");
     commitAll(repo, "rewrite");
     const r = hygiene({ cwd: repo, base, extendOnly: ["docs/log.md"] });
@@ -288,6 +288,46 @@ describe("hygiene", () => {
       kind: "extend_only_rewrite",
       removedPercent: 100,
     });
+  });
+
+  it("measures an extend-only file renamed and cut while git still reports a rename", () => {
+    const repo = initRepo();
+    write(repo, "docs/ext.md", numbered("entry", 50));
+    commitAll(repo, "add ext");
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    git(repo, ["mv", "docs/ext.md", "docs/ext2.md"]);
+    write(repo, "docs/ext2.md", numbered("entry", 30));
+    commitAll(repo, "rename and cut");
+    const status = git(repo, ["diff", "-M", "--name-status", base, "HEAD"]);
+    expect(status).toMatch(/^R\d+\tdocs\/ext\.md\tdocs\/ext2\.md$/m);
+    const r = hygiene({ cwd: repo, base, extendOnly: ["docs/ext.md"] });
+    expect(r.status).toBe("fail");
+    expect(r.findings).toHaveLength(1);
+    expect(r.findings[0]).toMatchObject({
+      kind: "extend_only_rewrite",
+      path: "docs/ext.md",
+      baseLines: 50,
+      removedLines: 20,
+      removedPercent: 40,
+    });
+    expect(r.warnings).toEqual([]);
+  });
+
+  it("treats an extend-only path as a literal name, not pathspec magic", () => {
+    const repo = initRepo();
+    write(repo, ":colon.md", numbered("entry", 50));
+    commitAll(repo, "add colon name");
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    write(repo, ":colon.md", "entry new\n");
+    commitAll(repo, "rewrite");
+    const r = hygiene({ cwd: repo, base, extendOnly: [":colon.md"] });
+    expect(r.status).toBe("fail");
+    expect(r.findings[0]).toMatchObject({
+      kind: "extend_only_rewrite",
+      path: ":colon.md",
+      removedPercent: 100,
+    });
+    expect(r.warnings).toEqual([]);
   });
 
   it("warns instead of passing silently when the removed lines cannot be measured", () => {

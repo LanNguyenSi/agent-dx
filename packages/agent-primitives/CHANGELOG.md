@@ -15,8 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `docs/hygiene.md`. The backup check covers the BSD flag-as-suffix
   leftovers of `sed -i -e` and `sed -i -E` (`*-e`, `*-E`, plus `*-n`,
   `*-r`, `*-s`) and reports only files that newly acquire such a name; the
-  extend-only measurement reads `git diff --numstat -z`, so paths git
-  C-quotes are measured, and an unmeasurable or absent extend-only path
+  extend-only measurement reads `git diff --numstat -z` with
+  `--literal-pathspecs`, so paths git C-quotes and paths that look like
+  pathspec magic (a leading `:`) are measured, and an unmeasurable or absent extend-only path
   warns instead of passing silently. The shipped skill
   (`assets/skill/SKILL.md`) now lists `hygiene` and points at
   `docs/hygiene.md`; its digest changes, so `init` reports an existing

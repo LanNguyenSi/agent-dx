@@ -262,7 +262,10 @@ export function hygiene(options: HygieneOptions): HygieneResult {
     }
     let removed = 0;
     if (file.status !== "D") {
+      // `--literal-pathspecs`: a path is a file name, never pathspec magic,
+      // so a file named `:x.md` or `*.md` is measured as itself.
       const numstat = runGit(gitRoot, [
+        "--literal-pathspecs",
         "diff",
         "--no-color",
         "-z",
