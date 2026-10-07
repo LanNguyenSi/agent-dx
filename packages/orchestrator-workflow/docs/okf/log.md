@@ -1,5 +1,12 @@
 # Bundle log
 
+- 2026-10-07T07:57:30Z, re-stamped `review-gate-and-waivers.md` and
+  `run-state-lifecycle-and-markers.md` after `CHANGELOG.md` gained an
+  Unreleased entry for the commit hygiene rule. Both docs cite the changelog
+  by version heading, and the new entry is under `[Unreleased]`, so no
+  claim in either changed; `subagent-contracts-superset.md` was re-stamped
+  with them.
+
 - 2026-10-07T07:53:30Z, commit hygiene rule added to the implementer prompt: a rule bullet
   after the slop-detector one requires `agent-primitives hygiene` before each
   commit and before returning. It shifted `implementer.md` lines from the
