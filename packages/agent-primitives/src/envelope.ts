@@ -767,6 +767,15 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
     return { envelope, exitCode: exitCodeForStatus(input.status) };
   }
   base.truncated = true;
+  // A reduced result names the complete one in a field of its own: the
+  // path also sits in `logs`, but only as the last entry of a list that
+  // may be long, and relative when `--log-dir` was. It joins every
+  // reduced candidate below (so the bound accounts for its size) but not
+  // the fixed-field skeleton, which stays the same shape for every result.
+  const pointer: Record<string, unknown> =
+    fullResultPath === undefined
+      ? {}
+      : { fullResult: path.resolve(fullResultPath) };
 
   // The skeleton (fixed fields only) is never cut, so it is a hard floor
   // on what the reduction can achieve: aim for max(maxChars,
@@ -788,6 +797,7 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
     const candidate = {
       ...base,
       ...applyCaps(payload, limits, input.keepWhole ?? []),
+      ...pointer,
     };
     if (serializedLength(candidate) > effectiveMaxChars) return false;
     best = candidate;

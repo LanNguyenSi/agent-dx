@@ -302,6 +302,67 @@ describe("cli", () => {
       expect(fs.existsSync(artifact)).toBe(true);
   });
 
+  it("probe --plan with more than 7 mutants: a roomy budget lists every mutant, a tight one names the complete result in fullResult", async () => {
+    const count = 27;
+    const repo = makeTmpDir();
+    const logs = makeTmpDir();
+    const git = (args: string[]) => execFileSync("git", args, { cwd: repo });
+    git(["init", "-q"]);
+    git(["config", "user.email", "test@example.com"]);
+    git(["config", "user.name", "test"]);
+    const lines = Array.from({ length: count }, (_, i) => `var v${i} = ${i};`);
+    fs.writeFileSync(
+      path.join(repo, "fixture.js"),
+      [...lines, "module.exports = true;", ""].join("\n"),
+    );
+    git(["add", "."]);
+    git(["commit", "-qm", "fixture"]);
+    const plan = path.join(repo, "plan.json");
+    fs.writeFileSync(
+      plan,
+      JSON.stringify({
+        test: "node -e \"process.exit(require('./fixture.js') ? 0 : 1)\"",
+        mutants: lines.map((_, i) => ({
+          file: "fixture.js",
+          line: i + 1,
+          replace: `var v${i} = -1;`,
+        })),
+      }),
+    );
+
+    const roomy = await spawnCli([
+      "-C",
+      repo,
+      "-l",
+      logs,
+      "-m",
+      "1000000",
+      "probe",
+      "--plan",
+      plan,
+    ]);
+    const roomyEnvelope = JSON.parse(roomy.stdout);
+    expect(roomyEnvelope.truncated).toBe(false);
+    expect(roomyEnvelope.plan.results).toHaveLength(count);
+
+    const tight = await spawnCli([
+      "-C",
+      repo,
+      "-l",
+      logs,
+      "probe",
+      "--plan",
+      plan,
+    ]);
+    const tightEnvelope = JSON.parse(tight.stdout);
+    expect(tightEnvelope.truncated).toBe(true);
+    expect(tightEnvelope.plan.summary.total).toBe(count);
+    expect(path.isAbsolute(tightEnvelope.fullResult)).toBe(true);
+    expect(tightEnvelope.logs).toContain(tightEnvelope.fullResult);
+    const saved = JSON.parse(fs.readFileSync(tightEnvelope.fullResult, "utf8"));
+    expect(saved.plan.results).toHaveLength(count);
+  }, 120000);
+
   it("prints parseable JSON with status: usage_error on stdout and exits 2 for a mistyped flag", async () => {
     const run = await spawnCli(["doctor", "--no-such-flag"]);
     expect(run.code).toBe(2);

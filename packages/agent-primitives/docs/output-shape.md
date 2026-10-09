@@ -39,7 +39,10 @@ Every subcommand accepts:
   depth it was cut at, instead of vanishing; when not even the shallowest
   structure fits, a warning says the result was reduced to the fixed
   fields alone and points at the full result on disk. The full untruncated
-  result is written to the log directory and its path returned in `logs`.
+  result is written to the log directory and its path returned in `logs`. When the result was reduced, the same path is also returned
+  absolute in the top-level `fullResult` field (a `probe --plan` run's
+  `plan.results` is cut like any other array, so `fullResult` is where every
+  mutant's verdict lives).
   The reduction reads no clock and does no work proportional to how far
   over the bound a result is: within one process the same result always
   yields the same envelope, and between processes the only thing that

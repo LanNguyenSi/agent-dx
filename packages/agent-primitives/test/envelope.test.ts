@@ -152,7 +152,10 @@ function deepestContainerLevel(value: unknown, level: number): number {
 
 /** The envelope's keys that are not fixed fields. */
 function payloadKeysOf(envelope: Record<string, unknown>): string[] {
-  return Object.keys(envelope).filter((k) => !FIXED_FIELDS.includes(k));
+  // `fullResult` is the pointer a reduced envelope adds, not payload.
+  return Object.keys(envelope).filter(
+    (k) => !FIXED_FIELDS.includes(k) && k !== "fullResult",
+  );
 }
 
 const TOTAL_LOSS_PREFIX = "result reduced to the fixed fields only";
