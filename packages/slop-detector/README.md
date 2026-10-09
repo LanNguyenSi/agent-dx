@@ -45,6 +45,32 @@ slop-detector check . --pack agent-tics --explain
 
 Run `slop-detector list-rules` for the full rule catalogue with severities and rationales. See [What a run looks like](docs/integration.md#what-a-run-looks-like) for sample output.
 
+## GitHub Action
+
+A composite action builds this package from the checkout at the action's ref and runs the CLI, so the ref you pin is the exact CLI source you run:
+
+```yaml
+- uses: actions/checkout@v5
+- uses: LanNguyenSi/agent-dx/packages/slop-detector/action@<ref>
+  with:
+    path: .
+    pack: placement-slop
+    config: slop.config.yml
+    severity-threshold: block
+```
+
+Until a tag exists, `<ref>` must be a branch or a commit SHA. The action does not install from the npm registry because the bare `slop-detector` name there belongs to an unrelated package.
+
+| Input | Default | Meaning |
+| --- | --- | --- |
+| `path` | `.` | File or directory to scan. |
+| `pack` | none | Comma-separated pack ids, passed as repeated `--pack`. |
+| `config` | none | Path to a `slop.config.yml` / `.json`. |
+| `severity-threshold` | `block` | Fail at or above this severity: `block`, `warn` or `info`. Any other value fails the step. |
+| `changed-files-only` | `false` | On `pull_request` events, scan only files from `git diff --name-only <base>...<head>` that still exist (needs a checkout with enough history, for example `fetch-depth: 0`). |
+
+Each violation becomes a workflow annotation: `block` as `::error`, `warn` as `::warning`, `info` as `::notice`. The step exits 1 when any violation is at or above the threshold, 0 otherwise, and 2 (with an error annotation) when the CLI exits 2 or its output is not parseable JSON.
+
 ## Documentation
 
 - [Rule pack reference](docs/rule-packs.md): the full pack table, plus `ui-slop` and `placement-slop` worked examples.

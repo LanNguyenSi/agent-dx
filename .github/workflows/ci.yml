@@ -46,6 +46,22 @@ jobs:
       - name: Check for org-, machine-, or point-in-time-bound evidence in instruction files
         run: node packages/slop-detector/dist/cli.js check . --pack placement-slop --config slop.config.yml
 
+  placement-guard-action:
+    name: placement guard via composite action
+    runs-on: ubuntu-latest
+    # Same 5-minute budget as placement-guard: the action runs the same
+    # install and build before scanning.
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: ./packages/slop-detector/action
+        with:
+          path: .
+          pack: placement-slop
+          config: slop.config.yml
+          severity-threshold: block
+
   bundle-prose-guard:
     name: OKF bundle prose guard
     runs-on: ubuntu-latest

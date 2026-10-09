@@ -9,6 +9,10 @@ specific pack and config:
   pack: it blocks org-, machine-, or point-in-time-bound evidence (machine
   paths, run ids, counts like "four so far") from landing in instruction
   files.
+- `placement guard via composite action` runs the same check through the
+  repository's own composite action
+  (`packages/slop-detector/action`, see the package README), as a dogfood
+  of the action; it must agree with `placement-guard`.
 - `review-guard` checks the whole repository with the `review-slop` pack:
   it blocks run-local review references from landing in reusable content.
 - `OKF bundle prose guard` checks
