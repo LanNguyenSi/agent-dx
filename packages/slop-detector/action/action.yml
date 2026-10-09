@@ -1,0 +1,47 @@
+name: slop-detector
+description: Run slop-detector from the checkout at this action's ref and annotate findings.
+inputs:
+  path:
+    description: File or directory to scan.
+    required: false
+    default: "."
+  pack:
+    description: Comma-separated pack ids to run (default is the CLI's default packs).
+    required: false
+    default: ""
+  config:
+    description: Path to a slop.config.yml / .json.
+    required: false
+    default: ""
+  severity-threshold:
+    description: Fail the step when a violation is at or above this severity (block, warn, info).
+    required: false
+    default: block
+  changed-files-only:
+    description: On pull_request events, scan only files changed in the PR (needs enough fetch depth for the base commit).
+    required: false
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v5
+      with:
+        node-version: 22
+    - name: Install slop-detector
+      shell: bash
+      working-directory: ${{ github.action_path }}/..
+      run: npm ci --no-audit --no-fund
+    - name: Build slop-detector
+      shell: bash
+      working-directory: ${{ github.action_path }}/..
+      run: npm run build
+    - name: Run slop-detector
+      shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_PACK: ${{ inputs.pack }}
+        INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_SEVERITY_THRESHOLD: ${{ inputs.severity-threshold }}
+        INPUT_CHANGED_FILES_ONLY: ${{ inputs.changed-files-only }}
+        ACTION_ROOT: ${{ github.action_path }}/..
+      run: node "$ACTION_ROOT/dist/action/run.js"
