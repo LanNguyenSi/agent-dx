@@ -725,7 +725,8 @@ describe("buildEnvelope: a payload that fits nowhere", () => {
   });
 
   it("names the absolute full-result path in the warning, and says so when none was written", () => {
-    const logDir = makeTmpDir();
+    // A relative log dir, so an unresolved path in the warning would show.
+    const logDir = path.relative(process.cwd(), makeTmpDir());
     const extra = { tools: Array.from({ length: 20 }, (_, i) => ({ i })) };
     const { envelope } = buildEnvelope({
       version: "0.1.0",
@@ -739,6 +740,7 @@ describe("buildEnvelope: a payload that fits nowhere", () => {
     });
     const logs = envelope.logs as string[];
     expect(logs.length).toBe(1);
+    expect(path.isAbsolute(logs[0])).toBe(false);
     const warning = (envelope.warnings as string[]).find((w) =>
       w.startsWith(TOTAL_LOSS_PREFIX),
     );
