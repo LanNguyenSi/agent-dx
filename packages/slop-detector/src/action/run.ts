@@ -108,7 +108,34 @@ export function parseSummary(stdout: string): CheckSummary {
   if (s === null || typeof s !== "object" || !Array.isArray(s.violations)) {
     throw new Error("slop-detector output has no violations array");
   }
+  s.violations.forEach((v: unknown, i) => {
+    if (!isViolationShape(v)) {
+      throw new Error(
+        `slop-detector output has a malformed violation at index ${i}`,
+      );
+    }
+  });
+  if (
+    s.warnings !== undefined &&
+    (!Array.isArray(s.warnings) ||
+      !s.warnings.every((w: unknown) => typeof w === "string"))
+  ) {
+    throw new Error("slop-detector output has a malformed warnings list");
+  }
   return s as CheckSummary;
+}
+
+function isViolationShape(v: unknown): boolean {
+  if (v === null || typeof v !== "object") return false;
+  const o = v as Record<string, unknown>;
+  return (
+    typeof o.severity === "string" &&
+    Object.prototype.hasOwnProperty.call(RANK, o.severity) &&
+    typeof o.path === "string" &&
+    typeof o.line === "number" &&
+    Number.isFinite(o.line) &&
+    typeof o.message === "string"
+  );
 }
 
 class ActionFailure extends Error {
@@ -253,7 +280,11 @@ export function runAction(
       deps.write(`::error title=slop-detector::${escapeData(err.message)}\n`);
       return err.code;
     }
-    throw err;
+    const message = err instanceof Error ? err.message : String(err);
+    deps.write(
+      `::error title=slop-detector::${escapeData(`unexpected error: ${message}`)}\n`,
+    );
+    return 2;
   }
 }
 

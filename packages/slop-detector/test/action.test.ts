@@ -1,4 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   escapeData,
   escapeProperty,
@@ -14,6 +19,7 @@ import {
   selectChangedFiles,
 } from "../src/action/run.js";
 import type { Severity, Violation } from "../src/types.js";
+import { ensureBuilt } from "./built-cli.js";
 
 function violation(
   severity: Severity,
@@ -142,6 +148,35 @@ describe("parseSummary", () => {
 
   it("rejects JSON without violations", () => {
     expect(() => parseSummary("{}")).toThrow(/no violations array/);
+  });
+
+  it("rejects a violation missing its fields", () => {
+    expect(() => parseSummary('{"violations":[{}]}')).toThrow(
+      /malformed violation at index 0/,
+    );
+  });
+
+  it("rejects an unknown severity, a non-string path, a non-numeric line, a non-string message", () => {
+    const bad: Partial<Record<keyof Violation, unknown>>[] = [
+      { severity: "fatal" },
+      { severity: "toString" },
+      { path: 3 },
+      { line: "3" },
+      { message: null },
+    ];
+    for (const over of bad) {
+      const json = JSON.stringify({
+        violations: [{ ...violation("block"), ...over }],
+      });
+      expect(() => parseSummary(json)).toThrow(/malformed violation/);
+    }
+  });
+
+  it("rejects warnings that are not an array of strings", () => {
+    for (const warnings of ["w", [1], [null]]) {
+      const json = JSON.stringify({ violations: [], warnings });
+      expect(() => parseSummary(json)).toThrow(/malformed warnings/);
+    }
   });
 });
 
@@ -293,6 +328,25 @@ describe("runAction exit codes", () => {
     expect(h.out.join("")).toContain("::error");
   });
 
+  it("a malformed violation in the CLI summary gives 2 with an ::error", () => {
+    const h = harness({ cli: { stdout: '{"violations":[{}]}' } });
+    expect(runAction({ GITHUB_WORKSPACE: "/w/repo" }, h.deps)).toBe(2);
+    expect(h.out.join("")).toMatch(
+      /^::error title=slop-detector::.*malformed violation/m,
+    );
+  });
+
+  it("an unexpected error gives 2 with an ::error instead of throwing", () => {
+    const h = harness({});
+    h.deps.spawn = () => {
+      throw new Error("spawn exploded");
+    };
+    expect(runAction({ GITHUB_WORKSPACE: "/w/repo" }, h.deps)).toBe(2);
+    expect(h.out.join("")).toBe(
+      "::error title=slop-detector::unexpected error: spawn exploded\n",
+    );
+  });
+
   it("de-duplicates repeated warnings", () => {
     const stdout = JSON.stringify({
       ...JSON.parse(cleanJson),
@@ -367,5 +421,56 @@ describe("runAction changed-files-only", () => {
     runAction({ ...prEnv, INPUT_PATH: "/w/repo/docs" }, h.deps);
     const cli = h.calls[1].args;
     expect(cli.slice(cli.indexOf("--") + 1)).toEqual(["docs/a.md"]);
+  });
+});
+
+// The action step runs the built entrypoint (`node dist/action/run.js`, see
+// action/action.yml), and only the built tree resolves the CLI it spawns
+// (`dist/cli.js`), so these tests run that built file as a subprocess and
+// check the process exit code, not just runAction's return value.
+describe("action entrypoint subprocess", () => {
+  const packageRoot = path.dirname(
+    path.dirname(fileURLToPath(import.meta.url)),
+  );
+  const entry = path.join(packageRoot, "dist", "action", "run.js");
+  let workspace: string;
+
+  beforeAll(() => {
+    ensureBuilt();
+    workspace = fs.mkdtempSync(path.join(os.tmpdir(), "slop-action-"));
+    fs.writeFileSync(
+      path.join(workspace, "AGENTS.md"),
+      "# Agents\n\nThe checkout lives at /Users/someone/git/repo for now.\n",
+    );
+  });
+
+  afterAll(() => {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  });
+
+  function runEntry(extra: Record<string, string>) {
+    const env: NodeJS.ProcessEnv = {};
+    for (const k of ["PATH", "HOME", "SYSTEMROOT"]) {
+      if (process.env[k] !== undefined) env[k] = process.env[k];
+    }
+    return spawnSync(process.execPath, [entry], {
+      cwd: workspace,
+      encoding: "utf8",
+      env: { ...env, GITHUB_WORKSPACE: workspace, ...extra },
+    });
+  }
+
+  it("exits 2 with an ::error for an invalid severity-threshold", () => {
+    const r = runEntry({ INPUT_SEVERITY_THRESHOLD: "bogus" });
+    expect(r.status).toBe(2);
+    expect(r.stdout).toMatch(
+      /^::error title=slop-detector::invalid severity-threshold/m,
+    );
+  });
+
+  it("exits 1 with an ::error annotation for a block finding", () => {
+    const r = runEntry({ INPUT_PACK: "placement-slop" });
+    expect(r.status).toBe(1);
+    expect(r.stdout).toMatch(/^::error file=AGENTS\.md,line=3,/m);
   });
 });

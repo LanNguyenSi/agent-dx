@@ -69,7 +69,7 @@ Until a tag exists, `<ref>` must be a branch or a commit SHA. The action does no
 | `severity-threshold` | `block` | Fail at or above this severity: `block`, `warn` or `info`. Any other value fails the step. |
 | `changed-files-only` | `false` | On `pull_request` events, scan only files from `git diff --name-only <base>...<head>` that still exist (needs a checkout with enough history, for example `fetch-depth: 0`). |
 
-Each violation becomes a workflow annotation: `block` as `::error`, `warn` as `::warning`, `info` as `::notice`. The step exits 1 when any violation is at or above the threshold, 0 otherwise, and 2 (with an error annotation) when the CLI exits 2 or higher, its output is not parseable JSON, `severity-threshold` is invalid, `git diff` fails (changed-files-only), or the event file is missing or unreadable or carries a base/head that is not a full commit SHA (changed-files-only).
+Each violation becomes a workflow annotation: `block` as `::error`, `warn` as `::warning`, `info` as `::notice`. The step exits 1 when any violation is at or above the threshold, 0 otherwise, and 2 (with an error annotation) when the CLI exits 2 or higher, its output is not parseable JSON or not a well-formed summary, `severity-threshold` is invalid, `git diff` fails (changed-files-only), or the event file is missing or unreadable or carries a base/head that is not a full commit SHA (changed-files-only), or the action hits any other unexpected error.
 
 The action runs `actions/setup-node` (Node 22), which changes `node` on the `PATH` for the later steps of the same job.
 
