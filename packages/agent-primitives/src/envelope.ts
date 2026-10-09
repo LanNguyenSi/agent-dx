@@ -520,6 +520,10 @@ function limitsForScale(base: CapLimits, scale: number): CapLimits {
 // meets them first; a payload key named like one of them is dropped before
 // the reduction, so none can be shadowed either. This set must stay equal
 // to the key set of `base` in buildEnvelope.
+// `fullResult` is reserved too: it is the pointer a reduced envelope adds,
+// so a payload key of that name is dropped as well (see buildEnvelope).
+const FULL_RESULT_KEY = "fullResult";
+
 const PROTECTED_KEYS: ReadonlySet<string> = new Set([
   "tool",
   "version",
@@ -541,8 +545,8 @@ function overrunWarning(finalLength: number, maxChars: number): string {
  * absence: a non-empty result that came back as the fixed fields alone,
  * because no structure this module can build fits the bound. Without it,
  * "the command produced no fields" and "the command's fields did not fit"
- * look identical in the envelope. It points at `logs` for the full result
- * rather than restating the path itself, which `logs` already carries.
+ * look identical in the envelope. It names the absolute path of the full
+ * result when one was written.
  */
 function totalLossWarning(
   maxChars: number,
@@ -551,7 +555,7 @@ function totalLossWarning(
   const where =
     fullResultPath === undefined
       ? "no full result was written"
-      : "the full result is in logs";
+      : `the full result is at ${path.resolve(fullResultPath)}`;
   return `result reduced to the fixed fields only: no payload structure fits within max-chars ${maxChars}; ${where}`;
 }
 
@@ -682,7 +686,9 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
   // composition order safe, and it also keeps the key from consuming a
   // slot in the object key cap and from being walked for nothing.
   for (const key of Object.keys(payload)) {
-    if (PROTECTED_KEYS.has(key)) delete payload[key];
+    if (PROTECTED_KEYS.has(key) || key === FULL_RESULT_KEY) {
+      delete payload[key];
+    }
   }
 
   const base: Record<string, unknown> = {
@@ -767,6 +773,15 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
     return { envelope, exitCode: exitCodeForStatus(input.status) };
   }
   base.truncated = true;
+  // A reduced result names the complete one in a field of its own: the
+  // path also sits in `logs`, but only as the last entry of a list that
+  // may be long, and relative when `--log-dir` was. It joins every
+  // reduced candidate below (so the bound accounts for its size) but not
+  // the fixed-field skeleton, which stays the same shape for every result.
+  const pointer: Record<string, unknown> =
+    fullResultPath === undefined
+      ? {}
+      : { [FULL_RESULT_KEY]: path.resolve(fullResultPath) };
 
   // The skeleton (fixed fields only) is never cut, so it is a hard floor
   // on what the reduction can achieve: aim for max(maxChars,
@@ -788,6 +803,7 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
     const candidate = {
       ...base,
       ...applyCaps(payload, limits, input.keepWhole ?? []),
+      ...pointer,
     };
     if (serializedLength(candidate) > effectiveMaxChars) return false;
     best = candidate;
@@ -827,6 +843,13 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
       if (fitsWithLimits({ ...narrowest, maxDepth })) break;
     }
   }
+  // Nothing but the fixed fields fit. The pointer is one short field and
+  // the reader's only way to the complete result, so keep it when it also
+  // fits (the candidates above all carry it, the bare skeleton does not).
+  if (best === skeleton && Object.keys(pointer).length > 0) {
+    const withPointer = { ...skeleton, ...pointer };
+    if (serializedLength(withPointer) <= effectiveMaxChars) best = withPointer;
+  }
   envelope = best;
 
   // `warnings` is the very array the envelope carries (base holds it by
@@ -835,7 +858,9 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
   // the true final length including this warning.
   if (
     Object.keys(payload).length > 0 &&
-    Object.keys(envelope).every((key) => PROTECTED_KEYS.has(key))
+    Object.keys(envelope).every(
+      (key) => PROTECTED_KEYS.has(key) || key === FULL_RESULT_KEY,
+    )
   ) {
     warnings.push(totalLossWarning(maxChars, fullResultPath));
   }

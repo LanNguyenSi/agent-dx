@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- A reduced envelope now carries a top-level `fullResult` field with the
+  absolute path of the complete result file. A `probe --plan` run with more
+  mutants than fit `-m` (default 8000) cuts `plan.results` to a few entries;
+  the path to the full list used to be only the last item of `logs`, relative
+  when `--log-dir` was (626c5cb2). The field is reserved (a payload key of
+  that name is dropped), survives next to the fixed fields when nothing more
+  fits, and the "fixed fields only" warning now names the absolute path. The
+  shipped skill mentions it, so its digest changes and `init` reports an
+  existing install as `outdated` until refreshed with `--force`.
 - Add the `hygiene` command: refuses backup files (`*-E`, `*.bak`, `*.orig`,
   `*~`) in a git range or the index, flags a commit that deletes more than a
   configurable share (default 20%) of a file listed as extend-only, and flags

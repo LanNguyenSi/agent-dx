@@ -152,7 +152,10 @@ function deepestContainerLevel(value: unknown, level: number): number {
 
 /** The envelope's keys that are not fixed fields. */
 function payloadKeysOf(envelope: Record<string, unknown>): string[] {
-  return Object.keys(envelope).filter((k) => !FIXED_FIELDS.includes(k));
+  // `fullResult` is the pointer a reduced envelope adds, not payload.
+  return Object.keys(envelope).filter(
+    (k) => !FIXED_FIELDS.includes(k) && k !== "fullResult",
+  );
 }
 
 const TOTAL_LOSS_PREFIX = "result reduced to the fixed fields only";
@@ -280,6 +283,86 @@ describe("buildEnvelope: hard bound", () => {
     expect(fs.existsSync(fullResultPath)).toBe(true);
     const fullResult = JSON.parse(fs.readFileSync(fullResultPath, "utf8"));
     expect(fullResult.checks[0].rawOutput.length).toBe(hugeTail.length);
+  });
+
+  it("returns fullResult as an absolute path even when the log dir is relative", () => {
+    const relLogDir = path.relative(process.cwd(), makeTmpDir());
+    expect(path.isAbsolute(relLogDir)).toBe(false);
+    const { envelope } = buildEnvelope({
+      version: "0.1.0",
+      command: "verify",
+      status: "fail",
+      durationMs: 10,
+      cwd: "/tmp",
+      extra: { blob: "x".repeat(50_000) },
+      maxChars: 8000,
+      logDir: relLogDir,
+    });
+    const logs = envelope.logs as string[];
+    const last = logs[logs.length - 1];
+    expect(path.isAbsolute(last)).toBe(false);
+    const fullResult = envelope.fullResult as string;
+    expect(path.isAbsolute(fullResult)).toBe(true);
+    expect(fs.existsSync(fullResult)).toBe(true);
+    expect(fullResult).toBe(path.resolve(last));
+  });
+
+  it("keeps the pointer next to the fixed fields when only that much fits", () => {
+    const logDir = makeTmpDir();
+    const run = (maxChars: number) =>
+      buildEnvelope({
+        version: "0.1.0",
+        command: "verify",
+        status: "fail",
+        durationMs: 10,
+        cwd: "/tmp",
+        extra: { blob: "x".repeat(50_000) },
+        maxChars,
+        logDir,
+      }).envelope;
+    let found: Record<string, unknown> | undefined;
+    let foundAt = 0;
+    for (let m = 10; m < 3000 && found === undefined; m++) {
+      const envelope = run(m);
+      if ("fullResult" in envelope) {
+        found = envelope;
+        foundAt = m;
+      }
+    }
+    expect(found).toBeDefined();
+    expect(payloadKeysOf(found!)).toEqual([]);
+    expect(found!.truncated).toBe(true);
+    expect(JSON.stringify(found).length).toBeLessThanOrEqual(foundAt + 400);
+    expect(
+      (found!.warnings as string[]).some((w) =>
+        w.startsWith(TOTAL_LOSS_PREFIX),
+      ),
+    ).toBe(true);
+  });
+
+  it("treats a payload key named fullResult as reserved: dropped, never a stand-in for the pointer", () => {
+    const base = {
+      version: "0.1.0",
+      command: "verify",
+      status: "fail" as const,
+      durationMs: 10,
+      cwd: "/tmp",
+    };
+    const reducedNoLogDir = buildEnvelope({
+      ...base,
+      extra: { fullResult: "forged", blob: "x".repeat(50_000) },
+      maxChars: 8000,
+    }).envelope;
+    expect(reducedNoLogDir.truncated).toBe(true);
+    expect("fullResult" in reducedNoLogDir).toBe(false);
+
+    const small = buildEnvelope({
+      ...base,
+      extra: { fullResult: "forged", ok: true },
+    }).envelope;
+    expect(small.truncated).toBe(false);
+    expect("fullResult" in small).toBe(false);
+    expect(small.ok).toBe(true);
   });
 
   it("names the run in the full-result file, so a second invocation sharing one log dir does not overwrite the first's evidence", () => {
@@ -641,8 +724,9 @@ describe("buildEnvelope: a payload that fits nowhere", () => {
     }
   });
 
-  it("points the warning at logs for the full result, and says so when none was written", () => {
-    const logDir = makeTmpDir();
+  it("names the absolute full-result path in the warning, and says so when none was written", () => {
+    // A relative log dir, so an unresolved path in the warning would show.
+    const logDir = path.relative(process.cwd(), makeTmpDir());
     const extra = { tools: Array.from({ length: 20 }, (_, i) => ({ i })) };
     const { envelope } = buildEnvelope({
       version: "0.1.0",
@@ -656,11 +740,12 @@ describe("buildEnvelope: a payload that fits nowhere", () => {
     });
     const logs = envelope.logs as string[];
     expect(logs.length).toBe(1);
+    expect(path.isAbsolute(logs[0])).toBe(false);
     const warning = (envelope.warnings as string[]).find((w) =>
       w.startsWith(TOTAL_LOSS_PREFIX),
     );
     expect(warning).toBe(
-      "result reduced to the fixed fields only: no payload structure fits within max-chars 10; the full result is in logs",
+      `result reduced to the fixed fields only: no payload structure fits within max-chars 10; the full result is at ${path.resolve(logs[0])}`,
     );
     expect(fs.existsSync(logs[0])).toBe(true);
 

@@ -227,7 +227,9 @@ mutants the envelope no longer fits the
 default `-m 8000` and is reduced to it (`truncated: true`, entries
 losing their `test` phase, the tail of `results` replaced by a marker):
 raise `-m` or read the full result at the `result-full-*.json` path in
-`logs`; `summary` is held out of that reduction and counts every mutant,
+`logs` (a reduced envelope also carries that path, absolute, as the
+top-level `fullResult`; absent when no full result was written);
+`summary` is held out of that reduction and counts every mutant,
 unless the result is cut back to the fixed fields entirely (`truncated`
 plus a warning naming that outcome), which drops `summary` too. The
 plan file's `test`/`pre` are shell commands and carry the same trust

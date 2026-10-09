@@ -38,8 +38,17 @@ Every subcommand accepts:
   back as a shallower sketch of itself, each pruned subtree naming the
   depth it was cut at, instead of vanishing; when not even the shallowest
   structure fits, a warning says the result was reduced to the fixed
-  fields alone and points at the full result on disk. The full untruncated
-  result is written to the log directory and its path returned in `logs`.
+  fields alone and names the full result on disk. The full untruncated
+  result is written to the log directory and its path returned in `logs`,
+  which stays authoritative. When the payload was reduced and the full
+  result was written, the same path is also returned absolute in the
+  top-level `fullResult` field (a `probe --plan` run's `plan.results` is
+  cut like any other array, so `fullResult` is where every mutant's verdict
+  lives). `fullResult` is absent when the write failed, when the payload
+  was unserializable, or when verify's `--max-failures` cut set truncated
+  without an envelope reduction, so `truncated: true` without `fullResult`
+  is possible. `fullResult` is a reserved key: a payload field of that
+  name is dropped.
   The reduction reads no clock and does no work proportional to how far
   over the bound a result is: within one process the same result always
   yields the same envelope, and between processes the only thing that
