@@ -317,7 +317,9 @@ describe("runAction exit codes", () => {
   it("unparseable CLI stdout gives 2", () => {
     const h = harness({ cli: { stdout: "boom" } });
     expect(runAction({ GITHUB_WORKSPACE: "/w/repo" }, h.deps)).toBe(2);
-    expect(h.out.join("")).toContain("::error");
+    expect(h.out.join("")).toMatch(
+      /^::error title=slop-detector::slop-detector output is not valid JSON$/m,
+    );
   });
 
   it("invalid threshold gives 2 without running the CLI", () => {
@@ -332,7 +334,7 @@ describe("runAction exit codes", () => {
     const h = harness({ cli: { stdout: '{"violations":[{}]}' } });
     expect(runAction({ GITHUB_WORKSPACE: "/w/repo" }, h.deps)).toBe(2);
     expect(h.out.join("")).toMatch(
-      /^::error title=slop-detector::.*malformed violation/m,
+      /^::error title=slop-detector::slop-detector output has a malformed violation at index 0$/m,
     );
   });
 
