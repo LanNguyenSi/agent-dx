@@ -615,6 +615,10 @@ describe("ui-slop/focus-outline-removed", () => {
       "initial",
       "0 none",
       "2px hidden",
+      "inherit",
+      "revert",
+      "unset",
+      "0 solid blue",
     ]) {
       expect(
         run(
@@ -634,10 +638,22 @@ describe("ui-slop/focus-outline-removed", () => {
         ),
       ),
     ).toEqual([]);
+    expect(
+      run(
+        id,
+        css(
+          `.btn:focus { outline: none; } .btn:focus-visible { outline: 2px solid rgb(0 0 0 / 50%); }`,
+        ),
+      ),
+    ).toEqual([]);
   });
 
   it("still flags :focus when a longhand resets the earlier :focus-visible border", () => {
-    for (const reset of ["border-width: 0", "border-style: none"]) {
+    for (const reset of [
+      "border-width: 0",
+      "border-style: none",
+      "border-color: transparent",
+    ]) {
       expect(
         run(
           id,

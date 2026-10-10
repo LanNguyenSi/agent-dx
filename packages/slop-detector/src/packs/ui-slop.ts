@@ -765,7 +765,9 @@ const OUTLINE_INVISIBLE_TOKEN =
 function outlinePaints(value: string): boolean {
   const v = value.replace(/\s*!important\s*$/i, "").trim();
   if (v.length === 0 || OUTLINE_REMOVED_VALUE.test(v)) return false;
-  return !OUTLINE_INVISIBLE_TOKEN.test(v);
+  // Colour functions such as `rgb(0 0 0)` carry bare `0` arguments; test the
+  // tokens outside parentheses only.
+  return !OUTLINE_INVISIBLE_TOKEN.test(v.replace(/\([^)]*\)/g, "()"));
 }
 
 // True when the declarations set a visible outline (the last outline
