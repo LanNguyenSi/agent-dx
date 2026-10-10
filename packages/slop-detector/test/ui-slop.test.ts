@@ -752,6 +752,23 @@ describe("ui-slop/img-missing-alt", () => {
     ).toHaveLength(1);
   });
 
+  it("is not blinded by a comment opener inside a string when a closer follows", () => {
+    expect(
+      run(
+        id,
+        tsx(
+          `const a = <input accept="image/*" />;\nconst b = <img src={p} />;\n/* end */`,
+        ),
+      ),
+    ).toHaveLength(1);
+    expect(
+      run(id, tsx(`const a = f(";// x"); const b = <img src={p} />;`)),
+    ).toHaveLength(1);
+    expect(
+      run(id, tsx(`const a = f('/*'); const b = <img src={p} />; /* end */`)),
+    ).toHaveLength(1);
+  });
+
   it("is not blinded by // in markup text or attribute values", () => {
     expect(
       run(
