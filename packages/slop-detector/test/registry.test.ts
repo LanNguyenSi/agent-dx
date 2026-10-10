@@ -11,7 +11,7 @@ const expectedRuleCounts: Record<string, number> = {
   "prose-slop": 7,
   "comment-slop": 5,
   "code-slop": 9,
-  "ui-slop": 6,
+  "ui-slop": 10,
   "placement-slop": 5,
   "workflow-slop": 6,
   "review-slop": 3,
@@ -25,9 +25,9 @@ describe("rule registry counts (doc-drift guard)", () => {
     expect(actual).toEqual(expectedRuleCounts);
   });
 
-  it("the eight packs total 48 rules", () => {
+  it("the eight packs total 52 rules", () => {
     const total = allPacks.reduce((sum, p) => sum + p.rules.length, 0);
-    expect(total).toBe(48);
+    expect(total).toBe(52);
   });
 
   it("registers placement-slop and lists its five rule ids", () => {

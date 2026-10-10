@@ -1,4 +1,5 @@
 import type {
+  FileKind,
   FileTarget,
   PackDefinition,
   Rule,
@@ -712,12 +713,388 @@ const flatTypeHierarchy: Rule = {
   },
 };
 
+// ─────────────────────────── Rule 7: focus-outline-removed ───
+
+// A declaration counts as a visible replacement focus indicator when it is a
+// painting property (`box-shadow`, `background`, `background-color`,
+// `background-image`, `border` and its colour / style longhands,
+// `text-decoration`, `text-decoration-line`, `text-decoration-color`) with a
+// value that actually paints. A width on its own (`border-width`), the
+// decoration tuning longhands (`text-decoration-thickness`,
+// `text-decoration-skip-ink`, ...), `border-radius*`, `border-collapse`,
+// `border-image*` and friends do not paint a focus change by themselves, and
+// a value of `none` / `0` / `transparent` / `initial` / `unset` removes or
+// resets rather than adds one. `outline-color` / `outline-offset` never
+// count: they only matter next to a visible outline, and a block that removes
+// the outline has none.
+const BORDER_PAINT_PROP =
+  /^border(?:-(?:top|right|bottom|left|block|inline)(?:-(?:start|end))?)?(?:-(?:color|style))?$/;
+const TEXT_DECORATION_PAINT_PROP = /^text-decoration(?:-(?:line|color))?$/;
+const NON_PAINTING_VALUE = /^(?:none|0|0px|transparent|initial|unset)$/;
+
+function isFocusReplacement(d: { prop: string; value: string }): boolean {
+  const { prop } = d;
+  const paints =
+    prop === "box-shadow" ||
+    prop === "background" ||
+    prop === "background-color" ||
+    prop === "background-image" ||
+    TEXT_DECORATION_PAINT_PROP.test(prop) ||
+    BORDER_PAINT_PROP.test(prop);
+  if (!paints) return false;
+  const value = d.value
+    .replace(/\s*!important\s*$/i, "")
+    .trim()
+    .toLowerCase();
+  return value.length > 0 && !NON_PAINTING_VALUE.test(value);
+}
+
+const OUTLINE_REMOVED_VALUE = /^(?:none|0|0px)(?:\s*!important)?$/i;
+
+function isOutlineProp(prop: string): boolean {
+  return prop === "outline" || prop === "outline-style";
+}
+
+// An outline value that draws nothing visible: a removal, or any token that
+// hides it (`2px solid transparent`, the shape of a common `outline-none`
+// utility; `0 none`; `hidden`) or resets it (`initial`, `unset`, `inherit`,
+// `revert`). A `var(...)` value counts as visible.
+const OUTLINE_INVISIBLE_TOKEN =
+  /(?:^|\s)(?:none|hidden|transparent|0|0px|initial|unset|inherit|revert|revert-layer)(?=\s|$)/i;
+
+function outlinePaints(value: string): boolean {
+  const v = value.replace(/\s*!important\s*$/i, "").trim();
+  if (v.length === 0 || OUTLINE_REMOVED_VALUE.test(v)) return false;
+  // Colour functions such as `rgb(0 0 0)` carry bare `0` arguments; test the
+  // tokens outside parentheses only.
+  return !OUTLINE_INVISIBLE_TOKEN.test(v.replace(/\([^)]*\)/g, "()"));
+}
+
+// True when the declarations set a visible outline (the last outline
+// declaration paints) or a replacement indicator.
+function providesFocusIndicator(decls: Decl[]): boolean {
+  const outlines = decls.filter((d) => isOutlineProp(d.prop));
+  const last = outlines[outlines.length - 1];
+  if (last && outlinePaints(last.value)) return true;
+  return decls.some(isFocusReplacement);
+}
+
+// True when one of `decls` resets `prop`: the same property, a shorthand of it
+// (`border: 0` resets `border-color`, `background: none` resets
+// `background-image`), or a longhand of it with a non-painting value
+// (`border-width: 0` or `border-style: none` resets `border`).
+function resetsProperty(decls: Decl[], prop: string): boolean {
+  return decls.some(
+    (d) =>
+      d.prop === prop ||
+      prop.startsWith(`${d.prop}-`) ||
+      (d.prop.startsWith(`${prop}-`) &&
+        NON_PAINTING_VALUE.test(
+          d.value
+            .replace(/\s*!important\s*$/i, "")
+            .trim()
+            .toLowerCase(),
+        )),
+  );
+}
+
+const focusOutlineRemoved: Rule = {
+  id: "ui-slop/focus-outline-removed",
+  pack: "ui-slop",
+  defaultSeverity: "warn",
+  enabledByDefault: true,
+  rationale:
+    "`outline: none` (or `0`) on a `:focus` / `:focus-visible` rule with no replacement indicator (box-shadow, border, background, text-decoration) leaves keyboard users with no visible focus. Agents strip the browser default to make a control look clean and rarely add a replacement.",
+  appliesTo: appliesToStyle,
+  check({ file }: RuleContext): Violation[] {
+    const text = stripCssComments(file.text);
+    interface FocusBlock {
+      order: number;
+      selector: string;
+      base: string;
+      visible: boolean;
+      decls: Decl[];
+    }
+    const blocks: FocusBlock[] = [];
+    let cursor = 0;
+    for (const block of iterateBlocks(text)) {
+      const selectorText = text.slice(cursor, block.openIndex);
+      cursor = block.closeIndex;
+      const lastTerm = Math.max(
+        selectorText.lastIndexOf("}"),
+        selectorText.lastIndexOf(";"),
+      );
+      // `:focus:not(:focus-visible)` is the documented way to drop the mouse
+      // focus ring while keeping the keyboard one, so it is not a target.
+      const selector = normalizeSelector(
+        selectorText.slice(lastTerm + 1),
+      ).replace(/:focus:not\(\s*:focus-visible\s*\)/g, "");
+      if (!/:focus(?:-visible)?(?![\w-])/.test(selector)) continue;
+      blocks.push({
+        order: block.openIndex,
+        selector,
+        base: selector.replace(/:focus(?:-visible)?(?![\w-])/g, ""),
+        visible: /:focus-visible(?![\w-])/.test(selector),
+        decls: iterateDeclarations(block.body, block.bodyStart),
+      });
+    }
+    const violations: Violation[] = [];
+    for (const b of blocks) {
+      const decls = b.decls;
+      const outlines = decls.filter((d) => isOutlineProp(d.prop));
+      const removed = outlines[outlines.length - 1];
+      if (!removed || !OUTLINE_REMOVED_VALUE.test(removed.value.trim())) {
+        continue;
+      }
+      if (decls.some(isFocusReplacement)) continue;
+      // A `:focus-visible` block for the same base selector can still keep a
+      // keyboard indicator. Both selectors have the same specificity, so for
+      // a property both blocks set, the later block wins the cascade. A later
+      // `:focus-visible` block excuses the removal with a visible outline or
+      // a replacement. An earlier one excuses it only with a replacement the
+      // `:focus` block does not reset: the removal overrides its outline but
+      // leaves its box-shadow or border in place.
+      const keepsIndicator = (o: FocusBlock): boolean => {
+        if (o.order > b.order) return providesFocusIndicator(o.decls);
+        return o.decls.some(
+          (r) => isFocusReplacement(r) && !resetsProperty(decls, r.prop),
+        );
+      };
+      if (
+        !b.visible &&
+        blocks.some(
+          (o) => o !== b && o.visible && o.base === b.base && keepsIndicator(o),
+        )
+      ) {
+        continue;
+      }
+      violations.push(
+        makeViolation(
+          focusOutlineRemoved,
+          file,
+          removed.propOffset,
+          removed.valueEnd,
+          `${removed.prop}: ${removed.value}`,
+          `Focus outline removed on \`${b.selector}\` with no replacement indicator; keyboard focus becomes invisible. Add a box-shadow, border or background change.`,
+        ),
+      );
+    }
+    return violations;
+  },
+};
+
+// ─────────────────────────── Rule 8: viewport-zoom-disabled ───
+
+const VIEWPORT_META = /<meta\b[^>]*>/gi;
+const VIEWPORT_NAME = /\bname\s*=\s*["']viewport["']/i;
+const ZOOM_DISABLED =
+  /user-scalable\s*=\s*(?:no|0)(?=[\s,;"'>/]|$)|maximum-scale\s*=\s*1(?:\.0+)?(?=[\s,;"'>/]|$)/i;
+
+const viewportZoomDisabled: Rule = {
+  id: "ui-slop/viewport-zoom-disabled",
+  pack: "ui-slop",
+  defaultSeverity: "warn",
+  enabledByDefault: true,
+  rationale:
+    "`user-scalable=no` or `maximum-scale=1` in the viewport meta tag blocks pinch-zoom, which low-vision users rely on (WCAG 1.4.4). Agents copy the snippet to stop iOS input zoom or to make a page feel app-like.",
+  appliesTo: appliesToHeadingHosts,
+  check({ file }: RuleContext): Violation[] {
+    const violations: Violation[] = [];
+    VIEWPORT_META.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = VIEWPORT_META.exec(file.text)) !== null) {
+      if (!VIEWPORT_NAME.test(m[0])) continue;
+      const zoom = ZOOM_DISABLED.exec(m[0]);
+      if (!zoom) continue;
+      const start = m.index + zoom.index;
+      violations.push(
+        makeViolation(
+          viewportZoomDisabled,
+          file,
+          start,
+          start + zoom[0].length,
+          zoom[0],
+          `Viewport meta disables zoom (\`${zoom[0]}\`); users cannot pinch-zoom the page.`,
+        ),
+      );
+    }
+    return violations;
+  },
+};
+
+// ─────────────────────────── Rule 9: img-missing-alt ───
+
+// Returns the offset just past the `>` closing the tag that starts at
+// `from`, skipping quoted attribute values and `{...}` JSX expressions so an
+// arrow function or `>` inside an attribute does not end the tag early.
+function findTagEnd(text: string, from: number): number {
+  let quote: '"' | "'" | null = null;
+  let braces = 0;
+  for (let i = from; i < text.length; i++) {
+    const c = text[i];
+    if (quote) {
+      if (c === quote) quote = null;
+    } else if (braces > 0) {
+      if (c === "{") braces++;
+      else if (c === "}") braces--;
+    } else if (c === '"' || c === "'") {
+      quote = c;
+    } else if (c === "{") {
+      braces++;
+    } else if (c === ">") {
+      return i + 1;
+    }
+  }
+  return -1;
+}
+
+const IMG_OPEN = /<img(?=[\s/>])/g;
+// `alt`, Vue `:alt` / `v-bind:alt`, Svelte `bind:alt`, Angular `[alt]` /
+// `[attr.alt]`; HTML attribute names are case-insensitive.
+const ALT_NAME = /^(?:(?:v-bind:|bind:|:)?alt|\[(?:attr\.)?alt\])$/i;
+
+const blankOut = (m: string): string => m.replace(/[^\n]/g, " ");
+
+// Blanks each terminated `<!-- ... -->` comment in markup (same length,
+// newlines kept) so an `<img` inside one is not scanned. As in the HTML
+// parser, a comment ends at the first `-->` or `--!>`, and `<!-->` and
+// `<!--->` are complete empty comments. An unterminated `<!--` masks nothing.
+// JS and JSX comments (in `.tsx` / `.jsx` code and in `<script>` bodies) are
+// never masked: one that mentions `<img>` is reported, which errs toward an
+// extra finding. The masking hides a real tag only when the tag sits between
+// a `<!--` that does not open a comment (inside a quoted attribute value, a
+// `<script>` or `<style>` body, or a `<textarea>`) and a later comment end.
+function maskHtmlComments(text: string, kind: FileKind): string {
+  if (kind !== "markup") return text;
+  return text.replace(/<!--(?:-?>|[\s\S]*?--!?>)/g, blankOut);
+}
+
+// Attribute-name based check over the text after `<img`: skips quoted and
+// unquoted values, so `title="an alt text"` does not count. A `{...spread}`
+// may carry `alt` and a Svelte `{alt}` shorthand is `alt`; both count.
+function hasAltAttribute(attrs: string): boolean {
+  let i = 0;
+  const n = attrs.length;
+  while (i < n) {
+    const c = attrs[i];
+    if (c === "{") {
+      let depth = 0;
+      const start = i;
+      for (; i < n; i++) {
+        if (attrs[i] === "{") depth++;
+        else if (attrs[i] === "}" && --depth === 0) {
+          i++;
+          break;
+        }
+      }
+      const inner = attrs.slice(start + 1, i - 1).trim();
+      if (inner.startsWith("...") || inner === "alt") return true;
+      continue;
+    }
+    if (/[\s/>]/.test(c)) {
+      i++;
+      continue;
+    }
+    const nameStart = i;
+    while (i < n && !/[\s=/>"'{}]/.test(attrs[i])) i++;
+    if (i === nameStart) {
+      i++;
+      continue;
+    }
+    if (ALT_NAME.test(attrs.slice(nameStart, i))) return true;
+    while (i < n && /\s/.test(attrs[i])) i++;
+    if (attrs[i] !== "=") continue;
+    i++;
+    while (i < n && /\s/.test(attrs[i])) i++;
+    const q = attrs[i];
+    if (q === '"' || q === "'") {
+      i++;
+      while (i < n && attrs[i] !== q) i++;
+      i++;
+    } else if (q === "{") {
+      let depth = 0;
+      for (; i < n; i++) {
+        if (attrs[i] === "{") depth++;
+        else if (attrs[i] === "}" && --depth === 0) {
+          i++;
+          break;
+        }
+      }
+    } else {
+      while (i < n && !/[\s>]/.test(attrs[i])) i++;
+    }
+  }
+  return false;
+}
+
+const imgMissingAlt: Rule = {
+  id: "ui-slop/img-missing-alt",
+  pack: "ui-slop",
+  defaultSeverity: "warn",
+  enabledByDefault: true,
+  rationale:
+    'An `<img>` with no `alt` attribute is announced by screen readers as its file name. Generated markup drops `alt` constantly; decorative images need an explicit `alt=""`, content images a description.',
+  appliesTo: appliesToHeadingHosts,
+  check({ file }: RuleContext): Violation[] {
+    const violations: Violation[] = [];
+    const masked = maskHtmlComments(file.text, file.kind);
+    IMG_OPEN.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = IMG_OPEN.exec(masked)) !== null) {
+      const end = findTagEnd(masked, m.index + m[0].length);
+      if (end === -1) continue;
+      const tag = file.text.slice(m.index, end);
+      IMG_OPEN.lastIndex = end;
+      if (hasAltAttribute(masked.slice(m.index + 4, end))) continue;
+      violations.push(
+        makeViolation(
+          imgMissingAlt,
+          file,
+          m.index,
+          end,
+          tag.length > 80 ? `${tag.slice(0, 80)}...` : tag,
+          '`<img>` has no `alt` attribute: add a description, or `alt=""` for a decorative image.',
+        ),
+      );
+    }
+    return violations;
+  },
+};
+
+// ─────────────────────────── Rule 10: lorem-ipsum-placeholder ───
+
+const LOREM_IPSUM = /\blorem\s+ipsum\b/i;
+
+const loremIpsumPlaceholder: Rule = {
+  id: "ui-slop/lorem-ipsum-placeholder",
+  pack: "ui-slop",
+  defaultSeverity: "warn",
+  enabledByDefault: true,
+  rationale:
+    "Lorem ipsum filler left in markup or JSX means generated scaffolding shipped without real copy. One finding per file is enough to flag it.",
+  appliesTo: appliesToHeadingHosts,
+  check({ file }: RuleContext): Violation[] {
+    const m = LOREM_IPSUM.exec(file.text);
+    if (!m) return [];
+    return [
+      makeViolation(
+        loremIpsumPlaceholder,
+        file,
+        m.index,
+        m.index + m[0].length,
+        m[0],
+        "Placeholder `lorem ipsum` text; replace it with real copy before shipping.",
+      ),
+    ];
+  },
+};
+
 // ─────────────────────────── pack export ───
 
 export const uiSlopPack: PackDefinition = {
   id: "ui-slop",
   description:
-    "Visual tells of AI-generated UIs in CSS / SCSS / LESS / markup: gradient text, purple+cyan palettes, animated layout properties, skipped heading levels, monospace-everywhere, flat type hierarchy. v1 is regex-driven and scope-limited (no Tailwind class strings, no JSX inline styles, no headless-browser rules); see the M3 followup tasks.",
+    "Visual tells of AI-generated UIs in CSS / SCSS / LESS / markup: gradient text, purple+cyan palettes, animated layout properties, skipped heading levels, monospace-everywhere, flat type hierarchy, removed focus outlines, zoom-disabling viewport meta, images without alt, lorem ipsum filler. v1 is regex-driven and scope-limited (no Tailwind class strings, no JSX inline styles, no headless-browser rules); see the M3 followup tasks.",
   rules: [
     gradientText,
     aiColorPalette,
@@ -725,5 +1102,9 @@ export const uiSlopPack: PackDefinition = {
     skippedHeadingLevels,
     monospaceEverywhere,
     flatTypeHierarchy,
+    focusOutlineRemoved,
+    viewportZoomDisabled,
+    imgMissingAlt,
+    loremIpsumPlaceholder,
   ],
 };
