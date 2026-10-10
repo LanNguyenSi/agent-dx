@@ -892,6 +892,9 @@ describe("drift (deleted-file basename guard)", () => {
 });
 
 describe("drift (ambient GIT_*_PATHSPECS switches)", () => {
+  // Without the env strip, GLOB, NOGLOB and LITERAL make `git grep` miss the
+  // cited doc and drift report ok; ICASE still matches. The ICASE case is a
+  // regression net only, it does not pin the defect.
   it.each([
     "GIT_GLOB_PATHSPECS",
     "GIT_NOGLOB_PATHSPECS",

@@ -1655,6 +1655,9 @@ describe("probe(): worktree isolation, the link policy", () => {
     ).toBe(true);
   });
 
+  // Without the env strip only LITERAL empties the `:(literal)` ls-files
+  // listing; the GLOB, NOGLOB and ICASE cases are a regression net only and
+  // do not pin the defect.
   it.each([
     "GIT_GLOB_PATHSPECS",
     "GIT_NOGLOB_PATHSPECS",
