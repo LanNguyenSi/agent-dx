@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-10-10
+
+First release cut for the tag-driven `publish-npm.yml` workflow (npm Trusted Publishing), which publishes with `--provenance`.
+
 ### Fixed
 
 - The CLI now refuses to start on a Node version below the `engines.node` range (currently `>=22`), exiting 1 with a stderr message that names the required and the running version. Previously npm only warned, and the first database command crashed with a SIGSEGV. The check runs in a small entry module (`dist/cli.js`) before the real CLI, and thus `better-sqlite3`, is loaded; `--help` and `--version` are refused as well. (11dc376f)
@@ -14,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.6.0] - 2026-10-10
 
 First release published to npm (`npm i -g friction-log`). Earlier versions ran from a local build of this repository. The entries below cover everything since the 0.5.0 milestone tag.
+
+0.6.0 was published by hand from a build of commit `48926fca`, because npm accepts a Trusted Publisher entry only for a package that already exists; it therefore has no provenance attestation. There is deliberately no `friction-log/v0.6.0` git tag: pushing it would trigger `publish-npm.yml`, which refuses a registry version without an attestation and would fail red.
 
 ### Added
 
