@@ -9,14 +9,14 @@ name: workflow-guard
 #
 # Form: a reusable workflow with an explicit `ref` input, not a composite
 # action. A called workflow does not fetch its own repository, so it checks
-# out agent-dx at `ref` itself, and it can compare `ref` with the commit SHA
-# of this very workflow file (`job.workflow_sha`), which makes a mismatch
-# between the caller's `uses: ...@<sha>` pin and the source that is built a
-# hard failure instead of a silent drift. A composite action under
-# packages/slop-detector/action already exists for steps inside a caller's own
-# job; it cannot refuse a branch pin, runs with the caller job's permissions,
-# and needs the caller to supply checkout and Node steps. This workflow runs in
-# its own job with `contents: read` only.
+# out agent-dx at `ref` itself. `ref` is an explicit consistency assertion:
+# the job compares it with the commit SHA the workflow was resolved at
+# (`job.workflow_sha`), so a drifted pin (for example a branch-pinned `uses:`
+# after the branch moved) is a hard failure instead of a silent mismatch. A
+# composite action under packages/slop-detector/action already exists for
+# steps inside a caller's own job; it runs with the caller job's permissions
+# and needs the caller to supply checkout and Node steps. This workflow runs
+# in its own job with `contents: read` only and sets up Node itself.
 #
 # Contexts used, all documented in GitHub's "Contexts" reference
 # (https://docs.github.com/en/actions/reference/workflows-and-actions/contexts):
@@ -27,7 +27,8 @@ name: workflow-guard
 # Reusable workflow semantics:
 # https://docs.github.com/en/actions/sharing-automations/reusing-workflows
 #
-# Caller usage (pin the same 40-hex commit in both places, never a branch):
+# Caller usage (pin the same 40-hex commit in both places, never a branch; take
+# the SHA from a merge commit on agent-dx's default branch, not an open PR or a fork):
 #
 #   jobs:
 #     workflow-guard:
@@ -66,6 +67,9 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
+    defaults:
+      run:
+        shell: bash
     steps:
       # Runs before any checkout or install, so a bad ref never reaches
       # `actions/checkout` with a caller-controlled value or `npm ci`.
