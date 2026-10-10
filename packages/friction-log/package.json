@@ -1,6 +1,6 @@
 {
   "name": "friction-log",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Capture, query, and infer agent-workflow frictions. SQLite-backed, sink-pluggable, zero-config default.",
   "main": "dist/index.js",
   "type": "module",
@@ -15,8 +15,11 @@
   },
   "files": [
     "dist",
+    "docs",
     "templates",
-    "README.md"
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc && node scripts/copy-templates.mjs && chmod +x dist/cli.js",
@@ -58,6 +61,6 @@
     "vitest": "^4.1.6"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   }
 }
