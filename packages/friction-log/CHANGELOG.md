@@ -28,4 +28,17 @@ First release published to npm (`npm i -g friction-log`). Earlier versions ran f
 
 ### Security
 
-- Dependency updates for published advisories: `tsx` to `^4.22.4` (esbuild advisories), the declared `yaml` floor to `^2.8.3`, and lockfile bumps for `nanoid`, `postcss`, `hono`, `proxy-addr`, and `source-map-js`.
+Runtime (shipped):
+
+- The declared `yaml` floor is raised to `^2.8.3` so installs cannot resolve an older release. The lockfile already resolved 2.9.0, so only the declared range changes.
+- `better-sqlite3` moves from 11.10.0 to 13.0.1 (see Changed and Fixed). Its install-time download chain (`prebuild-install`, `tar-fs`, `rc`, `minimist`, and related packages) is gone from the lockfile.
+
+Development-only (not shipped, not part of the published package):
+
+- `tsx` to `^4.22.4` (resolved 4.22.4), which pulls `esbuild` 0.28.1.
+- `vitest` to `^4.1.6` (resolved 4.1.11) and `vite` to 8.3.0, now built on `rolldown` 1.2.8 instead of `rollup`.
+- Lockfile bumps for `nanoid`, `postcss`, `source-map-js`, `picomatch`, and `tinyglobby`.
+
+### Notes
+
+Node 20 is unsupported: `better-sqlite3` 13 requires Node 22 or newer, and on Node 20 the process crashes with SIGSEGV on the first database command.
