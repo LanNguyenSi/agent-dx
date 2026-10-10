@@ -714,21 +714,41 @@ const flatTypeHierarchy: Rule = {
 
 // ─────────────────────────── Rule 7: focus-outline-removed ───
 
-// Properties that count as a visible replacement focus indicator when they
-// sit in the same block as the removed outline.
-const FOCUS_REPLACEMENT_PROPS = new Set([
-  "box-shadow",
-  "border",
-  "border-color",
-  "border-bottom",
-  "border-bottom-color",
-  "background",
-  "background-color",
-  "text-decoration",
-  "text-decoration-line",
-]);
+// A declaration counts as a visible replacement focus indicator when it is
+// `box-shadow`, any `background*` or `text-decoration*`, or any `border*`
+// except `border-radius*` and `border-image*` (those do not paint a visible
+// change by themselves). `outline-color` / `outline-offset` never count: they
+// only matter next to a visible outline, and a block that removes the outline
+// has none.
+function isFocusReplacementProp(prop: string): boolean {
+  if (prop === "box-shadow") return true;
+  if (prop.startsWith("background") || prop.startsWith("text-decoration")) {
+    return true;
+  }
+  if (prop.startsWith("border")) {
+    return (
+      !prop.startsWith("border-radius") && !prop.startsWith("border-image")
+    );
+  }
+  return false;
+}
 
 const OUTLINE_REMOVED_VALUE = /^(?:none|0|0px)(?:\s*!important)?$/i;
+
+function isOutlineProp(prop: string): boolean {
+  return prop === "outline" || prop === "outline-style";
+}
+
+// True when the declarations set a visible outline (the last outline
+// declaration is not a removal) or a replacement indicator.
+function providesFocusIndicator(
+  decls: ReturnType<typeof iterateDeclarations>,
+): boolean {
+  const outlines = decls.filter((d) => isOutlineProp(d.prop));
+  const last = outlines[outlines.length - 1];
+  if (last && !OUTLINE_REMOVED_VALUE.test(last.value.trim())) return true;
+  return decls.some((d) => isFocusReplacementProp(d.prop));
+}
 
 const focusOutlineRemoved: Rule = {
   id: "ui-slop/focus-outline-removed",
@@ -740,7 +760,13 @@ const focusOutlineRemoved: Rule = {
   appliesTo: appliesToStyle,
   check({ file }: RuleContext): Violation[] {
     const text = stripCssComments(file.text);
-    const violations: Violation[] = [];
+    interface FocusBlock {
+      selector: string;
+      base: string;
+      visible: boolean;
+      decls: ReturnType<typeof iterateDeclarations>;
+    }
+    const blocks: FocusBlock[] = [];
     let cursor = 0;
     for (const block of iterateBlocks(text)) {
       const selectorText = text.slice(cursor, block.openIndex);
@@ -755,14 +781,36 @@ const focusOutlineRemoved: Rule = {
         selectorText.slice(lastTerm + 1),
       ).replace(/:focus:not\(\s*:focus-visible\s*\)/g, "");
       if (!/:focus(?:-visible)?(?![\w-])/.test(selector)) continue;
-      const decls = iterateDeclarations(block.body, block.bodyStart);
-      const removed = decls.find(
-        (d) =>
-          (d.prop === "outline" || d.prop === "outline-style") &&
-          OUTLINE_REMOVED_VALUE.test(d.value.trim()),
-      );
-      if (!removed) continue;
-      if (decls.some((d) => FOCUS_REPLACEMENT_PROPS.has(d.prop))) continue;
+      blocks.push({
+        selector,
+        base: selector.replace(/:focus(?:-visible)?(?![\w-])/g, ""),
+        visible: /:focus-visible(?![\w-])/.test(selector),
+        decls: iterateDeclarations(block.body, block.bodyStart),
+      });
+    }
+    const violations: Violation[] = [];
+    for (const b of blocks) {
+      const decls = b.decls;
+      const outlines = decls.filter((d) => isOutlineProp(d.prop));
+      const removed = outlines[outlines.length - 1];
+      if (!removed || !OUTLINE_REMOVED_VALUE.test(removed.value.trim())) {
+        continue;
+      }
+      if (decls.some((d) => isFocusReplacementProp(d.prop))) continue;
+      // `.btn:focus { outline: none }` next to `.btn:focus-visible { ... }`
+      // keeps a keyboard indicator when the latter paints one.
+      if (
+        !b.visible &&
+        blocks.some(
+          (o) =>
+            o !== b &&
+            o.visible &&
+            o.base === b.base &&
+            providesFocusIndicator(o.decls),
+        )
+      ) {
+        continue;
+      }
       violations.push(
         makeViolation(
           focusOutlineRemoved,
@@ -770,7 +818,7 @@ const focusOutlineRemoved: Rule = {
           removed.propOffset,
           removed.valueEnd,
           `${removed.prop}: ${removed.value}`,
-          `Focus outline removed on \`${selector}\` with no replacement indicator — keyboard focus becomes invisible. Add a box-shadow, border or background change.`,
+          `Focus outline removed on \`${b.selector}\` with no replacement indicator; keyboard focus becomes invisible. Add a box-shadow, border or background change.`,
         ),
       );
     }
@@ -809,7 +857,7 @@ const viewportZoomDisabled: Rule = {
           start,
           start + zoom[0].length,
           zoom[0],
-          `Viewport meta disables zoom (\`${zoom[0]}\`) — users cannot pinch-zoom the page.`,
+          `Viewport meta disables zoom (\`${zoom[0]}\`); users cannot pinch-zoom the page.`,
         ),
       );
     }
@@ -844,7 +892,79 @@ function findTagEnd(text: string, from: number): number {
 }
 
 const IMG_OPEN = /<img(?=[\s/>])/g;
-const ALT_ATTR = /(?:^|[\s:])alt(?=[\s=/>]|$)/;
+const ALT_NAME = /^(?:v-bind:|:)?alt$/;
+
+// Blanks HTML comments, JS block comments and JS line comments (same length,
+// newlines kept) so an `<img` inside one is not scanned. A `//` only starts a
+// line comment at the start of a line or after whitespace / punctuation, so
+// `https://` inside a URL survives.
+function maskComments(text: string): string {
+  const blank = (m: string): string => m.replace(/[^\n]/g, " ");
+  return text
+    .replace(/<!--[\s\S]*?(?:-->|$)/g, blank)
+    .replace(/\/\*[\s\S]*?(?:\*\/|$)/g, blank)
+    .replace(/(^|[\s;{}(,])(\/\/[^\n]*)/g, (_m, pre: string, c: string) => {
+      return pre + blank(c);
+    });
+}
+
+// Attribute-name based check over the text after `<img`: skips quoted and
+// unquoted values, so `title="an alt text"` does not count. A `{...spread}`
+// may carry `alt` and a Svelte `{alt}` shorthand is `alt`; both count.
+function hasAltAttribute(attrs: string): boolean {
+  let i = 0;
+  const n = attrs.length;
+  while (i < n) {
+    const c = attrs[i];
+    if (c === "{") {
+      let depth = 0;
+      const start = i;
+      for (; i < n; i++) {
+        if (attrs[i] === "{") depth++;
+        else if (attrs[i] === "}" && --depth === 0) {
+          i++;
+          break;
+        }
+      }
+      const inner = attrs.slice(start + 1, i - 1).trim();
+      if (inner.startsWith("...") || inner === "alt") return true;
+      continue;
+    }
+    if (/[\s/>]/.test(c)) {
+      i++;
+      continue;
+    }
+    const nameStart = i;
+    while (i < n && !/[\s=/>"'{}]/.test(attrs[i])) i++;
+    if (i === nameStart) {
+      i++;
+      continue;
+    }
+    if (ALT_NAME.test(attrs.slice(nameStart, i))) return true;
+    while (i < n && /\s/.test(attrs[i])) i++;
+    if (attrs[i] !== "=") continue;
+    i++;
+    while (i < n && /\s/.test(attrs[i])) i++;
+    const q = attrs[i];
+    if (q === '"' || q === "'") {
+      i++;
+      while (i < n && attrs[i] !== q) i++;
+      i++;
+    } else if (q === "{") {
+      let depth = 0;
+      for (; i < n; i++) {
+        if (attrs[i] === "{") depth++;
+        else if (attrs[i] === "}" && --depth === 0) {
+          i++;
+          break;
+        }
+      }
+    } else {
+      while (i < n && !/[\s>]/.test(attrs[i])) i++;
+    }
+  }
+  return false;
+}
 
 const imgMissingAlt: Rule = {
   id: "ui-slop/img-missing-alt",
@@ -856,17 +976,15 @@ const imgMissingAlt: Rule = {
   appliesTo: appliesToHeadingHosts,
   check({ file }: RuleContext): Violation[] {
     const violations: Violation[] = [];
+    const masked = maskComments(file.text);
     IMG_OPEN.lastIndex = 0;
     let m: RegExpExecArray | null;
-    while ((m = IMG_OPEN.exec(file.text)) !== null) {
-      const end = findTagEnd(file.text, m.index + m[0].length);
+    while ((m = IMG_OPEN.exec(masked)) !== null) {
+      const end = findTagEnd(masked, m.index + m[0].length);
       if (end === -1) break;
       const tag = file.text.slice(m.index, end);
       IMG_OPEN.lastIndex = end;
-      const attrs = tag.slice(4);
-      if (ALT_ATTR.test(attrs)) continue;
-      // `{...props}` may carry alt; cannot tell statically.
-      if (/\{\s*\.\.\./.test(attrs)) continue;
+      if (hasAltAttribute(masked.slice(m.index + 4, end))) continue;
       violations.push(
         makeViolation(
           imgMissingAlt,
@@ -874,7 +992,7 @@ const imgMissingAlt: Rule = {
           m.index,
           end,
           tag.length > 80 ? `${tag.slice(0, 80)}...` : tag,
-          '`<img>` has no `alt` attribute — add a description, or `alt=""` for a decorative image.',
+          '`<img>` has no `alt` attribute: add a description, or `alt=""` for a decorative image.',
         ),
       );
     }
@@ -904,7 +1022,7 @@ const loremIpsumPlaceholder: Rule = {
         m.index,
         m.index + m[0].length,
         m[0],
-        "Placeholder `lorem ipsum` text — replace it with real copy before shipping.",
+        "Placeholder `lorem ipsum` text; replace it with real copy before shipping.",
       ),
     ];
   },

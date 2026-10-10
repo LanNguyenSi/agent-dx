@@ -75,19 +75,21 @@ button:focus {
 
 The four newer rules work like this:
 
-- `ui-slop/focus-outline-removed` flags `outline: none` / `0` on a top-level `:focus` or `:focus-visible` rule unless the same block sets `box-shadow`, `border*`, `background*` or `text-decoration*`; `:focus:not(:focus-visible)` is exempt.
+- `ui-slop/focus-outline-removed` flags `outline: none` / `0` on a top-level `:focus` or `:focus-visible` rule unless the same block sets a replacement indicator: `box-shadow`, any `background*` or `text-decoration*`, or any `border*` except `border-radius*` and `border-image*`. `outline-color` / `outline-offset` do not count because the outline itself is removed, and a block whose last `outline` / `outline-style` declaration is visible is not flagged. A `:focus` block is also skipped when the same file has a `:focus-visible` block for the same base selector that sets a visible outline or a replacement indicator. `:focus:not(:focus-visible)` is exempt.
 - `ui-slop/viewport-zoom-disabled` flags `user-scalable=no|0` or `maximum-scale=1` in a viewport `<meta>` (markup and JSX).
-- `ui-slop/img-missing-alt` flags a lowercase `<img>` with no `alt` (`alt=""` passes; a `{...spread}` is skipped because it may carry `alt`).
-- `ui-slop/lorem-ipsum-placeholder` flags `lorem ipsum` in markup or JSX, once per file.
+- `ui-slop/img-missing-alt` flags a lowercase `<img>` with no `alt` (`alt=""` passes; a `{...spread}` is skipped because it may carry `alt`, a Svelte `{alt}` shorthand counts, and `alt` is matched as an attribute name, so `title="an alt text"` does not count). An `<img` inside an HTML comment or a JS line or block comment is skipped.
+- `ui-slop/lorem-ipsum-placeholder` flags `lorem ipsum` in markup or JSX, once per file. It also fires on stories and fixtures that use the filler on purpose; exclude those with path ignores.
 
 The two off-by-default info rules (`ui-slop/monospace-everywhere`, `ui-slop/flat-type-hierarchy`) need an explicit `rules.<id>.enabled: true` in `slop.config.yml` or a CLI override; they remain off because both have legitimate counter-uses (technical-product landing pages, mature design systems with subtle steps).
 
 Known v1 limitations (tracked as M3 follow-ups):
 
 - Tailwind class strings like `bg-gradient-to-r from-purple-500 to-cyan-500` are not detected; only literal CSS / hex / hsl in style declarations.
-- JSX inline `style={{ background: 'linear-gradient(...)' }}` literals are not scanned for rules 1-3 (only `ui-slop/skipped-heading-levels` walks JSX).
+- JSX inline `style={{ background: 'linear-gradient(...)' }}` literals are not scanned for rules 1-3 (`ui-slop/skipped-heading-levels` walks JSX markup, and the viewport, `img-missing-alt` and lorem-ipsum rules scan JSX text).
 - Vue / Svelte single-file-component `<style>` blocks are detected as `markup`, so CSS-shape rules don't fire on them; extract the styles or scope a separate `.css` file.
-- `@media`-wrapped top-level selectors are not walked recursively by `ui-slop/monospace-everywhere`.
+- `@media`-wrapped top-level selectors are not walked recursively by `ui-slop/monospace-everywhere` or `ui-slop/focus-outline-removed`.
+- `ui-slop/focus-outline-removed` does not see SCSS nested `&:focus` blocks or `:focus` rules nested in `@media`; the `:focus-visible` sibling lookup compares whole selector strings, so selector lists are matched as written.
+- `ui-slop/img-missing-alt` masks `//` comments heuristically (after whitespace or punctuation) and `/* */` comments anywhere, so a `/*` inside a quoted attribute value can hide a later `<img`.
 - `transition: all` is flagged, but `animation: <name>` referencing a `@keyframes` outside the same file is not cross-resolved.
 
 ## `placement-slop` by example

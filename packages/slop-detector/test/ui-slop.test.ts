@@ -492,6 +492,65 @@ describe("ui-slop/focus-outline-removed", () => {
   it("ignores a visible outline on :focus", () => {
     expect(run(id, css(`a:focus { outline: 2px solid blue; }`))).toEqual([]);
   });
+
+  it("accepts any border* or background* property as a replacement", () => {
+    expect(
+      run(id, css(`a:focus { outline: none; border-left: 3px solid red; }`)),
+    ).toEqual([]);
+    expect(
+      run(
+        id,
+        css(
+          `a:focus { outline: none; background-image: linear-gradient(red, blue); }`,
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it("does not accept border-radius alone as a replacement", () => {
+    expect(
+      run(id, css(`a:focus { outline: none; border-radius: 4px; }`)),
+    ).toHaveLength(1);
+    expect(
+      run(id, css(`a:focus { outline: none; border-image: none; }`)),
+    ).toHaveLength(1);
+  });
+
+  it("skips :focus when a sibling :focus-visible paints an indicator", () => {
+    expect(
+      run(
+        id,
+        css(
+          `.btn:focus { outline: none; } .btn:focus-visible { box-shadow: 0 0 0 2px blue; }`,
+        ),
+      ),
+    ).toEqual([]);
+    expect(
+      run(
+        id,
+        css(
+          `.btn:focus { outline: none; } .btn:focus-visible { outline: 2px solid blue; }`,
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it("still flags :focus when the :focus-visible sibling sets nothing visible", () => {
+    expect(
+      run(
+        id,
+        css(`.btn:focus { outline: none; } .btn:focus-visible { color: red; }`),
+      ),
+    ).toHaveLength(1);
+    expect(
+      run(
+        id,
+        css(
+          `.btn:focus { outline: none; } .other:focus-visible { box-shadow: 0 0 0 2px blue; }`,
+        ),
+      ),
+    ).toHaveLength(1);
+  });
 });
 
 describe("ui-slop/viewport-zoom-disabled", () => {
@@ -530,6 +589,19 @@ describe("ui-slop/viewport-zoom-disabled", () => {
     ).toEqual([]);
   });
 
+  it("allows maximum-scale values that only start with 1", () => {
+    for (const v of ["1.5", "10"]) {
+      expect(
+        run(
+          id,
+          markup(
+            `<meta name="viewport" content="width=device-width, maximum-scale=${v}">`,
+          ),
+        ),
+      ).toEqual([]);
+    }
+  });
+
   it("allows maximum-scale above 1 and non-viewport meta", () => {
     expect(
       run(
@@ -561,6 +633,29 @@ describe("ui-slop/img-missing-alt", () => {
       run(id, markup(`<img src="a.png" alt="Logo"><img src="b.png" alt="">`)),
     ).toEqual([]);
     expect(run(id, tsx(`const x = <img {...props} />;`))).toEqual([]);
+  });
+
+  it("keeps tracking braces so an onLoad arrow does not end the tag", () => {
+    expect(run(id, tsx(`const x = <img onLoad={() => x} alt="y" />;`))).toEqual(
+      [],
+    );
+  });
+
+  it("treats the Svelte {alt} shorthand as alt present", () => {
+    expect(run(id, markup(`<img src="a.png" {alt}>`))).toEqual([]);
+  });
+
+  it("does not count alt inside another attribute's value", () => {
+    expect(
+      run(id, markup(`<img src="a.png" title="an alt text">`)),
+    ).toHaveLength(1);
+    expect(run(id, markup(`<img src="alt" data-x={alt}>`))).toHaveLength(1);
+  });
+
+  it("skips an img inside HTML, block and line comments", () => {
+    expect(run(id, markup(`<!-- <img src="a.png"> -->`))).toEqual([]);
+    expect(run(id, tsx(`/* <img src="a.png"> */`))).toEqual([]);
+    expect(run(id, tsx(`// <img src="a.png">\nconst a = 1;`))).toEqual([]);
   });
 
   it("ignores components and similarly named tags", () => {
