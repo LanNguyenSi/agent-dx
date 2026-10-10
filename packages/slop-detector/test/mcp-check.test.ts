@@ -49,6 +49,14 @@ describe("runSlopCheck — text input", () => {
   });
 });
 
+describe("runSlopCheck — unknown pack", () => {
+  it("throws naming the unknown pack", () => {
+    expect(() =>
+      runSlopCheck({ text: "hi", filename: "msg.md", packs: ["ui-slp"] }),
+    ).toThrow(/unknown pack "ui-slp"/);
+  });
+});
+
 describe("runSlopCheck — path input", () => {
   it("scans a file on disk", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "slop-mcp-"));

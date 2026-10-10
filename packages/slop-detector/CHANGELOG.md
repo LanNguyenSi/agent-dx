@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- An unknown pack id now fails instead of being ignored (task d85097bd): `check --pack <id>`, the MCP `packs` argument and `packsByFilter` throw for an id the registry does not know, naming the unknown id(s) and listing the known packs. The CLI exits 2 and the composite action fails with exit 2 and an `::error` annotation, where a typo such as `ui-slp` previously scanned nothing and reported a clean run. Pack names under `packs:` in a config file were already rejected by schema validation.
+
 ### Added
 
 - `ui-slop` grows from 6 to 10 rules (task 681fd3b9), re-implemented in this package: `focus-outline-removed`, `viewport-zoom-disabled`, `img-missing-alt` and `lorem-ipsum-placeholder`, all default-on (the pack itself stays opt-in). The package now ships 52 rules.
