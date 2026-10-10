@@ -8,7 +8,7 @@ name: Deprecate an npm version
 # NPM_AGENT_DX_TOKEN is a granular npm automation token whose package
 # scope is all of the account's packages with read and write access, so
 # it can write every package this workflow's allowlist names
-# (orchestrator-workflow, okf-kit, agent-primitives) for deprecation and,
+# (orchestrator-workflow, okf-kit, agent-primitives, friction-log) for deprecation and,
 # in npm-dist-tag.yml, dist-tag moves; 2FA-bypass is enabled so it works
 # non-interactively in CI. With that scope, adding a package to the
 # allowlist needs no token change. Only if the scope is ever narrowed to
@@ -81,11 +81,11 @@ jobs:
           VERSION: ${{ inputs.version }}
           MESSAGE: ${{ inputs.message }}
           # Keep in step with publish-npm.yml's PUBLISHABLE list
-          # (orchestrator-workflow, okf-kit, agent-primitives). Adding a
+          # (orchestrator-workflow, okf-kit, agent-primitives, friction-log). Adding a
           # package here needs no token change while NPM_AGENT_DX_TOKEN keeps
           # its all-packages scope (see the header comment above); this
           # validation does not check the token's scope.
-          ALLOWLIST: "orchestrator-workflow okf-kit agent-primitives"
+          ALLOWLIST: "orchestrator-workflow okf-kit agent-primitives friction-log"
         run: |
           set -euo pipefail
 

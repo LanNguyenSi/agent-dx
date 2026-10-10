@@ -19,12 +19,12 @@ root needs to be set up first.
 
 - `orchestrator-workflow` and `okf-kit` are published to npm with tagged
   releases.
-- `agent-primitives` is published to npm.
+- `agent-primitives` and `friction-log` are published to npm.
 - `slop-detector` is deliberately unpublished: the bare `slop-detector` name
   on npm belongs to an unrelated third-party package. It runs from a local
   build (see the root README's Quick start and Usage) and ships an MCP server
   alongside the CLI.
-- `agent-dev-kit`, `friction-log`, `git-batch-cli`, and `mcp-token-audit` are
+- `agent-dev-kit`, `git-batch-cli`, and `mcp-token-audit` are
   functional CLIs, not yet published to npm.
 - `github-api-tool` is marked private in its own `package.json`.
 - `agent-engineering-playbook` and `agentic-coding-playbook` are

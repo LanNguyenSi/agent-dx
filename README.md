@@ -4,7 +4,7 @@ A monorepo workshop for agent-development tooling, built while shipping AI-agent
 
 ## Overview
 
-`agent-dx` collects the CLIs, linters, and playbooks used to build and review AI-agent coding workflows across this workshop and its sibling repos. It is a folder of independent packages, not an npm workspaces, pnpm, or lerna monorepo: there is no root `package.json` and no shared root `node_modules`. Three packages ship on npm today: orchestrator-workflow, okf-kit, and agent-primitives. The rest are working tools or documentation packages. See [Repo layout and package status](docs/repo-layout.md) for how the packages relate to each other.
+`agent-dx` collects the CLIs, linters, and playbooks used to build and review AI-agent coding workflows across this workshop and its sibling repos. It is a folder of independent packages, not an npm workspaces, pnpm, or lerna monorepo: there is no root `package.json` and no shared root `node_modules`. Four packages ship on npm today: orchestrator-workflow, okf-kit, agent-primitives, and friction-log. The rest are working tools or documentation packages. See [Repo layout and package status](docs/repo-layout.md) for how the packages relate to each other.
 
 ## Packages
 
@@ -15,7 +15,7 @@ A monorepo workshop for agent-development tooling, built while shipping AI-agent
 | [agent-primitives](packages/agent-primitives) | Agent-first CLI: bounded JSON envelopes, a mutation-probe runner, a verify runner, and a PATH doctor, plus an `init` command that installs its own skill document into a harness's skill directory. | published |
 | [slop-detector](packages/slop-detector) | AI-slop linter for PRs: catches leaked tool-call XML, doubled Summary headings, hedging openers, marketing adjectives, and other agent-generated tells across eight rule packs. | not published (name taken by an unrelated package; run from a local build) |
 | [agent-dev-kit](packages/agent-dev-kit) | CLI scaffolding for AI agent projects: file layout, hooks, entrypoints. | not published |
-| [friction-log](packages/friction-log) | Capture, query, and infer agent-workflow frictions. SQLite-backed, sink-pluggable, zero-config default. | not published |
+| [friction-log](packages/friction-log) | Capture, query, and infer agent-workflow frictions. SQLite-backed, sink-pluggable, zero-config default. | published |
 | [git-batch-cli](packages/git-batch-cli) | Run safe batch git operations across all repos under a folder: sync, status, dirty checks, fetch, with `--strict` for automation. | not published |
 | [mcp-token-audit](packages/mcp-token-audit) | Ranks tool calls in Claude Code transcripts by approximate token cost per tool name, with an `mcp__*` share of the total. | not published |
 | [github-api-tool](packages/github-api-tool) | TypeScript CLI for GitHub API operations (issues, PRs, commits, standup digests), JSON output for agents calling via `exec`. | private |

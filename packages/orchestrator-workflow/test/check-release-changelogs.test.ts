@@ -87,6 +87,7 @@ const CLEAN_CHANGELOG = (version: string) =>
 // against a --root fixture that mirrors its package names.
 const PINNED_PACKAGES = [
   "agent-primitives",
+  "friction-log",
   "okf-kit",
   "orchestrator-workflow",
   "slop-detector",
@@ -408,12 +409,12 @@ describe("check-release-changelogs.mjs", () => {
       );
     });
 
-    it("still passes when a fifth, unpinned package with its own CHANGELOG is present", () => {
+    it("still passes when a sixth, unpinned package with its own CHANGELOG is present", () => {
       writeAllPinnedPackages();
       writePackage("extra-package", "1.0.0", CLEAN_CHANGELOG("1.0.0"));
       const result = run([], { expect: null });
       expect(result.status).toBe(0);
-      expect(result.stdout).toMatch(/OK \(5 package/);
+      expect(result.stdout).toMatch(/OK \(6 package/);
     });
 
     it('--expect "" opts out: an empty expectation list never fires, even with every pinned package missing', () => {
