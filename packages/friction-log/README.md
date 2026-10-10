@@ -21,27 +21,35 @@ Two recurring patterns in agent-driven development go unaddressed by most toolin
 
 ## Install / quick start
 
-Not published to npm; run it from a local build of this monorepo (Node.js 20 or later):
+Install from npm (Node.js 22 or later):
 
 ```bash
-git clone https://github.com/LanNguyenSi/agent-dx && cd agent-dx
-cd packages/friction-log && npm install && npm run build && cd ../..
+npm i -g friction-log
+friction-log --version
 
 # Log a friction you noticed
-node packages/friction-log/dist/cli.js log \
+friction-log log \
   --title "tasks_list returns 149kB blob" \
   --tool "mcp:agent-tasks/tasks_list" \
   --category output-overflow \
   --severity high
 
 # See it in the local database
-node packages/friction-log/dist/cli.js list
+friction-log list
 
 # Render and file it via the default markdown sink
-node packages/friction-log/dist/cli.js file 1
+friction-log file 1
 ```
 
-To get a `friction-log` command on PATH (needed for the Stop-hook below), run `npm link` in `packages/friction-log`.
+The global install puts a `friction-log` command on PATH, which the Stop-hook below needs.
+
+To run from a local build instead (for development on this repository):
+
+```bash
+git clone https://github.com/LanNguyenSi/agent-dx && cd agent-dx
+cd packages/friction-log && npm install && npm run build
+node dist/cli.js --help
+```
 
 A markdown record lands under `~/.local/share/friction-log/frictions/` with full frontmatter, ready to commit, paste into a chat, or pipe into another tool.
 

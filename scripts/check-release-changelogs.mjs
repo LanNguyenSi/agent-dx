@@ -123,6 +123,7 @@ const DEFAULT_REPO_ROOT = resolve(
 // both together (the test suite fails loudly when the two lists disagree).
 const EXPECTED_CHECKED_PACKAGES = [
   "agent-primitives",
+  "friction-log",
   "okf-kit",
   "orchestrator-workflow",
   "slop-detector",

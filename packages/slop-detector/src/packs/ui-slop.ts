@@ -23,7 +23,9 @@ function appliesToHeadingHosts(file: FileTarget): boolean {
 // Blanks /* ... */ comments with spaces of the same length so offsets stay
 // valid. Quoted strings are copied unchanged, so a "/*" inside a string
 // (content: "/*") never opens a comment. As in CSS, a string ends at its
-// matching unescaped quote or at a newline. An unterminated /* is left as is.
+// matching unescaped quote or at a newline. An unquoted url( body runs to its
+// closing ")" and is copied unchanged, so url(/*x.png) is a url token and not a
+// comment opener. An unterminated /* is left as is.
 function stripCssComments(text: string): string {
   let out = "";
   let i = 0;
@@ -39,6 +41,19 @@ function stripCssComments(text: string): string {
       out += text.slice(i, j);
       i = j;
       continue;
+    }
+    if ((ch === "u" || ch === "U") && (i === 0 || !/[\w-]/.test(text[i - 1]))) {
+      const m = /^url\([ \t\r\n\f]*/i.exec(text.slice(i, i + 64));
+      if (m && text[i + m[0].length] !== '"' && text[i + m[0].length] !== "'") {
+        let j = i + m[0].length;
+        while (j < text.length && text[j] !== ")") {
+          j += text[j] === "\\" ? 2 : 1;
+        }
+        j = Math.min(j + 1, text.length);
+        out += text.slice(i, j);
+        i = j;
+        continue;
+      }
     }
     if (ch === "/" && text[i + 1] === "*") {
       const close = text.indexOf("*/", i + 2);

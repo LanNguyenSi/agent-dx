@@ -42,7 +42,7 @@ npm writes (deprecate, dist-tag) still run via the `NPM_AGENT_DX_TOKEN`
 repository secret, a granular automation token whose package scope is
 all of the account's packages with read and write access, so it can
 write every package on these workflows' allowlist (orchestrator-workflow,
-okf-kit, agent-primitives) (see `npm-deprecate.yml` and
+okf-kit, agent-primitives, friction-log) (see `npm-deprecate.yml` and
 `npm-dist-tag.yml`), since OIDC only covers `npm publish`. With that
 scope, adding a package to the allowlist needs no token change. Only if
 the scope is ever narrowed to named packages would a new allowlist entry

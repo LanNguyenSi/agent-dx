@@ -1,5 +1,11 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -81,12 +87,13 @@ function run(args: string[], opts: { expect?: string | null } = {}) {
 const CLEAN_CHANGELOG = (version: string) =>
   `# Changelog\n\n## [Unreleased]\n\n## [${version}] - 2026-09-15\n\n- did a thing\n`;
 
-// The four packages check-release-changelogs.mjs's EXPECTED_CHECKED_PACKAGES
-// pins by default. Used only by the checked-package-scope tests below,
+// The packages check-release-changelogs.mjs's EXPECTED_CHECKED_PACKAGES
+// pins by default (see the list-equality test below). Used only by the checked-package-scope tests below,
 // which run with `expect: null` to exercise that real default list
 // against a --root fixture that mirrors its package names.
 const PINNED_PACKAGES = [
   "agent-primitives",
+  "friction-log",
   "okf-kit",
   "orchestrator-workflow",
   "slop-detector",
@@ -362,15 +369,34 @@ describe("check-release-changelogs.mjs", () => {
   });
 
   describe("rule 5 (checked-package-scope)", () => {
-    // These three tests pass `expect: null` (omit --expect entirely) so
+    // These tests pass `expect: null` (omit --expect entirely) so
     // the script falls back to its own default expectation list
-    // (EXPECTED_CHECKED_PACKAGES: agent-primitives, okf-kit,
-    // orchestrator-workflow, slop-detector) against a --root fixture that
+    // (EXPECTED_CHECKED_PACKAGES, mirrored by PINNED_PACKAGES) against a --root fixture that
     // mirrors those exact package names. This is also what discriminates
     // a mutant that empties EXPECTED_CHECKED_PACKAGES: with an empty
     // list rule 5 never fires (see the --expect "" opt-out test below),
     // so exercising the *default* (no --expect at all) is required to
     // catch that regression.
+
+    it("the script's EXPECTED_CHECKED_PACKAGES equals PINNED_PACKAGES exactly", () => {
+      const src = readFileSync(SCRIPT_PATH, "utf8");
+      const m = src.match(/const EXPECTED_CHECKED_PACKAGES = \[([^\]]*)\]/);
+      expect(m).not.toBeNull();
+      const names = [...m![1].matchAll(/"([^"]+)"/g)].map((x) => x[1]);
+      expect(names).toEqual([...PINNED_PACKAGES]);
+    });
+
+    it.each(PINNED_PACKAGES)(
+      "fails when pinned package %s's CHANGELOG.md is deleted",
+      (name) => {
+        writeAllPinnedPackages();
+        rmSync(join(root, "packages", name, "CHANGELOG.md"));
+        const result = run([], { expect: null });
+        expect(result.status).toBe(1);
+        expect(result.stderr).toMatch(/\[checked-package-scope\]/);
+        expect(result.stderr).toContain(name);
+      },
+    );
 
     it("fails when a pinned package's CHANGELOG.md is deleted", () => {
       writeAllPinnedPackages();
@@ -408,12 +434,12 @@ describe("check-release-changelogs.mjs", () => {
       );
     });
 
-    it("still passes when a fifth, unpinned package with its own CHANGELOG is present", () => {
+    it("still passes when a sixth, unpinned package with its own CHANGELOG is present", () => {
       writeAllPinnedPackages();
       writePackage("extra-package", "1.0.0", CLEAN_CHANGELOG("1.0.0"));
       const result = run([], { expect: null });
       expect(result.status).toBe(0);
-      expect(result.stdout).toMatch(/OK \(5 package/);
+      expect(result.stdout).toMatch(/OK \(6 package/);
     });
 
     it('--expect "" opts out: an empty expectation list never fires, even with every pinned package missing', () => {

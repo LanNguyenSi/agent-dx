@@ -7,7 +7,7 @@ name: Move an npm dist-tag
 # NPM_AGENT_DX_TOKEN is a granular npm automation token whose package
 # scope is all of the account's packages with read and write access, so
 # it can write every package this workflow's allowlist names
-# (orchestrator-workflow, okf-kit, agent-primitives) for dist-tag moves
+# (orchestrator-workflow, okf-kit, agent-primitives, friction-log) for dist-tag moves
 # and, in npm-deprecate.yml, deprecation; 2FA-bypass is enabled so it
 # works non-interactively in CI. With that scope, adding a package to the
 # allowlist needs no token change. Only if the scope is ever narrowed to
@@ -81,14 +81,14 @@ jobs:
           VERSION: ${{ inputs.version }}
           TAG: ${{ inputs.tag }}
           # NPM PACKAGE NAMES. publish-npm.yml's PUBLISHABLE list
-          # (orchestrator-workflow, okf-kit, agent-primitives) holds package
+          # (orchestrator-workflow, okf-kit, agent-primitives, friction-log) holds package
           # DIRECTORY names; today the two coincide, but a future package whose
           # npm name diverges from its directory name must be added here under
           # its npm name, not copied verbatim. Adding a package here needs no
           # token change while NPM_AGENT_DX_TOKEN keeps its all-packages scope
           # (see the header comment above); this validation does not check
           # the token's scope.
-          ALLOWLIST: "orchestrator-workflow okf-kit agent-primitives"
+          ALLOWLIST: "orchestrator-workflow okf-kit agent-primitives friction-log"
         run: |
           set -euo pipefail
 

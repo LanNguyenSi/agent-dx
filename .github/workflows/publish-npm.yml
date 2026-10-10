@@ -23,6 +23,7 @@ on:
       - "orchestrator-workflow/v*"
       - "okf-kit/v*"
       - "agent-primitives/v*"
+      - "friction-log/v*"
   workflow_dispatch:
     inputs:
       tag:
@@ -48,7 +49,7 @@ jobs:
         env:
           RESOLVED_TAG: ${{ inputs.tag || github.ref_name }}
           # Space-separated allowlist of publishable package directories.
-          PUBLISHABLE: "orchestrator-workflow okf-kit agent-primitives"
+          PUBLISHABLE: "orchestrator-workflow okf-kit agent-primitives friction-log"
         run: |
           set -euo pipefail
           pkg="${RESOLVED_TAG%%/v*}"
@@ -129,7 +130,7 @@ jobs:
         # (permissions.id-token: write above) matched against the package's
         # Trusted Publisher entry on npmjs.com (repo LanNguyenSi/agent-dx,
         # workflow publish-npm.yml) — no NPM_TOKEN secret involved. Every
-        # published package (orchestrator-workflow, okf-kit, agent-primitives)
+        # published package (orchestrator-workflow, okf-kit, agent-primitives, friction-log)
         # needs its own separate Trusted Publisher entry pointing at this file.
         run: npm install -g npm@^11.5.1 --no-audit --no-fund
 
