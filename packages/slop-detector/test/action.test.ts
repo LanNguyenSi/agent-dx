@@ -470,6 +470,15 @@ describe("action entrypoint subprocess", () => {
     );
   });
 
+  it("exits 2 with an ::error naming the unknown pack and the known ones", () => {
+    const r = runEntry({ INPUT_PACK: "placement-slop,ui-slp" });
+    expect(r.status).toBe(2);
+    expect(r.stdout).toMatch(/^::error title=slop-detector::/m);
+    expect(r.stdout).toContain('unknown pack "ui-slp"');
+    expect(r.stdout).toContain("known packs:");
+    expect(r.stdout).toContain("ui-slop");
+  });
+
   it("exits 1 with an ::error annotation for a block finding", () => {
     const r = runEntry({ INPUT_PACK: "placement-slop" });
     expect(r.status).toBe(1);

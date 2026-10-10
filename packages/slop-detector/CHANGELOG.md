@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- An unknown pack id now fails instead of being ignored (task d85097bd): `check --pack <id>`, the MCP `packs` argument and `packsByFilter` throw for an id the registry does not know, naming the unknown id(s) and listing the known packs. The CLI exits 2 and the composite action fails with exit 2 and an `::error` annotation, where a typo such as `ui-slp` previously scanned nothing and reported a clean run. Pack names under `packs:` in a config file were already rejected by schema validation.
+
 ### Added
 
 - Composite GitHub Action at `packages/slop-detector/action` (task 6b887410): builds the CLI from the checkout at the action's ref, runs it with `--format json`, emits one `::error`/`::warning`/`::notice` annotation per violation and fails at or above `severity-threshold` (`block` default; exit 2 for CLI or input failures). Changed-files-only lists files with `git diff --name-only -z`, so non-ASCII and unusual names survive, and validates the event's base/head SHAs. Inputs: `path`, `pack`, `config`, `severity-threshold`, `changed-files-only`. See the README's "GitHub Action" section.
