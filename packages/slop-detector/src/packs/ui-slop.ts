@@ -1,4 +1,5 @@
 import type {
+  FileKind,
   FileTarget,
   PackDefinition,
   Rule,
@@ -714,23 +715,34 @@ const flatTypeHierarchy: Rule = {
 
 // ─────────────────────────── Rule 7: focus-outline-removed ───
 
-// A declaration counts as a visible replacement focus indicator when it is
-// `box-shadow`, any `background*` or `text-decoration*`, or any `border*`
-// except `border-radius*` and `border-image*` (those do not paint a visible
-// change by themselves). `outline-color` / `outline-offset` never count: they
-// only matter next to a visible outline, and a block that removes the outline
-// has none.
-function isFocusReplacementProp(prop: string): boolean {
-  if (prop === "box-shadow") return true;
-  if (prop.startsWith("background") || prop.startsWith("text-decoration")) {
-    return true;
-  }
-  if (prop.startsWith("border")) {
-    return (
-      !prop.startsWith("border-radius") && !prop.startsWith("border-image")
-    );
-  }
-  return false;
+// A declaration counts as a visible replacement focus indicator when it is a
+// painting property (`box-shadow`, `background`, `background-color`,
+// `background-image`, `border` and its colour / width / style longhands,
+// `text-decoration*`) with a value that actually paints. `border-radius*`,
+// `border-collapse`, `border-image*` and friends do not paint a focus change
+// by themselves, and a value of `none` / `0` / `transparent` / `initial` /
+// `unset` removes or resets rather than adds one. `outline-color` /
+// `outline-offset` never count: they only matter next to a visible outline,
+// and a block that removes the outline has none.
+const BORDER_PAINT_PROP =
+  /^border(?:-(?:top|right|bottom|left|block|inline)(?:-(?:start|end))?)?(?:-(?:color|width|style))?$/;
+const NON_PAINTING_VALUE = /^(?:none|0|0px|transparent|initial|unset)$/;
+
+function isFocusReplacement(d: { prop: string; value: string }): boolean {
+  const { prop } = d;
+  const paints =
+    prop === "box-shadow" ||
+    prop === "background" ||
+    prop === "background-color" ||
+    prop === "background-image" ||
+    prop.startsWith("text-decoration") ||
+    BORDER_PAINT_PROP.test(prop);
+  if (!paints) return false;
+  const value = d.value
+    .replace(/\s*!important\s*$/i, "")
+    .trim()
+    .toLowerCase();
+  return value.length > 0 && !NON_PAINTING_VALUE.test(value);
 }
 
 const OUTLINE_REMOVED_VALUE = /^(?:none|0|0px)(?:\s*!important)?$/i;
@@ -747,7 +759,7 @@ function providesFocusIndicator(
   const outlines = decls.filter((d) => isOutlineProp(d.prop));
   const last = outlines[outlines.length - 1];
   if (last && !OUTLINE_REMOVED_VALUE.test(last.value.trim())) return true;
-  return decls.some((d) => isFocusReplacementProp(d.prop));
+  return decls.some(isFocusReplacement);
 }
 
 const focusOutlineRemoved: Rule = {
@@ -761,6 +773,7 @@ const focusOutlineRemoved: Rule = {
   check({ file }: RuleContext): Violation[] {
     const text = stripCssComments(file.text);
     interface FocusBlock {
+      order: number;
       selector: string;
       base: string;
       visible: boolean;
@@ -782,6 +795,7 @@ const focusOutlineRemoved: Rule = {
       ).replace(/:focus:not\(\s*:focus-visible\s*\)/g, "");
       if (!/:focus(?:-visible)?(?![\w-])/.test(selector)) continue;
       blocks.push({
+        order: block.openIndex,
         selector,
         base: selector.replace(/:focus(?:-visible)?(?![\w-])/g, ""),
         visible: /:focus-visible(?![\w-])/.test(selector),
@@ -796,15 +810,19 @@ const focusOutlineRemoved: Rule = {
       if (!removed || !OUTLINE_REMOVED_VALUE.test(removed.value.trim())) {
         continue;
       }
-      if (decls.some((d) => isFocusReplacementProp(d.prop))) continue;
-      // `.btn:focus { outline: none }` next to `.btn:focus-visible { ... }`
-      // keeps a keyboard indicator when the latter paints one.
+      if (decls.some(isFocusReplacement)) continue;
+      // `.btn:focus { outline: none }` followed by `.btn:focus-visible { ... }`
+      // keeps a keyboard indicator when the latter paints one. Both selectors
+      // have the same specificity, so the later block wins the cascade: a
+      // `:focus-visible` block written BEFORE the `:focus` removal is overridden
+      // by it and does not excuse it.
       if (
         !b.visible &&
         blocks.some(
           (o) =>
             o !== b &&
             o.visible &&
+            o.order > b.order &&
             o.base === b.base &&
             providesFocusIndicator(o.decls),
         )
@@ -892,20 +910,77 @@ function findTagEnd(text: string, from: number): number {
 }
 
 const IMG_OPEN = /<img(?=[\s/>])/g;
-const ALT_NAME = /^(?:v-bind:|:)?alt$/;
+// `alt`, Vue `:alt` / `v-bind:alt`, Svelte `bind:alt`, Angular `[alt]` /
+// `[attr.alt]`; HTML attribute names are case-insensitive.
+const ALT_NAME = /^(?:(?:v-bind:|bind:|:)?alt|\[(?:attr\.)?alt\])$/i;
 
-// Blanks HTML comments, JS block comments and JS line comments (same length,
-// newlines kept) so an `<img` inside one is not scanned. A `//` only starts a
-// line comment at the start of a line or after whitespace / punctuation, so
-// `https://` inside a URL survives.
-function maskComments(text: string): string {
-  const blank = (m: string): string => m.replace(/[^\n]/g, " ");
-  return text
-    .replace(/<!--[\s\S]*?(?:-->|$)/g, blank)
-    .replace(/\/\*[\s\S]*?(?:\*\/|$)/g, blank)
-    .replace(/(^|[\s;{}(,])(\/\/[^\n]*)/g, (_m, pre: string, c: string) => {
-      return pre + blank(c);
-    });
+const blankOut = (m: string): string => m.replace(/[^\n]/g, " ");
+
+// Blanks JS comments (same length, newlines kept) without touching strings.
+// Quoted strings end at the line break, template literals at the closing
+// backtick; neither is ever blanked, so `accept="image/*"`, a `"./a/*.png"`
+// glob or `title="a // b"` survive. A `//` only starts a comment at the start
+// of a line or after `; { } ( ) ,`, which keeps `https://` and prose such as
+// `<p>a // b</p>` intact. An unterminated block comment is left alone. Anything
+// this scanner fails to recognise stays unmasked, which can only add a finding
+// inside a comment, never hide a real tag.
+function maskJsComments(text: string): string {
+  const out = text.split("");
+  const n = text.length;
+  let i = 0;
+  while (i < n) {
+    const c = text[i];
+    if (c === '"' || c === "'") {
+      i++;
+      while (i < n && text[i] !== c && text[i] !== "\n") {
+        if (text[i] === "\\") i++;
+        i++;
+      }
+      i++;
+    } else if (c === "`") {
+      i++;
+      while (i < n && text[i] !== "`") {
+        if (text[i] === "\\") i++;
+        i++;
+      }
+      i++;
+    } else if (c === "/" && text[i + 1] === "*") {
+      const close = text.indexOf("*/", i + 2);
+      if (close === -1) {
+        i += 2;
+        continue;
+      }
+      for (let k = i; k < close + 2; k++) if (out[k] !== "\n") out[k] = " ";
+      i = close + 2;
+    } else if (c === "/" && text[i + 1] === "/") {
+      let k = i - 1;
+      while (k >= 0 && (text[k] === " " || text[k] === "\t")) k--;
+      if (k < 0 || text[k] === "\n" || ";{}(),".includes(text[k])) {
+        let end = text.indexOf("\n", i);
+        if (end === -1) end = n;
+        for (let j = i; j < end; j++) out[j] = " ";
+        i = end;
+      } else {
+        i += 2;
+      }
+    } else {
+      i++;
+    }
+  }
+  return out.join("");
+}
+
+// Masks comments so an `<img` inside one is not scanned. Code files get JS
+// comment masking only; markup gets `<!-- -->` masking, plus JS comment masking
+// inside `<script>` bodies only (a `//` in markup text or an attribute value is
+// not a comment).
+function maskComments(text: string, kind: FileKind): string {
+  if (kind === "code") return maskJsComments(text);
+  const html = text.replace(/<!--[\s\S]*?(?:-->|$)/g, blankOut);
+  return html.replace(
+    /(<script\b[^>]*>)([\s\S]*?)(?=<\/script\b|$)/gi,
+    (_m, open: string, body: string) => open + maskJsComments(body),
+  );
 }
 
 // Attribute-name based check over the text after `<img`: skips quoted and
@@ -976,12 +1051,12 @@ const imgMissingAlt: Rule = {
   appliesTo: appliesToHeadingHosts,
   check({ file }: RuleContext): Violation[] {
     const violations: Violation[] = [];
-    const masked = maskComments(file.text);
+    const masked = maskComments(file.text, file.kind);
     IMG_OPEN.lastIndex = 0;
     let m: RegExpExecArray | null;
     while ((m = IMG_OPEN.exec(masked)) !== null) {
       const end = findTagEnd(masked, m.index + m[0].length);
-      if (end === -1) break;
+      if (end === -1) continue;
       const tag = file.text.slice(m.index, end);
       IMG_OPEN.lastIndex = end;
       if (hasAltAttribute(masked.slice(m.index + 4, end))) continue;
