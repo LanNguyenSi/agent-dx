@@ -20,8 +20,41 @@ function appliesToHeadingHosts(file: FileTarget): boolean {
   return false;
 }
 
+// Blanks /* ... */ comments with spaces of the same length so offsets stay
+// valid. Quoted strings are copied unchanged, so a "/*" inside a string
+// (content: "/*") never opens a comment. As in CSS, a string ends at its
+// matching unescaped quote or at a newline. An unterminated /* is left as is.
 function stripCssComments(text: string): string {
-  return text.replace(/\/\*[\s\S]*?\*\//g, (block) => " ".repeat(block.length));
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === '"' || ch === "'") {
+      let j = i + 1;
+      while (j < text.length && text[j] !== ch && text[j] !== "\n") {
+        j += text[j] === "\\" ? 2 : 1;
+      }
+      if (j < text.length && text[j] === ch) j += 1;
+      j = Math.min(j, text.length);
+      out += text.slice(i, j);
+      i = j;
+      continue;
+    }
+    if (ch === "/" && text[i + 1] === "*") {
+      const close = text.indexOf("*/", i + 2);
+      if (close === -1) {
+        out += text.slice(i);
+        break;
+      }
+      const end = close + 2;
+      out += " ".repeat(end - i);
+      i = end;
+      continue;
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
 }
 
 function makeViolation(
@@ -52,8 +85,9 @@ function makeViolation(
 // Iterate balanced `{ ... }` blocks. Returns the inner body of each rule
 // (everything between the matched braces) with its absolute start offset
 // inside the original text. Skips strings to avoid matching `{` inside
-// quoted content like `content: "{"`. Naive on `\\`-escaped quotes — but
-// CSS rarely has them, and a false negative is fine for v1.
+// quoted content like `content: "{"`. Inside a string, backslash escapes are
+// honored (as in CSS and in `stripCssComments`), so `content: "a\""` does not
+// flip the string state and hide the rest of the file.
 interface BlockSpan {
   /** offset of the opening `{` */
   openIndex: number;
@@ -78,7 +112,8 @@ function iterateBlocks(text: string): BlockSpan[] {
     while (j < text.length && depth > 0) {
       const c = text[j];
       if (str) {
-        if (c === str) str = null;
+        if (c === "\\") j += 1;
+        else if (c === str) str = null;
       } else if (c === '"' || c === "'") {
         str = c;
       } else if (c === "{") {
