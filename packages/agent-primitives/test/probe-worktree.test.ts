@@ -1654,6 +1654,42 @@ describe("probe(): worktree isolation, the link policy", () => {
       ),
     ).toBe(true);
   });
+
+  // Without the env strip only LITERAL empties the `:(literal)` ls-files
+  // listing; the GLOB, NOGLOB and ICASE cases are a regression net only and
+  // do not pin the defect.
+  it.each([
+    "GIT_GLOB_PATHSPECS",
+    "GIT_NOGLOB_PATHSPECS",
+    "GIT_ICASE_PATHSPECS",
+    "GIT_LITERAL_PATHSPECS",
+  ])(
+    "still refuses a TRACKED directory the defaults file names when the ambient %s switch is set: the tracked-file listing must not come back empty and read as untracked",
+    async (name) => {
+      useLockDir();
+      const repo = initSrcRepo({ defaultsLinks: ["lib"] });
+      const saved = process.env[name];
+      process.env[name] = "1";
+      try {
+        const result = await probe(
+          baseOptions(repo, {
+            file: "src/fixture.js",
+            testCommand: SRC_TEST_COMMAND,
+          }),
+        );
+        expect(result.status).toBe("killed");
+        expect(result.isolation.linked).toEqual([]);
+        expect(
+          result.warnings.some(
+            (w) => w.includes('"lib"') && w.includes("git tracks it"),
+          ),
+        ).toBe(true);
+      } finally {
+        if (saved === undefined) delete process.env[name];
+        else process.env[name] = saved;
+      }
+    },
+  );
 });
 
 /**

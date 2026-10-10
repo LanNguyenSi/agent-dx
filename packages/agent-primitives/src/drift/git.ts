@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { withoutPathspecEnv } from "../git-env.js";
 
 /** Generous enough for a whole-repo diff or a doc file's contents without
  * truncating mid-line; this is a prototype tool run against one task-sized
@@ -16,10 +17,15 @@ export interface GitRunResult {
  * failure (git missing, cwd unreadable) comes back as `error` instead,
  * the same shape doctor's own `runWorktreeList` uses for its synchronous
  * git calls. */
-export function runGit(cwd: string, args: string[]): GitRunResult {
+export function runGit(
+  cwd: string,
+  args: string[],
+  env?: NodeJS.ProcessEnv,
+): GitRunResult {
   try {
     const result = spawnSync("git", args, {
       cwd,
+      ...(env !== undefined ? { env } : {}),
       encoding: "utf8",
       maxBuffer: GIT_MAX_BUFFER,
     });
@@ -93,15 +99,11 @@ export function grepIdentifier(
   name: string,
   pathspecs: readonly string[],
 ): GitRunResult {
-  return runGit(cwd, [
-    "grep",
-    "-n",
-    "-w",
-    "-F",
-    "-e",
-    name,
-    rev,
-    "--",
-    ...pathspecs,
-  ]);
+  return runGit(
+    cwd,
+    ["grep", "-n", "-w", "-F", "-e", name, rev, "--", ...pathspecs],
+    // The scan pathspecs are globs: an ambient GIT_*_PATHSPECS switch would
+    // make git grep match none of them and exit 1, which reads as "no site".
+    withoutPathspecEnv(),
+  );
 }

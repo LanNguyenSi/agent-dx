@@ -891,6 +891,42 @@ describe("drift (deleted-file basename guard)", () => {
   });
 });
 
+describe("drift (ambient GIT_*_PATHSPECS switches)", () => {
+  // Without the env strip, GLOB, NOGLOB and LITERAL make `git grep` miss the
+  // cited doc and drift report ok; ICASE still matches. The ICASE case is a
+  // regression net only, it does not pin the defect.
+  it.each([
+    "GIT_GLOB_PATHSPECS",
+    "GIT_NOGLOB_PATHSPECS",
+    "GIT_ICASE_PATHSPECS",
+    "GIT_LITERAL_PATHSPECS",
+  ])(
+    "still reports a removed identifier a doc cites when %s is set, never ok with zero sites",
+    async (name) => {
+      const repo = initRepo();
+      writeFile(repo, "src/a.ts", "export function fooBarBaz() {}\n");
+      writeFile(repo, "docs/a.md", "Call `fooBarBaz` to start.\n");
+      const base = commit(repo, "base");
+      writeFile(repo, "src/a.ts", "export function other() {}\n");
+      const head = commit(repo, "head");
+
+      const saved = process.env[name];
+      process.env[name] = "1";
+      try {
+        const result = await drift({ cwd: repo, base, head });
+        expect(result.warnings).toEqual([]);
+        expect(result.status).toBe("fail");
+        expect(result.sites.map((s) => `${s.path}:${s.identifier}`)).toEqual([
+          "docs/a.md:fooBarBaz",
+        ]);
+      } finally {
+        if (saved === undefined) delete process.env[name];
+        else process.env[name] = saved;
+      }
+    },
+  );
+});
+
 // ---------------------------------------------------------------------
 // drift(): the migration-doc-path check requires an actual `docs/**`
 // subtree, not merely both substrings "docs/" and "migration" anywhere in

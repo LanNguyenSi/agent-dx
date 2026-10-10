@@ -1,6 +1,7 @@
 import { UsageError } from "../envelope.js";
 import { findGitRoot } from "../probe/containment.js";
 import { revExists, runGit } from "../drift/git.js";
+import { withoutPathspecEnv } from "../git-env.js";
 
 /** Default for `maxDeletePercent`: a commit that removes more than this
  * share of an extend-only file's base lines is flagged. */
@@ -264,18 +265,22 @@ export function hygiene(options: HygieneOptions): HygieneResult {
     if (file.status !== "D") {
       // `--literal-pathspecs`: a path is a file name, never pathspec magic,
       // so a file named `:x.md` or `*.md` is measured as itself.
-      const numstat = runGit(gitRoot, [
-        "--literal-pathspecs",
-        "diff",
-        "--no-color",
-        "-z",
-        "-M",
-        "--numstat",
-        ...rangeArgs,
-        "--",
-        file.oldPath,
-        ...(file.newPath !== file.oldPath ? [file.newPath] : []),
-      ]);
+      const numstat = runGit(
+        gitRoot,
+        [
+          "--literal-pathspecs",
+          "diff",
+          "--no-color",
+          "-z",
+          "-M",
+          "--numstat",
+          ...rangeArgs,
+          "--",
+          file.oldPath,
+          ...(file.newPath !== file.oldPath ? [file.newPath] : []),
+        ],
+        withoutPathspecEnv(),
+      );
       const row =
         numstat.error === undefined && numstat.status === 0
           ? parseNumstat(numstat.stdout).find((r) => r.oldPath === file.oldPath)
