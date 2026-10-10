@@ -16,10 +16,15 @@ export interface GitRunResult {
  * failure (git missing, cwd unreadable) comes back as `error` instead,
  * the same shape doctor's own `runWorktreeList` uses for its synchronous
  * git calls. */
-export function runGit(cwd: string, args: string[]): GitRunResult {
+export function runGit(
+  cwd: string,
+  args: string[],
+  env?: NodeJS.ProcessEnv,
+): GitRunResult {
   try {
     const result = spawnSync("git", args, {
       cwd,
+      ...(env !== undefined ? { env } : {}),
       encoding: "utf8",
       maxBuffer: GIT_MAX_BUFFER,
     });

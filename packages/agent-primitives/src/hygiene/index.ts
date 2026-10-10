@@ -163,6 +163,23 @@ function lineCount(content: string): number {
   return content.endsWith("\n") ? n - 1 : n;
 }
 
+/** The ambient `GIT_*_PATHSPECS` switches change how git reads a pathspec
+ * (glob, no-glob, case-insensitive, literal) and conflict with the explicit
+ * `--literal-pathspecs` of the numstat call, which then exits non-zero. The
+ * numstat child runs without them. */
+const PATHSPEC_ENV_VARS = [
+  "GIT_GLOB_PATHSPECS",
+  "GIT_NOGLOB_PATHSPECS",
+  "GIT_ICASE_PATHSPECS",
+  "GIT_LITERAL_PATHSPECS",
+] as const;
+
+function withoutPathspecEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const name of PATHSPEC_ENV_VARS) delete env[name];
+  return env;
+}
+
 /**
  * Mechanical commit-hygiene check for a git range (or the index). Reports
  * backup files the change adds, extend-only files the change mostly
@@ -264,18 +281,22 @@ export function hygiene(options: HygieneOptions): HygieneResult {
     if (file.status !== "D") {
       // `--literal-pathspecs`: a path is a file name, never pathspec magic,
       // so a file named `:x.md` or `*.md` is measured as itself.
-      const numstat = runGit(gitRoot, [
-        "--literal-pathspecs",
-        "diff",
-        "--no-color",
-        "-z",
-        "-M",
-        "--numstat",
-        ...rangeArgs,
-        "--",
-        file.oldPath,
-        ...(file.newPath !== file.oldPath ? [file.newPath] : []),
-      ]);
+      const numstat = runGit(
+        gitRoot,
+        [
+          "--literal-pathspecs",
+          "diff",
+          "--no-color",
+          "-z",
+          "-M",
+          "--numstat",
+          ...rangeArgs,
+          "--",
+          file.oldPath,
+          ...(file.newPath !== file.oldPath ? [file.newPath] : []),
+        ],
+        withoutPathspecEnv(),
+      );
       const row =
         numstat.error === undefined && numstat.status === 0
           ? parseNumstat(numstat.stdout).find((r) => r.oldPath === file.oldPath)

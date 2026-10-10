@@ -330,6 +330,41 @@ describe("hygiene", () => {
     expect(r.warnings).toEqual([]);
   });
 
+  it("measures an extend-only rewrite under ambient GIT_*_PATHSPECS switches", () => {
+    const repo = initRepo();
+    write(repo, "docs/log.md", numbered("entry", 50));
+    commitAll(repo, "add log");
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    write(repo, "docs/log.md", "entry new\n");
+    commitAll(repo, "rewrite");
+    const names = [
+      "GIT_GLOB_PATHSPECS",
+      "GIT_NOGLOB_PATHSPECS",
+      "GIT_ICASE_PATHSPECS",
+      "GIT_LITERAL_PATHSPECS",
+    ];
+    const saved = names.map((n) => process.env[n]);
+    try {
+      for (const name of names) {
+        for (const other of names) delete process.env[other];
+        process.env[name] = "1";
+        const r = hygiene({ cwd: repo, base, extendOnly: ["docs/log.md"] });
+        expect(r.warnings, name).toEqual([]);
+        expect(r.status, name).toBe("fail");
+        expect(r.findings[0], name).toMatchObject({
+          kind: "extend_only_rewrite",
+          path: "docs/log.md",
+          removedPercent: 100,
+        });
+      }
+    } finally {
+      names.forEach((n, i) => {
+        if (saved[i] === undefined) delete process.env[n];
+        else process.env[n] = saved[i];
+      });
+    }
+  });
+
   it("warns instead of passing silently when the removed lines cannot be measured", () => {
     const repo = initRepo();
     write(repo, "bin.dat", "a\0b\n".repeat(20));

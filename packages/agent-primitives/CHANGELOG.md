@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-10
+
 - A reduced envelope now carries a top-level `fullResult` field with the
   absolute path of the complete result file. A `probe --plan` run with more
   mutants than fit `-m` (default 8000) cuts `plan.results` to a few entries;
@@ -26,8 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `*-r`, `*-s`) and reports only files that newly acquire such a name; the
   extend-only measurement reads `git diff --numstat -z` with
   `--literal-pathspecs`, so paths git C-quotes and paths that look like
-  pathspec magic (a leading `:`) are measured, and an unmeasurable or absent extend-only path
-  warns instead of passing silently. The shipped skill
+  pathspec magic (a leading `:`) are measured, and an unmeasurable or absent
+  extend-only path warns instead of passing silently. That git child runs
+  without `GIT_GLOB_PATHSPECS`, `GIT_NOGLOB_PATHSPECS`, `GIT_ICASE_PATHSPECS`
+  and `GIT_LITERAL_PATHSPECS`, which would otherwise conflict with the flag
+  and surface as a misleading "could not measure" warning (bb93b428). The shipped skill
   (`assets/skill/SKILL.md`) now lists `hygiene` and points at
   `docs/hygiene.md`; its digest changes, so `init` reports an existing
   install as `outdated` until it is refreshed with `--force`.
