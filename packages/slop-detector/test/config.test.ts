@@ -121,6 +121,13 @@ describe("config", () => {
     });
   });
 
+  it("loadConfig rejects an unknown pack name under packs:", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
+    const file = path.join(tmp, "slop.config.yml");
+    fs.writeFileSync(file, `packs:\n  ui-slp: true\n`);
+    expect(() => loadConfig(file)).toThrow(/ui-slp/);
+  });
+
   it("loadConfig rejects an invalid regex in placement.markers", () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "slop-cfg-"));
     const file = path.join(tmp, "slop.config.yml");

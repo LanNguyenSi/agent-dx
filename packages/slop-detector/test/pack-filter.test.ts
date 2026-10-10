@@ -4,7 +4,11 @@ import os from "node:os";
 import path from "node:path";
 import { checkPath } from "../src/engine.js";
 import { defaultConfig } from "../src/config.js";
-import { allPacks } from "../src/packs/registry.js";
+import {
+  allPacks,
+  packsByFilter,
+  UnknownPackError,
+} from "../src/packs/registry.js";
 
 let tmp: string;
 
@@ -68,5 +72,30 @@ describe("--pack filter enables off-by-default packs", () => {
         (v) => v.ruleId === "agent-tics/coauthored-by-claude",
       ),
     ).toBe(false);
+  });
+});
+
+describe("packsByFilter rejects unknown pack ids", () => {
+  it("throws naming every unknown id and listing the registry's packs", () => {
+    let err: unknown;
+    try {
+      packsByFilter(["prose-slop", "ui-slp", "nope"]);
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(UnknownPackError);
+    const msg = (err as Error).message;
+    expect(msg).toContain('"ui-slp"');
+    expect(msg).toContain('"nope"');
+    for (const p of allPacks) expect(msg).toContain(p.id);
+    expect(msg).not.toContain('"prose-slop"');
+  });
+
+  it("still resolves known ids and the empty filter", () => {
+    expect(packsByFilter(["prose-slop"]).map((p) => p.id)).toEqual([
+      "prose-slop",
+    ]);
+    expect(packsByFilter([])).toBe(allPacks);
+    expect(packsByFilter(undefined)).toBe(allPacks);
   });
 });

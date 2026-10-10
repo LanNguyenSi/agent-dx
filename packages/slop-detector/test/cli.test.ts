@@ -138,6 +138,21 @@ afterEach(() => {
 });
 
 describe("cli check [paths...]", () => {
+  it("exits 2 for an unknown --pack, naming it and the known packs", () => {
+    fs.writeFileSync(path.join(tmp, "a.md"), "plain text\n");
+    const { stderr, stdout, status } = runCli([
+      "check",
+      path.join(tmp, "a.md"),
+      "--pack",
+      "ui-slp",
+    ]);
+    expect(status).toBe(2);
+    expect(stdout).toBe("");
+    expect(stderr).toContain('unknown pack "ui-slp"');
+    expect(stderr).toContain("ui-slop");
+    expect(stderr).toContain("review-slop");
+  });
+
   it("scans two positional paths, both counted", () => {
     fs.writeFileSync(path.join(tmp, "a.md"), "F1 landed in review round 2.\n");
     fs.writeFileSync(path.join(tmp, "b.md"), "F2a fixed per review.\n");

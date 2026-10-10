@@ -19,4 +19,4 @@ export type { ConfigFile } from "./config.js";
 
 export { agentTicsPack } from "./packs/agent-tics.js";
 export { proseSlopPack } from "./packs/prose-slop.js";
-export { allPacks, packsByFilter } from "./packs/registry.js";
+export { allPacks, packsByFilter, UnknownPackError } from "./packs/registry.js";
