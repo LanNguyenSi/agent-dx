@@ -552,7 +552,7 @@ describe("ui-slop/focus-outline-removed", () => {
     ).toHaveLength(1);
   });
 
-  it("does not excuse :focus when the :focus-visible sibling comes first", () => {
+  it("does not excuse :focus with an outline-only :focus-visible sibling that comes first", () => {
     expect(
       run(
         id,
@@ -561,6 +561,9 @@ describe("ui-slop/focus-outline-removed", () => {
         ),
       ),
     ).toHaveLength(1);
+  });
+
+  it("excuses :focus with a replacement on an earlier :focus-visible sibling", () => {
     expect(
       run(
         id,
@@ -568,7 +571,42 @@ describe("ui-slop/focus-outline-removed", () => {
           `.btn:focus-visible { box-shadow: 0 0 0 2px blue; } .btn:focus { outline: none; }`,
         ),
       ),
+    ).toEqual([]);
+    expect(
+      run(
+        id,
+        css(
+          `.btn:focus-visible { outline: 2px solid blue; border-color: blue; }\n.btn:focus { outline: none; }`,
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it("still flags :focus when it resets the earlier :focus-visible replacement", () => {
+    expect(
+      run(
+        id,
+        css(
+          `.btn:focus-visible { box-shadow: 0 0 0 2px blue; } .btn:focus { outline: none; box-shadow: none; }`,
+        ),
+      ),
     ).toHaveLength(1);
+    expect(
+      run(
+        id,
+        css(
+          `.btn:focus-visible { border-color: blue; } .btn:focus { outline: none; border: 0; }`,
+        ),
+      ),
+    ).toHaveLength(1);
+    expect(
+      run(
+        id,
+        css(
+          `.btn:focus { outline: none; box-shadow: none; } .btn:focus-visible { box-shadow: 0 0 0 2px blue; }`,
+        ),
+      ),
+    ).toEqual([]);
   });
 
   it("does not count removals or non-painting values as a replacement", () => {
@@ -601,15 +639,45 @@ describe("ui-slop/focus-outline-removed", () => {
     ).toHaveLength(1);
   });
 
+  it("does not count a border width or a decoration tuning longhand as a replacement", () => {
+    expect(
+      run(id, css(`a:focus { outline: none; border-width: 2px; }`)),
+    ).toHaveLength(1);
+    expect(
+      run(id, css(`a:focus { outline: none; border-block-width: 2px; }`)),
+    ).toHaveLength(1);
+    expect(
+      run(
+        id,
+        css(`a:focus { outline: none; text-decoration-skip-ink: auto; }`),
+      ),
+    ).toHaveLength(1);
+    expect(
+      run(
+        id,
+        css(`a:focus { outline: none; text-decoration-thickness: 2px; }`),
+      ),
+    ).toHaveLength(1);
+  });
+
   it("still accepts painting longhands with a real value", () => {
     expect(
       run(id, css(`a:focus { outline: none; border-bottom-color: red; }`)),
     ).toEqual([]);
     expect(
-      run(id, css(`a:focus { outline: none; border-block-width: 2px; }`)),
+      run(id, css(`a:focus { outline: none; border-block-style: solid; }`)),
     ).toEqual([]);
     expect(
       run(id, css(`a:focus { outline: none; text-decoration: underline; }`)),
+    ).toEqual([]);
+    expect(
+      run(
+        id,
+        css(`a:focus { outline: none; text-decoration-line: underline; }`),
+      ),
+    ).toEqual([]);
+    expect(
+      run(id, css(`a:focus { outline: none; text-decoration-color: red; }`)),
     ).toEqual([]);
     expect(
       run(id, css(`a:focus { outline: none; background-color: #fee; }`)),
@@ -716,10 +784,60 @@ describe("ui-slop/img-missing-alt", () => {
     expect(run(id, markup(`<img src="alt" data-x={alt}>`))).toHaveLength(1);
   });
 
-  it("skips an img inside HTML, block and line comments", () => {
+  it("skips an img inside a terminated HTML comment in markup", () => {
     expect(run(id, markup(`<!-- <img src="a.png"> -->`))).toEqual([]);
-    expect(run(id, tsx(`/* <img src="a.png"> */`))).toEqual([]);
-    expect(run(id, tsx(`// <img src="a.png">\nconst a = 1;`))).toEqual([]);
+    expect(run(id, markup(`<!--\n<img src="a.png">\n-->`))).toEqual([]);
+    expect(run(id, markup(`<!-- <img src="a.png"> --!>`))).toEqual([]);
+  });
+
+  it("masks nothing for an unterminated HTML comment", () => {
+    const v = run(id, markup(`<!-- note\n<img src="a.png">`));
+    expect(v).toHaveLength(1);
+    expect(v[0].line).toBe(2);
+  });
+
+  it("ends an HTML comment where the HTML parser does", () => {
+    expect(run(id, markup(`<!--><img src="a.png"><!-- x -->`))).toHaveLength(1);
+    expect(run(id, markup(`<!---><img src="a.png"><!-- x -->`))).toHaveLength(
+      1,
+    );
+    expect(
+      run(id, markup(`<!-- a --><img src="a.png"><!-- b -->`)),
+    ).toHaveLength(1);
+  });
+
+  it("reports an img mentioned in a JS or JSX comment", () => {
+    expect(run(id, tsx(`/* <img src="a.png"> */`))).toHaveLength(1);
+    expect(run(id, tsx(`// <img src="a.png">\nconst a = 1;`))).toHaveLength(1);
+    expect(run(id, tsx(`{/* <img src="a.png"> */}`))).toHaveLength(1);
+    expect(
+      run(id, markup(`<script>\n// <img src="a.png">\n</script>`)),
+    ).toHaveLength(1);
+  });
+
+  it("is not blinded by a comment opener in a regex literal or JSX text", () => {
+    expect(
+      run(
+        id,
+        tsx(
+          `const t = p.replace(/\\/*$/, "");\nconst b = <img src="a.png" />;\nconst c = <div>{/* note */}</div>;`,
+        ),
+      ),
+    ).toHaveLength(1);
+    expect(
+      run(
+        id,
+        tsx(
+          `const a = <p>Accepted: image/*</p>;\nconst b = <img src="a.png" />;\nconst c = <div>{/* x */}</div>;`,
+        ),
+      ),
+    ).toHaveLength(1);
+    expect(
+      run(id, tsx(`const re = /[/*]/;\nconst b = <img src="a.png" />;`)),
+    ).toHaveLength(1);
+    expect(
+      run(id, tsx(`const a = <p>(beta) // <img src="b.png" /></p>;`)),
+    ).toHaveLength(1);
   });
 
   it("matches alt attribute names case-insensitively and in framework forms", () => {
@@ -806,19 +924,12 @@ describe("ui-slop/img-missing-alt", () => {
     const v = run(id, markup(`<img alt="oops><p>x</p>\n<img src=b.png>`));
     expect(v).toHaveLength(1);
     expect(v[0].line).toBe(2);
-  });
-
-  it("skips real comments in code, markup and script bodies", () => {
-    expect(run(id, tsx(`{/* <img src="a.png"> */}`))).toEqual([]);
-    expect(run(id, tsx(`foo(); // <img src="a.png">`))).toEqual([]);
-    expect(run(id, tsx(`  // <img src="a.png">\nconst a = 1;`))).toEqual([]);
-    expect(
-      run(id, markup(`<script>\n// <img src="a.png">\n</script>`)),
-    ).toEqual([]);
-    expect(run(id, markup(`<script>/* <img src="a.png"> */</script>`))).toEqual(
-      [],
+    const w = run(
+      id,
+      tsx(`const a = <img alt="oops />;\nconst b = <img src={p} />;`),
     );
-    expect(run(id, markup(`<!-- <img src="a.png"> -->`))).toEqual([]);
+    expect(w).toHaveLength(1);
+    expect(w[0].line).toBe(2);
   });
 
   it("ignores components and similarly named tags", () => {

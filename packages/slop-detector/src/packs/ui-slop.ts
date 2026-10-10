@@ -717,15 +717,19 @@ const flatTypeHierarchy: Rule = {
 
 // A declaration counts as a visible replacement focus indicator when it is a
 // painting property (`box-shadow`, `background`, `background-color`,
-// `background-image`, `border` and its colour / width / style longhands,
-// `text-decoration*`) with a value that actually paints. `border-radius*`,
-// `border-collapse`, `border-image*` and friends do not paint a focus change
-// by themselves, and a value of `none` / `0` / `transparent` / `initial` /
-// `unset` removes or resets rather than adds one. `outline-color` /
-// `outline-offset` never count: they only matter next to a visible outline,
-// and a block that removes the outline has none.
+// `background-image`, `border` and its colour / style longhands,
+// `text-decoration`, `text-decoration-line`, `text-decoration-color`) with a
+// value that actually paints. A width on its own (`border-width`), the
+// decoration tuning longhands (`text-decoration-thickness`,
+// `text-decoration-skip-ink`, ...), `border-radius*`, `border-collapse`,
+// `border-image*` and friends do not paint a focus change by themselves, and
+// a value of `none` / `0` / `transparent` / `initial` / `unset` removes or
+// resets rather than adds one. `outline-color` / `outline-offset` never
+// count: they only matter next to a visible outline, and a block that removes
+// the outline has none.
 const BORDER_PAINT_PROP =
-  /^border(?:-(?:top|right|bottom|left|block|inline)(?:-(?:start|end))?)?(?:-(?:color|width|style))?$/;
+  /^border(?:-(?:top|right|bottom|left|block|inline)(?:-(?:start|end))?)?(?:-(?:color|style))?$/;
+const TEXT_DECORATION_PAINT_PROP = /^text-decoration(?:-(?:line|color))?$/;
 const NON_PAINTING_VALUE = /^(?:none|0|0px|transparent|initial|unset)$/;
 
 function isFocusReplacement(d: { prop: string; value: string }): boolean {
@@ -735,7 +739,7 @@ function isFocusReplacement(d: { prop: string; value: string }): boolean {
     prop === "background" ||
     prop === "background-color" ||
     prop === "background-image" ||
-    prop.startsWith("text-decoration") ||
+    TEXT_DECORATION_PAINT_PROP.test(prop) ||
     BORDER_PAINT_PROP.test(prop);
   if (!paints) return false;
   const value = d.value
@@ -753,13 +757,18 @@ function isOutlineProp(prop: string): boolean {
 
 // True when the declarations set a visible outline (the last outline
 // declaration is not a removal) or a replacement indicator.
-function providesFocusIndicator(
-  decls: ReturnType<typeof iterateDeclarations>,
-): boolean {
+function providesFocusIndicator(decls: Decl[]): boolean {
   const outlines = decls.filter((d) => isOutlineProp(d.prop));
   const last = outlines[outlines.length - 1];
   if (last && !OUTLINE_REMOVED_VALUE.test(last.value.trim())) return true;
   return decls.some(isFocusReplacement);
+}
+
+// True when one of `decls` resets `prop`: the same property, or a shorthand
+// of it (`border: 0` resets `border-color`, `background: none` resets
+// `background-image`).
+function resetsProperty(decls: Decl[], prop: string): boolean {
+  return decls.some((d) => d.prop === prop || prop.startsWith(`${d.prop}-`));
 }
 
 const focusOutlineRemoved: Rule = {
@@ -777,7 +786,7 @@ const focusOutlineRemoved: Rule = {
       selector: string;
       base: string;
       visible: boolean;
-      decls: ReturnType<typeof iterateDeclarations>;
+      decls: Decl[];
     }
     const blocks: FocusBlock[] = [];
     let cursor = 0;
@@ -811,20 +820,23 @@ const focusOutlineRemoved: Rule = {
         continue;
       }
       if (decls.some(isFocusReplacement)) continue;
-      // `.btn:focus { outline: none }` followed by `.btn:focus-visible { ... }`
-      // keeps a keyboard indicator when the latter paints one. Both selectors
-      // have the same specificity, so the later block wins the cascade: a
-      // `:focus-visible` block written BEFORE the `:focus` removal is overridden
-      // by it and does not excuse it.
+      // A `:focus-visible` block for the same base selector can still keep a
+      // keyboard indicator. Both selectors have the same specificity, so for
+      // a property both blocks set, the later block wins the cascade. A later
+      // `:focus-visible` block excuses the removal with a visible outline or
+      // a replacement. An earlier one excuses it only with a replacement the
+      // `:focus` block does not reset: the removal overrides its outline but
+      // leaves its box-shadow or border in place.
+      const keepsIndicator = (o: FocusBlock): boolean => {
+        if (o.order > b.order) return providesFocusIndicator(o.decls);
+        return o.decls.some(
+          (r) => isFocusReplacement(r) && !resetsProperty(decls, r.prop),
+        );
+      };
       if (
         !b.visible &&
         blocks.some(
-          (o) =>
-            o !== b &&
-            o.visible &&
-            o.order > b.order &&
-            o.base === b.base &&
-            providesFocusIndicator(o.decls),
+          (o) => o !== b && o.visible && o.base === b.base && keepsIndicator(o),
         )
       ) {
         continue;
@@ -916,71 +928,18 @@ const ALT_NAME = /^(?:(?:v-bind:|bind:|:)?alt|\[(?:attr\.)?alt\])$/i;
 
 const blankOut = (m: string): string => m.replace(/[^\n]/g, " ");
 
-// Blanks JS comments (same length, newlines kept) without touching strings.
-// Quoted strings end at the line break, template literals at the closing
-// backtick; neither is ever blanked, so `accept="image/*"`, a `"./a/*.png"`
-// glob or `title="a // b"` survive. A `//` only starts a comment at the start
-// of a line or after `; { } ( ) ,`, which keeps `https://` and prose such as
-// `<p>a // b</p>` intact. An unterminated block comment is left alone. Anything
-// this scanner fails to recognise stays unmasked, which can only add a finding
-// inside a comment, never hide a real tag.
-function maskJsComments(text: string): string {
-  const out = text.split("");
-  const n = text.length;
-  let i = 0;
-  while (i < n) {
-    const c = text[i];
-    if (c === '"' || c === "'") {
-      i++;
-      while (i < n && text[i] !== c && text[i] !== "\n") {
-        if (text[i] === "\\") i++;
-        i++;
-      }
-      i++;
-    } else if (c === "`") {
-      i++;
-      while (i < n && text[i] !== "`") {
-        if (text[i] === "\\") i++;
-        i++;
-      }
-      i++;
-    } else if (c === "/" && text[i + 1] === "*") {
-      const close = text.indexOf("*/", i + 2);
-      if (close === -1) {
-        i += 2;
-        continue;
-      }
-      for (let k = i; k < close + 2; k++) if (out[k] !== "\n") out[k] = " ";
-      i = close + 2;
-    } else if (c === "/" && text[i + 1] === "/") {
-      let k = i - 1;
-      while (k >= 0 && (text[k] === " " || text[k] === "\t")) k--;
-      if (k < 0 || text[k] === "\n" || ";{}(),".includes(text[k])) {
-        let end = text.indexOf("\n", i);
-        if (end === -1) end = n;
-        for (let j = i; j < end; j++) out[j] = " ";
-        i = end;
-      } else {
-        i += 2;
-      }
-    } else {
-      i++;
-    }
-  }
-  return out.join("");
-}
-
-// Masks comments so an `<img` inside one is not scanned. Code files get JS
-// comment masking only; markup gets `<!-- -->` masking, plus JS comment masking
-// inside `<script>` bodies only (a `//` in markup text or an attribute value is
-// not a comment).
-function maskComments(text: string, kind: FileKind): string {
-  if (kind === "code") return maskJsComments(text);
-  const html = text.replace(/<!--[\s\S]*?(?:-->|$)/g, blankOut);
-  return html.replace(
-    /(<script\b[^>]*>)([\s\S]*?)(?=<\/script\b|$)/gi,
-    (_m, open: string, body: string) => open + maskJsComments(body),
-  );
+// Blanks each terminated `<!-- ... -->` comment in markup (same length,
+// newlines kept) so an `<img` inside one is not scanned. As in the HTML
+// parser, a comment ends at the first `-->` or `--!>`, and `<!-->` and
+// `<!--->` are complete empty comments. An unterminated `<!--` masks nothing.
+// JS and JSX comments (in `.tsx` / `.jsx` code and in `<script>` bodies) are
+// never masked: one that mentions `<img>` is reported, which errs toward an
+// extra finding. The masking hides a real tag only when the tag sits between
+// a `<!--` that does not open a comment (inside a quoted attribute value, a
+// `<script>` or `<style>` body, or a `<textarea>`) and a later comment end.
+function maskHtmlComments(text: string, kind: FileKind): string {
+  if (kind !== "markup") return text;
+  return text.replace(/<!--(?:-?>|[\s\S]*?--!?>)/g, blankOut);
 }
 
 // Attribute-name based check over the text after `<img`: skips quoted and
@@ -1051,7 +1010,7 @@ const imgMissingAlt: Rule = {
   appliesTo: appliesToHeadingHosts,
   check({ file }: RuleContext): Violation[] {
     const violations: Violation[] = [];
-    const masked = maskComments(file.text, file.kind);
+    const masked = maskHtmlComments(file.text, file.kind);
     IMG_OPEN.lastIndex = 0;
     let m: RegExpExecArray | null;
     while ((m = IMG_OPEN.exec(masked)) !== null) {
