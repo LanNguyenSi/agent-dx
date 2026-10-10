@@ -1097,3 +1097,54 @@ describe("CSS comment stripping skips quoted strings", () => {
     expect(v[0].matched).toBe("outline: none");
   });
 });
+
+describe("CSS comment stripping skips unquoted url( bodies", () => {
+  const focus = "ui-slop/focus-outline-removed";
+
+  it("url(/*x.png) does not open a comment that hides a later focus rule", () => {
+    const v = run(
+      focus,
+      css(
+        `.a { background: url(/*x.png); }\nb:focus { outline: none; }\n.c { color: red; } /* real */\n`,
+      ),
+    );
+    expect(v).toHaveLength(1);
+    expect(v[0].matched).toBe("outline: none");
+  });
+
+  it("matches url( case-insensitively and with inner whitespace", () => {
+    const v = run(
+      focus,
+      css(
+        `.a { background: URL( /*x.png ); }\nb:focus { outline: none; }\n/* real */\n`,
+      ),
+    );
+    expect(v).toHaveLength(1);
+  });
+
+  it("a comment after the closing paren is still stripped", () => {
+    expect(
+      run(
+        focus,
+        css(
+          `.a { background: url(x.png); } /* b:focus { outline: none; } */\n.c { color: red; }\n`,
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it("a comment containing url(/* is still stripped as a comment", () => {
+    expect(
+      run(focus, css(`/* see url(/* */ b:focus { outline: none; }\n`)),
+    ).toHaveLength(1);
+  });
+
+  it("an identifier ending in url( is not a url token", () => {
+    expect(
+      run(
+        focus,
+        css(`.a { --myurl(/* x */ }\n/* b:focus { outline: none; } */\n`),
+      ),
+    ).toEqual([]);
+  });
+});
