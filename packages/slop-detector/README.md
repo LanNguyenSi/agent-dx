@@ -10,7 +10,7 @@ Agents leave fingerprints in committed text: leaked `</result>` artefacts from M
 
 ## Key features
 
-- Eight rule packs, 48 rules total: `agent-tics` and `prose-slop` on by default, six more opt-in (`comment-slop`, `code-slop`, `ui-slop`, `placement-slop`, `workflow-slop`, `review-slop`).
+- Eight rule packs, 52 rules total: `agent-tics` and `prose-slop` on by default, six more opt-in (`comment-slop`, `code-slop`, `ui-slop`, `placement-slop`, `workflow-slop`, `review-slop`).
 - CLI (`slop-detector check`), stdio MCP server (`slop-detector-mcp`), and a programmatic API (`checkPath` / `checkFiles` / `checkText`).
 - Per-line and per-pack disable comments, JSON output, and a `--explain` mode.
 - `workflow-slop` catches GitHub Actions expression injection into `run:` steps and executed action inputs; `placement-slop` catches org-, machine-, and time-bound evidence leaking into reusable instruction files.

@@ -712,12 +712,210 @@ const flatTypeHierarchy: Rule = {
   },
 };
 
+// ─────────────────────────── Rule 7: focus-outline-removed ───
+
+// Properties that count as a visible replacement focus indicator when they
+// sit in the same block as the removed outline.
+const FOCUS_REPLACEMENT_PROPS = new Set([
+  "box-shadow",
+  "border",
+  "border-color",
+  "border-bottom",
+  "border-bottom-color",
+  "background",
+  "background-color",
+  "text-decoration",
+  "text-decoration-line",
+]);
+
+const OUTLINE_REMOVED_VALUE = /^(?:none|0|0px)(?:\s*!important)?$/i;
+
+const focusOutlineRemoved: Rule = {
+  id: "ui-slop/focus-outline-removed",
+  pack: "ui-slop",
+  defaultSeverity: "warn",
+  enabledByDefault: true,
+  rationale:
+    "`outline: none` (or `0`) on a `:focus` / `:focus-visible` rule with no replacement indicator (box-shadow, border, background, text-decoration) leaves keyboard users with no visible focus. Agents strip the browser default to make a control look clean and rarely add a replacement.",
+  appliesTo: appliesToStyle,
+  check({ file }: RuleContext): Violation[] {
+    const text = stripCssComments(file.text);
+    const violations: Violation[] = [];
+    let cursor = 0;
+    for (const block of iterateBlocks(text)) {
+      const selectorText = text.slice(cursor, block.openIndex);
+      cursor = block.closeIndex;
+      const lastTerm = Math.max(
+        selectorText.lastIndexOf("}"),
+        selectorText.lastIndexOf(";"),
+      );
+      // `:focus:not(:focus-visible)` is the documented way to drop the mouse
+      // focus ring while keeping the keyboard one, so it is not a target.
+      const selector = normalizeSelector(
+        selectorText.slice(lastTerm + 1),
+      ).replace(/:focus:not\(\s*:focus-visible\s*\)/g, "");
+      if (!/:focus(?:-visible)?(?![\w-])/.test(selector)) continue;
+      const decls = iterateDeclarations(block.body, block.bodyStart);
+      const removed = decls.find(
+        (d) =>
+          (d.prop === "outline" || d.prop === "outline-style") &&
+          OUTLINE_REMOVED_VALUE.test(d.value.trim()),
+      );
+      if (!removed) continue;
+      if (decls.some((d) => FOCUS_REPLACEMENT_PROPS.has(d.prop))) continue;
+      violations.push(
+        makeViolation(
+          focusOutlineRemoved,
+          file,
+          removed.propOffset,
+          removed.valueEnd,
+          `${removed.prop}: ${removed.value}`,
+          `Focus outline removed on \`${selector}\` with no replacement indicator — keyboard focus becomes invisible. Add a box-shadow, border or background change.`,
+        ),
+      );
+    }
+    return violations;
+  },
+};
+
+// ─────────────────────────── Rule 8: viewport-zoom-disabled ───
+
+const VIEWPORT_META = /<meta\b[^>]*>/gi;
+const VIEWPORT_NAME = /\bname\s*=\s*["']viewport["']/i;
+const ZOOM_DISABLED =
+  /user-scalable\s*=\s*(?:no|0)(?=[\s,;"'>/]|$)|maximum-scale\s*=\s*1(?:\.0+)?(?=[\s,;"'>/]|$)/i;
+
+const viewportZoomDisabled: Rule = {
+  id: "ui-slop/viewport-zoom-disabled",
+  pack: "ui-slop",
+  defaultSeverity: "warn",
+  enabledByDefault: true,
+  rationale:
+    "`user-scalable=no` or `maximum-scale=1` in the viewport meta tag blocks pinch-zoom, which low-vision users rely on (WCAG 1.4.4). Agents copy the snippet to stop iOS input zoom or to make a page feel app-like.",
+  appliesTo: appliesToHeadingHosts,
+  check({ file }: RuleContext): Violation[] {
+    const violations: Violation[] = [];
+    VIEWPORT_META.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = VIEWPORT_META.exec(file.text)) !== null) {
+      if (!VIEWPORT_NAME.test(m[0])) continue;
+      const zoom = ZOOM_DISABLED.exec(m[0]);
+      if (!zoom) continue;
+      const start = m.index + zoom.index;
+      violations.push(
+        makeViolation(
+          viewportZoomDisabled,
+          file,
+          start,
+          start + zoom[0].length,
+          zoom[0],
+          `Viewport meta disables zoom (\`${zoom[0]}\`) — users cannot pinch-zoom the page.`,
+        ),
+      );
+    }
+    return violations;
+  },
+};
+
+// ─────────────────────────── Rule 9: img-missing-alt ───
+
+// Returns the offset just past the `>` closing the tag that starts at
+// `from`, skipping quoted attribute values and `{...}` JSX expressions so an
+// arrow function or `>` inside an attribute does not end the tag early.
+function findTagEnd(text: string, from: number): number {
+  let quote: '"' | "'" | null = null;
+  let braces = 0;
+  for (let i = from; i < text.length; i++) {
+    const c = text[i];
+    if (quote) {
+      if (c === quote) quote = null;
+    } else if (braces > 0) {
+      if (c === "{") braces++;
+      else if (c === "}") braces--;
+    } else if (c === '"' || c === "'") {
+      quote = c;
+    } else if (c === "{") {
+      braces++;
+    } else if (c === ">") {
+      return i + 1;
+    }
+  }
+  return -1;
+}
+
+const IMG_OPEN = /<img(?=[\s/>])/g;
+const ALT_ATTR = /(?:^|[\s:])alt(?=[\s=/>]|$)/;
+
+const imgMissingAlt: Rule = {
+  id: "ui-slop/img-missing-alt",
+  pack: "ui-slop",
+  defaultSeverity: "warn",
+  enabledByDefault: true,
+  rationale:
+    'An `<img>` with no `alt` attribute is announced by screen readers as its file name. Generated markup drops `alt` constantly; decorative images need an explicit `alt=""`, content images a description.',
+  appliesTo: appliesToHeadingHosts,
+  check({ file }: RuleContext): Violation[] {
+    const violations: Violation[] = [];
+    IMG_OPEN.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = IMG_OPEN.exec(file.text)) !== null) {
+      const end = findTagEnd(file.text, m.index + m[0].length);
+      if (end === -1) break;
+      const tag = file.text.slice(m.index, end);
+      IMG_OPEN.lastIndex = end;
+      const attrs = tag.slice(4);
+      if (ALT_ATTR.test(attrs)) continue;
+      // `{...props}` may carry alt; cannot tell statically.
+      if (/\{\s*\.\.\./.test(attrs)) continue;
+      violations.push(
+        makeViolation(
+          imgMissingAlt,
+          file,
+          m.index,
+          end,
+          tag.length > 80 ? `${tag.slice(0, 80)}...` : tag,
+          '`<img>` has no `alt` attribute — add a description, or `alt=""` for a decorative image.',
+        ),
+      );
+    }
+    return violations;
+  },
+};
+
+// ─────────────────────────── Rule 10: lorem-ipsum-placeholder ───
+
+const LOREM_IPSUM = /\blorem\s+ipsum\b/i;
+
+const loremIpsumPlaceholder: Rule = {
+  id: "ui-slop/lorem-ipsum-placeholder",
+  pack: "ui-slop",
+  defaultSeverity: "warn",
+  enabledByDefault: true,
+  rationale:
+    "Lorem ipsum filler left in markup or JSX means generated scaffolding shipped without real copy. One finding per file is enough to flag it.",
+  appliesTo: appliesToHeadingHosts,
+  check({ file }: RuleContext): Violation[] {
+    const m = LOREM_IPSUM.exec(file.text);
+    if (!m) return [];
+    return [
+      makeViolation(
+        loremIpsumPlaceholder,
+        file,
+        m.index,
+        m.index + m[0].length,
+        m[0],
+        "Placeholder `lorem ipsum` text — replace it with real copy before shipping.",
+      ),
+    ];
+  },
+};
+
 // ─────────────────────────── pack export ───
 
 export const uiSlopPack: PackDefinition = {
   id: "ui-slop",
   description:
-    "Visual tells of AI-generated UIs in CSS / SCSS / LESS / markup: gradient text, purple+cyan palettes, animated layout properties, skipped heading levels, monospace-everywhere, flat type hierarchy. v1 is regex-driven and scope-limited (no Tailwind class strings, no JSX inline styles, no headless-browser rules); see the M3 followup tasks.",
+    "Visual tells of AI-generated UIs in CSS / SCSS / LESS / markup: gradient text, purple+cyan palettes, animated layout properties, skipped heading levels, monospace-everywhere, flat type hierarchy, removed focus outlines, zoom-disabling viewport meta, images without alt, lorem ipsum filler. v1 is regex-driven and scope-limited (no Tailwind class strings, no JSX inline styles, no headless-browser rules); see the M3 followup tasks.",
   rules: [
     gradientText,
     aiColorPalette,
@@ -725,5 +923,9 @@ export const uiSlopPack: PackDefinition = {
     skippedHeadingLevels,
     monospaceEverywhere,
     flatTypeHierarchy,
+    focusOutlineRemoved,
+    viewportZoomDisabled,
+    imgMissingAlt,
+    loremIpsumPlaceholder,
   ],
 };

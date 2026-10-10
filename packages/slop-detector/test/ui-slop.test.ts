@@ -420,11 +420,15 @@ describe("ui-slop pack metadata", () => {
         "ui-slop/gradient-text",
         "ui-slop/monospace-everywhere",
         "ui-slop/skipped-heading-levels",
+        "ui-slop/focus-outline-removed",
+        "ui-slop/viewport-zoom-disabled",
+        "ui-slop/img-missing-alt",
+        "ui-slop/lorem-ipsum-placeholder",
       ].sort(),
     );
   });
 
-  it("default-on rules are exactly the four spec rules", () => {
+  it("default-on rules are the four spec rules plus the four accessibility and placeholder rules", () => {
     const onByDefault = uiSlopPack.rules
       .filter((r) => r.enabledByDefault)
       .map((r) => r.id);
@@ -434,6 +438,10 @@ describe("ui-slop pack metadata", () => {
         "ui-slop/ai-color-palette",
         "ui-slop/animate-layout-properties",
         "ui-slop/skipped-heading-levels",
+        "ui-slop/focus-outline-removed",
+        "ui-slop/viewport-zoom-disabled",
+        "ui-slop/img-missing-alt",
+        "ui-slop/lorem-ipsum-placeholder",
       ].sort(),
     );
   });
@@ -446,5 +454,139 @@ describe("ui-slop pack metadata", () => {
     for (const r of offByDefault) {
       expect(r.defaultSeverity).toBe("info");
     }
+  });
+});
+
+describe("ui-slop/focus-outline-removed", () => {
+  const id = "ui-slop/focus-outline-removed";
+
+  it("flags outline:none on :focus with no replacement", () => {
+    const v = run(id, css(`button:focus { outline: none; color: red; }`));
+    expect(v).toHaveLength(1);
+    expect(v[0].matched).toBe("outline: none");
+  });
+
+  it("flags outline:0 on :focus-visible", () => {
+    expect(run(id, css(`a:focus-visible { outline: 0; }`))).toHaveLength(1);
+  });
+
+  it("allows a box-shadow replacement", () => {
+    expect(
+      run(
+        id,
+        css(`input:focus { outline: none; box-shadow: 0 0 0 2px blue; }`),
+      ),
+    ).toEqual([]);
+  });
+
+  it("allows the :focus:not(:focus-visible) pattern", () => {
+    expect(
+      run(id, css(`button:focus:not(:focus-visible) { outline: none; }`)),
+    ).toEqual([]);
+  });
+
+  it("ignores outline:none on a non-focus selector", () => {
+    expect(run(id, css(`.card { outline: none; }`))).toEqual([]);
+  });
+
+  it("ignores a visible outline on :focus", () => {
+    expect(run(id, css(`a:focus { outline: 2px solid blue; }`))).toEqual([]);
+  });
+});
+
+describe("ui-slop/viewport-zoom-disabled", () => {
+  const id = "ui-slop/viewport-zoom-disabled";
+
+  it("flags user-scalable=no", () => {
+    const v = run(
+      id,
+      markup(
+        `<meta name="viewport" content="width=device-width, user-scalable=no">`,
+      ),
+    );
+    expect(v).toHaveLength(1);
+    expect(v[0].matched).toBe("user-scalable=no");
+  });
+
+  it("flags maximum-scale=1 with content before name", () => {
+    expect(
+      run(
+        id,
+        markup(
+          `<meta content="width=device-width, maximum-scale=1.0" name="viewport" />`,
+        ),
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("allows a plain responsive viewport", () => {
+    expect(
+      run(
+        id,
+        markup(
+          `<meta name="viewport" content="width=device-width, initial-scale=1">`,
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it("allows maximum-scale above 1 and non-viewport meta", () => {
+    expect(
+      run(
+        id,
+        markup(
+          `<meta name="viewport" content="width=device-width, maximum-scale=5">
+<meta name="description" content="user-scalable=no is discussed here">`,
+        ),
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("ui-slop/img-missing-alt", () => {
+  const id = "ui-slop/img-missing-alt";
+
+  it("flags an img without alt", () => {
+    const v = run(id, markup(`<img src="a.png">`));
+    expect(v).toHaveLength(1);
+  });
+
+  it("flags a JSX img with an arrow function and no alt", () => {
+    const v = run(id, tsx(`const x = <img src={s} onLoad={() => go()} />;`));
+    expect(v).toHaveLength(1);
+  });
+
+  it("allows alt, empty alt, and a spread", () => {
+    expect(
+      run(id, markup(`<img src="a.png" alt="Logo"><img src="b.png" alt="">`)),
+    ).toEqual([]);
+    expect(run(id, tsx(`const x = <img {...props} />;`))).toEqual([]);
+  });
+
+  it("ignores components and similarly named tags", () => {
+    expect(
+      run(id, tsx(`const x = <Img src="a" />; const y = <imgx src="b" />;`)),
+    ).toEqual([]);
+  });
+});
+
+describe("ui-slop/lorem-ipsum-placeholder", () => {
+  const id = "ui-slop/lorem-ipsum-placeholder";
+
+  it("flags lorem ipsum once per file", () => {
+    const v = run(
+      id,
+      markup(`<p>Lorem ipsum dolor sit amet</p><p>lorem ipsum again</p>`),
+    );
+    expect(v).toHaveLength(1);
+    expect(v[0].matched).toBe("Lorem ipsum");
+  });
+
+  it("flags it in JSX", () => {
+    expect(run(id, tsx(`const a = <p>Lorem  Ipsum</p>;`))).toHaveLength(1);
+  });
+
+  it("allows real copy", () => {
+    expect(run(id, markup(`<p>Welcome to the dashboard</p>`))).toEqual([]);
   });
 });

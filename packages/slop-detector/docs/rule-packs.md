@@ -8,7 +8,7 @@ Each pack groups related rules; enable or disable a pack per repo via `slop.conf
 | `prose-slop` (7 rules)     | on                                      | Em-dashes in prose, hedging openers, empty marketing adjectives, signature LLM idioms like `delve into`, `tapestry of`, `leverage the power of`                                                                                                                            |
 | `comment-slop` (5 rules)   | off, opt in via `--pack`                | JSDoc on trivial getters, comments that restate the next line, orphan markers (`// removed`, `// kept for backcompat`), comment-heavier-than-body helpers, ASCII banner dividers                                                                                           |
 | `code-slop` (9 rules)      | off, opt in via `--pack`                | try/catch around code that cannot throw, defaults on required-typed params, empty / rethrow catches, `async` without `await`, backcompat shims for unreleased APIs, phantom imports of undeclared packages, stub function bodies, unused exports, single-callsite helpers  |
-| `ui-slop` (6 rules)        | off, opt in via `--pack ui-slop`        | Gradient text, purple+cyan AI palettes, animated layout properties, skipped heading levels, plus opt-in monospace-everywhere and flat type hierarchy (info-level). Scans CSS / SCSS / LESS / HTML / JSX.                                                                   |
+| `ui-slop` (10 rules)       | off, opt in via `--pack ui-slop`        | Gradient text, purple+cyan AI palettes, animated layout properties, skipped heading levels, removed focus outlines, zoom-disabling viewport meta, `<img>` without `alt`, lorem ipsum filler, plus opt-in monospace-everywhere and flat type hierarchy (info-level). Scans CSS / SCSS / LESS / HTML / JSX.                                                                   |
 | `placement-slop` (5 rules) | off, opt in via `--pack placement-slop` | Org-, machine-, and point-in-time-bound evidence leaking into reusable instruction files (`SKILL.md`, `AGENTS.md`, `CLAUDE.md`, agent/skill prompt files): home paths, dated evidence, tally phrases (`n=8`, `p=0.016`, `so far`), opaque ids, and configured org markers. <!-- slop-detector:disable-line=placement-slop --> |
 | `workflow-slop` (6 rules)  | off, opt in via `--pack workflow-slop`  | GitHub Actions workflow injection and CI-guard regressions: a `${{ ... }}` expression interpolated directly into a `run:` shell script or into a `with:` input a listed action executes as code (`actions/github-script`'s `script`, at minimum), unless it is one of the documented non-attacker-controllable contexts; a fail-closed check that a scanned workflow file actually parsed as YAML; a fail-closed report of a `<<` merge key or an unresolvable alias, which the pack cannot read through; a reintroduced Node-20 GitHub Actions major; an `audit.yml` with no certifiable `npm audit --audit-level=...` gate; and an npm-audit gate step whose shape is not one the pack recognises. Scans `.github/workflows/` workflow files, plus `action.yml`/`action.yaml` for the `run:` and executed-input scan, `node20-action-major` and the parse rules. |
 | `review-slop` (3 rules)    | off, opt in via `--pack review-slop`    | Run-local review tokens leaking into reusable content: finding ids (`F1`, `F2a`, or a severity-letter id like `M1`/`H2a` when the same sentence also carries a review-process word), round references (`round 2`, `R3`, `review round 1 fixes`), and workspace-handoff phrases (`per the <workspace> handoffs`). Scans Markdown, TypeScript/JavaScript source comments, test titles, and a commit-message file. |
@@ -19,7 +19,7 @@ Run `slop-detector list-rules` for the full rule catalogue with severities and r
 
 ## `ui-slop` (M3 v1) by example
 
-Opt in with `--pack ui-slop`. Examples that trip the four default-on rules:
+Opt in with `--pack ui-slop`. Examples that trip the default-on rules:
 
 ```css
 /* ui-slop/gradient-text */
@@ -55,7 +55,30 @@ Opt in with `--pack ui-slop`. Examples that trip the four default-on rules:
   <h3>Subtitle</h3>
   <!-- skipped h2 -->
 </section>
+
+<!-- ui-slop/viewport-zoom-disabled -->
+<meta name="viewport" content="width=device-width, user-scalable=no" />
+
+<!-- ui-slop/img-missing-alt -->
+<img src="hero.png" />
+
+<!-- ui-slop/lorem-ipsum-placeholder (one finding per file) -->
+<p>Lorem ipsum dolor sit amet</p>
 ```
+
+```css
+/* ui-slop/focus-outline-removed */
+button:focus {
+  outline: none;
+}
+```
+
+The four newer rules work like this:
+
+- `ui-slop/focus-outline-removed` flags `outline: none` / `0` on a top-level `:focus` or `:focus-visible` rule unless the same block sets `box-shadow`, `border*`, `background*` or `text-decoration*`; `:focus:not(:focus-visible)` is exempt.
+- `ui-slop/viewport-zoom-disabled` flags `user-scalable=no|0` or `maximum-scale=1` in a viewport `<meta>` (markup and JSX).
+- `ui-slop/img-missing-alt` flags a lowercase `<img>` with no `alt` (`alt=""` passes; a `{...spread}` is skipped because it may carry `alt`).
+- `ui-slop/lorem-ipsum-placeholder` flags `lorem ipsum` in markup or JSX, once per file.
 
 The two off-by-default info rules (`ui-slop/monospace-everywhere`, `ui-slop/flat-type-hierarchy`) need an explicit `rules.<id>.enabled: true` in `slop.config.yml` or a CLI override; they remain off because both have legitimate counter-uses (technical-product landing pages, mature design systems with subtle steps).
 
