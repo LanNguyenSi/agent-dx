@@ -767,6 +767,10 @@ describe("ui-slop/img-missing-alt", () => {
     ).toHaveLength(1);
   });
 
+  it("does not treat a // line in markup text as a comment", () => {
+    expect(run(id, markup(`<p>\n// <img src="a.png">\n</p>`))).toHaveLength(1);
+  });
+
   it("keeps scanning after a // inside an attribute string", () => {
     expect(
       run(id, markup(`<img title="see // here" src="a.png"><img src="b.png">`)),
