@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.6.1] - 2026-10-10
 
-First release published through the tag-driven `publish-npm.yml` workflow (npm Trusted Publishing), so it carries a provenance attestation.
+First release cut for the tag-driven `publish-npm.yml` workflow (npm Trusted Publishing), which publishes with `--provenance`.
 
 ### Fixed
 
