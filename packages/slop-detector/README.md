@@ -59,7 +59,7 @@ A composite action builds this package from the checkout at the action's ref and
     severity-threshold: block
 ```
 
-Until a tag exists, `<ref>` must be a branch or a commit SHA. The action does not install from the npm registry because the bare `slop-detector` name there belongs to an unrelated package.
+Until a tag exists, `<ref>` must be a branch or a commit SHA. The action does not install from the npm registry because the bare `slop-detector` name there belongs to an unrelated package. To run the `workflow-slop` pack in another repository as a separate, minimally permissioned job, call the reusable workflow instead; see [Use from another repo](docs/workflow-slop.md#use-from-another-repo).
 
 | Input | Default | Meaning |
 | --- | --- | --- |

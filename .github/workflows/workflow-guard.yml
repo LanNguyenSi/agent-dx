@@ -1,0 +1,136 @@
+name: workflow-guard
+
+# Reusable entry point for the slop-detector `workflow-slop` pack. A repository
+# outside agent-dx calls it to scan its own `.github/workflows/*.yml` and
+# composite `action.yml` files for `run:` expression injection, Node-20 action
+# majors and audit-gate shape, without an npm distribution of slop-detector
+# (the bare `slop-detector` name on the registry belongs to an unrelated
+# package).
+#
+# Form: a reusable workflow with an explicit `ref` input, not a composite
+# action. A called workflow does not fetch its own repository, so it checks
+# out agent-dx at `ref` itself, and it can compare `ref` with the commit SHA
+# of this very workflow file (`job.workflow_sha`), which makes a mismatch
+# between the caller's `uses: ...@<sha>` pin and the source that is built a
+# hard failure instead of a silent drift. A composite action under
+# packages/slop-detector/action already exists for steps inside a caller's own
+# job; it cannot refuse a branch pin, runs with the caller job's permissions,
+# and needs the caller to supply checkout and Node steps. This workflow runs in
+# its own job with `contents: read` only.
+#
+# Contexts used, all documented in GitHub's "Contexts" reference
+# (https://docs.github.com/en/actions/reference/workflows-and-actions/contexts):
+# `inputs` (workflow_call inputs), and `job.workflow_sha` ("The commit SHA of
+# the workflow file that defines the current job"; for a job defined in a
+# reusable workflow, the reusable workflow file, per the sibling
+# `job.workflow_ref` description; not available on GitHub Enterprise Server).
+# Reusable workflow semantics:
+# https://docs.github.com/en/actions/sharing-automations/reusing-workflows
+#
+# Caller usage (pin the same 40-hex commit in both places, never a branch):
+#
+#   jobs:
+#     workflow-guard:
+#       permissions:
+#         contents: read
+#       uses: LanNguyenSi/agent-dx/.github/workflows/workflow-guard.yml@<40-hex-sha>
+#       with:
+#         ref: <40-hex-sha>
+#         config: slop.config.yml   # optional, path inside the caller repo
+#
+# Every `${{ }}` that reaches a shell goes through `env:`. The caller's
+# repository content is data: the pack only reads workflow and action
+# metadata files, and the caller's checkout is kept apart from the tool
+# checkout so the scan never reads agent-dx's own files.
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Full 40-character lowercase hex commit SHA of agent-dx. Must equal the SHA in the caller's `uses:` pin.
+        type: string
+        required: true
+      config:
+        description: Optional path to the caller's slop config, relative to the caller repository root. Default is no config file.
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  workflow-guard:
+    name: workflow-guard
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      # Runs before any checkout or install, so a bad ref never reaches
+      # `actions/checkout` with a caller-controlled value or `npm ci`.
+      - name: Validate ref and config inputs
+        env:
+          INPUT_REF: ${{ inputs.ref }}
+          INPUT_CONFIG: ${{ inputs.config }}
+          PINNED_SHA: ${{ job.workflow_sha }}
+        run: |
+          if ! [[ "$INPUT_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::workflow-guard: input 'ref' must be a full 40-character lowercase hex commit SHA of agent-dx (a branch or tag name is refused)."
+            exit 1
+          fi
+          if [ -z "$PINNED_SHA" ]; then
+            echo "::error::workflow-guard: the SHA of this workflow file (job.workflow_sha) is empty, so the pin cannot be verified."
+            exit 1
+          fi
+          if [ "$INPUT_REF" != "$PINNED_SHA" ]; then
+            echo "::error::workflow-guard: input 'ref' does not equal the commit this workflow was called at. Pin the same 40-hex SHA in 'uses:' and in 'with: ref:'."
+            exit 1
+          fi
+          if [ -n "$INPUT_CONFIG" ]; then
+            if ! [[ "$INPUT_CONFIG" =~ ^[A-Za-z0-9._][A-Za-z0-9._/-]*$ ]] || [[ "/$INPUT_CONFIG/" == *"/../"* ]]; then
+              echo "::error::workflow-guard: input 'config' must be a relative path inside the caller repository without '..' segments."
+              exit 1
+            fi
+          fi
+
+      - name: Check out the caller repository
+        uses: actions/checkout@v5
+        with:
+          path: caller
+          persist-credentials: false
+
+      - name: Check out slop-detector at the pinned commit
+        uses: actions/checkout@v5
+        with:
+          repository: LanNguyenSi/agent-dx
+          ref: ${{ inputs.ref }}
+          path: tools
+          sparse-checkout: packages/slop-detector
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tools/packages/slop-detector/package-lock.json
+
+      - name: Install slop-detector
+        working-directory: tools/packages/slop-detector
+        run: npm ci --no-audit --no-fund
+
+      - name: Build slop-detector
+        working-directory: tools/packages/slop-detector
+        run: npm run build
+
+      - name: Check .github/workflows/*.yml and action.yml for run-expression injection, Node-20 action majors, and audit-gate shape
+        working-directory: caller
+        env:
+          INPUT_CONFIG: ${{ inputs.config }}
+          CLI: ${{ github.workspace }}/tools/packages/slop-detector/dist/cli.js
+        run: |
+          args=(check . --pack workflow-slop)
+          if [ -n "$INPUT_CONFIG" ]; then
+            args+=(--config "$INPUT_CONFIG")
+          fi
+          node "$CLI" "${args[@]}"

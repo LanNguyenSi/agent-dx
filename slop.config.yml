@@ -132,6 +132,8 @@ placement:
     # The composite action's public `uses:` reference; the action is only
     # reachable under this owner path, so it cannot be made org-neutral.
     - "LanNguyenSi/agent-dx/packages/slop-detector/action@"
+    # The reusable workflow's public `uses:` reference, same reason.
+    - "LanNguyenSi/agent-dx/\\.github/workflows/workflow-guard\\.yml@"
     - "https://github\\.com/LanNguyenSi/"
     - "https://raw\\.githubusercontent\\.com/LanNguyenSi/"
     # Same two URLs, lowercase org-path form: marker matching has no
