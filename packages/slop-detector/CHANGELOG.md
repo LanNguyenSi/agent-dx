@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `ui-slop` CSS comment stripping no longer treats an unquoted `url(/*x.png)` as a comment opener (task 7278f024): the unquoted url body runs to its closing paren, so a later rule such as `b:focus { outline: none; }` is no longer hidden up to the next `*/`.
 - `ui-slop` style rules no longer lose findings behind a quoted `/*` (task 0a28dde8): CSS comment stripping now skips quoted strings, so `content: "/*"` followed by a later `*/` no longer hides every rule in between. A string ends at its closing quote or at a newline, as in CSS.
 
 ### Security
