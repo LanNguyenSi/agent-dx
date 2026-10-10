@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ui-slop` grows from 6 to 10 rules (task 681fd3b9), re-implemented in this package: `focus-outline-removed`, `viewport-zoom-disabled`, `img-missing-alt` and `lorem-ipsum-placeholder`, all default-on (the pack itself stays opt-in). The package now ships 52 rules.
 - Composite GitHub Action at `packages/slop-detector/action` (task 6b887410): builds the CLI from the checkout at the action's ref, runs it with `--format json`, emits one `::error`/`::warning`/`::notice` annotation per violation and fails at or above `severity-threshold` (`block` default; exit 2 for CLI or input failures). Changed-files-only lists files with `git diff --name-only -z`, so non-ASCII and unusual names survive, and validates the event's base/head SHAs. Inputs: `path`, `pack`, `config`, `severity-threshold`, `changed-files-only`. See the README's "GitHub Action" section.
 
+### Fixed
+
+- `ui-slop` style rules no longer lose findings behind a quoted `/*` (task 0a28dde8): CSS comment stripping now skips quoted strings, so `content: "/*"` followed by a later `*/` no longer hides every rule in between. A string ends at its closing quote or at a newline, as in CSS.
+
 ### Security
 
 - **`@modelcontextprotocol/sdk` 1.32.1** (GHSA-6qxp-vccf-f47h, task aff72e2b): the lockfile resolves 1.32.1 and the dependency range is now `^1.32.1`, so consumers cannot resolve an affected version. Since 1.30.1 the SDK's HTTP server transports apply a 4 MiB default request-body limit and a 100-message batch cap.

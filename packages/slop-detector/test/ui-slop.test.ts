@@ -1024,3 +1024,76 @@ describe("ui-slop/lorem-ipsum-placeholder", () => {
     expect(run(id, markup(`<p>Welcome to the dashboard</p>`))).toEqual([]);
   });
 });
+
+describe("CSS comment stripping skips quoted strings", () => {
+  const focus = "ui-slop/focus-outline-removed";
+  const gradient = "ui-slop/gradient-text";
+
+  it('a "/*" inside a double-quoted string does not hide a later focus rule', () => {
+    const v = run(
+      focus,
+      css(
+        `.a::before { content: "/*"; }\nbutton:focus { outline: none; }\n.b { color: red; } /* real */\n`,
+      ),
+    );
+    expect(v).toHaveLength(1);
+    expect(v[0].matched).toBe("outline: none");
+  });
+
+  it("a '/*' inside a single-quoted string does not hide a later focus rule", () => {
+    const v = run(
+      focus,
+      css(
+        `.a::before { content: '/*'; }\nbutton:focus { outline: none; }\n/* real */\n`,
+      ),
+    );
+    expect(v).toHaveLength(1);
+  });
+
+  it('a "/*" inside a string does not hide a later gradient-text rule', () => {
+    const v = run(
+      gradient,
+      css(
+        `.a::before { content: "/*"; }\n.headline {\n  background: linear-gradient(90deg, #7c3aed, #06b6d4);\n  -webkit-background-clip: text;\n  color: transparent;\n}\n/* end */\n`,
+      ),
+    );
+    expect(v).toHaveLength(1);
+  });
+
+  it("an escaped quote does not end the string early", () => {
+    const v = run(
+      focus,
+      css(
+        `.a::before { content: "a\\"/*"; }\nbutton:focus { outline: none; }\n/* real */\n`,
+      ),
+    );
+    expect(v).toHaveLength(1);
+  });
+
+  it("real comments are still stripped", () => {
+    expect(
+      run(
+        focus,
+        css(`/* button:focus { outline: none; } */\n.c { color: red; }\n`),
+      ),
+    ).toEqual([]);
+  });
+
+  it("an unterminated string ends at the newline, so a later comment is still stripped", () => {
+    expect(
+      run(
+        focus,
+        css(
+          `.a::before { content: "oops; }\n/* button:focus { outline: none; } */\n.c { color: red; }\n`,
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it("finding offsets are unchanged after a stripped comment", () => {
+    const text = `/* x */ button:focus { outline: none; }\n`;
+    const v = run(focus, css(text));
+    expect(v).toHaveLength(1);
+    expect(v[0].matched).toBe("outline: none");
+  });
+});
