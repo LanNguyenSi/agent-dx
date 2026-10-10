@@ -32,10 +32,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   extend-only path warns instead of passing silently. That git child runs
   without `GIT_GLOB_PATHSPECS`, `GIT_NOGLOB_PATHSPECS`, `GIT_ICASE_PATHSPECS`
   and `GIT_LITERAL_PATHSPECS`, which would otherwise conflict with the flag
-  and surface as a misleading "could not measure" warning (bb93b428). The shipped skill
-  (`assets/skill/SKILL.md`) now lists `hygiene` and points at
+  and surface as a misleading "could not measure" warning (bb93b428). The
+  shipped skill (`assets/skill/SKILL.md`) now lists `hygiene` and points at
   `docs/hygiene.md`; its digest changes, so `init` reports an existing
   install as `outdated` until it is refreshed with `--force`.
+- Fixed: the same four ambient switches no longer make two other git children
+  fail open (bb93b428). `drift` ran `git grep` over its glob pathspecs with
+  them inherited, so git matched nothing, exited 1 and a doc still citing a
+  removed identifier reported `ok` with zero sites. `probe` ran its git calls
+  (including the link-policy `git ls-files -- :(literal)<dir>`) with them
+  inherited, so under `GIT_LITERAL_PATHSPECS=1` the listing came back empty
+  and a tracked directory read as untracked, the direction that links
+  repository content into the copy. Both now run without the switches, as
+  `hygiene` already did; every other variable is kept.
 
 ## [0.9.0] - 2026-10-03
 

@@ -1,6 +1,7 @@
 import { UsageError } from "../envelope.js";
 import { findGitRoot } from "../probe/containment.js";
 import { revExists, runGit } from "../drift/git.js";
+import { withoutPathspecEnv } from "../git-env.js";
 
 /** Default for `maxDeletePercent`: a commit that removes more than this
  * share of an extend-only file's base lines is flagged. */
@@ -161,23 +162,6 @@ function lineCount(content: string): number {
   if (content.length === 0) return 0;
   const n = content.split("\n").length;
   return content.endsWith("\n") ? n - 1 : n;
-}
-
-/** The ambient `GIT_*_PATHSPECS` switches change how git reads a pathspec
- * (glob, no-glob, case-insensitive, literal) and conflict with the explicit
- * `--literal-pathspecs` of the numstat call, which then exits non-zero. The
- * numstat child runs without them. */
-const PATHSPEC_ENV_VARS = [
-  "GIT_GLOB_PATHSPECS",
-  "GIT_NOGLOB_PATHSPECS",
-  "GIT_ICASE_PATHSPECS",
-  "GIT_LITERAL_PATHSPECS",
-] as const;
-
-function withoutPathspecEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env };
-  for (const name of PATHSPEC_ENV_VARS) delete env[name];
-  return env;
 }
 
 /**

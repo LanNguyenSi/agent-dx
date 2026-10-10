@@ -18,6 +18,7 @@ import {
   skippedLinkWarning,
   type LinkCandidate,
 } from "./link-policy.js";
+import { withoutPathspecEnv } from "../git-env.js";
 import { probeGitArgv } from "./git.js";
 import { GIT_CONTENT_WRITE_CONFIG_ARGS } from "./mutant.js";
 import { runArgv, type RunArgvResult } from "./run.js";
@@ -962,6 +963,10 @@ function gitArgv(
     logDir: runDir,
     logFileName,
     timeoutMs: 30_000,
+    // Several of these calls pass pathspecs (`ls-files -- :(literal)<dir>`,
+    // `add -- <paths>`); an ambient GIT_*_PATHSPECS switch would change how
+    // git reads them, and an empty `ls-files` listing reads as "untracked".
+    env: withoutPathspecEnv(),
     ...(signal ? { signal } : {}),
   });
 }

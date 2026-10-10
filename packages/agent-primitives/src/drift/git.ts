@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { withoutPathspecEnv } from "../git-env.js";
 
 /** Generous enough for a whole-repo diff or a doc file's contents without
  * truncating mid-line; this is a prototype tool run against one task-sized
@@ -98,15 +99,11 @@ export function grepIdentifier(
   name: string,
   pathspecs: readonly string[],
 ): GitRunResult {
-  return runGit(cwd, [
-    "grep",
-    "-n",
-    "-w",
-    "-F",
-    "-e",
-    name,
-    rev,
-    "--",
-    ...pathspecs,
-  ]);
+  return runGit(
+    cwd,
+    ["grep", "-n", "-w", "-F", "-e", name, rev, "--", ...pathspecs],
+    // The scan pathspecs are globs: an ambient GIT_*_PATHSPECS switch would
+    // make git grep match none of them and exit 1, which reads as "no site".
+    withoutPathspecEnv(),
+  );
 }
