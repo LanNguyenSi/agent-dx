@@ -755,20 +755,45 @@ function isOutlineProp(prop: string): boolean {
   return prop === "outline" || prop === "outline-style";
 }
 
+// An outline value that draws nothing visible: a removal, or any token that
+// hides it (`2px solid transparent`, the shape of a common `outline-none`
+// utility; `0 none`; `hidden`) or resets it (`initial`, `unset`, `inherit`,
+// `revert`). A `var(...)` value counts as visible.
+const OUTLINE_INVISIBLE_TOKEN =
+  /(?:^|\s)(?:none|hidden|transparent|0|0px|initial|unset|inherit|revert|revert-layer)(?=\s|$)/i;
+
+function outlinePaints(value: string): boolean {
+  const v = value.replace(/\s*!important\s*$/i, "").trim();
+  if (v.length === 0 || OUTLINE_REMOVED_VALUE.test(v)) return false;
+  return !OUTLINE_INVISIBLE_TOKEN.test(v);
+}
+
 // True when the declarations set a visible outline (the last outline
-// declaration is not a removal) or a replacement indicator.
+// declaration paints) or a replacement indicator.
 function providesFocusIndicator(decls: Decl[]): boolean {
   const outlines = decls.filter((d) => isOutlineProp(d.prop));
   const last = outlines[outlines.length - 1];
-  if (last && !OUTLINE_REMOVED_VALUE.test(last.value.trim())) return true;
+  if (last && outlinePaints(last.value)) return true;
   return decls.some(isFocusReplacement);
 }
 
-// True when one of `decls` resets `prop`: the same property, or a shorthand
-// of it (`border: 0` resets `border-color`, `background: none` resets
-// `background-image`).
+// True when one of `decls` resets `prop`: the same property, a shorthand of it
+// (`border: 0` resets `border-color`, `background: none` resets
+// `background-image`), or a longhand of it with a non-painting value
+// (`border-width: 0` or `border-style: none` resets `border`).
 function resetsProperty(decls: Decl[], prop: string): boolean {
-  return decls.some((d) => d.prop === prop || prop.startsWith(`${d.prop}-`));
+  return decls.some(
+    (d) =>
+      d.prop === prop ||
+      prop.startsWith(`${d.prop}-`) ||
+      (d.prop.startsWith(`${prop}-`) &&
+        NON_PAINTING_VALUE.test(
+          d.value
+            .replace(/\s*!important\s*$/i, "")
+            .trim()
+            .toLowerCase(),
+        )),
+  );
 }
 
 const focusOutlineRemoved: Rule = {

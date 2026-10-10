@@ -609,6 +609,47 @@ describe("ui-slop/focus-outline-removed", () => {
     ).toEqual([]);
   });
 
+  it("does not excuse :focus with a later :focus-visible outline that draws nothing", () => {
+    for (const outline of [
+      "2px solid transparent",
+      "initial",
+      "0 none",
+      "2px hidden",
+    ]) {
+      expect(
+        run(
+          id,
+          css(
+            `.btn:focus { outline: none; } .btn:focus-visible { outline: ${outline}; outline-offset: 2px; }`,
+          ),
+        ),
+        outline,
+      ).toHaveLength(1);
+    }
+    expect(
+      run(
+        id,
+        css(
+          `.btn:focus { outline: none; } .btn:focus-visible { outline: 2px solid var(--ring); }`,
+        ),
+      ),
+    ).toEqual([]);
+  });
+
+  it("still flags :focus when a longhand resets the earlier :focus-visible border", () => {
+    for (const reset of ["border-width: 0", "border-style: none"]) {
+      expect(
+        run(
+          id,
+          css(
+            `.btn:focus-visible { border: 2px solid blue; } .btn:focus { outline: none; ${reset}; }`,
+          ),
+        ),
+        reset,
+      ).toHaveLength(1);
+    }
+  });
+
   it("does not count removals or non-painting values as a replacement", () => {
     expect(
       run(id, css(`a:focus { outline: none; text-decoration: none; }`)),
@@ -752,6 +793,14 @@ describe("ui-slop/img-missing-alt", () => {
 
   it("flags an img without alt", () => {
     const v = run(id, markup(`<img src="a.png">`));
+    expect(v).toHaveLength(1);
+  });
+
+  it("never masks HTML comment markers inside code files", () => {
+    const v = run(
+      id,
+      tsx(`const open = "<!--";\n<img src="a.png" />\nconst close = "-->";`),
+    );
     expect(v).toHaveLength(1);
   });
 
