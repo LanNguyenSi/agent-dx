@@ -290,3 +290,35 @@ node packages/slop-detector/dist/cli.js check . --pack workflow-slop --config sl
 ```
 
 from the repo root. Any repo that vendors (or npm-installs) `slop-detector` can copy that one step into an existing CI job; no other wiring is needed since the pack is off by default until named with `--pack` or `packs.workflow-slop: true`.
+
+## Use from another repo
+
+A repository that does not vendor `slop-detector` can run this pack through the reusable workflow `.github/workflows/workflow-guard.yml` of this repository. It checks out `packages/slop-detector` at the commit you pin, builds it from source (there is no npm distribution), and runs `check . --pack workflow-slop` in your checkout. The job has `contents: read` and needs no secrets.
+
+```yaml
+# .github/workflows/workflow-guard.yml in the calling repository
+name: workflow-guard
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  workflow-guard:
+    permissions:
+      contents: read
+    uses: LanNguyenSi/agent-dx/.github/workflows/workflow-guard.yml@<40-hex-sha>
+    with:
+      ref: <40-hex-sha>
+      config: slop.config.yml # optional
+```
+
+- **Pin a commit SHA, never a branch.** `ref` must be a full 40-character lowercase hex SHA and must equal the SHA in `uses:`. The job's first step refuses anything else before any checkout, install or build runs: a `ref` that is not 40 lowercase hex characters (a branch or tag name, an abbreviated or uppercase SHA), or a `ref` that differs from the commit the workflow was resolved at (compared with `job.workflow_sha`). A `uses:` pinned to a branch is therefore not refused outright; it fails as soon as the branch moves past the SHA in `ref`, so pin the SHA in both places. `ref` is an explicit consistency assertion: `job.workflow_sha` already supplies the commit, and the input makes a drifted pin a failure instead of a silent mismatch. Take the SHA from a merge commit on agent-dx's default branch history, never from an open pull request or a fork. Update both values together.
+- **`config` (optional).** A path inside the calling repository, relative to its root, passed as `--config`. Default is no config file, which runs the pack's built-in defaults. A value that is absolute, contains a `..` segment or starts with `-` is refused. Use it to disable the two audit-gate rules in a repository whose `audit.yml` does not use `npm audit` (see "Scope: `npm audit` only" above).
+- **What it scans.** `.github/workflows/*.yml` and composite `action.yml` files of the calling repository, as data: the calling checkout is kept apart from the slop-detector checkout, so the scan never reads this repository's own files.
+- **Why a reusable workflow and not the composite action.** The [composite action](../README.md#github-action) runs as a step inside the caller's own job, with that job's permissions, and needs the caller to supply checkout and Node steps. The reusable workflow runs in its own job with `contents: read` only, sets up Node itself, and adds the explicit `ref` consistency assertion. It is not available on GitHub Enterprise Server, because `job.workflow_sha` is not.
+
+GitHub documents the [`job` context](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#job-context) (`workflow_sha`) and [reusable workflows](https://docs.github.com/en/actions/sharing-automations/reusing-workflows) (`workflow_call` inputs, the caller's `uses:` pin).
