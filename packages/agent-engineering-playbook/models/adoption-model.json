@@ -29,7 +29,8 @@
           "playbooks/06-testing-strategy.md",
           "playbooks/07-quality-assurance.md",
           "playbooks/08-documentation.md",
-          "playbooks/09-production.md"
+          "playbooks/09-production.md",
+          "playbooks/12-agent-governance.md"
         ]
       }
     },
@@ -75,7 +76,8 @@
       ],
       "prepare_next": [
         "playbooks/09-production.md",
-        "playbooks/11-change-management-and-incidents.md"
+        "playbooks/11-change-management-and-incidents.md",
+        "playbooks/12-agent-governance.md"
       ]
     },
     "phase_2": {

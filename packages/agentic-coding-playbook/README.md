@@ -49,10 +49,10 @@ For teams remediating dependency CVEs in an npm lockfile specifically:
 
 For teams that want to apply this model directly in a repository, this package also contains reusable artifacts:
 
-- [`templates/`](templates/): specs with evals, task slicing, review reports, and PR descriptions
+- [`templates/`](templates/): specs with evals, task slicing, agent tasks, risk classification, review reports, and PR descriptions
 - [`policies/`](policies/): example risk tiers, protected files, approval rules, and quality gates
 - [`skills/`](skills/): reusable agent role prompts (task slicer, implementation agent, reviewer, skeptic, release gate)
-- [`examples/`](examples/): stack-specific and workflow-specific examples
+- [`examples/`](examples/): placeholder for stack-specific and workflow-specific examples; none are included yet
 
 These artifacts are tool-agnostic and bilingual. Adapt them to your harness, CI system, and team workflow; they are not an enforcement layer on their own.
 

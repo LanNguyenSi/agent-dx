@@ -2,13 +2,13 @@
 **Executive Version**
 
 *Lan Nguyen Si | März 2026*
-*Basiert auf dem [Agent Engineering Playbook](https://github.com/LanNguyenSi/agent-engineering-playbook)*
+*Basiert auf dem [Agent Engineering Playbook](../agent-engineering-playbook)*
 
 ---
 
 ## Über den Autor
 
-**Lan Nguyen Si** ist Softwareentwickler mit Fokus auf GovTech und Open Source. Er entwickelt Werkzeuge an der Schnittstelle zwischen KI-gestützter Softwareentwicklung und strukturierter Governance, darunter [project-forge](https://github.com/LanNguyenSi/project-forge), [depsight](https://github.com/LanNguyenSi/depsight) und das [Agent Engineering Playbook](https://github.com/LanNguyenSi/agent-engineering-playbook).
+**Lan Nguyen Si** ist Softwareentwickler mit Fokus auf GovTech und Open Source. Er entwickelt Werkzeuge an der Schnittstelle zwischen KI-gestützter Softwareentwicklung und strukturierter Governance, darunter [project-forge](https://github.com/LanNguyenSi/project-forge), [depsight](https://github.com/LanNguyenSi/depsight) und das [Agent Engineering Playbook](../agent-engineering-playbook).
 
 Dieses Playbook ist aus der Praxis entstanden: mit echten Projekten, echten Agents und echten Fehlern. Auch dieses Dokument selbst wurde im Dialog zwischen Mensch und KI erarbeitet.
 
@@ -277,7 +277,7 @@ Diese Beispiele stammen aus realer Arbeit mit KI-Agents. Kein Gedankenexperiment
 
 ## Weiterführend
 
-- **[Agent Engineering Playbook](https://github.com/LanNguyenSi/agent-engineering-playbook)**: vollständige technische Referenz mit Checklisten und Templates
+- **[Agent Engineering Playbook](../agent-engineering-playbook)**: vollständige technische Referenz mit Checklisten und Templates
 - **[project-forge](https://github.com/LanNguyenSi/project-forge)**: Greenfield-Scaffolding mit integrierten Gates
 - **[depsight](https://github.com/LanNguyenSi/depsight)**: Security und Dependency Health für Brownfield
 
@@ -285,7 +285,7 @@ Diese Beispiele stammen aus realer Arbeit mit KI-Agents. Kein Gedankenexperiment
 
 Für Teams, die dieses Modell direkt in Repositories anwenden wollen, enthält dieses Package zusätzlich:
 
-- [`templates/`](templates/) für Specs mit Evals, Task-Slicing, Reviews und PR-Beschreibungen
+- [`templates/`](templates/) für Specs mit Evals, Task-Slicing, Agent-Tasks, Risikoklassifizierung, Reviews und PR-Beschreibungen
 - [`policies/`](policies/) für beispielhafte Risk-Tiers, Protected Files, Approval Rules und Quality Gates
 - [`skills/`](skills/) für wiederverwendbare Agentenrollen wie Task Slicer, Implementation Agent und Reviewer Agent
 
@@ -295,7 +295,7 @@ Diese Artefakte sind tool-agnostisch und zweisprachig. Sie müssen an den jeweil
 
 Unternehmen skalieren Agents nicht dadurch, dass sie ihnen mehr Freiheit geben, sondern dadurch, dass sie Verantwortung und Systemgrenzen sauber designen.
 
-*Feedback und Beiträge willkommen. Eine erweiterte Referenzversion mit Templates, CI-Snippets und konkreten Policies ist in Arbeit.*
+*Feedback und Beiträge willkommen. Templates, Policies und Skills liegen in diesem Package; Stack- und CI-Beispiele sind geplant (siehe [examples/](examples/)).*
 
 **Autor:** Lan Nguyen Si
 **Lizenz:** CC BY 4.0

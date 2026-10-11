@@ -71,7 +71,7 @@ This maps to a spec-driven / context-driven / eval-driven model: specs guide the
 
 ## Scope and non-goals
 
-This repository is intentionally vendor-neutral. It may mention specific tools, but it does not assume a single stack, cloud, proxy, framework, or AI workflow. It is not a certification framework, a substitute for legal, privacy, or security specialists, a substitute for formal compliance programs where they are required, or a promise that every team needs heavyweight process from day one. The goal is proportional rigor: enough control for the risk profile you actually have.
+This package is intentionally vendor-neutral. It may mention specific tools, but it does not assume a single stack, cloud, proxy, framework, or AI workflow. It is not a certification framework, a substitute for legal, privacy, or security specialists, a substitute for formal compliance programs where they are required, or a promise that every team needs heavyweight process from day one. The goal is proportional rigor: enough control for the risk profile you actually have.
 
 ## Contributing
 
