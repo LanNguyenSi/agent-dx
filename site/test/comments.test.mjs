@@ -274,7 +274,10 @@ test('blank lines inside a comment that starts a line are part of the comment', 
   renderAsIfDeleted([
     ['- a\n  <!-- b\n\n  c -->\n- d\n', '<ul>\n<li>\n<p>a</p>\n</li>\n<li>\n<p>d</p>\n</li>\n</ul>\n'],
     ['<!-- a -->\t<!-- b\n\nc -->\ntext\n', '<p>text</p>\n'],
-    ['<!-- a --> <!-- b\n\nc -->\ntext\n', '<p>text</p>\n']
+    ['<!-- a --> <!-- b\n\nc -->\ntext\n', '<p>text</p>\n'],
+    // The quote is first read up to the comment line after it, then its own
+    // lines are parsed; the comment inside still closes at its own "-->".
+    ['> <!-- a\n>\n> b -->\n> c\n<!-- d -->\n', '<blockquote>\n<p>c</p>\n</blockquote>\n']
   ])
 })
 
