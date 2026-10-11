@@ -138,7 +138,11 @@ describe("frontmatter-refs-resolve", () => {
         "url-uppercase.md",
       ]) {
         const f = forFile(run(opts), file);
-        expect(f).toHaveLength(file === "url-alias-slashes.md" ? 2 : 1);
+        expect(f).toHaveLength(
+          file === "url-alias-slashes.md" || file === "url-uppercase.md"
+            ? 2
+            : 1,
+        );
         for (const finding of f) {
           expect(finding.severity).toBe("error");
           expect(finding.message).toContain("URLs are not supported");
