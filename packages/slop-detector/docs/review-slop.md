@@ -2,8 +2,7 @@
 
 Opt in with `--pack review-slop`. Catches run-local review tokens (finding ids, round references, workspace-handoff phrases) leaking into reusable content; see the [rule pack reference](rule-packs.md) for the full pack table.
 
-
-Opt in with `--pack review-slop`. Three rules catch run-local review
+Three rules catch run-local review
 tokens: content that only means something inside the one review cycle (or
 the one workspace's handoff process) that produced it, and reads as dead
 or misleading the moment that cycle is over.
@@ -125,26 +124,10 @@ is scanned and folded into one combined result, and the same file named
 twice is scanned once rather than counted twice.
 
 `--stdin-path` only applies when reading stdin (no path given, or a bare
-`-`); passing it together with a real path is a usage error (exit `2`).
-So is reading stdin with nothing to read, and emptiness is the predicate
-there, not whether stdin is a terminal: a TTY, `< /dev/null`, an empty
-pipe and a whitespace-only pipe all exit `2` with a message naming
-`--stdin-path`, because a clean report over an empty document reads as
-"checked, found nothing" when in fact nothing was checked. A stdin that
-is opened but never written to and never closed (an inherited, non-TTY
-stream with no writer, which is what a CI step or an agent harness
-spawning the CLI with stdio inherited hands it) used to hang forever; it
-is now bounded by a 10-second first-byte timeout that is armed once,
-before the first byte, and cleared for good the moment any data arrives,
-and reports the same usage error. `SLOP_DETECTOR_STDIN_TIMEOUT_MS`
-overrides that bound. Trade-off: only the never-written case is bounded; a
-producer that writes some data and then stalls forever mid-stream is an
-ordinary pipe hang again, not a timed-out usage error, since a producer
-that has proven it is alive is trusted to keep going -- and a whitespace-only
-first chunk counts as proof too, since the timeout clears on any data
-regardless of content and the emptiness check only runs after `end`, so a
-whitespace-only chunk followed by a stall disarms the guard the same way a
-real one does.
+`-`); passing it together with a real path, or reading stdin with nothing
+to read, exits `2`. The full input rules, including the first-byte timeout
+on a stdin that is never written to, are in the [CLI
+reference](integration.md#cli-reference).
 
 **Configuration.**
 
@@ -170,4 +153,6 @@ skipped by every rule in the pack. It defaults to `["**/CHANGELOG.md"]`
 even without a config: a repo's changelog convention narrating rounds and
 finding ids by design is a config-level allow, not a violation, so the
 default excuses that file at the file level rather than forcing every
-repo to add the same entry by hand.
+repo to add the same entry by hand. Setting `review.allowPaths` in a
+config replaces this default rather than adding to it, so keep
+`"**/CHANGELOG.md"` in your list if changelogs should stay exempt.

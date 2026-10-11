@@ -22,11 +22,13 @@ Writes a markdown file under `~/.local/share/friction-log/frictions/` (override 
 
 ## `stdout-json`
 
-Emits a single-line JSON record to stdout and returns. Useful for piping into custom workflows:
+Emits a single-line JSON record to stdout. The `file` command then prints two status lines to stdout, so take the first line when piping into custom workflows:
 
 ```bash
-friction-log file 7 --sink stdout-json | jq '.rendered.body'
+friction-log file 7 --sink stdout-json | sed -n 1p | jq '.rendered.body'
 ```
+
+`sed -n 1p` reads the whole stream; a reader that closes the pipe early, such as `head -n 1`, can make the CLI fail with `EPIPE` while it writes the status lines.
 
 The schema is stable: any future field is additive.
 
@@ -56,6 +58,8 @@ Two modes, both honest about what they do:
 - **`mode: rest` (default)**: POSTs to `<apiBase>/api/projects/<id>/tasks` with bearer auth. Requires `apiBase`, `projectId`, and a token from `AGENT_TASKS_TOKEN` env or `token:` in config.
 - **`mode: mcp-emit`**: prints the equivalent `mcp__agent-tasks__task_create` invocation JSON to stdout and returns; no network call is made. This is the version of "the MCP path" that an honest standalone Node CLI can actually offer. An agent-harness wrapper can pick the line up and execute it under its own MCP scope.
 
+Optional in both modes: `priority` (`LOW`, `MEDIUM`, `HIGH`, `CRITICAL`; overrides the template's priority) and `labels` (merged with the template's labels).
+
 ```yaml
 sinks:
   agent-tasks:
@@ -67,7 +71,7 @@ sinks:
 
 ## `linear`
 
-GraphQL `issueCreate` against `api.linear.app/graphql`. Required: `teamId` and an API key (`LINEAR_API_KEY` env or `apiKey:` in config). Optional: `state` (matched case-insensitively against the team's workflow-state names; one extra query resolves it to a state id) and `assignee`.
+GraphQL `issueCreate` against `api.linear.app/graphql`. Required: `teamId` and an API key (`LINEAR_API_KEY` env or `apiKey:` in config). Optional: `state` (matched case-insensitively against the team's workflow-state names; one extra query resolves it to a state id), `assignee`, and `endpoint` (GraphQL URL, default `https://api.linear.app/graphql`; the API key is sent to this URL).
 
 ```yaml
 sinks:

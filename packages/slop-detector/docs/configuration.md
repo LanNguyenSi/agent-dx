@@ -6,7 +6,7 @@ Full `slop.config.yml` schema, severity overrides, the path-pattern anchor rule,
 
 Each rule has a default severity:
 
-- `block`: exits non-zero in CLI, fails pre-commit / CI checks. Reserved for objectively-wrong patterns (stray XML tags).
+- `block`: exits non-zero in CLI, fails pre-commit / CI checks. Used where a match is almost never legitimate: leaked tool-call tags, machine-bound paths and configured org markers in instruction files, all six `workflow-slop` rules, and run-local review finding ids and round references. `slop-detector list-rules` shows each rule's default.
 - `warn`: surfaced but does not fail. Default for stylistic rules.
 - `info`: listed but treated as advisory. Used for rules that have legitimate counter-examples.
 
@@ -66,7 +66,7 @@ review:
     - "**/CHANGELOG.md"
 ```
 
-Defaults applied even without a config: `agent-tics` and `prose-slop` packs on; `comment-slop`, `code-slop`, `ui-slop`, `placement-slop`, `workflow-slop`, `review-slop` off; ignores cover `node_modules`, `dist`, `build`, `coverage`, `.git`, lockfiles; `placement.markers`, `placement.instructionGlobs`, `placement.allow`, `workflow.allowExpressions`, `workflow.node20Majors`, `workflow.node20MajorsIgnore`, `workflow.auditGateTemplates`, and `workflow.executedActionInputs` default to `[]`; `review.allow` defaults to `[]` and `review.allowPaths` defaults to `["**/CHANGELOG.md"]` (see [the review-slop docs](review-slop.md)).
+Defaults applied even without a config: `agent-tics` and `prose-slop` packs on; `comment-slop`, `code-slop`, `ui-slop`, `placement-slop`, `workflow-slop`, `review-slop` off; ignores cover `node_modules`, `dist`, `build`, `coverage`, `.git`, lockfiles; `placement.markers`, `placement.instructionGlobs`, `placement.allow`, `workflow.allowExpressions`, `workflow.node20Majors`, `workflow.node20MajorsIgnore`, `workflow.auditGateTemplates`, and `workflow.executedActionInputs` default to `[]`; `review.allow` defaults to `[]` and `review.allowPaths` defaults to `["**/CHANGELOG.md"]` (a configured list replaces it; see [the review-slop docs](review-slop.md)).
 
 ## Path pattern anchor
 
@@ -94,7 +94,7 @@ This is what makes `check <file> [<file>...] --config slop.config.yml` judge eac
 The `placement` block only matters once `placement-slop` is enabled (see [`placement-slop` by example](rule-packs.md#placement-slop-by-example)):
 
 - `markers`: regex patterns (compiled as given, no implicit `i` flag) naming this org's own handles, products, or paths: each match is a `placement-slop/org-marker` violation. Empty by default, so the rule never fires until you configure it. A pattern that would match the empty string (e.g. `"a*"`) is rejected at config-load time, and matching runs per line with a 50-violations-per-file cap, so a runaway or pathological pattern can't blow up the output. These are repo-authored regexes, evaluated by the linter itself, not by an external process.
-- `instructionGlobs`: additive glob patterns, on top of the pack's built-in instruction-file globs (`SKILL.md`, `AGENTS.md`, `CLAUDE.md`, `.claude/agents/**`, `.opencode/agents/**`, `.claude/skills/**`); this only ever widens the built-in set, it can't narrow it. Matched against each scanned file's path relative to the anchor described in [Path pattern anchor](#path-pattern-anchor) below. A pattern must not start with `/`, same restriction as `entrypointGlobs`, and a leading `./` is normalized away. A pattern that matches zero scanned files is surfaced in `CheckSummary.warnings`, same mechanism as an unmatched `entrypointGlobs` pattern.
+- `instructionGlobs`: additive glob patterns, on top of the pack's built-in instruction-file globs (`SKILL.md`, `AGENTS.md`, `CLAUDE.md`, `.claude/agents/**`, `.opencode/agents/**`, `.claude/skills/**`); this only ever widens the built-in set, it can't narrow it. Matched against each scanned file's path relative to the anchor described in [Path pattern anchor](#path-pattern-anchor) above. A pattern must not start with `/`, same restriction as `entrypointGlobs`, and a leading `./` is normalized away. A pattern that matches zero scanned files is surfaced in `CheckSummary.warnings`, same mechanism as an unmatched `entrypointGlobs` pattern.
 - `allow`: regex patterns (also rejected at config-load time if they'd match the empty string), matched per line, and only the matched span is excused across every rule in the pack, including `block`-severity ones (the escape hatch for something like a legitimate install URL that carries an org handle). The exclusion is scoped to the matched span, not the whole line: a home path, a date, or a tally phrase elsewhere on the same line as an allowed match still fires. For narrower, single-rule suppression use a per-line disable comment instead (see [Per-line opt-out](#per-line-opt-out) below).
 
 The `workflow` block only matters once `workflow-slop` is enabled (see [`workflow-slop` by example](workflow-slop.md)): `allowExpressions` is an additive list of exact, whitespace-trimmed `${{ ... }}` expression bodies treated as safe on top of the pack's built-in allowlist, consumed by `run-expression`. `node20Majors` (additive) and `node20MajorsIgnore` (subtractive, applied after `node20Majors`) are both lists of exact `owner/repo@vN` entries consumed by `node20-action-major`, on top of the pack's built-in default list. `auditGateTemplates` is a list of `{ name, sha256 }` or `{ name, statements }` entries consumed by `audit-gate-shape`, each registering one exact gate block as recognised (see "Registering a gate template" in [the workflow-slop reference](workflow-slop.md)); an entry carrying neither or both of `sha256`/`statements` is rejected at config-load time. `executedActionInputs` is an additive list of exact `owner/repo:input` entries (no `@ref`; matching is ref-independent) consumed by `run-expression` to decide which `with:` inputs are scanned like `run:` scalars before the ordinary `with:` exemption applies, on top of the pack's built-in default list (see [Executed action inputs](workflow-slop.md#workflow-slop-executed-action-inputs)). All five are empty by default, so none of them widen or narrow what a rule accepts until you configure them.
@@ -125,6 +125,8 @@ corpus: true
 ```
 
 **Programmatic API** (`CheckOptions`):
+
+The package is not on npm (the registry name belongs to an unrelated package), so `slop-detector` resolves only after you install it from a local build, for example `npm install <path-to-agent-dx>/packages/slop-detector` after `npm run build` there.
 
 ```ts
 import { checkFiles } from "slop-detector";
@@ -176,8 +178,9 @@ Or scope by pack:
 
 ```md
 <!-- slop-detector:disable-next-line=agent-tics -->
-
 </result> a real example for the docs
 ```
 
 `slop-detector:disable-line` and `slop-detector:disable-next-line` accept either a rule id, a pack id, or no argument (disables every rule on that line).
+
+`disable-next-line` covers only the line directly below the comment; a blank line in between leaves the target line unsuppressed.

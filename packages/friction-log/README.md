@@ -8,11 +8,11 @@ Capture, query, and infer agent-workflow frictions. SQLite-backed, sink-pluggabl
 
 Two recurring patterns in agent-driven development go unaddressed by most tooling: the per-friction reflex (the agent notices a tool acting unexpectedly mid-task, mentally notes it, then moves on and the note evaporates) and the end-of-session bilanz (a retrospective naming tools exercised, frictions observed, tasks filed, easy to skip if nothing makes it cheap). `friction-log` lowers the cost of both: a one-line `log` for the per-moment capture, a one-command `file` to push the friction into whatever issue tracker the team uses, and a passive Stop-hook scan plus `bilanz` so missed frictions still get a second chance at the session boundary. The data isn't the goal; the goal is the inferences a few weeks of accumulated data enable (which tools cause the most friction, which categories recur, how long frictions take to become fixes), which is why the schema (SQLite + FTS5) is the foundation everything else builds on.
 
-**Status:** M5 (this release) completes the v1 surface. `init` writes a YAML config and optionally installs the Claude Code Stop-hook in one command (with a `--yes` non-interactive mode for scripted bootstrap). `import --format markdown-frontmatter <dir>` bulk-loads existing markdown notes into the database, idempotent on re-run via a content-hash dedup. Four templates round out the v1 set (`tool-missing-capability`, `auth-expiry`, `schema-drift`, `doc-gap`), all auto-picked by matching the friction's `category`.
+**Status:** The v1 command surface is complete; [CHANGELOG.md](./CHANGELOG.md) lists what each release added. `init` writes a YAML config and optionally installs the Claude Code Stop-hook in one command (with a `--yes` non-interactive mode for scripted bootstrap). `import --format markdown-frontmatter <dir>` bulk-loads existing markdown notes into the database, idempotent on re-run via a content-hash dedup. Four templates round out the v1 set (`tool-missing-capability`, `auth-expiry`, `schema-drift`, `doc-gap`), all auto-picked by matching the friction's `category`.
 
 ## Key features
 
-- One-command `init`: detects the local environment and writes config, optionally installing the Claude Code Stop-hook
+- One-command `init`: detects the local environment to suggest a sink, writes config, and optionally installs the Claude Code Stop-hook
 - Structured `log`, `list`, `search` (FTS5), `export`, and `digest` (aggregations) over a local SQLite store
 - Five pluggable filing sinks: `markdown-file` (default, zero-dependency), `stdout-json`, `github-issues`, `agent-tasks`, `linear`
 - Idempotent `scan` of Claude Code transcripts (deduped on session, tool, and title) and `import` of existing markdown notes (content-hash deduped)
@@ -82,8 +82,8 @@ See [Command reference](./docs/commands.md) for every subcommand, including manu
 - [Command reference](./docs/commands.md): full subcommand table, Stop-hook wiring, manual scan, templates
 - [Sinks](./docs/sinks.md): configuration for `markdown-file`, `stdout-json`, `github-issues`, `agent-tasks`, `linear`
 - [Sync-export](./docs/sync-export.md): optional multi-machine file merge, format, and write-through semantics
-- [Storage](./docs/storage.md): SQLite schema and `recurrence_of_id` matching rule
-- [Design notes](./docs/design.md): ADR for the sink options bag, roadmap, and how this relates to `slop-detector`
+- [Storage](./docs/storage.md): SQLite schema, friction status lifecycle, and the `recurrence_of_id` matching rule
+- [Design notes](./docs/design.md): module map and data-flow diagram, ADR for the sink options bag, roadmap, and how this relates to `slop-detector`
 
 ## Development
 
