@@ -453,9 +453,9 @@ const UNSET_RULE_PLAN =
 /**
  * The only runbook sentences of the installed assets that may name the data
  * authority together with a finding, a severity, or an obligation. Each one
- * either qualifies the obligation (only when, never automatic) or says the
- * runbook is data; any other such sentence fails the guard below, whatever
- * its wording.
+ * qualifies the obligation (only when, never automatic), says the runbook is
+ * data or leads to consult, or names where an adoption is recorded; any other
+ * such sentence fails the guard below, whatever its wording.
  */
 const CANONICAL_DATA_SENTENCES = [
   DATA_RULE,
