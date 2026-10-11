@@ -7,28 +7,32 @@ name: workflow-guard
 # (the bare `slop-detector` name on the registry belongs to an unrelated
 # package).
 #
-# Form: a reusable workflow with an explicit `ref` input, not a composite
-# action. A called workflow does not fetch its own repository, so it checks
-# out agent-dx at `ref` itself. `ref` is an explicit consistency assertion:
-# the job compares it with the commit SHA the workflow was resolved at
-# (`job.workflow_sha`), so a drifted pin (for example a branch-pinned `uses:`
-# after the branch moved) is a hard failure instead of a silent mismatch. A
-# composite action under packages/slop-detector/action already exists for
-# steps inside a caller's own job; it runs with the caller job's permissions
-# and needs the caller to supply checkout and Node steps. This workflow runs
-# in its own job with `contents: read` only and sets up Node itself.
+# Form: a reusable workflow, not a composite action. A called workflow does
+# not fetch its own repository, so it checks out agent-dx itself, at exactly
+# the commit it was called at (`job.workflow_repository` at
+# `job.workflow_sha`). The caller therefore pins the commit once, in `uses:`.
+# The optional `ref` input is a consistency assertion: when given, the job
+# compares it with `job.workflow_sha`, so a drifted pin is a hard failure.
+# When `ref` is omitted, the job refuses a `uses:` that is not pinned to a full
+# 40-hex SHA (it asserts `job.workflow_ref` is `<job.workflow_repository>/.github/workflows/<file>@<job.workflow_sha>`), so a
+# branch-pinned `uses:` cannot silently run the branch head. A composite
+# action under packages/slop-detector/action already exists for steps inside a
+# caller's own job; it runs with the caller job's permissions and needs the
+# caller to supply checkout and Node steps. This workflow runs in its own job
+# with `contents: read` only and sets up Node itself.
 #
 # Contexts used, all documented in GitHub's "Contexts" reference
 # (https://docs.github.com/en/actions/reference/workflows-and-actions/contexts):
-# `inputs` (workflow_call inputs), and `job.workflow_sha` ("The commit SHA of
+# `inputs` (workflow_call inputs), `job.workflow_repository`, `job.workflow_ref`
+# and `job.workflow_sha` ("The commit SHA of
 # the workflow file that defines the current job"; for a job defined in a
 # reusable workflow, the reusable workflow file, per the sibling
 # `job.workflow_ref` description; not available on GitHub Enterprise Server).
 # Reusable workflow semantics:
 # https://docs.github.com/en/actions/sharing-automations/reusing-workflows
 #
-# Caller usage (pin the same 40-hex commit in both places, never a branch; take
-# the SHA from a merge commit on agent-dx's default branch, not an open PR or a fork):
+# Caller usage (pin a 40-hex commit in `uses:`, never a branch; take the SHA
+# from a merge commit on agent-dx's default branch, not an open PR or a fork):
 #
 #   jobs:
 #     workflow-guard:
@@ -36,7 +40,6 @@ name: workflow-guard
 #         contents: read
 #       uses: LanNguyenSi/agent-dx/.github/workflows/workflow-guard.yml@<40-hex-sha>
 #       with:
-#         ref: <40-hex-sha>
 #         config: slop.config.yml   # optional, path inside the caller repo
 #
 # Every `${{ }}` that reaches a shell goes through `env:`. The caller's
@@ -48,9 +51,10 @@ on:
   workflow_call:
     inputs:
       ref:
-        description: Full 40-character lowercase hex commit SHA of agent-dx. Must equal the SHA in the caller's `uses:` pin.
+        description: Optional consistency assertion. When set, a full 40-character lowercase hex commit SHA of agent-dx that must equal the SHA in the caller's `uses:` pin. When omitted, the `uses:` pin itself must be a full 40-hex SHA.
         type: string
-        required: true
+        required: false
+        default: ""
       config:
         description: Optional path to the caller's slop config, relative to the caller repository root. Default is no config file.
         type: string
@@ -72,24 +76,50 @@ jobs:
         shell: bash
     steps:
       # Runs before any checkout or install, so a bad ref never reaches
-      # `actions/checkout` with a caller-controlled value or `npm ci`.
+      # `actions/checkout` or `npm ci`. The checkout below uses only
+      # job.workflow_repository and job.workflow_sha, both validated here.
       - name: Validate ref and config inputs
         env:
           INPUT_REF: ${{ inputs.ref }}
           INPUT_CONFIG: ${{ inputs.config }}
           PINNED_SHA: ${{ job.workflow_sha }}
+          PINNED_REPO: ${{ job.workflow_repository }}
+          PINNED_REF: ${{ job.workflow_ref }}
         run: |
-          if ! [[ "$INPUT_REF" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "::error::workflow-guard: input 'ref' must be a full 40-character lowercase hex commit SHA of agent-dx (a branch or tag name is refused)."
-            exit 1
-          fi
+          echo "workflow-guard: workflow_ref=$PINNED_REF workflow_repository=$PINNED_REPO workflow_sha=$PINNED_SHA"
           if [ -z "$PINNED_SHA" ]; then
             echo "::error::workflow-guard: the SHA of this workflow file (job.workflow_sha) is empty, so the pin cannot be verified."
             exit 1
           fi
-          if [ "$INPUT_REF" != "$PINNED_SHA" ]; then
-            echo "::error::workflow-guard: input 'ref' does not equal the commit this workflow was called at. Pin the same 40-hex SHA in 'uses:' and in 'with: ref:'."
+          if ! [[ "$PINNED_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::workflow-guard: job.workflow_sha is not a 40-character lowercase hex commit SHA."
             exit 1
+          fi
+          if ! [[ "$PINNED_REPO" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+            echo "::error::workflow-guard: job.workflow_repository is empty or not an owner/name pair."
+            exit 1
+          fi
+          if [ -n "$INPUT_REF" ]; then
+            if ! [[ "$INPUT_REF" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::workflow-guard: input 'ref' must be a full 40-character lowercase hex commit SHA of agent-dx (a branch or tag name is refused)."
+              exit 1
+            fi
+            if [ "$INPUT_REF" != "$PINNED_SHA" ]; then
+              echo "::error::workflow-guard: input 'ref' does not equal the commit this workflow was called at. Pin the same 40-hex SHA in 'uses:' and in 'with: ref:', or omit 'ref'."
+              exit 1
+            fi
+          else
+            # job.workflow_ref must be exactly <repo>/.github/workflows/<file>@<sha>:
+            # same repository as the checkout, one '@', and the part after it
+            # equal to job.workflow_sha (a branch or tag pin never matches).
+            pinned_prefix="$PINNED_REPO/.github/workflows/"
+            pinned_rest="${PINNED_REF#"$pinned_prefix"}"
+            if [ "$pinned_rest" = "$PINNED_REF" ] \
+              || ! [[ "$pinned_rest" =~ ^[A-Za-z0-9._-]+@([0-9a-f]{40})$ ]] \
+              || [ "${BASH_REMATCH[1]}" != "$PINNED_SHA" ]; then
+              echo "::error::workflow-guard: this workflow was not called with a full 40-hex commit SHA in 'uses:' that matches the checked-out commit (a branch or tag pin is refused). Pin 'uses:' to a SHA."
+              exit 1
+            fi
           fi
           if [ -n "$INPUT_CONFIG" ]; then
             if ! [[ "$INPUT_CONFIG" =~ ^[A-Za-z0-9._][A-Za-z0-9._/-]*$ ]] || [[ "/$INPUT_CONFIG/" == *"/../"* ]]; then
@@ -107,8 +137,8 @@ jobs:
       - name: Check out slop-detector at the pinned commit
         uses: actions/checkout@v5
         with:
-          repository: LanNguyenSi/agent-dx
-          ref: ${{ inputs.ref }}
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
           path: tools
           sparse-checkout: packages/slop-detector
           persist-credentials: false

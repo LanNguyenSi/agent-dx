@@ -13,6 +13,7 @@ const SCAFFOLD_FILENAMES = [
   "module-template.md",
   "invariant-template.md",
   "runbook-template.md",
+  "incident-template.md",
   "benchmark-template.md",
 ];
 
@@ -21,6 +22,7 @@ const TYPE_BY_TEMPLATE: Record<string, string> = {
   "module-template.md": "module",
   "invariant-template.md": "invariant",
   "runbook-template.md": "runbook",
+  "incident-template.md": "incident",
   "benchmark-template.md": "benchmark",
 };
 
@@ -168,6 +170,35 @@ describe("runInit", () => {
     );
     const parsed = benchmark?.frontmatter.parsed as Record<string, unknown>;
     expect("sources" in parsed).toBe(false);
+  });
+
+  it("incident-template.md has no `sources` key and carries the lesson fields", () => {
+    const targetDir = path.join(workDir, "incident-fields");
+    runInit(targetDir);
+    const ctx = loadBundle(targetDir);
+    const incident = ctx.docs.find((d) => d.relPath === "incident-template.md");
+    const parsed = incident?.frontmatter.parsed as Record<string, unknown>;
+    expect("sources" in parsed).toBe(false);
+    expect(parsed.type).toBe("incident");
+    for (const key of [
+      "area",
+      "root_cause",
+      "escape_reason",
+      "applies_when",
+      "related",
+    ]) {
+      expect(key in parsed, key).toBe(true);
+    }
+    const lessons = parsed.lessons as Array<Record<string, unknown>>;
+    expect(lessons).toHaveLength(1);
+    expect(lessons[0]).toMatchObject({ id: "L1", status: "proposed" });
+    expect("runbook" in lessons[0]).toBe(false);
+    const raw = fs.readFileSync(
+      path.join(targetDir, "incident-template.md"),
+      "utf8",
+    );
+    expect(raw).toContain("No personal data");
+    expect(raw).toContain("never the reverse");
   });
 
   it("no generated file contains an absolute (leading-slash) link", () => {

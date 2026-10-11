@@ -10,6 +10,25 @@ export function hasSourcesKey(parsed: unknown): boolean {
 }
 
 /**
+ * Returns the frontmatter list under `key` when it is shaped correctly (a
+ * non-empty array of non-empty strings), or undefined otherwise (absent, or
+ * present but malformed). The one shape check behind `getValidSources` and
+ * `getValidAppliesTo`.
+ */
+export function getValidPathList(
+  parsed: unknown,
+  key: string,
+): string[] | undefined {
+  if (!isRecord(parsed) || !(key in parsed)) return undefined;
+  const list = parsed[key];
+  const isValidShape =
+    Array.isArray(list) &&
+    list.length > 0 &&
+    list.every((s) => typeof s === "string" && s.trim() !== "");
+  return isValidShape ? (list as string[]) : undefined;
+}
+
+/**
  * Returns the frontmatter `sources` array when it is shaped correctly (a
  * non-empty array of non-empty strings), or undefined otherwise (absent, or
  * present but malformed). Shared between sources-shape (which reports the
@@ -18,13 +37,23 @@ export function hasSourcesKey(parsed: unknown): boolean {
  * sources-shape).
  */
 export function getValidSources(parsed: unknown): string[] | undefined {
-  if (!hasSourcesKey(parsed)) return undefined;
-  const sources = (parsed as Record<string, unknown>).sources;
-  const isValidShape =
-    Array.isArray(sources) &&
-    sources.length > 0 &&
-    sources.every((s) => typeof s === "string" && s.trim() !== "");
-  return isValidShape ? (sources as string[]) : undefined;
+  return getValidPathList(parsed, "sources");
+}
+
+/** Whether parsed frontmatter has an `applies_to` key at all, regardless of shape validity. */
+export function hasAppliesToKey(parsed: unknown): boolean {
+  return isRecord(parsed) && "applies_to" in parsed;
+}
+
+/**
+ * Returns the frontmatter `applies_to` array when it is shaped correctly
+ * (a non-empty array of non-empty strings, the same shape as `sources`), or
+ * undefined otherwise (absent, or present but malformed). `applies_to` is a
+ * lookup-only field: `docs-for` matches it, `sources-shape` validates it,
+ * and `sources-fresh` never reads it.
+ */
+export function getValidAppliesTo(parsed: unknown): string[] | undefined {
+  return getValidPathList(parsed, "applies_to");
 }
 
 /**
@@ -34,7 +63,8 @@ export function getValidSources(parsed: unknown): string[] | undefined {
  * `path.join` treats it as repo-relative, exactly like every other entry,
  * while `path.resolve` would treat the leading slash as an instruction to
  * re-root at the filesystem root, silently escaping `repoRoot` entirely.
- * Every place that resolves a `sources` entry goes through this helper
+ * An `applies_to` entry is resolved by the same helper. Every place that
+ * resolves a `sources` or `applies_to` entry goes through this helper
  * (`sources-shape`, `sources-fresh`, `citations-resolve` and `docs-for`),
  * so the check rules and the reverse lookup agree on what a `sources`
  * entry resolves to.

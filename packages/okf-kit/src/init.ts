@@ -3,6 +3,7 @@ import path from "node:path";
 import { UsageError } from "./errors.js";
 import {
   benchmarkTemplate,
+  incidentTemplate,
   indexTemplate,
   invariantTemplate,
   logTemplate,
@@ -30,6 +31,7 @@ const SCAFFOLD_FILENAMES = [
   "module-template.md",
   "invariant-template.md",
   "runbook-template.md",
+  "incident-template.md",
   "benchmark-template.md",
 ] as const;
 
@@ -67,6 +69,7 @@ export function runInit(
       "module-template.md": moduleTemplate(timestamp),
       "invariant-template.md": invariantTemplate(timestamp),
       "runbook-template.md": runbookTemplate(timestamp),
+      "incident-template.md": incidentTemplate(timestamp),
       "benchmark-template.md": benchmarkTemplate(timestamp),
     };
 
@@ -90,7 +93,8 @@ export function formatInitSummary(result: InitResult): string {
     "Next steps:",
     "  - Fill in each *-template.md placeholder and rename it to a real doc name.",
     "  - Replace the `path/to/covered/source` placeholder in each doc's `sources:` list with the",
-    "    real repo-root-relative path(s) it describes.",
+    "    real repo-root-relative path(s) it describes (the runbook template uses `applies_to:` for",
+    "    the same placeholder).",
     "  - Until you do, `okf-kit check` will report those placeholders as missing source paths",
     "    (`sources-shape` errors) whenever it has a repo root to check against (inside a git repo, or",
     "    with --repo-root); that is intentional, not a bug, it flags unwritten sources so you don't",

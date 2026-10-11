@@ -10,6 +10,7 @@ import {
   renderDocsForText,
   runDocsFor,
 } from "./docs-for.js";
+import { parseCompanions } from "./companions.js";
 import { UsageError } from "./errors.js";
 import { detectRepoRoot } from "./git.js";
 import { formatInitSummary, runInit } from "./init.js";
@@ -69,6 +70,14 @@ export interface CheckOptions {
    * edits (`--dirty-as-now`)" section.
    */
   dirtyAsNow?: boolean;
+  /**
+   * Raw `<alias>=<dir>` values (repeatable `--companion`) naming companion
+   * bundles for `frontmatter-refs-resolve`. A malformed value is a
+   * UsageError.
+   */
+  companions?: string[];
+  /** `--skip-companion-refs`: an unpassed companion alias is a notice, not an error. */
+  skipCompanionRefs?: boolean;
   /** Test-only override for git access; production code shells out to the real `git` binary. */
   runGit?: RunGit;
 }
@@ -95,6 +104,7 @@ export function runCheck(
   const repoRoot = options.repoRoot
     ? path.resolve(options.repoRoot)
     : detectRepoRoot(resolvedBundleDir, options.runGit);
+  const companions = parseCompanions(options.companions ?? []);
   const ctx = loadBundle(resolvedBundleDir, repoRoot, options.runGit);
   if (options.requireAnchors) {
     ctx.requireAnchors = { allow: options.requireAnchorsAllow ?? [] };
@@ -109,6 +119,12 @@ export function runCheck(
   }
   if (options.dirtyAsNow) {
     ctx.dirtyAsNow = true;
+  }
+  if (companions.size > 0) {
+    ctx.companions = companions;
+  }
+  if (options.skipCompanionRefs) {
+    ctx.skipCompanionRefs = true;
   }
 
   const findings = allRules.flatMap((rule) => rule.run(ctx));
@@ -176,6 +192,17 @@ program
       "untracked) -- a `sources` path and the doc itself alike -- as one virtual commit made right " +
       "now, so a pre-commit run matches what CI reports after the commit lands (opt-in, see docs/staleness.md)",
   )
+  .option(
+    "--companion <alias=dir>",
+    "frontmatter-refs-resolve: bundle directory that a frontmatter `<alias>:<path>` reference " +
+      "(`lessons[].runbook`, `derived_from[]`) resolves into; repeatable (see docs/check-catalog.md)",
+    (value: string, previous: string[] = []) => [...previous, value],
+  )
+  .option(
+    "--skip-companion-refs",
+    "frontmatter-refs-resolve: report a reference whose companion alias was not passed as a notice " +
+      "instead of an error",
+  )
   .exitOverride()
   .action(
     (
@@ -190,6 +217,8 @@ program
         proseLineReferencesStrict?: boolean;
         futureSkewMinutes?: string;
         dirtyAsNow?: boolean;
+        companion?: string[];
+        skipCompanionRefs?: boolean;
       },
     ) => {
       try {
@@ -216,6 +245,8 @@ program
           proseLineReferencesStrict: opts.proseLineReferencesStrict,
           futureSkewMinutes,
           dirtyAsNow: opts.dirtyAsNow,
+          companions: opts.companion,
+          skipCompanionRefs: opts.skipCompanionRefs,
         });
         const output = opts.json
           ? renderJson(result.bundleDir, result.findings)
@@ -237,11 +268,11 @@ program
 program
   .command("docs-for <bundleDir> <paths...>")
   .description(
-    "List every bundle doc whose frontmatter `sources` claims one of the given paths (relative or absolute, resolved against --repo-root; a path outside it is a usage error)",
+    "List every bundle doc whose frontmatter `sources` or `applies_to` claims one of the given paths (relative or absolute, resolved against --repo-root; a path outside it is a usage error)",
   )
   .option(
     "-r, --repo-root <path>",
-    "Repo root the given paths and each doc's `sources` entries are resolved against (auto-detected via " +
+    "Repo root the given paths and each doc's `sources` and `applies_to` entries are resolved against (auto-detected via " +
       "`git rev-parse --show-toplevel` from the bundle dir when omitted)",
   )
   .option("-j, --json", "Output matches as JSON")

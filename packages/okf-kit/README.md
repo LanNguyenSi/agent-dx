@@ -14,9 +14,9 @@ It validates frontmatter shape, link resolution, staleness against git history, 
 
 ## Key features
 
-- 9 rules covering frontmatter shape, reserved files, link resolution, and staleness/citation drift assessed against git history; see the [check catalog](docs/check-catalog.md).
+- 10 rules covering frontmatter shape, reserved files, link resolution, and staleness/citation drift assessed against git history; see the [check catalog](docs/check-catalog.md).
 - `init` scaffolds a starter bundle: `index.md`, `log.md`, and one template doc per concept type.
-- `docs-for` reverse lookup: given one or more changed paths, which bundle docs claim them as `sources`.
+- `docs-for` reverse lookup: given one or more changed paths, which bundle docs claim them as `sources` or `applies_to` (a lookup-only field that `sources-fresh` ignores).
 - A citation can carry an anchor (`#heading` or `#"text"`) so a `path:N-M` citation survives content moving above it; see [Citation resolution](docs/citations.md).
 - `--dirty-as-now` makes a pre-commit `check` run report the same staleness verdict CI reports after the commit lands; see [Staleness](docs/staleness.md).
 - `--require-anchors` and `--prose-line-references` opt into stricter checks for a bundle whose citations are already anchored.
@@ -48,6 +48,10 @@ okf-kit check path/to/bundle --json
 
 # fail on warnings too, not just errors (STALE and FUTURE-DATED findings are warnings)
 okf-kit check path/to/bundle --strict
+
+# resolve frontmatter refs like `shipped:runbooks/r.md` into another bundle (repeatable);
+# add --skip-companion-refs to report an unpassed alias as a notice instead of an error
+okf-kit check path/to/bundle --companion shipped=path/to/other/bundle
 ```
 
 `check` exits `0` with no errors (and, under `--strict`, no warnings), `1` when it finds one, and `2` on a CLI invocation error; see [check catalog](docs/check-catalog.md#exit-codes) for the full table.
@@ -78,7 +82,7 @@ Pin the exact version and use a full (non-shallow) checkout; [CI usage](docs/ci.
 
 ## Documentation
 
-- [Check catalog](docs/check-catalog.md): all 9 rules, repo-root auto-detection, exit codes.
+- [Check catalog](docs/check-catalog.md): all 10 rules, repo-root auto-detection, exit codes.
 - [Scaffold a bundle (`init`)](docs/init.md): generated files, placeholder sources, authoring guidance.
 - [Reverse lookup (`docs-for`)](docs/docs-for.md): matching rules, path resolution, output formats.
 - [Staleness (`sources-fresh`)](docs/staleness.md): the re-stamp rule, designator-less timestamps, squash-merge interaction, `--dirty-as-now`, `sources-fresh-future`.

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `frontmatter-refs-resolve` rule: frontmatter `lessons[].runbook` and `derived_from[]`, when present, must resolve to an existing `.md` file, relative to the doc inside the bundle or as `<alias>:<path>` into a companion bundle. Containment is enforced for both forms. URL-shaped values and absolute unprefixed paths are errors. URL schemes are matched case-insensitively, and `http`, `https`, `file` and `mailto` are reserved: `--companion` rejects them as an alias.
+- `check --companion <alias>=<dir>` (repeatable) declares a companion bundle; malformed values are CLI errors. `check --skip-companion-refs` downgrades a ref whose alias was not passed from an error to a notice. See [Check catalog](docs/check-catalog.md#frontmatter-references-frontmatter-refs-resolve).
+- `init` scaffolds `incident-template.md` (`type: incident`), a post-defect analysis with `area`, `root_cause`, `escape_reason`, `applies_when` and `lessons[]` (`id`, `rule`, `check`, `status`, and a `runbook` reference once adopted). Like the benchmark template it has no `sources`, so it never goes stale; its guidance covers personal data and keeping internal analyses in a bundle that points into the shipped one (task 02e80747, issue #429).
+- Optional frontmatter field `applies_to: [path, ...]` (files or directories, resolved and matched (exact path or directory containment) exactly like `sources`, no globs; any doc type may carry it). It is lookup-only: `docs-for` matches it in addition to `sources`, while `sources-fresh` never reads it, so wiring a runbook to a broad directory does not mark it stale on every edit there. `sources-shape` validates it like `sources` (non-empty array of non-empty strings, each path must exist under the repo root, same error severity). The `runbook` scaffold from `init` now shows `applies_to` and notes when to use `sources` instead. See [docs-for](docs/docs-for.md) and the [check catalog](docs/check-catalog.md). Closes agent-dx#428.
+- `docs-for` matches now carry `via` (`["sources"]`, `["applies_to"]` or both, in that order; a doc matching through both fields is reported once) and, when `applies_to` entries matched, `appliesTo`. Text output appends `applies_to: <entries>` for those entries. Additive: for a bundle without `applies_to` the JSON differs from before only by the new `via` key, and the match lines of the text output are unchanged (the empty-result message now mentions `applies_to`).
+
 ## [0.17.1] - 2026-10-05
 
 ### Changed

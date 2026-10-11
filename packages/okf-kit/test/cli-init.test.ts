@@ -55,6 +55,107 @@ describe("okf-kit cli init", () => {
     expect(parsed.summary.errors).toBe(0);
   });
 
+  it("init-then-check --strict reports no finding for incident-template.md", () => {
+    const bundleDir = path.join(workDir, "docs", "okf");
+    const fakeRepoRoot = path.join(workDir, "fake-repo-root");
+    expect(runCli(["init", bundleDir]).status).toBe(0);
+    fs.mkdirSync(path.join(fakeRepoRoot, "path", "to", "covered"), {
+      recursive: true,
+    });
+    fs.writeFileSync(
+      path.join(fakeRepoRoot, "path", "to", "covered", "source"),
+      "placeholder\n",
+    );
+
+    const checkResult = runCli([
+      "check",
+      bundleDir,
+      "--repo-root",
+      fakeRepoRoot,
+      "--strict",
+      "--json",
+    ]);
+    const parsed = JSON.parse(checkResult.stdout) as {
+      findings: Array<{ ruleId: string; file: string }>;
+    };
+    const incidentFindings = parsed.findings.filter(
+      (f) => f.file === "incident-template.md",
+    );
+    expect(incidentFindings).toEqual([]);
+  });
+
+  it("a filled incident doc copied from the template is clean under check --strict", () => {
+    const bundleDir = path.join(workDir, "docs", "okf");
+    const fakeRepoRoot = path.join(workDir, "fake-repo-root");
+    expect(runCli(["init", bundleDir]).status).toBe(0);
+    fs.mkdirSync(path.join(fakeRepoRoot, "path", "to", "covered"), {
+      recursive: true,
+    });
+    fs.writeFileSync(
+      path.join(fakeRepoRoot, "path", "to", "covered", "source"),
+      "placeholder\n",
+    );
+
+    const template = fs.readFileSync(
+      path.join(bundleDir, "incident-template.md"),
+      "utf8",
+    );
+    const filled = template
+      .replace("title: <short symptom>", "title: Export drops the last row")
+      .replace(
+        "description: <one line>",
+        "description: CSV export lost its final row for one release.",
+      )
+      .replace(
+        "area: <cluster key, ideally the topic of a runbook>",
+        "area: export",
+      )
+      .replace(
+        "root_cause: <term from the bundle's vocabulary>",
+        "root_cause: off-by-one",
+      )
+      .replace(
+        "escape_reason: <why checks before release did not catch it>",
+        "escape_reason: no test covered an export with an odd row count",
+      )
+      .replace(
+        "applies_when: <the kind of work where this lesson matters>",
+        "applies_when: changing pagination or export loops",
+      )
+      .replace(
+        "rule: <what to do differently>",
+        "rule: test exports with 0, 1 and n+1 rows",
+      )
+      .replace(
+        "check: <how to verify it>",
+        "check: export tests include an odd row count",
+      )
+      .replace("status: proposed", "status: adopted")
+      .replace(
+        "    # runbook: <path of the runbook that adopted this lesson, once adopted>",
+        "    runbook: runbook-template.md",
+      );
+    expect(filled).toContain("runbook: runbook-template.md");
+    expect(filled).not.toContain("<short symptom>");
+    fs.writeFileSync(path.join(bundleDir, "incident-example.md"), filled);
+
+    const checkResult = runCli([
+      "check",
+      bundleDir,
+      "--repo-root",
+      fakeRepoRoot,
+      "--strict",
+      "--json",
+    ]);
+    const parsed = JSON.parse(checkResult.stdout) as {
+      findings: Array<{ ruleId: string; file: string; message: string }>;
+    };
+    const exampleFindings = parsed.findings.filter(
+      (f) => f.file === "incident-example.md",
+    );
+    expect(exampleFindings).toEqual([]);
+  });
+
   it("init inside a real git repo, then check (auto-detect) reports exactly 4 sources-shape errors for the unresolved placeholders, exit 1", () => {
     const repo: TmpGitRepo = createTmpGitRepo();
     try {

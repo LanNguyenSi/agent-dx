@@ -3,8 +3,7 @@ import path from "node:path";
 import { loadBundle } from "./bundle.js";
 import { UsageError } from "./errors.js";
 import { detectRepoRoot } from "./git.js";
-import { getDocsWithSources } from "./rules/sources-fresh.js";
-import { resolveRepoPath } from "./util.js";
+import { getValidAppliesTo, getValidSources, resolveRepoPath } from "./util.js";
 import type { RunGit } from "./types.js";
 
 export interface DocsForOptions {
@@ -13,12 +12,32 @@ export interface DocsForOptions {
   runGit?: RunGit;
 }
 
-/** One bundle doc whose `sources` matched at least one given path, and which of its sources matched. */
+/** Which frontmatter field a `docs-for` match came through. */
+export type DocsForVia = "sources" | "applies_to";
+
+/**
+ * One bundle doc whose `sources` and/or `applies_to` matched at least one
+ * given path, and which of its entries matched.
+ */
 export interface DocsForMatch {
   /** Bundle-relative path, forward-slash separated (same convention as `Finding.file`). */
   doc: string;
   /** The doc's own `sources` entries that matched at least one given path, sorted, deduplicated. */
   sources: string[];
+  /**
+   * The doc's own `applies_to` entries that matched at least one given path,
+   * sorted, deduplicated. Omitted when the doc matched only through
+   * `sources`, so output for a bundle without `applies_to` differs from
+   * before only by `via`.
+   */
+  appliesTo?: string[];
+  /**
+   * Which field(s) matched, in the fixed order `sources`, `applies_to`. A
+   * doc matching through both fields is reported once, with both listed.
+   * `sources` means the doc describes the code; `applies_to` means the doc
+   * is a procedure for work there.
+   */
+  via: DocsForVia[];
 }
 
 export interface DocsForResult {
@@ -29,15 +48,15 @@ export interface DocsForResult {
 /**
  * `okf-kit docs-for <bundleDir> <path>...`: which bundle docs claim a given
  * path (relative or absolute, resolved against repoRoot) as a `sources`
- * entry, directly.
+ * or `applies_to` entry, directly. `applies_to` is lookup-only: this command
+ * matches it, while the staleness rules never read it.
  *
- * Reuses the IDENTICAL `sources` population `sources-shape`/`sources-fresh`
- * assess (`getDocsWithSources`, shape-validated via `getValidSources`): a
- * doc with no `sources` key, or a malformed one, contributes no matches
- * here either -- that shape error is `sources-shape`'s job to report, not
- * this command's.
+ * Reuses the shape validation `sources-shape` applies (`getValidSources`,
+ * `getValidAppliesTo`): a doc with no such key, or a malformed one,
+ * contributes no matches through that field -- that shape error is
+ * `sources-shape`'s job to report, not this command's.
  *
- * Matching a `sources` entry against a given path:
+ * Matching a `sources` or `applies_to` entry against a given path:
  *  - exact match: the given path resolves to the exact same path the
  *    `sources` entry resolves to.
  *  - directory containment: when the `sources` entry resolves to a path
@@ -96,38 +115,64 @@ export function runDocsFor(
   }
   const ctx = loadBundle(resolvedBundleDir, repoRoot, options.runGit);
 
-  const docsWithSources = getDocsWithSources(ctx);
-
   const givenAbsPaths = paths.map((p) => resolveGivenPath(repoRoot, p));
 
   const matches: DocsForMatch[] = [];
-  for (const { doc, sources } of docsWithSources) {
-    const matchedSources = new Set<string>();
-    for (const source of sources) {
-      const sourceAbs = stripTrailingSep(resolveRepoPath(repoRoot, source));
-      let sourceIsDir = false;
-      try {
-        sourceIsDir = fs.statSync(sourceAbs).isDirectory();
-      } catch {
-        sourceIsDir = false;
-      }
-      for (const given of givenAbsPaths) {
-        if (given === sourceAbs) {
-          matchedSources.add(source);
-        } else if (sourceIsDir && isWithinDirectory(sourceAbs, given)) {
-          matchedSources.add(source);
-        }
-      }
-    }
-    if (matchedSources.size > 0) {
-      matches.push({
-        doc: doc.relPath,
-        sources: [...matchedSources].sort(),
-      });
-    }
+  for (const doc of ctx.docs) {
+    const parsed = doc.frontmatter.parsed;
+    const matchedSources = matchEntries(
+      repoRoot,
+      getValidSources(parsed) ?? [],
+      givenAbsPaths,
+    );
+    const matchedAppliesTo = matchEntries(
+      repoRoot,
+      getValidAppliesTo(parsed) ?? [],
+      givenAbsPaths,
+    );
+    if (matchedSources.length === 0 && matchedAppliesTo.length === 0) continue;
+    const via: DocsForVia[] = [];
+    if (matchedSources.length > 0) via.push("sources");
+    if (matchedAppliesTo.length > 0) via.push("applies_to");
+    matches.push({
+      doc: doc.relPath,
+      sources: matchedSources,
+      ...(matchedAppliesTo.length > 0 ? { appliesTo: matchedAppliesTo } : {}),
+      via,
+    });
   }
   matches.sort((a, b) => a.doc.localeCompare(b.doc));
   return { bundleDir: resolvedBundleDir, matches };
+}
+
+/**
+ * The entries of one frontmatter path list (`sources` or `applies_to`; both
+ * resolve and match identically) that match at least one given absolute
+ * path, sorted and deduplicated.
+ */
+function matchEntries(
+  repoRoot: string,
+  entries: string[],
+  givenAbsPaths: string[],
+): string[] {
+  const matched = new Set<string>();
+  for (const entry of entries) {
+    const entryAbs = stripTrailingSep(resolveRepoPath(repoRoot, entry));
+    let entryIsDir = false;
+    try {
+      entryIsDir = fs.statSync(entryAbs).isDirectory();
+    } catch {
+      entryIsDir = false;
+    }
+    for (const given of givenAbsPaths) {
+      if (given === entryAbs) {
+        matched.add(entry);
+      } else if (entryIsDir && isWithinDirectory(entryAbs, given)) {
+        matched.add(entry);
+      }
+    }
+  }
+  return [...matched].sort();
 }
 
 /**
@@ -173,17 +218,24 @@ function isWithinDirectory(dir: string, target: string): boolean {
 
 /**
  * Text output: one doc per line (bundle-relative path, matching `check`'s
- * own `Finding.file` convention), followed by the `sources` entries of its
- * that matched, so a human can see WHICH source claim(s) pulled the doc in
+ * own `Finding.file` convention), followed by the `sources` entries that
+ * matched and, after a semicolon, the matched `applies_to` entries prefixed
+ * `applies_to:`, so a human can see WHICH claim(s) pulled the doc in
  * without switching to `--json`. "no matches" is reported explicitly rather
  * than as silent empty output, mirroring `renderText`'s own "clean, no
  * findings" line in report.ts.
  */
 export function renderDocsForText(result: DocsForResult): string {
   if (result.matches.length === 0) {
-    return `okf-kit: no bundle doc claims any given path as a source, in ${result.bundleDir}\n`;
+    return `okf-kit: no bundle doc claims any given path as a source or applies_to entry, in ${result.bundleDir}\n`;
   }
-  const lines = result.matches.map((m) => `${m.doc}: ${m.sources.join(", ")}`);
+  const lines = result.matches.map((m) => {
+    const parts: string[] = [];
+    if (m.sources.length > 0) parts.push(m.sources.join(", "));
+    if (m.appliesTo && m.appliesTo.length > 0)
+      parts.push(`applies_to: ${m.appliesTo.join(", ")}`);
+    return `${m.doc}: ${parts.join("; ")}`;
+  });
   return lines.join("\n") + "\n";
 }
 
