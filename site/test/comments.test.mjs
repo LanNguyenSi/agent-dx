@@ -317,8 +317,9 @@ test('render time grows linearly with the number of unclosed comment openers', (
   }
   render(page(100))
   // Ten times the openers on a ten times longer page: linear work takes about
-  // ten times as long, a search to the end of the page for every opener about
-  // a hundred times. The bound leaves room for timer noise.
+  // ten times as long, while a search to the end of the page for every opener
+  // grows with the square of the page and passes the bound on the larger step.
+  // The bound leaves room for timer noise.
   for (const [small, large] of [
     [100, 1000],
     [1000, 10000]
