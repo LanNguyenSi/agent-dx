@@ -218,7 +218,8 @@ test('lines holding only comments render nothing', () => {
     ['<!-- a\n\nb -->\n', ''],
     ['<!-- a --> <!-- b -->\n', ''],
     ['<!-- a --> <!-- b\nc -->\ntext\n', '<p>text</p>\n'],
-    ['a\n<!-- x --> <!-- y\nz -->\nb\n', '<p>a</p>\n<p>b</p>\n']
+    ['a\n<!-- x --> <!-- y\nz -->\nb\n', '<p>a</p>\n<p>b</p>\n'],
+    ['> <!-- a\nb -->\n', '<blockquote></blockquote>\n']
   ])
 })
 
