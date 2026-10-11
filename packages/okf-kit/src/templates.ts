@@ -36,6 +36,25 @@ okf-kit init guidance (delete this comment once the doc is written):
   that mistake: omit \`sources\` here rather than pointing it at yourself.
 -->`;
 
+const INCIDENT_FRONTMATTER_GUIDANCE = `<!--
+okf-kit init guidance (delete this comment once the doc is written):
+- This template intentionally has no \`sources:\` key. An incident analysis
+  is a historical record of what broke and why, not a description of the
+  current code, so it must not go stale when that code changes later.
+- \`timestamp\` means "last updated"; bump it (and add a line to this
+  bundle's log.md) whenever the record or a lesson's status changes. Never
+  hand-write an artificial midnight datetime.
+- No personal data: name roles ("the on-call reviewer"), never people.
+  Reference tickets and trackers by key, do not copy their content.
+- \`lessons[].status\` is one of proposed | adopted | rejected. Once a
+  lesson is adopted into a runbook, uncomment its \`runbook:\` line and
+  point it at that runbook.
+- If incident analyses must not ship with the repository, keep this bundle
+  outside the shipped repository and let it point INTO the shipped bundle,
+  never the reverse, so a shipped runbook does not reveal that internal
+  analyses exist.
+-->`;
+
 const BODY_GUIDANCE = `<!--
 Write dense, source-verified prose: name exact mechanisms (function/class/
 route names), exact file paths, and exact identifiers (config keys, env
@@ -65,6 +84,10 @@ map of the docs in this bundle as you add and rename them.
 ## Runbooks
 
 - [Runbook template](runbook-template.md), one doc per operational procedure: preconditions, steps, verification.
+
+## Incidents
+
+- [Incident template](incident-template.md), one doc per defect analysis: symptom, cause, why it escaped, the lesson and the runbook that adopted it.
 
 ## Benchmark
 
@@ -222,6 +245,52 @@ ${BODY_GUIDANCE}
 ## Verification
 
 - <How to confirm the runbook actually worked.>
+`;
+}
+
+export function incidentTemplate(timestamp: string): string {
+  return `---
+type: incident
+title: <short symptom>
+description: <one line>
+tags: [incident]
+timestamp: ${timestamp}
+area: <cluster key, ideally the topic of a runbook>
+root_cause: <term from the bundle's vocabulary>
+escape_reason: <why checks before release did not catch it>
+applies_when: <the kind of work where this lesson matters>
+lessons:
+  - id: L1
+    rule: <what to do differently>
+    check: <how to verify it>
+    status: proposed
+    # runbook: <path of the runbook that adopted this lesson, once adopted>
+related: []
+---
+
+${INCIDENT_FRONTMATTER_GUIDANCE}
+
+# <Short symptom>
+
+## Symptom
+
+- <What was observed, by whom (role), and where.>
+
+## Cause
+
+- <The defect itself, with the file or component it lived in.>
+
+## Why it escaped
+
+- <Which check, review, or test should have caught it, and why it did not.>
+
+## Fix
+
+- <What changed, referenced by PR or ticket key.>
+
+## Lesson / runbook change
+
+- <The rule from \`lessons\` above and which runbook adopted it, or why none did.>
 `;
 }
 

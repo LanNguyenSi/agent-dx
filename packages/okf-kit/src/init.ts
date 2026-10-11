@@ -3,6 +3,7 @@ import path from "node:path";
 import { UsageError } from "./errors.js";
 import {
   benchmarkTemplate,
+  incidentTemplate,
   indexTemplate,
   invariantTemplate,
   logTemplate,
@@ -30,6 +31,7 @@ const SCAFFOLD_FILENAMES = [
   "module-template.md",
   "invariant-template.md",
   "runbook-template.md",
+  "incident-template.md",
   "benchmark-template.md",
 ] as const;
 
@@ -67,6 +69,7 @@ export function runInit(
       "module-template.md": moduleTemplate(timestamp),
       "invariant-template.md": invariantTemplate(timestamp),
       "runbook-template.md": runbookTemplate(timestamp),
+      "incident-template.md": incidentTemplate(timestamp),
       "benchmark-template.md": benchmarkTemplate(timestamp),
     };
 
