@@ -14,7 +14,7 @@ name: workflow-guard
 # The optional `ref` input is a consistency assertion: when given, the job
 # compares it with `job.workflow_sha`, so a drifted pin is a hard failure.
 # When `ref` is omitted, the job refuses a `uses:` that is not pinned to a full
-# 40-hex SHA (it asserts `job.workflow_ref` ends in `@<40-hex>`), so a
+# 40-hex SHA (it asserts `job.workflow_ref` is `<job.workflow_repository>/.github/workflows/<file>@<job.workflow_sha>`), so a
 # branch-pinned `uses:` cannot silently run the branch head. A composite
 # action under packages/slop-detector/action already exists for steps inside a
 # caller's own job; it runs with the caller job's permissions and needs the
@@ -86,6 +86,7 @@ jobs:
           PINNED_REPO: ${{ job.workflow_repository }}
           PINNED_REF: ${{ job.workflow_ref }}
         run: |
+          echo "workflow-guard: workflow_ref=$PINNED_REF workflow_repository=$PINNED_REPO workflow_sha=$PINNED_SHA"
           if [ -z "$PINNED_SHA" ]; then
             echo "::error::workflow-guard: the SHA of this workflow file (job.workflow_sha) is empty, so the pin cannot be verified."
             exit 1
@@ -107,9 +108,18 @@ jobs:
               echo "::error::workflow-guard: input 'ref' does not equal the commit this workflow was called at. Pin the same 40-hex SHA in 'uses:' and in 'with: ref:', or omit 'ref'."
               exit 1
             fi
-          elif ! [[ "$PINNED_REF" =~ @[0-9a-f]{40}$ ]]; then
-            echo "::error::workflow-guard: this workflow was not called with a full 40-hex commit SHA in 'uses:' (a branch or tag pin is refused). Pin 'uses:' to a SHA."
-            exit 1
+          else
+            # job.workflow_ref must be exactly <repo>/.github/workflows/<file>@<sha>:
+            # same repository as the checkout, one '@', and the part after it
+            # equal to job.workflow_sha (a branch or tag pin never matches).
+            pinned_prefix="$PINNED_REPO/.github/workflows/"
+            pinned_rest="${PINNED_REF#"$pinned_prefix"}"
+            if [ "$pinned_rest" = "$PINNED_REF" ] \
+              || ! [[ "$pinned_rest" =~ ^[A-Za-z0-9._-]+@([0-9a-f]{40})$ ]] \
+              || [ "${BASH_REMATCH[1]}" != "$PINNED_SHA" ]; then
+              echo "::error::workflow-guard: this workflow was not called with a full 40-hex commit SHA in 'uses:' that matches the checked-out commit (a branch or tag pin is refused). Pin 'uses:' to a SHA."
+              exit 1
+            fi
           fi
           if [ -n "$INPUT_CONFIG" ]; then
             if ! [[ "$INPUT_CONFIG" =~ ^[A-Za-z0-9._][A-Za-z0-9._/-]*$ ]] || [[ "/$INPUT_CONFIG/" == *"/../"* ]]; then
