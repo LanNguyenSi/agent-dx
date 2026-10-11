@@ -55,6 +55,35 @@ describe("okf-kit cli init", () => {
     expect(parsed.summary.errors).toBe(0);
   });
 
+  it("init-then-check --strict reports no finding for incident-template.md", () => {
+    const bundleDir = path.join(workDir, "docs", "okf");
+    const fakeRepoRoot = path.join(workDir, "fake-repo-root");
+    expect(runCli(["init", bundleDir]).status).toBe(0);
+    fs.mkdirSync(path.join(fakeRepoRoot, "path", "to", "covered"), {
+      recursive: true,
+    });
+    fs.writeFileSync(
+      path.join(fakeRepoRoot, "path", "to", "covered", "source"),
+      "placeholder\n",
+    );
+
+    const checkResult = runCli([
+      "check",
+      bundleDir,
+      "--repo-root",
+      fakeRepoRoot,
+      "--strict",
+      "--json",
+    ]);
+    const parsed = JSON.parse(checkResult.stdout) as {
+      findings: Array<{ ruleId: string; file: string }>;
+    };
+    const incidentFindings = parsed.findings.filter(
+      (f) => f.file === "incident-template.md",
+    );
+    expect(incidentFindings).toEqual([]);
+  });
+
   it("init inside a real git repo, then check (auto-detect) reports exactly 4 sources-shape errors for the unresolved placeholders, exit 1", () => {
     const repo: TmpGitRepo = createTmpGitRepo();
     try {

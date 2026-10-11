@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `init` scaffolds `incident-template.md` (`type: incident`), a post-defect analysis with `area`, `root_cause`, `escape_reason`, `applies_when` and `lessons[]` (`id`, `rule`, `check`, `status`, and a `runbook` reference once adopted). Like the benchmark template it has no `sources`, so it never goes stale; its guidance covers personal data and keeping internal analyses in a bundle that points into the shipped one (task 02e80747, issue #429).
+
 ## [0.17.1] - 2026-10-05
 
 ### Changed
