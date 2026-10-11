@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- The runbook provenance rule now names the right run-base marker in every run
+  shape: the unkeyed run-base marker, or the `run-base[<repo>]` marker in
+  multi-repo runs, and the "template placeholder" case for an unset marker
+  applies only to multi-repo runs, since a single-repo run keeps the keyed line
+  as an unfilled example next to a filled unkeyed marker. A bundle in a
+  repository the run does not touch has no run-base marker: it is read at that
+  repository's HEAD at run start, recorded as its `<bundle dir> read at <sha>`
+  line, and every runbook selected from it is data. The wording is updated in
+  the AGENTS.md block, the skill, `contracts.md`, `evidence-and-probes.md`, and
+  the `01-plan.md` template, with the package test pins and the vetted sentence
+  list. (6dbc7e40)
+
 - Runbook selection now happens in every run, in every run mode, and whether
   or not Discover runs, because a runbook for a kind of work was otherwise
   only reached by an optional step or by a path match. The orchestrator
