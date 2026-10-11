@@ -328,6 +328,7 @@ describe("acceptance-baseline five-boundary contract inventory", () => {
       "acceptance_baseline",
       "acceptance_criteria",
       "context",
+      "runbooks",
       "verification_set",
       "constraints",
       "allowed_changes",

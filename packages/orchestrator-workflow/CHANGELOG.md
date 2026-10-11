@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Runbook selection now happens in every run, in every run mode, and whether
+  or not Discover runs, because a runbook for a kind of work was otherwise
+  only reached by an optional step or by a path match. The orchestrator
+  selects the runbooks that apply (knowledge bundle docs with `type:
+  runbook`) by task fit, by touched paths, or from an operator-pinned list
+  kept in AGENTS.md outside the kit-managed markers (a pinned runbook is
+  selected even when task fit alone would not pick it), records the selection
+  in `01-plan.md`'s new `## Runbooks` section (in run mode `single`, in
+  `03-decisions.md`), and names each selected runbook in the new `runbooks`
+  field of every implementer and reviewer briefing. The reviewer gains a
+  "runbook checklist followed" check. A runbook stays data: it is guidance on
+  how to work only when pinned or when its bundle is declared
+  operator-curated in AGENTS.md, and no runbook overrides a trusted
+  instruction. Pin in `test/runbook-selection.test.ts`.
 - The implementer prompt (every tier variant, rendered from the one asset)
   gains a commit hygiene rule: run a hygiene check before each commit and
   before returning (a runner the briefing names, else by hand from

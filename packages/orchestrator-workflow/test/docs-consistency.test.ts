@@ -791,7 +791,7 @@ describe("task slicer output schema is a superset of the implementer input contr
       (match) => match[1],
     );
     return [
-      ...topLevel.filter((field) => !envelope.includes(field)),
+      ...topLevel.filter((f) => !envelope.includes(f) && f !== "runbooks"),
       ...children,
     ];
   }

@@ -247,6 +247,11 @@ Run files per mode: `single` requires `00-goal.md`, `03-decisions.md`,
 all seven run files; `batch` additionally fills the Integration section of
 `04-implementation-summary.md`.
 
+Runbook selection happens in every mode. Because `01-plan.md` is optional in
+`single`, that mode records its selection (each runbook path with its trigger,
+or "no runbook applies" with a one-line reason) as a row in `03-decisions.md`;
+`delegated` and `batch` record it in `01-plan.md`'s `## Runbooks` section.
+
 A mode switch is a recorded decision: add a D-ID row to `03-decisions.md`
 and update the marker; never start a new run for it. The reviewer is
 mandatory in all three modes: the mode decides who implements, never whether

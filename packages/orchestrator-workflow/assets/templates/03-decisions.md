@@ -11,6 +11,8 @@ Supersedes cell names the prior decision it replaces. Routine in-scope
 orchestrator decisions, operator-approved scope changes, and operator-only
 critical waivers remain distinct. -->
 
+<!-- Run mode `single`: record the run's runbook selection here as one decision row (runbook paths with trigger 1 task fit / 2 touched paths / 3 pinned, or "no runbook applies" with a one-line reason), since 01-plan.md is optional in that mode. Other modes record it in 01-plan.md's Runbooks section. -->
+
 ## Review-round escalation
 
 <!-- One row per task that triggers the Review-round escalation budget in SKILL.md: the second round-2 halt signal or the third negative round on that task. A negative round counts only with at least one introduced_by_delta yes/unknown finding; no stays ordinary gate. A run carries multiple tasks, so this table can carry multiple rows. Leave the single placeholder row as n/a when no task in this run has triggered the budget. -->
