@@ -114,6 +114,21 @@ Innovation is fine. Novelty on the critical path needs explicit justification.
 
 If review, testing, release, or rollback cannot be automated, the design is creating operational cost.
 
+### SVGs/Glyphs over Emojis in UI
+
+**Rule:** Use SVG icons or icon libraries (Lucide, Heroicons, Phosphor) instead of emoji characters in production UI.
+
+**Why:**
+- Emojis render differently across OS and browsers (Apple vs Google vs Windows)
+- SVGs are scalable, styleable with CSS, and consistent
+- Emoji-heavy UI looks casual/demo-ish; SVGs signal production-ready quality
+- Easier to maintain (size, color, hover states via CSS)
+
+**Exceptions:**
+- Chat messages / user-generated content → emojis are fine
+- Marketing copy / social posts → emojis are fine
+- Internal tooling / debug dashboards → emojis acceptable
+
 ## Common Design Smells
 
 - authentication and authorization mixed ad hoc into handlers
@@ -140,22 +155,3 @@ Design quality is acceptable when:
 - the safe behavior is the default behavior
 - failure handling is intentional
 - the system remains operable after the change ships
-
-### SVGs/Glyphs over Emojis in UI
-
-**Rule:** Use SVG icons or icon libraries (Lucide, Heroicons, Phosphor) instead of emoji characters in production UI.
-
-**Why:**
-- Emojis render differently across OS and browsers (Apple vs Google vs Windows)
-- SVGs are scalable, styleable with CSS, and consistent
-- Emoji-heavy UI looks casual/demo-ish; SVGs signal production-ready quality
-- Easier to maintain (size, color, hover states via CSS)
-
-**Exceptions:**
-- Chat messages / user-generated content → emojis are fine
-- Marketing copy / social posts → emojis are fine
-- Internal tooling / debug dashboards → emojis acceptable
-
-**Example:** telerithm.cloud landing page SVG-Umstellung → DevReview 8.2 → 9.8/10.
-
-> "SVGs oder Glyphs anstatt Emojis → wirkt professioneller" — Lan

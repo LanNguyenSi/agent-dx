@@ -2,13 +2,13 @@
 **Executive Version**
 
 *Lan Nguyen Si | March 2026*
-*Based on the [Agent Engineering Playbook](https://github.com/LanNguyenSi/agent-engineering-playbook)*
+*Based on the [Agent Engineering Playbook](../agent-engineering-playbook)*
 
 ---
 
 ## About the Author
 
-**Lan Nguyen Si** is a software developer focused on GovTech and open source. He builds tools at the intersection of AI-assisted software development and structured governance, including [project-forge](https://github.com/LanNguyenSi/project-forge), [depsight](https://github.com/LanNguyenSi/depsight), and the [Agent Engineering Playbook](https://github.com/LanNguyenSi/agent-engineering-playbook).
+**Lan Nguyen Si** is a software developer focused on GovTech and open source. He builds tools at the intersection of AI-assisted software development and structured governance, including [project-forge](https://github.com/LanNguyenSi/project-forge), [depsight](https://github.com/LanNguyenSi/depsight), and the [Agent Engineering Playbook](../agent-engineering-playbook).
 
 This playbook came from practice: real projects, real agents, real mistakes. This document itself was developed in dialogue between human and AI.
 
@@ -277,7 +277,7 @@ These examples come from real work with AI agents. Not thought experiments.
 
 ## Further Reading
 
-- **[Agent Engineering Playbook](https://github.com/LanNguyenSi/agent-engineering-playbook)**: full technical reference with checklists and templates
+- **[Agent Engineering Playbook](../agent-engineering-playbook)**: full technical reference with checklists and templates
 - **[project-forge](https://github.com/LanNguyenSi/project-forge)**: greenfield scaffolding with built-in gates
 - **[depsight](https://github.com/LanNguyenSi/depsight)**: security and dependency health for brownfield
 
@@ -285,7 +285,7 @@ These examples come from real work with AI agents. Not thought experiments.
 
 For teams that want to apply this model directly in repositories, this package also contains:
 
-- [`templates/`](templates/) for specs with evals, task slicing, reviews, and PR descriptions
+- [`templates/`](templates/) for specs with evals, task slicing, agent tasks, risk classification, reviews, and PR descriptions
 - [`policies/`](policies/) for example risk tiers, protected files, approval rules, and quality gates
 - [`skills/`](skills/) for reusable agent roles such as task slicer, implementation agent, and reviewer agent
 
@@ -295,7 +295,7 @@ These artifacts are tool-agnostic and bilingual. They should be adapted to the l
 
 Organizations do not scale agents by giving them more freedom. They scale agents by designing accountability and system boundaries clearly.
 
-*Feedback and contributions welcome. An extended reference version with templates, CI snippets, and concrete policies is in progress.*
+*Feedback and contributions welcome. Templates, policies, and skills are in this package; stack and CI examples are planned (see [examples/](examples/)).*
 
 **Author:** Lan Nguyen Si
 **License:** CC BY 4.0

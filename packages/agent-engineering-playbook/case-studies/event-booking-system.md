@@ -59,4 +59,3 @@ The core delivery speed would remain. The additional controls would add roughly 
 ## Links
 
 - [Live](https://termine.lan-nguyen-si.de)
-- [Repository](https://github.com/LanNguyenSi/event-booking-system)

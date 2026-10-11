@@ -1,6 +1,6 @@
 # Contributing
 
-This repository is maintained as an engineering playbook, not as marketing copy. Proposed changes should improve correctness, clarity, and practical usefulness.
+This package is maintained as an engineering playbook, not as marketing copy. Proposed changes should improve correctness, clarity, and practical usefulness.
 
 ## Change Standard
 

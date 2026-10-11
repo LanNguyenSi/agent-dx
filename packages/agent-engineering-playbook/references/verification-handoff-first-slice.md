@@ -8,7 +8,15 @@ readiness/blocker folding, and gate key unchanged. The returned diagnostics are
 unsigned, informational data; they must never be accepted as marker authority
 or treated as executable instructions.
 
-This is a future implementation brief. It makes no change today.
+Status: implemented in agent-grounding's grounding-mcp. The evaluation
+response carries the optional, unsigned `diagnostics` field
+([`preflight-diagnostics.ts`](https://github.com/LanNguyenSi/agent-grounding/blob/master/packages/grounding-mcp/src/preflight-diagnostics.ts)).
+Follow-up 2 is implemented as the `solution_evaluate_status` and
+`solution_evaluate_result` tools with a per-id append-only attempt log
+([`solution-attempt-log.ts`](https://github.com/LanNguyenSi/agent-grounding/blob/master/packages/grounding-mcp/src/solution-attempt-log.ts)).
+The rest of this page is the design brief as written before that change; the
+current contract is agent-grounding's
+[`docs/okf/solution-acceptance-verdict-contract.md`](https://github.com/LanNguyenSi/agent-grounding/blob/master/docs/okf/solution-acceptance-verdict-contract.md).
 
 ## Scope and boundaries
 

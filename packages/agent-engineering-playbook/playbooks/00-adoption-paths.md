@@ -21,6 +21,7 @@ It covers:
 - quality gates
 - documentation
 - production readiness
+- agent governance
 
 Core path means "build something that can survive production," not "build a toy quickly."
 
@@ -94,6 +95,7 @@ Start preparing:
 
 - [09-production.md](09-production.md)
 - selected parts of [11-change-management-and-incidents.md](11-change-management-and-incidents.md) if the system is user-facing
+- [12-agent-governance.md](12-agent-governance.md) if agents contribute code that will reach production
 
 ### Phase 2: Production
 
@@ -109,6 +111,7 @@ Mandatory:
 - full core path
 - [09-production.md](09-production.md)
 - operational parts of [11-change-management-and-incidents.md](11-change-management-and-incidents.md)
+- [12-agent-governance.md](12-agent-governance.md) when agents contribute code that reaches production
 
 Add enterprise controls selectively when:
 

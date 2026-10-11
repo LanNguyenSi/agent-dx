@@ -87,17 +87,17 @@ the effective context, rebuild when that comparison warrants it, then use
 order/isolation checks and resource/process observations that discriminate among
 the hypotheses. This is an illustrative investigation, not an assumed cause.
 
-## Acceptance matrix for a future implementation
+## Acceptance matrix
 
 | Case | Required behavior | First slice? |
 | --- | --- | --- |
-| Producer runs longer than 30 seconds | Keep and poll the handle until a documented terminal state; never infer success from elapsed time. | Future caller/transport work |
+| Producer runs longer than 30 seconds | Keep and poll the handle until a documented terminal state; never infer success from elapsed time. | Implemented in agent-grounding (caller/transport) |
 | Start returns `running` without a handle | Treat as unknown/error and block dependent action; a synchronous terminal response is valid without a handle. | Future caller/transport work |
 | Producer exits nonzero before a dependent action | Preserve output and normalize it as the producer specifies; block the dependent action when it is a failed or unknown result. | First slice only for existing preflight output |
 | JSON is malformed or missing | Expose an explicit unavailable/parse diagnostic; do not fabricate a successful result. | First slice |
 | Reuse candidate fully matches | Reuse only after provenance, context, completeness, and before/after stability checks all match. | Future reuse work |
 | Reuse candidate is stale or in the wrong context | Rerun and append the new attempt. | Future reuse work |
-| Timeout followed by retry | Preserve both attempts and their terminal states; do not overwrite history or call the retry proof of flakiness. | Future caller/reuse work |
+| Timeout followed by retry | Preserve both attempts and their terminal states; do not overwrite history or call the retry proof of flakiness. | Implemented in agent-grounding (caller/transport) |
 
 The immediate slice is intentionally smaller: it passes through diagnostics
 from an already-run producer alongside an unchanged readiness verdict. It does
