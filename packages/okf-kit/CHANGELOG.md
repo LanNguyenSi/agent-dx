@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `check`, `docs-for` and `init` no longer end the process with `process.exit()` right after writing to stdout. For a pipe the write is asynchronous, so `check --json | jq` received a report cut at the pipe buffer size (platform dependent) when the output was larger. The commands now set `process.exitCode` and return, so the output drains first; exit codes are unchanged, and a reader that closes early (`| head -1`) still ends the run silently with the verdict code, while any other stdout write failure exits 2 with one stderr line (task 740a4bc8).
 - `sources-shape` now rejects a `sources` or `applies_to` entry that escapes the repo root (a `..` escape such as `../../outside`; the check is lexical and does not resolve symlinks) with an error naming the field, instead of passing it because the target exists. Containment uses `path.relative`, not a string prefix. `docs-for` ignores such an entry, so it never matches. Tracker task 799b0465.
 
 ## [0.17.1] - 2026-10-05

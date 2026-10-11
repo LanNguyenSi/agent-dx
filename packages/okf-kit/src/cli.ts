@@ -252,7 +252,11 @@ program
           ? renderJson(result.bundleDir, result.findings)
           : renderText(result.bundleDir, result.findings);
         process.stdout.write(output);
-        process.exit(result.exitCode);
+        // Set the code and return instead of process.exit(): a pipe write is
+        // asynchronous, and exiting here cut a report larger than the pipe
+        // buffer (platform dependent) short.
+        process.exitCode = result.exitCode;
+        return;
       } catch (err) {
         if (err instanceof UsageError) {
           process.stderr.write(`okf-kit: ${err.message}\n`);
@@ -291,7 +295,8 @@ program
           ? renderDocsForJson(result)
           : renderDocsForText(result);
         process.stdout.write(output);
-        process.exit(0);
+        process.exitCode = 0;
+        return;
       } catch (err) {
         if (err instanceof UsageError) {
           process.stderr.write(`okf-kit: ${err.message}\n`);
@@ -318,7 +323,8 @@ program
     try {
       const result = runInit(dir ?? "docs/okf", { force: opts.force });
       process.stdout.write(formatInitSummary(result));
-      process.exit(0);
+      process.exitCode = 0;
+      return;
     } catch (err) {
       if (err instanceof UsageError) {
         process.stderr.write(`okf-kit: ${err.message}\n`);
@@ -362,11 +368,40 @@ function resolvedArgvUrl(argv1: string): string {
   }
 }
 
+/**
+ * Exit code and optional stderr line for a stdout write error. A closed
+ * reader (EPIPE, or ENOTCONN when macOS reports a closed socket peer that
+ * way) keeps the verdict code the command already set and prints nothing;
+ * any other write error is exit 2 with one line.
+ */
+export function stdoutErrorOutcome(
+  err: NodeJS.ErrnoException,
+  currentExitCode: number | string | null | undefined,
+): { code: number; message?: string } {
+  if (err.code === "EPIPE" || err.code === "ENOTCONN") {
+    return { code: Number(currentExitCode ?? 0) };
+  }
+  return {
+    code: 2,
+    message: `okf-kit: cannot write to stdout: ${err.message}\n`,
+  };
+}
+
 const isMainModule =
   process.argv[1] !== undefined &&
   import.meta.url === resolvedArgvUrl(process.argv[1]);
 
 if (isMainModule) {
+  // The commands no longer exit right after writing, so a reader that closes
+  // early (`okf-kit check | head -1`) surfaces as a stdout 'error' event. A
+  // closed reader (EPIPE, or ENOTCONN when macOS reports a closed socket
+  // peer that way) ends the run silently with the verdict code the command
+  // already set; any other write error is one stderr line and exit 2.
+  process.stdout.on("error", (err: NodeJS.ErrnoException) => {
+    const outcome = stdoutErrorOutcome(err, process.exitCode);
+    if (outcome.message !== undefined) process.stderr.write(outcome.message);
+    process.exit(outcome.code);
+  });
   program.parseAsync().catch((err) => {
     if (err instanceof CommanderError) {
       if (PASSTHROUGH_EXIT_CODES.has(err.code)) {
