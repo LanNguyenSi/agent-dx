@@ -268,11 +268,11 @@ program
 program
   .command("docs-for <bundleDir> <paths...>")
   .description(
-    "List every bundle doc whose frontmatter `sources` claims one of the given paths (relative or absolute, resolved against --repo-root; a path outside it is a usage error)",
+    "List every bundle doc whose frontmatter `sources` or `applies_to` claims one of the given paths (relative or absolute, resolved against --repo-root; a path outside it is a usage error)",
   )
   .option(
     "-r, --repo-root <path>",
-    "Repo root the given paths and each doc's `sources` entries are resolved against (auto-detected via " +
+    "Repo root the given paths and each doc's `sources` and `applies_to` entries are resolved against (auto-detected via " +
       "`git rev-parse --show-toplevel` from the bundle dir when omitted)",
   )
   .option("-j, --json", "Output matches as JSON")

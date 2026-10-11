@@ -15,6 +15,7 @@
 | The doc's `timestamp` is missing or not a parseable date, while `sources` is present | notice | `staleness not assessable: no valid timestamp` |
 | No repo root available (see [check catalog](check-catalog.md#repo-root-auto-detection)) | notice | `staleness skipped: not inside a git work tree` |
 | A source path does not exist on disk | (nothing) | left to `sources-shape`, not duplicated here |
+| A path listed under `applies_to` (not `sources`) changed after the doc's `timestamp` | (nothing) | `applies_to` is lookup-only (`docs-for` matches it); `sources-fresh` never reads it, so it can never make a doc stale |
 
 STALE findings are warnings, so they are advisory by default; run with `--strict` to fail the build on them.
 

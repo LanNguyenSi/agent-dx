@@ -16,7 +16,7 @@ It validates frontmatter shape, link resolution, staleness against git history, 
 
 - 10 rules covering frontmatter shape, reserved files, link resolution, and staleness/citation drift assessed against git history; see the [check catalog](docs/check-catalog.md).
 - `init` scaffolds a starter bundle: `index.md`, `log.md`, and one template doc per concept type.
-- `docs-for` reverse lookup: given one or more changed paths, which bundle docs claim them as `sources`.
+- `docs-for` reverse lookup: given one or more changed paths, which bundle docs claim them as `sources` or `applies_to` (a lookup-only field that `sources-fresh` ignores).
 - A citation can carry an anchor (`#heading` or `#"text"`) so a `path:N-M` citation survives content moving above it; see [Citation resolution](docs/citations.md).
 - `--dirty-as-now` makes a pre-commit `check` run report the same staleness verdict CI reports after the commit lands; see [Staleness](docs/staleness.md).
 - `--require-anchors` and `--prose-line-references` opt into stricter checks for a bundle whose citations are already anchored.
