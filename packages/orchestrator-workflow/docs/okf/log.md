@@ -1,6 +1,6 @@
 # Bundle log
 
-- 2026-10-11T10:11:35Z, runbook selection third review fixes: the data-runbook finding rule is
+- 2026-10-11T10:15:17Z, runbook selection third review fixes: the data-runbook finding rule is
   now one sentence repeated verbatim wherever a document states it, the
   adoption rule has one wording, and the runbook rule text is closed by a
   vetted sentence list in the package tests. Selection inputs are read at the
@@ -20,9 +20,12 @@
   `05-review-findings.md`, and `06-handoff.md` templates, and `CHANGELOG.md`,
   so every citation into them, short-path forms included, was re-pointed by
   mapping each cited line through the diff and checking the anchor on the new
-  last line. The docs whose sources changed were re-stamped after re-reading
-  their claims against the changed files. `okf-kit check --require-anchors
-  --strict` was run on the bundle after the edit.
+  last line, and the citation-sibling-drift allowlist entries in
+  `test/docs-consistency.test.ts` that record `run-state-lifecycle-and-markers.md`
+  paragraph lines were shifted by the ten lines the new paragraph added. The
+  docs whose sources changed were re-stamped after re-reading their claims
+  against the changed files. `okf-kit check --require-anchors --strict` was
+  run on the bundle after the edit.
 
 - 2026-10-11T09:20:26Z, runbook selection second review fixes: every selection input (the
   bundle index listing, each doc's `type`, its `## When to use this` section,
