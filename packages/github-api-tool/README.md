@@ -2,7 +2,7 @@
 
 A command-line interface for GitHub API operations, designed for AI agents.
 
-> **Internal tool, not published to npm.** This CLI is used from source within this repo (`private: true`). Build and run it from the repo (`npm run build`) rather than installing from npm.
+> **Internal tool, not published to npm.** This CLI is used from source within this repo (`private: true`). Build and run it from `packages/github-api-tool` (`npm run build`) rather than installing from npm.
 
 ## Overview
 
@@ -20,6 +20,8 @@ A command-line interface for GitHub API operations, designed for AI agents.
 ## Install / quick start
 
 ```bash
+git clone https://github.com/LanNguyenSi/agent-dx
+cd agent-dx/packages/github-api-tool
 npm install
 npm run build
 npm link  # make the 'github' command globally available
@@ -32,6 +34,8 @@ github config set-token <your-github-pat>
 # or
 export GITHUB_TOKEN=<your-github-pat>
 ```
+
+`GITHUB_TOKEN`, when set, takes precedence over a stored token. `github config set-token` writes the token as plain JSON to `~/.github-api-tool/config.json`, with the directory set to mode 0700 and the file to 0600. Use the environment variable if the token should not be written to disk.
 
 Required token scopes: `repo` (issues, PRs, commits) and `read:org` (contributors).
 

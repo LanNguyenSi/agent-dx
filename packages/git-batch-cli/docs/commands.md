@@ -2,6 +2,8 @@
 
 ## `sync`
 
+`sync` is the default command: `git-batch` runs `sync` in the current directory, and `git-batch <root>` runs it in `<root>`. Run `git-batch status <root>` or add `--dry-run` to preview first.
+
 Checks all repositories on one level, skips dirty repositories by default, switches to the protected branch, and pulls with fast-forward only.
 
 ```bash
@@ -11,7 +13,35 @@ git-batch sync ~/git --only api,worker
 git-batch sync --protected main,develop --dry-run
 ```
 
-Default `sync` flow: `git fetch --all --prune`, detect the protected target branch, switch to it if the worktree is clean, then `git pull --ff-only`. Dirty repositories are skipped unless `--include-dirty` is passed. If `--protected` is given, that explicit branch order takes precedence over `origin/HEAD`; explicitly configured protected branches must exist on `origin` (local-only branches are not selected as pull targets).
+Default `sync` flow: `git fetch --all --prune`, detect the protected target branch, switch to it if the worktree is clean, then `git pull --ff-only`. Dirty repositories are skipped unless `--include-dirty` is passed. If `--protected` is given, that explicit branch order replaces `origin/HEAD` and the default branch list; explicitly configured protected branches must exist on `origin` (local-only branches are not selected as pull targets).
+
+The per-repository path of `sync` (see [Branch detection](#branch-detection) and [Outcomes and exit codes](#outcomes-and-exit-codes)):
+
+```mermaid
+flowchart TD
+  D["Discover child repos with .git"] --> S["git status --short --branch"]
+  S -->|"dirty, no --include-dirty"| SD["skipped_dirty"]
+  S -->|"clean, or --include-dirty"| F["git fetch --all --prune"]
+  F --> T{"Target branch on origin"}
+  T -->|"--protected given"| TP["first listed branch on origin"]
+  T -->|"no --protected"| TO["origin/HEAD, else first default branch on origin"]
+  T -->|"none found"| SN["skipped_no_protected_branch"]
+  TP --> C{"Checkout"}
+  TO --> C
+  C -->|"already on target"| P["git pull --ff-only<br/>origin target"]
+  C -->|"local branch exists"| CL["git checkout target"]
+  C -->|"remote only"| CR["git checkout -b target<br/>--track origin/target"]
+  CL --> P
+  CR --> P
+  P --> OK["ok"]
+  S -.->|"git fails"| E["error"]
+  F -.->|"git fails"| E
+  CL -.->|"git fails"| E
+  CR -.->|"git fails"| E
+  P -.->|"git fails"| E
+```
+
+With `--dry-run`, fetch, checkout and pull are recorded in `actions` but not run, so detection uses the refs from the last real fetch.
 
 ## `status`
 
@@ -39,7 +69,7 @@ A repo with no remote configured at all is not a fetch failure: `git fetch --qui
 
 ### `--fetch` performance
 
-`--fetch` runs repository fetches with a bounded parallel pool (default concurrency: **8**). On large trees this keeps status fresh enough for hook-driven workflows without changing the per-repo result shape.
+`--fetch` runs repository fetches with a bounded parallel pool of 8 concurrent fetches (fixed; no CLI option changes it). On large trees this keeps status fresh enough for hook-driven workflows without changing the per-repo result shape.
 
 ### Text output shape
 
@@ -86,14 +116,14 @@ git-batch list ~/git
 ## Options
 
 - `--root <path>`: explicitly set the root folder to scan (defaults to cwd)
-- `--protected <a,b,c>`: define preferred protected branches
+- `--protected <a,b,c>`: try only these branches, in order, as the target branch (replaces `origin/HEAD` and the default list, see [Branch detection](#branch-detection))
 - `--only <a,b,c>`: include only matching repository names
 - `--exclude <a,b,c>`: exclude matching repository names
 - `--include-current`: include the current folder if it is a Git repository itself
 - `--include-hidden`: scan hidden child directories as well
 - `--include-dirty`: allow `sync` to continue even when a repository has local changes
 - `--strict`: return a non-zero exit code for actionable problem states
-- `--dry-run`: print planned Git commands without executing them
+- `--dry-run`: for `sync` and `fetch`, list the Git commands that would change repositories without running them (read-only checks still run). `status --fetch` still fetches.
 - `--json`: emit JSON instead of plain text
 - `--fetch`: for `status`, run `git fetch --quiet` per repo before computing ahead/behind
 
@@ -115,11 +145,7 @@ git-batch sync ~/git --only '/^(api|web)-/' --exclude '/-sandbox$/'
 
 ## Branch detection
 
-Target branch detection uses this order:
-
-1. explicit `--protected` order, if provided
-2. `origin/HEAD`
-3. first matching branch from `main, master, develop, dev, staging, production, trunk`
+Without `--protected`, the target is `origin/HEAD`, else the first existing branch from `main, master, develop, dev, staging, production, trunk`. With `--protected`, only the given list is tried, in order; `origin/HEAD` and the default list are not consulted. If none of the listed branches exists, no target is detected: `branches` shows `target=-` and `sync` reports `skipped_no_protected_branch`. For `sync` a branch counts only if it exists on `origin`; `status` and `branches` also accept a local branch.
 
 ## Output model
 
@@ -139,7 +165,7 @@ git-batch sync /path/to/workspace --json --strict --dry-run
 
 Why this works well:
 
-- `--json` returns structured output with `command`, `root`, `repoCount`, `exitCode`, and `results`
+- `--json` returns structured output with `command`, `root`, `strict`, `repoCount`, `exitCode`, and `results`
 - `--strict` turns actionable states into a non-zero exit code
 - no interactive prompts are required
 - output order is stable because repositories are sorted by name
@@ -149,8 +175,23 @@ Recommended interpretation:
 - `status --json --strict`: fail if any repository is dirty
 - `dirty --json --strict`: fail if any repository has local changes
 - `sync --json --strict`: fail if any repository is skipped or errors
+- `branches --json --strict`: fail if any repository has no detected target branch
 
 With `--strict`, an empty result set stays exit code `0`. This keeps filtered runs such as `--only` stable for automation.
+
+### Outcomes and exit codes
+
+Each entry in `results` has an `outcome`:
+
+| `outcome` | Commands | Meaning |
+| --- | --- | --- |
+| `ok` | all | succeeded |
+| `error` | all | a Git command failed or the repository could not be read; the message is in `error` |
+| `fetch_failed` | `status --fetch` | the fetch failed; the other fields come from local refs |
+| `skipped_dirty` | `sync` | local changes, nothing run; `reason` is `worktree_dirty` |
+| `skipped_no_protected_branch` | `sync` | no target branch on `origin`; `reason` is `no_remote_protected_branch_detected` |
+
+Any `error` outcome exits 1, with or without `--strict`. With `--strict`, `sync` also exits 1 on any skipped repository, `status` on any dirty repository, `dirty` on any listed repository, and `branches` on any repository without a detected target branch. `fetch_failed` does not change the exit code.
 
 ## Open source files
 
