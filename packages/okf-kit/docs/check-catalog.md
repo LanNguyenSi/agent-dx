@@ -31,7 +31,7 @@ Resolution:
 - `<alias>:<path>` resolves to `<companion dir>/<path>`, where `<companion dir>` comes from `--companion <alias>=<dir>`.
 - Anything else is a path relative to the doc's own directory inside the checked bundle.
 - The prefix before the first `:` counts as an alias only when it matches `[a-z0-9-]+`. A value that contains a colon with any other prefix (`Notes v2:a.md`, `C:\x`) is an ordinary relative path and is not looked up as an alias. Windows drive paths are not supported.
-- A value that looks like a URL (a prefix of `http`, `https`, `file` or `mailto`, or an alias-shaped prefix followed by `//`) is an error: URLs are not supported, reference a `.md` file. This holds under `--skip-companion-refs` too.
+- A value that looks like a URL (a prefix of `http`, `https`, `file` or `mailto`, or an alias-shaped prefix followed by `//`, matched case-insensitively) is an error: URLs are not supported, reference a `.md` file. This holds under `--skip-companion-refs` too.
 - An absolute path without an alias prefix (`/etc/x.md`) is an error: unprefixed refs must be relative to the doc, consistent with `no-absolute-links`.
 - The target must be an existing file whose name ends in `.md`.
 - Containment: an unprefixed ref must stay inside the checked bundle and an alias ref inside its companion dir. A `../` climb or an absolute path that leaves that directory is an error even when the target exists. Containment is lexical, like the path handling in `links-resolve`: symlinks are not followed, so a symlink that points out of the bundle is not detected.
@@ -42,7 +42,7 @@ CLI options (on `check`):
 
 | Option | Meaning |
 |--------|---------|
-| `--companion <alias>=<dir>` | Declares a companion bundle directory for `<alias>:<path>` refs. Repeatable. A value with no `=`, an empty alias or directory, an alias outside `[a-z0-9-]+`, a duplicate alias, or a directory that does not exist is a CLI error (exit 2). |
+| `--companion <alias>=<dir>` | Declares a companion bundle directory for `<alias>:<path>` refs. Repeatable. A value with no `=`, an empty alias or directory, an alias outside `[a-z0-9-]+`, a duplicate alias, a reserved URL scheme (`http`, `https`, `file`, `mailto`) as alias, or a directory that does not exist is a CLI error (exit 2). |
 | `--skip-companion-refs` | An `<alias>:<path>` ref whose alias was not passed is reported as a notice instead of an error. Refs into the checked bundle and refs with a passed alias are still checked. |
 
 ## repo-root auto-detection

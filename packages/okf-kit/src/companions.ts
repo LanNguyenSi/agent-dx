@@ -10,6 +10,18 @@ import { UsageError } from "./errors.js";
 export const ALIAS_PATTERN = /^[a-z0-9-]+$/;
 
 /**
+ * URL schemes a frontmatter reference is rejected for. They are matched
+ * case-insensitively and are reserved: a companion alias may not use one,
+ * because a reference with that prefix is always treated as a URL.
+ */
+export const URL_SCHEMES: ReadonlySet<string> = new Set([
+  "http",
+  "https",
+  "file",
+  "mailto",
+]);
+
+/**
  * Parses repeatable `--companion <alias>=<dir>` values into an alias ->
  * absolute directory map. Every malformed value is a UsageError (exit 2),
  * never silently ignored: no `=`, empty alias or dir, an alias outside
@@ -39,6 +51,11 @@ export function parseCompanions(values: string[]): Map<string, string> {
     if (!ALIAS_PATTERN.test(alias)) {
       throw new UsageError(
         `--companion alias \`${alias}\` must match [a-z0-9-]+`,
+      );
+    }
+    if (URL_SCHEMES.has(alias)) {
+      throw new UsageError(
+        `--companion alias \`${alias}\` is reserved for URLs (${[...URL_SCHEMES].join(", ")}); pick another alias`,
       );
     }
     if (out.has(alias)) {

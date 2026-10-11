@@ -131,12 +131,19 @@ describe("frontmatter-refs-resolve", () => {
 
   it("rejects URL-shaped values with a dedicated message, also under --skip-companion-refs", () => {
     for (const opts of [{}, { skip: true }, { companion: true }]) {
-      for (const file of ["url-https.md", "url-mailto.md"]) {
+      for (const file of [
+        "url-https.md",
+        "url-mailto.md",
+        "url-alias-slashes.md",
+        "url-uppercase.md",
+      ]) {
         const f = forFile(run(opts), file);
-        expect(f).toHaveLength(1);
-        expect(f[0].severity).toBe("error");
-        expect(f[0].message).toContain("URLs are not supported");
-        expect(f[0].message).not.toContain("--companion");
+        expect(f).toHaveLength(file === "url-alias-slashes.md" ? 2 : 1);
+        for (const finding of f) {
+          expect(finding.severity).toBe("error");
+          expect(finding.message).toContain("URLs are not supported");
+          expect(finding.message).not.toContain("--companion");
+        }
       }
     }
   });
@@ -179,6 +186,8 @@ describe("--companion parsing", () => {
     ["no =", ["shipped"], "missing `=`"],
     ["empty alias", ["=" + COMPANION], "alias is empty"],
     ["empty dir", ["shipped="], "directory is empty"],
+    ["reserved URL alias https", ["https=" + COMPANION], "reserved for URLs"],
+    ["reserved URL alias mailto", ["mailto=" + COMPANION], "`mailto`"],
     ["bad alias chars", ["Shipped=" + COMPANION], "[a-z0-9-]+"],
     [
       "duplicate alias",

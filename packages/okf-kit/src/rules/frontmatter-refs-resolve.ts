@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { ALIAS_PATTERN } from "../companions.js";
+import { ALIAS_PATTERN, URL_SCHEMES } from "../companions.js";
 import { isRecord } from "../util.js";
 import type { BundleContext, Finding, Rule } from "../types.js";
 
@@ -108,8 +108,6 @@ export const frontmatterRefsResolveRule: Rule = {
   },
 };
 
-const URL_SCHEMES = new Set(["http", "https", "file", "mailto"]);
-
 type Report = (severity: Finding["severity"], message: string) => void;
 
 function checkRef(
@@ -128,8 +126,8 @@ function checkRef(
   const prefix = colon === -1 ? "" : ref.slice(0, colon);
   if (
     colon !== -1 &&
-    ALIAS_PATTERN.test(prefix) &&
-    (URL_SCHEMES.has(prefix) || ref.startsWith("//", colon + 1))
+    ALIAS_PATTERN.test(prefix.toLowerCase()) &&
+    (URL_SCHEMES.has(prefix.toLowerCase()) || ref.startsWith("//", colon + 1))
   ) {
     report(
       "error",
