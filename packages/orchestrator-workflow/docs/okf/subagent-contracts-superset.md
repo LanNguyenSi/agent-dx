@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-10-07T08:13:04Z
+timestamp: 2026-10-11T07:59:42Z
 sources:
   - packages/orchestrator-workflow/assets/agents/explorer.md
   - packages/orchestrator-workflow/assets/agents/task-slicer.md
@@ -241,7 +241,7 @@ verification_set, risk`, in that order. The v1 subagent input contract
 (`packages/orchestrator-workflow/assets/skill/references/contracts.md:40#"## Subagent input contract"`) requires
 `role, task_id, goal, acceptance_baseline, acceptance_criteria,
 context.relevant_files, context.relevant_docs, verification_set, constraints, allowed_changes,
-forbidden_changes, expected_output.format`. The slicer also supplies planning
+forbidden_changes, expected_output.format`, plus the top-level `runbooks` list (the runbooks the orchestrator selected for the task), which the orchestrator sets at delegation and the slicer does not carry. The slicer also supplies planning
 fields such as title, suggested tests, dependencies and risk. Under the copy
 rule at `packages/orchestrator-workflow/assets/skill/references/contracts.md:346#"rather than inventing new field"`, the
 orchestrator copies goal, baseline identity, assigned criterion records,
@@ -271,7 +271,7 @@ the live subagent-input yaml block itself rather than hardcoding it
 (`test/docs-consistency.test.ts:857#"^ {4}${field}:"`): it regex-extracts top-level fields
 across the whole input, including scope fields after `context`, plus only
 immediate `context.*` children; it subtracts the explicit envelope (`role,
-task_id, context, expected_output`), and asserts every remaining name
+task_id, context, expected_output`, and `runbooks`), and asserts every remaining name
 appears in the slicer output block, so a field added to the subagent input
 contract later cannot silently go undocumented in the slicer output; the test
 fails instead. Supporting checks in the same suite: both slicer-output copies

@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-10-07T08:13:04Z
+timestamp: 2026-10-11T07:59:42Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -430,7 +430,7 @@ is a D-ID row and never a new run are stated once, in the reference's last
 section
 (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:214#"## Run mode");
 `SKILL.md` and the reference's Intent only point there. `single` makes
-`01-plan.md` and `02-tasks.md` optional and keeps `04-implementation-summary.md`
+`01-plan.md` and `02-tasks.md` optional (it records its runbook selection in `03-decisions.md` instead of `01-plan.md`'s `## Runbooks` section) and keeps `04-implementation-summary.md`
 (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:244#"Run files per mode:"),
 because the verification set, the mutation probes, and the baseline coverage
 table live there; `batch` adds an Integration section to the same template
