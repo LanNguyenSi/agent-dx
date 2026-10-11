@@ -41,7 +41,7 @@ mcp-token-audit --days 3
 mcp-token-audit --json ~/.claude/projects/-Users-me-git-my-repo > before.json
 ```
 
-Sample text output:
+Sample text output (tool rows abbreviated):
 
 ```
 tool                            calls  ~tok_in  ~tok_out  ~tok/call
@@ -62,7 +62,7 @@ skipped 1 unreadable/missing project dir(s)
 
 - **Discovery.** With no `<projectDir...>` arguments, every directory directly under `~/.claude/projects/` is scanned (each one holds one Claude Code project's transcripts). Pass one or more directories to scan a subset instead. `--days N` restricts this to `*.jsonl` files whose mtime is within the last `N` days.
 - **Parsing.** Each transcript is JSONL, one entry per line. Lines that fail to `JSON.parse` are skipped and counted, not fatal, so a mid-session crash or a truncated write doesn't make the rest of the file unusable. A transcript file that cannot be read at all (permissions, a race with log rotation, ...) is skipped in its entirety and counted separately, as `skippedFiles`, from the per-line `skippedLines` count.
-- **Pairing.** Within each entry's `message.content[]` array, a `tool_use` block (`{ id, name, input }`) is matched to its `tool_result` block (`{ tool_use_id, content }`) by id. A `tool_use` with no matching `tool_result` still counts as a call, with zero output.
+- **Pairing.** Across all `user` and `assistant` entries of one transcript file, each `tool_use` block (`{ id, name, input }`) in `message.content[]` is matched by id to the `tool_result` block (`{ tool_use_id, content }`) with the same `tool_use_id`, usually on a later line. A `tool_use` with no matching `tool_result` still counts as a call, with zero output.
 - **Token approximation.** `~tok_in` is `JSON.stringify(tool_use.input).length / 4`, `~tok_out` is the stringified `tool_result.content` length / 4, both rounded to the nearest integer. This is a rough heuristic (~4 characters per token for English text), not a real tokenizer call: good for relative before/after comparisons of payload size, not for billing or exact context accounting.
 - **MCP share.** A tool counts toward the `mcp__*` subtotal when its name starts with the `mcp__` prefix Claude Code uses for MCP-server tools (e.g. `mcp__agent-tasks__task_create`). Built-in tools (`Bash`, `Read`, `Edit`, `Agent`, ...) do not.
 - **Ranking.** Tools are sorted descending by total tokens (`~tok_in + ~tok_out`) summed across all scanned files.
@@ -79,6 +79,8 @@ skipped 1 unreadable/missing project dir(s)
 
 `--json` emits the same numbers as a `{ filesScanned, skippedLines, skippedFiles, skippedDirs, tools[], totals, mcp }` object instead of a text table.
 
+The CLI exits 0 after a successful run, including one that finds no tool calls, and exits 2 with an `mcp-token-audit: <message>` line on stderr when the run fails, for example when `-d`/`--days` is not a positive number. Usage errors caught by the argument parser (an unknown option, a missing option value) exit 1 with an `error:` line.
+
 ## Limitations
 
 - No live API calls (this reads local transcript files only), no dollar-cost conversion, no dashboard. The `chars/4` approximation will drift from a real tokenizer, especially for code, JSON payloads, and non-English text; treat the numbers as directionally useful, not exact.
@@ -88,7 +90,7 @@ skipped 1 unreadable/missing project dir(s)
 
 ## Development
 
-Built and tested as part of the agent-dx monorepo CI matrix in [`.github/workflows/ci.yml`](https://github.com/LanNguyenSi/agent-dx/blob/master/.github/workflows/ci.yml): `npm run typecheck`, `npm run build`, `npm test`.
+Built and tested as part of the agent-dx monorepo CI matrix in [`.github/workflows/ci.yml`](https://github.com/LanNguyenSi/agent-dx/blob/master/.github/workflows/ci.yml): `npm run typecheck`, `npm run typecheck:test`, `npm run build`, `npm run format:check`, `npm test`.
 
 ## License
 

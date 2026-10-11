@@ -18,7 +18,7 @@ This skill provides direct GitHub API access for AI agents, enabling:
    - Create at: https://github.com/settings/tokens
    - Required scopes: `repo`, `read:org`
    - Store via: `github config set-token <token>`
-   - Or set env var: `GITHUB_TOKEN=<token>`
+   - Or set env var: `GITHUB_TOKEN=<token>` (takes precedence over a stored token; `set-token` stores it as plain JSON in `~/.github-api-tool/config.json`, file mode 0600)
 
 2. **Tool Installation:**
    ```bash
@@ -86,7 +86,7 @@ exec(`github issue create \
 const result = exec(`github issue list --repo owner/repo --state open --json`);
 const issues = JSON.parse(result.stdout);
 
-// Report the open-issue count
+// Report the open-issue count (`issue list` returns at most 30 unless --limit is set)
 console.log(`Open issues: ${issues.length}`);
 issues.forEach(issue => {
   console.log(`#${issue.number}: ${issue.title} (${issue.labels.join(', ')})`);

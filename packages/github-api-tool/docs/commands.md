@@ -54,12 +54,14 @@ github repo contributors --repo owner/repo
 github repo info --repo owner/repo
 ```
 
+`issue list`, `pr list` and `repo contributors` return at most 30 results unless you pass `--limit <n>`; `repo commits` defaults to 10. Each command reads a single page and does not paginate, so GitHub's per-page maximum (100) caps larger values.
+
 ## Standup digest
 
 Show commits across repos for a given time range, for daily standups or async team updates.
 
 ```bash
-# All repos for the last day (default)
+# Up to 100 most recently pushed repos, last day (default)
 github standup -o your-org
 
 # Last 7 days
@@ -75,9 +77,11 @@ github standup -o your-org --author octocat
 github standup -o your-org -d 3 --json
 ```
 
+Without `-r`, one page of up to 100 repositories is read, sorted by last push (organization first, then user). Each repository lists at most 100 commits, with or without `-r`.
+
 ## Bug report
 
-Creates a structured bug report issue, per this package's [ENGINEERING.md](../ENGINEERING.md) template.
+Creates an issue whose body has the sections Observed Behavior, Expected Behavior, Steps to Reproduce, Minimal Reproduce Case, Hypothesis and Root Cause.
 
 ```bash
 github bug-report --repo owner/repo --title "Bug: Login fails" \
@@ -85,9 +89,11 @@ github bug-report --repo owner/repo --title "Bug: Login fails" \
   --reproduce "curl -X POST /login" --labels bug,priority:high
 ```
 
+Only `--repo` is required. When `--title`, `--observed`, `--expected` or `--reproduce` is missing, the command asks for each missing field on stdin, and for a hypothesis unless `--hypothesis` is set; pass all four when an agent or CI job calls it. Other options: `--hypothesis <text>` (optional), `-l, --labels` (default `bug`), `--json` (prints `{ number, url }`).
+
 ## Coverage check
 
-Checks a Vitest `coverage-summary.json` against a minimum threshold, per this package's [ENGINEERING.md](../ENGINEERING.md).
+Checks a Vitest `coverage-summary.json` against a minimum threshold. Defaults: `--input coverage/coverage-summary.json`, `--threshold 80`, `--label Coverage`. It compares the statements percentage, or lines when statements is missing, and exits 1 below the threshold.
 
 ```bash
 github coverage-check --input coverage/coverage-summary.json --threshold 80 --label Coverage
@@ -95,7 +101,7 @@ github coverage-check --input coverage/coverage-summary.json --threshold 80 --la
 
 ## JSON output mode
 
-Add `--json` to any command for machine-readable output:
+Add `--json` to any issue, PR, repo, standup, bug-report or coverage-check command for machine-readable output:
 
 ```bash
 github issue list --repo owner/repo --json
@@ -133,13 +139,14 @@ src/
 │   ├── bug-report.ts  # Bug report command
 │   └── coverage-check.ts  # Coverage check command
 └── utils/
+    ├── args.ts        # Numeric option validation
     ├── config.ts      # Token/config management
     └── output.ts      # Formatted output (JSON/table)
 ```
 
 ## Error handling
 
-- **Network errors:** automatic retry (3 attempts) with exponential backoff
+- **Transient failures:** each API call is tried up to 3 times, waiting 1s and then 2s, on 5xx and 429 responses (Octokit reports a network failure as status 500) and on errors without an HTTP status, such as a timeout abort. Other 4xx responses, including 401 and 403, fail on the first attempt.
 - **Auth errors:** clear error message with setup instructions
-- **Rate limiting:** respects GitHub rate limits (built into Octokit)
+- **Rate limiting:** there is no client-side throttling. A rate-limit rejection returned as 403 fails at once; one returned as 429 is retried as above. Spread out bulk runs such as `standup` without `-r`.
 - **Invalid input:** validates repository format, event types, merge methods

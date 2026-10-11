@@ -34,6 +34,8 @@ git-batch sync ~/git
 git-batch status ~/git --fetch --json
 ```
 
+Without a command, `git-batch` runs `sync`.
+
 ## Documentation
 
 - [Command reference](./docs/commands.md): every subcommand, option, repository filter, branch-detection order, output model, agent/CI usage, and the open roadmap
