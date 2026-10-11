@@ -1,5 +1,16 @@
 # Bundle log
 
+- 2026-10-11T16:16:41Z, follow-up to the docs drift fixes: `install-fence-mechanics.md`
+  cites `listSkillReferenceNames` in `assets.ts` and lists
+  `test/skill-references.test.ts` under Tests. Two package README paragraphs
+  were re-wrapped without a text or line-count change, so no citation into
+  the README moved; `install-fence-mechanics.md`, `model-preselection.md`,
+  `run-state-lifecycle-and-markers.md`, and `subagent-contracts-superset.md`
+  list the README as a source and were re-read and re-stamped.
+  `okf-kit check --json --require-anchors` with okf-kit 0.17.1, the version
+  CI pins, on the committed tree: no findings, so neither the anchor guard
+  nor the strict freshness guard reports anything.
+
 - 2026-10-11T12:54:43Z, docs drift fixes for the installer, routing and architecture docs:
   `install-fence-mechanics.md` now names the skill `references/` files each
   harness installs, describes the bundle-wide conflict pre-check, the
@@ -18,8 +29,9 @@
   allowlist entries that record `install-fence-mechanics.md` paragraph lines
   were shifted by the lines the diagram, the `sources` entry, and the new
   skill-bundle bullet added. The docs whose sources changed were re-stamped
-  after re-reading their claims against the changed files. `okf-kit check
-  --require-anchors` was run on the bundle after the edit.
+  after re-reading their claims against the changed files. The `okf-kit
+  check` verdict for this change is recorded in the entry above, after the
+  follow-up edits.
 
 - 2026-10-11T10:15:17Z, runbook selection third review fixes: the data-runbook finding rule is
   now one sentence repeated verbatim wherever a document states it, the
