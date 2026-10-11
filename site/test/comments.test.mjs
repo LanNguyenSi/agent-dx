@@ -298,6 +298,11 @@ test('an inline comment that closes past the end of the text being parsed stays 
   assert.equal(state.tokens.map((t) => t.content).join(''), 'a <!-- b ')
 })
 
+test('an unclosed opener in a quote or list item stays visible', () => {
+  assert.equal(render('> <!-- never closed\n'), '<blockquote>\n<p>&lt;!-- never closed</p>\n</blockquote>\n')
+  assert.equal(render('- <!-- never closed\n- b\n'), '<ul>\n<li>&lt;!-- never closed</li>\n<li>b</li>\n</ul>\n')
+})
+
 test('render time grows linearly with the number of unclosed comment openers', () => {
   // Every paragraph starts with "<!--" and nothing after it closes one.
   const page = (n) => Array.from({ length: n }, (_, i) => `<!-- opener ${i}\ntext ${i}`).join('\n\n') + '\n'
