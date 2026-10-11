@@ -1,7 +1,8 @@
 # `snapshot`
 
 Capture read-only fingerprints for one physical Git checkout. Paths are
-root-relative even when `-C` names a subdirectory.
+root-relative even when `-C` names a subdirectory. Part of the
+[agent-primitives](../README.md) CLI.
 
 ```bash
 agent-primitives snapshot

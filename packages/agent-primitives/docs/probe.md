@@ -6,6 +6,35 @@ because a probe whose test was never shown to pass unmutated is not a
 probe), run the test against the mutant, restore the file, and classify
 the result. Part of the [agent-primitives](../README.md) CLI.
 
+## Options
+
+Exactly one mutant form (`-r`, `-M` with `-w`, or `-p`) is required
+unless `--plan` supplies the mutants. The global options (`-f`, `-C`,
+`-m`, `-l`, `--json`; see [Output shape](output-shape.md)) apply as for
+every command.
+
+| Option | Meaning | Default |
+| --- | --- | --- |
+| `--file <path>` | file to mutate; long-only, since the global `-f` is `--format` | required unless `-p` derives it from a single-path patch |
+| `-n, --line <n>` | 1-indexed line to mutate | required except with `-p` |
+| `-r, --replace <text>` | replace the whole line with this text | none |
+| `-M, --match <substr>` | substring to find on the line; requires `-w` | none |
+| `-w, --with <text>` | replacement for the first match of `-M` | none |
+| `-p, --patch <path>` | unified diff, applied with `git apply` | none |
+| `-t, --test <command>` | shell command that runs the test | required unless `--plan` supplies it |
+| `--pre <command>` | shell command (e.g. a rebuild) run before each test invocation | none |
+| `--env <NAME=VALUE>` | environment variable for `--pre` and `-t` in the baseline and the mutant run; repeatable | none |
+| `--require-baseline-evidence <regex>` | the baseline's own output must match before any verdict is issued | off |
+| `--pass-regex <regex>` | a match against a run's combined output is a pass, in place of the exit code | off (the exit code decides) |
+| `-i, --isolation <mode>` | `worktree` (mutates a detached git worktree) or `inplace` | `worktree` |
+| `--expect <verdict>` | `fail` (the mutant should break the test) or `pass` | `fail` |
+| `--timeout <seconds>` | bound for every `--pre` and `-t` invocation | none |
+| `--plan <path>` | JSON file with one test command and a list of mutants, run against one shared baseline | none |
+| `--link <dirs>` | comma-separated extra directories to link into the `-i worktree` copy | none |
+| `--allow-outside` | allow `--file`/`--link` to resolve outside the containment root | off |
+
+## Verdicts and --expect
+
 `killed`/`survived` always report the mutated run's ACTUAL, measured
 outcome, independent of `--expect`: `killed` means the mutated run's
 test exited non-zero (or, under `--pass-regex`, failed the pattern),
@@ -41,6 +70,85 @@ not a raw per-mutant outcome, and it DOES flip between `killed` and
 `survived` depending on `--expect` -- see the `--plan` section below, and
 its own top-level `expectation` field for the same verdict spelled
 without reusing the `killed`/`survived` words at all.
+
+## Pipeline
+
+A single probe runs its main safety gates in a fixed order, and a gate
+that fails ends the run with a refusal (`status: "usage_error"` or
+`"inconclusive"`, exit `2`) before anything after it runs. `probe()`
+first checks the option shape and reads the repository defaults file
+(either failing is a `usage_error`). `openRunSetup` (`src/probe/setup.ts`)
+then checks containment (`file_outside_root`), takes the lock
+(`probe_in_progress`, `lock_unavailable`), recovers or refuses a stale
+in-flight marker (`stale_probe_marker`), prepares the worktree copy under
+`-i worktree` (`stale_worktree`, `worktree_sync_failed`), and computes
+the mutant in a dry run (`mutant_not_applicable`).
+
+```mermaid
+flowchart TD
+  A["Option-shape checks and .agent-primitives.json"] -->|invalid| U["usage_error"]
+  A --> S["openRunSetup (setup.ts)"]
+  S --> C{"Every target inside<br/>the containment root?"}
+  C -->|no| R1["file_outside_root"]
+  C -->|yes| L{"Lock acquired?"}
+  L -->|no| R2["probe_in_progress or<br/>lock_unavailable"]
+  L -->|yes| M{"Stale in-flight marker<br/>absent or recoverable?"}
+  M -->|no| R3["stale_probe_marker"]
+  M -->|yes| W["Prepare the worktree copy<br/>(-i worktree only)"]
+  W -->|refused| R4["stale_worktree or<br/>worktree_sync_failed"]
+  W --> D{"Dry run: does<br/>the mutant apply?"}
+  D -->|no| R5["mutant_not_applicable"]
+  D -->|yes| N["Baseline (next diagram)"]
+```
+
+The baseline runs `--pre` and then the test command against the
+unmutated code. It is refused when `--pre` fails (`pre_failed`), when no
+test ran (`no_tests_executed`, `zero_tests_ambiguous`), when it fails
+(`baseline_failed`), when it rewrote the target
+(`target_changed_during_baseline`), or when `--require-baseline-evidence`
+is given and does not match (`baseline_evidence_not_matched`).
+
+```mermaid
+flowchart TD
+  B["Baseline: --pre, then the test command"] -->|"--pre fails"| R6["pre_failed"]
+  B --> Z{"Did any test run?"}
+  Z -->|"no, or unreadable"| R7["no_tests_executed or<br/>zero_tests_ambiguous"]
+  Z -->|yes| F{"Baseline passed?"}
+  F -->|no| R8["baseline_failed"]
+  F -->|yes| T{"Target unchanged<br/>by the baseline?"}
+  T -->|no| R9["target_changed_during_baseline"]
+  T -->|yes| E{"Evidence matched?<br/>(--require-baseline-evidence)"}
+  E -->|no| R10["baseline_evidence_not_matched"]
+  E -->|"yes, or not given"| N["Mutant step (next diagram)"]
+```
+
+Only then is the mutant applied (`runMutantAttempt` in
+`src/probe/step.ts`, which writes the in-flight marker first under
+`-i inplace`), tested, restored and verified by hash, and classified. A
+run that got past the lock ends in the same teardown whatever its
+outcome: the final `--pre` rebuild under `-i inplace` (only when `--pre`
+was given and a mutant was applied and restored), the worktree removal,
+and the lock release. The exit code is `0` for a met expectation, `1`
+for a violated one, and `2` for every refusal.
+
+```mermaid
+flowchart TD
+  AP["Write marker (-i inplace only),<br/>apply the mutant"] -->|"applied hash differs"| R11["apply_hash_mismatch"]
+  AP --> MT["--pre and test on the mutant"]
+  MT --> RS{"Restore verified<br/>by hash?"}
+  RS -->|no| R12["restore_failed"]
+  RS -->|"yes, but --pre failed"| R13["pre_failed"]
+  RS -->|yes| K{"Did the mutant run<br/>report an exit code?"}
+  K -->|no| R14["timeout"]
+  K -->|yes| V["killed or survived,<br/>expectation met or violated"]
+  V --> TEAR["Teardown: final --pre rebuild (-i inplace),<br/>worktree removal, lock release"]
+  TEAR --> O["Exit code: 0 met, 1 violated"]
+```
+
+`--plan` runs the same setup and baseline once, and the mutant step once
+per mutant.
+
+## Mutant forms (-r, -M/-w, -p)
 
 ```bash
 agent-primitives probe --file src/foo.js -n 12 -r 'return false;' \
@@ -285,6 +393,8 @@ caller of `probe()` can see when it omits `--file`/`-n` for a form that
 cannot derive them; the CLI never emits either, since `requireFileAndLine`
 (see `cli.ts`) rejects that case before `probe()` is even called.
 
+## Isolation (-i worktree / -i inplace)
+
 `-i worktree` is the default: `--file` is mutated in a detached git
 worktree, never in the working tree itself. Every git invocation this
 mode makes (the worktree add, the tracked-diff capture and apply, the
@@ -296,7 +406,7 @@ The add that checks out the worktree and the apply that replays the
 tracked diff also use the content-write pins above; the capture and
 listing calls do not alter checkout content.
 
-`-i worktree` mutates a throwaway copy, but the `-t`/`--test-command`,
+`-i worktree` mutates a throwaway copy, but the `-t`/`--test`,
 `--pre`, and every `--env NAME=VALUE` value you supply run wherever
 THEIR OWN cwd/args/environment point them: nothing about the isolation
 copy touches any of the three. An absolute path named in any of them
@@ -629,6 +739,8 @@ containment root, which has no meaning once re-based onto a worktree
 copy. Submodule contents are not synced by any of the above; a
 submodule directory is tracked as a gitlink, not walked into.
 
+### Linked directories
+
 Every `node_modules` directory or directory symlink (e.g. a hoisted or
 workspace-linked install) found in the source tree up to 3 levels deep
 (never one nested inside another `node_modules`) is a candidate for
@@ -940,14 +1052,16 @@ survived-detection heuristic inspecting the test output for paths under
 the source tree, are proposals tracked in issue #243, not implemented by
 this package.
 
+### Worktree removal and leftover recovery
+
 The sync runs under the same abort machinery as `--pre`/`-t`: every git
 call it makes is killed on `SIGINT`/`SIGTERM` and waited for before
 anything removes the worktree underneath it, and the untracked-file copy
 checks the abort between batches rather than running to the end of the
 listing. A sync stopped that way is `reason: "aborted"` for a library
 caller, never `worktree_sync_failed`; on the CLI the signal handler ends
-the process first, so nothing is printed (see the signals section
-above). The worktree is removed on normal completion, on any error,
+the process first, so nothing is printed (see
+[Signals, locks and recovery](#signals-locks-and-recovery) below). The worktree is removed on normal completion, on any error,
 and on `SIGINT`/`SIGTERM`, including a signal that lands while the sync
 is still running or while `git worktree add` itself is: whatever is on
 disk at the path is deleted, then `git worktree remove --force --force`
@@ -1079,6 +1193,8 @@ own leftover-on-crash case instead. Outside a git work tree, `worktree`
 falls back to `inplace` with a warning naming the fallback, never an
 error.
 
+### -i inplace, restore and the dist trap
+
 `-i inplace` backs up the target file before mutating it and restores
 from that backup afterward (on normal completion, on any error, and on
 `SIGINT`/`SIGTERM`; on a signal the CLI then ends the process, while the
@@ -1086,7 +1202,7 @@ exported `probe()` restores and returns control instead, unless the
 caller passes `exitOnSignal: true`).
 
 `--file` is long-only (the global `-f` is `--format`), and every global
-option (`-f`, `-C`, `-m`, `-l`) may precede the subcommand. Exactly one
+option (`-f`, `-C`, `-m`, `-l`, `--json`) may precede the subcommand. Exactly one
 mutant form is required: `-r, --replace` (replace the whole line),
 `-M, --match` with `-w, --with` (replace the first occurrence of a
 substring on the line), or `-p, --patch` (apply a unified diff via
@@ -1148,19 +1264,24 @@ agent-primitives probe --file src/foo.js -n 12 -r 'return false;' \
   -t 'npm test' --pre 'npm run build'
 ```
 
-`agent-primitives doctor` reports a `dist/` directory sitting next to
-`src/` as a hint that a probe on that project may need `--pre`.
+`agent-primitives doctor` flags a `src/` directory without a `dist/`
+beside it (`dist-next-to-src`) as a hint that a probe on that project may
+need `--pre`.
 
 `-i inplace` mutates the working tree directly and restores it from a
 backup afterward (on normal completion, on any error, and on
-`SIGINT`/`SIGTERM`, as the signals section above describes); because
+`SIGINT`/`SIGTERM`, as
+[Signals, locks and recovery](#signals-locks-and-recovery) below
+describes); because
 `SIGKILL` cannot be trapped, a probe killed outright while `-i inplace`
 is running can leave the mutation in place, which is why `worktree` is
 the default rather than `inplace`: a `worktree` probe killed the same
 way leaves the original tree untouched. The in-flight marker and its
-hash-verified recovery described above apply to `-i inplace`; a
+hash-verified recovery described below apply to `-i inplace`; a
 `worktree` probe's leftover is covered by the repository-keyed marker,
 git's own registry, and `doctor` as described in this section.
+
+## Shell commands, containment and --link
 
 `-t` and `--pre` are shell commands, executed through `sh -c` as given,
 so neither may be filled from untrusted text (an issue body, a model's
@@ -1265,7 +1386,7 @@ does not exist on a case-sensitive one (Linux's default, and what CI
 runs on), where the same value is `link_source_not_found` rather than a
 skipped or refused link.
 
-#### Non-JS repositories
+### Non-JS repositories
 
 `node_modules` and a composer project's `vendor-dir`/`bin-dir` are the
 two auto-link rules probe ships with; anything else a non-JS
@@ -1289,7 +1410,7 @@ whose test bootstraps through a linked `docroot/core` reports
 such a probe, or fix the repository's test bootstrap to register its
 own namespaces relative to itself ahead of the framework's.
 
-#### Repo defaults file
+### Repo defaults file
 
 `.agent-primitives.json` at the repository root (the same directory
 `probe` treats as the containment root: the git work-tree root, or the
@@ -1300,7 +1421,9 @@ naming the file's path and the offending key (`reason:
 "defaults_file_invalid"`, fail-closed, so a typo does not silently do
 nothing), and a present-but-unparsable file (not JSON, not a JSON
 object, `link` not an array of valid link strings) is a usage error
-naming the path. An absent file is not an error: nothing to add. Every
+naming the path. A file that is not a regular file, exceeds 64&nbsp;KiB,
+or cannot be read is `reason: "defaults_file_not_readable"`. An absent
+file is not an error: nothing to add. Every
 `link` entry is checked the same way `--link`/a plan's own `link` is
 (non-empty, no `$(...)` or backtick), and, like a plan's own `link` and
 a composer `config` value, may only name a directory git does not track
@@ -1314,6 +1437,8 @@ ADD a path, never remove one an earlier source already named. The first
 source's provenance is retained when case or symlink aliases name the same
 destination.
 
+## --pre, --timeout and --env
+
 `--pre <command>` runs (e.g. a rebuild) before each test invocation, in
 both the baseline and mutant runs, and in the invocation cwd (not the
 containment root, so a probe run from a subdirectory of a monorepo sees
@@ -1324,7 +1449,7 @@ reports a false `survived`. A non-zero `--pre` exit in either run is
 `status: "inconclusive"`, `reason: "pre_failed"`, exit `2`, never a
 verdict.
 
-Under `-i inplace` (the default), the build output `--pre` produced from
+Under `-i inplace`, the build output `--pre` produced from
 the LAST mutant would otherwise sit on disk until the next rebuild: once
 every mutant a run applies has been restored, `--pre` runs once more
 against that now-restored source, so a command run after the probe
@@ -1343,7 +1468,7 @@ notice is printed for it.
 A run interrupted by SIGINT/SIGTERM still restores the target (the
 signal handler's own restore-then-exit) but skips this extra `--pre`,
 for one of two distinct reasons depending on who called `probe`/`probePlan`:
-the CLI (`--exitOnSignal`/`exitOnSignal: true`) exits the process from
+the CLI (which calls `probe()`/`probePlan()` with `exitOnSignal: true`) exits the process from
 inside the signal handler itself, before this rebuild step is ever
 reached, so nothing about it can be reported -- rebuild by hand after an
 interrupted CLI run before trusting the build output. A library caller
@@ -1384,10 +1509,12 @@ is no longer necessary. Every override actually given is echoed back at the run 
 under the mutant's `test.env` in the result, so the isolation a caller
 asked for is visible in the report rather than only inferable from the
 command string. `probe`'s result is routinely pasted into PRs and task
-trackers, so a value whose NAME looks like a credential (`TOKEN`,
-`SECRET`, `PASSWORD`, `CREDENTIAL` anywhere, case-insensitive, or a name
-ending `_KEY`) is redacted to `"<redacted>"` in both echoes before that
-happens; every other name's value is echoed verbatim. That name check is
+trackers, so a value whose NAME carries `TOKEN`, `SECRET`, `PASSWORD`,
+`CREDENTIAL` or `KEY` (optionally followed by `S`) as its own
+`_`-delimited segment, case-insensitive, is redacted to `"<redacted>"` in
+both echoes before that happens (`API_TOKEN`, `AWS_SECRET_ACCESS_KEY`
+and `API_KEY_ID` redact; `MYTOKEN`, `APIKEY` and `TOKENIZER_MODEL` do
+not); every other name's value is echoed verbatim. That name check is
 the only guard here: `--env` still passes the real value to the child
 process either way, and a credential under a name it does not recognize
 is echoed in the clear -- do not pass one through `--env` under a name
@@ -1397,6 +1524,8 @@ usage error rather than a silently dropped variable. Available under
 to the shared baseline and every mutant's own run, the same as the
 single form, since both go through the same setup code either way -- see
 `--plan`'s own section below for where its `env` echo lands.
+
+## Zero-tests guard, --require-baseline-evidence and --pass-regex
 
 A baseline that exits `0` but never actually ran a test is never read as
 a real pass: both the baseline (before any mutant is even applied) and,
@@ -1493,8 +1622,8 @@ leading `^`), or use the explicit line-start workaround `(?:^|\n)OK \(`
 when the summary must begin a line. For example:
 `--require-baseline-evidence '(?:^|\n)OK \('`. Available under `--plan`: a plan
 runs every mutant against ONE shared baseline, so there is no
-two-sources conflict for this flag to referee; like `--link`,
-`--allow-outside` and `--env` there is no
+two-sources conflict for this flag to referee; like `--allow-outside`
+and `--env` there is no
 plan-file key for it, so it is command-line only, and it gates the
 plan's own baseline the same way it gates a single probe's -- a miss is
 the plan's own top-level `status: "inconclusive"`, `reason:
@@ -1740,6 +1869,8 @@ as `vitest run test/x.test.ts` (a file argument after `run`) or
 suppresses it, whatever the command looks like. The stderr line is
 never part of the JSON envelope.
 
+## Signals, locks and recovery
+
 Every `--pre`/`-t` invocation runs in a process group of its own, and the
 timeout, `SIGINT`, and `SIGTERM` all signal that whole group: the timeout
 sends `SIGTERM` and escalates to `SIGKILL` after a short grace, while a
@@ -1898,7 +2029,7 @@ before the containment check, the lock, the in-flight marker or any
 worktree, so a refusal leaves nothing behind and applies the same
 whether `--file` was given explicitly or is derived from the patch.
 
-#### Two probe traps
+## Two probe traps
 
 - A name filter inside the test command belongs to the test runner, not
   to this CLI: `-t`/`--test` here takes the whole test COMMAND, and a
@@ -1932,7 +2063,7 @@ whether `--file` was given explicitly or is derived from the patch.
   the branch returns. Negating a narrowing condition is not such a
   mutant: it can break the narrowing the same way the literal does.
 
-### Result shape
+## Result shape
 
 The single source of truth for a consumer of `probe`'s JSON: every field
 beside the common envelope (`tool`, `version`, `command`, `status`,
@@ -1945,11 +2076,15 @@ This table describes the single-mutant form (no `--plan`) after option
 parsing has succeeded. Two narrower envelopes sit outside it: a
 **top-level usage error** -- thrown by commander's own option parsing, or
 by a check this CLI runs before `probe()`/`probePlan()` is ever called
-(`-t/--test is required`, `--json` conflicting with `-f text`, a `--plan`
-file that cannot be read or parsed) -- reports `command: "unknown"` and
+(`-t/--test is required`, `--json` conflicting with `-f text`, `--plan`
+combined with a single-mutant flag) -- reports `command: "unknown"` and
 carries only `reason` and `message` from the rows below: no `mutant`,
 `mutation_probe`, `baseline`, `test`, `env`, `isolation` or
-`totalDurationMs`, because none of them were ever computed. A **`--plan`**
+`totalDurationMs`, because none of them were ever computed. A `--plan`
+file that cannot be read or parsed is not one of these: it reports
+`command: "probe"`, `status: "usage_error"`, `reason`
+(`plan_not_readable`, `plan_invalid` or `plan_empty`), and the parser's
+message in `warnings`, with no `message` field. A **`--plan`**
 run replaces `mutant`/`mutation_probe`/`test`/`env`/`totalDurationMs` at
 the top level with its own `plan: { baseline, results, summary }`; see
 [`--plan`](#--plan-several-mutants-one-baseline) below for that shape and
@@ -2026,7 +2161,7 @@ fails to compile); `test/probe-refusal-contract.test.ts` provokes every
 row below through `probe()` itself and asserts the presence matches
 exactly, in both directions, so this table cannot drift from what
 `REFUSAL_RESULT_SHAPE` itself declares, and every reason below is
-provoked at the table-named site the row below describes. Six more
+provoked at the table-named site the row below describes. Eight more
 `usage_error` reasons fire earlier, in `probe()`'s own option-shape
 checks (`src/probe/index.ts`), before `openRunSetup` is ever called:
 `--patch` combined with `--allow-outside` outside its supported shape
@@ -2036,7 +2171,11 @@ single `--file` for it (`patch_file_ambiguous`), a missing `--file`
 (`file_required`), a missing `-n`/`--line` (`line_required`), and a
 `--link`/`--plan` file's/defaults file's `link` value whose source is
 not an existing directory (`link_source_not_found`, see "Non-JS
-repositories" above). They
+repositories" above), and a repository defaults file
+(`.agent-primitives.json`) that is invalid (`defaults_file_invalid`) or
+cannot be used at all: not a regular file, over its 64&nbsp;KiB cap, or
+unreadable (`defaults_file_not_readable`, see "Repo defaults file"
+above). They
 sit outside this table entirely, reporting neither `mutant` nor
 `mutation_probe`, the same as the top-level usage error carve-out
 above.
@@ -2107,7 +2246,7 @@ would otherwise paste its whole absolute path into both descriptors
 uncapped, unlike the excerpt beside it. An ordinary path, including
 every path in this document's examples, is unaffected.
 
-### `--plan`: several mutants, one baseline
+## `--plan`: several mutants, one baseline
 
 `--plan <path>` takes a JSON file naming one test command and a list of
 mutants, and runs them against ONE baseline instead of one baseline per

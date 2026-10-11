@@ -1,7 +1,8 @@
 # `delta`
 
 Compare a saved full [`snapshot`](snapshot.md) with the same physical checkout
-now, including changes to files that were already dirty when captured.
+now, including changes to files that were already dirty when captured. Part of
+the [agent-primitives](../README.md) CLI.
 
 ```bash
 agent-primitives -C ./project delta --since /tmp/project-before.json

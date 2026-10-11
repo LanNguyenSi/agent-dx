@@ -1212,16 +1212,17 @@ function resolveMutantForm(opts: ProbeCliOptions): MutantChoice {
  * one of these beside it would mean two sources for the same value with
  * no honest precedence between them. `--env` is NOT in this set (it
  * used to be, when a plan run had no wiring for it at all): it is
- * command-line only, the same as `--link`/`--allow-outside` below --
+ * command-line only, the same as `--allow-outside` below --
  * threaded straight through to `probePlan`'s own setup, applied to the
  * baseline and every mutant, since a plan file has no key for it to
  * conflict with. `--require-baseline-evidence` is NOT in this set
  * either, for the same reason: a plan runs every mutant against ONE
  * shared baseline, so there is no second source for this value to
- * conflict with. The run-shaping options (`-i`, `--expect`, `--timeout`,
- * `--link`, `--allow-outside`) are NOT in this set either: they override
- * the plan's own value when given (see `runProbePlanCommand`'s own
- * docblock for that precedence). */
+ * conflict with. The run-shaping options (`-i`, `--expect`, `--timeout`)
+ * are NOT in this set either: they override the plan's own value when
+ * given (see `runProbePlanCommand`'s own docblock for that precedence).
+ * `--link` and `--allow-outside` are not in it either: `--link` is merged
+ * with the plan's own `link`, and `--allow-outside` has no plan key. */
 export const PLAN_EXCLUSIVE_OPTIONS: readonly {
   flag: string;
   key: keyof ProbeCliOptions;

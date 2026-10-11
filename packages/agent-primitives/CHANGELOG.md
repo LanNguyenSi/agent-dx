@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Docs: `docs/probe.md` now states the `--env` redaction rule as the code
+  applies it (a name redacts only when `TOKEN`, `SECRET`, `PASSWORD`,
+  `CREDENTIAL` or `KEY` is its own `_`-delimited segment, so `GHTOKEN` and
+  `APIKEY` are echoed in the clear), and corrects the `-i` default in the
+  final-rebuild paragraph, the `--plan` error envelope, the plan's `link`
+  key and the early `usage_error` reasons; it gains section headings, an
+  options table and pipeline diagrams. `docs/doctor.md` gets the
+  `dist-next-to-src` direction right and lists its options and checks,
+  `docs/output-shape.md` maps every status word to its exit code, and the
+  README gains an architecture section. The shipped skill's references
+  were corrected, so its digest changes and `init` reports an existing
+  install as `outdated` until it is refreshed with `--force`.
+
 ## [0.10.0] - 2026-10-10
 
 - A reduced envelope now carries a top-level `fullResult` field with the

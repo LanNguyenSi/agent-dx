@@ -445,7 +445,7 @@ export function patchUnusableReason(
 }
 
 /**
- * Runs the full probe pipeline: lock -> containment -> stale-marker
+ * Runs the full probe pipeline: containment -> lock -> stale-marker
  * recovery -> baseline -> mutate -> pre+test -> restore -> verify ->
  * classify. Setup through baseline is `setup.ts`'s `openRunSetup`, which
  * `probePlan` runs too; the mutate -> test -> restore -> classify step
