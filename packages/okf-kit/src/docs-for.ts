@@ -3,7 +3,12 @@ import path from "node:path";
 import { loadBundle } from "./bundle.js";
 import { UsageError } from "./errors.js";
 import { detectRepoRoot } from "./git.js";
-import { getValidAppliesTo, getValidSources, resolveRepoPath } from "./util.js";
+import {
+  getValidAppliesTo,
+  getValidSources,
+  isWithinRepoRoot,
+  resolveRepoPath,
+} from "./util.js";
 import type { RunGit } from "./types.js";
 
 export interface DocsForOptions {
@@ -157,6 +162,9 @@ function matchEntries(
 ): string[] {
   const matched = new Set<string>();
   for (const entry of entries) {
+    // An entry escaping the repo root (a `..` escape; symlinks are not
+    // resolved) is invalid; `sources-shape` reports it, and it never matches here.
+    if (!isWithinRepoRoot(repoRoot, entry)) continue;
     const entryAbs = stripTrailingSep(resolveRepoPath(repoRoot, entry));
     let entryIsDir = false;
     try {
