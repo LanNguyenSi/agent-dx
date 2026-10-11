@@ -178,6 +178,15 @@ ${BODY_GUIDANCE}
 `;
 }
 
+const RUNBOOK_APPLIES_TO_GUIDANCE = `<!--
+Runbook wiring (delete this comment too): \`applies_to\` lists the paths
+this procedure is run for (files or directories). \`okf-kit docs-for\`
+finds the runbook when any of them changes, but \`sources-fresh\` ignores
+the field, so a broad directory does not make the runbook stale on every
+edit there. Use \`sources\` instead (or as well) when the runbook cites
+concrete lines that must stay true: a change there then marks it stale.
+-->`;
+
 export function runbookTemplate(timestamp: string): string {
   return `---
 type: runbook
@@ -185,11 +194,13 @@ title: <runbook name>
 description: Step-by-step operational procedure with preconditions and verification.
 tags: [runbook]
 timestamp: ${timestamp}
-sources:
+applies_to:
   - path/to/covered/source
 ---
 
 ${FRONTMATTER_GUIDANCE}
+
+${RUNBOOK_APPLIES_TO_GUIDANCE}
 
 # <Runbook name>
 

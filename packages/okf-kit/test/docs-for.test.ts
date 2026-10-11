@@ -17,8 +17,8 @@ describe("runDocsFor", () => {
       repoRoot: REPO_ROOT,
     });
     expect(result.matches).toEqual([
-      { doc: "exact.md", sources: ["src/foo.ts"] },
-      { doc: "multi.md", sources: ["src/foo.ts"] },
+      { doc: "exact.md", sources: ["src/foo.ts"], via: ["sources"] },
+      { doc: "multi.md", sources: ["src/foo.ts"], via: ["sources"] },
     ]);
   });
 
@@ -27,8 +27,8 @@ describe("runDocsFor", () => {
       repoRoot: REPO_ROOT,
     });
     expect(result.matches).toEqual([
-      { doc: "dirsrc.md", sources: ["src/dir"] },
-      { doc: "multi.md", sources: ["src/dir"] },
+      { doc: "dirsrc.md", sources: ["src/dir"], via: ["sources"] },
+      { doc: "multi.md", sources: ["src/dir"], via: ["sources"] },
     ]);
   });
 
@@ -69,9 +69,9 @@ describe("runDocsFor", () => {
       repoRoot: REPO_ROOT,
     });
     expect(result.matches).toEqual([
-      { doc: "dirsrc.md", sources: ["src/dir"] },
-      { doc: "exact.md", sources: ["src/foo.ts"] },
-      { doc: "multi.md", sources: ["src/dir", "src/foo.ts"] },
+      { doc: "dirsrc.md", sources: ["src/dir"], via: ["sources"] },
+      { doc: "exact.md", sources: ["src/foo.ts"], via: ["sources"] },
+      { doc: "multi.md", sources: ["src/dir", "src/foo.ts"], via: ["sources"] },
     ]);
   });
 
@@ -130,7 +130,7 @@ describe("runDocsFor path normalization", () => {
 
     const result = runDocsFor(bundleDir, ["src/foo.ts"], { repoRoot });
     expect(result.matches).toEqual([
-      { doc: "leading-slash.md", sources: ["/src/foo.ts"] },
+      { doc: "leading-slash.md", sources: ["/src/foo.ts"], via: ["sources"] },
     ]);
   });
 
@@ -144,7 +144,7 @@ describe("runDocsFor path normalization", () => {
 
     const result = runDocsFor(bundleDir, ["./src/foo.ts"], { repoRoot });
     expect(result.matches).toEqual([
-      { doc: "exact.md", sources: ["src/foo.ts"] },
+      { doc: "exact.md", sources: ["src/foo.ts"], via: ["sources"] },
     ]);
   });
 
@@ -154,7 +154,7 @@ describe("runDocsFor path normalization", () => {
 
     const result = runDocsFor(bundleDir, ["src/dir/"], { repoRoot });
     expect(result.matches).toEqual([
-      { doc: "dirsrc.md", sources: ["src/dir"] },
+      { doc: "dirsrc.md", sources: ["src/dir"], via: ["sources"] },
     ]);
   });
 
@@ -171,7 +171,7 @@ describe("runDocsFor path normalization", () => {
 
     const result = runDocsFor(bundleDir, ["src/dir/nested.ts"], { repoRoot });
     expect(result.matches).toEqual([
-      { doc: "dirsrc.md", sources: ["src/dir/"] },
+      { doc: "dirsrc.md", sources: ["src/dir/"], via: ["sources"] },
     ]);
   });
 
@@ -202,7 +202,7 @@ describe("runDocsFor path normalization", () => {
 
     const result = runDocsFor(bundleDir, ["src/dir/..b.ts"], { repoRoot });
     expect(result.matches).toEqual([
-      { doc: "dirsrc.md", sources: ["src/dir"] },
+      { doc: "dirsrc.md", sources: ["src/dir"], via: ["sources"] },
     ]);
   });
 
@@ -220,7 +220,7 @@ describe("runDocsFor path normalization", () => {
       { repoRoot },
     );
     expect(result.matches).toEqual([
-      { doc: "exact.md", sources: ["src/foo.ts"] },
+      { doc: "exact.md", sources: ["src/foo.ts"], via: ["sources"] },
     ]);
   });
 
@@ -273,7 +273,7 @@ describe("runDocsFor path normalization", () => {
         repoRoot,
       });
       expect(result.matches).toEqual([
-        { doc: "dirsrc.md", sources: ["src/dir"] },
+        { doc: "dirsrc.md", sources: ["src/dir"], via: ["sources"] },
       ]);
     });
 
@@ -317,7 +317,7 @@ describe("runDocsFor path normalization", () => {
 
       const result = runDocsFor(bundleDir, ["src/dir"], { repoRoot });
       expect(result.matches).toEqual([
-        { doc: "dirsrc.md", sources: ["src/dir/"] },
+        { doc: "dirsrc.md", sources: ["src/dir/"], via: ["sources"] },
       ]);
     });
 
@@ -349,7 +349,7 @@ describe("runDocsFor path normalization", () => {
       runGit: stubRunGit,
     });
     expect(result.matches).toEqual([
-      { doc: "exact.md", sources: ["src/foo.ts"] },
+      { doc: "exact.md", sources: ["src/foo.ts"], via: ["sources"] },
     ]);
   });
 });

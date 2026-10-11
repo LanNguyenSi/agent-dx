@@ -48,8 +48,8 @@ describe("okf-kit docs-for cli", () => {
     };
     expect(parsed.bundleDir).toBe(BUNDLE_DIR);
     expect(parsed.matches).toEqual([
-      { doc: "dirsrc.md", sources: ["src/dir"] },
-      { doc: "multi.md", sources: ["src/dir"] },
+      { doc: "dirsrc.md", sources: ["src/dir"], via: ["sources"] },
+      { doc: "multi.md", sources: ["src/dir"], via: ["sources"] },
     ]);
   });
 

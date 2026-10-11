@@ -18,7 +18,7 @@ okf-kit init path/to/bundle --force
 
 ## Placeholder sources are intentional
 
-Every template doc except `benchmark-template.md` ships with `sources: [path/to/covered/source]`, a placeholder, not a real path. Running `okf-kit check` against the freshly scaffolded bundle (with a repo root available, explicit or auto-detected) will report that placeholder as a `sources-shape` "does not exist" error on every template doc. That is intentional: it is the tool telling you which docs still need a real source path, not a bug in the scaffold. The `init` completion message repeats this so it isn't missed. Replace each placeholder with the real repo-root-relative path(s) the doc describes as you write it, and the error clears doc by doc.
+Every template doc except `benchmark-template.md` ships with `sources: [path/to/covered/source]` (the runbook template ships `applies_to: [path/to/covered/source]` instead: `applies_to` is the lookup-only field `docs-for` matches and `sources-fresh` ignores, so the runbook is found for a broad directory without going stale on each edit there; switch it to `sources` when the runbook cites concrete lines that must stay true), a placeholder, not a real path. Running `okf-kit check` against the freshly scaffolded bundle (with a repo root available, explicit or auto-detected) will report that placeholder as a `sources-shape` "does not exist" error (naming the field) on every template doc. That is intentional: it is the tool telling you which docs still need a real source path, not a bug in the scaffold. The `init` completion message repeats this so it isn't missed. Replace each placeholder with the real repo-root-relative path(s) the doc describes as you write it, and the error clears doc by doc.
 
 ## Authoring guidance
 
