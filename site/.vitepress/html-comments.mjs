@@ -1,99 +1,146 @@
-// With markdown `html: true`, markdown-it itself decides what is an HTML
-// comment (never inside code blocks, code spans, or fences). A core rule then
-// works on the tokens, so every later consumer (heading slugs, the table of
-// contents, titles, the renderer) only ever sees text: comments are dropped
-// and any other raw HTML becomes literal text, so placeholders like <version>
-// stay visible and nothing else is lost. No html_block or html_inline token
-// from the source survives this rule, at any level.
+// The site renders Markdown with raw HTML off, so placeholders like <version>
+// and any other HTML in the playbooks show as literal text and nothing reaches
+// the page as markup. HTML comments are the one exception: they are hidden.
+// markdown-it's own tokenizer finds them, through a block rule for lines that
+// start with a comment and an inline rule for comments inside text, so a
+// comment in a code block, fenced code, a code span, or after a backslash
+// escape is never touched.
 //
-// The rule runs right after inline parsing, so the core rules that follow
-// (attributes, linkify, emoji, and VitePress's entity-restoring text_join)
-// treat a neutralised HTML line exactly like any other paragraph, and the
-// heading-anchor rule generates its permalink tokens afterwards, so they never
-// pass through here.
-//
-// An unclosed "<!--" opens an HTML block that runs to the end of the file; it
-// is kept as visible literal text (nothing is dropped silently).
-const COMMENT = /<!--[\s\S]*?-->/g
-// The same comments, skipped inside inline code spans, for an inline token's
-// raw source text.
-const COMMENT_OUTSIDE_CODE = /(`+)[^`]*?\1|<!--[\s\S]*?-->/g
+// A comment runs from "<!--" to the first "-->" after it; "--" inside it does
+// not end it. An unclosed "<!--" stays visible text. Inside a paragraph a
+// comment cannot reach past a blank line; a comment that starts a line hides
+// whole lines up to the line where it closes, like an HTML block.
+
+// Within text, what markdown-it reads before a comment can start: backslash
+// escapes and code spans (a run of backticks closed by a run of the same
+// length), then the comment itself. Used to remove comments from text that
+// markdown-it keeps as raw source: the heading text the permalink label is
+// built from, link titles, container titles, and comment lines.
+const COMMENT_OUTSIDE_CODE = /\\[!-\/:-@[-`{-~]|(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)|`+|<!--[\s\S]*?-->/g
+
+export function stripComments(text) {
+  return text.replace(COMMENT_OUTSIDE_CODE, (m) => (m.startsWith('<!--') ? '' : m))
+}
 
 export function htmlComments(md) {
-  md.core.ruler.after('inline', 'agent-dx-html', (state) => {
-    const { Token } = state
-    const tokens = state.tokens
-    const out = []
-    for (let i = 0; i < tokens.length; i++) {
-      const tok = tokens[i]
-      if (tok.type === 'html_block' || tok.type === 'html_inline') {
-        let src = tok.content
-        // VitePress's component block rule turns a line that starts with a
-        // custom element or component closed on the same line into a
-        // top-level html_inline plus an inline token holding the rest of
-        // that line. Rejoin the line so it becomes one paragraph.
-        const next = tokens[i + 1]
-        if (tok.type === 'html_inline' && next?.type === 'inline' && sameLines(tok.map, next.map)) {
-          src += next.content
-          i++
-        }
-        const rest = src.replace(COMMENT, '').trim()
-        if (rest) out.push(...paragraph(rest, tok, state, md))
-      } else {
-        if (tok.children) {
-          const seen = { comment: false }
-          tok.children = textOnly(tok.children, Token, seen)
-          // The heading permalink label is built from the raw source text.
-          if (seen.comment) tok.content = tok.content.replace(COMMENT_OUTSIDE_CODE, (m, code) => (code ? m : ''))
-        }
-        out.push(tok)
-      }
-    }
-    state.tokens = out
+  md.block.ruler.before('html_block', 'agent-dx-comment-block', commentBlock, {
+    alt: ['paragraph', 'reference', 'blockquote']
   })
+  md.inline.ruler.before('html_inline', 'agent-dx-comment', commentInline)
+  md.core.ruler.after('inline', 'agent-dx-comment-text', commentText)
 }
 
-function sameLines(a, b) {
-  return Boolean(a && b) && a[0] === b[0] && a[1] === b[1]
+// A line that starts with a comment. Lines holding nothing but comments become
+// blank lines, so paragraphs, lists, and quotes around them behave exactly as
+// if the comment had never been written. A single line with text after its
+// comment is left to the other rules, and the inline rule hides the comment.
+// A comment over several lines with text after it on its closing line hides
+// those lines and keeps the text as a paragraph.
+function commentBlock(state, startLine, endLine, silent) {
+  if (state.sCount[startLine] - state.blkIndent >= 4) return false
+  const start = state.bMarks[startLine] + state.tShift[startLine]
+  if (!state.src.startsWith('<!--', start)) return false
+
+  let line = startLine
+  let from = start + 4
+  for (;;) {
+    const close = state.src.indexOf('-->', from)
+    if (close !== -1 && close < state.eMarks[line]) break
+    line++
+    if (line >= endLine || state.sCount[line] < state.blkIndent) return false
+    from = state.bMarks[line] + state.tShift[line]
+  }
+  const nextLine = line + 1
+
+  const rest = stripComments(state.getLines(startLine, nextLine, state.blkIndent, false)).trim()
+  if (rest && nextLine === startLine + 1) return false
+  // Blank lines at the start of a document, quote, or list item do not
+  // count as blank lines between blocks, so comment lines there stay as they
+  // are; everywhere else they become blank lines.
+  const last = state.tokens[state.tokens.length - 1]
+  if (!rest && (silent || (last && last.nesting !== 1))) {
+    for (let l = startLine; l < nextLine; l++) state.eMarks[l] = state.bMarks[l] + state.tShift[l]
+  }
+  if (silent) return true
+
+  state.line = nextLine
+  if (rest) {
+    const open = state.push('paragraph_open', 'p', 1)
+    open.map = [startLine, nextLine]
+    const inline = state.push('inline', '', 0)
+    inline.content = rest
+    inline.map = [startLine, nextLine]
+    inline.children = []
+    state.push('paragraph_close', 'p', -1)
+  }
+  return true
 }
 
-// A paragraph whose content is the HTML source re-parsed as inline Markdown,
-// with every html_inline turned into text.
-function paragraph(content, tok, state, md) {
-  const { Token } = state
-  const open = new Token('paragraph_open', 'p', 1)
-  open.block = true
-  open.map = tok.map
-  open.level = tok.level
-  const inline = new Token('inline', '', 0)
-  inline.block = true
-  inline.map = tok.map
-  inline.level = tok.level + 1
-  inline.content = content
-  inline.children = []
-  md.inline.parse(content, md, { references: state.env.references }, inline.children)
-  inline.children = textOnly(inline.children, Token, { comment: false })
-  const close = new Token('paragraph_close', 'p', -1)
-  close.block = true
-  close.level = tok.level
-  return [open, inline, close]
+// A comment inside text is skipped without a token, so the text around it
+// joins as if the comment had never been written.
+function commentInline(state) {
+  if (!state.src.startsWith('<!--', state.pos)) return false
+  const close = state.src.indexOf('-->', state.pos + 4)
+  if (close === -1 || close + 3 > state.posMax) return false
+  state.pos = close + 3
+  return true
 }
 
-function textOnly(children, Token, seen) {
+// After inline parsing. Comments in link, image, and container titles are
+// removed. Where text held a comment, the whitespace the comment leaves at the
+// start or end of the text or of a line is trimmed as for any other text, the
+// raw text the heading permalink label is built from loses the comment, and a
+// paragraph left empty is dropped.
+function commentText(state) {
   const out = []
-  for (const t of children) {
-    if (t.type === 'html_inline') {
-      const text = t.content.replace(COMMENT, '')
-      if (text !== t.content) seen.comment = true
-      if (!text) continue
-      const tt = new Token('text', '', 0)
-      tt.content = text
-      tt.level = t.level
-      out.push(tt)
-    } else {
-      if (t.children) t.children = textOnly(t.children, Token, seen)
-      out.push(t)
+  for (let i = 0; i < state.tokens.length; i++) {
+    const tok = state.tokens[i]
+    if (/^container_.+_open$/.test(tok.type)) tok.info = stripComments(tok.info)
+    out.push(tok)
+    if (tok.type !== 'inline' || !tok.children) continue
+    for (const child of tok.children) {
+      if (child.type === 'link_open' || child.type === 'image') stripTitle(child)
+    }
+    const content = stripComments(tok.content)
+    if (content === tok.content) continue
+    tok.content = content.trim()
+    tok.children = trimText(tok.children)
+    if (
+      !tok.children.length &&
+      state.tokens[i - 1]?.type === 'paragraph_open' &&
+      state.tokens[i + 1]?.type === 'paragraph_close'
+    ) {
+      out.splice(-2, 2)
+      i++
     }
   }
+  state.tokens = out
+}
+
+function trimText(children) {
+  const blank = (t) => /^(soft|hard)break$/.test(t.type) || (t.type === 'text' && !t.content.trim())
+  let start = 0
+  let end = children.length
+  while (start < end && blank(children[start])) start++
+  while (end > start && blank(children[end - 1])) end--
+  const out = []
+  for (let i = start; i < end; i++) {
+    const t = children[i]
+    if (t.type === 'text') {
+      if (i === start) t.content = t.content.trimStart()
+      else if (/^(soft|hard)break$/.test(children[i - 1].type)) t.content = t.content.replace(/^[ \t]+/, '')
+      if (i === end - 1) t.content = t.content.trimEnd()
+      if (!t.content) continue
+    }
+    out.push(t)
+  }
   return out
+}
+
+function stripTitle(token) {
+  const title = token.attrGet('title')
+  if (!title) return
+  const text = stripComments(title)
+  if (text) token.attrSet('title', text)
+  else token.attrs = token.attrs.filter(([name]) => name !== 'title')
 }

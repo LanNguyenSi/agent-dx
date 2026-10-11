@@ -38,10 +38,12 @@ test('inline code span keeps its comment', () => {
 })
 
 test('prose mentioning an opener keeps every paragraph up to a later closer', () => {
-  const out = render('first mentions \\<!-- here\n\nmiddle paragraph\n\nlast closes --> there\n')
-  assert.match(out, /first mentions/)
-  assert.match(out, /middle paragraph/)
-  assert.match(out, /last closes/)
+  for (const opener of ['\\<!--', '<!--']) {
+    const out = render(`first mentions ${opener} here\n\nmiddle paragraph\n\nlast closes --> there\n`)
+    assert.match(out, /first mentions/)
+    assert.match(out, /middle paragraph/)
+    assert.match(out, /last closes/)
+  }
 })
 
 test('inline comment is dropped from a sentence', () => {
@@ -101,12 +103,14 @@ test('an unclosed comment opener stays visible and drops nothing', () => {
 
 const htmlTokens = (src) => {
   const flat = (tokens) => tokens.flatMap((t) => [t, ...flat(t.children ?? [])])
-  return flat(md.parse(src, { relativePath: 'fixture.md' })).filter((t) => /^html_/.test(t.type))
+  return flat(md.parse(src, { relativePath: 'fixture.md' })).filter(
+    (t) => /^html_/.test(t.type) && !t.meta?.isPermalinkSymbol
+  )
 }
 
 test('a line starting with a custom element or component renders as escaped text', () => {
-  // VitePress parses these lines as components, which the Vue compiler
-  // would turn into live elements and props.
+  // With raw HTML on, VitePress would parse these lines as components, which
+  // the Vue compiler turns into live elements and props.
   const cases = {
     '<x-a onclick="1">t</x-a>\n': '<p>&lt;x-a onclick=&quot;1&quot;&gt;t&lt;/x-a&gt;</p>\n',
     '<Foo />\n': '<p>&lt;Foo /&gt;</p>\n',
@@ -135,4 +139,115 @@ test('a comment in a heading is dropped from the permalink label, a code span ke
   assert.match(render('## A <!-- x --> B\n'), /aria-label="Permalink to &quot;A {2}B&quot;"/)
   const code = render('## A <!-- x --> `<!-- y -->` B\n')
   assert.match(code, /aria-label="Permalink to &quot;A {2}`(&lt;|&#x3C;)!-- y --&gt;` B&quot;"/)
+})
+
+// Each case is [Markdown, expected HTML]. The expected HTML is the rendering of
+// the same Markdown with its comments deleted from the source first, so a
+// hidden comment leaves the page exactly as if it had never been written.
+const renderAsIfDeleted = (cases) => {
+  for (const [src, expected] of cases) {
+    assert.equal(render(src), expected, src)
+    assert.deepEqual(htmlTokens(src), [], src)
+  }
+}
+
+test('comments with -- inside, or opened by <!--> or <!--->, stay hidden', () => {
+  renderAsIfDeleted([
+    ['Run it <!-- TODO: add --dry-run --> now\n', '<p>Run it  now</p>\n'],
+    ['Run it <!-- TODO\nuse --dry-run --> now\n', '<p>Run it  now</p>\n'],
+    ['a <!--> b --> c\n', '<p>a  c</p>\n'],
+    ['a <!---> b --> c\n', '<p>a  c</p>\n']
+  ])
+})
+
+test('a heading keeps the slug and permalink label it has without the comment', () => {
+  renderAsIfDeleted([
+    [
+      '## Step <!-- note --force --> one\n',
+      '<h2 id="step-one" tabindex="-1">Step  one <a class="header-anchor" href="#step-one" aria-label="Permalink to &quot;Step  one&quot;">&ZeroWidthSpace;</a></h2>\n'
+    ],
+    [
+      '## Title <!-- note -->\n',
+      '<h2 id="title" tabindex="-1">Title <a class="header-anchor" href="#title" aria-label="Permalink to &quot;Title&quot;">&ZeroWidthSpace;</a></h2>\n'
+    ]
+  ])
+})
+
+test('comments in table cells and in link, image, and container titles are hidden', () => {
+  renderAsIfDeleted([
+    [
+      '| a <!-- c --> | <!-- d --> b |\n|---|---|\n| c | d |\n',
+      '<table tabindex="0">\n<thead>\n<tr>\n<th>a</th>\n<th>b</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>c</td>\n<td>d</td>\n</tr>\n</tbody>\n</table>\n'
+    ],
+    [
+      '[x](https://e.example "t <!-- c -->")\n',
+      '<p><a href="https://e.example" title="t " target="_blank" rel="noreferrer">x</a></p>\n'
+    ],
+    [
+      '[x](https://e.example "<!-- c -->")\n',
+      '<p><a href="https://e.example" target="_blank" rel="noreferrer">x</a></p>\n'
+    ],
+    [
+      '[x][r]\n\n[r]: https://e.example "t <!-- c -->"\n',
+      '<p><a href="https://e.example" title="t " target="_blank" rel="noreferrer">x</a></p>\n'
+    ],
+    ['![a](x.png "t <!-- c -->")\n', '<p><img src="./x.png" alt="a" title="t "></p>\n'],
+    [
+      '::: details <!-- c -->\nbody\n:::\n',
+      '<details class="details custom-block"><summary>Details</summary>\n<p>body</p>\n</details>\n'
+    ]
+  ])
+})
+
+test('a comment inside a code span is kept next to a component, an HTML tag, or a comment', () => {
+  renderAsIfDeleted([
+    [
+      '<Foo /> use `<!-- kept -->` here\n',
+      '<p>&lt;Foo /&gt; use <code>&lt;!-- kept --&gt;</code> here</p>\n'
+    ],
+    ['<div>\n`<!-- kept -->`\n</div>\n', '<p>&lt;div&gt;\n<code>&lt;!-- kept --&gt;</code>\n&lt;/div&gt;</p>\n'],
+    ['<!-- a --> `<!-- kept -->` x\n', '<p><code>&lt;!-- kept --&gt;</code> x</p>\n']
+  ])
+})
+
+test('lines holding only comments render nothing', () => {
+  renderAsIfDeleted([
+    ['<!-- c -->\n', ''],
+    ['<!-- use --force here -->\n', ''],
+    ['<!-- use --force here -->\n\ntext\n', '<p>text</p>\n'],
+    ['<!-- a\n\nb -->\n', ''],
+    ['<!-- a --> <!-- b -->\n', ''],
+    ['<!-- a --> <!-- b\nc -->\ntext\n', '<p>text</p>\n']
+  ])
+})
+
+test('comments in list items keep the list tight or loose as without them', () => {
+  renderAsIfDeleted([
+    ['- <!-- c --> text\n- b\n', '<ul>\n<li>text</li>\n<li>b</li>\n</ul>\n'],
+    ['- <div>x</div>\n- b\n', '<ul>\n<li>&lt;div&gt;x&lt;/div&gt;</li>\n<li>b</li>\n</ul>\n'],
+    ['- <Foo />\n- b\n', '<ul>\n<li>&lt;Foo /&gt;</li>\n<li>b</li>\n</ul>\n'],
+    ['- a\n  <!-- c -->\n- b\n', '<ul>\n<li>\n<p>a</p>\n</li>\n<li>\n<p>b</p>\n</li>\n</ul>\n'],
+    ['- <!-- c -->\n  a\n- b\n', '<ul>\n<li>a</li>\n<li>b</li>\n</ul>\n']
+  ])
+})
+
+test('text after a comment that starts a line stays part of its paragraph', () => {
+  renderAsIfDeleted([
+    ['a\n<!-- c --> text\n', '<p>a\ntext</p>\n'],
+    ['<!-- c --> text\nmore\n', '<p>text\nmore</p>\n'],
+    ['<!-- a\n\nb --> tail\n', '<p>tail</p>\n']
+  ])
+})
+
+test('escaped backticks in a heading do not keep a comment in the permalink label', () => {
+  // The backticks are escaped, so they open no code span and the comment
+  // between them is hidden in the heading, its slug, and its label alike.
+  assert.equal(
+    render('## A \\` <!-- x --> \\` B\n'),
+    '<h2 id="a-b" tabindex="-1">A `  ` B <a class="header-anchor" href="#a-b" aria-label="Permalink to &quot;A \\`  \\` B&quot;">&ZeroWidthSpace;</a></h2>\n'
+  )
+})
+
+test('text without a comment is left exactly as written', () => {
+  assert.equal(md.renderInline(' x '), ' x ')
 })

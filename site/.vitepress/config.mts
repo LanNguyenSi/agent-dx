@@ -176,10 +176,9 @@ export default defineConfig({
     ]
   },
   lastUpdated: false,
-  // Raw HTML is parsed so that markdown-it decides what is a comment; the
-  // htmlComments core rule drops comments and turns any other HTML into text,
-  // so placeholders like <version> still render as text.
-  markdown: { html: true, config: linkMapper },
+  // Raw HTML stays off so that placeholders like <version> render as text; HTML
+  // comments in the playbooks are hidden by the htmlComments rules above.
+  markdown: { html: false, config: linkMapper },
   themeConfig: {
     search: { provider: 'local' },
     nav: [
