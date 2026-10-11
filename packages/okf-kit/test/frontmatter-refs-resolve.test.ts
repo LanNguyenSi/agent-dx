@@ -118,6 +118,36 @@ describe("frontmatter-refs-resolve", () => {
     expect(f[0].message).toContain("in the bundle");
   });
 
+  it("resolves a nested doc's refs against its own directory, contained by the bundle", () => {
+    const f = forFile(run(), "nested/doc.md");
+    // lessons[0].runbook `../runbooks/ok-runbook.md` leaves the doc dir but
+    // stays in the bundle: ok. derived_from `runbooks/ok-runbook.md` resolves
+    // to nested/runbooks/ and is dangling.
+    expect(f).toHaveLength(1);
+    expect(f[0].severity).toBe("error");
+    expect(f[0].message).toContain("derived_from[0]");
+    expect(f[0].message).toContain("does not resolve to a file in the bundle");
+  });
+
+  it("rejects URL-shaped values with a dedicated message, also under --skip-companion-refs", () => {
+    for (const opts of [{}, { skip: true }, { companion: true }]) {
+      for (const file of ["url-https.md", "url-mailto.md"]) {
+        const f = forFile(run(opts), file);
+        expect(f).toHaveLength(1);
+        expect(f[0].severity).toBe("error");
+        expect(f[0].message).toContain("URLs are not supported");
+        expect(f[0].message).not.toContain("--companion");
+      }
+    }
+  });
+
+  it("rejects an absolute unprefixed ref as not relative", () => {
+    const f = forFile(run(), "absolute-unprefixed.md");
+    expect(f).toHaveLength(1);
+    expect(f[0].severity).toBe("error");
+    expect(f[0].message).toContain("must be relative");
+  });
+
   it("reports malformed shapes as errors without crashing", () => {
     const findings = run({ companion: true });
     const expectOne = (file: string, text: string) => {

@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `frontmatter-refs-resolve` rule: frontmatter `lessons[].runbook` and `derived_from[]`, when present, must resolve to an existing `.md` file, relative to the doc inside the bundle or as `<alias>:<path>` into a companion bundle. Containment is enforced for both forms.
+- `frontmatter-refs-resolve` rule: frontmatter `lessons[].runbook` and `derived_from[]`, when present, must resolve to an existing `.md` file, relative to the doc inside the bundle or as `<alias>:<path>` into a companion bundle. Containment is enforced for both forms. URL-shaped values and absolute unprefixed paths are errors.
 - `check --companion <alias>=<dir>` (repeatable) declares a companion bundle; malformed values are CLI errors. `check --skip-companion-refs` downgrades a ref whose alias was not passed from an error to a notice. See [Check catalog](docs/check-catalog.md#frontmatter-references-frontmatter-refs-resolve).
 
 ## [0.17.1] - 2026-10-05

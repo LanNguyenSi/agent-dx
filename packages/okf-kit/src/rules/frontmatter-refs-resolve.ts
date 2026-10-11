@@ -108,6 +108,8 @@ export const frontmatterRefsResolveRule: Rule = {
   },
 };
 
+const URL_SCHEMES = new Set(["http", "https", "file", "mailto"]);
+
 type Report = (severity: Finding["severity"], message: string) => void;
 
 function checkRef(
@@ -120,9 +122,21 @@ function checkRef(
   let baseDir: string;
   let relPart: string;
   let scope: string;
+  let root: string;
 
   const colon = ref.indexOf(":");
   const prefix = colon === -1 ? "" : ref.slice(0, colon);
+  if (
+    colon !== -1 &&
+    ALIAS_PATTERN.test(prefix) &&
+    (URL_SCHEMES.has(prefix) || ref.startsWith("//", colon + 1))
+  ) {
+    report(
+      "error",
+      `\`${field}\` reference \`${ref}\` looks like a URL; URLs are not supported, reference a .md file.`,
+    );
+    return;
+  }
   if (colon !== -1 && ALIAS_PATTERN.test(prefix)) {
     const companionDir = ctx.companions?.get(prefix);
     if (!companionDir) {
@@ -140,15 +154,23 @@ function checkRef(
       return;
     }
     baseDir = companionDir;
+    root = companionDir;
     relPart = ref.slice(colon + 1);
     scope = `companion \`${prefix}\``;
   } else {
+    if (path.isAbsolute(ref)) {
+      report(
+        "error",
+        `\`${field}\` reference \`${ref}\` must be relative to the doc, not an absolute path.`,
+      );
+      return;
+    }
     baseDir = path.dirname(path.join(ctx.bundleDir, docRelPath));
+    root = ctx.bundleDir;
     relPart = ref;
     scope = "the bundle";
   }
 
-  const root = scope === "the bundle" ? ctx.bundleDir : (baseDir as string);
   const target = path.resolve(baseDir, relPart);
   const rel = path.relative(root, target);
   if (rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel)) {
