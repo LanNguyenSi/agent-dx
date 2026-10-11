@@ -44,6 +44,15 @@ unsuffixed file; another allowed key configures the corresponding
 }
 ```
 
+The file is validated before anything is written. Valid harness keys are
+`claude`, `codex`, and `opencode`, and role keys are the five role names. A
+leaf must name a tier its role supports (see [Effort tiers](#effort-tiers))
+and contain exactly `model` and `effort`, with `effort` one of `low`, `medium`,
+`high`, or `xhigh`. A model is a plain id without whitespace. opencode leaves
+need a `provider/model` id, and Codex leaves cannot use a Claude alias
+(`sonnet`, `opus`, `haiku`). Any other key is rejected, and the error names
+the valid values.
+
 An omitted `--routing` preserves the exact persisted map on a re-install.
 Changing one leaf leaves the others intact, which makes a previous manifest a
 usable rollback record. Model updates are deliberate per role and tier: the
@@ -77,8 +86,15 @@ The shipped routing is:
 
 When you have a deterministic Codex model catalog, pass it with
 `--codex-catalog <json-file>`. The CLI validates the selected Codex model and
-effort pairs before writing. Without a supplied catalog it performs no online
-entitlement check; offline or account-specific availability remains unknown.
+effort pairs before writing. The catalog is a JSON array of models, or an
+object with a `models` array. Each model has a unique `slug` and may list
+`supported_reasoning_levels` as objects with an `effort` field. Only the
+selections for installed roles and tiers are checked: a selected model that is
+not in the catalog, or an effort it does not list, stops the install before any
+kit file is written; a model without `supported_reasoning_levels` only produces
+a warning. The bundled `assets/codex-models.json` alias map is not a catalog.
+Without a supplied catalog the CLI performs no online entitlement check;
+offline or account-specific availability remains unknown.
 Use the harness's native capability commands, such as `codex debug models`, to
 refresh a catalog before installation when appropriate. A bundled-capability
 view describes what the binary knows and does not prove account entitlement.

@@ -7320,7 +7320,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 990,
     end: 990,
     anchorKey: "3a4a026f",
-    paragraphLine: 38,
+    paragraphLine: 63,
     uncitedLines: [1010],
     claim:
       "the sentence describes the per-template asset read driven by `listTemplateNames()`; line 990 is the read of a templates-directory asset, while uncited 1010 reads the skill asset for a different install step the sentence never mentions.",
@@ -7332,7 +7332,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 202,
     end: 208,
     anchorKey: "67834189",
-    paragraphLine: 292,
+    paragraphLine: 317,
     uncitedLines: [200],
     claim:
       "the sentence claims an inline marker mention survives a re-run; line 208 is the assertion that it did survive, while uncited 200 is the test's own input string, which writes the mention before the run and asserts nothing.",
@@ -7344,7 +7344,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 971,
     end: 976,
     anchorKey: "33e8e25a",
-    paragraphLine: 335,
+    paragraphLine: 360,
     uncitedLines: [984],
     claim:
       "the sentence is explicitly about the path-exists-and-unedited branch; line 976 records the hash inside that branch's own `if`, while uncited 984 is the path-does-not-exist branch's record, which the sentence's own wording excludes.",
@@ -7356,7 +7356,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 134,
     end: 147,
     anchorKey: "6b912d8f",
-    paragraphLine: 337,
+    paragraphLine: 362,
     uncitedLines: [123],
     claim:
       "the sentence claims a plain SECOND run is a byte-for-byte no-op; line 147 is the idempotence block's second-run assertion, while uncited 123 is the same assertion inside an earlier first-install test, which says nothing about a second run.",
@@ -7368,7 +7368,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 141,
     end: 150,
     anchorKey: "0bf37874",
-    paragraphLine: 344,
+    paragraphLine: 370,
     uncitedLines: [155, 160],
     claim:
       "the sentence names the containment re-check made before the unlink; line 150 is that guard's own loop exit, while uncited 155 and 160 exit the same loop for a missing file and a non-regular file, two guards this sentence does not describe (the anchor is a bare loop keyword, so it is the cited RANGE, not the anchor, that identifies the branch here).",
@@ -7428,7 +7428,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 990,
     end: 990,
     anchorKey: "3a4a026f",
-    paragraphLine: 38,
+    paragraphLine: 63,
     uncitedLines: [1013],
     claim:
       'line 990 cites `readAsset(join("templates", name)),`; uncited 1013 is instead line 1013 in `content: readAsset(join("skill", "references", name)),`, a different site the citing sentence never names.',
@@ -7440,7 +7440,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1084,
     end: 1086,
     anchorKey: "d89da8cc",
-    paragraphLine: 54,
+    paragraphLine: 79,
     uncitedLines: [612],
     claim:
       "line 1086 cites `composeClaudeAgentVariant(`; uncited 612 is instead line 612 in `function composeClaudeAgentVariant(`, a different site the citing sentence never names.",
@@ -7452,7 +7452,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 685,
     end: 701,
     anchorKey: "c0c3cd7c",
-    paragraphLine: 78,
+    paragraphLine: 103,
     uncitedLines: [581],
     claim:
       "the sentence describes `effortLine` being passed into `composeOpencodeAgentVariant` as a parameter; line 701 is that function's own effortLine push, while uncited 581 is the byte-identical push inside `composeOpencodeAgent`, the default (non-variant) composer the sentence does not name.",
@@ -7464,7 +7464,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 292,
     end: 292,
     anchorKey: "23db3722",
-    paragraphLine: 187,
+    paragraphLine: 212,
     uncitedLines: [172],
     claim:
       "line 292 cites `previous.harnessesRecordedEmpty`; uncited 172 is instead line 172 in `* together with `previous.harnessesRecordedEmpty` (which `apply`'s`, a different site the citing sentence never names.",
@@ -7476,7 +7476,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 2553,
     end: 2586,
     anchorKey: "08402497",
-    paragraphLine: 199,
+    paragraphLine: 224,
     uncitedLines: [1153, 2157],
     claim:
       'line 2586 cites the `harnesses-stickiness gate is immune to an all-unknown-names…` test (`expect(result.stdout).toContain("installed for: claude");`); uncited 1153 and 2157 is instead line 1153 in the `init --yes runs non-interactively and installs` test (`expect(result.stdout).toContain("installed for: claude");`); and line 2157 in the `prints the tiers status in both the \'Found existing install…` test (`expect(second.stdout).toMatch(/installed for: claude.*tiers: true/);`), a different site the citing sentence never names.',
@@ -7488,7 +7488,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 91,
     end: 97,
     anchorKey: "56ac8f47",
-    paragraphLine: 292,
+    paragraphLine: 317,
     uncitedLines: [51],
     claim:
       "the sentence describes `upsertMarkerSection`'s own conflict path for a broken or duplicated marker pair; line 97 is that function's `report.conflicted.push`, while uncited 51 is the byte-identical push inside `installFile`, the general kit-file conflict path for a user-edited file, which this sentence does not describe.",
@@ -7500,7 +7500,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 146,
     end: 156,
     anchorKey: "3e9881f8",
-    paragraphLine: 313,
+    paragraphLine: 338,
     uncitedLines: [92],
     claim:
       "the sentence describes `Manifest`'s own persisted `routing` field; line 156 is that field's declaration inside the `Manifest` interface, while uncited 92 is the byte-identical declaration inside `InitOptions`, the install-input type the sentence does not name.",
@@ -7512,7 +7512,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1162,
     end: 1181,
     anchorKey: "be999e8e",
-    paragraphLine: 328,
+    paragraphLine: 353,
     uncitedLines: [559, 1617],
     claim:
       'line 1181 cites the `a plain re-run keeps the previously chosen models` test (`).toContain("model: haiku");`); uncited 559 and 1617 is instead line 559 in the `installs all four adapters; opencode agents omit model: whe…` test (`expect(claudeSlicer).toContain("model: haiku");`); and line 1617 in the `tiers=true, claude, full profile: exactly 15 agent files wi…` test (`expect(explorerLow).toContain("model: haiku");`), a different site the citing sentence never names.',
@@ -7524,7 +7524,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 977,
     end: 979,
     anchorKey: "eeab560e",
-    paragraphLine: 336,
+    paragraphLine: 361,
     uncitedLines: [1042],
     claim:
       "line 979 cites `installedFiles[relativePath] = recorded;`; uncited 1042 is instead line 1042 in `if (recorded !== undefined) installedFiles[relativePath] = recorded;`, a different site the citing sentence never names.",
@@ -7536,7 +7536,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 327,
     end: 342,
     anchorKey: "1c10d762",
-    paragraphLine: 336,
+    paragraphLine: 361,
     uncitedLines: [2316],
     claim:
       'line 342 cites the `keeps a user-edited kit file as a conflict and preserves th…` test (`createHash("sha256").update("user edit\\n", "utf8").digest("hex"),`); uncited 2316 is instead line 2316 in the `repo kit-version pin (operator apply support)` test (`createHash("sha256").update(content, "utf8").digest("hex");`), a different site the citing sentence never names.',
@@ -7548,7 +7548,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 134,
     end: 147,
     anchorKey: "6b912d8f",
-    paragraphLine: 337,
+    paragraphLine: 362,
     uncitedLines: [2043],
     claim:
       "the sentence's first clause describes the plain (non-tiers) second run's no-op, correctly anchored at the `a second run changes no file` test's own `report.updated` assertion (line 147); uncited 2043 is the byte-identical assertion inside the `a second run with tiers=true changes no file (idempotent)` test, which the same bullet's second clause already cites separately, by its own anchor, at test/init.test.ts:2027-2038.",
@@ -7560,7 +7560,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 2027,
     end: 2038,
     anchorKey: "d6e57f7c",
-    paragraphLine: 337,
+    paragraphLine: 362,
     uncitedLines: [2359],
     claim:
       "the sentence describes the `tiers: true` second-run no-op; line 2038 is that assertion inside the `a second run with tiers=true changes no file (idempotent)` test, while uncited 2359 is the byte-identical assertion inside the separate `sets a pin, is a byte-for-byte no-op on repeat...` test, which covers the `pin` option, not tiers, and the sentence does not name.",
@@ -7572,7 +7572,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1463,
     end: 2043,
     anchorKey: "6b912d8f",
-    paragraphLine: 353,
+    paragraphLine: 379,
     uncitedLines: [123, 147],
     claim:
       "line 2043 cites the `a second run with tiers=true changes no file (idempotent)` test (`expect(report.updated).toEqual([]);`); uncited 123 and 147 is instead line 123 in the `creates run state, AGENTS.md section, and claude adapter fi…` test (`expect(report.updated).toEqual([]);`); and line 147 in the `a second run changes no file` test (`expect(report.updated).toEqual([]);`), a different site the citing sentence never names.",
@@ -7584,7 +7584,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1464,
     end: 1517,
     anchorKey: "13baa7b3",
-    paragraphLine: 353,
+    paragraphLine: 379,
     uncitedLines: [114, 360],
     claim:
       'line 1517 cites the `a legacy manifest with no tiers field defaults to false and…` test (`"model: sonnet",`); uncited 114 and 360 is instead line 114 in the `creates run state, AGENTS.md section, and claude adapter fi…` test (`expect(slicer).toContain("model: sonnet");`); and line 360 in the `installs the explorer with a read-only posture on both harn…` test (`expect(claudeExplorer).toContain("model: sonnet");`), a different site the citing sentence never names.',
@@ -7596,7 +7596,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1931,
     end: 1950,
     anchorKey: "49a539a9",
-    paragraphLine: 353,
+    paragraphLine: 379,
     uncitedLines: [605],
     claim:
       'line 1950 cites the `opencode: a claude-family model behind a non-anthropic prov…` test (`"model: github-copilot/claude-sonnet-4.6",`); uncited 605 is instead line 605 in the `emits model: line when opencodeModels provides a FQ id` test (`expect(explorer).toContain("model: github-copilot/claude-sonnet-4.6");`), a different site the citing sentence never names.',
@@ -7608,7 +7608,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 2027,
     end: 2043,
     anchorKey: "6b912d8f",
-    paragraphLine: 353,
+    paragraphLine: 379,
     uncitedLines: [123, 147],
     claim:
       "line 2043 cites the `a second run with tiers=true changes no file (idempotent)` test (`expect(report.updated).toEqual([]);`); uncited 123 and 147 is instead line 123 in the `creates run state, AGENTS.md section, and claude adapter fi…` test (`expect(report.updated).toEqual([]);`); and line 147 in the `a second run changes no file` test (`expect(report.updated).toEqual([]);`), a different site the citing sentence never names.",
@@ -7620,7 +7620,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1045,
     end: 1079,
     anchorKey: "df091a00",
-    paragraphLine: 353,
+    paragraphLine: 379,
     uncitedLines: [1023],
     claim:
       'line 1079 cites the `opencode + tiers on + unresolved tier-class models (0 varia…` test (`(note) => !note.includes("-low.md") && !note.includes("-high.md"),`); uncited 1023 is instead line 1023 in the `a claude install with tiers on, then a re-run switching to …` test (`expect(report.notes.every((note) => !note.includes(".opencode"))).toB…`), a different site the citing sentence never names.',
@@ -7632,7 +7632,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 1046,
     end: 1079,
     anchorKey: "df091a00",
-    paragraphLine: 353,
+    paragraphLine: 379,
     uncitedLines: [1023],
     claim:
       'line 1079 cites the `opencode + tiers on + unresolved tier-class models (0 varia…` test (`(note) => !note.includes("-low.md") && !note.includes("-high.md"),`); uncited 1023 is instead line 1023 in the `a claude install with tiers on, then a re-run switching to …` test (`expect(report.notes.every((note) => !note.includes(".opencode"))).toB…`), a different site the citing sentence never names.',
@@ -7644,7 +7644,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 2553,
     end: 2586,
     anchorKey: "08402497",
-    paragraphLine: 353,
+    paragraphLine: 379,
     uncitedLines: [1153],
     claim:
       "the sentence describes the harnesses-stickiness F1 regression test asserting a live claude install is not stuck to templates-only; line 2586 is that test's own stdout assertion, while uncited 1153 is the byte-identical assertion inside the unrelated `init --yes runs non-interactively and installs` smoke test in the `cli smoke` describe block, which the sentence does not name.",
@@ -12006,7 +12006,7 @@ describe("run mode in the policy section and the README", () => {
       "[`run-state-and-harness.md`](assets/skill/references/run-state-and-harness.md)",
     );
     expect(readme).toContain(
-      "Review is always delegated to narrow subagents, and by default so is implementation (see [Run modes](#run-modes));",
+      "Review is never skipped: non-trivial review goes to a narrow reviewer subagent, and by default so does implementation (see [Run modes](#run-modes));",
     );
   });
 

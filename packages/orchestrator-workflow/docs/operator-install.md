@@ -17,6 +17,50 @@ orchestrator-workflow setup --yes
 orchestrator-workflow apply --target /path/to/repo
 ```
 
+The first diagram shows which command reads or writes the operator manifest
+and a target's own manifest.
+
+```mermaid
+flowchart LR
+  OM[("operator manifest<br/>manifest.json in the operator home")]
+  SETUP["setup"]
+  APPLY["apply --target"]
+  DOCTOR["doctor"]
+  ADOPT["adopt"]
+  RM[("target manifest<br/>.ai/workflow/manifest.json")]
+
+  OM ---|"setup writes defaults"| SETUP
+  OM ---|"apply reads defaults,<br/>registers the target"| APPLY
+  OM ---|"doctor reads targets,<br/>rewrites on --prune"| DOCTOR
+  OM ---|"adopt registers, or<br/>bootstraps when absent"| ADOPT
+  APPLY ---|"apply reads, then rewrites<br/>through the install"| RM
+  DOCTOR ---|"doctor inspects"| RM
+  ADOPT ---|"adopt reads only"| RM
+```
+
+The second diagram shows the order of the steps inside one `apply` run,
+including the pin gate and the precedence step described below.
+
+```mermaid
+flowchart TD
+  START["apply --target"]
+  LOAD["read operator defaults<br/>and the target manifest"]
+  NOSETUP["exit 1"]
+  PIN{"target pinned to another<br/>version, and no --pin,<br/>--unpin, or --force-pin?"}
+  SKIP["skip, exit 0"]
+  PREC["resolve options:<br/>flag, then target record,<br/>then operator default;<br/>--sync: operator first"]
+  RUN["runInit: install, rewrite<br/>the target manifest"]
+  REG["register the target in the<br/>operator manifest, under the lock"]
+
+  START --> LOAD
+  LOAD -->|"no operator setup,<br/>or unreadable"| NOSETUP
+  LOAD --> PIN
+  PIN -->|yes| SKIP
+  PIN -->|no| PREC
+  PREC --> RUN
+  RUN --> REG
+```
+
 **`setup`** writes or updates this operator's default install options
 (harnesses, profile, legacy models, routing, tiers) as the baseline for future installs; it
 touches no repository. A flag always wins; a flag-less re-run keeps the
@@ -35,8 +79,8 @@ operator manifest. It requires a prior `orchestrator-workflow setup`;
 without one it exits `1` with "No operator setup found". Option resolution
 follows one precedence order: an
 explicit flag wins, then the target's own previously recorded settings,
-then the operator's defaults (harnesses fall back one step further, to
-what `init` would have auto-detected) -- except a target whose own
+then the operator's defaults (harnesses fall back further, to what `init`
+would detect, then to `claude`) -- except a target whose own
 manifest recorded a real `harnesses: []` (a deliberate templates-only
 install, see [Install reference](install-reference.md)'s "Templates-only
 mode"), which stays templates-only on

@@ -4,25 +4,37 @@ The orchestrator/subagent loop `orchestrator-workflow` installs, and the
 reasoning behind it. See the [package README](../README.md) for installation
 and day-to-day usage.
 
-```text
-                 Operator
-             goal |    ^ handoff: what changed, how verified,
-                  v    | what remains open
-  explorer  -->  Orchestrator  . . . . .  .ai/runs/<date>-<slug>/
-  optional,      session model             00-goal       04-implementation-summary
-  read-only      plans, validates slices,  01-plan       05-review-findings
-  terrain map    decides acceptance        02-tasks      06-handoff
-                      |                     03-decisions
-     narrow           |    ^ structured     (state lives in files,
-     contracts        v    | YAML evidence   not in chat history)
-        +-------------+-------------+
-        |             |             |
-    task-slicer   implementer   reviewer
-      sonnet        sonnet        opus
-    small,        one narrow    skeptical, severity-rated
-    testable      task, plus    findings, no rewrites
-    slices        tests
+The diagram shows the operator, the orchestrator, the run directory it keeps
+state in, and the five subagent roles of the default `full` profile with the
+model each one gets by default on Claude Code and opencode.
+
+```mermaid
+flowchart TD
+  OP["Operator"]
+  EXP["explorer, sonnet<br/>optional, read-only<br/>terrain map"]
+  ADV["advisor, opus<br/>optional, read-only<br/>recommends, never decides"]
+  ORC["Orchestrator<br/>session model<br/>plans, validates slices,<br/>decides acceptance"]
+  RUN[(".ai/runs/YYYY-MM-DD-slug/<br/>00-goal ... 06-handoff<br/>state in files, not chat")]
+  TS["task-slicer, sonnet<br/>small, testable slices"]
+  IMP["implementer, sonnet<br/>one narrow task, plus tests"]
+  REV["reviewer, opus<br/>skeptical, severity-rated<br/>findings, no rewrites"]
+
+  OP -->|goal| ORC
+  ORC -->|"handoff: what changed,<br/>how verified, what is open"| OP
+  EXP <-.->|"solution unclear"| ORC
+  ADV <-.->|"escalation only"| ORC
+  ORC <--> RUN
+  ORC <-->|"contract / YAML evidence"| TS
+  ORC <-->|"contract / YAML evidence"| IMP
+  ORC <-->|"contract / YAML evidence"| REV
 ```
+
+The `minimal` profile installs only the implementer and the reviewer. The
+advisor is consulted only at escalation triggers and returns a recommendation;
+the orchestrator still decides (see
+[Role profile reference](role-profile-reference.md)). The model names shown
+are the Claude Code and opencode defaults; Codex routes the same roles through
+the table in [Model routing reference](model-routing-reference.md#codex-defaults).
 
 Two effects fall out of this shape:
 

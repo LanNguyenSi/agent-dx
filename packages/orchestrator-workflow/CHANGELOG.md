@@ -73,6 +73,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mechanical check is the `agent-primitives hygiene` command, not a hook the
   kit installs into other repositories. Pin in
   `test/commit-hygiene-rule.test.ts`.
+- Docs follow the code more closely: the write surface in `INSTALL-AGENT.md`
+  and the installer-fence bundle doc name the skill `references/` files and
+  the bundle-wide conflict check; the README states when a run is interactive
+  and which harnesses a non-interactive run installs; the install reference
+  lists every manifest field and the exit codes of `init`, `setup`, `apply`,
+  and `uninstall`; the model routing reference states the `--routing`
+  validation rules and the `--codex-catalog` shape; and the architecture,
+  operator-install, and installer-fence docs gain Mermaid diagrams, including
+  the advisor role in the loop diagram.
 
 ## [0.43.1] - 2026-10-01
 

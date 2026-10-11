@@ -24,6 +24,7 @@ sources:
   - packages/orchestrator-workflow/test/codex.test.ts
   - packages/orchestrator-workflow/test/routing.test.ts
   - packages/orchestrator-workflow/test/doctor.test.ts
+  - packages/orchestrator-workflow/test/skill-references.test.ts
   - packages/orchestrator-workflow/INSTALL-AGENT.md
   - packages/orchestrator-workflow/README.md
   - packages/orchestrator-workflow/docs/harnesses.md
@@ -35,12 +36,36 @@ sources:
 
 ## What `init` writes
 
+The diagram shows how the `init` command resolves its inputs and the order in
+which `runInit` then checks and writes; each harness step runs only when that
+harness is selected.
+
+```mermaid
+flowchart TD
+  subgraph inputs["init command: resolve inputs"]
+    CLI["init command"] --> DET["detectHarnesses"]
+    DET --> PREV["readInstalledManifest"]
+    PREV --> RES["resolveInitInputs"]
+    RES -->|interactive| PROMPT["harness, profile,<br/>model prompts"]
+    RES -->|"opencode needs resolution"| OC["loadOpencodeCatalog"]
+  end
+  subgraph writes["runInit: checks and writes, in order"]
+    CAT["Codex catalog check,<br/>before any write"] --> TPL[".ai/workflow/templates<br/>and .ai/runs/.gitkeep"]
+    TPL --> AG["AGENTS.md fenced section,<br/>when any harness is selected"]
+    AG --> CL["claude: skill bundle,<br/>.claude/agents, CLAUDE.md import"]
+    CL --> CX["codex: skill bundle,<br/>.codex/agents"]
+    CX --> OA["opencode: skill bundle,<br/>.opencode/agents"]
+    OA --> MF[".ai/workflow/manifest.json,<br/>last, only when changed"]
+  end
+  RES -->|"resolved options"| CAT
+```
+
 - `.ai/workflow/templates/00-goal.md` through `06-handoff.md`, one per name from `listTemplateNames()` (init.ts:990#"readAsset(join("), plus an empty `.ai/runs/.gitkeep` (init.ts:993#".gitkeep"). See [run-state-lifecycle-and-markers.md](run-state-lifecycle-and-markers.md) for how these templates become run directories.
 - The marker-fenced `## Agentic Coding Workflow` section in `AGENTS.md`, installed whenever at least one harness is selected, regardless of which one (init.ts:995-1002#"if (options.harnesses.length > 0) {"): Codex and opencode read `AGENTS.md` natively, Claude Code gets it via an import, so the section is written for any of the three. Since agent-tasks 613316c9 (`--harness none`, templates-only mode), an empty `options.harnesses` skips this write entirely: only `.ai/workflow/**` and `.ai/runs/.gitkeep` (the bullet above) are installed, and AGENTS.md is left untouched, never created from scratch either. See "`--harness none` (templates-only mode)" below.
 - Per selected harness (`options.harnesses`), and per role `rolesForProfile(profile)` selects for that harness (0.15.0: `full` installs `{explorer,task-slicer,implementer,reviewer}`, `minimal` installs only `{implementer,reviewer}`; since 0.21.0 `full` also installs `advisor` (`{explorer,task-slicer,implementer,reviewer,advisor}`), the fifth role added purely by extending `ROLES`/`MINIMAL_PROFILE_ROLES` in `src/models.ts`, `rolesForProfile` itself unchanged, `minimal` still filters against the same two-role `MINIMAL_PROFILE_ROLES` set, so advisor is dropped from `minimal` for free, the same way explorer/task-slicer already are; see [model-preselection.md](model-preselection.md) and the manifest's `profile` field below):
-  - **claude**: `.claude/skills/orchestrator-workflow/SKILL.md` and `.claude/agents/{role}.md` for each installed role (init.ts:1073-1077#"options.models[role],"), plus the `CLAUDE.md` import (init.ts:1095#"ensureClaudeImport(report, join(targetDir,").
-  - **codex**: `.agents/skills/orchestrator-workflow/SKILL.md` plus `.codex/agents/{role}.toml` for each installed role. The TOML contains the exact routed model/effort and canonical role instructions. Explorer/advisor request a read-only sandbox; reviewer inherits the caller's sandbox and prohibits source edits through its prompt.
-  - **opencode**: `.opencode/skills/orchestrator-workflow/SKILL.md` and `.opencode/agents/{role}.md` for each installed role (init.ts:1144-1155#"composeOpencodeAgent(role, modelValue, defaultEffortLine),").
+  - **claude**: the skill bundle `.claude/skills/orchestrator-workflow/SKILL.md` plus one `references/<name>.md` per packaged reference (init.ts:1071#"installSkillBundle(skillDir);", see "Skill bundle" below), and `.claude/agents/{role}.md` for each installed role (init.ts:1073-1077#"options.models[role],"), plus the `CLAUDE.md` import (init.ts:1095#"ensureClaudeImport(report, join(targetDir,").
+  - **codex**: the skill bundle `.agents/skills/orchestrator-workflow/SKILL.md` plus its `references/*.md` (init.ts:1101#"installSkillBundle(skillDir);"), and `.codex/agents/{role}.toml` for each installed role. The TOML contains the exact routed model/effort and canonical role instructions. Explorer/advisor request a read-only sandbox; reviewer inherits the caller's sandbox and prohibits source edits through its prompt.
+  - **opencode**: the skill bundle `.opencode/skills/orchestrator-workflow/SKILL.md` plus its `references/*.md` (init.ts:1140#"installSkillBundle(skillDir);"), and `.opencode/agents/{role}.md` for each installed role (init.ts:1144-1155#"composeOpencodeAgent(role, modelValue, defaultEffortLine),").
 - `.ai/workflow/manifest.json`, written last, only when the computed desired state differs from what is recorded (init.ts:1201-1252#"${JSON.stringify(manifest, null, 2)}\n").
 
 Since 0.22.0, every **claude** and **opencode** default (unsuffixed) file
@@ -329,12 +354,13 @@ folded into drift rather than aborting the whole target check.
 
 ## Re-install / upgrade semantics
 
-`installKitFile` (init.ts:963-983#"installFile(report, path, content, { force });") drives every kit-owned file (templates, skills, per-role agent files, and, since 0.19.0, per-role-per-tier variant files, since the tier-rendering loops call the exact same closure):
+`installKitFile` (init.ts:963-983#"installFile(report, path, content, { force });") drives every kit-owned file (templates, skills, per-role agent files, and, since 0.19.0, per-role-per-tier variant files, since the tier-rendering loops call the exact same closure); the skill bundle reaches it only after the bundle-wide pre-check described under "Skill bundle" below:
 
 - Path doesn't exist: write, record hash.
 - Path exists and its current sha256 matches the hash recorded in the previous manifest ("unedited"): overwritten with the newly shipped content even without `--force` (init.ts:971-976#"installedFiles[relativePath] = sha256(content);"), this is how a kit version bump propagates (init.test.ts:260-280#"expect(readFileSync(templatePath,").
 - Path exists and differs from shipped, with either a hash mismatch or no recorded hash: kept as-is and reported `conflicted` unless `--force`; the previous hash record is preserved rather than dropped (init.ts:977-979#"installedFiles[relativePath] = recorded;"), so a later upgrade still recognizes the file as edited (init.test.ts:327-342#"createHash(").
 - A plain second run with no drift is a byte-for-byte no-op across every file, including the manifest, which is only rewritten when the computed `desired` object differs from `previous` (init.ts:1201-1252#"${JSON.stringify(manifest, null, 2)}\n", init.test.ts:134-147#"expect(report.updated).toEqual([]);"); since 0.19.0 this no-op also covers a `tiers: true` re-run, `test/init.test.ts:2027-2038#"expect([...after.keys()].sort()).toEqual([...before.keys()].sort());"` pins a second `tiers: true` run changing no file.
+- Skill bundle: `SKILL.md` and every packaged reference (`listSkillReferenceNames`, the safe, flat, regular `.md` files of `assets/skill/references/`) install as one unit (init.ts:1015#"const installSkillBundle = (skillDir: string): boolean => {"). Before any bundle file is written, every bundle path is checked: a file conflicts when it exists, differs from the shipped content, and has no matching recorded hash, unless `--force` is set (init.ts:1023#"const conflicts = files.filter(({ relativePath, content }) => {"). Any conflict reports each conflicting path, writes no bundle file at all (so an unedited bundle file the per-file rule above would update is not updated either), and keeps the previous hash record of every bundle path, so a later run still recognises the old bundle as replaceable (init.ts:1037#"// Keep the prior coherent bundle ledger intact"). With no conflict, each bundle file goes through `installKitFile`. Before each harness's bundle install, a previously tracked `references/` path that is no longer shipped gets a note and stays on disk, untracked (init.ts:1062#"no longer shipped"). Covered by `test/skill-references.test.ts:136#"keeps an old core active when an unrecorded required reference conflicts"`, `test/skill-references.test.ts:190#"blocks a core update when a tracked reference was locally changed"`, and `test/skill-references.test.ts:215#"notes a previously tracked reference that is no longer shipped"`.
 - 0.15.0: a `full` -> `minimal` downgrade is the one case where a plain re-run is *not* silent, see the manifest.json section above for the leftover-files note it prints. Since fix-round-1, `tiers: true` -> `tiers: false` is the same kind of not-silent case, via its own dedicated note block rather than by accreting onto the profile-downgrade one; before the fix it was a structurally identical leftover-files case that printed nothing at all (review finding M2, see "What `init` writes" above).
 
 ## Uninstall: exact removal surface
@@ -345,7 +371,7 @@ folded into drift rather than aborting the whole target check.
 2. `removeAgentsSection` (uninstall.ts:36-71#"${path} (workflow section)") removes exactly the fenced block via the same begin/end line-scan as install; if what remains is empty or exactly `AGENTS_MD_HEADING`, the file itself is deleted, otherwise the remainder is written back. A broken/duplicated fence is left in place and reported, mirroring install's conflict behavior (uninstall.ts:47-54#"${path}: marker fence is broken or duplicated; section left in place.").
 3. `removeClaudeImport` (uninstall.ts:74-92#"${path} (@AGENTS.md import line)") deletes `CLAUDE.md` only if it is byte-identical to `CLAUDE_MD_BOILERPLATE`, otherwise strips only the `@AGENTS.md` line; an inline mention survives untouched (test/uninstall.test.ts:217-224#"expect(readFileSync(join(target, ").
 4. `manifest.json` is always deleted (uninstall.ts:177-180#"report.removed.push(manifestPath);").
-5. `PRUNE_CANDIDATES` (uninstall.ts:104-122#"export function runUninstall(options: {"), deepest-first, each removed only via `rmdirSync`, which throws (swallowed) on a non-empty directory (uninstall.ts:183-188#"// Not empty or not present; either way it stays."), so any directory holding surviving user content is left standing. `runUninstall` itself needs no profile- or tiers-specific logic: it only ever iterates `manifest.files`, so a `full` -> `minimal` downgrade's now-untracked `task-slicer.md`/`explorer.md`/`advisor.md` (since 0.21.0) are simply absent from that loop and are left on disk without comment (init.test.ts:873-888#"task-slicer.md/explorer.md are no longer in the manifest's file" confirms uninstall still completes without error in that case). Since 0.19.0, an install with `tiers: true` writes every `<role>-<tier>.md` path into `manifest.files` the same as any other kit-owned file (no separate ledger), so uninstalling a tiers-on install removes them the same way as the base agent files with no dedicated code (`test/init.test.ts:2047-2058#"expect(existsSync(explorerLowPath)).toBe(false);"` covers a fresh `tiers: true` install followed by `uninstall`, asserting a rendered variant file is gone afterward).
+5. `PRUNE_CANDIDATES` (uninstall.ts:104-122#"export function runUninstall(options: {"), deepest-first, including each harness's skill `references/` directory, each removed only via `rmdirSync`, which throws (swallowed) on a non-empty directory (uninstall.ts:183-188#"// Not empty or not present; either way it stays."), so any directory holding surviving user content is left standing. `runUninstall` itself needs no profile- or tiers-specific logic: it only ever iterates `manifest.files`, so a `full` -> `minimal` downgrade's now-untracked `task-slicer.md`/`explorer.md`/`advisor.md` (since 0.21.0) are simply absent from that loop and are left on disk without comment (init.test.ts:873-888#"task-slicer.md/explorer.md are no longer in the manifest's file" confirms uninstall still completes without error in that case). Since 0.19.0, an install with `tiers: true` writes every `<role>-<tier>.md` path into `manifest.files` the same as any other kit-owned file (no separate ledger), so uninstalling a tiers-on install removes them the same way as the base agent files with no dedicated code (`test/init.test.ts:2047-2058#"expect(existsSync(explorerLowPath)).toBe(false);"` covers a fresh `tiers: true` install followed by `uninstall`, asserting a rendered variant file is gone afterward).
 6. `.ai/runs/` is never touched by the removal loop and is explicitly noted as kept when present (uninstall.ts:192-195#"${runsDir}: run history kept; remove manually if no longer needed."); run history outlives uninstall by design.
 
 ## Tests
