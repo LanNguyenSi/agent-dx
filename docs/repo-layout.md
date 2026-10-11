@@ -47,7 +47,11 @@ README, and the build fails on a relative link whose target inside the
 repository does not exist (Markdown pages, folders, and other files alike).
 For authors: raw HTML in the playbooks renders as literal text, so a
 placeholder such as `<version>` shows as written, and HTML comments
-(`<!-- ... -->`) are hidden except inside code.
+(`<!-- ... -->`) are hidden except inside code. A line that starts with `<!--`
+hides everything up to the first `-->` after it in the same quote or `:::`
+container, blank lines and list items included, and lines that hold nothing
+but comments read as blank lines; an opener with no `-->` after it stays
+visible.
 
 ```bash
 cd site && npm ci && npm run build   # output in site/.vitepress/dist
