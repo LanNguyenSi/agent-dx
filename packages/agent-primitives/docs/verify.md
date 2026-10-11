@@ -214,8 +214,8 @@ tool run in a fully non-interactive environment can still default to
 colorized output (only SGR sequences are stripped; none of these three
 tools' default text output emits cursor-movement or other non-SGR
 escape sequences). eslint 10
-(a devDependency, used only for this package's own lint check and for the
-`eslint` detector's fixtures) requires Node `^20.19.0 || ^22.13.0 || >=24`,
+(a devDependency, used only for the `eslint` detector's test fixtures)
+requires Node `^20.19.0 || ^22.13.0 || >=24`,
 narrower than the `>=20` this package itself requires; that floor
 applies to developing this package, not to a caller running the built CLI.
 Whatever the detector, a check that ends `fail` or `error` with zero
@@ -269,5 +269,6 @@ guessing at it: the check that was running becomes `status: "error"` with
 a failure naming the abort (never a synthesized `exit code null`
 finding), every check queued behind it is left unstarted and named in a
 warning, and the result carries `reason: "aborted"`. The CLI prints none
-of that on a signal (see [probe.md](probe.md)'s signal handling).
+of that on a signal (see the "Signals, locks and recovery" section of
+[probe.md](probe.md)).
 

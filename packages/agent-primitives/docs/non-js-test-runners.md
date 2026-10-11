@@ -248,9 +248,10 @@ naming a real summary line), not this warning.
 **The pass predicate** (`--pass-regex`/`passWhen.regex`) is implemented on
 both `probe` and `verify`; each documents its own option in its own
 section (`probe`'s own in [probe.md](probe.md); `verify`'s own is the paragraph
-right above naming `--pass-regex`, not this one). A composer
-`vendor-dir`/`bin-dir` link rule remains its own pending task (issue
-#225 part 2). For every
+right above naming `--pass-regex`, not this one). A composer project's
+`vendor-dir`/`bin-dir` (default `vendor`, `vendor/bin`) is linked into
+the `-i worktree` copy automatically; see probe.md's "Non-JS
+repositories". For every
 check without a predicate, `verify`'s status classification, and
 `probe`'s own baseline verdict, still read the plain exit code exactly
 as described above (the phpunit/phpstan/phpcs detectors parse output

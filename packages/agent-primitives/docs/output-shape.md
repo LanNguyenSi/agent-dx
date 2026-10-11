@@ -7,12 +7,30 @@ Every result carries a common envelope (`tool`, `version`, `command`,
 that order, followed by the subcommand-specific fields. `status` classes
 into `ok` (exit 0), `finding` (exit 1), or `cannot-conclude` (exit 2,
 includes `usage_error`), so a caller can gate on the exit code alone
-without parsing the body.
+without parsing the body. The status words map to the classes as
+follows (`src/envelope.ts`):
 
-The same machinery is importable for callers building their own bounded
-output: `buildEnvelope` produces the whole envelope, and `applyCaps`
-applies the four structural caps (`CapLimits`) to a plain object in one
-pass, returning a new structure with every cut marked in place.
+| Class | Exit | Status words |
+| --- | --- | --- |
+| `ok` | `0` | `ok`, `pass`, `killed`, `unchanged`, `written` |
+| `finding` | `1` | `missing`, `fail`, `survived`, `conflicted`, `outdated` |
+| `cannot-conclude` | `2` | `usage_error`, `inconclusive`, `error`, `baseline_failed` |
+
+Any status not listed is treated as `cannot-conclude` (exit `2`). A
+single `probe` with a `killed`/`survived` verdict takes its exit code
+from `mutation_probe.expectation` instead (`0` met, `1` violated), so
+under `--expect pass` a `survived` exits `0`; see [probe.md](probe.md).
+
+`buildEnvelope` produces the whole envelope, and `applyCaps` applies the
+four structural caps (`CapLimits`) to a plain object in one pass,
+returning a new structure with every cut marked in place. Both are
+exported from the built `dist/index.js` together with every command
+function except `hygiene` (`doctor()`, `verify()`, `probe()`,
+`probePlan()`, `init()`, `drift()`, `captureSnapshot()` and
+`compareSnapshots()`). `package.json` declares
+no `main` or `exports` entry, so `import ... from "agent-primitives"`
+does not resolve; a library caller imports
+`agent-primitives/dist/index.js` instead.
 
 ## Global options
 

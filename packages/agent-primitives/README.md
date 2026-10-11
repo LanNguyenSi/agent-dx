@@ -20,7 +20,7 @@ for teams shipping with AI agents.
 
 ## Key features
 
-- `doctor`: checks a fixed list of required and optional binaries on `PATH`
+- `doctor`: checks a list of required and optional binaries on `PATH`
   and reports a few environment signals (git worktree, `node_modules`,
   whether a rebuild is likely needed).
 - `verify`: runs named checks (`build`, `typecheck`, `lint`, `test` by
@@ -32,16 +32,17 @@ for teams shipping with AI agents.
   directory.
 - `drift`: finds prose and comments that still cite an identifier a change
   deleted or renamed.
-- `hygiene`: refuses staged or committed backup files (`*-E`, `*.bak`,
-  `*.orig`, `*~`) and flags rewrites of extend-only files and dropped test
-  cases.
+- `hygiene`: refuses staged or committed backup files (`*.bak`, `*.orig`,
+  `*~`, and the BSD `sed -i` leftovers `*-e`, `*-E`, `*-n`, `*-r`, `*-s`)
+  and flags rewrites of extend-only files and dropped test cases.
 - `snapshot` / `delta`: save checkout/index/content fingerprints to a full
   external artifact and compare the same checkout later.
 - Non-Node repositories are supported: PHP (PHPUnit, PHPStan,
   PHP_CodeSniffer) output is recognized by `verify` and `probe` alongside
   vitest, tsc, and eslint.
 - Every command accepts the same global flags (`-f/--format`, `-C/--cwd`,
-  `-m/--max-chars`, `-l/--log-dir`); see
+  `-m/--max-chars`, `-l/--log-dir`, and `--json` as an alias for
+  `-f json`); see
   [Output shape](docs/output-shape.md) for the JSON envelope and the
   `-m` reduction algorithm.
 
@@ -59,7 +60,9 @@ npm install -g agent-primitives
 agent-primitives doctor
 ```
 
-Requires Node >= 20.
+Requires Node >= 20 and git (2.35 or newer for `probe`'s default
+worktree isolation; `doctor` reports its `git-version` check ok from
+2.36).
 
 ## Usage
 
@@ -92,6 +95,60 @@ file, and reports whether the test caught it (`killed`) or missed it
 - [Output shape](docs/output-shape.md): the JSON envelope, global flags,
   and the `-m/--max-chars` reduction algorithm.
 
+## Architecture
+
+`src/cli.ts` registers every command and sends each result through
+`buildEnvelope` in `src/envelope.ts`, which applies the `-m` bound and
+maps the status to the exit code. Each command lives in its own module:
+
+| Command | Module |
+| --- | --- |
+| `doctor` | `src/doctor/index.ts` |
+| `verify` | `src/verify/index.ts`, output detectors in `src/verify/detectors/` |
+| `probe` | `src/probe/` (`index.ts`, `setup.ts`, `step.ts`, `session.ts`, `isolation.ts` and helpers) |
+| `init` | `src/init/index.ts`, digest ledger in `src/init/ledger.ts`; installs `assets/skill/SKILL.md` |
+| `drift` | `src/drift/` |
+| `hygiene` | `src/hygiene/index.ts`, using `src/drift/git.ts` |
+| `snapshot`, `delta` | `src/snapshot/` |
+
+`verify` spawns its checks through `execCommand` in `src/exec.ts`.
+`probe` is split into a setup phase (`src/probe/setup.ts`: containment,
+lock, stale-marker recovery, worktree preparation, baseline) and a
+per-mutant step (`src/probe/step.ts`: in-flight marker, apply, test,
+restore, classify), which `--plan` runs once per mutant;
+[docs/probe.md](docs/probe.md) shows the order of its gates. Both phases
+go through `src/probe/session.ts`: its `runPreThenTest` starts the
+baseline's and each mutant's `--pre` and test command through
+`execCommand` (the final `--pre` rebuild under `-i inplace` goes
+through `runFinalRebuild` in the same module, which `probe/index.ts`
+calls through `finalRebuildOrWarn`), and its
+`prepareWorktreeSession` creates the `-i worktree` copy through
+`src/probe/isolation.ts`. `doctor` reuses `src/lock.ts` and
+`src/probe/isolation.ts` to read the markers and scratch worktrees
+`probe` leaves behind. The diagram shows the main imports between the
+`verify`, `probe` and `doctor` modules and the shared ones; output
+helpers that `setup.ts` and `step.ts` also import from `exec.ts` are
+left out.
+
+```mermaid
+flowchart TD
+  VER["verify/index.ts"] -->|execCommand| EXEC["exec.ts"]
+  PRB["probe/index.ts"] --> SET["probe/setup.ts"]
+  PRB --> STP["probe/step.ts"]
+  SET --> SES["probe/session.ts"]
+  STP --> SES
+  PRB -->|finalRebuildOrWarn| SES
+  SET -->|acquireLock| LCK["lock.ts"]
+  STP -->|writeMarker| LCK
+  SES -->|execCommand| EXEC
+  SES -->|beginWorktree| ISO["probe/isolation.ts"]
+  ISO --> CON["probe/containment.ts"]
+  ISO --> LP["probe/link-policy.ts"]
+  LP --> CON
+  DOC["doctor/index.ts"] --> LCK
+  DOC --> ISO
+```
+
 ## Development
 
 To work on the package itself, build it from source:
@@ -105,7 +162,10 @@ node dist/cli.js doctor
 ```
 
 `npm test` runs the build first (`pretest`), then the test suite
-(vitest).
+(vitest). Before pushing, run `npm run typecheck`, `npm run
+typecheck:test`, `npm run format:check` and `npm test`; CI runs all of
+them for this package (see the repository's
+[CONTRIBUTING.md](../../CONTRIBUTING.md)).
 
 ## License
 
