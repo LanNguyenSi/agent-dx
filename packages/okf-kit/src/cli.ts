@@ -253,8 +253,8 @@ program
           : renderText(result.bundleDir, result.findings);
         process.stdout.write(output);
         // Set the code and return instead of process.exit(): a pipe write is
-        // asynchronous, and exiting here cut a report larger than the 64 KiB
-        // pipe buffer short.
+        // asynchronous, and exiting here cut a report larger than the pipe
+        // buffer (platform dependent) short.
         process.exitCode = result.exitCode;
         return;
       } catch (err) {
@@ -373,6 +373,15 @@ const isMainModule =
   import.meta.url === resolvedArgvUrl(process.argv[1]);
 
 if (isMainModule) {
+  // The commands no longer exit right after writing, so a reader that closes
+  // early (`okf-kit check | head -1`) surfaces as a stdout 'error' event. A
+  // closed reader (EPIPE) ends the run silently with the verdict code the
+  // command already set; any other write error is one stderr line and exit 2.
+  process.stdout.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EPIPE") process.exit(process.exitCode ?? 0);
+    process.stderr.write(`okf-kit: cannot write to stdout: ${err.message}\n`);
+    process.exit(2);
+  });
   program.parseAsync().catch((err) => {
     if (err instanceof CommanderError) {
       if (PASSTHROUGH_EXIT_CODES.has(err.code)) {

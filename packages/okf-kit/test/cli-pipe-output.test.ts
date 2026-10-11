@@ -1,11 +1,11 @@
 // Regression: `check --json` must deliver its whole report when stdout is a
 // pipe. The CLI used to call process.exit() right after process.stdout.write();
-// for a pipe the write is asynchronous, so a report larger than the 64 KiB pipe
-// buffer was cut off at the buffer size .
+// for a pipe the write is asynchronous, so a report larger than the pipe
+// buffer (platform dependent) was cut off at the buffer size.
 // A file redirect hides the bug (file writes are synchronous), so these tests
 // spawn the built CLI with a real pipe and a real pipe reader.
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -32,6 +32,24 @@ function largeBundle(docs: number): string {
   return dir;
 }
 
+// Same shape as largeBundle, but every finding is a warning (absolute link),
+// so the verdict is exit 0 without --strict.
+function largeWarningBundle(docs: number): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "okf-kit-pipe-"));
+  tmpDirs.push(dir);
+  fs.writeFileSync(
+    path.join(dir, "other.md"),
+    "---\ntype: concept\n---\n\n# Other\n",
+  );
+  for (let i = 0; i < docs; i++) {
+    fs.writeFileSync(
+      path.join(dir, `doc-${i}.md`),
+      `---\ntype: concept\n---\n\n[Other](/other.md)\n`,
+    );
+  }
+  return dir;
+}
+
 interface PipedRun {
   code: number | null;
   stdout: Buffer;
@@ -49,6 +67,22 @@ function runPiped(args: string[]): Promise<PipedRun> {
     child.on("close", (code) =>
       resolve({ code, stdout: Buffer.concat(chunks) }),
     );
+  });
+}
+
+// Reads one chunk, then closes the read end like `| head -1` would.
+function runEarlyClose(
+  args: string[],
+): Promise<{ code: number | null; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [CLI_PATH, ...args], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.on("data", (c: Buffer) => (stderr += c.toString("utf8")));
+    child.stdout.once("data", () => child.stdout.destroy());
+    child.on("error", reject);
+    child.on("close", (code) => resolve({ code, stderr }));
   });
 }
 
@@ -72,7 +106,6 @@ describe("check output through a pipe", () => {
     const outFile = path.join(bundle, "..", `${path.basename(bundle)}.json`);
     tmpDirs.push(outFile);
     const fd = fs.openSync(outFile, "w");
-    const { spawnSync } = await import("node:child_process");
     const filed = spawnSync(
       process.execPath,
       [CLI_PATH, "check", "--json", "--repo-root", bundle, bundle],
@@ -108,5 +141,57 @@ describe("check output through a pipe", () => {
     expect(lax.code).toBe(0);
     const strict = await runPiped(["check", "--json", "--strict", dir]);
     expect(strict.code).toBe(1);
+  });
+
+  it("ends silently with the verdict code when the reader closes early (warnings only)", async () => {
+    const bundle = largeWarningBundle(3000);
+    const run = await runEarlyClose(["check", "--repo-root", bundle, bundle]);
+    expect(run.stderr).toBe("");
+    expect(run.code).toBe(0);
+  });
+
+  it("keeps exit 1 and an empty stderr when the reader closes early on an error bundle", async () => {
+    const bundle = largeBundle(1500);
+    const run = await runEarlyClose(["check", "--repo-root", bundle, bundle]);
+    expect(run.stderr).toBe("");
+    expect(run.code).toBe(1);
+  });
+});
+
+describe("docs-for output through a pipe", () => {
+  it("delivers the complete JSON when it exceeds the pipe buffer", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "okf-kit-pipe-"));
+    tmpDirs.push(root);
+    fs.mkdirSync(path.join(root, "src"));
+    fs.writeFileSync(path.join(root, "src", "foo.ts"), "export {};\n");
+    const bundle = path.join(root, "docs");
+    fs.mkdirSync(bundle);
+    for (let i = 0; i < 1500; i++) {
+      fs.writeFileSync(
+        path.join(bundle, `doc-${i}.md`),
+        `---\ntype: concept\nsources:\n  - src/foo.ts\n---\n\n# Doc ${i}\n`,
+      );
+    }
+    const args = [
+      "docs-for",
+      "--json",
+      "--repo-root",
+      root,
+      bundle,
+      "src/foo.ts",
+    ];
+    const piped = await runPiped(args);
+    expect(piped.stdout.length).toBeGreaterThan(65536);
+    expect(piped.code).toBe(0);
+
+    const outFile = path.join(root, "out.json");
+    const fd = fs.openSync(outFile, "w");
+    const filed = spawnSync(process.execPath, [CLI_PATH, ...args], {
+      stdio: ["ignore", fd, "ignore"],
+    });
+    fs.closeSync(fd);
+    expect(filed.status).toBe(0);
+    expect(piped.stdout.equals(fs.readFileSync(outFile))).toBe(true);
+    expect(JSON.parse(piped.stdout.toString("utf8"))).toBeTruthy();
   });
 });
