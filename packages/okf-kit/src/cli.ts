@@ -252,7 +252,11 @@ program
           ? renderJson(result.bundleDir, result.findings)
           : renderText(result.bundleDir, result.findings);
         process.stdout.write(output);
-        process.exit(result.exitCode);
+        // Set the code and return instead of process.exit(): a pipe write is
+        // asynchronous, and exiting here cut a report larger than the 64 KiB
+        // pipe buffer short.
+        process.exitCode = result.exitCode;
+        return;
       } catch (err) {
         if (err instanceof UsageError) {
           process.stderr.write(`okf-kit: ${err.message}\n`);
@@ -291,7 +295,8 @@ program
           ? renderDocsForJson(result)
           : renderDocsForText(result);
         process.stdout.write(output);
-        process.exit(0);
+        process.exitCode = 0;
+        return;
       } catch (err) {
         if (err instanceof UsageError) {
           process.stderr.write(`okf-kit: ${err.message}\n`);
@@ -318,7 +323,8 @@ program
     try {
       const result = runInit(dir ?? "docs/okf", { force: opts.force });
       process.stdout.write(formatInitSummary(result));
-      process.exit(0);
+      process.exitCode = 0;
+      return;
     } catch (err) {
       if (err instanceof UsageError) {
         process.stderr.write(`okf-kit: ${err.message}\n`);
