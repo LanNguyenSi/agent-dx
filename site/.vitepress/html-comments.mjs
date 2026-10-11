@@ -114,15 +114,14 @@ function commentInline(state) {
 
 // After inline parsing. Comments in link, image, and container titles are
 // removed. Where text held a comment, the whitespace the comment leaves at the
-// start or end of the text or of a line is trimmed as for any other text, the
-// raw text the heading permalink label is built from loses the comment, and a
-// paragraph left empty is dropped.
+// start or end of the text or of a line is trimmed as for any other text, and
+// the raw text the heading permalink label is built from loses the comment.
+// No paragraph is left empty here: the block rule leaves a paragraph that
+// starts with a comment to the inline rule only when text follows the comment
+// on its line or the comment does not close inside its quote or container.
 function commentText(state) {
-  const out = []
-  for (let i = 0; i < state.tokens.length; i++) {
-    const tok = state.tokens[i]
+  for (const tok of state.tokens) {
     if (/^container_.+_open$/.test(tok.type)) tok.info = stripComments(tok.info)
-    out.push(tok)
     if (tok.type !== 'inline' || !tok.children) continue
     for (const child of tok.children) {
       if (child.type === 'link_open' || child.type === 'image') stripTitle(child)
@@ -131,16 +130,7 @@ function commentText(state) {
     if (content === tok.content) continue
     tok.content = content.trim()
     tok.children = trimText(tok.children)
-    if (
-      !tok.children.length &&
-      state.tokens[i - 1]?.type === 'paragraph_open' &&
-      state.tokens[i + 1]?.type === 'paragraph_close'
-    ) {
-      out.splice(-2, 2)
-      i++
-    }
   }
-  state.tokens = out
 }
 
 function trimText(children) {
