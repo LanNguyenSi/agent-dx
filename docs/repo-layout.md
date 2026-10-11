@@ -45,13 +45,17 @@ they are and remain the source. The sidebar is generated from the file tree
 with titles from each file's first H1, directory links land on the folder's
 README, and the build fails on a relative link whose target inside the
 repository does not exist (Markdown pages, folders, and other files alike).
+For authors: raw HTML in the playbooks renders as literal text, so a
+placeholder such as `<version>` shows as written, and HTML comments
+(`<!-- ... -->`) are hidden except inside code.
 
 ```bash
 cd site && npm ci && npm run build   # output in site/.vitepress/dist
+cd site && npm test                  # rendering checks for comments and raw HTML
 cd site && npm run dev               # local preview with search
 ```
 
-`.github/workflows/pages.yml` builds the site on pull requests that touch
-`site/`, the two playbooks, or the workflow itself, and deploys it to GitHub
-Pages on pushes to `master` that touch the same paths, or on a manual run on
-`master`.
+`.github/workflows/pages.yml` runs `npm test` and then builds the site on pull
+requests that touch `site/`, the two playbooks, or the workflow itself, and
+deploys it to GitHub Pages on pushes to `master` that touch the same paths, or
+on a manual run on `master`.
