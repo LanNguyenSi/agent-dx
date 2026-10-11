@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Reusable workflow `workflow-guard.yml` (task d9b3c9f1): the `ref` input is now optional. The tool is checked out from `job.workflow_repository` at `job.workflow_sha`, so the commit is pinned once, in `uses:`. With `ref` omitted the job requires `job.workflow_ref` to end in `@<40-hex>` (a branch or tag pin fails closed); with `ref` given, the existing 40-hex and equality checks apply unchanged, so callers passing `ref` keep working. An empty or non-hex `job.workflow_sha` still fails.
 - An unknown pack id now fails instead of being ignored (task d85097bd): `check --pack <id>`, the MCP `packs` argument and `packsByFilter` throw for an id the registry does not know, naming the unknown id(s) and listing the known packs. The CLI exits 2 and the composite action fails with exit 2 and an `::error` annotation, where a typo such as `ui-slp` previously scanned nothing and reported a clean run. Pack names under `packs:` in a config file were already rejected by schema validation.
 
 ### Added
