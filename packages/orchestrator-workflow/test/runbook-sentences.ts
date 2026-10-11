@@ -10,6 +10,11 @@
  * without naming it ("It becomes ...", "Such a defect ..."). Fenced code is
  * skipped, HTML comment delimiters are dropped, and headings, list items, and
  * table rows each start a new paragraph.
+ *
+ * Known limit: a sentence that refers to a runbook only by a pronoun or a
+ * synonym and sits outside that window (before the first runbook sentence of a
+ * paragraph, or in a later paragraph) is not a runbook sentence, so neither
+ * guard sees it. Review stays the primary control for such wording.
  */
 import { readdirSync } from "node:fs";
 import { join, relative, sep } from "node:path";
@@ -17,7 +22,7 @@ import { join, relative, sep } from "node:path";
 import { ASSETS_DIR } from "../src/assets.js";
 
 export const RUNBOOK_SUBJECT =
-  /runbook|checklist|authority: ?`?data|`data`|data[- ]authority/i;
+  /run[- ]?books?|checklist|authority: ?`?data|`data`|data[- ]authority/i;
 
 /** Every markdown asset the kit installs, as a `/`-separated path under assets/. */
 export function assetMarkdownFiles(): string[] {

@@ -455,7 +455,8 @@ const UNSET_RULE_PLAN =
  * authority together with a finding, a severity, or an obligation. Each one
  * qualifies the obligation (only when, never automatic), says the runbook is
  * data or leads to consult, or names where an adoption is recorded; any other
- * such sentence fails the guard below, whatever its wording.
+ * such runbook sentence (see test/runbook-sentences.ts for the window and its
+ * known limit) fails the guard below.
  */
 const CANONICAL_DATA_SENTENCES = [
   DATA_RULE,
@@ -541,7 +542,7 @@ describe("the data-runbook rule is one canonical sentence", () => {
     expect(runbookSentencesByFile.get(file)).toContain(DATA_RULE);
   });
 
-  it("no installed asset ties the data authority to a finding, a severity, or an obligation outside the canonical sentences", () => {
+  it("no runbook sentence of an installed asset ties the data authority to a finding, a severity, or an obligation outside the canonical sentences", () => {
     const offenders: string[] = [];
     for (const [file, sentences] of runbookSentencesByFile) {
       for (const sentence of sentences) {
@@ -594,11 +595,13 @@ describe("the data-runbook rule is one canonical sentence", () => {
 });
 
 describe("the runbook rule text is a closed, vetted set of sentences", () => {
-  // Every runbook sentence of the installed assets (see test/runbook-sentences.ts)
-  // is listed in this fixture, per file. A sentence that is not listed fails
-  // the first check below, whatever its wording; a listed sentence that is gone
-  // fails the second. A wording change to the runbook rules therefore needs a
-  // matching, reviewed change to the fixture.
+  // Every runbook sentence of the installed assets (see test/runbook-sentences.ts
+  // for the window and its known limit) is listed in this fixture, per file. A
+  // runbook sentence that is not listed fails the first check below; a listed
+  // sentence that is gone fails the second. A wording change to the runbook
+  // rules therefore needs a matching change to the fixture, and that fixture
+  // change is reviewed against the trust boundary like the asset change itself;
+  // never regenerate the fixture without that review.
   const vetted = JSON.parse(
     readFileSync(
       new URL("./fixtures/runbook-rule-sentences.json", import.meta.url),
@@ -633,7 +636,10 @@ describe("the runbook rule text is a closed, vetted set of sentences", () => {
       const missing = (vetted[file] ?? []).filter(
         (sentence) => !present.has(sentence),
       );
-      expect(missing).toEqual([]);
+      expect(
+        missing,
+        `vetted runbook sentences no longer present in ${file}: if the wording changed on purpose, review the new sentence against the trust boundary and the data-runbook rule, then update test/fixtures/runbook-rule-sentences.json`,
+      ).toEqual([]);
     },
   );
 
