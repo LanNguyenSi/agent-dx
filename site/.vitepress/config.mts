@@ -177,8 +177,8 @@ export default defineConfig({
   },
   lastUpdated: false,
   // Raw HTML is parsed so that markdown-it decides what is a comment; the
-  // htmlComments renderer rules drop comments and escape any other HTML, so
-  // placeholders like <version> still render as text.
+  // htmlComments core rule drops comments and turns any other HTML into text,
+  // so placeholders like <version> still render as text.
   markdown: { html: true, config: linkMapper },
   themeConfig: {
     search: { provider: 'local' },

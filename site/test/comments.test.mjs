@@ -98,3 +98,41 @@ test('an unclosed comment opener stays visible and drops nothing', () => {
   assert.match(out, /&lt;!-- never closed/)
   assert.match(out, /later text/)
 })
+
+const htmlTokens = (src) => {
+  const flat = (tokens) => tokens.flatMap((t) => [t, ...flat(t.children ?? [])])
+  return flat(md.parse(src, { relativePath: 'fixture.md' })).filter((t) => /^html_/.test(t.type))
+}
+
+test('a line starting with a custom element or component renders as escaped text', () => {
+  // VitePress parses these lines as components, which the Vue compiler
+  // would turn into live elements and props.
+  const cases = {
+    '<x-a onclick="1">t</x-a>\n': '<p>&lt;x-a onclick=&quot;1&quot;&gt;t&lt;/x-a&gt;</p>\n',
+    '<Foo />\n': '<p>&lt;Foo /&gt;</p>\n',
+    '<Foo bar="1" /> rest **b**\n': '<p>&lt;Foo bar=&quot;1&quot; /&gt; rest <strong>b</strong></p>\n',
+    '<my-el v-html="\'<img src=x>\'"></my-el>\n':
+      '<p>&lt;my-el v-html=&quot;\'&lt;img src=x&gt;\'&quot;&gt;&lt;/my-el&gt;</p>\n'
+  }
+  for (const [src, expected] of Object.entries(cases)) {
+    assert.equal(render(src), expected)
+    assert.deepEqual(htmlTokens(src), [])
+  }
+})
+
+test('entities and backslash escapes inside an HTML block render as in a paragraph', () => {
+  const out = render('<div>\n\\*x\\* &amp; &copy; &#60;b&#62;\n</div>\n')
+  assert.equal(out, '<p>&lt;div&gt;\n*x* &amp; &copy; &#60;b&#62;\n&lt;/div&gt;</p>\n')
+})
+
+test('a comment inside image alt text is dropped from the alt attribute', () => {
+  const src = '![a <!-- c --> b](x.png)\n'
+  assert.match(render(src), /<img src="[^"]*x\.png" alt="a {2}b">/)
+  assert.deepEqual(htmlTokens(src), [])
+})
+
+test('a comment in a heading is dropped from the permalink label, a code span keeps it', () => {
+  assert.match(render('## A <!-- x --> B\n'), /aria-label="Permalink to &quot;A {2}B&quot;"/)
+  const code = render('## A <!-- x --> `<!-- y -->` B\n')
+  assert.match(code, /aria-label="Permalink to &quot;A {2}`(&lt;|&#x3C;)!-- y --&gt;` B&quot;"/)
+})
