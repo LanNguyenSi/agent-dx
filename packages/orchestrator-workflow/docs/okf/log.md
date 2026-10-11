@@ -1,5 +1,21 @@
 # Bundle log
 
+- 2026-10-11T08:54:03Z, runbook selection review fixes: the reviewer now classifies a runbook
+  deviation by the briefing's authority (an operator runbook deviation is a
+  finding by its consequence, a data runbook deviation goes into the new
+  `runbook_notes` list and is a finding only when it is independently a
+  defect), the implementer return gained `runbooks_consulted`, and the
+  reviewer return gained `runbook_notes`. The lines these edits added or moved
+  shifted `contracts.md`, `reviewer.md`, `implementer.md`,
+  `agents-md-section.md`, `SKILL.md`, `evidence-and-probes.md`,
+  `run-state-and-harness.md`, `CHANGELOG.md`, and `test/docs-consistency.test.ts`,
+  so every citation into them was re-pointed by anchor after comparing each
+  moved range's content with its old content, and the sibling-drift allowlist
+  entries that record `docs-consistency.test.ts` lines were shifted by the
+  same offset. The docs whose sources changed were re-stamped after re-reading
+  their claims against the changed files. `okf-kit check --require-anchors
+  --strict` was run on the bundle after the edit.
+
 - 2026-10-07T08:13:04Z, commit hygiene rule reworded after review: the by-hand fallback
   names `git diff --cached --stat <base>` before a commit and `git diff --stat
   <base>..HEAD` before returning, the threshold follows the runner, and the
