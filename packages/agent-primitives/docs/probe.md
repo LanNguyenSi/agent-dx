@@ -124,12 +124,8 @@ flowchart TD
 
 Only then is the mutant applied (`runMutantAttempt` in
 `src/probe/step.ts`, which writes the in-flight marker first under
-`-i inplace`), tested, restored and verified by hash, and classified. A
-run that got past the lock ends in the same teardown whatever its
-outcome: the final `--pre` rebuild under `-i inplace` (only when `--pre`
-was given and a mutant was applied and restored), the worktree removal,
-and the lock release. The exit code is `0` for a met expectation, `1`
-for a violated one, and `2` for every refusal.
+`-i inplace`), tested, restored and verified by hash, and classified.
+The diagram shows that mutant step up to its verdict or refusal.
 
 ```mermaid
 flowchart TD
@@ -141,9 +137,20 @@ flowchart TD
   RS -->|yes| K{"Did the mutant run<br/>report an exit code?"}
   K -->|no| R14["timeout"]
   K -->|yes| V["killed or survived,<br/>expectation met or violated"]
-  V --> TEAR["Teardown: final --pre rebuild (-i inplace),<br/>worktree removal, lock release"]
-  TEAR --> O["Exit code: 0 met, 1 violated"]
 ```
+
+A run that got past the lock ends in the same teardown after a verdict
+and after every refusal from the stale-marker check on: the final
+`--pre` rebuild under `-i inplace` (only when `--pre` was given, a
+mutant was applied and its restore was verified), the worktree removal,
+and the lock release. A run interrupted by `SIGINT`/`SIGTERM` skips
+that rebuild. The CLI's signal handler restores the target, removes the
+worktree, releases the lock and exits `130` or `143` with no output;
+a library caller gets a `warnings` entry about the stale build instead
+(see [--pre, --timeout and --env](#--pre---timeout-and---env) and
+[Signals, locks and recovery](#signals-locks-and-recovery)). Otherwise
+the exit code is `0` for a met expectation, `1` for a violated one, and `2` for
+every refusal.
 
 `--plan` runs the same setup and baseline once, and the mutant step once
 per mutant.

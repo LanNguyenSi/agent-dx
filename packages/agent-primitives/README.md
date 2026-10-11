@@ -111,28 +111,36 @@ maps the status to the exit code. Each command lives in its own module:
 | `hygiene` | `src/hygiene/index.ts`, using `src/drift/git.ts` |
 | `snapshot`, `delta` | `src/snapshot/` |
 
-`verify` and `probe` spawn their commands through `src/exec.ts`. `probe`
-is split into a setup phase (`src/probe/setup.ts`: containment, lock,
-stale-marker recovery, worktree preparation, baseline) and a per-mutant
-step (`src/probe/step.ts`: apply, test, restore, classify), which
-`--plan` runs once per mutant; [docs/probe.md](docs/probe.md) shows the
-order of its gates. `doctor` reuses `src/lock.ts` and
+`verify` spawns its checks through `execCommand` in `src/exec.ts`.
+`probe` is split into a setup phase (`src/probe/setup.ts`: containment,
+lock, stale-marker recovery, worktree preparation, baseline) and a
+per-mutant step (`src/probe/step.ts`: in-flight marker, apply, test,
+restore, classify), which `--plan` runs once per mutant;
+[docs/probe.md](docs/probe.md) shows the order of its gates. Both phases
+go through `src/probe/session.ts`: its `runPreThenTest` starts every
+`--pre` and test command through `execCommand`, and its
+`prepareWorktreeSession` creates the `-i worktree` copy through
+`src/probe/isolation.ts`. `doctor` reuses `src/lock.ts` and
 `src/probe/isolation.ts` to read the markers and scratch worktrees
-`probe` leaves behind. The diagram shows these imports between
-the `verify`, `probe` and `doctor` modules and the shared ones.
+`probe` leaves behind. The diagram shows the main imports between the
+`verify`, `probe` and `doctor` modules and the shared ones; output
+helpers that `setup.ts` and `step.ts` also import from `exec.ts` are
+left out.
 
 ```mermaid
 flowchart TD
-  VER["verify/index.ts"] --> EXEC["exec.ts"]
+  VER["verify/index.ts"] -->|execCommand| EXEC["exec.ts"]
   PRB["probe/index.ts"] --> SET["probe/setup.ts"]
   PRB --> STP["probe/step.ts"]
-  SET --> EXEC
-  SET --> LCK["lock.ts"]
-  STP --> EXEC
-  STP --> SES["probe/session.ts"]
-  SES --> ISO["probe/isolation.ts"]
+  SET --> SES["probe/session.ts"]
+  STP --> SES
+  SET -->|acquireLock| LCK["lock.ts"]
+  STP -->|writeMarker| LCK
+  SES -->|execCommand| EXEC
+  SES -->|beginWorktree| ISO["probe/isolation.ts"]
   ISO --> CON["probe/containment.ts"]
   ISO --> LP["probe/link-policy.ts"]
+  LP --> CON
   DOC["doctor/index.ts"] --> LCK
   DOC --> ISO
 ```
