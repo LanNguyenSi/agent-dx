@@ -20,8 +20,8 @@ flowchart TD
   REV["reviewer, opus<br/>skeptical, severity-rated<br/>findings, no rewrites"]
 
   OP -->|goal| ORC
-  ORC -->|"handoff: what changed,<br/>how verified, what is open"| OP
-  EXP <-.->|"solution unclear"| ORC
+  ORC -->|handoff| OP
+  EXP <-.->|"goal, solution or<br/>terrain unclear"| ORC
   ADV <-.->|"escalation only"| ORC
   ORC <--> RUN
   ORC <-->|"contract / YAML evidence"| TS

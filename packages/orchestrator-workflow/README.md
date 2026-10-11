@@ -8,10 +8,10 @@ you actually use (Claude Code, OpenAI Codex, opencode).
 The primary agent acts as the orchestrator: it owns goal, plan, task
 validation, acceptance, and the operator handoff. Review is never skipped:
 non-trivial review goes to a narrow reviewer subagent, and by default so does
-implementation (see [Run modes](#run-modes)); subagents return structured YAML evidence, not
-transcripts, and every unit of work leaves an auditable run directory
-behind. See [Architecture: why this shape](docs/architecture.md) for the
-loop diagram and the reasoning, and [Run contracts](docs/run-contracts.md)
+implementation (see [Run modes](#run-modes)); subagents return structured YAML
+evidence, not transcripts, and every unit of work leaves an auditable run
+directory behind. See [Architecture: why this shape](docs/architecture.md) for
+the loop diagram and the reasoning, and [Run contracts](docs/run-contracts.md)
 for the optional frozen acceptance-baseline contract and the
 decision-authority record every run keeps.
 
@@ -62,10 +62,10 @@ when the target is not a git repository root; pass `init <dir>` to install
 into a different directory. The installer is interactive by default: it
 locates existing harness configs (`.claude/`, `CLAUDE.md`, `.opencode/`,
 `opencode.json`, `opencode.jsonc`, `.agents/`, `.codex/`) and preselects what
-it found. For a
-guided install, use the agent-led path above: the agent inspects the repository
-and available harness capabilities, prepares the exact CLI invocation and
-routing diff, and asks only about choices or authority it cannot infer safely.
+it found. For a guided install, use the agent-led path above: the agent
+inspects the repository and available harness capabilities, prepares the exact
+CLI invocation and routing diff, and asks only about choices or authority it
+cannot infer safely.
 
 Non-interactive:
 

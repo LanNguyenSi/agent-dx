@@ -44,17 +44,19 @@ including the pin gate and the precedence step described below.
 ```mermaid
 flowchart TD
   START["apply --target"]
-  LOAD["read operator defaults<br/>and the target manifest"]
+  LOADOP["read the operator manifest"]
   NOSETUP["exit 1"]
+  LOADT["read the target manifest"]
   PIN{"target pinned to another<br/>version, and no --pin,<br/>--unpin, or --force-pin?"}
   SKIP["skip, exit 0"]
-  PREC["resolve options:<br/>flag, then target record,<br/>then operator default;<br/>--sync: operator first"]
+  PREC["resolve options:<br/>flag, then target record,<br/>then operator default;<br/>--sync: operator default<br/>over target record"]
   RUN["runInit: install, rewrite<br/>the target manifest"]
   REG["register the target in the<br/>operator manifest, under the lock"]
 
-  START --> LOAD
-  LOAD -->|"no operator setup,<br/>or unreadable"| NOSETUP
-  LOAD --> PIN
+  START --> LOADOP
+  LOADOP -->|"absent or unreadable"| NOSETUP
+  LOADOP --> LOADT
+  LOADT --> PIN
   PIN -->|yes| SKIP
   PIN -->|no| PREC
   PREC --> RUN
