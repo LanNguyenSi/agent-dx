@@ -10,6 +10,25 @@ export function hasSourcesKey(parsed: unknown): boolean {
 }
 
 /**
+ * Returns the frontmatter list under `key` when it is shaped correctly (a
+ * non-empty array of non-empty strings), or undefined otherwise (absent, or
+ * present but malformed). The one shape check behind `getValidSources` and
+ * `getValidAppliesTo`.
+ */
+export function getValidPathList(
+  parsed: unknown,
+  key: string,
+): string[] | undefined {
+  if (!isRecord(parsed) || !(key in parsed)) return undefined;
+  const list = parsed[key];
+  const isValidShape =
+    Array.isArray(list) &&
+    list.length > 0 &&
+    list.every((s) => typeof s === "string" && s.trim() !== "");
+  return isValidShape ? (list as string[]) : undefined;
+}
+
+/**
  * Returns the frontmatter `sources` array when it is shaped correctly (a
  * non-empty array of non-empty strings), or undefined otherwise (absent, or
  * present but malformed). Shared between sources-shape (which reports the
@@ -18,13 +37,7 @@ export function hasSourcesKey(parsed: unknown): boolean {
  * sources-shape).
  */
 export function getValidSources(parsed: unknown): string[] | undefined {
-  if (!hasSourcesKey(parsed)) return undefined;
-  const sources = (parsed as Record<string, unknown>).sources;
-  const isValidShape =
-    Array.isArray(sources) &&
-    sources.length > 0 &&
-    sources.every((s) => typeof s === "string" && s.trim() !== "");
-  return isValidShape ? (sources as string[]) : undefined;
+  return getValidPathList(parsed, "sources");
 }
 
 /** Whether parsed frontmatter has an `applies_to` key at all, regardless of shape validity. */
@@ -40,13 +53,7 @@ export function hasAppliesToKey(parsed: unknown): boolean {
  * and `sources-fresh` never reads it.
  */
 export function getValidAppliesTo(parsed: unknown): string[] | undefined {
-  if (!hasAppliesToKey(parsed)) return undefined;
-  const appliesTo = (parsed as Record<string, unknown>).applies_to;
-  const isValidShape =
-    Array.isArray(appliesTo) &&
-    appliesTo.length > 0 &&
-    appliesTo.every((s) => typeof s === "string" && s.trim() !== "");
-  return isValidShape ? (appliesTo as string[]) : undefined;
+  return getValidPathList(parsed, "applies_to");
 }
 
 /**

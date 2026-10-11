@@ -48,14 +48,15 @@ export interface DocsForResult {
 /**
  * `okf-kit docs-for <bundleDir> <path>...`: which bundle docs claim a given
  * path (relative or absolute, resolved against repoRoot) as a `sources`
- * entry, directly.
+ * or `applies_to` entry, directly. `applies_to` is lookup-only: this command
+ * matches it, while the staleness rules never read it.
  *
  * Reuses the shape validation `sources-shape` applies (`getValidSources`,
  * `getValidAppliesTo`): a doc with no such key, or a malformed one,
  * contributes no matches through that field -- that shape error is
  * `sources-shape`'s job to report, not this command's.
  *
- * Matching a `sources` entry against a given path:
+ * Matching a `sources` or `applies_to` entry against a given path:
  *  - exact match: the given path resolves to the exact same path the
  *    `sources` entry resolves to.
  *  - directory containment: when the `sources` entry resolves to a path
@@ -217,8 +218,9 @@ function isWithinDirectory(dir: string, target: string): boolean {
 
 /**
  * Text output: one doc per line (bundle-relative path, matching `check`'s
- * own `Finding.file` convention), followed by the `sources` entries of its
- * that matched, so a human can see WHICH source claim(s) pulled the doc in
+ * own `Finding.file` convention), followed by the `sources` entries that
+ * matched and, after a semicolon, the matched `applies_to` entries prefixed
+ * `applies_to:`, so a human can see WHICH claim(s) pulled the doc in
  * without switching to `--json`. "no matches" is reported explicitly rather
  * than as silent empty output, mirroring `renderText`'s own "clean, no
  * findings" line in report.ts.

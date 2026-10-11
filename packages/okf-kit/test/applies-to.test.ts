@@ -3,11 +3,19 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadBundle } from "../src/bundle.js";
 import { runDocsFor } from "../src/docs-for.js";
-import { sourcesFreshRule } from "../src/rules/sources-fresh.js";
+import {
+  sourcesFreshFutureRule,
+  sourcesFreshRule,
+} from "../src/rules/sources-fresh.js";
 import { runbookTemplate } from "../src/templates.js";
 import { sourcesShapeRule } from "../src/rules/sources-shape.js";
 import { CLI_PATH, runCli } from "./helpers.js";
-import { createTmpGitRepo, writeDoc, type TmpGitRepo } from "./git-helpers.js";
+import {
+  createTmpGitRepo,
+  docContent,
+  writeDoc,
+  type TmpGitRepo,
+} from "./git-helpers.js";
 
 describe("applies_to", () => {
   let repo: TmpGitRepo;
@@ -111,6 +119,73 @@ describe("applies_to", () => {
       repo.dir,
     ]);
     expect(text.stdout).toBe("runbook.md: applies_to: templates\n");
+  });
+
+  it("docs-for text output joins sources and applies_to entries with a semicolon", () => {
+    repo.commitFile("src/x.ts", "x\n", "2025-01-01T00:00:00Z");
+    writeDoc(repo.dir, "bundle/both.md", {
+      type: "runbook",
+      timestamp: "2025-06-01T00:00:00Z",
+      sources: ["src/x.ts"],
+      applies_to: ["src"],
+    });
+    const text = runCli([
+      "docs-for",
+      bundleDir(),
+      "src/x.ts",
+      "--repo-root",
+      repo.dir,
+    ]);
+    expect(text.status).toBe(0);
+    expect(text.stdout).toBe("both.md: src/x.ts; applies_to: src\n");
+  });
+
+  describe("a doc with fresh sources and an applies_to directory changed after its timestamp", () => {
+    // sources are unchanged since the doc timestamp; only the applies_to
+    // directory moved on. applies_to must never feed the staleness rules.
+    const writeBoth = (): void => {
+      repo.commitFile("src/x.ts", "x\n", "2025-01-01T00:00:00Z");
+      repo.commitFile(
+        "templates/a.md",
+        "template a, edited\n",
+        "2026-01-01T00:00:00Z",
+      );
+      repo.commitFile(
+        "bundle/both.md",
+        docContent({
+          type: "runbook",
+          timestamp: "2025-06-01T00:00:00Z",
+          sources: ["src/x.ts"],
+          applies_to: ["templates"],
+        }),
+        "2025-06-01T00:00:00Z",
+      );
+    };
+
+    it("sources-fresh does not flag it STALE", () => {
+      writeBoth();
+      const findings = sourcesFreshRule.run(loadBundle(bundleDir(), repo.dir));
+      expect(findings).toEqual([]);
+    });
+
+    it("sources-fresh-future does not flag it", () => {
+      writeBoth();
+      const findings = sourcesFreshFutureRule.run(
+        loadBundle(bundleDir(), repo.dir),
+      );
+      expect(findings).toEqual([]);
+    });
+
+    it("sources-fresh does not flag it with --dirty-as-now and an uncommitted edit in the applies_to directory", () => {
+      writeBoth();
+      fs.writeFileSync(
+        path.join(repo.dir, "templates/a.md"),
+        "template a, dirty\n",
+      );
+      const ctx = loadBundle(bundleDir(), repo.dir);
+      ctx.dirtyAsNow = true;
+      expect(sourcesFreshRule.run(ctx)).toEqual([]);
+    });
   });
 
   it("a change inside an applies_to directory after the doc timestamp does NOT make the doc stale", () => {
