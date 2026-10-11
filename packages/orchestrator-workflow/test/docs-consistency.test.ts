@@ -780,9 +780,15 @@ describe("task slicer output schema is a superset of the implementer input contr
     expect(block).toMatch(criterionRecordsShape());
   });
 
+  // Fields only the orchestrator sets at delegation, so the task slicer's
+  // output deliberately never carries them. `runbooks` is the only one: the
+  // slicer sees no runbook selection, which happens at delegation.
+  const orchestratorSetFields = ["runbooks"];
+
   function requiredTaskFields(block: string): string[] {
-    // Only the explicit delegation envelope is excluded. Scan the WHOLE
-    // block for top-level fields, including those following context.
+    // Only the explicit delegation envelope and the orchestrator-set fields
+    // are excluded. Scan the WHOLE block for top-level fields, including
+    // those following context.
     const envelope = ["role", "task_id", "context", "expected_output"];
     const topLevel = [...block.matchAll(/^(\w+):/gm)].map((match) => match[1]);
     const context =
@@ -791,12 +797,15 @@ describe("task slicer output schema is a superset of the implementer input contr
       (match) => match[1],
     );
     return [
-      ...topLevel.filter((field) => !envelope.includes(field)),
+      ...topLevel.filter(
+        (field) =>
+          !envelope.includes(field) && !orchestratorSetFields.includes(field),
+      ),
       ...children,
     ];
   }
 
-  it("derives fields after context and excludes only immediate envelope fields", () => {
+  it("derives fields after context and excludes only the envelope and the orchestrator-set fields", () => {
     const input = yamlBlockAfter(skillMdRaw, "## Subagent input contract");
     const extended = input.replace(
       "expected_output:",
@@ -7284,25 +7293,25 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "subagent-contracts-superset.md",
     kind: "duplicate-citation",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1106,
-    end: 1106,
+    start: 1115,
+    end: 1115,
     anchorKey: "03317257",
     paragraphLine: 466,
     secondCitationLine: 470,
     claim:
-      "same opening-citation-then-closing-enumeration convention as the review-gate-consequence entry above, here at :1106/line 470: the closing list walks :1081, :1089, :1094 and ends on the cross-copy equality check the :1106 opening sentence named, leaving no further assertion of that block uncited.",
+      "same opening-citation-then-closing-enumeration convention as the review-gate-consequence entry above, here at :1115/line 470: the closing list walks :1090, :1098, :1103 and ends on the cross-copy equality check the :1115 opening sentence named, leaving no further assertion of that block uncited.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "duplicate-citation",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1262,
-    end: 1262,
+    start: 1271,
+    end: 1271,
     anchorKey: "b19680bb",
     paragraphLine: 755,
     secondCitationLine: 763,
     claim:
-      "same convention again, here at :1262/line 763: the closing list walks :1228, :1234, :1257 and ends on the not-applicable-clause pin the :1262 opening sentence named, leaving no further assertion of that block uncited.",
+      "same convention again, here at :1271/line 763: the closing list walks :1237, :1243, :1266 and ends on the not-applicable-clause pin the :1271 opening sentence named, leaving no further assertion of that block uncited.",
   },
   {
     doc: "install-fence-mechanics.md",
@@ -8043,7 +8052,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 71,
     end: 73,
     anchorKey: "ea438f34",
-    paragraphLine: 180,
+    paragraphLine: 190,
     uncitedLines: [602],
     claim:
       "line 73 cites the test that 00-goal.md carries the keyed run-base placeholder line byte-exactly; uncited 602 repeats the identical marker line at a wholly separate site the citing sentence never names.",
@@ -8055,7 +8064,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 88,
     end: 95,
     anchorKey: "3cd8bcb0",
-    paragraphLine: 184,
+    paragraphLine: 194,
     uncitedLines: [602],
     claim:
       "line 95 cites the test that the keyed run-base placeholder line sits directly below the unkeyed one; uncited 602 repeats the identical marker line at a wholly separate site the citing sentence never names.",
@@ -8067,7 +8076,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 99,
     end: 100,
     anchorKey: "3c649d56",
-    paragraphLine: 187,
+    paragraphLine: 197,
     uncitedLines: [50],
     claim:
       "the sentence describes the keyed-marker-noninterference test (`the existing unkeyed run-base regex still matches exactly once...`); lines 99-100 are that test's own assertion, while uncited 50 is the byte-identical assertion inside the earlier, more general `00-goal.md has exactly one run-base marker, defaulting to TODO` test, which predates the keyed marker and does not test non-interference, a test the sentence does not name.",
@@ -8079,7 +8088,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 216,
     end: 226,
     anchorKey: "86ae35d5",
-    paragraphLine: 265,
+    paragraphLine: 275,
     uncitedLines: [251, 252],
     claim:
       'line 226 cites the `carries a header row with both Severity and Decision columns` test (`expect(cells).toContain("decision");`); uncited 251 and 252 is instead line 251 in the `invites only the reader\'s resolved Decision vocabulary in t…` test (`const decisionCell = cells[cells.indexOf("accepted/defer")];`); and line 252 in the `invites only the reader\'s resolved Decision vocabulary in t…` test (`const tokens = decisionCell`), a different site the citing sentence never names.',
@@ -8100,37 +8109,37 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1037,
-    end: 1037,
+    start: 1046,
+    end: 1046,
     anchorKey: "fcc9c9f6",
     paragraphLine: 182,
-    uncitedLines: [1841, 1881],
+    uncitedLines: [1850, 1890],
     claim:
-      "line 1037 cites the reviewer-copy byte-identity test for the reproduction field; uncited 1841 and 1881 are the same equality-assertion shape inside the separate findings-block and method_applied/withdrawn-block reviewer-copy tests, which this sentence does not name.",
+      "line 1046 cites the reviewer-copy byte-identity test for the reproduction field; uncited 1850 and 1890 are the same equality-assertion shape inside the separate findings-block and method_applied/withdrawn-block reviewer-copy tests, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1106,
-    end: 1106,
+    start: 1115,
+    end: 1115,
     anchorKey: "bd3b4521",
     paragraphLine: 185,
-    uncitedLines: [1257, 5038],
+    uncitedLines: [1266, 5047],
     claim:
-      "line 1106 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1257 and 5038 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
+      "line 1115 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1266 and 5047 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 857,
-    end: 857,
+    start: 866,
+    end: 866,
     anchorKey: "9e1acc22",
     paragraphLine: 271,
-    uncitedLines: [751, 820],
+    uncitedLines: [751, 829],
     claim:
-      "line 857 is the slicer-output match inside the test proving no subagent-input field is absent from the slicer output schema, the test this sentence describes; uncited 751 is the list-shape helper's own field regex, and uncited 820 is the same match inside the separate excludes-only-immediate-envelope-fields test, neither of which this sentence names.",
+      "line 866 is the slicer-output match inside the test proving no subagent-input field is absent from the slicer output schema, the test this sentence describes; uncited 751 is the list-shape helper's own field regex, and uncited 829 is the same match inside the separate excludes-only-the-envelope-and-orchestrator-set-fields test, neither of which this sentence names.",
   },
   {
     doc: "subagent-contracts-superset.md",
@@ -8148,109 +8157,109 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1106,
-    end: 1106,
+    start: 1115,
+    end: 1115,
     anchorKey: "bd3b4521",
     paragraphLine: 466,
-    uncitedLines: [1257, 5038],
+    uncitedLines: [1266, 5047],
     claim:
-      "line 1106 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1257 and 5038 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
+      "line 1115 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1266 and 5047 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1106,
-    end: 1106,
+    start: 1115,
+    end: 1115,
     anchorKey: "bd3b4521",
     paragraphLine: 470,
-    uncitedLines: [1257, 5038],
+    uncitedLines: [1266, 5047],
     claim:
-      "line 1106 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1257 and 5038 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
+      "line 1115 cites the implementer-copy byte-identity test for the mutation_probes field; uncited 1266 and 5047 are the same equality-assertion shape inside the separate commits-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1146,
-    end: 1146,
+    start: 1155,
+    end: 1155,
     anchorKey: "1d478a12",
     paragraphLine: 473,
-    uncitedLines: [1262],
+    uncitedLines: [1271],
     claim:
-      "line 1146 cites the test for the installed prompt's not-applicable mutation_probes clause; uncited 1262 is the same containment assertion inside the separate not-applicable commits-clause test, which this sentence does not name.",
+      "line 1155 cites the test for the installed prompt's not-applicable mutation_probes clause; uncited 1271 is the same containment assertion inside the separate not-applicable commits-clause test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 4979,
-    end: 4979,
+    start: 4988,
+    end: 4988,
     anchorKey: "ecb73fca",
     paragraphLine: 533,
-    uncitedLines: [5009],
+    uncitedLines: [5018],
     claim:
-      "line 4979 cites the test that step 6 treats a replayed probe that now survives or cannot be applied as a regression signal; uncited 5009 is the same regression-signal sentence quoted again inside the separate workflow-step-6-source test, which this sentence does not name.",
+      "line 4988 cites the test that step 6 treats a replayed probe that now survives or cannot be applied as a regression signal; uncited 5018 is the same regression-signal sentence quoted again inside the separate workflow-step-6-source test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 4997,
-    end: 4997,
+    start: 5006,
+    end: 5006,
     anchorKey: "2e18ea4a",
     paragraphLine: 537,
-    uncitedLines: [6449],
+    uncitedLines: [6458],
     claim:
-      "line 4997 cites the test that the installed implementer prompt carries the same regression-signal consequence; uncited 6449 is unrelated fixture prose inside the separate shape-3 sibling-guard fixture test that happens to share a short word run with that consequence sentence, which this sentence does not name.",
+      "line 5006 cites the test that the installed implementer prompt carries the same regression-signal consequence; uncited 6458 is unrelated fixture prose inside the separate shape-3 sibling-guard fixture test that happens to share a short word run with that consequence sentence, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 5037,
-    end: 5037,
+    start: 5046,
+    end: 5046,
     anchorKey: "a4566152",
     paragraphLine: 539,
-    uncitedLines: [1151],
+    uncitedLines: [1160],
     claim:
-      "line 5037 cites the test that both output contract copies carry a byte-identical mutation_probes block; uncited 1151 is the same boolean-literal phrase inside the separate exact-sub-field-names test earlier in the file, which this sentence does not name.",
+      "line 5046 cites the test that both output contract copies carry a byte-identical mutation_probes block; uncited 1160 is the same boolean-literal phrase inside the separate exact-sub-field-names test earlier in the file, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1262,
-    end: 1262,
+    start: 1271,
+    end: 1271,
     anchorKey: "1d478a12",
     paragraphLine: 755,
-    uncitedLines: [1146],
+    uncitedLines: [1155],
     claim:
-      "line 1262 cites the test for the installed prompt's not-applicable commits clause; uncited 1146 is the same containment assertion inside the separate not-applicable mutation_probes-clause test, which this sentence does not name.",
+      "line 1271 cites the test for the installed prompt's not-applicable commits clause; uncited 1155 is the same containment assertion inside the separate not-applicable mutation_probes-clause test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1257,
-    end: 1257,
+    start: 1266,
+    end: 1266,
     anchorKey: "bd3b4521",
     paragraphLine: 760,
-    uncitedLines: [1106, 5038],
+    uncitedLines: [1115, 5047],
     claim:
-      "line 1257 cites the implementer-copy byte-identity test for the commits field; uncited 1106 and 5038 are the same equality-assertion shape inside the separate mutation_probes-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
+      "line 1266 cites the implementer-copy byte-identity test for the commits field; uncited 1115 and 5047 are the same equality-assertion shape inside the separate mutation_probes-field test and the replayed-sub-field byte-identity test, which this sentence does not name.",
   },
   {
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 1262,
-    end: 1262,
+    start: 1271,
+    end: 1271,
     anchorKey: "1d478a12",
     paragraphLine: 763,
-    uncitedLines: [1146],
+    uncitedLines: [1155],
     claim:
-      "line 1262 cites the test for the installed prompt's not-applicable commits clause; uncited 1146 is the same containment assertion inside the separate not-applicable mutation_probes-clause test, which this sentence does not name.",
+      "line 1271 cites the test for the installed prompt's not-applicable commits clause; uncited 1155 is the same containment assertion inside the separate not-applicable mutation_probes-clause test, which this sentence does not name.",
   },
 ];
 

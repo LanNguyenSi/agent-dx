@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Runbook selection now happens in every run, in every run mode, and whether
+  or not Discover runs, because a runbook for a kind of work was otherwise
+  only reached by an optional step or by a path match. The orchestrator
+  selects the runbooks that apply (knowledge bundle docs with `type:
+  runbook`) by task fit (the runbooks whose own `## When to use this` section
+  matches the goal), by touched paths (the `sources` or `applies_to` match
+  `okf-kit docs-for` returns), or from an operator-pinned list kept in
+  AGENTS.md outside the kit-managed markers (a pinned runbook is selected
+  even when task fit alone would not pick it), records the selection in
+  `01-plan.md`'s new `## Runbooks` section (in run mode `single`, as a row in
+  `03-decisions.md`), and names the runbooks selected for each task in the new
+  `runbooks` field of that task's implementer and reviewer briefings. A
+  runbook stays data: it is guidance on how to work only when pinned or when
+  its bundle is declared operator-curated in AGENTS.md, a data-runbook step
+  becomes binding without a pin only when the orchestrator adopts it into a
+  task's acceptance criteria as a recorded decision, and no runbook overrides
+  a trusted instruction. In an `acceptance-baseline/v1` run, the adoption
+  happens before the baseline is frozen or is recorded as a baseline
+  revision. Pins, curated declarations, and the selected runbooks are read at
+  the run base, and a diff that changes a pin or a curated declaration, or
+  adds a runbook to a configured bundle or changes one's frontmatter or
+  checklist, does not take effect in that run. Every selection input (the
+  bundle index listing, each doc's `type`, its `## When to use this` section,
+  and its `sources` and `applies_to`) is evaluated at the run base of the
+  repository that holds the bundle, recorded as `<bundle dir> read at <sha>`
+  in the `## Runbooks` record, a runbook absent at that revision is not
+  selected, and when that run-base marker is unset (`TODO`, missing, or the
+  template placeholder) selection reads the pre-change HEAD and every
+  selected runbook is `authority: data`. The orchestrator lists every
+  surfaced runbook, pin, or declaration diff in `06-handoff.md` and a
+  `03-decisions.md` row. The reviewer checks "runbook checklist followed" for
+  every listed runbook: a deviation from an `authority: operator` runbook is
+  a finding classified by its consequence, a deviation from a data runbook
+  goes into the new reviewer field `runbook_notes` and is a finding only when
+  it is independently a defect, and a diff that adds a runbook to a
+  configured bundle or changes the frontmatter or checklist of one is a
+  finding when it touches a pin, a curated declaration, or an operator
+  runbook and a `runbook_notes` entry otherwise. The reviewer briefing names
+  the operator-curated bundle dirs and pinned runbook paths read at the run
+  base, so a runbook's authority never comes from its own text, and the
+  orchestrator records each `runbook_notes` entry in `05-review-findings.md`
+  and `06-handoff.md`, never as a finding. In run mode `single` the
+  orchestrator records its `runbooks_consulted` entries in the new
+  `## Runbooks Consulted` section of `04-implementation-summary.md`, where
+  the reviewer reads them. The implementer return gains a
+  `runbooks_consulted` record per listed runbook (steps followed, each
+  deviation with a reason), and a listed runbook the return does not account
+  for is a low finding. `validate-review-report` now requires `runbook_notes`
+  (an empty list when there is none), so a return from a reviewer prompt
+  older than this release fails validation until the agent files are
+  re-installed. Pinned in `test/runbook-selection.test.ts`, which also keeps
+  the runbook rule text closed: every runbook sentence of the installed
+  assets must be listed in `test/fixtures/runbook-rule-sentences.json`, and
+  only a fixed set of canonical sentences may tie a data runbook to a
+  finding, a severity, or an obligation.
 - The implementer prompt (every tier variant, rendered from the one asset)
   gains a commit hygiene rule: run a hygiene check before each commit and
   before returning (a runner the briefing names, else by hand from

@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-10-07T08:13:04Z
+timestamp: 2026-10-11T10:15:17Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -92,6 +92,16 @@ not verified from this repo). Introduced in 0.9.0
 one `run-base` marker, defaulting to `TODO`) and template-markers.test.ts:55-57#"<!-- solution-acceptance: run-base = TODO -->" (the literal line,
 wrapper included).
 
+Runbook selection reads the same marker inside the kit: every selection
+input is evaluated at the run base of the repository that holds the bundle
+(its keyed marker in multi-repo runs), and when that marker is unset
+(`TODO`, missing, or the template placeholder for that repository),
+selection reads the pre-change HEAD and every selected runbook is treated as
+data
+(packages/orchestrator-workflow/assets/skill/references/contracts.md:128-130#"every selected runbook is treated as").
+The posture stays fail-open: an unset marker withholds operator authority
+from every runbook and blocks nothing.
+
 ## The `.ai/run` pointer and keyed `run-base[<repo-basename>]` markers (0.26.0, round 2)
 
 The run directory may live in the orchestrator's own workspace or in one of
@@ -133,7 +143,7 @@ packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:
 The policy section installed into `AGENTS.md` carries the same two facts in
 one bullet: every touched worktree gets the pointer, and `00-goal.md` gets
 one keyed `run-base[<repo-basename>]` marker per repository for a multi-repo
-run (packages/orchestrator-workflow/assets/agents-md-section.md:247#"marker per repository for multi-repo runs").
+run (packages/orchestrator-workflow/assets/agents-md-section.md:308#"marker per repository for multi-repo runs").
 
 For a run that touches more than one repository, the orchestrator records
 one keyed marker per repository on its own line beside the unkeyed one,
@@ -224,10 +234,10 @@ SKILL.md's closing instruction: "replace the `TODO` in each
 `<!-- solution-acceptance: ... = TODO -->` marker with the chosen enum
 value. That marker line is the machine-readable signal the harness
 solution-acceptance run-gate reads, so leaving it as `TODO` keeps the run
-non-accepting (fail-closed)" (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:410#"non-accepting (fail-closed)."). A freshly-copied run is
+non-accepting (fail-closed)" (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:453#"non-accepting (fail-closed)."). A freshly-copied run is
 therefore non-accepting by construction; this contract shipped in 0.7.0
 (`CHANGELOG.md:#[0.7.0]`). Consumer is "the harness solution-acceptance
-run-gate" per packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:408#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
+run-gate" per packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:451#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
 does not assert the external gate's internals. Pinned by
 template-markers.test.ts:32-34#"/solution-acceptance:\s*acceptance-recommendation\s*=\s*" (regexes) and template-markers.test.ts:37-38#"const matches = [...handoffTemplate.matchAll(finalStatusRe)];" and template-markers.test.ts:43-44#"const matches = [...reviewTemplate.matchAll(recommendationRe)];" (one marker per
 template, default `TODO`).
@@ -288,7 +298,7 @@ replace the row when transferring findings, or delete it outright for a
 genuine zero-findings review (a header row with no data rows is valid;
 leaving the legend row next to real finding rows is also fine), and
 SKILL.md's step 7 carries the same one-sentence rule
-(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:289#"rows as the template never having been filled in. When"). The runtime half (grounding-mcp's reader treating a
+(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:332#"rows as the template never having been filled in. When"). The runtime half (grounding-mcp's reader treating a
 survived, unaccompanied placeholder row as an explicit format blocker,
 instead of silently reporting zero findings) is a lockstep sibling change in
 the grounding-mcp repo, out of scope for this bundle; this doc, like the
@@ -328,16 +338,16 @@ applying this guidance before filling the file: check whether the change
 touched any path a bundle doc claims as a `sources:` entry, and if so either
 update the affected docs (re-verify and re-stamp) or record a follow-up
 task, running the bundle validator when one is available (for example
-`okf-kit check`) (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:397#"validator when one is available (for example"). It is explicitly non-gating: "apply
+`okf-kit check`) (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:440#"validator when one is available (for example"). It is explicitly non-gating: "apply
 this optional guidance" and "Repos without a bundle are unaffected"
-(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:391#"guidance: when the repo carries a curated knowledge"; packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:398#"without a bundle are unaffected"). Step 9 is a safety net for sources
+(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:434#"guidance: when the repo carries a curated knowledge"; packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:441#"without a bundle are unaffected"). Step 9 is a safety net for sources
 the task list missed: bundle docs whose sources a task changes are listed in
 that task's `relevant_docs` at slicing and re-stamped by that task, so the
 hand-off check covers only sources no task re-stamped
-(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:387-389#"hand-off check is a safety net for sources the task list missed. Before"). Since 0.24.0 (placement rule) step 9 also
+(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:430-432#"hand-off check is a safety net for sources the task list missed. Before"). Since 0.24.0 (placement rule) step 9 also
 carries a one-sentence placement check for the orchestrator: before handing
 off, check that no org-, machine- or point-in-time-bound evidence was added
-to a reusable instruction file (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:404#"or the consuming workspace, with a pointer left behind."); the fix is to move the
+to a reusable instruction file (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:447#"or the consuming workspace, with a pointer left behind."); the fix is to move the
 evidence to the changelog, the run files, or the consuming workspace, with a
 pointer left behind. `reviewer.md`'s "Check, at minimum" list carries a
 matching check for the same thing on the implementer side of a run. This is
@@ -430,11 +440,13 @@ is a D-ID row and never a new run are stated once, in the reference's last
 section
 (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:214#"## Run mode");
 `SKILL.md` and the reference's Intent only point there. `single` makes
-`01-plan.md` and `02-tasks.md` optional and keeps `04-implementation-summary.md`
+`01-plan.md` and `02-tasks.md` optional (it records its runbook selection in `03-decisions.md` instead of `01-plan.md`'s `## Runbooks` section) and keeps `04-implementation-summary.md`
 (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:244#"Run files per mode:"),
-because the verification set, the mutation probes, and the baseline coverage
-table live there; `batch` adds an Integration section to the same template
-(packages/orchestrator-workflow/assets/templates/04-implementation-summary.md:129#"## Integration").
+because the verification set, the mutation probes, the baseline coverage
+table, and the run's own runbook consultation record
+(packages/orchestrator-workflow/assets/templates/04-implementation-summary.md:125#"## Runbooks Consulted")
+live there; `batch` adds an Integration section to the same template
+(packages/orchestrator-workflow/assets/templates/04-implementation-summary.md:140#"## Integration").
 The marker line and its explanatory comment deliberately avoid naming both
 tokens of a run-base marker, which the consuming reader would flag as a
 malformed run-base attempt; the pin for that is
@@ -448,11 +460,11 @@ pointer site restates them.
 The generated policy section and the README follow the same rule of one
 normative place. The Core rules bullet on implementation now reads
 "Non-trivial implementation follows the run mode recorded in `00-goal.md`"
-(packages/orchestrator-workflow/assets/agents-md-section.md:26#"Non-trivial implementation follows the run mode recorded in");
+(packages/orchestrator-workflow/assets/agents-md-section.md:46#"Non-trivial implementation follows the run mode recorded in");
 it names `delegated` as the default and the other two modes in one clause
 each, and ends by pointing to the skill's Run mode section. The Run state
 list of the policy section names the marker beside the keyed run-base marker
-(packages/orchestrator-workflow/assets/agents-md-section.md:247#"marker per repository for multi-repo runs").
+(packages/orchestrator-workflow/assets/agents-md-section.md:308#"marker per repository for multi-repo runs").
 The README has a short "Run modes" section
 (packages/orchestrator-workflow/README.md:194#"## Run modes")
 that links the reference. Both sites are pinned against restating a
@@ -491,16 +503,16 @@ The grant is deliberately narrow. `push-branch` covers a push of one of the
 run's own task branches and `open-pr` opening a pull request from one of
 them; neither ever covers a force push, a push to the default branch, or a
 merge into it
-(packages/orchestrator-workflow/assets/agents-md-section.md:191-195#"into the default branch."). Every other outward action (merging, commenting,
+(packages/orchestrator-workflow/assets/agents-md-section.md:252-256#"into the default branch."). Every other outward action (merging, commenting,
 creating, editing, transitioning, or closing a ticket or pull request,
 approving, deleting a remote branch, triggering CI or a deployment,
 releasing, publishing, messaging, any other external write) always needs
 per-action operator confirmation and cannot be granted by the marker at all
-(packages/orchestrator-workflow/assets/agents-md-section.md:196-201#"any other write to an external system."). The marker only ever waives the
+(packages/orchestrator-workflow/assets/agents-md-section.md:257-262#"any other write to an external system."). The marker only ever waives the
 orchestrator's own per-action confirmation; it never authorizes a subagent,
 and an outward action stays orchestrator-only whether or not the marker
 grants its class
-(packages/orchestrator-workflow/assets/agents-md-section.md:181-182#"only the orchestrator ever performs").
+(packages/orchestrator-workflow/assets/agents-md-section.md:242-243#"only the orchestrator ever performs").
 
 The grant condition sits on the reader side, not only on the writer: a class
 counts as granted only when `03-decisions.md` carries the
@@ -522,7 +534,7 @@ scope in their own words. AGENTS.md's Outward-facing actions section
 defines an outward action itself by boundary (any write to a system outside
 the local checkout and the run directory), with the named actions as
 examples of that boundary, not the complete membership test
-(packages/orchestrator-workflow/assets/agents-md-section.md:170-179#"spawned it.").
+(packages/orchestrator-workflow/assets/agents-md-section.md:231-240#"spawned it.").
 Pinned by `test/outward-actions.test.ts`, a sibling to
 `template-markers.test.ts` and `run-mode.test.ts` for this marker:
 `describe` blocks covering every file that carries the rule (the policy

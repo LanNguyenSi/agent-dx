@@ -25,4 +25,6 @@ method_applied: rigorous
 withdrawn:
   - description: "Considered flagging a second naming nit in the same helper."
     reason: "Same identifier, already covered by the first finding; not a separate defect."
+runbook_notes:
+  - "Step 3 of the data runbook was skipped: the implementer recorded that the target has no such file."
 ```

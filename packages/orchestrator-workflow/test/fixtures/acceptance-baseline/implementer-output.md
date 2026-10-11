@@ -30,6 +30,7 @@ class_closure:
   command: ""
   sites: []
   closed: true
+runbooks_consulted: []
 risks: []
 open_questions: []
 recommendation: review
