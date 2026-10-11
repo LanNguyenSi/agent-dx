@@ -103,10 +103,13 @@ manifest on every run. The rules:
 ## Exit codes
 
 `init`, `setup`, and `apply` exit `2` when an option file (`--routing`,
-`--codex-models`, `--codex-catalog`) cannot be read or fails validation;
-`apply` also exits `2` for `--pin` combined with `--unpin`, or for a `--pin`
-value that is empty or contains whitespace. A selected Codex model or effort missing from the supplied catalog
-exits `2` for `setup` and `1` for `init` and `apply`. Any other failure exits
+`--codex-models`, `--codex-catalog`) cannot be read or parsed as JSON, or
+when a `--routing` or `--codex-models` file fails validation; `apply` also
+exits `2` for `--pin` combined with `--unpin`, or for a `--pin` value that is
+empty or contains whitespace. When Codex is a selected harness, a
+`--codex-catalog` file with an invalid shape, or one missing a selected Codex
+model or effort, exits `2` for `setup` and `1` for `init` and `apply`; without
+Codex the catalog is parsed but not checked. Any other failure exits
 `1`, for example a missing target directory, an unknown harness or profile,
 a missing or unreadable operator manifest for `apply`, or `uninstall` without
 `--yes` in a non-interactive session. Every other run exits `0`, including an
