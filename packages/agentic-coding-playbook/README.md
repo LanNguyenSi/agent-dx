@@ -4,6 +4,8 @@
 
 *Lan Nguyen Si | CC BY 4.0*
 
+Browse it with navigation and search on the agent-dx playbook site, linked from the [repository README](../../README.md).
+
 ## Core thesis
 
 **Agents may optimize. Humans must remain accountable. Systems must enforce the difference.**

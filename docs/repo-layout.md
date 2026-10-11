@@ -32,3 +32,23 @@ root needs to be set up first.
 
 Each package has its own version, README, and CI. APIs may evolve at
 minor-version bumps; this workshop as a whole is experimental.
+
+## Playbook site
+
+`site/` is the one directory outside `packages/` with its own `package.json`.
+It is private, not a package, and builds a static
+[VitePress](https://vitepress.dev) site from the Markdown of
+`agent-engineering-playbook` and `agentic-coding-playbook`, which stay where
+they are and remain the source. The sidebar is generated from the file tree
+with titles from each file's first H1, directory links land on the folder's
+README, and the build fails on a relative link whose target inside the
+repository does not exist (Markdown pages, folders, and other files alike).
+
+```bash
+cd site && npm ci && npm run build   # output in site/.vitepress/dist
+cd site && npm run dev               # local preview with search
+```
+
+`.github/workflows/pages.yml` builds the site on pull requests that touch
+`site/` or the two playbooks, and deploys it to GitHub Pages on pushes to
+`master` or a manual run on `master`.

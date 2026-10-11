@@ -1,0 +1,72 @@
+name: pages
+
+# Builds the playbook site (site/) with VitePress. Pull requests only build it
+# as a check. A push to master (or a manual run on master) builds it again and deploys the result to
+# GitHub Pages. The Pages source setting must be "GitHub Actions".
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - "site/**"
+      - "packages/agent-engineering-playbook/**"
+      - "packages/agentic-coding-playbook/**"
+      - ".github/workflows/pages.yml"
+  pull_request:
+    branches: [master]
+    paths:
+      - "site/**"
+      - "packages/agent-engineering-playbook/**"
+      - "packages/agentic-coding-playbook/**"
+      - ".github/workflows/pages.yml"
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install site dependencies
+        working-directory: site
+        run: npm ci --no-audit --no-fund
+
+      - name: Build site
+        working-directory: site
+        run: npm run build
+
+      - uses: actions/upload-pages-artifact@v5
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+        with:
+          path: site/.vitepress/dist
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
