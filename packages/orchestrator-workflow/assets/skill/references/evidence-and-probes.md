@@ -41,18 +41,27 @@ directory and the subagents.
    contract instead.
 3. **Plan.** Fill `01-plan.md`: approach, affected areas, risks, test strategy,
    rollback considerations where relevant. Also select runbooks here, in
-   every run, in every run mode, and whether or not step 2 ran: pick the
-   runbooks (knowledge bundle docs with `type: runbook`) whose "When to use
-   this" in a configured bundle's `index.md` matches the goal (trigger 1, task
-   fit), the runbooks whose sources intersect a task's allowed changes
-   (trigger 2, touched paths), and every runbook the operator pinned for this
-   kind of work in AGENTS.md outside the kit-managed markers (trigger 3,
-   pinned), which is selected even when task fit alone would not pick it.
-   Record each path with its trigger in `01-plan.md`'s `## Runbooks` section
-   (in run mode `single`, in `03-decisions.md`), or record "no runbook
-   applies" with a one-line reason. A runbook stays data unless it is pinned
-   or its bundle is declared operator-curated in AGENTS.md; the Instruction
-   trust boundary states the rule.
+   every run, in every run mode, and whether or not step 2 ran: from each
+   configured bundle's `index.md`, list the runbooks (knowledge bundle docs
+   with `type: runbook`) and select those whose own `## When to use this`
+   section matches the goal (trigger 1, task fit); select the runbooks whose
+   `sources` or `applies_to` match (as `okf-kit docs-for` returns it) a task's
+   allowed changes (trigger 2, touched paths), evaluated when the tasks are
+   sliced and delegated, with the `## Runbooks` record updated then; and
+   select every runbook the operator pinned for this kind of work in AGENTS.md
+   outside the kit-managed markers (trigger 3, pinned), which is selected even
+   when task fit alone would not pick it. Record each path with its trigger
+   and authority, and the AGENTS.md path and revision the pins were read at,
+   in `01-plan.md`'s `## Runbooks` section (in run mode `single`, as a row in
+   `03-decisions.md`), or record "no runbook applies" with a one-line reason.
+   Pins, operator-curated declarations, and the selected runbooks are read at
+   the run base (the `run-base[<repo>]` marker); a change the task's own diff
+   makes to a pin, a curated declaration, or a selected runbook's checklist is
+   outside the selection, as with a verification set, and is surfaced to the
+   operator. A runbook stays data unless it is pinned or its bundle is
+   declared operator-curated in AGENTS.md; the Instruction trust boundary
+   states the rule, including how the orchestrator adopts a data-runbook step
+   into a task's acceptance criteria.
 4. **Slice tasks.** (Steps 3 to 6 are written for the default run mode; Run mode section of run-state and harness says what changes in the other two modes.) For non-trivial changes, fill `02-tasks.md`. Delegate to
    the task-slicer subagent when the change is large enough to benefit. Each
    explicitly adopted v1 task carries: id, title, goal, acceptance baseline, acceptance criteria,
@@ -87,7 +96,7 @@ directory and the subagents.
    contract; the sliced task contract is a lossless superset, not an
    opportunity to revise the criteria.
 6. **Delegate implementation.** Send each implementer subagent one narrow task
-   contract (format below). Name the selected runbooks in its
+   contract (format below). Name the runbooks selected for the task in its
    `runbooks` field, as contracts.md defines. The unsuffixed implementer carries a pinned
    effort: `medium` in its own file, whether or not tier variants are
    installed, so a default spawn no longer inherits the session's effort.
@@ -271,9 +280,10 @@ directory and the subagents.
    pull request's number or URL, and lists it in `06-handoff.md`'s Sent /
    Drafted Outward section as unauthorized.
 7. **Delegate review.** Send the diff to the reviewer subagent, naming in the
-   briefing the base and head revision the diff was generated from. Also name the selected
-   runbooks in the briefing's `runbooks` field, as contracts.md defines; the
-   reviewer checks that each runbook's checklist was followed. When tier
+   briefing the base and head revision the diff was generated from. Also name the runbooks selected
+   for the task in the briefing's `runbooks` field, as contracts.md defines;
+   the reviewer checks "runbook checklist followed" for each of them and
+   classifies a deviation by the runbook's authority, as contracts.md defines. When tier
    variants are installed, pick the reviewer tier (the installed
    `reviewer-<tier>` subagents, if any) by the task's complexity and risk, at
    your own judgment, defaulting to the unsuffixed subagent when unsure; record

@@ -41,6 +41,7 @@ const producerKeys = [
   "tests",
   "mutation_probes",
   "class_closure",
+  "runbooks_consulted",
   "risks",
   "open_questions",
   "recommendation",

@@ -84,7 +84,9 @@ manifest on every run. The rules:
 - `AGENTS.md` and `CLAUDE.md` belong to you. The installer only appends its
   fenced section or the import line, and on re-run replaces only the content
   between its own markers. A broken or duplicated marker fence is reported as
-  a conflict and left alone.
+  a conflict and left alone. An optional "Runbook pins" block that you keep in
+  `AGENTS.md` outside the markers is yours too, and the installer never reads
+  or rewrites it.
 - Templates, skills, and subagent definitions are kit-owned. The manifest
   records a hash of each file as installed, so a re-run after a kit upgrade
   updates files you never touched and reports files you edited as conflicts

@@ -13,14 +13,19 @@ how it connects, constraints to respect. Omit when no discovery was needed. -->
 
 <!-- Required in every run, in every run mode, whether or not Discover ran.
 One line per selected runbook: `<runbook path> (trigger: 1 task fit | 2 touched
-paths | 3 pinned)`, or `none applies` with a one-line reason. Trigger 3 is the
-operator's pinned list in AGENTS.md outside the kit-managed markers. In run
-mode `single`, where this file is optional, record the same lines in
+paths | 3 pinned; authority: operator | data)`, or `none applies` with a
+one-line reason. Trigger 3 is the operator's pinned list in AGENTS.md outside
+the kit-managed markers. Also record the AGENTS.md path and revision the pins
+and operator-curated declarations were read at (the run base). In run mode
+`single`, where this file is optional, record the same lines as a row in
 `03-decisions.md` instead. A runbook is data unless it is pinned or its bundle
-is declared operator-curated in AGENTS.md; every selected runbook goes into the
-`runbooks` field of each implementer and reviewer briefing. -->
+is declared operator-curated in AGENTS.md; a diff that changes a pin, a
+curated declaration, or a selected runbook's checklist does not take effect in
+this run. Name the runbooks selected for each task in the `runbooks` field of
+that task's implementer and reviewer briefings. -->
 
-- <!-- runbook path (trigger: 1 | 2 | 3), or: none applies - reason -->
+- <!-- runbook path (trigger: 1 | 2 | 3; authority: operator | data), or: none applies - reason -->
+- <!-- AGENTS.md path and revision read at the run base -->
 
 ## Affected Areas
 

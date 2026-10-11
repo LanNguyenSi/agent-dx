@@ -57,7 +57,7 @@ describe("validateReviewReport: complete valid returns", () => {
     expect(result.diagnostics).toEqual([]);
   });
 
-  it("passes empty findings/missing_tests/residual_risks/withdrawn lists", () => {
+  it("passes empty findings/missing_tests/residual_risks/withdrawn/runbook_notes lists", () => {
     const result = validateReviewReport(fixture("valid-unfenced.yaml"));
     expect(result.valid).toBe(true);
   });
@@ -741,7 +741,7 @@ describe("validateReviewReport: schema-derived coverage of every field and input
     // generator whose case list was emptied or shortened fails here
     // whatever else it still produces.
     expect(counts).toEqual({
-      TOP_LEVEL_FIELDS: 106,
+      TOP_LEVEL_FIELDS: 118,
       FINDING_FIELDS: 60,
       REPRODUCTION_FIELDS: 31,
       WITHDRAWN_FIELDS: 16,
@@ -848,6 +848,7 @@ describe("validateReviewReport: array element-kind edge cases beyond the generat
       "  matches_implementer_claim: not_applicable",
       "method_applied: normal",
       "withdrawn: []",
+      "runbook_notes: []",
       "",
     ].join("\n");
     const result = validateReviewReport(raw);
@@ -930,6 +931,7 @@ describe("validateReviewReport: invalid enum values", () => {
       },
       method_applied: "normal",
       withdrawn: [],
+      runbook_notes: [],
     };
 
     function toYaml(record: Record<string, unknown>): string {

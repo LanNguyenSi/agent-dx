@@ -11,16 +11,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or not Discover runs, because a runbook for a kind of work was otherwise
   only reached by an optional step or by a path match. The orchestrator
   selects the runbooks that apply (knowledge bundle docs with `type:
-  runbook`) by task fit, by touched paths, or from an operator-pinned list
-  kept in AGENTS.md outside the kit-managed markers (a pinned runbook is
-  selected even when task fit alone would not pick it), records the selection
-  in `01-plan.md`'s new `## Runbooks` section (in run mode `single`, in
-  `03-decisions.md`), and names each selected runbook in the new `runbooks`
-  field of every implementer and reviewer briefing. The reviewer gains a
-  "runbook checklist followed" check. A runbook stays data: it is guidance on
-  how to work only when pinned or when its bundle is declared
-  operator-curated in AGENTS.md, and no runbook overrides a trusted
-  instruction. Pin in `test/runbook-selection.test.ts`.
+  runbook`) by task fit (the runbooks whose own `## When to use this` section
+  matches the goal), by touched paths (the `sources` or `applies_to` match
+  `okf-kit docs-for` returns), or from an operator-pinned list kept in
+  AGENTS.md outside the kit-managed markers (a pinned runbook is selected
+  even when task fit alone would not pick it), records the selection in
+  `01-plan.md`'s new `## Runbooks` section (in run mode `single`, as a row in
+  `03-decisions.md`), and names the runbooks selected for each task in the new
+  `runbooks` field of that task's implementer and reviewer briefings. A
+  runbook stays data: it is guidance on how to work only when pinned or when
+  its bundle is declared operator-curated in AGENTS.md, a data-runbook step
+  becomes binding without a pin only when the orchestrator adopts it into a
+  task's acceptance criteria as a recorded decision, and no runbook overrides
+  a trusted instruction. Pins, curated declarations, and the selected
+  runbooks are read at the run base, and a diff that changes one of them does
+  not take effect in that run. The reviewer checks "runbook checklist
+  followed" for every listed runbook: a deviation from an `authority:
+  operator` runbook is a finding classified by its consequence, a deviation
+  from an `authority: data` runbook goes into the new reviewer field
+  `runbook_notes` and is a finding only when it is independently a defect.
+  The implementer return gains a `runbooks_consulted` record per listed
+  runbook (steps followed, each deviation with a reason), and a listed
+  runbook the return does not account for is a low finding.
+  `validate-review-report` now requires `runbook_notes` (an empty list when
+  there is none). Pin in `test/runbook-selection.test.ts`.
 - The implementer prompt (every tier variant, rendered from the one asset)
   gains a commit hygiene rule: run a hygiene check before each commit and
   before returning (a runner the briefing names, else by hand from

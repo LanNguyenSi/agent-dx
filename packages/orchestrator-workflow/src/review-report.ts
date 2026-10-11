@@ -26,6 +26,7 @@ export const TOP_LEVEL_FIELDS = [
   "reproduction",
   "method_applied",
   "withdrawn",
+  "runbook_notes",
 ] as const;
 
 /** Field names of one `findings[]` entry, in the contract's own order. */
@@ -485,6 +486,8 @@ const TOP_LEVEL_CHECKS: Record<(typeof TOP_LEVEL_FIELDS)[number], DocChecker> =
         diagnostics,
       ),
     withdrawn: checkWithdrawn,
+    runbook_notes: (doc, diagnostics) =>
+      checkArrayField(doc, "runbook_notes", diagnostics),
   };
 
 /** Every field name any of the four contract constants declares. */
@@ -552,6 +555,7 @@ export const FIELD_KINDS = {
   reproduction: "mapping",
   method_applied: "enum",
   withdrawn: "mapping-list",
+  runbook_notes: "array",
   severity: "enum",
   category: "enum",
   description: "string",
@@ -606,7 +610,7 @@ export function expectedTextFor(field: SchemaFieldName): string {
 /** The `expected` text a diagnostic about one element of a `mapping-list` carries. */
 export const MAPPING_LIST_ELEMENT_EXPECTED = KIND_EXPECTED.mapping;
 
-/** The `expected` text a diagnostic about one non-string element of a plain `array`-kind field (`summary`, `missing_tests`, `residual_risks`) carries. */
+/** The `expected` text a diagnostic about one non-string element of a plain `array`-kind field (`summary`, `missing_tests`, `residual_risks`, `runbook_notes`) carries. */
 export const ARRAY_ELEMENT_EXPECTED = KIND_EXPECTED.string;
 
 interface ExtractedYaml {
