@@ -3,8 +3,9 @@
 `agent-dx` is a folder of independent packages, not an npm workspaces, pnpm,
 or lerna monorepo. There is no root `package.json`, no workspace manifest,
 and no shared root `node_modules`. Each code package under `packages/`
-carries its own `package.json`, install, build, test, and version, so the
-install pattern is the same for every local-build package:
+carries its own `package.json`, install, test, and version (and a build
+step where it has one), so the install pattern is the same for every
+local-build package:
 
 ```bash
 cd packages/<name> && npm install && npm run build

@@ -103,8 +103,8 @@ Every package that `publish-npm.yml` publishes is released the same way:
    (`.github/workflows/npm-dist-tag.yml`); re-running the publish workflow
    does not repair it.
 
-okf-kit, orchestrator-workflow and agent-primitives add the package-specific
-steps below; friction-log needs nothing beyond these steps.
+okf-kit and agent-primitives add the package-specific steps below;
+orchestrator-workflow and friction-log need nothing beyond these steps.
 
 ### Adding a published package
 
