@@ -6,7 +6,10 @@
   retired-reference note and the pruned `references/` directories, gains an
   `init` flow diagram, and lists `test/skill-references.test.ts` in its
   `sources`. `operator-install-and-registry.md` names the final `claude`
-  fallback of `apply`'s harness chain. The package README, `INSTALL-AGENT.md`,
+  fallback of `apply`'s harness chain and is re-stamped: none of its sources
+  changed since the commit that last re-pointed its citations, and the edited
+  claim was checked against `resolveApplyHarnesses` in `src/cli.ts`. The
+  package README, `INSTALL-AGENT.md`,
   `CHANGELOG.md`, `docs/harnesses.md`, `docs/model-routing-reference.md`, and
   `test/docs-consistency.test.ts` changed, so every citation into them was
   re-pointed by mapping each cited line through the diff and checking the
