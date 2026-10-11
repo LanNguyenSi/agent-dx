@@ -48,6 +48,10 @@ jobs:
         working-directory: site
         run: npm ci --no-audit --no-fund
 
+      - name: Test comment handling
+        working-directory: site
+        run: npm test
+
       - name: Build site
         working-directory: site
         run: npm run build

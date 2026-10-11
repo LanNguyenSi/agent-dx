@@ -3,6 +3,7 @@ import type MarkdownIt from 'markdown-it'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { htmlComments } from './html-comments.mjs'
 
 // The site is built from the Markdown in place. srcDir is the repository
 // root, and only the two playbooks plus site/index.md are pages.
@@ -71,33 +72,8 @@ function mapLink(href: string, fromRepoRel: string): string {
   return `${githubBase}/blob/master/${rel}${suffix}`
 }
 
-// With raw HTML off, an HTML comment would render as visible text. Drop
-// comments (block, inline, multi-line) from the source before parsing, but
-// keep them inside fenced code and inline code spans.
-function stripComments(src: string): string {
-  let inFence = false
-  const out: string[] = []
-  let buf: string[] = []
-  const flush = () => {
-    out.push(buf.join('\n').replace(/(`+)[^`]*?\1|<!--[\s\S]*?-->/g, (m, code) => (code ? m : '')))
-    buf = []
-  }
-  for (const line of src.split('\n')) {
-    if (/^\s*(```|~~~)/.test(line)) {
-      if (!inFence) flush()
-      inFence = !inFence
-      out.push(line)
-    } else if (inFence) out.push(line)
-    else buf.push(line)
-  }
-  flush()
-  return out.join('\n')
-}
-
 function linkMapper(md: MarkdownIt) {
-  md.core.ruler.before('block', 'agent-dx-comments', (state) => {
-    state.src = stripComments(state.src)
-  })
+  md.use(htmlComments)
   md.core.ruler.push('agent-dx-links', (state) => {
     const rel = (state.env.relativePath as string | undefined) ?? ''
     // env.relativePath is the rewritten path; find the source file again.
@@ -200,9 +176,10 @@ export default defineConfig({
     ]
   },
   lastUpdated: false,
-  // Raw HTML stays off so that placeholders like <version> render as text; HTML
-  // comments in the playbooks are dropped by the agent-dx-comments rule above.
-  markdown: { html: false, config: linkMapper },
+  // Raw HTML is parsed so that markdown-it decides what is a comment; the
+  // htmlComments renderer rules drop comments and escape any other HTML, so
+  // placeholders like <version> still render as text.
+  markdown: { html: true, config: linkMapper },
   themeConfig: {
     search: { provider: 'local' },
     nav: [
