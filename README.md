@@ -22,6 +22,8 @@ A monorepo workshop for agent-development tooling, built while shipping AI-agent
 | [agent-engineering-playbook](packages/agent-engineering-playbook) | Guide for building production-ready AI agent systems. | doc package |
 | [agentic-coding-playbook](packages/agentic-coding-playbook) | Practical playbook for teams using AI agents in coding. | doc package |
 
+Both playbooks are also published as one searchable site: <https://lannguyensi.github.io/agent-dx/>.
+
 ## Quick start
 
 Requires Node.js >= 20 (CI runs on Node 22).

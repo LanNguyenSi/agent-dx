@@ -2,6 +2,8 @@
 
 Pragmatic guidance for building AI-assisted software that can survive enterprise expectations: security reviews, auditability, reliability, change control, and production operations.
 
+Browse it with navigation and search on the agent-dx playbook site, linked from the [repository README](../../README.md).
+
 ## Overview
 
 This is a working playbook for teams building production systems with human engineers and AI agents. It does not assume that speed alone is success: delivery, safety, operability, and maintainability are treated as first-class concerns. The material is organized into thirteen playbooks (adoption paths through agent governance), plus checklists, templates, and a machine-readable adoption model, split into a `core path` for any product expected to reach production quality and an `enterprise path` for higher customer, compliance, security, or organizational complexity.
