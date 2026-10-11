@@ -36,16 +36,23 @@ const isPage = (repoRel: string) => pages.includes(repoRel)
 // Resolve a relative link found in `fromRepoRel` to a target the site can
 // serve. Targets that exist but are not site pages (yaml, json, folders
 // without a README, files outside the playbooks) go to the GitHub view.
-// Missing targets are left untouched so the dead-link check reports them.
+// A relative target that does not exist (or has a malformed percent escape)
+// fails the build with the file and href, whatever its extension.
 function mapLink(href: string, fromRepoRel: string): string {
   if (/^([a-z][a-z0-9+.-]*:|\/|#)/i.test(href)) return href
   const m = /^([^?#]*)([?#].*)?$/.exec(href)!
-  const target = decodeURI(m[1])
+  let target: string
+  try {
+    target = decodeURI(m[1])
+  } catch {
+    throw new Error(`Dead link in ${fromRepoRel}: ${href} (malformed percent escape)`)
+  }
   const suffix = m[2] ?? ''
   if (!target) return href
   const abs = path.resolve(repoRoot, path.dirname(fromRepoRel), target)
   const rel = path.relative(repoRoot, abs).split(path.sep).join('/')
-  if (rel.startsWith('..') || !fs.existsSync(abs)) return href
+  if (rel.startsWith('..')) return href
+  if (!fs.existsSync(abs)) throw new Error(`Dead link in ${fromRepoRel}: ${href} (target does not exist)`)
   const stat = fs.statSync(abs)
   if (stat.isDirectory()) {
     const readme = fs.readdirSync(abs).find((n) => /^README\.md$/i.test(n))
@@ -64,7 +71,33 @@ function mapLink(href: string, fromRepoRel: string): string {
   return `${githubBase}/blob/master/${rel}${suffix}`
 }
 
+// With raw HTML off, an HTML comment would render as visible text. Drop
+// comments (block, inline, multi-line) from the source before parsing, but
+// keep them inside fenced code and inline code spans.
+function stripComments(src: string): string {
+  let inFence = false
+  const out: string[] = []
+  let buf: string[] = []
+  const flush = () => {
+    out.push(buf.join('\n').replace(/(`+)[^`]*?\1|<!--[\s\S]*?-->/g, (m, code) => (code ? m : '')))
+    buf = []
+  }
+  for (const line of src.split('\n')) {
+    if (/^\s*(```|~~~)/.test(line)) {
+      if (!inFence) flush()
+      inFence = !inFence
+      out.push(line)
+    } else if (inFence) out.push(line)
+    else buf.push(line)
+  }
+  flush()
+  return out.join('\n')
+}
+
 function linkMapper(md: MarkdownIt) {
+  md.core.ruler.before('block', 'agent-dx-comments', (state) => {
+    state.src = stripComments(state.src)
+  })
   md.core.ruler.push('agent-dx-links', (state) => {
     const rel = (state.env.relativePath as string | undefined) ?? ''
     // env.relativePath is the rewritten path; find the source file again.
@@ -83,6 +116,7 @@ function linkMapper(md: MarkdownIt) {
 
 // Sidebar from the file tree, titles from the first H1. The language is
 // visible in the label: *.de.md files and the German file names get "(DE)".
+// German-named files without a .de.md suffix must be listed here to get the (DE) label.
 const germanFiles = new Set([
   'agentic-coding-playbook/PLAYBOOK.md',
   'agentic-coding-playbook/references/review-stufen-und-qualitaetsstandards.md',
@@ -120,9 +154,19 @@ function sidebarFor(pb: string): DefaultTheme.SidebarItem[] {
       }))
     const dirs = entries
       .filter((e) => e.isDirectory())
-      .map((e) => ({ name: e.name, items: build(`${dir}/${e.name}`) }))
-      .filter((d) => d.items.length > 0)
-      .map((d) => ({ text: d.name, collapsed: true, items: d.items }))
+      .map((e) => {
+        const sub = `${dir}/${e.name}`
+        const readme = fs.readdirSync(path.join(repoRoot, sub)).find((n) => /^README\.md$/i.test(n))
+        return { name: e.name, sub, readme, items: build(sub) }
+      })
+      // A folder is listed when it has pages or a README (README-only folders too).
+      .filter((d) => d.items.length > 0 || d.readme)
+      .map((d) => ({
+        text: d.name,
+        ...(d.readme ? { link: '/' + sitePath(`${d.sub}/${d.readme}`).replace(/\.md$/, '').replace(/index$/, '') } : {}),
+        collapsed: true,
+        items: d.items
+      }))
     return [...files, ...dirs]
   }
   return [
@@ -156,7 +200,8 @@ export default defineConfig({
     ]
   },
   lastUpdated: false,
-  // The playbooks use no raw HTML; placeholders like <version> must render as text.
+  // Raw HTML stays off so that placeholders like <version> render as text; HTML
+  // comments in the playbooks are dropped by the agent-dx-comments rule above.
   markdown: { html: false, config: linkMapper },
   themeConfig: {
     search: { provider: 'local' },
