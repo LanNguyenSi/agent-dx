@@ -79,13 +79,20 @@ describe("repo-root containment of sources and applies_to", () => {
   }
 
   it("docs-for never matches an escaping entry", () => {
+    // A symlink inside the repo that points outside it: the given path
+    // equals the entry's own path, so only the containment filter keeps it
+    // from matching.
+    fs.symlinkSync(
+      path.join(base, "outside.txt"),
+      path.join(repoRoot, "link.txt"),
+    );
     writeDoc(repoRoot, "bundle/d.md", {
       type: "note",
       timestamp: "2025-06-01T00:00:00Z",
-      sources: ["src/../../repo-evil"],
-      applies_to: ["../repo-evil/b.ts"],
+      sources: ["link.txt"],
+      applies_to: ["link.txt"],
     });
-    const result = runDocsFor(bundleDir(), ["src/a.ts"], { repoRoot });
+    const result = runDocsFor(bundleDir(), ["link.txt"], { repoRoot });
     expect(result.matches).toEqual([]);
     // An in-root entry still matches, so the filter is not dropping everything.
     writeDoc(repoRoot, "bundle/e.md", {
