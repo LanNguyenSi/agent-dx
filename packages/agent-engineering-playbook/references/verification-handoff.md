@@ -99,7 +99,9 @@ the hypotheses. This is an illustrative investigation, not an assumed cause.
 | Reuse candidate is stale or in the wrong context | Rerun and append the new attempt. | Future reuse work |
 | Timeout followed by retry | Preserve both attempts and their terminal states; do not overwrite history or call the retry proof of flakiness. | Implemented in agent-grounding (caller/transport) |
 
-The immediate slice is intentionally smaller: it passes through diagnostics
-from an already-run producer alongside an unchanged readiness verdict. It does
-not add a runner, wrapper, cache, transport protocol, external result ingestion,
-cross-run reuse, or automatic waiver policy.
+The first slice was intentionally smaller: it passed through diagnostics from
+an already-run producer alongside an unchanged readiness verdict, without a
+runner, wrapper, cache, transport protocol, external result ingestion, cross-run
+reuse, or automatic waiver policy. The rows marked implemented came with
+agent-grounding's later attempt-log change; the rows marked future work remain
+open.
