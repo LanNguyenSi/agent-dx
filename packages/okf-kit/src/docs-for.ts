@@ -162,8 +162,8 @@ function matchEntries(
 ): string[] {
   const matched = new Set<string>();
   for (const entry of entries) {
-    // An entry escaping the repo root (`../x`, or a symlink out of it) is
-    // invalid; `sources-shape` reports it, and it never matches here.
+    // An entry escaping the repo root (a `..` escape; symlinks are not
+    // resolved) is invalid; `sources-shape` reports it, and it never matches here.
     if (!isWithinRepoRoot(repoRoot, entry)) continue;
     const entryAbs = stripTrailingSep(resolveRepoPath(repoRoot, entry));
     let entryIsDir = false;

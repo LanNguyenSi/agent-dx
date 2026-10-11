@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `sources-shape` now rejects a `sources` or `applies_to` entry that escapes the repo root (for example `../../outside`, or a symlink resolving outside the repo) with an error naming the field, instead of passing it because the target exists. Containment uses `path.relative`, not a string prefix. `docs-for` ignores such an entry, so it never matches. Tracker task 799b0465.
+- `sources-shape` now rejects a `sources` or `applies_to` entry that escapes the repo root (a `..` escape such as `../../outside`; the check is lexical and does not resolve symlinks) with an error naming the field, instead of passing it because the target exists. Containment uses `path.relative`, not a string prefix. `docs-for` ignores such an entry, so it never matches. Tracker task 799b0465.
 
 ## [0.17.1] - 2026-10-05
 

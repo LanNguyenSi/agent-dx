@@ -61,39 +61,33 @@ describe("repo-root containment of sources and applies_to", () => {
         expect(run()).toEqual([]);
       });
 
-      it("flags a symlink that resolves outside the repo root", () => {
-        fs.symlinkSync(
-          path.join(base, "outside.txt"),
-          path.join(repoRoot, "link.txt"),
-        );
+      it("flags a nonexistent escaping entry with the escape message, not the missing-path one", () => {
         writeDoc(repoRoot, "bundle/d.md", {
           type: "note",
           timestamp: "2025-06-01T00:00:00Z",
-          [field]: ["link.txt"],
+          [field]: ["../does-not-exist.txt"],
         });
         const findings = run();
-        expect(findings).toHaveLength(1);
-        expect(findings[0].message).toContain("escapes the repo root");
+        expect(findings.map((f) => f.message)).toEqual([
+          `\`${field}\` path escapes the repo root: \`../does-not-exist.txt\``,
+        ]);
       });
     });
   }
 
   it("docs-for never matches an escaping entry", () => {
-    // A symlink inside the repo that points outside it: the given path
-    // equals the entry's own path, so only the containment filter keeps it
-    // from matching.
-    fs.symlinkSync(
-      path.join(base, "outside.txt"),
-      path.join(repoRoot, "link.txt"),
-    );
+    // `..` resolves to the directory holding the repo, which lexically
+    // contains the given in-repo path, so only the containment filter keeps
+    // these from matching.
     writeDoc(repoRoot, "bundle/d.md", {
       type: "note",
       timestamp: "2025-06-01T00:00:00Z",
-      sources: ["link.txt"],
-      applies_to: ["link.txt"],
+      sources: ["../outside.txt", ".."],
+      applies_to: ["..", "../outside.txt"],
     });
-    const result = runDocsFor(bundleDir(), ["link.txt"], { repoRoot });
-    expect(result.matches).toEqual([]);
+    expect(runDocsFor(bundleDir(), ["src/a.ts"], { repoRoot }).matches).toEqual(
+      [],
+    );
     // An in-root entry still matches, so the filter is not dropping everything.
     writeDoc(repoRoot, "bundle/e.md", {
       type: "note",

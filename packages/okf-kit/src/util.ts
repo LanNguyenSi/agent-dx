@@ -1,4 +1,3 @@
-import fs from "node:fs";
 import path from "node:path";
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -79,25 +78,11 @@ export function resolveRepoPath(repoRoot: string, source: string): string {
  * entry is resolved with `resolveRepoPath` and judged with `path.relative`
  * (never a string prefix, so a sibling directory sharing the root's name
  * prefix does not pass); a leading-slash entry is repo-relative there, so
- * only `..` segments can escape. Symlinks: when the target exists, its
- * realpath must also lie inside the realpath of `repoRoot`, so an
- * in-tree link pointing outside the repo is rejected. A target that does
- * not exist is judged lexically (the existence error is reported
- * separately).
+ * only `..` segments can escape. The check is lexical: symlinks are not
+ * resolved, so an in-tree link pointing outside the repo is not detected.
  */
 export function isWithinRepoRoot(repoRoot: string, entry: string): boolean {
-  const target = resolveRepoPath(repoRoot, entry);
-  if (!relativeIsInside(path.relative(repoRoot, target))) return false;
-  try {
-    const realRoot = fs.realpathSync(repoRoot);
-    const realTarget = fs.realpathSync(target);
-    return relativeIsInside(path.relative(realRoot, realTarget));
-  } catch {
-    return true;
-  }
-}
-
-function relativeIsInside(rel: string): boolean {
+  const rel = path.relative(repoRoot, resolveRepoPath(repoRoot, entry));
   return (
     rel !== ".." && !rel.startsWith(".." + path.sep) && !path.isAbsolute(rel)
   );
