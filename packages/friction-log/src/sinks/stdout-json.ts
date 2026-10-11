@@ -8,9 +8,10 @@ import type {
 
 /**
  * Emit a structured JSON record to stdout. No side effects beyond stdout.
- * Useful for piping into custom workflows:
+ * The `file` command prints two status lines after the record, so take the
+ * first line when piping into custom workflows:
  *
- *   friction-log file 7 --sink stdout-json | jq '.rendered.body'
+ *   friction-log file 7 --sink stdout-json | sed -n 1p | jq '.rendered.body'
  *
  * The record shape is stable: any future field is additive.
  */

@@ -6,9 +6,34 @@ Schema (M1): `sessions`, `frictions` (plus FTS5 virtual table), `tasks` (records
 
 Schema v2 (M3): adds `CHECK(severity IN ('low','medium','high','critical') OR severity IS NULL)` to `frictions`. On upgrade the migration normalizes any rogue severity values to `NULL` before swapping the table in, so existing rows survive. The FTS5 virtual table and triggers are recreated against the new physical table.
 
+## Friction status lifecycle
+
+A friction has one of four statuses: `open`, `filed`, `resolved`, `wontfix`.
+
+- `log`, `scan` and `import` insert new frictions as `open`.
+- `file` sets `filed` after the sink call succeeds. It does not check the current status: filing the same friction again records another `tasks` row and leaves it `filed`.
+- `update --status` sets any of the four statuses from any other; there are no transition rules.
+- `rm` deletes the friction together with its `tasks` and `tags` rows. It fails with `FOREIGN KEY constraint failed` while another friction still records it as its `recurrence_of_id`.
+
+Only an open root collects auto-linked recurrences (see below), so once a root is filed, resolved or wontfix, the next matching friction starts a new chain.
+
+The diagram shows the commands that set each status; `update --status` can also move between any two statuses not drawn here.
+
+```mermaid
+stateDiagram-v2
+    [*] --> open: log / scan / import
+    open --> filed: file
+    filed --> filed: file again
+    filed --> resolved: update --status
+    filed --> wontfix: update --status
+    resolved --> open: update --status
+    wontfix --> open: update --status
+    note right of open: only an open root collects auto-linked recurrences
+```
+
 ## `recurrence_of_id` semantics
 
-When `log` (or `scan`) inserts a new friction without an explicit `--recurrence-of` flag, the database looks for an existing friction that is:
+When `log`, `scan` or `import` inserts a new friction without an explicit recurrence id (`log --recurrence-of`), the database looks for an existing friction that is:
 
 1. `status = 'open'`,
 2. itself a root (`recurrence_of_id IS NULL`),
