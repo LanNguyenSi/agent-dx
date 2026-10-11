@@ -1,0 +1,103 @@
+/**
+ * Sentence extraction for the runbook rule guard in runbook-selection.test.ts.
+ * It lives outside a `*.test.ts` file so that the guard and a one-off
+ * listing of the current sentences (when vetting a deliberate wording
+ * change) use the same segmentation.
+ *
+ * A runbook sentence is a sentence of an installed markdown asset that names
+ * a runbook, a checklist, or the data authority, plus the sentence right
+ * after it in the same paragraph or list item, which can refer back to it
+ * without naming it ("It becomes ...", "Such a defect ..."). Fenced code is
+ * skipped, HTML comment delimiters are dropped, and headings, list items, and
+ * table rows each start a new paragraph.
+ */
+import { readdirSync } from "node:fs";
+import { join, relative, sep } from "node:path";
+
+import { ASSETS_DIR } from "../src/assets.js";
+
+export const RUNBOOK_SUBJECT =
+  /runbook|checklist|authority: ?`?data|`data`|data[- ]authority/i;
+
+/** Every markdown asset the kit installs, as a `/`-separated path under assets/. */
+export function assetMarkdownFiles(): string[] {
+  const found: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith(".md")) {
+        found.push(relative(ASSETS_DIR, full).split(sep).join("/"));
+      }
+    }
+  };
+  walk(ASSETS_DIR);
+  return found.sort();
+}
+
+/** Paragraphs and list items of a markdown document, each on one line. */
+export function proseUnits(doc: string): string[] {
+  const units: string[] = [];
+  let current: string[] = [];
+  let inFence = false;
+  const flush = () => {
+    if (current.length > 0) units.push(current.join(" "));
+    current = [];
+  };
+  for (const raw of doc.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line.startsWith("```")) {
+      flush();
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    if (line === "") {
+      flush();
+      continue;
+    }
+    const standalone = /^#{1,6} /.test(line) || line.startsWith("|");
+    if (standalone || /^([-*]|\d+\.) /.test(line)) flush();
+    current.push(line);
+    if (standalone) flush();
+  }
+  flush();
+  return units
+    .map((unit) =>
+      unit
+        .replace(/<!--|-->/g, " ")
+        .replace(/\s+/g, " ")
+        .replace(/^\s*([-*]|\d+\.)\s+/, "")
+        .trim(),
+    )
+    .filter((unit) => unit.length > 0);
+}
+
+/**
+ * Sentences of one unit. The splitter breaks after a period followed by white
+ * space, so a file name such as `06-handoff.md` stays inside its sentence and
+ * a semicolon never separates a clause from the qualifier it carries.
+ */
+export function sentencesOf(unit: string): string[] {
+  return unit
+    .split(/(?<=\.)\s+/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length > 0);
+}
+
+/** The runbook sentences of a markdown document (see the module comment). */
+export function runbookSentences(doc: string): string[] {
+  const found: string[] = [];
+  for (const unit of proseUnits(doc)) {
+    const sentences = sentencesOf(unit);
+    sentences.forEach((sentence, i) => {
+      if (
+        RUNBOOK_SUBJECT.test(sentence) ||
+        (i > 0 && RUNBOOK_SUBJECT.test(sentences[i - 1]))
+      ) {
+        found.push(sentence);
+      }
+    });
+  }
+  return found;
+}

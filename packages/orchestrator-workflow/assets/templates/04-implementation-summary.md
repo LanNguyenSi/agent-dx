@@ -122,6 +122,17 @@ intentional supersession and rationale in `03-decisions.md`.
 |---|---|---|---|
 | <!-- relative plan path --> | <!-- immutable id --> | <!-- locator --> | <!-- relative result artifact --> |
 
+## Runbooks Consulted
+
+<!-- Run mode `single` only, where the orchestrator is also the implementer:
+one entry per runbook the run's selection row in `03-decisions.md` lists, with
+the fields of the implementer's `runbooks_consulted` return: its path, the
+checklist steps followed, and each deviation with the step and the reason.
+Other run modes leave this section as is; each implementer's return carries
+the record there. -->
+
+- <!-- runbook path; steps followed; deviations (step: reason), or none -->
+
 ## Risks / Notes
 
 - <!-- note -->

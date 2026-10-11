@@ -26,29 +26,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a trusted instruction. In an `acceptance-baseline/v1` run, the adoption
   happens before the baseline is frozen or is recorded as a baseline
   revision. Pins, curated declarations, and the selected runbooks are read at
-  the run base, and a diff that changes one of them does not take effect in
-  that run. Every selection input (the bundle index listing, each doc's
-  `type`, its `## When to use this` section, and its `sources` and
-  `applies_to`) is evaluated at the run base recorded in the `## Runbooks`
-  record, a runbook absent at that revision is not selected, and an unset
-  run-base marker makes every selected runbook `authority: data`. The
-  orchestrator lists every surfaced runbook, pin, or declaration diff in
-  `06-handoff.md` and a `03-decisions.md` row. The reviewer checks "runbook
-  checklist followed" for every listed runbook: a deviation from an
-  `authority: operator` runbook is a finding classified by its consequence,
-  a deviation from an `authority: data` runbook goes into the new reviewer
-  field `runbook_notes` and is a finding only when it is independently a
-  defect, and a diff that adds a runbook to a configured bundle or changes
-  the frontmatter or checklist of one is a finding when it touches a pin, a
-  curated declaration, or an operator runbook and a `runbook_notes` entry
-  otherwise; in run mode `single` the reviewer reads the
-  `runbooks_consulted` entries from `04-implementation-summary.md`. The
-  implementer return gains a `runbooks_consulted` record per listed runbook
-  (steps followed, each deviation with a reason), and a listed runbook the
-  return does not account for is a low finding. `validate-review-report` now
-  requires `runbook_notes` (an empty list when there is none), so a return
-  from a reviewer prompt older than this release fails validation until the
-  agent files are re-installed. Pin in `test/runbook-selection.test.ts`.
+  the run base, and a diff that changes a pin or a curated declaration, or
+  adds a runbook to a configured bundle or changes one's frontmatter or
+  checklist, does not take effect in that run. Every selection input (the
+  bundle index listing, each doc's `type`, its `## When to use this` section,
+  and its `sources` and `applies_to`) is evaluated at the run base of the
+  repository that holds the bundle, recorded as `<bundle dir> read at <sha>`
+  in the `## Runbooks` record, a runbook absent at that revision is not
+  selected, and when that run-base marker is unset (`TODO`, missing, or the
+  template placeholder) selection reads the pre-change HEAD and every
+  selected runbook is `authority: data`. The orchestrator lists every
+  surfaced runbook, pin, or declaration diff in `06-handoff.md` and a
+  `03-decisions.md` row. The reviewer checks "runbook checklist followed" for
+  every listed runbook: a deviation from an `authority: operator` runbook is
+  a finding classified by its consequence, a deviation from a data runbook
+  goes into the new reviewer field `runbook_notes` and is a finding only when
+  it is independently a defect, and a diff that adds a runbook to a
+  configured bundle or changes the frontmatter or checklist of one is a
+  finding when it touches a pin, a curated declaration, or an operator
+  runbook and a `runbook_notes` entry otherwise. The reviewer briefing names
+  the operator-curated bundle dirs and pinned runbook paths read at the run
+  base, so a runbook's authority never comes from its own text, and the
+  orchestrator records each `runbook_notes` entry in `05-review-findings.md`
+  and `06-handoff.md`, never as a finding. In run mode `single` the
+  orchestrator records its `runbooks_consulted` entries in the new
+  `## Runbooks Consulted` section of `04-implementation-summary.md`, where
+  the reviewer reads them. The implementer return gains a
+  `runbooks_consulted` record per listed runbook (steps followed, each
+  deviation with a reason), and a listed runbook the return does not account
+  for is a low finding. `validate-review-report` now requires `runbook_notes`
+  (an empty list when there is none), so a return from a reviewer prompt
+  older than this release fails validation until the agent files are
+  re-installed. Pinned in `test/runbook-selection.test.ts`, which also keeps
+  the runbook rule text closed: every runbook sentence of the installed
+  assets must be listed in `test/fixtures/runbook-rule-sentences.json`, and
+  only a fixed set of canonical sentences may tie a data runbook to a
+  finding, a severity, or an obligation.
 - The implementer prompt (every tier variant, rendered from the one asset)
   gains a commit hygiene rule: run a hygiene check before each commit and
   before returning (a runner the briefing names, else by hand from

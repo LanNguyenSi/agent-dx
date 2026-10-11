@@ -25,7 +25,7 @@ end-of-sentence punctuation or one balanced, non-nested parenthetical aside.
 
 ## Residual Risks
 
-- <!-- risk -->
+- <!-- risk; also each `runbook_notes` entry the reviewer returned, which is a note, not a finding, so it never goes in the Findings table -->
 
 ## Acceptance Recommendation
 

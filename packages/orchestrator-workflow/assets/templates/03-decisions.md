@@ -11,7 +11,7 @@ Supersedes cell names the prior decision it replaces. Routine in-scope
 orchestrator decisions, operator-approved scope changes, and operator-only
 critical waivers remain distinct. -->
 
-<!-- Run mode `single`: record the run's runbook selection here as one decision row (runbook paths with trigger 1 task fit / 2 touched paths / 3 pinned and each entry's authority, the AGENTS.md path and revision read at the run base, or "no runbook applies" with a one-line reason), since 01-plan.md is optional in that mode. Other modes record it in 01-plan.md's Runbooks section. An orchestrator decision that adopts a data-runbook step into a task's acceptance criteria is recorded here too. In an `acceptance-baseline/v1` run, adopt before the baseline is frozen (step 5), or record the adoption as a baseline revision. A surfaced runbook, pin, or declaration diff gets a row here too. -->
+<!-- Run mode `single`: record the run's runbook selection here as one decision row (runbook paths with trigger 1 task fit / 2 touched paths / 3 pinned and each entry's authority, the AGENTS.md path and revision read at the run base, one `<bundle dir> read at <sha>` line per configured bundle, or "no runbook applies" with a one-line reason), since 01-plan.md is optional in that mode. Other modes record it in 01-plan.md's Runbooks section. An orchestrator decision that adopts a data-runbook step into a task's acceptance criteria is recorded here too. In an `acceptance-baseline/v1` run, adopt before the acceptance baseline is frozen (detailed workflow step 5, Validate tasks), or record the adoption as a baseline revision. A surfaced runbook, pin, or declaration diff gets a row here too. -->
 
 ## Review-round escalation
 

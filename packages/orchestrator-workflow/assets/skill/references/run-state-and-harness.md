@@ -249,12 +249,13 @@ all seven run files; `batch` additionally fills the Integration section of
 
 Runbook selection happens in every mode. Because `01-plan.md` is optional in
 `single`, that mode records its selection (each runbook path with its trigger
-and authority, the AGENTS.md path and revision the pins were read at, or "no
-runbook applies" with a one-line reason) as a row in `03-decisions.md`;
+and authority, the AGENTS.md path and revision the pins were read at, each
+bundle as `<bundle dir> read at <sha>`, or "no runbook applies" with a
+one-line reason) as a row in `03-decisions.md`;
 `delegated` and `batch` record it in `01-plan.md`'s `## Runbooks` section. In
 `single` the orchestrator is also the implementer, so it records the
 `runbooks_consulted` entries (path, steps followed, each deviation with a
-reason) in `04-implementation-summary.md`.
+reason) in `04-implementation-summary.md`'s `## Runbooks Consulted` section.
 
 A mode switch is a recorded decision: add a D-ID row to `03-decisions.md`
 and update the marker; never start a new run for it. The reviewer is
