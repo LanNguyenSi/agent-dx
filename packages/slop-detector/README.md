@@ -12,7 +12,7 @@ Agents leave fingerprints in committed text: leaked `</result>` artefacts from M
 
 - Eight rule packs, 52 rules total: `agent-tics` and `prose-slop` on by default, six more opt-in (`comment-slop`, `code-slop`, `ui-slop`, `placement-slop`, `workflow-slop`, `review-slop`).
 - CLI (`slop-detector check`), stdio MCP server (`slop-detector-mcp`), and a programmatic API (`checkPath` / `checkFiles` / `checkText`).
-- Per-line and per-pack disable comments, JSON output, and a `--explain` mode.
+- Per-line and per-pack disable comments, JSON output (schema in the [CLI reference](docs/integration.md#cli-reference)), and a `--explain` mode.
 - `workflow-slop` catches GitHub Actions expression injection into `run:` steps and executed action inputs; `placement-slop` catches org-, machine-, and time-bound evidence leaking into reusable instruction files.
 
 ## Install / quick start
@@ -67,7 +67,7 @@ Until a tag exists, `<ref>` must be a branch or a commit SHA. The action does no
 | `pack` | none | Comma-separated pack ids, passed as repeated `--pack`. An unknown id fails the step (exit 2). |
 | `config` | none | Path to a `slop.config.yml` / `.json`. |
 | `severity-threshold` | `block` | Fail at or above this severity: `block`, `warn` or `info`. Any other value fails the step. |
-| `changed-files-only` | `false` | On `pull_request` events, scan only files from `git diff --name-only <base>...<head>` that still exist (needs a checkout with enough history, for example `fetch-depth: 0`). |
+| `changed-files-only` | `false` | On `pull_request` and `pull_request_target` events, scan only files from `git diff --name-only <base>...<head>` that still exist (needs a checkout with enough history, for example `fetch-depth: 0`); on other events the input is ignored with a notice and the full `path` is scanned. |
 
 Each violation becomes a workflow annotation: `block` as `::error`, `warn` as `::warning`, `info` as `::notice`. The step exits 1 when any violation is at or above the threshold, 0 otherwise, and 2 (with an error annotation) when the CLI exits 2 or higher, its output is not parseable JSON or not a well-formed summary, `severity-threshold` is invalid, `pack` names an unknown pack, `git diff` fails (changed-files-only), or the event file is missing or unreadable or carries a base/head that is not a full commit SHA (changed-files-only), or the action hits any other unexpected error.
 
@@ -79,7 +79,7 @@ The action runs `actions/setup-node` (Node 22), which changes `node` on the `PAT
 - [workflow-slop rule pack](docs/workflow-slop.md): GitHub Actions expression-injection and CI-guard rules, worked examples, scope and limitations.
 - [review-slop rule pack](docs/review-slop.md): run-local review-token rules, in depth.
 - [Configuration reference](docs/configuration.md): full `slop.config.yml` schema, severity overrides, the "Path pattern anchor" rule (and its migration note), the cross-file corpus pre-pass, and per-line opt-out.
-- [Integration reference](docs/integration.md): sample output, the scan pipeline, pre-commit/CI recipes, the MCP server, exit codes, and the roadmap.
+- [Integration reference](docs/integration.md): sample output, the scan pipeline, pre-commit/CI recipes, the MCP server, the CLI reference (options, input rules, JSON output), exit codes, and the roadmap.
 - [CHANGELOG.md](CHANGELOG.md): release notes from 0.3.1 on.
 
 ## Development
@@ -93,6 +93,8 @@ npm run format:check
 ```
 
 This repository also runs a dedicated `review-guard` CI job: it builds this package and runs `node packages/slop-detector/dist/cli.js check . --pack review-slop --config slop.config.yml` against the whole repository.
+
+The `check` argument shape (`[paths...]`, `--pack`, `--stdin-path`) and the exit-code meanings are used verbatim by orchestrator-workflow's implementer prompt and pinned by `test/cli.test.ts`; change them only together with that prompt.
 
 ## License
 

@@ -80,7 +80,7 @@ The four newer rules work like this:
 - `ui-slop/img-missing-alt` flags a lowercase `<img>` with no `alt` (`alt=""` passes; a `{...spread}` is skipped because it may carry `alt`, a Svelte `{alt}` shorthand counts, and `alt` is matched as a case-insensitive attribute name, including `:alt`, `v-bind:alt`, `bind:alt`, `[alt]` and `[attr.alt]`, so `title="an alt text"` does not count). An `<img` inside a terminated `<!-- -->` comment in a markup file is skipped; an unterminated `<!--` skips nothing. JS and JSX comments are not skipped (see the limitations below).
 - `ui-slop/lorem-ipsum-placeholder` flags `lorem ipsum` in markup or JSX, once per file. It also fires on stories and fixtures that use the filler on purpose; exclude those with path ignores.
 
-The two off-by-default info rules (`ui-slop/monospace-everywhere`, `ui-slop/flat-type-hierarchy`) need an explicit `rules.<id>.enabled: true` in `slop.config.yml` or a CLI override; they remain off because both have legitimate counter-uses (technical-product landing pages, mature design systems with subtle steps).
+The two off-by-default info rules (`ui-slop/monospace-everywhere`, `ui-slop/flat-type-hierarchy`) need an explicit `rules.<id>.enabled: true` in `slop.config.yml`, passed with `--config` (there is no per-rule CLI flag); they remain off because both have legitimate counter-uses (technical-product landing pages, mature design systems with subtle steps).
 
 Known v1 limitations (tracked as M3 follow-ups):
 
