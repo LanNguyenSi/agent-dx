@@ -8052,7 +8052,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 71,
     end: 73,
     anchorKey: "ea438f34",
-    paragraphLine: 180,
+    paragraphLine: 190,
     uncitedLines: [602],
     claim:
       "line 73 cites the test that 00-goal.md carries the keyed run-base placeholder line byte-exactly; uncited 602 repeats the identical marker line at a wholly separate site the citing sentence never names.",
@@ -8064,7 +8064,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 88,
     end: 95,
     anchorKey: "3cd8bcb0",
-    paragraphLine: 184,
+    paragraphLine: 194,
     uncitedLines: [602],
     claim:
       "line 95 cites the test that the keyed run-base placeholder line sits directly below the unkeyed one; uncited 602 repeats the identical marker line at a wholly separate site the citing sentence never names.",
@@ -8076,7 +8076,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 99,
     end: 100,
     anchorKey: "3c649d56",
-    paragraphLine: 187,
+    paragraphLine: 197,
     uncitedLines: [50],
     claim:
       "the sentence describes the keyed-marker-noninterference test (`the existing unkeyed run-base regex still matches exactly once...`); lines 99-100 are that test's own assertion, while uncited 50 is the byte-identical assertion inside the earlier, more general `00-goal.md has exactly one run-base marker, defaulting to TODO` test, which predates the keyed marker and does not test non-interference, a test the sentence does not name.",
@@ -8088,7 +8088,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 216,
     end: 226,
     anchorKey: "86ae35d5",
-    paragraphLine: 265,
+    paragraphLine: 275,
     uncitedLines: [251, 252],
     claim:
       'line 226 cites the `carries a header row with both Severity and Decision columns` test (`expect(cells).toContain("decision");`); uncited 251 and 252 is instead line 251 in the `invites only the reader\'s resolved Decision vocabulary in t…` test (`const decisionCell = cells[cells.indexOf("accepted/defer")];`); and line 252 in the `invites only the reader\'s resolved Decision vocabulary in t…` test (`const tokens = decisionCell`), a different site the citing sentence never names.',
