@@ -77,7 +77,7 @@ github standup -o your-org --author octocat
 github standup -o your-org -d 3 --json
 ```
 
-Without `-r`, one page of up to 100 repositories is read, sorted by last push (organization first, then user), and at most 100 commits per repository are listed.
+Without `-r`, one page of up to 100 repositories is read, sorted by last push (organization first, then user). Each repository lists at most 100 commits, with or without `-r`.
 
 ## Bug report
 
@@ -146,7 +146,7 @@ src/
 
 ## Error handling
 
-- **Transient failures:** each API call is tried up to 3 times, waiting 1s and then 2s, on 5xx and 429 responses and on errors without an HTTP status, such as network failures. Other 4xx responses, including 401 and 403, fail on the first attempt.
+- **Transient failures:** each API call is tried up to 3 times, waiting 1s and then 2s, on 5xx and 429 responses (Octokit reports a network failure as status 500) and on errors without an HTTP status, such as a timeout abort. Other 4xx responses, including 401 and 403, fail on the first attempt.
 - **Auth errors:** clear error message with setup instructions
 - **Rate limiting:** there is no client-side throttling. A rate-limit rejection returned as 403 fails at once; one returned as 429 is retried as above. Spread out bulk runs such as `standup` without `-r`.
 - **Invalid input:** validates repository format, event types, merge methods

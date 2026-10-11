@@ -13,7 +13,7 @@ git-batch sync ~/git --only api,worker
 git-batch sync --protected main,develop --dry-run
 ```
 
-Default `sync` flow: `git fetch --all --prune`, detect the protected target branch, switch to it if the worktree is clean, then `git pull --ff-only`. Dirty repositories are skipped unless `--include-dirty` is passed. If `--protected` is given, that explicit branch order replaces `origin/HEAD` and the default branch list; explicitly configured protected branches must exist on `origin` (local-only branches are not selected as pull targets).
+Default `sync` flow: read `git status`; a dirty repository is skipped without fetching unless `--include-dirty` is passed; otherwise `git fetch --all --prune`, detect the protected target branch, switch to it, then `git pull --ff-only`. If `--protected` is given, that explicit branch order replaces `origin/HEAD` and the default branch list; explicitly configured protected branches must exist on `origin` (local-only branches are not selected as pull targets).
 
 The per-repository path of `sync` (see [Branch detection](#branch-detection) and [Outcomes and exit codes](#outcomes-and-exit-codes)):
 
@@ -186,7 +186,7 @@ Each entry in `results` has an `outcome`:
 | `outcome` | Commands | Meaning |
 | --- | --- | --- |
 | `ok` | all | succeeded |
-| `error` | all | a Git command failed or the repository could not be read; the message is in `error` |
+| `error` | `sync`, `status`, `fetch`, `dirty` | a Git command failed or the repository could not be read; the message is in `error` |
 | `fetch_failed` | `status --fetch` | the fetch failed; the other fields come from local refs |
 | `skipped_dirty` | `sync` | local changes, nothing run; `reason` is `worktree_dirty` |
 | `skipped_no_protected_branch` | `sync` | no target branch on `origin`; `reason` is `no_remote_protected_branch_detected` |

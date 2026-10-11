@@ -17,7 +17,7 @@ cd /path/to/your/workspace
 agent-dev create my-agent --features=memory,skills
 ```
 
-`create` writes the project into the current directory, so run it outside the agent-dx clone.
+`create` writes the project to `./<name>` under the current directory, so run it outside the agent-dx clone.
 
 ## Usage
 
@@ -29,7 +29,7 @@ agent-dev create my-agent --features=memory,skills
 
 `create <name>` options:
 
-- `-f, --features <list>`: `memory`, `skills`. Without it, `create` prompts for features and an agent description; pass `--features` for non-interactive use.
+- `-f, --features <features>`: `memory`, `skills`. Without it, `create` prompts for features and an agent description; pass `--features` for non-interactive use.
 - `--no-typescript`: generate JavaScript instead of TypeScript.
 - `--no-git`: skip `git init`, `git add .` and the initial commit.
 - `--no-install`: skip `npm install` in the new project.

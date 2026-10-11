@@ -79,7 +79,7 @@ skipped 1 unreadable/missing project dir(s)
 
 `--json` emits the same numbers as a `{ filesScanned, skippedLines, skippedFiles, skippedDirs, tools[], totals, mcp }` object instead of a text table.
 
-The CLI exits 0 after a successful run, including one that finds no tool calls, and exits 2 with an `mcp-token-audit: <message>` line on stderr when the run fails, for example when `-d`/`--days` is not a positive number.
+The CLI exits 0 after a successful run, including one that finds no tool calls, and exits 2 with an `mcp-token-audit: <message>` line on stderr when the run fails, for example when `-d`/`--days` is not a positive number. Usage errors caught by the argument parser (an unknown option, a missing option value) exit 1 with an `error:` line.
 
 ## Limitations
 
