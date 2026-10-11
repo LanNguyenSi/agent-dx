@@ -31,19 +31,21 @@ npx okf-kit check path/to/bundle
 npm install -g okf-kit
 ```
 
-Requires Node >= 20.
+Requires Node >= 20, and `git` on the PATH for repo-root auto-detection and for the staleness rules, which read commit history; see the [check catalog](docs/check-catalog.md#repo-root-auto-detection) for what runs without it.
+
+The README on the default branch can describe options that are not yet published to npm; `CHANGELOG.md`'s `[Unreleased]` section lists them.
 
 ## Usage
 
 ```bash
 okf-kit check path/to/bundle
 
-# explicit repo root, used for both sources-shape existence checks and
-# sources-fresh staleness checks (see docs/check-catalog.md's "repo-root
+# explicit repo root, used for sources-shape existence checks, staleness
+# checks and citation checks (see docs/check-catalog.md's "repo-root
 # auto-detection" for what happens when you omit this)
 okf-kit check path/to/bundle --repo-root /path/to/repo
 
-# JSON output for tooling
+# JSON output for tooling (format: docs/check-catalog.md's "Output")
 okf-kit check path/to/bundle --json
 
 # fail on warnings too, not just errors (STALE and FUTURE-DATED findings are warnings)
@@ -54,7 +56,7 @@ okf-kit check path/to/bundle --strict
 okf-kit check path/to/bundle --companion shipped=path/to/other/bundle
 ```
 
-`check` exits `0` with no errors (and, under `--strict`, no warnings), `1` when it finds one, and `2` on a CLI invocation error; see [check catalog](docs/check-catalog.md#exit-codes) for the full table.
+`check` exits `0` with no errors (and, under `--strict`, no warnings), `1` when it finds one, and `2` on an invocation or tool error; see [check catalog](docs/check-catalog.md#exit-codes) for the full table and [Output](docs/check-catalog.md#output) for the text and JSON formats.
 
 Other commands:
 
@@ -82,13 +84,13 @@ Pin the exact version and use a full (non-shallow) checkout; [CI usage](docs/ci.
 
 ## Documentation
 
-- [Check catalog](docs/check-catalog.md): all 10 rules, repo-root auto-detection, exit codes.
+- [Check catalog](docs/check-catalog.md): all 10 rules, repo-root auto-detection, exit codes, output format.
 - [Scaffold a bundle (`init`)](docs/init.md): generated files, placeholder sources, authoring guidance.
 - [Reverse lookup (`docs-for`)](docs/docs-for.md): matching rules, path resolution, output formats.
 - [Staleness (`sources-fresh`)](docs/staleness.md): the re-stamp rule, designator-less timestamps, squash-merge interaction, `--dirty-as-now`, `sources-fresh-future`.
 - [Citation resolution (`citations-resolve`)](docs/citations.md): every finding id, anchor forms, continuation and short-form citations, `--require-anchors`.
 - [Prose line references](docs/prose-line-references.md): the opt-in `--prose-line-references` check for line numbers written outside `citations-resolve`'s own grammar.
-- [CI usage](docs/ci.md): shallow-clone caveats, the pinned-version rationale, the release-time pin bump, and the `templates/okf-staleness.yml` warn-only workflow template.
+- [CI usage](docs/ci.md): shallow-clone caveats, the pinned-version rationale, the template's pin, and the `templates/okf-staleness.yml` warn-only workflow template.
 
 ## Development
 
@@ -99,6 +101,49 @@ npm test
 ```
 
 See [`../../CONTRIBUTING.md`](../../CONTRIBUTING.md) for issue and PR conventions, and the release process (including `CONTRIBUTING.md`'s "Releasing okf-kit" section for bumping this repo's own `okf-kit@<version>` pins).
+
+### Architecture
+
+Modules under `src/`:
+
+- `cli.ts`: the `check`, `docs-for` and `init` commands, `runCheck`, and the mapping of results and errors to exit codes.
+- `bundle.ts`: `loadBundle` walks the bundle's `*.md` files and parses their frontmatter (`parseFrontmatter`).
+- `rules/`: one file per rule (`sources-fresh.ts` holds both `sources-fresh` and `sources-fresh-future`); `rules/index.ts` registers them in `allRules`.
+- `report.ts`: `summarize`, and the text (`renderText`) and JSON (`renderJson`) output of `check`.
+- `git.ts`: `runGit`, the git child-process wrapper, and `detectRepoRoot`.
+- `util.ts`: frontmatter `sources`/`applies_to` getters, `resolveRepoPath`, and `timestamp` parsing.
+- `links.ts`: `extractMarkdownLinks`, shared by `links-resolve` and `no-absolute-links`.
+- `companions.ts`: `--companion` parsing (`parseCompanions`).
+- `docs-for.ts`: `runDocsFor` and its text and JSON output.
+- `init.ts` and `templates.ts`: `runInit` and the scaffolded file bodies.
+- `types.ts`: the shared types (`Finding`, `Rule`, `BundleContext`, `RunGit`); `errors.ts`: `UsageError`.
+
+The diagram shows how the three commands (all defined in `cli.ts`) share repo-root detection, bundle loading and path resolution, and where the rule registry and the exit code sit.
+
+```mermaid
+flowchart TD
+  CHECK["check: runCheck (cli.ts)"] --> DETECT["detectRepoRoot (git.ts)<br/>when --repo-root is omitted"]
+  DOCSFOR["docs-for: runDocsFor<br/>(docs-for.ts)"] --> DETECT
+  CHECK --> COMP["parseCompanions (companions.ts)"]
+  CHECK --> LOAD["loadBundle (bundle.ts)"]
+  DOCSFOR --> LOAD
+  DETECT -->|"git rev-parse"| GIT["runGit (git.ts)"]
+  LOAD -->|"ctx"| RULES["allRules (rules/index.ts)"]
+  COMP -->|"ctx.companions"| RULES
+  RULES -->|"git log (sources-fresh rules)"| GIT
+  RULES --> RESOLVE["resolveRepoPath (util.ts)"]
+  DOCSFOR -->|"sources, applies_to entries"| RESOLVE
+  RULES -->|"findings"| REPORT["summarize / renderText / renderJson<br/>(report.ts)"]
+  REPORT --> EXIT["exit 0 / 1, or 2 on an error"]
+  INIT["init: runInit (init.ts)<br/>+ templates.ts"]
+```
+
+To add a rule:
+
+1. Implement `Rule` (`id`, `description`, `run(ctx)`) in `src/rules/<id>.ts`.
+2. Register it in `allRules` in `src/rules/index.ts` and add its id to `test/rules-registry.test.ts`.
+3. For an opt-in rule: add a `CheckOptions` field and a commander option in `cli.ts` and a `BundleContext` field in `types.ts`, copy the option onto `ctx` in `runCheck`, and return `[]` from `run()` when it is unset.
+4. Add a row to the [check catalog](docs/check-catalog.md) and update the rule count in this README (Key features and Documentation).
 
 ## License
 

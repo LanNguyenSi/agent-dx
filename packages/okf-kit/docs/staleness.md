@@ -33,6 +33,31 @@ Known limitation: the doc-commit comparison suppresses staleness for every sourc
 
 One sentence for the outcome: a source reads fresh when its own last commit is at or before the doc's resolved last commit and that commit moved the `timestamp` value strictly forward (or created the doc), or when the source's own last commit is at or before the frontmatter `timestamp`; every other assessable case is STALE, including a backwards or same-instant "re-stamp" (the not-assessable and no-valid-timestamp notices are neither fresh nor STALE; the backwards warning and the same-instant notice accompany a STALE verdict, they do not replace it).
 
+The flowchart below traces one `sources` entry of one doc to its verdict along the committed-history path. Under [`--dirty-as-now`](#uncommitted-edits---dirty-as-now) the decision is the same; only the epoch of a dirty path and the re-stamp verdict of a dirty doc come from the working tree instead.
+
+```mermaid
+flowchart TD
+  P0{"doc has a valid sources list?"} -->|no| NA["not assessed by this rule"]
+  P0 -->|yes| R0{"repo root available?"}
+  R0 -->|no| N1["one bundle-level notice:<br/>staleness skipped"]
+  R0 -->|yes| T0{"timestamp parseable?"}
+  T0 -->|no| N2["notice per doc:<br/>no valid timestamp"]
+  T0 -->|yes| E0{"source exists on disk?"}
+  E0 -->|no| SK["skipped<br/>(sources-shape reports it)"]
+  E0 -->|yes| C0{"source has a commit?"}
+  C0 -->|no| N3["notice: untracked by git"]
+  C0 -->|yes| S0{"source commit after timestamp?"}
+  S0 -->|no| F["fresh"]
+  S0 -->|yes| D0{"doc's last commit known and<br/>at or after the source commit?"}
+  D0 -->|no| ST["STALE warning"]
+  D0 -->|yes| V0{"re-stamp verdict<br/>of that commit"}
+  V0 -->|restamped| F2["fresh"]
+  V0 -->|value unchanged| ST2["STALE warning"]
+  V0 -->|moved backwards| SB["STALE + backwards warning<br/>(once per doc)"]
+  V0 -->|same instant| SS["STALE + same-instant notice<br/>(once per doc)"]
+  V0 -->|unknown| N4["notice: not assessable<br/>(once per doc), no STALE"]
+```
+
 The one consequence that follows for a branch merging a trunk carrying a squash: the squash re-dates every source it touched to the merge instant, and steps 1-3 can only ever see the MERGING branch's own resolved doc commit, never the trunk's route to that squash. So after such a merge, a clean verdict is not evidence the branch's doc was verified against the re-dated source (the known limitation above already says a re-stamp silences drift on sources it never itself checked, and step 3 only asks whether the value moved, never what it verified); a STALE verdict means the branch's resolved doc commit is older than the re-dated source, or newer but carrying no re-stamp of its own. Which of the two the rule reports depends only on where the branch's resolved doc commit falls relative to the squash (steps 1 and 2), never on who edited what:
 
 | Branch shape | Doc commit the lookup resolves to | Verdict | Why |
@@ -74,9 +99,9 @@ If it reports a doc STALE, re-verify that doc against its current `sources` and 
 
 That last row is the one shape where a clean local run does NOT imply a clean CI run, and it is inherent to the model rather than a gap to be fixed: the flag judges the content in YOUR WORKING TREE, while CI judges only what you actually pushed. Commit the source edit without its doc re-stamp and CI sees a source newer than the doc's committed `timestamp`, exactly as it should. The remedy is the one this section already recommends: commit the re-stamp, in the same commit as the source edit or its own.
 
-What "matches CI" actually means here: `--dirty-as-now` makes a local run compute the same `sources-fresh`/`sources-fresh-future` VERDICT (fresh, STALE, or not-assessable) that a post-commit `check` run would compute for the same content -- it says nothing about whether a given CI setup turns that verdict into a failed build, and nothing about warning classes outside these two rules. Whether it does depends entirely on how that CI wires up `okf-kit check`: this package's own CI runs it two different ways for the same bundle -- `.github/workflows/okf-staleness.yml` calls `check` warn-only (findings surface in the job summary and as annotations, but the job never fails on them), while `.github/workflows/ci.yml`'s freshness guard step runs `check --require-anchors` and then filters the JSON report through `jq` for `sources-fresh`/`sources-fresh-future` findings, only failing the build on THOSE. `--strict` is broader than either: it fails on every warning-severity finding from EVERY rule (including ones this flag says nothing about, like `citations-resolve`), so a locally-strict, CI-clean bundle is not a contradiction -- it means the CI in question does not block on every warning class `--strict` does. Read the target repo's actual CI wiring before treating `--dirty-as-now --strict` as equivalent to "will this pass CI".
+What "matches CI" actually means here: `--dirty-as-now` makes a local run compute the same `sources-fresh`/`sources-fresh-future` VERDICT (fresh, STALE, or not-assessable) that a post-commit `check` run would compute for the same content -- it says nothing about whether a given CI setup turns that verdict into a failed build, and nothing about warning classes outside these two rules. Whether it does depends entirely on how that CI wires up `okf-kit check`: for example, one job can run `check` warn-only (findings surface in the job summary and as annotations, and the job never fails on them), while another runs `check --json` and fails the build only on the `sources-fresh`/`sources-fresh-future` findings it filters from the report. `--strict` is broader than either: it fails on every warning-severity finding from EVERY rule (including ones this flag says nothing about, like `citations-resolve`), so a locally-strict, CI-clean bundle is not a contradiction -- it means the CI in question does not block on every warning class `--strict` does. Read the target repo's actual CI wiring before treating `--dirty-as-now --strict` as equivalent to "will this pass CI".
 
-`--dirty-as-now` ships in the same `okf-kit` release as everything else in this CHANGELOG entry; a CI step that installs a PINNED `okf-kit` version (as both workflows above do) only gains the flag once that pin is bumped to a release that includes it.
+`--dirty-as-now` needs an okf-kit release that includes it (see `CHANGELOG.md`); a CI step that installs a pinned version gains the flag only once the pin names such a release.
 
 **Known limitations, stated rather than hidden.** Ignored files (`.gitignore`) are deliberately NOT treated as dirty here (`git status` is run without `--ignored`): an ignored source keeps its ordinary `untracked by git, staleness unknown` notice rather than becoming newly dirty under this flag. A source living inside a dirty SUBMODULE is likewise not detected as dirty: `git status` reports a submodule with uncommitted changes as one single record for the submodule's own path, not per file inside it, and this flag's path-matching does not currently descend into that report to find the individual dirty files a `sources` entry might name.
 

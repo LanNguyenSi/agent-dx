@@ -20,12 +20,16 @@ A candidate file-mention token that itself fails to resolve, or resolves to more
 
 **Findings:**
 
+Every finding below is reported with `ruleId` `prose-line-references`; the reason (`out-of-bounds`, `blank-start-line`, `unresolvable`, `ambiguous`, or `prose-line-reference-not-anchored` under strict mode) is the bracketed suffix at the end of `message` (for example `` `lines 5-7` (doc line 12): bound to `src/a.ts`, start line is blank [blank-start-line] ``), so filter `--json` output on that suffix, not on `ruleId` (see [Output](check-catalog.md#output)).
+
 | Reason | Meaning | Severity |
 |--------|---------|----------|
 | `out-of-bounds` | The bound reference's range is inverted, or its start (or end) line exceeds the bound file's line count. | Warning |
 | `blank-start-line` | The bound reference's start line is blank. | Warning |
 | `unresolvable` | No file mention could be bound (no candidate in the sentence or paragraph, the nearest candidate does not resolve to a real file, or the resolved target could not be read). | Notice |
 | `ambiguous` | The nearest file mention's basename resolves to more than one real file; not evaluated. The finding names both (or all) candidates. | Notice |
+
+Like `citations-resolve`, this rule needs a repo root (explicit `--repo-root` or auto-detected); without one it emits a single bundle-level notice (`prose line reference resolution skipped: not inside a git work tree`) instead of reporting nothing.
 
 `unresolvable` and `ambiguous` are notice-severity rather than warning: "line" occurs constantly in ordinary English with no adjacent file nearby ("in line with", "product line"), so "no file mention nearby" is weaker evidence of actual drift than a reference that resolved cleanly and then turned out wrong. `out-of-bounds` and `blank-start-line` are warning-severity, mirroring `citations-resolve`'s own "a wrong start/target is strong drift evidence" posture once a reference DOES resolve to a single real file.
 
