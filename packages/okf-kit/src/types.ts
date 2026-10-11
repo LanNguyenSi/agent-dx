@@ -113,6 +113,17 @@ export interface BundleContext {
    * and the shared value rather than racing the wall clock.
    */
   now?: () => number;
+  /**
+   * Companion bundles for `frontmatter-refs-resolve`: alias -> absolute
+   * directory, from repeatable `--companion <alias>=<dir>`. Undefined when
+   * none were passed.
+   */
+  companions?: Map<string, string>;
+  /**
+   * `--skip-companion-refs`: a `<alias>:<path>` reference whose alias was
+   * not passed is a notice instead of an error.
+   */
+  skipCompanionRefs?: boolean;
 }
 
 export interface Rule {
