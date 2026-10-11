@@ -23,9 +23,10 @@ flowchart TD
     SCAN -->|"insertFriction"| DB[("SQLite store (db.ts)<br/>recurrence auto-link on insert")]
     LI["log / import"] -->|"insertFriction"| DB
     UR["update / rm"] -->|"status change, delete"| DB
-    DB <-->|"friction row; tasks row, status filed"| FILE["file"]
+    DB -->|"friction row"| FILE["file"]
+    FILE -->|"tasks row, status filed"| DB
     FILE --> TPL["templates.ts<br/>pick + render"]
-    TPL -->|"rendered template"| SINK["sinks/index.ts<br/>loadSink (lazy)"]
+    TPL -->|"rendered template"| SINK["sink.file(friction, rendered)<br/>loaded lazily by sinks/index.ts"]
     SINK --> EXT["markdown dir / stdout JSON / gh CLI /<br/>agent-tasks REST / Linear GraphQL"]
     DB -->|"dump after each change"| SX["maybeSyncExport<br/>atomic write to sync_export.path"]
     DB --> READ["list / search / export / bilanz"]

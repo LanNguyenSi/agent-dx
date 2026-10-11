@@ -17,13 +17,15 @@ A friction has one of four statuses: `open`, `filed`, `resolved`, `wontfix`.
 
 Only an open root collects auto-linked recurrences (see below), so once a root is filed, resolved or wontfix, the next matching friction starts a new chain.
 
-The diagram shows the commands that set each status; `update --status` can also move between any two statuses not drawn here.
+The diagram shows the commands that set each status. `file` sets `filed` from any status, and `update --status` can also move between any two statuses, including moves not drawn here such as `open` to `resolved`.
 
 ```mermaid
 stateDiagram-v2
     [*] --> open: log / scan / import
     open --> filed: file
-    filed --> filed: file again
+    resolved --> filed: file
+    wontfix --> filed: file
+    filed --> filed: file
     filed --> resolved: update --status
     filed --> wontfix: update --status
     resolved --> open: update --status

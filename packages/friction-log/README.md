@@ -82,8 +82,8 @@ See [Command reference](./docs/commands.md) for every subcommand, including manu
 - [Command reference](./docs/commands.md): full subcommand table, Stop-hook wiring, manual scan, templates
 - [Sinks](./docs/sinks.md): configuration for `markdown-file`, `stdout-json`, `github-issues`, `agent-tasks`, `linear`
 - [Sync-export](./docs/sync-export.md): optional multi-machine file merge, format, and write-through semantics
-- [Storage](./docs/storage.md): SQLite schema and `recurrence_of_id` matching rule
-- [Design notes](./docs/design.md): ADR for the sink options bag, roadmap, and how this relates to `slop-detector`
+- [Storage](./docs/storage.md): SQLite schema, friction status lifecycle, and the `recurrence_of_id` matching rule
+- [Design notes](./docs/design.md): module map and data-flow diagram, ADR for the sink options bag, roadmap, and how this relates to `slop-detector`
 
 ## Development
 
