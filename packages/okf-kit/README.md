@@ -118,7 +118,7 @@ Modules under `src/`:
 - `init.ts` and `templates.ts`: `runInit` and the scaffolded file bodies.
 - `types.ts`: the shared types (`Finding`, `Rule`, `BundleContext`, `RunGit`); `errors.ts`: `UsageError`.
 
-The diagram shows how the three commands (all defined in `cli.ts`) share repo-root detection, bundle loading and path resolution, and where the rule registry and the exit code sit.
+The diagram shows how `check` and `docs-for` share repo-root detection, bundle loading and path resolution, where the rule registry and the exit code sit, and that `init` (registered in `cli.ts` like the other two commands) stands apart: it only writes the `templates.ts` bodies.
 
 ```mermaid
 flowchart TD
@@ -130,7 +130,7 @@ flowchart TD
   DETECT -->|"git rev-parse"| GIT["runGit (git.ts)"]
   LOAD -->|"ctx"| RULES["allRules (rules/index.ts)"]
   COMP -->|"ctx.companions"| RULES
-  RULES -->|"git log (sources-fresh rules)"| GIT
+  RULES -->|"git (sources-fresh rules)"| GIT
   RULES --> RESOLVE["resolveRepoPath (util.ts)"]
   DOCSFOR -->|"sources, applies_to entries"| RESOLVE
   RULES -->|"findings"| REPORT["summarize / renderText / renderJson<br/>(report.ts)"]

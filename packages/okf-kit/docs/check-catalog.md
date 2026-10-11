@@ -83,6 +83,6 @@ Pass `--repo-root` explicitly to pin a specific root (useful in CI when the bund
 - `bundleDir` is the absolute path the bundle argument resolved to, so it is not portable across machines.
 - `ruleId` is one of the rule names in the table above. `citations-resolve` and `prose-line-references` report their finding id (for example `blank-start-line`) as a bracketed suffix at the end of `message`, not in `ruleId`; filter on that suffix to select one kind of finding (see [Citation resolution](citations.md) and [Prose line references](prose-line-references.md)).
 
-Without `--json`, `check` prints one `<SEVERITY> <ruleId> <file>: <message>` line per finding (`ERROR`, `WARN` or `NOTICE`), grouped by file, each followed by an indented `detail` line when present, then a closing `<n> findings (errors <e>, warnings <w>, notices <n>)` line. A run with no findings prints `okf-kit: clean, no findings in <dir>` instead.
+Without `--json`, `check` prints one `<SEVERITY> <ruleId> <file>: <message>` line per finding (`ERROR`, `WARN` or `NOTICE`), grouped by file, each followed by an indented `detail` line when present, then a closing `<total> findings (errors <e>, warnings <w>, notices <n>)` line. A run with no findings prints `okf-kit: clean, no findings in <dir>` instead.
 
 An invocation or tool error (exit 2) prints a message to stderr and no report.

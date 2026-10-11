@@ -33,7 +33,7 @@ Known limitation: the doc-commit comparison suppresses staleness for every sourc
 
 One sentence for the outcome: a source reads fresh when its own last commit is at or before the doc's resolved last commit and that commit moved the `timestamp` value strictly forward (or created the doc), or when the source's own last commit is at or before the frontmatter `timestamp`; every other assessable case is STALE, including a backwards or same-instant "re-stamp" (the not-assessable and no-valid-timestamp notices are neither fresh nor STALE; the backwards warning and the same-instant notice accompany a STALE verdict, they do not replace it).
 
-The flowchart below traces one `sources` entry of one doc to its verdict along the committed-history path. Under [`--dirty-as-now`](#uncommitted-edits---dirty-as-now) the decision is the same; only the epoch of a dirty path and the re-stamp verdict of a dirty doc come from the working tree instead.
+The flowchart below traces one `sources` entry of one doc to its verdict along the committed-history path. Under [`--dirty-as-now`](#uncommitted-edits---dirty-as-now) the decision is the same; only a dirty path's commit time becomes the run's shared "now", and a dirty doc's re-stamp verdict compares its working-tree `timestamp` with the one committed at `HEAD`.
 
 ```mermaid
 flowchart TD
