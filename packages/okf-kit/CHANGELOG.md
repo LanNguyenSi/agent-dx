@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `check`, `docs-for` and `init` no longer end the process with `process.exit()` right after writing to stdout. For a pipe the write is asynchronous, so `check --json | jq` received a report cut at the pipe buffer size (platform dependent) when the output was larger. The commands now set `process.exitCode` and return, so the output drains first; exit codes are unchanged, and a reader that closes early (`| head -1`) still ends the run silently with the verdict code (task 740a4bc8).
+- `check`, `docs-for` and `init` no longer end the process with `process.exit()` right after writing to stdout. For a pipe the write is asynchronous, so `check --json | jq` received a report cut at the pipe buffer size (platform dependent) when the output was larger. The commands now set `process.exitCode` and return, so the output drains first; exit codes are unchanged, and a reader that closes early (`| head -1`) still ends the run silently with the verdict code, while any other stdout write failure exits 2 with one stderr line (task 740a4bc8).
 
 ## [0.17.1] - 2026-10-05
 

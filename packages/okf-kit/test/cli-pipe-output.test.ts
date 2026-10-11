@@ -18,15 +18,23 @@ afterEach(() => {
   tmpDirs = [];
 });
 
-// A bundle whose JSON report is well over 64 KiB: every doc carries a broken
-// link, so each one adds an error finding.
+// Output must exceed this to prove the pipe path is exercised: a Linux stdio
+// pipe (a socketpair) absorbs well over 100 KB before a write blocks, so a
+// fixture near the macOS 64 KiB pipe size would pass vacuously on CI.
+const MIN_PIPED_BYTES = 512 * 1024;
+
+// A long link target pads each finding so a few thousand docs reach the size.
+const PAD = "x".repeat(100);
+
+// A bundle whose report is far over the pipe buffer: every doc carries a
+// broken link, so each one adds an error finding.
 function largeBundle(docs: number): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "okf-kit-pipe-"));
   tmpDirs.push(dir);
   for (let i = 0; i < docs; i++) {
     fs.writeFileSync(
       path.join(dir, `doc-${i}.md`),
-      `---\ntype: concept\n---\n\n[Broken](missing-target-${i}.md)\n`,
+      `---\ntype: concept\n---\n\n[Broken](missing-target-${i}-${PAD}.md)\n`,
     );
   }
   return dir;
@@ -88,7 +96,7 @@ function runEarlyClose(
 
 describe("check output through a pipe", () => {
   it("delivers the complete JSON report when it exceeds the pipe buffer", async () => {
-    const bundle = largeBundle(600);
+    const bundle = largeBundle(2500);
     const piped = await runPiped([
       "check",
       "--json",
@@ -97,9 +105,9 @@ describe("check output through a pipe", () => {
       bundle,
     ]);
 
-    expect(piped.stdout.length).toBeGreaterThan(65536);
+    expect(piped.stdout.length).toBeGreaterThan(MIN_PIPED_BYTES);
     const report = JSON.parse(piped.stdout.toString("utf8"));
-    expect(report.summary.errors).toBeGreaterThanOrEqual(600);
+    expect(report.summary.errors).toBeGreaterThanOrEqual(2500);
     expect(piped.code).toBe(1);
 
     // Same bytes as a redirect to a file would carry.
@@ -117,10 +125,12 @@ describe("check output through a pipe", () => {
   });
 
   it("delivers the complete text report when it exceeds the pipe buffer", async () => {
-    const bundle = largeBundle(1500);
+    const bundle = largeBundle(4000);
     const piped = await runPiped(["check", "--repo-root", bundle, bundle]);
-    expect(piped.stdout.length).toBeGreaterThan(65536);
-    expect(piped.stdout.toString("utf8")).toContain("missing-target-1499.md");
+    expect(piped.stdout.length).toBeGreaterThan(MIN_PIPED_BYTES);
+    expect(piped.stdout.toString("utf8")).toContain(
+      `missing-target-3999-${PAD}.md`,
+    );
     expect(piped.code).toBe(1);
   });
 
@@ -144,14 +154,18 @@ describe("check output through a pipe", () => {
   });
 
   it("ends silently with the verdict code when the reader closes early (warnings only)", async () => {
-    const bundle = largeWarningBundle(3000);
+    const bundle = largeWarningBundle(8000);
+    const full = await runPiped(["check", "--repo-root", bundle, bundle]);
+    expect(full.stdout.length).toBeGreaterThan(MIN_PIPED_BYTES);
     const run = await runEarlyClose(["check", "--repo-root", bundle, bundle]);
     expect(run.stderr).toBe("");
     expect(run.code).toBe(0);
   });
 
   it("keeps exit 1 and an empty stderr when the reader closes early on an error bundle", async () => {
-    const bundle = largeBundle(1500);
+    const bundle = largeBundle(4000);
+    const full = await runPiped(["check", "--repo-root", bundle, bundle]);
+    expect(full.stdout.length).toBeGreaterThan(MIN_PIPED_BYTES);
     const run = await runEarlyClose(["check", "--repo-root", bundle, bundle]);
     expect(run.stderr).toBe("");
     expect(run.code).toBe(1);
@@ -166,7 +180,7 @@ describe("docs-for output through a pipe", () => {
     fs.writeFileSync(path.join(root, "src", "foo.ts"), "export {};\n");
     const bundle = path.join(root, "docs");
     fs.mkdirSync(bundle);
-    for (let i = 0; i < 1500; i++) {
+    for (let i = 0; i < 6000; i++) {
       fs.writeFileSync(
         path.join(bundle, `doc-${i}.md`),
         `---\ntype: concept\nsources:\n  - src/foo.ts\n---\n\n# Doc ${i}\n`,
@@ -181,7 +195,7 @@ describe("docs-for output through a pipe", () => {
       "src/foo.ts",
     ];
     const piped = await runPiped(args);
-    expect(piped.stdout.length).toBeGreaterThan(65536);
+    expect(piped.stdout.length).toBeGreaterThan(MIN_PIPED_BYTES);
     expect(piped.code).toBe(0);
 
     const outFile = path.join(root, "out.json");
