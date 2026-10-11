@@ -185,7 +185,7 @@ harnesses/profile/tiers/models/routing precedence is layered:
    (the synthetic manifest built below) carries
    (cli-inputs.ts:386#"const tiers = opts.tiers ?? previous?.tiers ?? false;").
 2. Absent an explicit `--harness`, harnesses fall back to the target's own
-   recorded harnesses, else the operator defaults, else detection
+   recorded harnesses, else the operator defaults, else detection, else `claude`
    (cli.ts:719-721#"else the operator defaults, else detected",
    cli.ts:632-644#"return detected.length > 0 ? detected :").
 3. Absent an explicit flag, `profile`/`tiers`/`models`/`routing` fall back to the
