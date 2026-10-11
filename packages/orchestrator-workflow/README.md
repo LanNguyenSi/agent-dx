@@ -6,12 +6,12 @@ and per-role subagent definitions with preselected models for the harnesses
 you actually use (Claude Code, OpenAI Codex, opencode).
 
 The primary agent acts as the orchestrator: it owns goal, plan, task
-validation, acceptance, and the operator handoff. Review is always
-delegated to narrow subagents, and by default so is implementation (see
-[Run modes](#run-modes)); subagents return structured YAML evidence, not
-transcripts, and every unit of work leaves an auditable run directory
-behind. See [Architecture: why this shape](docs/architecture.md) for the
-loop diagram and the reasoning, and [Run contracts](docs/run-contracts.md)
+validation, acceptance, and the operator handoff. Review is never skipped:
+non-trivial review goes to a narrow reviewer subagent, and by default so does
+implementation (see [Run modes](#run-modes)); subagents return structured YAML
+evidence, not transcripts, and every unit of work leaves an auditable run
+directory behind. See [Architecture: why this shape](docs/architecture.md) for
+the loop diagram and the reasoning, and [Run contracts](docs/run-contracts.md)
 for the optional frozen acceptance-baseline contract and the
 decision-authority record every run keeps.
 
@@ -61,19 +61,29 @@ resolved target (`Installing into ...`) before it writes anything and warns
 when the target is not a git repository root; pass `init <dir>` to install
 into a different directory. The installer is interactive by default: it
 locates existing harness configs (`.claude/`, `CLAUDE.md`, `.opencode/`,
-`opencode.json`, `.agents/`, `.codex/`) and preselects what it found. For a
-guided install, use the agent-led path above: the agent inspects the repository
-and available harness capabilities, prepares the exact CLI invocation and
-routing diff, and asks only about choices or authority it cannot infer safely.
+`opencode.json`, `opencode.jsonc`, `.agents/`, `.codex/`) and preselects what
+it found. For a guided install, use the agent-led path above: the agent
+inspects the repository and available harness capabilities, prepares the exact
+CLI invocation and routing diff, and asks only about choices or authority it
+cannot infer safely.
 
 Non-interactive:
 
 ```bash
 npx orchestrator-workflow init --yes
 npx orchestrator-workflow init --harness claude,codex,opencode --models "implementer=sonnet,reviewer=opus" --yes
-npx orchestrator-workflow init --harness codex --routing ./routing.json --codex-catalog ./codex-models.json --tiers --yes
+npx orchestrator-workflow init --harness codex --routing ./routing.json --codex-catalog ./codex-catalog.json --tiers --yes
 npx orchestrator-workflow init --profile minimal --yes
 ```
+
+A run is interactive only when `--yes` is absent and both stdin and stdout
+are terminals; otherwise it runs non-interactively. Without `--harness`, a
+non-interactive run installs the detected harnesses plus any recorded by a
+previous install, and Claude Code when there are none (a previous
+templates-only install stays templates-only, see below). An interactive run
+asks for each choice no flag sets: the harnesses (preselecting the same set,
+or Claude Code), the profile, and, when Claude Code or opencode is selected
+and `--models` is not given, a model for each installed role.
 
 **Templates-only mode.** `--harness none` (the literal word `none`, on its
 own) installs only `.ai/workflow/**` and `.ai/runs/.gitkeep`: no
@@ -275,6 +285,11 @@ Documentation above). `npm test` (vitest) and `npm run typecheck` run from
 "Releasing okf-kit" order (`test/docs-consistency.test.ts` pins the
 `okf-kit@<version>` this repo's CI installs against the sibling
 `packages/okf-kit` package's version).
+
+The package's main entry also exports a programmatic API: `runInit` and
+`runUninstall`, harness detection and parsing, the role, profile, tier, and
+model constants, the routing helpers, and the Codex agent-file composer. The
+CLI calls the same functions.
 
 ## License
 

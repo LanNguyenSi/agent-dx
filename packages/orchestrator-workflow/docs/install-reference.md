@@ -4,7 +4,8 @@ Details behind the install commands in the [package README](../README.md):
 what the agent-led installer's conflict check does, the exact rules for
 `--harness none` (templates-only mode) on a re-run, the optional
 `knowledge` manifest field for a repository whose bundle is not at the
-default location, and the file-ownership rules a re-run follows.
+default location, the file-ownership rules a re-run follows, and the exit
+codes of the install commands.
 
 ## Agent-led installation: bundle and conflict handling
 
@@ -91,7 +92,28 @@ manifest on every run. The rules:
   records a hash of each file as installed, so a re-run after a kit upgrade
   updates files you never touched and reports files you edited as conflicts
   instead of overwriting them; `--force` overwrites those too.
-- `.ai/workflow/manifest.json` is the kit's state file. It records the applied
-  version, harnesses, role profile, models, the `--tiers` flag, the optional
-  kit-version pin, and file hashes, and is rewritten whenever that state
-  changes; do not edit it by hand.
+- `.ai/workflow/manifest.json` is the kit's state file. It records the kit
+  name and applied version, harnesses, role profile, legacy models, the
+  effective `routing` map, the `--tiers` flag, the optional kit-version pin,
+  the optional `knowledge` list, the opencode compatibility maps
+  (`opencodeModels`, `opencodeClassModels`) when present, file hashes, and the
+  first install time, and is rewritten whenever that state changes. Apart from
+  the `knowledge` field described above, do not edit it by hand.
+
+## Exit codes
+
+`init`, `setup`, and `apply` exit `2` when an option file (`--routing`,
+`--codex-models`, `--codex-catalog`) cannot be read or parsed as JSON, or
+when a `--routing` or `--codex-models` file fails validation; `apply` also
+exits `2` for `--pin` combined with `--unpin`, or for a `--pin` value that is
+empty or contains whitespace. When Codex is a selected harness, a
+`--codex-catalog` file with an invalid shape, or one missing a selected Codex
+model or effort, exits `2` for `setup` and `1` for `init` and `apply`; without
+Codex the catalog is parsed but not checked. Any other failure exits
+`1`, for example a missing target directory, an unknown harness or profile,
+a missing or unreadable operator manifest for `apply`, or `uninstall` without
+`--yes` in a non-interactive session. Every other run exits `0`, including an
+`apply` skipped by a pin and an install that reported conflicts. `doctor`,
+`adopt`, and `validate-review-report` have their own exit codes, listed in
+[Operator-level install](operator-install.md) and the
+[`validate-review-report` CLI reference](validate-review-report.md).

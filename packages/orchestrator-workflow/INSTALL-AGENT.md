@@ -69,8 +69,10 @@ The install creates or touches only these paths:
   orchestrator later writes a per-worktree `.ai/run` pointer at run time (a
   machine-local absolute path, not written by the installer); add it to the
   repository's `.gitignore`. This repository's own `.ai/workflow/manifest.json`
-  can additionally carry one optional field, `pin`: a kit version recorded
-  by `apply --pin`/`--unpin`/`--force-pin`, absent when no pin was ever set.
+  can additionally carry an optional `pin` (a kit version recorded by
+  `apply --pin`/`--unpin`/`--force-pin`, absent when no pin was ever set)
+  and an optional, hand-edited `knowledge` list (see "The `knowledge`
+  manifest field" in `docs/install-reference.md`).
 - **Operator path only** (`apply`/`adopt`, not `init`): the operator's own
   home's manifest, `<operator home>/manifest.json`, where the operator home
   is `~/.orchestrator-workflow/` unless `ORCHESTRATOR_WORKFLOW_HOME` names a
@@ -83,11 +85,15 @@ The install creates or touches only these paths:
   markers is never modified
 - `CLAUDE.md`: one `@AGENTS.md` import line appended when missing; the file
   is created with a short heading when absent (Claude Code harness only)
-- `.claude/skills/orchestrator-workflow/SKILL.md` and
+- `.claude/skills/orchestrator-workflow/SKILL.md` and one
+  `.claude/skills/orchestrator-workflow/references/<name>.md` per file in
+  `assets/skill/references/`, plus
   `.claude/agents/{explorer,task-slicer,implementer,reviewer,advisor}.md` (Claude Code)
-- `.agents/skills/orchestrator-workflow/SKILL.md` and
+- `.agents/skills/orchestrator-workflow/SKILL.md` and the same
+  `references/*.md` files, plus
   `.codex/agents/{explorer,task-slicer,implementer,reviewer,advisor}.toml` (Codex)
-- `.opencode/skills/orchestrator-workflow/SKILL.md` and
+- `.opencode/skills/orchestrator-workflow/SKILL.md` and the same
+  `references/*.md` files, plus
   `.opencode/agents/{explorer,task-slicer,implementer,reviewer,advisor}.md` (opencode)
 
 The per-role agent files above are the `full` profile (the default); the

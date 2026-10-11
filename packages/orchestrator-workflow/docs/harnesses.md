@@ -5,8 +5,9 @@ the CLI surface.
 
 Each installed skill includes the compact `SKILL.md` entrypoint and every
 regular Markdown file from its adjacent `references/` directory. The entrypoint
-routes run-state/harness, contracts, evidence/probes, and review/recovery work
-to those files; references are part of the installed skill, not optional docs.
+routes run-state/harness, contracts, evidence/probes, review/recovery, and
+bundle-gate-in-CI work to those files; references are part of the installed
+skill, not optional docs.
 
 | Harness | Files | Notes |
 |---|---|---|
