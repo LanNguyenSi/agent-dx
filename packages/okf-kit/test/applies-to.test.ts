@@ -308,7 +308,7 @@ describe("applies_to", () => {
     expect(fromAppliesTo[0].message).toContain(escaping);
   });
 
-  it("an existing escaping entry gets the same verdict from both fields (no finding), pinning parity", () => {
+  it("an existing escaping entry gets the same verdict from both fields (an escape error), pinning parity", () => {
     const outside = path.join(
       path.dirname(repo.dir),
       "okf-kit-applies-to-outside.txt",
@@ -325,7 +325,10 @@ describe("applies_to", () => {
         applies_to: [escaping],
       });
       const findings = sourcesShapeRule.run(loadBundle(bundleDir(), repo.dir));
-      expect(findings).toEqual([]);
+      expect(findings.map((f) => f.message).sort()).toEqual([
+        `\`applies_to\` path escapes the repo root: \`${escaping}\``,
+        `\`sources\` path escapes the repo root: \`${escaping}\``,
+      ]);
     } finally {
       fs.rmSync(outside, { force: true });
     }

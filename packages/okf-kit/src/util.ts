@@ -74,6 +74,21 @@ export function resolveRepoPath(repoRoot: string, source: string): string {
 }
 
 /**
+ * Whether a `sources` / `applies_to` entry stays inside `repoRoot`. The
+ * entry is resolved with `resolveRepoPath` and judged with `path.relative`
+ * (never a string prefix, so a sibling directory sharing the root's name
+ * prefix does not pass); a leading-slash entry is repo-relative there, so
+ * only `..` segments can escape. The check is lexical: symlinks are not
+ * resolved, so an in-tree link pointing outside the repo is not detected.
+ */
+export function isWithinRepoRoot(repoRoot: string, entry: string): boolean {
+  const rel = path.relative(repoRoot, resolveRepoPath(repoRoot, entry));
+  return (
+    rel !== ".." && !rel.startsWith(".." + path.sep) && !path.isAbsolute(rel)
+  );
+}
+
+/**
  * Parses a frontmatter `timestamp` STRING to milliseconds since the epoch,
  * forcing UTC interpretation whenever the string carries no UTC designator
  * (`Z`) or numeric offset (`hasUtcDesignator`, D-016). `Date.parse` resolves
