@@ -7,6 +7,7 @@ import { sourcesShapeRule } from "./sources-shape.js";
 import { sourcesFreshRule, sourcesFreshFutureRule } from "./sources-fresh.js";
 import { citationsResolveRule } from "./citations-resolve.js";
 import { proseLineReferencesRule } from "./prose-line-references.js";
+import { frontmatterRefsResolveRule } from "./frontmatter-refs-resolve.js";
 
 // proseLineReferencesRule is always registered here, same as
 // citationsResolveRule -- its own run(ctx) no-ops (returns []) unless
@@ -28,6 +29,7 @@ export const allRules: Rule[] = [
   sourcesFreshFutureRule,
   citationsResolveRule,
   proseLineReferencesRule,
+  frontmatterRefsResolveRule,
 ];
 
 export {
@@ -40,4 +42,5 @@ export {
   sourcesFreshFutureRule,
   citationsResolveRule,
   proseLineReferencesRule,
+  frontmatterRefsResolveRule,
 };
