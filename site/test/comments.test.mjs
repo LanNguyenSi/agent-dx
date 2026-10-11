@@ -60,3 +60,41 @@ test('an HTML block holding a comment and other HTML drops only the comment', ()
   assert.ok(!out.includes('gone'))
   assert.match(out, /&lt;version&gt;/)
 })
+
+test('a raw tag in a heading is escaped in the table of contents and the heading', () => {
+  const out = render('[[toc]]\n\n## Hi <img src=x onerror=alert(1)>\n')
+  assert.ok(!out.includes('<img'))
+  assert.match(out, /Hi &lt;img src=x onerror=alert\(1\)&gt;/)
+})
+
+test('no source HTML token survives for later consumers', () => {
+  const src = '<!-- c --> **x**\n\n## Hi <img src=x> <!-- c --> there\n\n<div>\nbody <b>y</b>\n'
+  const flat = (tokens) => tokens.flatMap((t) => [t, ...flat(t.children ?? [])])
+  const html = flat(md.parse(src, { relativePath: 'fixture.md' })).filter((t) => /^html_/.test(t.type))
+  // Only the generated heading permalink symbol may remain.
+  assert.deepEqual(html.map((t) => t.content), ['&ZeroWidthSpace;'])
+})
+
+test('a placeholder in a heading keeps its text in the anchor slug', () => {
+  const out = render('### Task 1: <title>\n')
+  assert.match(out, /<h3 id="task-1-title"/)
+  assert.match(out, /href="#task-1-title"/)
+})
+
+test('the heading permalink symbol is markup, not escaped text', () => {
+  const out = render('## Plain heading\n')
+  assert.match(out, /&ZeroWidthSpace;<\/a>/)
+  assert.ok(!out.includes('&amp;ZeroWidthSpace;'))
+})
+
+test('text after a closing comment on the same line still renders as Markdown', () => {
+  const out = render('<!-- note --> **bold** tail\n')
+  assert.ok(!out.includes('note'))
+  assert.match(out, /<strong>bold<\/strong> tail/)
+})
+
+test('an unclosed comment opener stays visible and drops nothing', () => {
+  const out = render('before\n\n<!-- never closed\n\nlater text\n')
+  assert.match(out, /&lt;!-- never closed/)
+  assert.match(out, /later text/)
+})
