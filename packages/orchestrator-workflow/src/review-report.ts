@@ -195,7 +195,7 @@ function checkScalarField(
 
 /**
  * Checks a top-level `array`-kind field (`summary`, `missing_tests`,
- * `residual_risks`): the contract writes each of these as a plain list of
+ * `residual_risks`, `runbook_notes`): the contract writes each of these as a plain list of
  * strings (`- ""`), so every element that is not a string is its own
  * diagnostic at `<key>[<index>]`, `expected: "string"`, alongside the
  * container-level checks. All offending elements are reported, not only
@@ -210,7 +210,7 @@ function checkScalarField(
  * `task_id` uses). A bare `- ` or `- ~` bullet is not a string at all --
  * YAML parses either as `null`, which this checker rejects the same as
  * any other non-string element; only a quoted placeholder passes. These
- * three fields are declared `"array"` in {@link FIELD_KINDS}, not
+ * four fields are declared `"array"` in {@link FIELD_KINDS}, not
  * `"non-empty-string"`, so a quoted element gets the same tolerance its
  * own kind implies; a reviewer emitting a quoted placeholder blank bullet
  * is a content question the orchestrator judges, not a structural one
@@ -220,16 +220,17 @@ function checkArrayField(
   doc: Record<string, unknown>,
   key: string,
   diagnostics: Diagnostic[],
+  expected = "array",
 ): void {
   const value = doc[key];
   if (value === undefined) {
-    diagnostics.push({ path: key, expected: "array", got: "missing" });
+    diagnostics.push({ path: key, expected, got: "missing" });
     return;
   }
   if (!Array.isArray(value)) {
     diagnostics.push({
       path: key,
-      expected: "array",
+      expected,
       got: describeValue(value),
     });
     return;
@@ -487,7 +488,12 @@ const TOP_LEVEL_CHECKS: Record<(typeof TOP_LEVEL_FIELDS)[number], DocChecker> =
       ),
     withdrawn: checkWithdrawn,
     runbook_notes: (doc, diagnostics) =>
-      checkArrayField(doc, "runbook_notes", diagnostics),
+      checkArrayField(
+        doc,
+        "runbook_notes",
+        diagnostics,
+        expectedTextFor("runbook_notes"),
+      ),
   };
 
 /** Every field name any of the four contract constants declares. */
@@ -585,11 +591,12 @@ const KIND_EXPECTED: Record<Exclude<FieldKind, "enum">, string> = {
 
 /**
  * Fields whose diagnostic wording differs from their kind's default.
- * `withdrawn`'s own text spells out that an empty list is fine, since a
- * reviewer with nothing withdrawn must still emit the key.
+ * `withdrawn`'s and `runbook_notes`'s own text spells out that an empty list
+ * is fine, since a reviewer with nothing to report must still emit the key.
  */
 const EXPECTED_OVERRIDES: Partial<Record<SchemaFieldName, string>> = {
   withdrawn: "array (may be empty)",
+  runbook_notes: "array (may be empty)",
 };
 
 /**

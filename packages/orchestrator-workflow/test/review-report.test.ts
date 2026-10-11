@@ -63,6 +63,30 @@ describe("validateReviewReport: complete valid returns", () => {
   });
 });
 
+describe("validateReviewReport: runbook_notes", () => {
+  it("says an empty list is fine when the field is missing or not a list", () => {
+    const missing = validDoc();
+    delete missing.runbook_notes;
+    expect(validateReviewReport(JSON.stringify(missing)).diagnostics).toEqual([
+      {
+        path: "runbook_notes",
+        expected: "array (may be empty)",
+        got: "missing",
+      },
+    ]);
+    const wrongType = { ...validDoc(), runbook_notes: "none" };
+    expect(validateReviewReport(JSON.stringify(wrongType)).diagnostics).toEqual(
+      [
+        {
+          path: "runbook_notes",
+          expected: "array (may be empty)",
+          got: '"none"',
+        },
+      ],
+    );
+  });
+});
+
 describe("validateReviewReport: fence handling", () => {
   it("tolerates prose after the closing fence as a warning, not a failure", () => {
     const result = validateReviewReport(fixture("prose-after.yaml"));

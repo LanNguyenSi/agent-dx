@@ -14,7 +14,7 @@
 
 ## Known Risks
 
-- <!-- risk or none -->
+- <!-- risk or none; also list each runbook, pin, or declaration diff surfaced because it does not take effect in this run, mirrored in a 03-decisions.md row -->
 
 ## Accepted Waivers
 
