@@ -75,10 +75,19 @@ without reusing the `killed`/`survived` words at all.
 
 A single probe runs its main safety gates in a fixed order, and a gate
 that fails ends the run with a refusal (`status: "usage_error"` or
-`"inconclusive"`, exit `2`) before anything after it runs. `probe()`
-first checks the option shape and reads the repository defaults file
-(either failing is a `usage_error`). `openRunSetup` (`src/probe/setup.ts`)
-then checks containment (`file_outside_root`), takes the lock
+`"inconclusive"`, exit `2`) before anything after it runs; the
+[Refusal reason shape](#refusal-reason-shape) table lists every reason.
+`probe()` first checks the option shape and reads the repository
+defaults file (either failing is a `usage_error`). It also refuses a
+`--link` or defaults-file link whose source is missing
+(`link_source_not_found`, `usage_error`) or outside the root
+(`file_outside_root`, `inconclusive`), and a `-p` patch whose touched
+paths cannot be listed (`inconclusive`). `openRunSetup`
+(`src/probe/setup.ts`) then refuses two `-i worktree` shapes, both a
+`usage_error`: `--allow-outside` (`worktree_allow_outside_unsupported`)
+and a test command, `--pre` or `--env` value that names the real
+repository root (`test_command_escapes_isolation`). It then checks
+containment (`file_outside_root`), takes the lock
 (`probe_in_progress`, `lock_unavailable`), recovers or refuses a stale
 in-flight marker (`stale_probe_marker`), prepares the worktree copy under
 `-i worktree` (`stale_worktree`, `worktree_sync_failed`), and computes
@@ -86,9 +95,11 @@ the mutant in a dry run (`mutant_not_applicable`).
 
 ```mermaid
 flowchart TD
-  A["Option-shape checks and .agent-primitives.json"] -->|invalid| U["usage_error"]
+  A["Option shape, defaults file,<br/>link sources, -p listing"] -->|refused| U["usage_error, or inconclusive<br/>for a link or -p listing"]
   A --> S["openRunSetup (setup.ts)"]
-  S --> C{"Every target inside<br/>the containment root?"}
+  S --> I{"-i worktree with<br/>--allow-outside, or a<br/>command naming the root?"}
+  I -->|yes| R0["worktree_allow_outside_unsupported or<br/>test_command_escapes_isolation"]
+  I -->|"no, or -i inplace"| C{"Every target inside<br/>the containment root?"}
   C -->|no| R1["file_outside_root"]
   C -->|yes| L{"Lock acquired?"}
   L -->|no| R2["probe_in_progress or<br/>lock_unavailable"]
@@ -114,10 +125,10 @@ flowchart TD
   B --> Z{"Did any test run?"}
   Z -->|"no, or unreadable"| R7["no_tests_executed or<br/>zero_tests_ambiguous"]
   Z -->|yes| F{"Baseline passed?"}
-  F -->|no| R8["baseline_failed"]
+  F -->|no| R8["baseline_failed (or<br/>baseline_evidence_not_matched<br/>under --pass-regex)"]
   F -->|yes| T{"Target unchanged<br/>by the baseline?"}
   T -->|no| R9["target_changed_during_baseline"]
-  T -->|yes| E{"Evidence matched?<br/>(--require-baseline-evidence)"}
+  T -->|yes| E{"Baseline evidence<br/>matched?"}
   E -->|no| R10["baseline_evidence_not_matched"]
   E -->|"yes, or not given"| N["Mutant step (next diagram)"]
 ```
@@ -125,7 +136,11 @@ flowchart TD
 Only then is the mutant applied (`runMutantAttempt` in
 `src/probe/step.ts`, which writes the in-flight marker first under
 `-i inplace`), tested, restored and verified by hash, and classified.
-The diagram shows that mutant step up to its verdict or refusal.
+A mutant run whose output shows no test ran, or matches the baseline's
+output byte for byte with no test summary either detector recognizes,
+is reported `inconclusive` (`no_tests_executed`, `zero_tests_ambiguous`)
+instead of a verdict. The diagram shows that mutant step up to its
+verdict or refusal.
 
 ```mermaid
 flowchart TD
@@ -136,7 +151,9 @@ flowchart TD
   RS -->|"yes, but --pre failed"| R13["pre_failed"]
   RS -->|yes| K{"Did the mutant run<br/>report an exit code?"}
   K -->|no| R14["timeout"]
-  K -->|yes| V["killed or survived,<br/>expectation met or violated"]
+  K -->|yes| Z{"Did any test run?<br/>(mutant output)"}
+  Z -->|"no, or unreadable"| R15["no_tests_executed or<br/>zero_tests_ambiguous"]
+  Z -->|yes| V["killed or survived,<br/>expectation met or violated"]
 ```
 
 A run that got past the lock ends in the same teardown after a verdict
@@ -152,8 +169,11 @@ a library caller gets a `warnings` entry about the stale build instead
 the exit code is `0` for a met expectation, `1` for a violated one, and `2` for
 every refusal.
 
-`--plan` runs the same setup and baseline once, and the mutant step once
-per mutant.
+`--plan` runs the same setup, without the dry run, and the baseline
+once. Each mutant's dry run, apply, test and restore then run per
+mutant, and a mutant that does not apply is recorded `inconclusive`
+without ending the plan. A plan reports `file_outside_root` as a
+`usage_error`, where a single probe reports it `inconclusive`.
 
 ## Mutant forms (-r, -M/-w, -p)
 

@@ -117,8 +117,11 @@ lock, stale-marker recovery, worktree preparation, baseline) and a
 per-mutant step (`src/probe/step.ts`: in-flight marker, apply, test,
 restore, classify), which `--plan` runs once per mutant;
 [docs/probe.md](docs/probe.md) shows the order of its gates. Both phases
-go through `src/probe/session.ts`: its `runPreThenTest` starts every
-`--pre` and test command through `execCommand`, and its
+go through `src/probe/session.ts`: its `runPreThenTest` starts the
+baseline's and each mutant's `--pre` and test command through
+`execCommand` (the final `--pre` rebuild under `-i inplace` goes
+through `runFinalRebuild` in the same module, which `probe/index.ts`
+calls through `finalRebuildOrWarn`), and its
 `prepareWorktreeSession` creates the `-i worktree` copy through
 `src/probe/isolation.ts`. `doctor` reuses `src/lock.ts` and
 `src/probe/isolation.ts` to read the markers and scratch worktrees
@@ -134,6 +137,7 @@ flowchart TD
   PRB --> STP["probe/step.ts"]
   SET --> SES["probe/session.ts"]
   STP --> SES
+  PRB -->|finalRebuildOrWarn| SES
   SET -->|acquireLock| LCK["lock.ts"]
   STP -->|writeMarker| LCK
   SES -->|execCommand| EXEC
