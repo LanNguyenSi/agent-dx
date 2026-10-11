@@ -3,7 +3,11 @@ name: Publish to npm
 # Publishes a package under packages/ on a pushed tag matching the agent-dx
 # tag convention `<pkg>/v<semver>`. The package directory and version are
 # derived from the tag, so adding a package means adding its tag pattern to
-# `on.push.tags` and its name to PUBLISHABLE below, nothing else.
+# `on.push.tags`, its name to PUBLISHABLE below and to the ALLOWLIST in
+# npm-deprecate.yml and npm-dist-tag.yml (orchestrator-workflow's
+# docs-consistency test keeps these lists and their prose copies equal), and
+# a Trusted Publisher entry for the package on npmjs.com (see the npm upgrade
+# step below). CONTRIBUTING.md lists the remaining steps.
 #
 # The workflow_dispatch path exists so a tag that predates this workflow
 # (orchestrator-workflow/v0.1.0) can be published once the Trusted Publisher

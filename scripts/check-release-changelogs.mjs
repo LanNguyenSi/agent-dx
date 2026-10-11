@@ -60,13 +60,13 @@
  *     this is its own rule rather than folded into rule 1's check.
  *  5. checked-package-scope (only when the expectation list is
  *     non-empty, see --expect below): a list of packages this repository
- *     is already known to check (agent-primitives, okf-kit,
+ *     is already known to check (agent-primitives, friction-log, okf-kit,
  *     orchestrator-workflow, slop-detector by default) must still all be
  *     in the checked set computed by "Scope" below. Without this, a
  *     package silently losing its CHANGELOG.md (deleted by accident, or
  *     the package flipped to `"private": true`) only shows up as a
  *     smaller number in the final "N package(s) checked" line, which
- *     nobody reads closely enough to notice a shrink from 4 to 3. The
+ *     nobody reads closely enough to notice a shrink by one. The
  *     expectation list defaults to the pinned `EXPECTED_CHECKED_PACKAGES`
  *     below when `--expect` is not given (the real repo's CI invocation
  *     takes this default); `--expect <csv>` overrides it, and an empty

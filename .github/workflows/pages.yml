@@ -1,8 +1,9 @@
 name: pages
 
 # Builds the playbook site (site/) with VitePress. Pull requests only build it
-# as a check. A push to master (or a manual run on master) builds it again and deploys the result to
-# GitHub Pages. The Pages source setting must be "GitHub Actions".
+# as a check. A push to master that touches the paths below (or a manual run
+# on master) builds it again and deploys the result to GitHub Pages. The Pages
+# source setting must be "GitHub Actions".
 
 on:
   workflow_dispatch:

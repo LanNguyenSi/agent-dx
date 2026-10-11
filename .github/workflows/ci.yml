@@ -14,9 +14,8 @@ permissions:
   contents: read
 
 # Only the npm packages are matrix entries. `agent-engineering-playbook`
-# and `agentic-coding-playbook` are pure documentation directories (no
-# package.json), and `scaffoldkit` is a Python sub-package (handled in its
-# own toolchain), so nothing to build/test for those here.
+# and `agentic-coding-playbook` are documentation directories (no
+# package.json), so there is nothing to build or test for them here.
 jobs:
   placement-guard:
     runs-on: ubuntu-latest
@@ -198,9 +197,10 @@ jobs:
         # test/docs-consistency.test.ts (globs every .github/workflows/
         # file for an okf-kit@<version> pin, install or npx form). The
         # --require-anchors flag used below turns on citations-resolve's
-        # four opt-in rules: anchor-required, anchor-not-on-last-line,
-        # anchor-not-unique-in-range, and test-range-straddles-block (see
-        # the "Anchor-citation guard" step further down).
+        # five opt-in rules: anchor-required, anchor-required-continuation,
+        # anchor-not-on-last-line, anchor-not-unique-in-range, and
+        # test-range-straddles-block (see the "Anchor-citation guard" step
+        # further down).
         #
         # Probe the pin with `npm view okf-kit@<pin> version` first:
         # published, install exactly as before, no drift. If that probe
@@ -326,7 +326,8 @@ jobs:
         # only CHANGELOG.md's citations, see docs/okf/log.md for the live
         # counts -- not hand-copied here since they drift as citations
         # are added or re-pointed), plus one deliberate violation of each
-        # of --require-anchors' four opt-in rules (anchor-required,
+        # of --require-anchors' opt-in rules except
+        # anchor-required-continuation (anchor-required,
         # anchor-not-on-last-line, anchor-not-unique-in-range,
         # test-range-straddles-block). The heading and string findings are
         # produced by drifting the same two citations' ranges (repointing
@@ -553,7 +554,7 @@ jobs:
           # heading-section-* are matched by name below, not by the
           # wildcard, since neither id starts with "anchor-".
           # test-range-straddles-block is one of --require-anchors' own
-          # four opt-in rules (see the Install step above).
+          # opt-in rules (see the Install step above).
           # heading-section-* covers okf-kit 0.8.0's line-independent
           # `path.md:#heading` citation form
           # (heading-section-not-found/-ambiguous/-empty and its

@@ -11,8 +11,8 @@ A monorepo workshop for agent-development tooling, built while shipping AI-agent
 | Package | What it does | npm |
 |---------|--------------|-----|
 | [orchestrator-workflow](packages/orchestrator-workflow) | Installer for an orchestrator-led agent workflow: `.ai/` run state, an `AGENTS.md` policy section, and subagent definitions with preselected models for Claude Code, Codex, and opencode. | published |
-| [okf-kit](packages/okf-kit) | CLI that validates OKF v0.1 knowledge bundles: frontmatter shape, reserved files, link resolution, absolute-link warnings, `sources` shape. | published |
-| [agent-primitives](packages/agent-primitives) | Agent-first CLI: bounded JSON envelopes, a mutation-probe runner, a verify runner, and a PATH doctor, plus an `init` command that installs its own skill document into a harness's skill directory. | published |
+| [okf-kit](packages/okf-kit) | CLI that validates OKF v0.1 knowledge bundles (structure, links, staleness against git history, citation drift), scaffolds a starter bundle with `init`, and lists which docs claim a changed path with `docs-for`. | published |
+| [agent-primitives](packages/agent-primitives) | Agent-first CLI that returns one bounded JSON result per call: mutation-probe and verify runners, a PATH doctor, identifier-drift and commit-hygiene guards, and checkout snapshot/delta, plus an `init` command that installs its own skill document into a harness's skill directory. | published |
 | [slop-detector](packages/slop-detector) | AI-slop linter for PRs: catches leaked tool-call XML, doubled Summary headings, hedging openers, marketing adjectives, and other agent-generated tells across eight rule packs. | not published (name taken by an unrelated package; run from a local build) |
 | [agent-dev-kit](packages/agent-dev-kit) | CLI scaffolding for AI agent projects: file layout, hooks, entrypoints. | not published |
 | [friction-log](packages/friction-log) | Capture, query, and infer agent-workflow frictions. SQLite-backed, sink-pluggable, zero-config default. | published |
@@ -26,7 +26,7 @@ Both playbooks are also published as one searchable site: <https://lannguyensi.g
 
 ## Quick start
 
-Requires Node.js >= 20 (CI runs on Node 22).
+Requires Node.js >= 20; friction-log requires Node.js >= 22. CI runs on Node 22.
 
 Try one of the published CLIs directly:
 
@@ -59,7 +59,7 @@ node packages/slop-detector/dist/cli.js check examples/slop-sample.md --explain
 
 - [Repo layout and package status](docs/repo-layout.md): why this is not a workspace monorepo, and which packages are published, private, or doc-only.
 - [Where this fits](docs/ecosystem.md): how `slop-detector` and this workshop relate to the sibling Project OS repos.
-- [CI checks on this repository](docs/ci-checks.md): what `placement-guard`, `review-guard`, and the OKF bundle prose guard enforce.
+- [CI checks on this repository](docs/ci-checks.md): what `placement-guard`, `review-guard`, `workflow-guard`, and the OKF bundle prose guard enforce.
 - `slop-detector` overview and quick start: [packages/slop-detector/README.md](packages/slop-detector/README.md); full pack reference and the scan pipeline: [packages/slop-detector/docs/rule-packs.md](packages/slop-detector/docs/rule-packs.md) and [packages/slop-detector/docs/integration.md](packages/slop-detector/docs/integration.md).
 - Each package's own README covers its full install, usage, and API.
 
@@ -69,4 +69,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for issue and PR conventions, the dev set
 
 ## License
 
-MIT, see [LICENSE](LICENSE). Experimental: each package has its own version and CI, and APIs may evolve at minor-version bumps.
+MIT, see [LICENSE](LICENSE). Experimental: each code package has its own version and its own entry in the shared CI matrix, and APIs may evolve at minor-version bumps.

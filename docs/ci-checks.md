@@ -1,9 +1,8 @@
 # CI checks on this repository
 
-CI runs dedicated `placement-guard` and `review-guard` jobs for the
-repository, plus an `OKF bundle prose guard` job. All three run
-[`slop-detector`](../packages/slop-detector) from a local build against a
-specific pack and config:
+CI runs the following jobs. Each builds
+[`slop-detector`](../packages/slop-detector) from this checkout and runs it
+against one pack and config:
 
 - `placement-guard` checks the whole repository with the `placement-slop`
   pack: it blocks org-, machine-, or point-in-time-bound evidence (machine
@@ -15,6 +14,12 @@ specific pack and config:
   of the action; it must agree with `placement-guard`.
 - `review-guard` checks the whole repository with the `review-slop` pack:
   it blocks run-local review references from landing in reusable content.
+- `workflow-guard` checks the repository's workflow files and composite
+  action metadata with the `workflow-slop` pack: it blocks `run:` expression injection, workflow
+  files that do not parse, reintroduced Node-20 action majors, and a
+  missing or unrecognized npm-audit gate. It is a security control rather
+  than a doc-hygiene lint, so it reports under its own status check. See
+  [workflow-slop](../packages/slop-detector/docs/workflow-slop.md).
 - `OKF bundle prose guard` checks
   `packages/orchestrator-workflow/docs/okf` with the `prose-slop` pack: it
   blocks em dashes and hedging openers in that knowledge bundle.
@@ -29,3 +34,12 @@ hedging-opener rules to block for the bundle prose guard.
 See [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) for the full
 job list, including the build/test/typecheck/lint matrix over the npm
 packages and the OKF anchor guard.
+
+## Using these checks in another repository
+
+Another repository can run the `workflow-slop` pack through this
+repository's reusable workflow `.github/workflows/workflow-guard.yml`,
+pinned to a full commit SHA in `uses:`, or run any pack inside its own job
+with the composite action `packages/slop-detector/action`. See
+[Use from another repo](../packages/slop-detector/docs/workflow-slop.md#use-from-another-repo)
+and the [slop-detector README](../packages/slop-detector/README.md).

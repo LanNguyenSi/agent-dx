@@ -2,9 +2,9 @@
 
 `agent-dx` is a folder of independent packages, not an npm workspaces, pnpm,
 or lerna monorepo. There is no root `package.json`, no workspace manifest,
-and no shared root `node_modules`. Each package under `packages/` carries
-its own `package.json`, install, build, test, and version, so the install
-pattern is the same for every local-build package:
+and no shared root `node_modules`. Each code package under `packages/`
+carries its own `package.json`, install, build, test, and version, so the
+install pattern is the same for every local-build package:
 
 ```bash
 cd packages/<name> && npm install && npm run build
@@ -17,9 +17,9 @@ root needs to be set up first.
 
 ## Package status
 
-- `orchestrator-workflow` and `okf-kit` are published to npm with tagged
-  releases.
-- `agent-primitives` and `friction-log` are published to npm.
+- `orchestrator-workflow`, `okf-kit`, `agent-primitives`, and `friction-log`
+  are published to npm from `<package>/v<version>` tags (see
+  `.github/workflows/publish-npm.yml`).
 - `slop-detector` is deliberately unpublished: the bare `slop-detector` name
   on npm belongs to an unrelated third-party package. It runs from a local
   build (see the root README's Quick start and Usage) and ships an MCP server
@@ -30,8 +30,9 @@ root needs to be set up first.
 - `agent-engineering-playbook` and `agentic-coding-playbook` are
   documentation packages, not code: they have no `package.json`.
 
-Each package has its own version, README, and CI. APIs may evolve at
-minor-version bumps; this workshop as a whole is experimental.
+Each code package has its own version and README and its own entry in the
+shared CI matrix. APIs may evolve at minor-version bumps; this workshop as a
+whole is experimental.
 
 ## Playbook site
 
@@ -50,5 +51,6 @@ cd site && npm run dev               # local preview with search
 ```
 
 `.github/workflows/pages.yml` builds the site on pull requests that touch
-`site/` or the two playbooks, and deploys it to GitHub Pages on pushes to
-`master` or a manual run on `master`.
+`site/`, the two playbooks, or the workflow itself, and deploys it to GitHub
+Pages on pushes to `master` that touch the same paths, or on a manual run on
+`master`.

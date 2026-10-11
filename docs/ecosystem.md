@@ -10,8 +10,11 @@ human-agent dev lifecycle. It sits alongside:
   (evidence ledger, claim gate, hypothesis tracker)
 - [agent-preflight](https://github.com/LanNguyenSi/agent-preflight) gates
   pushes
-- [harness](https://github.com/LanNguyenSi/harness) declares and enforces
-  the policy boundary that calls into all of the above
+- [harness](https://github.com/LanNguyenSi/harness) declares an agent's
+  configuration in one manifest and blocks tool calls that violate its
+  declared policies at runtime; it can register agent-tasks and
+  agent-grounding's `grounding-mcp` as MCP servers and queries
+  `grounding-mcp`'s evidence ledger
 
 [scaffoldkit](https://github.com/LanNguyenSi/scaffoldkit) and
 [agent-planforge](https://github.com/LanNguyenSi/agent-planforge) are
