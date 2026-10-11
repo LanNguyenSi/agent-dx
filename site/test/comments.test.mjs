@@ -217,7 +217,8 @@ test('lines holding only comments render nothing', () => {
     ['<!-- use --force here -->\n\ntext\n', '<p>text</p>\n'],
     ['<!-- a\n\nb -->\n', ''],
     ['<!-- a --> <!-- b -->\n', ''],
-    ['<!-- a --> <!-- b\nc -->\ntext\n', '<p>text</p>\n']
+    ['<!-- a --> <!-- b\nc -->\ntext\n', '<p>text</p>\n'],
+    ['a\n<!-- x --> <!-- y\nz -->\nb\n', '<p>a</p>\n<p>b</p>\n']
   ])
 })
 

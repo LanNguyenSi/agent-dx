@@ -30,7 +30,8 @@ export function htmlComments(md) {
   md.core.ruler.after('inline', 'agent-dx-comment-text', commentText)
 }
 
-// A line that starts with a comment. Lines holding nothing but comments become
+// A line that starts with a comment, or with several in a row, up to the line
+// where the last of them closes. Lines holding nothing but comments become
 // blank lines, so paragraphs, lists, and quotes around them behave exactly as
 // if the comment had never been written. A single line with text after its
 // comment is left to the other rules, and the inline rule hides the comment.
@@ -45,7 +46,14 @@ function commentBlock(state, startLine, endLine, silent) {
   let from = start + 4
   for (;;) {
     const close = state.src.indexOf('-->', from)
-    if (close !== -1 && close < state.eMarks[line]) break
+    if (close !== -1 && close < state.eMarks[line]) {
+      // A comment that follows on the same line continues the run.
+      let next = close + 3
+      while (next < state.eMarks[line] && (state.src[next] === ' ' || state.src[next] === '\t')) next++
+      if (!state.src.startsWith('<!--', next)) break
+      from = next + 4
+      continue
+    }
     line++
     if (line >= endLine || state.sCount[line] < state.blkIndent) return false
     from = state.bMarks[line] + state.tShift[line]
