@@ -168,14 +168,6 @@ describe("applies_to", () => {
       expect(findings).toEqual([]);
     });
 
-    it("sources-fresh-future does not flag it", () => {
-      writeBoth();
-      const findings = sourcesFreshFutureRule.run(
-        loadBundle(bundleDir(), repo.dir),
-      );
-      expect(findings).toEqual([]);
-    });
-
     it("sources-fresh does not flag it with --dirty-as-now and an uncommitted edit in the applies_to directory", () => {
       writeBoth();
       fs.writeFileSync(
@@ -186,6 +178,40 @@ describe("applies_to", () => {
       ctx.dirtyAsNow = true;
       expect(sourcesFreshRule.run(ctx)).toEqual([]);
     });
+  });
+
+  it("sources-fresh-future does not assess an applies_to-only doc, even with a timestamp far after its own commit", () => {
+    // Control: the same shape under `sources` IS flagged (next test), so
+    // an empty result here comes from applies_to not being a population.
+    repo.commitFile(
+      "bundle/future.md",
+      docContent({
+        type: "runbook",
+        timestamp: "2026-01-01T00:00:00Z",
+        applies_to: ["templates"],
+      }),
+      "2025-01-01T00:00:00Z",
+    );
+    const findings = sourcesFreshFutureRule.run(
+      loadBundle(bundleDir(), repo.dir),
+    );
+    expect(findings).toEqual([]);
+  });
+
+  it("sources-fresh-future DOES flag the same future-dated doc when the list is under sources (control)", () => {
+    repo.commitFile(
+      "bundle/future.md",
+      docContent({
+        type: "runbook",
+        timestamp: "2026-01-01T00:00:00Z",
+        sources: ["templates"],
+      }),
+      "2025-01-01T00:00:00Z",
+    );
+    const findings = sourcesFreshFutureRule.run(
+      loadBundle(bundleDir(), repo.dir),
+    );
+    expect(findings.map((f) => f.message).join("\n")).toContain("FUTURE-DATED");
   });
 
   it("a change inside an applies_to directory after the doc timestamp does NOT make the doc stale", () => {
