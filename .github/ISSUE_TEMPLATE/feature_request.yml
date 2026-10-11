@@ -14,6 +14,8 @@ body:
         - github-api-tool
         - git-batch-cli
         - agent-dev-kit
+        - agent-primitives
+        - mcp-token-audit
         - agentic-coding-playbook
         - agent-engineering-playbook
         - new package

@@ -11,7 +11,9 @@ Thanks for your interest. This is a TypeScript monorepo of small, independent to
 
 1. Fork, branch off `master` (e.g. `feat/slop-detector-rule-x`, `fix/okf-kit-bug`).
 2. Keep changes scoped to one package where possible. Cross-package refactors should be split.
-3. Run whatever checks the changed package defines (commonly `npm run build`, `npm test`, plus `npm run format:check` / `npm run typecheck` where present). The `ci` job's Typecheck, Build, and Lint steps use `--if-present` so a missing script there is not a blocker, and its Test step falls back to `npm test --if-present` when `test:ci` is absent; but four checks fail closed instead: the Format check step fails the build if a package ships TypeScript sources under `src/` without a `format:check` script, the `lint-format-matrix` job fails if a `packages/*/package.json` directory is missing from the `ci` job's `matrix.package` list, and the `lint-package-licenses` job fails if a non-private package is missing a LICENSE matching the repo root LICENSE or does not pack it into its tarball, and the `lint-release-changelogs` job fails a release commit that bumps a package's version without cutting its CHANGELOG (see "Releasing okf-kit" below).
+3. Run whatever checks the changed package defines (commonly `npm run build`, `npm test`, plus `npm run format:check` / `npm run typecheck` where present). The `ci` job's Typecheck, Build, and Lint steps use `--if-present` so a missing script there is not a blocker, and its Test step falls back to `npm test --if-present` when `test:ci` is absent; but these checks fail closed instead: the Typecheck (test files) step fails if a package has a `tsconfig.json` but no `typecheck:test` script, the Format check step fails the build if a package ships TypeScript sources under `src/` without a `format:check` script, the `lint-format-matrix` job fails if a `packages/*/package.json` directory is missing from the `ci` job's `matrix.package` list, the `lint-package-licenses` job fails if a non-private package is missing a LICENSE matching the repo root LICENSE or does not pack it into its tarball, the `lint-cli-flag-order` job (`node scripts/check-cli-flag-order.mjs` from the repo root) fails on a commander option declared as `--long, -s` instead of `-s, --long`, and the `lint-release-changelogs` job fails a release commit that bumps a package's version without cutting its CHANGELOG (see "Releasing a published package" below).
+
+   Some repo-root files are tested from package suites. `npm test` in `packages/orchestrator-workflow` reads the workflow files under `.github/workflows/`, `slop.config.yml`, the root README and this file, and runs `scripts/check-release-changelogs.mjs`; `npm test` in `packages/okf-kit` covers `scripts/bump-okf-kit-pin.mjs`. The other `scripts/*.mjs` checks run directly with `node scripts/<name>.mjs` from the repo root. Run these when a change touches only root files.
 4. Open the PR with a clear summary, motivation, and test plan.
 
 ## Dev Setup
@@ -30,7 +32,7 @@ The monorepo is mixed:
 
 - **`git-batch-cli`** is plain JavaScript without a build step: `cd agent-dx/packages/git-batch-cli && npm install && npm test`.
 
-- **Doc-only packages** (`agentic-coding-playbook`, `agent-engineering-playbook`): no install step, just edit Markdown.
+- **Doc-only packages** (`agentic-coding-playbook`, `agent-engineering-playbook`): no install step to edit Markdown. Pull requests that touch them build the playbook site, which fails on a relative link whose target does not exist; to check locally, run `cd site && npm ci && npm run build` (see [Repo layout](docs/repo-layout.md#playbook-site)). The `placement-guard` job also checks Markdown in `agentic-coding-playbook` and every package README (see [CI checks](docs/ci-checks.md)).
 
 Each package is self-contained, no root install.
 
@@ -53,13 +55,88 @@ likely cause. There is no working local
 npm token; do not debug a local `E401`/`E404`, trigger the workflow
 instead.
 
+The diagram below shows the tag-driven publish path next to the operator
+workflows that write to the registry with the repository token, where each
+allowlist check sits, and that the registry read-back decides the operator
+workflows' outcome.
+
+```mermaid
+flowchart TD
+  subgraph PUBWF["publish-npm.yml"]
+    TAG["push one tag pkg/vX.Y.Z"] --> PARSE["parse job:<br/>semver, PUBLISHABLE"]
+    PARSE -->|"needs: parse"| PUB["publish job:<br/>version equals tag, build, test"]
+    PUB -.->|version already on the registry| ATT["assert dist.attestations"]
+    PUB --> OIDC["npm publish --provenance<br/>OIDC, no token"]
+    OIDC -.->|non-zero exit but version landed| ATT
+  end
+  OIDC -->|published| REG[("npm registry")]
+  subgraph OPWF["operator workflows, workflow_dispatch"]
+    DEP["npm-deprecate.yml:<br/>ALLOWLIST, exact semver, non-empty message"]
+    DT["npm-dist-tag.yml:<br/>ALLOWLIST, published version, plain tag"]
+    TOK["write with the repository token secret<br/>step is continue-on-error"]
+    RB["registry read-back is the verdict"]
+    DEP --> TOK
+    DT --> TOK
+  end
+  TOK --> REG
+  REG -->|read back| RB
+  SYNC["orchestrator-workflow docs-consistency test:<br/>lists stay equal"] -.-> PARSE
+  SYNC -.-> DEP
+  SYNC -.-> DT
+```
+
+### Releasing a published package
+
+Every package that `publish-npm.yml` publishes is released the same way:
+
+1. `npm version --no-git-tag-version <new-version>` in `packages/<package>`.
+2. Move the `[Unreleased]` section of its `CHANGELOG.md` under the new
+   version heading.
+3. `node scripts/check-release-changelogs.mjs --base origin/master` from the
+   repo root and confirm it exits 0.
+4. Open the PR and squash merge.
+5. Push one annotated tag `<package>/v<new-version>` per `git push`. GitHub
+   turns a multi-tag push into one push event, and `publish-npm.yml` then
+   publishes only one of the tags.
+6. If `latest` ends up on an older version because two publish runs finished
+   out of order, run the "Move an npm dist-tag" workflow
+   (`.github/workflows/npm-dist-tag.yml`); re-running the publish workflow
+   does not repair it.
+
+okf-kit and agent-primitives add the package-specific steps below;
+orchestrator-workflow and friction-log need nothing beyond these steps.
+
+### Adding a published package
+
+A new package that `publish-npm.yml` should publish needs, in the same
+change:
+
+- its tag pattern in `on.push.tags` and its name in `PUBLISHABLE` in
+  `.github/workflows/publish-npm.yml`;
+- its name in the `ALLOWLIST` of `.github/workflows/npm-deprecate.yml` and
+  `.github/workflows/npm-dist-tag.yml`; `orchestrator-workflow`'s
+  `test/docs-consistency.test.ts` keeps these lists equal;
+- every prose copy of the package list that the same test counts: a
+  parenthetical naming the publishable packages in a workflow file, this
+  file, or the root README;
+- a Trusted Publisher entry for the package on npmjs.com that points at
+  `publish-npm.yml`;
+- a `LICENSE` byte-equal to the repo root `LICENSE`
+  (`scripts/check-package-licenses.mjs`);
+- for a package with a `CHANGELOG.md`, its name in
+  `EXPECTED_CHECKED_PACKAGES` in `scripts/check-release-changelogs.mjs` and
+  in `PINNED_PACKAGES` in
+  `packages/orchestrator-workflow/test/check-release-changelogs.test.ts`;
+- its row in the root README's package table and its entry in
+  [docs/repo-layout.md](docs/repo-layout.md)'s package status.
+
 ### Releasing okf-kit
 
 `orchestrator-workflow`'s `test/docs-consistency.test.ts` pins okf-kit's
 version against `packages/okf-kit/package.json`'s own version in two
 places: every `npm install -g okf-kit@<version>` or `npx
 okf-kit@<version>` occurrence under `.github/workflows/` (currently one
-of each, in `.github/workflows/ci.yml` and
+`npm install -g` pin in each of `.github/workflows/ci.yml` and
 `.github/workflows/okf-staleness.yml`, but the guard globs every
 `.yml`/`.yaml` file in that directory, so a new workflow or a second pin
 in an existing one is covered automatically too), and, via a separate
@@ -113,22 +190,35 @@ the same release commit, in this order:
    `okf-kit/v<new-version>` to trigger `publish-npm.yml`.
 
 Between step 1/4 and step 7, this PR's own commit names a pin (step 4)
-that is not on npm yet (the tag that publishes it is pushed only in
-step 7). `.github/workflows/ci.yml`'s `okf-anchor-guard` job and
+that is not on npm yet: the tag that publishes it is pushed only in
+step 7. `.github/workflows/ci.yml`'s `okf-anchor-guard` job and
 `.github/workflows/okf-staleness.yml`'s `okf-staleness` job each probe
-that pin with `npm view` before installing, then confirm with a second,
-package-level probe before deciding anything: when the pin is
-unpublished and equal to
+that pin with `npm view` before installing and, only when that probe
+fails, confirm with a second, package-level probe (`npm view okf-kit
+versions --json`) before deciding anything. A pin that list contains is
+installed like a published one. When the pin is unpublished and equal to
 `packages/okf-kit/package.json`'s version in the PR tree (the normal
 state of this PR), each job builds `packages/okf-kit` from the PR tree
 instead and installs that build, so both jobs stay green on this PR
 without waiting for the tag (see
 `packages/orchestrator-workflow/docs/okf/log.md` for the cases that
-motivated this). A red job at this point now means a real problem, not
-an expected release artifact: an unpublished pin that does NOT equal
-`packages/okf-kit/package.json`'s version (a stale bump, a typo) fails
-the job loudly instead of guessing, and so does a genuine registry/
-network error while probing the pin.
+motivated this). A red job at this point means a real problem: an
+unpublished pin that does not equal `packages/okf-kit/package.json`'s
+version (a stale bump, a typo) fails the job, and so does a registry or
+network error that leaves the second probe unreadable. The install
+decision, the same in both jobs:
+
+```mermaid
+flowchart TD
+  PIN["pin okf-kit@X in install_cmd"] --> V1{"npm view okf-kit@X version"}
+  V1 -->|"exit 0, non-empty output"| OK1["install the published pin"]
+  V1 -->|otherwise| V2{"npm view okf-kit<br/>versions --json"}
+  V2 -->|"non-zero exit, empty, or not a JSON array"| ERR1["registry-error: fail"]
+  V2 -->|X listed| OK2["install the published pin"]
+  V2 -->|X absent| CMP{"X equals the version in<br/>packages/okf-kit/<br/>package.json?"}
+  CMP -->|yes| TREE["build packages/okf-kit from the PR tree<br/>and install it"]
+  CMP -->|no| ERR2["unpublished-pin-mismatch: fail"]
+```
 
 Releasing orchestrator-workflow follows the same shape (`npm version`,
 CHANGELOG cut, tag `orchestrator-workflow/v<new-version>`) but has no pin
