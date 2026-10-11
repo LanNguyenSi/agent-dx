@@ -8,8 +8,11 @@
 //
 // A comment runs from "<!--" to the first "-->" after it; "--" inside it does
 // not end it. An unclosed "<!--" stays visible text. Inside a paragraph a
-// comment cannot reach past a blank line; a comment that starts a line hides
-// whole lines up to the line where it closes, like an HTML block.
+// comment cannot reach past a blank line. A comment that starts a line closes
+// at the first "-->" anywhere after it, across blank lines, less indented
+// lines, and fences, as long as that "-->" is inside the same quote or
+// container; it hides whole lines up to the line where it closes, and lines
+// that hold nothing but comments act as blank lines.
 
 // Within text, what markdown-it reads before a comment can start: backslash
 // escapes and code spans (a run of backticks closed by a run of the same
@@ -31,32 +34,35 @@ export function htmlComments(md) {
 }
 
 // A line that starts with a comment, or with several in a row, up to the line
-// where the last of them closes. Lines holding nothing but comments become
-// blank lines, so paragraphs, lists, and quotes around them behave exactly as
-// if the comment had never been written. A single line with text after its
-// comment is left to the other rules, and the inline rule hides the comment.
-// A comment over several lines with text after it on its closing line hides
-// those lines and keeps the text as a paragraph.
+// where the last of them closes. Each comment closes at the first "-->" after
+// it, so a comment opened in a list item or quote also hides blank lines and
+// less indented lines up to that "-->", and a list whose items are commented
+// out stays one list. Lines holding nothing but comments become blank lines,
+// so paragraphs, lists, and quotes around them behave exactly as if the
+// comment had never been written. A single line with text after its comment
+// is left to the other rules, and the inline rule hides the comment. A comment
+// over several lines with text after it on its closing line hides those lines
+// and keeps the text as a paragraph.
 function commentBlock(state, startLine, endLine, silent) {
+  // A line four or more columns in is code, or, after a paragraph or quote
+  // line, more text of that paragraph, where the inline rule hides the comment.
   if (state.sCount[startLine] - state.blkIndent >= 4) return false
   const start = state.bMarks[startLine] + state.tShift[startLine]
   if (!state.src.startsWith('<!--', start)) return false
 
   let line = startLine
-  let from = start + 4
+  let close = findClose(state, start + 4)
   for (;;) {
-    const close = state.src.indexOf('-->', from)
-    if (close !== -1 && close < state.eMarks[line]) {
-      // A comment that follows on the same line continues the run.
-      let next = close + 3
-      while (next < state.eMarks[line] && (state.src[next] === ' ' || state.src[next] === '\t')) next++
-      if (!state.src.startsWith('<!--', next)) break
-      from = next + 4
-      continue
+    if (close === -1) return false
+    while (state.eMarks[line] < close) {
+      line++
+      if (line >= endLine) return false
     }
-    line++
-    if (line >= endLine || state.sCount[line] < state.blkIndent) return false
-    from = state.bMarks[line] + state.tShift[line]
+    // A comment that follows on the same line continues the run.
+    let next = close + 3
+    while (next < state.eMarks[line] && (state.src[next] === ' ' || state.src[next] === '\t')) next++
+    if (!state.src.startsWith('<!--', next)) break
+    close = findClose(state, next + 4)
   }
   const nextLine = line + 1
 
@@ -84,11 +90,23 @@ function commentBlock(state, startLine, endLine, silent) {
   return true
 }
 
+// The first "-->" at or after `from`, or -1. A page with many openers and no
+// "-->" after them would search the rest of the page for each one, so the last
+// answer is kept per parser state and reused for any later start up to it.
+const lastClose = new WeakMap()
+function findClose(state, from) {
+  const known = lastClose.get(state)
+  if (known && from >= known.from && (known.at === -1 || from <= known.at)) return known.at
+  const at = state.src.indexOf('-->', from)
+  lastClose.set(state, { from, at })
+  return at
+}
+
 // A comment inside text is skipped without a token, so the text around it
 // joins as if the comment had never been written.
 function commentInline(state) {
   if (!state.src.startsWith('<!--', state.pos)) return false
-  const close = state.src.indexOf('-->', state.pos + 4)
+  const close = findClose(state, state.pos + 4)
   if (close === -1 || close + 3 > state.posMax) return false
   state.pos = close + 3
   return true

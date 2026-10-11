@@ -253,3 +253,69 @@ test('escaped backticks in a heading do not keep a comment in the permalink labe
 test('text without a comment is left exactly as written', () => {
   assert.equal(md.renderInline(' x '), ' x ')
 })
+
+test('commented-out list items leave one list, as without the comment', () => {
+  const loose = (tag, a, b) => `<${tag}>\n<li>\n<p>${a}</p>\n</li>\n<li>\n<p>${b}</p>\n</li>\n</${tag}>\n`
+  renderAsIfDeleted([
+    ['- a\n<!--\n- b\n-->\n- c\n', loose('ul', 'a', 'c')],
+    ['1. a\n<!--\n2. b\n-->\n3. c\n', loose('ol', 'a', 'c')],
+    ['- a\n<!-- b -->\n- c\n', loose('ul', 'a', 'c')],
+    ['- a\n  - b\n  <!--\n  - c\n  -->\n  - d\n', `<ul>\n<li>a\n${loose('ul', 'b', 'd')}</li>\n</ul>\n`],
+    ['> - a\n> <!--\n> - b\n> -->\n> - c\n', `<blockquote>\n${loose('ul', 'a', 'c')}</blockquote>\n`],
+    [
+      '::: tip\n- a\n<!--\n- b\n-->\n- c\n:::\n',
+      `<div class="tip custom-block"><p class="custom-block-title">TIP</p>\n${loose('ul', 'a', 'c')}</div>\n`
+    ],
+    ['- <!--\n- b\n-->\n- c\n', '<ul>\n<li></li>\n<li>c</li>\n</ul>\n']
+  ])
+})
+
+test('blank lines inside a comment that starts a line are part of the comment', () => {
+  renderAsIfDeleted([
+    ['- a\n  <!-- b\n\n  c -->\n- d\n', '<ul>\n<li>\n<p>a</p>\n</li>\n<li>\n<p>d</p>\n</li>\n</ul>\n'],
+    ['<!-- a -->\t<!-- b\n\nc -->\ntext\n', '<p>text</p>\n'],
+    ['<!-- a --> <!-- b\n\nc -->\ntext\n', '<p>text</p>\n']
+  ])
+})
+
+test('a comment line four or more columns in after a quote line stays in the quote', () => {
+  // As on GitHub, such a line continues the quote's paragraph, and the inline
+  // rule hides its comment; it neither ends the quote nor starts a code block.
+  renderAsIfDeleted([['> a\n    <!-- c\n    d --> e\n', '<blockquote>\n<p>a\ne</p>\n</blockquote>\n']])
+  assert.equal(render('> a\n    <!-- c -->\nb\n'), '<blockquote>\n<p>a\n\nb</p>\n</blockquote>\n')
+})
+
+test('an inline comment that closes past the end of the text being parsed stays text', () => {
+  // Link text is parsed with an end before the closing bracket; a comment is
+  // hidden only when it closes before that end.
+  const src = 'a <!-- b --> c'
+  const state = new md.inline.State(src, md, {}, [])
+  state.posMax = src.indexOf('-->')
+  md.inline.tokenize(state)
+  assert.equal(state.tokens.map((t) => t.content).join(''), 'a <!-- b ')
+})
+
+test('render time grows linearly with the number of unclosed comment openers', () => {
+  // Every paragraph starts with "<!--" and nothing after it closes one.
+  const page = (n) => Array.from({ length: n }, (_, i) => `<!-- opener ${i}\ntext ${i}`).join('\n\n') + '\n'
+  const fastest = (src, runs) => {
+    let best = Infinity
+    for (let i = 0; i < runs; i++) {
+      const start = performance.now()
+      render(src)
+      best = Math.min(best, performance.now() - start)
+    }
+    return best
+  }
+  render(page(100))
+  // Ten times the openers on a ten times longer page: linear work takes about
+  // ten times as long, a search to the end of the page for every opener about
+  // a hundred times. The bound leaves room for timer noise.
+  for (const [small, large] of [
+    [100, 1000],
+    [1000, 10000]
+  ]) {
+    const ratio = fastest(page(large), 2) / fastest(page(small), 5)
+    assert.ok(ratio < 30, `${large} openers took ${ratio.toFixed(1)} times as long as ${small}`)
+  }
+})
