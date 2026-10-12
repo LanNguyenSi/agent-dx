@@ -172,7 +172,7 @@ program
   .option("-f, --force", "overwrite kit-owned files that have local edits")
   .option(
     "--harness <list>",
-    `comma-separated harnesses (${HARNESSES.join(", ")}), or "none" alone for templates-only mode (.ai/workflow/** and .ai/runs/.gitkeep only, no AGENTS.md/CLAUDE.md/harness files); default: detected`,
+    `comma-separated harnesses (${HARNESSES.join(", ")}), or "none" alone for templates-only mode (.ai/workflow/** and .ai/runs/.gitkeep only, no AGENTS.md/CLAUDE.md/harness files); default: detected plus previously installed, else claude`,
   )
   .option(
     "--models <spec>",
@@ -319,7 +319,7 @@ program
 program
   .command("setup")
   .description(
-    "Write or update this operator's default install options (harnesses, profile, models, tiers), used as the baseline for future installs; touches no repository",
+    "Write or update this operator's default install options (harnesses, profile, models, tiers, routing), used as the baseline for future installs; touches no repository",
   )
   .option("-y, --yes", "accept all defaults and skip prompts")
   .option(
@@ -646,14 +646,14 @@ function resolveApplyHarnesses(
 
 /**
  * Builds the synthetic `previous` manifest handed to `resolveInitInputs`,
- * implementing `apply`'s profile/tiers/models precedence: operator defaults
+ * implementing `apply`'s profile/tiers/models/routing precedence: operator defaults
  * are the floor; when the target has its own recorded manifest, that
- * recording overrides the operator default for profile/tiers/models UNLESS
+ * recording overrides the operator default for profile/tiers/models/routing UNLESS
  * `--sync` is passed, in which case the operator default overrides the
  * recording instead (an explicit CLI flag still wins over either, handled
  * inside `resolveInitInputs` itself). `harnesses` on the returned value is
  * always the target's own recorded harnesses (never the operator default),
- * since `--sync` only affects profile/tiers/models per the rule above; the
+ * since `--sync` only affects profile/tiers/models/routing per the rule above; the
  * full harnesses fallback chain is `resolveApplyHarnesses`'s job, not this
  * function's. `harnessesRecordedEmpty` is carried straight from
  * `repoManifest` too (`undefined` when there is no repo manifest), so the
@@ -718,7 +718,7 @@ program
   .option("-f, --force", "overwrite kit-owned files that have local edits")
   .option(
     "--harness <list>",
-    `comma-separated harnesses (${HARNESSES.join(", ")}); default: the target's recorded harnesses, else the operator defaults, else detected`,
+    `comma-separated harnesses (${HARNESSES.join(", ")}); default: the target's recorded harnesses, else the operator defaults, else detected, else claude`,
   )
   .option(
     "--models <spec>",
@@ -748,7 +748,7 @@ program
   )
   .option(
     "--sync",
-    "let the operator defaults for profile/tiers/models override the target's own recorded values, instead of the other way around",
+    "let the operator defaults for profile/tiers/models/routing override the target's own recorded values, instead of the other way around",
   )
   .option(
     "--force-pin",

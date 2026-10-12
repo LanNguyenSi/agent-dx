@@ -2812,7 +2812,7 @@ function scanDoc(
 export const citationsResolveRule: Rule = {
   id: RULE_ID,
   description:
-    "`path:N`/`path:N-M` citations (and their `:N`, -`M`/–`M`, (`N`) continuations), and backtick-delimited `` `path:#heading` `` heading-section citations (`.md` targets only), must resolve to a real target file and land on real, non-blank content. Mechanical only: does not verify the cited line is semantically correct.",
+    "`path:N`/`path:N-M` citations (recognised target extensions: .ts, .js, .mjs, .md, .yml, .yaml, .json; and their `:N`, -`M`/–`M`, (`N`) continuations), and backtick-delimited `` `path:#heading` `` heading-section citations (`.md` targets only), must resolve to a real target file and land on real, non-blank content. Mechanical only: does not verify the cited line is semantically correct.",
   run(ctx) {
     if (!ctx.repoRoot) {
       // Never silently skip: mirrors sources-fresh's posture so a "clean"

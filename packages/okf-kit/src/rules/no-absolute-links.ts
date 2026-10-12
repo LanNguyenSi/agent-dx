@@ -5,7 +5,8 @@ const RULE_ID = "no-absolute-links";
 
 export const noAbsoluteLinksRule: Rule = {
   id: RULE_ID,
-  description: "Link targets should not start with `/`.",
+  description:
+    "Markdown link targets to `.md` files should not start with `/` (links to other file types are not checked).",
   run(ctx) {
     const findings: Finding[] = [];
     for (const doc of ctx.docs) {

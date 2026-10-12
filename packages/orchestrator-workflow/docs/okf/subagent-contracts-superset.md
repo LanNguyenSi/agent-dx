@@ -791,7 +791,7 @@ staged changes before a commit and over the committed range before
 returning, naming every extend-only file from the assignment, and otherwise
 checks by hand: `git status --porcelain` and `git diff --cached --stat
 <base>` before a commit, `git diff --stat <base>..HEAD` before returning. A
-backup file (`*-E`, `*-e`, `*.bak`, `*.orig`, `*~`), an extend-only file that
+backup file (`*-E`, `*-e`, `*-n`, `*-r`, `*-s`, `*.bak`, `*.orig`, `*~`), an extend-only file that
 loses a large share of its lines (the runner's threshold) or a changed test
 file with fewer test cases blocks the commit or the return. The sed advice
 is cross-platform: BSD needs `sed -i ''`, GNU needs `sed -i`, and a bare

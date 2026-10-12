@@ -169,7 +169,8 @@ program
   .option(
     "--require-anchors-allow <patterns...>",
     "citations-resolve: citedPath glob/exact patterns (e.g. README.md) exempt from " +
-      "--require-anchors' anchor-required check",
+      "--require-anchors' anchor-required check, and a continuation (`:N`) chained to a citation whose path " +
+      "matches is exempt from anchor-required-continuation",
   )
   .option(
     "--prose-line-references",

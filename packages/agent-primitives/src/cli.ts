@@ -768,7 +768,7 @@ program.configureOutput({
 program
   .name("agent-primitives")
   .description(
-    "Agent-first CLI primitives: bounded JSON envelopes, a mutation-probe runner, a verify runner, a PATH doctor",
+    "Agent-first CLI primitives: bounded JSON envelopes, a mutation-probe runner, a verify runner, a PATH doctor, an identifier-drift guard, a commit-hygiene guard, checkout snapshot/delta, and a skill installer (init)",
   )
   .version(VERSION)
   .option(
@@ -1439,7 +1439,7 @@ async function runProbePlanCommand(
 program
   .command("probe")
   .description(
-    "--file is long-only: the global -f is --format, and every global option (-f, -C, -m, -l) may precede the subcommand.\n\n" +
+    "--file is long-only: the global -f is --format, and every global option (-f, -C, -m, -l, --json) may precede the subcommand.\n\n" +
       "Confirm the unmutated test passes (the baseline), apply one mutant, run the test again and check it reacts per --expect (fails by default), then restore the file",
   )
   .option(
@@ -1896,7 +1896,7 @@ function renderHygieneText(result: HygieneResult): string {
 program
   .command("hygiene")
   .description(
-    "Refuse backup files (*-E, *.bak, *.orig, *~) and flag wholesale rewrites of extend-only files and dropped test cases in a git range or the index",
+    "Refuse backup files (*.bak, *.orig, *~, and the BSD sed -i leftovers *-e, *-E, *-n, *-r, *-s) and flag wholesale rewrites of extend-only files and dropped test cases in a git range or the index",
   )
   .requiredOption("--base <rev>", "base revision the task started from")
   .option("--head <rev>", "head revision (default HEAD)")
