@@ -954,6 +954,17 @@ describe("patch: git directories in any spelling", () => {
     expect(read(dir, "gd/config")).toBe(config);
   });
 
+  it.skipIf(!ci)(
+    "refuses .GIT/<symlink to a work-tree file> by its spelling in any case",
+    () => {
+      const dir = repo({ "a.txt": "a\n" });
+      fs.symlinkSync("../a.txt", path.join(dir, ".git", "lnk"));
+      const r = run(dir, [{ file: ".GIT/lnk", old: "a", new: "b" }]);
+      expect(r.reason).toBe("git_dir");
+      expect(read(dir, "a.txt")).toBe("a\n");
+    },
+  );
+
   it("refuses .git/<symlink to a work-tree file> by its spelling", () => {
     const dir = repo({ "a.txt": "a\n" });
     fs.symlinkSync("../a.txt", path.join(dir, ".git", "lnk"));
@@ -1232,8 +1243,33 @@ describe("patch: modes, line breaks and path checks", () => {
     );
   });
 
+  it("refuses to write when the resolved path no longer resolves to itself", () => {
+    const dir = repo({ "A/f.txt": "one\n", "B/f.txt": "two\n" });
+    let calls = 0;
+    const r = patch({
+      cwd: dir,
+      edits: [
+        { file: "A/f.txt", old: "one", new: "ONE" },
+        { file: "B/f.txt", old: "two", new: "TWO" },
+      ],
+      renameFile: (from, to) => {
+        fs.renameSync(from, to);
+        if (calls++ === 0) {
+          // Same file, but its directory now sits behind a symlink.
+          fs.renameSync(path.join(dir, "B"), path.join(dir, "B2"));
+          fs.symlinkSync("B2", path.join(dir, "B"));
+        }
+      },
+    });
+    expect(r.status).toBe("error");
+    expect(r.files[1].reason).toBe("path_changed");
+    expect(read(dir, "B2/f.txt")).toBe("two\n");
+  });
+
   it("replaces many occurrences in linear time", () => {
-    const n = 100_000;
+    // Large enough that spreading one array element per occurrence into a
+    // call would exceed the call stack.
+    const n = 250_000;
     const dir = repo({
       "a.txt": "x  \nfoo\n".repeat(n),
       "b.txt": "foo bar\n".repeat(n),
