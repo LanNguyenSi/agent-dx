@@ -121,6 +121,7 @@ test('titleFromText: === after a list item, quote line, table row or html block 
   assert.equal(titleFromText('> quote\ncontinued\n===\n', 'fb'), 'fb')
   assert.equal(titleFromText('| a | b |\n|---|---|\n| c | d |\n===\n# Real\n', 'fb'), 'Real')
   assert.equal(titleFromText('<div>\nHtml\n===\n</div>\n\n# Real\n', 'fb'), 'Real')
+  assert.equal(titleFromText('Text\n<div>\nHtml\n===\n', 'fb'), 'fb')
   assert.equal(titleFromText('    code\n===\n# Real\n', 'fb'), 'Real')
 })
 
