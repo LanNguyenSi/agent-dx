@@ -28,6 +28,7 @@ export type WorktreeRefusalReason =
   | "target_inside_worktree"
   | "path_and_root_conflict"
   | "base_not_found"
+  | "base_not_remote_branch"
   | "default_branch_unresolved"
   | "fetch_failed"
   | "run_dir_missing"
@@ -307,15 +308,58 @@ export function resolveDefaultBase(
   return undefined;
 }
 
-/** The base `--base <rev>` asks for, or `undefined` when `rev` does not
- * name a commit in the repository at `cwd` (a value starting with `-` never
- * does, so it cannot be read as a git option). The ref is `rev` as given. */
-export function resolveExplicitBase(
+/** A `--base` value resolved to a remote-tracking branch. */
+export interface RemoteBase {
+  /** The full ref, `refs/remotes/<remote>/<branch>`: what every git
+   * command measures against, so no worktree re-reads a relative rev. */
+  ref: string;
+  remote: string;
+  /** The branch part after `<remote>/`: the base a pull request names. */
+  branch: string;
+}
+
+export type RemoteBaseResolution =
+  | { ok: true; base: RemoteBase }
+  | {
+      ok: false;
+      /** `base_not_remote_branch`: the value is not a remote-tracking
+       * branch of a configured remote at all; `base_not_found`: it has that
+       * shape but the ref does not exist in this repository. */
+      reason: "base_not_remote_branch" | "base_not_found";
+    };
+
+/**
+ * Resolves `--base <rev>` once, in the repository at `cwd`, to a
+ * remote-tracking branch: `<remote>/<branch>` or
+ * `refs/remotes/<remote>/<branch>` for a configured remote. Anything else
+ * (`HEAD`, `HEAD~1`, `@{u}`, a local branch, a sha, a tag, an option-like
+ * value, a symbolic remote `HEAD`) is `base_not_remote_branch`. The match is
+ * on the exact ref, never on git's rev syntax.
+ */
+export function resolveRemoteBase(
   cwd: string,
   rev: string,
-): { ref: string; source: string } | undefined {
-  if (rev.startsWith("-") || !refExists(cwd, rev)) return undefined;
-  return { ref: rev, source: "flag" };
+): RemoteBaseResolution {
+  const notRemote = { ok: false, reason: "base_not_remote_branch" } as const;
+  if (rev.length === 0 || rev.startsWith("-")) return notRemote;
+  const full = rev.startsWith("refs/remotes/") ? rev : `refs/remotes/${rev}`;
+  const rest = full.slice("refs/remotes/".length);
+  const remotes = (gitText(cwd, ["remote"]) ?? "")
+    .split("\n")
+    .filter((name) => name.length > 0)
+    // The longest name first: remote names may contain a slash.
+    .sort((x, y) => y.length - x.length);
+  const remote = remotes.find((name) => rest.startsWith(`${name}/`));
+  if (remote === undefined) return notRemote;
+  const branch = rest.slice(remote.length + 1);
+  if (branch.length === 0 || branch === "HEAD") return notRemote;
+  if (git(cwd, ["symbolic-ref", "--quiet", full]).status === 0) {
+    return notRemote;
+  }
+  if (commitSha(cwd, full) === undefined) {
+    return { ok: false, reason: "base_not_found" };
+  }
+  return { ok: true, base: { ref: full, remote, branch } };
 }
 
 /** True when `rev` names a commit in the repository at `cwd`. */
@@ -415,13 +459,16 @@ export function runGh(
  * Merged into `baseRef`? Ancestry first (`git merge-base --is-ancestor`);
  * when that says no and the worktree has a branch, asks `gh` for a merged
  * pull request whose head is the branch and whose base is the branch the
- * verdict is about, which also catches a squash merge.
+ * verdict is about, which also catches a squash merge. `baseBranchName` is
+ * that branch when it cannot be read off `baseRef` (a remote other than
+ * `origin`, a full `refs/remotes/...` ref); by default `origin/` is stripped.
  */
 export function mergeVerdict(
   cwd: string,
   head: string,
   branch: string | undefined,
   baseRef: string,
+  baseBranchName?: string,
 ): MergeVerdict {
   const anc = git(cwd, ["merge-base", "--is-ancestor", head, baseRef]);
   if (anc.error === undefined && anc.status === 0) {
@@ -453,7 +500,7 @@ export function mergeVerdict(
   // The branch the pull request must have been merged into: a pull request
   // merged into another branch (a stacked PR into its parent, say) says
   // nothing about this base.
-  const baseBranch = baseRef.replace(/^origin\//, "");
+  const baseBranch = baseBranchName ?? baseRef.replace(/^origin\//, "");
   const gh = runGh(cwd, [
     "pr",
     "list",

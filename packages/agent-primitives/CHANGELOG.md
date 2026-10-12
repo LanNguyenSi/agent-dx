@@ -11,13 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   behind and merged are measured against a chosen base instead of only
   origin's default branch (a hotfix branch whose pull request targets
   `origin/master` in a repository whose default branch is `develop` was
-  reported unmerged). The `gh` merged-pull-request lookup uses `<rev>` without
-  a leading `origin/` as the pull request's base. Without `--base` nothing
-  changes. `list` shows `<rev>` as each entry's `base`; a `<rev>` a repository
-  cannot resolve gives `merged: unknown` plus a warning and no abort.
-  `remove --base` needs `--require-merged` or `--delete-branch` (alone it is
-  an `option_invalid` refusal) and refuses an unresolvable `<rev>` as
-  `base_not_found` before removing anything. The shipped skill text mentions
+  reported unmerged). `<rev>` must be a remote-tracking branch
+  (`<remote>/<branch>` or `refs/remotes/<remote>/<branch>`), resolved once in
+  the main checkout to the full ref; the `gh` merged-pull-request lookup uses
+  the branch part after `<remote>/` as the pull request's base. Anything else
+  (`HEAD`, `HEAD~n`, `@{u}`, a local branch, a sha, a tag) is refused as
+  `base_not_remote_branch` (`list` without `--root`, and `remove`, even with
+  `--force`; with `--root`, that repository's entries get `merged: unknown`
+  plus a warning). Without `--base` nothing changes. `list` shows `<rev>` as
+  each entry's `base`; a well-formed `<rev>` a repository lacks gives
+  `merged: unknown` plus a warning and no abort. `remove --base` needs
+  `--require-merged` or `--delete-branch` (alone it is an `option_invalid`
+  refusal) and refuses a missing `<rev>` as `base_not_found` before removing
+  anything. The shipped skill text mentions
   the flag, so its digest changes.
 
 ## [0.11.0] - 2026-10-12

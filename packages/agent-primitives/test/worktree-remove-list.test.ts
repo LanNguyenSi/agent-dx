@@ -1027,7 +1027,13 @@ describe("worktree list --base", () => {
     // A second repository that does resolve a revision the first one lacks.
     const other = path.join(f.base, "other");
     git(f.base, ["clone", "-q", f.origin, other]);
-    git(other, ["branch", "onlyhere", "origin/hotfixbase"]);
+    git(other, [
+      "push",
+      "-q",
+      "origin",
+      "origin/hotfixbase:refs/heads/onlyhere",
+    ]);
+    git(other, ["fetch", "-q", "origin"]);
     git(other, [
       "worktree",
       "add",
@@ -1043,17 +1049,19 @@ describe("worktree list --base", () => {
       "--root",
       wts,
       "--base",
-      "onlyhere",
+      "origin/onlyhere",
     ]);
     expect(mixed.code, mixed.stdout + mixed.stderr).toBe(0);
     const entries = mixed.json.worktrees as Record<string, any>[];
     const resolved = entries.find((w) => w.repo === "other");
     const unresolved = entries.find((w) => w.repo === "repo");
     expect(resolved?.merged).toMatchObject({ merged: "yes", via: "ancestry" });
-    expect(resolved?.base).toBe("onlyhere");
+    expect(resolved?.base).toBe("origin/onlyhere");
     expect(unresolved?.merged.merged).toBe("unknown");
     expect(
-      (mixed.json.warnings as string[]).filter((w) => w.includes("onlyhere")),
+      (mixed.json.warnings as string[]).filter((w) =>
+        w.includes("origin/onlyhere"),
+      ),
     ).toHaveLength(1);
 
     // Same call with a revision no repository knows.
@@ -1128,7 +1136,11 @@ describe("worktree remove --base", () => {
   it("refuses an unresolvable base with its own reason and removes nothing", async () => {
     const f = makeFixture();
     const { wt } = makeHotfix(f);
-    for (const bad of ["origin/nope", "--upload-pack=x"]) {
+    const cases: [string, string][] = [
+      ["origin/nope", "base_not_found"],
+      ["--upload-pack=x", "base_not_remote_branch"],
+    ];
+    for (const [bad, reason] of cases) {
       const r = await cli(f.work, [
         "remove",
         wt,
@@ -1137,7 +1149,7 @@ describe("worktree remove --base", () => {
         "--force",
       ]);
       expect(r.code, r.stdout + r.stderr).toBe(2);
-      expect(r.json.reason).toBe("base_not_found");
+      expect(r.json.reason).toBe(reason);
       expect(r.json.details.base).toBe(bad);
       expect(listedWorktrees(f.repo)).toContain(wt);
       expect(fs.existsSync(wt)).toBe(true);
@@ -1151,6 +1163,155 @@ describe("worktree remove --base", () => {
     expect(r.code, r.stdout + r.stderr).toBe(2);
     expect(r.json.reason).toBe("option_invalid");
     expect(listedWorktrees(f.repo)).toContain(wt);
+  });
+
+  it("refuses a base that is no remote-tracking branch, even with --force, and keeps the worktree and its branch", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    // An unpushed commit on top: a merged verdict against a local base or a
+    // relative rev must never excuse it.
+    commitHere(wt, "more.txt", "unpushed work");
+    git(f.repo, ["branch", "localbase", "hotfix/one"]);
+    const sha = git(wt, ["rev-parse", "HEAD"]).trim();
+    git(f.repo, ["tag", "sometag", "hotfix/one"]);
+    for (const bad of [
+      "HEAD",
+      "HEAD~1",
+      "localbase",
+      "hotfix/one",
+      sha,
+      "sometag",
+      "@{u}",
+      "refs/heads/localbase",
+      "origin/HEAD",
+      "origin",
+    ]) {
+      for (const extra of [[], ["--force"]]) {
+        const r = await cli(f.work, [
+          "remove",
+          wt,
+          "--delete-branch",
+          `--base=${bad}`,
+          ...extra,
+        ]);
+        expect(r.code, `${bad}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.json.reason, bad).toBe("base_not_remote_branch");
+        expect(listedWorktrees(f.repo)).toContain(wt);
+        expect(gitTry(f.repo, ["rev-parse", "--verify", "hotfix/one"])).toBe(
+          `${sha}\n`,
+        );
+      }
+    }
+  });
+
+  it("still refuses unpushed commits over a remote-tracking base that does not contain them", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    commitHere(wt, "more.txt", "unpushed work");
+    const r = await cli(f.work, [
+      "remove",
+      wt,
+      "--delete-branch",
+      "--base",
+      "origin/hotfixbase",
+    ]);
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(listedWorktrees(f.repo)).toContain(wt);
+  });
+});
+
+describe("worktree --base with a remote other than origin", () => {
+  it("derives the gh base from the remote name, for short and full refs", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeHotfix(f);
+    git(f.repo, ["remote", "add", "upstream", f.origin]);
+    git(f.repo, ["fetch", "-q", "upstream"]);
+    const stub = ghStub(
+      f,
+      `[{"number":9,"headRefOid":"${sha}","baseRefName":"hotfixbase"}]`,
+      { recordArgs: true },
+    );
+    for (const base of [
+      "upstream/hotfixbase",
+      "refs/remotes/upstream/hotfixbase",
+      "refs/remotes/origin/hotfixbase",
+    ]) {
+      const r = await cli(f.work, ["list", "--repo", f.repo, "--base", base], {
+        PATH: stub,
+      });
+      expect(r.code, r.stdout + r.stderr).toBe(0);
+      const entry = (r.json.worktrees as Record<string, any>[]).find(
+        (w) => w.path === wt,
+      );
+      expect(entry?.base).toBe(base);
+      expect(entry?.merged, base).toMatchObject({ merged: "yes", via: "gh" });
+    }
+    const lines = ghArgs(f);
+    expect(lines.length).toBe(3);
+    expect(lines.every((l) => l.includes("--base hotfixbase"))).toBe(true);
+    expect(lines.some((l) => l.includes("upstream"))).toBe(false);
+
+    const rm = await cli(
+      f.work,
+      ["remove", wt, "--require-merged", "--base", "upstream/hotfixbase"],
+      { PATH: stub },
+    );
+    expect(rm.code, rm.stdout + rm.stderr).toBe(0);
+    expect(ghArgs(f).at(-1)).toContain("--base hotfixbase");
+  });
+});
+
+describe("worktree list --base resolution", () => {
+  it("refuses a base that is no remote-tracking branch", async () => {
+    const f = makeFixture();
+    makeHotfix(f);
+    for (const bad of ["HEAD", "HEAD~1", "main", "--x", "@{u}"]) {
+      const r = await cli(f.work, ["list", "--repo", f.repo, `--base=${bad}`]);
+      expect(r.code, `${bad}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.json.reason, bad).toBe("base_not_remote_branch");
+    }
+  });
+
+  it("with --root, a repository where the value is no remote-tracking branch gives unknown and a warning", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    const wts = path.join(f.base, "wts");
+    fs.mkdirSync(wts);
+    fs.renameSync(wt, path.join(wts, "moved"));
+    git(f.repo, ["worktree", "repair", path.join(wts, "moved")]);
+    const r = await cli(f.work, ["list", "--root", wts, "--base", "HEAD"]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    const entries = r.json.worktrees as Record<string, any>[];
+    expect(entries).toHaveLength(1);
+    expect(entries[0].merged.merged).toBe("unknown");
+    expect(entries[0].ahead).toBeNull();
+    expect((r.json.warnings as string[]).length).toBe(1);
+  });
+
+  it("measures every worktree of a repository against the same commit", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeHotfix(f);
+    const second = addWorktree(f, "second", path.join(f.base, "wt-second"));
+    commitHere(second, "s.txt", "second");
+    commitHere(second, "s2.txt", "second again");
+    // A local branch that shadows the short spelling must not matter: the
+    // remote-tracking ref is read by its full name.
+    git(f.repo, ["branch", "origin/hotfixbase", "main"]);
+    const r = await cli(f.work, [
+      "list",
+      "--repo",
+      f.repo,
+      "--base",
+      "origin/hotfixbase",
+    ]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    const entries = r.json.worktrees as Record<string, any>[];
+    const hot = entries.find((w) => w.path === wt);
+    const sec = entries.find((w) => w.path === second);
+    expect(hot).toMatchObject({ ahead: 1, behind: 0 });
+    // second was cut from origin/main, which is the hotfix base's commit.
+    expect(sec).toMatchObject({ ahead: 2, behind: 0 });
+    expect(sha).toHaveLength(40);
   });
 });
 

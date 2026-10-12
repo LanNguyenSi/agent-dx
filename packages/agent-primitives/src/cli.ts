@@ -2319,7 +2319,7 @@ worktreeCommand
   )
   .option(
     "--base <rev>",
-    "run the merge check against <rev> instead of origin's default branch, for a branch whose pull request targets another one (origin/master, say); needs --require-merged or --delete-branch; the gh lookup uses <rev> without a leading origin/",
+    "run the merge check against the remote-tracking branch <rev> (<remote>/<branch> or refs/remotes/<remote>/<branch>, e.g. origin/master) instead of origin's default branch, for a branch whose pull request targets another one; anything else (HEAD, a local branch, a sha, a tag) is refused as base_not_remote_branch; needs --require-merged or --delete-branch; the gh lookup uses the branch part after <remote>/",
   )
   .action(
     async (
@@ -2429,7 +2429,7 @@ worktreeCommand
   )
   .option(
     "--base <rev>",
-    "measure ahead, behind and merged against <rev> instead of origin's default branch, in every repository reported (origin/master for hotfix branches, say); a <rev> a repository cannot resolve gives merged unknown and a warning; the gh lookup uses <rev> without a leading origin/",
+    "measure ahead, behind and merged against the remote-tracking branch <rev> (<remote>/<branch> or refs/remotes/<remote>/<branch>, e.g. origin/master for hotfix branches) instead of origin's default branch, in every repository reported; a value that is no remote-tracking branch at all (HEAD, a local branch, a sha) is refused as base_not_remote_branch, except with --root, where a repository that cannot resolve it gives merged unknown and a warning; the gh lookup uses the branch part after <remote>/",
   )
   .action(async (opts: WorktreeListCliOptions, command: Command) => {
     const start = Date.now();

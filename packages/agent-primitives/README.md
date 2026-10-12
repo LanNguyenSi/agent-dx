@@ -50,7 +50,7 @@ for teams shipping with AI agents.
   main checkout.
 - `worktree list`: reports every worktree of a repository, or every work tree
   below `--root`, with its branch, `.ai/run` pointer, dirty state, commits
-  ahead of and behind the default base (or `--base <rev>`), merge verdict and
+  ahead of and behind the default base (or a remote-tracking `--base <rev>`), merge verdict and
   dependency links.
 - Non-Node repositories are supported: PHP (PHPUnit, PHPStan,
   PHP_CodeSniffer) output is recognized by `verify` and `probe` alongside

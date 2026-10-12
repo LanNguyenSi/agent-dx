@@ -8,7 +8,7 @@ import {
   isWithin,
   mergeVerdict,
   resolveDefaultBase,
-  resolveExplicitBase,
+  resolveRemoteBase,
   resolveRepo,
   type MergeVerdict,
 } from "./git.js";
@@ -108,17 +108,21 @@ export async function removeWorktree(
   }
   const repo = resolveRepo(target);
 
-  // An unresolvable --base refuses before anything is read or changed.
-  const explicitBase =
-    o.base === undefined
-      ? undefined
-      : resolveExplicitBase(repo.mainCheckout, o.base);
-  if (o.base !== undefined && explicitBase === undefined) {
-    throw new WorktreeRefusal(
-      `--base ${o.base} does not name a commit in ${repo.mainCheckout}`,
-      "base_not_found",
-      { base: o.base },
-    );
+  // --base must be a remote-tracking branch, resolved once here to a full
+  // ref; anything else refuses before anything is read or changed.
+  let explicitBase: { ref: string; ghBase: string } | undefined;
+  if (o.base !== undefined) {
+    const resolved = resolveRemoteBase(repo.mainCheckout, o.base);
+    if (!resolved.ok) {
+      throw new WorktreeRefusal(
+        resolved.reason === "base_not_found"
+          ? `--base ${o.base} does not name an existing remote-tracking branch in ${repo.mainCheckout}`
+          : `--base ${o.base} is not a remote-tracking branch; pass <remote>/<branch> or refs/remotes/<remote>/<branch> of a configured remote`,
+        resolved.reason,
+        { base: o.base },
+      );
+    }
+    explicitBase = { ref: resolved.base.ref, ghBase: resolved.base.branch };
   }
 
   const entry = repo.worktrees.find((w) => sameDirectory(w.path, target));
@@ -188,7 +192,19 @@ export async function removeWorktree(
   }
 
   const defaultBase = resolveDefaultBase(repo.mainCheckout);
-  const base = explicitBase ?? defaultBase;
+  const base: { ref: string; ghBase?: string } | undefined =
+    explicitBase ?? defaultBase;
+  // Defence in depth for the unpushed exemption below: a merged verdict only
+  // excuses commits no remote has when it was measured against a
+  // remote-tracking branch, never against a local branch or a relative rev.
+  const baseIsRemoteTracking =
+    base !== undefined &&
+    resolveRemoteBase(
+      repo.mainCheckout,
+      base.ref.startsWith("refs/remotes/")
+        ? base.ref
+        : `refs/remotes/${base.ref}`,
+    ).ok;
   // Asked only when a flag needs the answer: the `gh` lookup of a verdict is
   // a network call where `gh` happens to be installed. Computed before the
   // unpushed check, because a branch that is merged into the base has no
@@ -202,7 +218,7 @@ export async function removeWorktree(
             via: "none",
             reason: "origin's default branch cannot be resolved",
           }
-        : mergeVerdict(target, "HEAD", entry.branch, base.ref);
+        : mergeVerdict(target, "HEAD", entry.branch, base.ref, base.ghBase);
   if (o.requireMerged === true && o.force !== true && merged !== null) {
     if (merged.merged === "no") {
       throw new WorktreeRefusal(
@@ -231,7 +247,8 @@ export async function removeWorktree(
     );
   }
   const unpushedLines = statusLines(unpushed.stdout);
-  const mergedIntoBase = merged !== null && merged.merged === "yes";
+  const mergedIntoBase =
+    merged !== null && merged.merged === "yes" && baseIsRemoteTracking;
   if (unpushedLines.length > 0 && o.force !== true && !mergedIntoBase) {
     throw new WorktreeRefusal(
       `${target} has ${String(unpushedLines.length)} commit(s) that no remote branch has; push them first, or pass --force to remove the worktree and lose them`,
@@ -259,7 +276,7 @@ export async function removeWorktree(
   }
 
   const warnings: string[] = [];
-  if (unpushedLines.length > 0 && merged !== null && merged.merged === "yes") {
+  if (unpushedLines.length > 0 && mergedIntoBase) {
     warnings.push(
       `${String(unpushedLines.length)} commit(s) are on no remote branch, but the branch is merged into ${base?.ref ?? "the default branch"} (${merged.via}); not counted as unpushed`,
     );
