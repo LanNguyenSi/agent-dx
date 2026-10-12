@@ -6,15 +6,21 @@
  *
  * A runbook sentence is a sentence of an installed markdown asset that names
  * a runbook, a checklist, or the data authority, plus the sentence right
- * after it in the same paragraph or list item, which can refer back to it
- * without naming it ("It becomes ...", "Such a defect ..."). Fenced code is
- * skipped, HTML comment delimiters are dropped, and headings, list items, and
- * table rows each start a new paragraph.
+ * before it and the sentence right after it in the same paragraph or list
+ * item, which can refer to it without naming it ("Every step of those is
+ * mandatory." before it, "It becomes ..." or "Such a defect ..." after it),
+ * plus the first sentence of the next paragraph or list item (a heading does
+ * not count as one), which can carry such a reference across the break.
+ * Fenced code is skipped, HTML comment delimiters are dropped, and headings,
+ * list items, and table rows each start a new paragraph.
  *
  * Known limit: a sentence that refers to a runbook only by a pronoun or a
- * synonym and sits outside that window (before the first runbook sentence of a
- * paragraph, or in a later paragraph) is not a runbook sentence, so neither
- * guard sees it. Review stays the primary control for such wording.
+ * synonym and sits outside that window (two or more sentences away, or in a
+ * later paragraph than the one right after) is not a runbook sentence, so
+ * neither guard sees it. The same holds for wording in the paragraph or list
+ * item before the runbook sentence (for example a lead-in line ending in a
+ * colon above a list): it stays outside the window. Review stays the primary
+ * control for such wording.
  */
 import { readdirSync } from "node:fs";
 import { join, relative, sep } from "node:path";
@@ -93,16 +99,27 @@ export function sentencesOf(unit: string): string[] {
 /** The runbook sentences of a markdown document (see the module comment). */
 export function runbookSentences(doc: string): string[] {
   const found: string[] = [];
+  // The first sentence of the next prose unit is in the window when a unit
+  // before it names a runbook; a heading carries no prose of its own, so it
+  // does not use up that slot.
+  let carry = false;
   for (const unit of proseUnits(doc)) {
+    const heading = /^#{1,6} /.test(unit);
     const sentences = sentencesOf(unit);
+    const names = sentences.map((sentence) => RUNBOOK_SUBJECT.test(sentence));
     sentences.forEach((sentence, i) => {
       if (
-        RUNBOOK_SUBJECT.test(sentence) ||
-        (i > 0 && RUNBOOK_SUBJECT.test(sentences[i - 1]))
+        names[i] ||
+        (i > 0 && names[i - 1]) ||
+        (i + 1 < sentences.length && names[i + 1]) ||
+        (i === 0 && carry && !heading)
       ) {
         found.push(sentence);
       }
     });
+    const named = names.some(Boolean);
+    if (heading) carry = carry || named;
+    else carry = named;
   }
   return found;
 }

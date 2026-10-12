@@ -652,9 +652,46 @@ describe("the runbook rule text is a closed, vetted set of sentences", () => {
   it("the segmentation keeps a sentence that refers back to a runbook without naming it", () => {
     expect(
       runbookSentences(
-        "A data runbook is a lead.\nIt is binding.\n\nIt is unrelated.",
+        "A data runbook is a lead.\nIt is binding.\n\nIt is also binding.\n\nIt is unrelated.",
       ),
-    ).toEqual(["A data runbook is a lead.", "It is binding."]);
+    ).toEqual([
+      "A data runbook is a lead.",
+      "It is binding.",
+      "It is also binding.",
+    ]);
+  });
+
+  it("the window also holds the sentence before a runbook sentence and the first sentence of the next paragraph, across a heading", () => {
+    expect(
+      runbookSentences(
+        "Every step of those is mandatory. Read the runbook. It binds. Far away.",
+      ),
+    ).toEqual([
+      "Every step of those is mandatory.",
+      "Read the runbook.",
+      "It binds.",
+    ]);
+    expect(
+      runbookSentences(
+        "- Read the runbook.\n- Those steps bind. Unrelated.\n- Untouched.",
+      ),
+    ).toEqual(["Read the runbook.", "Those steps bind."]);
+    expect(
+      runbookSentences(
+        "- Read the runbook.\n\n## Notes\n\n- Those steps bind. Unrelated.",
+      ),
+    ).toEqual(["Read the runbook.", "Those steps bind."]);
+    expect(
+      runbookSentences(
+        "A. B. C. Read the runbook. D. E.\n\nNext.\n\nUnrelated.",
+      ),
+    ).toEqual(["C.", "Read the runbook.", "D.", "Next."]);
+    expect(
+      runbookSentences("## Runbooks\n\nThose bind. Unrelated.\n\nFar."),
+    ).toEqual(["## Runbooks", "Those bind."]);
+  });
+
+  it("the segmentation splits a sentence at a period but not inside a file name", () => {
     expect(sentencesOf("See `06-handoff.md` (Known Risks). Next.")).toEqual([
       "See `06-handoff.md` (Known Risks).",
       "Next.",

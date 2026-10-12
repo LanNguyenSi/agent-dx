@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- The package's runbook-sentence guard now also reads the sentence before a
+  sentence that names a runbook, a checklist, or the data authority, and the
+  first sentence of the next paragraph or list item (across a heading), so a
+  forward reference in the same paragraph or list item ("Every step of those is
+  mandatory.") or a pronoun in the next item can no longer add an obligation or
+  a severity to the runbook rules unseen. Wording in the paragraph or list item
+  before the runbook sentence (a lead-in line above a list) stays outside the
+  window. Test-only: no installed asset text changes; the vetted sentence
+  fixture gains the newly covered sentences. (bb0fb6c7)
 - The runbook run-base wording is consistent everywhere it is stated: the
   reviewer prompt, the skill's trust boundary, and the `03-decisions.md`
   template now say that a bundle in a repository the run does not touch is read
