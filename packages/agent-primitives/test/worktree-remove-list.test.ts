@@ -1290,6 +1290,45 @@ describe("worktree remove --base", () => {
     expect(git(f.repo, ["rev-parse", "hotfix/one"]).trim()).toBe(c2);
   });
 
+  it("refuses a base whose name only exists as a local branch or tag spelled like the remote ref", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    commitHere(wt, "more.txt", "unpushed work");
+    const sha = git(wt, ["rev-parse", "HEAD"]).trim();
+    // `origin/ghost` is no remote-tracking ref, but git's rev lookup finds
+    // these two under that spelling.
+    git(f.repo, ["update-ref", "refs/heads/refs/remotes/origin/ghost", sha]);
+    git(f.repo, ["update-ref", "refs/tags/refs/remotes/origin/ghost2", sha]);
+    for (const ghost of ["origin/ghost", "origin/ghost2"]) {
+      for (const flags of [
+        ["--delete-branch"],
+        ["--require-merged"],
+        ["--delete-branch", "--require-merged"],
+      ]) {
+        const r = await cli(f.work, [
+          "remove",
+          wt,
+          ...flags,
+          `--base=${ghost}`,
+        ]);
+        expect(r.code, `${ghost}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.json.reason, ghost).toBe("base_not_found");
+        expect(listedWorktrees(f.repo)).toContain(wt);
+      }
+      const l = await cli(f.work, [
+        "list",
+        "--repo",
+        f.repo,
+        `--base=${ghost}`,
+      ]);
+      expect(l.code, l.stdout + l.stderr).toBe(0);
+      for (const w of l.json.worktrees as Record<string, any>[]) {
+        expect(w.merged.merged).toBe("unknown");
+      }
+    }
+    expect(git(f.repo, ["rev-parse", "hotfix/one"]).trim()).toBe(sha);
+  });
+
   it("still refuses unpushed commits over a remote-tracking base that does not contain them", async () => {
     const f = makeFixture();
     const { wt } = makeHotfix(f);
@@ -1348,6 +1387,27 @@ describe("worktree --base with a remote other than origin", () => {
 });
 
 describe("worktree list --base resolution", () => {
+  it("reports a well-formed base that does not exist as unknown with exactly one warning", async () => {
+    const f = makeFixture();
+    makeHotfix(f);
+    const r = await cli(f.work, [
+      "list",
+      "--repo",
+      f.repo,
+      "--base",
+      "origin/nope",
+    ]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    const entries = r.json.worktrees as Record<string, any>[];
+    expect(entries.length).toBeGreaterThan(1);
+    for (const w of entries) {
+      expect(w.base).toBe("origin/nope");
+      expect(w.merged.merged).toBe("unknown");
+    }
+    expect(r.json.warnings as string[]).toHaveLength(1);
+    expect((r.json.warnings as string[])[0]).toContain("origin/nope");
+  });
+
   it("refuses a base that is no remote-tracking branch", async () => {
     const f = makeFixture();
     makeHotfix(f);

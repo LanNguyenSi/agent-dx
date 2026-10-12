@@ -222,7 +222,9 @@ export async function listWorktrees(
     const repo = resolveRepo(path.resolve(o.cwd, o.repo ?? "."));
     if (o.base !== undefined) {
       const resolved = resolveRemoteBase(repo.mainCheckout, o.base);
-      resolutions.set(repo.mainCheckout, resolved);
+      // Only a good resolution is cached: a failed one is resolved again
+      // when the first entry is described, which is what emits its warning.
+      if (resolved.ok) resolutions.set(repo.mainCheckout, resolved);
       if (!resolved.ok && resolved.reason === "base_not_remote_branch") {
         throw new WorktreeRefusal(
           `--base ${o.base} is not a remote-tracking branch; pass <remote>/<branch> or refs/remotes/<remote>/<branch> of a configured remote`,
