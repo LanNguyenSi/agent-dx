@@ -5,8 +5,9 @@ description: Use before searching a codebase, before claiming a check passed, wh
 
 # agent-primitives
 
-`agent-primitives` is a CLI with nine subcommands: `probe`, `verify`,
-`doctor`, `init`, `drift`, `snapshot`, `delta`, `hygiene`, `worktree`. Every invocation
+`agent-primitives` is a CLI with ten subcommands: `probe`, `verify`,
+`doctor`, `init`, `drift`, `snapshot`, `delta`, `hygiene`, `worktree`,
+`patch`. Every invocation
 prints one bounded JSON result object on stdout by default (`-f text` for a
 human-readable rendering instead) and uses a stable exit-code contract: `0`
 ok, `1` a real finding, `2` the run could not conclude, including a usage
@@ -333,3 +334,20 @@ is refused). `worktree list [--repo <path> | --root <dir>]
 [--base <rev>]` reports
 each worktree's branch, dirty state, ahead/behind, merged state, run
 pointer and links. See the agent-primitives package's docs/worktree.md.
+
+## 11. Editing files
+
+To replace text in files from a shell, use `patch` instead of a
+read-replace-write script or `sed -i`. Write the edits as a JSON plan
+with the Write tool and run `agent-primitives patch --plan <file>`:
+`{"edits":[{"file":"<path>","old":"<exact text>","new":"<text>"}]}`
+(`"replaceAll": true` to replace every occurrence). For one edit,
+`patch --file <path> --old-file <p> --new-file <p>` avoids shell quoting.
+Every edit is resolved before any file is written; a `missing`,
+`ambiguous` or `overlap` edit writes nothing and exits `1`, with a hint
+naming the closest lines (whitespace made visible) or the match lines.
+Fix `old` and rerun the whole plan. `--dry-run` shows the diff without
+writing. Read each edit's `tier`: anything other than `exact` rewrote
+whole lines from normalized text. Paths outside the repository root and
+inside `.git` are refused. See the agent-primitives package's
+docs/patch.md.

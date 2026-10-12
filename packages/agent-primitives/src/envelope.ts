@@ -27,11 +27,17 @@ const STATUS_CLASS: Record<string, StatusClass> = {
   killed: "ok",
   unchanged: "ok",
   written: "ok",
+  // `patch --dry-run`: the plan resolved and a file would change.
+  would_write: "ok",
   // finding class -> exit 1
   missing: "finding",
   fail: "finding",
   survived: "finding",
   conflicted: "finding",
+  // `patch`: an edit's old text matches more than once, or two edits of
+  // one file overlap; the plan is refused and nothing is written.
+  ambiguous: "finding",
+  overlap: "finding",
   // `init`'s additive target status: bytes match a released, older copy
   // of the packaged asset (per the digest ledger) rather than an unknown
   // edit. Same class and exit code as `conflicted` (still nothing
