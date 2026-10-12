@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-10-12
+
 - The package's runbook-sentence guard now also reads the sentence before a
   sentence that names a runbook, a checklist, or the data authority, and the
   first sentence of the next paragraph or list item (across a heading), so a
