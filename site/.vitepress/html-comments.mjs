@@ -12,18 +12,13 @@
 // at its first "-->" within the same quote or container, across blank lines
 // and less indented lines; it hides whole lines up to the line where it
 // closes, and lines that hold nothing but comments act as blank lines. A
-// comment never cuts a fenced code block it recognises (fences inside list
-// items only approximately): when its first "-->" lies inside a
-// fence that opened after the comment's first line, the opener is not a
-// comment and stays visible. A whole fence may lie inside a comment. A fence
-// is a line that starts with three or more backticks or tildes; a backtick
-// fence's info string holds no backtick. Such a line indented four or more
-// columns past the container may be no fence or the fence of a nested block
-// such as a list item. A fence closes at a line made only of at least as
-// many of the same character, followed by nothing but spaces and tabs,
-// indented at most three columns past the container column or past the
-// opener's own column, and the opener stays visible when its "-->" lies
-// inside a fence under any of these readings.
+// comment never cuts a fenced code block: when its first "-->" lies inside a
+// fence that markdown-it recognises, the opener is not a comment and stays
+// visible, whether the fence stands at the top level, in a quote, or in a list
+// item at any depth. A whole fence may lie inside a comment. Fences are found
+// as markdown-it finds them in the page without the comment rules, and an
+// indented code block that holds a line starting with three backticks or
+// tildes counts as a fence indented too far.
 
 // Within text, what markdown-it reads before a comment can start: backslash
 // escapes and code spans (a run of backticks closed by a run of the same
@@ -58,6 +53,8 @@ export function htmlComments(md) {
 // comment. A comment over several lines with text after it on its closing
 // line hides those lines and keeps the text as a paragraph.
 function commentBlock(state, startLine, endLine, silent) {
+  // Off while the page is parsed again to find its fences.
+  if (reparsing) return false
   // A line four or more columns in is code, or, after a paragraph or quote
   // line, more text of that paragraph, where the inline rule hides the comment.
   if (state.sCount[startLine] - state.blkIndent >= 4) return false
@@ -178,42 +175,49 @@ function stripTitle(token) {
 }
 
 // True when the line holding the comment's closer sits inside a fenced code
-// block that opened after the comment's first line. A fence is a line that
-// starts with three or more backticks or tildes, and a backtick fence's info
-// string holds no backtick. A backtick or tilde line indented four or more
-// columns past the container is read both ways, as no fence and as the fence
-// of a nested block such as a list item, and the closer counts as inside a
-// fence under either reading. A fence closes at a line made only of at least
-// as many of the same character, with nothing but spaces and tabs after them,
-// indented at most three columns past the container column or past the
-// opener's own column, and the closer counts as inside a fence under any of
-// these readings. Fences inside list items are recognised only as far as
-// this line view of their columns allows.
+// block. The fences are those markdown-it finds in the page when the comment
+// rules are switched off, so a fence in a list item, a nested item, or after a
+// less indented line is found as markdown-it finds it, whatever its columns. A
+// fence holds the closer when the closer's line lies within the lines of its
+// token. An indented code block with a line that starts with three backticks or
+// tildes counts as a fence indented too far. The page is parsed once per parser
+// state, and only for a comment that spans lines on a page that has a run of
+// three backticks or tildes.
+const fences = new WeakMap()
+const MISINDENTED_FENCE = /^[ \t]*(```|~~~)/m
+let reparsing = false
 function closesInFence(state, startLine, closeLine) {
-  return (
-    inFence(state, startLine, closeLine, true) ||
-    inFence(state, startLine, closeLine, false) ||
-    inFence(state, startLine, closeLine, true, true)
-  )
-}
-
-// One reading of the lines after the comment's first line: bounded takes a
-// backtick or tilde line indented four or more columns past the container as
-// no fence, unbounded takes it as a fence whose closer is measured against
-// its own column. With own set, every closer is measured against its
-// opener's own column, which matches a fence inside a list item.
-function inFence(state, startLine, closeLine, bounded, own = false) {
-  let fence = null
-  let indent = 0
-  for (let l = startLine + 1; l <= closeLine; l++) {
-    const text = state.src.slice(state.bMarks[l] + state.tShift[l], state.eMarks[l])
-    if (!fence) {
-      const m = /^(`{3,}|~{3,})/.exec(text)
-      if (m && (!bounded || state.sCount[l] - state.blkIndent < 4) && !(m[1][0] === '`' && text.slice(m[1].length).includes('`'))) {
-        fence = m[1]
-        indent = !own && state.sCount[l] - state.blkIndent < 4 ? Math.min(state.blkIndent, state.sCount[l]) : state.sCount[l]
+  if (closeLine === startLine) return false
+  let spans = fences.get(state)
+  if (!spans) {
+    spans = []
+    if (state.src.includes('```') || state.src.includes('~~~')) {
+      const tokens = []
+      reparsing = true
+      try {
+        // Block rules read the page path (a snippet line resolves its file from
+        // it) and a reference rule adds the definitions it finds to the env, so
+        // the parse gets a copy that keeps the path and starts without
+        // definitions, which stay with the real parse.
+        state.md.block.parse(state.src, state.md, { ...state.env, references: undefined }, tokens)
+      } finally {
+        reparsing = false
       }
-    } else if (state.sCount[l] - indent <= 3 && new RegExp('^' + fence[0].replace(/[`~]/, (c) => '\\' + c) + '{' + fence.length + ',}[ \\t]*$').test(text)) fence = null
+      for (const t of tokens) {
+        if (t.type === 'fence' || (t.type === 'code_block' && MISINDENTED_FENCE.test(t.content))) spans.push(t.map)
+      }
+    }
+    fences.set(state, spans)
   }
-  return fence !== null
+  // The spans do not overlap and are in source order.
+  let lo = 0
+  let hi = spans.length - 1
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1
+    const [from, to] = spans[mid]
+    if (closeLine < from) hi = mid - 1
+    else if (closeLine >= to) lo = mid + 1
+    else return true
+  }
+  return false
 }
