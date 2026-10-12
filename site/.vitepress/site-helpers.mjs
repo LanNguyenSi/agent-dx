@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { htmlComments } from './html-comments.mjs'
+import { allowedAttributes, rawOutput } from './raw-output.mjs'
 
 // Pure helpers behind the site config: link mapping, titles and the sidebar.
 // They take the repository root as a parameter so a test can run them against
@@ -33,7 +34,14 @@ export function sitePath(repoRel) {
 // text, and HTML comments are hidden by the htmlComments rules. Everything
 // that changes how blocks are parsed lives here, so the sidebar titles and the
 // rendered pages cannot disagree about where a heading is.
-export const markdownBase = { html: false, config: (md) => md.use(htmlComments) }
+export const markdownBase = {
+  html: false,
+  attrs: { allowedAttributes },
+  config: (md) => {
+    md.use(htmlComments)
+    md.use(rawOutput)
+  }
+}
 
 // A leading byte order mark and front matter are stripped before the body is
 // parsed, as VitePress does.
