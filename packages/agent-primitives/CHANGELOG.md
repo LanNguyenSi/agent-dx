@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scoped to that target's harness. A `conflicted` target keeps its output
   without that hint (task ce5bc259).
 
+- `probe`: when `--pre` passes on the baseline and fails on the mutant,
+  the `pre_failed` warning now says the mutant does not build and quotes
+  a few lines of the captured `--pre` output (its last lines when the
+  output was longer than the captured tail); docs/probe.md lists mutant
+  patterns that still compile under `noUnusedLocals`/`noUnusedParameters`.
+  The verdict stays `inconclusive` (task d4b992e4).
+
 ## [0.11.0] - 2026-10-12
 
 - `worktree create` records the links it made in the new worktree's git
