@@ -1235,3 +1235,90 @@ describe("nestedRepoBoundaryRelPath: a target inside a nested repository's own b
     ).toBe("outer");
   });
 });
+
+describe("planLinks: a refusal another candidate of the round supersedes is not reported", () => {
+  /** A gitignored `vendor` symlinked outside the root, once as the
+   * composer `vendor-dir` repository content named (refused) and once as
+   * the operator's own `--link` (accepted). */
+  function vendorShapes(): {
+    root: string;
+    named: { absDir: string; namedBy: string };
+    operator: { absDir: string };
+  } {
+    const root = makeTmpDir();
+    const outside = makeTmpDir();
+    fs.symlinkSync(outside, path.join(root, "vendor"));
+    const absDir = path.join(root, "vendor");
+    return {
+      root,
+      named: {
+        absDir,
+        namedBy: `"vendor" named in "vendor-dir" of ${root}/composer.json`,
+      },
+      operator: { absDir },
+    };
+  }
+
+  it("drops the warning when the operator's --link names the same destination, whichever candidate comes first", () => {
+    const { root, named, operator } = vendorShapes();
+
+    for (const candidates of [
+      [named, operator],
+      [operator, named],
+    ]) {
+      const plan = planLinks(candidates, ctx(root));
+
+      expect(plan.warnings).toEqual([]);
+      expect(plan.links.map((l) => l.candidate)).toEqual([operator]);
+    }
+  });
+
+  it("keeps the warning, unchanged, when nothing links that destination", () => {
+    const { root, named } = vendorShapes();
+
+    const plan = planLinks([named], ctx(root));
+
+    expect(plan.links).toEqual([]);
+    expect(plan.warnings).toHaveLength(1);
+    expect(plan.warnings[0]).toBe(
+      `skipped linking ${named.absDir} (${named.namedBy}): it resolves ` +
+        "outside the repository root; a directory named by repository " +
+        "content must both sit inside the root and resolve inside it",
+    );
+  });
+
+  it("matches on the copy's own spelling of the destination", () => {
+    const { root, named } = vendorShapes();
+    const fold = (relPath: string) => relPath.toLowerCase();
+    fs.symlinkSync(path.join(root, "vendor"), path.join(root, "x"));
+    const operator = { absDir: path.join(root, "vendor") };
+
+    const plan = planLinks(
+      [named, operator],
+      ctx(root, { canonicalRelPath: fold }),
+    );
+
+    expect(plan.warnings).toEqual([]);
+  });
+
+  it("still reports a refusal for a different destination, and one for a path only nested with the linked one", () => {
+    const root = makeTmpDir();
+    const outside = makeTmpDir();
+    fs.mkdirSync(path.join(root, "a", "inner"), { recursive: true });
+    fs.symlinkSync(outside, path.join(root, "other"));
+
+    const plan = planLinks(
+      [
+        { absDir: path.join(root, "a") },
+        { absDir: path.join(root, "a", "inner") },
+        { absDir: path.join(root, "other"), namedBy: "named" },
+      ],
+      ctx(root),
+    );
+
+    expect(plan.links.map((l) => l.relPath)).toEqual(["a"]);
+    expect(plan.warnings).toHaveLength(2);
+    expect(plan.warnings[0]).toContain("already covered by a");
+    expect(plan.warnings[1]).toContain("resolves outside the repository root");
+  });
+});

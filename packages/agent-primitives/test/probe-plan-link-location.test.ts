@@ -157,6 +157,39 @@ describe("probe --plan: a plan outside the repository gets the --link policy for
     expect(code).toBe(0);
   }, 60000);
 
+  it("reports no skipped-link warning for a composer vendor-dir that the plan's own link supersedes", async () => {
+    const fx = makeFixture();
+    fs.writeFileSync(
+      path.join(fx.repo, "composer.json"),
+      JSON.stringify({ config: { "vendor-dir": "lib" } }),
+    );
+    const plan = writePlan(path.join(fx.runDir, "plan.json"), fx.planBody);
+
+    const { envelope } = await runPlan(fx, plan);
+
+    expect(envelope.status).toBe("killed");
+    expect(
+      envelope.warnings.filter((w) => w.includes("skipped linking")),
+    ).toEqual([]);
+  }, 60000);
+
+  it("keeps that warning when the plan carries no link for the vendor-dir", async () => {
+    const fx = makeFixture();
+    fs.writeFileSync(
+      path.join(fx.repo, "composer.json"),
+      JSON.stringify({ config: { "vendor-dir": "lib" } }),
+    );
+    const body = { ...fx.planBody };
+    delete body.link;
+    const plan = writePlan(path.join(fx.runDir, "plan.json"), body);
+
+    const { envelope } = await runPlan(fx, plan);
+
+    expect(
+      envelope.warnings.filter((w) => w.includes("skipped linking")),
+    ).toHaveLength(1);
+  }, 60000);
+
   it("resolves a relative --plan path against -C, and honours an outside plan reached through a symlinked directory that lies outside too", async () => {
     const fx = makeFixture();
     writePlan(path.join(fx.runDir, "plan.json"), fx.planBody);

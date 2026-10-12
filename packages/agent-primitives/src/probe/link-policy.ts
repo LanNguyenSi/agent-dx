@@ -625,9 +625,22 @@ export function planLinks(
   ctx: LinkPolicyContext,
 ): LinkPlan {
   const links: PlannedLink[] = [];
-  const warnings: string[] = [];
+  // Every refusal, with the destination it concerned (the copy's own
+  // spelling) when the candidate has one. Whether a refusal is reported
+  // is decided once the whole round is known: see the end of the function.
+  const refusals: { warning: string; destination: string | undefined }[] = [];
+  let currentDestination: string | undefined;
+  const warnings = {
+    push(warning: string): void {
+      refusals.push({ warning, destination: currentDestination });
+    },
+  };
   for (const candidate of candidates) {
     const relPath = linkRelPath(candidate.absDir, ctx.rootReal);
+    currentDestination =
+      relPath === undefined || relPath === ""
+        ? undefined
+        : ctx.canonicalRelPath(relPath);
     if (relPath === undefined) {
       warnings.push(
         skippedLinkWarning(
@@ -844,6 +857,10 @@ export function planLinks(
       relContains(planned.canonicalRelPath, canonicalRel),
     );
     if (covering !== undefined) {
+      // Never superseded, even for the same destination: this warning is
+      // what says a duplicate (or case variant) of a planned link was
+      // seen and left out.
+      currentDestination = undefined;
       warnings.push(
         skippedLinkWarning(
           candidate,
@@ -854,7 +871,23 @@ export function planLinks(
     }
     links.push({ candidate, relPath, canonicalRelPath: canonicalRel });
   }
-  return { links, warnings };
+  // A refusal is only worth reporting when the directory it concerns
+  // ends up unlinked. Another candidate of this round that names the
+  // same destination and was accepted (typically the operator's own
+  // `--link` for a path a `composer.json` also names) already provides
+  // that link, so the refused duplicate would only be noise. The check
+  // runs after the loop, so candidate order cannot matter, and it only
+  // filters what is reported: no accept/refuse decision above depends on it.
+  const linkedDestinations = new Set(links.map((l) => l.canonicalRelPath));
+  return {
+    links,
+    warnings: refusals
+      .filter(
+        (r) =>
+          r.destination === undefined || !linkedDestinations.has(r.destination),
+      )
+      .map((r) => r.warning),
+  };
 }
 
 /** What `linkSourceIsOperatorInput` is asked about: the `link` list of a
