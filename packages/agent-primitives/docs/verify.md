@@ -82,6 +82,17 @@ against a conservative pattern (letters, digits, `_`, `.`, `:`, `-`) before
 any command is built; a name outside that pattern is `status:
 "usage_error"`, exit `2`, and is never run.
 
+`-c` takes check names, not commands. To run a script that is not one of
+the default check names (for example `typecheck:test` or `format:check`),
+give it a name with `-c` and its command with `-x`; the usage error for a
+command passed to `-c` prints this form with a derived name:
+
+```sh
+agent-primitives verify -c typecheck_test,format_check \
+  -x 'typecheck_test=npm run typecheck:test' \
+  -x 'format_check=npm run format:check'
+```
+
 Check resolution, per name: an `-x` override wins; otherwise a matching
 `package.json` `scripts[name]` runs as `npm run <name> --silent`; a requested
 name with neither is recorded as `status: "skipped", reason: "no_script"`,
