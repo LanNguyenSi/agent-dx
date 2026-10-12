@@ -440,7 +440,9 @@ test('a backtick line in an indented code block before a fence leaves that fence
 })
 
 test('a backtick line whose info string holds a backtick opens no fence', () => {
-  // The comment closes at the "-->" on the line after that line, so both
-  // lines are hidden with it.
-  renderAsIfDeleted([['<!-- typo\n``` a`b\nx -->\ntail\n', '<p>tail</p>\n']])
+  // The comment that starts a line closes at the "-->" on the line after that
+  // line, across the blank line between them, so all of it is hidden. Only
+  // the block rule reaches past a blank line: were that line a fence, the
+  // opener would stay visible and the lines after the blank line would show.
+  renderAsIfDeleted([['<!-- typo\n\n``` a`b\nx -->\ntail\n', '<p>tail</p>\n']])
 })
