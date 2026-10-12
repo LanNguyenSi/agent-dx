@@ -1,16 +1,17 @@
 // Renders hostile Markdown through the site's real markdown configuration and
 // checks that author text never reaches the page as live HTML or as a Vue
-// expression: fence info strings, markdown-it-attrs, code-group and alert
-// titles, mustache, and env.title.
+// expression: fence info strings, markdown-it-attrs, explicit ids, code-group
+// and alert titles, mustache, and the page description.
 import test, { before } from 'node:test'
 import assert from 'node:assert/strict'
 import { createMarkdownRenderer, resolveConfig } from 'vitepress'
-import { allowedAttributes, defuseMustache, escapeText } from '../.vitepress/raw-output.mjs'
+import { allowedAttributes, defuseMustache, escapeDescriptionMeta, escapeText, safeId } from '../.vitepress/raw-output.mjs'
 import { escapeText as siteEscapeText, markdownBase } from '../.vitepress/site-helpers.mjs'
 
 let md
+let cfg
 before(async () => {
-  const cfg = await resolveConfig('.')
+  cfg = await resolveConfig('.')
   md = await createMarkdownRenderer(cfg.srcDir, cfg.userConfig.markdown, cfg.site.base)
 })
 const render = (src, env = {}) => md.render(src, { relativePath: 'fixture.md', ...env })
@@ -64,6 +65,28 @@ test('an ordinary fence keeps its language label, class and highlighted lines', 
   assert.equal(render('```js {1,3}\nx\ny\nz\n```\n').match(/class="line highlighted"/g)?.length, 2)
 })
 
+test('a line separator in a fence info string cannot hide a tag or a mustache', () => {
+  for (const sep of ['\u2028', '\u2029']) {
+    for (const fence of ['```', '~~~']) {
+      const out = render(`${fence}<img/src=x/onerror=1>${sep}{{ 7*7 }}\nbody\n${fence}\n`)
+      assert.deepEqual(liveTags(out), [], JSON.stringify(out))
+      assert.ok(!out.includes('<img'), JSON.stringify(out))
+      assert.match(out, /<span class="lang">&lt;img\/src/)
+      assert.ok(!out.includes('{{'), JSON.stringify(out))
+    }
+  }
+})
+
+test('a line separator after a code-group title cannot hide a tag or a mustache', () => {
+  for (const sep of ['\u2028', '\u2029']) {
+    const out = render(`::: code-group\n\n\`\`\`js [{{ 7*7 }}]${sep}]\nx\n\`\`\`\n\n\`\`\`js [<img src=x onerror=1>]${sep}]\ny\n\`\`\`\n\n:::\n`)
+    assert.deepEqual(liveTags(out), [], JSON.stringify(out))
+    assert.ok(!out.includes('{{'), JSON.stringify(out))
+    assert.match(out, /<label data-title="&#123;&#123; 7\*7 \}\}" for="[^"]+">&#123;&#123; 7\*7 \}\}<\/label>/)
+    assert.match(out, /<label data-title="&lt;img src=x onerror=1&gt;" for="[^"]+">&lt;img src=x onerror=1&gt;<\/label>/)
+  }
+})
+
 // markdown-it-attrs
 
 test('event handler attributes from a curly block are dropped', () => {
@@ -86,8 +109,38 @@ test('other attributes outside the allowlist are dropped too', () => {
 })
 
 test('id and class from a curly block are kept', () => {
+  assert.match(render('para {.one .two-b #mine_1}\n'), /<p class="one two-b" id="mine_1">para<\/p>/)
   assert.match(render('para {.keep #mine}\n'), /<p class="keep" id="mine">para<\/p>/)
   assert.match(render('# Head {#custom}\n'), /<h1 id="custom"/)
+})
+
+test('an explicit id with a character outside letters, digits, underscore and hyphen is dropped', () => {
+  for (const id of ['b"onmouseover="alert(1)', "q'x", 'x><img/src=x/onerror=1>', 'ü', 'a.b', 'a:b', 'a&b']) {
+    const out = render(`[[toc]]\n\n## Head {#${id}}\n`)
+    assert.deepEqual(liveTags(out), [], out)
+    const nav = /<nav class="table-of-contents">.*?<\/nav>/.exec(out)?.[0]
+    assert.match(nav, /<li><a href="#head">Head<\/a><\/li>/, out)
+    assert.match(out, /<h2 id="head"/, out)
+  }
+  assert.ok(safeId.test('kept-id_1') && !safeId.test('') && !safeId.test('a b') && !safeId.test('a\n'))
+})
+
+test('an explicit id made of letters, digits, underscore and hyphen is kept in the heading and the contents list', () => {
+  const out = render('[[toc]]\n\n## Head {#My-id_2}\n')
+  assert.match(out, /<h2 id="My-id_2"/)
+  assert.match(out, /<a href="#My-id_2">Head<\/a>/)
+})
+
+test('an id on a nested token is checked too', () => {
+  const out = render('para *em*{#a"b} and\n\n- item {#c"d}\n')
+  assert.doesNotMatch(out, /id="[^"]*"[^>]*"/)
+  assert.doesNotMatch(out, /id=/)
+})
+
+test('the contents list holds no live mustache and no tag from heading text', () => {
+  const out = render("[[toc]]\n\n## A {{ constructor.constructor('x')() }} <img src=x onerror=1>\n")
+  assert.ok(!out.includes('{{'), out)
+  assert.deepEqual(liveTags(out), [], out)
 })
 
 test('the site passes the allowlist to markdown-it-attrs', () => {
@@ -156,10 +209,11 @@ test('a mustache is defused in every place Vue compiles text', () => {
   }
 })
 
-test('a mustache in a fenced block stays as written, inside v-pre', () => {
+test('a mustache in a fenced block is written as references inside v-pre, which read as the same text', () => {
   const out = render('```js\nconst a = {{ b }}\n```\n')
   assert.match(out, /<pre[^>]*\bv-pre\b/)
-  assert.ok(out.includes('{{'), out)
+  assert.ok(!out.includes('{{'), out)
+  assert.ok(out.replace(/<[^>]+>/g, '').replaceAll('&#123;', '{').includes('const a = {{ b }}'), out)
 })
 
 test('single braces and a mustache written as references are untouched', () => {
@@ -171,23 +225,38 @@ test('defuseMustache turns only a double open brace into references', () => {
   assert.equal(defuseMustache('{{ a }} {b} {{{c'), '&#123;&#123; a }} {b} &#123;&#123;{c')
 })
 
-// env.title
+// Page title and description
 
-test('env.title holds the first h1 as escaped text', () => {
+test('the page title is left as typed in the page data, since VitePress escapes it where it writes the title', () => {
   const env = { relativePath: 'fixture.md' }
   md.render('# <b>hi</b> & "q" `<i>`\n', env)
-  assert.equal(env.title, '&lt;b&gt;hi&lt;/b&gt; &amp; &quot;q&quot; &lt;i&gt;')
+  assert.equal(env.title, '<b>hi</b> & "q" <i>')
 })
 
-test('env.title is escaped once when the page is rendered twice, and empty without an h1', () => {
-  const src = '# a & b\n'
-  const a = { relativePath: 'fixture.md' }
-  const b = { relativePath: 'fixture.md' }
-  md.render(src, a)
-  md.render(src, b)
-  assert.equal(a.title, 'a &amp; b')
-  assert.equal(b.title, 'a &amp; b')
-  const c = { relativePath: 'fixture.md' }
-  md.render('no heading\n', c)
-  assert.equal(c.title, '')
+const meta = (description) => `<head><meta name="description" content="${description}"></head>`
+
+test('the site config escapes the description of every page it writes', () => {
+  const description = '"><img src=x onerror=alert(1)>'
+  assert.equal(cfg.userConfig.transformHtml(meta(description), 'index.html', { description }), meta('&quot;&gt;&lt;img src=x onerror=alert(1)&gt;'))
+})
+
+test('a hostile description is escaped in the meta tag', () => {
+  const description = '"><img src=x onerror=alert(1)> R&D'
+  const out = escapeDescriptionMeta(meta(description), 'index.html', { description })
+  assert.equal(out, meta('&quot;&gt;&lt;img src=x onerror=alert(1)&gt; R&amp;D'))
+})
+
+test('a page without a description is left as it is', () => {
+  assert.equal(escapeDescriptionMeta('<head></head>', 'index.html', {}), '<head></head>')
+})
+
+test('an ordinary description is left as it is', () => {
+  for (const description of ['Agent Engineering Playbook and Agentic Coding Playbook from agent-dx', "It's fine: a, b; c (d) 1/2 &copy; x", '']) {
+    assert.equal(escapeDescriptionMeta(meta(description), 'index.html', { description }), meta(description))
+  }
+})
+
+test('a description with replacement patterns is written as is', () => {
+  const description = '$& $1 $$ <'
+  assert.equal(escapeDescriptionMeta(meta(description), 'index.html', { description }), meta('$&amp; $1 $$ &lt;'))
 })
