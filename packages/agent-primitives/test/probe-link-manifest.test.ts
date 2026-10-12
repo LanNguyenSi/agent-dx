@@ -505,6 +505,28 @@ describe("a recorded link is trusted only while it stands as recorded", () => {
     expect(linkWarnings[0]).toContain(JSON.stringify(other));
   });
 
+  it("does not trust a link whose text changed even when it still reaches the same directory", async () => {
+    const f = makeFixture();
+    const wt = await createWorktree(f, "wt-alias", ["lib"]);
+    // Same directory, other spelling: the identity check alone would let
+    // this through, the recorded text is what the operator's link said.
+    const alias = path.join(f.base, "lib-alias");
+    fs.symlinkSync(path.join(f.repo, "lib"), alias);
+    fs.rmSync(path.join(wt, "lib"));
+    fs.symlinkSync(alias, path.join(wt, "lib"));
+    const entry = recordedEntry(wt, "lib");
+    expect(captureLinkIdentity(path.join(wt, "lib"))).toMatchObject({
+      resolved: entry.resolved,
+      dev: entry.dev,
+      ino: entry.ino,
+    });
+
+    expect(recordedLinkStillHolds(wt, entry)).toMatchObject({
+      holds: false,
+      reason: expect.stringContaining("now points at"),
+    });
+  });
+
   it("still honours an explicit --link next to a retargeted record", async () => {
     const f = makeFixture();
     const wt = await createWorktree(f, "wt-retarget-flag", ["lib"]);
