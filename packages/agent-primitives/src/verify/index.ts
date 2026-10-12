@@ -204,7 +204,7 @@ export function selectDetector(
  * `error`, never `fail`. A timeout, or a null exit code from a signal
  * kill outside the timeout path, is likewise something the runner cannot
  * conclude pass/fail from, so it too maps to `error`. */
-function classifyStatus(
+export function classifyStatus(
   exitCode: number | null,
   timedOut: boolean,
 ): CheckStatus {

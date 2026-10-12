@@ -57,6 +57,11 @@ import {
   outsideCheckout,
 } from "./snapshot/index.js";
 import { checkoutIdentity } from "./snapshot/git.js";
+import {
+  createWorktree,
+  WorktreeRefusal,
+  type CreateWorktreeResult,
+} from "./worktree/index.js";
 
 function readVersion(): string {
   try {
@@ -2067,6 +2072,192 @@ program
   .description("Compare a saved snapshot with the same checkout now")
   .requiredOption("--since <path>", "saved snapshot artifact")
   .action((opts, command) => runObservation("delta", opts, command));
+
+interface WorktreeCreateCliOptions {
+  repo?: string;
+  branch: string;
+  base?: string;
+  path?: string;
+  root?: string;
+  run?: string;
+  link: string[];
+  linksFrom?: string;
+  setup?: string;
+  smoke?: string;
+  passRegex?: RegExp;
+  /** `--no-fetch` sets this to `false`; commander defaults it to `true`. */
+  fetch: boolean;
+}
+
+function renderWorktreeCreateText(result: CreateWorktreeResult): string {
+  const lines: string[] = [
+    `status: ${result.status}`,
+    `worktree: ${result.worktree.path}`,
+    `branch: ${result.worktree.branch} (${result.upstream === null ? "no upstream" : `tracks ${result.upstream}`})`,
+    `base: ${result.base.ref} @ ${result.base.sha}`,
+    result.runBase,
+    `fetch: ${result.fetch.status}${result.fetch.reason ? ` (${result.fetch.reason})` : ""}`,
+    `pointer: ${result.pointer.status}${result.pointer.reason ? ` (${result.pointer.reason})` : ""}`,
+  ];
+  for (const link of result.links.made) {
+    lines.push(
+      `link: ${link.path} -> ${link.target} (exclude: ${link.exclude})`,
+    );
+  }
+  for (const link of result.links.skipped) {
+    lines.push(`link skipped: ${link.path}: ${link.reason}: ${link.detail}`);
+  }
+  for (const [name, step] of [
+    ["setup", result.setup],
+    ["smoke", result.smoke],
+  ] as const) {
+    lines.push(
+      `${name}: ${step.status}${step.reason ? ` (${step.reason})` : ""}`,
+    );
+  }
+  if (result.warnings.length > 0) {
+    lines.push("", "warnings:");
+    for (const warning of result.warnings) lines.push(`  - ${warning}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+const worktreeCommand = program
+  .command("worktree")
+  .description(
+    "Manage linked git worktrees for task branches (subcommand: create)",
+  );
+
+worktreeCommand
+  .command("create")
+  .description(
+    "Create a linked worktree on a new branch (no upstream) from a base, without touching the main checkout; optionally write the .ai/run pointer, link shared dependencies, run a setup command and a smoke check",
+  )
+  .requiredOption("--branch <name>", "new branch to create in the worktree")
+  .option(
+    "--repo <path>",
+    "repository to branch from (default: the invocation directory)",
+  )
+  .option(
+    "--base <rev>",
+    "start point for the branch (default: origin/<default branch>)",
+  )
+  .option(
+    "--path <dir>",
+    "exact worktree directory; relative values resolve against the invocation directory, not --repo",
+  )
+  .option(
+    "--root <dir>",
+    "directory to create <branch> in (default: <repo>-worktrees next to the main checkout)",
+  )
+  .option(
+    "--run <dir>",
+    "run directory; written to .ai/run in the worktree when git ignores that path",
+  )
+  .option(
+    "--link <rel>",
+    "repository-relative path to symlink from the main checkout (repeatable, comma-separated)",
+    collectList,
+    [] as string[],
+  )
+  .option(
+    "--links-from <file>",
+    "file with one --link path per line (# comments); must live outside the repository",
+  )
+  .option("--setup <cmd>", "shell command to run in the worktree after linking")
+  .option(
+    "--smoke <cmd>",
+    "readiness check to run in the worktree after setup; its exit code (or --pass-regex) decides ready / not_ready",
+  )
+  .option(
+    "--pass-regex <regex>",
+    "with --smoke: a match against its combined stdout+stderr is ready, no match is not, in place of the exit code",
+    parsePassRegex,
+  )
+  .option("--no-fetch", "do not fetch origin before resolving the base")
+  .action(async (opts: WorktreeCreateCliOptions, command: Command) => {
+    const start = Date.now();
+    const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
+    let result: CreateWorktreeResult;
+    try {
+      result = await createWorktree({
+        cwd: global.cwd,
+        repo: opts.repo,
+        branch: opts.branch,
+        base: opts.base,
+        path: opts.path,
+        root: opts.root,
+        run: opts.run,
+        links: opts.link,
+        linksFrom: opts.linksFrom,
+        setup: opts.setup,
+        smoke: opts.smoke,
+        passRegex: opts.passRegex,
+        fetch: opts.fetch,
+        logDir: global.logDir,
+        signal: shutdownController.signal,
+        execFn: trackingExec,
+      });
+    } catch (err) {
+      if (!(err instanceof WorktreeRefusal)) throw err;
+      const { envelope, exitCode } = buildEnvelope({
+        version: VERSION,
+        command: "worktree create",
+        status: "usage_error",
+        durationMs: Date.now() - start,
+        cwd: global.cwd,
+        warnings: [],
+        logs: [],
+        extra: {
+          reason: err.reason,
+          message: err.message,
+          ...(err.details !== undefined ? { details: err.details } : {}),
+        },
+        maxChars: global.maxChars,
+        logDir: global.logDir,
+      });
+      emit(
+        envelope,
+        exitCode,
+        { format: global.format, maxChars: global.maxChars },
+        () => `worktree create refused (${err.reason}): ${err.message}\n`,
+      );
+      return;
+    }
+    const logs = [result.setup.logPath, result.smoke.logPath].filter(
+      (p): p is string => p !== undefined,
+    );
+    const { envelope, exitCode } = buildEnvelope({
+      version: VERSION,
+      command: "worktree create",
+      status: result.status,
+      durationMs: Date.now() - start,
+      cwd: global.cwd,
+      warnings: result.warnings,
+      logs,
+      extra: {
+        worktree: result.worktree,
+        base: result.base,
+        fetch: result.fetch,
+        upstream: result.upstream,
+        runBase: result.runBase,
+        pointer: result.pointer,
+        links: result.links,
+        setup: result.setup,
+        smoke: result.smoke,
+      },
+      keepWhole: ["worktree", "base", "runBase", "upstream"],
+      maxChars: global.maxChars,
+      logDir: global.logDir,
+    });
+    emit(
+      envelope,
+      exitCode,
+      { format: global.format, maxChars: global.maxChars },
+      () => renderWorktreeCreateText(result),
+    );
+  });
 
 // CommanderError codes that represent a genuine, successful exit (--help,
 // --version) rather than a usage error, and must therefore pass their exit

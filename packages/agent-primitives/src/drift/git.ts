@@ -21,11 +21,13 @@ export function runGit(
   cwd: string,
   args: string[],
   env?: NodeJS.ProcessEnv,
+  timeoutMs?: number,
 ): GitRunResult {
   try {
     const result = spawnSync("git", args, {
       cwd,
       ...(env !== undefined ? { env } : {}),
+      ...(timeoutMs !== undefined ? { timeout: timeoutMs } : {}),
       encoding: "utf8",
       maxBuffer: GIT_MAX_BUFFER,
     });
