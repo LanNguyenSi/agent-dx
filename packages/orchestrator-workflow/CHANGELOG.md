@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- The package's runbook-sentence guard now also reads the last sentence of the
+  paragraph or list item before a unit that opens with a sentence naming a
+  runbook, a checklist, or the data authority, so a lead-in line above a list
+  ("Every step below is mandatory:") can no longer add an obligation to the
+  runbook rules unseen. Its segmenter also recognises `+` list items and `~~~`
+  fences. A question mark or a colon still does not end a sentence (both keep
+  more wording in the window), and a lead-in sentence that is not the last of
+  its paragraph stays outside the window. Test-only (no asset text changes);
+  the vetted sentence fixture gains the newly covered sentences. (80d2752a)
+
 ## [0.44.0] - 2026-10-12
 
 - The package's runbook-sentence guard now also reads the sentence before a
