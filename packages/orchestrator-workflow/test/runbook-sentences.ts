@@ -10,17 +10,26 @@
  * item, which can refer to it without naming it ("Every step of those is
  * mandatory." before it, "It becomes ..." or "Such a defect ..." after it),
  * plus the first sentence of the next paragraph or list item (a heading does
- * not count as one), which can carry such a reference across the break.
- * Fenced code is skipped, HTML comment delimiters are dropped, and headings,
- * list items, and table rows each start a new paragraph.
+ * not count as one), which can carry such a reference across the break, plus,
+ * when the first sentence of a paragraph or list item names one, the last
+ * sentence of the previous paragraph or list item (a heading does not count
+ * as one, and a heading never opens this window), which can be a lead-in line
+ * ending in a colon above a list ("Every step below is mandatory:").
+ * Fenced code (backtick or tilde fences) is skipped, HTML comment delimiters
+ * are dropped, and headings, list items (`-`, `*`, `+`, or a number and a
+ * period), and table rows each start a new paragraph. A sentence ends at a
+ * period or a question mark followed by white space; a colon does not end one,
+ * since `authority: data` and a `key: value` pair contain one.
  *
  * Known limit: a sentence that refers to a runbook only by a pronoun or a
  * synonym and sits outside that window (two or more sentences away, or in a
- * later paragraph than the one right after) is not a runbook sentence, so
- * neither guard sees it. The same holds for wording in the paragraph or list
- * item before the runbook sentence (for example a lead-in line ending in a
- * colon above a list): it stays outside the window. Review stays the primary
- * control for such wording.
+ * paragraph further from the runbook sentence than the one right before or
+ * right after it) is not a runbook sentence, so neither guard sees it. The
+ * same holds for a lead-in whose colon-ended sentence shares its paragraph
+ * with an earlier sentence (only its last sentence is in the window), and for a
+ * runbook named only in a later sentence of the unit that follows the lead-in
+ * (only a unit whose first sentence names one opens the window). Review stays
+ * the primary control for such wording.
  */
 import { readdirSync } from "node:fs";
 import { join, relative, sep } from "node:path";
@@ -50,25 +59,37 @@ export function assetMarkdownFiles(): string[] {
 export function proseUnits(doc: string): string[] {
   const units: string[] = [];
   let current: string[] = [];
-  let inFence = false;
+  let fence = "";
   const flush = () => {
     if (current.length > 0) units.push(current.join(" "));
     current = [];
   };
   for (const raw of doc.split(/\r?\n/)) {
     const line = raw.trim();
-    if (line.startsWith("```")) {
-      flush();
-      inFence = !inFence;
+    const opening = line.match(/^(`{3,}|~{3,})/);
+    if (fence === "") {
+      if (opening) {
+        flush();
+        fence = opening[1];
+        continue;
+      }
+    } else {
+      // A fence closes with the same character, at least as long as the opener.
+      if (
+        opening &&
+        opening[1][0] === fence[0] &&
+        opening[1].length >= fence.length
+      ) {
+        fence = "";
+      }
       continue;
     }
-    if (inFence) continue;
     if (line === "") {
       flush();
       continue;
     }
     const standalone = /^#{1,6} /.test(line) || line.startsWith("|");
-    if (standalone || /^([-*]|\d+\.) /.test(line)) flush();
+    if (standalone || /^([-*+]|\d+\.) /.test(line)) flush();
     current.push(line);
     if (standalone) flush();
   }
@@ -78,48 +99,60 @@ export function proseUnits(doc: string): string[] {
       unit
         .replace(/<!--|-->/g, " ")
         .replace(/\s+/g, " ")
-        .replace(/^\s*([-*]|\d+\.)\s+/, "")
+        .replace(/^\s*([-*+]|\d+\.)\s+/, "")
         .trim(),
     )
     .filter((unit) => unit.length > 0);
 }
 
 /**
- * Sentences of one unit. The splitter breaks after a period followed by white
- * space, so a file name such as `06-handoff.md` stays inside its sentence and
+ * Sentences of one unit. The splitter breaks after a period or a question mark
+ * followed by white space, so a file name such as `06-handoff.md` stays inside its sentence and
  * a semicolon never separates a clause from the qualifier it carries.
  */
 export function sentencesOf(unit: string): string[] {
   return unit
-    .split(/(?<=\.)\s+/)
+    .split(/(?<=[.?])\s+/)
     .map((sentence) => sentence.trim())
     .filter((sentence) => sentence.length > 0);
 }
 
 /** The runbook sentences of a markdown document (see the module comment). */
 export function runbookSentences(doc: string): string[] {
-  const found: string[] = [];
+  const units = proseUnits(doc).map((unit) => {
+    const sentences = sentencesOf(unit);
+    return {
+      heading: /^#{1,6} /.test(unit),
+      sentences,
+      names: sentences.map((sentence) => RUNBOOK_SUBJECT.test(sentence)),
+      keep: sentences.map(() => false),
+    };
+  });
   // The first sentence of the next prose unit is in the window when a unit
   // before it names a runbook; a heading carries no prose of its own, so it
   // does not use up that slot.
   let carry = false;
-  for (const unit of proseUnits(doc)) {
-    const heading = /^#{1,6} /.test(unit);
-    const sentences = sentencesOf(unit);
-    const names = sentences.map((sentence) => RUNBOOK_SUBJECT.test(sentence));
-    sentences.forEach((sentence, i) => {
-      if (
+  // The previous prose unit, whose last sentence is in the window when the
+  // current unit opens with a runbook sentence (a heading never opens it).
+  let previous: (typeof units)[number] | undefined;
+  for (const unit of units) {
+    const { heading, sentences, names, keep } = unit;
+    sentences.forEach((_sentence, i) => {
+      keep[i] =
         names[i] ||
         (i > 0 && names[i - 1]) ||
         (i + 1 < sentences.length && names[i + 1]) ||
-        (i === 0 && carry && !heading)
-      ) {
-        found.push(sentence);
-      }
+        (i === 0 && carry && !heading);
     });
+    if (!heading && previous && names[0]) {
+      previous.keep[previous.keep.length - 1] = true;
+    }
     const named = names.some(Boolean);
     if (heading) carry = carry || named;
     else carry = named;
+    if (!heading) previous = unit;
   }
-  return found;
+  return units.flatMap((unit) =>
+    unit.sentences.filter((_sentence, i) => unit.keep[i]),
+  );
 }
