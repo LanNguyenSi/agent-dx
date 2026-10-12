@@ -529,6 +529,16 @@ test('a comment whose closer lies in an indented code block that holds a fence l
   }
   assert.equal(render('<!-- typo\n\n    code --> x\n\n```\nf\n```\n').includes('typo'), false)
   assert.equal(render('<!-- note\n\n    ```\n    old\n\n-->\n\nKept.\n'), '<p>Kept.</p>\n')
+  // Only a line that starts with the run makes a block a misindented fence.
+  assert.equal(render('<!-- typo\n\n    echo ``` x --> y\n\ntail\n'), '<p>y</p>\n<p>tail</p>\n')
+})
+
+test('the second parse of a page leaves its reference definitions alone', () => {
+  // A definition inside a comment is hidden, so a link that uses it stays
+  // text, even though the second parse sees the definition.
+  const out = render('<!-- a\n\n[x]: https://example.com/x\n\nb -->\n\n```\nf\n```\n\nsee [x]\n')
+  assert.ok(!out.includes('<a '), out)
+  assert.match(out, /see \[x\]/)
 })
 
 test('the closer is looked up among all the fences of a page', () => {
