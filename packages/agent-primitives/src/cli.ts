@@ -2297,7 +2297,7 @@ worktreeCommand
   )
   .option(
     "--base <rev>",
-    "run the merge check against the remote-tracking branch <rev> (<remote>/<branch> or refs/remotes/<remote>/<branch>, e.g. origin/master) instead of origin's default branch, for a branch whose pull request targets another one; anything else (HEAD, a local branch, a sha, a tag) is refused as base_not_remote_branch; needs --require-merged or --delete-branch; the gh lookup uses the branch part after <remote>/",
+    "run the merge check against the remote-tracking branch <rev> (<remote>/<branch> or refs/remotes/<remote>/<branch>, e.g. origin/master) instead of origin's default branch, for a branch whose pull request targets another one; anything else (HEAD, a local branch, a sha, a tag) is refused as base_not_remote_branch; needs --require-merged or --delete-branch; the gh lookup uses the branch part after <remote>/ as the pull request base and runs against gh's default repository (no --repo is passed)",
   )
   .action(
     async (
@@ -2395,7 +2395,7 @@ function renderWorktreeListText(result: ListWorktreesResult): string {
 worktreeCommand
   .command("list")
   .description(
-    "Report every worktree of a repository (or every work tree below --root): its branch, run pointer, dirty state, commits ahead of and behind the default base, whether it is merged, and its dependency links",
+    "Report every worktree of a repository (or every work tree below --root): its branch, run pointer, dirty state, commits ahead of and behind the default base (or --base), whether it is merged, and its dependency links",
   )
   .option(
     "--repo <path>",
@@ -2407,7 +2407,7 @@ worktreeCommand
   )
   .option(
     "--base <rev>",
-    "measure ahead, behind and merged against the remote-tracking branch <rev> (<remote>/<branch> or refs/remotes/<remote>/<branch>, e.g. origin/master for hotfix branches) instead of origin's default branch, in every repository reported; a value that is no remote-tracking branch at all (HEAD, a local branch, a sha) is refused as base_not_remote_branch, except with --root, where a repository that cannot resolve it gives merged unknown and a warning; the gh lookup uses the branch part after <remote>/",
+    "measure ahead, behind and merged against the remote-tracking branch <rev> (<remote>/<branch> or refs/remotes/<remote>/<branch>, e.g. origin/master for hotfix branches) instead of origin's default branch, in every repository reported; a value that is no remote-tracking branch at all (HEAD, a local branch, a sha) is refused as base_not_remote_branch, except with --root, where a repository that cannot resolve it gives merged unknown and a warning; a well-formed value whose ref a repository lacks gives merged unknown and a warning in either mode; the gh lookup uses the branch part after <remote>/ as the pull request base and runs against gh's default repository (no --repo is passed)",
   )
   .action(async (opts: WorktreeListCliOptions, command: Command) => {
     const start = Date.now();

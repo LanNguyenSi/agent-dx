@@ -115,7 +115,7 @@ function describeEntry(
     base = resolveDefaultBase(repo.mainCheckout);
   } else {
     // Resolved once per repository, in its main checkout, to a full ref:
-    // every worktree is measured against the same commit.
+    // every worktree is measured against the same full ref.
     let resolved = resolutions.get(repo.mainCheckout);
     if (resolved === undefined) {
       resolved = resolveRemoteBase(repo.mainCheckout, baseFlag);

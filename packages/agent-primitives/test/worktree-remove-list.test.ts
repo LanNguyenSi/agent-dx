@@ -1343,9 +1343,118 @@ describe("worktree remove --base", () => {
     expect(r.code, r.stdout + r.stderr).toBe(2);
     expect(listedWorktrees(f.repo)).toContain(wt);
   });
+
+  it("refuses a symbolic remote-tracking ref that points at the worktree branch, with and without --force", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    commitHere(wt, "more.txt", "unpushed work");
+    const sha = git(wt, ["rev-parse", "HEAD"]).trim();
+    git(f.repo, [
+      "symbolic-ref",
+      "refs/remotes/origin/self",
+      "refs/heads/hotfix/one",
+    ]);
+    for (const extra of [[], ["--force"]]) {
+      const r = await cli(f.work, [
+        "remove",
+        wt,
+        "--require-merged",
+        "--delete-branch",
+        "--base",
+        "origin/self",
+        ...extra,
+      ]);
+      expect(r.code, r.stdout + r.stderr).toBe(2);
+      expect(r.json.reason).toBe("base_not_remote_branch");
+      expect(listedWorktrees(f.repo)).toContain(wt);
+      expect(git(f.repo, ["rev-parse", "hotfix/one"]).trim()).toBe(sha);
+    }
+  });
+
+  it("refuses a symbolic remote-tracking ref that points at another local branch holding unpushed work", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    commitHere(wt, "more.txt", "unpushed work");
+    const sha = git(wt, ["rev-parse", "HEAD"]).trim();
+    git(f.repo, ["branch", "elsewhere", "hotfix/one"]);
+    git(f.repo, [
+      "symbolic-ref",
+      "refs/remotes/origin/other",
+      "refs/heads/elsewhere",
+    ]);
+    for (const extra of [[], ["--force"]]) {
+      const r = await cli(f.work, [
+        "remove",
+        wt,
+        "--require-merged",
+        "--delete-branch",
+        "--base",
+        "origin/other",
+        ...extra,
+      ]);
+      expect(r.code, r.stdout + r.stderr).toBe(2);
+      expect(r.json.reason).toBe("base_not_remote_branch");
+      expect(listedWorktrees(f.repo)).toContain(wt);
+      expect(git(f.repo, ["rev-parse", "hotfix/one"]).trim()).toBe(sha);
+    }
+  });
+
+  it("refuses a plain refs/remotes/origin/HEAD that is not symbolic", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    commitHere(wt, "more.txt", "unpushed work");
+    const sha = git(wt, ["rev-parse", "HEAD"]).trim();
+    // Replace the symbolic remote HEAD by a plain ref at the worktree head.
+    git(f.repo, ["symbolic-ref", "--delete", "refs/remotes/origin/HEAD"]);
+    git(f.repo, ["update-ref", "refs/remotes/origin/HEAD", sha]);
+    expect(
+      gitTry(f.repo, ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"]),
+    ).toBeUndefined();
+    for (const extra of [[], ["--force"]]) {
+      const r = await cli(f.work, [
+        "remove",
+        wt,
+        "--require-merged",
+        "--delete-branch",
+        "--base",
+        "origin/HEAD",
+        ...extra,
+      ]);
+      expect(r.code, r.stdout + r.stderr).toBe(2);
+      expect(r.json.reason).toBe("base_not_remote_branch");
+      expect(listedWorktrees(f.repo)).toContain(wt);
+      expect(git(f.repo, ["rev-parse", "hotfix/one"]).trim()).toBe(sha);
+    }
+  });
 });
 
 describe("worktree --base with a remote other than origin", () => {
+  it("takes the longest configured remote name when one remote name prefixes another", async () => {
+    const f = makeFixture();
+    makeHotfix(f);
+    // `git remote add` refuses a name nested in another remote's name, but
+    // the configuration can hold both.
+    git(f.repo, ["config", "remote.up.url", f.origin]);
+    git(f.repo, ["config", "remote.up/stream.url", f.origin]);
+    expect(git(f.repo, ["remote"]).split("\n")).toEqual(
+      expect.arrayContaining(["up", "up/stream"]),
+    );
+    // At main, which the hotfix branch is ahead of: ancestry cannot decide,
+    // so the gh lookup runs.
+    git(f.repo, ["update-ref", "refs/remotes/up/stream/x", f.mainSha]);
+    const stub = ghStub(f, "[]", { recordArgs: true });
+    const r = await cli(
+      f.work,
+      ["list", "--repo", f.repo, "--base", "up/stream/x"],
+      { PATH: stub },
+    );
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    const lines = ghArgs(f);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.every((l) => l.includes("--base x"))).toBe(true);
+    expect(lines.some((l) => l.includes("--base stream/x"))).toBe(false);
+  });
+
   it("derives the gh base from the remote name, for short and full refs", async () => {
     const f = makeFixture();
     const { wt, sha } = makeHotfix(f);
@@ -1434,7 +1543,7 @@ describe("worktree list --base resolution", () => {
     expect((r.json.warnings as string[]).length).toBe(1);
   });
 
-  it("measures every worktree of a repository against the same commit", async () => {
+  it("measures against the full remote-tracking ref when a local branch shadows its short spelling", async () => {
     const f = makeFixture();
     const { wt, sha } = makeHotfix(f);
     const second = addWorktree(f, "second", path.join(f.base, "wt-second"));

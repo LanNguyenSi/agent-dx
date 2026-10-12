@@ -33,7 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reported unmerged). `<rev>` must be a remote-tracking branch
   (`<remote>/<branch>` or `refs/remotes/<remote>/<branch>`), resolved once in
   the main checkout to the full ref; the `gh` merged-pull-request lookup uses
-  the branch part after `<remote>/` as the pull request's base. Anything else
+  the branch part after `<remote>/` as the pull request's base and runs
+  against gh's default repository (no `--repo` is passed, so the remote's own
+  repository is not selected). Anything else
   (`HEAD`, `HEAD~n`, `@{u}`, rev syntax such as `origin/x@{1}`, `origin/x~1` or
   `origin/x^`, a local branch, a sha, a tag) is refused as
   `base_not_remote_branch` (`list` without `--root`, and `remove`, even with
@@ -44,8 +46,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--require-merged` or `--delete-branch` (alone it is an `option_invalid`
   refusal) and refuses a missing `<rev>` as `base_not_found` before removing
   anything. Without `--base`, `remove` behaves as before: the default base
-  (an `origin/...` ref) keeps excusing the unpushed commits of a merged branch. The shipped skill text mentions
-  the flag, so its digest changes.
+  (an `origin/...` ref) keeps excusing the unpushed commits of a merged
+  branch. The shipped skill text mentions the flag, so its digest changes.
 
 - `probe` no longer warns that a directory repository content named (a
   composer `vendor-dir` or `bin-dir`) resolves outside the repository root
