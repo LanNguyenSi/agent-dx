@@ -7,16 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-- `probe` no longer warns about a link candidate refused by the link policy
-  when another candidate of the same planning round with the same destination
-  was accepted. The typical case is a composer `vendor-dir` or `bin-dir` that
-  is a symlink resolving outside the repository: the candidate repository
-  content named is refused, while the operator's `--link`, the worktree link
-  manifest or an outside plan's `link` list for the same path links it, so the
-  warning contradicted the `isolation.linked` entry. Candidate order does not
-  matter, a refusal for a destination nothing links keeps its warning
-  unchanged, and the "already covered" note for a duplicate destination is
-  kept. Only what is reported changes; no link decision does.
+- `probe` no longer warns that a directory repository content named (a
+  composer `vendor-dir` or `bin-dir`) resolves outside the repository root
+  when another candidate of the same planning round for the same destination
+  was accepted: the operator's `--link`, the worktree link manifest or an
+  outside plan's `link` list. The directory is linked, so the warning
+  contradicted the `isolation.linked` entry. Candidate order does not matter.
+  Only that one refusal is dropped; every other refusal (a tracked
+  destination or target, a nested repository, the "already covered" note)
+  keeps its warning, and the warning is unchanged when nothing links the
+  destination. Only what is reported changes; no link decision does.
 
 ## [0.11.0] - 2026-10-12
 

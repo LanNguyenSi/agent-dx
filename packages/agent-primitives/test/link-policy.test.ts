@@ -1289,16 +1289,63 @@ describe("planLinks: a refusal another candidate of the round supersedes is not 
 
   it("matches on the copy's own spelling of the destination", () => {
     const { root, named } = vendorShapes();
-    const fold = (relPath: string) => relPath.toLowerCase();
-    fs.symlinkSync(path.join(root, "vendor"), path.join(root, "x"));
-    const operator = { absDir: path.join(root, "vendor") };
+    // The copy spells every destination upper-case, so the two candidates
+    // below only meet under that spelling: `vendor` and `Vendor` differ as
+    // strings.
+    const canonical = (relPath: string) => relPath.toUpperCase();
+    const operator = { absDir: path.join(root, "Vendor") };
 
     const plan = planLinks(
       [named, operator],
-      ctx(root, { canonicalRelPath: fold }),
+      ctx(root, { canonicalRelPath: canonical }),
     );
 
+    expect(plan.links.map((l) => l.candidate)).toEqual([operator]);
     expect(plan.warnings).toEqual([]);
+  });
+
+  it("keeps the warning for a hazard of the target: a tracked target is refused for repository content even when the operator links the same path", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, "src"));
+    fs.symlinkSync("src", path.join(root, "node_modules"), "dir");
+    const absDir = path.join(root, "node_modules");
+    const named = {
+      absDir,
+      namedBy: `"node_modules" named in a file`,
+    };
+    const operator = { absDir };
+
+    for (const candidates of [
+      [named, operator],
+      [operator, named],
+    ]) {
+      const plan = planLinks(candidates, ctx(root, { tracked: ["src"] }));
+
+      expect(plan.links.map((l) => l.candidate)).toEqual([operator]);
+      expect(plan.warnings).toHaveLength(1);
+      expect(plan.warnings[0]).toContain(
+        `git tracks its target ${path.join(root, "src")}`,
+      );
+    }
+  });
+
+  it("still reports a refused destination nested under a linked one, which is not the same destination", () => {
+    const root = makeTmpDir();
+    const outside = makeTmpDir();
+    fs.mkdirSync(path.join(root, "a"));
+    fs.symlinkSync(outside, path.join(root, "a", "ext"));
+
+    const plan = planLinks(
+      [
+        { absDir: path.join(root, "a") },
+        { absDir: path.join(root, "a", "ext"), namedBy: "named" },
+      ],
+      ctx(root),
+    );
+
+    expect(plan.links.map((l) => l.relPath)).toEqual(["a"]);
+    expect(plan.warnings).toHaveLength(1);
+    expect(plan.warnings[0]).toContain("resolves outside the repository root");
   });
 
   it("still reports a refusal for a different destination, and one for a path only nested with the linked one", () => {
