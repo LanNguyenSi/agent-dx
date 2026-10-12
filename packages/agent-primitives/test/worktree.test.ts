@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ExecResult } from "../src/exec.js";
 import {
   branchSlug,
@@ -26,6 +26,10 @@ const GIT_ENV: NodeJS.ProcessEnv = {
   GIT_COMMITTER_NAME: "test",
   GIT_COMMITTER_EMAIL: "test@example.com",
 };
+
+// Several cases spawn the CLI (a node start plus a handful of git calls)
+// more than once; the default 5 s is too tight for a loaded CI runner.
+vi.setConfig({ testTimeout: 60_000 });
 
 const tmpDirs: string[] = [];
 afterEach(() => {
