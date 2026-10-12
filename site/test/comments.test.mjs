@@ -428,6 +428,17 @@ test('a fence closes only at a line of enough of its character, at the container
   ])
 })
 
+test('a backtick line in an indented code block before a fence leaves that fence intact', () => {
+  // Read as a fence, the indented line would be closed by the real fence's
+  // opener and the "-->" inside the real fence would close the comment; read
+  // as no fence, the real fence holds the "-->" and the opener stays visible.
+  // Both readings count, so the opener stays visible and the code is kept.
+  renderAsIfNoRule([
+    ['<!-- typo\n\n    ```\n    code\n```\nx --> y\n```\n\ntail\n', '<p>&lt;!-- typo</p>\n<pre><code>```\ncode\n</code></pre>\n<div class="language- vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang"></span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span>x --> y</span></span></code></pre>\n</div><p>tail</p>\n'],
+    ['<!-- typo\n\n    ~~~\n    code\n~~~\nx --> y\n~~~\n\ntail\n', '<p>&lt;!-- typo</p>\n<pre><code>~~~\ncode\n</code></pre>\n<div class="language- vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang"></span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span>x --> y</span></span></code></pre>\n</div><p>tail</p>\n'],
+  ])
+})
+
 test('a backtick line whose info string holds a backtick opens no fence', () => {
   // The comment closes at the "-->" on the line after that line, so both
   // lines are hidden with it.
