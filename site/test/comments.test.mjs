@@ -379,3 +379,10 @@ test('a page of unclosed openers is searched for a closer once, not once per ope
   const searches = indexOf.mock.calls.filter((c) => c.arguments[0] === '-->' && String(c.this) === src)
   assert.ok(searches.length <= 2, `the page was searched ${searches.length} times for -->`)
 })
+
+test('a backtick line indented four columns after a comment line is not a fence', () => {
+  // Such a line is a lazy continuation of the comment's paragraph, not a fence
+  // opener, so the comment closes at the "-->" after it and nothing is left.
+  assert.equal(render('<!-- typo\n    ```\n    x -->\n'), '')
+  assert.equal(render('para\n<!-- typo\n    ```\n    x -->\ntail\n'), '<p>para</p>\n<p>tail</p>\n')
+})

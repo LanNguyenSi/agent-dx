@@ -174,8 +174,8 @@ function stripTitle(token) {
 
 // True when the line holding the comment's closer sits inside a fenced code
 // block that opened after the comment's first line. A fence is a line that
-// starts, after any indentation, with three or more backticks or tildes, and
-// a backtick fence's info string holds no backtick. It closes at a line made
+// starts, indented less than four columns, with three or more backticks or
+// tildes, and a backtick fence's info string holds no backtick. It closes at a line made
 // only of at least as many of the same character, indented at most three
 // columns more than its opener.
 function closesInFence(state, startLine, closeLine) {
@@ -185,7 +185,7 @@ function closesInFence(state, startLine, closeLine) {
     const text = state.src.slice(state.bMarks[l] + state.tShift[l], state.eMarks[l])
     if (!fence) {
       const m = /^(`{3,}|~{3,})/.exec(text)
-      if (m && !(m[1][0] === '`' && text.slice(m[1].length).includes('`'))) {
+      if (m && state.sCount[l] - state.blkIndent < 4 && !(m[1][0] === '`' && text.slice(m[1].length).includes('`'))) {
         fence = m[1]
         indent = state.sCount[l]
       }
