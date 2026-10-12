@@ -209,14 +209,22 @@ export async function listWorktrees(
     const top = gitText(child, ["rev-parse", "--show-toplevel"]);
     if (top === undefined || top.length === 0) continue;
     if (!sameDirectory(top, child)) continue;
-    const repo = resolveRepo(child);
-    const entry =
-      repo.worktrees.find((w) => sameDirectory(w.path, child)) ??
-      repo.worktrees[0];
-    if (entry === undefined) continue;
-    worktrees.push(
-      describeEntry(entry, repo, entry === repo.worktrees[0], warnings),
-    );
+    // One child that cannot be resolved is a warning, not a failed report:
+    // a work tree of a bare repository, say, has no main checkout to
+    // describe, but its siblings still do.
+    try {
+      const repo = resolveRepo(child);
+      const entry =
+        repo.worktrees.find((w) => sameDirectory(w.path, child)) ??
+        repo.worktrees[0];
+      if (entry === undefined) continue;
+      worktrees.push(
+        describeEntry(entry, repo, entry === repo.worktrees[0], warnings),
+      );
+    } catch (err) {
+      if (!(err instanceof WorktreeRefusal)) throw err;
+      warnings.push(`skipped ${child}: ${err.message}`);
+    }
   }
   return { status: "ok", worktrees, warnings };
 }

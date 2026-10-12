@@ -66,7 +66,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and reports `merge_state_unknown` when no `gh` can tell. It unlinks the
   ignored dependency links without ever following them, keeps the branch
   unless `--delete-branch`, never deletes the default branch, and never
-  removes or switches the main checkout. `list` reports per worktree its
+  removes or switches the main checkout. Every check fails closed: a
+  `git status` that cannot answer is the `status_unknown` refusal rather than
+  a clean reading, a `git rev-list HEAD --not --remotes` that cannot answer is
+  `unpushed_state_unknown` rather than zero unpushed commits, a worktree that
+  contains another worktree (`nested_worktree`) or has a `.gitmodules` file
+  (`has_submodules`) is refused before anything is unlinked or removed, and
+  the `gh` lookup counts a merged pull request only when its `headRefOid` is
+  the worktree's own commit, which is also what lets a merged branch whose
+  remote branch is gone be removed without `--force`, its commits reported in
+  `warnings` rather than counted as unpushed. `list` reports per worktree its
   branch, `.ai/run` pointer, dirty state, commits ahead of and behind the
   default base, merge verdict and dependency links, across one repository or
   across every work tree below `--root`; see `docs/worktree.md`.

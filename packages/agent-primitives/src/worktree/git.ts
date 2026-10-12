@@ -40,6 +40,10 @@ export type WorktreeRefusalReason =
   | "remove_main_checkout"
   | "worktree_locked"
   | "worktree_dirty"
+  | "status_unknown"
+  | "unpushed_state_unknown"
+  | "nested_worktree"
+  | "has_submodules"
   | "unpushed_commits"
   | "branch_not_merged"
   | "merge_state_unknown"
@@ -423,6 +427,17 @@ export function mergeVerdict(
         "detached HEAD is not an ancestor of the base and has no branch to look up",
     };
   }
+  // The commit a merged pull request must be at: a branch whose name was
+  // reused, or that gained commits after the merge, is not covered by a
+  // pull request that merged an older head of it.
+  const headSha = commitSha(cwd, head);
+  if (headSha === undefined) {
+    return {
+      merged: "unknown",
+      via: "none",
+      reason: "cannot resolve the worktree HEAD",
+    };
+  }
   const gh = runGh(cwd, [
     "pr",
     "list",
@@ -431,9 +446,9 @@ export function mergeVerdict(
     "--head",
     branch,
     "--json",
-    "number",
+    "number,headRefOid",
     "--limit",
-    "1",
+    "20",
   ]);
   if (gh === undefined) {
     return {
@@ -460,12 +475,24 @@ export function mergeVerdict(
       reason: "gh returned output that is not JSON",
     };
   }
-  if (Array.isArray(prs) && prs.length > 0) {
-    return {
-      merged: "yes",
-      via: "gh",
-      reason: `gh lists a merged pull request for ${branch}`,
-    };
+  if (Array.isArray(prs)) {
+    for (const pr of prs) {
+      if (typeof pr !== "object" || pr === null) continue;
+      const { number, headRefOid } = pr as Record<string, unknown>;
+      if (typeof headRefOid !== "string" || headRefOid !== headSha) continue;
+      return {
+        merged: "yes",
+        via: "gh",
+        reason: `gh lists merged pull request #${String(number)} for ${branch} at ${headSha}`,
+      };
+    }
+    if (prs.length > 0) {
+      return {
+        merged: "no",
+        via: "gh",
+        reason: `gh lists merged pull requests for ${branch}, but none at ${headSha} (the branch has commits after the merge, or the name was reused)`,
+      };
+    }
   }
   return {
     merged: "no",

@@ -4,7 +4,6 @@ import {
   WorktreeRefusal,
   git,
   gitFailure,
-  gitText,
   ignoredSymlinks,
   isWithin,
   mergeVerdict,
@@ -62,10 +61,12 @@ function sameDirectory(a: string, b: string): boolean {
 }
 
 /**
- * Removes one linked worktree: the unpushed, uncommitted and merged checks
- * first, then the ignored dependency links (unlinked, never followed), then
- * `git worktree remove` and `git worktree prune`, and finally the optional
- * `git branch -D`.
+ * Removes one linked worktree: the locked, nested-worktree, submodule,
+ * status, merged and unpushed checks first, each of the last three failing
+ * closed so that a git command which cannot answer is a refusal rather than
+ * a clean, unpushed or unmerged reading. Then the ignored dependency links
+ * (unlinked, never followed), then `git worktree remove` and
+ * `git worktree prune`, and finally the optional `git branch -D`.
  *
  * The main checkout is never modified: its HEAD, index, working tree and
  * stash are untouched, and `git stash`, `checkout`, `switch` and `reset`
@@ -115,12 +116,35 @@ export async function removeWorktree(
     );
   }
 
+  const nested = repo.worktrees.find(
+    (w) => w !== entry && isWithin(target, w.path),
+  );
+  if (nested !== undefined && o.force !== true) {
+    throw new WorktreeRefusal(
+      `${nested.path} is a worktree inside ${target}; remove it first, or pass --force`,
+      "nested_worktree",
+      { worktree: nested.path },
+    );
+  }
+  if (fs.existsSync(path.join(target, ".gitmodules")) && o.force !== true) {
+    throw new WorktreeRefusal(
+      `${target} has submodules, which git cannot remove without --force`,
+      "has_submodules",
+    );
+  }
+
   const status = git(target, [
     "status",
     "--porcelain",
     "--untracked-files=all",
   ]);
-  const dirty = statusLines(status.error === undefined ? status.stdout : "");
+  if ((status.error !== undefined || status.status !== 0) && o.force !== true) {
+    throw new WorktreeRefusal(
+      `cannot read the status of ${target}: ${gitFailure(status)}; pass --force to remove it anyway`,
+      "status_unknown",
+    );
+  }
+  const dirty = statusLines(status.stdout);
   if (dirty.length > 0 && o.force !== true) {
     throw new WorktreeRefusal(
       `${target} has ${String(dirty.length)} uncommitted change(s), tracked or untracked; commit, stash or discard them first, or pass --force to remove the worktree with them`,
@@ -129,20 +153,11 @@ export async function removeWorktree(
     );
   }
 
-  const unpushed =
-    gitText(target, ["rev-list", "HEAD", "--not", "--remotes"]) ?? "";
-  const unpushedLines = statusLines(unpushed);
-  if (unpushedLines.length > 0 && o.force !== true) {
-    throw new WorktreeRefusal(
-      `${target} has ${String(unpushedLines.length)} commit(s) that no remote branch has; push them first, or pass --force to remove the worktree and lose them`,
-      "unpushed_commits",
-      { commits: unpushedLines.length },
-    );
-  }
-
   const base = resolveDefaultBase(repo.mainCheckout);
   // Asked only when a flag needs the answer: the `gh` lookup of a verdict is
-  // a network call where `gh` happens to be installed.
+  // a network call where `gh` happens to be installed. Computed before the
+  // unpushed check, because a branch that is merged into the base has no
+  // work left to lose even when no remote branch holds its commits.
   const merged: MergeVerdict | null =
     o.requireMerged !== true && o.deleteBranch !== true
       ? null
@@ -170,6 +185,26 @@ export async function removeWorktree(
     }
   }
 
+  const unpushed = git(target, ["rev-list", "HEAD", "--not", "--remotes"]);
+  if (
+    (unpushed.error !== undefined || unpushed.status !== 0) &&
+    o.force !== true
+  ) {
+    throw new WorktreeRefusal(
+      `cannot tell which commits of ${target} are on a remote: ${gitFailure(unpushed)}; pass --force to remove it anyway`,
+      "unpushed_state_unknown",
+    );
+  }
+  const unpushedLines = statusLines(unpushed.stdout);
+  const mergedIntoBase = merged !== null && merged.merged === "yes";
+  if (unpushedLines.length > 0 && o.force !== true && !mergedIntoBase) {
+    throw new WorktreeRefusal(
+      `${target} has ${String(unpushedLines.length)} commit(s) that no remote branch has; push them first, or pass --force to remove the worktree and lose them`,
+      "unpushed_commits",
+      { commits: unpushedLines.length },
+    );
+  }
+
   const defaultBranch =
     base === undefined ? undefined : base.ref.replace(/^origin\//, "");
   const mainBranch = repo.worktrees[0]?.branch;
@@ -187,6 +222,11 @@ export async function removeWorktree(
   }
 
   const warnings: string[] = [];
+  if (unpushedLines.length > 0 && merged !== null && merged.merged === "yes") {
+    warnings.push(
+      `${String(unpushedLines.length)} commit(s) are on no remote branch, but the branch is merged into ${base?.ref ?? "the default branch"} (${merged.via}); not counted as unpushed`,
+    );
+  }
   const linksRemoved: string[] = [];
   for (const rel of ignoredSymlinks(target)) {
     // `unlink` removes the link itself and never follows it, so the shared
@@ -234,7 +274,8 @@ export async function removeWorktree(
       branch = { deleted: false, reason: "detached HEAD, no branch" };
     } else {
       // `-D` cannot lose work here: an unpushed branch was already refused
-      // above, unless `--force` said otherwise.
+      // above, unless `--force` said otherwise or the verdict said the
+      // branch is merged into the base, which warned about those commits.
       const deleted = git(repo.mainCheckout, ["branch", "-D", entry.branch]);
       const ok = deleted.error === undefined && deleted.status === 0;
       const text = [deleted.stdout.trim(), deleted.stderr.trim()]

@@ -128,13 +128,17 @@ In this order, with every check that can refuse before the first change:
 
 1. Resolves `<path>` and finds it among `git worktree list` entries.
 2. Refuses the main checkout, and a locked entry without `--force`.
-3. Dirty check: `git status --porcelain --untracked-files=all`. Ignored paths are invisible here, which is what lets a worktree with its `.ai/run` pointer and its dependency links be removed without `--force`.
-4. Unpushed check: `git rev-list HEAD --not --remotes` counts the commits no remote branch has.
-5. Merge check (only with `--require-merged` or `--delete-branch`): `merge-base --is-ancestor HEAD origin/<default>`, and otherwise `gh pr list --state merged --head <branch>`.
-6. Branch guard: refuses to delete the branch the default base names, or the branch the main checkout is on.
-7. Unlinks the ignored symlinks in the work tree (the dependency links `create` made), each with `unlink`, which removes the link itself and never follows it, so the shared directory in the main checkout is left exactly as it was.
-8. `git worktree remove` from the main checkout (`--force` once, or twice for a locked entry, as git requires), then `git worktree prune`.
-9. `git branch -D <branch>` with `--delete-branch`. `-D` cannot lose work in the normal path, because an unpushed branch was already refused in step 4 unless `--force` said otherwise.
+3. Nested worktree check: refuses when another registered worktree of the repository lies inside `<path>`, however its path is spelled, since `git worktree remove` would take that checkout and its uncommitted work with it.
+4. Submodule check: refuses a work tree that has a `.gitmodules` file without `--force`, which is what git itself cannot remove either. The check runs before the links are unlinked, so nothing is half-changed.
+5. Dirty check: `git status --porcelain --untracked-files=all`. Ignored paths are invisible here, which is what lets a worktree with its `.ai/run` pointer and its dependency links be removed without `--force`. A status that fails (non-zero, or a git that could not start) is the `status_unknown` refusal, never a clean reading.
+6. Merge check (only with `--require-merged` or `--delete-branch`): `merge-base --is-ancestor HEAD origin/<default>`, and otherwise `gh pr list --state merged --head <branch> --json number,headRefOid`, where a merged pull request counts only when its `headRefOid` is the worktree's own commit.
+7. Unpushed check: `git rev-list HEAD --not --remotes` counts the commits no remote branch has, and a rev-list that fails is the `unpushed_state_unknown` refusal, never zero. A branch the merge check called merged is not refused here: its commits are named in `warnings` and treated as safe, so a squash-merged branch whose remote branch was deleted and pruned is removable with `--require-merged` and without `--force`.
+8. Branch guard: refuses to delete the branch the default base names, or the branch the main checkout is on.
+9. Unlinks the ignored symlinks in the work tree (the dependency links `create` made), each with `unlink`, which removes the link itself and never follows it, so the shared directory in the main checkout is left exactly as it was.
+10. `git worktree remove` from the main checkout (`--force` once, or twice for a locked entry, as git requires), then `git worktree prune`.
+11. `git branch -D <branch>` with `--delete-branch`. `-D` cannot lose work in the normal path, because an unpushed branch was already refused in step 7 unless `--force` said otherwise or the merge verdict said the work is in the base.
+
+Ignored files and directories inside the worktree (`.env`, build output, a real `node_modules`) are deleted with it, without `--force`, as `git worktree remove` does.
 
 The main checkout is never modified: no `git stash`, `checkout`, `switch` or `reset` is run anywhere, and its HEAD, index, working tree and stash are untouched. Only its administrative directories are written (`worktree remove`, `worktree prune`, `branch -D`). Removing a worktree never deletes its branch unless `--delete-branch` says so.
 
@@ -145,11 +149,11 @@ The usual [envelope](output-shape.md) with `command: "worktree remove"`, plus:
 | Field | Meaning |
 | --- | --- |
 | `worktree` | `path` (absolute), `branch` when it had one, `head`. |
-| `linksRemoved` | Repository-relative paths of the ignored symlinks that were unlinked in step 7. |
+| `linksRemoved` | Repository-relative paths of the ignored symlinks that were unlinked in step 9. |
 | `merged` | The merge verdict, or `null` when neither `--require-merged` nor `--delete-branch` asked for one: `merged` `yes`/`no`/`unknown`, `via` `ancestry`/`gh`/`none`, and a `reason`. |
 | `branch` | `deleted` and the `reason` (git's own message, or why the branch was kept). |
 | `pruned` | Whether `git worktree prune` ran and succeeded afterwards. |
-| `warnings` | What did not work but could not stop the removal (a link that could not be unlinked, a failed prune). |
+| `warnings` | What did not work but could not stop the removal (a link that could not be unlinked, a failed prune), and the commits of a merged branch that were not counted as unpushed. |
 
 ### Refusals
 
@@ -159,8 +163,12 @@ The usual [envelope](output-shape.md) with `command: "worktree remove"`, plus:
 | `not_a_git_repo` | `<path>` is not inside a git working tree. |
 | `remove_main_checkout` | `<path>` is the main checkout. This command never removes it. |
 | `worktree_locked` | The entry is locked (`git worktree unlock` it, or pass `--force`). |
+| `nested_worktree` | Another registered worktree of the repository lies inside `<path>`; `details.worktree` names it. Remove that one first. |
+| `has_submodules` | The work tree has a `.gitmodules` file, which `git worktree remove` cannot handle without `--force`. |
 | `worktree_dirty` | Uncommitted or untracked changes; `details.entries` lists the first 20 status lines. |
-| `unpushed_commits` | Commits that no remote branch has; `details.commits` counts them. |
+| `status_unknown` | `git status` failed, so the dirty state could not be read; the message carries git's error. A failed check is never read as clean. |
+| `unpushed_commits` | Commits that no remote branch has; `details.commits` counts them. Not raised for a branch the merge verdict called merged: those commits are reported in `warnings` instead. |
+| `unpushed_state_unknown` | `git rev-list HEAD --not --remotes` failed, so the unpushed state could not be read; the message carries git's error. A failed check is never read as zero. |
 | `branch_not_merged` | `--require-merged`, and the branch is neither an ancestor of the base nor the head of a merged pull request. `details.merged` is the verdict. |
 | `merge_state_unknown` | `--require-merged`, and neither ancestry nor `gh` could decide, so the state is unknown rather than negative. `details.merged.reason` says which. |
 | `default_branch_delete` | `--delete-branch` was asked for the branch the default base names or the one the main checkout is on. |
@@ -168,7 +176,9 @@ The usual [envelope](output-shape.md) with `command: "worktree remove"`, plus:
 
 ### The merged rule
 
-Ancestry decides first: `HEAD` is an ancestor of `origin/<default branch>`, which covers a merge and a fast forward. A squash or a rebase merge leaves no ancestry, so `gh pr list --state merged --head <branch>` is asked next, and one merged pull request for the branch is a `yes` with `via: "gh"`. `gh` is only consulted when it is installed and only when the answer is needed; when it is absent, or fails, or answers something that is not JSON, the verdict is `unknown`, and `--require-merged` reports `merge_state_unknown` rather than removing the worktree on a guess. `--force` is what overrides both a `no` and an `unknown`.
+Ancestry decides first: `HEAD` is an ancestor of `origin/<default branch>`, which covers a merge and a fast forward. A squash or a rebase merge leaves no ancestry, so `gh pr list --state merged --head <branch> --json number,headRefOid` is asked next, and one merged pull request whose `headRefOid` is the worktree's own commit is a `yes` with `via: "gh"`. The commit has to match: a branch that gained commits after the merge, or whose name was reused for new work, is not covered by the pull request that merged an older head of it, and `details.merged.reason` says so. `gh` is only consulted when it is installed and only when the answer is needed; when it is absent, or fails, or answers something that is not JSON, the verdict is `unknown`, and `--require-merged` reports `merge_state_unknown` rather than removing the worktree on a guess. `--force` is what overrides both a `no` and an `unknown`.
+
+A branch that is merged into the base, by ancestry or by a merged pull request at the same commit, holds no work the base does not have, so it is not counted as unpushed even when its own remote branch was deleted and pruned; those commits are named in `warnings` instead of stopping the removal.
 
 ## list
 
@@ -182,7 +192,7 @@ Read-only: no git command that writes is run.
 | Option | Meaning |
 | --- | --- |
 | `--repo <path>` | The repository to report: the main checkout, a subdirectory, or a linked worktree. Every worktree git lists is reported, main checkout first. Default: the invocation directory (`-C`). |
-| `--root <dir>` | Instead of one repository, report the work trees that are direct children of `<dir>`, sorted by name. A child that is not a work tree top (a plain directory, or a subdirectory of some checkout) is skipped silently. Exclusive with `--repo`: both together are an `option_invalid` refusal. |
+| `--root <dir>` | Instead of one repository, report the work trees that are direct children of `<dir>`, sorted by name. A child that is not a work tree top (a plain directory, or a subdirectory of some checkout) is skipped silently. A child that is a work tree but whose repository cannot be described (a work tree of a bare repository, say) is left out with a `skipped <path>` warning, and its siblings are still reported. Exclusive with `--repo`: both together are an `option_invalid` refusal. |
 
 Per entry:
 
@@ -194,7 +204,7 @@ Per entry:
 | `runPointer` | Trimmed content of `<path>/.ai/run`, `null` when absent. |
 | `dirty` | Whether `git status --porcelain --untracked-files=all` says anything, `null` when git could not answer. |
 | `ahead`, `behind` | `git rev-list --left-right --count <base>...HEAD`: commits only on `HEAD`, and commits only on the base. `null` when either could not be told. |
-| `merged` | The same verdict as `remove --require-merged` would reach, so a `yes` means it is safe to remove the worktree and keep the base. |
+| `merged` | The same verdict as `remove --require-merged` would reach. `merged: yes` means the branch's work is in the base; `remove` still checks dirty and unpushed state. |
 | `links` | The ignored symlinks in the work tree: the dependency links `create` made. |
 | `prunable`, `locked` | git's own flags for the entry. |
 
@@ -202,5 +212,5 @@ A prunable entry (its directory is already gone) has no work tree to read, so `d
 
 ## Related
 
-`worktree create` writes what `worktree remove` later cleans up: the branch, the `.ai/run` pointer and the dependency links are its three artifacts, and `remove` reports each one it deleted. `list` reads the same fields back, so `create`'s envelope, `list`'s report and `remove`'s report describe one worktree in the same terms.
+`worktree create` writes what `worktree remove` later cleans up: the branch, the `.ai/run` pointer and the dependency links are its three artifacts, and `remove` reports the branch it deleted and each link it unlinked. `list` reads the same fields back, so `create`'s envelope, `list`'s report and `remove`'s report describe one worktree in the same terms.
 

@@ -41,6 +41,16 @@ function git(cwd: string, args: string[]): string {
   });
 }
 
+/** git's stdout, or `undefined` when it exited non-zero: for a question
+ * whose negative answer is an exit code rather than empty output. */
+function gitTry(cwd: string, args: string[]): string | undefined {
+  try {
+    return git(cwd, args);
+  } catch {
+    return undefined;
+  }
+}
+
 function write(root: string, rel: string, content: string): void {
   const full = path.join(root, rel);
   fs.mkdirSync(path.dirname(full), { recursive: true });
@@ -102,6 +112,41 @@ function commitHere(dir: string, file: string, message: string): void {
   write(dir, file, `${message}\n`);
   git(dir, ["add", "-A"]);
   git(dir, ["commit", "-q", "-m", message]);
+}
+
+/** The absolute path one `git rev-parse <question>` names inside `dir`
+ * (git answers a common dir relatively to the repository, a git dir of a
+ * linked worktree absolutely). */
+function absoluteGitPath(dir: string, question: string): string {
+  return path.resolve(dir, git(dir, ["rev-parse", question]).trim());
+}
+
+/**
+ * A worktree made through `worktree create` with a `node_modules` link into
+ * the main checkout, which the fixture's `.gitignore` ignores. `create` is
+ * the only way a link appears, so a test that needs one cannot use
+ * `addWorktree`.
+ */
+async function createWithLink(
+  f: Fixture,
+  branch: string,
+  dir: string,
+): Promise<string> {
+  fs.mkdirSync(path.join(f.repo, "node_modules", "pkg"), { recursive: true });
+  write(f.repo, "node_modules/pkg/keep.txt", "x");
+  const made = await cli(f.work, [
+    "create",
+    "--repo",
+    f.repo,
+    "--branch",
+    branch,
+    "--path",
+    dir,
+    "--link",
+    "node_modules",
+  ]);
+  expect(made.code, made.stdout + made.stderr).toBe(0);
+  return dir;
 }
 
 interface Cli {
@@ -217,6 +262,130 @@ describe("worktree remove: what it refuses", () => {
     expect(missing.code).toBe(2);
     expect(missing.json.reason).toBe("not_a_worktree");
     expect(listedWorktrees(f.repo)).toEqual(before);
+  });
+
+  it("refuses to read a failed rev-list as zero unpushed commits", async () => {
+    const f = makeFixture();
+    const wt = addWorktree(f, "stale", path.join(f.base, "wt-stale"));
+    commitHere(wt, "local.txt", "not pushed");
+    // A remote-tracking ref whose object does not exist makes
+    // `git rev-list HEAD --not --remotes` fail, and an empty output would
+    // otherwise be read as "everything is on a remote".
+    const brokenRef = path.join(
+      absoluteGitPath(f.repo, "--git-common-dir"),
+      "refs",
+      "remotes",
+      "origin",
+      "stale",
+    );
+    fs.mkdirSync(path.dirname(brokenRef), { recursive: true });
+    fs.writeFileSync(brokenRef, "0123456789012345678901234567890123456789\n");
+    try {
+      const r = await cli(f.work, ["remove", wt, "--delete-branch"]);
+      expect(r.code, r.stdout + r.stderr).toBe(2);
+      expect(r.json.status).toBe("usage_error");
+      expect(r.json.reason).toBe("unpushed_state_unknown");
+      expect(r.json.message).toContain("--force");
+      expect(fs.existsSync(wt)).toBe(true);
+      expect(listedWorktrees(f.repo)).toContain(wt);
+      // Neither the worktree nor its branch was touched.
+      expect(git(f.repo, ["branch", "--list", "stale"]).trim()).not.toBe("");
+    } finally {
+      fs.rmSync(brokenRef, { force: true });
+    }
+  });
+
+  it("refuses to read a failed git status as a clean worktree", async () => {
+    const f = makeFixture();
+    const wt = addWorktree(f, "badindex", path.join(f.base, "wt-badindex"));
+    fs.writeFileSync(
+      path.join(absoluteGitPath(wt, "--git-dir"), "index"),
+      "garbage",
+    );
+
+    const r = await cli(f.work, ["remove", wt]);
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.status).toBe("usage_error");
+    expect(r.json.reason).toBe("status_unknown");
+    expect(r.json.message).toContain(wt);
+    expect(r.json.message).toContain("--force");
+    expect(fs.existsSync(wt)).toBe(true);
+    expect(listedWorktrees(f.repo)).toContain(wt);
+  });
+
+  it("refuses a worktree that contains another worktree", async () => {
+    const f = makeFixture();
+    const outer = addWorktree(f, "outer", path.join(f.base, "wt-outer"));
+    git(outer, ["push", "-q", "origin", "outer"]);
+    // The nested checkout lives under an ignored path, so the outer worktree
+    // is not dirty: the nested worktree itself is what must stop the removal.
+    const exclude = path.join(
+      absoluteGitPath(f.repo, "--git-common-dir"),
+      "info",
+      "exclude",
+    );
+    fs.mkdirSync(path.dirname(exclude), { recursive: true });
+    fs.appendFileSync(exclude, "/build/\n");
+    const inner = path.join(outer, "build", "inner");
+    git(f.repo, [
+      "worktree",
+      "add",
+      "--no-track",
+      "-b",
+      "inner",
+      inner,
+      "origin/main",
+    ]);
+    write(inner, "a.txt", "work of the inner worktree\n");
+
+    const r = await cli(f.work, ["remove", outer]);
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.status).toBe("usage_error");
+    expect(r.json.reason).toBe("nested_worktree");
+    expect(r.json.details.worktree).toBe(inner);
+    expect(r.json.message).toContain(outer);
+    expect(fs.existsSync(path.join(inner, "a.txt"))).toBe(true);
+    expect(listedWorktrees(f.repo)).toContain(outer);
+  });
+
+  it("refuses a locked worktree, and removes it while locked with --force", async () => {
+    const f = makeFixture();
+    const wt = addWorktree(f, "locked", path.join(f.base, "wt-locked"));
+    git(f.repo, ["worktree", "lock", wt]);
+
+    const refused = await cli(f.work, ["remove", wt]);
+    expect(refused.code, refused.stdout + refused.stderr).toBe(2);
+    expect(refused.json.reason).toBe("worktree_locked");
+    expect(fs.existsSync(wt)).toBe(true);
+    expect(listedWorktrees(f.repo)).toContain(wt);
+
+    const forced = await cli(f.work, ["remove", wt, "--force"]);
+    expect(forced.code, forced.stdout + forced.stderr).toBe(0);
+    expect(forced.json.status).toBe("ok");
+    expect(fs.existsSync(wt)).toBe(false);
+    expect(listedWorktrees(f.repo)).not.toContain(wt);
+  });
+
+  it("refuses a worktree with submodules before unlinking its links", async () => {
+    const f = makeFixture();
+    const wt = await createWithLink(f, "subbed", path.join(f.base, "wt-sub"));
+    write(wt, ".gitmodules", '[submodule "vendor/lib"]\n\tpath = vendor/lib\n');
+    git(wt, ["add", ".gitmodules"]);
+    git(wt, ["commit", "-qm", "sub"]);
+    git(wt, ["push", "-q", "origin", "subbed"]);
+
+    const r = await cli(f.work, ["remove", wt]);
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.status).toBe("usage_error");
+    expect(r.json.reason).toBe("has_submodules");
+    expect(r.json.message).toContain("--force");
+    // Nothing was changed: the worktree and its dependency link are intact,
+    // so the worktree is still there to remove with `--force` or to fix.
+    expect(fs.existsSync(wt)).toBe(true);
+    expect(fs.lstatSync(path.join(wt, "node_modules")).isSymbolicLink()).toBe(
+      true,
+    );
+    expect(listedWorktrees(f.repo)).toContain(wt);
   });
 });
 
@@ -340,18 +509,20 @@ describe("worktree remove --require-merged", () => {
     });
     expect(listedWorktrees(f.repo)).not.toContain(anc);
 
-    // (b) a squash merge leaves no ancestry: gh decides it.
+    // (b) a squash merge leaves no ancestry: gh decides it, for the pull
+    // request whose head is this worktree's own commit.
     const sq = addWorktree(f, "squashed", path.join(f.base, "wt-squashed"));
     commitHere(sq, "sq.txt", "squashed work");
     git(sq, ["push", "-q", "origin", "squashed"]);
+    const sqSha = git(sq, ["rev-parse", "HEAD"]).trim();
     const byGh = await cli(f.work, ["remove", sq, "--require-merged"], {
-      PATH: ghStub(f, '[{"number":7}]'),
+      PATH: ghStub(f, `[{"number":7,"headRefOid":"${sqSha}"}]`),
     });
     expect(byGh.code, byGh.stdout + byGh.stderr).toBe(0);
     expect(byGh.json.merged).toMatchObject({
       merged: "yes",
       via: "gh",
-      reason: "gh lists a merged pull request for squashed",
+      reason: `gh lists merged pull request #7 for squashed at ${sqSha}`,
     });
     expect(listedWorktrees(f.repo)).not.toContain(sq);
 
@@ -395,6 +566,60 @@ describe("worktree remove --require-merged", () => {
     expect(forcedAway.code, forcedAway.stdout + forcedAway.stderr).toBe(0);
     expect(forcedAway.json.merged).toMatchObject({ merged: "no", via: "gh" });
     expect(listedWorktrees(f.repo)).not.toContain(um);
+  });
+
+  it("refuses a merged pull request that merged a different commit", async () => {
+    const f = makeFixture();
+    const wt = addWorktree(f, "reused", path.join(f.base, "wt-reused"));
+    commitHere(wt, "r.txt", "work after the merge");
+    git(wt, ["push", "-q", "origin", "reused"]);
+
+    const r = await cli(f.work, ["remove", wt, "--require-merged"], {
+      PATH: ghStub(
+        f,
+        '[{"number":7,"headRefOid":"1111111111111111111111111111111111111111"}]',
+      ),
+    });
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.reason).toBe("branch_not_merged");
+    expect(r.json.details.merged).toMatchObject({ merged: "no", via: "gh" });
+    expect(r.json.details.merged.reason).toContain("none at");
+    expect(listedWorktrees(f.repo)).toContain(wt);
+  });
+
+  it("does not count a merged branch as unpushed once its remote branch is gone", async () => {
+    const f = makeFixture();
+    const wt = addWorktree(f, "squashgone", path.join(f.base, "wt-squashgone"));
+    commitHere(wt, "sg.txt", "squashed work");
+    git(wt, ["push", "-q", "origin", "squashgone"]);
+    const headSha = git(wt, ["rev-parse", "HEAD"]).trim();
+    // The squash merge deleted the branch on the remote, and the next fetch
+    // pruned the remote-tracking ref: the commit is on no remote branch now,
+    // yet gh says the pull request that carried it was merged at this sha.
+    git(f.repo, ["push", "-q", "origin", "--delete", "squashgone"]);
+    git(f.repo, ["fetch", "-q", "--prune", "origin"]);
+    expect(
+      gitTry(wt, [
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        "refs/remotes/origin/squashgone",
+      ]),
+    ).toBeUndefined();
+
+    const r = await cli(f.work, ["remove", wt, "--require-merged"], {
+      PATH: ghStub(f, `[{"number":9,"headRefOid":"${headSha}"}]`),
+    });
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.status).toBe("ok");
+    expect(r.json.merged).toMatchObject({ merged: "yes", via: "gh" });
+    expect(
+      (r.json.warnings as string[]).some((w) =>
+        w.includes("not counted as unpushed"),
+      ),
+    ).toBe(true);
+    expect(fs.existsSync(wt)).toBe(false);
+    expect(listedWorktrees(f.repo)).not.toContain(wt);
   });
 });
 
@@ -481,6 +706,45 @@ describe("worktree list", () => {
     const both = await cli(f.work, ["list", "--repo", f.repo, "--root", wts]);
     expect(both.code, both.stdout + both.stderr).toBe(2);
     expect(both.json.reason).toBe("option_invalid");
+  });
+
+  it("with --root skips a child whose repository it cannot resolve", async () => {
+    const f = makeFixture();
+    const wts = path.join(f.base, "wts");
+    fs.mkdirSync(wts);
+    const one = addWorktree(f, "one", path.join(wts, "wt-one"));
+    const two = addWorktree(f, "two", path.join(wts, "wt-two"));
+    // A work tree of a BARE repository: it is a work tree top, so the walk
+    // reaches it, but it has no main checkout to describe it from.
+    const bare = path.join(f.base, "bare.git");
+    git(f.base, ["init", "-q", "--bare", "-b", "main", bare]);
+    git(f.repo, ["push", "-q", bare, "main"]);
+    const bareWt = path.join(wts, "bare-wt");
+    git(f.base, ["--git-dir", bare, "worktree", "add", bareWt, "main"]);
+
+    const r = await cli(f.work, ["list", "--root", wts]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.status).toBe("ok");
+    const entries = r.json.worktrees as Record<string, any>[];
+    expect(entries.map((w) => w.path)).toEqual([one, two]);
+    const warnings = r.json.warnings as string[];
+    expect(warnings.some((w) => w.startsWith(`skipped ${bareWt}`))).toBe(true);
+  });
+
+  it("reports the dependency links a worktree was created with", async () => {
+    const f = makeFixture();
+    const wt = await createWithLink(
+      f,
+      "listed",
+      path.join(f.base, "wt-listed"),
+    );
+
+    const r = await cli(f.work, ["list", "--repo", f.repo]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    const entries = r.json.worktrees as Record<string, any>[];
+    const listed = entries.find((w) => w.path === wt);
+    if (listed === undefined) throw new Error(`no entry for ${wt}`);
+    expect(listed.links).toContain("node_modules");
   });
 });
 
