@@ -241,7 +241,7 @@ describe("patch: bytes kept", () => {
   });
 
   it("keeps a byte-order mark", () => {
-    const dir = repo({ "a.txt": "﻿hello\n" });
+    const dir = repo({ "a.txt": "\uFEFFhello\n" });
     const r = run(dir, [{ file: "a.txt", old: "hello", new: "bye" }]);
     expect(r.files[0].bom).toBe(true);
     expect(readBuf(dir, "a.txt")).toEqual(
@@ -616,7 +616,7 @@ describe("patch: hints", () => {
   });
 
   it("visualises other whitespace as code points", () => {
-    expect(visualizeWhitespace("a b​c")).toBe("a⟨U+00A0⟩b⟨U+200B⟩c");
+    expect(visualizeWhitespace("a\u00A0b\u200Bc")).toBe("a⟨U+00A0⟩b⟨U+200B⟩c");
   });
 });
 
@@ -840,5 +840,503 @@ describe("patch CLI", () => {
     expect(miss.code).toBe(1);
     expect(miss.stdout).toContain("edits[0] a.txt: missing");
     expect(miss.stdout).toContain("expected: ··two");
+  });
+});
+
+/** True when the filesystem under `dir` treats `A` and `a` as one name. */
+function caseInsensitive(dir: string): boolean {
+  const probe = path.join(dir, "CaseProbe.tmp");
+  fs.writeFileSync(probe, "");
+  try {
+    return fs.existsSync(path.join(dir, "caseprobe.tmp"));
+  } finally {
+    fs.rmSync(probe, { force: true });
+  }
+}
+
+const gitEnv = {
+  ...process.env,
+  GIT_AUTHOR_NAME: "t",
+  GIT_AUTHOR_EMAIL: "t@example.com",
+  GIT_COMMITTER_NAME: "t",
+  GIT_COMMITTER_EMAIL: "t@example.com",
+};
+
+describe("patch: git directories in any spelling", () => {
+  const ci = caseInsensitive(os.tmpdir());
+
+  it.skipIf(!ci)(
+    "refuses .GIT/config and .Git/config on a case-insensitive filesystem",
+    () => {
+      const dir = repo({});
+      const config = read(dir, ".git/config");
+      for (const file of [".GIT/config", ".Git/config", "./.gIt/config"]) {
+        const r = run(dir, [{ file, old: "[core]", new: "[x]" }]);
+        expect(r.status, file).toBe("usage_error");
+        expect(r.reason, file).toBe("git_dir");
+      }
+      expect(read(dir, ".git/config")).toBe(config);
+    },
+  );
+
+  it.skipIf(!ci)("refuses a symlink to .GIT/config", () => {
+    const dir = repo({});
+    const config = read(dir, ".git/config");
+    fs.symlinkSync(".GIT/config", path.join(dir, "cfg"));
+    const r = run(dir, [{ file: "cfg", old: "[core]", new: "[x]" }]);
+    expect(r.reason).toBe("git_dir");
+    expect(read(dir, ".git/config")).toBe(config);
+  });
+
+  it.skipIf(!ci)("refuses -C <repo>/.GIT --file config", async () => {
+    const dir = repo({});
+    const config = read(dir, ".git/config");
+    const res = await spawnCli([
+      "-C",
+      path.join(dir, ".GIT"),
+      "patch",
+      "--file",
+      "config",
+      "--old",
+      "[core]",
+      "--new",
+      "[x]",
+    ]);
+    expect(res.code).toBe(2);
+    expect(JSON.parse(res.stdout)).toMatchObject({
+      command: "patch",
+      status: "usage_error",
+      reason: "git_dir",
+    });
+    expect(read(dir, ".git/config")).toBe(config);
+  });
+
+  it.skipIf(!ci)("refuses the .GIT file of a linked worktree", () => {
+    const main = repo({ "a.txt": "a\n" });
+    execFileSync("git", ["add", "a.txt"], { cwd: main, env: gitEnv });
+    execFileSync("git", ["commit", "-q", "-m", "init"], {
+      cwd: main,
+      env: gitEnv,
+    });
+    const wt = path.join(tmpDir(), "wt");
+    execFileSync("git", ["worktree", "add", "-q", wt], {
+      cwd: main,
+      env: gitEnv,
+    });
+    const pointer = read(wt, ".git");
+    const r = run(wt, [{ file: ".GIT", old: "gitdir", new: "x" }]);
+    expect(r.reason).toBe("git_dir");
+    expect(read(wt, ".git")).toBe(pointer);
+  });
+
+  it.skipIf(!ci)("refuses ../other/.GIT/config even with allowOutside", () => {
+    const other = repo({});
+    const config = read(other, ".git/config");
+    const dir = repo({});
+    const rel = path.join(path.relative(dir, other), ".GIT", "config");
+    const r = run(dir, [{ file: rel, old: "[core]", new: "[x]" }], {
+      allowOutside: true,
+    });
+    expect(r.status).toBe("usage_error");
+    expect(r.reason).toBe("git_dir");
+    expect(read(other, ".git/config")).toBe(config);
+  });
+
+  it("refuses a git directory with another name by its identity", () => {
+    const dir = tmpDir();
+    execFileSync("git", ["init", "-q", "--separate-git-dir", "gd", "."], {
+      cwd: dir,
+    });
+    const config = read(dir, "gd/config");
+    const r = run(dir, [{ file: "gd/config", old: "[core]", new: "[x]" }]);
+    expect(r.status).toBe("usage_error");
+    expect(r.reason).toBe("git_dir");
+    expect(read(dir, "gd/config")).toBe(config);
+  });
+
+  it("refuses .git/<symlink to a work-tree file> by its spelling", () => {
+    const dir = repo({ "a.txt": "a\n" });
+    fs.symlinkSync("../a.txt", path.join(dir, ".git", "lnk"));
+    const r = run(dir, [{ file: ".git/lnk", old: "a", new: "b" }]);
+    expect(r.reason).toBe("git_dir");
+    expect(read(dir, "a.txt")).toBe("a\n");
+  });
+});
+
+describe("patch: one file, every spelling", () => {
+  const ci = caseInsensitive(os.tmpdir());
+
+  it.skipIf(!ci)(
+    "groups a letter-case variant: overlap is detected and one write applies both",
+    () => {
+      const dir = repo({ "a.txt": "alpha\nbeta\n" });
+      const clash = run(dir, [
+        { file: "a.txt", old: "alpha", new: "X" },
+        { file: "A.txt", old: "alpha", new: "Y" },
+      ]);
+      expect(clash.status).toBe("overlap");
+      expect(clash.files).toHaveLength(1);
+      expect(read(dir, "a.txt")).toBe("alpha\nbeta\n");
+
+      const r = run(dir, [
+        { file: "a.txt", old: "alpha", new: "X" },
+        { file: "A.txt", old: "beta", new: "Y" },
+      ]);
+      expect(r.status).toBe("written");
+      expect(r.writtenFiles).toEqual(["a.txt"]);
+      expect(read(dir, "a.txt")).toBe("X\nY\n");
+    },
+  );
+
+  it("groups an NFD and an NFC spelling of one name", () => {
+    const nfc = "café.txt";
+    const nfd = "café.txt";
+    const dir = repo({ [nfc]: "one two\n" });
+    if (!fs.existsSync(path.join(dir, nfd))) return; // normalisation-sensitive FS
+    const r = run(dir, [
+      { file: nfc, old: "one", new: "1" },
+      { file: nfd, old: "two", new: "2" },
+    ]);
+    expect(r.status).toBe("written");
+    expect(r.files).toHaveLength(1);
+    expect(read(dir, nfc)).toBe("1 2\n");
+  });
+
+  it("groups a symlink and its target: one write applies both edits", () => {
+    const dir = repo({ "real.txt": "a b\n" });
+    fs.symlinkSync("real.txt", path.join(dir, "link.txt"));
+    const r = run(dir, [
+      { file: "link.txt", old: "a", new: "1" },
+      { file: "real.txt", old: "b", new: "2" },
+    ]);
+    expect(r.status).toBe("written");
+    expect(r.files).toHaveLength(1);
+    expect(r.writtenFiles).toEqual(["real.txt"]);
+    expect(read(dir, "real.txt")).toBe("1 2\n");
+    expect(fs.lstatSync(path.join(dir, "link.txt")).isSymbolicLink()).toBe(
+      true,
+    );
+  });
+
+  it("refuses a hard-linked file by default and names the reason", () => {
+    const dir = repo({ "a.txt": "a\n" });
+    fs.linkSync(path.join(dir, "a.txt"), path.join(dir, "b.txt"));
+    const r = run(dir, [{ file: "a.txt", old: "a", new: "A" }]);
+    expect(r.status).toBe("not_editable");
+    expect(statusClass(r.status)).toBe("finding");
+    expect(r.reason).toBe("hard_link");
+    expect(r.edits[0]).toMatchObject({
+      status: "not_editable",
+      reason: "hard_link",
+    });
+    expect(read(dir, "a.txt")).toBe("a\n");
+  });
+
+  it("with breakHardLinks groups both names into one write", () => {
+    const dir = repo({ "a.txt": "a b\n" });
+    fs.linkSync(path.join(dir, "a.txt"), path.join(dir, "b.txt"));
+    const r = run(
+      dir,
+      [
+        { file: "a.txt", old: "a", new: "1" },
+        { file: "b.txt", old: "b", new: "2" },
+      ],
+      { breakHardLinks: true },
+    );
+    expect(r.status).toBe("written");
+    expect(r.files).toHaveLength(1);
+    expect(r.writtenFiles).toEqual(["a.txt"]);
+    expect(read(dir, "a.txt")).toBe("1 2\n");
+    // The rename gave a.txt a new inode; the other name keeps the old text.
+    expect(read(dir, "b.txt")).toBe("a b\n");
+  });
+});
+
+describe("patch: fuzzy matches change nothing outside the match", () => {
+  it("refuses a unicode match whose line would lose typographic quotes elsewhere", () => {
+    const before = 'const q = "said “hi”"; run(‘1’);\n';
+    const dir = repo({ "a.js": before });
+    const r = run(dir, [{ file: "a.js", old: "run('1')", new: "run('2')" }]);
+    expect(r.status).toBe("fuzzy_side_effect");
+    expect(statusClass(r.status)).toBe("finding");
+    expect(r.edits[0]).toMatchObject({
+      status: "fuzzy_side_effect",
+      tier: "unicode",
+    });
+    const hint = r.edits[0].side_effect;
+    expect(hint?.changed_characters).toEqual(
+      expect.arrayContaining(['“ (U+201C) -> "', '” (U+201D) -> "']),
+    );
+    expect(hint?.exact_text).toBe("run(‘1’)");
+    expect(hint?.lines[0].line).toBe(1);
+    expect(read(dir, "a.js")).toBe(before);
+  });
+
+  it("refuses when NFKC would change a superscript or fullwidth text outside the match", () => {
+    for (const before of ["y = x² + run(‘1’);\n", "ＡＢ = run(‘1’);\n"]) {
+      const dir = repo({ "a.js": before });
+      const r = run(dir, [{ file: "a.js", old: "run('1')", new: "run('2')" }]);
+      expect(r.status, before).toBe("fuzzy_side_effect");
+      expect(read(dir, "a.js")).toBe(before);
+    }
+  });
+
+  it("applies a fuzzy match whose lines have nothing else to normalize, keeping the rest", () => {
+    const dir = repo({
+      "a.js": "foo(‘a’) + bar\n",
+      "b.txt": "a – b  \nc\n",
+    });
+    const r = run(dir, [
+      { file: "a.js", old: "foo('a')", new: "X" },
+      { file: "b.txt", old: "a - b", new: "Y" },
+    ]);
+    expect(r.status).toBe("written");
+    expect(r.edits.map((e) => e.tier)).toEqual(["unicode", "unicode"]);
+    expect(read(dir, "a.js")).toBe("X + bar\n");
+    // The trailing whitespace after the match is outside it: kept.
+    expect(read(dir, "b.txt")).toBe("Y  \nc\n");
+  });
+
+  it("keeps the line endings of a fuzzy match's lines in a mixed-ending file", () => {
+    const dir = repo({ "a.txt": "x\r\none  \ntwo\r\n" });
+    const r = run(dir, [{ file: "a.txt", old: "one\ntwo", new: "1\n2" }]);
+    expect(r.edits[0].tier).toBe("trailing_whitespace");
+    expect(read(dir, "a.txt")).toBe("x\r\n1\r\n2\r\n");
+  });
+
+  it("refuses two overlapping edits matched in the same fuzzy tier as overlap", () => {
+    const dir = repo({ "a.txt": "ab  \ncd\n" });
+    const r = run(dir, [
+      { file: "a.txt", old: "ab\nc", new: "1" },
+      { file: "a.txt", old: "b\ncd", new: "2" },
+    ]);
+    expect(r.edits.map((e) => e.tier)).toEqual([
+      "trailing_whitespace",
+      "trailing_whitespace",
+    ]);
+    expect(r.status).toBe("overlap");
+    expect(r.edits[0].overlaps_with).toEqual([1]);
+    expect(read(dir, "a.txt")).toBe("ab  \ncd\n");
+  });
+
+  it("does not match mid-line when old's last line ends in whitespace", () => {
+    const dir = repo({ "a.txt": "let v = computeTotal(x);\n" });
+    const r = run(dir, [{ file: "a.txt", old: "computeTotal ", new: "sum " }]);
+    expect(r.status).toBe("missing");
+    expect(read(dir, "a.txt")).toBe("let v = computeTotal(x);\n");
+
+    const end = repo({ "a.txt": "let x = 1;\t\nz\n" });
+    const ok = run(end, [
+      { file: "a.txt", old: "let x = 1; ", new: "let x = 2;" },
+    ]);
+    expect(ok.status).toBe("written");
+    expect(ok.edits[0].tier).toBe("trailing_whitespace");
+    expect(read(end, "a.txt")).toBe("let x = 2;\nz\n");
+  });
+
+  it("matches in a file whose last line is whitespace only without a newline", () => {
+    const dir = repo({ "a.txt": "x  \n   " });
+    const r = run(dir, [{ file: "a.txt", old: "x\n", new: "X\n" }]);
+    expect(r.status).toBe("written");
+    expect(r.edits[0].tier).toBe("trailing_whitespace");
+    expect(read(dir, "a.txt")).toBe("X\n   ");
+  });
+});
+
+describe("patch: modes, line breaks and path checks", () => {
+  it("keeps mode 0664 and a setgid bit under umask 022", () => {
+    const dir = repo({ "g.txt": "g\n", "s.txt": "s\n" });
+    fs.chmodSync(path.join(dir, "g.txt"), 0o664);
+    fs.chmodSync(path.join(dir, "s.txt"), 0o2775);
+    const setgid = (fs.statSync(path.join(dir, "s.txt")).mode & 0o2000) !== 0;
+    const previous = process.umask(0o022);
+    let r;
+    try {
+      r = run(dir, [
+        { file: "g.txt", old: "g", new: "G" },
+        { file: "s.txt", old: "s", new: "S" },
+      ]);
+    } finally {
+      process.umask(previous);
+    }
+    expect(r.status).toBe("written");
+    expect(fs.statSync(path.join(dir, "g.txt")).mode & 0o7777).toBe(0o664);
+    if (setgid) {
+      expect(fs.statSync(path.join(dir, "s.txt")).mode & 0o7777).toBe(0o2775);
+    }
+  });
+
+  it("edits a file with CR CR LF line breaks", () => {
+    const dir = repo({ "a.txt": "a\r\r\nb\n" });
+    const r = run(dir, [{ file: "a.txt", old: "b", new: "c" }]);
+    expect(r.status).toBe("written");
+    expect(read(dir, "a.txt")).toBe("a\r\r\nc\n");
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    "refuses a read-only file and leaves it as it is",
+    () => {
+      const dir = repo({ "a.txt": "ro\n" });
+      fs.chmodSync(path.join(dir, "a.txt"), 0o444);
+      const r = run(dir, [{ file: "a.txt", old: "ro", new: "rw" }]);
+      expect(r.status).toBe("not_editable");
+      expect(r.reason).toBe("read_only");
+      expect(read(dir, "a.txt")).toBe("ro\n");
+      expect(fs.statSync(path.join(dir, "a.txt")).mode & 0o777).toBe(0o444);
+    },
+  );
+
+  it("edits a file whose name starts with two dots at the root", () => {
+    const dir = repo({ "..foo.txt": "x\n" });
+    const r = run(dir, [{ file: "..foo.txt", old: "x", new: "y" }]);
+    expect(r.status).toBe("written");
+    expect(r.edits[0].path).toBe("..foo.txt");
+    expect(read(dir, "..foo.txt")).toBe("y\n");
+  });
+
+  it("says a missing file is never created", () => {
+    const dir = repo({});
+    const r = run(dir, [{ file: "new.txt", old: "x", new: "y" }]);
+    expect(r.status).toBe("error");
+    expect(r.reason).toBe("not_found");
+    expect(r.message).toContain(
+      "file does not exist; patch only edits existing files (it never creates one)",
+    );
+    expect(fs.existsSync(path.join(dir, "new.txt"))).toBe(false);
+  });
+
+  it("refuses to write when a directory on the path became a symlink after the read", () => {
+    const outside = tmpDir();
+    fs.writeFileSync(path.join(outside, "f.txt"), "outside\n");
+    const dir = repo({ "A/f.txt": "one\n", "B/f.txt": "two\n" });
+    let calls = 0;
+    const r = patch({
+      cwd: dir,
+      edits: [
+        { file: "A/f.txt", old: "one", new: "ONE" },
+        { file: "B/f.txt", old: "two", new: "TWO" },
+      ],
+      renameFile: (from, to) => {
+        fs.renameSync(from, to);
+        if (calls++ === 0) {
+          fs.rmSync(path.join(dir, "B"), { recursive: true });
+          fs.symlinkSync(outside, path.join(dir, "B"));
+        }
+      },
+    });
+    expect(r.status).toBe("error");
+    expect(r.files[1].reason).toBe("path_changed");
+    expect(r.writtenFiles).toEqual([path.join("A", "f.txt")]);
+    expect(fs.readFileSync(path.join(outside, "f.txt"), "utf8")).toBe(
+      "outside\n",
+    );
+  });
+
+  it("replaces many occurrences in linear time", () => {
+    const n = 100_000;
+    const dir = repo({
+      "a.txt": "x  \nfoo\n".repeat(n),
+      "b.txt": "foo bar\n".repeat(n),
+    });
+    const start = Date.now();
+    const r = run(dir, [
+      { file: "a.txt", old: "x\nfoo", new: "y\nbar", replaceAll: true },
+      { file: "b.txt", old: "foo", new: "baz", replaceAll: true },
+    ]);
+    const elapsed = Date.now() - start;
+    expect(r.status).toBe("written");
+    expect(r.edits.map((e) => e.occurrences)).toEqual([n, n]);
+    // The trailing whitespace inside each match is replaced with it.
+    expect(read(dir, "a.txt") === "y\nbar\n".repeat(n)).toBe(true);
+    expect(read(dir, "b.txt") === "baz bar\n".repeat(n)).toBe(true);
+    // Linear work takes well under a second here; the quadratic splice
+    // and line lookup took tens of seconds at this size.
+    expect(elapsed).toBeLessThan(10_000);
+  }, 60_000);
+});
+
+describe("patch: source hygiene", () => {
+  it("src/patch holds no invisible literal characters (they are written as escapes)", () => {
+    const dir = path.join(path.dirname(CLI_PATH), "..", "src", "patch");
+    for (const name of fs.readdirSync(dir)) {
+      const text = fs.readFileSync(path.join(dir, name), "utf8");
+      const invisible = [...text].filter(
+        (ch) => ch !== " " && /[\p{Cf}\p{Zs}\p{Zl}\p{Zp}]/u.test(ch),
+      );
+      expect(invisible, name).toEqual([]);
+    }
+  });
+});
+
+describe("patch CLI: findings", () => {
+  it("a fuzzy side effect exits 1 and the text mode shows the lines", async () => {
+    const dir = repo({ "a.js": 'q = "“hi”"; run(‘1’);\n' });
+    const json = await spawnCli([
+      "-C",
+      dir,
+      "patch",
+      "--file",
+      "a.js",
+      "--old",
+      "run('1')",
+      "--new",
+      "run('2')",
+    ]);
+    expect(json.code).toBe(1);
+    expect(JSON.parse(json.stdout)).toMatchObject({
+      command: "patch",
+      status: "fuzzy_side_effect",
+    });
+    const text = await spawnCli([
+      "-C",
+      dir,
+      "-f",
+      "text",
+      "patch",
+      "--file",
+      "a.js",
+      "--old",
+      "run('1')",
+      "--new",
+      "run('2')",
+    ]);
+    expect(text.stdout).toContain("edits[0] a.js: fuzzy_side_effect");
+    expect(text.stdout).toContain("line 1 normalized:");
+  });
+
+  it("--break-hard-links edits a hard-linked file", async () => {
+    const dir = repo({ "a.txt": "a\n" });
+    fs.linkSync(path.join(dir, "a.txt"), path.join(dir, "b.txt"));
+    const refused = await spawnCli([
+      "-C",
+      dir,
+      "patch",
+      "--file",
+      "a.txt",
+      "--old",
+      "a",
+      "--new",
+      "A",
+    ]);
+    expect(refused.code).toBe(1);
+    expect(JSON.parse(refused.stdout)).toMatchObject({
+      status: "not_editable",
+      reason: "hard_link",
+    });
+    const ok = await spawnCli([
+      "-C",
+      dir,
+      "patch",
+      "--break-hard-links",
+      "--file",
+      "a.txt",
+      "--old",
+      "a",
+      "--new",
+      "A",
+    ]);
+    expect(ok.code).toBe(0);
+    expect(read(dir, "a.txt")).toBe("A\n");
+    expect(read(dir, "b.txt")).toBe("a\n");
   });
 });

@@ -25,10 +25,15 @@ export function containmentRoot(cwd: string): string {
 }
 
 /** True when `absTarget` resolves to `root` itself or a path underneath
- * it. Both inputs must already be absolute, resolved paths. */
+ * it. Both inputs must already be absolute, resolved paths. Only a `..`
+ * path component leaves the root: an entry whose name merely starts with
+ * two dots (`..foo`) is inside it. */
 export function isPathContained(root: string, absTarget: string): boolean {
   const rel = path.relative(root, absTarget);
-  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+  return (
+    rel === "" ||
+    (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel))
+  );
 }
 
 /**

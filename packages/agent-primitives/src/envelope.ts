@@ -38,6 +38,10 @@ const STATUS_CLASS: Record<string, StatusClass> = {
   // one file overlap; the plan is refused and nothing is written.
   ambiguous: "finding",
   overlap: "finding",
+  // `patch`: a fuzzy-tier match would change text outside the matched
+  // text, or a target is hard-linked or read-only; nothing is written.
+  fuzzy_side_effect: "finding",
+  not_editable: "finding",
   // `init`'s additive target status: bytes match a released, older copy
   // of the packaged asset (per the digest ledger) rather than an unknown
   // edit. Same class and exit code as `conflicted` (still nothing

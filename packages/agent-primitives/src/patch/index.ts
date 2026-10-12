@@ -1,20 +1,26 @@
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { UsageError } from "../envelope.js";
 import { findGitRoot, isPathContained } from "../probe/containment.js";
 import {
-  applyRegions,
   applyRegionsToRaw,
   crlfToLf,
   detectLineEnding,
+  rawMappingAgrees,
   resolveFileEdits,
   type EditResolution,
   type LineRange,
   type MatchTier,
   type Region,
 } from "./engine.js";
-import { notFoundHint, type NotFoundHint } from "./hint.js";
+import {
+  fuzzySideEffectHint,
+  notFoundHint,
+  type FuzzySideEffectHint,
+  type NotFoundHint,
+} from "./hint.js";
 import { unifiedDiff } from "./diff.js";
 
 export { MATCH_TIERS, type MatchTier } from "./engine.js";
@@ -123,11 +129,13 @@ export function parsePatchPlan(text: string, source = "plan"): PatchEditSpec[] {
 
 /**
  * Per-edit status. `written`, `would_write` (dry run) and `unchanged` are
- * ok; `missing`, `ambiguous` and `overlap` are findings; `refused` (a path
- * outside the root or inside `.git`) is a usage error; `error` is a file
- * that could not be read, decoded or written; `not_written` is an edit
- * that resolved but was not written because the plan was refused or a
- * write failed.
+ * ok; `missing`, `ambiguous`, `overlap`, `fuzzy_side_effect` (a fuzzy
+ * match whose lines would change outside the matched text) and
+ * `not_editable` (a hard-linked or read-only file) are findings; `refused`
+ * (a path outside the root or inside a git directory) is a usage error;
+ * `error` is a file that could not be read, decoded or written;
+ * `not_written` is an edit that resolved but was not written because the
+ * plan was refused or a write failed.
  */
 export type PatchEditStatus =
   | "written"
@@ -136,6 +144,8 @@ export type PatchEditStatus =
   | "missing"
   | "ambiguous"
   | "overlap"
+  | "fuzzy_side_effect"
+  | "not_editable"
   | "refused"
   | "error"
   | "not_written";
@@ -155,10 +165,17 @@ export interface PatchEditResult {
   reason?: string;
   detail?: string;
   hint?: NotFoundHint;
+  side_effect?: FuzzySideEffectHint;
 }
 
 export type PatchFileStatus =
-  "written" | "would_write" | "unchanged" | "not_written" | "refused" | "error";
+  | "written"
+  | "would_write"
+  | "unchanged"
+  | "not_written"
+  | "not_editable"
+  | "refused"
+  | "error";
 
 export interface PatchFileResult {
   path: string;
@@ -178,6 +195,8 @@ export type PatchStatus =
   | "missing"
   | "ambiguous"
   | "overlap"
+  | "fuzzy_side_effect"
+  | "not_editable"
   | "usage_error"
   | "error";
 
@@ -203,6 +222,8 @@ export interface PatchResult {
     missing: number;
     ambiguous: number;
     overlap: number;
+    fuzzy_side_effect: number;
+    not_editable: number;
     refused: number;
     errors: number;
   };
@@ -214,6 +235,10 @@ export interface PatchOptions {
   edits: readonly PatchEditSpec[];
   dryRun?: boolean;
   allowOutside?: boolean;
+  /** Edit a file with more than one hard link anyway: the rename that
+   * writes it gives the edited name a new inode, so the other names keep
+   * the old content. Refused (`not_editable`, `hard_link`) otherwise. */
+  breakHardLinks?: boolean;
   /** Test seam: replaces the rename that commits a written file. */
   renameFile?: (from: string, to: string) => void;
 }
@@ -222,6 +247,8 @@ interface FileState {
   key: string;
   display: string;
   real: string;
+  /** Every absolute spelling of the file the plan used. */
+  lexicals: string[];
   edits: number[];
   status?: PatchFileStatus;
   reason?: string;
@@ -237,8 +264,63 @@ interface FileState {
   diff?: string;
 }
 
+/** A `.git` path component in any letter case: on a case-insensitive
+ * filesystem `.GIT` and `.Git` name the same directory. */
 function hasGitSegment(rel: string): boolean {
-  return rel.split(/[\\/]+/).some((seg) => seg === ".git");
+  return rel.split(/[\\/]+/).some((seg) => seg.toLowerCase() === ".git");
+}
+
+/** `dev:ino` of a path (following symlinks); undefined when it cannot be
+ * stated. Names one file whatever its spelling: letter case, Unicode
+ * normalisation, a symlink or another hard link. */
+function identityOf(p: string): string | undefined {
+  try {
+    const st = fs.statSync(p, { bigint: true });
+    return `${String(st.dev)}:${String(st.ino)}`;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Identities of the repository's git directory and common directory
+ * (they differ in a linked worktree), whatever they are named. Empty
+ * outside a git work tree or when git cannot answer. */
+function gitDirIdentities(root: string): Set<string> {
+  const ids = new Set<string>();
+  const env = { ...process.env };
+  for (const key of ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR"]) {
+    delete env[key];
+  }
+  let out: string;
+  try {
+    out = execFileSync(
+      "git",
+      ["rev-parse", "--absolute-git-dir", "--git-common-dir"],
+      { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    );
+  } catch {
+    return ids;
+  }
+  for (const line of out.split("\n")) {
+    if (line.trim().length === 0) continue;
+    const id = identityOf(path.resolve(root, line.trim()));
+    if (id !== undefined) ids.add(id);
+  }
+  return ids;
+}
+
+/** True when a directory above `real` is one of the git directories in
+ * `gitIds`, compared by identity rather than by name. */
+function insideGitDir(real: string, gitIds: ReadonlySet<string>): boolean {
+  if (gitIds.size === 0) return false;
+  let dir = path.dirname(real);
+  for (;;) {
+    const id = identityOf(dir);
+    if (id !== undefined && gitIds.has(id)) return true;
+    const parent = path.dirname(dir);
+    if (parent === dir) return false;
+    dir = parent;
+  }
 }
 
 /** Decodes a file for editing, or names why it cannot be edited. */
@@ -266,7 +348,8 @@ function decodeFile(
       detail: "file is not valid UTF-8; only UTF-8 text files are edited",
     };
   }
-  if (text.startsWith("﻿")) return { ok: true, raw: text.slice(1), bom: true };
+  if (text.startsWith("\uFEFF"))
+    return { ok: true, raw: text.slice(1), bom: true };
   return { ok: true, raw: text, bom: false };
 }
 
@@ -278,25 +361,30 @@ function errnoDetail(err: unknown): string {
 /**
  * Applies a plan of exact-text edits. Every edit is resolved against the
  * current content of every file before anything is written: a missing,
- * ambiguous or overlapping edit, a refused path or an unreadable file
- * refuses the whole plan and nothing is written. Then each changed file is
- * written through a temporary file in its own directory and a rename, in
- * plan order; a file whose bytes changed since they were read, or a write
- * error, stops the write phase and the result names the files already
- * written.
+ * ambiguous, overlapping or side-effecting edit, a refused path, a file
+ * that is not editable as is, or an unreadable file refuses the whole plan
+ * and nothing is written. Then each changed file is written through a
+ * temporary file in its own directory and a rename, in plan order; a file
+ * whose path or bytes changed since they were read, or a write error,
+ * stops the write phase and the result names the files already written.
  */
 export function patch(options: PatchOptions): PatchResult {
   const dryRun = options.dryRun === true;
   const cwd = path.resolve(options.cwd);
-  const rootLexical = findGitRoot(cwd) ?? cwd;
+  const gitRoot = findGitRoot(cwd);
+  const rootLexical = gitRoot ?? cwd;
   let root: string;
   try {
-    root = fs.realpathSync(rootLexical);
+    // The native realpath returns each component as it is stored, so a
+    // case or Unicode-normalisation variant of the root reads as the root.
+    root = fs.realpathSync.native(rootLexical);
   } catch (err) {
     throw new UsageError(
       `patch: cannot resolve root ${rootLexical}: ${errnoDetail(err)}`,
     );
   }
+  const gitIds =
+    gitRoot !== undefined ? gitDirIdentities(root) : new Set<string>();
   const warnings: string[] = [];
   const rename =
     options.renameFile ?? ((a: string, b: string) => fs.renameSync(a, b));
@@ -310,7 +398,8 @@ export function patch(options: PatchOptions): PatchResult {
     }
   }
 
-  // Resolve every target path; group edits per real file.
+  // Resolve every target path; group edits per file identity (dev:ino),
+  // so every spelling of one file shares one state and one write.
   const files = new Map<string, FileState>();
   const order: FileState[] = [];
   const editResults: PatchEditResult[] = [];
@@ -318,17 +407,43 @@ export function patch(options: PatchOptions): PatchResult {
     const spec = options.edits[i];
     const lexical = path.resolve(cwd, spec.file);
     let real: string | undefined;
+    let identity: string | undefined;
     let pathError:
-      | { reason: string; detail: string; status: "refused" | "error" }
+      | {
+          reason: string;
+          detail: string;
+          status: "refused" | "error" | "not_editable";
+        }
       | undefined;
     try {
-      real = fs.realpathSync(lexical);
+      real = fs.realpathSync.native(lexical);
     } catch (err) {
-      pathError = {
-        status: "error",
-        reason: "not_found",
-        detail: `cannot resolve ${spec.file}: ${errnoDetail(err)}`,
-      };
+      const code = (err as NodeJS.ErrnoException).code;
+      pathError =
+        code === "ENOENT" || code === "ENOTDIR"
+          ? {
+              status: "error",
+              reason: "not_found",
+              detail: `${spec.file}: file does not exist; patch only edits existing files (it never creates one)`,
+            }
+          : {
+              status: "error",
+              reason: "unreadable",
+              detail: `cannot resolve ${spec.file}: ${errnoDetail(err)}`,
+            };
+    }
+    let st: fs.Stats | undefined;
+    if (real !== undefined) {
+      try {
+        st = fs.statSync(real);
+        identity = identityOf(real);
+      } catch (err) {
+        pathError = {
+          status: "error",
+          reason: "unreadable",
+          detail: errnoDetail(err),
+        };
+      }
     }
     const contained = real !== undefined && isPathContained(root, real);
     const display =
@@ -337,18 +452,19 @@ export function patch(options: PatchOptions): PatchResult {
         : contained
           ? path.relative(root, real)
           : real;
-    if (real !== undefined) {
+    if (real !== undefined && pathError === undefined) {
       const lexicalRel = path.relative(rootLexical, lexical);
       if (
         hasGitSegment(contained ? path.relative(root, real) : real) ||
         hasGitSegment(
           isPathContained(rootLexical, lexical) ? lexicalRel : lexical,
-        )
+        ) ||
+        insideGitDir(real, gitIds)
       ) {
         pathError = {
           status: "refused",
           reason: "git_dir",
-          detail: `${spec.file} is inside a .git directory; patch never writes there`,
+          detail: `${spec.file} is inside a git directory; patch never writes there`,
         };
       } else if (!contained && options.allowOutside !== true) {
         pathError = {
@@ -356,33 +472,38 @@ export function patch(options: PatchOptions): PatchResult {
           reason: "outside_root",
           detail: `${spec.file} resolves to ${real}, outside the root ${root} (pass --allow-outside to permit)`,
         };
-      } else {
-        let st: fs.Stats | undefined;
-        try {
-          st = fs.statSync(real);
-        } catch (err) {
-          pathError = {
-            status: "error",
-            reason: "unreadable",
-            detail: errnoDetail(err),
-          };
-        }
-        if (st !== undefined && !st.isFile()) {
-          pathError = {
-            status: "error",
-            reason: "not_a_file",
-            detail: `${spec.file} is not a regular file`,
-          };
-        }
+      } else if (st !== undefined && !st.isFile()) {
+        pathError = {
+          status: "error",
+          reason: "not_a_file",
+          detail: `${spec.file} is not a regular file`,
+        };
+      } else if (
+        st !== undefined &&
+        st.nlink > 1 &&
+        options.breakHardLinks !== true
+      ) {
+        pathError = {
+          status: "not_editable",
+          reason: "hard_link",
+          detail: `${spec.file} has ${String(st.nlink)} hard links; writing it would leave the other names with the old content (pass --break-hard-links to accept that)`,
+        };
+      } else if (!isWritable(real)) {
+        pathError = {
+          status: "not_editable",
+          reason: "read_only",
+          detail: `${spec.file} is not writable; patch does not change a read-only file`,
+        };
       }
     }
-    const key = real ?? `missing:${lexical}`;
+    const key = identity ?? `missing:${lexical}`;
     let state = files.get(key);
     if (state === undefined) {
-      state = { key, display, real: real ?? lexical, edits: [] };
+      state = { key, display, real: real ?? lexical, lexicals: [], edits: [] };
       files.set(key, state);
       order.push(state);
     }
+    state.lexicals.push(lexical);
     state.edits.push(i);
     if (pathError !== undefined && state.status === undefined) {
       state.status = pathError.status;
@@ -392,81 +513,31 @@ export function patch(options: PatchOptions): PatchResult {
     editResults.push({
       index: i,
       file: spec.file,
-      path: display,
+      path: state.display,
       status: "not_written",
     });
   }
 
-  // Read and resolve every file that passed the path checks.
+  // Read and resolve every file that passed the path checks. An exception
+  // inside the engine is that file's error, never the whole command's.
   for (const state of order) {
     if (state.status !== undefined) continue;
-    let buffer: Buffer;
     try {
-      buffer = fs.readFileSync(state.real);
-      state.mode = fs.statSync(state.real).mode & 0o7777;
+      resolveState(state, options.edits, editResults);
     } catch (err) {
       state.status = "error";
-      state.reason = "unreadable";
-      state.detail = errnoDetail(err);
-      continue;
-    }
-    const decoded = decodeFile(buffer);
-    if (!decoded.ok) {
-      state.status = "error";
-      state.reason = decoded.reason;
-      state.detail = decoded.detail;
-      continue;
-    }
-    state.buffer = buffer;
-    state.raw = decoded.raw;
-    state.bom = decoded.bom;
-    state.ending = detectLineEnding(decoded.raw);
-    state.lf = crlfToLf(decoded.raw);
-    const resolution = resolveFileEdits(
-      state.lf,
-      state.edits.map((i) => ({
-        index: i,
-        old: crlfToLf(options.edits[i].old),
-        new: crlfToLf(options.edits[i].new),
-        replaceAll: options.edits[i].replaceAll === true,
-      })),
-    );
-    for (const r of resolution.edits) applyResolution(editResults[r.index], r);
-    for (const r of resolution.edits) {
-      if (r.status === "missing") {
-        const spec = options.edits[r.index];
-        editResults[r.index].hint = notFoundHint(
-          state.lf,
-          crlfToLf(spec.old),
-          crlfToLf(spec.new),
-        );
-      }
-    }
-    if (resolution.newContent !== undefined) {
-      state.regions = resolution.regions;
-      const newRaw = applyRegionsToRaw(
-        decoded.raw,
-        resolution.regions,
-        state.ending,
-      );
-      state.newRaw = newRaw;
-      state.diff = unifiedDiff(state.display, state.lf, resolution.regions);
-      // Cross-check: the raw splice and the LF splice must agree.
-      if (
-        crlfToLf(newRaw) !==
-        crlfToLf(applyRegions(state.lf, resolution.regions))
-      ) {
-        state.status = "error";
-        state.reason = "internal";
-        state.detail =
-          "line-ending mapping disagreed with the LF view; nothing written";
-      }
+      state.reason = "internal";
+      state.detail = `internal error while resolving the edits: ${errnoDetail(err)}; nothing written`;
     }
   }
 
-  // Path and IO errors on the edits of an unusable file.
+  // Path, IO and editability errors on the edits of an unusable file.
   for (const state of order) {
-    if (state.status === "refused" || state.status === "error") {
+    if (
+      state.status === "refused" ||
+      state.status === "error" ||
+      state.status === "not_editable"
+    ) {
       for (const i of state.edits) {
         editResults[i].status = state.status;
         editResults[i].reason = state.reason;
@@ -482,7 +553,9 @@ export function patch(options: PatchOptions): PatchResult {
     has("error") ||
     has("missing") ||
     has("ambiguous") ||
-    has("overlap");
+    has("overlap") ||
+    has("fuzzy_side_effect") ||
+    has("not_editable");
 
   const writtenFiles: string[] = [];
   let writeFailure:
@@ -565,6 +638,11 @@ export function patch(options: PatchOptions): PatchResult {
     status = "ambiguous";
   } else if (has("overlap")) {
     status = "overlap";
+  } else if (has("fuzzy_side_effect")) {
+    status = "fuzzy_side_effect";
+  } else if (has("not_editable")) {
+    status = "not_editable";
+    reason = firstWith("not_editable")?.reason;
   } else if (dryRun) {
     status = order.some((s) => s.status === "would_write")
       ? "would_write"
@@ -575,9 +653,16 @@ export function patch(options: PatchOptions): PatchResult {
   if (refusedPlan && status !== "usage_error" && status !== "error") {
     message = "plan refused: nothing was written";
   }
-  if (editResults.some((e) => e.tier !== undefined && e.tier !== "exact")) {
+  if (
+    editResults.some(
+      (e) =>
+        e.tier !== undefined &&
+        e.tier !== "exact" &&
+        e.status !== "fuzzy_side_effect",
+    )
+  ) {
     warnings.push(
-      "a fuzzy tier matched: the lines such a match touches are rewritten from the normalized text (trailing whitespace dropped; under the unicode tier also NFKC and ASCII quotes, dashes and spaces)",
+      "a fuzzy tier matched: the old text matched only after normalization (trailing whitespace ignored; under the unicode tier also NFKC, typographic quotes, dashes and special spaces), so the replaced text in the file differs from old; every character outside the match is kept",
     );
   }
 
@@ -615,11 +700,101 @@ export function patch(options: PatchOptions): PatchResult {
       missing: count("missing"),
       ambiguous: count("ambiguous"),
       overlap: count("overlap"),
+      fuzzy_side_effect: count("fuzzy_side_effect"),
+      not_editable: count("not_editable"),
       refused: count("refused"),
       errors: count("error"),
     },
     warnings,
   };
+}
+
+/** True when the current process may write `p`. */
+function isWritable(p: string): boolean {
+  try {
+    fs.accessSync(p, fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Reads, decodes and resolves the edits of one file into `state`. */
+function resolveState(
+  state: FileState,
+  edits: readonly PatchEditSpec[],
+  editResults: PatchEditResult[],
+): void {
+  let buffer: Buffer;
+  try {
+    buffer = fs.readFileSync(state.real);
+    state.mode = fs.statSync(state.real).mode & 0o7777;
+  } catch (err) {
+    state.status = "error";
+    state.reason = "unreadable";
+    state.detail = errnoDetail(err);
+    return;
+  }
+  const decoded = decodeFile(buffer);
+  if (!decoded.ok) {
+    state.status = "error";
+    state.reason = decoded.reason;
+    state.detail = decoded.detail;
+    return;
+  }
+  state.buffer = buffer;
+  state.raw = decoded.raw;
+  state.bom = decoded.bom;
+  state.ending = detectLineEnding(decoded.raw);
+  const lf = crlfToLf(decoded.raw);
+  state.lf = lf;
+  const resolution = resolveFileEdits(
+    lf,
+    state.edits.map((i) => ({
+      index: i,
+      old: crlfToLf(edits[i].old),
+      new: crlfToLf(edits[i].new),
+      replaceAll: edits[i].replaceAll === true,
+    })),
+  );
+  for (const r of resolution.edits) {
+    const target = editResults[r.index];
+    applyResolution(target, r);
+    if (r.status === "missing") {
+      target.hint = notFoundHint(
+        lf,
+        crlfToLf(edits[r.index].old),
+        crlfToLf(edits[r.index].new),
+      );
+    } else if (r.status === "fuzzy_side_effect") {
+      target.side_effect = fuzzySideEffectHint(
+        lf,
+        r.affectedLines,
+        r.tier,
+        crlfToLf(edits[r.index].old),
+      );
+      target.detail = target.side_effect.message;
+    }
+  }
+  if (resolution.newContent !== undefined) {
+    state.regions = resolution.regions;
+    // Every raw range the write replaces or keeps must read as the LF
+    // view does, or the raw splice would not be the change the LF view
+    // (and the diff) shows.
+    if (!rawMappingAgrees(decoded.raw, lf, resolution.regions)) {
+      state.status = "error";
+      state.reason = "internal";
+      state.detail =
+        "line-ending mapping disagreed with the LF view; nothing written";
+      return;
+    }
+    state.newRaw = applyRegionsToRaw(
+      decoded.raw,
+      resolution.regions,
+      state.ending,
+    );
+    state.diff = unifiedDiff(state.display, lf, resolution.regions);
+  }
 }
 
 function applyResolution(target: PatchEditResult, r: EditResolution): void {
@@ -647,15 +822,50 @@ function applyResolution(target: PatchEditResult, r: EditResolution): void {
       target.overlaps_with = r.overlapsWith;
       target.detail = `overlaps edits ${r.overlapsWith.map((i) => `[${String(i)}]`).join(", ")} in the same file (a fuzzy-tier match covers whole lines); merge them into one edit or target disjoint text`;
       break;
+    case "fuzzy_side_effect":
+      target.status = "fuzzy_side_effect";
+      target.tier = r.tier;
+      target.occurrences = r.occurrences;
+      target.line_ranges = r.lineRanges;
+      break;
   }
 }
 
 /** Writes one file through a temporary file in the same directory plus a
- * rename, keeping the file mode and BOM. Returns a failure or undefined. */
+ * rename, keeping the file mode and BOM. Right before, every spelling of
+ * the file must still resolve to the path that was read (a directory
+ * swapped for a symlink in between is refused) and the bytes must be the
+ * ones that were read. Returns a failure or undefined. */
 function writeFile(
   state: FileState,
   rename: (from: string, to: string) => void,
 ): { reason: string; detail: string } | undefined {
+  // The resolved path must still resolve to itself (no directory on it
+  // was swapped for a symlink), and every spelling the plan used must
+  // still name the same file.
+  let now: string;
+  try {
+    now = fs.realpathSync.native(state.real);
+  } catch (err) {
+    return {
+      reason: "path_changed",
+      detail: `${state.real} no longer resolves (${errnoDetail(err)}); not written`,
+    };
+  }
+  if (now !== state.real) {
+    return {
+      reason: "path_changed",
+      detail: `${state.real} now resolves to ${now}; not written`,
+    };
+  }
+  for (const spelling of state.lexicals) {
+    if (identityOf(spelling) !== state.key) {
+      return {
+        reason: "path_changed",
+        detail: `${spelling} no longer names the file that was read; not written`,
+      };
+    }
+  }
   let current: Buffer;
   try {
     current = fs.readFileSync(state.real);
@@ -673,7 +883,7 @@ function writeFile(
     dir,
     `.${path.basename(state.real)}.${randomBytes(6).toString("hex")}.agent-primitives-patch.tmp`,
   );
-  const content = (state.bom === true ? "﻿" : "") + (state.newRaw ?? "");
+  const content = (state.bom === true ? "\uFEFF" : "") + (state.newRaw ?? "");
   try {
     fs.writeFileSync(tmp, content, { flag: "wx", mode: state.mode ?? 0o644 });
     // writeFileSync's mode is filtered by the umask; set it exactly.

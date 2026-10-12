@@ -347,7 +347,10 @@ Every edit is resolved before any file is written; a `missing`,
 `ambiguous` or `overlap` edit writes nothing and exits `1`, with a hint
 naming the closest lines (whitespace made visible) or the match lines.
 Fix `old` and rerun the whole plan. `--dry-run` shows the diff without
-writing. Read each edit's `tier`: anything other than `exact` rewrote
-whole lines from normalized text. Paths outside the repository root and
-inside `.git` are refused. See the agent-primitives package's
+writing. Read each edit's `tier`: anything other than `exact` matched
+only after normalization; a fuzzy match that would also change text
+outside the match is refused as `fuzzy_side_effect` (exit `1`), with the
+exact text to use as `old`. A hard-linked or read-only file is refused as
+`not_editable`. Paths outside the repository root and inside a git
+directory are refused. See the agent-primitives package's
 docs/patch.md.

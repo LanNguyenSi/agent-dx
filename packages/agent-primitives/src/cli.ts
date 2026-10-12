@@ -1983,6 +1983,7 @@ interface PatchCliOptions {
   replaceAll?: boolean;
   dryRun?: boolean;
   allowOutside?: boolean;
+  breakHardLinks?: boolean;
 }
 
 /** Reads a `--plan`/`--old-file`/`--new-file` argument verbatim: `-`
@@ -2076,6 +2077,12 @@ function renderPatchText(result: PatchResult): string {
     const tier = e.tier !== undefined ? ` (${e.tier}${where})` : "";
     lines.push(`edits[${String(e.index)}] ${e.path}: ${e.status}${tier}`);
     if (e.detail !== undefined) lines.push(`  ${e.detail}`);
+    if (e.side_effect !== undefined) {
+      for (const l of e.side_effect.lines) {
+        lines.push(`    line ${String(l.line)} original:   ${l.original}`);
+        lines.push(`    line ${String(l.line)} normalized: ${l.normalized}`);
+      }
+    }
     if (e.hint !== undefined) {
       lines.push(`  ${e.hint.message}`);
       for (const c of e.hint.candidates) {
@@ -2151,6 +2158,10 @@ program
     "--allow-outside",
     "allow files that resolve outside the repository root (never inside .git)",
   )
+  .option(
+    "--break-hard-links",
+    "edit a file that has more than one hard link (refused otherwise); the edited name gets a new inode and the other names keep the old content",
+  )
   .action(async (opts: PatchCliOptions, command: Command) => {
     const start = Date.now();
     const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
@@ -2161,18 +2172,29 @@ program
         edits: patchEditsFromCli(global.cwd, opts),
         dryRun: Boolean(opts.dryRun),
         allowOutside: Boolean(opts.allowOutside),
+        breakHardLinks: Boolean(opts.breakHardLinks),
       });
     } catch (err) {
-      if (!(err instanceof PatchUsageError)) throw err;
+      // A usage error, or an unexpected failure outside the per-file
+      // handling: either way the envelope names the command.
+      const usage = err instanceof UsageError;
       const { envelope, exitCode } = buildEnvelope({
         version: VERSION,
         command: "patch",
-        status: "usage_error",
+        status: usage ? "usage_error" : "error",
         durationMs: Date.now() - start,
         cwd: global.cwd,
         warnings: [],
         logs: [],
-        extra: { reason: err.reason, message: err.message },
+        extra: usage
+          ? {
+              reason: err instanceof PatchUsageError ? err.reason : "usage",
+              message: err.message,
+            }
+          : {
+              reason: "internal",
+              message: `patch: ${err instanceof Error ? err.message : String(err)}`,
+            },
         maxChars: global.maxChars,
         logDir: global.logDir,
       });

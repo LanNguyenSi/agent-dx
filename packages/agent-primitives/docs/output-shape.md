@@ -13,7 +13,7 @@ follows (`src/envelope.ts`):
 | Class | Exit | Status words |
 | --- | --- | --- |
 | `ok` | `0` | `ok`, `pass`, `killed`, `unchanged`, `written`, `would_write` |
-| `finding` | `1` | `missing`, `fail`, `survived`, `conflicted`, `outdated`, `ambiguous`, `overlap` |
+| `finding` | `1` | `missing`, `fail`, `survived`, `conflicted`, `outdated`, `ambiguous`, `overlap`, `fuzzy_side_effect`, `not_editable` |
 | `cannot-conclude` | `2` | `usage_error`, `inconclusive`, `error`, `baseline_failed` |
 
 Any status not listed is treated as `cannot-conclude` (exit `2`). A

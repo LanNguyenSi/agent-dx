@@ -1,4 +1,9 @@
-import { normalizeForFuzzyMatch } from "./engine.js";
+import {
+  normalizeForFuzzyMatch,
+  normalizeForTier,
+  type LineRange,
+  type MatchTier,
+} from "./engine.js";
 
 /** One line of a candidate that differs from the old text, both sides
  * rendered with `visualizeWhitespace`. */
@@ -47,7 +52,7 @@ export function visualizeWhitespace(line: string): string {
   for (const ch of line) {
     if (ch === " ") out += "·";
     else if (ch === "\t") out += "→";
-    else if (/[\s​-‍⁠﻿]/u.test(ch) || /\p{Cf}/u.test(ch)) {
+    else if (/[\s\u200B-\u200D\u2060\uFEFF]/u.test(ch) || /\p{Cf}/u.test(ch)) {
       out += `⟨U+${(ch.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0")}⟩`;
     } else out += ch;
   }
@@ -201,5 +206,109 @@ export function notFoundHint(
     message: `old text not found; ${parts.join("; ")}`,
     candidates,
     ...(newTextAtLine !== undefined ? { new_text_at_line: newTextAtLine } : {}),
+  };
+}
+
+/** One line a refused fuzzy match touches, as it is and as the tier's
+ * normalisation reads it, both rendered with `visualizeWhitespace`. */
+export interface SideEffectLine {
+  line: number;
+  original: string;
+  normalized: string;
+}
+
+export interface FuzzySideEffectHint {
+  message: string;
+  /** The touched lines the normalisation changes. */
+  lines: SideEffectLine[];
+  /** Each distinct character the normalisation changes on those lines,
+   * as `<char> (U+XXXX) -> <replacement>`, plus `trailing whitespace`. */
+  changed_characters: string[];
+  /** The text of the file the old text matched, when it lies on one line
+   * and is found exactly once there: use it as `old` for an exact match. */
+  exact_text?: string;
+}
+
+/** Longest line searched for `exact_text`, and the longest candidate
+ * relative to the old text. */
+const MAX_EXACT_SEARCH_LINE = 1000;
+
+function codePoint(ch: string): string {
+  return `U+${(ch.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0")}`;
+}
+
+/** Every text on `line` that normalizes to `needle` under `tier`,
+ * leaving out candidates that start or end in whitespace. */
+function exactTextOnLine(
+  line: string,
+  needle: string,
+  tier: MatchTier,
+): string[] {
+  const found = new Set<string>();
+  if (line.length > MAX_EXACT_SEARCH_LINE) return [];
+  const maxLen = needle.length * 2 + 8;
+  for (let a = 0; a < line.length; a++) {
+    if (/\s/u.test(line[a])) continue;
+    for (let b = a + 1; b <= Math.min(line.length, a + maxLen); b++) {
+      const sub = line.slice(a, b);
+      if (sub !== sub.trimEnd()) continue;
+      if (normalizeForTier(sub, tier) === needle) found.add(sub);
+    }
+  }
+  return [...found];
+}
+
+/**
+ * The hint for a fuzzy-tier match refused because rewriting its lines
+ * would change text outside the matched text: the touched lines as they
+ * are and as normalized, the characters the normalisation changes, and,
+ * when it can be found, the exact text to use as `old` instead.
+ */
+export function fuzzySideEffectHint(
+  content: string,
+  affected: LineRange,
+  tier: MatchTier,
+  old: string,
+): FuzzySideEffectHint {
+  const fileLines = content.split("\n");
+  const lines: SideEffectLine[] = [];
+  const changed = new Set<string>();
+  for (let n = affected.start; n <= affected.end; n++) {
+    const original = fileLines[n - 1] ?? "";
+    const normalized = normalizeForTier(original, tier);
+    if (normalized === original) continue;
+    lines.push({
+      line: n,
+      original: visualizeWhitespace(original),
+      normalized: visualizeWhitespace(normalized),
+    });
+    const core = original.trimEnd();
+    if (core !== original) changed.add("trailing whitespace");
+    for (const ch of core) {
+      const to = normalizeForTier(ch, tier);
+      if (to !== ch) changed.add(`${ch} (${codePoint(ch)}) -> ${to}`);
+    }
+  }
+  const needle = normalizeForTier(old, tier);
+  let exactText: string | undefined;
+  if (!needle.includes("\n")) {
+    const hits = new Set<string>();
+    for (let n = affected.start; n <= affected.end; n++) {
+      for (const h of exactTextOnLine(fileLines[n - 1] ?? "", needle, tier)) {
+        hits.add(h);
+      }
+    }
+    if (hits.size === 1) exactText = [...hits][0];
+  }
+  const where =
+    affected.start === affected.end
+      ? `line ${String(affected.start)}`
+      : `lines ${String(affected.start)}-${String(affected.end)}`;
+  const chars = [...changed];
+  return {
+    message: `the ${tier} tier matched, but rewriting ${where} would also change text outside the match (${chars.length > 0 ? chars.join(", ") : "normalized text"}); nothing was written. Use the exact text from the file as old${exactText !== undefined ? `: ${JSON.stringify(exactText)}` : ""}`,
+    lines,
+    changed_characters: chars,
+    ...(exactText !== undefined ? { exact_text: exactText } : {}),
   };
 }

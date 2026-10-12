@@ -50,25 +50,31 @@ function lineChanges(
     text += content.slice(cursor, lines[group.last].end);
     let oldStart = group.first;
     let oldEnd = group.last + 1;
-    const newLines = splitLinesWithEndings(text);
+    const allNew = splitLinesWithEndings(text);
+    let newStart = 0;
+    let newEnd = allNew.length;
     while (
       oldStart < oldEnd &&
-      newLines.length > 0 &&
-      oldLines[oldStart] === newLines[0]
+      newStart < newEnd &&
+      oldLines[oldStart] === allNew[newStart]
     ) {
       oldStart += 1;
-      newLines.shift();
+      newStart += 1;
     }
     while (
       oldEnd > oldStart &&
-      newLines.length > 0 &&
-      oldLines[oldEnd - 1] === newLines[newLines.length - 1]
+      newEnd > newStart &&
+      oldLines[oldEnd - 1] === allNew[newEnd - 1]
     ) {
       oldEnd -= 1;
-      newLines.pop();
+      newEnd -= 1;
     }
-    if (oldStart === oldEnd && newLines.length === 0) continue;
-    changes.push({ oldStart, oldEnd, newLines });
+    if (oldStart === oldEnd && newStart === newEnd) continue;
+    changes.push({
+      oldStart,
+      oldEnd,
+      newLines: allNew.slice(newStart, newEnd),
+    });
   }
   return changes;
 }
@@ -151,7 +157,9 @@ export function unifiedDiff(
     out.push(
       `@@ -${String(oldStartNo)},${String(oldCount)} +${String(newStartNo)},${String(newCount)} @@`,
     );
-    out.push(...body);
+    // One line at a time: spreading a hunk of many thousand lines into
+    // push() would exceed the call stack.
+    for (const line of body) out.push(line);
     delta += hunkDelta;
   }
   return out.join("\n") + "\n";

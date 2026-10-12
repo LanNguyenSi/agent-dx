@@ -12,24 +12,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "replaceAll"?}]}`) or one edit (`--file` with `--old`/`--old-file` and
   `--new`/`--new-file`). Every edit is resolved against the current
   content of every file before anything is written; a missing, ambiguous
-  or overlapping edit, a refused path or an unreadable, binary or
-  non-UTF-8 file refuses the whole plan. Several edits of one file are
-  matched against its original content. Matching tries `exact`, then
+  or overlapping edit, a fuzzy match that would change text outside the
+  matched text, a hard-linked or read-only file, a refused path or an
+  unreadable, binary or non-UTF-8 file refuses the whole plan. Several
+  edits of one file are matched against its original content, and files
+  are told apart by device and inode, so every spelling of one file
+  (letter case, Unicode normalisation, symlink, hard link) shares one
+  overlap check and one write. Matching tries `exact`, then
   `trailing_whitespace`, then `unicode` (NFKC, typographic punctuation,
   special spaces), reports the tier per edit and counts ambiguity in that
-  tier. A missing edit's hint names the closest lines with visible
-  whitespace; an ambiguous edit lists its match lines. Files are written
-  through a temporary file and a rename in the same directory, keeping
-  line endings (per line, in a mixed file too), BOM, a missing trailing
-  newline and the file mode; a write error names the files already
-  written. `--dry-run` returns the same envelope with `would_write` and a
-  unified diff preview. Paths outside the repository root are refused
-  unless `--allow-outside`, paths inside `.git` always; a symlink is
-  followed and its target checked. New envelope statuses: `ambiguous`
-  and `overlap` (exit `1`), `would_write` (exit `0`). The matching engine
+  tier; a fuzzy match replaces only the matched text and keeps every
+  other character. A missing edit's hint names the closest lines with
+  visible whitespace; an ambiguous edit lists its match lines; a refused
+  fuzzy match names the characters and the exact text to use. Files are
+  written through a temporary file and a rename in the same directory,
+  keeping line endings (per line, in a mixed file too), BOM, a missing
+  trailing newline and the exact file mode; right before each write the
+  path and bytes are checked again, and a write error names the files
+  already written. `--dry-run` returns the same envelope with
+  `would_write` and a unified diff preview. Paths outside the repository
+  root are refused unless `--allow-outside`; paths inside a git directory
+  always, by a `.git` component in any letter case and by the identity of
+  the repository's git and common directories; a symlink is followed and
+  its target checked. `--break-hard-links` edits a hard-linked file. New
+  envelope statuses: `ambiguous`, `overlap`, `fuzzy_side_effect` and
+  `not_editable` (exit `1`), `would_write` (exit `0`). The matching engine
   is ported from pi-mono's `edit-diff.ts` (MIT); its notice is kept in
   `src/patch/engine.ts`. The shipped skill text gains a section on
   `patch`, so its digest changes.
+- `probe`: a file directly under the containment root whose name starts
+  with two dots (`..foo`) counts as inside the root; only a `..` path
+  component leaves it.
 
 ## [0.12.0] - 2026-10-12
 
