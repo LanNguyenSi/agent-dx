@@ -2178,6 +2178,28 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
     };
   }
 
+  /** The refusal a repository-content lane gives for the in-repo symlink
+   * `given`: it names the link, the file that named it, where the symlink
+   * itself points (its `readlink` text), and the `--link` workaround, and
+   * nothing that depends on what sits outside the repository. */
+  function chainRefusal(
+    lane: Exclude<ChainLane, "--link">,
+    repo: string,
+    given: string,
+  ): string {
+    const namedIn = path.join(
+      repo,
+      lane === "plan" ? "plan.json" : ".agent-primitives.json",
+    );
+    return (
+      `outside the containment root (${repo}): link "${given}" named in ` +
+      `the "link" list of ${namedIn} is a symlink to ` +
+      `${JSON.stringify(fs.readlinkSync(path.join(repo, given)))}, which does not resolve ` +
+      "inside the root, and a link named by repository content must; pass " +
+      "it as --link to treat it as operator input"
+    );
+  }
+
   /** The chain lengths every parity case runs: the short lengths the
    * earlier two- and three-hop cases pinned by hand, the walk's
    * previous cap of 32 (also macOS's own per-lookup limit, and the one
@@ -2199,7 +2221,15 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
   async function chainPair(
     lane: ChainLane,
     length: number,
-  ): Promise<{ existing: ChainAnswer; missing: ChainAnswer; outside: string }> {
+  ): Promise<{
+    existing: ChainAnswer;
+    missing: ChainAnswer;
+    outside: string;
+    existingRepo: string;
+    missingRepo: string;
+    existingGiven: string;
+    missingGiven: string;
+  }> {
     useLockDir();
     const outside = fs.realpathSync(makeTmpDir());
     const existingTarget = path.join(outside, "target");
@@ -2207,24 +2237,38 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
     const missingTarget = path.join(outside, "does-not-exist");
     const existingRepo = initRealpathRepo();
     const missingRepo = initRealpathRepo();
-    const existing = await probeChainLane(
-      lane,
+    const existingGiven = symlinkChain(existingRepo, length, existingTarget);
+    const missingGiven = symlinkChain(missingRepo, length, missingTarget);
+    const existing = await probeChainLane(lane, existingRepo, existingGiven);
+    const missing = await probeChainLane(lane, missingRepo, missingGiven);
+    return {
+      existing,
+      missing,
+      outside,
       existingRepo,
-      symlinkChain(existingRepo, length, existingTarget),
-    );
-    const missing = await probeChainLane(
-      lane,
       missingRepo,
-      symlinkChain(missingRepo, length, missingTarget),
-    );
-    return { existing, missing, outside };
+      existingGiven,
+      missingGiven,
+    };
   }
 
-  describe.each(CHAIN_LANES.filter((lane) => lane !== "--link"))(
+  describe.each(
+    CHAIN_LANES.filter(
+      (lane): lane is Exclude<ChainLane, "--link"> => lane !== "--link",
+    ),
+  )(
     "repository-content lane %s: a symlink chain to an out-of-root target answers file_outside_root whether the far end exists or not",
     (lane) => {
       it.each(CHAIN_LENGTHS)("chain of %i links", async (length) => {
-        const { existing, missing, outside } = await chainPair(lane, length);
+        const {
+          existing,
+          missing,
+          outside,
+          existingRepo,
+          missingRepo,
+          existingGiven,
+          missingGiven,
+        } = await chainPair(lane, length);
 
         // Up to the cap the walk itself decides where the chain ends;
         // one link past it the walk gives up and the link is refused
@@ -2240,9 +2284,29 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
           expect(warning).not.toContain("does not exist");
           expect(warning).not.toContain("is not a directory");
           expect(warning).not.toContain("could not be checked");
-          // The refusal names the in-root value only, never where the
-          // chain ends.
-          expect(warning).not.toContain(outside);
+        }
+        // The refusal names the in-repo link and what that link itself
+        // says (a one-link chain says the absolute far end, the repo's
+        // own text), never where a longer chain physically ends.
+        if (length > 1) {
+          for (const warning of [...existing.warnings, ...missing.warnings]) {
+            expect(warning).not.toContain(outside);
+          }
+        }
+        expect(existing.warnings).toEqual([
+          chainRefusal(lane, existingRepo, existingGiven),
+        ]);
+        expect(missing.warnings).toEqual([
+          chainRefusal(lane, missingRepo, missingGiven),
+        ]);
+        if (length > 1) {
+          // Past one link the text is a property of the repository alone:
+          // the two sides read the same.
+          expect(
+            missing.warnings.map((w) => w.replaceAll(missingRepo, "<r>")),
+          ).toEqual(
+            existing.warnings.map((w) => w.replaceAll(existingRepo, "<r>")),
+          );
         }
       });
     },
@@ -2376,7 +2440,7 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
     expect(refusal).toBeUndefined();
   });
 
-  it("firstLinkSourceRefusal fails closed on a chain the walk cannot resolve: when nothing else refuses it, the link is file_outside_root naming only the in-root value, never skipped to the later checks", () => {
+  it("firstLinkSourceRefusal fails closed on a chain the walk cannot resolve: when nothing else refuses it, the link is file_outside_root naming only the in-repo link and its own readlink text, never skipped to the later checks", () => {
     const root = fs.realpathSync(makeTmpDir());
     const outside = fs.realpathSync(makeTmpDir());
     const target = path.join(outside, "target");
@@ -2403,7 +2467,11 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
 
     expect(refusal).toEqual({
       reason: "file_outside_root",
-      message: `outside the containment root (${root}): ${oracle}`,
+      message:
+        `outside the containment root (${root}): link ${link.namedBy} is a ` +
+        `symlink to ${JSON.stringify(fs.readlinkSync(oracle))}, which does not resolve ` +
+        "inside the root, and a link named by repository content must; " +
+        "pass it as --link to treat it as operator input",
     });
     expect(refusal?.message).not.toContain(outside);
   });
@@ -2547,10 +2615,11 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
   const MARKER_TEST_COMMAND =
     "node fixture.test.js && node -e \"require('fs').writeFileSync('oracle/ESCAPED', '')\"";
 
-  const LANE_SPELLINGS: readonly [ChainLane, Spelling][] = CHAIN_LANES.filter(
-    (lane) => lane !== "--link",
+  type FileLane = Exclude<ChainLane, "--link">;
+  const LANE_SPELLINGS: readonly [FileLane, Spelling][] = CHAIN_LANES.filter(
+    (lane): lane is FileLane => lane !== "--link",
   ).flatMap((lane) =>
-    SPELLINGS.map((spelling): [ChainLane, Spelling] => [lane, spelling]),
+    SPELLINGS.map((spelling): [FileLane, Spelling] => [lane, spelling]),
   );
 
   describe.each(LANE_SPELLINGS)(
@@ -2593,9 +2662,7 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
 
           expect(answer.reason).toBe("file_outside_root");
           expect(answer.linked).toBe(0);
-          expect(answer.warnings).toEqual([
-            `outside the containment root (${repo}): ${path.join(repo, "oracle")}`,
-          ]);
+          expect(answer.warnings).toEqual([chainRefusal(lane, repo, "oracle")]);
           for (const warning of answer.warnings) {
             expect(warning).not.toContain(outside);
             expect(warning).not.toContain("does not exist");

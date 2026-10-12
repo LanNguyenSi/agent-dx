@@ -851,7 +851,12 @@ The four rules, in this order:
    sees any candidate, since a
    path an invocation explicitly asked for and cannot have is a usage
    error rather than something to skip past. Only an auto-discovered
-   candidate is skipped with a warning and the run carried on.
+   candidate is skipped with a warning and the run carried on. The one
+   exception is a `--plan` file that itself lies outside the containment
+   root: it is not content of the repository being probed, so its `link`
+   is judged exactly like `--link` (see "Where a plan file lives" under
+   `--plan` below). The defaults file, stored inside the repository, always
+   sits at the root and has no such exception.
 2. The copy's own root is never linked, and neither is any directory
    that CONTAINS the cwd `--pre`/`-t` will run in or the directory a
    mutant is written into: those have to stay real directories of the
@@ -859,8 +864,9 @@ The four rules, in this order:
    `composer.json` carrying `"bin-dir": "."`, or a defaults file naming
    the directory under test, is exactly this shape.
 3. What git tracks is never shared, asked in two places. A directory
-   named by repository CONTENT -- a composer `config` value, a `--plan`
-   file's `link`, the repository defaults file's `link` -- is linked
+   named by repository CONTENT -- a composer `config` value, the `link` of
+   a `--plan` file stored inside the repository, the `link` of the
+   defaults file stored inside the repository -- is linked
    only when git does not track that DESTINATION; and no candidate but
    an operator's own `--link`, the auto-discovered ones included, is
    linked when git tracks what it POINTS AT, whatever name it sits
@@ -2147,7 +2153,7 @@ exactly which `reason` is which).
 | `test` | `{ command, exitCode, durationMs, timedOut, stdoutTail, stderrTail, logPath, env? }` | once the mutant run has happened | `env` only when at least one `--env NAME=VALUE` was given: the overrides this run applied, redacted (see `env` below); `exitCode` is likewise unchanged by `--pass-regex` -- the field that distinguishes a mutant run that crashed (no output on either stream) from a genuine test failure once the regex is what decides `killed`/`survived` |
 | `env` | `Record<string, string>` | whenever at least one `--env NAME=VALUE` was given | echoed once at the run level, independent of which phase actually ran: present on every status including `baseline_failed` and the other baseline-phase refusals, none of which reach a `test` phase to carry their own `test.env`. Both `env` and `test.env` redact a value whose NAME carries `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`/`CREDENTIALS`, or `KEY` as its own `_`-delimited segment (case-insensitive; the segment must sit at the start or end of the name, or between two underscores), replacing it with the literal string `"<redacted>"` and keeping the name visible: `API_TOKEN`, `TOKEN`, `MY_SECRET_VALUE` redact, but `TOKENIZER_MODEL` and `KEYBOARD` do not (the recognized word is a substring of a longer segment, not a segment of its own). Every other value is echoed verbatim (never the whole merged environment). This redaction covers only these two echoes (`env` and `test.env`); it does not, and cannot, redact a secret the test command itself prints -- that value appears verbatim wherever the command's own output does (`test.stdoutTail`/`test.stderrTail` above, and the exec log `test.logPath` links to), the same as it would running that command directly. Under `--plan`, this same `env` row appears on the plan's own top-level envelope (`plan`'s sibling, not inside it), applied to the shared baseline and every mutant's own run, echoed once the same way. |
 | `expectation` | `"met"` \| `"violated"` | `--plan` only, once the plan has concluded (`status` is `killed` or `survived`) | the plan's own verdict as an expectation aggregate, in the same words `mutation_probe.expectation` uses for one mutant: `"met"` when every mutant's own expectation was met, `"violated"` when at least one was, mirroring `summary.met`/`summary.violated` (see the `--plan` section below). Absent when the plan did not conclude (`status: "inconclusive"`, whatever the `reason`): nothing was aggregated. The single-probe form carries no top-level `expectation` of its own -- its one verdict already sits in `mutation_probe.expectation`, so there is nothing separate to aggregate. |
-| `isolation` | `{ mode, path, linked, linkedNamedBy, syncedTrackedFiles, syncedUntrackedFiles }` | always, for this envelope (see the top-level-usage-error carve-out above, which has no `isolation` at all) | `path` is the worktree directory for `worktree`, `null` for `inplace`; `linked` lists the absolute source-tree paths the copy resolves through a symlink (every link this run created, plus a destination the untracked-file copy had already recreated as the very same symlink, which the link step leaves as synced) -- every entry in it names a source that was checked to exist as a directory when the run started (an auto-discovered candidate is only ever a candidate once it already exists, and `--link`/a `--plan` file's/the defaults file's `link` are refused up front, `reason: "link_source_not_found"`, when their source does not, see "Non-JS repositories" above); that check runs once, so a source removed between it and the link actually being created is not re-checked and can still end up a dangling link -- `linkedNamedBy` is one `{ path, namedBy }` entry per link REPOSITORY CONTENT asked for (a composer `config` value, a `--plan` file's `link`, the defaults file's `link`), carrying the same phrase a refusal of that candidate would have carried, and empty for a copy whose links all came from `--link` or from the auto-discovery walk; every `path` in it appears in `linked` too; `syncedTrackedFiles`/`syncedUntrackedFiles` are counts, `0` for both on a clean tree and for every `inplace` run |
+| `isolation` | `{ mode, path, linked, linkedNamedBy, syncedTrackedFiles, syncedUntrackedFiles }` | always, for this envelope (see the top-level-usage-error carve-out above, which has no `isolation` at all) | `path` is the worktree directory for `worktree`, `null` for `inplace`; `linked` lists the absolute source-tree paths the copy resolves through a symlink (every link this run created, plus a destination the untracked-file copy had already recreated as the very same symlink, which the link step leaves as synced) -- every entry in it names a source that was checked to exist as a directory when the run started (an auto-discovered candidate is only ever a candidate once it already exists, and `--link`/a `--plan` file's/the defaults file's `link` are refused up front, `reason: "link_source_not_found"`, when their source does not, see "Non-JS repositories" above); that check runs once, so a source removed between it and the link actually being created is not re-checked and can still end up a dangling link -- `linkedNamedBy` is one `{ path, namedBy }` entry per link REPOSITORY CONTENT asked for (a composer `config` value, the `link` of a `--plan` file stored inside the repository, the `link` of the defaults file stored inside the repository), carrying the same phrase a refusal of that candidate would have carried, and empty for a copy whose links all came from `--link` or from the auto-discovery walk; every `path` in it appears in `linked` too; `syncedTrackedFiles`/`syncedUntrackedFiles` are counts, `0` for both on a clean tree and for every `inplace` run |
 | `totalDurationMs` | number | always, for this envelope (see the top-level-usage-error carve-out above, and `--plan`, whose own envelope carries no `totalDurationMs` at all) | wall-clock time of the whole `probe()` call, every branch (a normal return, a refusal before any mutant ran, or the emergency-restore path); the same field name and meaning `verify`'s own result carries |
 
 ### Mapping a probe result into an implementer report
@@ -2467,3 +2473,72 @@ never from repository content, issue or PR text, or any other untrusted
 input. Nothing in the plan file is ever read as a command by this
 package's own validation.
 
+### Where a plan file lives
+
+A plan's `link` is judged by where the plan file is stored, because that
+decides whether it is content of the repository being probed.
+
+- A plan stored inside the containment root may have been written by
+  whoever wrote the repository, so its `link` is repository content and
+  keeps the strict rule: every entry must resolve inside the root, and an
+  in-repo symlink pointing outside is refused (`reason:
+  "file_outside_root"`). The repository defaults file
+  (`.agent-primitives.json`), stored inside the repository, is always
+  inside the root and is always treated this way.
+- A plan stored outside the containment root (the usual case for a plan an
+  orchestrator keeps in a run directory beside the repository) is not
+  content of the repository being probed. Naming it with `--plan` is the
+  operator's act, so its
+  `link` gets the same policy as `--link`: an entry that is a gitignored
+  symlink to a dependency directory outside the repository (a linked
+  worktree whose `vendor` or `node_modules` points at the main checkout) is
+  linked, and a reviewer can replay the implementer's plan unchanged, with
+  no extra `--link` flags. Entries are still resolved against the
+  repository root, not the plan's directory, and still must sit inside the
+  root. Use this only for a plan whose content you trust as you would a
+  typed `--link`: the plan also carries the `test` and `pre` shell commands
+  (see the trust paragraph on `test` and `pre` above).
+
+The decision fails closed. A plan counts as outside only when all of this
+holds, and any doubt means inside:
+
+- Its realpath, verified against the very file the bytes were read from, is
+  not under the root. A symlink inside the repository that points at an
+  outside plan therefore does not make that plan outside, nor does a plan
+  stored inside the repository and reached through a symlink kept elsewhere
+  count as outside.
+- No step of the path as it was typed sits under the root: a symlink or a
+  symlinked directory inside the repository that leads to a plan elsewhere
+  counts as a path into the repository, because the person who typed it
+  cannot tell it from repository content.
+- The comparison is by filesystem identity, not by comparing path strings,
+  so a case-variant spelling of the repository (`REPO` for `repo` on a
+  case-insensitive volume) is still inside.
+- A plan that is not a regular file whose realpath names the same file is
+  never outside, and neither is a regular file with more than one hard
+  link (one of its other names may sit inside the repository). For
+  `--plan /dev/stdin` this depends on the platform: on macOS the realpath
+  is `/dev/fd/0`, a different object than the redirected file, so the plan
+  is never outside; on Linux `/dev/stdin` resolves to the redirected
+  file, and where that file lives decides. A pipe is not a regular file
+  and is refused as a plan.
+
+When a plan inside the repository names a symlink that points out of it,
+the refusal names the link, the file that named it, the text the symlink
+itself carries (quoted), and the way out. The old wording, which gives the
+value alone, is used when the link is not spelled under the root through
+real directories only (for example an ancestor of it is a symlink, or the
+entry is spelled outside the root). Repository content cannot widen what
+it may share, but an operator can: pass the directory as `--link` instead,
+or store the plan outside the repository.
+
+```text
+outside the containment root (/work/repo): link "lib" named in the "link"
+list of /work/repo/plan.json is a symlink to "../shared/lib", which does not
+resolve inside the root, and a link named by repository content must; pass
+it as --link to treat it as operator input
+```
+
+The message gives the text the symlink itself carries rather than the path
+it physically resolves to, so that its wording is the same whatever exists
+outside the repository and never tells whether a path there is present.

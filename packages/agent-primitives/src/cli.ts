@@ -1353,12 +1353,15 @@ async function runProbePlanCommand(
       // The plan's own `link` stays SEPARATE from `--link` all the way
       // into `probePlan`, which merges all three sources itself in one
       // place ("defaults file, then plan, then CLI"): the plan's
-      // entries are repository content and the link policy holds them
-      // to a stricter rule than an operator's own `--link`, which a
-      // merge here would erase.
+      // entries are repository content (unless the plan file itself
+      // lies outside the containment root, which `probePlan` decides)
+      // and the link policy holds repository content to a stricter
+      // rule than an operator's own `--link`, which a merge here would
+      // erase.
       links: opts.link ?? [],
       planLinks: plan.link ?? [],
       planPath,
+      planRealPath: parsed.realPath,
       allowOutside: opts.allowOutside ?? false,
       cwd: global.cwd,
       logDir: global.logDir,

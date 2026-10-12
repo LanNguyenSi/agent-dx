@@ -33,6 +33,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   line; see `docs/worktree.md`. The shipped skill gains a short section, so
   its digest changes and `init` reports an existing install as `outdated`
   until it is refreshed with `--force`.
+
+- `probe --plan` now honours the `link` list of a plan file stored outside
+  the containment root, judging it exactly like `--link` (9b6e013f, #468). A
+  plan kept in a run directory beside the repository is not content of the
+  repository being probed, so a reviewer can replay an implementer's plan
+  unchanged in a linked worktree whose dependency directories are gitignored
+  symlinks to the main checkout, with no extra `--link` flags; the plan's
+  `test` and `pre` commands keep the trust rule in `docs/probe.md`. A plan
+  inside the root, and `.agent-primitives.json`, keep the strict rule. The
+  decision is by the plan's verified realpath and by filesystem identity, and
+  fails closed: a plan reached through a symlink that lives inside the
+  repository counts as inside, as does any plan whose location cannot be
+  shown (including a plan file with more than one hard link). The
+  `file_outside_root` refusal for an in-repo symlink pointing out of the
+  root now names the link, the file that named it, the quoted text the
+  symlink itself carries and the workaround (pass it as `--link`); it still
+  never says what exists outside the repository: when the link is not
+  spelled under the root through real directories only (an ancestor is a
+  symlink, or the entry is spelled outside the root) it gives the value
+  alone, so the message does not depend on state outside the repository. `parsePlanFile` returns an
+  optional `realPath` on success. See `docs/probe.md`, "Where a plan file
+  lives".
+
 - Docs: `docs/probe.md` now states the `--env` redaction rule as the code
   applies it (a name redacts only when `TOKEN`, `SECRET`, `PASSWORD`,
   `CREDENTIAL` or `KEY` is its own `_`-delimited segment, so `GHTOKEN` and
