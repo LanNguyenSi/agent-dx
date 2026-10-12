@@ -2194,7 +2194,7 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
     return (
       `outside the containment root (${repo}): link "${given}" named in ` +
       `the "link" list of ${namedIn} is a symlink to ` +
-      `${fs.readlinkSync(path.join(repo, given))}, which does not resolve ` +
+      `${JSON.stringify(fs.readlinkSync(path.join(repo, given)))}, which does not resolve ` +
       "inside the root, and a link named by repository content must; pass " +
       "it as --link to treat it as operator input"
     );
@@ -2469,7 +2469,7 @@ describe("probe(): worktree isolation, an explicit in-repo link to a sibling tar
       reason: "file_outside_root",
       message:
         `outside the containment root (${root}): link ${link.namedBy} is a ` +
-        `symlink to ${fs.readlinkSync(oracle)}, which does not resolve ` +
+        `symlink to ${JSON.stringify(fs.readlinkSync(oracle))}, which does not resolve ` +
         "inside the root, and a link named by repository content must; " +
         "pass it as --link to treat it as operator input",
     });
