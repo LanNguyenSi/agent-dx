@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- The runbook run-base wording is consistent everywhere it is stated: the
+  reviewer prompt, the skill's trust boundary, and the `03-decisions.md`
+  template now say that a bundle in a repository the run does not touch is read
+  at that repository's HEAD at run start (the revision its
+  `<bundle dir> read at <sha>` line records), not at a run base. The
+  `01-plan.md` Runbooks comment and the runbook paragraphs of the skill,
+  `contracts.md`, and `evidence-and-probes.md` are re-wrapped at 80 columns,
+  and the bundle citation into the untouched-repository sentence of
+  `contracts.md` is widened to cover it. (7fe10623)
+
 - The runbook provenance rule now names the right run-base marker in every run
   shape: the unkeyed run-base marker, or the `run-base[<repo>]` marker in
   multi-repo runs, and the "template placeholder" case for an unset marker
