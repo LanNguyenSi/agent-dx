@@ -380,9 +380,56 @@ test('a page of unclosed openers is searched for a closer once, not once per ope
   assert.ok(searches.length <= 2, `the page was searched ${searches.length} times for -->`)
 })
 
+test('a long page of unclosed openers renders within a coarse time bound', () => {
+  // One search over the page answers every opener. A search that starts over
+  // at each opener, through whatever string primitive, grows with the square
+  // of the page's length and takes several times this bound, while one search
+  // stays far below it even on a busy machine.
+  const page = (n) => Array.from({ length: n }, (_, i) => `<!-- opener ${i}\ntext ${i}`).join('\n\n') + '\n'
+  const start = performance.now()
+  render(page(32000))
+  const ms = performance.now() - start
+  assert.ok(ms < 3000, `rendering 32000 unclosed openers took ${Math.round(ms)} ms`)
+})
+
 test('a backtick line indented four columns after a comment line is not a fence', () => {
   // Such a line is a lazy continuation of the comment's paragraph, not a fence
-  // opener, so the comment closes at the "-->" after it and nothing is left.
-  assert.equal(render('<!-- typo\n    ```\n    x -->\n'), '')
-  assert.equal(render('para\n<!-- typo\n    ```\n    x -->\ntail\n'), '<p>para</p>\n<p>tail</p>\n')
+  // opener, so the comment closes at the "-->" after it and its content stays
+  // hidden. The paragraph the lines formed is left empty, as it is when the
+  // same lines stand inside a quote or a list item.
+  assert.equal(render('<!-- typo\n    ```\n    x -->\n'), '<p></p>\n')
+  assert.equal(render('para\n<!-- typo\n    ```\n    x -->\ntail\n'), '<p>para\n\ntail</p>\n')
+})
+
+test('a fence in a nested list item or container after a comment line keeps the opener visible', () => {
+  // The fence lines sit four or more columns past the comment's container, as
+  // the content of a nested list item does, and the first "-->" after each
+  // opener lies inside that fence: the opener stays visible, the list keeps
+  // its items, and the fence keeps its content.
+  renderAsIfNoRule([
+    ['<!-- TODO reword\n\n- Step one\n  - Run this:\n    ```mermaid\n    graph LR\n    A --> B\n    ```\n- Step two\n\nAfter.\n', '<p>&lt;!-- TODO reword</p>\n<ul>\n<li>Step one\n<ul>\n<li>Run this:<div class="language-mermaid vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang">mermaid</span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">graph LR</span></span>\n<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">A --> B</span></span></code></pre>\n</div></li>\n</ul>\n</li>\n<li>Step two</li>\n</ul>\n<p>After.</p>\n'],
+    ['<!-- TODO reword\n\n10. Run this:\n    ```bash\n    yes | head --> out\n    ```\n11. Next\n\nAfter.\n', '<p>&lt;!-- TODO reword</p>\n<ol start="10">\n<li>Run this:<div class="language-bash vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang">bash</span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0">yes</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583"> |</span><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0"> head</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF"> --</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">></span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF"> out</span></span></code></pre>\n</div></li>\n<li>Next</li>\n</ol>\n<p>After.</p>\n'],
+    ['- <!-- TODO reword\n- Step\n  - Sub\n    - Subsub\n      ```\n      a --> b\n      ```\n- Last\n', '<ul>\n<li>&lt;!-- TODO reword</li>\n<li>Step\n<ul>\n<li>Sub\n<ul>\n<li>Subsub<div class="language- vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang"></span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span>a --> b</span></span></code></pre>\n</div></li>\n</ul>\n</li>\n</ul>\n</li>\n<li>Last</li>\n</ul>\n'],
+    ['::: tip\n<!-- typo\n\n- a\n  - b\n    ```\n    x --> y\n    ```\n:::\n', '<div class="tip custom-block"><p class="custom-block-title">TIP</p>\n<p>&lt;!-- typo</p>\n<ul>\n<li>a\n<ul>\n<li>b<div class="language- vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang"></span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span>x --> y</span></span></code></pre>\n</div></li>\n</ul>\n</li>\n</ul>\n</div>\n'],
+  ])
+})
+
+test('a fence closes only at a line of enough of its character, at the container column, followed by spaces or tabs alone', () => {
+  // A line indented four columns past the container does not close a fence
+  // opened two columns in, a closer followed by a no-break space is not a
+  // closer, three backticks do not close a four-backtick fence, and a backtick
+  // line with an info string closes nothing. In each case the first "-->"
+  // after the opener still lies inside the fence, so the opener stays visible.
+  renderAsIfNoRule([
+    ['<!-- typo\n\n  ```\n  code\n    ```\n  x --> y\n  ```\n\ntail\n', '<p>&lt;!-- typo</p>\n<div class="language- vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang"></span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span>code</span></span>\n<span class="line"><span>  ```</span></span>\n<span class="line"><span>x --> y</span></span></code></pre>\n</div><p>tail</p>\n'],
+    ['<!-- typo\n\n```\ncode\n``` \nx --> y\n```\n\ntail\n', '<p>&lt;!-- typo</p>\n<div class="language- vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang"></span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span>code</span></span>\n<span class="line"><span>``` </span></span>\n<span class="line"><span>x --> y</span></span></code></pre>\n</div><p>tail</p>\n'],
+    ['<!-- typo\n\n````md\n```js\ncode\n```\nA --> B\n````\n\ntail\n', '<p>&lt;!-- typo</p>\n<div class="language-md vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang">md</span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">```js</span></span>\n<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">code</span></span>\n<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">```</span></span>\n<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">A --> B</span></span></code></pre>\n</div><p>tail</p>\n'],
+    ['<!-- typo\n\n```\ncode\n```js\nx --> y\n```\n\ntail\n', '<p>&lt;!-- typo</p>\n<div class="language- vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang"></span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span>code</span></span>\n<span class="line"><span>```js</span></span>\n<span class="line"><span>x --> y</span></span></code></pre>\n</div><p>tail</p>\n'],
+  ])
+})
+
+test('a backtick line whose info string holds a backtick opens no fence', () => {
+  // The comment closes at the "-->" on the line after that line, so both
+  // lines are hidden with it.
+  renderAsIfDeleted([['<!-- typo\n``` a`b\nx -->\ntail\n', '<p>tail</p>\n']])
 })
