@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-10-12T10:28:49Z
+timestamp: 2026-10-12T11:35:06Z
 sources:
   - packages/orchestrator-workflow/assets/agents/explorer.md
   - packages/orchestrator-workflow/assets/agents/task-slicer.md
@@ -791,7 +791,7 @@ staged changes before a commit and over the committed range before
 returning, naming every extend-only file from the assignment, and otherwise
 checks by hand: `git status --porcelain` and `git diff --cached --stat
 <base>` before a commit, `git diff --stat <base>..HEAD` before returning. A
-backup file (`*-E`, `*-e`, `*.bak`, `*.orig`, `*~`), an extend-only file that
+backup file (`*-E`, `*-e`, `*-n`, `*-r`, `*-s`, `*.bak`, `*.orig`, `*~`), an extend-only file that
 loses a large share of its lines (the runner's threshold) or a changed test
 file with fewer test cases blocks the commit or the return. The sed advice
 is cross-platform: BSD needs `sed -i ''`, GNU needs `sed -i`, and a bare

@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   were corrected, so its digest changes and `init` reports an existing
   install as `outdated` until it is refreshed with `--force`.
 
+- Help text and package description (tracker task 4134b1e6): the `hygiene` help
+  lists the full backup set it refuses (`*.bak`, `*.orig`, `*~`, `*-e`, `*-E`,
+  `*-n`, `*-r`, `*-s`), the `probe` help lists `--json` among the global
+  options, and the package and program descriptions also name the drift guard,
+  the hygiene guard, snapshot/delta and `init`.
+
 ## [0.10.0] - 2026-10-10
 
 - A reduced envelope now carries a top-level `fullResult` field with the

@@ -17,6 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its paragraph stays outside the window. Test-only (no asset text changes);
   the vetted sentence fixture gains the newly covered sentences. (80d2752a)
 
+- Help text and one prompt line (tracker task 4134b1e6): `init --harness` help now
+  reads "default: detected plus previously installed, else claude" and `apply
+  --harness` ends with ", else claude"; `apply --sync` help and its doc comment
+  name routing among what the operator defaults override; the `setup`
+  description lists routing. The implementer prompt's commit-hygiene sentence
+  lists the full backup set the check refuses (`*-E`, `*-e`, `*-n`, `*-r`,
+  `*-s`, `*.bak`, `*.orig`, `*~`), so an installed implementer file reports as
+  outdated until refreshed.
+
 ## [0.44.0] - 2026-10-12
 
 - The package's runbook-sentence guard now also reads the sentence before a

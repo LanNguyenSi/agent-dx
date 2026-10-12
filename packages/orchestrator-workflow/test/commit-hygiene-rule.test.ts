@@ -16,7 +16,7 @@ const RULE_SENTENCES = [
   "naming every file the assignment says you only extend",
   "before a commit read `git status --porcelain` and `git diff --cached --stat <base>`",
   "before returning `git diff --stat <base>..HEAD`",
-  "backup files (`*-E`, `*-e`, `*.bak`, `*.orig`, `*~`)",
+  "backup files (`*-E`, `*-e`, `*-n`, `*-r`, `*-s`, `*.bak`, `*.orig`, `*~`)",
   "loses a large share of its lines (the runner's threshold)",
   "a changed test file that has fewer test cases than before",
   "A finding blocks the commit or the return",

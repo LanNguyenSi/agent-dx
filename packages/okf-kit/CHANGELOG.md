@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Help and runtime text only: the `citations-resolve` rule description and the
+  `okf-staleness.yml` job summary now name the recognised target extensions
+  (`.ts`, `.js`, `.mjs`, `.md`, `.yml`, `.yaml`, `.json`), the `no-absolute-links`
+  description says only `.md` link targets are checked, and the
+  `--require-anchors-allow` help says the exemption also covers
+  `anchor-required-continuation` through the governing citation's path
+  (tracker task 4134b1e6).
+
 ## [0.18.0] - 2026-10-12
 
 ### Added
