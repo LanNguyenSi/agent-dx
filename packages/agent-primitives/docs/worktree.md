@@ -62,7 +62,26 @@ Per entry, after the worktree exists:
 
 The exclude line lives in the common git directory, not in the new worktree, so it also applies to the main checkout and stays in place after the worktree is removed.
 
-The result lists `links.made` (`path`, `target`, `exclude`: `added`, `already_ignored` or `failed`) and `links.skipped` (`path`, `reason`, `detail`).
+### Link manifest
+
+When at least one link was made, `create` records them in
+`agent-primitives-links.json` inside the new worktree's git administration
+directory (`<common git dir>/worktrees/<id>/`), never in the working tree: a
+JSON object with `version`, `toolVersion` and `links`, each link carrying
+its repository-relative `path`, the absolute `target` it points at, and
+`createdAt`. The file is created exclusively with mode 0600. [`probe`](probe.md)
+run in that worktree reads it and treats each link that still stands as
+recorded like a `--link`, so a plan from the run directory needs no extra
+flag; a link that has been replaced or retargeted since is not trusted. The
+trust rule, the checks on the file and why it lives outside the working tree
+are in probe.md under "Links recorded by `worktree create`".
+
+`git worktree remove` deletes the administration directory, and the manifest
+with it. Nothing is written when no link was made. A failed write is a
+warning and `links.manifest.status: "failed"`; the worktree and its links
+stay, and `probe` then needs `--link` for them.
+
+The result lists `links.made` (`path`, `target`, `exclude`: `added`, `already_ignored` or `failed`), `links.skipped` (`path`, `reason`, `detail`) and `links.manifest` (`status`: `written`, `not_needed` or `failed`, with `path` or `reason`).
 
 ## Result
 

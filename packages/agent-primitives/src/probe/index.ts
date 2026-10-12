@@ -14,6 +14,7 @@ import {
   mergeLinkSources,
   type MergedLink,
 } from "./link-list.js";
+import { manifestLinkGroup, trustedManifestLinks } from "./link-manifest.js";
 import { linkRelPath, linkSourceIsOperatorInput } from "./link-policy.js";
 import {
   DEFAULT_GIT_APPLY_TIMEOUT_MS,
@@ -716,6 +717,8 @@ async function runProbePipeline(
       dryRunLogPaths: derivationLogPaths,
     };
   }
+  const manifestLinks = trustedManifestLinks(root);
+  warnings.push(...manifestLinks.warnings);
   const mergedLinks = mergeLinkSources([
     {
       base: root,
@@ -724,6 +727,7 @@ async function runProbePipeline(
       namedIn: `the "link" list of ${defaultsFile.path}`,
       remedy: `remove the entry from ${defaultsFile.path}`,
     },
+    manifestLinkGroup(root, manifestLinks.values),
     {
       base: cwd,
       basePhrase: "the invocation cwd",
@@ -1524,6 +1528,8 @@ async function runProbePlanPipeline(
       },
       realRoot,
     );
+  const manifestLinks = trustedManifestLinks(root);
+  warnings.push(...manifestLinks.warnings);
   const mergedLinks = mergeLinkSources([
     {
       base: root,
@@ -1543,6 +1549,7 @@ async function runProbePlanPipeline(
           }),
       remedy: `remove the entry from ${opts.planPath ?? "the --plan file"}`,
     },
+    manifestLinkGroup(root, manifestLinks.values),
     {
       base: cwd,
       basePhrase: "the invocation cwd",

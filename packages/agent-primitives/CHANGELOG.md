@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `worktree create` records the links it made in the new worktree's git
+  administration directory (`agent-primitives-links.json`, mode 0600, never
+  in the working tree), and `probe` run in that worktree treats each recorded
+  link like an operator `--link`, with or without `--plan` (0d8ccad5, #469).
+  The manifest is read only for a linked worktree whose git directory is
+  `<common git dir>/worktrees/<id>`, opened without following a symlink and
+  checked on the descriptor (regular file, one hard link, at most 64 KiB,
+  owned by the current user, not writable by group or others), and parsed
+  against an exact schema; the first problem rejects it whole with a warning.
+  An entry counts only while the working tree still holds the symlink `create`
+  made, with the recorded target text; a link replaced or retargeted since
+  (for instance by a checkout) is not trusted and `probe` warns. A manifest
+  file in the working tree is never read. `git worktree remove` deletes the
+  manifest with the administration directory. The envelope gains
+  `links.manifest` (`status` `written`, `not_needed` or `failed`). The
+  shipped skill's worktree section gains a sentence, so its digest changes
+  (`init` reports an existing install as `outdated` until it is refreshed).
+  See `docs/probe.md`, "Links recorded by `worktree create`".
+
 - `hygiene` counts PHPUnit test methods (a `test*` method name, an
   `@test` docblock tag, or a `#[Test]` attribute, short or fully
   qualified; each method once) in `.php` files and treats `*Test.php`

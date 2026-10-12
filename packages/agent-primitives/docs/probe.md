@@ -855,7 +855,9 @@ The four rules, in this order:
    exception is a `--plan` file that itself lies outside the containment
    root: it is not content of the repository being probed, so its `link`
    is judged exactly like `--link` (see "Where a plan file lives" under
-   `--plan` below). The defaults file, stored inside the repository, always
+   `--plan` below). The other is a link `worktree create` recorded for the
+   linked worktree being probed (see "Links recorded by `worktree create`"
+   below). The defaults file, stored inside the repository, always
    sits at the root and has no such exception.
 2. The copy's own root is never linked, and neither is any directory
    that CONTAINS the cwd `--pre`/`-t` will run in or the directory a
@@ -2542,3 +2544,54 @@ it as --link to treat it as operator input
 The message gives the text the symlink itself carries rather than the path
 it physically resolves to, so that its wording is the same whatever exists
 outside the repository and never tells whether a path there is present.
+
+### Links recorded by `worktree create`
+
+A linked worktree made by [`worktree create --link ...`](worktree.md) holds
+gitignored symlinks to the main checkout's dependency directories. `create`
+records them in a manifest, and `probe` run in that worktree treats each
+recorded link exactly like a `--link` for the same path, with no flag and
+whether or not a `--plan` is used (a single probe included). A reviewer
+can therefore replay a plan from a run directory in the worktree an
+implementer worked in.
+
+Repository content must never be able to grant that, so the manifest is not
+a file of the working tree:
+
+- It is `agent-primitives-links.json` in the worktree's git administration
+  directory (`<common git dir>/worktrees/<id>/`, what
+  `git rev-parse --absolute-git-dir` names in the worktree). A checkout
+  writes the working tree only, so a repository cannot ship one. A file of
+  that name (or any other) in the working tree is never read.
+- It is read only when the containment root is the top level of a linked
+  worktree and its git directory has the shape `git worktree add` makes,
+  `<common git dir>/worktrees/<id>`. A plain clone, a submodule and the
+  main checkout have none, whatever files sit in their `.git`. The location
+  is asked of git with `GIT_DIR` and the other repository-selection
+  variables removed.
+- The file is opened once without following a symlink and checked on the
+  open descriptor, as a plan file is: a regular file, one hard link, at
+  most 64 KiB, owned by the current user and not writable by group or
+  others (on platforms with those notions). The schema is exact (`version`
+  `1`, `toolVersion`, `links` of `path`, `target`, `createdAt`, no other
+  key, no duplicate path, at most 256 entries, every `path` in normalized
+  repository-relative form and not under `.git`). The first problem rejects
+  the whole manifest: nothing in it is trusted and the result carries one
+  warning naming the file and the problem. A manifest that is absent is not
+  an error.
+- Each entry is then trusted only while it still stands as `create` made
+  it: every directory between the root and the link is a real directory,
+  the link is a symbolic link whose text is exactly the recorded target,
+  and the target is a directory. A link replaced, removed, retargeted or
+  moved behind a symlinked directory (a branch checkout can overwrite an
+  ignored path) is not trusted, and the result warns `not trusting recorded
+  worktree link <path>` with the reason. Passing the same path as `--link`
+  still works. An entry whose target is a file is skipped without a warning,
+  since only directories can be linked.
+
+A trusted entry joins the merged link list after the defaults file's and the
+plan's and before `--link`. A path that the defaults file or a plan inside
+the repository also names keeps that earlier source's stricter rule, as for
+any path several sources name. `git worktree remove` deletes the
+administration directory and the manifest with it; no separate cleanup
+exists.

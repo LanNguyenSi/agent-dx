@@ -316,7 +316,10 @@ main checkout, and reports the base sha as a ready `run-base[<repo>] = <sha>`
 line. `--link`/`--links-from` symlink shared dependency directories,
 `--setup` and `--smoke` (with `--pass-regex`) prepare and check it. Exit `0`
 ok, `1` setup failed or not ready (the worktree exists), `2` refused with a
-`reason`.
+`reason`. `probe` run in that worktree treats the links `create` made as
+`--link` on its own (they are recorded in the worktree's git directory), so a
+plan kept in the run directory needs no extra `--link`; a link changed since
+is not trusted and `probe` warns.
 
 To clean up after a merge, run `worktree remove <path>` instead of `rm -rf`
 or `git worktree remove`. It refuses a dirty or untracked worktree and

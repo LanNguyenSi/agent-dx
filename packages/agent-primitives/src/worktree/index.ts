@@ -4,6 +4,7 @@ export {
   normalizeLinkEntry,
   type CreateWorktreeOptions,
   type CreateWorktreeResult,
+  type LinkManifestReport,
   type MadeLink,
   type SkippedLink,
   type StepReport,
