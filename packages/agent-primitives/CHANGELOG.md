@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `worktree create` records the links it made in the new worktree's git
+  administration directory (`agent-primitives-links.json`, mode 0600, never
+  in the working tree), and `probe` run in that worktree treats each recorded
+  link like an operator `--link`, with or without `--plan` (0d8ccad5, #469).
+  The manifest is read only for a linked worktree whose git directory is
+  `<common git dir>/worktrees/<id>`, opened without following a symlink and
+  checked on the descriptor (regular file, one hard link, at most 64 KiB;
+  `O_NOFOLLOW` where the platform supports it; owned by the current user and
+  not writable by group or others on POSIX only), and parsed against an exact
+  schema; the first problem rejects it whole with a warning. An entry counts
+  only while the working tree still holds the symlink `create` made, with the
+  recorded target text, and that link still resolves to the directory the
+  operator's link reached at creation (the manifest records the target's
+  `realpath`, device and inode), so a main checkout that swaps the target
+  path for another directory or a symlink does not extend trust to it; a
+  link replaced, retargeted or swapped since is not trusted and `probe`
+  warns. The `realpath` binds the location; the inode additionally catches a
+  directory renamed into place but may not catch one deleted and recreated
+  where inode numbers are reused (ext4, overlayfs), and a branch checkout
+  that fills the existing ignored directory keeps it trusted. A manifest
+  file in the working tree is never read. `create` writes only entries the
+  reader accepts: a link whose path it would refuse, or whose target does
+  not resolve, is made but listed under `links.manifest.unrecorded` (when
+  no link can be recorded, the manifest status is `failed` instead).
+  `git worktree remove` deletes
+  the manifest with the administration directory. The envelope gains
+  `links.manifest` (`status` `written`, `not_needed` or `failed`, and
+  `unrecorded`). The
+  shipped skill's worktree section gains a sentence, so its digest changes
+  (`init` reports an existing install as `outdated` until it is refreshed).
+  See `docs/probe.md`, "Links recorded by `worktree create`".
+
 - `hygiene` counts PHPUnit test methods (a `test*` method name, an
   `@test` docblock tag, or a `#[Test]` attribute, short or fully
   qualified; each method once) in `.php` files and treats `*Test.php`

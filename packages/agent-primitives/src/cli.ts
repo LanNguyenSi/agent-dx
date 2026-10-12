@@ -2114,6 +2114,11 @@ function renderWorktreeCreateText(result: CreateWorktreeResult): string {
   for (const link of result.links.skipped) {
     lines.push(`link skipped: ${link.path}: ${link.reason}: ${link.detail}`);
   }
+  if (result.links.manifest.status !== "not_needed") {
+    lines.push(
+      `link manifest: ${result.links.manifest.status}${result.links.manifest.reason ? ` (${result.links.manifest.reason})` : ""}`,
+    );
+  }
   for (const [name, step] of [
     ["setup", result.setup],
     ["smoke", result.smoke],
@@ -2203,6 +2208,7 @@ worktreeCommand
         passRegex: opts.passRegex,
         fetch: opts.fetch,
         logDir: global.logDir,
+        toolVersion: VERSION,
         signal: shutdownController.signal,
         execFn: trackingExec,
       });
