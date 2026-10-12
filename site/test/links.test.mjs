@@ -177,6 +177,18 @@ test('a file name used as the fallback title and a folder name are escaped', () 
   assert.ok(!items.some((i) => /[<>]|&(?!amp;|lt;|gt;)/.test(i.text)))
 })
 
+test('a file or folder name with entity-like text is shown literally, not decoded', () => {
+  // escapeLiteral, not the page-text rule: a name is not markdown, so `&amp;`
+  // in a name must render as the five characters it is.
+  write(`${AE}/x&amp;y.md`, 'just text\n')
+  write(`${AE}/d&lt;e/page.md`)
+  const s = createSite(root, readTitle)
+  assert.equal(s.titleOf(`${AE}/x&amp;y.md`), 'x&amp;amp;y')
+  const items = s.sidebarFor('agent-engineering-playbook')
+  assert.ok(items.some((i) => i.text === 'x&amp;amp;y'))
+  assert.ok(items.some((i) => i.text === 'd&amp;lt;e'))
+})
+
 test('the sidebar label for a markup title is escaped and keeps the language suffix', () => {
   write(`${AE}/markup.de.md`, '# Install <version> now\n')
   const s = createSite(root, readTitle)
