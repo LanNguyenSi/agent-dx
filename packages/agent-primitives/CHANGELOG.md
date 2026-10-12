@@ -21,7 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `probe`: when `--pre` passes on the baseline and fails on the mutant,
   the `pre_failed` warning now says the mutant does not build and quotes
-  the first lines of the `--pre` output; docs/probe.md lists mutant
+  a few lines of the captured `--pre` output (its last lines when the
+  output was longer than the captured tail); docs/probe.md lists mutant
   patterns that still compile under `noUnusedLocals`/`noUnusedParameters`.
   The verdict stays `inconclusive` (task d4b992e4).
 

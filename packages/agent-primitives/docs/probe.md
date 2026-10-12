@@ -2100,12 +2100,16 @@ whether `--file` was given explicitly or is derived from the patch.
 
   Mutants that do not compile: when `--pre` passed on the baseline and
   fails on the mutant, the warning says the mutant does not build and
-  quotes the first lines of the `--pre` output. Under strict TypeScript
+  quotes a few lines of the captured `--pre` output: its first lines,
+  or, when the output was longer than the captured tail, its last
+  lines, where compilers print the error. Under strict TypeScript
   settings (`noUnusedLocals`, `noUnusedParameters`) a mutant that stops
-  using a variable, parameter or import fails with TS6133 even though it
-  is otherwise valid. Keep every name in use: `cond && false` instead of
-  `false`, `[a, b][1]` instead of `b`, or change a literal the code
-  compares against (`.endsWith(".php")` to `.endsWith(".nophp")`).
+  using a variable, parameter or import fails with TS6133 (TS6192 when
+  every import of a declaration becomes unused, TS6196 for an unused
+  type) even though it is otherwise valid. Keep every name in use:
+  `cond && false` instead of `false`, `[a, b][1]` instead of `b`, or
+  change a literal the code compares against (`.endsWith(".php")` to
+  `.endsWith(".nophp")`).
 
 ## Result shape
 
