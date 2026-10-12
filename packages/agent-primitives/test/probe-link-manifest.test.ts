@@ -662,6 +662,26 @@ describe("a recorded link is trusted only while it leads where the operator saw 
     expect(envelope.status).toBe("killed");
   });
 
+  it.each([
+    ["resolved path", { resolved: "/somewhere/else" }],
+    ["device", { dev: "999999999" }],
+    ["inode", { ino: "999999999" }],
+  ])(
+    "each part of the recorded identity counts on its own: a different %s is not trusted",
+    async (_name, change) => {
+      const f = makeFixture();
+      const wt = await createWorktree(f, "wt-parts", ["lib"]);
+      const entry = recordedEntry(wt, "lib");
+
+      expect(recordedLinkStillHolds(wt, { ...entry, ...change })).toMatchObject(
+        {
+          holds: false,
+          reason: expect.stringContaining("now resolves to"),
+        },
+      );
+    },
+  );
+
   it("control: an untouched link still resolves to the recorded identity", async () => {
     const f = makeFixture();
     const wt = await createWorktree(f, "wt-same", ["lib"]);
