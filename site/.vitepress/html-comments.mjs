@@ -195,7 +195,11 @@ function closesInFence(state, startLine, closeLine) {
       const tokens = []
       reparsing = true
       try {
-        state.md.block.parse(state.src, state.md, {}, tokens)
+        // Block rules read the page path (a snippet line resolves its file from
+        // it) and a reference rule adds the definitions it finds to the env, so
+        // the parse gets a copy that keeps the path and starts without
+        // definitions, which stay with the real parse.
+        state.md.block.parse(state.src, state.md, { ...state.env, references: undefined }, tokens)
       } finally {
         reparsing = false
       }

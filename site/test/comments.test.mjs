@@ -2,28 +2,45 @@
 // that HTML comments are dropped without losing any other content.
 import test, { before } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { createMarkdownRenderer, resolveConfig } from 'vitepress'
 
 let md
-let plain
 before(async () => {
   const cfg = await resolveConfig('.')
   md = await createMarkdownRenderer(cfg.srcDir, cfg.userConfig.markdown, cfg.site.base)
-  // The same renderer with the comment rules switched off, which shows every
-  // opener as text.
-  const markdown = {
-    ...cfg.userConfig.markdown,
-    config: (m) => {
-      cfg.userConfig.markdown.config(m)
-      m.block.ruler.disable('agent-dx-comment-block')
-      m.inline.ruler.disable('agent-dx-comment')
-      m.core.ruler.disable('agent-dx-comment-text')
-    }
-  }
-  plain = await createMarkdownRenderer(cfg.srcDir, markdown, cfg.site.base)
 })
-const render = (src) => md.render(src, { relativePath: 'fixture.md' })
-const renderPlain = (src) => plain.render(src, { relativePath: 'fixture.md' })
+const render = (src, env = {}) => md.render(src, { relativePath: 'fixture.md', ...env })
+// The same renderer with the comment rules switched off, which shows every
+// opener as text. VitePress hands out one renderer per process, so the rules
+// are switched off on that renderer for the duration of the call.
+const RULES = [
+  [(m) => m.block.ruler, 'agent-dx-comment-block'],
+  [(m) => m.inline.ruler, 'agent-dx-comment'],
+  [(m) => m.core.ruler, 'agent-dx-comment-text']
+]
+const renderPlain = (src) => {
+  for (const [ruler, name] of RULES) ruler(md).disable(name)
+  try {
+    return md.render(src, { relativePath: 'fixture.md' })
+  } finally {
+    for (const [ruler, name] of RULES) ruler(md).enable(name)
+  }
+}
+
+test('the rule-free renderer shows what the comment rules hide', () => {
+  // Without this, a renderPlain that is the same renderer as render would make
+  // every comparison between the two pass.
+  for (const src of ['a <!-- hidden --> b\n', '<!-- hidden\n\nstill hidden -->\n\ntail\n']) {
+    assert.match(renderPlain(src), /hidden/, src)
+    assert.ok(!render(src).includes('hidden'), src)
+    assert.notEqual(render(src), renderPlain(src), src)
+  }
+  // The comment rules are back on after a plain render.
+  assert.ok(!render('a <!-- hidden --> b\n').includes('hidden'))
+})
 
 test('top-of-file multi-line comment is removed', () => {
   const out = render('<!-- line one\nline two -->\n\n# Title\n\nbody\n')
@@ -441,10 +458,9 @@ test('a fence closes only at a line of enough of its character, at the container
 })
 
 test('a backtick line in an indented code block before a fence leaves that fence intact', () => {
-  // Read as a fence, the indented line would be closed by the real fence's
-  // opener and the "-->" inside the real fence would close the comment; read
-  // as no fence, the real fence holds the "-->" and the opener stays visible.
-  // Both readings count, so the opener stays visible and the code is kept.
+  // markdown-it reads the indented lines as code, so the unindented fence line
+  // after them opens a real fence that holds the "-->". The opener stays
+  // visible and the code is kept.
   renderAsIfNoRule([
     ['<!-- typo\n\n    ```\n    code\n```\nx --> y\n```\n\ntail\n', '<p>&lt;!-- typo</p>\n<pre><code>```\ncode\n</code></pre>\n<div class="language- vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang"></span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span>x --> y</span></span></code></pre>\n</div><p>tail</p>\n'],
     ['<!-- typo\n\n    ~~~\n    code\n~~~\nx --> y\n~~~\n\ntail\n', '<p>&lt;!-- typo</p>\n<pre><code>~~~\ncode\n</code></pre>\n<div class="language- vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang"></span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span>x --> y</span></span></code></pre>\n</div><p>tail</p>\n'],
@@ -539,6 +555,27 @@ test('the second parse of a page leaves its reference definitions alone', () => 
   const out = render('<!-- a\n\n[x]: https://example.com/x\n\nb -->\n\n```\nf\n```\n\nsee [x]\n')
   assert.ok(!out.includes('<a '), out)
   assert.match(out, /see \[x\]/)
+  // Also when the page already has definitions before the comment.
+  const after = render('[y]: https://example.com/y\n\n<!-- a\n\n[x]: https://example.com/x\n\nb -->\n\n```\nf\n```\n\nsee [x] and [y]\n')
+  assert.ok(!after.includes('example.com/x'), after)
+  assert.match(after, /see \[x\] and <a href="https:\/\/example.com\/y"/)
+})
+
+test('the second parse of a page keeps the page path, so a snippet line next to a comment and a fence renders', () => {
+  // The snippet rule resolves its file from the page path in the env while
+  // the page is parsed, the second parse included.
+  const dir = mkdtempSync(join(tmpdir(), 'comments-snippet-'))
+  try {
+    writeFileSync(join(dir, 'snippet.js'), 'const fromSnippet = 1\n')
+    const env = { path: join(dir, 'page.md'), realPath: join(dir, 'page.md') }
+    const src = '<!-- a\nb -->\n\n```\nf\n```\n\n<<< ./snippet.js\n\ntail\n'
+    const out = render(src, env)
+    assert.match(out, /fromSnippet/)
+    assert.match(out, /tail/)
+    assert.ok(!out.includes('<!--') && !out.includes('&lt;!--'), out)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('the closer is looked up among all the fences of a page', () => {
