@@ -316,4 +316,14 @@ main checkout, and reports the base sha as a ready `run-base[<repo>] = <sha>`
 line. `--link`/`--links-from` symlink shared dependency directories,
 `--setup` and `--smoke` (with `--pass-regex`) prepare and check it. Exit `0`
 ok, `1` setup failed or not ready (the worktree exists), `2` refused with a
-`reason`. See the agent-primitives package's docs/worktree.md.
+`reason`.
+
+To clean up after a merge, run `worktree remove <path>` instead of `rm -rf`
+or `git worktree remove`. It refuses a dirty or untracked worktree and
+commits that are on no remote branch (unless `--force`), unlinks the
+dependency links without following them, keeps the branch unless
+`--delete-branch`, and with `--require-merged` refuses a branch that is not
+merged into the default branch (ancestry, or a merged pull request via `gh`
+for a squash merge). `worktree list [--repo <path> | --root <dir>]` reports
+each worktree's branch, dirty state, ahead/behind, merged state, run
+pointer and links. See the agent-primitives package's docs/worktree.md.

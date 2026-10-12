@@ -59,8 +59,12 @@ import {
 import { checkoutIdentity } from "./snapshot/git.js";
 import {
   createWorktree,
+  listWorktrees,
+  removeWorktree,
   WorktreeRefusal,
   type CreateWorktreeResult,
+  type ListWorktreesResult,
+  type RemoveWorktreeResult,
 } from "./worktree/index.js";
 
 function readVersion(): string {
@@ -2129,7 +2133,7 @@ function renderWorktreeCreateText(result: CreateWorktreeResult): string {
 const worktreeCommand = program
   .command("worktree")
   .description(
-    "Manage linked git worktrees for task branches (subcommand: create)",
+    "Manage linked git worktrees for task branches (subcommands: create, remove, list)",
   );
 
 worktreeCommand
@@ -2259,6 +2263,212 @@ worktreeCommand
       exitCode,
       { format: global.format, maxChars: global.maxChars },
       () => renderWorktreeCreateText(result),
+    );
+  });
+
+interface WorktreeRemoveCliOptions {
+  force?: boolean;
+  deleteBranch?: boolean;
+  requireMerged?: boolean;
+}
+
+function renderWorktreeRemoveText(result: RemoveWorktreeResult): string {
+  const lines: string[] = [
+    `status: ${result.status}`,
+    `worktree: ${result.worktree.path}${result.worktree.branch === undefined ? "" : ` (${result.worktree.branch})`}`,
+    `links removed: ${result.linksRemoved.length > 0 ? result.linksRemoved.join(", ") : "none"}`,
+    `merged: ${result.merged === null ? "not checked" : `${result.merged.merged} (${result.merged.via})`}`,
+    `branch: ${result.branch.deleted ? `deleted (${result.branch.reason})` : result.branch.reason}`,
+    `pruned: ${result.pruned ? "yes" : "no"}`,
+  ];
+  if (result.warnings.length > 0) {
+    lines.push("", "warnings:");
+    for (const warning of result.warnings) lines.push(`  - ${warning}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+worktreeCommand
+  .command("remove")
+  .description(
+    "Remove a linked worktree, refusing a dirty, unpushed or (with --require-merged) unmerged one unless --force; unlinks the dependency links it finds, never follows them, and never deletes the default branch or removes the main checkout",
+  )
+  .argument(
+    "<path>",
+    "the worktree to remove; relative paths resolve against the invocation directory",
+  )
+  .option(
+    "--force",
+    "remove it even when it is dirty, has commits no remote branch has, is locked, or is not merged",
+  )
+  .option(
+    "--delete-branch",
+    "delete the worktree's branch after the worktree is gone (never the default branch or the main checkout's own branch)",
+  )
+  .option(
+    "--require-merged",
+    "refuse unless the branch is merged into origin/<default branch>, by ancestry or by a merged pull request that gh reports for it",
+  )
+  .action(
+    async (
+      pathArg: string,
+      opts: WorktreeRemoveCliOptions,
+      command: Command,
+    ) => {
+      const start = Date.now();
+      const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
+      let result: RemoveWorktreeResult;
+      try {
+        result = await removeWorktree({
+          cwd: global.cwd,
+          path: pathArg,
+          force: opts.force,
+          deleteBranch: opts.deleteBranch,
+          requireMerged: opts.requireMerged,
+        });
+      } catch (err) {
+        if (!(err instanceof WorktreeRefusal)) throw err;
+        const { envelope, exitCode } = buildEnvelope({
+          version: VERSION,
+          command: "worktree remove",
+          status: "usage_error",
+          durationMs: Date.now() - start,
+          cwd: global.cwd,
+          warnings: [],
+          logs: [],
+          extra: {
+            reason: err.reason,
+            message: err.message,
+            ...(err.details !== undefined ? { details: err.details } : {}),
+          },
+          maxChars: global.maxChars,
+          logDir: global.logDir,
+        });
+        emit(
+          envelope,
+          exitCode,
+          { format: global.format, maxChars: global.maxChars },
+          () => `worktree remove refused (${err.reason}): ${err.message}\n`,
+        );
+        return;
+      }
+      const { envelope, exitCode } = buildEnvelope({
+        version: VERSION,
+        command: "worktree remove",
+        status: result.status,
+        durationMs: Date.now() - start,
+        cwd: global.cwd,
+        warnings: result.warnings,
+        logs: [],
+        extra: {
+          worktree: result.worktree,
+          linksRemoved: result.linksRemoved,
+          merged: result.merged,
+          branch: result.branch,
+          pruned: result.pruned,
+        },
+        keepWhole: ["worktree", "branch"],
+        maxChars: global.maxChars,
+        logDir: global.logDir,
+      });
+      emit(
+        envelope,
+        exitCode,
+        { format: global.format, maxChars: global.maxChars },
+        () => renderWorktreeRemoveText(result),
+      );
+    },
+  );
+
+interface WorktreeListCliOptions {
+  repo?: string;
+  root?: string;
+}
+
+function renderWorktreeListText(result: ListWorktreesResult): string {
+  const lines = result.worktrees.map((w) => {
+    const dirty = w.dirty === null ? "?" : w.dirty ? "y" : "n";
+    const ahead = w.ahead === null ? "?" : String(w.ahead);
+    const behind = w.behind === null ? "?" : String(w.behind);
+    return `${w.path}  ${w.branch ?? "detached"}  dirty=${dirty}  ahead=${ahead} behind=${behind}  merged=${w.merged.merged}  run=${w.runPointer ?? "-"}`;
+  });
+  if (result.warnings.length > 0) {
+    lines.push("warnings:");
+    for (const warning of result.warnings) lines.push(`  - ${warning}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+worktreeCommand
+  .command("list")
+  .description(
+    "Report every worktree of a repository (or every work tree below --root): its branch, run pointer, dirty state, commits ahead of and behind the default base, whether it is merged, and its dependency links",
+  )
+  .option(
+    "--repo <path>",
+    "repository to report (default: the invocation directory)",
+  )
+  .option(
+    "--root <dir>",
+    "instead of one repository, report the work trees that are direct children of this directory; exclusive with --repo",
+  )
+  .action(async (opts: WorktreeListCliOptions, command: Command) => {
+    const start = Date.now();
+    const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
+    let result: ListWorktreesResult;
+    try {
+      result = await listWorktrees({
+        cwd: global.cwd,
+        repo: opts.repo,
+        root: opts.root,
+      });
+    } catch (err) {
+      if (!(err instanceof WorktreeRefusal)) throw err;
+      const { envelope, exitCode } = buildEnvelope({
+        version: VERSION,
+        command: "worktree list",
+        status: "usage_error",
+        durationMs: Date.now() - start,
+        cwd: global.cwd,
+        warnings: [],
+        logs: [],
+        extra: {
+          reason: err.reason,
+          message: err.message,
+          ...(err.details !== undefined ? { details: err.details } : {}),
+        },
+        maxChars: global.maxChars,
+        logDir: global.logDir,
+      });
+      emit(
+        envelope,
+        exitCode,
+        { format: global.format, maxChars: global.maxChars },
+        () => `worktree list refused (${err.reason}): ${err.message}\n`,
+      );
+      return;
+    }
+    const { envelope, exitCode } = buildEnvelope({
+      version: VERSION,
+      command: "worktree list",
+      status: result.status,
+      durationMs: Date.now() - start,
+      cwd: global.cwd,
+      warnings: result.warnings,
+      logs: [],
+      extra: {
+        worktrees: result.worktrees,
+      },
+      maxChars: global.maxChars,
+      logDir: global.logDir,
+    });
+    emit(
+      envelope,
+      exitCode,
+      { format: global.format, maxChars: global.maxChars },
+      () => renderWorktreeListText(result),
     );
   });
 
