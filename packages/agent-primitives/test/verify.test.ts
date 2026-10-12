@@ -14,6 +14,7 @@ import {
   phpcsDetector,
   DEFAULT_CHECKS,
   DEFAULT_DETECTORS,
+  deriveCheckName,
 } from "../src/verify/index.js";
 import {
   phpunitZeroTestsVerdict,
@@ -602,6 +603,78 @@ describe("verify: check name validation", () => {
     const { fn, calls } = makeStubExec();
     await verify({ cwd, logDir, checks: ["a.b:c-d_1"], execFn: fn });
     expect(calls).toEqual(["npm run a.b:c-d_1 --silent"]);
+  });
+
+  it("hints the -c/-x form when -c is passed a shell command", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, {});
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    const message = `verify: invalid check name "npm run typecheck" (must match /^[A-Za-z0-9_.:-]+$/); -c takes check names, not commands. To run a command as a check, name it and pass the command with -x: -c npm_run_typecheck -x 'npm_run_typecheck=npm run typecheck'`;
+    await expect(
+      verify({ cwd, logDir, checks: ["npm run typecheck"], execFn: fn }),
+    ).rejects.toThrow(message);
+    let err: unknown;
+    try {
+      await verify({ cwd, logDir, checks: ["npm run typecheck"], execFn: fn });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(UsageError);
+    expect((err as Error).message).toBe(message);
+    expect(calls).toEqual([]);
+  });
+
+  it("POSIX-quotes single quotes in the derived -x command of the hint", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, {});
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    let err: unknown;
+    try {
+      await verify({ cwd, logDir, checks: ["echo 'hi'"], execFn: fn });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(UsageError);
+    const suffix = String.raw`-c echo_hi -x 'echo_hi=echo '\''hi'\'''`;
+    expect((err as Error).message.endsWith(suffix)).toBe(true);
+    expect(calls).toEqual([]);
+  });
+
+  it("keeps the old hintless message for an invalid -x override name", async () => {
+    const cwd = makeTmpDir();
+    writePackageJson(cwd, {});
+    const logDir = makeTmpDir();
+    const { fn, calls } = makeStubExec();
+    let err: unknown;
+    try {
+      await verify({
+        cwd,
+        logDir,
+        checks: [],
+        overrides: { "bad name": "echo hi" },
+        execFn: fn,
+      });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(UsageError);
+    expect((err as Error).message).toBe(
+      `verify: invalid check name "bad name" (must match /^[A-Za-z0-9_.:-]+$/)`,
+    );
+    expect(calls).toEqual([]);
+  });
+
+  it("deriveCheckName derives a valid check name from any raw value", () => {
+    expect(deriveCheckName("npm run typecheck")).toBe("npm_run_typecheck");
+    expect(deriveCheckName("npm run typecheck:test")).toBe(
+      "npm_run_typecheck:test",
+    );
+    expect(deriveCheckName("echo 'hi'")).toBe("echo_hi");
+    expect(deriveCheckName(";;")).toBe("check");
+    expect(deriveCheckName("--fix all")).toBe("fix_all");
+    expect(deriveCheckName(".hidden")).toBe("hidden");
   });
 });
 

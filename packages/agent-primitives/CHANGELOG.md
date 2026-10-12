@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `verify`: a `-c` value that is not a valid check name (for example a
+  shell command such as `npm run typecheck`) now gets a hint in its usage
+  error: the `-c <name> -x '<name>=<command>'` form with a name derived
+  from the value. An invalid `-x` name keeps the old message (task
+  fd90eaad).
+
 ## [0.11.0] - 2026-10-12
 
 - `worktree create` records the links it made in the new worktree's git
