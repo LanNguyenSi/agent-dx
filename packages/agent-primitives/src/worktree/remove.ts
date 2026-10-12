@@ -116,8 +116,14 @@ export async function removeWorktree(
     );
   }
 
+  // A prunable entry whose directory is already gone has nothing inside to
+  // lose, so it is not a nested worktree here; a prunable entry whose
+  // directory is still there keeps refusing.
   const nested = repo.worktrees.find(
-    (w) => w !== entry && isWithin(target, w.path),
+    (w) =>
+      w !== entry &&
+      !(w.prunable && !fs.existsSync(w.path)) &&
+      isWithin(target, w.path),
   );
   if (nested !== undefined && o.force !== true) {
     throw new WorktreeRefusal(

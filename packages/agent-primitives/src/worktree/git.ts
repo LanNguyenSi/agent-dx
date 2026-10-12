@@ -403,7 +403,8 @@ export function runGh(
 /**
  * Merged into `baseRef`? Ancestry first (`git merge-base --is-ancestor`);
  * when that says no and the worktree has a branch, asks `gh` for a merged
- * pull request whose head is the branch, which also catches a squash merge.
+ * pull request whose head is the branch and whose base is the branch the
+ * verdict is about, which also catches a squash merge.
  */
 export function mergeVerdict(
   cwd: string,
@@ -438,6 +439,10 @@ export function mergeVerdict(
       reason: "cannot resolve the worktree HEAD",
     };
   }
+  // The branch the pull request must have been merged into: a pull request
+  // merged into another branch (a stacked PR into its parent, say) says
+  // nothing about this base.
+  const baseBranch = baseRef.replace(/^origin\//, "");
   const gh = runGh(cwd, [
     "pr",
     "list",
@@ -445,8 +450,10 @@ export function mergeVerdict(
     "merged",
     "--head",
     branch,
+    "--base",
+    baseBranch,
     "--json",
-    "number,headRefOid",
+    "number,headRefOid,baseRefName",
     "--limit",
     "20",
   ]);
@@ -478,19 +485,22 @@ export function mergeVerdict(
   if (Array.isArray(prs)) {
     for (const pr of prs) {
       if (typeof pr !== "object" || pr === null) continue;
-      const { number, headRefOid } = pr as Record<string, unknown>;
+      const { number, headRefOid, baseRefName } = pr as Record<string, unknown>;
       if (typeof headRefOid !== "string" || headRefOid !== headSha) continue;
+      if (typeof baseRefName !== "string" || baseRefName !== baseBranch) {
+        continue;
+      }
       return {
         merged: "yes",
         via: "gh",
-        reason: `gh lists merged pull request #${String(number)} for ${branch} at ${headSha}`,
+        reason: `gh lists merged pull request #${String(number)} for ${branch} into ${baseBranch} at ${headSha}`,
       };
     }
     if (prs.length > 0) {
       return {
         merged: "no",
         via: "gh",
-        reason: `gh lists merged pull requests for ${branch}, but none at ${headSha} (the branch has commits after the merge, or the name was reused)`,
+        reason: `gh lists merged pull requests for ${branch}, but none into ${baseBranch} at ${headSha} (the branch has commits after the merge, was merged into another branch, or the name was reused)`,
       };
     }
   }

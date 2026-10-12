@@ -120,7 +120,7 @@ One positional `<path>`: the worktree to remove. A relative value resolves again
 | --- | --- |
 | `--force` | Remove the worktree even when it is dirty, has commits no remote branch has, is locked, or (with `--require-merged`) is not merged or its merge state cannot be told. The three structural refusals stand regardless: `not_a_worktree`, `remove_main_checkout` and `default_branch_delete`. |
 | `--delete-branch` | Delete the worktree's branch after the worktree is gone. |
-| `--require-merged` | Refuse unless the branch is merged into `origin/<default branch>`, by ancestry or by a merged pull request that `gh` reports for it. |
+| `--require-merged` | Refuse unless the branch is merged into `origin/<default branch>`, by ancestry or by a merged pull request that `gh` reports as merged into the default branch at the worktree's HEAD commit. |
 
 ### What it does
 
@@ -131,7 +131,7 @@ In this order, with every check that can refuse before the first change:
 3. Nested worktree check: refuses when another registered worktree of the repository lies inside `<path>`, however its path is spelled, since `git worktree remove` would take that checkout and its uncommitted work with it.
 4. Submodule check: refuses a work tree that has a `.gitmodules` file without `--force`, which is what git itself cannot remove either. The check runs before the links are unlinked, so nothing is half-changed.
 5. Dirty check: `git status --porcelain --untracked-files=all`. Ignored paths are invisible here, which is what lets a worktree with its `.ai/run` pointer and its dependency links be removed without `--force`. A status that fails (non-zero, or a git that could not start) is the `status_unknown` refusal, never a clean reading.
-6. Merge check (only with `--require-merged` or `--delete-branch`): `merge-base --is-ancestor HEAD origin/<default>`, and otherwise `gh pr list --state merged --head <branch> --json number,headRefOid`, where a merged pull request counts only when its `headRefOid` is the worktree's own commit.
+6. Merge check (only with `--require-merged` or `--delete-branch`): `merge-base --is-ancestor HEAD origin/<default>`, and otherwise `gh pr list --state merged --head <branch> --base <default branch> --json number,headRefOid,baseRefName`, where a merged pull request counts only when its `headRefOid` is the worktree's own commit and its `baseRefName` is the default branch.
 7. Unpushed check: `git rev-list HEAD --not --remotes` counts the commits no remote branch has, and a rev-list that fails is the `unpushed_state_unknown` refusal, never zero. A branch the merge check called merged is not refused here: its commits are named in `warnings` and treated as safe, so a squash-merged branch whose remote branch was deleted and pruned is removable with `--require-merged` and without `--force`.
 8. Branch guard: refuses to delete the branch the default base names, or the branch the main checkout is on.
 9. Unlinks the ignored symlinks in the work tree (the dependency links `create` made), each with `unlink`, which removes the link itself and never follows it, so the shared directory in the main checkout is left exactly as it was.
@@ -163,7 +163,7 @@ The usual [envelope](output-shape.md) with `command: "worktree remove"`, plus:
 | `not_a_git_repo` | `<path>` is not inside a git working tree. |
 | `remove_main_checkout` | `<path>` is the main checkout. This command never removes it. |
 | `worktree_locked` | The entry is locked (`git worktree unlock` it, or pass `--force`). |
-| `nested_worktree` | Another registered worktree of the repository lies inside `<path>`; `details.worktree` names it. Remove that one first. |
+| `nested_worktree` | Another registered worktree of the repository lies inside `<path>`; `details.worktree` names it. Remove that one first. A stale entry whose directory is gone (a prunable one) does not count, since it has nothing inside to lose; a prunable entry whose directory is still there does. |
 | `has_submodules` | The work tree has a `.gitmodules` file, which `git worktree remove` cannot handle without `--force`. |
 | `worktree_dirty` | Uncommitted or untracked changes; `details.entries` lists the first 20 status lines. |
 | `status_unknown` | `git status` failed, so the dirty state could not be read; the message carries git's error. A failed check is never read as clean. |
@@ -176,7 +176,7 @@ The usual [envelope](output-shape.md) with `command: "worktree remove"`, plus:
 
 ### The merged rule
 
-Ancestry decides first: `HEAD` is an ancestor of `origin/<default branch>`, which covers a merge and a fast forward. A squash or a rebase merge leaves no ancestry, so `gh pr list --state merged --head <branch> --json number,headRefOid` is asked next, and one merged pull request whose `headRefOid` is the worktree's own commit is a `yes` with `via: "gh"`. The commit has to match: a branch that gained commits after the merge, or whose name was reused for new work, is not covered by the pull request that merged an older head of it, and `details.merged.reason` says so. `gh` is only consulted when it is installed and only when the answer is needed; when it is absent, or fails, or answers something that is not JSON, the verdict is `unknown`, and `--require-merged` reports `merge_state_unknown` rather than removing the worktree on a guess. `--force` is what overrides both a `no` and an `unknown`.
+Ancestry decides first: `HEAD` is an ancestor of `origin/<default branch>`, which covers a merge and a fast forward. A squash or a rebase merge leaves no ancestry, so `gh pr list --state merged --head <branch> --base <default branch> --json number,headRefOid,baseRefName` is asked next, and one merged pull request is a `yes` with `via: "gh"` only when it was merged into the default branch (`--base <default branch>`) at the worktree's HEAD commit, that is, its `headRefOid` is that commit and its `baseRefName` is the default branch. The commit has to match: a branch that gained commits after the merge, or whose name was reused for new work, is not covered by the pull request that merged an older head of it. The base has to match too: a pull request merged into another branch (a stacked pull request merged into its parent branch, say) says nothing about this base. `details.merged.reason` says so in both cases. `gh` is only consulted when it is installed and only when the answer is needed; when it is absent, or fails, or answers something that is not JSON, the verdict is `unknown`, and `--require-merged` reports `merge_state_unknown` rather than removing the worktree on a guess. `--force` is what overrides both a `no` and an `unknown`.
 
 A branch that is merged into the base, by ancestry or by a merged pull request at the same commit, holds no work the base does not have, so it is not counted as unpushed even when its own remote branch was deleted and pruned; those commits are named in `warnings` instead of stopping the removal.
 

@@ -348,6 +348,67 @@ describe("worktree remove: what it refuses", () => {
     expect(listedWorktrees(f.repo)).toContain(outer);
   });
 
+  it("refuses --delete-branch over unpushed commits when no gh is installed", async () => {
+    const f = makeFixture();
+    const wt = addWorktree(f, "savelocal", path.join(f.base, "wt-savelocal"));
+    commitHere(wt, "keep.txt", "never pushed");
+
+    const r = await cli(f.work, ["remove", wt, "--delete-branch"]);
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.reason).toBe("unpushed_commits");
+    expect(fs.existsSync(wt)).toBe(true);
+    expect(git(f.repo, ["branch", "--list", "savelocal"]).trim()).not.toBe("");
+  });
+
+  it("refuses --delete-branch over unpushed commits when gh knows no pull request", async () => {
+    const f = makeFixture();
+    const wt = addWorktree(f, "savelocal2", path.join(f.base, "wt-savelocal2"));
+    commitHere(wt, "keep.txt", "never pushed");
+
+    const r = await cli(f.work, ["remove", wt, "--delete-branch"], {
+      PATH: ghStub(f, "[]"),
+    });
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.reason).toBe("unpushed_commits");
+    expect(fs.existsSync(wt)).toBe(true);
+    expect(git(f.repo, ["branch", "--list", "savelocal2"]).trim()).not.toBe("");
+  });
+
+  it("does not count a stale entry whose directory is gone as a nested worktree", async () => {
+    const f = makeFixture();
+    const host = addWorktree(f, "host", path.join(f.base, "wt-host"));
+    git(host, ["push", "-q", "origin", "host"]);
+    const exclude = path.join(
+      absoluteGitPath(f.repo, "--git-common-dir"),
+      "info",
+      "exclude",
+    );
+    fs.mkdirSync(path.dirname(exclude), { recursive: true });
+    fs.appendFileSync(exclude, "/build/\n");
+    const gone = path.join(host, "build", "gone");
+    git(f.repo, [
+      "worktree",
+      "add",
+      "--no-track",
+      "-b",
+      "gone",
+      gone,
+      "origin/main",
+    ]);
+    // The directory is deleted behind git's back, so the entry is listed as
+    // prunable: it has nothing left inside the host worktree to lose.
+    fs.rmSync(gone, { recursive: true, force: true });
+    expect(git(f.repo, ["worktree", "list", "--porcelain"])).toContain(
+      "prunable",
+    );
+
+    const r = await cli(f.work, ["remove", host]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.status).toBe("ok");
+    expect(fs.existsSync(host)).toBe(false);
+    expect(listedWorktrees(f.repo)).not.toContain(host);
+  });
+
   it("refuses a locked worktree, and removes it while locked with --force", async () => {
     const f = makeFixture();
     const wt = addWorktree(f, "locked", path.join(f.base, "wt-locked"));
@@ -516,13 +577,16 @@ describe("worktree remove --require-merged", () => {
     git(sq, ["push", "-q", "origin", "squashed"]);
     const sqSha = git(sq, ["rev-parse", "HEAD"]).trim();
     const byGh = await cli(f.work, ["remove", sq, "--require-merged"], {
-      PATH: ghStub(f, `[{"number":7,"headRefOid":"${sqSha}"}]`),
+      PATH: ghStub(
+        f,
+        `[{"number":7,"headRefOid":"${sqSha}","baseRefName":"main"}]`,
+      ),
     });
     expect(byGh.code, byGh.stdout + byGh.stderr).toBe(0);
     expect(byGh.json.merged).toMatchObject({
       merged: "yes",
       via: "gh",
-      reason: `gh lists merged pull request #7 for squashed at ${sqSha}`,
+      reason: `gh lists merged pull request #7 for squashed into main at ${sqSha}`,
     });
     expect(listedWorktrees(f.repo)).not.toContain(sq);
 
@@ -577,13 +641,13 @@ describe("worktree remove --require-merged", () => {
     const r = await cli(f.work, ["remove", wt, "--require-merged"], {
       PATH: ghStub(
         f,
-        '[{"number":7,"headRefOid":"1111111111111111111111111111111111111111"}]',
+        '[{"number":7,"headRefOid":"1111111111111111111111111111111111111111","baseRefName":"main"}]',
       ),
     });
     expect(r.code, r.stdout + r.stderr).toBe(2);
     expect(r.json.reason).toBe("branch_not_merged");
     expect(r.json.details.merged).toMatchObject({ merged: "no", via: "gh" });
-    expect(r.json.details.merged.reason).toContain("none at");
+    expect(r.json.details.merged.reason).toContain("none into main at");
     expect(listedWorktrees(f.repo)).toContain(wt);
   });
 
@@ -608,7 +672,10 @@ describe("worktree remove --require-merged", () => {
     ).toBeUndefined();
 
     const r = await cli(f.work, ["remove", wt, "--require-merged"], {
-      PATH: ghStub(f, `[{"number":9,"headRefOid":"${headSha}"}]`),
+      PATH: ghStub(
+        f,
+        `[{"number":9,"headRefOid":"${headSha}","baseRefName":"main"}]`,
+      ),
     });
     expect(r.code, r.stdout + r.stderr).toBe(0);
     expect(r.json.status).toBe("ok");
@@ -619,6 +686,52 @@ describe("worktree remove --require-merged", () => {
       ),
     ).toBe(true);
     expect(fs.existsSync(wt)).toBe(false);
+    expect(listedWorktrees(f.repo)).not.toContain(wt);
+  });
+
+  it("refuses a pull request merged into another branch (a stacked PR)", async () => {
+    const f = makeFixture();
+    const wt = addWorktree(f, "stacked", path.join(f.base, "wt-stacked"));
+    commitHere(wt, "st.txt", "stacked work");
+    git(wt, ["push", "-q", "origin", "stacked"]);
+    const headSha = git(wt, ["rev-parse", "HEAD"]).trim();
+    // The commit is on no remote branch now, and gh reports a merged pull
+    // request at it, but that pull request went into `feature-a`, not into
+    // the default branch the verdict is about.
+    git(f.repo, ["push", "-q", "origin", "--delete", "stacked"]);
+    git(f.repo, ["fetch", "-q", "--prune", "origin"]);
+
+    const r = await cli(f.work, ["remove", wt, "--require-merged"], {
+      PATH: ghStub(
+        f,
+        `[{"number":9,"headRefOid":"${headSha}","baseRefName":"feature-a"}]`,
+      ),
+    });
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.reason).toBe("branch_not_merged");
+    expect(r.json.details.merged).toMatchObject({ merged: "no", via: "gh" });
+    expect(r.json.details.merged.reason).toContain("none into main");
+    expect(fs.existsSync(wt)).toBe(true);
+    expect(listedWorktrees(f.repo)).toContain(wt);
+  });
+
+  it("takes the one merged pull request that matches the commit from several", async () => {
+    const f = makeFixture();
+    const wt = addWorktree(f, "several", path.join(f.base, "wt-several"));
+    commitHere(wt, "s.txt", "several work");
+    git(wt, ["push", "-q", "origin", "several"]);
+    const headSha = git(wt, ["rev-parse", "HEAD"]).trim();
+
+    const r = await cli(f.work, ["remove", wt, "--require-merged"], {
+      PATH: ghStub(
+        f,
+        `[{"number":3,"headRefOid":"1111111111111111111111111111111111111111","baseRefName":"main"},{"number":4,"headRefOid":"${headSha}","baseRefName":"main"}]`,
+      ),
+    });
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.status).toBe("ok");
+    expect(r.json.merged).toMatchObject({ merged: "yes", via: "gh" });
+    expect(r.json.merged.reason).toContain("#4");
     expect(listedWorktrees(f.repo)).not.toContain(wt);
   });
 });
