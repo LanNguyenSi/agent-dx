@@ -49,9 +49,11 @@ For authors: raw HTML in the playbooks renders as literal text, so a
 placeholder such as `<version>` shows as written, and HTML comments
 (`<!-- ... -->`) are hidden except inside code. A line that starts with `<!--`
 hides everything up to the first `-->` after it in the same quote or `:::`
-container, blank lines and list items included, and lines that hold nothing
-but comments read as blank lines; an opener with no `-->` after it stays
-visible.
+container, blank lines and list items included, but it never cuts a fenced
+code block: when that `-->` sits inside a fence opened after the comment's
+first line, the opener stays visible as text, while a fence that opens and
+closes inside the comment is hidden with it. Lines that hold nothing but
+comments read as blank lines; an opener with no `-->` after it stays visible.
 
 ```bash
 cd site && npm ci && npm run build   # output in site/.vitepress/dist
