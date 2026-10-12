@@ -72,10 +72,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `unpushed_state_unknown` rather than zero unpushed commits, a worktree that
   contains another worktree (`nested_worktree`) or has a `.gitmodules` file
   (`has_submodules`) is refused before anything is unlinked or removed, and
-  the `gh` lookup counts a merged pull request only when its `headRefOid` is
-  the worktree's own commit, which is also what lets a merged branch whose
-  remote branch is gone be removed without `--force`, its commits reported in
-  `warnings` rather than counted as unpushed. `list` reports per worktree its
+  the `gh` lookup counts a merged pull request only at the worktree's HEAD
+  (its `headRefOid` is the worktree's own commit) and with the default branch
+  as its base (`--base <default branch>`, and its `baseRefName` is that
+  branch), which is also what lets a merged branch whose remote branch is
+  gone be removed without `--force`, its commits reported in `warnings`
+  rather than counted as unpushed. `list` reports per worktree its
   branch, `.ai/run` pointer, dirty state, commits ahead of and behind the
   default base, merge verdict and dependency links, across one repository or
   across every work tree below `--root`; see `docs/worktree.md`.

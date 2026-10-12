@@ -178,15 +178,37 @@ async function cli(
  * CLI so that `gh` is it, followed by the fixed bin dir. `json` is what the
  * stub prints on stdout; `null` stands for an installed `gh` that fails.
  * Without this, `gh` is absent: the spawned CLI sees only git, node, npm
- * and sh.
+ * and sh. With `recordArgs`, every call also appends its arguments as one
+ * line to the file `ghArgs` reads, so a test can pin what was asked.
  */
-function ghStub(f: Fixture, json: string | null): string {
+function ghStub(
+  f: Fixture,
+  json: string | null,
+  opts: { recordArgs?: boolean } = {},
+): string {
   const dir = path.join(f.base, "ghbin");
   fs.mkdirSync(dir, { recursive: true });
+  const record =
+    opts.recordArgs === true ? `echo "$@" >> '${ghArgsFile(f)}'\n` : "";
   const script =
-    json === null ? "#!/bin/sh\nexit 1\n" : `#!/bin/sh\necho '${json}'\n`;
+    json === null
+      ? `#!/bin/sh\n${record}exit 1\n`
+      : `#!/bin/sh\n${record}echo '${json}'\n`;
   fs.writeFileSync(path.join(dir, "gh"), script, { mode: 0o755 });
   return `${dir}${path.delimiter}${FIXED_BIN_DIR}`;
+}
+
+function ghArgsFile(f: Fixture): string {
+  return path.join(f.base, "gh-args.log");
+}
+
+/** The argument lines a `ghStub` with `recordArgs` wrote, one per call. */
+function ghArgs(f: Fixture): string[] {
+  if (!fs.existsSync(ghArgsFile(f))) return [];
+  return fs
+    .readFileSync(ghArgsFile(f), "utf8")
+    .split("\n")
+    .filter((line) => line !== "");
 }
 
 function listedWorktrees(repo: string): string[] {
@@ -407,6 +429,45 @@ describe("worktree remove: what it refuses", () => {
     expect(r.json.status).toBe("ok");
     expect(fs.existsSync(host)).toBe(false);
     expect(listedWorktrees(f.repo)).not.toContain(host);
+  });
+
+  it("still refuses a prunable nested entry whose directory is still there", async () => {
+    const f = makeFixture();
+    const host = addWorktree(f, "host", path.join(f.base, "wt-host"));
+    git(host, ["push", "-q", "origin", "host"]);
+    const exclude = path.join(
+      absoluteGitPath(f.repo, "--git-common-dir"),
+      "info",
+      "exclude",
+    );
+    fs.mkdirSync(path.dirname(exclude), { recursive: true });
+    fs.appendFileSync(exclude, "/build/\n");
+    const kept = path.join(host, "build", "kept");
+    git(f.repo, [
+      "worktree",
+      "add",
+      "--no-track",
+      "-b",
+      "kept",
+      kept,
+      "origin/main",
+    ]);
+    // Only the `.git` file goes, so git lists the entry as prunable while
+    // its directory, and the work in it, is still inside the host worktree.
+    fs.rmSync(path.join(kept, ".git"));
+    write(kept, "work.txt", "work left in the nested directory\n");
+    expect(fs.existsSync(kept)).toBe(true);
+    expect(git(f.repo, ["worktree", "list", "--porcelain"])).toContain(
+      "prunable",
+    );
+
+    const r = await cli(f.work, ["remove", host]);
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.status).toBe("usage_error");
+    expect(r.json.reason).toBe("nested_worktree");
+    expect(r.json.details.worktree).toBe(kept);
+    expect(fs.existsSync(path.join(kept, "work.txt"))).toBe(true);
+    expect(listedWorktrees(f.repo)).toContain(host);
   });
 
   it("refuses a locked worktree, and removes it while locked with --force", async () => {
@@ -705,12 +766,20 @@ describe("worktree remove --require-merged", () => {
       PATH: ghStub(
         f,
         `[{"number":9,"headRefOid":"${headSha}","baseRefName":"feature-a"}]`,
+        { recordArgs: true },
       ),
     });
     expect(r.code, r.stdout + r.stderr).toBe(2);
     expect(r.json.reason).toBe("branch_not_merged");
     expect(r.json.details.merged).toMatchObject({ merged: "no", via: "gh" });
     expect(r.json.details.merged.reason).toContain("none into main");
+    // The stub ignores its arguments, so the base filter gh was asked for is
+    // pinned here: the lookup asks only for pull requests into the default
+    // branch, with the fields the verdict reads.
+    const calls = ghArgs(f);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("--base main");
+    expect(calls[0]).toContain("number,headRefOid,baseRefName");
     expect(fs.existsSync(wt)).toBe(true);
     expect(listedWorktrees(f.repo)).toContain(wt);
   });

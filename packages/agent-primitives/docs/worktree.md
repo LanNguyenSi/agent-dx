@@ -128,7 +128,7 @@ In this order, with every check that can refuse before the first change:
 
 1. Resolves `<path>` and finds it among `git worktree list` entries.
 2. Refuses the main checkout, and a locked entry without `--force`.
-3. Nested worktree check: refuses when another registered worktree of the repository lies inside `<path>`, however its path is spelled, since `git worktree remove` would take that checkout and its uncommitted work with it.
+3. Nested worktree check: refuses when another registered worktree of the repository lies inside `<path>`, however its path is spelled, since `git worktree remove` would take that checkout and its uncommitted work with it. A prunable entry whose directory is gone does not count, since it has nothing inside to lose; a prunable entry whose directory is still there does.
 4. Submodule check: refuses a work tree that has a `.gitmodules` file without `--force`, which is what git itself cannot remove either. The check runs before the links are unlinked, so nothing is half-changed.
 5. Dirty check: `git status --porcelain --untracked-files=all`. Ignored paths are invisible here, which is what lets a worktree with its `.ai/run` pointer and its dependency links be removed without `--force`. A status that fails (non-zero, or a git that could not start) is the `status_unknown` refusal, never a clean reading.
 6. Merge check (only with `--require-merged` or `--delete-branch`): `merge-base --is-ancestor HEAD origin/<default>`, and otherwise `gh pr list --state merged --head <branch> --base <default branch> --json number,headRefOid,baseRefName`, where a merged pull request counts only when its `headRefOid` is the worktree's own commit and its `baseRefName` is the default branch.
