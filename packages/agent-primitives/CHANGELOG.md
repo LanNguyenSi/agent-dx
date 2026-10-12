@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-12
+
 - `worktree create` records the links it made in the new worktree's git
   administration directory (`agent-primitives-links.json`, mode 0600, never
   in the working tree), and `probe` run in that worktree treats each recorded
