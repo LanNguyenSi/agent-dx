@@ -7,11 +7,12 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createMarkdownRenderer, disposeMdItInstance } from 'vitepress'
-import { createSite, createTitleReader, githubBase, markdownBase } from '../.vitepress/site-helpers.mjs'
+import { createSite, createTitleReader, escapeLiteral, escapeText, githubBase, markdownBase } from '../.vitepress/site-helpers.mjs'
 
 let root
 let site
 let readTitle
+let renderer
 const AE = 'packages/agent-engineering-playbook'
 const write = (rel, text = '# T\n') => {
   fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true })
@@ -32,7 +33,8 @@ before(async () => {
   write('docs/note.md')
   // The renderer the site builds its titles with: VitePress's, from the site's
   // own markdown options.
-  readTitle = createTitleReader(await createMarkdownRenderer(root, markdownBase, '/agent-dx/'))
+  renderer = await createMarkdownRenderer(root, markdownBase, '/agent-dx/')
+  readTitle = createTitleReader(renderer)
   site = createSite(root, readTitle)
 })
 after(() => {
@@ -108,7 +110,23 @@ const titleCases = {
   'emoji in a heading': ['# Hi :tada:\n', 'Hi \u{1F389}'],
   'leading byte order mark': ['\uFEFF# Title\n', 'Title'],
   'placeholder line before an ATX heading is no title': ['<one focused task>\n# Goal\n', 'Goal'],
-  'placeholder as setext heading text': ['<Project name>\n===\n', '<Project name>'],
+  'placeholder as setext heading text': ['<Project name>\n===\n', '&lt;Project name&gt;'],
+  // The reader's output ends up in v-html sinks (sidebar, previous/next
+  // footer), so it is HTML-escaped text.
+  'a placeholder tag is escaped text': ['# Install <version> now\n', 'Install &lt;version&gt; now'],
+  'an event-handler tag is escaped text': ['# Hi <img src=x onerror=alert(1)> there\n', 'Hi &lt;img src=x onerror=alert(1)&gt; there'],
+  'a script tag is escaped text': ['# <script>alert(1)</script>\n', '&lt;script&gt;alert(1)&lt;/script&gt;'],
+  'an ampersand is escaped': ['# Q&A and R&D\n', 'Q&amp;A and R&amp;D'],
+  'a code span with markup is escaped': ['# Use `<b>x</b>` here\n', 'Use &lt;b&gt;x&lt;/b&gt; here'],
+  // Entities stay as written, as in the page body: escaped once, never twice.
+  'an entity is kept as written': ['# a &lt;b&gt; c\n', 'a &lt;b&gt; c'],
+  'an escaped entity stays one level deep': ['# a &amp;lt; b\n', 'a &amp;lt; b'],
+  'a numeric entity is kept as written': ['# a &#60;b&#62; c\n', 'a &#60;b&#62; c'],
+  'a backslash-escaped angle bracket is escaped': ['# a \\<b\\> c\n', 'a &lt;b&gt; c'],
+  'a backslash-escaped ampersand is escaped once': ['# a \\& b\n', 'a &amp; b'],
+  'a code span keeps entities literal': ['# Use `&lt;` here\n', 'Use &amp;lt; here'],
+  'an ampersand that only looks like an entity start is escaped': ['# R&D and more\n', 'R&amp;D and more'],
+  'quotes are escaped as in the page body': ['# It\'s a "quote"\n', 'It\'s a &quot;quote&quot;'],
   'link reference definition before a setext heading': ['[a]: /url\nFoo\n===\n', 'Foo'],
   'text inside a ::: tip container': ['::: tip\n# Inside\n:::\n# Real\n', 'Inside'],
   'setext heading inside a ::: tip container': ['::: tip Note\nText\n===\n:::\n', 'Text'],
@@ -145,7 +163,67 @@ test('an empty or missing H1 falls back to the file name in the sidebar', () => 
   const s = createSite(root, readTitle)
   assert.equal(s.titleOf(`${AE}/emptyh1.md`), 'emptyh1')
   assert.equal(s.titleOf(`${AE}/noh1.md`), 'noh1')
-  assert.equal(s.titleOf(`${AE}/placeholder.md`), '<Project name>')
+  assert.equal(s.titleOf(`${AE}/placeholder.md`), '&lt;Project name&gt;')
+})
+
+test('a file name used as the fallback title and a folder name are escaped', () => {
+  write(`${AE}/a&b<i>.md`, 'just text\n')
+  write(`${AE}/dir&<u>/page.md`)
+  const s = createSite(root, readTitle)
+  assert.equal(s.titleOf(`${AE}/a&b<i>.md`), 'a&amp;b&lt;i&gt;')
+  const items = s.sidebarFor('agent-engineering-playbook')
+  assert.ok(items.some((i) => i.text === 'a&amp;b&lt;i&gt;'))
+  assert.ok(items.some((i) => i.text === 'dir&amp;&lt;u&gt;'))
+  assert.ok(!items.some((i) => /[<>]|&(?!amp;|lt;|gt;)/.test(i.text)))
+})
+
+test('a file or folder name with entity-like text is shown literally, not decoded', () => {
+  // escapeLiteral, not the page-text rule: a name is not markdown, so `&amp;`
+  // in a name must render as the five characters it is.
+  write(`${AE}/x&amp;y.md`, 'just text\n')
+  write(`${AE}/d&lt;e/page.md`)
+  const s = createSite(root, readTitle)
+  assert.equal(s.titleOf(`${AE}/x&amp;y.md`), 'x&amp;amp;y')
+  const items = s.sidebarFor('agent-engineering-playbook')
+  assert.ok(items.some((i) => i.text === 'x&amp;amp;y'))
+  assert.ok(items.some((i) => i.text === 'd&amp;lt;e'))
+})
+
+test('the sidebar label for a markup title is escaped and keeps the language suffix', () => {
+  write(`${AE}/markup.de.md`, '# Install <version> now\n')
+  const s = createSite(root, readTitle)
+  const item = s.sidebarFor('agent-engineering-playbook').find((i) => i.link?.endsWith('/markup.de'))
+  assert.equal(item.text, 'Install &lt;version&gt; now (DE)')
+})
+
+// The page body is rendered by the same markdown-it with raw HTML off. The
+// sidebar label is the HTML that the body renders for the heading text, so the
+// two read the same in the browser.
+const parityHeadings = [
+  'Install <version> now',
+  'a &lt;b&gt; c',
+  'a &amp;lt; b',
+  'a &#60;b&#62; c',
+  'Q&A <i>x</i>',
+  'R&D and more',
+  'a \\& b \\<c\\>',
+  'It\'s a "quote"',
+  'Use `<b>` and `&lt;` here',
+  '<img src=x onerror=alert(1)>',
+  'Hi :tada:'
+]
+for (const heading of parityHeadings) {
+  test(`the sidebar label matches the heading text in the rendered page: ${heading}`, () => {
+    const html = renderer.render(`# ${heading}\n`, { relativePath: 'x.md' })
+    const inner = /^<h1[^>]*>([\s\S]*?)<a class="header-anchor"/.exec(html)?.[1].replace(/<\/?code>/g, '')
+    assert.ok(inner, html)
+    assert.equal(readTitle(`# ${heading}\n`), inner.trim())
+  })
+}
+
+test('escapeText keeps entities and escapes everything else, escapeLiteral escapes all', () => {
+  assert.equal(escapeText(`<a href="x">&amp; &#60; &copy; R&D</a>`), `&lt;a href=&quot;x&quot;&gt;&amp; &#60; &copy; R&amp;D&lt;/a&gt;`)
+  assert.equal(escapeLiteral(`<a href="x">&amp;</a>`), `&lt;a href=&quot;x&quot;&gt;&amp;amp;&lt;/a&gt;`)
 })
 
 test('createSite refuses to run without a title reader', () => {

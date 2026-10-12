@@ -39,21 +39,45 @@ export const markdownBase = { html: false, config: (md) => md.use(htmlComments) 
 // parsed, as VitePress does.
 const FRONT_MATTER = /^---[ \t]*\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/
 
-// Inline tokens whose content is title text, as in VitePress's own title
-// resolution (text, emoji, inline code).
-const TITLE_TOKENS = new Set(['text', 'emoji', 'code_inline'])
+// The default theme renders sidebar labels and the previous/next footer with
+// v-html, so every string that becomes a sidebar `text` must be HTML-escaped.
+//
+// escapeLiteral escapes a string that is plain text (a file or folder name, or
+// an inline code span): & < > and ".
+export const escapeLiteral = (text) =>
+  text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+
+// escapeText escapes a markdown-it text token exactly as the page renderer
+// does (VitePress's restoreEntities text rule): entity references written in
+// the source stay as written, because VitePress keeps them raw in the token, so
+// the label reads like the heading on the page and an entity is escaped once,
+// never twice. Everything else is escaped as in escapeLiteral; what survives
+// unescaped is only `&` followed by word characters or `#` and a `;`.
+export const escapeText = (text) =>
+  text.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/&(?![\w#]+;)/g, '&amp;')
 
 // Reads the title of a Markdown source with the given markdown-it instance
 // (VitePress's own renderer built from markdownBase): the text of the first
-// H1 token, whatever block structure produced it. Returns '' when there is
-// none or it is empty.
+// H1 token, whatever block structure produced it, as HTML-escaped text the way
+// the page body escapes it (see escapeText and escapeLiteral). Returns '' when
+// there is none or it is empty.
 export function createTitleReader(md) {
   return (source) => {
     const tokens = md.parse(source.replace(/^\uFEFF/, '').replace(FRONT_MATTER, ''), {})
     const at = tokens.findIndex((t) => t.type === 'heading_open' && t.tag === 'h1')
     if (at < 0) return ''
     const text = (tokens[at + 1].children ?? [])
-      .map((c) => (TITLE_TOKENS.has(c.type) ? c.content : c.type === 'softbreak' || c.type === 'hardbreak' ? ' ' : ''))
+      .map((c) =>
+        c.type === 'text'
+          ? escapeText(c.content)
+          : c.type === 'code_inline'
+            ? escapeLiteral(c.content)
+            : c.type === 'emoji'
+              ? c.content
+              : c.type === 'softbreak' || c.type === 'hardbreak'
+                ? ' '
+                : ''
+      )
       .join('')
     return text.replace(/\s+/g, ' ').trim()
   }
@@ -116,10 +140,10 @@ export function createSite(repoRoot, readTitle) {
   }
 
   const isGerman = (repoRel) => /\.de\.md$/.test(repoRel) || germanFiles.has(repoRel.replace(/^packages\//, ''))
-  // Sidebar titles come from the first H1; an empty or missing one falls back
-  // to the file name.
+  // Sidebar titles come from the first H1 (already HTML-escaped by the reader);
+  // an empty or missing one falls back to the file name, escaped the same way.
   const titleOf = (repoRel) =>
-    readTitle(fs.readFileSync(path.join(repoRoot, repoRel), 'utf8')) || path.basename(repoRel, '.md')
+    readTitle(fs.readFileSync(path.join(repoRoot, repoRel), 'utf8')) || escapeLiteral(path.basename(repoRel, '.md'))
   // The language is visible in the label: *.de.md files and the German file
   // names get "(DE)".
   function labelOf(repoRel) {
@@ -146,7 +170,7 @@ export function createSite(repoRoot, readTitle) {
         // A folder is listed when it has pages or a README (README-only folders too).
         .filter((d) => d.items.length > 0 || d.readme)
         .map((d) => ({
-          text: d.name,
+          text: escapeLiteral(d.name),
           ...(d.readme ? { link: '/' + sitePath(`${d.sub}/${d.readme}`).replace(/\.md$/, '').replace(/index$/, '') } : {}),
           collapsed: true,
           items: d.items
