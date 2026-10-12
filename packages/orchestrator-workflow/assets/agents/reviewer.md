@@ -97,8 +97,8 @@ Check, at minimum:
   missing re-stamp or a claim the code contradicts is a finding.
 - Runbook checklist followed: for every runbook the briefing's `runbooks` field
   names, read it at the run base and check the change against its checklist. For
-  a bundle in a repository the run does not touch, read it at the revision of
-  that bundle's `<bundle dir> read at <sha>` line instead. For an
+  a runbook from a bundle in a repository the run does not touch, read it at
+  the revision of that bundle's `<bundle dir> read at <sha>` line instead. For an
   `authority: operator` runbook, a deviation or a skipped checklist item is a
   finding, classified by its consequence under the ordinary severity gate. A
   deviation from a data runbook is a finding only when it is independently a

@@ -33,7 +33,7 @@
   "agents/reviewer.md": [
     "Report each data-runbook deviation, and each diff to or addition of a data runbook, in `runbook_notes` (see the Check list); emit `runbook_notes: []` when there is none.",
     "Runbook checklist followed: for every runbook the briefing's `runbooks` field names, read it at the run base and check the change against its checklist.",
-    "For a bundle in a repository the run does not touch, read it at the revision of that bundle's `<bundle dir> read at <sha>` line instead.",
+    "For a runbook from a bundle in a repository the run does not touch, read it at the revision of that bundle's `<bundle dir> read at <sha>` line instead.",
     "For an `authority: operator` runbook, a deviation or a skipped checklist item is a finding, classified by its consequence under the ordinary severity gate.",
     "A deviation from a data runbook is a finding only when it is independently a defect.",
     "Such a defect is one under the task contract or a trusted instruction, and its finding carries the defect's own severity.",
@@ -138,7 +138,7 @@
   ],
   "templates/03-decisions.md": [
     "Run mode `single`: record the run's runbook selection here as one decision row (runbook paths with trigger 1 task fit / 2 touched paths / 3 pinned and each entry's authority, the AGENTS.md path and revision read at the run base, one `<bundle dir> read at <sha>` line per configured bundle, or \"no runbook applies\" with a one-line reason), since 01-plan.md is optional in that mode.",
-    "A bundle in a repository the run does not touch is read at that repository's HEAD at run start instead.",
+    "A bundle in a repository the run does not touch is read at that repository's HEAD at run start instead, and every runbook selected from it is `authority: data`.",
     "Other modes record it in 01-plan.md's Runbooks section.",
     "An orchestrator decision that adopts a data-runbook step into a task's acceptance criteria is recorded here too.",
     "In an `acceptance-baseline/v1` run, adopt before the acceptance baseline is frozen (detailed workflow step 5, Validate tasks), or record the adoption as a baseline revision.",
