@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `verify`: a `-c` value that is not a valid check name (for example a
+  shell command such as `npm run typecheck`) now gets a hint in its usage
+  error: the `-c <name> -x '<name>=<command>'` form with a name derived
+  from the value. An invalid `-x` name keeps the old message (task
+  fd90eaad).
+
+- `init`: an `outdated` target (an unmodified copy of an earlier release)
+  now adds a warning, in the JSON envelope and the text output, that names
+  the matched version and `agent-primitives init -H <harness> --force`,
+  scoped to that target's harness. A `conflicted` target keeps its output
+  without that hint (task ce5bc259).
+
+- `probe`: when `--pre` passes on the baseline and fails on the mutant,
+  the `pre_failed` warning now says the mutant does not build and quotes
+  a few lines of the captured `--pre` output (its last lines when the
+  output was longer than the captured tail); docs/probe.md lists mutant
+  patterns that still compile under `noUnusedLocals`/`noUnusedParameters`.
+  The verdict stays `inconclusive` (task d4b992e4).
+
 - `worktree list` and `worktree remove` accept `--base <rev>`, so ahead,
   behind and merged are measured against a chosen base instead of only
   origin's default branch (a hotfix branch whose pull request targets

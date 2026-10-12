@@ -38,6 +38,7 @@ import { reconcileEnvelopeDiffTruncation } from "./probe/mutant.js";
 import { linkEntryUsageError } from "./probe/link-list.js";
 import {
   init,
+  renderInitText,
   ALL_HARNESSES,
   InitFsUsageError,
   type Harness,
@@ -1672,29 +1673,6 @@ interface InitCliOptions {
   harness: Harness[];
   targetDir?: string;
   force?: boolean;
-}
-
-function renderInitText(result: InitResult): string {
-  const lines: string[] = [];
-  lines.push(`status: ${result.status}`);
-  lines.push("");
-  lines.push("targets:");
-  for (const target of result.targets) {
-    const suffix =
-      target.status === "outdated" && target.matchedVersion
-        ? ` (matches ledger version ${target.matchedVersion})`
-        : "";
-    lines.push(
-      `  [${target.status}] ${target.harness}: ${target.path}${suffix}`,
-    );
-  }
-  if (result.warnings.length > 0) {
-    lines.push("");
-    lines.push("warnings:");
-    for (const warning of result.warnings) lines.push(`  - ${warning}`);
-  }
-  lines.push("");
-  return lines.join("\n");
 }
 
 program

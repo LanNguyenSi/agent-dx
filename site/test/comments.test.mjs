@@ -2,6 +2,9 @@
 // that HTML comments are dropped without losing any other content.
 import test, { before } from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { createMarkdownRenderer, resolveConfig } from 'vitepress'
 
 let md
@@ -9,7 +12,35 @@ before(async () => {
   const cfg = await resolveConfig('.')
   md = await createMarkdownRenderer(cfg.srcDir, cfg.userConfig.markdown, cfg.site.base)
 })
-const render = (src) => md.render(src, { relativePath: 'fixture.md' })
+const render = (src, env = {}) => md.render(src, { relativePath: 'fixture.md', ...env })
+// The same renderer with the comment rules switched off, which shows every
+// opener as text. VitePress hands out one renderer per process, so the rules
+// are switched off on that renderer for the duration of the call.
+const RULES = [
+  [(m) => m.block.ruler, 'agent-dx-comment-block'],
+  [(m) => m.inline.ruler, 'agent-dx-comment'],
+  [(m) => m.core.ruler, 'agent-dx-comment-text']
+]
+const renderPlain = (src) => {
+  for (const [ruler, name] of RULES) ruler(md).disable(name)
+  try {
+    return md.render(src, { relativePath: 'fixture.md' })
+  } finally {
+    for (const [ruler, name] of RULES) ruler(md).enable(name)
+  }
+}
+
+test('the rule-free renderer shows what the comment rules hide', () => {
+  // Without this, a renderPlain that is the same renderer as render would make
+  // every comparison between the two pass.
+  for (const src of ['a <!-- hidden --> b\n', '<!-- hidden\n\nstill hidden -->\n\ntail\n']) {
+    assert.match(renderPlain(src), /hidden/, src)
+    assert.ok(!render(src).includes('hidden'), src)
+    assert.notEqual(render(src), renderPlain(src), src)
+  }
+  // The comment rules are back on after a plain render.
+  assert.ok(!render('a <!-- hidden --> b\n').includes('hidden'))
+})
 
 test('top-of-file multi-line comment is removed', () => {
   const out = render('<!-- line one\nline two -->\n\n# Title\n\nbody\n')
@@ -394,10 +425,9 @@ test('a long page of unclosed openers renders within a coarse time bound', () =>
 test('a backtick line indented four columns after a comment line is not a fence', () => {
   // Such a line is a lazy continuation of the comment's paragraph, not a fence
   // opener, so the comment closes at the "-->" after it and its content stays
-  // hidden. The paragraph the lines formed is left empty, as it is when the
-  // same lines stand inside a quote or a list item.
-  assert.equal(render('<!-- typo\n    ```\n    x -->\n'), '<p></p>\n')
-  assert.equal(render('para\n<!-- typo\n    ```\n    x -->\ntail\n'), '<p>para\n\ntail</p>\n')
+  // hidden, and the comment lines read as blank lines.
+  assert.equal(render('<!-- typo\n    ```\n    x -->\n'), '')
+  assert.equal(render('para\n<!-- typo\n    ```\n    x -->\ntail\n'), '<p>para</p>\n<p>tail</p>\n')
 })
 
 test('a fence in a nested list item or container after a comment line keeps the opener visible', () => {
@@ -428,10 +458,9 @@ test('a fence closes only at a line of enough of its character, at the container
 })
 
 test('a backtick line in an indented code block before a fence leaves that fence intact', () => {
-  // Read as a fence, the indented line would be closed by the real fence's
-  // opener and the "-->" inside the real fence would close the comment; read
-  // as no fence, the real fence holds the "-->" and the opener stays visible.
-  // Both readings count, so the opener stays visible and the code is kept.
+  // markdown-it reads the indented lines as code, so the unindented fence line
+  // after them opens a real fence that holds the "-->". The opener stays
+  // visible and the code is kept.
   renderAsIfNoRule([
     ['<!-- typo\n\n    ```\n    code\n```\nx --> y\n```\n\ntail\n', '<p>&lt;!-- typo</p>\n<pre><code>```\ncode\n</code></pre>\n<div class="language- vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang"></span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span>x --> y</span></span></code></pre>\n</div><p>tail</p>\n'],
     ['<!-- typo\n\n    ~~~\n    code\n~~~\nx --> y\n~~~\n\ntail\n', '<p>&lt;!-- typo</p>\n<pre><code>~~~\ncode\n</code></pre>\n<div class="language- vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang"></span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span>x --> y</span></span></code></pre>\n</div><p>tail</p>\n'],
@@ -455,7 +484,7 @@ test('a fence in a list item closed two or three columns past the item keeps a l
   ])
 })
 
-test('the fence rules each decide a render', () => {
+test('a fence is found as markdown-it finds it, not by its indentation alone', () => {
   const x1 = render('<!-- typo\n\n    ```\n    code\n   ```\nx --> y\n   ```\n\ntail\n')
   assert.match(x1, /&lt;!-- typo/)
   assert.match(x1, /x --&gt; y|x --> y/)
@@ -468,7 +497,7 @@ test('the fence rules each decide a render', () => {
   assert.match(x4, /code/)
 })
 
-test('each fence reading decides a render on its own', () => {
+test('a fence closes where markdown-it closes it, whatever stands inside its container', () => {
   // A closed comment in a list item hides a fence less indented than the
   // item, even when a line five columns in looks like a closer.
   assert.equal(render('- a\n  <!--\n```\n     ```\n```\n-->\n\nKept.\n'), '<ul>\n<li>a</li>\n</ul>\n<p>Kept.</p>\n')
@@ -477,4 +506,119 @@ test('each fence reading decides a render on its own', () => {
   const out = render('<!-- typo\n    ```\n  ```js\n     ```\nx --> y\n')
   assert.match(out, /&lt;!-- typo/)
   assert.match(out, /x --> y|x --&gt; y/)
+})
+
+test('a comment whose closer lies in a fence inside a list item keeps the opener visible', () => {
+  // Each source renders as it does without the comment rules: the opener is
+  // text, the list keeps its items, and the fence keeps its content. The
+  // fence ends with its item, or holds a line two or three columns past its
+  // opener, or sits in a nested item, a quote, or a list item whose own
+  // content is the comment.
+  const cases = [
+    '<!-- typo\n- a\n  ```\n  code\n```\nx --> y\n```\n\ntail\n',
+    '<!-- typo\n- a\n  ```\n  code\n- b\n\n```\nx --> y\n```\n\ntail\n',
+    '<!-- typo\n- a\n  - b\n      ```\n      code\n        ```\n      x --> y\n      ```\n- c\n',
+    '<!-- typo\n- a\n  - b\n      ```\n      code\n         ```\n      x --> y\n      ```\n- c\n',
+    '- <!-- typo\n  - b\n    ```\n    code\n  ```\n  x --> y\n  ```\n',
+    '> <!-- typo\n> - a\n>   ```\n>   code\n> ```\n> x --> y\n> ```\n'
+  ]
+  for (const src of cases) {
+    const out = render(src)
+    assert.match(out, /&lt;!-- typo/, src)
+    assert.equal(out, renderPlain(src), src)
+  }
+})
+
+test('a comment whose closer lies in an indented code block that holds a fence line keeps the opener visible', () => {
+  // Such a block is a fence indented too far. One without a fence line is
+  // code that the comment hides, and a closer after the block hides it too.
+  const cases = [
+    '<!-- typo\n- a\n\n      ```js\n      x --> y\n',
+    '<!-- typo\n\n    ~~~\n    x --> y\n',
+    '<!-- typo\n\n    code\n    ```\n    x --> y\n',
+    '<!-- typo\n\n    code\n      ~~~\n    x --> y\n'
+  ]
+  for (const src of cases) {
+    const out = render(src)
+    assert.match(out, /&lt;!-- typo/, src)
+    assert.equal(out, renderPlain(src), src)
+  }
+  assert.equal(render('<!-- typo\n\n    code --> x\n\n```\nf\n```\n').includes('typo'), false)
+  assert.equal(render('<!-- note\n\n    ```\n    old\n\n-->\n\nKept.\n'), '<p>Kept.</p>\n')
+  // Only a line that starts with the run makes a block a misindented fence.
+  assert.equal(render('<!-- typo\n\n    echo ``` x --> y\n\ntail\n'), '<p>y</p>\n<p>tail</p>\n')
+})
+
+test('the second parse of a page leaves its reference definitions alone', () => {
+  // A definition inside a comment is hidden, so a link that uses it stays
+  // text, even though the second parse sees the definition.
+  const out = render('<!-- a\n\n[x]: https://example.com/x\n\nb -->\n\n```\nf\n```\n\nsee [x]\n')
+  assert.ok(!out.includes('<a '), out)
+  assert.match(out, /see \[x\]/)
+  // Also when the page already has definitions before the comment.
+  const after = render('[y]: https://example.com/y\n\n<!-- a\n\n[x]: https://example.com/x\n\nb -->\n\n```\nf\n```\n\nsee [x] and [y]\n')
+  assert.ok(!after.includes('example.com/x'), after)
+  assert.match(after, /see \[x\] and <a href="https:\/\/example.com\/y"/)
+})
+
+test('the second parse of a page keeps the page path, so a snippet line next to a comment and a fence renders', () => {
+  // The snippet rule resolves its file from the page path in the env while
+  // the page is parsed, the second parse included.
+  const dir = mkdtempSync(join(tmpdir(), 'comments-snippet-'))
+  try {
+    writeFileSync(join(dir, 'snippet.js'), 'const fromSnippet = 1\n')
+    const env = { path: join(dir, 'page.md'), realPath: join(dir, 'page.md') }
+    const src = '<!-- a\nb -->\n\n```\nf\n```\n\n<<< ./snippet.js\n\ntail\n'
+    const out = render(src, env)
+    assert.match(out, /fromSnippet/)
+    assert.match(out, /tail/)
+    assert.ok(!out.includes('<!--') && !out.includes('&lt;!--'), out)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the closer is looked up among all the fences of a page', () => {
+  // Four fences with prose between them. A closer in any fence keeps the
+  // opener visible; a closer in the prose before the first fence, between two
+  // fences, or after the last one hides the comment up to it.
+  const page = (closeIn) => {
+    const lines = ['<!-- typo', '']
+    for (let k = 1; k <= 4; k++) lines.push('```', 'fence' + k + (k === closeIn ? ' -->' : ''), '```', '', 'between' + k, '')
+    lines.push('after', '')
+    return lines
+  }
+  for (const k of [1, 2, 3, 4]) {
+    const src = page(k).join('\n')
+    const out = render(src)
+    assert.match(out, /&lt;!-- typo/, src)
+    assert.equal(out, renderPlain(src), src)
+  }
+  for (const [at, hidden, shown] of [[1, 'typo', 'fence1'], [6, 'fence1', 'fence2'], [12, 'fence2', 'fence3'], [18, 'fence3', 'fence4'], [24, 'fence4', 'after']]) {
+    const lines = page(0)
+    lines[at] += ' -->'
+    const out = render(lines.join('\n'))
+    assert.ok(!out.includes(hidden), `closer on line ${at} leaves ${hidden} shown`)
+    assert.ok(out.includes(shown), `closer on line ${at} hides ${shown}`)
+  }
+  // A closer on the line a fence opens on stays inside that fence.
+  const info = '<!-- typo\n\n~~~ x --> y\ncode\n~~~\n\ntail\n'
+  assert.match(render(info), /&lt;!-- typo/)
+  assert.equal(render(info), renderPlain(info))
+})
+
+test('a page is parsed again for its fences only when a comment spans lines on a page with a fence line', (t) => {
+  const parse = t.mock.method(md.block, 'parse')
+  const parses = (src) => {
+    parse.mock.resetCalls()
+    render(src)
+    return parse.mock.callCount()
+  }
+  // The render itself is one parse.
+  assert.equal(parses('<!-- one line -->\n\n```\ncode\n```\n'), 1)
+  assert.equal(parses('<!-- two\nlines -->\n\ntext\n'), 1)
+  assert.equal(parses('<!-- two\nlines -->\n\n~~~\ncode\n~~~\n'), 2)
+  assert.equal(parses('<!-- two\nlines -->\n\n```\ncode\n```\n'), 2)
+  // Once for the page, however many comments it holds.
+  assert.equal(parses('<!-- a\nb -->\n\n```\nx\n```\n\n<!-- c\nd -->\n\n<!-- e\nf -->\n'), 2)
 })
