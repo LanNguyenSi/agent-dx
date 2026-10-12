@@ -15,18 +15,17 @@ const base = '/agent-dx/'
 // renders one. createMarkdownRenderer keeps one renderer per process and hands
 // it back to every later caller, including VitePress's own build, which must
 // get one that carries the link mapper below; so this one is disposed as soon
-// as the titles are read.
+// as the titles are read. On a dev reload the config may be handed the live
+// page renderer instead; it is disposed only after the sidebar was built, so a
+// config error that aborts the reload leaves the running server's renderer
+// intact (a failed build exits anyway).
 const titleRenderer = await createMarkdownRenderer(repoRoot, markdownBase, base)
 const { rewrites, mapLink, sidebarFor } = createSite(repoRoot, createTitleReader(titleRenderer))
-let sidebar
-try {
-  sidebar = {
-    '/agent-engineering-playbook/': sidebarFor('agent-engineering-playbook'),
-    '/agentic-coding-playbook/': sidebarFor('agentic-coding-playbook')
-  }
-} finally {
-  disposeMdItInstance()
+const sidebar = {
+  '/agent-engineering-playbook/': sidebarFor('agent-engineering-playbook'),
+  '/agentic-coding-playbook/': sidebarFor('agentic-coding-playbook')
 }
+disposeMdItInstance()
 
 function linkMapper(md: MarkdownIt) {
   markdownBase.config(md)

@@ -35,8 +35,13 @@ export function sitePath(repoRel) {
 // rendered pages cannot disagree about where a heading is.
 export const markdownBase = { html: false, config: (md) => md.use(htmlComments) }
 
-// Front matter is stripped before the body is parsed, as VitePress does.
+// A leading byte order mark and front matter are stripped before the body is
+// parsed, as VitePress does.
 const FRONT_MATTER = /^---[ \t]*\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/
+
+// Inline tokens whose content is title text, as in VitePress's own title
+// resolution (text, emoji, inline code).
+const TITLE_TOKENS = new Set(['text', 'emoji', 'code_inline'])
 
 // Reads the title of a Markdown source with the given markdown-it instance
 // (VitePress's own renderer built from markdownBase): the text of the first
@@ -44,11 +49,11 @@ const FRONT_MATTER = /^---[ \t]*\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/
 // none or it is empty.
 export function createTitleReader(md) {
   return (source) => {
-    const tokens = md.parse(source.replace(FRONT_MATTER, ''), {})
+    const tokens = md.parse(source.replace(/^\uFEFF/, '').replace(FRONT_MATTER, ''), {})
     const at = tokens.findIndex((t) => t.type === 'heading_open' && t.tag === 'h1')
     if (at < 0) return ''
     const text = (tokens[at + 1].children ?? [])
-      .map((c) => (c.type === 'text' || c.type === 'code_inline' ? c.content : c.type === 'softbreak' || c.type === 'hardbreak' ? ' ' : ''))
+      .map((c) => (TITLE_TOKENS.has(c.type) ? c.content : c.type === 'softbreak' || c.type === 'hardbreak' ? ' ' : ''))
       .join('')
     return text.replace(/\s+/g, ' ').trim()
   }
