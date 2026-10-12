@@ -95,7 +95,7 @@ A refusal is `status: "usage_error"` (exit 2) with a `reason`, a `message`, and 
 | `branch_checked_out` | The branch is checked out in a worktree (the main checkout included); the message and `details.worktree` name it. A stale entry is marked `prunable`. |
 | `target_exists` | The target path exists, whatever it is. |
 | `target_inside_checkout` | The target lies inside the main checkout, however its path is spelled (symlinks and letter case on a case-insensitive volume included). |
-| `target_inside_worktree` | The target lies inside another working tree of the repository: the linked worktree `--repo` points into, or any registered worktree whose directory still exists (a stale, prunable entry does not count). `details.worktree` names it. |
+| `target_inside_worktree` | The target lies inside another working tree of the repository: the linked worktree `--repo` points into, or any registered worktree that git does not list as prunable (a locked entry counts even when its directory is missing). `details.worktree` names it. |
 | `path_and_root_conflict` | Both `--path` and `--root` were given. |
 | `base_not_found` | `--base` does not name a commit (or starts with `-`). |
 | `default_branch_unresolved` | No `--base`, and `origin/HEAD`, `origin/main` and `origin/master` all fail to resolve. Pass `--base`. |

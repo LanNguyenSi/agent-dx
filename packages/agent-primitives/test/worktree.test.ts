@@ -485,6 +485,26 @@ describe("worktree create: refusals", () => {
     expect(fs.existsSync(path.join(f.repo, "wt-in-repo"))).toBe(false);
   });
 
+  it("refuses a missing target reached through a symlink that points into a subdirectory of the main checkout", async () => {
+    const f = makeFixture();
+    fs.mkdirSync(path.join(f.repo, "sub"));
+    const lnk = path.join(f.base, "lnk-into-sub");
+    fs.symlinkSync(path.join(f.repo, "sub"), lnk);
+    await expectRefusal(
+      f,
+      [
+        "--repo",
+        f.repo,
+        "--branch",
+        "x",
+        "--path",
+        path.join(lnk, "deep", "er"),
+      ],
+      "target_inside_checkout",
+    );
+    expect(fs.existsSync(path.join(f.repo, "sub", "deep"))).toBe(false);
+  });
+
   it("refuses a target inside a linked worktree, whether --repo names it or the repository lists it", async () => {
     const f = makeFixture();
     const first = path.join(f.base, "wt-first");
