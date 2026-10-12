@@ -88,6 +88,15 @@ export const DEFAULT_MAX_FAILURES = 20;
  * being interpolated into a shell command. */
 const CHECK_NAME_PATTERN = /^[A-Za-z0-9_.:-]+$/;
 
+/** Derives a valid check name from an arbitrary raw string (the `-c` hint);
+ * it starts with a letter or digit, so the hint never reads as a flag. */
+export function deriveCheckName(raw: string): string {
+  const derived = raw
+    .replace(/[^A-Za-z0-9_.:-]+/g, "_")
+    .replace(/^[^A-Za-z0-9]+|_+$/g, "");
+  return derived === "" ? "check" : derived;
+}
+
 /** eslint's own "✖ N problems (N errors, M warnings)" summary line: the
  * tool's own total, always more trustworthy than a count of issue rows
  * out of a tail that may have been cut before every row reached it. This
@@ -388,9 +397,18 @@ export async function verify(options: VerifyOptions): Promise<VerifyResult> {
   // Every resolved name is validated before any command is built (from
   // `-c`/the default list and from `-x` keys alike): a name carrying a
   // shell metacharacter is a usage error, never interpolated into `npm
-  // run <name> --silent` under `sh -c`.
+  // run <name> --silent` under `sh -c`. A name from the requested list
+  // additionally gets the `-c <name> -x '<name>=<command>'` hint, since
+  // the common case is an agent passing a whole command to `-c`.
   for (const name of requestedAndOverrideNames) {
     if (!CHECK_NAME_PATTERN.test(name)) {
+      if (requestedNames.includes(name)) {
+        const derived = deriveCheckName(name);
+        const quoted = name.replace(/'/g, "'\\''");
+        throw new UsageError(
+          `verify: invalid check name "${name}" (must match ${CHECK_NAME_PATTERN}); -c takes check names, not commands. To run a command as a check, name it and pass the command with -x: -c ${derived} -x '${derived}=${quoted}'`,
+        );
+      }
       throw new UsageError(
         `verify: invalid check name "${name}" (must match ${CHECK_NAME_PATTERN})`,
       );

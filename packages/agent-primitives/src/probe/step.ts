@@ -6,6 +6,7 @@ import {
   reportedNoVerdict,
   signalNumberFromExitCode,
   wasSignalKilled,
+  type ExecResult,
 } from "../exec.js";
 import { truncationNote } from "../pass-regex.js";
 import {
@@ -86,6 +87,43 @@ export type PreparedMutant =
       reason: "mutant_not_applicable" | "git_apply_timeout" | "aborted";
       logPaths: string[];
     };
+
+/**
+ * The mutant-side `--pre` warning for a command that reported its own
+ * non-zero exit code. Only reached after the SAME `--pre` passed against
+ * the unmutated baseline, so a failure here means the mutant itself does
+ * not build: the warning says so, quotes a few lines of the captured
+ * `--pre` output: its first lines, or its last lines when the output was
+ * longer than the captured tail (the compiler error the caller has to
+ * rewrite against), and points at the log.
+ */
+function mutantBuildFailedMessage(
+  pre: Pick<
+    ExecResult,
+    | "exitCode"
+    | "stdoutTail"
+    | "stderrTail"
+    | "stdoutTruncated"
+    | "stderrTruncated"
+    | "logPath"
+  >,
+): string {
+  const truncated = pre.stdoutTruncated || pre.stderrTruncated;
+  const lines = combinedOutput(pre.stdoutTail, pre.stderrTail)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+  // A truncated tail starts mid-output; compilers print the error and their
+  // summary last, so the end of the captured tail is the useful part.
+  const picked = (truncated ? lines.slice(-5) : lines.slice(0, 5)).map(
+    (line) => (line.length > 200 ? `${line.slice(0, 200)}...` : line),
+  );
+  const label = truncated
+    ? "last lines of the captured --pre output (the output was longer than the captured tail)"
+    : "first lines of the --pre output";
+  const base = `--pre exited ${pre.exitCode} during the mutant run after passing on the baseline: the mutant does not build. Rewrite it as a change that still compiles (see "Mutants that do not compile" in docs/probe.md); see ${pre.logPath}`;
+  return picked.length > 0 ? `${base}; ${label}: ${picked.join(" | ")}` : base;
+}
 
 /**
  * Step 1 of a mutant: compute what it would do WITHOUT touching the real
@@ -509,7 +547,7 @@ export async function runMutantAttempt(
           ? mutantRun.pre.timedOut
             ? `--pre timed out during the mutant run, no exit code was reported; see ${mutantRun.pre.logPath}`
             : `--pre was terminated by a signal during the mutant run, no exit code was reported; see ${mutantRun.pre.logPath}`
-          : `--pre exited ${mutantRun.pre.exitCode} during the mutant run; see ${mutantRun.pre.logPath}`,
+          : mutantBuildFailedMessage(mutantRun.pre),
     );
     return {
       status: "inconclusive",
