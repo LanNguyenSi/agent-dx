@@ -6,6 +6,7 @@ import {
   reportedNoVerdict,
   signalNumberFromExitCode,
   wasSignalKilled,
+  type ExecResult,
 } from "../exec.js";
 import { truncationNote } from "../pass-regex.js";
 import {
@@ -86,6 +87,29 @@ export type PreparedMutant =
       reason: "mutant_not_applicable" | "git_apply_timeout" | "aborted";
       logPaths: string[];
     };
+
+/**
+ * The mutant-side `--pre` warning for a command that reported its own
+ * non-zero exit code. Only reached after the SAME `--pre` passed against
+ * the unmutated baseline, so a failure here means the mutant itself does
+ * not build: the warning says so, quotes the head of the `--pre` output
+ * (the compiler error the caller has to rewrite against), and points at
+ * the log.
+ */
+function mutantBuildFailedMessage(
+  pre: Pick<ExecResult, "exitCode" | "stdoutTail" | "stderrTail" | "logPath">,
+): string {
+  const head = combinedOutput(pre.stdoutTail, pre.stderrTail)
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "")
+    .slice(0, 5)
+    .map((line) => (line.length > 200 ? `${line.slice(0, 200)}...` : line));
+  const base = `--pre exited ${pre.exitCode} during the mutant run after passing on the baseline: the mutant does not build. Rewrite it as a change that still compiles (see "Mutants that do not compile" in docs/probe.md); see ${pre.logPath}`;
+  return head.length > 0
+    ? `${base}; first lines of the --pre output: ${head.join(" | ")}`
+    : base;
+}
 
 /**
  * Step 1 of a mutant: compute what it would do WITHOUT touching the real
@@ -509,7 +533,7 @@ export async function runMutantAttempt(
           ? mutantRun.pre.timedOut
             ? `--pre timed out during the mutant run, no exit code was reported; see ${mutantRun.pre.logPath}`
             : `--pre was terminated by a signal during the mutant run, no exit code was reported; see ${mutantRun.pre.logPath}`
-          : `--pre exited ${mutantRun.pre.exitCode} during the mutant run; see ${mutantRun.pre.logPath}`,
+          : mutantBuildFailedMessage(mutantRun.pre),
     );
     return {
       status: "inconclusive",

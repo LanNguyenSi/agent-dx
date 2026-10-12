@@ -2098,6 +2098,15 @@ whether `--file` was given explicitly or is derived from the patch.
   the branch returns. Negating a narrowing condition is not such a
   mutant: it can break the narrowing the same way the literal does.
 
+  Mutants that do not compile: when `--pre` passed on the baseline and
+  fails on the mutant, the warning says the mutant does not build and
+  quotes the first lines of the `--pre` output. Under strict TypeScript
+  settings (`noUnusedLocals`, `noUnusedParameters`) a mutant that stops
+  using a variable, parameter or import fails with TS6133 even though it
+  is otherwise valid. Keep every name in use: `cond && false` instead of
+  `false`, `[a, b][1]` instead of `b`, or change a literal the code
+  compares against (`.endsWith(".php")` to `.endsWith(".nophp")`).
+
 ## Result shape
 
 The single source of truth for a consumer of `probe`'s JSON: every field

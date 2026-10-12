@@ -5,6 +5,7 @@ import {
   type ChildProcess,
 } from "node:child_process";
 import fs from "node:fs";
+import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -1646,6 +1647,9 @@ describe("probe(): a non-zero --pre is pre_failed, never a verdict", () => {
     expect(result.status).toBe("inconclusive");
     expect(result.reason).toBe("pre_failed");
     expect(["killed", "survived"]).not.toContain(result.status);
+    expect(
+      result.warnings.some((w) => w.includes("the mutant does not build")),
+    ).toBe(true);
     expect(fs.readFileSync(target, "utf8")).toBe(before);
   });
 
@@ -1659,6 +1663,14 @@ describe("probe(): a non-zero --pre is pre_failed, never a verdict", () => {
     expect(result.status).toBe("inconclusive");
     expect(result.reason).toBe("pre_failed");
     expect(result.baseline).toBeUndefined();
+    expect(
+      result.warnings.some((w) => w.includes("the mutant does not build")),
+    ).toBe(false);
+    // Today's baseline-side wording, pinned: the mutant-side prose is
+    // what changes, this one stays a plain exit-code report.
+    expect(JSON.stringify(result)).toContain(
+      "--pre exited 1 during the baseline run",
+    );
     expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
     // Same fact `baseline_failed` already reports (the dry run computes
     // the mutant before the baseline's own `--pre` ever runs): a
@@ -1761,6 +1773,43 @@ describe("probe(): a non-zero --pre is pre_failed, never a verdict", () => {
       false,
     );
   }, 10000);
+
+  it("a mutant that breaks a strict TypeScript build (noUnusedLocals) says the mutant does not build and shows the compiler error", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    // `limit` is read on the baseline, so `--pre` passes there; the
+    // mutant's `return true;` drops the only use of it, and tsc's
+    // TS6133 reports through a non-zero exit on the mutant alone.
+    const original = `export function f(n: number): boolean {
+  const limit = 0;
+  return n > limit;
+}
+`;
+    fs.writeFileSync(path.join(repo, "fixture.ts"), original);
+    git(repo, ["add", "fixture.ts"]);
+    git(repo, ["-c", "commit.gpgsign=false", "commit", "-q", "-m", "ts"]);
+
+    const tsc = createRequire(import.meta.url).resolve("typescript/bin/tsc");
+    const result = await probe(
+      baseOptions(repo, {
+        file: "fixture.ts",
+        line: 3,
+        replaceText: "  return true;",
+        preCommand: `node ${JSON.stringify(tsc)} --noEmit --strict --noUnusedLocals fixture.ts`,
+        testCommand: "node -e 0",
+      }),
+    );
+
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("pre_failed");
+    expect(
+      result.warnings.some((w) => w.includes("the mutant does not build")),
+    ).toBe(true);
+    expect(result.warnings.some((w) => w.includes("TS6133"))).toBe(true);
+    expect(fs.readFileSync(path.join(repo, "fixture.ts"), "utf8")).toBe(
+      original,
+    );
+  }, 60000);
 });
 
 describe("probe(): the post-apply hash-changed check", () => {
