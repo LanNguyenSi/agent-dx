@@ -1,5 +1,18 @@
 # Bundle log
 
+- 2026-10-12T07:34:25Z, run-base wording follow-up: `reviewer.md`, `SKILL.md`'s trust boundary,
+  and `03-decisions.md` now state that a bundle in a repository the run does not
+  touch is read at that repository's HEAD at run start, as separate sentences so
+  the pinned run-base sentences stay verbatim. The runbook paragraphs of
+  `SKILL.md`, `contracts.md`, `evidence-and-probes.md`, and the `01-plan.md`
+  Runbooks comment were re-wrapped at 80 columns. Every citation into the
+  touched files was re-pointed by locating its anchor in the new text, and the
+  `contracts.md` citation in `run-state-lifecycle-and-markers.md` now spans the
+  unset-marker and untouched-repository sentences (anchor on the last line of
+  the range). `okf-kit check --json --require-anchors` with the tree-built
+  okf-kit 0.17.1 reports no findings after the re-stamp of the three docs whose
+  sources changed.
+
 - 2026-10-11T18:43:22Z, runbook provenance wording: the selection rule names the unkeyed
   run-base marker in single-repo runs and the `run-base[<repo>]` marker in
   multi-repo runs, scopes the template-placeholder case to multi-repo runs, and
