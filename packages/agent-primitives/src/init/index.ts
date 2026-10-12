@@ -87,13 +87,16 @@ export interface InitResult {
    * as before `outdated` existed. */
   status: InitTargetStatus;
   targets: InitTargetResult[];
-  /** Non-fatal notes. Populated only when the checked-in digest ledger
+  /** Non-fatal notes. Populated when the checked-in digest ledger
    * (`assets/skill-ledger.json`) could not be fully loaded (missing,
    * unparsable, wrong shape, or one or more malformed entries): `init`
    * degrades to treating the ledger as empty (or as missing just those
-   * entries) rather than failing the run, and names the cause here. Empty
-   * otherwise. Kept so `init`'s result shape matches every other
-   * subcommand's envelope-facing fields. */
+   * entries) rather than failing the run, and names the cause here. Also
+   * populated with one entry per `outdated` target, naming
+   * `agent-primitives init --force` and the matched version as the safe
+   * way to replace that unmodified earlier copy. Empty otherwise. Kept so
+   * `init`'s result shape matches every other subcommand's
+   * envelope-facing fields. */
   warnings: string[];
 }
 
@@ -648,6 +651,27 @@ export function init(options: InitOptions = {}): InitResult {
     }
   }
 
+  // An `outdated` target is a known-safe overwrite candidate, so point the
+  // operator at `--force` explicitly (the status alone does not spell out
+  // the remedy). `conflicted`, `written` and `unchanged` targets get no
+  // such hint: a conflicted copy is a local edit `--force` would clobber,
+  // and the other two needed no action.
+  for (const t of targets) {
+    if (t.status === "outdated") {
+      const which =
+        t.matchedVersion === undefined
+          ? "an unmodified copy of an earlier agent-primitives release"
+          : `an unmodified copy of the agent-primitives ${t.matchedVersion} release`;
+      // Scoped to this target's own harness: a bare `--force` re-run of a
+      // multi-harness request would also overwrite a conflicted sibling.
+      warnings.push(
+        `${t.harness} skill at ${t.path} is ${which}, safe to replace: ` +
+          `re-run \`agent-primitives init -H ${t.harness} --force\` ` +
+          "(same -C/-t as this run) to update only this copy",
+      );
+    }
+  }
+
   const status: InitTargetStatus = targets.some(
     (t) => t.status === "conflicted",
   )
@@ -659,4 +683,27 @@ export function init(options: InitOptions = {}): InitResult {
         : "unchanged";
 
   return { status, targets, warnings };
+}
+
+export function renderInitText(result: InitResult): string {
+  const lines: string[] = [];
+  lines.push(`status: ${result.status}`);
+  lines.push("");
+  lines.push("targets:");
+  for (const target of result.targets) {
+    const suffix =
+      target.status === "outdated" && target.matchedVersion
+        ? ` (matches ledger version ${target.matchedVersion})`
+        : "";
+    lines.push(
+      `  [${target.status}] ${target.harness}: ${target.path}${suffix}`,
+    );
+  }
+  if (result.warnings.length > 0) {
+    lines.push("");
+    lines.push("warnings:");
+    for (const warning of result.warnings) lines.push(`  - ${warning}`);
+  }
+  lines.push("");
+  return lines.join("\n");
 }

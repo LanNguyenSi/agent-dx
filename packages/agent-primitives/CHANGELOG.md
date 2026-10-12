@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from the value. An invalid `-x` name keeps the old message (task
   fd90eaad).
 
+- `init`: an `outdated` target (an unmodified copy of an earlier release)
+  now adds a warning, in the JSON envelope and the text output, that names
+  the matched version and `agent-primitives init -H <harness> --force`,
+  scoped to that target's harness. A `conflicted` target keeps its output
+  without that hint (task ce5bc259).
+
 ## [0.11.0] - 2026-10-12
 
 - `worktree create` records the links it made in the new worktree's git
