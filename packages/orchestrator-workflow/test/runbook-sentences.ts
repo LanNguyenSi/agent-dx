@@ -106,13 +106,14 @@ export function proseUnits(doc: string): string[] {
 }
 
 /**
- * Sentences of one unit. The splitter breaks after a period or a question mark
- * followed by white space, so a file name such as `06-handoff.md` stays inside its sentence and
+ * Sentences of one unit. The splitter breaks only after a period followed by
+ * white space (a question mark does not end a sentence here: splitting there would
+ * push the wording before a question out of the one-sentence window), so a file name such as `06-handoff.md` stays inside its sentence and
  * a semicolon never separates a clause from the qualifier it carries.
  */
 export function sentencesOf(unit: string): string[] {
   return unit
-    .split(/(?<=[.?])\s+/)
+    .split(/(?<=\.)\s+/)
     .map((sentence) => sentence.trim())
     .filter((sentence) => sentence.length > 0);
 }

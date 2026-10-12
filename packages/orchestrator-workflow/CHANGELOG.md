@@ -12,10 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runbook, a checklist, or the data authority, so a lead-in line above a list
   ("Every step below is mandatory:") can no longer add an obligation to the
   runbook rules unseen. Its segmenter also recognises `+` list items and `~~~`
-  fences, and ends a sentence at a question mark. A colon still does not end a
-  sentence, and a lead-in sentence that is not the last of its paragraph stays
-  outside the window. Test-only: no installed asset text changes; the vetted
-  sentence fixture gains the newly covered sentences. (80d2752a)
+  fences. A question mark or a colon still does not end a sentence (both keep
+  more wording in the window), and a lead-in sentence that is not the last of
+  its paragraph stays outside the window. Test-only (no asset text changes);
+  the vetted sentence fixture gains the newly covered sentences. (80d2752a)
 
 ## [0.44.0] - 2026-10-12
 

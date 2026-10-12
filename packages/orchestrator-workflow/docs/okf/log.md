@@ -1,6 +1,6 @@
 # Bundle log
 
-- 2026-10-12T12:30:00Z, runbook-sentence guard window: the package's `CHANGELOG.md` gained an
+- 2026-10-12T10:09:14Z, runbook-sentence guard window: the package's `CHANGELOG.md` gained an
   `[Unreleased]` entry (ten lines), which shifted every anchored `CHANGELOG.md` line
   citation in this log (the `The implementer` and `Citation scanning` entries);
   all occurrences were re-pointed and the anchors checked on the new lines.

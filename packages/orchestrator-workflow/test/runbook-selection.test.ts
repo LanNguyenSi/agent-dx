@@ -745,12 +745,12 @@ describe("the runbook rule text is a closed, vetted set of sentences", () => {
     ]);
   });
 
-  it("the segmentation splits a sentence at a question mark", () => {
-    expect(sentencesOf("Is it so? It is. Really?")).toEqual([
-      "Is it so?",
-      "It is.",
-      "Really?",
-    ]);
+  it("the segmentation keeps a question with the sentence after it", () => {
+    // Over-inclusion is the safe direction for a guard: "mandatory, right?" must
+    // stay in the window of the runbook sentence that follows.
+    expect(
+      sentencesOf("All steps are mandatory, right? Fine. Read the runbook."),
+    ).toEqual(["All steps are mandatory, right? Fine.", "Read the runbook."]);
   });
 
   it("the segmentation splits a sentence at a period but not inside a file name", () => {
