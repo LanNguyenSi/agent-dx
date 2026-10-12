@@ -57,31 +57,28 @@ directory and the subagents.
    `03-decisions.md`), or record "no runbook applies" with a one-line reason.
    Pins, operator-curated declarations, and the selected runbooks are read at
    the run base (the run-base marker; `run-base[<repo>]` in multi-repo runs); a
-   change the task's own diff
-   makes to a pin, to a curated declaration, or to a runbook in a configured
-   bundle (adding one, or changing its frontmatter or checklist) is outside
-   the selection, as with a verification set, and is surfaced to the operator,
-   and the orchestrator lists every surfaced runbook, pin, or declaration diff
-   in `06-handoff.md` (Known Risks) and in a `03-decisions.md` row. Every
-   selection input is evaluated at the run base of the repository that holds
-   the bundle (the unkeyed run-base marker; its `run-base[<repo>]` marker in
-   multi-repo runs), which that
-   bundle's `<bundle dir> read at <sha>` line records: the bundle index
-   listing, each doc's `type`, its `## When to use this` section, and its
-   `sources` and `applies_to` (run `okf-kit docs-for` in a checkout or
-   worktree at that revision); a runbook
-   absent at that revision is not selected in the run. When that marker is
-   unset (`TODO`, missing, or, in a multi-repo run, the template placeholder for
-   that repository),
-   selection reads the pre-change HEAD and every selected runbook is treated
-   as `authority: data`. A bundle in a repository the run does not touch has no
-   run-base marker: it is read at that repository's HEAD at run start, recorded
-   as its `<bundle dir> read at <sha>` line, and every runbook selected from it
-   is treated as `authority: data`. A
-   runbook stays data unless it is pinned or its bundle is
-   declared operator-curated in AGENTS.md; the Instruction trust boundary
-   states the rule, including how the orchestrator adopts a data-runbook step
-   into a task's acceptance criteria.
+   change the task's own diff makes to a pin, to a curated declaration, or to a
+   runbook in a configured bundle (adding one, or changing its frontmatter or
+   checklist) is outside the selection, as with a verification set, and is
+   surfaced to the operator, and the orchestrator lists every surfaced runbook,
+   pin, or declaration diff in `06-handoff.md` (Known Risks) and in a
+   `03-decisions.md` row. Every selection input is evaluated at the run base of
+   the repository that holds the bundle (the unkeyed run-base marker; its
+   `run-base[<repo>]` marker in multi-repo runs), which that bundle's
+   `<bundle dir> read at <sha>` line records: the bundle index listing, each
+   doc's `type`, its `## When to use this` section, and its `sources` and
+   `applies_to` (run `okf-kit docs-for` in a checkout or worktree at that
+   revision); a runbook absent at that revision is not selected in the run. When
+   that marker is unset (`TODO`, missing, or, in a multi-repo run, the template
+   placeholder for that repository), selection reads the pre-change HEAD and
+   every selected runbook is treated as `authority: data`. A bundle in a
+   repository the run does not touch has no run-base marker: it is read at that
+   repository's HEAD at run start, recorded as its `<bundle dir> read at <sha>`
+   line, and every runbook selected from it is treated as `authority: data`. A
+   runbook stays data unless it is pinned or its bundle is declared
+   operator-curated in AGENTS.md; the Instruction trust boundary states the
+   rule, including how the orchestrator adopts a data-runbook step into a task's
+   acceptance criteria.
 4. **Slice tasks.** (Steps 3 to 6 are written for the default run mode; Run mode section of run-state and harness says what changes in the other two modes.) For non-trivial changes, fill `02-tasks.md`. Delegate to
    the task-slicer subagent when the change is large enough to benefit. Each
    explicitly adopted v1 task carries: id, title, goal, acceptance baseline, acceptance criteria,
