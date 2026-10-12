@@ -303,28 +303,79 @@ test('an unclosed opener in a quote or list item stays visible', () => {
   assert.equal(render('- <!-- never closed\n- b\n'), '<ul>\n<li>&lt;!-- never closed</li>\n<li>b</li>\n</ul>\n')
 })
 
-test('render time grows linearly with the number of unclosed comment openers', () => {
-  // Every paragraph starts with "<!--" and nothing after it closes one.
+// Each case is [Markdown, expected HTML], the expected HTML taken from a
+// renderer without the comment rules, which shows the opener as text.
+const renderAsIfNoRule = (cases) => {
+  for (const [src, expected] of cases) assert.equal(render(src), expected, src)
+}
+
+test('a comment that starts a line never cuts a fenced code block', () => {
+  // The first "-->" after each opener lies inside a fence that opens after the
+  // comment's first line, so the opener is not a comment: it stays visible,
+  // the fence keeps its content, and later fences keep their pairing. A
+  // backtick fence is closed only by at least as many backticks, a tilde
+  // fence only by tildes, and a closer indented four or more columns past its
+  // opener does not close it.
+  renderAsIfNoRule([
+    ['- step one\n- <!-- TODO fix the wording\n- step three\n\nMore prose.\n\n```bash\nyes | head --> out\n```\n\nAfter the fence.\n', '<ul>\n<li>step one</li>\n<li>&lt;!-- TODO fix the wording</li>\n<li>step three</li>\n</ul>\n<p>More prose.</p>\n<div class="language-bash vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang">bash</span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0">yes</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583"> |</span><span style="--shiki-light:#6F42C1;--shiki-dark:#B392F0"> head</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF"> --</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">></span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF"> out</span></span></code></pre>\n</div><p>After the fence.</p>\n'],
+    ['<!-- TODO fix\n\nKeep this paragraph.\n\n```mermaid\ngraph LR\nA --> B\n```\n\nAfter the fence.\n\n```js\nlet x = 1\n```\n\nTail.\n', '<p>&lt;!-- TODO fix</p>\n<p>Keep this paragraph.</p>\n<div class="language-mermaid vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang">mermaid</span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">graph LR</span></span>\n<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">A --> B</span></span></code></pre>\n</div><p>After the fence.</p>\n<div class="language-js vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang">js</span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">let</span><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8"> x </span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583">=</span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF"> 1</span></span></code></pre>\n</div><p>Tail.</p>\n'],
+    ['- a\n  <!-- typo\n\n  ```\n  x --> y\n  ```\n- b\n', '<ul>\n<li>\n<p>a\n&lt;!-- typo</p>\n<div class="language- vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang"></span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span>x --> y</span></span></code></pre>\n</div></li>\n<li>\n<p>b</p>\n</li>\n</ul>\n'],
+    ['- <!-- typo\n\n```\na --> b\n```\n\nprose one\n\n```\ncode two\n```\n\nprose two\n', '<ul>\n<li>&lt;!-- typo</li>\n</ul>\n<div class="language- vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang"></span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span>a --> b</span></span></code></pre>\n</div><p>prose one</p>\n<div class="language- vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang"></span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span>code two</span></span></code></pre>\n</div><p>prose two</p>\n'],
+    ['<!-- typo\n\n````md\n```js\nA --> B\n```\n````\n\ntail\n', '<p>&lt;!-- typo</p>\n<div class="language-md vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang">md</span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">```js</span></span>\n<span class="line"><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">A</span><span style="--shiki-light:#D73A49;--shiki-dark:#F97583"> --></span><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF"> B</span></span>\n<span class="line"><span style="--shiki-light:#24292E;--shiki-dark:#E1E4E8">```</span></span></code></pre>\n</div><p>tail</p>\n'],
+    ['<!-- typo\n\n~~~\ncode\n```\nx --> y\n~~~\n\ntail\n', '<p>&lt;!-- typo</p>\n<div class="language- vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang"></span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span>code</span></span>\n<span class="line"><span>```</span></span>\n<span class="line"><span>x --> y</span></span></code></pre>\n</div><p>tail</p>\n'],
+    ['<!-- typo\n\n```\ncode\n    ```\nx --> y\n```\n\ntail\n', '<p>&lt;!-- typo</p>\n<div class="language- vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang"></span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span>code</span></span>\n<span class="line"><span>    ```</span></span>\n<span class="line"><span>x --> y</span></span></code></pre>\n</div><p>tail</p>\n'],
+    ['<!-- x\n```\n-->\n```\ntail\n', '<p>&lt;!-- x</p>\n<div class="language- vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang"></span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span>--></span></span></code></pre>\n</div><p>tail</p>\n'],
+    ['- a\n- <!-- TODO reword\n- gamma\n\nProse.\n\n```text\nA --> B\n```\n\nProse between fences.\n\n```bash\necho second\n```\n', '<ul>\n<li>a</li>\n<li>&lt;!-- TODO reword</li>\n<li>gamma</li>\n</ul>\n<p>Prose.</p>\n<div class="language-text vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang">text</span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span>A --> B</span></span></code></pre>\n</div><p>Prose between fences.</p>\n<div class="language-bash vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang">bash</span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span style="--shiki-light:#005CC5;--shiki-dark:#79B8FF">echo</span><span style="--shiki-light:#032F62;--shiki-dark:#9ECBFF"> second</span></span></code></pre>\n</div>'],
+  ])
+})
+
+test('a comment that starts a line may enclose a whole fence', () => {
+  renderAsIfDeleted([
+    ['<!--\n## Old\n```bash\nold\n```\n-->\n\nKept.\n', '<p>Kept.</p>\n'],
+    ['- a\n  <!--\n  ```bash\n  old\n  ```\n  -->\n- b\n', '<ul>\n<li>\n<p>a</p>\n</li>\n<li>\n<p>b</p>\n</li>\n</ul>\n'],
+  ])
+})
+
+test('a comment opened in a quote stays visible when its closer lies in a fence inside the quote', () => {
+  renderAsIfNoRule([
+    ['> <!-- typo\n>\n> ```\n> a --> b\n> ```\n> c\n', '<blockquote>\n<p>&lt;!-- typo</p>\n<div class="language- vp-adaptive-theme"><button title="Copy Code" class="copy"></button><span class="lang"></span><pre class="shiki shiki-themes github-light github-dark vp-code" tabindex="0" v-pre=""><code><span class="line"><span>a --> b</span></span></code></pre>\n</div><p>c</p>\n</blockquote>\n'],
+  ])
+})
+
+test('the closer search for a comment in a quote ends at the quote', () => {
+  // The quote's own lines are parsed with the quote's end as the limit, and a
+  // "-->" after that end does not close a comment opened inside it.
+  assert.equal(
+    render('> <!-- a\n> b\n\nc -->\nd\n'),
+    '<blockquote>\n<p>&lt;!-- a\nb</p>\n</blockquote>\n<p>c --&gt;\nd</p>\n'
+  )
+})
+
+test('an unclosed opener does not end the paragraph or quote before it', () => {
+  assert.equal(render('before\n<!-- never closed\nafter\n'), '<p>before\n&lt;!-- never closed\nafter</p>\n')
+  assert.equal(
+    render('> a\n<!-- never closed\nb\n'),
+    '<blockquote>\n<p>a\n&lt;!-- never closed\nb</p>\n</blockquote>\n'
+  )
+})
+
+test('a comment line after a quote line ends the quote', () => {
+  // Without the comment rule among the quote's terminators the line would
+  // continue the quote's paragraph, and so would the text after it.
+  for (const src of ['> a\n<!-- c -->\nb\n', '> a\n<!-- c\nd -->\nb\n']) {
+    assert.equal(render(src), '<blockquote>\n<p>a</p>\n</blockquote>\n<p>b</p>\n', src)
+  }
+})
+
+test('a page of unclosed openers is searched for a closer once, not once per opener', (t) => {
+  // findClose keeps the answer of one search over the page and answers every
+  // later opener from it. The inline rule searches each paragraph's own text,
+  // which is short whatever the page length, so only searches over the whole
+  // page count here.
   const page = (n) => Array.from({ length: n }, (_, i) => `<!-- opener ${i}\ntext ${i}`).join('\n\n') + '\n'
-  const fastest = (src, runs) => {
-    let best = Infinity
-    for (let i = 0; i < runs; i++) {
-      const start = performance.now()
-      render(src)
-      best = Math.min(best, performance.now() - start)
-    }
-    return best
-  }
-  render(page(100))
-  // Ten times the openers on a ten times longer page: linear work takes about
-  // ten times as long, while a search to the end of the page for every opener
-  // grows with the square of the page and passes the bound on the larger step.
-  // The bound leaves room for timer noise.
-  for (const [small, large] of [
-    [100, 1000],
-    [1000, 10000]
-  ]) {
-    const ratio = fastest(page(large), 2) / fastest(page(small), 5)
-    assert.ok(ratio < 30, `${large} openers took ${ratio.toFixed(1)} times as long as ${small}`)
-  }
+  const src = page(1000)
+  const indexOf = t.mock.method(String.prototype, 'indexOf')
+  render(src)
+  const searches = indexOf.mock.calls.filter((c) => c.arguments[0] === '-->' && String(c.this) === src)
+  assert.ok(searches.length <= 2, `the page was searched ${searches.length} times for -->`)
 })
