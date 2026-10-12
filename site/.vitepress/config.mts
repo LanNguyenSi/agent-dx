@@ -1,18 +1,35 @@
-import { defineConfig } from 'vitepress'
+import { createMarkdownRenderer, defineConfig, disposeMdItInstance } from 'vitepress'
 import type MarkdownIt from 'markdown-it'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { htmlComments } from './html-comments.mjs'
-import { createSite, githubBase } from './site-helpers.mjs'
+import { createSite, createTitleReader, githubBase, markdownBase } from './site-helpers.mjs'
 
 // The site is built from the Markdown in place. srcDir is the repository
 // root, and only the two playbooks plus site/index.md are pages.
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 
-const { rewrites, mapLink, sidebarFor } = createSite(repoRoot)
+const base = '/agent-dx/'
+
+// Sidebar titles are read with VitePress's own renderer built from the same
+// markdown options as the pages, so a heading is found exactly where the page
+// renders one. createMarkdownRenderer keeps one renderer per process and hands
+// it back to every later caller, including VitePress's own build, which must
+// get one that carries the link mapper below; so this one is disposed as soon
+// as the titles are read.
+const titleRenderer = await createMarkdownRenderer(repoRoot, markdownBase, base)
+const { rewrites, mapLink, sidebarFor } = createSite(repoRoot, createTitleReader(titleRenderer))
+let sidebar
+try {
+  sidebar = {
+    '/agent-engineering-playbook/': sidebarFor('agent-engineering-playbook'),
+    '/agentic-coding-playbook/': sidebarFor('agentic-coding-playbook')
+  }
+} finally {
+  disposeMdItInstance()
+}
 
 function linkMapper(md: MarkdownIt) {
-  md.use(htmlComments)
+  markdownBase.config(md)
   md.core.ruler.push('agent-dx-links', (state) => {
     const rel = (state.env.relativePath as string | undefined) ?? ''
     // env.relativePath is the rewritten path; find the source file again.
@@ -32,7 +49,7 @@ function linkMapper(md: MarkdownIt) {
 export default defineConfig({
   title: 'agent-dx playbooks',
   description: 'Agent Engineering Playbook and Agentic Coding Playbook from agent-dx',
-  base: '/agent-dx/',
+  base,
   srcDir: '..',
   // Only the two playbooks and the site home page are pages.
   srcExclude: ['*.md', '!(packages|site)/**', 'packages/!(agent-engineering-playbook|agentic-coding-playbook)/**', 'site/!(index.md)', '.*/**'],
@@ -55,18 +72,15 @@ export default defineConfig({
   },
   lastUpdated: false,
   // Raw HTML stays off so that placeholders like <version> render as text; HTML
-  // comments in the playbooks are hidden by the htmlComments rules above.
-  markdown: { html: false, config: linkMapper },
+  // comments in the playbooks are hidden by the htmlComments rules in markdownBase.
+  markdown: { ...markdownBase, config: linkMapper },
   themeConfig: {
     search: { provider: 'local' },
     nav: [
       { text: 'Agent Engineering', link: '/agent-engineering-playbook/' },
       { text: 'Agentic Coding', link: '/agentic-coding-playbook/' }
     ],
-    sidebar: {
-      '/agent-engineering-playbook/': sidebarFor('agent-engineering-playbook'),
-      '/agentic-coding-playbook/': sidebarFor('agentic-coding-playbook')
-    },
+    sidebar,
     socialLinks: [{ icon: 'github', link: githubBase }]
   }
 })

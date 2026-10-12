@@ -6,17 +6,19 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createSite, titleFromText, githubBase } from '../.vitepress/site-helpers.mjs'
+import { createMarkdownRenderer, disposeMdItInstance } from 'vitepress'
+import { createSite, createTitleReader, githubBase, markdownBase } from '../.vitepress/site-helpers.mjs'
 
 let root
 let site
+let readTitle
 const AE = 'packages/agent-engineering-playbook'
 const write = (rel, text = '# T\n') => {
   fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true })
   fs.writeFileSync(path.join(root, rel), text)
 }
 
-before(() => {
+before(async () => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'site-links-'))
   write(`${AE}/README.md`)
   write(`${AE}/guide.md`)
@@ -28,9 +30,15 @@ before(() => {
   write('docs/pic.png', 'x')
   write('packages/other/README.md')
   write('docs/note.md')
-  site = createSite(root)
+  // The renderer the site builds its titles with: VitePress's, from the site's
+  // own markdown options.
+  readTitle = createTitleReader(await createMarkdownRenderer(root, markdownBase, '/agent-dx/'))
+  site = createSite(root, readTitle)
 })
-after(() => fs.rmSync(root, { recursive: true, force: true }))
+after(() => {
+  disposeMdItInstance()
+  fs.rmSync(root, { recursive: true, force: true })
+})
 
 const from = `${AE}/guide.md`
 const map = (href, f = from) => site.mapLink(href, f)
@@ -86,60 +94,61 @@ test('link escaping the repository fails and names file and href', () => {
   assert.throws(() => map('../../..'), /outside the repository/)
 })
 
-test('titleFromText: an inner shorter fence does not close an outer fence', () => {
-  const src = '````md\n```js\n# not a title\n```\n# still code\n````\n\n# Real\n'
-  assert.equal(titleFromText(src, 'fb'), 'Real')
+// Titles come from VitePress's own renderer built from the site's markdown
+// options, so each case pins what that parser decides, not a re-implementation.
+const titleCases = {
+  'ATX heading with closing hashes': ['# Atx Title #\n', 'Atx Title'],
+  'setext heading, inline markup is dropped': ['Setext *Title*\n==========\n\ntext\n', 'Setext Title'],
+  'multi-line setext paragraph': ['Line one\n  Line   two\n===\n', 'Line one Line two'],
+  'front matter is stripped': ['---\nx: 1\n---\n# Atx Title\n', 'Atx Title'],
+  'CRLF front matter and setext': ['---\r\nx: 1\r\n---\r\nTitle\r\n===\r\n', 'Title'],
+  'placeholder line before an ATX heading is no title': ['<one focused task>\n# Goal\n', 'Goal'],
+  'placeholder as setext heading text': ['<Project name>\n===\n', '<Project name>'],
+  'link reference definition before a setext heading': ['[a]: /url\nFoo\n===\n', 'Foo'],
+  'text inside a ::: tip container': ['::: tip\n# Inside\n:::\n# Real\n', 'Inside'],
+  'setext heading inside a ::: tip container': ['::: tip Note\nText\n===\n:::\n', 'Text'],
+  'tab after a list marker': ['-\tItem\n\t===\n# Real\n', 'Item'],
+  'code span keeps its underscores': ['# Use `snake_case` now\n', 'Use snake_case now'],
+  'underscores inside a word': ['# snake_case_name\n', 'snake_case_name'],
+  'emphasis and links keep their text': ['# A *b* _c_ [the docs](x.md)\n', 'A b c the docs'],
+  'html comment inside a heading': ['# Ti<!-- c -->tle\n', 'Title'],
+  'html comment line before a setext heading': ['<!-- c -->\nTitle\n===\n', 'Title'],
+  'html comment block hides a heading': ['<!--\n# hidden\n-->\n# Real\n', 'Real'],
+  'a fenced heading is code': ['```\n# code\n```\n# Real\n', 'Real'],
+  'an inner shorter fence does not close an outer fence': ['````md\n```js\n# not a title\n```\n# still code\n````\n\n# Real\n', 'Real'],
+  'closing fence must use the same character': ['~~~\n```\n# code\n~~~\n# Real\n', 'Real'],
+  'indented code is code': ['    # code\n# Real\n', 'Real'],
+  'a list item before === is no setext title': ['- item\n===\n# Real\n', 'Real'],
+  'a table row before === is no setext title': ['| a | b |\n|---|---|\n| c | d |\n===\n# Real\n', 'Real'],
+  'a block quote line before === is no setext title': ['> quote\n===\n# Real\n', 'Real'],
+  'setext inside a block quote': ['> Quoted\n> ===\n\n# Real\n', 'Quoted'],
+  'a second-level heading is skipped': ['## Sub\n# Real\n', 'Real'],
+  'no heading': ['no heading\n', ''],
+  'only a fenced heading': ['```\nCode\n====\n```\n', ''],
+  'empty ATX heading': ['#\n', '']
+}
+for (const [name, [source, expected]] of Object.entries(titleCases)) {
+  test(`title reader: ${name}`, () => {
+    assert.equal(readTitle(source), expected)
+  })
+}
+
+test('an empty or missing H1 falls back to the file name in the sidebar', () => {
+  write(`${AE}/emptyh1.md`, '#\n')
+  write(`${AE}/noh1.md`, 'just text\n')
+  write(`${AE}/placeholder.md`, '<Project name>\n===\n')
+  const s = createSite(root, readTitle)
+  assert.equal(s.titleOf(`${AE}/emptyh1.md`), 'emptyh1')
+  assert.equal(s.titleOf(`${AE}/noh1.md`), 'noh1')
+  assert.equal(s.titleOf(`${AE}/placeholder.md`), '<Project name>')
 })
 
-test('titleFromText: closing fence must use the same character', () => {
-  assert.equal(titleFromText('~~~\n```\n# code\n~~~\n# Real\n', 'fb'), 'Real')
-  assert.equal(titleFromText('```\n~~~\n# code\n```\n# Real\n', 'fb'), 'Real')
-})
-
-test('titleFromText: setext H1 is recognised, ATX and fallback still work', () => {
-  assert.equal(titleFromText('Setext *Title*\n==========\n\ntext\n', 'fb'), 'Setext Title')
-  assert.equal(titleFromText('---\nx: 1\n---\n# Atx Title #\n', 'fb'), 'Atx Title')
-  assert.equal(titleFromText('no heading\n', 'fb'), 'fb')
-  assert.equal(titleFromText('```\nCode\n====\n```\n', 'fb'), 'fb')
-})
-
-test('titleFromText: a closing fence with an info string does not close', () => {
-  assert.equal(titleFromText('```\n``` js\n# code\n```\n# Real\n', 'fb'), 'Real')
-  assert.equal(titleFromText('~~~\n~~~ x\n# code\n~~~\n# Real\n', 'fb'), 'Real')
-})
-
-test('titleFromText: a backtick opener with a backtick in its info string is no fence', () => {
-  assert.equal(titleFromText('```js`x\n# Real\n', 'fb'), 'Real')
-  assert.equal(titleFromText('~~~ a`b\n# code\n~~~\n# Real\n', 'fb'), 'Real')
-})
-
-test('titleFromText: === after a list item, quote line, table row or html block is no title', () => {
-  assert.equal(titleFromText('- item\n===\n# Real\n', 'fb'), 'Real')
-  assert.equal(titleFromText('- item\n  continued\n===\n', 'fb'), 'fb')
-  assert.equal(titleFromText('1. one\n===\n# Real\n', 'fb'), 'Real')
-  assert.equal(titleFromText('> quote\n===\n# Real\n', 'fb'), 'Real')
-  assert.equal(titleFromText('> quote\ncontinued\n===\n', 'fb'), 'fb')
-  assert.equal(titleFromText('| a | b |\n|---|---|\n| c | d |\n===\n# Real\n', 'fb'), 'Real')
-  assert.equal(titleFromText('<div>\nHtml\n===\n</div>\n\n# Real\n', 'fb'), 'Real')
-  assert.equal(titleFromText('Text\n<div>\nHtml\n===\n', 'fb'), 'fb')
-  assert.equal(titleFromText('    code\n===\n# Real\n', 'fb'), 'Real')
-})
-
-test('titleFromText: setext inside a quote or list item, multi-line paragraph', () => {
-  assert.equal(titleFromText('> Quoted\n> ===\n\n# Real\n', 'fb'), 'Quoted')
-  assert.equal(titleFromText('- Item\n  ===\n# Real\n', 'fb'), 'Item')
-  assert.equal(titleFromText('Line one\n  Line   two\n===\n', 'fb'), 'Line one Line two')
-  assert.equal(titleFromText('Foo\n---\n===\n# Real\n', 'fb'), 'Real')
-})
-
-test('titleFromText: empty ATX heading is an empty title, the sidebar falls back to the file name', () => {
-  assert.equal(titleFromText('#\n# Real\n', 'fb'), '')
-  write(`${AE}/emptyh1.md`, '#\n# Real\n')
-  assert.equal(createSite(root).titleOf(`${AE}/emptyh1.md`), 'emptyh1')
+test('createSite refuses to run without a title reader', () => {
+  assert.throws(() => createSite(root), /readTitle/)
 })
 
 test('sidebar links every playbook page exactly once', () => {
-  const real = createSite(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..'))
+  const real = createSite(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..'), readTitle)
   const links = []
   const collect = (items) => {
     for (const i of items) {
