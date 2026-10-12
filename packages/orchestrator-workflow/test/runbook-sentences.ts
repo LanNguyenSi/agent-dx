@@ -17,7 +17,10 @@
  * Known limit: a sentence that refers to a runbook only by a pronoun or a
  * synonym and sits outside that window (two or more sentences away, or in a
  * later paragraph than the one right after) is not a runbook sentence, so
- * neither guard sees it. Review stays the primary control for such wording.
+ * neither guard sees it. The same holds for wording in the paragraph or list
+ * item before the runbook sentence (for example a lead-in line ending in a
+ * colon above a list): it stays outside the window. Review stays the primary
+ * control for such wording.
  */
 import { readdirSync } from "node:fs";
 import { join, relative, sep } from "node:path";

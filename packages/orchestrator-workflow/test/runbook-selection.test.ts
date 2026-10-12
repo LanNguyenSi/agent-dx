@@ -686,6 +686,9 @@ describe("the runbook rule text is a closed, vetted set of sentences", () => {
         "A. B. C. Read the runbook. D. E.\n\nNext.\n\nUnrelated.",
       ),
     ).toEqual(["C.", "Read the runbook.", "D.", "Next."]);
+    expect(
+      runbookSentences("## Runbooks\n\nThose bind. Unrelated.\n\nFar."),
+    ).toEqual(["## Runbooks", "Those bind."]);
   });
 
   it("the segmentation splits a sentence at a period but not inside a file name", () => {
