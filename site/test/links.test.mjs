@@ -101,6 +101,7 @@ const titleCases = {
   'setext heading, inline markup is dropped': ['Setext *Title*\n==========\n\ntext\n', 'Setext Title'],
   'multi-line setext paragraph': ['Line one\n  Line   two\n===\n', 'Line one Line two'],
   'front matter is stripped': ['---\nx: 1\n---\n# Atx Title\n', 'Atx Title'],
+  'front matter holding a comment line that looks like a heading': ['---\n# a yaml comment\n---\n# Page\n', 'Page'],
   'CRLF front matter and setext': ['---\r\nx: 1\r\n---\r\nTitle\r\n===\r\n', 'Title'],
   'placeholder line before an ATX heading is no title': ['<one focused task>\n# Goal\n', 'Goal'],
   'placeholder as setext heading text': ['<Project name>\n===\n', '<Project name>'],
