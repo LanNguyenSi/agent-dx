@@ -52,7 +52,9 @@ hides everything up to the first `-->` after it in the same quote or `:::`
 container, blank lines and list items included, but it never cuts a fenced
 code block: when that `-->` sits inside a fence opened after the comment's
 first line, the opener stays visible as text, while a fence that opens and
-closes inside the comment is hidden with it. Lines that hold nothing but
+closes inside the comment is hidden with it. Fences inside list items are
+recognised only approximately, so an unclosed opener above one can still
+hide text; close every comment. Lines that hold nothing but
 comments read as blank lines; an opener with no `-->` after it stays visible.
 
 ```bash

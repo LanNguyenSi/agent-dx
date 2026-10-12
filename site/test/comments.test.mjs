@@ -381,10 +381,9 @@ test('a page of unclosed openers is searched for a closer once, not once per ope
 })
 
 test('a long page of unclosed openers renders within a coarse time bound', () => {
-  // One search over the page answers every opener. A search that starts over
-  // at each opener, through whatever string primitive, grows with the square
-  // of the page's length and takes several times this bound, while one search
-  // stays far below it even on a busy machine.
+  // One search over the page answers every opener; a search that starts over
+  // at each opener grows with the square of the page's length. The bound
+  // assumes a runner with at least one full core.
   const page = (n) => Array.from({ length: n }, (_, i) => `<!-- opener ${i}\ntext ${i}`).join('\n\n') + '\n'
   const start = performance.now()
   render(page(32000))
@@ -445,4 +444,26 @@ test('a backtick line whose info string holds a backtick opens no fence', () => 
   // the block rule reaches past a blank line: were that line a fence, the
   // opener would stay visible and the lines after the blank line would show.
   renderAsIfDeleted([['<!-- typo\n\n``` a`b\nx -->\ntail\n', '<p>tail</p>\n']])
+})
+
+test('a fence in a list item closed two or three columns past the item keeps a later fence whole', () => {
+  // The list item's fence closes at its own column, so the "-->" inside the
+  // later fence lies in a fence and the opener stays visible.
+  renderAsIfNoRule([
+    ['<!-- typo\n- a\n  ```\n  code\n    ```\n- b\n\n```\nx --> y\n```\n\ntail\n', '<p>&lt;!-- typo</p>\n<ul>\n<li>a<div class=\"language- vp-adaptive-theme\"><button title=\"Copy Code\" class=\"copy\"></button><span class=\"lang\"></span><pre class=\"shiki shiki-themes github-light github-dark vp-code\" tabindex=\"0\" v-pre=\"\"><code><span class=\"line\"><span>code</span></span></code></pre>\n</div></li>\n<li>b</li>\n</ul>\n<div class=\"language- vp-adaptive-theme\"><button title=\"Copy Code\" class=\"copy\"></button><span class=\"lang\"></span><pre class=\"shiki shiki-themes github-light github-dark vp-code\" tabindex=\"0\" v-pre=\"\"><code><span class=\"line\"><span>x --> y</span></span></code></pre>\n</div><p>tail</p>\n'],
+    ['<!-- typo\n- a\n  ```\n  code\n\t```\n\n```\nx --> y\n```\n', '<p>&lt;!-- typo</p>\n<ul>\n<li>a<div class=\"language- vp-adaptive-theme\"><button title=\"Copy Code\" class=\"copy\"></button><span class=\"lang\"></span><pre class=\"shiki shiki-themes github-light github-dark vp-code\" tabindex=\"0\" v-pre=\"\"><code><span class=\"line\"><span>code</span></span></code></pre>\n</div></li>\n</ul>\n<div class=\"language- vp-adaptive-theme\"><button title=\"Copy Code\" class=\"copy\"></button><span class=\"lang\"></span><pre class=\"shiki shiki-themes github-light github-dark vp-code\" tabindex=\"0\" v-pre=\"\"><code><span class=\"line\"><span>x --> y</span></span></code></pre>\n</div>'],
+  ])
+})
+
+test('the fence rules each decide a render', () => {
+  const x1 = render('<!-- typo\n\n    ```\n    code\n   ```\nx --> y\n   ```\n\ntail\n')
+  assert.match(x1, /&lt;!-- typo/)
+  assert.match(x1, /x --&gt; y|x --> y/)
+  const x2 = render('- <!-- typo\n```\ncode\n    ```\nx --> y\n```\n')
+  assert.match(x2, /&lt;!-- typo/)
+  assert.match(x2, /code/)
+  assert.equal(render('<!--\n- a\n  - b\n    ```\n    x\n    ```\n-->\n\nKept.\n'), '<p>Kept.</p>\n')
+  const x4 = render('<!-- typo\n\n```\ncode\n   ```\n\n```\nx --> y\n```\n')
+  assert.match(x4, /&lt;!-- typo/)
+  assert.match(x4, /code/)
 })

@@ -12,7 +12,8 @@
 // at its first "-->" within the same quote or container, across blank lines
 // and less indented lines; it hides whole lines up to the line where it
 // closes, and lines that hold nothing but comments act as blank lines. A
-// comment never cuts a fenced code block: when its first "-->" lies inside a
+// comment never cuts a fenced code block it recognises (fences inside list
+// items only approximately): when its first "-->" lies inside a
 // fence that opened after the comment's first line, the opener is not a
 // comment and stays visible. A whole fence may lie inside a comment. A fence
 // is a line that starts with three or more backticks or tildes; a backtick
@@ -184,17 +185,24 @@ function stripTitle(token) {
 // of a nested block such as a list item, and the closer counts as inside a
 // fence under either reading. A fence closes at a line made only of at least
 // as many of the same character, with nothing but spaces and tabs after them,
-// indented at most three columns past the container column, or past the
-// opener's own column for an opener four or more columns past the container.
+// indented at most three columns past the container column or past the
+// opener's own column, and the closer counts as inside a fence under any of
+// these readings. Fences inside list items are recognised only as far as
+// this line view of their columns allows.
 function closesInFence(state, startLine, closeLine) {
-  return inFence(state, startLine, closeLine, true) || inFence(state, startLine, closeLine, false)
+  return (
+    inFence(state, startLine, closeLine, true) ||
+    inFence(state, startLine, closeLine, false) ||
+    inFence(state, startLine, closeLine, true, true)
+  )
 }
 
 // One reading of the lines after the comment's first line: bounded takes a
 // backtick or tilde line indented four or more columns past the container as
 // no fence, unbounded takes it as a fence whose closer is measured against
-// its own column.
-function inFence(state, startLine, closeLine, bounded) {
+// its own column. With own set, every closer is measured against its
+// opener's own column, which matches a fence inside a list item.
+function inFence(state, startLine, closeLine, bounded, own = false) {
   let fence = null
   let indent = 0
   for (let l = startLine + 1; l <= closeLine; l++) {
@@ -203,7 +211,7 @@ function inFence(state, startLine, closeLine, bounded) {
       const m = /^(`{3,}|~{3,})/.exec(text)
       if (m && (!bounded || state.sCount[l] - state.blkIndent < 4) && !(m[1][0] === '`' && text.slice(m[1].length).includes('`'))) {
         fence = m[1]
-        indent = state.sCount[l] - state.blkIndent < 4 ? Math.min(state.blkIndent, state.sCount[l]) : state.sCount[l]
+        indent = !own && state.sCount[l] - state.blkIndent < 4 ? Math.min(state.blkIndent, state.sCount[l]) : state.sCount[l]
       }
     } else if (state.sCount[l] - indent <= 3 && new RegExp('^' + fence[0].replace(/[`~]/, (c) => '\\' + c) + '{' + fence.length + ',}[ \\t]*$').test(text)) fence = null
   }
