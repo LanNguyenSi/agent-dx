@@ -29,9 +29,6 @@ function linkMapper(md: MarkdownIt) {
   })
 }
 
-// Sidebar from the file tree, titles from the first H1. The language is
-// visible in the label: *.de.md files and the German file names get "(DE)".
-
 export default defineConfig({
   title: 'agent-dx playbooks',
   description: 'Agent Engineering Playbook and Agentic Coding Playbook from agent-dx',
