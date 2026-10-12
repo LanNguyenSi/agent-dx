@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `hygiene` counts PHPUnit test methods (a `test*` method name, an
+  `@test` docblock tag, or a `#[Test]` attribute, short or fully
+  qualified; each method once) in `.php` files and treats `*Test.php`
+  as a test path, so deleting PHP tests reports `test_cases_dropped`
+  (agent-dx#470).
+
 - Docs: `docs/probe.md` now states the `--env` redaction rule as the code
   applies it (a name redacts only when `TOKEN`, `SECRET`, `PASSWORD`,
   `CREDENTIAL` or `KEY` is its own `_`-delimited segment, so `GHTOKEN` and

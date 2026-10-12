@@ -66,7 +66,7 @@ export function isBackupPath(filePath: string): boolean {
 }
 
 const TEST_PATH =
-  /(^|\/)(tests?|__tests__)\/|\.(test|spec)\.[cm]?[jt]sx?$|(^|\/)test_[^/]*\.py$|_test\.(py|go)$|(^|\/)[A-Za-z0-9]*Test\.java$/;
+  /(^|\/)(tests?|__tests__)\/|\.(test|spec)\.[cm]?[jt]sx?$|(^|\/)test_[^/]*\.py$|_test\.(py|go)$|(^|\/)[A-Za-z0-9]*Test\.java$|(^|\/)[A-Za-z0-9_]*Test\.php$/;
 
 export function isTestPath(filePath: string): boolean {
   return TEST_PATH.test(filePath);
@@ -74,9 +74,13 @@ export function isTestPath(filePath: string): boolean {
 
 /** Test-case markers, one per line at most: JS/TS `it(`/`test(` (with
  * `.only`/`.skip`/`.each(...)` style suffixes), Python `def test_`,
- * Go `func Test`, and `@test`/`@Test` annotations. A heuristic over text,
+ * Go `func Test`, and `@test`/`@Test` annotations. A `.php` file is
+ * counted by `countPhpTestMethods` instead. A heuristic over text,
  * not a parser: it exists to notice a count going down. */
-export function countTestCases(content: string): number {
+export function countTestCases(content: string, filePath?: string): number {
+  if (filePath !== undefined && filePath.endsWith(".php")) {
+    return countPhpTestMethods(content);
+  }
   let count = 0;
   for (const line of content.split("\n")) {
     if (
@@ -86,6 +90,36 @@ export function countTestCases(content: string): number {
       /^\s*@[Tt]est\b/.test(line)
     ) {
       count += 1;
+    }
+  }
+  return count;
+}
+
+const PHP_FUNCTION =
+  /^\s*(?:(?:public|protected|private|static|final|abstract)\s+)*function\s+&?\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/;
+const PHP_DOC_TEST_TAG = /(?:^|[\s*])@test\b/;
+const PHP_TEST_ATTRIBUTE =
+  /#\[\s*(?:[^\]]*,\s*)?\\?(?:PHPUnit\\Framework\\Attributes\\)?Test\s*(?:\(\s*\))?\s*[,\]]/;
+
+/** PHPUnit test methods: a method whose name starts with `test`, or a
+ * method preceded by an `@test` docblock tag or a `#[Test]` attribute
+ * (short or fully qualified). Each method counts once, so a method with
+ * both a `test*` name and a marker is one case, and removing only the
+ * marker from such a method is not a drop. A text heuristic: a
+ * `function test...(` line at the start of a heredoc line is counted
+ * too. */
+export function countPhpTestMethods(content: string): number {
+  let count = 0;
+  let pendingMarker = false;
+  for (const line of content.split("\n")) {
+    const fn = PHP_FUNCTION.exec(line);
+    if (fn !== null) {
+      if (pendingMarker || fn[1].startsWith("test")) count += 1;
+      pendingMarker = false;
+      continue;
+    }
+    if (PHP_DOC_TEST_TAG.test(line) || PHP_TEST_ATTRIBUTE.test(line)) {
+      pendingMarker = true;
     }
   }
   return count;
@@ -314,8 +348,8 @@ export function hygiene(options: HygieneOptions): HygieneResult {
     if (baseContent === undefined) continue;
     const headContent = file.status === "D" ? "" : showHead(file.newPath);
     if (headContent === undefined) continue;
-    const baseCases = countTestCases(baseContent);
-    const headCases = countTestCases(headContent);
+    const baseCases = countTestCases(baseContent, file.oldPath);
+    const headCases = countTestCases(headContent, file.newPath);
     if (headCases < baseCases) {
       findings.push({
         kind: "test_cases_dropped",

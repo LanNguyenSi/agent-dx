@@ -54,14 +54,18 @@ argument or revision is a usage error (exit `2`).
   `tests/` or `__tests__/`, or named `*.test.<ext>` or `*.spec.<ext>` with
   a JavaScript or TypeScript extension (`js`, `jsx`, `ts`, `tsx`, and the
   `m`/`c` variants), `test_*.py`, `*_test.py`, `*_test.go`, or an
-  alphanumeric `*Test.java`) whose count of test-case markers
-  is lower at the head than at the base. A marker is a line starting with
-  `it(` or `test(` (including `.skip`, `.only`, `.each(...)` forms),
-  `def test_`, `func Test`, or `@test`/`@Test`. The count is a text
-  heuristic, not a parser: it can miss a case written in an unusual shape,
-  and it cannot tell a deliberately removed case from an accidental one,
-  so a flagged drop is a prompt to explain it, not proof of a mistake.
-  Carries `baseCases` and `headCases`.
+  alphanumeric `*Test.java`, or `*Test.php`) whose count of test-case
+  markers is lower at the head than at the base. A marker is a line
+  starting with `it(` or `test(` (including `.skip`, `.only`,
+  `.each(...)` forms), `def test_`, `func Test`, or `@test`/`@Test`. In a
+  `.php` file only PHPUnit methods count: a method named `test*`, or one
+  preceded by an `@test` docblock tag or a `#[Test]` attribute (short or
+  fully qualified), each method once; a `function test...(` line inside a
+  heredoc is counted as well. The count is a text heuristic, not a
+  parser: it can miss a case written in an unusual shape, and it cannot
+  tell a deliberately removed case from an accidental one, so a flagged
+  drop is a prompt to explain it, not proof of a mistake. Carries
+  `baseCases` and `headCases`.
 
 ## Options
 
