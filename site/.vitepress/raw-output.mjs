@@ -57,8 +57,11 @@ export const safeId = /^[A-Za-z0-9_-]+$/
 // the page data stays plain, since the client sets it through the DOM.
 export function escapeDescriptionMeta(html, _file, { description }) {
   if (!description) return html
-  const raw = `<meta name="description" content="${description}">`
-  const escaped = `<meta name="description" content="${escapeText(description)}">`
+  // Frontmatter YAML can give a number, a boolean or a list; VitePress writes
+  // its string form, so match and escape that.
+  const text = String(description)
+  const raw = `<meta name="description" content="${text}">`
+  const escaped = `<meta name="description" content="${escapeText(text)}">`
   return html.replace(raw, () => escaped)
 }
 

@@ -62,6 +62,9 @@ without a message, and an `id` that holds anything but letters, digits, `_` and
 `-` is dropped too, so the heading keeps the id derived from its text. `{{ }}`
 always renders as text and is never evaluated, in prose, headings, tab titles
 and the contents list alike; a fenced block shows it as written.
+Frontmatter is trusted: only `description` is escaped, while `head`, `dir`,
+`prev`/`next` and the home layout's `hero` and `features` are written as HTML,
+as VitePress does.
 
 ```bash
 cd site && npm ci && npm run build   # output in site/.vitepress/dist

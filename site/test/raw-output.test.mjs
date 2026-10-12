@@ -63,6 +63,8 @@ test('an ordinary fence keeps its language label, class and highlighted lines', 
   assert.match(out, /<span class="lang">js<\/span>/)
   assert.equal(out.match(/class="line highlighted"/g)?.length, 1, out)
   assert.equal(render('```js {1,3}\nx\ny\nz\n```\n').match(/class="line highlighted"/g)?.length, 2)
+  assert.equal(render('```js{1-3}\nx\ny\nz\n```\n').match(/class="line highlighted"/g)?.length, 3)
+  assert.equal(render('```js {2-3}\nx\ny\nz\n```\n').match(/class="line highlighted"/g)?.length, 2)
 })
 
 test('a line separator in a fence info string cannot hide a tag or a mustache', () => {
@@ -253,6 +255,13 @@ test('a page without a description is left as it is', () => {
 test('an ordinary description is left as it is', () => {
   for (const description of ['Agent Engineering Playbook and Agentic Coding Playbook from agent-dx', "It's fine: a, b; c (d) 1/2 &copy; x", '']) {
     assert.equal(escapeDescriptionMeta(meta(description), 'index.html', { description }), meta(description))
+  }
+})
+
+test('a description that YAML reads as a number, a boolean or a list is escaped in its string form', () => {
+  for (const description of [123, true, ['a', '<b>']]) {
+    const text = String(description)
+    assert.equal(escapeDescriptionMeta(meta(text), 'index.html', { description }), meta(escapeText(text)))
   }
 })
 
