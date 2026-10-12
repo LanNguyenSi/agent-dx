@@ -13,6 +13,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as a test path, so deleting PHP tests reports `test_cases_dropped`
   (agent-dx#470).
 
+- Add `worktree create` (df570152): one command for the setup an orchestrator
+  does by hand before delegating a task. It makes a linked worktree on a new
+  branch from `--base` (default `origin/<default branch>`, after a fetch
+  unless `--no-fetch`) with `--no-track`, so a bare `git push` cannot aim at
+  the default branch; resolves `--path`/`--root` to an absolute path against
+  the invocation directory, never against the repository; and never switches,
+  resets or stashes the main checkout. It refuses, with a distinct `reason`
+  each, a branch that exists or is checked out elsewhere, a target that exists
+  or lies inside the main checkout (however its path is spelled, letter case
+  on a case-insensitive volume included) or inside another registered
+  worktree (`target_inside_worktree`), and a `--repo` that is not a git
+  repository. `--run` writes `.ai/run` only when `git check-ignore --no-index`
+  says it is ignored; `--link` and `--links-from` (an operator file outside
+  the repository) symlink shared dependency directories and exclude them
+  through the common git directory's `info/exclude`; `--setup` and `--smoke`
+  with `--pass-regex` (verify's predicate) run in the new worktree. The
+  envelope carries the base ref and sha and a ready `run-base[<repo>] = <sha>`
+  line; see `docs/worktree.md`. The shipped skill gains a short section, so
+  its digest changes and `init` reports an existing install as `outdated`
+  until it is refreshed with `--force`.
 - Docs: `docs/probe.md` now states the `--env` redaction rule as the code
   applies it (a name redacts only when `TOKEN`, `SECRET`, `PASSWORD`,
   `CREDENTIAL` or `KEY` is its own `_`-delimited segment, so `GHTOKEN` and

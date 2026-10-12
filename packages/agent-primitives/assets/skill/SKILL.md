@@ -5,8 +5,8 @@ description: Use before searching a codebase, before claiming a check passed, wh
 
 # agent-primitives
 
-`agent-primitives` is a CLI with eight subcommands: `probe`, `verify`,
-`doctor`, `init`, `drift`, `snapshot`, `delta`, `hygiene`. Every invocation
+`agent-primitives` is a CLI with nine subcommands: `probe`, `verify`,
+`doctor`, `init`, `drift`, `snapshot`, `delta`, `hygiene`, `worktree`. Every invocation
 prints one bounded JSON result object on stdout by default (`-f text` for a
 human-readable rendering instead) and uses a stable exit-code contract: `0`
 ok, `1` a real finding, `2` the run could not conclude, including a usage
@@ -304,3 +304,16 @@ than `--max-delete-percent` of its lines (default 20%; `--extend-only
 <path>`), and flags a changed test file with fewer test cases than before.
 Exit `0` ok, `1` a finding, `2` it could not conclude. See the
 agent-primitives package's docs/hygiene.md.
+
+## 10. Worktrees
+
+To give a task its own checkout, run `worktree create --repo <path> --branch
+<name> [--base <rev>] [--run <run-dir>]` instead of `git worktree add`. It
+makes the worktree at an absolute path on a new branch with no upstream,
+never switches, resets or stashes the main checkout, refuses a branch that
+exists or is checked out elsewhere, a target that exists or lies inside the
+main checkout, and reports the base sha as a ready `run-base[<repo>] = <sha>`
+line. `--link`/`--links-from` symlink shared dependency directories,
+`--setup` and `--smoke` (with `--pass-regex`) prepare and check it. Exit `0`
+ok, `1` setup failed or not ready (the worktree exists), `2` refused with a
+`reason`. See the agent-primitives package's docs/worktree.md.
