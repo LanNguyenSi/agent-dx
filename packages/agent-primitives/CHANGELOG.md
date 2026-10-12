@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`<remote>/<branch>` or `refs/remotes/<remote>/<branch>`), resolved once in
   the main checkout to the full ref; the `gh` merged-pull-request lookup uses
   the branch part after `<remote>/` as the pull request's base. Anything else
-  (`HEAD`, `HEAD~n`, `@{u}`, a local branch, a sha, a tag) is refused as
+  (`HEAD`, `HEAD~n`, `@{u}`, rev syntax such as `origin/x@{1}`, `origin/x~1` or
+  `origin/x^`, a local branch, a sha, a tag) is refused as
   `base_not_remote_branch` (`list` without `--root`, and `remove`, even with
   `--force`; with `--root`, that repository's entries get `merged: unknown`
   plus a warning). Without `--base` nothing changes. `list` shows `<rev>` as
@@ -23,7 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `merged: unknown` plus a warning and no abort. `remove --base` needs
   `--require-merged` or `--delete-branch` (alone it is an `option_invalid`
   refusal) and refuses a missing `<rev>` as `base_not_found` before removing
-  anything. The shipped skill text mentions
+  anything. Without `--base`, `remove` behaves as before: the default base
+  (an `origin/...` ref) keeps excusing the unpushed commits of a merged branch. The shipped skill text mentions
   the flag, so its digest changes.
 
 ## [0.11.0] - 2026-10-12

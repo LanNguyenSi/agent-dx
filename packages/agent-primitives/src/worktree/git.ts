@@ -332,8 +332,8 @@ export type RemoteBaseResolution =
  * Resolves `--base <rev>` once, in the repository at `cwd`, to a
  * remote-tracking branch: `<remote>/<branch>` or
  * `refs/remotes/<remote>/<branch>` for a configured remote. Anything else
- * (`HEAD`, `HEAD~1`, `@{u}`, a local branch, a sha, a tag, an option-like
- * value, a symbolic remote `HEAD`) is `base_not_remote_branch`. The match is
+ * (`HEAD`, `HEAD~1`, `origin/x@{1}`, `origin/x^`, `@{u}`, a local branch, a
+ * sha, a tag, an option-like value, a symbolic remote `HEAD`) is `base_not_remote_branch`. The match is
  * on the exact ref, never on git's rev syntax.
  */
 export function resolveRemoteBase(
@@ -353,8 +353,16 @@ export function resolveRemoteBase(
   if (remote === undefined) return notRemote;
   const branch = rest.slice(remote.length + 1);
   if (branch.length === 0 || branch === "HEAD") return notRemote;
+  // The value must be one exact ref name: `check-ref-format` rejects every
+  // piece of rev syntax (`@{1}`, `~n`, `^`, `^{commit}`, `..`, `:`), so a
+  // reflog entry or an ancestor of a remote-tracking branch is never taken
+  // for the branch itself.
+  if (git(cwd, ["check-ref-format", full]).status !== 0) return notRemote;
   if (git(cwd, ["symbolic-ref", "--quiet", full]).status === 0) {
     return notRemote;
+  }
+  if (git(cwd, ["show-ref", "--verify", "--quiet", full]).status !== 0) {
+    return { ok: false, reason: "base_not_found" };
   }
   if (commitSha(cwd, full) === undefined) {
     return { ok: false, reason: "base_not_found" };

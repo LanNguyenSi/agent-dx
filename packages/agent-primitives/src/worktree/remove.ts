@@ -110,7 +110,8 @@ export async function removeWorktree(
 
   // --base must be a remote-tracking branch, resolved once here to a full
   // ref; anything else refuses before anything is read or changed.
-  let explicitBase: { ref: string; ghBase: string } | undefined;
+  let explicitBase:
+    { ref: string; ghBase: string; remoteTracking: true } | undefined;
   if (o.base !== undefined) {
     const resolved = resolveRemoteBase(repo.mainCheckout, o.base);
     if (!resolved.ok) {
@@ -122,7 +123,11 @@ export async function removeWorktree(
         { base: o.base },
       );
     }
-    explicitBase = { ref: resolved.base.ref, ghBase: resolved.base.branch };
+    explicitBase = {
+      ref: resolved.base.ref,
+      ghBase: resolved.base.branch,
+      remoteTracking: true,
+    };
   }
 
   const entry = repo.worktrees.find((w) => sameDirectory(w.path, target));
@@ -192,19 +197,19 @@ export async function removeWorktree(
   }
 
   const defaultBase = resolveDefaultBase(repo.mainCheckout);
-  const base: { ref: string; ghBase?: string } | undefined =
-    explicitBase ?? defaultBase;
+  // Without --base the base is origin's default branch, an `origin/...`
+  // remote-tracking ref by construction, so that path behaves as it always
+  // did. An explicit base was verified by resolveRemoteBase above.
+  const base:
+    { ref: string; ghBase?: string; remoteTracking: boolean } | undefined =
+    explicitBase ??
+    (defaultBase === undefined
+      ? undefined
+      : { ref: defaultBase.ref, remoteTracking: true });
   // Defence in depth for the unpushed exemption below: a merged verdict only
   // excuses commits no remote has when it was measured against a
   // remote-tracking branch, never against a local branch or a relative rev.
-  const baseIsRemoteTracking =
-    base !== undefined &&
-    resolveRemoteBase(
-      repo.mainCheckout,
-      base.ref.startsWith("refs/remotes/")
-        ? base.ref
-        : `refs/remotes/${base.ref}`,
-    ).ok;
+  const baseIsRemoteTracking = base?.remoteTracking === true;
   // Asked only when a flag needs the answer: the `gh` lookup of a verdict is
   // a network call where `gh` happens to be installed. Computed before the
   // unpushed check, because a branch that is merged into the base has no
