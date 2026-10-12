@@ -9,10 +9,16 @@
 // A comment runs from "<!--" to the first "-->" after it; "--" inside it does
 // not end it. An unclosed "<!--" stays visible text. Inside a paragraph a
 // comment cannot reach past a blank line. A comment that starts a line closes
-// at the first "-->" anywhere after it, across blank lines, less indented
-// lines, and fences, as long as that "-->" is inside the same quote or
-// container; it hides whole lines up to the line where it closes, and lines
-// that hold nothing but comments act as blank lines.
+// at its first "-->" within the same quote or container, across blank lines
+// and less indented lines; it hides whole lines up to the line where it
+// closes, and lines that hold nothing but comments act as blank lines. A
+// comment never cuts a fenced code block: when its first "-->" lies inside a
+// fence that opened after the comment's first line, the opener is not a
+// comment and stays visible. A whole fence may lie inside a comment. A fence
+// is a line that starts, after any indentation, with three or more backticks
+// or tildes; a backtick fence's info string holds no backtick. The fence
+// closes at a line made only of at least as many of the same character,
+// indented at most three columns more than its opener.
 
 // Within text, what markdown-it reads before a comment can start: backslash
 // escapes and code spans (a run of backticks closed by a run of the same
@@ -34,15 +40,18 @@ export function htmlComments(md) {
 }
 
 // A line that starts with a comment, or with several in a row, up to the line
-// where the last of them closes. Each comment closes at the first "-->" after
-// it, so a comment opened in a list item or quote also hides blank lines and
-// less indented lines up to that "-->", and a list whose items are commented
-// out stays one list. Lines holding nothing but comments become blank lines,
-// so paragraphs, lists, and quotes around them behave exactly as if the
-// comment had never been written. A single line with text after its comment
-// is left to the other rules, and the inline rule hides the comment. A comment
-// over several lines with text after it on its closing line hides those lines
-// and keeps the text as a paragraph.
+// where the last of them closes. Each comment closes at its first "-->" within
+// the same quote or container, so a comment opened in a list item or quote
+// also hides blank lines and less indented lines up to that "-->", and a list
+// whose items are commented out stays one list. A comment never cuts a fenced
+// code block: when that "-->" lies inside a fence that opened after the
+// comment's first line, the opener is not a comment and stays visible, while
+// a whole fence may lie inside a comment. Lines holding nothing but comments
+// become blank lines, so paragraphs, lists, and quotes around them behave
+// exactly as if the comment had never been written. A single line with text
+// after its comment is left to the other rules, and the inline rule hides the
+// comment. A comment over several lines with text after it on its closing
+// line hides those lines and keeps the text as a paragraph.
 function commentBlock(state, startLine, endLine, silent) {
   // A line four or more columns in is code, or, after a paragraph or quote
   // line, more text of that paragraph, where the inline rule hides the comment.
@@ -64,6 +73,7 @@ function commentBlock(state, startLine, endLine, silent) {
     if (!state.src.startsWith('<!--', next)) break
     close = findClose(state, next + 4)
   }
+  if (closesInFence(state, startLine, line)) return false
   const nextLine = line + 1
 
   const rest = stripComments(state.getLines(startLine, nextLine, state.blkIndent, false)).trim()
@@ -118,7 +128,8 @@ function commentInline(state) {
 // the raw text the heading permalink label is built from loses the comment.
 // No paragraph is left empty here: the block rule leaves a paragraph that
 // starts with a comment to the inline rule only when text follows the comment
-// on its line or the comment does not close inside its quote or container.
+// on its line, the comment does not close inside its quote or container, or
+// its closer lies inside a fence.
 function commentText(state) {
   for (const tok of state.tokens) {
     if (/^container_.+_open$/.test(tok.type)) tok.info = stripComments(tok.info)
@@ -159,4 +170,26 @@ function stripTitle(token) {
   const text = stripComments(title)
   if (text) token.attrSet('title', text)
   else token.attrs = token.attrs.filter(([name]) => name !== 'title')
+}
+
+// True when the line holding the comment's closer sits inside a fenced code
+// block that opened after the comment's first line. A fence is a line that
+// starts, after any indentation, with three or more backticks or tildes, and
+// a backtick fence's info string holds no backtick. It closes at a line made
+// only of at least as many of the same character, indented at most three
+// columns more than its opener.
+function closesInFence(state, startLine, closeLine) {
+  let fence = null
+  let indent = 0
+  for (let l = startLine + 1; l <= closeLine; l++) {
+    const text = state.src.slice(state.bMarks[l] + state.tShift[l], state.eMarks[l])
+    if (!fence) {
+      const m = /^(`{3,}|~{3,})/.exec(text)
+      if (m && !(m[1][0] === '`' && text.slice(m[1].length).includes('`'))) {
+        fence = m[1]
+        indent = state.sCount[l]
+      }
+    } else if (state.sCount[l] - indent <= 3 && new RegExp('^' + fence[0].replace(/[`~]/, (c) => '\\' + c) + '{' + fence.length + ',}\\s*$').test(text)) fence = null
+  }
+  return fence !== null
 }
