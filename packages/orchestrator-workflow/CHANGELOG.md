@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- The package's runbook-sentence guard now also reads the sentence before a
+  sentence that names a runbook, a checklist, or the data authority, and the
+  first sentence of the next paragraph or list item (across a heading), so a
+  forward reference ("Every step of those is mandatory.") or a pronoun in the
+  next item can no longer add an obligation or a severity to the runbook rules
+  unseen. Test-only: no installed asset text changes; the vetted sentence
+  fixture gains the newly covered sentences. (bb0fb6c7)
+
 - The runbook provenance rule now names the right run-base marker in every run
   shape: the unkeyed run-base marker, or the `run-base[<repo>]` marker in
   multi-repo runs, and the "template placeholder" case for an unset marker
