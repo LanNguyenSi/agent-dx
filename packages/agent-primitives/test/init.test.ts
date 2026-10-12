@@ -2,7 +2,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, afterEach, vi } from "vitest";
-import { init, ALL_HARNESSES, InitFsUsageError } from "../src/init/index.js";
+import {
+  init,
+  renderInitText,
+  ALL_HARNESSES,
+  InitFsUsageError,
+} from "../src/init/index.js";
 import {
   init as initFromIndex,
   InitFsUsageError as InitFsUsageErrorFromIndex,
@@ -121,6 +126,10 @@ describe("init", () => {
       expect(result.status).toBe("outdated");
       expect(result.targets[0]?.status).toBe("outdated");
       expect(result.targets[0]?.matchedVersion).toBe("1.0.0");
+      expect(result.warnings).toEqual([
+        `claude skill at ${result.targets[0]?.path} is an unmodified copy of the agent-primitives 1.0.0 release, safe to replace: re-run \`agent-primitives init --force\` with the same -H/-t options to update it`,
+      ]);
+      expect(result.warnings[0]).toContain("agent-primitives init --force");
       expect(fs.readFileSync(filePath, "utf8")).toBe(CONTENT_OLD);
     });
 
@@ -138,6 +147,7 @@ describe("init", () => {
       expect(result.status).toBe("conflicted");
       expect(result.targets[0]?.status).toBe("conflicted");
       expect(result.targets[0]?.matchedVersion).toBeUndefined();
+      expect(result.warnings).toEqual([]);
       expect(fs.readFileSync(filePath, "utf8")).toBe(
         "# a local edit, not any released version\n",
       );
@@ -157,7 +167,39 @@ describe("init", () => {
       });
       expect(result.status).toBe("written");
       expect(result.targets[0]?.status).toBe("written");
+      expect(result.warnings).toEqual([]);
       expect(fs.readFileSync(filePath, "utf8")).toBe(CONTENT_NEW);
+    });
+
+    it("text output carries the --force hint for an outdated target", () => {
+      const dir = makeTmpDir();
+      const filePath = targetPath(dir);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, CONTENT_OLD);
+
+      const result = init({
+        targetDir: dir,
+        content: CONTENT_NEW,
+        ledger: LEDGER,
+      });
+      const text = renderInitText(result);
+      expect(text).toContain("warnings:");
+      expect(text).toContain("agent-primitives init --force");
+      expect(text).toContain("1.0.0");
+    });
+
+    it("text output of a conflicted target has no --force hint", () => {
+      const dir = makeTmpDir();
+      const filePath = targetPath(dir);
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+      fs.writeFileSync(filePath, "# a local edit, not any released version\n");
+
+      const result = init({
+        targetDir: dir,
+        content: CONTENT_NEW,
+        ledger: LEDGER,
+      });
+      expect(renderInitText(result)).not.toContain("--force");
     });
 
     it("EEXIST race: a ledger-matching file planted just before the absent-name open classifies outdated, not conflicted", () => {
