@@ -49,9 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `file_outside_root` refusal for an in-repo symlink pointing out of the
   root now names the link, the file that named it, the quoted text the
   symlink itself carries and the workaround (pass it as `--link`); it still
-  never says what exists outside the repository, and when an ancestor of the
-  link is itself a symlink it gives the in-root value alone, so the message
-  does not depend on state outside the repository. `parsePlanFile` returns an
+  never says what exists outside the repository: when the link is not
+  spelled under the root through real directories only (an ancestor is a
+  symlink, or the entry is spelled outside the root) it gives the value
+  alone, so the message does not depend on state outside the repository. `parsePlanFile` returns an
   optional `realPath` on success. See `docs/probe.md`, "Where a plan file
   lives".
 
