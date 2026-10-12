@@ -354,11 +354,12 @@ export type ManifestReadResult =
 /**
  * Reads the manifest of the linked worktree whose top level is `root`.
  * The file is opened once, without following a symlink in its last
- * component (`O_NOFOLLOW`; `O_NONBLOCK` keeps a FIFO from hanging the
- * open), and every check is made on that descriptor: a regular file with
- * one hard link, within the size cap, owned by the current user and not
- * writable by group or others (where the platform has those notions). The
- * bytes read are bounded by the size the cap was checked against.
+ * component (`O_NOFOLLOW`, where the platform supports it; `O_NONBLOCK`
+ * keeps a FIFO from hanging the open), and every check is made on that
+ * descriptor: a regular file with one hard link, within the size cap and,
+ * on POSIX only, owned by the current user and not writable by group or
+ * others. The bytes read are bounded by the size the cap was checked
+ * against.
  */
 export function readLinkManifest(root: string): ManifestReadResult {
   const admin = linkedWorktreeAdminDir(root);
