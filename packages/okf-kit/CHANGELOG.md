@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-12
+
 ### Added
 
 - `frontmatter-refs-resolve` rule: frontmatter `lessons[].runbook` and `derived_from[]`, when present, must resolve to an existing `.md` file, relative to the doc inside the bundle or as `<alias>:<path>` into a companion bundle. Containment is enforced for both forms. URL-shaped values and absolute unprefixed paths are errors. URL schemes are matched case-insensitively, and `http`, `https`, `file` and `mailto` are reserved: `--companion` rejects them as an alias.
