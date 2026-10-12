@@ -90,7 +90,12 @@ reader would reject (for example one containing a backslash) is still made
 but left out of the manifest, listed under `links.manifest.unrecorded` with
 a warning, and the other links are recorded as usual.
 
-A link whose target does not resolve (a dangling symlink in the main checkout) is made but not recorded either, and is listed under `links.manifest.unrecorded`; probe refuses a missing source, so create the target in the main checkout first and then pass `--link`.
+A link whose target does not resolve (a dangling symlink in the main
+checkout) is made but not recorded either. It is listed under
+`links.manifest.unrecorded` when the other links are written; when no link
+can be recorded, the manifest status is `failed` and nothing is recorded.
+Probe refuses a missing source, so create the target in the main checkout
+first and then pass `--link`.
 
 The result lists `links.made` (`path`, `target`, `exclude`: `added`, `already_ignored` or `failed`), `links.skipped` (`path`, `reason`, `detail`) and `links.manifest` (`status`: `written`, `not_needed` or `failed`, with `path` or `reason`, and `unrecorded`: `path` and `reason` of each link left out of a written manifest).
 

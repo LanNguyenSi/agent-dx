@@ -29,7 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that fills the existing ignored directory keeps it trusted. A manifest
   file in the working tree is never read. `create` writes only entries the
   reader accepts: a link whose path it would refuse, or whose target does
-  not resolve, is made but listed under `links.manifest.unrecorded`.
+  not resolve, is made but listed under `links.manifest.unrecorded` (when
+  no link can be recorded, the manifest status is `failed` instead).
   `git worktree remove` deletes
   the manifest with the administration directory. The envelope gains
   `links.manifest` (`status` `written`, `not_needed` or `failed`, and
