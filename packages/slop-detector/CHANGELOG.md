@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-12
+
 ### Changed
 
 - Reusable workflow `workflow-guard.yml` (task d9b3c9f1): the `ref` input is now optional. The tool is checked out from `job.workflow_repository` at `job.workflow_sha`, so the commit is pinned once, in `uses:`. With `ref` omitted the job requires `job.workflow_ref` to be exactly `<job.workflow_repository>/.github/workflows/<file>@<job.workflow_sha>` (a branch or tag pin fails closed); the job also prints `workflow_ref`, `workflow_repository` and `workflow_sha` before the checks; with `ref` given, the existing 40-hex and equality checks apply unchanged, so callers passing `ref` keep working. An empty or non-hex `job.workflow_sha` still fails.
@@ -27,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - **`@modelcontextprotocol/sdk` 1.32.1** (GHSA-6qxp-vccf-f47h, task aff72e2b): the lockfile resolves 1.32.1 and the dependency range is now `^1.32.1`, so consumers cannot resolve an affected version. Since 1.30.1 the SDK's HTTP server transports apply a 4 MiB default request-body limit and a 100-message batch cap.
+
+### Docs
+
+- The GitHub Action's usage example pins `@v1`, the action's first tag, which points at this release's commit; a commit SHA remains the immutable pin. `docs/integration.md` no longer calls the action and the reusable workflow unreleased.
 
 ## [0.8.0] - 2026-10-05
 
