@@ -363,7 +363,7 @@ export function firstLinkSourceRefusal(
  * the root, shared by both places `firstLinkSourceRefusal` produces it so
  * the envelope cannot differ between them. It names the link (with the
  * file that named it), where the symlink ITSELF says it points (its
- * `readlink` text, verbatim), and the way out: the same directory passed
+ * `readlink` text, JSON-quoted), and the way out: the same directory passed
  * as `--link` is operator input and keeps the operator's latitude.
  *
  * It deliberately does NOT name the physically resolved far end. That

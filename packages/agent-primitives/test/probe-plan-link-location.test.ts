@@ -444,6 +444,105 @@ describe("probe --plan: the refusal for a repository link never depends on state
       }
     }, 240000);
   }
+
+  describe("an entry spelled outside the root", () => {
+    type Lane = "plan" | "defaults";
+    type Spelling = "absolute" | "climbing";
+    type LeafState = "symlink-A" | "symlink-B" | "missing";
+
+    const states: LeafState[] = ["symlink-A", "symlink-B", "missing"];
+
+    /** The leaf `<base>/out/d/oracle` is the only thing that varies; its
+     * parent is a real directory outside the repo. The leaf text for each
+     * state is a marker that must never appear in the refusal. */
+    function setLeaf(fx: Fixture, state: LeafState): void {
+      const dir = path.join(fx.base, "out", "d");
+      fs.mkdirSync(dir, { recursive: true });
+      const leaf = path.join(dir, "oracle");
+      fs.rmSync(leaf, { force: true });
+      if (state === "symlink-A") fs.symlinkSync("/MARKER-TEXT-AAA", leaf);
+      if (state === "symlink-B") fs.symlinkSync("/MARKER-TEXT-BBB", leaf);
+    }
+
+    async function refusalsAcrossStates(
+      lane: Lane,
+      spelling: Spelling,
+    ): Promise<{ fx: Fixture; entry: string; warnings: string[][] }> {
+      const fx = makeFixture();
+      const entry =
+        spelling === "absolute"
+          ? path.join(fx.base, "out", "d", "oracle")
+          : "../out/d/oracle";
+      let plan: string;
+      if (lane === "plan") {
+        plan = writePlan(path.join(fx.repo, "plan.json"), {
+          ...fx.planBody,
+          link: [entry],
+        });
+      } else {
+        const body = { ...fx.planBody };
+        delete body.link;
+        plan = writePlan(path.join(fx.runDir, "plan.json"), body);
+        fs.writeFileSync(
+          path.join(fx.repo, ".agent-primitives.json"),
+          JSON.stringify({ link: [entry] }),
+        );
+      }
+      const warnings: string[][] = [];
+      for (const state of states) {
+        setLeaf(fx, state);
+        const { envelope } = await runPlan(fx, plan);
+        expect(envelope.reason).toBe("file_outside_root");
+        warnings.push(envelope.warnings);
+      }
+      return { fx, entry, warnings };
+    }
+
+    for (const lane of ["plan", "defaults"] as const) {
+      for (const spelling of ["absolute", "climbing"] as const) {
+        it(`gives one identical message that quotes no outside link text (${lane} lane, ${spelling} entry)`, async () => {
+          const { fx, warnings } = await refusalsAcrossStates(lane, spelling);
+
+          const outsideValue = path.join(fx.base, "out", "d", "oracle");
+          for (const answer of warnings) {
+            expect(answer).toEqual([
+              `outside the containment root (${fx.repo}): ${outsideValue}`,
+            ]);
+            expect(answer.join("\n")).not.toContain("MARKER-TEXT");
+          }
+        }, 240000);
+      }
+    }
+  });
+
+  for (const spelling of ["under the real path", "relative to -C"] as const) {
+    it(`quotes the link's own readlink text when -C reaches the checkout through a symlink and the entry is spelled ${spelling}`, async () => {
+      const fx = makeFixture();
+      fs.mkdirSync(path.join(fx.repo, "a"));
+      fs.mkdirSync(path.join(fx.base, "out"));
+      fs.symlinkSync("../../out/t", path.join(fx.repo, "a", "oracle"));
+      const viaLink = path.join(fx.base, "repolink");
+      fs.symlinkSync(fx.repo, viaLink);
+      const entry =
+        spelling === "relative to -C"
+          ? path.join("a", "oracle")
+          : path.join(fx.repo, "a", "oracle");
+      const plan = writePlan(path.join(fx.repo, "plan.json"), {
+        ...fx.planBody,
+        link: [entry],
+      });
+
+      const { envelope } = await runPlan(fx, plan, [], viaLink);
+
+      expect(envelope.reason).toBe("file_outside_root");
+      expect(envelope.warnings).toEqual([
+        `outside the containment root (${viaLink}): link "${entry}" named in ` +
+          `the "link" list of ${plan} is a symlink to "../../out/t", which ` +
+          "does not resolve inside the root, and a link named by repository " +
+          "content must; pass it as --link to treat it as operator input",
+      ]);
+    }, 60000);
+  }
 });
 
 describe("linkSourceIsOperatorInput", () => {

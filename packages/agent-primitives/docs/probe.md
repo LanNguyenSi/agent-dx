@@ -2525,11 +2525,12 @@ holds, and any doubt means inside:
 
 When a plan inside the repository names a symlink that points out of it,
 the refusal names the link, the file that named it, the text the symlink
-itself carries (quoted), and the way out. When the link does not itself sit
-inside the repository as a real directory chain (an ancestor of it is a
-symlink), it gives the in-root value alone, as before. Repository content cannot widen what it may
-share, but an operator can: pass the directory as `--link` instead, or
-store the plan outside the repository.
+itself carries (quoted), and the way out. The old wording, which gives the
+value alone, is used when the link is not spelled under the root through
+real directories only (for example an ancestor of it is a symlink, or the
+entry is spelled outside the root). Repository content cannot widen what
+it may share, but an operator can: pass the directory as `--link` instead,
+or store the plan outside the repository.
 
 ```text
 outside the containment root (/work/repo): link "lib" named in the "link"
