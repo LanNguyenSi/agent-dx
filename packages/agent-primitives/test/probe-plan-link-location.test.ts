@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { probePlan } from "../src/probe/index.js";
 import { linkSourceIsOperatorInput } from "../src/probe/link-policy.js";
 import { parsePlanFile } from "../src/probe/plan.js";
@@ -298,6 +298,28 @@ describe("parsePlanFile: realPath", () => {
 
     expect(parsed.ok).toBe(true);
     expect(parsed.ok && parsed.realPath).toBe(real);
+  });
+});
+
+describe("parsePlanFile: a realpath that is not the file that was read", () => {
+  it("reports no realPath when the realpath names a different file than the one the bytes came from", () => {
+    const fx = makeFixture();
+    const opened = writePlan(path.join(fx.runDir, "plan.json"), fx.planBody);
+    const other = writePlan(path.join(fx.runDir, "other.json"), fx.planBody);
+    const spy = vi
+      .spyOn(fs, "realpathSync")
+      .mockImplementation(((p: fs.PathLike) =>
+        p === opened ? other : p) as typeof fs.realpathSync);
+    try {
+      const parsed = parsePlanFile(opened);
+
+      expect(parsed.ok).toBe(true);
+      expect(parsed.ok && parsed.realPath).toBeUndefined();
+    } finally {
+      spy.mockRestore();
+    }
+    const again = parsePlanFile(opened);
+    expect(again.ok && again.realPath).toBe(opened);
   });
 });
 
