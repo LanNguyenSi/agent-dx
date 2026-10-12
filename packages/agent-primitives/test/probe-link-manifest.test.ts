@@ -1,7 +1,8 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   LINK_MANIFEST_FILE,
@@ -34,6 +35,11 @@ const GIT_ENV: NodeJS.ProcessEnv = {
   GIT_AUTHOR_EMAIL: "test@example.com",
   GIT_COMMITTER_NAME: "test",
   GIT_COMMITTER_EMAIL: "test@example.com",
+};
+
+const GIT_ENV_WITH_PATH: NodeJS.ProcessEnv = {
+  PATH: process.env.PATH,
+  ...GIT_ENV,
 };
 
 vi.setConfig({ testTimeout: 120_000 });
@@ -917,11 +923,41 @@ describe("the manifest file is read with the same care as a plan", () => {
         // (ENOENT) means the test cannot run.
         if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
       }
-      const reason = await rejectedWith((file) => {
-        fs.rmSync(file);
-        execFileSync("mkfifo", [file]);
+      const f = makeFixture();
+      const wt = await createWorktree(f, "wt-fifo", ["lib"]);
+      const file = path.join(adminDirOf(wt), LINK_MANIFEST_FILE);
+      fs.rmSync(file);
+      execFileSync("mkfifo", [file]);
+
+      // A blocking open of a FIFO never returns, and a synchronous open
+      // cannot be interrupted by the test runner's own timeout, so the
+      // read runs in a child process with a hard limit.
+      const moduleUrl = pathToFileURL(
+        path.join(
+          path.dirname(fileURLToPath(import.meta.url)),
+          "..",
+          "dist",
+          "probe",
+          "link-manifest.js",
+        ),
+      ).href;
+      const child = spawnSync(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          `import { readLinkManifest } from ${JSON.stringify(moduleUrl)};
+           process.stdout.write(JSON.stringify(readLinkManifest(${JSON.stringify(wt)})));`,
+        ],
+        { encoding: "utf8", timeout: 20_000, env: GIT_ENV_WITH_PATH },
+      );
+
+      expect(child.error, "the read hung on the FIFO").toBeUndefined();
+      expect(child.status, child.stderr).toBe(0);
+      expect(JSON.parse(child.stdout)).toMatchObject({
+        status: "rejected",
+        reason: "it is not a regular file",
       });
-      expect(reason).toBe("it is not a regular file");
     },
   );
 
