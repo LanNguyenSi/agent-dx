@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  countPhpTestMethods,
   countTestCases,
   hygiene,
   isBackupPath,
@@ -110,6 +111,70 @@ describe("helpers", () => {
       "// it(not a case",
     ].join("\n");
     expect(countTestCases(src)).toBe(7);
+  });
+
+  it("counts PHPUnit test methods by name, docblock tag and attribute", () => {
+    const byName = [
+      "<?php",
+      "final class FooTest extends TestCase {",
+      "  public function testOne(): void {}",
+      "  public static function testTwo(): void {}",
+      "  protected function helper(): void {}",
+      "}",
+    ].join("\n");
+    expect(countPhpTestMethods(byName)).toBe(2);
+
+    const byDoc = [
+      "  /**",
+      "   * Checks the thing.",
+      "   *",
+      "   * @test",
+      "   * @dataProvider provider",
+      "   */",
+      "  public function itWorks(): void {}",
+      "  /** @test */",
+      "  public function alsoWorks(): void {}",
+      "  /** @testdox not a marker */",
+      "  public function notATest(): void {}",
+    ].join("\n");
+    expect(countPhpTestMethods(byDoc)).toBe(2);
+
+    const byAttribute = [
+      "  #[Test]",
+      "  public function a(): void {}",
+      "  #[\\PHPUnit\\Framework\\Attributes\\Test]",
+      "  public function b(): void {}",
+      "  #[DataProvider('p'), Test]",
+      "  public function c(): void {}",
+      "  #[TestDox('x')]",
+      "  public function d(): void {}",
+    ].join("\n");
+    expect(countPhpTestMethods(byAttribute)).toBe(3);
+  });
+
+  it("counts a PHP method with both a test name and a marker once", () => {
+    const both = "  /** @test */\n  public function testOne(): void {}\n";
+    const nameOnly = "  public function testOne(): void {}\n";
+    expect(countPhpTestMethods(both)).toBe(1);
+    expect(countPhpTestMethods(nameOnly)).toBe(1);
+  });
+
+  it("does not count PHP comments or non-test methods", () => {
+    const src = [
+      "  // public function testCommented(): void {}",
+      "   * function testInDocblock()",
+      "  public function provider(): array { return []; }",
+      "  $s = 'function testInString()';",
+    ].join("\n");
+    expect(countPhpTestMethods(src)).toBe(0);
+  });
+
+  it("routes .php paths to the PHP counter only", () => {
+    const php = "  public function testOne(): void {}\n@test\n";
+    expect(countTestCases(php, "tests/src/Unit/FooTest.php")).toBe(1);
+    expect(countTestCases(php)).toBe(1);
+    expect(isTestPath("src/FooTest.php")).toBe(true);
+    expect(isTestPath("src/Foo.php")).toBe(false);
   });
 });
 
@@ -428,6 +493,66 @@ describe("hygiene", () => {
       baseCases: 3,
       headCases: 1,
     });
+  });
+
+  it("flags PHPUnit test methods reduced from 4 to 1", () => {
+    const repo = initRepo();
+    write(
+      repo,
+      "tests/src/Unit/FooTest.php",
+      [
+        "<?php",
+        "final class FooTest extends TestCase {",
+        "  public function testOne(): void {}",
+        "  /** @test */",
+        "  public function two(): void {}",
+        "  #[Test]",
+        "  public function three(): void {}",
+        "  public function testFour(): void {}",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repo, "php tests");
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    write(
+      repo,
+      "tests/src/Unit/FooTest.php",
+      [
+        "<?php",
+        "final class FooTest extends TestCase {",
+        "  public function testOne(): void {}",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repo);
+    const r = hygiene({ cwd: repo, base });
+    expect(r.status).toBe("fail");
+    expect(r.findings[0]).toMatchObject({
+      kind: "test_cases_dropped",
+      path: "tests/src/Unit/FooTest.php",
+      baseCases: 4,
+      headCases: 1,
+    });
+  });
+
+  it("does not flag removing only the @test tag from a test-named PHP method", () => {
+    const repo = initRepo();
+    write(
+      repo,
+      "tests/BarTest.php",
+      "<?php\n  /** @test */\n  public function testOne(): void {}\n",
+    );
+    commitAll(repo, "php test");
+    const base = git(repo, ["rev-parse", "HEAD"]).trim();
+    write(
+      repo,
+      "tests/BarTest.php",
+      "<?php\n  public function testOne(): void {}\n",
+    );
+    commitAll(repo);
+    expect(hygiene({ cwd: repo, base }).status).toBe("ok");
   });
 
   it("flags a deleted test file and tracks a rename without a false positive", () => {
