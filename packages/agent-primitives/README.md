@@ -1,8 +1,8 @@
 # agent-primitives
 
 Agent-first CLI primitives for narrow subagents: a mutation-probe runner, a
-verify runner, a PATH doctor, an identifier-drift guard, a commit-hygiene guard, checkout snapshot/delta, and linked-worktree creation, each returning
-one bounded JSON result instead of raw tool output.
+verify runner, a PATH doctor, an identifier-drift guard, a commit-hygiene guard, checkout snapshot/delta, and linked-worktree creation, removal and
+reporting, each returning one bounded JSON result instead of raw tool output.
 
 ## Overview
 
@@ -42,6 +42,14 @@ for teams shipping with AI agents.
   the `.ai/run` pointer, symlinks shared dependency directories, runs a setup
   command and a smoke check, and reports the base sha as a ready
   `run-base[<repo>] = <sha>` line.
+- `worktree remove`: removes one linked worktree, refusing a dirty, unpushed
+  or (with `--require-merged`) unmerged one unless `--force`, unlinking the
+  dependency links it finds without ever following them, keeping the branch
+  unless `--delete-branch` says otherwise, and never removing or switching the
+  main checkout.
+- `worktree list`: reports every worktree of a repository, or every work tree
+  below `--root`, with its branch, `.ai/run` pointer, dirty state, commits
+  ahead of and behind the default base, merge verdict and dependency links.
 - Non-Node repositories are supported: PHP (PHPUnit, PHPStan,
   PHP_CodeSniffer) output is recognized by `verify` and `probe` alongside
   vitest, tsc, and eslint.
@@ -94,8 +102,8 @@ file, and reports whether the test caught it (`killed`) or missed it
   extend-only rewrites and dropped test cases.
 - [`snapshot`](docs/snapshot.md): read-only checkout fingerprints.
 - [`delta`](docs/delta.md): compare the same checkout with a saved snapshot.
-- [`worktree`](docs/worktree.md): create a linked worktree for a task branch,
-  with its flags and refusals.
+- [`worktree`](docs/worktree.md): create, list and remove linked worktrees
+  for a task branch, with their flags and refusals.
 - [Non-JS test runners](docs/non-js-test-runners.md): PHP and other
   non-Node test runner support, including the "Python bytecode cache"
   section a `probe` warning points to.
@@ -117,7 +125,7 @@ maps the status to the exit code. Each command lives in its own module:
 | `drift` | `src/drift/` |
 | `hygiene` | `src/hygiene/index.ts`, using `src/drift/git.ts` |
 | `snapshot`, `delta` | `src/snapshot/` |
-| `worktree` | `src/worktree/` (`create.ts`; shared git helpers in `git.ts`, the smoke verdict in `readiness.ts`) |
+| `worktree` | `src/worktree/` (`create.ts`, `remove.ts`, `list.ts`; shared git helpers in `git.ts`, the smoke verdict in `readiness.ts`) |
 
 `verify` spawns its checks through `execCommand` in `src/exec.ts`.
 `probe` is split into a setup phase (`src/probe/setup.ts`: containment,

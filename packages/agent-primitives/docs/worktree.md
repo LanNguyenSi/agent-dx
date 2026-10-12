@@ -1,6 +1,6 @@
 # `worktree`
 
-Creates and (in later releases) manages linked git worktrees for task branches. Part of the [agent-primitives](../README.md) CLI. This page covers `worktree create`.
+Creates, reports and removes linked git worktrees for task branches. Part of the [agent-primitives](../README.md) CLI. This page covers `worktree create`, `worktree remove` and `worktree list`; everything above the `## remove` heading documents `create`.
 
 Before delegating a task, an orchestrator typically makes a worktree on a fresh branch, points it at the run directory, links the dependency directories that are too big to reinstall, and checks that the result runs. Done by hand that is a dozen commands, and each has a known way to go wrong: a relative path resolved against `git -C <repo>` puts the worktree inside the repository, a branch started from `origin/<default>` inherits that branch as its upstream (a bare `git push` then aims at the default branch), and the run pointer gets written where git does not ignore it. `worktree create` does the whole sequence, refuses what is unsafe, and reports everything a run record needs in one envelope.
 
@@ -107,6 +107,100 @@ A refusal is `status: "usage_error"` (exit 2) with a `reason`, a `message`, and 
 | `option_invalid` | `--pass-regex` without `--smoke`, or an empty `--setup` / `--smoke`. |
 | `worktree_add_failed` | `git worktree add` itself failed; the message carries git's error. |
 
+## remove
+
+```bash
+agent-primitives worktree remove ~/wt/app-login
+agent-primitives worktree remove ~/wt/app-login --delete-branch --require-merged
+```
+
+One positional `<path>`: the worktree to remove. A relative value resolves against the invocation directory (`-C`), never against the repository.
+
+| Option | Meaning |
+| --- | --- |
+| `--force` | Remove the worktree even when it is dirty, has commits no remote branch has, is locked, or (with `--require-merged`) is not merged or its merge state cannot be told. The three structural refusals stand regardless: `not_a_worktree`, `remove_main_checkout` and `default_branch_delete`. |
+| `--delete-branch` | Delete the worktree's branch after the worktree is gone. |
+| `--require-merged` | Refuse unless the branch is merged into `origin/<default branch>`, by ancestry or by a merged pull request that `gh` reports for it. |
+
+### What it does
+
+In this order, with every check that can refuse before the first change:
+
+1. Resolves `<path>` and finds it among `git worktree list` entries.
+2. Refuses the main checkout, and a locked entry without `--force`.
+3. Dirty check: `git status --porcelain --untracked-files=all`. Ignored paths are invisible here, which is what lets a worktree with its `.ai/run` pointer and its dependency links be removed without `--force`.
+4. Unpushed check: `git rev-list HEAD --not --remotes` counts the commits no remote branch has.
+5. Merge check (only with `--require-merged` or `--delete-branch`): `merge-base --is-ancestor HEAD origin/<default>`, and otherwise `gh pr list --state merged --head <branch>`.
+6. Branch guard: refuses to delete the branch the default base names, or the branch the main checkout is on.
+7. Unlinks the ignored symlinks in the work tree (the dependency links `create` made), each with `unlink`, which removes the link itself and never follows it, so the shared directory in the main checkout is left exactly as it was.
+8. `git worktree remove` from the main checkout (`--force` once, or twice for a locked entry, as git requires), then `git worktree prune`.
+9. `git branch -D <branch>` with `--delete-branch`. `-D` cannot lose work in the normal path, because an unpushed branch was already refused in step 4 unless `--force` said otherwise.
+
+The main checkout is never modified: no `git stash`, `checkout`, `switch` or `reset` is run anywhere, and its HEAD, index, working tree and stash are untouched. Only its administrative directories are written (`worktree remove`, `worktree prune`, `branch -D`). Removing a worktree never deletes its branch unless `--delete-branch` says so.
+
+### Result
+
+The usual [envelope](output-shape.md) with `command: "worktree remove"`, plus:
+
+| Field | Meaning |
+| --- | --- |
+| `worktree` | `path` (absolute), `branch` when it had one, `head`. |
+| `linksRemoved` | Repository-relative paths of the ignored symlinks that were unlinked in step 7. |
+| `merged` | The merge verdict, or `null` when neither `--require-merged` nor `--delete-branch` asked for one: `merged` `yes`/`no`/`unknown`, `via` `ancestry`/`gh`/`none`, and a `reason`. |
+| `branch` | `deleted` and the `reason` (git's own message, or why the branch was kept). |
+| `pruned` | Whether `git worktree prune` ran and succeeded afterwards. |
+| `warnings` | What did not work but could not stop the removal (a link that could not be unlinked, a failed prune). |
+
+### Refusals
+
+| `reason` | Cause |
+| --- | --- |
+| `not_a_worktree` | `<path>` is not an existing directory, or is a directory git does not list as a worktree of its repository. |
+| `not_a_git_repo` | `<path>` is not inside a git working tree. |
+| `remove_main_checkout` | `<path>` is the main checkout. This command never removes it. |
+| `worktree_locked` | The entry is locked (`git worktree unlock` it, or pass `--force`). |
+| `worktree_dirty` | Uncommitted or untracked changes; `details.entries` lists the first 20 status lines. |
+| `unpushed_commits` | Commits that no remote branch has; `details.commits` counts them. |
+| `branch_not_merged` | `--require-merged`, and the branch is neither an ancestor of the base nor the head of a merged pull request. `details.merged` is the verdict. |
+| `merge_state_unknown` | `--require-merged`, and neither ancestry nor `gh` could decide, so the state is unknown rather than negative. `details.merged.reason` says which. |
+| `default_branch_delete` | `--delete-branch` was asked for the branch the default base names or the one the main checkout is on. |
+| `worktree_remove_failed` | `git worktree remove` itself failed; the message carries git's error. |
+
+### The merged rule
+
+Ancestry decides first: `HEAD` is an ancestor of `origin/<default branch>`, which covers a merge and a fast forward. A squash or a rebase merge leaves no ancestry, so `gh pr list --state merged --head <branch>` is asked next, and one merged pull request for the branch is a `yes` with `via: "gh"`. `gh` is only consulted when it is installed and only when the answer is needed; when it is absent, or fails, or answers something that is not JSON, the verdict is `unknown`, and `--require-merged` reports `merge_state_unknown` rather than removing the worktree on a guess. `--force` is what overrides both a `no` and an `unknown`.
+
+## list
+
+```bash
+agent-primitives worktree list --repo ~/src/app
+agent-primitives worktree list --root ~/wt
+```
+
+Read-only: no git command that writes is run.
+
+| Option | Meaning |
+| --- | --- |
+| `--repo <path>` | The repository to report: the main checkout, a subdirectory, or a linked worktree. Every worktree git lists is reported, main checkout first. Default: the invocation directory (`-C`). |
+| `--root <dir>` | Instead of one repository, report the work trees that are direct children of `<dir>`, sorted by name. A child that is not a work tree top (a plain directory, or a subdirectory of some checkout) is skipped silently. Exclusive with `--repo`: both together are an `option_invalid` refusal. |
+
+Per entry:
+
+| Field | Meaning |
+| --- | --- |
+| `path`, `repo`, `main` | The directory, the basename of the main checkout it belongs to, and whether this entry is that main checkout (the only `main: true` of a repository). |
+| `branch`, `head` | From `git worktree list --porcelain`; `branch` is absent for a detached HEAD. |
+| `base` | The default base the three fields below are measured against (`origin/main`, say), absent when it cannot be resolved. |
+| `runPointer` | Trimmed content of `<path>/.ai/run`, `null` when absent. |
+| `dirty` | Whether `git status --porcelain --untracked-files=all` says anything, `null` when git could not answer. |
+| `ahead`, `behind` | `git rev-list --left-right --count <base>...HEAD`: commits only on `HEAD`, and commits only on the base. `null` when either could not be told. |
+| `merged` | The same verdict as `remove --require-merged` would reach, so a `yes` means it is safe to remove the worktree and keep the base. |
+| `links` | The ignored symlinks in the work tree: the dependency links `create` made. |
+| `prunable`, `locked` | git's own flags for the entry. |
+
+A prunable entry (its directory is already gone) has no work tree to read, so `dirty`, `ahead` and `behind` are `null`, `links` and `runPointer` are empty, and `merged` says `prunable: the directory is gone`.
+
 ## Related
 
-`worktree remove` and `worktree list` are planned as the next subcommands and will reuse the helpers in `src/worktree/git.ts`.
+`worktree create` writes what `worktree remove` later cleans up: the branch, the `.ai/run` pointer and the dependency links are its three artifacts, and `remove` reports each one it deleted. `list` reads the same fields back, so `create`'s envelope, `list`'s report and `remove`'s report describe one worktree in the same terms.
+

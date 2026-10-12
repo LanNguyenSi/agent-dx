@@ -56,6 +56,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   optional `realPath` on success. See `docs/probe.md`, "Where a plan file
   lives".
 
+- Add `worktree remove` and `worktree list` (2f2f3f35): `remove` deletes one
+  linked worktree, refusing before it changes anything a worktree with
+  uncommitted or untracked changes (`worktree_dirty`), commits no remote
+  branch has (`unpushed_commits`), or a locked entry, each overridable with
+  `--force`; with `--require-merged` it also refuses a branch that is neither
+  an ancestor of `origin/<default branch>` nor the head of a merged pull
+  request that `gh` reports for it, which is how a squash merge is recognized,
+  and reports `merge_state_unknown` when no `gh` can tell. It unlinks the
+  ignored dependency links without ever following them, keeps the branch
+  unless `--delete-branch`, never deletes the default branch, and never
+  removes or switches the main checkout. `list` reports per worktree its
+  branch, `.ai/run` pointer, dirty state, commits ahead of and behind the
+  default base, merge verdict and dependency links, across one repository or
+  across every work tree below `--root`; see `docs/worktree.md`.
+
 - Docs: `docs/probe.md` now states the `--env` redaction rule as the code
   applies it (a name redacts only when `TOKEN`, `SECRET`, `PASSWORD`,
   `CREDENTIAL` or `KEY` is its own `_`-delimited segment, so `GHTOKEN` and

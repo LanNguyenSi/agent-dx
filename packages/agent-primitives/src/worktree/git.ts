@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { UsageError } from "../envelope.js";
@@ -34,7 +35,16 @@ export type WorktreeRefusalReason =
   | "links_file_unreadable"
   | "links_file_inside_repo"
   | "option_invalid"
-  | "worktree_add_failed";
+  | "worktree_add_failed"
+  | "not_a_worktree"
+  | "remove_main_checkout"
+  | "worktree_locked"
+  | "worktree_dirty"
+  | "unpushed_commits"
+  | "branch_not_merged"
+  | "merge_state_unknown"
+  | "default_branch_delete"
+  | "worktree_remove_failed";
 
 /** A precondition that was not met. Nothing has been changed when one is
  * thrown, with the single exception of `worktree_add_failed` and
@@ -359,4 +369,135 @@ export function addToExclude(commonDir: string, pattern: string): boolean {
   const lead = existing.length > 0 && !existing.endsWith("\n") ? "\n" : "";
   fs.appendFileSync(file, `${lead}${pattern}\n`);
   return true;
+}
+
+/** Whether `branch` is merged into `baseRef`, and how that was decided. */
+export interface MergeVerdict {
+  merged: "yes" | "no" | "unknown";
+  /** `ancestry`: the branch tip is an ancestor of the base. `gh`: GitHub
+   * lists a merged pull request for the branch (a squash merge leaves no
+   * ancestry). `none`: neither could decide. */
+  via: "ancestry" | "gh" | "none";
+  reason: string;
+}
+
+/** Runs `gh` with a bound; `undefined` when it cannot be started. */
+export function runGh(
+  cwd: string,
+  args: readonly string[],
+): { status: number | null; stdout: string; stderr: string } | undefined {
+  const r = spawnSync("gh", [...args], {
+    cwd,
+    encoding: "utf8",
+    env: withoutRepoSelectionEnv(),
+    timeout: 30_000,
+  });
+  if (r.error !== undefined) return undefined;
+  return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+}
+
+/**
+ * Merged into `baseRef`? Ancestry first (`git merge-base --is-ancestor`);
+ * when that says no and the worktree has a branch, asks `gh` for a merged
+ * pull request whose head is the branch, which also catches a squash merge.
+ */
+export function mergeVerdict(
+  cwd: string,
+  head: string,
+  branch: string | undefined,
+  baseRef: string,
+): MergeVerdict {
+  const anc = git(cwd, ["merge-base", "--is-ancestor", head, baseRef]);
+  if (anc.error === undefined && anc.status === 0) {
+    return {
+      merged: "yes",
+      via: "ancestry",
+      reason: `${head} is an ancestor of ${baseRef}`,
+    };
+  }
+  if (branch === undefined) {
+    return {
+      merged: "unknown",
+      via: "none",
+      reason:
+        "detached HEAD is not an ancestor of the base and has no branch to look up",
+    };
+  }
+  const gh = runGh(cwd, [
+    "pr",
+    "list",
+    "--state",
+    "merged",
+    "--head",
+    branch,
+    "--json",
+    "number",
+    "--limit",
+    "1",
+  ]);
+  if (gh === undefined) {
+    return {
+      merged: "unknown",
+      via: "none",
+      reason:
+        "not an ancestor of the base, and gh is not available to check for a squash merge",
+    };
+  }
+  if (gh.status !== 0) {
+    return {
+      merged: "unknown",
+      via: "none",
+      reason: `not an ancestor of the base, and gh failed: ${gh.stderr.trim() || `exit ${String(gh.status)}`}`,
+    };
+  }
+  let prs: unknown;
+  try {
+    prs = JSON.parse(gh.stdout);
+  } catch {
+    return {
+      merged: "unknown",
+      via: "none",
+      reason: "gh returned output that is not JSON",
+    };
+  }
+  if (Array.isArray(prs) && prs.length > 0) {
+    return {
+      merged: "yes",
+      via: "gh",
+      reason: `gh lists a merged pull request for ${branch}`,
+    };
+  }
+  return {
+    merged: "no",
+    via: "gh",
+    reason: `not an ancestor of ${baseRef} and gh lists no merged pull request for ${branch}`,
+  };
+}
+
+/**
+ * Ignored symlinks in the work tree at `cwd` (the dependency links
+ * `create` makes are ignored through info/exclude). git does not descend
+ * into a symlink, so a link to a large directory costs one entry.
+ * Repository-relative paths.
+ */
+export function ignoredSymlinks(cwd: string): string[] {
+  const r = git(cwd, [
+    "ls-files",
+    "-z",
+    "--others",
+    "--ignored",
+    "--exclude-standard",
+    "--directory",
+  ]);
+  if (r.error !== undefined || r.status !== 0) return [];
+  const out: string[] = [];
+  for (const entry of r.stdout.split("\0")) {
+    if (entry.length === 0 || entry.endsWith("/")) continue;
+    try {
+      if (fs.lstatSync(path.join(cwd, entry)).isSymbolicLink()) out.push(entry);
+    } catch {
+      // vanished between listing and lstat
+    }
+  }
+  return out;
 }
