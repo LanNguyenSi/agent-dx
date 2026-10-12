@@ -35,9 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the main checkout to the full ref; the `gh` merged-pull-request lookup uses
   the branch part after `<remote>/` as the pull request's base and runs
   against gh's default repository (no `--repo` is passed, so the remote's own
-  repository is not selected). Anything else
-  (`HEAD`, `HEAD~n`, `@{u}`, rev syntax such as `origin/x@{1}`, `origin/x~1` or
-  `origin/x^`, a local branch, a sha, a tag) is refused as
+  repository is not selected). Anything else (`HEAD`, `HEAD~n`, `@{u}`, rev
+  syntax such as `origin/x@{1}`, `origin/x~1` or `origin/x^`, a local
+  branch, a sha, a tag) is refused as
   `base_not_remote_branch` (`list` without `--root`, and `remove`, even with
   `--force`; with `--root`, that repository's entries get `merged: unknown`
   plus a warning). Without `--base` nothing changes. `list` shows `<rev>` as
