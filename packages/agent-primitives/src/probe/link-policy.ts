@@ -879,10 +879,11 @@ export interface PlanLinkSource {
  * Trust is by location. Repository content is whatever lives under the
  * containment root, so a plan stored there can have been written by
  * whoever wrote the repository, and its `link` stays untrusted. A plan
- * stored outside the root cannot have come from the repository's own
- * files, so naming it on the command line is the operator's act and its
- * `link` is treated as if typed as `--link`. The repository defaults file
- * is not a source here at all: it always lives at the root.
+ * stored outside the root is not content of the repository being probed,
+ * so naming it on the command line is the operator's act and its
+ * `link` is treated as if typed as `--link`. The repository defaults file,
+ * stored inside the repository, is not a source here at all: it always
+ * lives at the root.
  *
  * The decision fails closed. A plan is outside only when ALL of these
  * hold, and any doubt means "inside":

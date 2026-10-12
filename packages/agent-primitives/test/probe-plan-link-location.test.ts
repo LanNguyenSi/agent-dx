@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -7,7 +7,13 @@ import { probePlan } from "../src/probe/index.js";
 import { linkSourceIsOperatorInput } from "../src/probe/link-policy.js";
 import { parsePlanFile } from "../src/probe/plan.js";
 import { caseInsensitiveVolume } from "./helpers/case-fs.js";
-import { spawnCli } from "./helpers/spawn-cli.js";
+import {
+  buildSpawnEnv,
+  CLI_PATH,
+  collectCli,
+  spawnCli,
+  type PipedCli,
+} from "./helpers/spawn-cli.js";
 
 /**
  * Where a `--plan` file lives decides how its `link` list is judged: a
@@ -131,7 +137,7 @@ function refusalFor(fx: Fixture, namedIn: string): string {
   return (
     `outside the containment root (${fx.repo}): link ` +
     `"lib" named in the "link" list of ${namedIn} is a symlink to ` +
-    "../shared/lib, which does not resolve inside the root, and a link " +
+    '"../shared/lib", which does not resolve inside the root, and a link ' +
     "named by repository content must; pass it as --link to treat it as " +
     "operator input"
   );
@@ -255,6 +261,191 @@ describe("probe --plan: a plan outside the repository gets the --link policy for
   }, 60000);
 });
 
+describe("probe --plan: boundary shapes of the location decision", () => {
+  it("keeps the strict rule for `--plan /dev/stdin` fed from a plan inside the repo", async () => {
+    const fx = makeFixture();
+    const plan = writePlan(path.join(fx.repo, "plan.json"), fx.planBody);
+    const fd = fs.openSync(plan, "r");
+    let run;
+    try {
+      const child = spawn(
+        process.execPath,
+        [
+          CLI_PATH,
+          "-C",
+          fx.repo,
+          "-l",
+          fx.logs,
+          "-m",
+          "100000",
+          "probe",
+          "--plan",
+          "/dev/stdin",
+        ],
+        { env: buildSpawnEnv(), stdio: [fd, "pipe", "pipe"] },
+      ) as unknown as PipedCli;
+      run = await collectCli(child);
+    } finally {
+      fs.closeSync(fd);
+    }
+
+    const envelope = JSON.parse(run.stdout) as {
+      status: string;
+      reason?: string;
+    };
+    expect(envelope.status).toBe("usage_error");
+    expect(envelope.reason).toBe("file_outside_root");
+  }, 60000);
+
+  it("treats an outside symlink whose absolute target spells the repo in another case as inside", async () => {
+    const fx = makeFixture();
+    writePlan(path.join(fx.repo, "plan.json"), fx.planBody);
+    const alias = path.join(fx.runDir, "alias.json");
+    const variant = path.join(fx.base, "REPO", "plan.json");
+    fs.symlinkSync(variant, alias);
+
+    const { envelope } = await runPlan(fx, alias);
+
+    if (caseInsensitiveVolume(fx.base)) {
+      expect(envelope.status).toBe("usage_error");
+      expect(envelope.reason).toBe("file_outside_root");
+    } else {
+      // On a case-sensitive volume the alias dangles: it is no way into the
+      // repository at all.
+      expect(envelope.reason).toBe("plan_not_readable");
+    }
+  }, 60000);
+
+  it("treats a case-variant typed path through an in-repo symlink to an outside dir as inside", async () => {
+    const fx = makeFixture();
+    writePlan(path.join(fx.runDir, "plan.json"), fx.planBody);
+    fs.symlinkSync(fx.runDir, path.join(fx.repo, "runlink"));
+    const typed = path.join(fx.base, "REPO", "runlink", "plan.json");
+
+    const { envelope } = await runPlan(fx, typed);
+
+    if (caseInsensitiveVolume(fx.base)) {
+      expect(envelope.status).toBe("usage_error");
+      expect(envelope.reason).toBe("file_outside_root");
+    } else {
+      expect(envelope.reason).toBe("plan_not_readable");
+    }
+  }, 60000);
+
+  it("treats an outside plan with a second hard link as inside: its other name may sit in the repo", async () => {
+    const fx = makeFixture();
+    const plan = writePlan(path.join(fx.runDir, "plan.json"), fx.planBody);
+    fs.linkSync(plan, path.join(fx.repo, "plan-hard.json"));
+
+    const { envelope } = await runPlan(fx, plan);
+
+    expect(envelope.status).toBe("usage_error");
+    expect(envelope.reason).toBe("file_outside_root");
+  }, 60000);
+});
+
+describe("probe --plan: the refusal for a repository link never depends on state outside the root", () => {
+  type Shape = "gone-exists-oracle" | "gone-missing" | "gone-exists-bare";
+
+  /** A repo where `dang` is a symlink to `<base>/out/gone` and `a` is a
+   * symlink to `dang/../b`; the three states vary only what exists outside
+   * the repo. `link` names `a/oracle`. */
+  function makeDanglingShape(fx: Fixture, shape: Shape): void {
+    fs.mkdirSync(path.join(fx.base, "out", "b"), { recursive: true });
+    const gone = path.join(fx.base, "out", "gone");
+    if (shape !== "gone-missing") fs.mkdirSync(gone);
+    if (shape !== "gone-exists-bare") {
+      fs.symlinkSync(
+        "/SECRET/OUTSIDE/LINK/TEXT",
+        path.join(fx.base, "out", "b", "oracle"),
+      );
+    }
+    fs.symlinkSync(gone, path.join(fx.repo, "dang"));
+    fs.symlinkSync("dang/../b", path.join(fx.repo, "a"));
+  }
+
+  /** A repo where `a` is a symlink to `<base>/out/y` and the far end is a
+   * cycle back to `a`, a directory holding an `oracle` symlink, or absent. */
+  function makeLoopShape(fx: Fixture, far: "cycle" | "dir" | "missing"): void {
+    fs.mkdirSync(path.join(fx.base, "out"), { recursive: true });
+    const y = path.join(fx.base, "out", "y");
+    if (far === "cycle") fs.symlinkSync(path.join(fx.repo, "a"), y);
+    if (far === "dir") {
+      fs.mkdirSync(y);
+      fs.symlinkSync("/ELSEWHERE", path.join(y, "oracle"));
+    }
+    fs.symlinkSync(y, path.join(fx.repo, "a"));
+  }
+
+  const shapes: [string, (fx: Fixture) => void][] = [
+    [
+      "dangling ancestor, far end exists with an oracle symlink",
+      (fx) => makeDanglingShape(fx, "gone-exists-oracle"),
+    ],
+    [
+      "dangling ancestor, far end missing",
+      (fx) => makeDanglingShape(fx, "gone-missing"),
+    ],
+    [
+      "dangling ancestor, far end exists without an oracle",
+      (fx) => makeDanglingShape(fx, "gone-exists-bare"),
+    ],
+    [
+      "ancestor loops through an outside symlink",
+      (fx) => makeLoopShape(fx, "cycle"),
+    ],
+    [
+      "ancestor points at an outside dir with an oracle symlink",
+      (fx) => makeLoopShape(fx, "dir"),
+    ],
+    [
+      "ancestor points at a missing outside path",
+      (fx) => makeLoopShape(fx, "missing"),
+    ],
+  ];
+
+  async function warningsFor(
+    lane: "plan" | "defaults",
+    build: (fx: Fixture) => void,
+  ): Promise<string[]> {
+    const fx = makeFixture();
+    build(fx);
+    let plan: string;
+    if (lane === "plan") {
+      plan = writePlan(path.join(fx.repo, "plan.json"), {
+        ...fx.planBody,
+        link: ["a/oracle"],
+      });
+    } else {
+      const body = { ...fx.planBody };
+      delete body.link;
+      plan = writePlan(path.join(fx.runDir, "plan.json"), body);
+      fs.writeFileSync(
+        path.join(fx.repo, ".agent-primitives.json"),
+        JSON.stringify({ link: ["a/oracle"] }),
+      );
+    }
+    const { envelope } = await runPlan(fx, plan);
+    expect(envelope.reason).toBe("file_outside_root");
+    return envelope.warnings.map((w) => w.split(fx.repo).join("<repo>"));
+  }
+
+  for (const lane of ["plan", "defaults"] as const) {
+    it(`gives one identical message for every outside state (${lane} lane), the in-root value alone`, async () => {
+      const answers: string[][] = [];
+      for (const [, build] of shapes) {
+        answers.push(await warningsFor(lane, build));
+      }
+
+      for (const answer of answers) {
+        expect(answer).toEqual([
+          "outside the containment root (<repo>): <repo>/a/oracle",
+        ]);
+      }
+    }, 240000);
+  }
+});
+
 describe("linkSourceIsOperatorInput", () => {
   it("is false for a plan whose realpath could not be verified, wherever it is named", () => {
     const fx = makeFixture();
@@ -298,6 +489,21 @@ describe("parsePlanFile: realPath", () => {
 
     expect(parsed.ok).toBe(true);
     expect(parsed.ok && parsed.realPath).toBe(real);
+  });
+});
+
+describe("parsePlanFile: hard links", () => {
+  it("reports no realPath for a plan file with a second hard link", () => {
+    const fx = makeFixture();
+    const plan = writePlan(path.join(fx.runDir, "plan.json"), fx.planBody);
+    const single = parsePlanFile(plan);
+    fs.linkSync(plan, path.join(fx.runDir, "plan-2.json"));
+
+    const linked = parsePlanFile(plan);
+
+    expect(single.ok && single.realPath).toBe(plan);
+    expect(linked.ok).toBe(true);
+    expect(linked.ok && linked.realPath).toBeUndefined();
   });
 });
 

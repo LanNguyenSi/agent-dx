@@ -379,19 +379,21 @@ function repositoryLinkOutsideMessage(
   realRoot: string,
   link: MergedLink,
 ): string {
-  // Only a link whose own parent directory chain stays inside the root
-  // has a `readlink` text that is repository content. When an ancestor
-  // is itself a symlink out of the root, that text lives outside it and
-  // whether it exists is not for the envelope to tell, so the original
-  // wording, which names the in-root value alone, stays.
-  if (
-    !isPathContained(realRoot, resolveDeepestExisting(path.dirname(link.value)))
-  ) {
+  // Only a link that PHYSICALLY sits inside the root has a `readlink`
+  // text that is repository content. The decision is taken by lstat-ing
+  // each directory between the root and the link, so it depends on
+  // nothing a resolver would settle by the state outside the root: an
+  // ancestor that is itself a symlink (wherever it points, however its
+  // far end resolves or fails to) keeps the original wording, which names
+  // the in-root value alone.
+  if (!sitsPhysicallyInside([root, realRoot], link.value)) {
     return `outside the containment root (${root}): ${link.value}`;
   }
   let pointsTo = "";
   try {
-    pointsTo = ` is a symlink to ${fs.readlinkSync(link.value)}, which`;
+    pointsTo = ` is a symlink to ${JSON.stringify(
+      fs.readlinkSync(link.value),
+    )}, which`;
   } catch {
     // Not a symlink itself, or unreadable: say nothing about where it
     // points rather than guess.
@@ -401,6 +403,50 @@ function repositoryLinkOutsideMessage(
     `${pointsTo} does not resolve inside the root, and a link named by ` +
     "repository content must; pass it as --link to treat it as operator input"
   );
+}
+
+/**
+ * Whether `value`, written as an absolute path under one of `bases`,
+ * names an entry whose every parent directory below that base is a real
+ * directory, not a symlink: each component from the base down to
+ * `path.dirname(value)` is `lstat`-ed in turn. Any symlink, any `lstat`
+ * failure, any `..` segment and any value that is not spelled under a
+ * base answers `false`.
+ *
+ * `realpath`-style resolution is deliberately not used: it collapses
+ * `..` lexically and falls back to a lexical spelling on ENOENT and
+ * ELOOP, so for `a -> dang/../b` its answer follows what exists outside
+ * the root, while the kernel (which `readlink` goes through) does not.
+ * A walk that only ever asks "is this component a symlink" has one
+ * answer per repository.
+ */
+function sitsPhysicallyInside(
+  bases: readonly string[],
+  value: string,
+): boolean {
+  const parent = path.dirname(value);
+  for (const base of bases) {
+    const rel = path.relative(base, parent);
+    if (path.isAbsolute(rel)) continue;
+    const segments = rel.split(path.sep).filter((s) => s.length > 0);
+    if (segments.some((s) => s === "..")) continue;
+    let current = base;
+    let ok = true;
+    for (const segment of segments) {
+      current = path.join(current, segment);
+      try {
+        if (!fs.lstatSync(current).isDirectory()) {
+          ok = false;
+          break;
+        }
+      } catch {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) return true;
+  }
+  return false;
 }
 
 /** Whether `p` itself is a symlink (`lstatSync`, never following it):
@@ -655,7 +701,8 @@ async function runProbePipeline(
       dryRunLogPaths: derivationLogPaths,
     };
   }
-  // The repo defaults file, read on every invocation and merged ahead
+  // The repo defaults file (stored inside the repository), read on every
+  // invocation and merged ahead
   // of `opts.links` (`--link`): "defaults file, then plan, then CLI",
   // all three additive, never overriding one another (a single probe
   // has no plan of its own; see `probePlan` for the three-source form).
@@ -1451,7 +1498,8 @@ async function runProbePlanPipeline(
     );
   }
   // The three `link` sources, merged here in their one documented
-  // precedence: the repo defaults file (read on every invocation), then
+  // precedence: the repo defaults file (stored inside the repository,
+  // read on every invocation), then
   // the plan's own `link` (both relative to the repository root and
   // both repository CONTENT, so both carry the phrase naming their file
   // and entry -- see `link-policy.ts`'s rule for what that provenance
@@ -1462,9 +1510,9 @@ async function runProbePlanPipeline(
   if (!defaultsFile.ok) {
     return refuse("usage_error", defaultsFile.reason, defaultsFile.message);
   }
-  // A plan stored outside the containment root cannot be repository
-  // content, so its `link` is then operator input, judged like `--link`
-  // (no `namedIn`, hence no `namedBy` provenance). It keeps the plan
+  // A plan stored outside the containment root is not content of the
+  // repository being probed, so its `link` is then operator input, judged
+  // like `--link` (no `namedIn`, hence no `namedBy` provenance). It keeps the plan
   // file's own base (the repository root) and merge position.
   const planLinksAreOperatorInput =
     opts.planPath !== undefined &&

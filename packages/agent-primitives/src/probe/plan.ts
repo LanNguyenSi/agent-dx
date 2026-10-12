@@ -293,12 +293,18 @@ export function parsePlanFile(planPath: string): PlanParseResult {
  * open, or one whose realpath is a different object than the descriptor
  * (`/dev/stdin` on macOS resolves to `/dev/fd/0`, which lives on another
  * device), yields `undefined`, so that where the plan "lives" is never
- * decided on a path that is not the bytes' actual home.
+ * decided on a path that is not the bytes' actual home. A file with more
+ * than one hard link also yields `undefined`: one of its names may sit
+ * inside the repository.
  */
 function verifiedRealPath(
   absPlanPath: string,
   opened: fs.Stats,
 ): string | undefined {
+  // A file with more than one hard link has a second name this process
+  // cannot see, and that name may sit inside the repository: the bytes'
+  // home is then not decided by the path that was typed.
+  if (opened.nlink > 1) return undefined;
   try {
     const real = fs.realpathSync(absPlanPath);
     const stat = fs.statSync(real);
