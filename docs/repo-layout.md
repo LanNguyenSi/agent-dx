@@ -43,8 +43,9 @@ It is private, not a package, and builds a static
 `agent-engineering-playbook` and `agentic-coding-playbook`, which stay where
 they are and remain the source. The sidebar is generated from the file tree
 with titles from each file's first H1, directory links land on the folder's
-README, and the build fails on a relative link whose target inside the
-repository does not exist (Markdown pages, folders, and other files alike).
+README, and the build fails on a relative link whose target does not exist or
+resolves outside the repository (Markdown pages, folders, and other files
+alike).
 For authors: raw HTML in the playbooks renders as literal text, so a
 placeholder such as `<version>` shows as written, and HTML comments
 (`<!-- ... -->`) are hidden except inside code. A line that starts with `<!--`

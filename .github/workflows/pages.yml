@@ -48,7 +48,7 @@ jobs:
         working-directory: site
         run: npm ci --no-audit --no-fund
 
-      - name: Test comment handling
+      - name: Test comment handling, link mapper and sidebar
         working-directory: site
         run: npm test
 
