@@ -29,7 +29,12 @@ import { linkEntryUsageError, type LinkSourceGroup } from "./link-list.js";
 /** File name inside the worktree's git administration directory. */
 export const LINK_MANIFEST_FILE = "agent-primitives-links.json";
 
-export const LINK_MANIFEST_VERSION = 1;
+/**
+ * Version 2 adds the resolved identity of each link's target (see
+ * `ManifestLink`). A version 1 file has no identity to compare, so it is
+ * rejected whole instead of being trusted on the readlink text alone.
+ */
+export const LINK_MANIFEST_VERSION = 2;
 
 /** A manifest is a short list of paths; anything larger is the wrong file. */
 export const LINK_MANIFEST_MAX_BYTES = 64 * 1024;
@@ -39,7 +44,14 @@ export const LINK_MANIFEST_MAX_BYTES = 64 * 1024;
 export const LINK_MANIFEST_MAX_ENTRIES = 256;
 
 const MANIFEST_KEYS = ["version", "toolVersion", "links"] as const;
-const ENTRY_KEYS = ["path", "target", "createdAt"] as const;
+const ENTRY_KEYS = [
+  "path",
+  "target",
+  "createdAt",
+  "resolved",
+  "dev",
+  "ino",
+] as const;
 
 /** One link `create` made. */
 export interface ManifestLink {
@@ -49,6 +61,41 @@ export interface ManifestLink {
   target: string;
   /** ISO timestamp of the creation. */
   createdAt: string;
+  /** `realpath` of the link when `create` made it: the directory the
+   * operator's link actually reached then, whatever the readlink text
+   * says now. */
+  resolved: string;
+  /** Device and inode of that directory (decimal strings, since an inode
+   * can exceed what a JSON number holds). A directory swapped for another
+   * at the same path keeps `resolved` but not these. */
+  dev: string;
+  ino: string;
+}
+
+/** What a link reaches right now: its `realpath` and the identity of the
+ * directory entry behind it. */
+export interface LinkIdentity {
+  resolved: string;
+  dev: string;
+  ino: string;
+}
+
+/**
+ * The identity `target` resolves to (symbolic links followed), or undefined
+ * when it cannot be resolved. `create` records it for each link it makes;
+ * `recordedLinkStillHolds` compares it again at probe time.
+ */
+export function captureLinkIdentity(target: string): LinkIdentity | undefined {
+  try {
+    const st = fs.statSync(target, { bigint: true });
+    return {
+      resolved: fs.realpathSync(target),
+      dev: st.dev.toString(),
+      ino: st.ino.toString(),
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 export interface LinkManifest {
@@ -99,8 +146,15 @@ export function linkedWorktreeAdminDir(root: string): AdminDirResult {
 }
 
 export type ManifestWriteResult =
-  | { status: "written"; path: string }
+  | { status: "written"; path: string; unrecorded: UnrecordedLink[] }
   | { status: "failed"; path?: string; reason: string };
+
+/** A link `create` made that the manifest does not carry, because the
+ * reader would reject its entry. */
+export interface UnrecordedLink {
+  path: string;
+  reason: string;
+}
 
 /**
  * Writes the manifest into the administration directory of the freshly
@@ -109,6 +163,14 @@ export type ManifestWriteResult =
  * whatever the umask. A failure is reported, never thrown: the worktree
  * and its links are already in place, and a missing manifest only means
  * the probe will not trust them without `--link`.
+ *
+ * The reader's own rules decide what is written: an entry whose path
+ * `recordedPathProblem` would refuse is left out and returned in
+ * `unrecorded` (the link itself stays, it just needs `--link`), so one
+ * such entry cannot make the reader reject the others, and the manifest
+ * is run through `parseManifest` before it is written, so what is on disk
+ * is always something the reader accepts (apart from the file's own
+ * mode, owner and link count, which only the reader can check).
  */
 export function writeLinkManifest(
   worktree: string,
@@ -118,11 +180,40 @@ export function writeLinkManifest(
   const admin = linkedWorktreeAdminDir(worktree);
   if (!admin.ok) return { status: "failed", reason: admin.reason };
   const file = path.join(admin.dir, LINK_MANIFEST_FILE);
+  const unrecorded: UnrecordedLink[] = [];
+  const recorded: ManifestLink[] = [];
+  for (const link of links) {
+    const problem = recordedPathProblem(link.path);
+    if (problem !== undefined) {
+      unrecorded.push({
+        path: link.path,
+        reason: `the path ${problem}`,
+      });
+    } else {
+      recorded.push(link);
+    }
+  }
+  if (recorded.length === 0) {
+    return {
+      status: "failed",
+      reason:
+        unrecorded.length > 0
+          ? "no link has a path the manifest can record"
+          : "no link to record",
+    };
+  }
   const manifest: LinkManifest = {
     version: LINK_MANIFEST_VERSION,
     toolVersion,
-    links: [...links],
+    links: recorded,
   };
+  const checked = parseManifest(JSON.parse(JSON.stringify(manifest)));
+  if (!checked.ok) {
+    return {
+      status: "failed",
+      reason: `the manifest would be rejected by the reader: ${checked.reason}`,
+    };
+  }
   try {
     fs.writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`, {
       flag: "wx",
@@ -135,7 +226,7 @@ export function writeLinkManifest(
       reason: err instanceof Error ? err.message : String(err),
     };
   }
-  return { status: "written", path: file };
+  return { status: "written", path: file, unrecorded };
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -178,6 +269,13 @@ export function parseManifest(parsed: unknown): ParsedManifest {
   );
   if (extra !== undefined)
     return { ok: false, reason: `unknown key "${extra}"` };
+  if (parsed.version === 1) {
+    return {
+      ok: false,
+      reason:
+        "version 1 has no resolved target identity to check, so it is not trusted; recreate the worktree or pass --link",
+    };
+  }
   if (parsed.version !== LINK_MANIFEST_VERSION) {
     return { ok: false, reason: "unsupported version" };
   }
@@ -217,10 +315,26 @@ export function parseManifest(parsed: unknown): ParsedManifest {
     ) {
       return { ok: false, reason: `${at}.createdAt must be a timestamp` };
     }
+    if (typeof raw.resolved !== "string" || !path.isAbsolute(raw.resolved)) {
+      return { ok: false, reason: `${at}.resolved must be an absolute path` };
+    }
+    for (const key of ["dev", "ino"] as const) {
+      const value = raw[key];
+      if (typeof value !== "string" || !/^[0-9]{1,24}$/.test(value)) {
+        return { ok: false, reason: `${at}.${key} must be a decimal string` };
+      }
+    }
     if (seen.has(rel))
       return { ok: false, reason: `${at}.path is a duplicate` };
     seen.add(rel);
-    links.push({ path: rel, target: raw.target, createdAt: raw.createdAt });
+    links.push({
+      path: rel,
+      target: raw.target,
+      createdAt: raw.createdAt,
+      resolved: raw.resolved,
+      dev: raw.dev as string,
+      ino: raw.ino as string,
+    });
   }
   return {
     ok: true,
@@ -330,13 +444,18 @@ export type LinkHolds =
  * Whether the recorded link still stands in the working tree of `root`
  * exactly as `create` made it: every parent below the root is a real
  * directory, the entry itself is a symbolic link, its readlink text is
- * the recorded target, and that target is (still) a directory.
+ * the recorded target, that target is (still) a directory, and that
+ * directory is the one the operator's link reached at create time (same
+ * `realpath`, same device and inode).
  *
- * A checkout can replace a link (git overwrites an ignored path), and
- * anyone can retarget one; a link that is no longer what `create` made
- * is not the operator's act any more, so it is not trusted. A target that
- * is not a directory is not an error but is not a `probe --link` source
- * either (`quiet`).
+ * A checkout can replace a link (git overwrites an ignored path), anyone
+ * can retarget one, and the main checkout can swap what the recorded
+ * target path leads to (an ignored directory replaced by a tracked
+ * symlink or directory, say) while the readlink text in the worktree
+ * stays the same; a link that is no longer what `create` made is not the
+ * operator's act any more, so it is not trusted. A target that is not a
+ * directory is not an error but is not a `probe --link` source either
+ * (`quiet`).
  */
 export function recordedLinkStillHolds(
   root: string,
@@ -393,6 +512,20 @@ export function recordedLinkStillHolds(
       holds: false,
       reason: "its target is not a directory",
       quiet: true,
+    };
+  }
+  const now = captureLinkIdentity(dest);
+  if (now === undefined) {
+    return { holds: false, reason: "the recorded target cannot be resolved" };
+  }
+  if (
+    now.resolved !== link.resolved ||
+    now.dev !== link.dev ||
+    now.ino !== link.ino
+  ) {
+    return {
+      holds: false,
+      reason: `it now resolves to ${JSON.stringify(now.resolved)} (device ${now.dev}, inode ${now.ino}), not to the directory it resolved to at creation, ${JSON.stringify(link.resolved)} (device ${link.dev}, inode ${link.ino})`,
     };
   }
   return { holds: true };

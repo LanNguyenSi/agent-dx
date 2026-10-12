@@ -3,7 +3,12 @@ import path from "node:path";
 import { execCommand, type ExecResult } from "../exec.js";
 import { withoutRepoSelectionEnv } from "../git-env.js";
 import { linkEntryUsageError } from "../probe/link-list.js";
-import { writeLinkManifest } from "../probe/link-manifest.js";
+import {
+  captureLinkIdentity,
+  writeLinkManifest,
+  type LinkIdentity,
+  type ManifestLink,
+} from "../probe/link-manifest.js";
 import type { ExecLike } from "../verify/types.js";
 import {
   FETCH_TIMEOUT_MS,
@@ -78,6 +83,9 @@ export interface LinkManifestReport {
   status: "written" | "not_needed" | "failed";
   path?: string;
   reason?: string;
+  /** Links made but left out of a written manifest because the reader
+   * would reject their entry; `probe` needs `--link` for these. */
+  unrecorded?: { path: string; reason: string }[];
 }
 
 export interface SkippedLink {
@@ -469,7 +477,10 @@ function makeLinks(
   repo: RepoContext,
   worktree: string,
   warnings: string[],
-): Omit<CreateWorktreeResult["links"], "manifest"> {
+): Omit<CreateWorktreeResult["links"], "manifest"> & {
+  identities: Map<string, LinkIdentity>;
+} {
+  const identities = new Map<string, LinkIdentity>();
   const made: MadeLink[] = [];
   const skipped: SkippedLink[] = [];
   for (const rel of rels) {
@@ -548,8 +559,12 @@ function makeLinks(
       }
     }
     made.push({ path: rel, target: source, exclude });
+    // What the link reaches now, as the operator sees it; the manifest
+    // keeps it so a later swap behind the same path is noticed.
+    const identity = captureLinkIdentity(dest);
+    if (identity !== undefined) identities.set(rel, identity);
   }
-  return { made, skipped };
+  return { made, skipped, identities };
 }
 
 /**
@@ -561,19 +576,49 @@ function makeLinks(
  */
 function recordLinks(
   made: readonly MadeLink[],
+  identities: ReadonlyMap<string, LinkIdentity>,
   worktree: string,
   toolVersion: string,
   warnings: string[],
 ): LinkManifestReport {
   if (made.length === 0) return { status: "not_needed" };
   const createdAt = new Date().toISOString();
-  const written = writeLinkManifest(
-    worktree,
-    made.map((l) => ({ path: l.path, target: l.target, createdAt })),
-    toolVersion,
-  );
+  const recordable: ManifestLink[] = [];
+  const unresolved: { path: string; reason: string }[] = [];
+  for (const l of made) {
+    const identity = identities.get(l.path);
+    if (identity === undefined) {
+      // A link that does not resolve is not a `--link` source anyway.
+      unresolved.push({ path: l.path, reason: "its target does not resolve" });
+    } else {
+      recordable.push({
+        path: l.path,
+        target: l.target,
+        createdAt,
+        ...identity,
+      });
+    }
+  }
+  if (recordable.length === 0) {
+    const reason = "no link resolves to its target";
+    warnings.push(
+      `could not record the links for probe: ${reason}; pass --link to probe to link them`,
+    );
+    return { status: "failed", reason };
+  }
+  const written = writeLinkManifest(worktree, recordable, toolVersion);
   if (written.status === "written") {
-    return { status: "written", path: written.path };
+    const unrecorded = [...unresolved, ...written.unrecorded];
+    if (unrecorded.length > 0) {
+      warnings.push(
+        `not recorded for probe (pass --link to probe for these): ${unrecorded.map((u) => `${u.path} (${u.reason})`).join(", ")}`,
+      );
+    }
+    return {
+      status: "written",
+      path: written.path,
+      ...(unrecorded.length > 0 ? { unrecorded } : {}),
+    };
   }
   warnings.push(
     `could not record the links for probe: ${written.reason}; pass --link to probe to link them`,
@@ -714,11 +759,16 @@ export async function createWorktree(
   const madeLinks = makeLinks(linkRels, repo, target, warnings);
   const manifest = recordLinks(
     madeLinks.made,
+    madeLinks.identities,
     target,
     options.toolVersion ?? "unknown",
     warnings,
   );
-  const links = { ...madeLinks, manifest };
+  const links = {
+    made: madeLinks.made,
+    skipped: madeLinks.skipped,
+    manifest,
+  };
 
   let setup: StepReport = { status: "not_requested" };
   let setupFailed = false;

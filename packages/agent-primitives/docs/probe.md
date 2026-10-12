@@ -2569,25 +2569,42 @@ a file of the working tree:
   main checkout have none, whatever files sit in their `.git`. The location
   is asked of git with `GIT_DIR` and the other repository-selection
   variables removed.
-- The file is opened once without following a symlink and checked on the
-  open descriptor, as a plan file is: a regular file, one hard link, at
-  most 64 KiB, owned by the current user and not writable by group or
-  others (on platforms with those notions). The schema is exact (`version`
-  `1`, `toolVersion`, `links` of `path`, `target`, `createdAt`, no other
-  key, no duplicate path, at most 256 entries, every `path` in normalized
-  repository-relative form and not under `.git`). The first problem rejects
-  the whole manifest: nothing in it is trusted and the result carries one
-  warning naming the file and the problem. A manifest that is absent is not
-  an error.
+- The file is opened once, without following a symlink in its last
+  component where the platform supports `O_NOFOLLOW` (and without blocking
+  on a FIFO), and checked on the open descriptor: a regular file, one hard
+  link, at most 64 KiB. On POSIX platforms it must also be owned by the
+  current user and not writable by group or others; those two checks are
+  skipped on Windows, which has no such notions. The plan-file checks are
+  the model, but they are not identical to them. The schema is exact
+  (`version` `2`, `toolVersion`, `links` of `path`, `target`, `createdAt`,
+  `resolved`, `dev`, `ino`, no other key, no duplicate path, at most 256
+  entries, every `path` in normalized repository-relative form and not
+  under `.git`). The first problem rejects the whole manifest: nothing in
+  it is trusted and the result carries one warning naming the file and the
+  problem. A version 1 manifest, written before the resolved identity was
+  recorded, is rejected the same way (recreate the worktree or pass
+  `--link`). A manifest that is absent is not an error.
+- `create` writes only what this reader accepts. An entry whose path the
+  reader would refuse (for example one with a backslash, which `--link`
+  itself allows) is left out of the file, the other links are recorded as
+  usual, and the entry is listed under `links.manifest.unrecorded` with a
+  warning; `probe` needs `--link` for it.
 - Each entry is then trusted only while it still stands as `create` made
   it: every directory between the root and the link is a real directory,
   the link is a symbolic link whose text is exactly the recorded target,
-  and the target is a directory. A link replaced, removed, retargeted or
-  moved behind a symlinked directory (a branch checkout can overwrite an
-  ignored path) is not trusted, and the result warns `not trusting recorded
-  worktree link <path>` with the reason. Passing the same path as `--link`
-  still works. An entry whose target is a file is skipped without a warning,
-  since only directories can be linked.
+  and the target is a directory. It must also lead where the operator's
+  link led when `create` ran: `create` records the `realpath` of the target
+  and its device and inode, and the entry is trusted only while the link
+  still resolves to that same `realpath` and the same device and inode. The
+  readlink text alone is not enough, because the main checkout can change
+  what a path leads to without touching the worktree's link (a branch
+  checkout can replace the ignored directory with a tracked symlink or
+  directory). A link replaced, removed, retargeted, moved behind a
+  symlinked directory or resolving elsewhere now is not trusted, and the
+  result warns `not trusting recorded worktree link <path>` with the
+  reason, naming what it now resolves to. Passing the same path as `--link`
+  still works. An entry whose target is a file is skipped without a
+  warning, since only directories can be linked.
 
 A trusted entry joins the merged link list after the defaults file's and the
 plan's and before `--link`. A path that the defaults file or a plan inside

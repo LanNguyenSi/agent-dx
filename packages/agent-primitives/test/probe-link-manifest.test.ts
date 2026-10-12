@@ -8,13 +8,16 @@ import {
   LINK_MANIFEST_MAX_BYTES,
   linkedWorktreeAdminDir,
   manifestLinkGroup,
+  captureLinkIdentity,
   parseManifest,
   readLinkManifest,
   recordedLinkStillHolds,
   trustedManifestLinks,
   writeLinkManifest,
+  type ManifestLink,
 } from "../src/probe/link-manifest.js";
 import { mergeLinkSources } from "../src/probe/link-list.js";
+import { normalizeLinkEntry } from "../src/worktree/index.js";
 import { spawnCli } from "./helpers/spawn-cli.js";
 
 /**
@@ -125,6 +128,28 @@ function adminDirOf(worktree: string): string {
   return admin.dir;
 }
 
+/** The entry `create` recorded for `rel` in `worktree`'s manifest. */
+function recordedEntry(worktree: string, rel: string): ManifestLink {
+  const read = readLinkManifest(worktree);
+  if (read.status !== "ok") throw new Error(JSON.stringify(read));
+  const entry = read.manifest.links.find((l) => l.path === rel);
+  if (entry === undefined) throw new Error(`no recorded link ${rel}`);
+  return entry;
+}
+
+/** A well-formed manifest entry for the directory at `dir`, as a hostile
+ * commit or a stale file might claim it. */
+function claimedEntry(rel: string, dir: string): ManifestLink {
+  const identity = captureLinkIdentity(dir);
+  if (identity === undefined) throw new Error(`cannot resolve ${dir}`);
+  return {
+    path: rel,
+    target: dir,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    ...identity,
+  };
+}
+
 function writePlan(file: string, body: Record<string, unknown> = {}): string {
   fs.writeFileSync(
     file,
@@ -182,14 +207,25 @@ describe("worktree create: the link manifest", () => {
     const recorded = JSON.parse(fs.readFileSync(file, "utf8")) as {
       version: number;
       toolVersion: string;
-      links: { path: string; target: string; createdAt: string }[];
+      links: {
+        path: string;
+        target: string;
+        createdAt: string;
+        resolved: string;
+        dev: string;
+        ino: string;
+      }[];
     };
-    expect(recorded.version).toBe(1);
+    expect(recorded.version).toBe(2);
     expect(typeof recorded.toolVersion).toBe("string");
     expect(recorded.links).toHaveLength(1);
+    const libStat = fs.statSync(path.join(f.repo, "lib"), { bigint: true });
     expect(recorded.links[0]).toMatchObject({
       path: "lib",
       target: path.join(f.repo, "lib"),
+      resolved: fs.realpathSync(path.join(f.repo, "lib")),
+      dev: libStat.dev.toString(),
+      ino: libStat.ino.toString(),
     });
     expect(Number.isNaN(Date.parse(recorded.links[0]!.createdAt))).toBe(false);
     // Private to its owner, and nothing of it in the working tree.
@@ -269,6 +305,32 @@ describe("worktree create: the link manifest", () => {
     expect(fs.existsSync(wt)).toBe(false);
   });
 
+  it("is deleted by `worktree remove` of a clean, pushed worktree: the administration directory goes with the manifest", async () => {
+    const f = makeFixture();
+    // `remove` refuses commits that are on no remote branch, so the
+    // fixture gets an origin and the worktree's branch is pushed.
+    const origin = path.join(f.base, "origin.git");
+    git(f.base, ["init", "-q", "--bare", "-b", "main", origin]);
+    git(f.repo, ["remote", "add", "origin", origin]);
+    git(f.repo, ["push", "-q", "origin", "main"]);
+    git(f.repo, ["remote", "set-head", "origin", "main"]);
+    const wt = await createWorktree(f, "wt-cli-remove", ["lib"]);
+    git(wt, ["push", "-q", "origin", "wt-cli-remove"]);
+    const admin = adminDirOf(wt);
+    expect(fs.existsSync(path.join(admin, LINK_MANIFEST_FILE))).toBe(true);
+
+    const removed = await spawnCli(["-C", f.base, "worktree", "remove", wt], {
+      env: GIT_ENV,
+    });
+
+    expect(removed.code, removed.stdout + removed.stderr).toBe(0);
+    expect(fs.existsSync(admin)).toBe(false);
+    expect(fs.existsSync(path.join(admin, LINK_MANIFEST_FILE))).toBe(false);
+    expect(fs.existsSync(wt)).toBe(false);
+    // The link target in the main checkout is untouched.
+    expect(fs.existsSync(path.join(f.repo, "lib", "x.js"))).toBe(true);
+  });
+
   it("reports a failed write as a failed status instead of throwing", () => {
     const f = makeFixture();
     // The main checkout is not a linked worktree: there is no
@@ -343,15 +405,9 @@ describe("probe in a worktree made by create: the recorded links count as --link
     fs.writeFileSync(
       path.join(f.repo, ".git", LINK_MANIFEST_FILE),
       JSON.stringify({
-        version: 1,
+        version: 2,
         toolVersion: "x",
-        links: [
-          {
-            path: "lib2",
-            target: outside,
-            createdAt: new Date().toISOString(),
-          },
-        ],
+        links: [claimedEntry("lib2", outside)],
       }),
       { mode: 0o600 },
     );
@@ -369,15 +425,9 @@ describe("repository content never grants a link", () => {
     const wt = await createWorktree(f, "wt-hostile", []);
     fs.symlinkSync(path.join(f.repo, "lib"), path.join(wt, "lib"));
     const body = JSON.stringify({
-      version: 1,
+      version: 2,
       toolVersion: "x",
-      links: [
-        {
-          path: "lib",
-          target: path.join(f.repo, "lib"),
-          createdAt: new Date().toISOString(),
-        },
-      ],
+      links: [claimedEntry("lib", path.join(f.repo, "lib"))],
     });
     for (const name of [
       LINK_MANIFEST_FILE,
@@ -408,15 +458,9 @@ describe("repository content never grants a link", () => {
     fs.writeFileSync(
       path.join(wt, LINK_MANIFEST_FILE),
       JSON.stringify({
-        version: 1,
+        version: 2,
         toolVersion: "x",
-        links: [
-          {
-            path: "lib",
-            target: path.join(f.repo, "lib"),
-            createdAt: new Date().toISOString(),
-          },
-        ],
+        links: [claimedEntry("lib", path.join(f.repo, "lib"))],
       }),
     );
 
@@ -478,11 +522,7 @@ describe("a recorded link is trusted only while it stands as recorded", () => {
   it("rejects each way a link can stop being what create made", async () => {
     const f = makeFixture();
     const wt = await createWorktree(f, "wt-states", ["lib"]);
-    const entry = {
-      path: "lib",
-      target: path.join(f.repo, "lib"),
-      createdAt: "2026-01-01T00:00:00.000Z",
-    };
+    const entry = recordedEntry(wt, "lib");
     expect(recordedLinkStillHolds(wt, entry)).toEqual({ holds: true });
 
     // Replaced by a real directory (what a checkout overwriting an
@@ -525,11 +565,7 @@ describe("a recorded link is trusted only while it stands as recorded", () => {
     fs.mkdirSync(path.join(f.repo, "deep", "dir"), { recursive: true });
     fs.writeFileSync(path.join(f.repo, "deep", "dir", "n.txt"), "n\n");
     const wt = await createWorktree(f, "wt-nested", ["deep/dir"]);
-    const entry = {
-      path: "deep/dir",
-      target: path.join(f.repo, "deep", "dir"),
-      createdAt: "2026-01-01T00:00:00.000Z",
-    };
+    const entry = recordedEntry(wt, "deep/dir");
     expect(recordedLinkStillHolds(wt, entry)).toEqual({ holds: true });
 
     const elsewhere = path.join(f.base, "elsewhere");
@@ -542,6 +578,248 @@ describe("a recorded link is trusted only while it stands as recorded", () => {
       reason: expect.stringContaining("is not a plain directory any more"),
     });
   });
+});
+
+describe("a recorded link is trusted only while it leads where the operator saw it lead", () => {
+  /** A directory that would satisfy the test command, so a failing
+   * baseline can only mean the link was not trusted. */
+  function lookalike(f: Fixture, name: string): string {
+    const dir = path.join(f.base, name);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "x.js"), "module.exports = 3;\n");
+    return dir;
+  }
+
+  it("does not trust a link whose target path was swapped for a symlink in the main checkout", async () => {
+    const f = makeFixture();
+    const wt = await createWorktree(f, "wt-swap-link", ["lib"]);
+    const attacker = lookalike(f, "attacker-lib");
+    // What a checkout does to an ignored directory when the branch tracks
+    // the same path as a symbolic link: the main checkout's `lib` is now a
+    // link to somewhere else. The readlink text in the worktree is
+    // unchanged, so only the resolved identity can tell.
+    fs.rmSync(path.join(f.repo, "lib"), { recursive: true });
+    fs.symlinkSync(attacker, path.join(f.repo, "lib"));
+    expect(fs.readlinkSync(path.join(wt, "lib"))).toBe(
+      path.join(f.repo, "lib"),
+    );
+    const plan = writePlan(path.join(f.runDir, "plan.json"));
+
+    const { envelope } = await probeIn(f, wt, ["--plan", plan]);
+
+    expect(envelope.status).toBe("inconclusive");
+    expect(envelope.reason).toBe("baseline_failed");
+    const linkWarnings = envelope.warnings.filter(isLinkWarning);
+    expect(linkWarnings).toHaveLength(1);
+    expect(linkWarnings[0]).toContain(
+      "not trusting recorded worktree link lib",
+    );
+    expect(linkWarnings[0]).toContain("now resolves to");
+    expect(linkWarnings[0]).toContain(JSON.stringify(attacker));
+    expect(trustedManifestLinks(wt).values).toEqual([]);
+  });
+
+  it("does not trust a link whose target path was swapped for another directory at the same path", async () => {
+    const f = makeFixture();
+    const wt = await createWorktree(f, "wt-swap-dir", ["lib"]);
+    // Same path, same readlink text, same realpath; a different
+    // directory (the new one is made before the old one is moved away, so
+    // the inode cannot be reused).
+    const replacement = path.join(f.repo, "lib.new");
+    fs.mkdirSync(replacement);
+    fs.writeFileSync(path.join(replacement, "x.js"), "module.exports = 4;\n");
+    fs.renameSync(path.join(f.repo, "lib"), path.join(f.repo, "lib.old"));
+    fs.renameSync(replacement, path.join(f.repo, "lib"));
+    const plan = writePlan(path.join(f.runDir, "plan.json"));
+
+    const { envelope } = await probeIn(f, wt, ["--plan", plan]);
+
+    expect(envelope.status).toBe("inconclusive");
+    expect(envelope.reason).toBe("baseline_failed");
+    const linkWarnings = envelope.warnings.filter(isLinkWarning);
+    expect(linkWarnings).toHaveLength(1);
+    expect(linkWarnings[0]).toContain("now resolves to");
+    expect(recordedLinkStillHolds(wt, recordedEntry(wt, "lib"))).toMatchObject({
+      holds: false,
+    });
+  });
+
+  it("an explicit --link still works next to a swapped target", async () => {
+    const f = makeFixture();
+    const wt = await createWorktree(f, "wt-swap-flag", ["lib"]);
+    const attacker = lookalike(f, "attacker-lib");
+    fs.rmSync(path.join(f.repo, "lib"), { recursive: true });
+    fs.symlinkSync(attacker, path.join(f.repo, "lib"));
+    const plan = writePlan(path.join(f.runDir, "plan.json"));
+
+    const { envelope } = await probeIn(f, wt, [
+      "--plan",
+      plan,
+      "--link",
+      "lib",
+    ]);
+
+    expect(envelope.status).toBe("killed");
+  });
+
+  it("control: an untouched link still resolves to the recorded identity", async () => {
+    const f = makeFixture();
+    const wt = await createWorktree(f, "wt-same", ["lib"]);
+    expect(recordedLinkStillHolds(wt, recordedEntry(wt, "lib"))).toEqual({
+      holds: true,
+    });
+  });
+
+  it("rejects a version 1 manifest (no identity) as a whole, with a warning", async () => {
+    const f = makeFixture();
+    const wt = await createWorktree(f, "wt-v1", ["lib"]);
+    const file = path.join(adminDirOf(wt), LINK_MANIFEST_FILE);
+    const entry = recordedEntry(wt, "lib");
+    fs.rmSync(file);
+    fs.writeFileSync(
+      file,
+      JSON.stringify({
+        version: 1,
+        toolVersion: "0.10.0",
+        links: [
+          {
+            path: entry.path,
+            target: entry.target,
+            createdAt: entry.createdAt,
+          },
+        ],
+      }),
+      { mode: 0o600 },
+    );
+    const plan = writePlan(path.join(f.runDir, "plan.json"));
+
+    const { envelope } = await probeIn(f, wt, ["--plan", plan]);
+
+    expect(envelope.status).toBe("inconclusive");
+    expect(envelope.reason).toBe("baseline_failed");
+    const linkWarnings = envelope.warnings.filter(isLinkWarning);
+    expect(linkWarnings).toHaveLength(1);
+    expect(linkWarnings[0]).toContain("version 1");
+    expect(trustedManifestLinks(wt).values).toEqual([]);
+  });
+});
+
+describe("the writer only writes what the reader accepts", () => {
+  it("writeLinkManifest leaves out an entry the reader would reject and reports it, keeping the others", async () => {
+    const f = makeFixture();
+    const wt = await createWorktree(f, "wt-writer", []);
+    const good = claimedEntry("lib", path.join(f.repo, "lib"));
+    const bad = { ...good, path: "we\\ird" };
+
+    const written = writeLinkManifest(wt, [good, bad], "0.0.0");
+
+    expect(written.status).toBe("written");
+    if (written.status !== "written") return;
+    expect(written.unrecorded.map((u) => u.path)).toEqual(["we\\ird"]);
+    const read = readLinkManifest(wt);
+    expect(read.status).toBe("ok");
+    if (read.status === "ok") {
+      expect(read.manifest.links.map((l) => l.path)).toEqual(["lib"]);
+    }
+  });
+
+  it("writeLinkManifest fails, writing nothing, when no entry is recordable", async () => {
+    const f = makeFixture();
+    const wt = await createWorktree(f, "wt-writer-none", []);
+    const bad = {
+      ...claimedEntry("lib", path.join(f.repo, "lib")),
+      path: "a\\b",
+    };
+
+    const written = writeLinkManifest(wt, [bad], "0.0.0");
+
+    expect(written.status).toBe("failed");
+    expect(fs.existsSync(path.join(adminDirOf(wt), LINK_MANIFEST_FILE))).toBe(
+      false,
+    );
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "round trip: every entry normalizeLinkEntry accepts is either read back or reported unrecorded by create",
+    async () => {
+      const f = makeFixture();
+      const proposed = [
+        "lib",
+        "deep/dir",
+        "with space",
+        "we\\ird",
+        "semi;colon",
+        "dollar$x",
+        "dollar$(x)",
+        "uni\u00e9",
+        "./dot/./lead",
+        "trail/",
+      ];
+      // Only what the creator accepts is in scope for the round trip.
+      const candidates = proposed.filter(
+        (c) => normalizeLinkEntry(c).rel !== undefined,
+      );
+      expect(candidates).toContain("we\\ird");
+      expect(candidates.length).toBeGreaterThan(3);
+      for (const c of candidates) {
+        const rel = normalizeLinkEntry(c).rel!;
+        fs.mkdirSync(path.join(f.repo, rel), { recursive: true });
+        fs.writeFileSync(path.join(f.repo, rel, "k.txt"), "k\n");
+      }
+      const target = path.join(f.base, "wt-roundtrip");
+      const created = await spawnCli(
+        [
+          "-C",
+          f.base,
+          "worktree",
+          "create",
+          "--repo",
+          f.repo,
+          "--branch",
+          "wt-roundtrip",
+          "--base",
+          "main",
+          "--path",
+          target,
+          ...candidates.flatMap((c) => ["--link", c]),
+        ],
+        { env: GIT_ENV },
+      );
+      expect(created.code, created.stdout + created.stderr).toBe(0);
+      const report = JSON.parse(created.stdout) as {
+        links: {
+          made: { path: string }[];
+          manifest: {
+            status: string;
+            unrecorded?: { path: string; reason: string }[];
+          };
+        };
+      };
+
+      expect(report.links.made.length).toBeGreaterThan(0);
+      expect(report.links.manifest.status).toBe("written");
+      const read = readLinkManifest(target);
+      expect(read.status).toBe("ok");
+      if (read.status !== "ok") return;
+      const recorded = new Set(read.manifest.links.map((l) => l.path));
+      const unrecorded = new Set(
+        (report.links.manifest.unrecorded ?? []).map((u) => u.path),
+      );
+      for (const made of report.links.made) {
+        expect(
+          recorded.has(made.path) !== unrecorded.has(made.path),
+          `${made.path}: recorded=${String(recorded.has(made.path))} unrecorded=${String(unrecorded.has(made.path))}`,
+        ).toBe(true);
+      }
+      // The backslash name is the one the reader refuses; the rest keep
+      // working, and everything recorded still holds.
+      expect([...unrecorded]).toEqual(["we\\ird"]);
+      expect(trustedManifestLinks(target).warnings).toEqual([]);
+      expect(trustedManifestLinks(target).values.sort()).toEqual(
+        [...recorded].sort(),
+      );
+    },
+  );
 });
 
 describe("the manifest file is read with the same care as a plan", () => {
@@ -584,6 +862,49 @@ describe("the manifest file is read with the same care as a plan", () => {
     expect(reason).toBe("it is not a regular file");
   });
 
+  it.skipIf(
+    process.platform === "win32" || typeof process.getuid !== "function",
+  )(
+    "rejects a file owned by another user, and trusts no link from it",
+    async () => {
+      const f = makeFixture();
+      const wt = await createWorktree(f, "wt-owner", ["lib"]);
+      expect(readLinkManifest(wt).status).toBe("ok");
+      const uid = process.getuid!();
+      const spy = vi.spyOn(process, "getuid").mockReturnValue(uid + 1);
+      try {
+        const read = readLinkManifest(wt);
+        expect(read).toMatchObject({
+          status: "rejected",
+          reason: "it is not owned by the current user",
+        });
+        expect(trustedManifestLinks(wt).values).toEqual([]);
+        expect(trustedManifestLinks(wt).warnings).toHaveLength(1);
+      } finally {
+        spy.mockRestore();
+      }
+      expect(readLinkManifest(wt).status).toBe("ok");
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "rejects a FIFO in its place without hanging on the open",
+    async () => {
+      try {
+        execFileSync("mkfifo", ["--help"], { stdio: "ignore" });
+      } catch (err) {
+        // `mkfifo --help` exits non-zero on BSD; only a missing binary
+        // (ENOENT) means the test cannot run.
+        if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+      }
+      const reason = await rejectedWith((file) => {
+        fs.rmSync(file);
+        execFileSync("mkfifo", [file]);
+      });
+      expect(reason).toBe("it is not a regular file");
+    },
+  );
+
   it.skipIf(process.platform === "win32")(
     "rejects a file writable by group or others",
     async () => {
@@ -617,7 +938,10 @@ describe("the manifest file is read with the same care as a plan", () => {
     const good = JSON.parse(fs.readFileSync(file, "utf8")) as {
       links: unknown[];
     };
-    good.links.push({ path: "../escape", target: "/x", createdAt: "2026" });
+    good.links.push({
+      ...claimedEntry("lib", path.join(f.repo, "lib")),
+      path: "../escape",
+    });
     fs.writeFileSync(file, JSON.stringify(good), { mode: 0o600 });
 
     expect(readLinkManifest(wt).status).toBe("rejected");
@@ -630,8 +954,11 @@ describe("parseManifest: the shape is exact and fails closed", () => {
     path: "lib",
     target: "/abs/lib",
     createdAt: "2026-01-01T00:00:00.000Z",
+    resolved: "/abs/real-lib",
+    dev: "16777230",
+    ino: "123456",
   };
-  const ok = { version: 1, toolVersion: "1.2.3", links: [entry] };
+  const ok = { version: 2, toolVersion: "1.2.3", links: [entry] };
 
   it("accepts what create writes", () => {
     expect(parseManifest(ok)).toEqual({ ok: true, manifest: ok });
@@ -640,7 +967,24 @@ describe("parseManifest: the shape is exact and fails closed", () => {
   it.each([
     ["an array", []],
     ["null", null],
-    ["a wrong version", { ...ok, version: 2 }],
+    ["a wrong version", { ...ok, version: 3 }],
+    ["a version 1 manifest (no identity)", { ...ok, version: 1 }],
+    [
+      "an entry without a resolved identity",
+      {
+        ...ok,
+        links: [
+          { path: "lib", target: "/abs/lib", createdAt: entry.createdAt },
+        ],
+      },
+    ],
+    [
+      "a relative resolved path",
+      { ...ok, links: [{ ...entry, resolved: "lib" }] },
+    ],
+    ["a numeric inode", { ...ok, links: [{ ...entry, ino: 5 }] }],
+    ["a non-decimal device", { ...ok, links: [{ ...entry, dev: "0x10" }] }],
+    ["an empty inode", { ...ok, links: [{ ...entry, ino: "" }] }],
     ["a missing version", { toolVersion: "x", links: [] }],
     ["an extra top-level key", { ...ok, extra: 1 }],
     ["a non-string toolVersion", { ...ok, toolVersion: 1 }],
@@ -692,7 +1036,7 @@ describe("where the manifest is looked for", () => {
     fs.writeFileSync(path.join(sub, ".git"), `gitdir: ${moved}\n`);
     fs.writeFileSync(
       path.join(moved, LINK_MANIFEST_FILE),
-      JSON.stringify({ version: 1, toolVersion: "x", links: [] }),
+      JSON.stringify({ version: 2, toolVersion: "x", links: [] }),
       { mode: 0o600 },
     );
 
