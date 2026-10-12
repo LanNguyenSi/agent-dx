@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optional frontmatter field `applies_to: [path, ...]` (files or directories, resolved and matched (exact path or directory containment) exactly like `sources`, no globs; any doc type may carry it). It is lookup-only: `docs-for` matches it in addition to `sources`, while `sources-fresh` never reads it, so wiring a runbook to a broad directory does not mark it stale on every edit there. `sources-shape` validates it like `sources` (non-empty array of non-empty strings, each path must exist under the repo root, same error severity). The `runbook` scaffold from `init` now shows `applies_to` and notes when to use `sources` instead. See [docs-for](docs/docs-for.md) and the [check catalog](docs/check-catalog.md). Closes agent-dx#428.
 - `docs-for` matches now carry `via` (`["sources"]`, `["applies_to"]` or both, in that order; a doc matching through both fields is reported once) and, when `applies_to` entries matched, `appliesTo`. Text output appends `applies_to: <entries>` for those entries. Additive: for a bundle without `applies_to` the JSON differs from before only by the new `via` key, and the match lines of the text output are unchanged (the empty-result message now mentions `applies_to`).
 
+### Fixed
+
+- `check`, `docs-for` and `init` no longer end the process with `process.exit()` right after writing to stdout. For a pipe the write is asynchronous, so `check --json | jq` received a report cut at the pipe buffer size (platform dependent) when the output was larger. The commands now set `process.exitCode` and return, so the output drains first; exit codes are unchanged, and a reader that closes early (`| head -1`) still ends the run silently with the verdict code, while any other stdout write failure exits 2 with one stderr line (task 740a4bc8).
+- `sources-shape` now rejects a `sources` or `applies_to` entry that escapes the repo root (a `..` escape such as `../../outside`; the check is lexical and does not resolve symlinks) with an error naming the field, instead of passing it because the target exists. Containment uses `path.relative`, not a string prefix. `docs-for` ignores such an entry, so it never matches. Tracker task 799b0465.
+
 ## [0.17.1] - 2026-10-05
 
 ### Changed

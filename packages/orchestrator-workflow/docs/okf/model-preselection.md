@@ -3,7 +3,7 @@ type: module
 title: Model preselection and routing
 description: How legacy role models and harness-specific role/tier selections flow through the CLI and manifests into agent definitions.
 tags: [models, routing, cli, manifest, per-role, harness-adapters]
-timestamp: 2026-10-11T16:16:41Z
+timestamp: 2026-10-11T18:43:22Z
 sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/routing.ts
@@ -588,7 +588,7 @@ validate native definitions.
 ## Orchestrator-runs-on-session-model policy
 
 The installed `AGENTS.md` policy section carries a `### Models` subsection
-verbatim (`assets/agents-md-section.md:316#"implementer, reviewer, advisor) are recorded in"`):
+verbatim (`assets/agents-md-section.md:322#"implementer, reviewer, advisor) are recorded in"`):
 the orchestrator stays on the session model while exact role/tier routing is
 recorded in the repo manifest and agent definitions. The following bullets
 make upgrades deliberate, retain prior routing as rollback input, and define
