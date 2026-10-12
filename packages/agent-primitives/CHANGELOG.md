@@ -23,9 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `realpath`, device and inode), so a main checkout that swaps the target
   path for another directory or a symlink does not extend trust to it; a
   link replaced, retargeted or swapped since is not trusted and `probe`
-  warns. A manifest file in the working tree is never read. `create` writes
-  only entries the reader accepts: a link whose path it would refuse is made
-  but listed under `links.manifest.unrecorded`. `git worktree remove` deletes
+  warns. The `realpath` binds the location; the inode additionally catches a
+  directory renamed into place but may not catch one deleted and recreated
+  where inode numbers are reused (ext4, overlayfs), and a branch checkout
+  that fills the existing ignored directory keeps it trusted. A manifest
+  file in the working tree is never read. `create` writes only entries the
+  reader accepts: a link whose path it would refuse, or whose target does
+  not resolve, is made but listed under `links.manifest.unrecorded`.
+  `git worktree remove` deletes
   the manifest with the administration directory. The envelope gains
   `links.manifest` (`status` `written`, `not_needed` or `failed`, and
   `unrecorded`). The

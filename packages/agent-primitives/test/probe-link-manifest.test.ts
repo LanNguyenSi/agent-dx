@@ -747,8 +747,102 @@ describe("a recorded link is trusted only while it leads where the operator saw 
     expect(envelope.reason).toBe("baseline_failed");
     const linkWarnings = envelope.warnings.filter(isLinkWarning);
     expect(linkWarnings).toHaveLength(1);
-    expect(linkWarnings[0]).toContain("version 1");
+    expect(linkWarnings[0]).toContain("unsupported version");
+    expect(linkWarnings[0]).not.toContain("version 1");
     expect(trustedManifestLinks(wt).values).toEqual([]);
+  });
+});
+
+describe("worktree create: a link whose target does not resolve", () => {
+  interface Created {
+    links: {
+      made: { path: string }[];
+      manifest: {
+        status: string;
+        path?: string;
+        reason?: string;
+        unrecorded?: { path: string; reason: string }[];
+      };
+    };
+    warnings: string[];
+  }
+
+  /** `rel` in the main checkout becomes a symlink to a path that is not
+   * there; `worktree create` still links it (the source exists as an
+   * entry), but nothing it reaches can be recorded. */
+  function dangle(f: Fixture, rel: string): void {
+    fs.symlinkSync(path.join(f.base, "nowhere"), path.join(f.repo, rel));
+  }
+
+  async function createWith(
+    f: Fixture,
+    name: string,
+    links: string[],
+  ): Promise<{ wt: string; out: Created }> {
+    const wt = path.join(f.base, name);
+    const r = await spawnCli(
+      [
+        "-C",
+        f.base,
+        "worktree",
+        "create",
+        "--repo",
+        f.repo,
+        "--branch",
+        name,
+        "--base",
+        "main",
+        "--path",
+        wt,
+        ...links.flatMap((l) => ["--link", l]),
+      ],
+      { env: GIT_ENV },
+    );
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    return { wt, out: JSON.parse(r.stdout) as Created };
+  }
+
+  it("records nothing when the only link dangles, and does not promise --link", async () => {
+    const f = makeFixture();
+    fs.rmSync(path.join(f.repo, "lib"), { recursive: true });
+    dangle(f, "lib");
+
+    const { wt, out } = await createWith(f, "wt-dangle-only", ["lib"]);
+
+    expect(out.links.made.map((l) => l.path)).toEqual(["lib"]);
+    expect(out.links.manifest.status).toBe("failed");
+    expect(out.links.manifest.reason).toBe("no link resolves to its target");
+    expect(fs.existsSync(path.join(adminDirOf(wt), LINK_MANIFEST_FILE))).toBe(
+      false,
+    );
+    // The warning says what to do about the missing target, in that order.
+    const warning = out.warnings.find((w) => w.includes("could not record"));
+    expect(warning).toContain("create the targets in the main checkout");
+    expect(warning).not.toContain("to link them");
+    expect(trustedManifestLinks(wt).values).toEqual([]);
+  });
+
+  it("records the links that resolve and lists the dangling one as unrecorded", async () => {
+    const f = makeFixture();
+    dangle(f, "lib2");
+    fs.appendFileSync(path.join(f.repo, ".gitignore"), "lib2\n");
+
+    const { wt, out } = await createWith(f, "wt-dangle-one", ["lib", "lib2"]);
+
+    expect(out.links.manifest.status).toBe("written");
+    const unrecorded = out.links.manifest.unrecorded ?? [];
+    expect(unrecorded.map((u) => u.path)).toEqual(["lib2"]);
+    expect(unrecorded[0]!.reason).toContain("its target does not resolve");
+    expect(unrecorded[0]!.reason).toContain("create the target");
+    const warning = out.warnings.find((w) => w.includes("not recorded"));
+    expect(warning).toContain("lib2");
+    expect(warning).toContain("create the target");
+    expect(trustedManifestLinks(wt).values).toEqual(["lib"]);
+    const read = readLinkManifest(wt);
+    expect(read.status).toBe("ok");
+    if (read.status === "ok") {
+      expect(read.manifest.links.map((l) => l.path)).toEqual(["lib"]);
+    }
   });
 });
 
@@ -785,6 +879,26 @@ describe("the writer only writes what the reader accepts", () => {
     expect(fs.existsSync(path.join(adminDirOf(wt), LINK_MANIFEST_FILE))).toBe(
       false,
     );
+  });
+
+  it("writeLinkManifest fails, writing nothing, when an entry passes the path filter but the reader would reject it", async () => {
+    const f = makeFixture();
+    const wt = await createWorktree(f, "wt-writer-reject", []);
+    const good = claimedEntry("lib", path.join(f.repo, "lib"));
+    const file = path.join(adminDirOf(wt), LINK_MANIFEST_FILE);
+
+    for (const bad of [
+      { ...good, target: "relative/target" },
+      { ...good, dev: "x" },
+    ]) {
+      const written = writeLinkManifest(wt, [bad], "0.0.0");
+
+      expect(written.status).toBe("failed");
+      if (written.status === "failed") {
+        expect(written.reason).toContain("would be rejected by the reader");
+      }
+      expect(fs.existsSync(file)).toBe(false);
+    }
   });
 
   it.skipIf(process.platform === "win32")(

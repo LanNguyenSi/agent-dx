@@ -2581,9 +2581,8 @@ a file of the working tree:
   entries, every `path` in normalized repository-relative form and not
   under `.git`). The first problem rejects the whole manifest: nothing in
   it is trusted and the result carries one warning naming the file and the
-  problem. A version 1 manifest, written before the resolved identity was
-  recorded, is rejected the same way (recreate the worktree or pass
-  `--link`). A manifest that is absent is not an error.
+  problem; any other `version` is rejected as unsupported. A manifest that
+  is absent is not an error.
 - `create` writes only what this reader accepts. An entry whose path the
   reader would refuse (for example one with a backslash, which `--link`
   itself allows) is left out of the file, the other links are recorded as
@@ -2599,7 +2598,12 @@ a file of the working tree:
   readlink text alone is not enough, because the main checkout can change
   what a path leads to without touching the worktree's link (a branch
   checkout can replace the ignored directory with a tracked symlink or
-  directory). A link replaced, removed, retargeted, moved behind a
+  directory). The `realpath` binds the location; the device and inode
+  additionally catch a different directory renamed into place. They may not
+  catch one deleted and recreated at the same path where the filesystem
+  reuses inode numbers (for example ext4 and overlayfs), and a branch checkout that merely fills the existing
+  ignored directory keeps the entry trusted, since that directory is still
+  the operator's own. A link replaced, removed, retargeted, moved behind a
   symlinked directory or resolving elsewhere now is not trusted, and the
   result warns `not trusting recorded worktree link <path>` with the
   reason, naming what it now resolves to. Passing the same path as `--link`

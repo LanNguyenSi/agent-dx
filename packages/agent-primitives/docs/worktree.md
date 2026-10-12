@@ -76,7 +76,8 @@ that worktree reads it and treats each link that still stands as recorded
 like a `--link`, so a plan from the run directory needs no extra flag; a
 link that has been replaced or retargeted since, or whose target now leads
 to a different directory (the main checkout swapped what the path resolves
-to), is not trusted. The trust rule, the checks on the file (`O_NOFOLLOW`
+to), is not trusted; the recorded device and inode may miss a directory
+deleted and recreated at the same path where inode numbers are reused. The trust rule, the checks on the file (`O_NOFOLLOW`
 where the platform supports it, owner and mode on POSIX only) and why it
 lives outside the working tree are in probe.md under "Links recorded by
 `worktree create`".
@@ -88,6 +89,8 @@ stay, and `probe` then needs `--link` for them. A link whose path the
 reader would reject (for example one containing a backslash) is still made
 but left out of the manifest, listed under `links.manifest.unrecorded` with
 a warning, and the other links are recorded as usual.
+
+A link whose target does not resolve (a dangling symlink in the main checkout) is made but not recorded either, and is listed under `links.manifest.unrecorded`; probe refuses a missing source, so create the target in the main checkout first and then pass `--link`.
 
 The result lists `links.made` (`path`, `target`, `exclude`: `added`, `already_ignored` or `failed`), `links.skipped` (`path`, `reason`, `detail`) and `links.manifest` (`status`: `written`, `not_needed` or `failed`, with `path` or `reason`, and `unrecorded`: `path` and `reason` of each link left out of a written manifest).
 

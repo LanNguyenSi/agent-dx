@@ -29,11 +29,8 @@ import { linkEntryUsageError, type LinkSourceGroup } from "./link-list.js";
 /** File name inside the worktree's git administration directory. */
 export const LINK_MANIFEST_FILE = "agent-primitives-links.json";
 
-/**
- * Version 2 adds the resolved identity of each link's target (see
- * `ManifestLink`). A version 1 file has no identity to compare, so it is
- * rejected whole instead of being trusted on the readlink text alone.
- */
+/** The only manifest version this reader accepts; any other is rejected
+ * whole. */
 export const LINK_MANIFEST_VERSION = 2;
 
 /** A manifest is a short list of paths; anything larger is the wrong file. */
@@ -66,8 +63,10 @@ export interface ManifestLink {
    * says now. */
   resolved: string;
   /** Device and inode of that directory (decimal strings, since an inode
-   * can exceed what a JSON number holds). A directory swapped for another
-   * at the same path keeps `resolved` but not these. */
+   * can exceed what a JSON number holds). `resolved` binds the location;
+   * these additionally catch a different directory renamed into place.
+   * They may not catch one deleted and recreated at the same path, where
+   * the filesystem reuses inode numbers (ext4, overlayfs). */
   dev: string;
   ino: string;
 }
@@ -269,13 +268,6 @@ export function parseManifest(parsed: unknown): ParsedManifest {
   );
   if (extra !== undefined)
     return { ok: false, reason: `unknown key "${extra}"` };
-  if (parsed.version === 1) {
-    return {
-      ok: false,
-      reason:
-        "version 1 has no resolved target identity to check, so it is not trusted; recreate the worktree or pass --link",
-    };
-  }
   if (parsed.version !== LINK_MANIFEST_VERSION) {
     return { ok: false, reason: "unsupported version" };
   }
@@ -447,14 +439,18 @@ export type LinkHolds =
  * directory, the entry itself is a symbolic link, its readlink text is
  * the recorded target, that target is (still) a directory, and that
  * directory is the one the operator's link reached at create time (same
- * `realpath`, same device and inode).
+ * `realpath`, same device and inode; the `realpath` binds the location,
+ * the inode check additionally catches a directory renamed into place).
  *
  * A checkout can replace a link (git overwrites an ignored path), anyone
  * can retarget one, and the main checkout can swap what the recorded
  * target path leads to (an ignored directory replaced by a tracked
  * symlink or directory, say) while the readlink text in the worktree
  * stays the same; a link that is no longer what `create` made is not the
- * operator's act any more, so it is not trusted. A target that is not a
+ * operator's act any more, so it is not trusted. The check cannot see a
+ * directory deleted and recreated at the same path on a filesystem that
+ * reuses inode numbers, nor a branch checkout that fills the existing
+ * ignored directory: that directory is still the operator's own. A target that is not a
  * directory is not an error but is not a `probe --link` source either
  * (`quiet`).
  */

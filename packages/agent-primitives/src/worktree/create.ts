@@ -588,8 +588,14 @@ function recordLinks(
   for (const l of made) {
     const identity = identities.get(l.path);
     if (identity === undefined) {
-      // A link that does not resolve is not a `--link` source anyway.
-      unresolved.push({ path: l.path, reason: "its target does not resolve" });
+      // A link that does not resolve is not a `--link` source either:
+      // probe refuses a source that is missing, so the remedy is to
+      // create the target first.
+      unresolved.push({
+        path: l.path,
+        reason:
+          "its target does not resolve; create the target in the main checkout, then pass --link",
+      });
     } else {
       recordable.push({
         path: l.path,
@@ -602,7 +608,7 @@ function recordLinks(
   if (recordable.length === 0) {
     const reason = "no link resolves to its target";
     warnings.push(
-      `could not record the links for probe: ${reason}; pass --link to probe to link them`,
+      `could not record the links for probe: ${reason}; create the targets in the main checkout, then pass --link to probe`,
     );
     return { status: "failed", reason };
   }
@@ -610,9 +616,15 @@ function recordLinks(
   if (written.status === "written") {
     const unrecorded = [...unresolved, ...written.unrecorded];
     if (unrecorded.length > 0) {
-      warnings.push(
-        `not recorded for probe (pass --link to probe for these): ${unrecorded.map((u) => `${u.path} (${u.reason})`).join(", ")}`,
-      );
+      // A path the manifest cannot hold is linked with `--link`; a link
+      // whose target is missing is not (see `unresolved` above).
+      const described = [
+        ...unresolved.map((u) => `${u.path} (${u.reason})`),
+        ...written.unrecorded.map(
+          (u) => `${u.path} (${u.reason}; pass --link to probe)`,
+        ),
+      ];
+      warnings.push(`not recorded for probe: ${described.join(", ")}`);
     }
     return {
       status: "written",
