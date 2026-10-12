@@ -797,7 +797,19 @@ copying/linking, is `status: "inconclusive"`,
 
 The link policy decides about every candidate, from every source, BEFORE
 any link is created, and every refusal is a warning in the envelope,
-never a silent drop. Each link is a delete followed by a symlink-create
+never a silent drop, with one exception: the refusal of a directory
+repository content named because it resolves outside the root (a
+composer `vendor-dir` that is a symlink out of the repository) is not
+reported when another candidate of the same round for the same
+destination (in the copy's own spelling) was accepted, such as the
+operator's `--link`, the worktree link manifest or an outside plan's
+`link` list for that path. The destination is planned to be linked (a
+later syscall-time refusal is reported on its own), so the warning
+would contradict `isolation.linked`. Every other refusal keeps its
+warning: a tracked destination or target describes a hazard of the
+destination or its target that a second candidate does not remove, and
+the "already covered" note reports a duplicate that was left out. Each
+link is a delete followed by a symlink-create
 at a path inside the copy, and both of those resolve symlinks in the
 path they are given: a link created at the copy's own root, over a
 directory this run writes into, or underneath a link the same step

@@ -47,6 +47,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (an `origin/...` ref) keeps excusing the unpushed commits of a merged branch. The shipped skill text mentions
   the flag, so its digest changes.
 
+- `probe` no longer warns that a directory repository content named (a
+  composer `vendor-dir` or `bin-dir`) resolves outside the repository root
+  when another candidate of the same planning round for the same destination
+  was accepted: the operator's `--link`, the worktree link manifest or an
+  outside plan's `link` list. The directory is linked, so the warning
+  contradicted the `isolation.linked` entry. Candidate order does not matter.
+  Only that one refusal is dropped; every other refusal (a tracked
+  destination or target, a nested repository, the "already covered" note)
+  keeps its warning, and the warning is unchanged when nothing links the
+  destination. Only what is reported changes; no link decision does.
+
 ## [0.11.0] - 2026-10-12
 
 - `worktree create` records the links it made in the new worktree's git
