@@ -15,10 +15,14 @@
 // comment never cuts a fenced code block: when its first "-->" lies inside a
 // fence that opened after the comment's first line, the opener is not a
 // comment and stays visible. A whole fence may lie inside a comment. A fence
-// is a line that starts, after any indentation, with three or more backticks
-// or tildes; a backtick fence's info string holds no backtick. The fence
-// closes at a line made only of at least as many of the same character,
-// indented at most three columns more than its opener.
+// is a line that starts with three or more backticks or tildes; a backtick
+// fence's info string holds no backtick. Such a line indented four or more
+// columns past the container may be no fence or the fence of a nested block
+// such as a list item, and the opener stays visible when its "-->" lies
+// inside a fence under either reading. A fence closes at a line made only of
+// at least as many of the same character, followed by nothing but spaces and
+// tabs, indented at most three columns past the container column, or past
+// the opener's own column for an opener four or more columns in.
 
 // Within text, what markdown-it reads before a comment can start: backslash
 // escapes and code spans (a run of backticks closed by a run of the same
@@ -174,22 +178,34 @@ function stripTitle(token) {
 
 // True when the line holding the comment's closer sits inside a fenced code
 // block that opened after the comment's first line. A fence is a line that
-// starts, indented less than four columns, with three or more backticks or
-// tildes, and a backtick fence's info string holds no backtick. It closes at a line made
-// only of at least as many of the same character, indented at most three
-// columns more than its opener.
+// starts with three or more backticks or tildes, and a backtick fence's info
+// string holds no backtick. A backtick or tilde line indented four or more
+// columns past the container is read both ways, as no fence and as the fence
+// of a nested block such as a list item, and the closer counts as inside a
+// fence under either reading. A fence closes at a line made only of at least
+// as many of the same character, with nothing but spaces and tabs after them,
+// indented at most three columns past the container column, or past the
+// opener's own column for an opener four or more columns past the container.
 function closesInFence(state, startLine, closeLine) {
+  return inFence(state, startLine, closeLine, true) || inFence(state, startLine, closeLine, false)
+}
+
+// One reading of the lines after the comment's first line: bounded takes a
+// backtick or tilde line indented four or more columns past the container as
+// no fence, unbounded takes it as a fence whose closer is measured against
+// its own column.
+function inFence(state, startLine, closeLine, bounded) {
   let fence = null
   let indent = 0
   for (let l = startLine + 1; l <= closeLine; l++) {
     const text = state.src.slice(state.bMarks[l] + state.tShift[l], state.eMarks[l])
     if (!fence) {
       const m = /^(`{3,}|~{3,})/.exec(text)
-      if (m && state.sCount[l] - state.blkIndent < 4 && !(m[1][0] === '`' && text.slice(m[1].length).includes('`'))) {
+      if (m && (!bounded || state.sCount[l] - state.blkIndent < 4) && !(m[1][0] === '`' && text.slice(m[1].length).includes('`'))) {
         fence = m[1]
-        indent = state.sCount[l]
+        indent = state.sCount[l] - state.blkIndent < 4 ? Math.min(state.blkIndent, state.sCount[l]) : state.sCount[l]
       }
-    } else if (state.sCount[l] - indent <= 3 && new RegExp('^' + fence[0].replace(/[`~]/, (c) => '\\' + c) + '{' + fence.length + ',}\\s*$').test(text)) fence = null
+    } else if (state.sCount[l] - indent <= 3 && new RegExp('^' + fence[0].replace(/[`~]/, (c) => '\\' + c) + '{' + fence.length + ',}[ \\t]*$').test(text)) fence = null
   }
   return fence !== null
 }
