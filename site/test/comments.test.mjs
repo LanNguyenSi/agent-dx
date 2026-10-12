@@ -467,3 +467,14 @@ test('the fence rules each decide a render', () => {
   assert.match(x4, /&lt;!-- typo/)
   assert.match(x4, /code/)
 })
+
+test('each fence reading decides a render on its own', () => {
+  // A closed comment in a list item hides a fence less indented than the
+  // item, even when a line five columns in looks like a closer.
+  assert.equal(render('- a\n  <!--\n```\n     ```\n```\n-->\n\nKept.\n'), '<ul>\n<li>a</li>\n</ul>\n<p>Kept.</p>\n')
+  // A fence opened two columns in is not closed five columns in, so the
+  // "-->" lies inside it and the opener stays visible.
+  const out = render('<!-- typo\n    ```\n  ```js\n     ```\nx --> y\n')
+  assert.match(out, /&lt;!-- typo/)
+  assert.match(out, /x --> y|x --&gt; y/)
+})

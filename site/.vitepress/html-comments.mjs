@@ -19,11 +19,11 @@
 // is a line that starts with three or more backticks or tildes; a backtick
 // fence's info string holds no backtick. Such a line indented four or more
 // columns past the container may be no fence or the fence of a nested block
-// such as a list item, and the opener stays visible when its "-->" lies
-// inside a fence under either reading. A fence closes at a line made only of
-// at least as many of the same character, followed by nothing but spaces and
-// tabs, indented at most three columns past the container column, or past
-// the opener's own column for an opener four or more columns in.
+// such as a list item. A fence closes at a line made only of at least as
+// many of the same character, followed by nothing but spaces and tabs,
+// indented at most three columns past the container column or past the
+// opener's own column, and the opener stays visible when its "-->" lies
+// inside a fence under any of these readings.
 
 // Within text, what markdown-it reads before a comment can start: backslash
 // escapes and code spans (a run of backticks closed by a run of the same
