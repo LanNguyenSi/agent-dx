@@ -558,7 +558,10 @@ export function skippedLinkWarning(
  * time it is acted on.
  *
  * Four rules, in this order, each skip a warning and never a silent
- * drop:
+ * drop. The one exception is rule 1's provenance refusal (a directory
+ * repository content named that resolves outside the root): it is not
+ * reported when another candidate of the same round for the same
+ * destination was accepted, since the directory is linked after all:
  *
  * 1. Containment, judged on where the candidate SITS (`linkRelPath`),
  *    never on where a symlinked candidate POINTS. A candidate outside
@@ -625,7 +628,15 @@ export function planLinks(
   ctx: LinkPolicyContext,
 ): LinkPlan {
   const links: PlannedLink[] = [];
-  const warnings: string[] = [];
+  // Every refusal, in evaluation order. A refusal carries a `destination`
+  // (the copy's own spelling) only when it may be superseded by an
+  // accepted candidate for that destination: see the end of the function.
+  const refusals: { warning: string; destination: string | undefined }[] = [];
+  const warnings = {
+    push(warning: string): void {
+      refusals.push({ warning, destination: undefined });
+    },
+  };
   for (const candidate of candidates) {
     const relPath = linkRelPath(candidate.absDir, ctx.rootReal);
     if (relPath === undefined) {
@@ -652,14 +663,20 @@ export function planLinks(
       candidate.namedBy !== undefined &&
       !isPathContained(ctx.rootReal, resolved)
     ) {
-      warnings.push(
-        skippedLinkWarning(
+      // The one refusal another candidate can supersede: it is about who
+      // asked for the directory, and an accepted candidate for the same
+      // destination (the operator's own) answers that. Every other refusal
+      // describes a hazard of the destination or its target, which a twin
+      // does not remove, so it keeps its warning.
+      refusals.push({
+        warning: skippedLinkWarning(
           candidate,
           "it resolves outside the repository root; a directory named by " +
             "repository content must both sit inside the root and resolve " +
             "inside it",
         ),
-      );
+        destination: ctx.canonicalRelPath(relPath),
+      });
       continue;
     }
     // Where a candidate RESOLVES may be the root itself, or an ancestor
@@ -854,7 +871,24 @@ export function planLinks(
     }
     links.push({ candidate, relPath, canonicalRelPath: canonicalRel });
   }
-  return { links, warnings };
+  // A provenance refusal (a directory repository content named that
+  // resolves outside the root) is only worth reporting when the directory
+  // it concerns ends up unlinked. Another candidate of this round for the
+  // same destination that was accepted (typically the operator's own
+  // `--link` for a path a `composer.json` also names) already provides
+  // that link, so the refused twin would only be noise. The check runs
+  // after the loop, so candidate order cannot matter, and it only filters
+  // what is reported: no accept/refuse decision above depends on it.
+  const linkedDestinations = new Set(links.map((l) => l.canonicalRelPath));
+  return {
+    links,
+    warnings: refusals
+      .filter(
+        (r) =>
+          r.destination === undefined || !linkedDestinations.has(r.destination),
+      )
+      .map((r) => r.warning),
+  };
 }
 
 /** What `linkSourceIsOperatorInput` is asked about: the `link` list of a
