@@ -3,7 +3,6 @@ import path from "node:path";
 import { UsageError } from "../envelope.js";
 import { runGit, type GitRunResult } from "../drift/git.js";
 import { withoutRepoSelectionEnv } from "../git-env.js";
-import { resolveDeepestExisting } from "../probe/containment.js";
 import { probeGitArgv } from "../probe/git.js";
 
 /**
@@ -25,6 +24,7 @@ export type WorktreeRefusalReason =
   | "branch_checked_out"
   | "target_exists"
   | "target_inside_checkout"
+  | "target_inside_worktree"
   | "path_and_root_conflict"
   | "base_not_found"
   | "default_branch_unresolved"
@@ -206,14 +206,64 @@ export function resolveRepo(repoPath: string): RepoContext {
   };
 }
 
-/** True when `candidate` is `root` or lies below it. Both sides are run
- * through `resolveDeepestExisting` first, so a symlinked spelling of
- * either cannot flip the answer. */
-export function isWithin(root: string, candidate: string): boolean {
-  const r = resolveDeepestExisting(path.resolve(root));
-  const c = resolveDeepestExisting(path.resolve(candidate));
-  const rel = path.relative(r, c);
+/**
+ * Resolves `p` through its deepest existing prefix with the platform's own
+ * `realpath`, which reports the spelling the filesystem stores (so
+ * `Repo` and `repo` become one string on a case-insensitive volume), and
+ * puts the missing tail back unchanged. JavaScript's `realpathSync` keeps
+ * the case it was given and would leave the two spellings apart.
+ */
+function canonicalDeepest(p: string): string {
+  try {
+    return fs.realpathSync.native(p);
+  } catch {
+    const parent = path.dirname(p);
+    if (parent === p) return p;
+    return path.join(canonicalDeepest(parent), path.basename(p));
+  }
+}
+
+function lexicallyWithin(root: string, candidate: string): boolean {
+  const rel = path.relative(root, candidate);
   return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
+/** True when `a` and `b` are the same filesystem object (device and inode),
+ * whatever spelling reached them. */
+function sameObject(a: fs.Stats, b: fs.Stats): boolean {
+  return a.ino !== 0 && a.ino === b.ino && a.dev === b.dev;
+}
+
+/**
+ * True when `candidate` is `root` or lies below it. Both sides are
+ * canonicalised by the platform `realpath` first, so a symlinked or
+ * differently cased spelling of either cannot flip the answer. As a
+ * second check that does not depend on any spelling, every existing
+ * ancestor of the candidate is compared with the root by device and
+ * inode, which also covers a case-insensitive volume whose `realpath`
+ * reports the spelling it was given.
+ */
+export function isWithin(root: string, candidate: string): boolean {
+  const r = canonicalDeepest(path.resolve(root));
+  const c = canonicalDeepest(path.resolve(candidate));
+  if (lexicallyWithin(r, c)) return true;
+  let rootStat: fs.Stats;
+  try {
+    rootStat = fs.statSync(r);
+  } catch {
+    return false;
+  }
+  let dir = c;
+  for (;;) {
+    try {
+      if (sameObject(fs.statSync(dir), rootStat)) return true;
+    } catch {
+      // A missing component has no identity to compare; keep climbing.
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) return false;
+    dir = parent;
+  }
 }
 
 /** The short name of the remote's default branch as `origin/<name>`

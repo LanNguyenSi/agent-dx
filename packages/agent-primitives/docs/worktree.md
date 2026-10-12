@@ -60,6 +60,8 @@ Per entry, after the worktree exists:
 - The destination must not exist (`destination_exists`, for instance a tracked path) and no existing parent of it may be a symlink or a non-directory (`parent_is_symlink`, `parent_not_directory`), so nothing is ever written through one link into the main checkout. Missing parent directories are created.
 - Once the link exists, git is asked whether it ignores the path (`git check-ignore --no-index`). If it does not, `/<rel>` (glob characters escaped) is appended to `info/exclude` of the repository's common git directory, which every worktree shares. A directory-only pattern such as `vendor/` does not cover a symlink, which git treats as a file, so the line is added in that case too.
 
+The exclude line lives in the common git directory, not in the new worktree, so it also applies to the main checkout and stays in place after the worktree is removed.
+
 The result lists `links.made` (`path`, `target`, `exclude`: `added`, `already_ignored` or `failed`) and `links.skipped` (`path`, `reason`, `detail`).
 
 ## Result
@@ -92,7 +94,8 @@ A refusal is `status: "usage_error"` (exit 2) with a `reason`, a `message`, and 
 | `branch_exists` | The branch already exists. This command only creates branches. |
 | `branch_checked_out` | The branch is checked out in a worktree (the main checkout included); the message and `details.worktree` name it. A stale entry is marked `prunable`. |
 | `target_exists` | The target path exists, whatever it is. |
-| `target_inside_checkout` | The target lies inside the main checkout. |
+| `target_inside_checkout` | The target lies inside the main checkout, however its path is spelled (symlinks and letter case on a case-insensitive volume included). |
+| `target_inside_worktree` | The target lies inside another working tree of the repository: the linked worktree `--repo` points into, or any registered worktree whose directory still exists (a stale, prunable entry does not count). `details.worktree` names it. |
 | `path_and_root_conflict` | Both `--path` and `--root` were given. |
 | `base_not_found` | `--base` does not name a commit (or starts with `-`). |
 | `default_branch_unresolved` | No `--base`, and `origin/HEAD`, `origin/main` and `origin/master` all fail to resolve. Pass `--base`. |
@@ -100,7 +103,7 @@ A refusal is `status: "usage_error"` (exit 2) with a `reason`, a `message`, and 
 | `run_dir_missing` | `--run` is not an existing directory. |
 | `link_invalid` | A link entry is unusable (see Links). |
 | `links_file_unreadable` | `--links-from` cannot be read. |
-| `links_file_inside_repo` | `--links-from` lies inside the repository. |
+| `links_file_inside_repo` | `--links-from` lies inside the repository, however its path is spelled (as for `target_inside_checkout`). |
 | `option_invalid` | `--pass-regex` without `--smoke`, or an empty `--setup` / `--smoke`. |
 | `worktree_add_failed` | `git worktree add` itself failed; the message carries git's error. |
 

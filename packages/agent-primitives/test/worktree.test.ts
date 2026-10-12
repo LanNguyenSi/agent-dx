@@ -11,6 +11,7 @@ import {
   smokeVerdict,
 } from "../src/worktree/index.js";
 import { excludePatternFor } from "../src/worktree/git.js";
+import { caseInsensitiveVolume } from "./helpers/case-fs.js";
 import { spawnCli } from "./helpers/spawn-cli.js";
 
 /**
@@ -125,9 +126,13 @@ interface Cli {
   stderr: string;
 }
 
-async function run(cwd: string, args: string[]): Promise<Cli> {
+async function run(
+  cwd: string,
+  args: string[],
+  extraEnv: NodeJS.ProcessEnv = {},
+): Promise<Cli> {
   const r = await spawnCli(["-C", cwd, "worktree", "create", ...args], {
-    env: GIT_ENV,
+    env: { ...GIT_ENV, ...extraEnv },
   });
   let json: Record<string, any> = {};
   try {
@@ -478,6 +483,94 @@ describe("worktree create: refusals", () => {
       f.repo,
     );
     expect(fs.existsSync(path.join(f.repo, "wt-in-repo"))).toBe(false);
+  });
+
+  it("refuses a target inside a linked worktree, whether --repo names it or the repository lists it", async () => {
+    const f = makeFixture();
+    const first = path.join(f.base, "wt-first");
+    const made = await run(f.work, [
+      "--repo",
+      f.repo,
+      "--branch",
+      "first",
+      "--path",
+      first,
+    ]);
+    expect(made.code, made.stdout + made.stderr).toBe(0);
+
+    // --repo is the linked worktree itself.
+    const viaLinked = await expectRefusal(
+      f,
+      ["--repo", first, "--branch", "x", "--path", path.join(first, "nested")],
+      "target_inside_worktree",
+    );
+    expect(viaLinked.json.details.worktree).toBe(first);
+
+    // --repo is the main checkout, the target sits in a registered worktree.
+    const viaMain = await expectRefusal(
+      f,
+      [
+        "--repo",
+        f.repo,
+        "--branch",
+        "y",
+        "--path",
+        path.join(first, "deep", "er"),
+      ],
+      "target_inside_worktree",
+    );
+    expect(viaMain.json.details.worktree).toBe(first);
+    expect(fs.existsSync(path.join(first, "deep"))).toBe(false);
+  });
+
+  it("does not count a pruned worktree's old directory as a working tree", async () => {
+    const f = makeFixture();
+    const gone = path.join(f.base, "wt-gone");
+    const made = await run(f.work, [
+      "--repo",
+      f.repo,
+      "--branch",
+      "gone",
+      "--path",
+      gone,
+    ]);
+    expect(made.code, made.stdout + made.stderr).toBe(0);
+    fs.rmSync(gone, { recursive: true, force: true });
+    const again = await run(f.work, [
+      "--repo",
+      f.repo,
+      "--branch",
+      "again",
+      "--path",
+      path.join(gone, "again"),
+    ]);
+    expect(again.code, again.stdout + again.stderr).toBe(0);
+  });
+
+  it("judges containment by the directory, not by the letter case it was spelled with", async () => {
+    const f = makeFixture();
+    // `repo` is the checkout; `REPO` names it too on a case-insensitive volume.
+    const variant = path.join(f.base, "REPO", "nested");
+    if (caseInsensitiveVolume(f.base)) {
+      await expectRefusal(
+        f,
+        ["--repo", f.repo, "--branch", "x", "--path", variant],
+        "target_inside_checkout",
+      );
+      expect(fs.existsSync(path.join(f.repo, "nested"))).toBe(false);
+    } else {
+      // A case-sensitive volume: `REPO` is another, absent directory.
+      const r = await run(f.work, [
+        "--repo",
+        f.repo,
+        "--branch",
+        "x",
+        "--path",
+        variant,
+      ]);
+      expect(r.code, r.stdout + r.stderr).toBe(0);
+      expect(fs.existsSync(path.join(f.repo, "nested"))).toBe(false);
+    }
   });
 
   it("refuses a --repo that is not a git repository, or does not exist", async () => {
@@ -860,6 +953,35 @@ describe("worktree create: dependency links", () => {
     expect(inside.code).toBe(2);
     expect(inside.json.reason).toBe("links_file_inside_repo");
 
+    // The same file spelled with another letter case: still inside.
+    const variant = path.join(f.base, "REPO", "links.txt");
+    if (caseInsensitiveVolume(f.base)) {
+      const cased = await run(f.work, [
+        "--repo",
+        f.repo,
+        "--branch",
+        "x",
+        "--path",
+        t,
+        "--links-from",
+        variant,
+      ]);
+      expect(cased.code).toBe(2);
+      expect(cased.json.reason).toBe("links_file_inside_repo");
+    } else {
+      const cased = await run(f.work, [
+        "--repo",
+        f.repo,
+        "--branch",
+        "x",
+        "--path",
+        t,
+        "--links-from",
+        variant,
+      ]);
+      expect(cased.json.reason).toBe("links_file_unreadable");
+    }
+
     const unreadable = await run(f.work, [
       "--repo",
       f.repo,
@@ -893,6 +1015,46 @@ describe("worktree create: dependency links", () => {
       expect(r.json.reason, bad).toBe("link_invalid");
     }
     expect(fs.existsSync(t)).toBe(false);
+  });
+});
+
+describe("worktree create: ambient repository selection", () => {
+  it("ignores GIT_DIR, GIT_WORK_TREE and GIT_INDEX_FILE for git and for setup", async () => {
+    const f = makeFixture();
+    const other = makeFixture();
+    const otherGitDir = path.join(other.repo, ".git");
+    const otherIndex = path.join(otherGitDir, "index");
+    const indexBefore = fs.readFileSync(otherIndex);
+    const otherListBefore = listedWorktrees(other.repo);
+    const otherBranchesBefore = git(other.repo, ["branch", "--list"]);
+    const target = path.join(f.base, "wt-env");
+    const r = await run(
+      f.work,
+      [
+        "--repo",
+        f.repo,
+        "--branch",
+        "env",
+        "--path",
+        target,
+        "--setup",
+        "echo dir=${GIT_DIR-unset} tree=${GIT_WORK_TREE-unset} index=${GIT_INDEX_FILE-unset} > env.txt",
+      ],
+      {
+        GIT_DIR: otherGitDir,
+        GIT_WORK_TREE: other.repo,
+        GIT_INDEX_FILE: otherIndex,
+      },
+    );
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(listedWorktrees(f.repo)).toContain(target);
+    expect(listedWorktrees(other.repo)).toEqual(otherListBefore);
+    expect(git(other.repo, ["branch", "--list"])).toBe(otherBranchesBefore);
+    expect(fs.readFileSync(otherIndex).equals(indexBefore)).toBe(true);
+    expect(r.json.setup.status).toBe("ok");
+    expect(fs.readFileSync(path.join(target, "env.txt"), "utf8").trim()).toBe(
+      "dir=unset tree=unset index=unset",
+    );
   });
 });
 

@@ -293,6 +293,23 @@ function resolveTarget(
       { target, mainCheckout: repo.mainCheckout },
     );
   }
+  // A target inside another working tree of the repository would nest one
+  // checkout in another: the linked worktree `--repo` was pointed at, or
+  // any registered worktree whose directory still exists.
+  const others = [
+    repo.repoRoot,
+    ...repo.worktrees.filter((w) => !w.prunable).map((w) => w.path),
+  ];
+  for (const other of others) {
+    if (isWithin(repo.mainCheckout, other)) continue;
+    if (isWithin(other, target)) {
+      throw new WorktreeRefusal(
+        `target ${target} lies inside the worktree ${other}; choose a path outside every working tree of the repository`,
+        "target_inside_worktree",
+        { target, worktree: other },
+      );
+    }
+  }
   let exists = true;
   try {
     fs.lstatSync(target);

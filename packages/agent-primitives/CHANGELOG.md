@@ -21,7 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the invocation directory, never against the repository; and never switches,
   resets or stashes the main checkout. It refuses, with a distinct `reason`
   each, a branch that exists or is checked out elsewhere, a target that exists
-  or lies inside the main checkout, and a `--repo` that is not a git
+  or lies inside the main checkout (however its path is spelled, letter case
+  on a case-insensitive volume included) or inside another registered
+  worktree (`target_inside_worktree`), and a `--repo` that is not a git
   repository. `--run` writes `.ai/run` only when `git check-ignore --no-index`
   says it is ignored; `--link` and `--links-from` (an operator file outside
   the repository) symlink shared dependency directories and exclude them
