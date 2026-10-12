@@ -856,3 +856,84 @@ export function planLinks(
   }
   return { links, warnings };
 }
+
+/** What `linkSourceIsOperatorInput` is asked about: the `link` list of a
+ * `--plan` file. */
+export interface PlanLinkSource {
+  kind: "plan";
+  /** The plan file's absolute path as it was named, symlinks unresolved. */
+  planPath: string;
+  /** The plan's realpath, as `parsePlanFile` verified it against the
+   * descriptor the bytes were read from; `undefined` when that could not
+   * be shown. */
+  planRealPath: string | undefined;
+}
+
+/**
+ * Whether a `link` list read from a file is operator input, to be judged
+ * like `--link`, instead of repository content, which the policy holds
+ * to the stricter rules (`namedBy`). This is the ONE place that decision
+ * is taken; every file-sourced `link` list goes through it, and a second
+ * trusted source belongs here as a second `kind`.
+ *
+ * Trust is by location. Repository content is whatever lives under the
+ * containment root, so a plan stored there can have been written by
+ * whoever wrote the repository, and its `link` stays untrusted. A plan
+ * stored outside the root cannot have come from the repository's own
+ * files, so naming it on the command line is the operator's act and its
+ * `link` is treated as if typed as `--link`. The repository defaults file
+ * is not a source here at all: it always lives at the root.
+ *
+ * The decision fails closed. A plan is outside only when ALL of these
+ * hold, and any doubt means "inside":
+ *
+ * - its realpath is known (verified against the open descriptor) and does
+ *   not sit under the root;
+ * - no step of the path as the operator NAMED it sits under the root
+ *   either. A symlink inside the repository that points at a plan
+ *   elsewhere, or a symlinked directory inside the repository holding
+ *   it, is a path into the repository: the operator who typed it cannot
+ *   tell it from repository content, so it counts as inside though the
+ *   bytes live elsewhere.
+ *
+ * "Under the root" is decided by filesystem identity
+ * (`linkTargetRelPath`), never by comparing two path strings, because
+ * `realpath` keeps whatever case and Unicode form it was given: on a
+ * case-insensitive volume `/r/REPO/plan.json` is a plan inside `/r/repo`
+ * that no string comparison sees.
+ */
+export function linkSourceIsOperatorInput(
+  source: PlanLinkSource,
+  rootReal: string,
+): boolean {
+  if (source.planRealPath === undefined) return false;
+  if (linkTargetRelPath(source.planRealPath, rootReal) !== undefined) {
+    return false;
+  }
+  return !namedPathTouchesRoot(source.planPath, rootReal);
+}
+
+/** Whether any step of `absPath` as named sits under `rootReal`: each
+ * prefix is placed by its resolved parent directory plus its own last
+ * segment verbatim (a symlink step is therefore judged where it sits,
+ * not where it points), and that placement is compared with the root by
+ * identity. Anything that cannot be placed counts as touching it. */
+function namedPathTouchesRoot(absPath: string, rootReal: string): boolean {
+  const resolved = path.resolve(absPath);
+  const segments = path
+    .relative(path.parse(resolved).root, resolved)
+    .split(path.sep)
+    .filter((s) => s.length > 0);
+  let prefix = path.parse(resolved).root;
+  for (const segment of segments) {
+    let placed: string;
+    try {
+      placed = path.join(fs.realpathSync(prefix), segment);
+    } catch {
+      return true;
+    }
+    if (linkTargetRelPath(placed, rootReal) !== undefined) return true;
+    prefix = path.join(prefix, segment);
+  }
+  return false;
+}

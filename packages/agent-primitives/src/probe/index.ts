@@ -14,7 +14,7 @@ import {
   mergeLinkSources,
   type MergedLink,
 } from "./link-list.js";
-import { linkRelPath } from "./link-policy.js";
+import { linkRelPath, linkSourceIsOperatorInput } from "./link-policy.js";
 import {
   DEFAULT_GIT_APPLY_TIMEOUT_MS,
   listPatchTouchedPaths,
@@ -336,7 +336,7 @@ export function firstLinkSourceRefusal(
       // else for an existing one; see the docblock above).
       return {
         reason: "file_outside_root",
-        message: `outside the containment root (${root}): ${link.value}`,
+        message: repositoryLinkOutsideMessage(root, realRoot, link),
       };
     }
     if (!isPathContained(realRoot, target)) {
@@ -344,7 +344,7 @@ export function firstLinkSourceRefusal(
         if (isSymlinkSource(link.value) && !allowOutside) {
           return {
             reason: "file_outside_root",
-            message: `outside the containment root (${root}): ${link.value}`,
+            message: repositoryLinkOutsideMessage(root, realRoot, link),
           };
         }
         continue;
@@ -356,6 +356,51 @@ export function firstLinkSourceRefusal(
     }
   }
   return undefined;
+}
+
+/**
+ * The refusal for a repository-content link that does not resolve inside
+ * the root, shared by both places `firstLinkSourceRefusal` produces it so
+ * the envelope cannot differ between them. It names the link (with the
+ * file that named it), where the symlink ITSELF says it points (its
+ * `readlink` text, verbatim), and the way out: the same directory passed
+ * as `--link` is operator input and keeps the operator's latitude.
+ *
+ * It deliberately does NOT name the physically resolved far end. That
+ * path is only known when the chain could be followed, so printing it
+ * would answer, per link, whether an out-of-root path a symlinked
+ * component names exists: the chain `dang/../x` places at `<elsewhere>/x`
+ * when `dang` resolves and cannot be placed when it dangles. The
+ * `readlink` text is a property of the repository's own content, the
+ * same for every filesystem state outside it.
+ */
+function repositoryLinkOutsideMessage(
+  root: string,
+  realRoot: string,
+  link: MergedLink,
+): string {
+  // Only a link whose own parent directory chain stays inside the root
+  // has a `readlink` text that is repository content. When an ancestor
+  // is itself a symlink out of the root, that text lives outside it and
+  // whether it exists is not for the envelope to tell, so the original
+  // wording, which names the in-root value alone, stays.
+  if (
+    !isPathContained(realRoot, resolveDeepestExisting(path.dirname(link.value)))
+  ) {
+    return `outside the containment root (${root}): ${link.value}`;
+  }
+  let pointsTo = "";
+  try {
+    pointsTo = ` is a symlink to ${fs.readlinkSync(link.value)}, which`;
+  } catch {
+    // Not a symlink itself, or unreadable: say nothing about where it
+    // points rather than guess.
+  }
+  return (
+    `outside the containment root (${root}): link ${link.namedBy ?? link.given}` +
+    `${pointsTo} does not resolve inside the root, and a link named by ` +
+    "repository content must; pass it as --link to treat it as operator input"
+  );
 }
 
 /** Whether `p` itself is a symlink (`lstatSync`, never following it):
@@ -1104,13 +1149,21 @@ export interface ProbePlanOptions {
   links?: string[];
   /** The plan file's own `link` entries, relative to the repository
    * root, kept SEPARATE from `links` rather than pre-merged by the
-   * caller: they are repository content, and the link policy holds
-   * repository-content links to a stricter rule than an operator's own
-   * `--link` (see `link-policy.ts`). */
+   * caller: they are repository content unless the plan file lies
+   * outside the containment root (`planRealPath`), and the link policy
+   * holds repository-content links to a stricter rule than an
+   * operator's own `--link` (see `link-policy.ts`). */
   planLinks?: string[];
   /** The plan file's path, named in a warning about one of its own
    * `link` entries. */
   planPath?: string;
+  /** The plan file's realpath, as `parsePlanFile` verified it
+   * (`PlanParseResult.realPath`). Together with `planPath` it decides
+   * whether the plan's `link` is repository content or operator input
+   * (`linkSourceIsOperatorInput`); left out, the plan is repository
+   * content, which is also what every caller that did not read the plan
+   * from a file gets. */
+  planRealPath?: string;
   allowOutside?: boolean;
   cwd: string;
   logDir: string;
@@ -1409,6 +1462,20 @@ async function runProbePlanPipeline(
   if (!defaultsFile.ok) {
     return refuse("usage_error", defaultsFile.reason, defaultsFile.message);
   }
+  // A plan stored outside the containment root cannot be repository
+  // content, so its `link` is then operator input, judged like `--link`
+  // (no `namedIn`, hence no `namedBy` provenance). It keeps the plan
+  // file's own base (the repository root) and merge position.
+  const planLinksAreOperatorInput =
+    opts.planPath !== undefined &&
+    linkSourceIsOperatorInput(
+      {
+        kind: "plan",
+        planPath: opts.planPath,
+        planRealPath: opts.planRealPath,
+      },
+      realRoot,
+    );
   const mergedLinks = mergeLinkSources([
     {
       base: root,
@@ -1421,7 +1488,11 @@ async function runProbePlanPipeline(
       base: root,
       basePhrase: "the repository root",
       values: opts.planLinks ?? [],
-      namedIn: `the "link" list of ${opts.planPath ?? "the --plan file"}`,
+      ...(planLinksAreOperatorInput
+        ? {}
+        : {
+            namedIn: `the "link" list of ${opts.planPath ?? "the --plan file"}`,
+          }),
       remedy: `remove the entry from ${opts.planPath ?? "the --plan file"}`,
     },
     {

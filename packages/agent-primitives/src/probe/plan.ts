@@ -68,7 +68,20 @@ export type PlanParseFailureReason =
   "plan_not_readable" | "plan_invalid" | "plan_empty";
 
 export type PlanParseResult =
-  | { ok: true; plan: ProbePlanSpec }
+  | {
+      ok: true;
+      plan: ProbePlanSpec;
+      /**
+       * The plan file's realpath, set only when it was verified to be the
+       * very file the bytes were read from: `stat` of the realpath agrees
+       * with the open descriptor on device and inode, and it is a regular
+       * file. Absent when that could not be shown (the path was swapped
+       * while it was read, or it names something like `/dev/stdin` whose
+       * realpath is not the file behind the descriptor). The link policy
+       * treats a plan without it as repository content.
+       */
+      realPath?: string;
+    }
   | { ok: false; reason: PlanParseFailureReason; message: string };
 
 const PLAN_KEYS = [
@@ -224,6 +237,7 @@ export function parsePlanFile(planPath: string): PlanParseResult {
     return notReadable();
   }
   let text: string;
+  let realPath: string | undefined;
   try {
     const stat = fs.fstatSync(fd);
     if (!stat.isFile()) {
@@ -243,6 +257,7 @@ export function parsePlanFile(planPath: string): PlanParseResult {
       };
     }
     text = readBounded(fd, stat.size);
+    realPath = verifiedRealPath(absPlanPath, stat);
   } catch (err) {
     return notReadable(err instanceof Error ? err.message : String(err));
   } finally {
@@ -265,7 +280,34 @@ export function parsePlanFile(planPath: string): PlanParseResult {
       })`,
     };
   }
-  return validatePlan(parsed, absPlanPath);
+  const validated = validatePlan(parsed, absPlanPath);
+  return validated.ok && realPath !== undefined
+    ? { ...validated, realPath }
+    : validated;
+}
+
+/**
+ * The realpath of `absPlanPath`, but only when it provably names the file
+ * the descriptor behind `opened` was read from: a regular file whose
+ * `dev`/`ino` match. A path that was swapped for another file after the
+ * open, or one whose realpath is a different object than the descriptor
+ * (`/dev/stdin` on macOS resolves to `/dev/fd/0`, which lives on another
+ * device), yields `undefined`, so that where the plan "lives" is never
+ * decided on a path that is not the bytes' actual home.
+ */
+function verifiedRealPath(
+  absPlanPath: string,
+  opened: fs.Stats,
+): string | undefined {
+  try {
+    const real = fs.realpathSync(absPlanPath);
+    const stat = fs.statSync(real);
+    return stat.isFile() && stat.dev === opened.dev && stat.ino === opened.ino
+      ? real
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** The schema half of `parsePlanFile`, on an already-parsed value.

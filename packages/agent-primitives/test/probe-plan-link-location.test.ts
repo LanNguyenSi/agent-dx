@@ -1,0 +1,327 @@
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { probePlan } from "../src/probe/index.js";
+import { linkSourceIsOperatorInput } from "../src/probe/link-policy.js";
+import { parsePlanFile } from "../src/probe/plan.js";
+import { caseInsensitiveVolume } from "./helpers/case-fs.js";
+import { spawnCli } from "./helpers/spawn-cli.js";
+
+/**
+ * Where a `--plan` file lives decides how its `link` list is judged: a
+ * plan stored outside the containment root is the operator's own input
+ * (judged like `--link`), a plan under the root is repository content
+ * and keeps the strict rule, and so does anything that cannot be shown
+ * to lie outside.
+ */
+
+const tmpDirs: string[] = [];
+function makeTmpDir(): string {
+  const dir = fs.realpathSync(
+    fs.mkdtempSync(path.join(os.tmpdir(), "agent-primitives-plan-loc-")),
+  );
+  tmpDirs.push(dir);
+  return dir;
+}
+
+afterEach(() => {
+  for (const dir of tmpDirs.splice(0)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+interface Fixture {
+  base: string;
+  repo: string;
+  /** The directory the in-repo `lib` symlink points at, outside the repo. */
+  sharedLib: string;
+  /** A directory outside the repo for plan files (the run directory). */
+  runDir: string;
+  logs: string;
+  planBody: Record<string, unknown>;
+}
+
+/** A repository whose gitignored `lib` is a symlink to a directory outside
+ * it. The test command passes only when `lib` is linked into the
+ * isolation copy, so a plan that does not get its link honoured fails its
+ * baseline instead of killing the mutant. */
+function makeFixture(): Fixture {
+  const base = makeTmpDir();
+  const sharedLib = path.join(base, "shared", "lib");
+  fs.mkdirSync(sharedLib, { recursive: true });
+  fs.writeFileSync(path.join(sharedLib, "x.js"), "module.exports = 1;\n");
+  const repo = path.join(base, "repo");
+  fs.mkdirSync(path.join(repo, "src"), { recursive: true });
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: repo });
+  git("init", "-q");
+  git("config", "user.email", "t@example.invalid");
+  git("config", "user.name", "t");
+  fs.writeFileSync(path.join(repo, "src", "a.sh"), "x=1\n");
+  fs.writeFileSync(
+    path.join(repo, "test.js"),
+    [
+      'const fs = require("fs");',
+      'const ok = fs.existsSync("lib/x.js") &&',
+      '  fs.readFileSync("src/a.sh", "utf8").includes("x=1");',
+      'if (ok) console.log("OK (1 test)");',
+      "process.exit(ok ? 0 : 1);",
+      "",
+    ].join("\n"),
+  );
+  fs.writeFileSync(path.join(repo, ".gitignore"), "lib\nplan*.json\nrunlink\n");
+  fs.symlinkSync("../shared/lib", path.join(repo, "lib"));
+  git("add", ".gitignore", "src", "test.js");
+  git("commit", "-qm", "init");
+  const runDir = path.join(base, "run");
+  fs.mkdirSync(runDir);
+  return {
+    base,
+    repo,
+    sharedLib,
+    runDir,
+    logs: path.join(base, "logs"),
+    planBody: {
+      test: "node test.js",
+      link: ["lib"],
+      passWhen: { regex: "^OK \\(" },
+      mutants: [{ file: "src/a.sh", line: 1, replace: "x=2" }],
+    },
+  };
+}
+
+function writePlan(file: string, body: Record<string, unknown>): string {
+  fs.writeFileSync(file, JSON.stringify(body));
+  return file;
+}
+
+async function runPlan(
+  fx: Fixture,
+  planArg: string,
+  extra: string[] = [],
+  cwd: string = fx.repo,
+) {
+  const run = await spawnCli([
+    "-C",
+    cwd,
+    "-l",
+    fx.logs,
+    "-m",
+    "100000",
+    "probe",
+    "--plan",
+    planArg,
+    ...extra,
+  ]);
+  return {
+    code: run.code,
+    envelope: JSON.parse(run.stdout) as {
+      status: string;
+      reason?: string;
+      warnings: string[];
+      plan?: { results: { status: string }[] };
+    },
+  };
+}
+
+/** The refusal text for the fixture's `lib` (a symlink to
+ * `../shared/lib`) named by the file at `namedIn`. */
+function refusalFor(fx: Fixture, namedIn: string): string {
+  return (
+    `outside the containment root (${fx.repo}): link ` +
+    `"lib" named in the "link" list of ${namedIn} is a symlink to ` +
+    "../shared/lib, which does not resolve inside the root, and a link " +
+    "named by repository content must; pass it as --link to treat it as " +
+    "operator input"
+  );
+}
+
+describe("probe --plan: a plan outside the repository gets the --link policy for its `link`", () => {
+  it("honours the `link` of a plan stored outside the repo: the mutant is killed instead of a file_outside_root refusal", async () => {
+    const fx = makeFixture();
+    const plan = writePlan(path.join(fx.runDir, "plan.json"), fx.planBody);
+
+    const { code, envelope } = await runPlan(fx, plan);
+
+    expect(envelope.warnings).toEqual([]);
+    expect(envelope.status).toBe("killed");
+    expect(envelope.reason).toBeUndefined();
+    expect(envelope.plan?.results.map((r) => r.status)).toEqual(["killed"]);
+    expect(code).toBe(0);
+  }, 60000);
+
+  it("resolves a relative --plan path against -C, and honours an outside plan reached through a symlinked directory that lies outside too", async () => {
+    const fx = makeFixture();
+    writePlan(path.join(fx.runDir, "plan.json"), fx.planBody);
+    const viaLink = path.join(fx.base, "run-alias");
+    fs.symlinkSync(fx.runDir, viaLink);
+
+    const relative = await runPlan(fx, "../run/plan.json");
+    const aliased = await runPlan(fx, path.join(viaLink, "plan.json"));
+
+    expect(relative.envelope.status).toBe("killed");
+    expect(aliased.envelope.status).toBe("killed");
+  }, 120000);
+
+  it("refuses the same plan copied INSIDE the repo, with the refusal naming the link, where it points and the --link workaround", async () => {
+    const fx = makeFixture();
+    const plan = writePlan(path.join(fx.repo, "plan.json"), fx.planBody);
+
+    const { code, envelope } = await runPlan(fx, plan);
+
+    expect(envelope.status).toBe("usage_error");
+    expect(envelope.reason).toBe("file_outside_root");
+    expect(envelope.warnings).toEqual([refusalFor(fx, plan)]);
+    expect(code).toBe(2);
+  }, 60000);
+
+  it("the workaround the refusal names works: the same inside-repo plan with the link passed as --link is killed", async () => {
+    const fx = makeFixture();
+    const body = { ...fx.planBody };
+    delete body.link;
+    const plan = writePlan(path.join(fx.repo, "plan.json"), body);
+
+    const { envelope } = await runPlan(fx, plan, ["--link", "lib"]);
+
+    expect(envelope.status).toBe("killed");
+  }, 60000);
+
+  it("still refuses `.agent-primitives.json`'s link when the plan itself lies outside the repo", async () => {
+    const fx = makeFixture();
+    const body = { ...fx.planBody };
+    delete body.link;
+    const plan = writePlan(path.join(fx.runDir, "plan.json"), body);
+    fs.writeFileSync(
+      path.join(fx.repo, ".agent-primitives.json"),
+      JSON.stringify({ link: ["lib"] }),
+    );
+
+    const { envelope } = await runPlan(fx, plan);
+
+    expect(envelope.status).toBe("usage_error");
+    expect(envelope.reason).toBe("file_outside_root");
+    expect(envelope.warnings).toEqual([
+      refusalFor(fx, path.join(fx.repo, ".agent-primitives.json")),
+    ]);
+  }, 60000);
+
+  it("treats an outside plan reached through a symlink that lives inside the repo as inside", async () => {
+    const fx = makeFixture();
+    const real = writePlan(path.join(fx.runDir, "plan.json"), fx.planBody);
+    const viaFile = path.join(fx.repo, "plan-link.json");
+    fs.symlinkSync(real, viaFile);
+    const dirLink = path.join(fx.repo, "runlink");
+    fs.symlinkSync(fx.runDir, dirLink);
+
+    const throughFile = await runPlan(fx, viaFile);
+    const throughDir = await runPlan(fx, path.join(dirLink, "plan.json"));
+
+    for (const answer of [throughFile, throughDir]) {
+      expect(answer.envelope.status).toBe("usage_error");
+      expect(answer.envelope.reason).toBe("file_outside_root");
+    }
+  }, 120000);
+
+  it("treats an inside plan reached through a symlink that lives outside the repo as inside (the realpath of the plan decides)", async () => {
+    const fx = makeFixture();
+    const real = writePlan(path.join(fx.repo, "plan.json"), fx.planBody);
+    const alias = path.join(fx.runDir, "alias.json");
+    fs.symlinkSync(real, alias);
+
+    const { envelope } = await runPlan(fx, alias);
+
+    expect(envelope.status).toBe("usage_error");
+    expect(envelope.reason).toBe("file_outside_root");
+  }, 60000);
+
+  it("treats a case-variant spelling of the repository as inside on a case-insensitive volume", async () => {
+    const fx = makeFixture();
+    writePlan(path.join(fx.repo, "plan.json"), fx.planBody);
+    const variant = path.join(fx.base, "REPO", "plan.json");
+    const insensitive = caseInsensitiveVolume(fx.base);
+
+    if (insensitive) {
+      expect(fs.existsSync(variant)).toBe(true);
+      const { envelope } = await runPlan(fx, variant);
+      expect(envelope.status).toBe("usage_error");
+      expect(envelope.reason).toBe("file_outside_root");
+    } else {
+      // A case-sensitive volume has no such directory: the variant is not
+      // a way into the repository at all.
+      const { envelope } = await runPlan(fx, variant);
+      expect(envelope.reason).toBe("plan_not_readable");
+    }
+  }, 60000);
+});
+
+describe("linkSourceIsOperatorInput", () => {
+  it("is false for a plan whose realpath could not be verified, wherever it is named", () => {
+    const fx = makeFixture();
+    const plan = writePlan(path.join(fx.runDir, "plan.json"), fx.planBody);
+
+    expect(
+      linkSourceIsOperatorInput(
+        { kind: "plan", planPath: plan, planRealPath: undefined },
+        fx.repo,
+      ),
+    ).toBe(false);
+    expect(
+      linkSourceIsOperatorInput(
+        { kind: "plan", planPath: plan, planRealPath: plan },
+        fx.repo,
+      ),
+    ).toBe(true);
+  });
+
+  it("is false for a plan stored under the root", () => {
+    const fx = makeFixture();
+    const plan = writePlan(path.join(fx.repo, "sub-plan.json"), fx.planBody);
+
+    expect(
+      linkSourceIsOperatorInput(
+        { kind: "plan", planPath: plan, planRealPath: plan },
+        fx.repo,
+      ),
+    ).toBe(false);
+  });
+});
+
+describe("parsePlanFile: realPath", () => {
+  it("reports the realpath of a regular plan file, following a symlink to it", () => {
+    const fx = makeFixture();
+    const real = writePlan(path.join(fx.runDir, "plan.json"), fx.planBody);
+    const alias = path.join(fx.base, "alias.json");
+    fs.symlinkSync(real, alias);
+
+    const parsed = parsePlanFile(alias);
+
+    expect(parsed.ok).toBe(true);
+    expect(parsed.ok && parsed.realPath).toBe(real);
+  });
+});
+
+describe("probePlan: no verified realpath means repository content", () => {
+  it("keeps the strict rule for a plan outside the repo when the caller supplies no planRealPath", async () => {
+    const fx = makeFixture();
+    const plan = writePlan(path.join(fx.runDir, "plan.json"), fx.planBody);
+
+    const result = await probePlan({
+      mutants: [
+        { file: "src/a.sh", line: 1, form: "replace", replaceText: "x=2" },
+      ],
+      testCommand: "node test.js",
+      passRegex: /^OK \(/,
+      isolation: "worktree",
+      expect: "fail",
+      cwd: fx.repo,
+      logDir: fx.logs,
+      planLinks: ["lib"],
+      planPath: plan,
+    });
+
+    expect(result.status).toBe("usage_error");
+    expect(result.reason).toBe("file_outside_root");
+    expect(result.warnings).toEqual([refusalFor(fx, plan)]);
+  }, 60000);
+});
