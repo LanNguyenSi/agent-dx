@@ -806,9 +806,10 @@ operator's `--link`, the worktree link manifest or an outside plan's
 `link` list for that path. The destination is planned to be linked (a
 later syscall-time refusal is reported on its own), so the warning
 would contradict `isolation.linked`. Every other refusal keeps its
-warning, including a tracked destination or target and the "already
-covered" note, since those describe a hazard that a second candidate
-does not remove. Each link is a delete followed by a symlink-create
+warning: a tracked destination or target describes a hazard of the
+destination or its target that a second candidate does not remove, and
+the "already covered" note reports a duplicate that was left out. Each
+link is a delete followed by a symlink-create
 at a path inside the copy, and both of those resolve symlinks in the
 path they are given: a link created at the copy's own root, over a
 directory this run writes into, or underneath a link the same step
