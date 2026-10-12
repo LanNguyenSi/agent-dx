@@ -1817,47 +1817,55 @@ describe("probe(): a non-zero --pre is pre_failed, never a verdict", () => {
     );
   }, 60000);
 
-  it("a mutant-phase --pre with output longer than the captured tail quotes its last lines, including the error", async () => {
-    useLockDir();
-    const { repo } = initRepo();
-    const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
+  // Both streams: compilers write the flood and the error to stderr as
+  // often as to stdout, and each half of the truncation check is pinned.
+  it.each(["log", "error"] as const)(
+    "a mutant-phase --pre with output longer than the captured tail quotes its last lines, including the error (console.%s)",
+    async (stream) => {
+      useLockDir();
+      const { repo } = initRepo();
+      const before = fs.readFileSync(path.join(repo, "fixture.js"), "utf8");
 
-    // Reads the target back: silent and green on the unmutated baseline,
-    // and on the mutant it floods more output than `--pre`'s tail keeps
-    // (60 lines / 6000 characters) before reporting the compiler error
-    // LAST -- the position a "first lines" quote would never show.
-    const PRE_SCRIPT = [
-      'const s = require("fs").readFileSync("fixture.js", "utf8");',
-      'if (s.includes("MUTANT_MARK")) {',
-      '  for (let i = 0; i < 100; i++) console.log("progress line " + i);',
-      "  console.log(\"fixture.js(2,3): error TS6133: 'limit' is declared but its value is never read.\");",
-      "  process.exit(2);",
-      "}",
-    ].join("\n");
-    fs.writeFileSync(path.join(repo, "pre.js"), PRE_SCRIPT);
+      // Reads the target back: silent and green on the unmutated baseline,
+      // and on the mutant it floods more output than `--pre`'s tail keeps
+      // (60 lines / 6000 characters) before reporting the compiler error
+      // LAST -- the position a "first lines" quote would never show.
+      const PRE_SCRIPT = [
+        'const s = require("fs").readFileSync("fixture.js", "utf8");',
+        'if (s.includes("MUTANT_MARK")) {',
+        `  for (let i = 0; i < 100; i++) console.${stream}("progress line " + i);`,
+        `  console.${stream}("fixture.js(2,3): error TS6133: 'limit' is declared but its value is never read.");`,
+        "  process.exit(2);",
+        "}",
+      ].join("\n");
+      fs.writeFileSync(path.join(repo, "pre.js"), PRE_SCRIPT);
 
-    const result = await probe(
-      baseOptions(repo, {
-        replaceText: "  return n > 0; // MUTANT_MARK",
-        preCommand: "node pre.js",
-      }),
-    );
+      const result = await probe(
+        baseOptions(repo, {
+          replaceText: "  return n > 0; // MUTANT_MARK",
+          preCommand: "node pre.js",
+        }),
+      );
 
-    expect(result.status).toBe("inconclusive");
-    expect(result.reason).toBe("pre_failed");
-    expect(
-      result.warnings.some((w) =>
-        w.includes("last lines of the captured --pre output"),
-      ),
-    ).toBe(true);
-    expect(result.warnings.some((w) => w.includes("TS6133"))).toBe(true);
-    expect(
-      result.warnings.some((w) =>
-        w.includes("first lines of the --pre output"),
-      ),
-    ).toBe(false);
-    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(before);
-  }, 60000);
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("pre_failed");
+      expect(
+        result.warnings.some((w) =>
+          w.includes("last lines of the captured --pre output"),
+        ),
+      ).toBe(true);
+      expect(result.warnings.some((w) => w.includes("TS6133"))).toBe(true);
+      expect(
+        result.warnings.some((w) =>
+          w.includes("first lines of the --pre output"),
+        ),
+      ).toBe(false);
+      expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(
+        before,
+      );
+    },
+    60000,
+  );
 });
 
 describe("probe(): the post-apply hash-changed check", () => {
