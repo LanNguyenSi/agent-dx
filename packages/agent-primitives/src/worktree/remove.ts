@@ -8,6 +8,7 @@ import {
   isWithin,
   mergeVerdict,
   resolveDefaultBase,
+  resolveRemoteBase,
   resolveRepo,
   type MergeVerdict,
 } from "./git.js";
@@ -29,6 +30,10 @@ export interface RemoveWorktreeOptions {
   deleteBranch?: boolean;
   /** Refuse unless the branch is merged into the default base. */
   requireMerged?: boolean;
+  /** The revision the merge check runs against instead of origin's default
+   * branch. Needs `requireMerged` or `deleteBranch`, the two options that
+   * run the check; alone it is a usage error rather than a silent no-op. */
+  base?: string;
 }
 
 export interface RemoveWorktreeResult {
@@ -77,6 +82,16 @@ function sameDirectory(a: string, b: string): boolean {
 export async function removeWorktree(
   o: RemoveWorktreeOptions,
 ): Promise<RemoveWorktreeResult> {
+  if (
+    o.base !== undefined &&
+    o.requireMerged !== true &&
+    o.deleteBranch !== true
+  ) {
+    throw new WorktreeRefusal(
+      "--base only applies to the merge check; pass it with --require-merged or --delete-branch",
+      "option_invalid",
+    );
+  }
   const target = path.resolve(o.cwd, o.path);
   let exists = true;
   try {
@@ -92,6 +107,26 @@ export async function removeWorktree(
     );
   }
   const repo = resolveRepo(target);
+
+  // --base must be a remote-tracking branch, resolved once here to a full
+  // ref; anything else refuses before anything is read or changed.
+  let explicitBase: { ref: string; ghBase: string } | undefined;
+  if (o.base !== undefined) {
+    const resolved = resolveRemoteBase(repo.mainCheckout, o.base);
+    if (!resolved.ok) {
+      throw new WorktreeRefusal(
+        resolved.reason === "base_not_found"
+          ? `--base ${o.base} does not name an existing remote-tracking branch in ${repo.mainCheckout}`
+          : `--base ${o.base} is not a remote-tracking branch; pass <remote>/<branch> or refs/remotes/<remote>/<branch> of a configured remote`,
+        resolved.reason,
+        { base: o.base },
+      );
+    }
+    explicitBase = {
+      ref: resolved.base.ref,
+      ghBase: resolved.base.branch,
+    };
+  }
 
   const entry = repo.worktrees.find((w) => sameDirectory(w.path, target));
   if (entry === undefined) {
@@ -159,7 +194,14 @@ export async function removeWorktree(
     );
   }
 
-  const base = resolveDefaultBase(repo.mainCheckout);
+  const defaultBase = resolveDefaultBase(repo.mainCheckout);
+  // resolveRemoteBase above is the single guard for an explicit base: it
+  // only ever yields an existing remote-tracking ref, which is what lets a
+  // merged verdict excuse commits no remote has (below). Without --base the
+  // base is origin's default branch, an `origin/<default>` ref by
+  // construction.
+  const base: { ref: string; ghBase?: string } | undefined =
+    explicitBase ?? defaultBase;
   // Asked only when a flag needs the answer: the `gh` lookup of a verdict is
   // a network call where `gh` happens to be installed. Computed before the
   // unpushed check, because a branch that is merged into the base has no
@@ -173,7 +215,7 @@ export async function removeWorktree(
             via: "none",
             reason: "origin's default branch cannot be resolved",
           }
-        : mergeVerdict(target, "HEAD", entry.branch, base.ref);
+        : mergeVerdict(target, "HEAD", entry.branch, base.ref, base.ghBase);
   if (o.requireMerged === true && o.force !== true && merged !== null) {
     if (merged.merged === "no") {
       throw new WorktreeRefusal(
@@ -212,7 +254,9 @@ export async function removeWorktree(
   }
 
   const defaultBranch =
-    base === undefined ? undefined : base.ref.replace(/^origin\//, "");
+    defaultBase === undefined
+      ? undefined
+      : defaultBase.ref.replace(/^origin\//, "");
   const mainBranch = repo.worktrees[0]?.branch;
   if (o.deleteBranch === true && entry.branch !== undefined) {
     const protectedName =
@@ -228,7 +272,7 @@ export async function removeWorktree(
   }
 
   const warnings: string[] = [];
-  if (unpushedLines.length > 0 && merged !== null && merged.merged === "yes") {
+  if (unpushedLines.length > 0 && mergedIntoBase) {
     warnings.push(
       `${String(unpushedLines.length)} commit(s) are on no remote branch, but the branch is merged into ${base?.ref ?? "the default branch"} (${merged.via}); not counted as unpushed`,
     );

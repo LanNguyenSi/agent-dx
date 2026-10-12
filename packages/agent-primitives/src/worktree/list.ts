@@ -8,6 +8,8 @@ import {
   isWithin,
   mergeVerdict,
   resolveDefaultBase,
+  resolveRemoteBase,
+  type RemoteBaseResolution,
   resolveRepo,
   type MergeVerdict,
   type RepoContext,
@@ -30,6 +32,10 @@ export interface ListWorktreesOptions {
   repo?: string;
   /** Report the work trees that are direct children of this directory. */
   root?: string;
+  /** Measure ahead, behind and merged against this revision instead of
+   * origin's default branch; must be a remote-tracking branch. Applies to
+   * every repository of a `root`. */
+  base?: string;
 }
 
 export interface ListedWorktree {
@@ -40,8 +46,8 @@ export interface ListedWorktree {
   main: boolean;
   branch?: string;
   head?: string;
-  /** The default base the ahead, behind and merged values are measured
-   * against, for example `origin/main`. */
+  /** The base the ahead, behind and merged values are measured against:
+   * the default base, for example `origin/main`, or the `--base` value. */
   base?: string;
   /** Trimmed content of `<path>/.ai/run`, `null` when it is absent. */
   runPointer: string | null;
@@ -100,15 +106,48 @@ function describeEntry(
   repo: RepoContext,
   main: boolean,
   warnings: string[],
+  baseFlag: string | undefined,
+  resolutions: Map<string, RemoteBaseResolution>,
 ): ListedWorktree {
-  const base = resolveDefaultBase(repo.mainCheckout);
+  let base: { ref: string; ghBase?: string } | undefined;
+  let baseProblem: string | undefined;
+  if (baseFlag === undefined) {
+    base = resolveDefaultBase(repo.mainCheckout);
+  } else {
+    // Resolved once per repository, in its main checkout, to a full ref:
+    // every worktree is measured against the same full ref.
+    let resolved = resolutions.get(repo.mainCheckout);
+    if (resolved === undefined) {
+      resolved = resolveRemoteBase(repo.mainCheckout, baseFlag);
+      resolutions.set(repo.mainCheckout, resolved);
+      if (!resolved.ok) {
+        const warning =
+          resolved.reason === "base_not_found"
+            ? `--base ${baseFlag} does not name an existing remote-tracking branch in ${repo.mainCheckout}; the merge state of its worktrees is reported as unknown`
+            : `--base ${baseFlag} is not a remote-tracking branch (<remote>/<branch>) of ${repo.mainCheckout}; the merge state of its worktrees is reported as unknown`;
+        warnings.push(warning);
+      }
+    }
+    if (resolved.ok) {
+      base = { ref: resolved.base.ref, ghBase: resolved.base.branch };
+    } else {
+      baseProblem =
+        resolved.reason === "base_not_found"
+          ? `--base ${baseFlag} does not name an existing remote-tracking branch in ${repo.mainCheckout}`
+          : `--base ${baseFlag} is not a remote-tracking branch (<remote>/<branch>) of ${repo.mainCheckout}`;
+    }
+  }
   const listed: ListedWorktree = {
     path: entry.path,
     repo: repo.name,
     main,
     ...(entry.branch !== undefined ? { branch: entry.branch } : {}),
     ...(entry.head !== undefined ? { head: entry.head } : {}),
-    ...(base !== undefined ? { base: base.ref } : {}),
+    ...(baseFlag !== undefined
+      ? { base: baseFlag }
+      : base !== undefined
+        ? { base: base.ref }
+        : {}),
     runPointer: null,
     dirty: null,
     ahead: null,
@@ -140,7 +179,13 @@ function describeEntry(
   }
 
   if (base !== undefined) {
-    listed.merged = mergeVerdict(entry.path, "HEAD", entry.branch, base.ref);
+    listed.merged = mergeVerdict(
+      entry.path,
+      "HEAD",
+      entry.branch,
+      base.ref,
+      base.ghBase,
+    );
     const countsOfBase = counts(entry.path, base.ref);
     listed.ahead = countsOfBase.ahead;
     listed.behind = countsOfBase.behind;
@@ -148,7 +193,7 @@ function describeEntry(
     listed.merged = {
       merged: "unknown",
       via: "none",
-      reason: "origin's default branch cannot be resolved",
+      reason: baseProblem ?? "origin's default branch cannot be resolved",
     };
   }
 
@@ -171,13 +216,27 @@ export async function listWorktrees(
     );
   }
   const warnings: string[] = [];
+  const resolutions = new Map<string, RemoteBaseResolution>();
 
   if (o.root === undefined) {
     const repo = resolveRepo(path.resolve(o.cwd, o.repo ?? "."));
+    if (o.base !== undefined) {
+      const resolved = resolveRemoteBase(repo.mainCheckout, o.base);
+      // Only a good resolution is cached: a failed one is resolved again
+      // when the first entry is described, which is what emits its warning.
+      if (resolved.ok) resolutions.set(repo.mainCheckout, resolved);
+      if (!resolved.ok && resolved.reason === "base_not_remote_branch") {
+        throw new WorktreeRefusal(
+          `--base ${o.base} is not a remote-tracking branch; pass <remote>/<branch> or refs/remotes/<remote>/<branch> of a configured remote`,
+          "base_not_remote_branch",
+          { base: o.base },
+        );
+      }
+    }
     return {
       status: "ok",
       worktrees: repo.worktrees.map((entry, index) =>
-        describeEntry(entry, repo, index === 0, warnings),
+        describeEntry(entry, repo, index === 0, warnings, o.base, resolutions),
       ),
       warnings,
     };
@@ -219,7 +278,14 @@ export async function listWorktrees(
         repo.worktrees[0];
       if (entry === undefined) continue;
       worktrees.push(
-        describeEntry(entry, repo, entry === repo.worktrees[0], warnings),
+        describeEntry(
+          entry,
+          repo,
+          entry === repo.worktrees[0],
+          warnings,
+          o.base,
+          resolutions,
+        ),
       );
     } catch (err) {
       if (!(err instanceof WorktreeRefusal)) throw err;

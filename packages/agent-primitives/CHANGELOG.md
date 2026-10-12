@@ -26,6 +26,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   patterns that still compile under `noUnusedLocals`/`noUnusedParameters`.
   The verdict stays `inconclusive` (task d4b992e4).
 
+- `worktree list` and `worktree remove` accept `--base <rev>`, so ahead,
+  behind and merged are measured against a chosen base instead of only
+  origin's default branch (a hotfix branch whose pull request targets
+  `origin/master` in a repository whose default branch is `develop` was
+  reported unmerged). `<rev>` must be a remote-tracking branch
+  (`<remote>/<branch>` or `refs/remotes/<remote>/<branch>`), resolved once in
+  the main checkout to the full ref; the `gh` merged-pull-request lookup uses
+  the branch part after `<remote>/` as the pull request's base and runs
+  against gh's default repository (no `--repo` is passed, so the remote's own
+  repository is not selected). Anything else (`HEAD`, `HEAD~n`, `@{u}`, rev
+  syntax such as `origin/x@{1}`, `origin/x~1` or `origin/x^`, a local
+  branch, a sha, a tag) is refused as
+  `base_not_remote_branch` (`list` without `--root`, and `remove`, even with
+  `--force`; with `--root`, that repository's entries get `merged: unknown`
+  plus a warning). Without `--base` nothing changes. `list` shows `<rev>` as
+  each entry's `base`; a well-formed `<rev>` a repository lacks gives
+  `merged: unknown` plus a warning and no abort. `remove --base` needs
+  `--require-merged` or `--delete-branch` (alone it is an `option_invalid`
+  refusal) and refuses a missing `<rev>` as `base_not_found` before removing
+  anything. Without `--base`, `remove` behaves as before: the default base
+  (an `origin/...` ref) keeps excusing the unpushed commits of a merged
+  branch. The shipped skill text mentions the flag, so its digest changes.
+
 - `probe` no longer warns that a directory repository content named (a
   composer `vendor-dir` or `bin-dir`) resolves outside the repository root
   when another candidate of the same planning round for the same destination

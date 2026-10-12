@@ -930,6 +930,648 @@ describe("worktree list", () => {
   });
 });
 
+/** A hotfix branch the way a repository whose default branch is `main`
+ * still ships one: `origin/hotfixbase` is a second long-lived branch, the
+ * hotfix worktree is cut from it and carries one commit. Returns the
+ * worktree and its head sha. */
+function makeHotfix(f: Fixture): { wt: string; sha: string } {
+  git(f.repo, ["push", "-q", "origin", "main:hotfixbase"]);
+  git(f.repo, ["fetch", "-q", "origin"]);
+  const wt = path.join(f.base, "wt-hotfix");
+  git(f.repo, [
+    "worktree",
+    "add",
+    "--no-track",
+    "-b",
+    "hotfix/one",
+    wt,
+    "origin/hotfixbase",
+  ]);
+  commitHere(wt, "fix.txt", "hotfix work");
+  git(wt, ["push", "-q", "origin", "hotfix/one"]);
+  return { wt, sha: git(wt, ["rev-parse", "HEAD"]).trim() };
+}
+
+describe("worktree list --base", () => {
+  it("measures against the given base, by ancestry and by the gh lookup", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeHotfix(f);
+    const prStub = ghStub(
+      f,
+      `[{"number":9,"headRefOid":"${sha}","baseRefName":"hotfixbase"}]`,
+      { recordArgs: true },
+    );
+    const entryAt = (r: Cli): Record<string, any> => {
+      const found = (r.json.worktrees as Record<string, any>[]).find(
+        (w) => w.path === wt,
+      );
+      if (found === undefined) throw new Error(`no entry for ${wt}`);
+      return found;
+    };
+
+    // Unchanged without --base: measured against origin/main, where the
+    // pull request into hotfixbase says nothing.
+    const plain = await cli(f.work, ["list", "--repo", f.repo], {
+      PATH: prStub,
+    });
+    expect(plain.code, plain.stdout + plain.stderr).toBe(0);
+    expect(entryAt(plain)).toMatchObject({
+      base: "origin/main",
+      ahead: 1,
+      behind: 0,
+    });
+    expect(entryAt(plain).merged).toMatchObject({ merged: "no", via: "gh" });
+
+    // With --base, the gh lookup asks for the branch name without origin/.
+    const based = await cli(
+      f.work,
+      ["list", "--repo", f.repo, "--base", "origin/hotfixbase"],
+      { PATH: prStub },
+    );
+    expect(based.code, based.stdout + based.stderr).toBe(0);
+    expect(entryAt(based)).toMatchObject({
+      base: "origin/hotfixbase",
+      ahead: 1,
+      behind: 0,
+    });
+    expect(entryAt(based).merged).toMatchObject({ merged: "yes", via: "gh" });
+    expect(ghArgs(f).some((line) => line.includes("--base hotfixbase"))).toBe(
+      true,
+    );
+
+    // Merged by ancestry once the base holds the commit.
+    git(f.repo, ["push", "-q", "origin", `${sha}:refs/heads/hotfixbase`]);
+    git(f.repo, ["fetch", "-q", "origin"]);
+    const anc = await cli(f.work, [
+      "list",
+      "--repo",
+      f.repo,
+      "--base",
+      "origin/hotfixbase",
+    ]);
+    expect(anc.code, anc.stdout + anc.stderr).toBe(0);
+    expect(entryAt(anc)).toMatchObject({ ahead: 0, behind: 0 });
+    expect(entryAt(anc).merged).toMatchObject({
+      merged: "yes",
+      via: "ancestry",
+    });
+  });
+
+  it("reports an unresolvable base as unknown with a warning, per repository, without aborting", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    const wts = path.join(f.base, "wts");
+    fs.mkdirSync(wts);
+    fs.renameSync(wt, path.join(wts, "moved"));
+    git(f.repo, ["worktree", "repair", path.join(wts, "moved")]);
+    // A second repository that does resolve a revision the first one lacks.
+    const other = path.join(f.base, "other");
+    git(f.base, ["clone", "-q", f.origin, other]);
+    git(other, [
+      "push",
+      "-q",
+      "origin",
+      "origin/hotfixbase:refs/heads/onlyhere",
+    ]);
+    git(other, ["fetch", "-q", "origin"]);
+    git(other, [
+      "worktree",
+      "add",
+      "--no-track",
+      "-b",
+      "o1",
+      path.join(wts, "other-wt"),
+      "origin/hotfixbase",
+    ]);
+
+    const mixed = await cli(f.work, [
+      "list",
+      "--root",
+      wts,
+      "--base",
+      "origin/onlyhere",
+    ]);
+    expect(mixed.code, mixed.stdout + mixed.stderr).toBe(0);
+    const entries = mixed.json.worktrees as Record<string, any>[];
+    const resolved = entries.find((w) => w.repo === "other");
+    const unresolved = entries.find((w) => w.repo === "repo");
+    expect(resolved?.merged).toMatchObject({ merged: "yes", via: "ancestry" });
+    expect(resolved?.base).toBe("origin/onlyhere");
+    expect(unresolved?.merged.merged).toBe("unknown");
+    expect(
+      (mixed.json.warnings as string[]).filter((w) =>
+        w.includes("origin/onlyhere"),
+      ),
+    ).toHaveLength(1);
+
+    // Same call with a revision no repository knows.
+    const none = await cli(f.work, [
+      "list",
+      "--root",
+      wts,
+      "--base",
+      "origin/nope",
+    ]);
+    expect(none.code, none.stdout + none.stderr).toBe(0);
+    const all = none.json.worktrees as Record<string, any>[];
+    expect(all).toHaveLength(2);
+    for (const w of all) {
+      expect(w.base).toBe("origin/nope");
+      expect(w.merged.merged).toBe("unknown");
+      expect(w.merged.reason).toContain("--base origin/nope");
+      expect(w.ahead).toBeNull();
+    }
+    const warnings = none.json.warnings as string[];
+    expect(
+      warnings.filter((w) => w.includes("--base origin/nope")),
+    ).toHaveLength(2);
+  });
+});
+
+describe("worktree remove --base", () => {
+  it("checks the merge against the given base", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeHotfix(f);
+    const prStub = ghStub(
+      f,
+      `[{"number":9,"headRefOid":"${sha}","baseRefName":"hotfixbase"}]`,
+    );
+
+    const without = await cli(f.work, ["remove", wt, "--require-merged"], {
+      PATH: prStub,
+    });
+    expect(without.code, without.stdout + without.stderr).toBe(2);
+    expect(without.json.reason).toBe("branch_not_merged");
+    expect(listedWorktrees(f.repo)).toContain(wt);
+
+    const withBase = await cli(
+      f.work,
+      ["remove", wt, "--require-merged", "--base", "origin/hotfixbase"],
+      { PATH: prStub },
+    );
+    expect(withBase.code, withBase.stdout + withBase.stderr).toBe(0);
+    expect(withBase.json.merged).toMatchObject({ merged: "yes", via: "gh" });
+    expect(listedWorktrees(f.repo)).not.toContain(wt);
+  });
+
+  it("applies to --delete-branch as well", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeHotfix(f);
+    git(f.repo, ["push", "-q", "origin", `${sha}:refs/heads/hotfixbase`]);
+    git(f.repo, ["fetch", "-q", "origin"]);
+    git(f.repo, ["push", "-q", "origin", "--delete", "hotfix/one"]);
+    git(f.repo, ["fetch", "-q", "--prune", "origin"]);
+    const r = await cli(f.work, [
+      "remove",
+      wt,
+      "--delete-branch",
+      "--base",
+      "origin/hotfixbase",
+    ]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.merged).toMatchObject({ merged: "yes", via: "ancestry" });
+    expect(r.json.branch.deleted).toBe(true);
+  });
+
+  it("refuses an unresolvable base with its own reason and removes nothing", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    const cases: [string, string][] = [
+      ["origin/nope", "base_not_found"],
+      ["--upload-pack=x", "base_not_remote_branch"],
+    ];
+    for (const [bad, reason] of cases) {
+      const r = await cli(f.work, [
+        "remove",
+        wt,
+        "--require-merged",
+        `--base=${bad}`,
+        "--force",
+      ]);
+      expect(r.code, r.stdout + r.stderr).toBe(2);
+      expect(r.json.reason).toBe(reason);
+      expect(r.json.details.base).toBe(bad);
+      expect(listedWorktrees(f.repo)).toContain(wt);
+      expect(fs.existsSync(wt)).toBe(true);
+    }
+  });
+
+  it("treats --base without a merge check as a usage error", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    const r = await cli(f.work, ["remove", wt, "--base", "origin/hotfixbase"]);
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.reason).toBe("option_invalid");
+    expect(listedWorktrees(f.repo)).toContain(wt);
+  });
+
+  it("refuses a base that is no remote-tracking branch, even with --force, and keeps the worktree and its branch", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    // An unpushed commit on top: a merged verdict against a local base or a
+    // relative rev must never excuse it.
+    commitHere(wt, "more.txt", "unpushed work");
+    git(f.repo, ["branch", "localbase", "hotfix/one"]);
+    const sha = git(wt, ["rev-parse", "HEAD"]).trim();
+    git(f.repo, ["tag", "sometag", "hotfix/one"]);
+    for (const bad of [
+      "HEAD",
+      "HEAD~1",
+      "localbase",
+      "hotfix/one",
+      sha,
+      "sometag",
+      "@{u}",
+      "refs/heads/localbase",
+      "origin/HEAD",
+      "origin",
+    ]) {
+      for (const extra of [[], ["--force"]]) {
+        const r = await cli(f.work, [
+          "remove",
+          wt,
+          "--delete-branch",
+          `--base=${bad}`,
+          ...extra,
+        ]);
+        expect(r.code, `${bad}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.json.reason, bad).toBe("base_not_remote_branch");
+        expect(listedWorktrees(f.repo)).toContain(wt);
+        expect(gitTry(f.repo, ["rev-parse", "--verify", "hotfix/one"])).toBe(
+          `${sha}\n`,
+        );
+      }
+    }
+  });
+
+  it("reads the remote-tracking ref by its full name when a local branch shadows the short spelling", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    commitHere(wt, "more.txt", "unpushed work");
+    git(f.repo, ["branch", "origin/hotfixbase", "hotfix/one"]);
+    const r = await cli(f.work, [
+      "remove",
+      wt,
+      "--delete-branch",
+      "--base",
+      "origin/hotfixbase",
+    ]);
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.reason).toBe("unpushed_commits");
+    expect(listedWorktrees(f.repo)).toContain(wt);
+    expect(
+      gitTry(f.repo, ["rev-parse", "--verify", "hotfix/one"]),
+    ).toBeDefined();
+  });
+
+  it("refuses rev syntax after a valid remote prefix, with and without --require-merged or --force", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    commitHere(wt, "more.txt", "unpushed work");
+    const sha = git(wt, ["rev-parse", "HEAD"]).trim();
+    const bads = [
+      "origin/hotfixbase@{1}",
+      "refs/remotes/origin/hotfixbase@{1}",
+      "origin/hotfixbase~0",
+      "origin/hotfixbase^",
+      "origin/hotfixbase^{commit}",
+      "origin/hotfixbase..HEAD",
+    ];
+    const flagSets = [
+      ["--delete-branch"],
+      ["--require-merged"],
+      ["--delete-branch", "--require-merged"],
+      ["--delete-branch", "--force"],
+      ["--require-merged", "--force"],
+    ];
+    for (const bad of bads) {
+      for (const flags of flagSets) {
+        const r = await cli(f.work, ["remove", wt, ...flags, `--base=${bad}`]);
+        expect(
+          r.code,
+          `${bad} ${flags.join(" ")}: ${r.stdout}${r.stderr}`,
+        ).toBe(2);
+        expect(r.json.reason, bad).toBe("base_not_remote_branch");
+        expect(listedWorktrees(f.repo)).toContain(wt);
+      }
+      const l = await cli(f.work, ["list", "--repo", f.repo, `--base=${bad}`]);
+      expect(l.code, `${bad}: ${l.stdout}${l.stderr}`).toBe(2);
+      expect(l.json.reason, bad).toBe("base_not_remote_branch");
+    }
+    expect(gitTry(f.repo, ["rev-parse", "--verify", "hotfix/one"])).toBe(
+      `${sha}\n`,
+    );
+  });
+
+  it("does not let a reflog entry of the remote-tracking branch excuse commits no ref holds", async () => {
+    const f = makeFixture();
+    const { wt, sha: c1 } = makeHotfix(f);
+    commitHere(wt, "c2.txt", "second commit");
+    const c2 = git(wt, ["rev-parse", "HEAD"]).trim();
+    git(wt, ["push", "-q", "origin", "hotfix/one"]);
+    git(wt, ["push", "-q", "--force", "origin", `${c1}:refs/heads/hotfix/one`]);
+    // The reflog now says origin/hotfix/one@{1} is c2, while no ref holds it.
+    expect(git(f.repo, ["rev-parse", "origin/hotfix/one@{1}"]).trim()).toBe(c2);
+    for (const base of [
+      "origin/hotfix/one@{1}",
+      "refs/remotes/origin/hotfix/one@{1}",
+    ]) {
+      for (const flags of [
+        ["--delete-branch"],
+        ["--require-merged"],
+        ["--delete-branch", "--require-merged", "--force"],
+      ]) {
+        const r = await cli(f.work, ["remove", wt, ...flags, `--base=${base}`]);
+        expect(r.code, `${base}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.json.reason).toBe("base_not_remote_branch");
+      }
+    }
+    expect(listedWorktrees(f.repo)).toContain(wt);
+    expect(git(f.repo, ["rev-parse", "hotfix/one"]).trim()).toBe(c2);
+  });
+
+  it("refuses a base whose name only exists as a local branch or tag spelled like the remote ref", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    commitHere(wt, "more.txt", "unpushed work");
+    const sha = git(wt, ["rev-parse", "HEAD"]).trim();
+    // `origin/ghost` is no remote-tracking ref, but git's rev lookup finds
+    // these two under that spelling.
+    git(f.repo, ["update-ref", "refs/heads/refs/remotes/origin/ghost", sha]);
+    git(f.repo, ["update-ref", "refs/tags/refs/remotes/origin/ghost2", sha]);
+    for (const ghost of ["origin/ghost", "origin/ghost2"]) {
+      for (const flags of [
+        ["--delete-branch"],
+        ["--require-merged"],
+        ["--delete-branch", "--require-merged"],
+      ]) {
+        const r = await cli(f.work, [
+          "remove",
+          wt,
+          ...flags,
+          `--base=${ghost}`,
+        ]);
+        expect(r.code, `${ghost}: ${r.stdout}${r.stderr}`).toBe(2);
+        expect(r.json.reason, ghost).toBe("base_not_found");
+        expect(listedWorktrees(f.repo)).toContain(wt);
+      }
+      const l = await cli(f.work, [
+        "list",
+        "--repo",
+        f.repo,
+        `--base=${ghost}`,
+      ]);
+      expect(l.code, l.stdout + l.stderr).toBe(0);
+      for (const w of l.json.worktrees as Record<string, any>[]) {
+        expect(w.merged.merged).toBe("unknown");
+      }
+    }
+    expect(git(f.repo, ["rev-parse", "hotfix/one"]).trim()).toBe(sha);
+  });
+
+  it("still refuses unpushed commits over a remote-tracking base that does not contain them", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    commitHere(wt, "more.txt", "unpushed work");
+    const r = await cli(f.work, [
+      "remove",
+      wt,
+      "--delete-branch",
+      "--base",
+      "origin/hotfixbase",
+    ]);
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(listedWorktrees(f.repo)).toContain(wt);
+  });
+
+  it("refuses a symbolic remote-tracking ref that points at the worktree branch, with and without --force", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    commitHere(wt, "more.txt", "unpushed work");
+    const sha = git(wt, ["rev-parse", "HEAD"]).trim();
+    git(f.repo, [
+      "symbolic-ref",
+      "refs/remotes/origin/self",
+      "refs/heads/hotfix/one",
+    ]);
+    for (const extra of [[], ["--force"]]) {
+      const r = await cli(f.work, [
+        "remove",
+        wt,
+        "--require-merged",
+        "--delete-branch",
+        "--base",
+        "origin/self",
+        ...extra,
+      ]);
+      expect(r.code, r.stdout + r.stderr).toBe(2);
+      expect(r.json.reason).toBe("base_not_remote_branch");
+      expect(listedWorktrees(f.repo)).toContain(wt);
+      expect(git(f.repo, ["rev-parse", "hotfix/one"]).trim()).toBe(sha);
+    }
+  });
+
+  it("refuses a symbolic remote-tracking ref that points at another local branch holding unpushed work", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    commitHere(wt, "more.txt", "unpushed work");
+    const sha = git(wt, ["rev-parse", "HEAD"]).trim();
+    git(f.repo, ["branch", "elsewhere", "hotfix/one"]);
+    git(f.repo, [
+      "symbolic-ref",
+      "refs/remotes/origin/other",
+      "refs/heads/elsewhere",
+    ]);
+    for (const extra of [[], ["--force"]]) {
+      const r = await cli(f.work, [
+        "remove",
+        wt,
+        "--require-merged",
+        "--delete-branch",
+        "--base",
+        "origin/other",
+        ...extra,
+      ]);
+      expect(r.code, r.stdout + r.stderr).toBe(2);
+      expect(r.json.reason).toBe("base_not_remote_branch");
+      expect(listedWorktrees(f.repo)).toContain(wt);
+      expect(git(f.repo, ["rev-parse", "hotfix/one"]).trim()).toBe(sha);
+    }
+  });
+
+  it("refuses a plain refs/remotes/origin/HEAD that is not symbolic", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    commitHere(wt, "more.txt", "unpushed work");
+    const sha = git(wt, ["rev-parse", "HEAD"]).trim();
+    // Replace the symbolic remote HEAD by a plain ref at the worktree head.
+    git(f.repo, ["symbolic-ref", "--delete", "refs/remotes/origin/HEAD"]);
+    git(f.repo, ["update-ref", "refs/remotes/origin/HEAD", sha]);
+    expect(
+      gitTry(f.repo, ["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"]),
+    ).toBeUndefined();
+    for (const extra of [[], ["--force"]]) {
+      const r = await cli(f.work, [
+        "remove",
+        wt,
+        "--require-merged",
+        "--delete-branch",
+        "--base",
+        "origin/HEAD",
+        ...extra,
+      ]);
+      expect(r.code, r.stdout + r.stderr).toBe(2);
+      expect(r.json.reason).toBe("base_not_remote_branch");
+      expect(listedWorktrees(f.repo)).toContain(wt);
+      expect(git(f.repo, ["rev-parse", "hotfix/one"]).trim()).toBe(sha);
+    }
+  });
+});
+
+describe("worktree --base with a remote other than origin", () => {
+  it("takes the longest configured remote name when one remote name prefixes another", async () => {
+    const f = makeFixture();
+    makeHotfix(f);
+    // `git remote add` refuses a name nested in another remote's name, but
+    // the configuration can hold both.
+    git(f.repo, ["config", "remote.up.url", f.origin]);
+    git(f.repo, ["config", "remote.up/stream.url", f.origin]);
+    expect(git(f.repo, ["remote"]).split("\n")).toEqual(
+      expect.arrayContaining(["up", "up/stream"]),
+    );
+    // At main, which the hotfix branch is ahead of: ancestry cannot decide,
+    // so the gh lookup runs.
+    git(f.repo, ["update-ref", "refs/remotes/up/stream/x", f.mainSha]);
+    const stub = ghStub(f, "[]", { recordArgs: true });
+    const r = await cli(
+      f.work,
+      ["list", "--repo", f.repo, "--base", "up/stream/x"],
+      { PATH: stub },
+    );
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    const lines = ghArgs(f);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.every((l) => l.includes("--base x"))).toBe(true);
+    expect(lines.some((l) => l.includes("--base stream/x"))).toBe(false);
+  });
+
+  it("derives the gh base from the remote name, for short and full refs", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeHotfix(f);
+    git(f.repo, ["remote", "add", "upstream", f.origin]);
+    git(f.repo, ["fetch", "-q", "upstream"]);
+    const stub = ghStub(
+      f,
+      `[{"number":9,"headRefOid":"${sha}","baseRefName":"hotfixbase"}]`,
+      { recordArgs: true },
+    );
+    for (const base of [
+      "upstream/hotfixbase",
+      "refs/remotes/upstream/hotfixbase",
+      "refs/remotes/origin/hotfixbase",
+    ]) {
+      const r = await cli(f.work, ["list", "--repo", f.repo, "--base", base], {
+        PATH: stub,
+      });
+      expect(r.code, r.stdout + r.stderr).toBe(0);
+      const entry = (r.json.worktrees as Record<string, any>[]).find(
+        (w) => w.path === wt,
+      );
+      expect(entry?.base).toBe(base);
+      expect(entry?.merged, base).toMatchObject({ merged: "yes", via: "gh" });
+    }
+    const lines = ghArgs(f);
+    expect(lines.length).toBe(3);
+    expect(lines.every((l) => l.includes("--base hotfixbase"))).toBe(true);
+    expect(lines.some((l) => l.includes("upstream"))).toBe(false);
+
+    const rm = await cli(
+      f.work,
+      ["remove", wt, "--require-merged", "--base", "upstream/hotfixbase"],
+      { PATH: stub },
+    );
+    expect(rm.code, rm.stdout + rm.stderr).toBe(0);
+    expect(ghArgs(f).at(-1)).toContain("--base hotfixbase");
+  });
+});
+
+describe("worktree list --base resolution", () => {
+  it("reports a well-formed base that does not exist as unknown with exactly one warning", async () => {
+    const f = makeFixture();
+    makeHotfix(f);
+    const r = await cli(f.work, [
+      "list",
+      "--repo",
+      f.repo,
+      "--base",
+      "origin/nope",
+    ]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    const entries = r.json.worktrees as Record<string, any>[];
+    expect(entries.length).toBeGreaterThan(1);
+    for (const w of entries) {
+      expect(w.base).toBe("origin/nope");
+      expect(w.merged.merged).toBe("unknown");
+    }
+    expect(r.json.warnings as string[]).toHaveLength(1);
+    expect((r.json.warnings as string[])[0]).toContain("origin/nope");
+  });
+
+  it("refuses a base that is no remote-tracking branch", async () => {
+    const f = makeFixture();
+    makeHotfix(f);
+    for (const bad of ["HEAD", "HEAD~1", "main", "--x", "@{u}"]) {
+      const r = await cli(f.work, ["list", "--repo", f.repo, `--base=${bad}`]);
+      expect(r.code, `${bad}: ${r.stdout}${r.stderr}`).toBe(2);
+      expect(r.json.reason, bad).toBe("base_not_remote_branch");
+    }
+  });
+
+  it("with --root, a repository where the value is no remote-tracking branch gives unknown and a warning", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    const wts = path.join(f.base, "wts");
+    fs.mkdirSync(wts);
+    fs.renameSync(wt, path.join(wts, "moved"));
+    git(f.repo, ["worktree", "repair", path.join(wts, "moved")]);
+    const r = await cli(f.work, ["list", "--root", wts, "--base", "HEAD"]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    const entries = r.json.worktrees as Record<string, any>[];
+    expect(entries).toHaveLength(1);
+    expect(entries[0].merged.merged).toBe("unknown");
+    expect(entries[0].ahead).toBeNull();
+    expect((r.json.warnings as string[]).length).toBe(1);
+  });
+
+  it("measures against the full remote-tracking ref when a local branch shadows its short spelling", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeHotfix(f);
+    const second = addWorktree(f, "second", path.join(f.base, "wt-second"));
+    commitHere(second, "s.txt", "second");
+    commitHere(second, "s2.txt", "second again");
+    // A local branch that shadows the short spelling must not matter: the
+    // remote-tracking ref is read by its full name.
+    git(f.repo, ["branch", "origin/hotfixbase", "second"]);
+    const r = await cli(f.work, [
+      "list",
+      "--repo",
+      f.repo,
+      "--base",
+      "origin/hotfixbase",
+    ]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    const entries = r.json.worktrees as Record<string, any>[];
+    const hot = entries.find((w) => w.path === wt);
+    const sec = entries.find((w) => w.path === second);
+    expect(hot).toMatchObject({ ahead: 1, behind: 0 });
+    // second was cut from origin/main, which is the hotfix base's commit.
+    // The shadowing local branch sits at second's own HEAD, so measuring
+    // against the short spelling would give 0 and 0 here.
+    expect(sec).toMatchObject({ ahead: 2, behind: 0 });
+    expect(sha).toHaveLength(40);
+  });
+});
+
 describe("ignoredSymlinks", () => {
   it("finds an excluded directory symlink and no other ignored path", () => {
     const f = makeFixture();
