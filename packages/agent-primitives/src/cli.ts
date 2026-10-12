@@ -2276,6 +2276,7 @@ interface WorktreeRemoveCliOptions {
   force?: boolean;
   deleteBranch?: boolean;
   requireMerged?: boolean;
+  base?: string;
 }
 
 function renderWorktreeRemoveText(result: RemoveWorktreeResult): string {
@@ -2314,7 +2315,11 @@ worktreeCommand
   )
   .option(
     "--require-merged",
-    "refuse unless the branch is merged into origin/<default branch>, by ancestry or by a merged pull request that gh reports for it",
+    "refuse unless the branch is merged into origin/<default branch> (or --base), by ancestry or by a merged pull request that gh reports for it",
+  )
+  .option(
+    "--base <rev>",
+    "run the merge check against <rev> instead of origin's default branch, for a branch whose pull request targets another one (origin/master, say); needs --require-merged or --delete-branch; the gh lookup uses <rev> without a leading origin/",
   )
   .action(
     async (
@@ -2332,6 +2337,7 @@ worktreeCommand
           force: opts.force,
           deleteBranch: opts.deleteBranch,
           requireMerged: opts.requireMerged,
+          base: opts.base,
         });
       } catch (err) {
         if (!(err instanceof WorktreeRefusal)) throw err;
@@ -2390,6 +2396,7 @@ worktreeCommand
 interface WorktreeListCliOptions {
   repo?: string;
   root?: string;
+  base?: string;
 }
 
 function renderWorktreeListText(result: ListWorktreesResult): string {
@@ -2420,6 +2427,10 @@ worktreeCommand
     "--root <dir>",
     "instead of one repository, report the work trees that are direct children of this directory; exclusive with --repo",
   )
+  .option(
+    "--base <rev>",
+    "measure ahead, behind and merged against <rev> instead of origin's default branch, in every repository reported (origin/master for hotfix branches, say); a <rev> a repository cannot resolve gives merged unknown and a warning; the gh lookup uses <rev> without a leading origin/",
+  )
   .action(async (opts: WorktreeListCliOptions, command: Command) => {
     const start = Date.now();
     const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
@@ -2429,6 +2440,7 @@ worktreeCommand
         cwd: global.cwd,
         repo: opts.repo,
         root: opts.root,
+        base: opts.base,
       });
     } catch (err) {
       if (!(err instanceof WorktreeRefusal)) throw err;

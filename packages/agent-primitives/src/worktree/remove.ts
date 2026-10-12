@@ -8,6 +8,7 @@ import {
   isWithin,
   mergeVerdict,
   resolveDefaultBase,
+  resolveExplicitBase,
   resolveRepo,
   type MergeVerdict,
 } from "./git.js";
@@ -29,6 +30,10 @@ export interface RemoveWorktreeOptions {
   deleteBranch?: boolean;
   /** Refuse unless the branch is merged into the default base. */
   requireMerged?: boolean;
+  /** The revision the merge check runs against instead of origin's default
+   * branch. Needs `requireMerged` or `deleteBranch`, the two options that
+   * run the check; alone it is a usage error rather than a silent no-op. */
+  base?: string;
 }
 
 export interface RemoveWorktreeResult {
@@ -77,6 +82,16 @@ function sameDirectory(a: string, b: string): boolean {
 export async function removeWorktree(
   o: RemoveWorktreeOptions,
 ): Promise<RemoveWorktreeResult> {
+  if (
+    o.base !== undefined &&
+    o.requireMerged !== true &&
+    o.deleteBranch !== true
+  ) {
+    throw new WorktreeRefusal(
+      "--base only applies to the merge check; pass it with --require-merged or --delete-branch",
+      "option_invalid",
+    );
+  }
   const target = path.resolve(o.cwd, o.path);
   let exists = true;
   try {
@@ -92,6 +107,19 @@ export async function removeWorktree(
     );
   }
   const repo = resolveRepo(target);
+
+  // An unresolvable --base refuses before anything is read or changed.
+  const explicitBase =
+    o.base === undefined
+      ? undefined
+      : resolveExplicitBase(repo.mainCheckout, o.base);
+  if (o.base !== undefined && explicitBase === undefined) {
+    throw new WorktreeRefusal(
+      `--base ${o.base} does not name a commit in ${repo.mainCheckout}`,
+      "base_not_found",
+      { base: o.base },
+    );
+  }
 
   const entry = repo.worktrees.find((w) => sameDirectory(w.path, target));
   if (entry === undefined) {
@@ -159,7 +187,8 @@ export async function removeWorktree(
     );
   }
 
-  const base = resolveDefaultBase(repo.mainCheckout);
+  const defaultBase = resolveDefaultBase(repo.mainCheckout);
+  const base = explicitBase ?? defaultBase;
   // Asked only when a flag needs the answer: the `gh` lookup of a verdict is
   // a network call where `gh` happens to be installed. Computed before the
   // unpushed check, because a branch that is merged into the base has no
@@ -212,7 +241,9 @@ export async function removeWorktree(
   }
 
   const defaultBranch =
-    base === undefined ? undefined : base.ref.replace(/^origin\//, "");
+    defaultBase === undefined
+      ? undefined
+      : defaultBase.ref.replace(/^origin\//, "");
   const mainBranch = repo.worktrees[0]?.branch;
   if (o.deleteBranch === true && entry.branch !== undefined) {
     const protectedName =

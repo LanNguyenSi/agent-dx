@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `worktree list` and `worktree remove` accept `--base <rev>`, so ahead,
+  behind and merged are measured against a chosen base instead of only
+  origin's default branch (a hotfix branch whose pull request targets
+  `origin/master` in a repository whose default branch is `develop` was
+  reported unmerged). The `gh` merged-pull-request lookup uses `<rev>` without
+  a leading `origin/` as the pull request's base. Without `--base` nothing
+  changes. `list` shows `<rev>` as each entry's `base`; a `<rev>` a repository
+  cannot resolve gives `merged: unknown` plus a warning and no abort.
+  `remove --base` needs `--require-merged` or `--delete-branch` (alone it is
+  an `option_invalid` refusal) and refuses an unresolvable `<rev>` as
+  `base_not_found` before removing anything. The shipped skill text mentions
+  the flag, so its digest changes.
+
 ## [0.11.0] - 2026-10-12
 
 - `worktree create` records the links it made in the new worktree's git

@@ -930,6 +930,230 @@ describe("worktree list", () => {
   });
 });
 
+/** A hotfix branch the way a repository whose default branch is `main`
+ * still ships one: `origin/hotfixbase` is a second long-lived branch, the
+ * hotfix worktree is cut from it and carries one commit. Returns the
+ * worktree and its head sha. */
+function makeHotfix(f: Fixture): { wt: string; sha: string } {
+  git(f.repo, ["push", "-q", "origin", "main:hotfixbase"]);
+  git(f.repo, ["fetch", "-q", "origin"]);
+  const wt = path.join(f.base, "wt-hotfix");
+  git(f.repo, [
+    "worktree",
+    "add",
+    "--no-track",
+    "-b",
+    "hotfix/one",
+    wt,
+    "origin/hotfixbase",
+  ]);
+  commitHere(wt, "fix.txt", "hotfix work");
+  git(wt, ["push", "-q", "origin", "hotfix/one"]);
+  return { wt, sha: git(wt, ["rev-parse", "HEAD"]).trim() };
+}
+
+describe("worktree list --base", () => {
+  it("measures against the given base, by ancestry and by the gh lookup", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeHotfix(f);
+    const prStub = ghStub(
+      f,
+      `[{"number":9,"headRefOid":"${sha}","baseRefName":"hotfixbase"}]`,
+      { recordArgs: true },
+    );
+    const entryAt = (r: Cli): Record<string, any> => {
+      const found = (r.json.worktrees as Record<string, any>[]).find(
+        (w) => w.path === wt,
+      );
+      if (found === undefined) throw new Error(`no entry for ${wt}`);
+      return found;
+    };
+
+    // Unchanged without --base: measured against origin/main, where the
+    // pull request into hotfixbase says nothing.
+    const plain = await cli(f.work, ["list", "--repo", f.repo], {
+      PATH: prStub,
+    });
+    expect(plain.code, plain.stdout + plain.stderr).toBe(0);
+    expect(entryAt(plain)).toMatchObject({
+      base: "origin/main",
+      ahead: 1,
+      behind: 0,
+    });
+    expect(entryAt(plain).merged).toMatchObject({ merged: "no", via: "gh" });
+
+    // With --base, the gh lookup asks for the branch name without origin/.
+    const based = await cli(
+      f.work,
+      ["list", "--repo", f.repo, "--base", "origin/hotfixbase"],
+      { PATH: prStub },
+    );
+    expect(based.code, based.stdout + based.stderr).toBe(0);
+    expect(entryAt(based)).toMatchObject({
+      base: "origin/hotfixbase",
+      ahead: 1,
+      behind: 0,
+    });
+    expect(entryAt(based).merged).toMatchObject({ merged: "yes", via: "gh" });
+    expect(ghArgs(f).some((line) => line.includes("--base hotfixbase"))).toBe(
+      true,
+    );
+
+    // Merged by ancestry once the base holds the commit.
+    git(f.repo, ["push", "-q", "origin", `${sha}:refs/heads/hotfixbase`]);
+    git(f.repo, ["fetch", "-q", "origin"]);
+    const anc = await cli(f.work, [
+      "list",
+      "--repo",
+      f.repo,
+      "--base",
+      "origin/hotfixbase",
+    ]);
+    expect(anc.code, anc.stdout + anc.stderr).toBe(0);
+    expect(entryAt(anc)).toMatchObject({ ahead: 0, behind: 0 });
+    expect(entryAt(anc).merged).toMatchObject({
+      merged: "yes",
+      via: "ancestry",
+    });
+  });
+
+  it("reports an unresolvable base as unknown with a warning, per repository, without aborting", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    const wts = path.join(f.base, "wts");
+    fs.mkdirSync(wts);
+    fs.renameSync(wt, path.join(wts, "moved"));
+    git(f.repo, ["worktree", "repair", path.join(wts, "moved")]);
+    // A second repository that does resolve a revision the first one lacks.
+    const other = path.join(f.base, "other");
+    git(f.base, ["clone", "-q", f.origin, other]);
+    git(other, ["branch", "onlyhere", "origin/hotfixbase"]);
+    git(other, [
+      "worktree",
+      "add",
+      "--no-track",
+      "-b",
+      "o1",
+      path.join(wts, "other-wt"),
+      "origin/hotfixbase",
+    ]);
+
+    const mixed = await cli(f.work, [
+      "list",
+      "--root",
+      wts,
+      "--base",
+      "onlyhere",
+    ]);
+    expect(mixed.code, mixed.stdout + mixed.stderr).toBe(0);
+    const entries = mixed.json.worktrees as Record<string, any>[];
+    const resolved = entries.find((w) => w.repo === "other");
+    const unresolved = entries.find((w) => w.repo === "repo");
+    expect(resolved?.merged).toMatchObject({ merged: "yes", via: "ancestry" });
+    expect(resolved?.base).toBe("onlyhere");
+    expect(unresolved?.merged.merged).toBe("unknown");
+    expect(
+      (mixed.json.warnings as string[]).filter((w) => w.includes("onlyhere")),
+    ).toHaveLength(1);
+
+    // Same call with a revision no repository knows.
+    const none = await cli(f.work, [
+      "list",
+      "--root",
+      wts,
+      "--base",
+      "origin/nope",
+    ]);
+    expect(none.code, none.stdout + none.stderr).toBe(0);
+    const all = none.json.worktrees as Record<string, any>[];
+    expect(all).toHaveLength(2);
+    for (const w of all) {
+      expect(w.base).toBe("origin/nope");
+      expect(w.merged.merged).toBe("unknown");
+      expect(w.merged.reason).toContain("--base origin/nope");
+      expect(w.ahead).toBeNull();
+    }
+    const warnings = none.json.warnings as string[];
+    expect(
+      warnings.filter((w) => w.includes("--base origin/nope")),
+    ).toHaveLength(2);
+  });
+});
+
+describe("worktree remove --base", () => {
+  it("checks the merge against the given base", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeHotfix(f);
+    const prStub = ghStub(
+      f,
+      `[{"number":9,"headRefOid":"${sha}","baseRefName":"hotfixbase"}]`,
+    );
+
+    const without = await cli(f.work, ["remove", wt, "--require-merged"], {
+      PATH: prStub,
+    });
+    expect(without.code, without.stdout + without.stderr).toBe(2);
+    expect(without.json.reason).toBe("branch_not_merged");
+    expect(listedWorktrees(f.repo)).toContain(wt);
+
+    const withBase = await cli(
+      f.work,
+      ["remove", wt, "--require-merged", "--base", "origin/hotfixbase"],
+      { PATH: prStub },
+    );
+    expect(withBase.code, withBase.stdout + withBase.stderr).toBe(0);
+    expect(withBase.json.merged).toMatchObject({ merged: "yes", via: "gh" });
+    expect(listedWorktrees(f.repo)).not.toContain(wt);
+  });
+
+  it("applies to --delete-branch as well", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeHotfix(f);
+    git(f.repo, ["push", "-q", "origin", `${sha}:refs/heads/hotfixbase`]);
+    git(f.repo, ["fetch", "-q", "origin"]);
+    git(f.repo, ["push", "-q", "origin", "--delete", "hotfix/one"]);
+    git(f.repo, ["fetch", "-q", "--prune", "origin"]);
+    const r = await cli(f.work, [
+      "remove",
+      wt,
+      "--delete-branch",
+      "--base",
+      "origin/hotfixbase",
+    ]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.merged).toMatchObject({ merged: "yes", via: "ancestry" });
+    expect(r.json.branch.deleted).toBe(true);
+  });
+
+  it("refuses an unresolvable base with its own reason and removes nothing", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    for (const bad of ["origin/nope", "--upload-pack=x"]) {
+      const r = await cli(f.work, [
+        "remove",
+        wt,
+        "--require-merged",
+        `--base=${bad}`,
+        "--force",
+      ]);
+      expect(r.code, r.stdout + r.stderr).toBe(2);
+      expect(r.json.reason).toBe("base_not_found");
+      expect(r.json.details.base).toBe(bad);
+      expect(listedWorktrees(f.repo)).toContain(wt);
+      expect(fs.existsSync(wt)).toBe(true);
+    }
+  });
+
+  it("treats --base without a merge check as a usage error", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    const r = await cli(f.work, ["remove", wt, "--base", "origin/hotfixbase"]);
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.reason).toBe("option_invalid");
+    expect(listedWorktrees(f.repo)).toContain(wt);
+  });
+});
+
 describe("ignoredSymlinks", () => {
   it("finds an excluded directory symlink and no other ignored path", () => {
     const f = makeFixture();

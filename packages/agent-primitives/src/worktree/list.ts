@@ -8,6 +8,7 @@ import {
   isWithin,
   mergeVerdict,
   resolveDefaultBase,
+  resolveExplicitBase,
   resolveRepo,
   type MergeVerdict,
   type RepoContext,
@@ -30,6 +31,9 @@ export interface ListWorktreesOptions {
   repo?: string;
   /** Report the work trees that are direct children of this directory. */
   root?: string;
+  /** Measure ahead, behind and merged against this revision instead of
+   * origin's default branch. Applies to every repository of a `root`. */
+  base?: string;
 }
 
 export interface ListedWorktree {
@@ -40,8 +44,8 @@ export interface ListedWorktree {
   main: boolean;
   branch?: string;
   head?: string;
-  /** The default base the ahead, behind and merged values are measured
-   * against, for example `origin/main`. */
+  /** The base the ahead, behind and merged values are measured against:
+   * the default base, for example `origin/main`, or the `--base` value. */
   base?: string;
   /** Trimmed content of `<path>/.ai/run`, `null` when it is absent. */
   runPointer: string | null;
@@ -100,15 +104,27 @@ function describeEntry(
   repo: RepoContext,
   main: boolean,
   warnings: string[],
+  baseFlag: string | undefined,
 ): ListedWorktree {
-  const base = resolveDefaultBase(repo.mainCheckout);
+  const base =
+    baseFlag === undefined
+      ? resolveDefaultBase(repo.mainCheckout)
+      : resolveExplicitBase(repo.mainCheckout, baseFlag);
+  if (baseFlag !== undefined && base === undefined) {
+    const warning = `--base ${baseFlag} does not name a commit in ${repo.mainCheckout}; the merge state of its worktrees is reported as unknown`;
+    if (!warnings.includes(warning)) warnings.push(warning);
+  }
   const listed: ListedWorktree = {
     path: entry.path,
     repo: repo.name,
     main,
     ...(entry.branch !== undefined ? { branch: entry.branch } : {}),
     ...(entry.head !== undefined ? { head: entry.head } : {}),
-    ...(base !== undefined ? { base: base.ref } : {}),
+    ...(base !== undefined
+      ? { base: base.ref }
+      : baseFlag !== undefined
+        ? { base: baseFlag }
+        : {}),
     runPointer: null,
     dirty: null,
     ahead: null,
@@ -148,7 +164,10 @@ function describeEntry(
     listed.merged = {
       merged: "unknown",
       via: "none",
-      reason: "origin's default branch cannot be resolved",
+      reason:
+        baseFlag === undefined
+          ? "origin's default branch cannot be resolved"
+          : `--base ${baseFlag} does not name a commit in ${repo.mainCheckout}`,
     };
   }
 
@@ -177,7 +196,7 @@ export async function listWorktrees(
     return {
       status: "ok",
       worktrees: repo.worktrees.map((entry, index) =>
-        describeEntry(entry, repo, index === 0, warnings),
+        describeEntry(entry, repo, index === 0, warnings, o.base),
       ),
       warnings,
     };
@@ -219,7 +238,13 @@ export async function listWorktrees(
         repo.worktrees[0];
       if (entry === undefined) continue;
       worktrees.push(
-        describeEntry(entry, repo, entry === repo.worktrees[0], warnings),
+        describeEntry(
+          entry,
+          repo,
+          entry === repo.worktrees[0],
+          warnings,
+          o.base,
+        ),
       );
     } catch (err) {
       if (!(err instanceof WorktreeRefusal)) throw err;

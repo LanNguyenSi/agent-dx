@@ -43,13 +43,15 @@ for teams shipping with AI agents.
   command and a smoke check, and reports the base sha as a ready
   `run-base[<repo>] = <sha>` line.
 - `worktree remove`: removes one linked worktree, refusing a dirty, unpushed
-  or (with `--require-merged`) unmerged one unless `--force`, unlinking the
+  or (with `--require-merged`, optionally against `--base <rev>`) unmerged one
+  unless `--force`, unlinking the
   dependency links it finds without ever following them, keeping the branch
   unless `--delete-branch` says otherwise, and never removing or switching the
   main checkout.
 - `worktree list`: reports every worktree of a repository, or every work tree
   below `--root`, with its branch, `.ai/run` pointer, dirty state, commits
-  ahead of and behind the default base, merge verdict and dependency links.
+  ahead of and behind the default base (or `--base <rev>`), merge verdict and
+  dependency links.
 - Non-Node repositories are supported: PHP (PHPUnit, PHPStan,
   PHP_CodeSniffer) output is recognized by `verify` and `probe` alongside
   vitest, tsc, and eslint.

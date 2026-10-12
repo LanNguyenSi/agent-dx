@@ -156,6 +156,7 @@ One positional `<path>`: the worktree to remove. A relative value resolves again
 | `--force` | Remove the worktree even when it is dirty, has commits no remote branch has, is locked, or (with `--require-merged`) is not merged or its merge state cannot be told. The three structural refusals stand regardless: `not_a_worktree`, `remove_main_checkout` and `default_branch_delete`. |
 | `--delete-branch` | Delete the worktree's branch after the worktree is gone. |
 | `--require-merged` | Refuse unless the branch is merged into `origin/<default branch>`, by ancestry or by a merged pull request that `gh` reports as merged into the default branch at the worktree's HEAD commit. |
+| `--base <rev>` | Run the merge check against `<rev>` instead of origin's default branch, for a branch whose pull request targets another one (`origin/master` for a hotfix in a repository whose default branch is `develop`, say). The `gh` lookup uses `<rev>` with a leading `origin/` removed as the pull request's base. It only changes the merge check, so it needs `--require-merged` or `--delete-branch`: alone it is an `option_invalid` refusal, because a flag that silently changes nothing hides a mistake. A `<rev>` that names no commit in the repository is a `base_not_found` refusal before anything is removed. The default-branch protection of `--delete-branch` still names origin's default branch. |
 
 ### What it does
 
@@ -204,6 +205,8 @@ The usual [envelope](output-shape.md) with `command: "worktree remove"`, plus:
 | `status_unknown` | `git status` failed, so the dirty state could not be read; the message carries git's error. A failed check is never read as clean. |
 | `unpushed_commits` | Commits that no remote branch has; `details.commits` counts them. Not raised for a branch the merge verdict called merged: those commits are reported in `warnings` instead. |
 | `unpushed_state_unknown` | `git rev-list HEAD --not --remotes` failed, so the unpushed state could not be read; the message carries git's error. A failed check is never read as zero. |
+| `base_not_found` | `--base <rev>` names no commit in the repository. Nothing was removed. |
+| `option_invalid` | `--base` without `--require-merged` or `--delete-branch`. |
 | `branch_not_merged` | `--require-merged`, and the branch is neither an ancestor of the base nor the head of a merged pull request. `details.merged` is the verdict. |
 | `merge_state_unknown` | `--require-merged`, and neither ancestry nor `gh` could decide, so the state is unknown rather than negative. `details.merged.reason` says which. |
 | `default_branch_delete` | `--delete-branch` was asked for the branch the default base names or the one the main checkout is on. |
@@ -220,6 +223,7 @@ A branch that is merged into the base, by ancestry or by a merged pull request a
 ```bash
 agent-primitives worktree list --repo ~/src/app
 agent-primitives worktree list --root ~/wt
+agent-primitives worktree list --repo ~/src/app --base origin/master
 ```
 
 Read-only: no git command that writes is run.
@@ -228,6 +232,7 @@ Read-only: no git command that writes is run.
 | --- | --- |
 | `--repo <path>` | The repository to report: the main checkout, a subdirectory, or a linked worktree. Every worktree git lists is reported, main checkout first. Default: the invocation directory (`-C`). |
 | `--root <dir>` | Instead of one repository, report the work trees that are direct children of `<dir>`, sorted by name. A child that is not a work tree top (a plain directory, or a subdirectory of some checkout) is skipped silently. A child that is a work tree but whose repository cannot be described (a work tree of a bare repository, say) is left out with a `skipped <path>` warning, and its siblings are still reported. Exclusive with `--repo`: both together are an `option_invalid` refusal. |
+| `--base <rev>` | Measure `ahead`, `behind` and `merged` against `<rev>` instead of origin's default branch (`origin/master` for hotfix branches in a repository whose default branch is `develop`, say); each entry's `base` shows `<rev>`. With `--root` it applies to every repository. A `<rev>` that names no commit in a repository gives that repository's entries `merged: unknown` with a reason, null `ahead`/`behind`, and one warning; the report still completes. The `gh` lookup uses `<rev>` with a leading `origin/` removed as the pull request's base. Still read-only: nothing is fetched, so a remote-tracking `<rev>` is as fresh as the last fetch. |
 
 Per entry:
 
@@ -235,7 +240,7 @@ Per entry:
 | --- | --- |
 | `path`, `repo`, `main` | The directory, the basename of the main checkout it belongs to, and whether this entry is that main checkout (the only `main: true` of a repository). |
 | `branch`, `head` | From `git worktree list --porcelain`; `branch` is absent for a detached HEAD. |
-| `base` | The default base the three fields below are measured against (`origin/main`, say), absent when it cannot be resolved. |
+| `base` | The base the three fields below are measured against: the `--base` value, or else the default base (`origin/main`, say), absent when no default can be resolved. |
 | `runPointer` | Trimmed content of `<path>/.ai/run`, `null` when absent. |
 | `dirty` | Whether `git status --porcelain --untracked-files=all` says anything, `null` when git could not answer. |
 | `ahead`, `behind` | `git rev-list --left-right --count <base>...HEAD`: commits only on `HEAD`, and commits only on the base. `null` when either could not be told. |

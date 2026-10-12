@@ -307,6 +307,17 @@ export function resolveDefaultBase(
   return undefined;
 }
 
+/** The base `--base <rev>` asks for, or `undefined` when `rev` does not
+ * name a commit in the repository at `cwd` (a value starting with `-` never
+ * does, so it cannot be read as a git option). The ref is `rev` as given. */
+export function resolveExplicitBase(
+  cwd: string,
+  rev: string,
+): { ref: string; source: string } | undefined {
+  if (rev.startsWith("-") || !refExists(cwd, rev)) return undefined;
+  return { ref: rev, source: "flag" };
+}
+
 /** True when `rev` names a commit in the repository at `cwd`. */
 export function refExists(cwd: string, rev: string): boolean {
   return commitSha(cwd, rev) !== undefined;

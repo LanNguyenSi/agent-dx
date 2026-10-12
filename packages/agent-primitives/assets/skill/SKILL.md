@@ -327,6 +327,8 @@ commits that are on no remote branch (unless `--force`), unlinks the
 dependency links without following them, keeps the branch unless
 `--delete-branch`, and with `--require-merged` refuses a branch that is not
 merged into the default branch (ancestry, or a merged pull request via `gh`
-for a squash merge). `worktree list [--repo <path> | --root <dir>]` reports
+for a squash merge); `--base <rev>` checks against another branch, such as
+`origin/master` for a hotfix. `worktree list [--repo <path> | --root <dir>]
+[--base <rev>]` reports
 each worktree's branch, dirty state, ahead/behind, merged state, run
 pointer and links. See the agent-primitives package's docs/worktree.md.
