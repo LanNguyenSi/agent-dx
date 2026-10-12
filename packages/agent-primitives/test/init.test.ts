@@ -127,9 +127,11 @@ describe("init", () => {
       expect(result.targets[0]?.status).toBe("outdated");
       expect(result.targets[0]?.matchedVersion).toBe("1.0.0");
       expect(result.warnings).toEqual([
-        `claude skill at ${result.targets[0]?.path} is an unmodified copy of the agent-primitives 1.0.0 release, safe to replace: re-run \`agent-primitives init --force\` with the same -H/-t options to update it`,
+        `claude skill at ${result.targets[0]?.path} is an unmodified copy of the agent-primitives 1.0.0 release, safe to replace: re-run \`agent-primitives init -H claude --force\` (same -C/-t as this run) to update only this copy`,
       ]);
-      expect(result.warnings[0]).toContain("agent-primitives init --force");
+      expect(result.warnings[0]).toContain(
+        "agent-primitives init -H claude --force",
+      );
       expect(fs.readFileSync(filePath, "utf8")).toBe(CONTENT_OLD);
     });
 
@@ -151,6 +153,37 @@ describe("init", () => {
       expect(fs.readFileSync(filePath, "utf8")).toBe(
         "# a local edit, not any released version\n",
       );
+    });
+
+    it("multi-harness with one outdated and one conflicted target: the hint names only the outdated harness", () => {
+      const dir = makeTmpDir();
+      const claudePath = targetPath(dir);
+      const codexPath = path.join(
+        dir,
+        ".agents",
+        "skills",
+        "agent-primitives",
+        "SKILL.md",
+      );
+      fs.mkdirSync(path.dirname(claudePath), { recursive: true });
+      fs.writeFileSync(claudePath, CONTENT_OLD);
+      fs.mkdirSync(path.dirname(codexPath), { recursive: true });
+      fs.writeFileSync(codexPath, "# a local edit\n");
+
+      const result = init({
+        targetDir: dir,
+        content: CONTENT_NEW,
+        ledger: LEDGER,
+        harnesses: ["claude", "codex"],
+      });
+      expect(result.status).toBe("conflicted");
+      expect(result.warnings).toHaveLength(1);
+      expect(result.warnings[0]).toContain(
+        "agent-primitives init -H claude --force",
+      );
+      expect(result.warnings.join("\n")).not.toContain("init --force");
+      expect(result.warnings.join("\n")).not.toContain("codex");
+      expect(fs.readFileSync(codexPath, "utf8")).toBe("# a local edit\n");
     });
 
     it("--force overwrites an outdated target and reports written", () => {
@@ -184,7 +217,7 @@ describe("init", () => {
       });
       const text = renderInitText(result);
       expect(text).toContain("warnings:");
-      expect(text).toContain("agent-primitives init --force");
+      expect(text).toContain("agent-primitives init -H claude --force");
       expect(text).toContain("1.0.0");
     });
 

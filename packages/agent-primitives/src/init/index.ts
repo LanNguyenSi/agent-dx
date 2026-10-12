@@ -662,10 +662,12 @@ export function init(options: InitOptions = {}): InitResult {
         t.matchedVersion === undefined
           ? "an unmodified copy of an earlier agent-primitives release"
           : `an unmodified copy of the agent-primitives ${t.matchedVersion} release`;
+      // Scoped to this target's own harness: a bare `--force` re-run of a
+      // multi-harness request would also overwrite a conflicted sibling.
       warnings.push(
         `${t.harness} skill at ${t.path} is ${which}, safe to replace: ` +
-          "re-run `agent-primitives init --force` with the same -H/-t " +
-          "options to update it",
+          `re-run \`agent-primitives init -H ${t.harness} --force\` ` +
+          "(same -C/-t as this run) to update only this copy",
       );
     }
   }

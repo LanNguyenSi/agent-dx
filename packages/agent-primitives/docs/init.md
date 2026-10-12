@@ -64,14 +64,16 @@ instead of `outdated`, and `InitResult.warnings` names the cause.
 
 Each `outdated` target also adds one entry to `warnings` (shown under
 `warnings:` in the text format) that names the matched version and
-`agent-primitives init --force`. A `conflicted` target gets no such hint,
-since its bytes are a local edit. The upgrade sequence after a new
+`agent-primitives init -H <that harness> --force`, scoped to that one
+harness, since a bare `--force` re-run of a multi-harness request would
+also overwrite a conflicted sibling. A `conflicted` target gets no such
+hint, since its bytes are a local edit. The upgrade sequence after a new
 release is:
 
 ```bash
 npm install -g agent-primitives@<version>
-agent-primitives init            # reports outdated with the --force hint
-agent-primitives init --force    # replaces the unmodified older copy
+agent-primitives init                     # reports outdated with the --force hint
+agent-primitives init -H claude --force   # replaces the unmodified older copy
 ```
 
 Every requested harness's target is validated against
