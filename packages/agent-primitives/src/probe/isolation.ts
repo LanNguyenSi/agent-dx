@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { isPidAlive } from "../lock.js";
 import {
   isPathContained,
+  isRelContained,
   resolveDeepestExisting,
   resolveLinkSourceTarget,
 } from "./containment.js";
@@ -1411,9 +1412,7 @@ export async function beginWorktree(
     resolveDeepestExisting(path.resolve(cwd)),
   ]
     .map((p) => path.relative(rootReal, p))
-    .filter(
-      (rel) => rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel),
-    );
+    .filter((rel) => rel !== "" && isRelContained(rel));
   // The SOURCE tree's own spelling of an in-root path, the mirror of
   // `canonicalRelPath` above: `canonicalDestRelPath` is anchored at
   // whichever directory it is given, and the tracked-TARGET half of rule
@@ -1817,7 +1816,7 @@ export async function beginWorktree(
   ];
   for (const written of writtenPaths) {
     const rel = path.relative(rootReal, written);
-    if (rel.startsWith("..") || path.isAbsolute(rel)) continue;
+    if (!isRelContained(rel)) continue;
     const resolved = resolveDeepestExisting(path.join(worktreePath, rel));
     if (isPathContained(wtReal, resolved)) continue;
     const through = created.find((c) =>

@@ -4101,6 +4101,101 @@ describe("probe(): worktree isolation, a destination the copy spells differently
       ),
     ).toBe(true);
   });
+
+  it("the postcondition also covers a mutated file under a directory named ..foo (case-variant spelling)", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.mkdirSync(path.join(repo, "..foo", "sub"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repo, "..foo", "sub", "fixture.js"),
+      SRC_FIXTURE_JS,
+    );
+    fs.writeFileSync(
+      path.join(repo, "sub-check.test.js"),
+      [
+        "const assert = require('node:assert');",
+        "const { isPositive } = require('./..foo/sub/fixture.js');",
+        "assert.strictEqual(isPositive(5), true);",
+        "assert.strictEqual(isPositive(-5), false);",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repo, "sub");
+    if (!caseInsensitiveVolume(repo)) {
+      // Without an alias the two spellings name two directories, one of
+      // which does not exist, and nothing aliases anything.
+      return;
+    }
+
+    const before = hashTree(repo);
+    // The run's own two inputs spell one directory two ways: `--file`
+    // reaches the mutant through `..FOO/sub`, the link names `..foo/sub`.
+    // The protected path is the source tree's spelling of the first, the
+    // candidate's canonical destination is the copy's spelling of the
+    // second, and rule 2 compares strings; only the postcondition, which
+    // resolves both against the copy's filesystem, sees that the link
+    // moved the file this run mutates out of the copy.
+    const result = await probe(
+      baseOptions(repo, {
+        file: path.join("..FOO", "sub", "fixture.js"),
+        testCommand: "node sub-check.test.js",
+        links: [path.join(repo, "..foo", "sub")],
+      }),
+    );
+    const after = hashTree(repo);
+
+    expect(after).toEqual(before);
+    expect(
+      fs.readFileSync(path.join(repo, "..foo", "sub", "fixture.js"), "utf8"),
+    ).toBe(SRC_FIXTURE_JS);
+    expect(result.status).toBe("inconclusive");
+    expect(result.reason).toBe("worktree_sync_failed");
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes(path.join("..FOO", "sub", "fixture.js")) &&
+          w.includes("outside the") &&
+          w.includes("would have written to the source tree"),
+      ),
+    ).toBe(true);
+  });
+
+  it("a --link over the mutated file's own directory named ..foo is refused as a protected path", async () => {
+    useLockDir();
+    const { repo } = initRepo();
+    fs.mkdirSync(path.join(repo, "..foo"), { recursive: true });
+    fs.writeFileSync(path.join(repo, "..foo", "fixture.js"), SRC_FIXTURE_JS);
+    fs.writeFileSync(
+      path.join(repo, "dotdot-check.test.js"),
+      [
+        "const assert = require('node:assert');",
+        "const { isPositive } = require('./..foo/fixture.js');",
+        "assert.strictEqual(isPositive(5), true);",
+        "assert.strictEqual(isPositive(-5), false);",
+        "",
+      ].join("\n"),
+    );
+    commitAll(repo, "dotdot");
+    const before = hashTree(repo);
+    const result = await probe(
+      baseOptions(repo, {
+        file: path.join("..foo", "fixture.js"),
+        testCommand: "node dotdot-check.test.js",
+        links: [path.join(repo, "..foo")],
+      }),
+    );
+    expect(hashTree(repo)).toEqual(before);
+    expect(
+      result.warnings.some(
+        (w) =>
+          w.includes("..foo") &&
+          w.includes(
+            "sits inside it, and must stay a real directory in the copy",
+          ),
+      ),
+    ).toBe(true);
+    expect(result.status).toBe("killed");
+  });
 });
 
 describe("probe(): worktree isolation, a link target that reaches the repository root under a SECOND SPELLING", () => {

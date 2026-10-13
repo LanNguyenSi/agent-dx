@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { isPathContained, resolveDeepestExisting } from "./containment.js";
+import {
+  isPathContained,
+  isRelContained,
+  resolveDeepestExisting,
+} from "./containment.js";
 
 /**
  * One directory something asked `beginWorktree` to symlink into the
@@ -207,7 +211,7 @@ export function linkRelPath(
       ? absDir // the filesystem root has no parent to resolve
       : path.join(resolveDeepestExisting(parent), path.basename(absDir));
   const rel = path.relative(rootReal, location);
-  if (rel.startsWith("..") || path.isAbsolute(rel)) return undefined;
+  if (!isRelContained(rel)) return undefined;
   return rel;
 }
 

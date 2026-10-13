@@ -6,6 +6,7 @@ import {
   escapingRootMentions,
   isCaseInsensitiveFilesystem,
   isPathContained,
+  isRelContained,
   resolveDeepestExisting,
 } from "../src/probe/containment.js";
 
@@ -1099,5 +1100,26 @@ describe("escapingRootMentions(): the scratch match's own boundary is closed to 
     expect(escapingRootMentions(text, root, scratchRoot)).toEqual([
       scratchRoot,
     ]);
+  });
+});
+
+describe("isRelContained: a name starting with two dots is inside", () => {
+  it("treats '', '..foo', '..foo/x' and 'a/..b' as inside", () => {
+    expect(isRelContained("")).toBe(true);
+    expect(isRelContained("..foo")).toBe(true);
+    expect(isRelContained(path.join("..foo", "x"))).toBe(true);
+    expect(isRelContained(path.join("a", "..b"))).toBe(true);
+  });
+  it("treats '..', '../x' and an absolute path as outside", () => {
+    expect(isRelContained("..")).toBe(false);
+    expect(isRelContained(path.join("..", "x"))).toBe(false);
+    expect(isRelContained(path.resolve("/abs"))).toBe(false);
+  });
+  it("isPathContained agrees for a real ..foo entry under a root", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, "..foo", "x"), { recursive: true });
+    expect(isPathContained(root, path.join(root, "..foo"))).toBe(true);
+    expect(isPathContained(root, path.join(root, "..foo", "x"))).toBe(true);
+    expect(isPathContained(root, path.join(root, "..", "x"))).toBe(false);
   });
 });

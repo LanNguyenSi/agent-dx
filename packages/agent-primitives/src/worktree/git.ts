@@ -5,6 +5,7 @@ import { UsageError } from "../envelope.js";
 import { runGit, type GitRunResult } from "../drift/git.js";
 import { withoutRepoSelectionEnv } from "../git-env.js";
 import { probeGitArgv } from "../probe/git.js";
+import { isRelContained } from "../probe/containment.js";
 
 /**
  * Helpers shared by every `worktree` subcommand: how git is run, how the
@@ -239,8 +240,7 @@ function canonicalDeepest(p: string): string {
 }
 
 function lexicallyWithin(root: string, candidate: string): boolean {
-  const rel = path.relative(root, candidate);
-  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+  return isRelContained(path.relative(root, candidate));
 }
 
 /** True when `a` and `b` are the same filesystem object (device and inode),

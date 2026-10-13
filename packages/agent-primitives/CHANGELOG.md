@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   declarations as removed. Semantics change: the diff was two-dot
   (`base..head`) before. The envelope gains `base_sha`, `head_sha` and
   `merge_base` (tracker fe567f51).
+- `probe` and `worktree`: four more containment checks now treat a file
+  or directory whose name starts with two dots (`..foo`) as inside the
+  root, matching `isPathContained`. Before, `probe`'s protected-path
+  rule and its post-link check skipped such paths, and `linkRelPath`
+  and `isWithin`'s lexical half called them outside (task e7c3006d).
 - `patch`: a new command that replaces exact text in one or more files
   from a JSON edit plan (`--plan <file>`, `{"edits":[{"file","old","new",
   "replaceAll"?}]}`) or one edit (`--file` with `--old`/`--old-file` and
