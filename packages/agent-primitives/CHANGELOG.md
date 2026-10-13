@@ -58,6 +58,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `isPathContained`, the shared containment check used by `probe`,
   `init` and `doctor`, treats an entry whose name starts with two dots
   (`..foo`) as inside the root; only a `..` path component leaves it.
+- `worktree remove` accepts `--path <dir>` as an alias of the positional
+  path, matching `worktree create`; a positional path and a different
+  `--path` together, or no path at all, are an `option_invalid` refusal
+  (task 09d5ff4d).
 
 ## [0.12.0] - 2026-10-12
 

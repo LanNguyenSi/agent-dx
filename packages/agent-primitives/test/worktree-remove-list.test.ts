@@ -607,6 +607,51 @@ describe("worktree remove: what it does", () => {
       ),
     ).toBe("x");
   });
+
+  it("accepts --path as an alias of the positional path", async () => {
+    const f = makeFixture();
+    const wt = addWorktree(f, "alias-one", path.join(f.base, "wt-alias-one"));
+    const r = await cli(f.work, ["remove", "--path", wt]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.status).toBe("ok");
+    expect(listedWorktrees(f.repo)).not.toContain(wt);
+    expect(fs.existsSync(wt)).toBe(false);
+  });
+
+  it("accepts the positional path and --path together when they name the same directory", async () => {
+    const f = makeFixture();
+    const wt = addWorktree(f, "alias-two", path.join(f.base, "wt-alias-two"));
+    const r = await cli(f.work, [
+      "remove",
+      path.relative(f.work, wt),
+      "--path",
+      wt,
+    ]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.status).toBe("ok");
+    expect(listedWorktrees(f.repo)).not.toContain(wt);
+  });
+
+  it("refuses a positional path and a different --path, naming both, and removes nothing", async () => {
+    const f = makeFixture();
+    const one = addWorktree(f, "alias-three", path.join(f.base, "wt-a3"));
+    const two = addWorktree(f, "alias-four", path.join(f.base, "wt-a4"));
+    const r = await cli(f.work, ["remove", one, "--path", two]);
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.reason).toBe("option_invalid");
+    expect(r.json.message).toContain(one);
+    expect(r.json.message).toContain(two);
+    expect(listedWorktrees(f.repo)).toContain(one);
+    expect(listedWorktrees(f.repo)).toContain(two);
+  });
+
+  it("refuses when neither a positional path nor --path is given", async () => {
+    const f = makeFixture();
+    const r = await cli(f.work, ["remove"]);
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.reason).toBe("option_invalid");
+    expect(r.json.message).toContain("--path");
+  });
 });
 
 describe("worktree remove --require-merged", () => {
