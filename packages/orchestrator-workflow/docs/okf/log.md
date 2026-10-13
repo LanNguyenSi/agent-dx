@@ -1,5 +1,15 @@
 # Bundle log
 
+- 2026-10-13T15:33:17Z, adversarial-fixture run rule, fix round: the reviewer's own-run sentence moved from
+  the test-adequacy bullet to a rules bullet in `reviewer.md`, and `evidence-and-probes.md`
+  gained a pointer sentence for the orchestrator's own runs. The added lines shifted the
+  anchored `reviewer.md`, `evidence-and-probes.md`, and `CHANGELOG.md` line citations in
+  `subagent-contracts-superset.md`, `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md`, and this log; each was re-pointed by locating its anchor on
+  the new line and the bundle check was re-run with `--require-anchors`. No doc claim changed (the
+  I/O contracts are untouched), so the four docs listing the changed sources were re-stamped
+  without a wording change.
+
 - 2026-10-13T15:06:10Z, adversarial-fixture run rule: `implementer.md` gained one rules bullet and
   `reviewer.md` extended its test-adequacy bullet with the same rule (own process group,
   hard timeout, memory cap, group kill, leftover check). The added lines shifted the
