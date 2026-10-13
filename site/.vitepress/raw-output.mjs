@@ -102,10 +102,19 @@ export function escapeDescriptionMeta(html, _file, { description }) {
 // entity reference stays one). A number, a boolean or an empty value cannot
 // hold markup and is kept as it is, since `prev: false` hides a link.
 //
-// What stays as typed: `head` (VitePress's documented way to add tags) and
-// the link fields (prev and next link, hero action and feature link, target
-// and rel), which the theme writes into href, target and rel attributes
-// without checking the scheme. These are author-trusted, like head.
+// The link fields (prev and next link, hero action and feature link) go into
+// an href. VitePress returns a URL it does not know unchanged, so a
+// `javascript:` link would run in the page origin on click (an explicit
+// `target: _self` makes that reliable). A link is kept only when it is
+// http(s), mailto or relative (see isSafeLink); otherwise the field is
+// dropped and the button or card renders without a link (a footer link falls
+// back to the one the sidebar gives). `target` on a hero action or a feature
+// is kept only when it is one of the four browsing-context keywords, and `rel`
+// only when every token is on the allow-list below; the theme's own default
+// then applies. hero.actions must be a list, like features.
+//
+// What stays as typed: `head` (VitePress's documented way to add tags), which
+// is author-trusted.
 export const allowedDirs = new Set(['ltr', 'rtl', 'auto'])
 export const allowedLayouts = new Set(['doc', 'home', 'page'])
 
@@ -123,7 +132,89 @@ const isRecord = (value) => value !== null && typeof value === 'object' && !Arra
 const isPlain = (value) => typeof value === 'string' || typeof value === 'number'
 const withText = (value, keys) =>
   isRecord(value) ? { ...value, ...Object.fromEntries(keys.filter((k) => k in value).map((k) => [k, asText(value[k])])) } : value
-const pageLink = (value) => (isRecord(value) ? withText(value, ['text']) : asText(value))
+const pageLink = (value) => (isRecord(value) ? withSafeLink(withText(value, ['text'])) : asText(value))
+
+// What a link field may hold. Only a string can: the theme calls string
+// methods on it, so a number or a list would stop the build.
+//
+//   - absolute: the scheme (letters, digits, "+", "-", ".", after a letter) is
+//     http, https or mailto, read case-insensitively. Every other scheme is
+//     refused (javascript, data, vbscript, blob, file, tel, ...).
+//   - relative: no scheme, and it stays on the site when resolved against a
+//     base: a path (`a/b`, `./a`, `../a`), a root-relative path (`/a`), `#frag`,
+//     `?query` and the empty string. A first segment with a colon needs a
+//     leading `./` (`a:b` is a scheme, `./a:b` a path).
+//   - refused as well: a scheme-relative `//host` and any backslash. They are
+//     not a path on this site, and the URL parser reads `\` as `/`, so `/\host`
+//     is the same host change as `//host`. Write the scheme to link elsewhere.
+//   - refused as well: any control character, space or DEL anywhere. The URL
+//     parser drops leading and trailing ones and removes tabs and newlines
+//     inside, so ` javascript:x`, `\tjavascript:x` and `java\nscript:x` all
+//     carry the javascript scheme. Percent-encode a space instead.
+//   - an entity (`javascript&colon;x`) or a percent escape (`%6Aavascript:x`)
+//     is not decoded by the URL parser, so it starts no scheme and is a
+//     relative path; the page writer escapes the `&` and the browser resolves
+//     it on the site.
+const linkSchemes = new Set(['http:', 'https:', 'mailto:'])
+const hiddenChars = /[\u0000-\u0020\u007f-\u009f\s]/
+const leadingScheme = /^[A-Za-z][A-Za-z0-9+.-]*:/
+const resolveBase = new URL('http://site.invalid/base/page')
+export function isSafeLink(value) {
+  if (typeof value !== 'string' || hiddenChars.test(value) || value.includes('\\')) return false
+  if (leadingScheme.test(value)) {
+    try {
+      return linkSchemes.has(new URL(value).protocol)
+    } catch {
+      return false
+    }
+  }
+  if (value.startsWith('//')) return false
+  try {
+    return new URL(value, resolveBase).origin === resolveBase.origin
+  } catch {
+    return false
+  }
+}
+
+export const allowedTargets = new Set(['_blank', '_self', '_parent', '_top'])
+// Tokens of a `rel` that describe a link and weaken nothing. `opener` is left
+// out on purpose: the theme gives an external link `noreferrer` when no rel is
+// set, and an author-set rel replaces it.
+export const allowedRelTokens = new Set([
+  'noopener',
+  'noreferrer',
+  'nofollow',
+  'external',
+  'sponsored',
+  'ugc',
+  'me',
+  'author',
+  'help',
+  'license',
+  'bookmark',
+  'tag',
+  'prev',
+  'next',
+  'alternate',
+  'search'
+])
+const isSafeRel = (rel) =>
+  typeof rel === 'string' && /^[a-z]+(?: [a-z]+)*$/.test(rel) && rel.split(' ').every((t) => allowedRelTokens.has(t))
+
+// Removes link, target and rel from a record unless each passes its check.
+// A key that is absent stays absent.
+function withSafeLink(item, { target = false } = {}) {
+  if (!isRecord(item)) return item
+  const safe = { ...item }
+  if ('link' in safe && !isSafeLink(safe.link)) delete safe.link
+  if (target) {
+    if ('target' in safe && !allowedTargets.has(safe.target)) delete safe.target
+    if ('rel' in safe && !isSafeRel(safe.rel)) delete safe.rel
+  }
+  return safe
+}
+
+const sanitizeAction = (action) => withSafeLink(action, { target: true })
 
 // An image as the theme reads it: a string (a source), or an object. Returns
 // undefined for anything else, which the caller drops. The theme spreads an
@@ -146,7 +237,7 @@ export function safeImage(image) {
 }
 
 const sanitizeFeature = (feature) => {
-  const item = withText(feature, ['title', 'details'])
+  const item = withSafeLink(withText(feature, ['title', 'details']), { target: true })
   if (!isRecord(item)) return item
   const icon = isRecord(item.icon) ? safeImage(item.icon) : asText(item.icon)
   const { icon: _drop, ...rest } = item
@@ -161,8 +252,9 @@ export function sanitizeFrontmatter(frontmatter) {
   if ('hero' in safe) {
     const hero = withText(safe.hero, ['name', 'text', 'tagline'])
     if (isRecord(hero)) {
-      const { image: source, ...rest } = hero
+      const { image: source, actions, ...rest } = hero
       const image = safeImage(source)
+      if ('actions' in hero && Array.isArray(actions)) rest.actions = actions.map(sanitizeAction)
       safe.hero = image === undefined ? rest : { ...rest, image }
     } else {
       safe.hero = hero

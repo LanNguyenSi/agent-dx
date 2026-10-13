@@ -83,7 +83,12 @@ before(async () => {
       'layout-page',
       'layout-false',
       'steer-fields',
-      'trusted-raw'
+      'trusted-raw',
+      'link-nav-bad',
+      'link-nav-ok',
+      'link-hero',
+      'link-hero-map',
+      'link-features'
     ].map((name) => [
       name,
       fs.readFileSync(path.join(out, `${name}.html`), 'utf8')
@@ -321,15 +326,96 @@ test('a layout of false is kept, so the page is written without the theme layout
   assert.equal(pageData('layout-false').frontmatter.layout, false)
 })
 
-test('head entries and link fields stay as typed, the two raw paths the docs name', () => {
+test('head entries stay as typed, the one raw path the docs name', () => {
   const page = pages['trusted-raw']
   const head = page.slice(0, page.indexOf('</head>'))
   assert.ok(head.includes('<meta name="trusted-head" content="kept">'), head)
   assert.ok(head.includes('<script>window.trustedhead=1;</script>'), head)
+  assertNoLiveMarkup(app(page), ['VPHero'])
+})
+
+// Every href in a rendered page, as the browser would read it.
+const section = (region, className) => {
+  const from = region.indexOf(`class="${className}`)
+  assert.ok(from > 0, `${className} not found`)
+  return region.slice(from)
+}
+const hrefsOf = (region) => [...region.matchAll(/\shref="([^"]*)"/g)].map((m) => m[1])
+const targetsOf = (region) => [...region.matchAll(/\starget="([^"]*)"/g)].map((m) => m[1])
+const relsOf = (region) => [...region.matchAll(/\srel="([^"]*)"/g)].map((m) => m[1])
+// What is left of a link that carried a script scheme: nothing reads as one.
+const assertNoScriptHref = (page, markers) => {
+  assertNoRaw(page, markers)
+  for (const href of hrefsOf(app(page))) {
+    const url = new URL(href.replaceAll('&amp;', '&'), 'https://site.invalid/base/page')
+    assert.ok(['https:', 'http:', 'mailto:'].includes(url.protocol), `${href} resolves to ${url.protocol}`)
+  }
+}
+
+test('a previous or next link with a script scheme is dropped, the text stays', () => {
+  const page = pages['link-nav-bad']
+  assertNoScriptHref(page, ['prevlink', 'nextlink', 'javascript:', 'JaVaScRiPt'])
+  assertNoLiveMarkup(app(page), ['VPDocFooter'])
+  const data = pageData('link-nav-bad').frontmatter
+  assert.deepEqual(data.prev, { text: 'Previous' })
+  assert.deepEqual(data.next, { text: 'Next' })
+})
+
+test('previous and next links that are relative or http(s) are kept', () => {
+  const page = pages['link-nav-ok']
+  const footer = app(page)
+  assertNoLiveMarkup(footer, ['VPDocFooter'])
+  assert.match(footer, /href="\/nav\/one(?:\.html)?"/)
+  assert.match(footer, /href="https:\/\/example\.com\/next\?a=1&amp;b=2"/)
+  assert.deepEqual(pageData('link-nav-ok').frontmatter.next, { text: 'Next', link: 'https://example.com/next?a=1&b=2' })
+})
+
+test('a hero action link with a script scheme is dropped, a safe action keeps link, target and rel; an odd target and rel are dropped', () => {
+  const page = pages['link-hero']
+  assertNoScriptHref(page, ['heroaction', 'heroodd', 'herotab', 'javascript:', 'data:text'])
   const home = app(page)
-  assertNoLiveMarkup(home, ['VPHero', 'VPFeatures'])
-  assert.match(home, /<a class="VPLink link[^"]*" href="javascript:featurelink"[^>]* rel="trustedrel"/)
-  assert.match(home, /<a class="VPButton medium brand" href="javascript:heroaction" target="_self"/)
+  assertNoLiveMarkup(home, ['VPHero'])
+  assert.match(home, /<a class="VPButton medium alt" href="\/nav\/one(?:\.html)?" target="_blank" rel="noopener nofollow"/)
+  const actionsHtml = home.slice(home.indexOf('class="actions"'), home.indexOf('class="image"') > 0 ? home.indexOf('class="image"') : undefined)
+  assert.equal(actionsHtml.match(/<(?:a|button)\s/g).length, 4)
+  assert.deepEqual(targetsOf(actionsHtml), ['_self', '_blank'])
+  assert.deepEqual(relsOf(actionsHtml), ['noopener nofollow'])
+  assert.equal(hrefsOf(actionsHtml).length, 1)
+  const actions = pageData('link-hero').frontmatter.hero.actions
+  assert.deepEqual(actions[0], { theme: 'brand', text: 'Script', target: '_self' })
+  assert.deepEqual(actions[1], { theme: 'alt', text: 'Kept', link: '/nav/one', target: '_blank', rel: 'noopener nofollow' })
+  assert.deepEqual(actions[2], { theme: 'alt', text: 'Odd target' })
+  assert.deepEqual(actions[3], { theme: 'alt', text: 'Bypass' })
+})
+
+test('hero actions given as a mapping are dropped, not rendered through the theme', () => {
+  const page = pages['link-hero-map']
+  assertNoRaw(page, ['actionmapfirst', 'javascript:'])
+  assert.doesNotMatch(app(page), /class="actions"/)
+  assert.equal(pageData('link-hero-map').frontmatter.hero.actions, undefined)
+})
+
+test('a feature link with a script scheme, in every spelling a browser might read, is dropped', () => {
+  const page = pages['link-features']
+  assertNoScriptHref(page, ['featurelink', 'featurevb', 'featuredata', 'featureblob', 'featureupper', 'featurenl', 'featuretab', 'featurespace', 'featurelist', 'featureobject', 'featureschemerel', 'featurebackslash', 'evil.example', 'vbscript', 'javascript:', 'JaVaScRiPt'])
+  const home = app(page)
+  assertNoLiveMarkup(home, ['VPFeatures', 'VPFeature'])
+  const cards = section(home, 'VPFeatures')
+  // The percent escape and the entity start no scheme: they are relative paths on this site, written escaped.
+  assert.deepEqual(hrefsOf(cards), [
+    'https://example.com/kept',
+    '/nav/one.html',
+    '/javascript&amp;colon;featureentity.html',
+    '/%6Aavascript:featurepercent.html'
+  ])
+  assert.deepEqual(targetsOf(cards), ['_self', '_blank'])
+  assert.deepEqual(relsOf(cards), ['noreferrer'])
+  const features = pageData('link-features').frontmatter.features
+  assert.equal(features.length, 17)
+  assert.deepEqual(features[0], { title: 'Script', target: '_self' })
+  assert.deepEqual(features[1], { title: 'Kept', link: 'https://example.com/kept', target: '_blank', rel: 'noreferrer' })
+  assert.deepEqual(features[2], { title: 'Odd rel', link: '/nav/one' })
+  for (const i of [3, 4, 5, 6, 7, 8, 9, 12, 13, 14, 15, 16]) assert.equal('link' in features[i], false, JSON.stringify(features[i]))
 })
 
 test('the page data the client hydrates from holds the same escaped frontmatter', () => {
