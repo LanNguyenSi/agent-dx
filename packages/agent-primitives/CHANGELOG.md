@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `worktree remove --delete-branch` now adds a warning when it deletes a
+  branch whose merge verdict is `no` or `unknown` (without
+  `--require-merged`, or with `--force` overriding it), naming the branch,
+  the base and the verdict and pointing at `--require-merged`. Removal,
+  branch deletion and the exit status are unchanged (#488, task 42fd7fa6).
+
 - `hygiene`: `--base` and `--head` are resolved to commit SHAs once and
   the comparison starts at their merge-base (with `--staged`, the
   merge-base of `--base` and `HEAD`), so a symbolic base that moved
