@@ -372,6 +372,17 @@ test('a themed image keeps light and dark with the same rule, and nothing else',
   assert.deepEqual(safeImage({ src: '/a.png', light: '/l.png', dark: { src: '/d.png' } }), { src: '/a.png' })
 })
 
+test('an icon that is neither text nor an image object is dropped, the other keys stay', () => {
+  for (const icon of [null, 5, 0, true, false, ['a'], [], () => 1, Symbol('s')]) {
+    const out = sanitizeFrontmatter({ features: [{ title: 'T', details: 'D', icon, link: '/y' }] })
+    assert.deepEqual(out.features, [{ title: 'T', details: 'D', link: '/y' }], String(icon))
+    assert.equal('icon' in out.features[0], false)
+  }
+  // Text, a date and an image object are still icons.
+  assert.equal(sanitizeFrontmatter({ features: [{ icon: '<u>' }] }).features[0].icon, '&lt;u&gt;')
+  assert.deepEqual(sanitizeFrontmatter({ features: [{ icon: { src: '/i.png' } }] }).features[0].icon, { src: '/i.png' })
+})
+
 test('hero.image and an icon object are limited, other hero and feature keys stay', () => {
   const out = sanitizeFrontmatter({
     hero: { name: 'N', image: { src: '/h.png', onerror: 'x()' }, actions: [{ text: 'a', link: '/x', target: '_self' }] },
@@ -386,7 +397,7 @@ test('hero.image and an icon object are limited, other hero and feature keys sta
   assert.deepEqual(out.features[0], { title: 'T', icon: { src: '/i.png' }, link: '/y', linkText: 'more' })
   assert.deepEqual(out.features[1], { title: 'U', icon: { alt: 'u', light: { src: '/l.png' }, dark: '/d.png' } })
   assert.deepEqual(out.features[2], { title: 'V', icon: {} })
-  assert.deepEqual(out.features[3], { title: 'W', icon: '&lt;b&gt;' })
+  assert.deepEqual(out.features[3], { title: 'W' })
   assert.deepEqual(sanitizeFrontmatter({ hero: { image: 5 } }).hero, {})
   assert.deepEqual(sanitizeFrontmatter({ hero: { image: '/h.png?a=1&b=2' } }).hero, { image: '/h.png?a=1&b=2' })
 })
