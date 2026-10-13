@@ -32,6 +32,8 @@ every command.
 | `--plan <path>` | JSON file with one test command and a list of mutants, run against one shared baseline | none |
 | `--link <dirs>` | comma-separated extra directories to link into the `-i worktree` copy | none |
 | `--allow-outside` | allow `--file`/`--link` to resolve outside the containment root | off |
+| `--summary` | print one line per mutant and a totals line instead of the JSON envelope; see [Compact views](#compact-views---summary-and---print) | off |
+| `--print <fields>` | print only these comma-separated envelope fields as one JSON object; see [Compact views](#compact-views---summary-and---print) | off |
 
 ## Verdicts and --expect
 
@@ -2122,6 +2124,74 @@ whether `--file` was given explicitly or is derived from the patch.
   `cond && false` instead of `false`, `[a, b][1]` instead of `b`, or
   change a literal the code compares against (`.endsWith(".php")` to
   `.endsWith(".nophp")`).
+
+## Compact views: --summary and --print
+
+Callers that only need the verdict used to parse the JSON envelope with
+an ad-hoc script. Two flags replace that; both are views over the same
+result, so the envelope schema, the exit code and the saved full result
+(`result-full-*.json`, see [Output shape](output-shape.md)) are exactly
+what they are without the flag. Both work for a single probe and for
+`--plan`, take precedence over `-f`, are bounded by `-m` (see below for
+how), and are mutually exclusive.
+
+What a run that stops early prints, by case:
+
+- An argument or option error is raised before any probe work and prints
+  the JSON `usage_error` envelope with exit `2`, as for every other
+  command: an unknown `--print` field, `--summary` together with
+  `--print`, an invalid value, an invalid combination such as `--plan`
+  with `--pre`.
+- A refusal that names no mutant prints the `totals:` line (`total=0`)
+  and a `note:` line with the first warning or message: an unreadable
+  plan file, a single-probe `--file` outside the containment root.
+- A refusal or failure that concerns a mutant prints that mutant's
+  `not_run(...)` line, or `not_run` with the reason in `totals:`, and the
+  `totals:` line with `not_run=1`, and no `note:` line: a failing
+  baseline or a `--pre` failure (single and `--plan`), a `--plan` mutant
+  whose file lies outside the root.
+- `--print` prints its one JSON line in every case that is not an
+  argument error, with `null` for a field the run did not produce.
+
+They are flags on `probe` rather than a new `-f` value: `-f` is a global
+option shared by every command and `probe` is the only one with a
+per-mutant verdict to summarise, and `--print` needs an argument, which a
+format value cannot carry.
+
+`--summary` prints one line per mutant, fields separated by ` | `:
+
+```text
+<file>:<line> | <verdict> | expectation=<met|violated|-> | restored=<true|false|-> | failing=<first failing test line|-> | log=<path>
+totals: status=<status> [reason=<reason>] total=N killed=N survived=N inconclusive=N not_run=N met=N violated=N
+```
+
+`<file>` is relative to `-C` when it lies under it. A `--plan` line is
+prefixed with the mutant's `#<index>`. `<verdict>` is
+`mutation_probe.result` (`killed`, `survived`, `not_run`); a mutant that
+never reached a verdict shows its status instead, with the reason in
+parentheses (`not_run(pre_failed)`). `failing=` is the first line of the
+test's captured output tails that looks like a failing test (`FAIL`,
+`not ok`, `AssertionError`, a leading cross mark and similar), `-` when
+none does or the verdict is not `killed` (a survived mutant passed, so
+error-shaped output it printed is not a failing test); it is a heuristic over free text,
+because the envelope has no structured failing-test field. `log=` is the
+mutant run's log, or the baseline's when no mutant run happened. The cases above say what an early stop prints. `-m` bounds the mutant lines only: when they do not fit, the
+last ones are replaced by a marker line naming how many were omitted, and
+the `totals:` line is always printed (the `note:` line is dropped before
+the totals line if even those two do not fit).
+
+`--print <field,...>` prints one JSON object on one line, one key per
+requested field in the order given. A name is a top-level envelope field
+(`status`, `reason`, `logs`, `mutation_probe`, `test`, `plan`, ...) and a
+dotted path descends into objects (`mutation_probe.result`,
+`plan.summary`) and is read from the full result (what
+`result-full-*.json` holds), not from the `-m`-reduced envelope, so a
+field the JSON view shortened or cut still prints whole; only the
+printed line itself is bounded by `-m`. A top-level name outside the envelope's field list is a
+`usage_error` raised before the probe runs, naming the field and listing
+the known ones; a known field this run did not produce (for example
+`test` after a failing baseline) prints `null`, as does a dotted path
+that does not resolve.
 
 ## Result shape
 
