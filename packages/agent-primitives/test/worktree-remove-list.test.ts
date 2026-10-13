@@ -3704,6 +3704,24 @@ describe("untrustedFilesRefStore: the walk", () => {
     expect(untrustedFilesRefStore(dir)).toBeUndefined();
   });
 
+  it("refuses a directory that is refs itself, reached again below it", () => {
+    const dir = tree();
+    // An empty directory standing in for a bind mount of refs onto
+    // refs/remotes/self: nothing below it would give the loop away.
+    fs.mkdirSync(path.join(dir, "refs/remotes/self"));
+    const root = fs.lstatSync(path.join(dir, "refs"), { bigint: true });
+    const spy = fakeIdentity((p) =>
+      p.endsWith("refs/remotes/self") ? { dev: root.dev, ino: root.ino } : {},
+    );
+    try {
+      expect(untrustedFilesRefStore(dir)).toBe(
+        "refs/remotes/self is a directory already reached under another name",
+      );
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("refuses a directory on another device than refs", () => {
     const dir = tree();
     fs.mkdirSync(path.join(dir, "refs/remotes/mnt"));
