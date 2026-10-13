@@ -53,8 +53,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `default_branch_unresolved` and `list` reports the merge state as
   unknown. `list` measures the full remote-tracking ref and resolves the
   default base once per repository; the base it shows and `create` starts
-  from is git's unambiguous name for the ref (`origin/main`, or
-  `remotes/origin/main` where a local branch or tag of that name exists),
+  from is git's unambiguous name for the ref, read from the exact ref
+  rather than resolved as a name (`origin/main`, or `remotes/origin/main`
+  where a local branch or tag of that name exists),
   and when `origin/HEAD` is skipped `create` names `origin/HEAD is not set
   or not usable` as the reason. Normal layouts print and behave as before.
 - `patch`: a new command that replaces exact text in one or more files

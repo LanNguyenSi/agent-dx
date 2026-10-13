@@ -789,6 +789,60 @@ describe("worktree create: the default base in unusual layouts", () => {
     expect(git(target, ["rev-parse", "HEAD"]).trim()).toBe(f.mainSha);
   });
 
+  it("branches from the remote-tracking ref when a local branch is spelled refs/remotes/origin/main", async () => {
+    const f = makeFixture();
+    // A ref of this name makes `refs/remotes/origin/main` ambiguous for
+    // every command that resolves it as a name, with origin/HEAD set.
+    git(f.repo, [
+      "update-ref",
+      "refs/heads/refs/remotes/origin/main",
+      commitOn(f, f.mainSha),
+    ]);
+    const target = path.join(f.base, "wt-spelled");
+    const r = await run(f.work, [
+      "--repo",
+      f.repo,
+      "--branch",
+      "feat/spelled",
+      "--no-fetch",
+      "--path",
+      target,
+    ]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.status).toBe("ok");
+    expect(r.json.base).toMatchObject({
+      ref: "origin/main",
+      sha: f.mainSha,
+      source: "default",
+    });
+    expect(git(target, ["rev-parse", "HEAD"]).trim()).toBe(f.mainSha);
+  });
+
+  it("branches from the remote-tracking ref when a local branch origin/main and a tag remotes/origin/main both exist", async () => {
+    const f = makeFixture();
+    const other = commitOn(f, f.mainSha);
+    git(f.repo, ["branch", "origin/main", other]);
+    git(f.repo, ["tag", "remotes/origin/main", other]);
+    const target = path.join(f.base, "wt-two-shadows");
+    const r = await run(f.work, [
+      "--repo",
+      f.repo,
+      "--branch",
+      "feat/two-shadows",
+      "--no-fetch",
+      "--path",
+      target,
+    ]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.status).toBe("ok");
+    // Neither short spelling names the ref alone, so the full ref is shown.
+    expect(r.json.base).toMatchObject({
+      ref: "refs/remotes/origin/main",
+      sha: f.mainSha,
+    });
+    expect(git(target, ["rev-parse", "HEAD"]).trim()).toBe(f.mainSha);
+  });
+
   it("says why origin/HEAD was skipped when it names a local branch and a fallback is used", async () => {
     const f = makeFixture();
     git(f.repo, [

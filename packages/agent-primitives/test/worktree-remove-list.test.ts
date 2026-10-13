@@ -1722,6 +1722,29 @@ describe("worktree list: the default base", () => {
     expect(entry?.merged.merged).not.toBe("yes");
   });
 
+  it("shows and measures origin/main when a local branch is spelled refs/remotes/origin/main", async () => {
+    const f = makeFixture();
+    const ahead = addWorktree(f, "aheadb", path.join(f.base, "wt-ahead"));
+    commitHere(ahead, "ahead.txt", "one commit ahead");
+    // A branch of this name makes the full ref ambiguous for every command
+    // that resolves it as a name; git's listing of the exact ref is not.
+    git(f.repo, [
+      "update-ref",
+      "refs/heads/refs/remotes/origin/main",
+      commitOn(f, f.mainSha),
+    ]);
+    const r = await cli(f.work, ["list", "--repo", f.repo]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.status).toBe("ok");
+    const entries = r.json.worktrees as Record<string, any>[];
+    expect(entries.every((w) => w.base === "origin/main")).toBe(true);
+    expect(entries.find((w) => w.path === ahead)).toMatchObject({
+      ahead: 1,
+      behind: 0,
+    });
+    expect(entries[0].merged).toMatchObject({ merged: "yes" });
+  });
+
   it.each([
     ["fails", "echo 'fatal: injected abbrev failure' >&2; exit 128"],
     ["prints nothing", "exit 0"],
@@ -1733,7 +1756,7 @@ describe("worktree list: the default base", () => {
         f,
         "git-no-abbrev",
         `for a in "$@"; do
-  case "$a" in --abbrev-ref*) ${action};; esac
+  case "$a" in '--format=%(refname:short)') ${action};; esac
 done`,
       );
       const r = await cli(f.work, ["list", "--repo", f.repo], { PATH });

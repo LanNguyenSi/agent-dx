@@ -311,16 +311,19 @@ function defaultBaseOf(
   const resolved = resolveRemoteBase(cwd, fullRef);
   if (!resolved.ok) return undefined;
   if (resolved.base.remote !== "origin") return undefined;
-  // Strict mode only names a ref by a spelling that no other ref of the
-  // repository matches, so a local branch or tag called `origin/main` makes
-  // it `remotes/origin/main`. Should git not answer, the full ref is shown.
-  const short = gitText(cwd, [
-    "rev-parse",
-    "--abbrev-ref=strict",
+  // `%(refname:short)` is git's unambiguous abbreviation of exactly this
+  // ref: a local branch or tag called `origin/main` makes it
+  // `remotes/origin/main`. Unlike `rev-parse --abbrev-ref`, it does not
+  // resolve a name, so a ref spelled `refs/heads/refs/remotes/origin/main`
+  // cannot make the answer ambiguous. Should git not answer, the full ref is
+  // shown.
+  const listed = gitText(cwd, [
+    "for-each-ref",
+    "--format=%(refname:short)",
     resolved.base.ref,
   ]);
   const display =
-    short !== undefined && short.length > 0 ? short : resolved.base.ref;
+    listed !== undefined && listed.length > 0 ? listed : resolved.base.ref;
   return {
     ref: display,
     fullRef: resolved.base.ref,
@@ -365,7 +368,9 @@ export function resolveDefaultBase(cwd: string): DefaultBase | undefined {
  * out, because `--remotes` would follow it to a local branch and count that
  * branch's commits as pushed, although deleting the branch leaves them on no
  * ref at all. Fails (non-zero status or `error`) when the refs cannot be
- * listed, so the caller treats the state as unknown.
+ * listed, so the caller treats the state as unknown. `error` counts even
+ * with a status of 0: a listing that outgrows the output limit of `runGit`
+ * comes back cut short, with `error` set, when git has already exited.
  */
 export function unpushedCommits(cwd: string): GitRunResult {
   const refs = git(cwd, [
