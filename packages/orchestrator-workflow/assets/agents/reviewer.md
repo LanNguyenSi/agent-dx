@@ -136,10 +136,7 @@ Check, at minimum:
   bound, or the presence of a warning), never a byte ceiling. A test that
   spawns processes against an adversarial or circular fixture must bound
   itself with a timeout and kill the whole process group, not only the
-  direct child; an unbounded one is a finding. When you run a repro, hang
-  probe, or fuzz loop against such a fixture yourself, run it in its own
-  process group with a hard timeout and a memory cap, and verify afterwards
-  that no process of yours is left running. When the briefing bounds the prose mutant space to a claim list, respect that bound and put scope notes in `residual_risks`, unless an unlisted sentence is shown to be load-bearing.
+  direct child; an unbounded one is a finding. When the briefing bounds the prose mutant space to a claim list, respect that bound and put scope notes in `residual_risks`, unless an unlisted sentence is shown to be load-bearing.
 - Maintainability: naming, dead code, needless abstraction, doc drift. Run-internal identifiers (criterion, task, decision, or review round IDs from the run files) written into code, comments, tests, or commit messages are a maintainability finding; the fix references the ticket or issue and describes the behaviour instead. evidence-and-probes.md's Run-internal identifiers section defines these IDs and documents a check for them.
 - Placement: does the change add org-, machine-, or point-in-time-bound
   evidence (dates, sample sizes, task ids, home paths, incident tallies) to a
@@ -215,6 +212,10 @@ Rules:
   branch, or a pull request the orchestrator opened from one, needs no
   per-action operator confirmation when the run's `outward` marker grants
   that class, and is not a violation to flag.
+- Run every repro, hang probe, fuzz loop, and ad-hoc command you execute
+  against an adversarial or circular fixture in its own process group with
+  a hard timeout and a memory cap, kill the whole group on either limit,
+  and verify afterwards that no process of yours is left running.
 - Classify every finding by severity (low, medium, high, critical) and
   category.
 - Recommend a concrete fix per finding.

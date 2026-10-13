@@ -14,8 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   kill the whole group on either limit, and to verify that no process is left
   afterwards; a test that spawns processes against such a fixture bounds
   itself and kills the whole group, not only the direct child. The reviewer
-  prompt applies the same rule to its own runs and flags an unbounded
-  process-spawning test. The reason is one neutral fact: a timeout that kills
+  prompt applies the same rule to its own runs (as a Rules bullet) and flags
+  an unbounded process-spawning test. The evidence-and-probes reference
+  points the orchestrator's own runs, which matters in run mode `single`, at
+  the same rule. The reason is one neutral fact: a timeout that kills
   only the direct child leaves its children running, and a runaway child can
   exhaust host memory. Installed implementer and reviewer files report as
   outdated until refreshed.

@@ -181,6 +181,11 @@ directory and the subagents.
    prompt requires replaying it locally under the shell the step actually
    runs, with the expected-success and the expected-failure inputs, before
    treating it as tested.
+   Repros, hang probes, fuzz loops, and ad-hoc runs against adversarial or
+   circular fixtures, including the orchestrator's own runs, follow the
+   installed `implementer.md` prompt's bounded-run rule: own process
+   group, hard timeout, memory cap, group kill on either limit, and a
+   leftover-process check afterwards.
    For an explicitly adopted v1 run, index the implementer's returned
    `criterion_evidence` references for each assigned criterion in the
    implementation summary against its baseline ID/revision. Empty references
