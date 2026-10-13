@@ -124,7 +124,6 @@ function commentBlock(state, startLine, endLine, silent) {
 // ends only grow, so a binary search finds it; walking the lines one by one
 // would cost the distance to a far closer for each opener that has one.
 function lineEndingAfter(state, from, endLine, close) {
-  if (state.eMarks[endLine - 1] < close) return -1
   let lo = from
   let hi = endLine - 1
   while (lo < hi) {
@@ -132,7 +131,7 @@ function lineEndingAfter(state, from, endLine, close) {
     if (state.eMarks[mid] >= close) hi = mid
     else lo = mid + 1
   }
-  return lo
+  return state.eMarks[lo] >= close ? lo : -1
 }
 
 // The first "-->" at or after `from`, or -1. A page with many openers and no
