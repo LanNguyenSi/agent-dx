@@ -4,6 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createSite, createTitleReader, githubBase, markdownBase } from './site-helpers.mjs'
 import { escapeDescriptionMeta, transformPageData } from './raw-output.mjs'
+import { scriptSafePageData } from './script-safe.mjs'
 
 // The site is built from the Markdown in place. srcDir is the repository
 // root, and only the two playbooks plus site/index.md are pages.
@@ -60,6 +61,7 @@ export default defineConfig({
   // up from the page file. Resolve them from this config file instead.
   vite: {
     plugins: [
+      scriptSafePageData(),
       {
         name: 'agent-dx-resolve-vue-from-site',
         enforce: 'pre',

@@ -89,7 +89,10 @@ before(async () => {
       'link-nav-ok',
       'link-hero',
       'link-hero-map',
-      'link-features'
+      'link-features',
+      'script-text',
+      'script-home',
+      'icon-kinds'
     ].map((name) => [
       name,
       fs.readFileSync(path.join(out, `${name}.html`), 'utf8')
@@ -579,4 +582,85 @@ test('a build refuses an include directive and does not run the included frontma
     }
   }
   assert.equal(globalThis[marker], undefined)
+})
+
+// Text that would end the script block of the generated component: every
+// spelling of a closing script tag, plus an opening comment and an opening
+// script tag. Each page must build, and show the text as written.
+const hostileText = (m) => `${m.toUpperCase()} </script> ${m}1 </SCRIPT > ${m}2 </script ${m}3 <!-- ${m}4 <script ${m}5`
+const asShown = (text) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+// The script tags VitePress writes itself: every one is opened and closed once.
+const assertOnlyOwnScripts = (page) => {
+  assert.equal([...page.matchAll(/<\/script/gi)].length, [...page.matchAll(/<script[\s>]/gi)].length)
+}
+
+test('a closing script tag in a title, description or heading builds and shows as written', () => {
+  const page = pages['script-text']
+  const title = hostileText('t')
+  const description = hostileText('d')
+  assert.ok(page.includes(`<title>${asShown(title)} | hardening fixture</title>`), page.slice(0, 700))
+  assert.ok(page.includes(`<meta name="description" content="${asShown(description)}">`))
+  const data = pageData('script-text')
+  assert.equal(data.title, title)
+  assert.equal(data.description, description)
+  assert.equal(data.frontmatter.title, title)
+  assert.equal(data.frontmatter.description, description)
+  const main = content(page)
+  for (const heading of ['H </script> h1', 'a </script> b1', 'a </SCRIPT > b2', 'a </script b3', 'a <!-- b4 <script b5']) {
+    assert.ok(main.includes(`>${asShown(heading)} <a`), `${heading}: ${main}`)
+  }
+  assertOnlyOwnScripts(page)
+})
+
+test('a closing script tag in prev and next text shows as written', () => {
+  const page = pages['script-text']
+  const region = app(page)
+  assert.ok(region.includes(asShown('P </script> p1 </SCRIPT > p2 </script p3 <!-- p4 <script p5')))
+  assert.ok(region.includes(asShown('N </script> n1 </SCRIPT > n2 </script n3 <!-- n4 <script n5')))
+  const data = pageData('script-text').frontmatter
+  assert.equal(data.prev.text, 'P &lt;/script&gt; p1 &lt;/SCRIPT &gt; p2 &lt;/script p3 &lt;!-- p4 &lt;script p5')
+  assert.equal(data.next.text, 'N &lt;/script&gt; n1 &lt;/SCRIPT &gt; n2 &lt;/script n3 &lt;!-- n4 &lt;script n5')
+})
+
+test('a closing script tag in a hero and in features shows as written', () => {
+  const page = pages['script-home']
+  const home = app(page)
+  assertNoLiveMarkup(home, ['VPHero', 'VPFeatures'])
+  for (const marker of ['HN hn', 'HT ht', 'HG hg', 'FT ft', 'FD fd', 'FI fi']) {
+    const [head, tail] = marker.split(' ')
+    const text = `${head} </script> ${tail}1 </SCRIPT > ${tail}2 </script ${tail}3 <!-- ${tail}4 <script ${tail}5`
+    assert.ok(home.includes(asShown(text)), `${marker}: ${home}`)
+  }
+  assertOnlyOwnScripts(page)
+})
+
+test('the local search index builds with the same pages and holds the heading text', async () => {
+  const searchOut = path.join(work, 'search-out')
+  process.env.AGENT_DX_HARDENING_SEARCH = '1'
+  process.env.AGENT_DX_HARDENING_CACHE = path.join(work, 'search-cache')
+  try {
+    await build(root, { outDir: searchOut })
+  } finally {
+    delete process.env.AGENT_DX_HARDENING_SEARCH
+    process.env.AGENT_DX_HARDENING_CACHE = path.join(work, 'cache')
+  }
+  const chunks = path.join(searchOut, 'assets', 'chunks')
+  const index = fs.readdirSync(chunks).find((f) => f.startsWith('@localSearchIndexroot.'))
+  assert.ok(index, fs.readdirSync(chunks).join())
+  const text = fs.readFileSync(path.join(chunks, index), 'utf8')
+  assert.ok(text.includes('a &lt;/SCRIPT &gt; b2'), 'the heading text is in the index')
+  assert.ok(text.includes('H &lt;/script&gt; h1'))
+  assert.doesNotMatch(text, /<\/script/i)
+})
+
+test('an icon that is null, a number, a boolean or a list is dropped and the page builds', () => {
+  const page = pages['icon-kinds']
+  const home = app(page)
+  assertNoLiveMarkup(home, ['VPFeatures'])
+  const titles = [...home.matchAll(/<h2 class="title"[^>]*>([^<]*)<\/h2>/g)].map((m) => m[1])
+  assert.deepEqual(titles, ['iconnull', 'iconnumber', 'iconbool', 'iconlist', 'iconstring', 'iconobject'])
+  assert.equal(tagsOf(home).filter((t) => t.name === 'img').length, 1)
+  assert.match(home, /<div class="icon"[^>]*>✓<\/div>/)
+  const icons = pageData('icon-kinds').frontmatter.features.map((f) => f.icon)
+  assert.deepEqual(icons, [undefined, undefined, undefined, undefined, '✓', { src: '/missing-kinds.png' }])
 })

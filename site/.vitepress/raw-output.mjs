@@ -92,7 +92,9 @@ export function escapeDescriptionMeta(html, _file, { description }) {
 //   - prev and next: the footer link text, as a string or as { text, link },
 //     written with v-html.
 //   - hero name, text and tagline; features title, details and a string icon,
-//     all written with v-html.
+//     all written with v-html. An icon that is neither a string nor an
+//     object (null, a number, a boolean, a list) is dropped; the theme would
+//     crash on null.
 //   - features: an array. Any other shape (a YAML mapping, which Vue also
 //     iterates) is dropped, so a field cannot skip the item checks.
 //   - hero.image and an icon given as an object: the theme spreads the whole
@@ -272,10 +274,16 @@ export function safeImage(image) {
   return safe
 }
 
+// A feature icon the theme can draw: text (a string, or a date as its ISO
+// text) or an image object. The theme tests typeof icon === 'object' and then
+// reads icon.wrap, so null crashes it; a number, a boolean and a list are no
+// icon either. Anything else is undefined, which the caller drops.
+const featureIcon = (icon) => (isRecord(icon) ? safeImage(icon) : typeof icon === 'string' || isDate(icon) ? asText(icon) : undefined)
+
 const sanitizeFeature = (feature) => {
   const item = withSafeLink(withText(feature, ['title', 'details']), { target: true })
   if (!isRecord(item)) return item
-  const icon = isRecord(item.icon) ? safeImage(item.icon) : asText(item.icon)
+  const icon = featureIcon(item.icon)
   const { icon: _drop, ...rest } = item
   return icon === undefined ? rest : { ...rest, icon }
 }
