@@ -260,15 +260,15 @@ that would replace nothing is `missing`.
   that git opens as a git directory although it passes neither the layout
   test nor the identity lookup: the layout test is git's own, wider where
   it differs, and the one known case is a `commondir` file whose content
-  is not valid UTF-8. A configuration value of gigabytes (a sparse file
-  counts) in a file git reads while it sets up: the repository's
-  `config`, a file its `include.path` names, or `config.worktree` under
-  `extensions.worktreeConfig`. A NUL stops git only where it expects a
-  section or key, not inside a value, which it takes in at its parser's
-  pace, a few hundred megabytes per second; the bound on git is then the
-  3 seconds of the identity lookup, so on the order of a gigabyte of
-  memory before it is stopped. And the window between the check and
-  the write.
+  is not valid UTF-8. A large configuration in a file git reads while it
+  sets up: the repository's `config`, a file its `include.path` names, or
+  `config.worktree` under `extensions.worktreeConfig`. A single value of
+  gigabytes (a sparse file counts; a NUL stops git only where it expects
+  a section or key, not inside a value) or many small entries grow git
+  at its parser's pace, which reached about 1 GiB per second for many
+  small entries on a current Mac. The bound is the 3 seconds of the
+  identity lookup, so a few gigabytes of memory before git is stopped.
+  And the window between the check and the write.
 - Refused although git would not object: a `-C` inside a submodule (or
   another repository) nested in a work tree that is checked out inside
   its bare repository, since the submodule's own git directory is not

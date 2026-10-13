@@ -3345,6 +3345,68 @@ describe("patch: git's identity lookup is bounded", () => {
     60_000,
   );
 
+  it("reads the root's .git file up to git's 1 MiB limit: a padded gitdir path stays the root's own, a file past the limit names no git directory", async () => {
+    // `p/w/.git` names `..`, so `p` is the root's own git directory. Line
+    // breaks after the path do not count (git strips them), but git
+    // refuses a .git file over 1 MiB, and then `p` is a git directory
+    // above the root like any other.
+    const p = gitDirLayout(path.join(tmpDir(), "p"));
+    const w = path.join(p, "w");
+    fs.mkdirSync(w);
+    fs.writeFileSync(path.join(w, "a.txt"), "a\n");
+    const cases = [
+      ["100 KiB", 100 * 1024, "would_write"],
+      ["over 1 MiB", 1024 * 1024 + 4096, "usage_error"],
+    ] as const;
+    for (const [size, bytes, status] of cases) {
+      fs.writeFileSync(
+        path.join(w, ".git"),
+        "gitdir: ..\n" + "\n".repeat(bytes - "gitdir: ..\n".length),
+      );
+      for (const [label, env] of [
+        ["git", GIT_CHILD_ENV],
+        ["no git", NO_GIT_ENV()],
+      ] as const) {
+        const { out } = await patchInChild(
+          {
+            cwd: w,
+            edits: [{ file: "a.txt", old: "a", new: "b" }],
+            dryRun: true,
+            gitTimeoutMs: 3000,
+          },
+          env,
+        );
+        expect(out.status, `${size}, ${label}`).toBe(status);
+        if (status === "usage_error") {
+          expect(out.reason, `${size}, ${label}`).toBe("git_dir");
+        }
+      }
+    }
+    expect(read(w, "a.txt")).toBe("a\n");
+  }, 60_000);
+
+  it("reads a commondir as git does: trailing line breaks dropped, then the path ends at a NUL", () => {
+    // `D` has a HEAD and a commondir naming `../C`, which holds objects and
+    // refs, so git opens `D` as a git directory. The bytes after the NUL
+    // are not part of the path for git and must not hide `C` from the check.
+    const root = repo({ "D/f.txt": "f\n" });
+    fs.writeFileSync(path.join(root, "D", "HEAD"), "ref: refs/heads/main\n");
+    fs.writeFileSync(
+      path.join(root, "D", "commondir"),
+      Buffer.concat([
+        Buffer.from("../C"),
+        Buffer.from([0]),
+        Buffer.from("junk\r\n"),
+      ]),
+    );
+    fs.mkdirSync(path.join(root, "C", "objects"), { recursive: true });
+    fs.mkdirSync(path.join(root, "C", "refs"), { recursive: true });
+    const r = run(root, [{ file: "D/f.txt", old: "f", new: "g" }]);
+    expect(r.status).toBe("usage_error");
+    expect(r.reason).toBe("git_dir");
+    expect(read(root, "D/f.txt")).toBe("f\n");
+  });
+
   it.skipIf(process.platform === "win32")(
     "a caller's GIT_OBJECT_DIRECTORY does not reach git's identity lookup, so git's discovery ends where the check modelled it",
     async () => {

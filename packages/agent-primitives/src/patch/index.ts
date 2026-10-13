@@ -687,7 +687,16 @@ function commonDirOf(dir: string, strict: boolean): string | undefined {
   if (content === undefined || content.length === 0) {
     return strict ? undefined : dir;
   }
-  const named = content.toString("utf8").replace(/[\r\n]+$/, "");
+  // As `get_common_dir_noenv`: trailing CR and LF go first, then the path
+  // ends at the first NUL (git hands it on as a C string).
+  let end = content.length;
+  while (end > 0 && (content[end - 1] === 0x0a || content[end - 1] === 0x0d)) {
+    end--;
+  }
+  let bytes = content.subarray(0, end);
+  const nul = bytes.indexOf(0);
+  if (nul >= 0) bytes = bytes.subarray(0, nul);
+  const named = bytes.toString("utf8");
   const resolved = physicalPath(dir, named);
   if (resolved !== undefined) return resolved;
   return strict ? undefined : path.resolve(dir, named);

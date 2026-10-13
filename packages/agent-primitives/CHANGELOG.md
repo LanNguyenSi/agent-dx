@@ -99,7 +99,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `<repo>/.git/hooks` made a repository of its own. A `commondir` path
   and a `.git` file's `gitdir:` path are resolved by the filesystem, as
   git resolves them (a symlink before a `..` is followed first), never
-  by folding the path lexically. git's identity lookup runs with the
+  by folding the path lexically, and a `commondir` path ends at its
+  first NUL as it does for git. git's identity lookup runs with the
   discovery variables (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`,
   `GIT_OBJECT_DIRECTORY`, `GIT_CEILING_DIRECTORIES`,
   `GIT_DISCOVERY_ACROSS_FILESYSTEM`) removed from its environment, for
