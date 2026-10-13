@@ -2446,6 +2446,26 @@ describe("remove --delete-branch warns about a branch it deletes unmerged (#488)
     expect(warnsUnmerged(r.json.warnings)).toBe(false);
   });
 
+  it("warns when --force overrides --require-merged", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    const r = await cli(
+      f.work,
+      ["remove", wt, "--delete-branch", "--require-merged", "--force"],
+      { PATH: ghStub(f, "[]") },
+    );
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.merged).toMatchObject({ merged: "no" });
+    expect(r.json.branch.deleted).toBe(true);
+    expect(
+      r.json.warnings.some(
+        (w: string) =>
+          w.includes("deleted branch hotfix/one") &&
+          w.includes("--force overrode --require-merged"),
+      ),
+    ).toBe(true);
+  });
+
   it("does not warn when the branch is kept", async () => {
     const f = makeFixture();
     const { wt } = makeHotfix(f);

@@ -356,15 +356,19 @@ export async function removeWorktree(
               ? `deleted ${entry.branch}`
               : `git branch -D ${entry.branch} failed`,
       };
-      if (ok && merged !== null && o.requireMerged !== true) {
+      if (ok && merged !== null) {
         const where = base?.label ?? "the default branch";
+        const hint =
+          o.requireMerged === true
+            ? "--force overrode --require-merged"
+            : "pass --require-merged to refuse instead";
         if (merged.merged === "no") {
           warnings.push(
-            `deleted branch ${entry.branch}, which is not merged into ${where} (${merged.via}: ${merged.reason}); pass --require-merged to refuse instead`,
+            `deleted branch ${entry.branch}, which is not merged into ${where} (${merged.via}: ${merged.reason}); ${hint}`,
           );
         } else if (merged.merged === "unknown") {
           warnings.push(
-            `deleted branch ${entry.branch}, but whether it is merged into ${where} is unknown (${merged.reason}); pass --require-merged to refuse instead`,
+            `deleted branch ${entry.branch}, but whether it is merged into ${where} is unknown (${merged.reason}); ${hint}`,
           );
         }
       }
