@@ -1341,3 +1341,101 @@ describe("drift CLI", () => {
     expect(parsed.counts).toEqual({ removed: 3, sites: 5, allowlisted: 5 });
   });
 });
+
+// ---------------------------------------------------------------------
+// A symbolic --base that moved after the branch point.
+// ---------------------------------------------------------------------
+describe("drift (symbolic base that moved after the branch point)", () => {
+  /** A repo whose `origin/master` remote-tracking ref gained a declaration
+   * after `feat` branched off; `feat` lives in a linked worktree and only
+   * adds a note that mentions the name. */
+  function buildMovedBaseFixture(): {
+    worktree: string;
+    branchPoint: string;
+    movedTip: string;
+  } {
+    const parent = makeTmpDir();
+    const bare = path.join(parent, "origin.git");
+    const main = path.join(parent, "main");
+    const worktree = path.join(parent, "wt");
+    fs.mkdirSync(bare);
+    git(bare, ["init", "-q", "--bare", "-b", "master"]);
+    fs.mkdirSync(main);
+    git(main, ["init", "-q", "-b", "master"]);
+    git(main, ["config", "user.email", "test@example.com"]);
+    git(main, ["config", "user.name", "test"]);
+    git(main, ["config", "diff.noprefix", "false"]);
+    git(main, ["config", "diff.mnemonicPrefix", "false"]);
+    git(main, ["config", "core.autocrlf", "false"]);
+    git(main, ["remote", "add", "origin", bare]);
+    writeFile(main, "src/a.ts", "export function keep() {}\n");
+    const branchPoint = commit(main, "base");
+    git(main, ["push", "-q", "origin", "HEAD:master"]);
+    git(main, ["fetch", "-q", "origin"]);
+    git(main, [
+      "worktree",
+      "add",
+      "-q",
+      "-b",
+      "feat",
+      worktree,
+      "origin/master",
+    ]);
+    writeFile(worktree, "notes.md", "see addedLater in these notes\n");
+    commit(worktree, "feat");
+    writeFile(
+      main,
+      "src/a.ts",
+      "export function keep() {}\nexport function addedLater() {}\n",
+    );
+    const movedTip = commit(main, "master adds addedLater");
+    git(main, ["push", "-q", "origin", "HEAD:master"]);
+    git(main, ["fetch", "-q", "origin"]);
+    return { worktree, branchPoint, movedTip };
+  }
+
+  it("reports the same result for the ref and for its merge-base SHA", async () => {
+    const { worktree, branchPoint, movedTip } = buildMovedBaseFixture();
+    const byRef = await drift({
+      cwd: worktree,
+      base: "origin/master",
+      head: "HEAD",
+    });
+    const bySha = await drift({
+      cwd: worktree,
+      base: branchPoint,
+      head: "HEAD",
+    });
+    expect(byRef.removedIdentifiers).toEqual([]);
+    expect(byRef.sites).toEqual([]);
+    expect(byRef.status).toBe("ok");
+    expect(byRef.counts).toEqual(bySha.counts);
+    expect(byRef.status).toBe(bySha.status);
+    expect(byRef.baseSha).toBe(movedTip);
+    expect(byRef.mergeBase).toBe(branchPoint);
+    expect(bySha.baseSha).toBe(branchPoint);
+    expect(bySha.mergeBase).toBe(branchPoint);
+  });
+
+  it("names the resolved SHAs in the CLI envelope", async () => {
+    const { worktree, branchPoint, movedTip } = buildMovedBaseFixture();
+    const run = await spawnCli([
+      "-C",
+      worktree,
+      "drift",
+      "--base",
+      "origin/master",
+      "--head",
+      "HEAD",
+    ]);
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout) as Record<string, unknown>;
+    expect(parsed.base).toBe("origin/master");
+    expect(parsed.base_sha).toBe(movedTip);
+    expect(parsed.merge_base).toBe(branchPoint);
+    expect(parsed.head_sha).toBe(
+      gitOutput(worktree, ["rev-parse", "HEAD"]).trim(),
+    );
+    expect(parsed.counts).toEqual({ removed: 0, sites: 0, allowlisted: 0 });
+  });
+});

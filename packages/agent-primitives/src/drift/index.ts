@@ -1,6 +1,12 @@
 import { UsageError } from "../envelope.js";
 import { findGitRoot } from "../probe/containment.js";
-import { diffText, grepIdentifier, revExists, showFile } from "./git.js";
+import {
+  diffText,
+  grepIdentifier,
+  mergeBase,
+  resolveCommit,
+  showFile,
+} from "./git.js";
 import {
   parseRemovedIdentifiers,
   type RemovedIdentifier,
@@ -66,6 +72,14 @@ export interface DriftResult {
   status: DriftStatus;
   base: string;
   head: string;
+  /** The commit `base` resolved to. */
+  baseSha: string;
+  /** The commit `head` resolved to. */
+  headSha: string;
+  /** The commit the diff actually started from: the merge-base of
+   * `baseSha` and `headSha`. Equal to `baseSha` when `base` is an ancestor
+   * of `head`. */
+  mergeBase: string;
   removedIdentifiers: RemovedIdentifier[];
   sites: DriftSite[];
   allowlisted: DriftSite[];
@@ -198,17 +212,32 @@ export async function drift(options: DriftOptions): Promise<DriftResult> {
   // grep call here, alongside the diff and show calls that already are
   // root-relative, keeps every path in this module root-relative,
   // uniformly.
-  if (!revExists(gitRoot, options.base)) {
+  const baseSha = resolveCommit(gitRoot, options.base);
+  if (baseSha === undefined) {
     throw new UsageError(`drift: --base revision not found: ${options.base}`);
   }
-  if (!revExists(gitRoot, options.head)) {
+  const headSha = resolveCommit(gitRoot, options.head);
+  if (headSha === undefined) {
     throw new UsageError(`drift: --head revision not found: ${options.head}`);
   }
 
-  const diffResult = diffText(gitRoot, options.base, options.head);
+  // Both revisions are resolved to commits once, and the diff runs from
+  // their merge-base, so a symbolic base (a remote-tracking ref that moved
+  // after the branch point) reports the same removals as the SHA it
+  // resolves to. A plain `base..head` diff would also count every change
+  // the base side made since the branch point as a removal on the head side.
+  let diffBase = mergeBase(gitRoot, baseSha, headSha);
+  if (diffBase === undefined) {
+    diffBase = baseSha;
+    warnings.push(
+      `no merge-base between ${baseSha} and ${headSha}: diffing the two trees directly`,
+    );
+  }
+
+  const diffResult = diffText(gitRoot, diffBase, headSha);
   if (diffResult.error !== undefined || diffResult.status !== 0) {
     throw new UsageError(
-      `drift: git diff ${options.base}..${options.head} failed: ` +
+      `drift: git diff ${diffBase}..${headSha} failed: ` +
         (diffResult.error ??
           `git exited ${String(diffResult.status)}: ${diffResult.stderr.trim()}`),
     );
@@ -234,22 +263,22 @@ export async function drift(options: DriftOptions): Promise<DriftResult> {
   const headingsFor = (filePath: string): Heading[] => {
     const cached = headingsByPath.get(filePath);
     if (cached !== undefined) return cached;
-    const content = showFile(gitRoot, options.head, filePath);
+    const content = showFile(gitRoot, headSha, filePath);
     const headings = content !== undefined ? parseHeadings(content) : [];
     headingsByPath.set(filePath, headings);
     return headings;
   };
 
   for (const name of uniqueNames) {
-    const grep = grepIdentifier(gitRoot, options.head, name, SCAN_PATHSPECS);
+    const grep = grepIdentifier(gitRoot, headSha, name, SCAN_PATHSPECS);
     if (grep.error !== undefined || (grep.status !== 0 && grep.status !== 1)) {
       warnings.push(
-        `git grep for "${name}" at ${options.head} failed: ${grep.error ?? `git exited ${String(grep.status)}: ${grep.stderr.trim()}`}`,
+        `git grep for "${name}" at ${headSha} failed: ${grep.error ?? `git exited ${String(grep.status)}: ${grep.stderr.trim()}`}`,
       );
       continue;
     }
     if (grep.status === 1) continue;
-    const matches = parseGrepOutput(grep.stdout, options.head);
+    const matches = parseGrepOutput(grep.stdout, headSha);
     for (const match of matches) {
       const kind = classifyLine(match.path, match.text);
       if (kind === undefined) continue;
@@ -288,6 +317,9 @@ export async function drift(options: DriftOptions): Promise<DriftResult> {
     status: sites.length > 0 ? "fail" : "ok",
     base: options.base,
     head: options.head,
+    baseSha,
+    headSha,
+    mergeBase: diffBase,
     removedIdentifiers: parsed.removed,
     sites,
     allowlisted,
