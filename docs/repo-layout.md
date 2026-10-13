@@ -83,7 +83,9 @@ at build time. Write frontmatter as YAML (or JSON). A YAML date such as
 `2024-05-01` in a text field shows as an ISO timestamp. Include directives
 (`<!--@include: file.md-->`) are refused anywhere in a page and fail the build,
 because VitePress reads the included file's frontmatter without that refusal
-and can embed any readable file.
+and can embed any readable file. The check runs when the site config
+loads (build and dev-server start); a running dev server does not re-check
+pages edited later, so do not point one at untrusted content.
 
 ```bash
 cd site && npm ci && npm run build   # output in site/.vitepress/dist

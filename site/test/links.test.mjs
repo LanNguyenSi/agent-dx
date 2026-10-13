@@ -251,6 +251,18 @@ test('a page with an include directive is refused with its path, in any spelling
   assert.doesNotThrow(() => createSite(root, readTitle))
 })
 
+test('an include directive in site/index.md is refused too', () => {
+  const index = path.join(root, 'site/index.md')
+  const clean = fs.readFileSync(index, 'utf8')
+  fs.writeFileSync(index, `${clean}\r\n<!--\t@include: ../docs/note.md-->\r\n`)
+  try {
+    assert.throws(() => createSite(root, readTitle), /Include directives are not supported: site\/index\.md/)
+  } finally {
+    fs.writeFileSync(index, clean)
+  }
+  assert.doesNotThrow(() => createSite(root, readTitle))
+})
+
 test('refuseIncludes passes a page that mentions includes without the directive', () => {
   write(`${AE}/inc-text.md`, '# T\n\nThe @include: syntax and <!-- a comment --> are fine.\n')
   try {
