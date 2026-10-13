@@ -322,8 +322,8 @@ test('values that cannot hold markup are kept as they are', () => {
     head: [['script', {}, 'raw()']],
     prev: false,
     next: 5,
-    hero: { name: 7, text: false, tagline: null },
-    features: [{ title: 1, details: true, icon }, 'plain', null]
+    hero: { name: 7, text: false, tagline: null, extra: undefined },
+    features: [{ title: 1, details: true, icon }, { title: 'no icon', details: undefined }, 'plain', null]
   }
   const out = sanitizeFrontmatter(input)
   assert.deepEqual(out, input)
