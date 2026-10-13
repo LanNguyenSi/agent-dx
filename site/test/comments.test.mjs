@@ -621,4 +621,193 @@ test('a page is parsed again for its fences only when a comment spans lines on a
   assert.equal(parses('<!-- two\nlines -->\n\n```\ncode\n```\n'), 2)
   // Once for the page, however many comments it holds.
   assert.equal(parses('<!-- a\nb -->\n\n```\nx\n```\n\n<!-- c\nd -->\n\n<!-- e\nf -->\n'), 2)
+  // Inside text it is the same: a comment on one line looks up no fence, even
+  // when it starts its line, and one that spans lines looks one up once for
+  // the page, even when its closer starts a line.
+  assert.equal(parses('a <!-- one --> b\n\n```\ncode\n```\n'), 1)
+  assert.equal(parses('a\n<!-- one --> b\n\n```\ncode\n```\n'), 1)
+  assert.equal(parses('a <!-- two\nlines --> b\n\n```\ncode\n```\n'), 2)
+  assert.equal(parses('a <!-- two\n--> b\n\n```\ncode\n```\n'), 2)
+  assert.equal(parses('a <!-- two\nlines --> b <!-- c\nd --> e\n\n```\ncode\n```\n\nf <!-- g\nh --> i\n'), 2)
+})
+
+// The words a page shows, with entities decoded and markup dropped.
+const words = (html) =>
+  html
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&(lt|#x3C);/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .split(/\s+/)
+    .filter(Boolean)
+
+// Without the comment rules every word of the page is shown. With them, only
+// the words of the comments that are hidden are gone, and nothing else.
+const assertOnlyHiddenLost = (src, hidden) => {
+  const left = words(render(src))
+  const lost = []
+  for (const w of words(renderPlain(src))) {
+    const at = left.indexOf(w)
+    if (at !== -1) left.splice(at, 1)
+    else lost.push(w)
+  }
+  assert.deepEqual(lost.sort(), [...hidden].sort(), src)
+}
+
+test('an earlier hidden comment that regroups the lines does not let a later opener hide a fence', () => {
+  // The first comment closes inside its list item and hides two lines, which
+  // ends the item. The lines after it then form one paragraph that holds the
+  // opener and the lines of a fence that markdown-it finds without the comment
+  // rules. The "-->" in that fence does not close the opener: the opener stays
+  // visible and no word of the fence is lost.
+  const hidden = ['<!--', 'a', 'b', '-->']
+  const cases = [
+    '1. <!-- a\nb --> z\n<!-- typo\n10. item\n    ```\n    x --> y\n    ```\n',
+    '1. <!-- a\nb --> z\n<!-- typo\n10. item\n    ~~~\n    x --> y\n    ~~~\n',
+    '1. <!-- a\nb --> z\n<!-- typo\n10. item\n    ```\n    x --> y\n',
+    '> 1. <!-- a\n> b --> z\n> <!-- typo\n> 10. item\n>     ```\n>     x --> y\n>     ```\n'
+  ]
+  for (const src of cases) {
+    assert.match(render(src), /&lt;!-- typo/, src)
+    assert.match(render(src), /x --&gt; y/, src)
+    assertOnlyHiddenLost(src, hidden)
+  }
+  // With the closer after the fence, the comment closes there and is hidden
+  // together with the fence lines it spans.
+  const closed = '1. <!-- a\nb --> z\n<!-- typo\n10. item\n    ```\n    x\n    ```\n    --> y\n'
+  assert.ok(!render(closed).includes('typo'))
+  assert.ok(!render(closed).includes('item'))
+})
+
+test('a hidden comment that ends a list item does not let a later opener hide a nested fence', () => {
+  // The comment at the start of the first line runs over the item's second
+  // line, so the lines below it are no longer part of the list. The opener
+  // there and the lines of the fence in a nested item form one paragraph.
+  const hidden = ['<!--', 'one', 'k', '-->']
+  for (const src of [
+    '<!--\n  1) one\nk --> z\n  <!-- typo\n       - sub\n         ````\n         x --> y\n',
+    '<!--\n  1) one\nk --> z\n  <!-- typo\n       - sub\n         ````\n         x --> y\n         ````\n'
+  ]) {
+    assert.match(render(src), /&lt;!-- typo/, src)
+    assert.match(render(src), /x --&gt; y/, src)
+    assertOnlyHiddenLost(src, hidden)
+  }
+})
+
+test('a comment in a paragraph that no fence holds the closer of is hidden', () => {
+  assert.equal(render('a <!-- x\ny --> b\n\n```\nf\n```\n').startsWith('<p>a  b</p>\n'), true)
+  assert.equal(render('1. <!-- a\nb --> z\n<!-- c\nd --> e\n'), '<ol>\n<li>z</li>\n</ol>\n<p>e</p>\n')
+})
+
+test('a table cell with a comment is not given a paragraph line', () => {
+  // Cell text has no source lines of its own to look up.
+  const out = render('| a | b |\n|---|---|\n| c <!-- x --> | d |\n\n```\nf\n```\n')
+  assert.ok(!out.includes('x -->') && !out.includes('x --&gt;'), out)
+  assert.match(out, /<td>c\s*<\/td>/)
+})
+
+test('an env used for another page does not hand over the fences of the first page', () => {
+  // The first page has a fence on lines 2 to 4. The second page has none there,
+  // and its "-->" is on line 3, so the comment closes there.
+  const env = { relativePath: 'fixture.md' }
+  const first = '<!-- typo\n\n```\nx --> y\n```\n'
+  const second = '<!-- typo\n\nbetween\nx --> y\n\n```\nf\n```\n'
+  assert.match(md.render(first, env), /&lt;!-- typo/)
+  assert.ok(!md.render(second, env).includes('typo'))
+})
+
+test('text that is not a paragraph of the page has no fence to look up', () => {
+  // A plugin can parse text of its own into a token array of its own, which
+  // the page's paragraphs do not use.
+  const tokens = []
+  md.inline.parse('a <!-- x\ny --> b', md, {}, tokens)
+  assert.deepEqual(tokens.map((t) => t.content), ['a  b'])
+})
+
+test('a closer on the line a fence opens on is found among many lines', () => {
+  // The info string of the fence holds the "-->". The paragraph has enough
+  // lines for the search for the closer's line to take several steps.
+  const src = '1. <!-- a\nb --> z\n<!-- typo\n10. item\n    more\n    ``` x --> y\n    code\n    code\n    code\n    ```\n'
+  // The page shows the info string as text, so only the first comment's
+  // words are missing from it.
+  assert.match(render(src), /&lt;!-- typo/)
+  assertOnlyHiddenLost(src, ['<!--', 'a', 'b'])
+})
+
+test('a closer on the last line of a paragraph is found on that line', () => {
+  // The fence opens on the paragraph's second and last line and runs to the
+  // end of the page, so the line after the paragraph is not in it.
+  const src = '1. <!-- a\nb --> z\n<!-- typo\n    ``` x --> y\n'
+  assert.match(render(src), /&lt;!-- typo/)
+  assertOnlyHiddenLost(src, ['<!--', 'a', 'b'])
+})
+
+test('the fences of a page are looked up once however many openers it holds', () => {
+  // An opener on each of 3000 lines, none of them closed before a fence.
+  const src = '1. <!-- a\nb --> z\n' + '<!-- typo\n'.repeat(3000) + '10. item\n    ```\n    x --> y\n    ```\n'
+  const out = render(src)
+  assert.equal(out.split('&lt;!-- typo').length - 1, 3000)
+  assert.match(out, /x --&gt; y/)
+})
+
+test('the lines of a paragraph are found once, not once per opener', (t) => {
+  // Each of the 400 openers is refused because its closer lies in the fence
+  // below. The line starts of the paragraph come from one pass over its text
+  // however many openers ask; a pass for each opener would make about 400
+  // times as many searches for a newline.
+  const lines = 400
+  const src = '1. <!-- a\nb --> z\n' + '<!-- typo\n'.repeat(lines) + '10. item\n    ```\n    x --> y\n    ```\n'
+  const indexOf = t.mock.method(String.prototype, 'indexOf')
+  const out = render(src)
+  const searches = indexOf.mock.calls.filter((c) => c.arguments[0] === '\n' && String(c.this).startsWith('<!-- typo\n<!-- typo'))
+  assert.equal(out.split('&lt;!-- typo').length - 1, lines)
+  assert.ok(searches.length < 3 * lines, `${searches.length} searches for a newline`)
+  assert.ok(searches.length > 0)
+})
+
+test('a quote that becomes an alert does not shift the lines of its first paragraph', () => {
+  // VitePress takes the "[!NOTE]" line out of the first paragraph of a quote
+  // without changing the lines that paragraph spans. The paragraph below holds
+  // a list item with an opener and a fence, after a hidden comment that ends
+  // the first item. The alert must treat the opener as the plain quote does.
+  const shown = (marker, tail) =>
+    `> 1. <!-- a\n> b -->\n> ${marker}\n> 10. item <!-- typo\n${tail}`
+  const fenceInfo = '>     ``` x --> y\n>     code\n>     ```\n'
+  for (const marker of ['[!NOTE]', '[!WARNING] Heads up', 'plain']) {
+    const src = shown(marker, fenceInfo)
+    assert.match(render(src), /&lt;!-- typo/, src)
+    assert.match(render(src), /x --&gt; y/, src)
+    // The fence's info string is shown by the page and dropped by the plain
+    // renderer, so only the first comment and the alert marker are missing.
+    assertOnlyHiddenLost(src, ['<!--', 'a', 'b', ...(marker === 'plain' ? [] : [marker.split(' ')[0]])])
+  }
+  // The alert and the plain quote show the same paragraph.
+  const para = (src) => render(src).match(/<p>(?:plain\n)?10\. item[\s\S]*?<\/p>/)[0].replace('<p>plain\n', '<p>')
+  assert.equal(para(shown('[!NOTE]', fenceInfo)), para(shown('plain', fenceInfo)))
+})
+
+test('a quote that becomes an alert still hides a comment that closes after a fence', () => {
+  // The closer lies on the line after the fence, so the comment closes there
+  // and is hidden, in the alert as in the plain quote.
+  const after = '>     ```\n>     code\n>     ```\n>     --> y\n'
+  for (const marker of ['[!NOTE]', '[!CAUTION] Careful', 'plain']) {
+    const src = `> 1. <!-- a\n> b -->\n> ${marker}\n> 10. item <!-- typo\n${after}`
+    const out = render(src)
+    assert.ok(!out.includes('typo') && !out.includes('code'), src)
+    assert.match(out, /10\. item {2}y/, src)
+  }
+})
+
+test('text rendered inline with blank lines finds the line of a closer relative to its fences', () => {
+  // Inline rendering takes the whole text as one paragraph, so it can hold a
+  // blank line. The closer is on the line a fence opens on.
+  const text = 'a <!-- x\n\nb\n``` y --> z\nc\n```'
+  const out = md.renderInline(text, { relativePath: 'fixture.md' })
+  assert.match(out, /&lt;!-- x/)
+  assert.match(out, /y --&gt; z/)
+  // A blank line after the closer's line, which lies just before a fence: the
+  // fence starts on the line after the closer, so a miscount of the lines
+  // that follow would put the closer in it.
+  const closed = md.renderInline('a <!-- x\nb --> y\n```\nc\n\nd\n```', { relativePath: 'fixture.md' })
+  assert.ok(!closed.includes('x') && !closed.includes('&lt;!--'), closed)
 })
