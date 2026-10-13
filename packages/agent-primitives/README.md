@@ -1,7 +1,7 @@
 # agent-primitives
 
 Agent-first CLI primitives for narrow subagents: a mutation-probe runner, a
-verify runner, a PATH doctor, an identifier-drift guard, a commit-hygiene guard, checkout snapshot/delta, and linked-worktree creation, removal and
+verify runner, a PATH doctor, an identifier-drift guard, a commit-hygiene guard, an all-or-nothing exact-text patcher, checkout snapshot/delta, and linked-worktree creation, removal and
 reporting, each returning one bounded JSON result instead of raw tool output.
 
 ## Overview
@@ -35,6 +35,11 @@ for teams shipping with AI agents.
 - `hygiene`: refuses staged or committed backup files (`*.bak`, `*.orig`,
   `*~`, and the BSD `sed -i` leftovers `*-e`, `*-E`, `*-n`, `*-r`, `*-s`)
   and flags rewrites of extend-only files and dropped test cases.
+- `patch`: replaces exact text in one or more files from a JSON edit plan
+  (or one `--file`/`--old`/`--new` edit), resolving every edit first and
+  writing nothing when one is missing, ambiguous or overlapping; reports
+  the matching tier per edit, keeps line endings, BOM and file mode, and
+  has a `--dry-run` diff preview.
 - `snapshot` / `delta`: save checkout/index/content fingerprints to a full
   external artifact and compare the same checkout later.
 - `worktree create`: makes a linked worktree on a new branch with no upstream,
@@ -102,6 +107,8 @@ file, and reports whether the test caught it (`killed`) or missed it
   comments.
 - [`hygiene`](docs/hygiene.md): the commit-hygiene guard for backup files,
   extend-only rewrites and dropped test cases.
+- [`patch`](docs/patch.md): all-or-nothing exact-text edits, the matching
+  tiers, refusals and the result shape.
 - [`snapshot`](docs/snapshot.md): read-only checkout fingerprints.
 - [`delta`](docs/delta.md): compare the same checkout with a saved snapshot.
 - [`worktree`](docs/worktree.md): create, list and remove linked worktrees
@@ -126,6 +133,7 @@ maps the status to the exit code. Each command lives in its own module:
 | `init` | `src/init/index.ts`, digest ledger in `src/init/ledger.ts`; installs `assets/skill/SKILL.md` |
 | `drift` | `src/drift/` |
 | `hygiene` | `src/hygiene/index.ts`, using `src/drift/git.ts` |
+| `patch` | `src/patch/` (`index.ts` plan and write phase, `engine.ts` matching, `hint.ts`, `diff.ts`) |
 | `snapshot`, `delta` | `src/snapshot/` |
 | `worktree` | `src/worktree/` (`create.ts`, `remove.ts`, `list.ts`; shared git helpers in `git.ts`, the smoke verdict in `readiness.ts`) |
 

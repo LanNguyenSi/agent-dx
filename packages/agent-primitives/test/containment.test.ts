@@ -775,6 +775,13 @@ describe("isPathContained() (sanity, unchanged by this task)", () => {
     expect(isPathContained("/a/b", "/a/bc")).toBe(false);
     expect(isPathContained("/a/b", "/a")).toBe(false);
   });
+
+  it("an entry whose name starts with two dots is inside; a `..` component is not", () => {
+    expect(isPathContained("/a/b", "/a/b/..foo")).toBe(true);
+    expect(isPathContained("/a/b", "/a/b/..")).toBe(false);
+    expect(isPathContained("/a/b", "/a/b/../c")).toBe(false);
+    expect(isPathContained("/a/b", "/a/..foo")).toBe(false);
+  });
 });
 
 describe("escapingRootMentions(): the SCRATCH spelling's own boundary rule", () => {

@@ -51,6 +51,13 @@ import {
   type HygieneResult,
 } from "./hygiene/index.js";
 import {
+  parsePatchPlan,
+  patch,
+  PatchUsageError,
+  type PatchEditSpec,
+  type PatchResult,
+} from "./patch/index.js";
+import {
   captureSnapshot,
   compareSnapshots,
   persistSnapshot,
@@ -778,7 +785,7 @@ program.configureOutput({
 program
   .name("agent-primitives")
   .description(
-    "Agent-first CLI primitives: bounded JSON envelopes, a mutation-probe runner, a verify runner, a PATH doctor, an identifier-drift guard, a commit-hygiene guard, checkout snapshot/delta, and a skill installer (init)",
+    "Agent-first CLI primitives: bounded JSON envelopes, a mutation-probe runner, a verify runner, a PATH doctor, an identifier-drift guard, a commit-hygiene guard, an exact-text patcher, checkout snapshot/delta, and a skill installer (init)",
   )
   .version(VERSION)
   .option(
@@ -1963,6 +1970,270 @@ program
       exitCode,
       { format: global.format, maxChars: global.maxChars },
       () => renderHygieneText(result),
+    );
+  });
+
+interface PatchCliOptions {
+  plan?: string;
+  file?: string;
+  old?: string;
+  oldFile?: string;
+  new?: string;
+  newFile?: string;
+  replaceAll?: boolean;
+  dryRun?: boolean;
+  allowOutside?: boolean;
+  breakHardLinks?: boolean;
+}
+
+/** Reads a `--plan`/`--old-file`/`--new-file` argument verbatim: `-`
+ * is stdin, anything else a path resolved against the `-C` directory. */
+function readPatchInput(cwd: string, flag: string, p: string): string {
+  try {
+    return p === "-"
+      ? fs.readFileSync(0, "utf8")
+      : fs.readFileSync(path.resolve(cwd, p), "utf8");
+  } catch (err) {
+    throw new PatchUsageError(
+      `patch: cannot read ${flag} ${p}: ${err instanceof Error ? err.message : String(err)}`,
+      "input_unreadable",
+    );
+  }
+}
+
+/** Builds the edit list from either `--plan` or the one-shot flags,
+ * refusing any mix of the two forms. */
+function patchEditsFromCli(
+  cwd: string,
+  opts: PatchCliOptions,
+): PatchEditSpec[] {
+  const oneShot = [
+    ["--file", opts.file],
+    ["--old", opts.old],
+    ["--old-file", opts.oldFile],
+    ["--new", opts.new],
+    ["--new-file", opts.newFile],
+    ["--replace-all", opts.replaceAll],
+  ].filter(([, v]) => v !== undefined);
+  if (opts.plan !== undefined) {
+    if (oneShot.length > 0) {
+      throw new PatchUsageError(
+        `patch: --plan cannot be combined with ${oneShot.map(([f]) => String(f)).join(", ")}`,
+        "option_conflict",
+      );
+    }
+    return parsePatchPlan(readPatchInput(cwd, "--plan", opts.plan), "--plan");
+  }
+  if (opts.file === undefined) {
+    throw new PatchUsageError(
+      "patch: pass --plan <file>, or --file with --old/--old-file and --new/--new-file",
+      "option_missing",
+    );
+  }
+  const pick = (
+    inline: string | undefined,
+    file: string | undefined,
+    name: "old" | "new",
+  ): string => {
+    if (inline !== undefined && file !== undefined) {
+      throw new PatchUsageError(
+        `patch: --${name} and --${name}-file are mutually exclusive`,
+        "option_conflict",
+      );
+    }
+    if (inline !== undefined) return inline;
+    if (file !== undefined) return readPatchInput(cwd, `--${name}-file`, file);
+    throw new PatchUsageError(
+      `patch: --file needs --${name} or --${name}-file`,
+      "option_missing",
+    );
+  };
+  if (opts.oldFile === "-" && opts.newFile === "-") {
+    throw new PatchUsageError(
+      "patch: --old-file and --new-file cannot both read stdin",
+      "option_conflict",
+    );
+  }
+  const spec: PatchEditSpec = {
+    file: opts.file,
+    old: pick(opts.old, opts.oldFile, "old"),
+    new: pick(opts.new, opts.newFile, "new"),
+  };
+  if (opts.replaceAll === true) spec.replaceAll = true;
+  return [spec];
+}
+
+function renderPatchText(result: PatchResult): string {
+  const lines: string[] = [
+    `status: ${result.status}${result.dryRun ? " (dry run)" : ""}`,
+  ];
+  if (result.message !== undefined) lines.push(result.message);
+  lines.push("");
+  for (const e of result.edits) {
+    const where =
+      e.line_ranges !== undefined && e.line_ranges.length > 0
+        ? `, lines ${e.line_ranges.map((r) => (r.start === r.end ? String(r.start) : `${String(r.start)}-${String(r.end)}`)).join(", ")}`
+        : "";
+    const tier = e.tier !== undefined ? ` (${e.tier}${where})` : "";
+    lines.push(`edits[${String(e.index)}] ${e.path}: ${e.status}${tier}`);
+    if (e.detail !== undefined) lines.push(`  ${e.detail}`);
+    if (e.side_effect !== undefined) {
+      for (const l of e.side_effect.lines) {
+        lines.push(`    line ${String(l.line)} original:   ${l.original}`);
+        lines.push(`    line ${String(l.line)} normalized: ${l.normalized}`);
+      }
+    }
+    if (e.hint !== undefined) {
+      lines.push(`  ${e.hint.message}`);
+      for (const c of e.hint.candidates) {
+        lines.push(
+          `  candidate lines ${String(c.line_start)}-${String(c.line_end)} (similarity ${c.similarity.toFixed(2)}):`,
+        );
+        for (const d of c.differences) {
+          lines.push(`    line ${String(d.line)} expected: ${d.expected}`);
+          lines.push(`    line ${String(d.line)} actual:   ${d.actual}`);
+        }
+        if (c.more_differences > 0) {
+          lines.push(
+            `    ... ${String(c.more_differences)} more differing line(s)`,
+          );
+        }
+      }
+    }
+  }
+  lines.push("");
+  for (const f of result.files) {
+    lines.push(
+      `${f.path}: ${f.status}${f.reason !== undefined ? ` (${f.reason})` : ""}`,
+    );
+  }
+  for (const f of result.files) {
+    if (f.diff !== undefined) {
+      lines.push("");
+      lines.push(f.diff.trimEnd());
+    }
+  }
+  if (result.warnings.length > 0) {
+    lines.push("");
+    lines.push("warnings:");
+    for (const warning of result.warnings) lines.push(`  - ${warning}`);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+program
+  .command("patch")
+  .description(
+    "Replace exact text in one or more files from a JSON edit plan (or one --file/--old/--new edit): every edit is verified before any file is written, all or nothing",
+  )
+  .addHelpText(
+    "before",
+    '--file is long-only: the global -f is --format, and every global option (-f, -C, -m, -l, --json) may precede the subcommand.\n\nPlan: {"edits":[{"file":"<path>","old":"<text>","new":"<text>","replaceAll":false}]}\n',
+  )
+  .option(
+    "--plan <file>",
+    "JSON edit plan (- reads stdin); paths in it resolve against -C",
+  )
+  .option(
+    "--file <path>",
+    "one-shot form: the file to edit (long-only: the global -f is --format)",
+  )
+  .option("--old <text>", "one-shot form: the exact text to replace")
+  .option(
+    "--old-file <path>",
+    "one-shot form: read the old text from a file, verbatim (- reads stdin)",
+  )
+  .option("--new <text>", "one-shot form: the replacement text")
+  .option(
+    "--new-file <path>",
+    "one-shot form: read the new text from a file, verbatim (- reads stdin)",
+  )
+  .option(
+    "--replace-all",
+    "one-shot form: replace every occurrence instead of refusing more than one",
+  )
+  .option("--dry-run", "resolve every edit and show the diff without writing")
+  .option(
+    "--allow-outside",
+    "allow files that resolve outside the repository root (never inside .git)",
+  )
+  .option(
+    "--break-hard-links",
+    "edit a file that has more than one hard link (refused otherwise); the edited name gets a new inode and the other names keep the old content",
+  )
+  .action(async (opts: PatchCliOptions, command: Command) => {
+    const start = Date.now();
+    const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
+    let result: PatchResult;
+    try {
+      result = patch({
+        cwd: global.cwd,
+        edits: patchEditsFromCli(global.cwd, opts),
+        dryRun: Boolean(opts.dryRun),
+        allowOutside: Boolean(opts.allowOutside),
+        breakHardLinks: Boolean(opts.breakHardLinks),
+      });
+    } catch (err) {
+      // A usage error, or an unexpected failure outside the per-file
+      // handling: either way the envelope names the command.
+      const usage = err instanceof UsageError;
+      const { envelope, exitCode } = buildEnvelope({
+        version: VERSION,
+        command: "patch",
+        status: usage ? "usage_error" : "error",
+        durationMs: Date.now() - start,
+        cwd: global.cwd,
+        warnings: [],
+        logs: [],
+        extra: usage
+          ? {
+              reason: err instanceof PatchUsageError ? err.reason : "usage",
+              message: err.message,
+            }
+          : {
+              reason: "internal",
+              message: `patch: ${err instanceof Error ? err.message : String(err)}`,
+            },
+        maxChars: global.maxChars,
+        logDir: global.logDir,
+      });
+      emit(envelope, exitCode, {
+        format: global.format,
+        maxChars: global.maxChars,
+      });
+      return;
+    }
+    const { envelope, exitCode } = buildEnvelope({
+      version: VERSION,
+      command: "patch",
+      status: result.status,
+      durationMs: Date.now() - start,
+      cwd: global.cwd,
+      warnings: result.warnings,
+      logs: [],
+      extra: {
+        ...(result.reason !== undefined ? { reason: result.reason } : {}),
+        ...(result.message !== undefined ? { message: result.message } : {}),
+        dry_run: result.dryRun,
+        root: result.root,
+        counts: result.counts,
+        written_files: result.writtenFiles,
+        edits: result.edits,
+        files: result.files,
+      },
+      // `written_files` is what a caller needs after a failed write phase
+      // to know which files already changed; `counts` says how much of
+      // the reduced `edits`/`files` arrays is missing.
+      keepWhole: ["counts", "written_files"],
+      maxChars: global.maxChars,
+      logDir: global.logDir,
+    });
+    emit(
+      envelope,
+      exitCode,
+      { format: global.format, maxChars: global.maxChars },
+      () => renderPatchText(result),
     );
   });
 

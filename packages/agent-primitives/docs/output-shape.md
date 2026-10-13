@@ -12,8 +12,8 @@ follows (`src/envelope.ts`):
 
 | Class | Exit | Status words |
 | --- | --- | --- |
-| `ok` | `0` | `ok`, `pass`, `killed`, `unchanged`, `written` |
-| `finding` | `1` | `missing`, `fail`, `survived`, `conflicted`, `outdated` |
+| `ok` | `0` | `ok`, `pass`, `killed`, `unchanged`, `written`, `would_write` |
+| `finding` | `1` | `missing`, `fail`, `survived`, `conflicted`, `outdated`, `ambiguous`, `overlap`, `fuzzy_side_effect`, `not_editable` |
 | `cannot-conclude` | `2` | `usage_error`, `inconclusive`, `error`, `baseline_failed` |
 
 Any status not listed is treated as `cannot-conclude` (exit `2`). A
@@ -25,7 +25,7 @@ under `--expect pass` a `survived` exits `0`; see [probe.md](probe.md).
 four structural caps (`CapLimits`) to a plain object in one pass,
 returning a new structure with every cut marked in place. Both are
 exported from the built `dist/index.js` together with every command
-function except `hygiene` (`doctor()`, `verify()`, `probe()`,
+function except `hygiene` and `patch` (`doctor()`, `verify()`, `probe()`,
 `probePlan()`, `init()`, `drift()`, `captureSnapshot()` and
 `compareSnapshots()`). `package.json` declares
 no `main` or `exports` entry, so `import ... from "agent-primitives"`
