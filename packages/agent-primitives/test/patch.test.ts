@@ -1631,9 +1631,12 @@ describe("patch: a git directory check that cannot be made is reported", () => {
     expect(read(dir, "gd/config")).toBe(config);
   });
 
-  it("warns when the root is a work tree but git fails there", () => {
+  it("warns when the root is a work tree but git fails there, and runs no git for a .git file naming a path that does not resolve", () => {
     const dir = tmpDir();
-    fs.writeFileSync(path.join(dir, ".git"), "gitdir: no-such-git-dir\n");
+    // A directory that exists but is no git directory: git stops at the
+    // .git file with an error.
+    fs.mkdirSync(path.join(dir, "adm"));
+    fs.writeFileSync(path.join(dir, ".git"), "gitdir: adm\n");
     fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
     const r = run(dir, [{ file: "a.txt", old: "a", new: "b" }], {
       dryRun: true,
@@ -1641,6 +1644,16 @@ describe("patch: a git directory check that cannot be made is reported", () => {
     expect(r.status).toBe("would_write");
     expect(r.warnings.join("\n")).toContain(
       "the git directory check by identity was skipped (git rev-parse failed",
+    );
+    // A path the filesystem cannot resolve: the check cannot follow it
+    // to the commondir git would read, so git is not run.
+    fs.writeFileSync(path.join(dir, ".git"), "gitdir: no-such-git-dir\n");
+    const missing = run(dir, [{ file: "a.txt", old: "a", new: "b" }], {
+      dryRun: true,
+    });
+    expect(missing.status).toBe("would_write");
+    expect(missing.warnings.join("\n")).toContain(
+      `the git directory check by identity was skipped (git was not run: ${path.join(dir, ".git")} names its git directory by a path that does not resolve, which this check cannot follow)`,
     );
   });
 });
@@ -2753,6 +2766,7 @@ async function patchInChild(
     cwd: string;
     edits: PatchEditSpec[];
     dryRun?: boolean;
+    allowOutside?: boolean;
     gitTimeoutMs?: number;
   },
   env: NodeJS.ProcessEnv,
@@ -2815,6 +2829,45 @@ function gitDirLayout(dir: string): string {
   fs.writeFileSync(path.join(dir, "HEAD"), "ref: refs/heads/main\n");
   return dir;
 }
+
+/**
+ * A work tree `w` whose `.git` file names its git directory by a path
+ * that reaches `g` only after a symlink and a `..`, in one of three
+ * forms: `link/../g` relative to `w`, the same absolute, or an absolute
+ * path through a symlinked directory above `w` (`<base>/alias/../g`).
+ * git lets the filesystem resolve the path (the symlink first, then the
+ * `..`), which lands on the physical `g`; read lexically the path names
+ * a decoy next to it, laid out like a git directory with a harmless
+ * `commondir`, so a check that folds the `..` sees nothing there.
+ */
+function gitfileThroughSymlink(form: "relative" | "absolute" | "ancestor"): {
+  root: string;
+  physical: string;
+} {
+  const base = tmpDir();
+  const w = path.join(base, "w");
+  fs.mkdirSync(w);
+  fs.writeFileSync(path.join(w, "a.txt"), "a\n");
+  const elsewhere = path.join(base, "elsewhere");
+  fs.mkdirSync(path.join(elsewhere, "deep"), { recursive: true });
+  const physical = gitDirLayout(path.join(elsewhere, "g"));
+  let gitdir: string;
+  let decoy: string;
+  if (form === "ancestor") {
+    fs.symlinkSync(path.join(elsewhere, "deep"), path.join(base, "alias"));
+    gitdir = `${base}/alias/../g`;
+    decoy = gitDirLayout(path.join(base, "g"));
+  } else {
+    fs.symlinkSync(path.join(elsewhere, "deep"), path.join(w, "link"));
+    gitdir = form === "relative" ? "link/../g" : `${w}/link/../g`;
+    decoy = gitDirLayout(path.join(w, "g"));
+  }
+  fs.writeFileSync(path.join(decoy, "commondir"), ".\n");
+  fs.writeFileSync(path.join(w, ".git"), `gitdir: ${gitdir}\n`);
+  return { root: w, physical };
+}
+
+const GITFILE_FORMS = ["relative", "absolute", "ancestor"] as const;
 
 /** git's own directories in a git directory, as patch reserves them. */
 const RESERVED_GIT_SUBDIRS = [
@@ -3172,6 +3225,166 @@ describe("patch: git's identity lookup is bounded", () => {
   );
 
   it.skipIf(process.platform === "win32")(
+    "resolves a .git file's gitdir path as git does, the symlink before the .., and does not run git for a FIFO commondir only the physical target holds",
+    async () => {
+      const fifos: string[] = [];
+      try {
+        for (const form of GITFILE_FORMS) {
+          const { root, physical } = gitfileThroughSymlink(form);
+          const fifo = path.join(physical, "commondir");
+          execFileSync("mkfifo", [fifo]);
+          fifos.push(fifo);
+          const { out } = await patchInChild(
+            {
+              cwd: root,
+              edits: [{ file: "a.txt", old: "a", new: "b" }],
+              dryRun: true,
+              gitTimeoutMs: 3000,
+            },
+            GIT_CHILD_ENV,
+          );
+          expect(out.warnings.join("\n"), form).toContain(notRun);
+          expect(out.warnings.join("\n"), form).toContain(
+            `git would read ${fifo} whole, and it is not a regular file`,
+          );
+        }
+      } finally {
+        for (const fifo of fifos) releaseFifo(fifo);
+      }
+    },
+    90_000,
+  );
+
+  it("resolves a .git file's gitdir path as git does and does not run git for a sparse commondir only the physical target holds (no git on PATH)", async () => {
+    for (const form of GITFILE_FORMS) {
+      const { root, physical } = gitfileThroughSymlink(form);
+      const sparse = path.join(physical, "commondir");
+      fs.writeFileSync(sparse, "");
+      fs.truncateSync(sparse, 128 * 1024);
+      const { out } = await patchInChild(
+        {
+          cwd: root,
+          edits: [{ file: "a.txt", old: "a", new: "b" }],
+          dryRun: true,
+        },
+        NO_GIT_ENV(),
+      );
+      expect(out.warnings.join("\n"), form).toContain(notRun);
+      expect(out.warnings.join("\n"), form).toContain(
+        `git would read ${sparse} whole, and it holds 131072 bytes`,
+      );
+    }
+  }, 60_000);
+
+  it("grants the root's own git directory through a gitdir path the filesystem resolves to the repository around the root", async () => {
+    // `w/.git` names `link/..` with `w/link` a symlink to `p/objects`:
+    // for git, `w` is a work tree of `p`. Read lexically, `link/..` is
+    // `w` itself, which is no git directory, and `p` would be refused.
+    const p = gitDirLayout(path.join(tmpDir(), "p"));
+    const w = path.join(p, "w");
+    fs.mkdirSync(w);
+    fs.symlinkSync(path.join(p, "objects"), path.join(w, "link"));
+    fs.writeFileSync(path.join(w, ".git"), "gitdir: link/..\n");
+    fs.writeFileSync(path.join(w, "a.txt"), "a\n");
+    for (const [label, env] of [
+      ["git", GIT_CHILD_ENV],
+      ["no git", NO_GIT_ENV()],
+    ] as const) {
+      const { out } = await patchInChild(
+        {
+          cwd: w,
+          edits: [{ file: "a.txt", old: "a", new: "b" }],
+          dryRun: true,
+        },
+        env,
+      );
+      expect(out.status, label).toBe("would_write");
+      // The repository's own files stay refused from there.
+      const head = await patchInChild(
+        {
+          cwd: w,
+          edits: [{ file: "../HEAD", old: "ref", new: "x" }],
+          dryRun: true,
+          allowOutside: true,
+        },
+        env,
+      );
+      expect(head.out.status, label).toBe("usage_error");
+      expect(head.out.reason, label).toBe("git_dir");
+    }
+    expect(read(p, "HEAD")).toBe("ref: refs/heads/main\n");
+  }, 60_000);
+
+  it.skipIf(process.platform === "win32")(
+    "reads an empty gitdir path as git does: git stops at the .git file, so a FIFO commondir beside it is never a hazard and git runs",
+    async () => {
+      const x = tmpDir();
+      fs.writeFileSync(path.join(x, ".git"), "gitdir: \n");
+      fs.writeFileSync(path.join(x, "a.txt"), "a\n");
+      const fifo = path.join(x, "commondir");
+      execFileSync("mkfifo", [fifo]);
+      try {
+        const { out } = await patchInChild(
+          {
+            cwd: x,
+            edits: [{ file: "a.txt", old: "a", new: "b" }],
+            dryRun: true,
+            gitTimeoutMs: 3000,
+          },
+          GIT_CHILD_ENV,
+        );
+        expect(out.status).toBe("would_write");
+        expect(out.warnings.join("\n")).toContain(
+          "the git directory check by identity was skipped (git rev-parse failed",
+        );
+        expect(out.warnings.join("\n")).not.toContain(notRun);
+      } finally {
+        releaseFifo(fifo);
+      }
+    },
+    60_000,
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "a caller's GIT_OBJECT_DIRECTORY does not reach git's identity lookup, so git's discovery ends where the check modelled it",
+    async () => {
+      // A repository under a parent holding a valid HEAD and a FIFO
+      // commondir (no objects or refs, so the layout check does not
+      // refuse it). With GIT_OBJECT_DIRECTORY naming a directory that
+      // does not exist, git's test fails for every directory and its
+      // discovery would walk past the repository into the parent, where
+      // it reads commondir right after HEAD and would wait on the FIFO;
+      // the variable is removed from git's environment, so git names the
+      // repository and warns of nothing.
+      const parent = path.join(tmpDir(), "p");
+      fs.mkdirSync(parent);
+      fs.writeFileSync(path.join(parent, "HEAD"), "ref: refs/heads/main\n");
+      const dir = path.join(parent, "r");
+      fs.mkdirSync(dir);
+      gitIn(dir, "init", "-q");
+      fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+      const fifo = path.join(parent, "commondir");
+      execFileSync("mkfifo", [fifo]);
+      try {
+        const { out } = await patchInChild(
+          {
+            cwd: dir,
+            edits: [{ file: "a.txt", old: "a", new: "b" }],
+            dryRun: true,
+            gitTimeoutMs: 3000,
+          },
+          { ...GIT_CHILD_ENV, GIT_OBJECT_DIRECTORY: "/nonexistent" },
+        );
+        expect(out.status).toBe("would_write");
+        expect(out.warnings).toEqual([]);
+      } finally {
+        releaseFifo(fifo);
+      }
+    },
+    60_000,
+  );
+
+  it.skipIf(process.platform === "win32")(
     "stops git when it waits on a FIFO HEAD and warns, the name and layout checks still applying",
     async () => {
       const dir = repo({ "a.txt": "a\n" });
@@ -3284,6 +3497,32 @@ describe("patch: git's identity lookup is bounded", () => {
             await new Promise((r) => setTimeout(r, 50));
           }
           expect(recorded.filter(alive)).toEqual([]);
+        } finally {
+          killRecorded(pids);
+        }
+      }, 60_000);
+
+      it("stops git after the default 3 s when no timeout is given", async () => {
+        const { env, pids } = fakeGit(
+          'echo $$ >> "$PIDS"\nexec /bin/sleep 300',
+        );
+        const dir = tmpDir();
+        fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+        try {
+          const { out, ms } = await patchInChild(
+            {
+              cwd: dir,
+              edits: [{ file: "a.txt", old: "a", new: "b" }],
+              dryRun: true,
+            },
+            env,
+          );
+          expect(out.status).toBe("would_write");
+          expect(out.warnings.join("\n")).toContain(
+            "git rev-parse did not finish within 3000 ms and was stopped",
+          );
+          expect(ms).toBeGreaterThanOrEqual(2500);
+          expect(ms).toBeLessThan(20_000);
         } finally {
           killRecorded(pids);
         }

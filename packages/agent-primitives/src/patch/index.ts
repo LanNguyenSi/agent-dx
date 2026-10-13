@@ -323,18 +323,27 @@ function hasGitEntry(from: string, full: string): boolean {
 /** Environment variables that steer git's repository discovery. They are
  * removed from git's environment for the identity lookup, so that it
  * answers for the root itself, not for a repository the caller named or
- * a ceiling the caller set. */
+ * a ceiling the caller set, and so that git's discovery runs over the
+ * layout the pre-check (`gitDiscoveryHazard`, which reads no
+ * environment) modelled: `GIT_OBJECT_DIRECTORY` stands in for
+ * `objects` in git's test of a git directory, so a value that does not
+ * exist fails every directory and sends discovery past the root's
+ * repository. */
 const GIT_DISCOVERY_ENV = [
   "GIT_DIR",
   "GIT_WORK_TREE",
   "GIT_COMMON_DIR",
+  "GIT_OBJECT_DIRECTORY",
   "GIT_CEILING_DIRECTORIES",
   "GIT_DISCOVERY_ACROSS_FILESYSTEM",
 ];
 
 /** How long git's identity lookup may run. It answers in milliseconds;
- * a layout that makes it wait (a FIFO it opens) ends here. */
-const GIT_LOOKUP_TIMEOUT_MS = 10_000;
+ * a layout that makes it wait (a FIFO it opens) ends here, and so does
+ * one that makes it grow (a configuration value of gigabytes, taken in
+ * at its parser's pace), so this time, times that pace, bounds git's
+ * memory. */
+const GIT_LOOKUP_TIMEOUT_MS = 3_000;
 
 /** The most output taken from git's identity lookup (two paths). */
 const GIT_LOOKUP_MAX_OUTPUT = 64 * 1024;
@@ -351,7 +360,9 @@ const GITFILE_MAX = 1024 * 1024;
 
 /** Why git would read `<dir>/commondir` without bound, or undefined.
  * git reads the file when an `lstat` finds it (`file_exists`), through
- * a symlink; one that then cannot be opened stops git with an error. */
+ * a symlink; one that then cannot be opened stops git with an error.
+ * `dir` is a real path (the root, a directory above it, or one from
+ * `physicalPath`), so joining the name to it folds nothing. */
 function commondirHazard(dir: string): string | undefined {
   const file = path.join(dir, "commondir");
   let st: fs.Stats;
@@ -397,14 +408,38 @@ function gitfilePath(content: Buffer | undefined): string | null | undefined {
   }
 }
 
+/** The real path of the directory git reaches by `named`, a path read
+ * from a file in `dir` (a `.git` file's `gitdir:` line, a `commondir`
+ * line) or from git's output. git keeps such bytes as they are, prefixed
+ * with `<dir>/` when relative (`read_gitfile_gently` and
+ * `get_common_dir_noenv` in git's `setup.c`), and lets the filesystem
+ * resolve them, so a `..` after a symlink applies to the symlink's
+ * target; `path.resolve` or `path.join` would fold it lexically and name
+ * another directory. Every path taken from on-disk content passes
+ * through here before a name is appended to it. Undefined when the
+ * filesystem cannot resolve it (a missing directory, a dangling symlink,
+ * a loop): git's own `lstat` of `<named>/HEAD` fails there the same
+ * way, so git reads nothing behind such a path. */
+function physicalPath(dir: string, named: string): string | undefined {
+  const joined = path.isAbsolute(named) ? named : `${dir}/${named}`;
+  try {
+    return fs.realpathSync.native(joined);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Follows git's repository discovery from `root` (`setup.c`,
- * `setup_git_directory_gently_1`) to the `commondir` files git would read
+ * `repo_discovery_find_dir`) to the `commondir` files git would read
  * on the way and names the first one that is not a regular file of at
  * most `COMMONDIR_MAX` bytes. In each directory from `root` up: a `.git`
  * directory (its `commondir`, and the walk ends when it passes git's
- * test), a `.git` file (the `commondir` of the directory it names; git
- * ends there either way), then the directory itself as a bare
+ * test), a `.git` file (the `commondir` of the directory it names, that
+ * path resolved by the filesystem as git resolves it, `physicalPath`;
+ * git ends there either way, and a path the filesystem cannot resolve
+ * is named as a hazard, since this check cannot follow it), then the
+ * directory itself as a bare
  * repository. It ends no earlier than git 2.39 or newer does: past a
  * `.git` entry that is neither a file nor a directory, or one that
  * cannot be stated, it goes on (git 2.39 does, newer git stops there
@@ -432,7 +467,11 @@ function gitDiscoveryHazard(root: string): string | undefined {
       if (named === null) {
         return `${dotGit} names its git directory by a path that is not UTF-8, which this check cannot follow`;
       }
-      return commondirHazard(path.resolve(dir, named));
+      const target = physicalPath(dir, named);
+      if (target === undefined) {
+        return `${dotGit} names its git directory by a path that does not resolve, which this check cannot follow`;
+      }
+      return commondirHazard(target);
     }
     const hazard = commondirHazard(dir);
     if (hazard !== undefined) return hazard;
@@ -545,9 +584,9 @@ function gitDirIdentities(
   }
   for (const line of lines) {
     if (line.length === 0) continue;
-    const named = path.resolve(root, line);
-    const id = identityOf(named);
-    if (id === undefined) {
+    const named = physicalPath(root, line);
+    const id = named === undefined ? undefined : identityOf(named);
+    if (named === undefined || id === undefined) {
       problems.push(`git named ${line}, which cannot be stated`);
       continue;
     }
@@ -649,12 +688,9 @@ function commonDirOf(dir: string, strict: boolean): string | undefined {
     return strict ? undefined : dir;
   }
   const named = content.toString("utf8").replace(/[\r\n]+$/, "");
-  const joined = path.isAbsolute(named) ? named : `${dir}/${named}`;
-  try {
-    return fs.realpathSync.native(joined);
-  } catch {
-    return strict ? undefined : path.resolve(joined);
-  }
+  const resolved = physicalPath(dir, named);
+  if (resolved !== undefined) return resolved;
+  return strict ? undefined : path.resolve(dir, named);
 }
 
 function entryExists(p: string): boolean {
@@ -757,11 +793,14 @@ function gitDirLayout(
 
 /** The git directory that makes `root` a work tree git opens: its `.git`
  * directory, or the directory its `.git` file names (`gitdir: <path>`,
- * relative to `root`; setup.c, `read_gitfile_gently`), when that passes
- * git's own test as git applies it. Undefined when `.git` is neither,
- * names nothing, or names a directory git would not open: git then stops
- * (a `.git` file) or looks further up for another repository (a `.git`
- * directory), so `root` has no git directory of its own. */
+ * read as git reads it, `gitfilePath`, and resolved by the filesystem
+ * from `root` as git resolves it, `physicalPath`; setup.c,
+ * `read_gitfile_gently`), when that passes git's own test as git applies
+ * it. Undefined when `.git` is neither, names nothing, names a path that
+ * cannot be followed or resolved, or names a directory git would not
+ * open: git then stops (a `.git` file) or looks further up for another
+ * repository (a `.git` directory), so `root` has no git directory of its
+ * own. */
 function workTreeGitDir(root: string): string | undefined {
   const entry = path.join(root, ".git");
   let st: fs.Stats;
@@ -771,14 +810,11 @@ function workTreeGitDir(root: string): string | undefined {
     return undefined;
   }
   if (st.isDirectory()) return isGitDirectory(entry, true) ? entry : undefined;
-  if (!st.isFile()) return undefined;
-  const content = readRegular(entry)?.toString("utf8");
-  if (content === undefined || !content.startsWith("gitdir: ")) {
-    return undefined;
-  }
-  const named = content.slice("gitdir: ".length).replace(/[\r\n]+$/, "");
-  if (named.length === 0) return undefined;
-  const gitDir = path.resolve(root, named);
+  if (!st.isFile() || st.size > GITFILE_MAX) return undefined;
+  const named = gitfilePath(readRegular(entry, GITFILE_MAX));
+  if (named === undefined || named === null) return undefined;
+  const gitDir = physicalPath(root, named);
+  if (gitDir === undefined) return undefined;
   return isGitDirectory(gitDir, true) ? gitDir : undefined;
 }
 

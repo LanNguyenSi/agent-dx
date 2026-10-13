@@ -193,9 +193,11 @@ that would replace nothing is `missing`.
      directory or common directory git names from the root
      (`git rev-parse --absolute-git-dir --git-common-dir`, run in the root
      with `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`,
-     `GIT_CEILING_DIRECTORIES` and `GIT_DISCOVERY_ACROSS_FILESYSTEM`
-     removed from its environment, each line taken as git spells it),
-     compared by device and inode, so under any name or spelling. A line
+     `GIT_OBJECT_DIRECTORY`, `GIT_CEILING_DIRECTORIES` and
+     `GIT_DISCOVERY_ACROSS_FILESYSTEM` removed from its environment, so
+     that git's discovery runs over the layout as it is on disk, each
+     line taken as git spells it and resolved by the filesystem from the
+     root), compared by device and inode, so under any name or spelling. A line
      of git's answer counts only when the directory it names is laid out
      like a git directory, like a linked worktree's administrative
      directory, or like a common directory (`objects` and `refs`).
@@ -217,7 +219,11 @@ that would replace nothing is `missing`.
   name, lower-cased; on a case-sensitive filesystem that only adds
   refusals (`Hooks` there is another directory than git's `hooks`). The
   root's own git directory is its `.git`
-  directory, or the directory its `.git` file names (`gitdir: <path>`),
+  directory, or the directory its `.git` file names (`gitdir: <path>`,
+  read as git reads it: up to 1 MiB, ended by a NUL, and a path that is
+  not UTF-8 names nothing; resolved by the filesystem from the root, so
+  a symlink in it is followed before a `..` after it applies, and a
+  path that does not resolve names nothing),
   and only when git would open it: it passes git's own test as git
   applies it, without the `GIT_*` variables above, with `objects` and
   `refs` that can be searched, `HEAD` whitespace as git reads it (space,
@@ -254,9 +260,14 @@ that would replace nothing is `missing`.
   that git opens as a git directory although it passes neither the layout
   test nor the identity lookup: the layout test is git's own, wider where
   it differs, and the one known case is a `commondir` file whose content
-  is not valid UTF-8. A configuration file git reads while it sets up
-  (or one it includes) holding a value of many gigabytes: the bound on
-  git is then only its 10 seconds. And the window between the check and
+  is not valid UTF-8. A configuration value of gigabytes (a sparse file
+  counts) in a file git reads while it sets up: the repository's
+  `config`, a file its `include.path` names, or `config.worktree` under
+  `extensions.worktreeConfig`. A NUL stops git only where it expects a
+  section or key, not inside a value, which it takes in at its parser's
+  pace, a few hundred megabytes per second; the bound on git is then the
+  3 seconds of the identity lookup, so on the order of a gigabyte of
+  memory before it is stopped. And the window between the check and
   the write.
 - Refused although git would not object: a `-C` inside a submodule (or
   another repository) nested in a work tree that is checked out inside
@@ -270,14 +281,18 @@ that would replace nothing is `missing`.
   than a timeout can stop it. Before git runs, patch follows git's own
   discovery from the root (in each directory from the root up: a `.git`
   directory, the directory a `.git` file names, read up to git's 1 MiB
-  limit, then the directory itself as a bare repository) and ends it no
+  limit and resolved by the filesystem as git resolves it, a symlink
+  before a `..` followed first, never by folding the path lexically,
+  then the directory itself as a bare repository) and ends it no
   earlier than git 2.39 or a newer git does: at the first directory
   that passes git's test of a git directory, or at any `.git` file; not
   at a `.git` entry that is neither a file nor a directory (git 2.39
   looks further up past one), and not at a filesystem boundary. It does
   not run git when a `commondir` met on the way is not a regular file
   of at most 64 KiB, or a `.git` file names its directory by a path
-  that is not UTF-8. git then runs for at most 10 seconds (a FIFO
+  that is not UTF-8 or that the filesystem cannot resolve (the check
+  cannot follow it; git itself stops at such a file). git then runs for
+  at most 3 seconds (a FIFO
   it opens makes it wait), with at most 64 KiB of output, in a process
   group of its own; when it does not end by itself (the time or output
   bound, a signal), that whole group is killed, so no process of it

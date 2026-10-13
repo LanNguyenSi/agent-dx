@@ -97,12 +97,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tree inside another repository's git directory is refused: a bare
   repository nested in a work tree, `-C` inside one, and a
   `<repo>/.git/hooks` made a repository of its own. A `commondir` path
-  is resolved by its real path, as git does. git's identity lookup runs
-  for at most 10 seconds with at most 64 KiB of output, in a process
-  group of its own that is killed when git does not end by itself, and
-  is not run when its repository discovery would read a `commondir` file
-  that is not a regular file of at most 64 KiB (git reads it whole). A
-  warning names an identity
+  and a `.git` file's `gitdir:` path are resolved by the filesystem, as
+  git resolves them (a symlink before a `..` is followed first), never
+  by folding the path lexically. git's identity lookup runs with the
+  discovery variables (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`,
+  `GIT_OBJECT_DIRECTORY`, `GIT_CEILING_DIRECTORIES`,
+  `GIT_DISCOVERY_ACROSS_FILESYSTEM`) removed from its environment, for
+  at most 3 seconds with at most 64 KiB of output, in a process group of
+  its own that is killed when git does not end by itself, and is not run
+  when its repository discovery would read a `commondir` file that is
+  not a regular file of at most 64 KiB (git reads it whole), or a `.git`
+  file names its directory by a path that is not UTF-8 or does not
+  resolve. A warning names an identity
   lookup that could not be made, a directory git names that is not laid
   out like one, and a git directory name with a line break; a symlink is
   followed and its target checked. `--break-hard-links` edits
