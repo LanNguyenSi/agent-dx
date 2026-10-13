@@ -16,7 +16,7 @@ import { detectRepoRoot } from "./git.js";
 import { formatInitSummary, runInit } from "./init.js";
 import { allRules } from "./rules/index.js";
 import { renderJson, renderText, summarize } from "./report.js";
-import type { Finding, RunGit } from "./types.js";
+import type { Finding, RunGit, Severity } from "./types.js";
 
 export { UsageError };
 
@@ -78,6 +78,17 @@ export interface CheckOptions {
   companions?: string[];
   /** `--skip-companion-refs`: an unpassed companion alias is a notice, not an error. */
   skipCompanionRefs?: boolean;
+  /**
+   * `--rule`: report only findings of these rule ids. Every id must be a
+   * registered rule id, otherwise a UsageError lists the valid ones.
+   * Undefined or empty: every rule is reported.
+   */
+  rules?: string[];
+  /**
+   * `--min-severity`: report only findings at this severity or above
+   * (error > warning > notice). Undefined: every severity is reported.
+   */
+  minSeverity?: Severity;
   /** Test-only override for git access; production code shells out to the real `git` binary. */
   runGit?: RunGit;
 }
@@ -88,12 +99,45 @@ export interface CheckResult {
   exitCode: number;
 }
 
+const SEVERITY_RANK: Record<Severity, number> = {
+  notice: 0,
+  warning: 1,
+  error: 2,
+};
+
+/** Parses a `--min-severity` value; a UsageError names the valid levels. */
+export function parseMinSeverity(value: string): Severity {
+  const trimmed = value.trim();
+  if (trimmed === "error" || trimmed === "warning" || trimmed === "notice") {
+    return trimmed;
+  }
+  throw new UsageError(
+    `--min-severity must be one of error, warning, notice, got \`${value}\``,
+  );
+}
+
+/** Rejects a `--rule` id that names no registered rule, listing the valid ids. */
+function validateRuleIds(ids: string[]): void {
+  const valid = allRules.map((rule) => rule.id);
+  const unknown = ids.filter((id) => !valid.includes(id));
+  if (unknown.length > 0) {
+    throw new UsageError(
+      `unknown rule id${unknown.length > 1 ? "s" : ""} ${unknown
+        .map((id) => `\`${id}\``)
+        .join(", ")} for --rule; valid ids: ${valid.join(", ")}`,
+    );
+  }
+}
+
 export function runCheck(
   bundleDir: string,
   options: CheckOptions = {},
 ): CheckResult {
   if (!fs.existsSync(bundleDir) || !fs.statSync(bundleDir).isDirectory()) {
     throw new UsageError(`Bundle directory does not exist: ${bundleDir}`);
+  }
+  if (options.rules !== undefined && options.rules.length > 0) {
+    validateRuleIds(options.rules);
   }
   const resolvedBundleDir = path.resolve(bundleDir);
   // When --repo-root is omitted, try to find the enclosing git work tree so
@@ -127,7 +171,21 @@ export function runCheck(
     ctx.skipCompanionRefs = true;
   }
 
-  const findings = allRules.flatMap((rule) => rule.run(ctx));
+  const selectedRules =
+    options.rules !== undefined && options.rules.length > 0
+      ? new Set(options.rules)
+      : undefined;
+  const minRank =
+    options.minSeverity !== undefined ? SEVERITY_RANK[options.minSeverity] : 0;
+  // Filter what is reported; the exit code below is computed from the
+  // reported findings only.
+  const findings = allRules
+    .flatMap((rule) => rule.run(ctx))
+    .filter(
+      (finding) =>
+        (selectedRules === undefined || selectedRules.has(finding.ruleId)) &&
+        SEVERITY_RANK[finding.severity] >= minRank,
+    );
   const summary = summarize(findings);
   const exitCode =
     summary.errors > 0 || (Boolean(options.strict) && summary.warnings > 0)
@@ -204,6 +262,23 @@ program
     "frontmatter-refs-resolve: report a reference whose companion alias was not passed as a notice " +
       "instead of an error",
   )
+  .option(
+    "--rule <ids>",
+    "Report only findings of these rule ids (comma-separated, repeatable); the exit status counts only the " +
+      "reported findings; an unknown id is a usage error that lists the valid ids",
+    (value: string, previous: string[] = []) => [
+      ...previous,
+      ...value
+        .split(",")
+        .map((id) => id.trim())
+        .filter((id) => id.length > 0),
+    ],
+  )
+  .option(
+    "--min-severity <level>",
+    "Report only findings at this severity or above: error, warning or notice (default: all); the exit " +
+      "status counts only the reported findings",
+  )
   .exitOverride()
   .action(
     (
@@ -220,6 +295,8 @@ program
         dirtyAsNow?: boolean;
         companion?: string[];
         skipCompanionRefs?: boolean;
+        rule?: string[];
+        minSeverity?: string;
       },
     ) => {
       try {
@@ -237,6 +314,10 @@ program
           }
           futureSkewMinutes = n;
         }
+        const minSeverity =
+          opts.minSeverity !== undefined
+            ? parseMinSeverity(opts.minSeverity)
+            : undefined;
         const result = runCheck(bundleDir, {
           repoRoot: opts.repoRoot,
           strict: opts.strict,
@@ -248,6 +329,8 @@ program
           dirtyAsNow: opts.dirtyAsNow,
           companions: opts.companion,
           skipCompanionRefs: opts.skipCompanionRefs,
+          rules: opts.rule,
+          minSeverity,
         });
         const output = opts.json
           ? renderJson(result.bundleDir, result.findings)
