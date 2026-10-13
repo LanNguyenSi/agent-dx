@@ -32,11 +32,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   already written. `--dry-run` returns the same envelope with
   `would_write` and a unified diff preview. Paths outside the repository
   root are refused unless `--allow-outside`; paths inside a git directory
-  always, by a `.git` component in any letter case and by the identity of
-  the git and common directories git finds from the root (a bare
-  repository or git directory as `-C` included; a warning names an
-  identity check that could not be made); a symlink is followed and
-  its target checked. `--break-hard-links` edits a hard-linked file. New
+  always: by a `.git` component in any letter case, by a directory above
+  the target that is laid out like a git directory (git's own test, which
+  runs no git here, so it holds for a bare repository git declines to
+  open and under any `GIT_*` environment), and by the identity of the git
+  and common directories git names from the root. Above a target inside
+  a work tree the check stops at the work-tree root, so a work tree
+  checked out inside a bare repository is editable from inside it; a
+  bare repository nested in a work tree, and `-C` inside one, are
+  refused. A warning names an identity lookup that could not be made; a
+  symlink is followed and its target checked. `--break-hard-links` edits
+  a hard-linked file. New
   envelope statuses: `ambiguous`, `overlap`, `fuzzy_side_effect` and
   `not_editable` (exit `1`), `would_write` (exit `0`). The matching engine
   is ported from pi-mono's `edit-diff.ts` (MIT); its notice is kept in

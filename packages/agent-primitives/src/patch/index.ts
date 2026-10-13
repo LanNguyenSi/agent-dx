@@ -282,6 +282,18 @@ function identityOf(p: string): string | undefined {
   }
 }
 
+/** Environment variables that steer git's repository discovery. They are
+ * removed from git's environment for the identity lookup, so that it
+ * answers for the root itself, not for a repository the caller named or
+ * a ceiling the caller set. */
+const GIT_DISCOVERY_ENV = [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_COMMON_DIR",
+  "GIT_CEILING_DIRECTORIES",
+  "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+];
+
 /**
  * Identities of the git directory and common directory (they differ in a
  * linked worktree) git finds from `root`, whatever they are named. Asked
@@ -289,8 +301,8 @@ function identityOf(p: string): string | undefined {
  * directory, git answers with that directory. The set is empty when git
  * finds no repository there, and then also carries a warning when the
  * check could not be made: git cannot be run, or `root` is a git work
- * tree (`inWorkTree`) and git fails or names a directory that cannot be
- * stated there.
+ * tree (`inWorkTree`) and git fails there, or git names a directory that
+ * cannot be read line by line or cannot be stated.
  */
 function gitDirIdentities(
   root: string,
@@ -298,12 +310,10 @@ function gitDirIdentities(
 ): { ids: Set<string>; warning?: string } {
   const ids = new Set<string>();
   const env = { ...process.env };
-  for (const key of ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR"]) {
-    delete env[key];
-  }
+  for (const key of GIT_DISCOVERY_ENV) delete env[key];
   const skipped = (why: string): { ids: Set<string>; warning: string } => ({
     ids,
-    warning: `the git directory check by identity was skipped (${why}); only a .git path component is refused`,
+    warning: `the git directory check by identity was skipped (${why}); a .git path component and a directory laid out like a git directory are still refused`,
   });
   let out: string;
   try {
@@ -323,35 +333,234 @@ function gitDirIdentities(
       `git rev-parse failed with exit code ${String(e.status)} in the work tree ${root}`,
     );
   }
-  const lines = out
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
+  // One path per line, each as git spells it (a name may end in
+  // whitespace); only the final line break is dropped.
+  const lines = out.split("\n");
+  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
   for (const line of lines) {
+    if (line.length === 0) {
+      return skipped(
+        "git named a directory with a line break in its name, which cannot be read line by line",
+      );
+    }
     const id = identityOf(path.resolve(root, line));
     if (id === undefined) {
       return skipped(`git named ${line}, which cannot be stated`);
     }
     ids.add(id);
   }
-  if (ids.size === 0 && inWorkTree) {
-    return skipped("git named no git directory for the work tree");
-  }
   return { ids };
 }
 
-/** True when a directory above `real` is one of the git directories in
- * `gitIds`, compared by identity rather than by name. */
-function insideGitDir(real: string, gitIds: ReadonlySet<string>): boolean {
-  if (gitIds.size === 0) return false;
+/** Up to 255 bytes of a file, as much of `HEAD` as git reads (setup.c,
+ * `validate_headref`); undefined when the file cannot be read. */
+function readHead(p: string): string | undefined {
+  let fd: number;
+  try {
+    fd = fs.openSync(p, "r");
+  } catch {
+    return undefined;
+  }
+  try {
+    const buf = Buffer.alloc(255);
+    const n = fs.readSync(fd, buf, 0, buf.length, 0);
+    return buf.toString("latin1", 0, n);
+  } catch {
+    return undefined;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/** git's test of a `HEAD` entry (setup.c, `validate_headref`): a symlink
+ * into `refs/`, or a file that holds `ref:`, optional whitespace and a
+ * name under `refs/`, or that starts with a hexadecimal object id. */
+function validHeadRef(p: string): boolean {
+  let st: fs.Stats;
+  try {
+    st = fs.lstatSync(p);
+  } catch {
+    return false;
+  }
+  if (st.isSymbolicLink()) {
+    try {
+      return fs.readlinkSync(p).startsWith("refs/");
+    } catch {
+      return false;
+    }
+  }
+  const head = readHead(p);
+  if (head === undefined) return false;
+  if (head.startsWith("ref:")) return /^ref:[ \t\n\r\f\v]*refs\//.test(head);
+  return /^[0-9a-fA-F]{40}/.test(head);
+}
+
+/** The directory holding `objects` and `refs` for the git directory
+ * `dir`: the one its `commondir` file names, relative to `dir` (a linked
+ * worktree's administrative directory names the repository's), else
+ * `dir` itself (setup.c, `get_common_dir_noenv`). */
+function commonDirOf(dir: string): string {
+  let named: string;
+  try {
+    named = fs.readFileSync(path.join(dir, "commondir"), "utf8");
+  } catch {
+    return dir;
+  }
+  return path.resolve(dir, named.replace(/[\r\n]+$/, ""));
+}
+
+function entryExists(p: string): boolean {
+  try {
+    fs.statSync(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isRegularFile(p: string): boolean {
+  try {
+    return fs.statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** git's own test of a git directory (setup.c, `is_git_directory`): a
+ * valid `HEAD`, plus `objects` and `refs` in the common directory. When
+ * they are set, git takes `GIT_COMMON_DIR` as the common directory and
+ * `GIT_OBJECT_DIRECTORY` for the objects instead; here the first adds a
+ * second place to look and the second makes `objects` optional, so the
+ * variables can widen the test but never narrow it. */
+function isGitDirectory(dir: string): boolean {
+  if (!validHeadRef(path.join(dir, "HEAD"))) return false;
+  const commons = [commonDirOf(dir)];
+  const envCommon = process.env.GIT_COMMON_DIR ?? "";
+  if (envCommon.length > 0) commons.push(path.resolve(envCommon));
+  const objectsElsewhere = (process.env.GIT_OBJECT_DIRECTORY ?? "").length > 0;
+  return commons.some(
+    (common) =>
+      (objectsElsewhere || entryExists(path.join(common, "objects"))) &&
+      entryExists(path.join(common, "refs")),
+  );
+}
+
+/** A linked worktree's administrative directory (`<git dir>/worktrees/
+ * <name>`), by the two files `git worktree add` writes there: `gitdir`,
+ * naming the work tree, and `commondir`, naming the repository. */
+function isWorktreeAdminDir(dir: string): boolean {
+  return (
+    isRegularFile(path.join(dir, "gitdir")) &&
+    isRegularFile(path.join(dir, "commondir"))
+  );
+}
+
+/** Why a directory counts as a git directory: git named it from the
+ * root, or it is laid out like one. */
+type GitDirEvidence = "named" | "layout" | "worktree_admin";
+
+/** The layout test, cached per directory for one `patch` call. */
+function gitDirLayout(
+  dir: string,
+  cache: Map<string, GitDirEvidence | null>,
+): GitDirEvidence | null {
+  const known = cache.get(dir);
+  if (known !== undefined) return known;
+  const result: GitDirEvidence | null = isGitDirectory(dir)
+    ? "layout"
+    : isWorktreeAdminDir(dir)
+      ? "worktree_admin"
+      : null;
+  cache.set(dir, result);
+  return result;
+}
+
+/** True when `root` is a work tree git would open: its `.git` entry is a
+ * directory laid out like a git directory, or a file naming one
+ * (`gitdir: <path>`, relative to `root`; setup.c, `read_gitfile_gently`).
+ * A `.git` that is neither makes no work tree, so the walk above a
+ * target in it does not stop at `root`. */
+function isWorkTreeRoot(
+  root: string,
+  cache: Map<string, GitDirEvidence | null>,
+): boolean {
+  const entry = path.join(root, ".git");
+  let st: fs.Stats;
+  try {
+    st = fs.statSync(entry);
+  } catch {
+    return false;
+  }
+  if (st.isDirectory()) return gitDirLayout(entry, cache) === "layout";
+  if (!st.isFile()) return false;
+  let content: string;
+  try {
+    content = fs.readFileSync(entry, "utf8");
+  } catch {
+    return false;
+  }
+  if (!content.startsWith("gitdir: ")) return false;
+  const named = content.slice("gitdir: ".length).replace(/[\r\n]+$/, "");
+  if (named.length === 0) return false;
+  return gitDirLayout(path.resolve(root, named), cache) === "layout";
+}
+
+interface GitDirChecks {
+  /** Identities of the git and common directories git names from the
+   * root. */
+  ids: ReadonlySet<string>;
+  root: string;
+  /** Whether `root` is a work tree git would open; only then does the
+   * walk above a target inside the root end at the root. */
+  rootIsWorkTree: boolean;
+  layout: Map<string, GitDirEvidence | null>;
+}
+
+/**
+ * The nearest directory above `real` that is a git directory: one git
+ * named from the root (compared by identity, so under any name), or one
+ * laid out like a git directory, whatever git says or is allowed to say.
+ * Above a target inside a root that is a work tree, the walk ends at the
+ * root, so a work tree checked out inside a bare repository is editable
+ * from inside; above any other target (one outside the root, or inside a
+ * root that is no work tree) it goes on to the filesystem root.
+ */
+function gitDirAbove(
+  real: string,
+  contained: boolean,
+  checks: GitDirChecks,
+): { dir: string; evidence: GitDirEvidence } | undefined {
   let dir = path.dirname(real);
   for (;;) {
     const id = identityOf(dir);
-    if (id !== undefined && gitIds.has(id)) return true;
+    if (id !== undefined && checks.ids.has(id)) {
+      return { dir, evidence: "named" };
+    }
+    const layout = gitDirLayout(dir, checks.layout);
+    if (layout !== null) return { dir, evidence: layout };
+    if (contained && checks.rootIsWorkTree && dir === checks.root) {
+      return undefined;
+    }
     const parent = path.dirname(dir);
-    if (parent === dir) return false;
+    if (parent === dir) return undefined;
     dir = parent;
   }
+}
+
+function gitDirDetail(
+  file: string,
+  above: { dir: string; evidence: GitDirEvidence } | undefined,
+): string {
+  if (above === undefined) {
+    return `${file} has a .git path component; patch never writes into a git directory`;
+  }
+  const how =
+    above.evidence === "named"
+      ? "which git names as its git directory or common directory"
+      : above.evidence === "layout"
+        ? "which looks like a git directory (HEAD, objects and refs)"
+        : "which looks like a git directory (a linked worktree's gitdir and commondir files)";
+  return `${file} is inside ${above.dir}, ${how}; patch never writes into a git directory`;
 }
 
 /** Decodes a file for editing, or names why it cannot be edited. */
@@ -417,7 +626,13 @@ export function patch(options: PatchOptions): PatchResult {
   // Asked whether or not a work tree was found: `-C` may lie in a bare
   // repository or a git directory, which has no work tree.
   const gitDirs = gitDirIdentities(root, gitRoot !== undefined);
-  const gitIds = gitDirs.ids;
+  const layout = new Map<string, GitDirEvidence | null>();
+  const checks: GitDirChecks = {
+    ids: gitDirs.ids,
+    root,
+    rootIsWorkTree: gitRoot !== undefined && isWorkTreeRoot(root, layout),
+    layout,
+  };
   const warnings: string[] =
     gitDirs.warning !== undefined ? [gitDirs.warning] : [];
   const rename =
@@ -488,17 +703,19 @@ export function patch(options: PatchOptions): PatchResult {
           : real;
     if (real !== undefined && pathError === undefined) {
       const lexicalRel = path.relative(rootLexical, lexical);
-      if (
+      const gitSegment =
         hasGitSegment(contained ? path.relative(root, real) : real) ||
         hasGitSegment(
           isPathContained(rootLexical, lexical) ? lexicalRel : lexical,
-        ) ||
-        insideGitDir(real, gitIds)
-      ) {
+        );
+      const above = gitSegment
+        ? undefined
+        : gitDirAbove(real, contained, checks);
+      if (gitSegment || above !== undefined) {
         pathError = {
           status: "refused",
           reason: "git_dir",
-          detail: `${spec.file} is inside a git directory; patch never writes there`,
+          detail: gitDirDetail(spec.file, above),
         };
       } else if (!contained && options.allowOutside !== true) {
         pathError = {

@@ -151,31 +151,63 @@ that would replace nothing is `missing`.
   `-C` directory itself outside a git work tree. A path whose resolved
   target lies outside the root is refused (`reason: "outside_root"`)
   unless `--allow-outside` is passed.
-- A path inside a git directory is always refused (`reason: "git_dir"`),
-  `--allow-outside` or not. Refused are: a path with a `.git` component in
-  any letter case (`.GIT`, `.Git`), both as given (resolved against the
-  `-C` directory, before following symlinks) and after resolving
-  symlinks, where each component is read as it is stored on disk; and a
-  path whose resolved location lies below the git directory or common
-  directory git finds from the root (as
-  `git rev-parse --absolute-git-dir --git-common-dir` run there reports
-  them, compared by device and inode, so a git directory under another
-  name is covered too). That lookup runs also when the root has no work
-  tree: with `-C` inside a bare repository (`repo.git`) or a git directory
-  (`repo.git/worktrees/<name>`), git names that directory and its
-  content is refused. Not covered: another repository's git directory
-  that is not named `.git` (a bare repository or a `--separate-git-dir`
-  elsewhere) when it is not the one git finds from the root.
-- When the identity lookup cannot be made, the `.git` component check
-  still applies and the result carries a warning that the identity check
+- A path inside a git directory is refused (`reason: "git_dir"`),
+  `--allow-outside` or not, by three checks; the edit's `detail` names the
+  one that applied.
+  1. Its name: a `.git` component in any letter case (`.GIT`, `.Git`),
+     both in the path as given (resolved against the `-C` directory,
+     before following symlinks) and after resolving symlinks, where each
+     component is read as it is stored on disk.
+  2. Its layout: a directory above the resolved target that is laid out
+     like a git directory. That is git's own test of one
+     (`is_git_directory` in git's `setup.c`): a `HEAD` that is a symlink
+     into `refs/`, or a file holding `ref:` and a name under `refs/`, or
+     starting with a hexadecimal object id; plus `objects` and `refs`, in
+     that directory or in the one its `commondir` file names (a linked
+     worktree's administrative directory, `<git dir>/worktrees/<name>`,
+     names the repository that way). `GIT_OBJECT_DIRECTORY` set in the
+     environment makes `objects` optional and `GIT_COMMON_DIR` adds the
+     directory it names as a second place for `objects` and `refs`, as
+     git looks there; neither variable narrows the test. A directory
+     holding both a `gitdir` and a `commondir` file (a linked worktree's
+     administrative directory) counts as well. This check runs no git, so
+     it holds whatever git's configuration or environment says: a bare
+     repository git declines to open (`safe.bareRepository`,
+     `safe.directory`), a `GIT_CEILING_DIRECTORIES` setting, a repository
+     git cannot read.
+  3. Its identity: a directory above the resolved target that is the git
+     directory or common directory git names from the root
+     (`git rev-parse --absolute-git-dir --git-common-dir`, run in the root
+     with `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`,
+     `GIT_CEILING_DIRECTORIES` and `GIT_DISCOVERY_ACROSS_FILESYSTEM`
+     removed from its environment, each line taken as git spells it),
+     compared by device and inode, so under any name or spelling.
+- Which directories are checked. For a target inside the root, when the
+  root is a work tree git would open (its `.git` is a directory laid out
+  like a git directory, or a file naming one): the directories from the
+  target's own up to and including the root, and no further. So a work
+  tree checked out inside a bare repository (`git -C repo.git worktree
+  add main`) is editable from a `-C` inside it, while a bare repository
+  nested in a work tree is refused from the work tree and from a `-C`
+  inside it. When the root is not such a work tree (`-C` inside a bare
+  repository or a git directory, `repo.git/hooks` for example, or a
+  directory whose `.git` names no git directory), and for a target
+  outside the root: every directory up to the filesystem root, so a work
+  tree inside a bare repository is refused as an outside target.
+- Not covered: a directory that git opens as a git directory although it
+  passes neither the layout test (git's own discovery applies that test,
+  so none is known) nor the identity lookup; and the window between the
+  check and the write.
+- When the identity lookup cannot be made, the name and layout checks
+  still apply and the result carries a warning that the identity check
   was skipped, with the cause: `git` cannot be run (not installed or not
   on `PATH`), whatever the root; the root is a git work tree but
   `git rev-parse` fails there (a broken `.git` file, a repository git
   refuses as unsafe, a damaged repository); or git names a directory that
-  cannot be stated. Outside any repository git fails as well; that is
-  read as "no git directory here", with no warning, so a bare repository
-  that git refuses to open from a root without a work tree is not
-  detected either.
+  cannot be read line by line (a line break in its name) or cannot be
+  stated. Outside any work tree, git failing is read as "git names no
+  directory here", with no warning; a bare repository git declines to
+  open is then refused by its layout.
 - A symlink is followed: its resolved target is checked against the root
   and edited in place, and the link stays a link. A symlink whose target
   lies outside the root is refused like any other outside path.

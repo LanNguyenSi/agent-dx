@@ -671,9 +671,9 @@ export function resolveFileEdits(
       // replaceAll takes the non-overlapping occurrences from the same
       // filtered list the ambiguity count sees, so an occurrence the
       // line-end rule drops never hides an overlapping one it keeps.
+      // `all` is not empty here and nonOverlapping keeps its first start,
+      // so `used` holds at least one occurrence.
       const used = edit.replaceAll ? nonOverlapping(all, needle.length) : all;
-      // An edit that would replace nothing is not resolved (it is missing).
-      if (used.length === 0) break;
       found = true;
       const replacements = used.map((o) => ({
         matchIndex: o,
