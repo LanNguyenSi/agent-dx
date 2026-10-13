@@ -9,7 +9,7 @@ import type { GitRunResult } from "../src/drift/git.js";
 // file replaces it with a wrapper that can hand back what `spawnSync` returns
 // for output past its limit, which no real git run produces on demand: git
 // has exited with status 0, `error` is ENOBUFS, and `stdout` is cut short.
-const cut = vi.hoisted(() => ({ on: false }));
+const cut = vi.hoisted(() => ({ on: false, failing: "", empty: "" }));
 
 vi.mock("../src/drift/git.js", async (importOriginal) => {
   const real = await importOriginal<typeof import("../src/drift/git.js")>();
@@ -17,6 +17,14 @@ vi.mock("../src/drift/git.js", async (importOriginal) => {
     ...real,
     runGit: (...args: Parameters<typeof real.runGit>): GitRunResult => {
       const result = real.runGit(...args);
+      // One named git call that exits 0 and prints nothing.
+      if (cut.empty !== "" && args[1].includes(cut.empty)) {
+        return { ...result, stdout: "" };
+      }
+      // The same exit-0-with-error shape for one named git call.
+      if (cut.failing !== "" && args[1].includes(cut.failing)) {
+        return { ...result, error: "spawnSync git ETIMEDOUT" };
+      }
       if (!cut.on || !args[1].includes("for-each-ref")) return result;
       // Only the first line is kept, so refs/remotes/zzz/self is lost.
       const kept = result.stdout.slice(0, result.stdout.indexOf("\n", 0) + 1);
@@ -43,6 +51,8 @@ const GIT_ENV: NodeJS.ProcessEnv = {
 const tmpDirs: string[] = [];
 afterEach(() => {
   cut.on = false;
+  cut.failing = "";
+  cut.empty = "";
   for (const dir of tmpDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -100,5 +110,38 @@ describe("unpushedCommits: a ref listing that comes back cut short", () => {
     expect(r.status).toBe(0);
     expect(r.error).toMatch(/ENOBUFS/);
     expect(r.stdout).not.toContain("zzz");
+  });
+});
+
+describe("unpushedCommits: the lookups that come before the ref listing", () => {
+  it("fails outside a repository with git's own status", () => {
+    const dir = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "agent-primitives-wt-norepo-")),
+    );
+    tmpDirs.push(dir);
+    const r = unpushedCommits(dir);
+    expect(r.status).not.toBe(0);
+    expect(r.stdout).toBe("");
+  });
+
+  it("fails on the error alone when naming the common directory, though git exited with status 0", () => {
+    const { repo } = makeRepo();
+    cut.failing = "--git-common-dir";
+    const r = unpushedCommits(repo);
+    expect(r.error).toMatch(/ETIMEDOUT/);
+  });
+
+  it("fails when git names no common directory, rather than reading the working directory", () => {
+    const { repo } = makeRepo();
+    cut.empty = "--git-common-dir";
+    const r = unpushedCommits(repo);
+    expect(r.error).toMatch(/did not name the common git directory/);
+  });
+
+  it("fails on the error alone when reading the ref storage, though git exited with status 0", () => {
+    const { repo } = makeRepo();
+    cut.failing = "extensions.refStorage";
+    const r = unpushedCommits(repo);
+    expect(r.error).toMatch(/ETIMEDOUT/);
   });
 });

@@ -2820,6 +2820,56 @@ describe("worktree remove: a file system symlink under refs/remotes", () => {
   });
 });
 
+describe("worktree remove: the ref backend is read from the repository's own config", () => {
+  it("refuses a storage format it does not know, instead of skipping the walk", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeUnpushed(f);
+    fs.symlinkSync(
+      "../../heads/feat",
+      path.join(commonDirOf(f), "refs/remotes/origin/self"),
+    );
+    const bogus = gitWrapper(
+      f,
+      "git-bogus-storage",
+      `for a in "$@"; do
+  if [ "$a" = extensions.refStorage ]; then echo bogus; exit 0; fi
+done`,
+    );
+    await expectUnknownState(f, wt, sha, [["--delete-branch"]], {
+      PATH: bogus,
+    });
+  });
+
+  it("refuses when the config read fails with a status other than 'no such key'", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeUnpushed(f);
+    const failing = gitWrapper(
+      f,
+      "git-failing-config",
+      `for a in "$@"; do
+  if [ "$a" = extensions.refStorage ]; then echo 'fatal: injected' >&2; exit 3; fi
+done`,
+    );
+    await expectUnknownState(f, wt, sha, [["--delete-branch"]], {
+      PATH: failing,
+    });
+  });
+
+  it("is not told 'reftable' by an environment config that the repository does not carry", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeUnpushed(f);
+    fs.symlinkSync(
+      "../../heads/feat",
+      path.join(commonDirOf(f), "refs/remotes/origin/self"),
+    );
+    await expectUnknownState(f, wt, sha, [["--delete-branch"]], {
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "extensions.refStorage",
+      GIT_CONFIG_VALUE_0: "reftable",
+    });
+  });
+});
+
 describe("worktree remove: plain layouts under refs/remotes are unchanged", () => {
   it("removes a pushed branch with nested remote branches and packed refs, with and without --base", async () => {
     for (const base of [[], ["--base", "origin/main"]]) {
@@ -2924,6 +2974,65 @@ describe("untrustedLooseRemoteRef: the walk", () => {
     fs.rmSync(path.join(dir, "refs/remotes"), { recursive: true });
     expect(untrustedLooseRemoteRef(dir)).toBeUndefined();
   });
+
+  it("names refs or refs/remotes when it is a link, or not a directory", () => {
+    const dir = tree();
+    fs.renameSync(
+      path.join(dir, "refs/remotes"),
+      path.join(dir, "remotes-real"),
+    );
+    fs.symlinkSync("../remotes-real", path.join(dir, "refs/remotes"));
+    expect(untrustedLooseRemoteRef(dir)).toBe(
+      "refs/remotes is a symbolic link",
+    );
+    fs.rmSync(path.join(dir, "refs/remotes"));
+    fs.writeFileSync(path.join(dir, "refs/remotes"), "x\n");
+    expect(untrustedLooseRemoteRef(dir)).toBe(
+      "refs/remotes is not a directory",
+    );
+    fs.rmSync(path.join(dir, "refs"), { recursive: true });
+    fs.symlinkSync("remotes-real", path.join(dir, "refs"));
+    expect(untrustedLooseRemoteRef(dir)).toBe("refs is a symbolic link");
+    fs.rmSync(path.join(dir, "refs"));
+    fs.writeFileSync(path.join(dir, "refs"), "x\n");
+    expect(untrustedLooseRemoteRef(dir)).toBe("refs is not a directory");
+  });
+
+  it("names a special file", () => {
+    const dir = tree();
+    execFileSync("mkfifo", [path.join(dir, "refs/remotes/origin/pipe")]);
+    expect(untrustedLooseRemoteRef(dir)).toBe(
+      "refs/remotes/origin/pipe is neither a regular file nor a directory",
+    );
+  });
+
+  it.skipIf(process.getuid?.() === 0)(
+    "treats a directory or entry it cannot read as untrusted",
+    () => {
+      const dir = tree();
+      const origin = path.join(dir, "refs/remotes/origin");
+      try {
+        // Listed but not searchable: readdir works, lstat of the entries not.
+        fs.chmodSync(origin, 0o444);
+        expect(untrustedLooseRemoteRef(dir)).toContain(
+          "refs/remotes/origin/main cannot be inspected",
+        );
+        // Not even listable.
+        fs.chmodSync(origin, 0o000);
+        expect(untrustedLooseRemoteRef(dir)).toContain(
+          "refs/remotes/origin cannot be read",
+        );
+        // The component itself cannot be inspected.
+        fs.chmodSync(path.join(dir, "refs"), 0o000);
+        expect(untrustedLooseRemoteRef(dir)).toContain(
+          "refs/remotes cannot be inspected",
+        );
+      } finally {
+        fs.chmodSync(path.join(dir, "refs"), 0o755);
+        fs.chmodSync(origin, 0o755);
+      }
+    },
+  );
 
   it("names a link and never descends into a looping directory link", () => {
     const dir = tree();

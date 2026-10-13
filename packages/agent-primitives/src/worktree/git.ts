@@ -388,20 +388,17 @@ export function untrustedLooseRemoteRef(
   commonDir: string,
   bounds: LooseRefBounds = LOOSE_REF_BOUNDS,
 ): string | undefined {
-  const lstat = (rel: string): fs.Stats | string | undefined => {
+  // No loose remote-tracking refs at all (packed refs only) is an ordinary
+  // layout, so a missing `refs` or `refs/remotes` is fine; any other way
+  // these two components fail to be directories is not.
+  for (const rel of ["refs", "refs/remotes"]) {
+    let st: fs.Stats;
     try {
-      return fs.lstatSync(path.join(commonDir, rel));
+      st = fs.lstatSync(path.join(commonDir, rel));
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
       return `${rel} cannot be inspected: ${messageOf(err)}`;
     }
-  };
-  // No loose remote-tracking refs at all (packed refs only) is an ordinary
-  // layout; any other way these two components fail to be directories is not.
-  for (const rel of ["refs", "refs/remotes"]) {
-    const st = lstat(rel);
-    if (st === undefined) return undefined;
-    if (typeof st === "string") return st;
     if (st.isSymbolicLink()) return `${rel} is a symbolic link`;
     if (!st.isDirectory()) return `${rel} is not a directory`;
   }
@@ -422,10 +419,14 @@ export function untrustedLooseRemoteRef(
         return `refs/remotes holds more than ${String(bounds.maxEntries)} entries`;
       }
       const rel = `${next.rel}/${name}`;
-      const st = lstat(rel);
-      // A name that vanished since the listing is a ref being rewritten.
-      if (st === undefined) continue;
-      if (typeof st === "string") return st;
+      // A name that readdir listed and lstat then cannot find is a ref
+      // being rewritten: unreadable, like any other lstat failure.
+      let st: fs.Stats;
+      try {
+        st = fs.lstatSync(path.join(commonDir, rel));
+      } catch (err) {
+        return `${rel} cannot be inspected: ${messageOf(err)}`;
+      }
       if (st.isSymbolicLink()) return `${rel} is a symbolic link`;
       if (st.isDirectory()) {
         if (next.depth + 1 > bounds.maxDepth) {
@@ -484,10 +485,12 @@ export function unpushedCommits(cwd: string): GitRunResult {
     "--get",
     "extensions.refStorage",
   ]);
-  if (storage.error !== undefined) return storage;
   // Exit status 1 is "no such key": the default, files backend.
-  if (storage.status !== 0 && storage.status !== 1) return storage;
-  const backend = storage.status === 1 ? "files" : storage.stdout.trim();
+  let backend: string;
+  if (storage.error === undefined && storage.status === 1) backend = "files";
+  else if (storage.error === undefined && storage.status === 0) {
+    backend = storage.stdout.trim();
+  } else return storage;
   if (backend !== "files" && backend !== "reftable") {
     return unknownUnpushed(
       `unknown ref storage format ${JSON.stringify(backend)}`,
