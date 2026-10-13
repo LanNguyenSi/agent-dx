@@ -1177,10 +1177,19 @@ function emitProbe(
       persistFullResult: false,
       maxChars: Number.MAX_SAFE_INTEGER,
     }).envelope;
-    const source =
-      envelope.fullResult === undefined
-        ? unreduced
-        : { ...unreduced, fullResult: envelope.fullResult };
+    // `logs` and `warnings` are overlaid from the emitted envelope: the
+    // result-full path and a "full result not written" warning only exist
+    // after the real build ran. `logs` is a protected key, never reduced.
+    const source: Record<string, unknown> = {
+      ...unreduced,
+      logs: envelope.logs,
+      ...(envelope.warnings === undefined
+        ? {}
+        : { warnings: envelope.warnings }),
+      ...(envelope.fullResult === undefined
+        ? {}
+        : { fullResult: envelope.fullResult }),
+    };
     writeAndExit(
       boundText(renderPrint(source, opts.print), global.maxChars),
       exitCode,

@@ -2135,12 +2135,23 @@ what they are without the flag. Both work for a single probe and for
 `--plan`, take precedence over `-f`, are bounded by `-m` (see below for
 how), and are mutually exclusive.
 
-An argument or option error (an unknown `--print` field, `--summary`
-together with `--print`, an invalid value) is raised before any probe
-work and still prints the JSON `usage_error` envelope with exit `2`, as
-for every other command. Only a refusal reached inside the probe (an
-unreadable plan file, a failing baseline, a `--pre` failure) prints the
-compact `totals:` and `note:` lines.
+What a run that stops early prints, by case:
+
+- An argument or option error is raised before any probe work and prints
+  the JSON `usage_error` envelope with exit `2`, as for every other
+  command: an unknown `--print` field, `--summary` together with
+  `--print`, an invalid value, an invalid combination such as `--plan`
+  with `--pre`.
+- A refusal that names no mutant prints the `totals:` line (`total=0`)
+  and a `note:` line with the first warning or message: an unreadable
+  plan file, a single-probe `--file` outside the containment root.
+- A refusal or failure that concerns a mutant prints that mutant's
+  `not_run(...)` line, or `not_run` with the reason in `totals:`, and the
+  `totals:` line with `not_run=1`, and no `note:` line: a failing
+  baseline or a `--pre` failure (single and `--plan`), a `--plan` mutant
+  whose file lies outside the root.
+- `--print` prints its one JSON line in every case that is not an
+  argument error, with `null` for a field the run did not produce.
 
 They are flags on `probe` rather than a new `-f` value: `-f` is a global
 option shared by every command and `probe` is the only one with a
@@ -2164,10 +2175,7 @@ test's captured output tails that looks like a failing test (`FAIL`,
 none does or the verdict is not `killed` (a survived mutant passed, so
 error-shaped output it printed is not a failing test); it is a heuristic over free text,
 because the envelope has no structured failing-test field. `log=` is the
-mutant run's log, or the baseline's when no mutant run happened. A run
-that never reached a mutant (a usage error, an unreadable plan file)
-prints only the `totals:` line and a `note:` line with the first warning
-or message. `-m` bounds the mutant lines only: when they do not fit, the
+mutant run's log, or the baseline's when no mutant run happened. The cases above say what an early stop prints. `-m` bounds the mutant lines only: when they do not fit, the
 last ones are replaced by a marker line naming how many were omitted, and
 the `totals:` line is always printed (the `note:` line is dropped before
 the totals line if even those two do not fit).

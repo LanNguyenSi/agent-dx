@@ -314,6 +314,39 @@ describe("probe --print (CLI)", { timeout: 60000 }, () => {
     expect(printed["test.exitCode"]).toBe(0);
   });
 
+  it("--print logs carries the result-full path the JSON envelope lists, at the default -m", async () => {
+    const { repo, logs } = makeRepo();
+    const json = await spawnCli([
+      "-C",
+      repo,
+      "-l",
+      logs,
+      "probe",
+      ...SURVIVED_ARGS,
+    ]);
+    const view = await spawnCli([
+      "-C",
+      repo,
+      "-l",
+      logs,
+      "probe",
+      "--print",
+      "logs",
+      ...SURVIVED_ARGS,
+    ]);
+    const jsonLogs = JSON.parse(json.stdout).logs as string[];
+    const printed = JSON.parse(view.stdout).logs as string[];
+    const fullIn = (list: string[]) =>
+      list.filter((l) => /result-full-[^/]*\.json$/.test(l));
+    expect(fullIn(jsonLogs)).toHaveLength(1);
+    expect(fullIn(printed)).toHaveLength(1);
+    // Each run writes its own uniquely named files: compare the kinds of
+    // entry, not the unique ids.
+    const kind = (l: string) =>
+      path.basename(l).replace(/^(exec|result-full)-.*$/, "$1");
+    expect(printed.map(kind)).toEqual(jsonLogs.map(kind));
+  });
+
   it("every top-level field of the envelope and of the saved full result is printable", async () => {
     const { repo, logs } = makeRepo();
     const run = await spawnCli([
@@ -440,6 +473,28 @@ describe("summary helpers", () => {
       expect(text).toMatch(/\.\.\. \d+ more mutant lines omitted/);
     }
     expect(renderProbeSummary(input)).not.toContain("omitted");
+  });
+
+  it("renderProbeSummary keeps the totals line and drops the note under a tiny maxChars", () => {
+    const planInput = {
+      status: "usage_error",
+      reason: "plan_unreadable",
+      message: "plan file could not be read",
+      plan: { results: [], summary: { total: 0 } },
+    };
+    const zeroInput = {
+      status: "baseline_failed",
+      warnings: ["something went wrong before any mutant"],
+    };
+    for (const input of [planInput, zeroInput]) {
+      expect(renderProbeSummary(input, 1000)).toContain("note: ");
+      for (const max of [1, 50]) {
+        const text = renderProbeSummary(input, max);
+        const lines = text.trimEnd().split("\n");
+        expect(lines[lines.length - 1]).toMatch(/^totals: /);
+        expect(text).not.toContain("note: ");
+      }
+    }
   });
 
   it("renderProbeSummary falls back to the baseline log for a run with no test phase", () => {
