@@ -271,12 +271,13 @@ that would replace nothing is `missing`.
   discovery from the root (in each directory from the root up: a `.git`
   directory, the directory a `.git` file names, read up to git's 1 MiB
   limit, then the directory itself as a bare repository) and ends it no
-  earlier than git does: at the first directory that passes git's test
-  of a git directory, at any `.git` file, at a `.git` entry that is
-  neither a file nor a directory, and not at a filesystem boundary. It
-  does not run git when a `commondir` met on the way is not a regular
-  file of at most 64 KiB, or a `.git` file names its directory by a
-  path that is not UTF-8. git then runs for at most 10 seconds (a FIFO
+  earlier than git 2.39 or a newer git does: at the first directory
+  that passes git's test of a git directory, or at any `.git` file; not
+  at a `.git` entry that is neither a file nor a directory (git 2.39
+  looks further up past one), and not at a filesystem boundary. It does
+  not run git when a `commondir` met on the way is not a regular file
+  of at most 64 KiB, or a `.git` file names its directory by a path
+  that is not UTF-8. git then runs for at most 10 seconds (a FIFO
   it opens makes it wait), with at most 64 KiB of output, in a process
   group of its own; when it does not end by itself (the time or output
   bound, a signal), that whole group is killed, so no process of it

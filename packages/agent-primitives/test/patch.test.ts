@@ -3074,7 +3074,7 @@ describe("patch: git's identity lookup is bounded", () => {
   );
 
   it.skipIf(process.platform === "win32")(
-    "does not run git when a FIFO commondir is in a .git file's git directory or in a bare repository above the root",
+    "does not run git when a FIFO commondir is in a .git file's git directory or in a bare repository above the root, also past a .git FIFO or symlink loop",
     async () => {
       const viaGitfile = tmpDir();
       const g = gitDirLayout(path.join(viaGitfile, "g"));
@@ -3088,8 +3088,19 @@ describe("patch: git's identity lookup is bounded", () => {
       const below = path.join(above, "w");
       fs.mkdirSync(below);
       fs.writeFileSync(path.join(below, "a.txt"), "a\n");
+      // A .git that is neither a file nor a directory: git 2.39 looks
+      // further up past it (newer git stops there with an error).
+      const pastFifo = path.join(above, "f");
+      fs.mkdirSync(pastFifo);
+      execFileSync("mkfifo", [path.join(pastFifo, ".git")]);
+      fs.writeFileSync(path.join(pastFifo, "a.txt"), "a\n");
+      // A .git that cannot be stated (a symlink loop): git 2.39 goes on.
+      const pastLoop = path.join(above, "l");
+      fs.mkdirSync(pastLoop);
+      fs.symlinkSync(".git", path.join(pastLoop, ".git"));
+      fs.writeFileSync(path.join(pastLoop, "a.txt"), "a\n");
       try {
-        for (const cwd of [w, below]) {
+        for (const cwd of [w, below, pastFifo, pastLoop]) {
           const { out } = await patchInChild(
             {
               cwd,
@@ -3107,13 +3118,14 @@ describe("patch: git's identity lookup is bounded", () => {
       } finally {
         releaseFifo(path.join(g, "commondir"));
         releaseFifo(path.join(above, "commondir"));
+        releaseFifo(path.join(pastFifo, ".git"));
       }
     },
     90_000,
   );
 
   it.skipIf(process.platform === "win32")(
-    "looks no further up than git's discovery goes: a .git directory, a .git file, another .git entry, a bare repository",
+    "looks no further up than git's discovery goes: a .git directory, a .git file, a bare repository",
     async () => {
       const cases: [string, (dir: string) => void][] = [
         ["git dir", (dir) => gitIn(dir, "init", "-q")],
@@ -3123,10 +3135,6 @@ describe("patch: git's identity lookup is bounded", () => {
             gitIn(path.dirname(dir), "init", "-q", "--bare", "sep.git");
             fs.writeFileSync(path.join(dir, ".git"), "gitdir: ../sep.git\n");
           },
-        ],
-        [
-          "fifo .git",
-          (dir) => execFileSync("mkfifo", [path.join(dir, ".git")]),
         ],
         ["bare", (dir) => gitDirLayout(dir)],
       ];
@@ -3157,7 +3165,6 @@ describe("patch: git's identity lookup is bounded", () => {
           );
         } finally {
           releaseFifo(fifo);
-          if (label === "fifo .git") releaseFifo(path.join(dir, ".git"));
         }
       }
     },

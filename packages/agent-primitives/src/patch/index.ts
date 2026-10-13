@@ -404,9 +404,11 @@ function gitfilePath(content: Buffer | undefined): string | null | undefined {
  * most `COMMONDIR_MAX` bytes. In each directory from `root` up: a `.git`
  * directory (its `commondir`, and the walk ends when it passes git's
  * test), a `.git` file (the `commondir` of the directory it names; git
- * ends there either way), any other `.git` entry (git ends there with an
- * error), then the directory itself as a bare repository. It does not
- * stop at a filesystem boundary, as git does: that only adds checks.
+ * ends there either way), then the directory itself as a bare
+ * repository. It ends no earlier than git 2.39 or newer does: past a
+ * `.git` entry that is neither a file nor a directory, or one that
+ * cannot be stated, it goes on (git 2.39 does, newer git stops there
+ * with an error), and it does not stop at a filesystem boundary.
  */
 function gitDiscoveryHazard(root: string): string | undefined {
   let dir = root;
@@ -415,16 +417,16 @@ function gitDiscoveryHazard(root: string): string | undefined {
     let st: fs.Stats | undefined;
     try {
       st = fs.statSync(dotGit);
-    } catch (err) {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code !== "ENOENT" && code !== "ENOTDIR") return undefined;
+    } catch {
+      // No .git here, or one that cannot be stated: look further up.
     }
     if (st?.isDirectory() === true) {
       const hazard = commondirHazard(dotGit);
       if (hazard !== undefined) return hazard;
       if (isGitDirectory(dotGit, true)) return undefined;
-    } else if (st !== undefined) {
-      if (!st.isFile() || st.size > GITFILE_MAX) return undefined;
+    } else if (st?.isFile() === true) {
+      // git refuses a larger .git file.
+      if (st.size > GITFILE_MAX) return undefined;
       const named = gitfilePath(readRegular(dotGit, GITFILE_MAX));
       if (named === undefined) return undefined;
       if (named === null) {
