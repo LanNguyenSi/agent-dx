@@ -140,8 +140,8 @@ const pageLink = (value) => (isRecord(value) ? withSafeLink(withText(value, ['te
 //   - absolute: the scheme (letters, digits, "+", "-", ".", after a letter) is
 //     http, https or mailto, read case-insensitively. Every other scheme is
 //     refused (javascript, data, vbscript, blob, file, tel, ...).
-//   - relative: no scheme, and it stays on the site when resolved against a
-//     base: a path (`a/b`, `./a`, `../a`), a root-relative path (`/a`), `#frag`,
+//   - relative: no scheme, not a network-path reference, so it resolves on the
+//     site: a path (`a/b`, `./a`, `../a`), a root-relative path (`/a`), `#frag`,
 //     `?query` and the empty string. A first segment with a colon needs a
 //     leading `./` (`a:b` is a scheme, `./a:b` a path).
 //   - refused as well: a scheme-relative `//host` and any backslash. They are
@@ -158,7 +158,6 @@ const pageLink = (value) => (isRecord(value) ? withSafeLink(withText(value, ['te
 const linkSchemes = new Set(['http:', 'https:', 'mailto:'])
 const hiddenChars = /[\u0000-\u0020\u007f-\u009f\s]/
 const leadingScheme = /^[A-Za-z][A-Za-z0-9+.-]*:/
-const resolveBase = new URL('http://site.invalid/base/page')
 export function isSafeLink(value) {
   if (typeof value !== 'string' || hiddenChars.test(value) || value.includes('\\')) return false
   if (leadingScheme.test(value)) {
@@ -168,12 +167,7 @@ export function isSafeLink(value) {
       return false
     }
   }
-  if (value.startsWith('//')) return false
-  try {
-    return new URL(value, resolveBase).origin === resolveBase.origin
-  } catch {
-    return false
-  }
+  return !value.startsWith('//')
 }
 
 export const allowedTargets = new Set(['_blank', '_self', '_parent', '_top'])
@@ -198,8 +192,9 @@ export const allowedRelTokens = new Set([
   'alternate',
   'search'
 ])
-const isSafeRel = (rel) =>
-  typeof rel === 'string' && /^[a-z]+(?: [a-z]+)*$/.test(rel) && rel.split(' ').every((t) => allowedRelTokens.has(t))
+// Tokens are split on a single space, so an empty token (a doubled, leading or
+// trailing space) or a token with another separator is not on the list.
+const isSafeRel = (rel) => typeof rel === 'string' && rel.split(' ').every((t) => allowedRelTokens.has(t))
 
 // Removes link, target and rel from a record unless each passes its check.
 // A key that is absent stays absent.
@@ -254,7 +249,7 @@ export function sanitizeFrontmatter(frontmatter) {
     if (isRecord(hero)) {
       const { image: source, actions, ...rest } = hero
       const image = safeImage(source)
-      if ('actions' in hero && Array.isArray(actions)) rest.actions = actions.map(sanitizeAction)
+      if (Array.isArray(actions)) rest.actions = actions.map(sanitizeAction)
       safe.hero = image === undefined ? rest : { ...rest, image }
     } else {
       safe.hero = hero

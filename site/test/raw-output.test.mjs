@@ -520,6 +520,16 @@ test('a link with any other scheme is refused, whatever the spelling', () => {
   for (const link of refused) assert.equal(isSafeLink(link), false, JSON.stringify(link))
 })
 
+test('every kept link resolves to http(s), mailto or the site, as the URL parser reads it', () => {
+  const base = new URL('https://site.invalid/base/page')
+  const kept = ['https://example.com/a', 'mailto:a@example.com', '/a/b', 'a/b', './a', '../a', '#frag', '?q=1', '', './a:b', '/a:b', '%6Aavascript:x', 'javascript&colon;x', 'javascript&#58;x']
+  for (const link of kept) {
+    assert.equal(isSafeLink(link), true, link)
+    const url = new URL(link, base)
+    assert.ok((url.protocol === 'https:' && (url.origin === base.origin || link.startsWith('https://'))) || url.protocol === 'mailto:', `${link} resolves to ${url.href}`)
+  }
+})
+
 test('what a browser resolves from a refused link is never an http(s), mailto or same-site URL', () => {
   // Cross-check of the rule against the URL parser for the bypasses a browser would read as a script scheme.
   const base = new URL('https://site.invalid/base/page')
