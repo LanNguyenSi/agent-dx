@@ -80,7 +80,10 @@ documents, and the link fields (`link` in `prev`, `next`, `hero.actions` and
 JavaScript frontmatter is refused: a page whose frontmatter opens with `---js`
 or `---javascript` fails the build, because VitePress would run it as Node code
 at build time. Write frontmatter as YAML (or JSON). A YAML date such as
-`2024-05-01` in a text field shows as an ISO timestamp.
+`2024-05-01` in a text field shows as an ISO timestamp. Include directives
+(`<!--@include: file.md-->`) are refused anywhere in a page and fail the build,
+because VitePress reads the included file's frontmatter without that refusal
+and can embed any readable file.
 
 ```bash
 cd site && npm ci && npm run build   # output in site/.vitepress/dist

@@ -8,7 +8,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import vm from 'node:vm'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'vitepress'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'hardening')
@@ -374,6 +374,48 @@ test('a build refuses JavaScript frontmatter and does not run it, a YAML page bu
       }
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })
+    }
+  }
+  assert.equal(globalThis[marker], undefined)
+})
+
+// A page that includes a Markdown file whose frontmatter is a JavaScript block
+// must fail the build with the page path, and the block must not run. The site
+// is a repository-shaped tree built with the real helpers: createSite scans the
+// pages, as the real config does. The control tree has no directive and builds.
+test('a build refuses an include directive and does not run the included frontmatter', async () => {
+  const marker = 'agentDxIncludeEvaluated'
+  delete globalThis[marker]
+  const helpers = pathToFileURL(path.join(root, '..', '..', '..', '.vitepress', 'site-helpers.mjs')).href
+  for (const [label, include] of [['refused', true], ['control', false]]) {
+    // Written next to the fixtures, so that the pages resolve the same packages.
+    const repo = fs.mkdtempSync(path.join(root, '..', `include-${label}-`))
+    const outDir = path.join(work, `out-include-${label}`)
+    const pageDir = path.join(repo, 'packages', 'agent-engineering-playbook')
+    fs.mkdirSync(path.join(repo, 'site', '.vitepress'), { recursive: true })
+    fs.mkdirSync(pageDir, { recursive: true })
+    fs.writeFileSync(path.join(repo, 'site', 'index.md'), '# Home\n')
+    fs.writeFileSync(path.join(pageDir, 'README.md'), '# Playbook\n')
+    fs.writeFileSync(path.join(pageDir, 'payload.md'), `---js\n{ title: (globalThis.${marker} = '${label}', 'Evaluated') }\n---\n\nIncluded body\n`)
+    fs.writeFileSync(path.join(pageDir, 'page.md'), `# Page\n\n${include ? '<!--@include: ./payload.md-->' : 'No directive.'}\n`)
+    fs.writeFileSync(
+      path.join(repo, 'site', '.vitepress', 'config.mjs'),
+      [
+        `import { createSite, markdownBase } from ${JSON.stringify(helpers)}`,
+        "const { rewrites } = createSite(new URL('../..', import.meta.url).pathname, () => '')",
+        `export default { title: 'include', srcDir: '..', rewrites, srcExclude: ['**/payload.md'], markdown: markdownBase, lastUpdated: false, cacheDir: ${JSON.stringify(path.join(work, `cache-include-${label}`))} }`,
+        ''
+      ].join('\n')
+    )
+    try {
+      if (include) {
+        await assert.rejects(build(path.join(repo, 'site'), { outDir }), /Include directives are not supported: packages\/agent-engineering-playbook\/page\.md/, label)
+      } else {
+        await build(path.join(repo, 'site'), { outDir })
+        assert.ok(fs.existsSync(path.join(outDir, 'agent-engineering-playbook', 'page.html')))
+      }
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true })
     }
   }
   assert.equal(globalThis[marker], undefined)

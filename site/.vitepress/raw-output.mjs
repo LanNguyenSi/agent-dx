@@ -74,8 +74,9 @@ export function escapeDescriptionMeta(html, _file, { description }) {
 // renderer read was checked. These are written as escaped text, in a class
 // binding or as an on/off switch, and need nothing here: title and
 // titleTemplate, pageClass, the text and theme of a hero action, linkText,
-// outline, aside, sidebar, editLink, footer and navbar. The theme version is
-// pinned; after a VitePress upgrade, read the sinks again. How the frontmatter
+// outline, aside, sidebar, editLink, footer, navbar, markdownStyles,
+// lastUpdated and search. The theme version is pinned; after a VitePress
+// upgrade, read the sinks again. How the frontmatter
 // block is read is set in markdownBase (site-helpers.mjs): a JavaScript block
 // is refused there, because the bundled reader would run it as Node code.
 //
