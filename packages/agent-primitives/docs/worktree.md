@@ -147,12 +147,14 @@ A refusal is `status: "usage_error"` (exit 2) with a `reason`, a `message`, and 
 ```bash
 agent-primitives worktree remove ~/wt/app-login
 agent-primitives worktree remove ~/wt/app-login --delete-branch --require-merged
+agent-primitives worktree remove --path ~/wt/app-login
 ```
 
-One positional `<path>`: the worktree to remove. A relative value resolves against the invocation directory (`-C`), never against the repository.
+The worktree to remove, as one positional `<path>` or with `--path <dir>` (the flag `worktree create` takes). A relative value resolves against the invocation directory (`-C`), never against the repository. Both forms together must resolve to the same path (compared after resolving against the invocation directory, without following symlinks), otherwise the command refuses with `option_invalid`; neither form is `option_invalid` too.
 
 | Option | Meaning |
 | --- | --- |
+| `--path <dir>` | The worktree to remove, as an alternative to the positional `<path>`. |
 | `--force` | Remove the worktree even when it is dirty, has commits no remote branch has, is locked, or (with `--require-merged`) is not merged or its merge state cannot be told. The three structural refusals stand regardless: `not_a_worktree`, `remove_main_checkout` and `default_branch_delete`. |
 | `--delete-branch` | Delete the worktree's branch after the worktree is gone. |
 | `--require-merged` | Refuse unless the branch is merged into `origin/<default branch>` (or the `--base` ref), by ancestry or by a merged pull request that `gh` reports as merged into the default branch (or the branch part of `--base`) at the worktree's HEAD commit. |
@@ -207,7 +209,7 @@ The usual [envelope](output-shape.md) with `command: "worktree remove"`, plus:
 | `unpushed_state_unknown` | `git rev-list HEAD --not --remotes` failed, so the unpushed state could not be read; the message carries git's error. A failed check is never read as zero. |
 | `base_not_found` | `--base <rev>` has the shape of a remote-tracking branch but no such ref exists. Nothing was removed. |
 | `base_not_remote_branch` | `--base <rev>` is not `<remote>/<branch>` or `refs/remotes/<remote>/<branch>` of a configured remote. Nothing was removed. |
-| `option_invalid` | `--base` without `--require-merged` or `--delete-branch`. |
+| `option_invalid` | `--base` without `--require-merged` or `--delete-branch`; no path given; or a positional path and `--path` that name different directories. |
 | `branch_not_merged` | `--require-merged`, and the branch is neither an ancestor of the base nor the head of a merged pull request. `details.merged` is the verdict. |
 | `merge_state_unknown` | `--require-merged`, and neither ancestry nor `gh` could decide, so the state is unknown rather than negative. `details.merged.reason` says which. |
 | `default_branch_delete` | `--delete-branch` was asked for the branch the default base names or the one the main checkout is on. |

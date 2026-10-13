@@ -2525,10 +2525,37 @@ worktreeCommand
   });
 
 interface WorktreeRemoveCliOptions {
+  path?: string;
   force?: boolean;
   deleteBranch?: boolean;
   requireMerged?: boolean;
   base?: string;
+}
+
+/** The worktree `remove` acts on: the positional argument or `--path`,
+ * which must agree when both are given. */
+function resolveRemovePathArg(
+  positional: string | undefined,
+  flag: string | undefined,
+  cwd: string,
+): string {
+  if (positional === undefined && flag === undefined) {
+    throw new WorktreeRefusal(
+      "worktree remove needs a path: give it as the positional argument or with --path <dir>",
+      "option_invalid",
+    );
+  }
+  if (positional !== undefined && flag !== undefined) {
+    if (path.resolve(cwd, positional) !== path.resolve(cwd, flag)) {
+      throw new WorktreeRefusal(
+        `worktree remove got two different paths: "${positional}" (positional) and "${flag}" (--path)`,
+        "option_invalid",
+        { positional, path: flag },
+      );
+    }
+    return positional;
+  }
+  return (positional ?? flag) as string;
 }
 
 function renderWorktreeRemoveText(result: RemoveWorktreeResult): string {
@@ -2554,8 +2581,12 @@ worktreeCommand
     "Remove a linked worktree, refusing a dirty, unpushed or (with --require-merged) unmerged one unless --force; unlinks the dependency links it finds, never follows them, and never deletes the default branch or removes the main checkout",
   )
   .argument(
-    "<path>",
-    "the worktree to remove; relative paths resolve against the invocation directory",
+    "[path]",
+    "the worktree to remove; relative paths resolve against the invocation directory (or pass it with --path)",
+  )
+  .option(
+    "--path <dir>",
+    "the worktree to remove, as an alternative to the positional argument (the same flag `worktree create` takes); both forms together must resolve to the same path (symlinks are not followed)",
   )
   .option(
     "--force",
@@ -2575,7 +2606,7 @@ worktreeCommand
   )
   .action(
     async (
-      pathArg: string,
+      pathArg: string | undefined,
       opts: WorktreeRemoveCliOptions,
       command: Command,
     ) => {
@@ -2583,9 +2614,10 @@ worktreeCommand
       const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
       let result: RemoveWorktreeResult;
       try {
+        const target = resolveRemovePathArg(pathArg, opts.path, global.cwd);
         result = await removeWorktree({
           cwd: global.cwd,
-          path: pathArg,
+          path: target,
           force: opts.force,
           deleteBranch: opts.deleteBranch,
           requireMerged: opts.requireMerged,
