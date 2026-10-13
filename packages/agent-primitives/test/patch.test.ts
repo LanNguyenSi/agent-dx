@@ -2489,7 +2489,10 @@ describe("patch: the layout test of a git directory (no git on PATH)", () => {
           {
             env: { PATH: path.join(base, "no-git-bin") },
             encoding: "utf8",
+            // A CLI stuck in a blocking open of the FIFO cannot act on
+            // SIGTERM, so a stall is ended with SIGKILL and fails here.
             timeout: 20000,
+            killSignal: "SIGKILL",
           },
         );
         expect(res.signal, fifo).toBeNull();
