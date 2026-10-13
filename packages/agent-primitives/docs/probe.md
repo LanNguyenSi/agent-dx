@@ -32,6 +32,8 @@ every command.
 | `--plan <path>` | JSON file with one test command and a list of mutants, run against one shared baseline | none |
 | `--link <dirs>` | comma-separated extra directories to link into the `-i worktree` copy | none |
 | `--allow-outside` | allow `--file`/`--link` to resolve outside the containment root | off |
+| `--summary` | print one line per mutant and a totals line instead of the JSON envelope; see [Compact views](#compact-views---summary-and---print) | off |
+| `--print <fields>` | print only these comma-separated envelope fields as one JSON object; see [Compact views](#compact-views---summary-and---print) | off |
 
 ## Verdicts and --expect
 
@@ -2122,6 +2124,51 @@ whether `--file` was given explicitly or is derived from the patch.
   `cond && false` instead of `false`, `[a, b][1]` instead of `b`, or
   change a literal the code compares against (`.endsWith(".php")` to
   `.endsWith(".nophp")`).
+
+## Compact views: --summary and --print
+
+Callers that only need the verdict used to parse the JSON envelope with
+an ad-hoc script. Two flags replace that; both are views over the same
+result, so the envelope schema, the exit code and the saved full result
+(`result-full-*.json`, see [Output shape](output-shape.md)) are exactly
+what they are without the flag. Both work for a single probe and for
+`--plan`, take precedence over `-f`, are bounded by `-m` like text
+output, and are mutually exclusive (`usage_error`).
+
+They are flags on `probe` rather than a new `-f` value: `-f` is a global
+option shared by every command and `probe` is the only one with a
+per-mutant verdict to summarise, and `--print` needs an argument, which a
+format value cannot carry.
+
+`--summary` prints one line per mutant, fields separated by ` | `:
+
+```text
+<file>:<line> | <verdict> | expectation=<met|violated|-> | restored=<true|false|-> | failing=<first failing test line|-> | log=<path>
+totals: status=<status> [reason=<reason>] total=N killed=N survived=N inconclusive=N not_run=N met=N violated=N
+```
+
+A `--plan` line is prefixed with the mutant's `#<index>`. `<verdict>` is
+`mutation_probe.result` (`killed`, `survived`, `not_run`); a mutant that
+never reached a verdict shows its status instead, with the reason in
+parentheses (`not_run(pre_failed)`). `failing=` is the first line of the
+test's captured output tails that looks like a failing test (`FAIL`,
+`not ok`, `AssertionError`, a leading cross mark and similar), `-` when
+none does or the mutant survived; it is a heuristic over free text,
+because the envelope has no structured failing-test field. `log=` is the
+mutant run's log, or the baseline's when no mutant run happened. A run
+that never reached a mutant (a usage error, an unreadable plan file)
+prints only the `totals:` line and a `note:` line with the first warning
+or message.
+
+`--print <field,...>` prints one JSON object on one line, one key per
+requested field in the order given. A name is a top-level envelope field
+(`status`, `reason`, `logs`, `mutation_probe`, `test`, `plan`, ...) and a
+dotted path descends into objects (`mutation_probe.result`,
+`plan.summary`). A top-level name outside the envelope's field list is a
+`usage_error` raised before the probe runs, naming the field and listing
+the known ones; a known field this run did not produce (for example
+`test` after a failing baseline) prints `null`, as does a dotted path
+that does not resolve.
 
 ## Result shape
 

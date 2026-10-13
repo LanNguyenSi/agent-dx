@@ -35,6 +35,12 @@ import {
 import { parsePlanFile, type ProbePlanSpec } from "./probe/plan.js";
 import { compilePassRegex } from "./pass-regex.js";
 import { reconcileEnvelopeDiffTruncation } from "./probe/mutant.js";
+import {
+  parsePrintFields,
+  renderPrint,
+  renderProbeSummary,
+  type SummaryInput,
+} from "./probe/summary.js";
 import { linkEntryUsageError } from "./probe/link-list.js";
 import {
   init,
@@ -1135,6 +1141,48 @@ interface ProbeCliOptions {
   allowOutside?: boolean;
   requireBaselineEvidence?: RegExp;
   passRegex?: RegExp;
+  summary?: boolean;
+  print?: string[];
+}
+
+/** `--print` value: validated while the options are parsed, so an unknown
+ * field is a usage error before the probe spends a run. */
+function parsePrintOption(value: string): string[] {
+  try {
+    return parsePrintFields(value);
+  } catch (err) {
+    throw new InvalidArgumentError((err as Error).message);
+  }
+}
+
+/** Emits a probe envelope, or, with `--summary` / `--print`, the compact
+ * view of it instead. The exit code is the one already computed for the
+ * envelope; the envelope itself is built unchanged either way. */
+function emitProbe(
+  opts: ProbeCliOptions,
+  envelope: Record<string, unknown>,
+  exitCode: number,
+  global: ResolvedGlobal,
+  summary: SummaryInput,
+): void {
+  if (opts.print !== undefined) {
+    writeAndExit(
+      boundText(renderPrint(envelope, opts.print), global.maxChars),
+      exitCode,
+    );
+    return;
+  }
+  if (opts.summary) {
+    writeAndExit(
+      boundText(renderProbeSummary(summary), global.maxChars),
+      exitCode,
+    );
+    return;
+  }
+  emit(envelope, exitCode, {
+    format: global.format,
+    maxChars: global.maxChars,
+  });
 }
 
 function parseLine(value: string): number {
@@ -1327,9 +1375,10 @@ async function runProbePlanCommand(
       maxChars: global.maxChars,
       logDir: global.logDir,
     });
-    emit(envelope, exitCode, {
-      format: global.format,
-      maxChars: global.maxChars,
+    emitProbe(opts, envelope, exitCode, global, {
+      status: "usage_error",
+      reason: parsed.reason,
+      warnings: [parsed.message],
     });
     return;
   }
@@ -1450,9 +1499,16 @@ async function runProbePlanCommand(
     { planResults: result.results },
     global.maxChars,
   );
-  emit(envelope, exitCode, {
-    format: global.format,
-    maxChars: global.maxChars,
+  emitProbe(opts, envelope, exitCode, global, {
+    status: result.status,
+    reason: result.reason,
+    expectation: result.expectation,
+    warnings: result.warnings,
+    plan: {
+      baseline: result.baseline,
+      results: result.results,
+      summary: { ...result.summary },
+    },
   });
 }
 
@@ -1532,9 +1588,23 @@ program
     "--allow-outside",
     "allow --file/--link to resolve outside the containment root",
   )
+  .option(
+    "--summary",
+    "print one line per mutant (id, verdict, expectation, restored_verified, first failing test, log path) and a totals line instead of the JSON envelope; exit codes unchanged",
+  )
+  .option(
+    "--print <fields>",
+    "print only these comma-separated top-level envelope fields (dotted paths descend, e.g. mutation_probe.result) as one JSON object instead of the envelope; an unknown field is a usage error; exit codes unchanged",
+    parsePrintOption,
+  )
   .action(async (opts: ProbeCliOptions, command: Command) => {
     const start = Date.now();
     const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
+    if (opts.summary && opts.print !== undefined) {
+      throw new UsageError(
+        "probe: --summary and --print are mutually exclusive",
+      );
+    }
     if (opts.plan !== undefined) {
       await runProbePlanCommand(opts, command, global, start);
       return;
@@ -1670,9 +1740,14 @@ program
       { mutant: result.mutant },
       global.maxChars,
     );
-    emit(envelope, exitCode, {
-      format: global.format,
-      maxChars: global.maxChars,
+    emitProbe(opts, envelope, exitCode, global, {
+      status: envelopeStatus,
+      reason: result.reason,
+      warnings: result.warnings,
+      mutant: result.mutant,
+      mutation_probe: result.mutation_probe,
+      test: result.test,
+      baseline: result.baseline,
     });
   });
 

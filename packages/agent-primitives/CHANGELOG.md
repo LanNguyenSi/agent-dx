@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   root, matching `isPathContained`. Before, `probe`'s protected-path
   rule and its post-link check skipped such paths, and `linkRelPath`
   and `isWithin`'s lexical half called them outside (task e7c3006d).
+- `probe`: `--summary` prints one line per mutant (id, verdict,
+  expectation, `restored_verified`, first failing test line, log path)
+  and a totals line instead of the JSON envelope, for a single probe and
+  for `--plan`; `--print <field,...>` prints only the named envelope
+  fields as one JSON object, and an unknown field is a usage error before
+  the probe runs. The envelope schema and the exit codes are unchanged.
+  The shipped skill text names both flags, so its digest changes.
 - `patch`: a new command that replaces exact text in one or more files
   from a JSON edit plan (`--plan <file>`, `{"edits":[{"file","old","new",
   "replaceAll"?}]}`) or one edit (`--file` with `--old`/`--old-file` and

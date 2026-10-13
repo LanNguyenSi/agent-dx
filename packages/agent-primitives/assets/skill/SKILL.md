@@ -188,6 +188,15 @@ agent-primitives verify -c build,typecheck,lint,test
 agent-primitives doctor
 ```
 
+To read a probe's verdict, add `--summary` to any `probe` form instead
+of writing a python or jq reader of the JSON: one line per mutant (id as
+`file:line`, verdict, `expectation`, `restored_verified`, the first
+failing test line, the log path) plus a `totals:` line. `--print
+status,mutation_probe.result,logs` prints just those envelope fields as
+one JSON object (an unknown field is a usage error; a field this run
+lacks prints `null`). Both leave the exit code and the saved full result
+unchanged.
+
 Use the fourth form (`--plan`) when several mutants share one test
 command: the baseline runs once for the whole list instead of once per
 mutant, each mutant is applied and restored (verified by hash) before the
