@@ -362,18 +362,145 @@ export function resolveDefaultBase(cwd: string): DefaultBase | undefined {
   return undefined;
 }
 
+/** Upper bounds of the loose-ref walk: a hostile or broken tree under
+ * `refs/remotes` ends the walk as "unknown" instead of running on. */
+export interface LooseRefBounds {
+  maxEntries: number;
+  maxDepth: number;
+}
+const LOOSE_REF_BOUNDS: LooseRefBounds = { maxEntries: 500_000, maxDepth: 64 };
+
+/**
+ * Walks the loose refs below `<commonDir>/refs/remotes` with `lstat`, never
+ * following anything, and returns why the tree cannot be trusted, or
+ * `undefined` when it is plain files and directories. A file system symlink
+ * on any path component (`refs`, `refs/remotes` or a deeper directory) or as
+ * a ref itself is read by git as a plain ref although it only aliases
+ * another path: `refs/remotes/origin/self -> ../../heads/feat` makes the
+ * local branch `feat` look like a remote-tracking ref, and a directory link
+ * `refs/remotes/mirror -> ../heads` does the same for every local branch.
+ * A special file (fifo, socket, device), an entry that cannot be read, and a
+ * tree past the entry or depth bound count the same way, since each one is a
+ * layout git does not produce. Nothing is opened, so a fifo cannot block the
+ * walk.
+ */
+export function untrustedLooseRemoteRef(
+  commonDir: string,
+  bounds: LooseRefBounds = LOOSE_REF_BOUNDS,
+): string | undefined {
+  const lstat = (rel: string): fs.Stats | string | undefined => {
+    try {
+      return fs.lstatSync(path.join(commonDir, rel));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      return `${rel} cannot be inspected: ${messageOf(err)}`;
+    }
+  };
+  // No loose remote-tracking refs at all (packed refs only) is an ordinary
+  // layout; any other way these two components fail to be directories is not.
+  for (const rel of ["refs", "refs/remotes"]) {
+    const st = lstat(rel);
+    if (st === undefined) return undefined;
+    if (typeof st === "string") return st;
+    if (st.isSymbolicLink()) return `${rel} is a symbolic link`;
+    if (!st.isDirectory()) return `${rel} is not a directory`;
+  }
+  let entries = 0;
+  const pending: { rel: string; depth: number }[] = [
+    { rel: "refs/remotes", depth: 0 },
+  ];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    let names: string[];
+    try {
+      names = fs.readdirSync(path.join(commonDir, next.rel));
+    } catch (err) {
+      return `${next.rel} cannot be read: ${messageOf(err)}`;
+    }
+    for (const name of names) {
+      entries += 1;
+      if (entries > bounds.maxEntries) {
+        return `refs/remotes holds more than ${String(bounds.maxEntries)} entries`;
+      }
+      const rel = `${next.rel}/${name}`;
+      const st = lstat(rel);
+      // A name that vanished since the listing is a ref being rewritten.
+      if (st === undefined) continue;
+      if (typeof st === "string") return st;
+      if (st.isSymbolicLink()) return `${rel} is a symbolic link`;
+      if (st.isDirectory()) {
+        if (next.depth + 1 > bounds.maxDepth) {
+          return `${rel} is nested deeper than ${String(bounds.maxDepth)} levels`;
+        }
+        pending.push({ rel, depth: next.depth + 1 });
+      } else if (!st.isFile()) {
+        return `${rel} is neither a regular file nor a directory`;
+      }
+    }
+  }
+  return undefined;
+}
+
+function messageOf(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** A result that stands for "the unpushed state cannot be told": no git
+ * status, so the caller treats it like a failed listing. */
+function unknownUnpushed(message: string): GitRunResult {
+  return { status: null, stdout: "", stderr: "", error: message };
+}
+
 /**
  * `git rev-list HEAD --not <every real remote-tracking ref>` in `cwd`: the
  * commits no remote branch holds. A symbolic ref under `refs/remotes`
  * (`git symbolic-ref refs/remotes/origin/self refs/heads/feat`) is left
  * out, because `--remotes` would follow it to a local branch and count that
  * branch's commits as pushed, although deleting the branch leaves them on no
- * ref at all. Fails (non-zero status or `error`) when the refs cannot be
- * listed, so the caller treats the state as unknown. `error` counts even
- * with a status of 0: a listing that outgrows the output limit of `runGit`
- * comes back cut short, with `error` set, when git has already exited.
+ * ref at all. A file system symlink inside the loose `refs/remotes` tree
+ * does the same without git reporting it as symbolic, so with the files ref
+ * backend the tree is walked first and any symlink (or other layout git
+ * does not write) makes the answer unknown rather than a guess. The
+ * reftable backend has no loose refs and is not walked. Fails (non-zero
+ * status or `error`) when the refs cannot be listed, so the caller treats
+ * the state as unknown. `error` counts even with a status of 0: a listing
+ * that outgrows the output limit of `runGit` comes back cut short, with
+ * `error` set, when git has already exited.
  */
 export function unpushedCommits(cwd: string): GitRunResult {
+  const commonDirResult = git(cwd, ["rev-parse", "--git-common-dir"]);
+  if (commonDirResult.error !== undefined || commonDirResult.status !== 0) {
+    return commonDirResult;
+  }
+  const commonDirText = commonDirResult.stdout.trim();
+  if (commonDirText.length === 0) {
+    return unknownUnpushed("git did not name the common git directory");
+  }
+  // `--local` reads the repository's own config file only, so a global,
+  // system or environment setting cannot claim a backend the repository
+  // does not use.
+  const storage = git(cwd, [
+    "config",
+    "--local",
+    "--get",
+    "extensions.refStorage",
+  ]);
+  if (storage.error !== undefined) return storage;
+  // Exit status 1 is "no such key": the default, files backend.
+  if (storage.status !== 0 && storage.status !== 1) return storage;
+  const backend = storage.status === 1 ? "files" : storage.stdout.trim();
+  if (backend !== "files" && backend !== "reftable") {
+    return unknownUnpushed(
+      `unknown ref storage format ${JSON.stringify(backend)}`,
+    );
+  }
+  if (backend === "files") {
+    const untrusted = untrustedLooseRemoteRef(path.resolve(cwd, commonDirText));
+    if (untrusted !== undefined) {
+      return unknownUnpushed(
+        `${untrusted}; git reads such an entry as a plain remote-tracking ref, so a local branch could look pushed`,
+      );
+    }
+  }
   const refs = git(cwd, [
     "for-each-ref",
     "--format=%(refname)%09%(symref)",
