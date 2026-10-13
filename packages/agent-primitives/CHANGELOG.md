@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-13
+
 - `drift`: `--base` and `--head` are resolved to commit SHAs once and
   the diff runs from their merge-base to `--head`, so a symbolic base
   (`origin/master` that moved after the branch point) reports the same
