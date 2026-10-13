@@ -9,6 +9,7 @@ import {
   buildEnvelope,
   currentRunId,
   UsageError,
+  type EnvelopeInput,
   type EnvelopeOutput,
 } from "./envelope.js";
 import {
@@ -1164,17 +1165,31 @@ function emitProbe(
   exitCode: number,
   global: ResolvedGlobal,
   summary: SummaryInput,
+  envelopeInput: EnvelopeInput,
 ): void {
   if (opts.print !== undefined) {
+    // The same payload the result-full file carries, not the `-m`-reduced
+    // envelope: a field that exists must not print as null or shortened
+    // because the bound cut it from the JSON view. Only the printed text
+    // is bounded. `fullResult` is the one pointer only a reduced envelope has.
+    const unreduced = buildEnvelope({
+      ...envelopeInput,
+      persistFullResult: false,
+      maxChars: Number.MAX_SAFE_INTEGER,
+    }).envelope;
+    const source =
+      envelope.fullResult === undefined
+        ? unreduced
+        : { ...unreduced, fullResult: envelope.fullResult };
     writeAndExit(
-      boundText(renderPrint(envelope, opts.print), global.maxChars),
+      boundText(renderPrint(source, opts.print), global.maxChars),
       exitCode,
     );
     return;
   }
   if (opts.summary) {
     writeAndExit(
-      boundText(renderProbeSummary(summary), global.maxChars),
+      renderProbeSummary({ ...summary, cwd: global.cwd }, global.maxChars),
       exitCode,
     );
     return;
@@ -1362,7 +1377,7 @@ async function runProbePlanCommand(
   const planPath = path.resolve(global.cwd, opts.plan ?? "");
   const parsed = parsePlanFile(planPath);
   if (!parsed.ok) {
-    const { envelope, exitCode } = buildEnvelope({
+    const refusalInput: EnvelopeInput = {
       version: VERSION,
       command: "probe",
       persistFullResult: true,
@@ -1374,12 +1389,20 @@ async function runProbePlanCommand(
       extra: { reason: parsed.reason },
       maxChars: global.maxChars,
       logDir: global.logDir,
-    });
-    emitProbe(opts, envelope, exitCode, global, {
-      status: "usage_error",
-      reason: parsed.reason,
-      warnings: [parsed.message],
-    });
+    };
+    const { envelope, exitCode } = buildEnvelope(refusalInput);
+    emitProbe(
+      opts,
+      envelope,
+      exitCode,
+      global,
+      {
+        status: "usage_error",
+        reason: parsed.reason,
+        warnings: [parsed.message],
+      },
+      refusalInput,
+    );
     return;
   }
   const plan: ProbePlanSpec = parsed.plan;
@@ -1433,7 +1456,7 @@ async function runProbePlanCommand(
   } finally {
     probeOwnsShutdown = false;
   }
-  const { envelope, exitCode } = buildEnvelope({
+  const envelopeInput: EnvelopeInput = {
     version: VERSION,
     command: "probe",
     persistFullResult: true,
@@ -1483,7 +1506,8 @@ async function runProbePlanCommand(
     keepWhole: ["plan.summary"],
     maxChars: global.maxChars,
     logDir: global.logDir,
-  });
+  };
+  const { envelope, exitCode } = buildEnvelope(envelopeInput);
   // `plan.results[]` is an array, so `keepWhole` above cannot reach into
   // it (see that field's own docblock): a `diff.text` the reduction cut
   // further than this module's own bound already did is corrected here,
@@ -1499,17 +1523,24 @@ async function runProbePlanCommand(
     { planResults: result.results },
     global.maxChars,
   );
-  emitProbe(opts, envelope, exitCode, global, {
-    status: result.status,
-    reason: result.reason,
-    expectation: result.expectation,
-    warnings: result.warnings,
-    plan: {
-      baseline: result.baseline,
-      results: result.results,
-      summary: { ...result.summary },
+  emitProbe(
+    opts,
+    envelope,
+    exitCode,
+    global,
+    {
+      status: result.status,
+      reason: result.reason,
+      expectation: result.expectation,
+      warnings: result.warnings,
+      plan: {
+        baseline: result.baseline,
+        results: result.results,
+        summary: { ...result.summary },
+      },
     },
-  });
+    envelopeInput,
+  );
 }
 
 program
@@ -1681,7 +1712,7 @@ program
       result.status === "inconclusive" && result.reason === "baseline_failed"
         ? "baseline_failed"
         : result.status;
-    const { envelope, exitCode: statusExitCode } = buildEnvelope({
+    const envelopeInput: EnvelopeInput = {
       version: VERSION,
       command: "probe",
       persistFullResult: true,
@@ -1708,7 +1739,8 @@ program
       },
       maxChars: global.maxChars,
       logDir: global.logDir,
-    });
+    };
+    const { envelope, exitCode: statusExitCode } = buildEnvelope(envelopeInput);
     // `status` above is `result`'s own actual outcome, independent of
     // `--expect` (see `step.ts`'s classify step) -- so the exit code it
     // implies via `STATUS_CLASS` (killed -> ok, survived -> finding) is
@@ -1740,15 +1772,22 @@ program
       { mutant: result.mutant },
       global.maxChars,
     );
-    emitProbe(opts, envelope, exitCode, global, {
-      status: envelopeStatus,
-      reason: result.reason,
-      warnings: result.warnings,
-      mutant: result.mutant,
-      mutation_probe: result.mutation_probe,
-      test: result.test,
-      baseline: result.baseline,
-    });
+    emitProbe(
+      opts,
+      envelope,
+      exitCode,
+      global,
+      {
+        status: envelopeStatus,
+        reason: result.reason,
+        warnings: result.warnings,
+        mutant: result.mutant,
+        mutation_probe: result.mutation_probe,
+        test: result.test,
+        baseline: result.baseline,
+      },
+      envelopeInput,
+    );
   });
 
 interface InitCliOptions {

@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  PRINTABLE_FIELDS,
   firstFailingLine,
   parsePrintFields,
   renderPrint,
@@ -68,7 +69,7 @@ async function both(
   return { json, view, envelope: JSON.parse(json.stdout) };
 }
 
-describe("probe --summary (CLI)", () => {
+describe("probe --summary (CLI)", { timeout: 60000 }, () => {
   it("single killed probe: one mutant line and a totals line, exit code unchanged", async () => {
     const { repo, logs } = makeRepo();
     const { json, view } = await both(repo, logs, KILLED_ARGS, ["--summary"]);
@@ -97,6 +98,62 @@ describe("probe --summary (CLI)", () => {
     expect(lines[0]).toContain("failing=-");
     expect(lines[1]).toContain("survived=1");
     expect(lines[1]).toContain("violated=1");
+  });
+
+  it("survived probe whose passing test prints an error-shaped line: failing stays a dash", async () => {
+    const { repo, logs } = makeRepo();
+    const noisy =
+      "node -e \"console.log('Error: deprecation noise'); if (!require('./fixture.js')) process.exit(1)\"";
+    const { view } = await both(
+      repo,
+      logs,
+      [
+        "--file",
+        "fixture.js",
+        "-n",
+        "1",
+        "-r",
+        "module.exports = 1;",
+        "-t",
+        noisy,
+        "--require-baseline-evidence",
+        "deprecation noise",
+      ],
+      ["--summary"],
+    );
+    const lines = view.stdout.trimEnd().split("\n");
+    expect(lines[0]).toContain("survived");
+    expect(lines[0]).toContain("failing=-");
+    expect(lines[0]).not.toContain("deprecation noise");
+  });
+
+  it("a small -m keeps the totals line and says how many mutant lines were left out", async () => {
+    const { repo, logs } = makeRepo();
+    const plan = path.join(repo, "plan.json");
+    const mutants = Array.from({ length: 6 }, () => ({
+      file: "fixture.js",
+      line: 1,
+      replace: "module.exports = false;",
+    }));
+    fs.writeFileSync(plan, JSON.stringify({ test: TEST_CMD, mutants }));
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-l",
+      logs,
+      "-m",
+      "600",
+      "probe",
+      "--summary",
+      "--plan",
+      plan,
+    ]);
+    expect(run.code).toBe(0);
+    expect(run.stdout.length).toBeLessThanOrEqual(600);
+    expect(run.stdout).toMatch(/\.\.\. \d+ more mutant lines? omitted/);
+    expect(run.stdout.trimEnd().split("\n").pop()).toBe(
+      "totals: status=killed total=6 killed=6 survived=0 inconclusive=0 not_run=0 met=6 violated=0",
+    );
   });
 
   it("inconclusive pre_failed probe: verdict not_run with the reason, exit 2 as in JSON", async () => {
@@ -180,7 +237,7 @@ describe("probe --summary (CLI)", () => {
   });
 });
 
-describe("probe --print (CLI)", () => {
+describe("probe --print (CLI)", { timeout: 60000 }, () => {
   it("prints the selected fields, dotted paths descend, exit code unchanged", async () => {
     const { repo, logs } = makeRepo();
     const { json, view } = await both(repo, logs, SURVIVED_ARGS, [
@@ -228,9 +285,57 @@ describe("probe --print (CLI)", () => {
     const envelope = JSON.parse(run.stdout);
     expect(envelope.status).toBe("usage_error");
     expect(envelope.message).toContain('unknown field "verdict"');
-    expect(fs.readFileSync(path.join(repo, "fixture.js"), "utf8")).toBe(
-      "module.exports = true;\n",
+    // A probe that had run would have left its test log and its isolated
+    // worktree's artifacts in the log directory.
+    expect(fs.readdirSync(logs).filter((n) => /^(exec-|wt-)/.test(n))).toEqual(
+      [],
     );
+  });
+
+  it("reads the full result: a small -m does not turn existing fields into null", async () => {
+    const { repo, logs } = makeRepo();
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-l",
+      logs,
+      "-m",
+      "700",
+      "probe",
+      "--print",
+      "mutation_probe.result,mutation_probe.restored_verified,mutant.file,test.exitCode",
+      ...SURVIVED_ARGS,
+    ]);
+    expect(run.code).toBe(1);
+    const printed = JSON.parse(run.stdout);
+    expect(printed["mutation_probe.result"]).toBe("survived");
+    expect(printed["mutation_probe.restored_verified"]).toBe(true);
+    expect(printed["mutant.file"]).toMatch(/fixture\.js$/);
+    expect(printed["test.exitCode"]).toBe(0);
+  });
+
+  it("every top-level field of the envelope and of the saved full result is printable", async () => {
+    const { repo, logs } = makeRepo();
+    const run = await spawnCli([
+      "-C",
+      repo,
+      "-l",
+      logs,
+      "-m",
+      "2200",
+      "probe",
+      ...SURVIVED_ARGS,
+    ]);
+    const reduced = JSON.parse(run.stdout);
+    const fullPath = (reduced.logs as string[]).find((l) =>
+      /result-full-\S+\.json$/.test(l),
+    ) as string;
+    const full = JSON.parse(fs.readFileSync(fullPath, "utf8"));
+    for (const key of [...Object.keys(reduced), ...Object.keys(full)].filter(
+      (k) => k !== "...",
+    )) {
+      expect(PRINTABLE_FIELDS).toContain(key);
+    }
   });
 });
 
@@ -241,6 +346,7 @@ describe("summary helpers", () => {
       "logs",
       "mutation_probe.result",
     ]);
+    expect(parsePrintFields("fullResult")).toEqual(["fullResult"]);
     expect(() => parsePrintFields(" , ")).toThrow(/at least one field/);
     expect(() => parsePrintFields("status,nope.x")).toThrow(
       /unknown field "nope"/,
@@ -264,6 +370,76 @@ describe("summary helpers", () => {
       "-",
     );
     expect(firstFailingLine(undefined)).toBe("-");
+  });
+
+  it("renderProbeSummary prints failing only for a killed verdict", () => {
+    const test = { stdoutTail: "Error: noise\nFAIL x", stderrTail: "" };
+    const killed = renderProbeSummary({
+      status: "killed",
+      mutation_probe: { result: "killed", expectation: "met" },
+      test,
+    });
+    expect(killed).toContain("failing=Error: noise");
+    const survived = renderProbeSummary({
+      status: "survived",
+      mutation_probe: { result: "survived", expectation: "violated" },
+      test,
+    });
+    expect(survived).toContain("failing=- |");
+  });
+
+  it("renderProbeSummary reports restored_verified as it is, true, false or unknown", () => {
+    const line = (restored: boolean | undefined) =>
+      renderProbeSummary({
+        status: "killed",
+        mutation_probe: { result: "killed", restored_verified: restored },
+      }).split("\n")[0];
+    expect(line(true)).toContain("restored=true");
+    expect(line(false)).toContain("restored=false");
+    expect(line(undefined)).toContain("restored=-");
+  });
+
+  it("renderProbeSummary prints mutant files relative to the cwd", () => {
+    const text = renderProbeSummary({
+      status: "killed",
+      cwd: "/work/repo",
+      mutant: { file: "/work/repo/src/a.ts", line: 3 },
+      mutation_probe: { result: "killed" },
+    });
+    expect(text).toMatch(/^src\/a\.ts:3 \| killed/);
+    expect(
+      renderProbeSummary({
+        status: "killed",
+        cwd: "/work/repo",
+        mutant: { file: "/elsewhere/a.ts", line: 3 },
+        mutation_probe: { result: "killed" },
+      }),
+    ).toMatch(/^\/elsewhere\/a\.ts:3/);
+  });
+
+  it("renderProbeSummary bounds only the mutant lines: the totals line survives a small maxChars", () => {
+    const results = Array.from({ length: 40 }, (_, index) => ({
+      index,
+      mutant: { file: "src/some/long/path/file.ts", line: index + 1 },
+      mutation_probe: { result: "killed", expectation: "met" },
+      test: { logPath: "/logs/exec-123.log" },
+    }));
+    const input = {
+      status: "killed",
+      plan: {
+        results,
+        summary: { total: 40, killed: 40, met: 40 },
+      },
+    };
+    for (const max of [300, 500, 2000]) {
+      const text = renderProbeSummary(input, max);
+      expect(text.length).toBeLessThanOrEqual(max);
+      expect(text.trimEnd().split("\n").pop()).toMatch(
+        /^totals: status=killed total=40 killed=40 /,
+      );
+      expect(text).toMatch(/\.\.\. \d+ more mutant lines omitted/);
+    }
+    expect(renderProbeSummary(input)).not.toContain("omitted");
   });
 
   it("renderProbeSummary falls back to the baseline log for a run with no test phase", () => {

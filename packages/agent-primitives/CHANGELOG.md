@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for `--plan`; `--print <field,...>` prints only the named envelope
   fields as one JSON object, and an unknown field is a usage error before
   the probe runs. The envelope schema and the exit codes are unchanged.
+  `-m` bounds only the mutant lines of `--summary` (the totals line is
+  always kept), and `--print` reads the full result, not the reduced one.
   The shipped skill text names both flags, so its digest changes.
 - `patch`: a new command that replaces exact text in one or more files
   from a JSON edit plan (`--plan <file>`, `{"edits":[{"file","old","new",

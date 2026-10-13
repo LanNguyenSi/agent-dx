@@ -1,3 +1,4 @@
+import path from "node:path";
 import { combinedOutput } from "../exec.js";
 
 /**
@@ -32,6 +33,7 @@ export const PRINTABLE_FIELDS: readonly string[] = [
   "expectation",
   "plan",
   "isolation",
+  "fullResult",
   "totalDurationMs",
 ];
 
@@ -113,6 +115,8 @@ export interface SummaryInput {
   mutation_probe?: SummaryMutantLike["mutation_probe"];
   test?: SummaryMutantLike["test"];
   baseline?: { logPath?: string };
+  /** The invocation cwd (`-C`); mutant file paths under it print relative. */
+  cwd?: string;
   plan?: {
     baseline?: { logPath?: string };
     results: SummaryMutantLike[];
@@ -141,8 +145,19 @@ function oneLine(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
-function mutantLine(row: SummaryMutantLike, baselineLog: string): string {
-  const file = row.mutant?.file ?? row.file;
+function relativeTo(cwd: string | undefined, file: string): string {
+  if (cwd === undefined || !path.isAbsolute(file)) return file;
+  const rel = path.relative(cwd, file);
+  return rel.startsWith("..") || path.isAbsolute(rel) ? file : rel;
+}
+
+function mutantLine(
+  row: SummaryMutantLike,
+  baselineLog: string,
+  cwd: string | undefined,
+): string {
+  const rawFile = row.mutant?.file ?? row.file;
+  const file = rawFile === undefined ? undefined : relativeTo(cwd, rawFile);
   const where =
     file === undefined
       ? "(no mutant)"
@@ -166,7 +181,9 @@ function mutantLine(row: SummaryMutantLike, baselineLog: string): string {
       : verdict,
     `expectation=${probe?.expectation ?? "-"}`,
     `restored=${probe?.restored_verified === undefined ? "-" : String(probe.restored_verified)}`,
-    `failing=${firstFailingLine(row.test)}`,
+    // Only a killed mutant has a failing test to name: a survived one
+    // passed, so an error-shaped line in its output is noise.
+    `failing=${verdict === "killed" ? firstFailingLine(row.test) : "-"}`,
     `log=${log || "-"}`,
   ];
   return parts.join(" | ");
@@ -177,14 +194,21 @@ function mutantLine(row: SummaryMutantLike, baselineLog: string): string {
  * failing test, log path) and a final `totals:` line. A run that never
  * reached a mutant (usage error, plan file refusal) prints its status and
  * reason on the totals line alone.
+ *
+ * `maxChars` bounds the mutant lines only: the totals line (and the note
+ * line, when it fits) always survive, and a marker line names how many
+ * mutant lines were left out.
  */
-export function renderProbeSummary(input: SummaryInput): string {
+export function renderProbeSummary(
+  input: SummaryInput,
+  maxChars: number = Number.POSITIVE_INFINITY,
+): string {
   const lines: string[] = [];
   let counts: Record<string, number>;
   if (input.plan !== undefined) {
     const baselineLog = input.plan.baseline?.logPath ?? "";
     for (const row of input.plan.results) {
-      lines.push(mutantLine(row, baselineLog));
+      lines.push(mutantLine(row, baselineLog, input.cwd));
     }
     const s = input.plan.summary ?? {};
     counts = {
@@ -210,6 +234,7 @@ export function renderProbeSummary(input: SummaryInput): string {
             reason: input.reason,
           },
           input.baseline?.logPath ?? "",
+          input.cwd,
         ),
       );
     }
@@ -231,12 +256,33 @@ export function renderProbeSummary(input: SummaryInput): string {
     };
   }
   const head = `status=${input.status}${input.reason !== undefined ? ` reason=${input.reason}` : ""}`;
-  lines.push(
+  const tail: string[] = [
     `totals: ${head} total=${counts.total} killed=${counts.killed} survived=${counts.survived} inconclusive=${counts.inconclusive} not_run=${counts.not_run} met=${counts.met} violated=${counts.violated}`,
-  );
+  ];
   const note = input.message ?? input.warnings?.[0];
   if (counts.total === 0 && note !== undefined) {
-    lines.push(`note: ${oneLine(note)}`);
+    tail.push(`note: ${oneLine(note)}`);
   }
-  return lines.join("\n") + "\n";
+  const size = (rows: string[]): number =>
+    rows.reduce((n, r) => n + r.length + 1, 0);
+  // Drop the note before the totals when even the tail does not fit.
+  while (tail.length > 1 && size(tail) > maxChars) tail.pop();
+  const marker = (omitted: number): string =>
+    `... ${omitted} more mutant line${omitted === 1 ? "" : "s"} omitted (-m ${maxChars}); raise -m or read the result-full log`;
+  let kept = lines.length;
+  if (size(lines) + size(tail) > maxChars) {
+    while (
+      kept > 0 &&
+      size(lines.slice(0, kept)) +
+        marker(lines.length - kept).length +
+        1 +
+        size(tail) >
+        maxChars
+    ) {
+      kept -= 1;
+    }
+  }
+  const out = lines.slice(0, kept);
+  if (kept < lines.length) out.push(marker(lines.length - kept));
+  return [...out, ...tail].join("\n") + "\n";
 }
