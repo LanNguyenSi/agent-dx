@@ -412,17 +412,6 @@ test('a page of unclosed openers is searched for a closer once, not once per ope
   assert.ok(searches.length <= 2, `the page was searched ${searches.length} times for -->`)
 })
 
-test('a long page of unclosed openers renders within a coarse time bound', () => {
-  // One search over the page answers every opener; a search that starts over
-  // at each opener grows with the square of the page's length. The bound
-  // assumes a runner with at least one full core.
-  const page = (n) => Array.from({ length: n }, (_, i) => `<!-- opener ${i}\ntext ${i}`).join('\n\n') + '\n'
-  const start = performance.now()
-  render(page(32000))
-  const ms = performance.now() - start
-  assert.ok(ms < 3000, `rendering 32000 unclosed openers took ${Math.round(ms)} ms`)
-})
-
 // Counts the work the comment rules do instead of timing it, so the checks do
 // not depend on how busy the machine is. A block rule placed ahead of the
 // comment rule swaps each parser state's line-end array for a proxy that
@@ -497,6 +486,9 @@ test('a comment opened in a quote whose closer lies after the quote stays visibl
   // After a line of text the opener is no paragraph of its own: the quote keeps
   // one paragraph.
   assert.equal(render('> a\n> <!-- a\n> b\n\nc -->\n'), '<blockquote>\n<p>a\n&lt;!-- a\nb</p>\n</blockquote>\n<p>c --&gt;</p>\n')
+  // The closer sits on the line that ends the quote (a heading cannot continue
+  // the quote's paragraph), which still lies outside the quote.
+  assert.equal(render('> <!-- a\n# h -->\n'), '<blockquote>\n<p>&lt;!-- a</p>\n</blockquote>\n<h1 id="h" tabindex="-1">h --&gt; <a class="header-anchor" href="#h" aria-label="Permalink to &quot;h --&gt;&quot;">&ZeroWidthSpace;</a></h1>\n')
 })
 
 test('stripComments takes the first closer after each opener and keeps an opener without one', () => {
