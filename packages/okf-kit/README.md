@@ -54,6 +54,9 @@ okf-kit check path/to/bundle --strict
 # resolve frontmatter refs like `shipped:runbooks/r.md` into another bundle (repeatable);
 # add --skip-companion-refs to report an unpassed alias as a notice instead of an error
 okf-kit check path/to/bundle --companion shipped=path/to/other/bundle
+
+# report only some rules and/or a minimum severity (the exit status counts only what is reported)
+okf-kit check path/to/bundle --rule citations-resolve,links-resolve --min-severity warning
 ```
 
 `check` exits `0` with no errors (and, under `--strict`, no warnings), `1` when it finds one, and `2` on an invocation or tool error; see [check catalog](docs/check-catalog.md#exit-codes) for the full table and [Output](docs/check-catalog.md#output) for the text and JSON formats.

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `check --rule <ids>` and `check --min-severity <level>` report only the
+  selected rule ids and/or findings at or above a severity, in text and
+  JSON output (JSON `summary` included); the exit status counts only the
+  reported findings. An unknown rule id, an empty `--rule` value or an
+  invalid level is a usage error (exit 2) (task 74896a5f).
+
 - Help and runtime text only: the `citations-resolve` rule description and the
   `okf-staleness.yml` job summary now name the recognised target extensions
   (`.ts`, `.js`, `.mjs`, `.md`, `.yml`, `.yaml`, `.json`), the `no-absolute-links`
