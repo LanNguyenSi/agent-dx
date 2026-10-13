@@ -284,10 +284,11 @@ export function isWithin(root: string, candidate: string): boolean {
 /** The default branch of `origin`, resolved to one exact remote-tracking
  * ref. */
 export interface DefaultBase {
-  /** The name to show and to hand to commands that only display it:
-   * `origin/<branch>` when that short spelling reaches the same commit as
-   * the full ref, otherwise the full ref (a local branch or tag of the same
-   * name shadows the short spelling). */
+  /** The name to show, and to hand to commands that only display it or
+   * start a branch from it: git's own unambiguous abbreviation of
+   * `fullRef` (`origin/main` in a normal layout, `remotes/origin/main` when
+   * a local branch or tag of the name `origin/main` exists), and `fullRef`
+   * itself when the abbreviation would not reach the same commit. */
   ref: string;
   /** The full ref, `refs/remotes/origin/<branch>`: what every check that
    * decides whether work may be discarded measures against, so a local
@@ -312,9 +313,17 @@ function defaultBaseOf(
   if (resolved.base.remote !== "origin") return undefined;
   const sha = commitSha(cwd, resolved.base.ref);
   if (sha === undefined) return undefined;
-  const short = resolved.base.ref.slice("refs/remotes/".length);
+  // git's strict abbreviation never spells a ref the way another ref of the
+  // repository is spelled, so it stays unambiguous where `origin/main` would
+  // name a local branch or a tag; the sha check keeps the full ref should
+  // git's configuration make the abbreviation ambiguous after all.
+  const short = gitText(cwd, ["rev-parse", "--abbrev-ref", resolved.base.ref]);
+  const display =
+    short !== undefined && short.length > 0 && commitSha(cwd, short) === sha
+      ? short
+      : resolved.base.ref;
   return {
-    ref: commitSha(cwd, short) === sha ? short : resolved.base.ref,
+    ref: display,
     fullRef: resolved.base.ref,
     ghBase: resolved.base.branch,
     source,
@@ -343,7 +352,7 @@ export function resolveDefaultBase(cwd: string): DefaultBase | undefined {
     const found = defaultBaseOf(
       cwd,
       `refs/remotes/origin/${candidate}`,
-      `origin/${candidate} (origin/HEAD is not set)`,
+      `origin/${candidate} (origin/HEAD is not set or not usable)`,
     );
     if (found !== undefined) return found;
   }
@@ -539,6 +548,8 @@ export function runGh(
  * verdict is about, which also catches a squash merge. `baseBranchName` is
  * that branch when it cannot be read off `baseRef` (a remote other than
  * `origin`, a full `refs/remotes/...` ref); by default `origin/` is stripped.
+ * `baseLabel` is how the reasons name the base (default `baseRef`): the
+ * measurement is always against `baseRef`.
  */
 export function mergeVerdict(
   cwd: string,
@@ -546,13 +557,14 @@ export function mergeVerdict(
   branch: string | undefined,
   baseRef: string,
   baseBranchName?: string,
+  baseLabel: string = baseRef,
 ): MergeVerdict {
   const anc = git(cwd, ["merge-base", "--is-ancestor", head, baseRef]);
   if (anc.error === undefined && anc.status === 0) {
     return {
       merged: "yes",
       via: "ancestry",
-      reason: `${head} is an ancestor of ${baseRef}`,
+      reason: `${head} is an ancestor of ${baseLabel}`,
     };
   }
   if (branch === undefined) {
@@ -642,7 +654,7 @@ export function mergeVerdict(
   return {
     merged: "no",
     via: "gh",
-    reason: `not an ancestor of ${baseRef} and gh lists no merged pull request for ${branch}`,
+    reason: `not an ancestor of ${baseLabel} and gh lists no merged pull request for ${branch}`,
   };
 }
 

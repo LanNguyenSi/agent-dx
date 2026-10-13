@@ -30,16 +30,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The shipped skill text names both flags, so its digest changes.
 - `worktree remove`: without `--base`, the unpushed check no longer
   follows symbolic refs under `refs/remotes` (a
+- `worktree remove`: the unpushed check, with or without `--base`, no
+  longer follows symbolic refs under `refs/remotes` (a
   `git symbolic-ref refs/remotes/origin/self refs/heads/feat` made an
-  unpushed `feat` look pushed, so `--delete-branch` deleted it), and the
-  default base is resolved to the full `refs/remotes/origin/<branch>` ref
-  through the same guard as `--base`, so a local branch or tag named
-  `origin/main` can no longer excuse unpushed commits as merged. An
-  `origin/HEAD` that points at a local branch, a symbolic ref, another
-  remote or a missing ref is skipped for the `origin/main` and
-  `origin/master` fallback; a default base that cannot be resolved this
-  way is treated as unknown, which keeps the branch. A merge verdict for the
-  default base now names the full ref. Normal layouts behave as before.
+  unpushed `feat` look pushed, so `--delete-branch` deleted it); a
+  `git for-each-ref` that fails is `unpushed_state_unknown`. Without
+  `--base`, the default base is resolved to the full
+  `refs/remotes/origin/<branch>` ref through the same guard as `--base`,
+  so a local branch or tag named `origin/main` can no longer excuse
+  unpushed commits as merged. An `origin/HEAD` that points at a local
+  branch, a symbolic ref, another remote or a missing ref is skipped for
+  the `origin/main` and `origin/master` fallback, and the `origin` remote
+  has to be configured; when no default base can be resolved this way, the
+  merge verdict is unknown (`merge_state_unknown` with `--require-merged`)
+  and the unpushed check alone guards `--delete-branch`.
+- `worktree create` and `worktree list`: the default base goes through the
+  same guard. An `origin/HEAD` that points at a local branch (which
+  `create` used to start the branch from, and `list` to measure against), a
+  symbolic ref, another remote or a missing ref is skipped for the
+  fallback, and with no `origin` remote configured (stale
+  `refs/remotes/origin/*` refs left behind) `create` refuses with
+  `default_branch_unresolved` and `list` reports the merge state as
+  unknown. `list` measures the full remote-tracking ref and resolves the
+  default base once per repository; the base it shows and `create` starts
+  from is git's unambiguous name for the ref (`origin/main`, or
+  `remotes/origin/main` where a local branch or tag of that name exists),
+  and when `origin/HEAD` is skipped `create` names `origin/HEAD is not set
+  or not usable` as the reason. Normal layouts print and behave as before.
 - `patch`: a new command that replaces exact text in one or more files
   from a JSON edit plan (`--plan <file>`, `{"edits":[{"file","old","new",
   "replaceAll"?}]}`) or one edit (`--file` with `--old`/`--old-file` and

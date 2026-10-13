@@ -735,6 +735,106 @@ describe("worktree create: refusals", () => {
   });
 });
 
+describe("worktree create: the default base in unusual layouts", () => {
+  /** A commit on top of `parent`, made without touching any ref. */
+  function commitOn(f: Fixture, parent: string): string {
+    return git(f.repo, [
+      "commit-tree",
+      `${parent}^{tree}`,
+      "-p",
+      parent,
+      "-m",
+      "elsewhere",
+    ]).trim();
+  }
+
+  it("branches from the remote-tracking ref when a local branch origin/main sits at the same commit", async () => {
+    const f = makeFixture();
+    git(f.repo, ["branch", "origin/main", f.mainSha]);
+    const target = path.join(f.base, "wt-shadow-same");
+    const r = await run(f.work, [
+      "--repo",
+      f.repo,
+      "--branch",
+      "feat/shadow",
+      "--path",
+      target,
+    ]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.base).toMatchObject({
+      ref: "remotes/origin/main",
+      sha: f.mainSha,
+      source: "default",
+    });
+    expect(git(target, ["rev-parse", "HEAD"]).trim()).toBe(f.mainSha);
+  });
+
+  it("branches from the remote-tracking ref, not from a local branch origin/main at another commit", async () => {
+    const f = makeFixture();
+    git(f.repo, ["branch", "origin/main", commitOn(f, f.mainSha)]);
+    const target = path.join(f.base, "wt-shadow-other");
+    const r = await run(f.work, [
+      "--repo",
+      f.repo,
+      "--branch",
+      "feat/shadow",
+      "--path",
+      target,
+    ]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.base).toMatchObject({
+      ref: "remotes/origin/main",
+      sha: f.mainSha,
+    });
+    expect(git(target, ["rev-parse", "HEAD"]).trim()).toBe(f.mainSha);
+  });
+
+  it("says why origin/HEAD was skipped when it names a local branch and a fallback is used", async () => {
+    const f = makeFixture();
+    git(f.repo, [
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/heads/main",
+    ]);
+    const r = await run(f.work, [
+      "--repo",
+      f.repo,
+      "--branch",
+      "feat/skipped",
+      "--path",
+      path.join(f.base, "wt-skipped"),
+    ]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.base).toMatchObject({
+      ref: "origin/main",
+      sha: f.mainSha,
+      detail: "origin/main (origin/HEAD is not set or not usable)",
+    });
+  });
+
+  it("refuses with a message that names an unusable origin/HEAD when no default base is left", async () => {
+    const f = makeFixture();
+    git(f.repo, ["update-ref", "-d", "refs/remotes/origin/main"]);
+    git(f.repo, [
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/heads/main",
+    ]);
+    const r = await run(f.work, [
+      "--repo",
+      f.repo,
+      "--branch",
+      "x",
+      "--no-fetch",
+      "--path",
+      path.join(f.base, "wt-none"),
+    ]);
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.reason).toBe("default_branch_unresolved");
+    expect(r.json.message).toContain("origin/HEAD is not set or not usable");
+  });
+});
+
 describe("worktree create: run pointer", () => {
   it("writes .ai/run with the absolute run directory when git ignores it", async () => {
     const f = makeFixture({ gitignore: ".ai/run\n" });

@@ -1661,6 +1661,78 @@ describe("resolveRemoteBase: defence-in-depth checks", () => {
   });
 });
 
+describe("worktree list: the default base", () => {
+  it("shows origin/main and measures a normal layout as before", async () => {
+    const f = makeFixture();
+    const ahead = addWorktree(f, "aheadb", path.join(f.base, "wt-ahead"));
+    commitHere(ahead, "ahead.txt", "one commit ahead");
+    const r = await cli(f.work, ["list", "--repo", f.repo]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    const entries = r.json.worktrees as Record<string, any>[];
+    expect(entries.every((w) => w.base === "origin/main")).toBe(true);
+    expect(entries.find((w) => w.path === ahead)).toMatchObject({
+      ahead: 1,
+      behind: 0,
+    });
+  });
+
+  it("shows git's unambiguous name and measures the remote-tracking ref when a local branch shadows it at the same commit", async () => {
+    const f = makeFixture();
+    const ahead = addWorktree(f, "aheadb", path.join(f.base, "wt-ahead"));
+    commitHere(ahead, "ahead.txt", "one commit ahead");
+    git(f.repo, ["branch", "origin/main", f.mainSha]);
+    const r = await cli(f.work, ["list", "--repo", f.repo]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    const entries = r.json.worktrees as Record<string, any>[];
+    expect(entries.every((w) => w.base === "remotes/origin/main")).toBe(true);
+    expect(entries.find((w) => w.path === ahead)).toMatchObject({
+      ahead: 1,
+      behind: 0,
+    });
+    expect(entries.find((w) => w.path === ahead)?.merged).toMatchObject({
+      merged: "unknown",
+    });
+  });
+
+  it("measures the remote-tracking ref, not a shadowing local branch at another commit", async () => {
+    const f = makeFixture();
+    const second = addWorktree(f, "second", path.join(f.base, "wt-second"));
+    commitHere(second, "s.txt", "second");
+    commitHere(second, "s2.txt", "second again");
+    // The shadow sits at second's own HEAD: measured against it, second
+    // would be ahead by 0 and its merged state would be "yes".
+    git(f.repo, ["branch", "origin/main", "second"]);
+    const r = await cli(f.work, ["list", "--repo", f.repo]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    const entry = (r.json.worktrees as Record<string, any>[]).find(
+      (w) => w.path === second,
+    );
+    expect(entry).toMatchObject({
+      base: "remotes/origin/main",
+      ahead: 2,
+      behind: 0,
+    });
+    expect(entry?.merged.merged).not.toBe("yes");
+  });
+
+  it("reads origin's default base once per repository, not once per worktree", async () => {
+    const f = makeFixture();
+    addWorktree(f, "one", path.join(f.base, "wt-one"));
+    addWorktree(f, "two", path.join(f.base, "wt-two"));
+    addWorktree(f, "three", path.join(f.base, "wt-three"));
+    const log = path.join(f.base, "git-calls.log");
+    const PATH = gitWrapper(f, "git-logging", `echo "$@" >> '${log}'`);
+    const r = await cli(f.work, ["list", "--repo", f.repo], { PATH });
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.worktrees).toHaveLength(4);
+    const calls = fs
+      .readFileSync(log, "utf8")
+      .split("\n")
+      .filter((line) => line.includes("refs/remotes/origin/HEAD"));
+    expect(calls).toHaveLength(1);
+  });
+});
+
 describe("ignoredSymlinks", () => {
   it("finds an excluded directory symlink and no other ignored path", () => {
     const f = makeFixture();
@@ -1684,6 +1756,54 @@ function makeUnpushed(f: Fixture): { wt: string; sha: string } {
   const wt = addWorktree(f, "feat", path.join(f.base, "wt-feat"));
   commitHere(wt, "feat.txt", "unpushed work");
   return { wt, sha: git(wt, ["rev-parse", "HEAD"]).trim() };
+}
+
+/** A commit on top of `parent` (same tree), made without touching any ref
+ * or the work tree: the sha a shadowing local branch can sit at. */
+function commitOn(f: Fixture, parent: string): string {
+  return git(f.repo, [
+    "commit-tree",
+    `${parent}^{tree}`,
+    "-p",
+    parent,
+    "-m",
+    "elsewhere",
+  ]).trim();
+}
+
+function commitShaOf(f: Fixture, rev: string): string {
+  return git(f.repo, ["rev-parse", "--verify", `${rev}^{commit}`]).trim();
+}
+
+/**
+ * A directory holding a `git` that runs `prelude` (a shell snippet that may
+ * `exit`) before it hands every call on to the real git, and the PATH that
+ * puts it first. The spawned CLI sees nothing else but the fixed bin dir.
+ */
+function gitWrapper(f: Fixture, name: string, prelude: string): string {
+  const dir = path.join(f.base, name);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "git"),
+    `#!/bin/sh\n${prelude}\nexec '${path.join(FIXED_BIN_DIR, "git")}' "$@"\n`,
+    { mode: 0o755 },
+  );
+  return `${dir}${path.delimiter}${FIXED_BIN_DIR}`;
+}
+
+/** A `gitWrapper` PATH whose git fails like a broken ref store for
+ * `for-each-ref` and passes every other call on. */
+function failingForEachRef(f: Fixture): string {
+  return gitWrapper(
+    f,
+    "git-no-for-each-ref",
+    `for a in "$@"; do
+  if [ "$a" = for-each-ref ]; then
+    echo 'fatal: injected for-each-ref failure' >&2
+    exit 128
+  fi
+done`,
+  );
 }
 
 /** Runs `remove` without --base and without --force, once with
@@ -1847,8 +1967,13 @@ describe("worktree remove without --base: a local branch named like the default 
     });
     expect(merged.code, merged.stdout + merged.stderr).toBe(2);
     expect(merged.json.reason).toBe("branch_not_merged");
+    // git's own abbreviation of the full ref, which differs from the
+    // `origin/main` the local branch is called.
     expect(merged.json.details.merged.reason).toContain(
-      "refs/remotes/origin/main",
+      "not an ancestor of remotes/origin/main and",
+    );
+    expect(merged.json.message).toContain(
+      "not merged into remotes/origin/main;",
     );
     expect(git(f.repo, ["rev-parse", "feat"]).trim()).toBe(sha);
   });
@@ -1929,6 +2054,107 @@ describe("worktree remove without --base: a local branch named like the default 
   });
 });
 
+describe("worktree remove without --base: how the default base is named", () => {
+  it("shows origin/main, not the full ref, in a normal layout", async () => {
+    const f = makeFixture();
+    const { wt } = makeUnpushed(f);
+    const refused = await cli(f.work, ["remove", wt, "--require-merged"], {
+      PATH: ghStub(f, "[]"),
+    });
+    expect(refused.code, refused.stdout + refused.stderr).toBe(2);
+    expect(refused.json.reason).toBe("branch_not_merged");
+    expect(refused.json.message).toContain("not merged into origin/main;");
+    expect(refused.json.message).not.toContain("refs/remotes/");
+    expect(refused.json.details.merged.reason).toBe(
+      "not an ancestor of origin/main and gh lists no merged pull request for feat",
+    );
+
+    const clean = addWorktree(f, "clean", path.join(f.base, "wt-clean"));
+    const ok = await cli(f.work, ["remove", clean, "--require-merged"]);
+    expect(ok.code, ok.stdout + ok.stderr).toBe(0);
+    expect(ok.json.merged).toEqual({
+      merged: "yes",
+      via: "ancestry",
+      reason: "HEAD is an ancestor of origin/main",
+    });
+  });
+
+  it("shows origin/main in the warning about a merged branch's unpushed commits", async () => {
+    const f = makeFixture();
+    const wt = addWorktree(f, "squashed", path.join(f.base, "wt-squashed"));
+    commitHere(wt, "sq.txt", "squashed work");
+    const sha = git(wt, ["rev-parse", "HEAD"]).trim();
+    const r = await cli(f.work, ["remove", wt, "--require-merged"], {
+      PATH: ghStub(
+        f,
+        `[{"number":9,"headRefOid":"${sha}","baseRefName":"main"}]`,
+      ),
+    });
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.warnings).toEqual([
+      "1 commit(s) are on no remote branch, but the branch is merged into origin/main (gh); not counted as unpushed",
+    ]);
+  });
+
+  it("names a shadowed default base unambiguously, and does not mistake a shadow at the same commit for the base", async () => {
+    const f = makeFixture();
+    // origin/HEAD is set and a local branch of the same name as the
+    // remote-tracking ref sits at its own commit.
+    const clean = addWorktree(f, "clean", path.join(f.base, "wt-clean"));
+    git(f.repo, ["branch", "origin/main", f.mainSha]);
+    const r = await cli(f.work, ["remove", clean, "--require-merged"]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.merged.reason).toBe(
+      "HEAD is an ancestor of remotes/origin/main",
+    );
+  });
+});
+
+describe("worktree remove: symbolic refs and an explicit --base", () => {
+  it("keeps a branch that a symbolic remote-tracking ref points at, with --base", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeUnpushed(f);
+    git(f.repo, [
+      "symbolic-ref",
+      "refs/remotes/origin/self",
+      "refs/heads/feat",
+    ]);
+    const r = await cli(f.work, [
+      "remove",
+      wt,
+      "--delete-branch",
+      "--base",
+      "origin/main",
+    ]);
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.reason).toBe("unpushed_commits");
+    expect(listedWorktrees(f.repo)).toContain(wt);
+    expect(git(f.repo, ["rev-parse", "feat"]).trim()).toBe(sha);
+  });
+});
+
+describe("worktree remove: a for-each-ref that fails", () => {
+  it("refuses with unpushed_state_unknown and keeps the branch, though rev-list alone would call it pushed", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeUnpushed(f);
+    // Without for-each-ref the symbolic ref cannot be excluded, and
+    // `rev-list --remotes` follows it to the branch: the commit would look
+    // pushed and the branch would be deleted.
+    git(f.repo, [
+      "symbolic-ref",
+      "refs/remotes/origin/self",
+      "refs/heads/feat",
+    ]);
+    const PATH = failingForEachRef(f);
+    const r = await cli(f.work, ["remove", wt, "--delete-branch"], { PATH });
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.reason).toBe("unpushed_state_unknown");
+    expect(r.json.message).toContain("--force");
+    expect(listedWorktrees(f.repo)).toContain(wt);
+    expect(git(f.repo, ["rev-parse", "feat"]).trim()).toBe(sha);
+  });
+});
+
 describe("resolveDefaultBase", () => {
   const MAIN = "refs/remotes/origin/main";
 
@@ -1949,7 +2175,7 @@ describe("resolveDefaultBase", () => {
       ref: "origin/main",
       fullRef: MAIN,
       ghBase: "main",
-      source: "origin/main (origin/HEAD is not set)",
+      source: "origin/main (origin/HEAD is not set or not usable)",
     });
     git(f.repo, ["push", "-q", "origin", "main:master"]);
     git(f.repo, ["fetch", "-q", "origin"]);
@@ -1960,7 +2186,7 @@ describe("resolveDefaultBase", () => {
       ref: "origin/master",
       fullRef: "refs/remotes/origin/master",
       ghBase: "master",
-      source: "origin/master (origin/HEAD is not set)",
+      source: "origin/master (origin/HEAD is not set or not usable)",
     });
   });
 
@@ -1977,21 +2203,42 @@ describe("resolveDefaultBase", () => {
     });
   });
 
-  it("names the full ref for display when a local branch or tag shadows the short name", () => {
+  it("names git's unambiguous abbreviation when a local branch or tag shadows the short name", () => {
     const f = makeFixture();
     git(f.repo, ["symbolic-ref", "--delete", "refs/remotes/origin/HEAD"]);
     makeUnpushed(f);
     git(f.repo, ["branch", "origin/main", "feat"]);
     expect(resolveDefaultBase(f.repo)).toMatchObject({
-      ref: MAIN,
+      ref: "remotes/origin/main",
       fullRef: MAIN,
     });
     git(f.repo, ["branch", "-D", "origin/main"]);
     git(f.repo, ["tag", "origin/main", "feat"]);
     expect(resolveDefaultBase(f.repo)).toMatchObject({
-      ref: MAIN,
+      ref: "remotes/origin/main",
       fullRef: MAIN,
     });
+  });
+
+  it("names the abbreviation with origin/HEAD set, whether the shadow sits at the same commit or at another", () => {
+    const f = makeFixture();
+    // Same commit as the remote-tracking ref: `origin/main` would still be
+    // ambiguous for git, so it must not be the name handed on.
+    git(f.repo, ["branch", "origin/main", f.mainSha]);
+    expect(resolveDefaultBase(f.repo)).toEqual({
+      ref: "remotes/origin/main",
+      fullRef: MAIN,
+      ghBase: "main",
+      source: "origin/HEAD",
+    });
+    git(f.repo, ["branch", "-D", "origin/main"]);
+    const other = commitOn(f, f.mainSha);
+    git(f.repo, ["branch", "origin/main", other]);
+    expect(resolveDefaultBase(f.repo)).toMatchObject({
+      ref: "remotes/origin/main",
+      fullRef: MAIN,
+    });
+    expect(commitShaOf(f, "remotes/origin/main")).toBe(f.mainSha);
   });
 
   it("skips an origin/HEAD that names a local branch, and uses the fallback", () => {
@@ -2003,7 +2250,7 @@ describe("resolveDefaultBase", () => {
     ]);
     expect(resolveDefaultBase(f.repo)).toMatchObject({
       fullRef: MAIN,
-      source: "origin/main (origin/HEAD is not set)",
+      source: "origin/main (origin/HEAD is not set or not usable)",
     });
     git(f.repo, ["update-ref", "-d", MAIN]);
     expect(resolveDefaultBase(f.repo)).toBeUndefined();
@@ -2018,7 +2265,7 @@ describe("resolveDefaultBase", () => {
     ]);
     expect(resolveDefaultBase(f.repo)).toMatchObject({
       fullRef: MAIN,
-      source: "origin/main (origin/HEAD is not set)",
+      source: "origin/main (origin/HEAD is not set or not usable)",
     });
     git(f.repo, ["remote", "add", "upstream", f.origin]);
     git(f.repo, ["fetch", "-q", "upstream"]);
@@ -2029,7 +2276,7 @@ describe("resolveDefaultBase", () => {
     ]);
     expect(resolveDefaultBase(f.repo)).toMatchObject({
       fullRef: MAIN,
-      source: "origin/main (origin/HEAD is not set)",
+      source: "origin/main (origin/HEAD is not set or not usable)",
     });
   });
 

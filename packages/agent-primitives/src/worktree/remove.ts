@@ -111,7 +111,7 @@ export async function removeWorktree(
 
   // --base must be a remote-tracking branch, resolved once here to a full
   // ref; anything else refuses before anything is read or changed.
-  let explicitBase: { ref: string; ghBase: string } | undefined;
+  let explicitBase: { ref: string; ghBase: string; label: string } | undefined;
   if (o.base !== undefined) {
     const resolved = resolveRemoteBase(repo.mainCheckout, o.base);
     if (!resolved.ok) {
@@ -126,6 +126,7 @@ export async function removeWorktree(
     explicitBase = {
       ref: resolved.base.ref,
       ghBase: resolved.base.branch,
+      label: resolved.base.ref,
     };
   }
 
@@ -201,12 +202,18 @@ export async function removeWorktree(
   // verdict excuse commits no remote has (below). An explicit --base goes
   // through it above; the default base does inside resolveDefaultBase, and
   // is measured by its full `refs/remotes/origin/<branch>` ref so that a
-  // local branch named `origin/<branch>` cannot stand in for it.
-  const base: { ref: string; ghBase: string } | undefined =
+  // local branch named `origin/<branch>` cannot stand in for it. What the
+  // messages show is `label`, git's own unambiguous abbreviation of that ref
+  // (`origin/main` in a normal layout).
+  const base: { ref: string; ghBase: string; label: string } | undefined =
     explicitBase ??
     (defaultBase === undefined
       ? undefined
-      : { ref: defaultBase.fullRef, ghBase: defaultBase.ghBase });
+      : {
+          ref: defaultBase.fullRef,
+          ghBase: defaultBase.ghBase,
+          label: defaultBase.ref,
+        });
   // Asked only when a flag needs the answer: the `gh` lookup of a verdict is
   // a network call where `gh` happens to be installed. Computed before the
   // unpushed check, because a branch that is merged into the base has no
@@ -220,11 +227,18 @@ export async function removeWorktree(
             via: "none",
             reason: "origin's default branch cannot be resolved",
           }
-        : mergeVerdict(target, "HEAD", entry.branch, base.ref, base.ghBase);
+        : mergeVerdict(
+            target,
+            "HEAD",
+            entry.branch,
+            base.ref,
+            base.ghBase,
+            base.label,
+          );
   if (o.requireMerged === true && o.force !== true && merged !== null) {
     if (merged.merged === "no") {
       throw new WorktreeRefusal(
-        `${entry.branch ?? "HEAD"} is not merged into ${base?.ref ?? "the default branch"}; merge it first, or pass --force to remove the worktree anyway`,
+        `${entry.branch ?? "HEAD"} is not merged into ${base?.label ?? "the default branch"}; merge it first, or pass --force to remove the worktree anyway`,
         "branch_not_merged",
         { merged },
       );
@@ -276,7 +290,7 @@ export async function removeWorktree(
   const warnings: string[] = [];
   if (unpushedLines.length > 0 && mergedIntoBase) {
     warnings.push(
-      `${String(unpushedLines.length)} commit(s) are on no remote branch, but the branch is merged into ${base?.ref ?? "the default branch"} (${merged.via}); not counted as unpushed`,
+      `${String(unpushedLines.length)} commit(s) are on no remote branch, but the branch is merged into ${base?.label ?? "the default branch"} (${merged.via}); not counted as unpushed`,
     );
   }
   const linksRemoved: string[] = [];
