@@ -507,13 +507,13 @@ function gitDirIdentities(
         // The group is already gone.
       }
     }
-    const code = (res.error as NodeJS.ErrnoException | undefined)?.code;
-    if (code === "ETIMEDOUT") {
+    const e = res.error as NodeJS.ErrnoException | undefined;
+    if (e?.code === "ETIMEDOUT") {
       return skipped(
         `git rev-parse did not finish within ${String(timeoutMs)} ms and was stopped`,
       );
     }
-    if (code === "ENOBUFS") {
+    if (e?.code === "ENOBUFS") {
       return skipped(
         `git rev-parse wrote more than ${String(GIT_LOOKUP_MAX_OUTPUT)} bytes and was stopped`,
       );
