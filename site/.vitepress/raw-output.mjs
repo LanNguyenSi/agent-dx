@@ -35,6 +35,8 @@
 // an attribute, a tag name) are handled by sanitizeFrontmatter, passed as
 // transformPageData.
 
+import { EXTERNAL_URL_RE } from 'vitepress/dist/client/shared.js'
+
 // Attributes a "{...}" block may set. Event handlers and everything else are
 // dropped by markdown-it-attrs. The shipped playbooks use none; "{#id}" and
 // "{.class}" are kept for future headings and blocks. VitePress reads the line
@@ -102,10 +104,20 @@ export function escapeDescriptionMeta(html, _file, { description }) {
 // entity reference stays one). A number, a boolean or an empty value cannot
 // hold markup and is kept as it is, since `prev: false` hides a link.
 //
-// What stays as typed: `head` (VitePress's documented way to add tags) and
-// the link fields (prev and next link, hero action and feature link, target
-// and rel), which the theme writes into href, target and rel attributes
-// without checking the scheme. These are author-trusted, like head.
+// The link fields (prev and next link, hero action and feature link) go into
+// an href. VitePress returns a URL it does not know unchanged, so a
+// `javascript:` link would run in the page origin on click (an explicit
+// `target: _self` makes that reliable). A link is kept only when it is
+// http(s), mailto or relative, and a relative one only when the href the theme
+// writes for it stays on the site (see isSafeLink); otherwise the field is
+// dropped and the button or card renders without a link (a footer link falls
+// back to the one the sidebar gives). `target` on a hero action or a feature
+// is kept only when it is one of the four browsing-context keywords, and `rel`
+// only when every token is on the allow-list below; the theme's own default
+// then applies. hero.actions must be a list, like features.
+//
+// What stays as typed: `head` (VitePress's documented way to add tags), which
+// is author-trusted.
 export const allowedDirs = new Set(['ltr', 'rtl', 'auto'])
 export const allowedLayouts = new Set(['doc', 'home', 'page'])
 
@@ -123,7 +135,122 @@ const isRecord = (value) => value !== null && typeof value === 'object' && !Arra
 const isPlain = (value) => typeof value === 'string' || typeof value === 'number'
 const withText = (value, keys) =>
   isRecord(value) ? { ...value, ...Object.fromEntries(keys.filter((k) => k in value).map((k) => [k, asText(value[k])])) } : value
-const pageLink = (value) => (isRecord(value) ? withText(value, ['text']) : asText(value))
+const pageLink = (value) => (isRecord(value) ? withSafeLink(withText(value, ['text'])) : asText(value))
+
+// What a link field may hold. Only a string can: the theme calls string
+// methods on it, so a number or a list would stop the build.
+//
+//   - absolute: the scheme (letters, digits, "+", "-", ".", after a letter) is
+//     http, https or mailto, read case-insensitively. Every other scheme is
+//     refused (javascript, data, vbscript, blob, file, tel, ...).
+//   - relative: no scheme, and the href the theme writes for it (see
+//     themeHref) is not a network-path reference either, so it resolves on
+//     the site: a path (`a/b`, `./a`, `../a`), a root-relative path (`/a`),
+//     `#frag`, `?query` and the empty string. A first segment with a colon
+//     needs a leading `./` (`a:b` is a scheme, `./a:b` a path).
+//   - refused as well: a scheme-relative `//host` and any backslash. They are
+//     not a path on this site, and the URL parser reads `\` as `/`, so `/\host`
+//     is the same host change as `//host`. Write the scheme to link elsewhere.
+//   - refused as well: a value the theme turns into `//host`. The theme does
+//     not write a relative link as typed: it parses the value and writes the
+//     parsed path back, so dot segments before a double slash
+//     (`/.//host/x`, `/a/..//host/x`) leave a leading `//`, and a `$` pattern
+//     in the path (`/$1/host/x`) is expanded by the replacement it goes
+//     through. Both reach the page as an off-site link without the external
+//     markers.
+//   - refused as well: any control character, space or DEL anywhere. The URL
+//     parser drops leading and trailing ones and removes tabs and newlines
+//     inside, so ` javascript:x`, `\tjavascript:x` and `java\nscript:x` all
+//     carry the javascript scheme. Percent-encode a space instead.
+//   - an entity (`javascript&colon;x`) or a percent escape (`%6Aavascript:x`)
+//     is not decoded by the URL parser, so it starts no scheme and is a
+//     relative path; the page writer escapes the `&` and the browser resolves
+//     it on the site.
+const linkSchemes = new Set(['http:', 'https:', 'mailto:'])
+const hiddenChars = /[\u0000-\u0020\u007f-\u009f\s]/
+const leadingScheme = /^[A-Za-z][A-Za-z0-9+.-]*:/
+
+// The href the default theme writes for a link without a scheme, before the
+// site base is added: normalizeLink in theme-default/support/utils.js. It
+// parses the value against a dummy origin and, unless the path ends in "/" or
+// ".html", writes pathname, search and hash back over the value with
+// String.replace (keeping a leading run of dots), which is where dot segments
+// are resolved and where a "$" in the path is read as a replacement pattern.
+// The theme then adds the base unless the result matches EXTERNAL_URL_RE
+// (withBase in client/app/utils.js), so a result that does is written as typed
+// and the browser reads it as another site. The extension rule (treatAsHtml)
+// and the cleanUrls setting only change the end of the result, never its
+// start, which is what EXTERNAL_URL_RE reads, so ".html" is used and neither is
+// consulted: a link the theme would leave as typed is checked as rewritten
+// too, which can refuse an on-site path to a file with a known extension and
+// never keeps an off-site one. The base starts with "/" and joinPath collapses
+// slashes, so adding it never makes a result external.
+//
+// This copies the theme's computation; read both functions again after a
+// VitePress upgrade (docs/repo-layout.md names the coupling).
+const themeOrigin = 'http://a.com'
+function themeHref(value) {
+  const { pathname, search, hash } = new URL(value, themeOrigin)
+  return value.replace(/(?:(^\.+)\/)?.*$/, `$1${pathname.replace(/(\.md)?$/, '.html')}${search}${hash}`)
+}
+
+export function isSafeLink(value) {
+  if (typeof value !== 'string' || hiddenChars.test(value) || value.includes('\\')) return false
+  if (leadingScheme.test(value)) {
+    try {
+      return linkSchemes.has(new URL(value).protocol)
+    } catch {
+      return false
+    }
+  }
+  try {
+    return [value, themeHref(value)].every((href) => !EXTERNAL_URL_RE.test(href))
+  } catch {
+    return false
+  }
+}
+
+export const allowedTargets = new Set(['_blank', '_self', '_parent', '_top'])
+// Tokens of a `rel` that describe a link and weaken nothing. An author-set rel
+// replaces the theme's default `noreferrer` for an external link, so the list
+// the author writes is the whole list. `opener` is left out so that a link to a
+// new window never gives that window access to this page.
+export const allowedRelTokens = new Set([
+  'noopener',
+  'noreferrer',
+  'nofollow',
+  'external',
+  'sponsored',
+  'ugc',
+  'me',
+  'author',
+  'help',
+  'license',
+  'bookmark',
+  'tag',
+  'prev',
+  'next',
+  'alternate',
+  'search'
+])
+// Tokens are split on a single space, so an empty token (a doubled, leading or
+// trailing space) or a token with another separator is not on the list.
+const isSafeRel = (rel) => typeof rel === 'string' && rel.split(' ').every((t) => allowedRelTokens.has(t))
+
+// Removes link, target and rel from a record unless each passes its check.
+// A key that is absent stays absent.
+function withSafeLink(item, { target = false } = {}) {
+  if (!isRecord(item)) return item
+  const safe = { ...item }
+  if ('link' in safe && !isSafeLink(safe.link)) delete safe.link
+  if (target) {
+    if ('target' in safe && !allowedTargets.has(safe.target)) delete safe.target
+    if ('rel' in safe && !isSafeRel(safe.rel)) delete safe.rel
+  }
+  return safe
+}
+
+const sanitizeAction = (action) => withSafeLink(action, { target: true })
 
 // An image as the theme reads it: a string (a source), or an object. Returns
 // undefined for anything else, which the caller drops. The theme spreads an
@@ -146,7 +273,7 @@ export function safeImage(image) {
 }
 
 const sanitizeFeature = (feature) => {
-  const item = withText(feature, ['title', 'details'])
+  const item = withSafeLink(withText(feature, ['title', 'details']), { target: true })
   if (!isRecord(item)) return item
   const icon = isRecord(item.icon) ? safeImage(item.icon) : asText(item.icon)
   const { icon: _drop, ...rest } = item
@@ -161,8 +288,9 @@ export function sanitizeFrontmatter(frontmatter) {
   if ('hero' in safe) {
     const hero = withText(safe.hero, ['name', 'text', 'tagline'])
     if (isRecord(hero)) {
-      const { image: source, ...rest } = hero
+      const { image: source, actions, ...rest } = hero
       const image = safeImage(source)
+      if (Array.isArray(actions)) rest.actions = actions.map(sanitizeAction)
       safe.hero = image === undefined ? rest : { ...rest, image }
     } else {
       safe.hero = hero

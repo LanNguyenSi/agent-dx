@@ -72,11 +72,38 @@ entity reference such as `&copy;` stays one. `features` must be a list (any
 other shape is dropped), and an image given as an object (`hero.image`, an
 `icon`, and their `light` and `dark` sides) keeps only `src`, `alt`, `width`,
 `height` and `wrap`, so it cannot set an event handler or another attribute on
-the image. Two kinds of field stay as typed, and only trusted authors should
-write them: `head`, whose entries are written into the page head as VitePress
-documents, and the link fields (`link` in `prev`, `next`, `hero.actions` and
-`features`, with `target` and `rel`), which the theme writes into `href`,
-`target` and `rel` without checking the scheme, so a `javascript:` link works.
+the image. `head` stays as typed, and only trusted authors should write it: its
+entries are written into the page head as VitePress documents. The link fields
+(`link` in `prev`, `next`, `hero.actions` and `features`) are no longer a raw
+path: a link is kept only when it is `http:`, `https:` or `mailto:` (the scheme
+in any letter case), or relative to the site: a path (`a/b`, `./a`, `../a`),
+a root path (`/a`), `#fragment` or `?query`. Anything else is dropped, so the
+button, card or footer link renders without it (a footer link then falls back
+to the neighbour the sidebar gives). That covers other schemes (`javascript:`,
+`data:`, `vbscript:`, `blob:`, `file:`, `tel:`), a value that is not a string,
+a scheme-relative `//host` (write `https://host` to link elsewhere), a
+backslash (browsers read it as a slash), and any space or control character
+(percent-encode a space as `%20`; a leading space, tab or newline would hide a
+scheme from this check but not from the browser). A path whose first segment
+holds a colon needs a leading `./` (`./a:b`). The theme does not write a
+relative link as typed: it parses the value and writes the parsed path back,
+so a relative value that comes out of that as `//host/...` is dropped too,
+for example `/.//host/x`, `/a/..//host/x` (dot segments before a double
+slash) and `/$1/host/x` (a `$` pattern in the path). Without this the link
+would point at another site and carry none of the markers the theme gives an
+external link. A `//` inside a path (`/a//b`) and leading dots (`..//a`) stay
+on the site and are kept. The check repeats the theme's own computation
+(`normalizeLink` and `withBase` in the VitePress default theme), so after a
+VitePress upgrade read both again and run the site tests. `target` on a hero
+action or a feature is kept only as `_blank`, `_self`, `_parent` or `_top`,
+and `rel` only when every space-separated token is one of `noopener`,
+`noreferrer`, `nofollow`, `external`, `sponsored`, `ugc`, `me`, `author`,
+`help`, `license`, `bookmark`, `tag`, `prev`, `next`, `alternate` or
+`search`; otherwise the theme's own default applies. An author-set `rel`
+replaces the theme's default `noreferrer` for an external link, so list
+`noreferrer` too when the link should have it; `opener` is not on the list, so
+a link to a new window never gives that window access to the page.
+`hero.actions` must be a list, like `features`.
 JavaScript frontmatter is refused: a page whose frontmatter opens with `---js`
 or `---javascript` fails the build, because VitePress would run it as Node code
 at build time. Write frontmatter as YAML (or JSON). A YAML date such as

@@ -5,8 +5,9 @@
 import test, { before } from 'node:test'
 import assert from 'node:assert/strict'
 import { createMarkdownRenderer, resolveConfig } from 'vitepress'
-import { allowedAttributes, allowedDirs, allowedLayouts, defuseMustache, escapeDescriptionMeta, escapeText, safeId, safeImage, sanitizeFrontmatter, transformPageData } from '../.vitepress/raw-output.mjs'
+import { allowedAttributes, allowedDirs, allowedLayouts, allowedRelTokens, allowedTargets, defuseMustache, escapeDescriptionMeta, escapeText, isSafeLink, safeId, safeImage, sanitizeFrontmatter, transformPageData } from '../.vitepress/raw-output.mjs'
 import { escapeText as siteEscapeText, markdownBase } from '../.vitepress/site-helpers.mjs'
+import { keptRelative, themeOffsite } from './link-cases.mjs'
 
 let md
 let cfg
@@ -456,4 +457,192 @@ test('YAML and JSON frontmatter are read as before', () => {
     md.render(`${open}\n${body}\n---\n# T\n`, env)
     assert.deepEqual(env.frontmatter, { title: 'Home', dir: 'rtl' }, open)
   }
+})
+
+// Link fields
+
+test('a link is kept when it is http(s), mailto or a path that stays on the site', () => {
+  for (const link of ['https://example.com/a?b=1#c', 'http://example.com', 'HTTPS://EXAMPLE.COM', 'mailto:a@example.com', '/a/b', 'a/b', './a', '../a', '#frag', '?q=1', '', './a:b', '/a:b', '%6Aavascript:x', 'javascript&colon;x', 'javascript&#58;x']) {
+    assert.equal(isSafeLink(link), true, JSON.stringify(link))
+  }
+})
+
+test('a link with any other scheme is refused, whatever the spelling', () => {
+  const refused = [
+    'javascript:alert(1)',
+    'JaVaScRiPt:alert(1)',
+    'JAVASCRIPT:alert(1)',
+    'data:text/html,<b>x</b>',
+    'vbscript:msgbox(1)',
+    'blob:https://example.com/id',
+    'file:///etc/passwd',
+    'tel:+4912345',
+    'ftp://example.com/x',
+    'a:b',
+    'x-unknown:y',
+    // The URL parser drops leading and trailing control characters and spaces, and removes tab and newline anywhere.
+    ' javascript:x',
+    'javascript:x ',
+    '\tjavascript:x',
+    '\njavascript:x',
+    '\r\njavascript:x',
+    'java\nscript:x',
+    'java\tscript:x',
+    'java\rscript:x',
+    '\u0000javascript:x',
+    '\u001fjavascript:x',
+    '\u007fjavascript:x',
+    '\u00a0javascript:x',
+    '\u2028javascript:x',
+    '\ufeffjavascript:x',
+    // Network-path references and backslashes, which the URL parser reads as slashes.
+    '//evil.example/x',
+    '///evil.example',
+    '/\\evil.example',
+    '\\/evil.example',
+    '\\\\evil.example',
+    'a\\b',
+    // A space inside a path is not worth a second rule: it is refused too.
+    '/a b',
+    // Not a string, or a scheme the parser cannot complete.
+    'http:',
+    'https:',
+    'http://',
+    5,
+    0,
+    true,
+    null,
+    undefined,
+    ['javascript:x'],
+    ['/a'],
+    { href: 'javascript:x' },
+    { toString: () => '/a' }
+  ]
+  for (const link of refused) assert.equal(isSafeLink(link), false, JSON.stringify(link))
+})
+
+test('every kept link resolves to http(s), mailto or the site, as the URL parser reads it', () => {
+  const base = new URL('https://site.invalid/base/page')
+  const kept = ['https://example.com/a', 'mailto:a@example.com', '/a/b', 'a/b', './a', '../a', '#frag', '?q=1', '', './a:b', '/a:b', '%6Aavascript:x', 'javascript&colon;x', 'javascript&#58;x']
+  for (const link of kept) {
+    assert.equal(isSafeLink(link), true, link)
+    const url = new URL(link, base)
+    assert.ok((url.protocol === 'https:' && (url.origin === base.origin || link.startsWith('https://'))) || url.protocol === 'mailto:', `${link} resolves to ${url.href}`)
+  }
+})
+
+test('what a browser resolves from a refused link is never an http(s), mailto or same-site URL', () => {
+  // Cross-check of the rule against the URL parser for the bypasses a browser would read as a script scheme.
+  const base = new URL('https://site.invalid/base/page')
+  for (const link of ['java\nscript:x', '\tjavascript:x', ' javascript:x', 'JaVaScRiPt:x', 'data:text/html,x', '/\\evil.example']) {
+    const url = new URL(link, base)
+    assert.equal(isSafeLink(link), false, link)
+    assert.ok(!['http:', 'https:', 'mailto:'].includes(url.protocol) || url.origin !== base.origin, `${link} resolves to ${url.href}`)
+  }
+  // The kept look-alikes resolve on the site.
+  for (const link of ['%6Aavascript:x', 'javascript&colon;x']) assert.equal(new URL(link, base).origin, base.origin, link)
+})
+
+test('a relative link the theme would write as another site is refused, whatever the spelling', () => {
+  // None of these has a scheme or starts with "//", yet the theme writes each as "//evil.example/...".
+  for (const link of themeOffsite) assert.equal(isSafeLink(link), false, link)
+  // The same through every field that reaches an href.
+  for (const link of themeOffsite) {
+    assert.equal('link' in sanitizeFrontmatter({ prev: { text: 'P', link } }).prev, false, link)
+    assert.equal('link' in sanitizeFrontmatter({ next: { text: 'N', link } }).next, false, link)
+    assert.equal('link' in sanitizeFrontmatter({ hero: { actions: [{ text: 'a', link }] } }).hero.actions[0], false, link)
+    assert.equal('link' in sanitizeFrontmatter({ features: [{ title: 'f', link }] }).features[0], false, link)
+  }
+})
+
+test('a relative value the URL parser cannot read is refused', () => {
+  for (const link of ['//', '///', '//[x', '//:', '//%']) assert.equal(isSafeLink(link), false, link)
+})
+
+test('relative links that stay on the site are kept, including look-alikes of the refused ones', () => {
+  for (const link of keptRelative) {
+    assert.equal(isSafeLink(link), true, link)
+    assert.equal(sanitizeFrontmatter({ prev: { link } }).prev.link, link)
+    assert.equal(sanitizeFrontmatter({ hero: { actions: [{ link }] } }).hero.actions[0].link, link)
+    assert.equal(sanitizeFrontmatter({ features: [{ link }] }).features[0].link, link)
+  }
+})
+
+test('a refused relative link is a network path once the dot segments are resolved or the $ pattern is expanded', () => {
+  // Cross-check of the rule against the two operations the theme applies: the URL parser resolves the dot segments, and String.replace expands "$" patterns.
+  const resolved = (link) => new URL(link, 'http://a.invalid/').pathname
+  for (const link of ['/.//evil.example/x', '/%2e//evil.example/x', '/a/..//evil.example/x', 'a/..//evil.example/x', '%2e%2e//evil.example/x', 'x/../..//evil.example/deep']) {
+    assert.ok(resolved(link).startsWith('//'), `${link} resolves to ${resolved(link)}`)
+    assert.equal(isSafeLink(link), false, link)
+  }
+  assert.equal('/$1/evil.example/x'.replace(/(?:(^\.+)\/)?.*$/, `$1${resolved('/$1/evil.example/x')}`), '//evil.example/x')
+  // A double slash inside the path stays on the site. After leading dots the theme keeps the dots, so the written link is still a path.
+  assert.ok(!resolved('/a//b').startsWith('//'))
+  for (const link of ['.//e/x', '..//e/x']) assert.ok(resolved(link).startsWith('//') && isSafeLink(link), link)
+})
+
+test('a previous or next link with a refused value is dropped, its text and a good link stay', () => {
+  const out = sanitizeFrontmatter({
+    prev: { text: 'P', link: 'javascript:prev' },
+    next: { text: 'N', link: 'JaVaScRiPt:next' }
+  })
+  assert.deepEqual(out.prev, { text: 'P' })
+  assert.deepEqual(out.next, { text: 'N' })
+  assert.deepEqual(sanitizeFrontmatter({ prev: { link: ['/a'] } }).prev, {})
+  assert.deepEqual(sanitizeFrontmatter({ next: { text: 'N', link: 'https://example.com/n' } }).next, { text: 'N', link: 'https://example.com/n' })
+  assert.deepEqual(sanitizeFrontmatter({ prev: { text: 'P' } }).prev, { text: 'P' })
+  assert.equal(sanitizeFrontmatter({ prev: false }).prev, false)
+})
+
+test('a hero action link with a refused value is dropped', () => {
+  const actions = [
+    { text: 'a', link: 'javascript:a' },
+    { text: 'b', link: '/ok' },
+    { text: 'c', link: 5 },
+    { text: 'd', link: '//evil.example' },
+    { text: 'e' }
+  ]
+  assert.deepEqual(sanitizeFrontmatter({ hero: { actions } }).hero.actions, [{ text: 'a' }, { text: 'b', link: '/ok' }, { text: 'c' }, { text: 'd' }, { text: 'e' }])
+})
+
+test('hero actions are kept as a list and dropped in any other shape', () => {
+  assert.deepEqual(sanitizeFrontmatter({ hero: { name: 'N', actions: { first: { link: 'javascript:a' } } } }).hero, { name: 'N' })
+  assert.deepEqual(sanitizeFrontmatter({ hero: { actions: 'javascript:a' } }).hero, {})
+  assert.deepEqual(sanitizeFrontmatter({ hero: { actions: ['x', 5, null] } }).hero.actions, ['x', 5, null])
+})
+
+test('a feature link with a refused value is dropped', () => {
+  const features = [{ title: 'a', link: 'javascript:a' }, { title: 'b', link: 'mailto:x@example.com' }, { title: 'c', link: ['/a'] }, { title: 'd', link: 'data:text/html,x' }]
+  assert.deepEqual(sanitizeFrontmatter({ features }).features, [{ title: 'a' }, { title: 'b', link: 'mailto:x@example.com' }, { title: 'c' }, { title: 'd' }])
+})
+
+test('target is limited to the four browsing-context keywords', () => {
+  assert.deepEqual([...allowedTargets].sort(), ['_blank', '_parent', '_self', '_top'])
+  for (const target of allowedTargets) {
+    assert.equal(sanitizeFrontmatter({ hero: { actions: [{ target }] } }).hero.actions[0].target, target)
+    assert.equal(sanitizeFrontmatter({ features: [{ target }] }).features[0].target, target)
+  }
+  for (const target of ['frame', '_SELF', '_Blank', ' _self', '_self ', '_new', '', 0, null, true, ['_self'], { toString: () => '_self' }]) {
+    assert.equal('target' in sanitizeFrontmatter({ hero: { actions: [{ target }] } }).hero.actions[0], false, JSON.stringify(target))
+    assert.equal('target' in sanitizeFrontmatter({ features: [{ target }] }).features[0], false, JSON.stringify(target))
+  }
+})
+
+test('rel is kept only when every token is on the allow-list', () => {
+  assert.equal(allowedRelTokens.has('opener'), false)
+  for (const rel of ['noopener', 'noreferrer', 'noopener nofollow', 'nofollow ugc sponsored', 'me']) {
+    assert.equal(sanitizeFrontmatter({ hero: { actions: [{ rel }] } }).hero.actions[0].rel, rel)
+    assert.equal(sanitizeFrontmatter({ features: [{ rel }] }).features[0].rel, rel)
+  }
+  for (const rel of ['opener', 'noopener opener', 'trustedrel', 'noopener  nofollow', ' noopener', 'noopener ', 'NoOpener', 'noopener\nnofollow', '', 5, null, ['noopener'], { toString: () => 'noopener' }]) {
+    assert.equal('rel' in sanitizeFrontmatter({ hero: { actions: [{ rel }] } }).hero.actions[0], false, JSON.stringify(rel))
+    assert.equal('rel' in sanitizeFrontmatter({ features: [{ rel }] }).features[0], false, JSON.stringify(rel))
+  }
+})
+
+test('sanitising a link leaves its input alone', () => {
+  const input = { prev: { text: 'P', link: 'javascript:x' }, hero: { actions: [{ link: 'javascript:y', target: 'frame' }] }, features: [{ link: 'javascript:z' }] }
+  const copy = JSON.parse(JSON.stringify(input))
+  sanitizeFrontmatter(input)
+  assert.deepEqual(input, copy)
 })
