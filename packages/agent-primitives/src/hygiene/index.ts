@@ -1,6 +1,11 @@
 import { UsageError } from "../envelope.js";
 import { findGitRoot } from "../probe/containment.js";
-import { revExists, runGit } from "../drift/git.js";
+import {
+  isShallowRepository,
+  mergeBase,
+  resolveCommit,
+  runGit,
+} from "../drift/git.js";
 import { withoutPathspecEnv } from "../git-env.js";
 
 /** Default for `maxDeletePercent`: a commit that removes more than this
@@ -41,6 +46,15 @@ export interface HygieneResult {
   status: "ok" | "fail";
   base: string;
   head: string;
+  /** The commit `base` resolved to. */
+  baseSha: string;
+  /** The commit `head` resolved to; `null` with `staged` (the index is
+   * not a commit). */
+  headSha: string | null;
+  /** The commit the comparison starts from: the merge-base of `baseSha`
+   * and the head commit (`HEAD` with `staged`), or `baseSha` when there
+   * is none (a warning says why). */
+  mergeBase: string;
   maxDeletePercent: number;
   extendOnly: string[];
   findings: HygieneFinding[];
@@ -201,8 +215,11 @@ function lineCount(content: string): number {
 /**
  * Mechanical commit-hygiene check for a git range (or the index). Reports
  * backup files the change adds, extend-only files the change mostly
- * deletes, and test files whose test-case count went down. Throws
- * `UsageError` outside a git work tree or for an unresolvable revision.
+ * deletes, and test files whose test-case count went down. The comparison
+ * starts at the merge-base of `base` and the head (`HEAD` with `staged`),
+ * so a base that moved after the branch point does not count its own later
+ * changes. Throws `UsageError` outside a git work tree or for an
+ * unresolvable revision.
  */
 export function hygiene(options: HygieneOptions): HygieneResult {
   const warnings: string[] = [];
@@ -218,19 +235,56 @@ export function hygiene(options: HygieneOptions): HygieneResult {
       `hygiene: ${options.cwd} is not inside a git work tree`,
     );
   }
-  if (!revExists(gitRoot, options.base)) {
+  const baseSha = resolveCommit(gitRoot, options.base);
+  if (baseSha === undefined) {
     throw new UsageError(`hygiene: --base revision not found: ${options.base}`);
   }
   const staged = options.staged === true;
   const head = staged ? "(index)" : (options.head ?? "HEAD");
-  if (!staged && !revExists(gitRoot, head)) {
-    throw new UsageError(`hygiene: --head revision not found: ${head}`);
+  let headSha: string | null = null;
+  if (!staged) {
+    const resolved = resolveCommit(gitRoot, head);
+    if (resolved === undefined) {
+      throw new UsageError(`hygiene: --head revision not found: ${head}`);
+    }
+    headSha = resolved;
+  }
+
+  // Both sides are resolved to commits once and the comparison starts at
+  // their merge-base, so a symbolic base that moved after the branch point
+  // (a remote-tracking ref, a local default branch) gives the same result
+  // as the SHA it resolves to. Comparing against the base directly would
+  // count every change the base side made since the branch point, for
+  // example test cases added there, against the head side. With `staged`
+  // the head commit for the merge-base is `HEAD`.
+  const headCommit = staged ? resolveCommit(gitRoot, "HEAD") : headSha;
+  let diffBase = baseSha;
+  if (headCommit === undefined || headCommit === null) {
+    warnings.push(
+      `HEAD does not resolve to a commit: comparing the index with ${baseSha} directly`,
+    );
+  } else {
+    const mb = mergeBase(gitRoot, baseSha, headCommit);
+    if (mb.sha !== undefined) {
+      diffBase = mb.sha;
+    } else {
+      const cause = isShallowRepository(gitRoot)
+        ? "shallow clone: the history needed to find a common ancestor may be missing, fetch more history"
+        : mb.reason === "no-common-ancestor"
+          ? "no common ancestor"
+          : `git merge-base failed: ${mb.detail}`;
+      warnings.push(
+        `no merge-base between ${baseSha} and ${headCommit} (${cause}): diffing the two trees directly`,
+      );
+    }
   }
   const extendOnly = [
     ...new Set((options.extendOnly ?? []).map(normalizePath)),
   ];
 
-  const rangeArgs = staged ? ["--cached", options.base] : [options.base, head];
+  const rangeArgs = staged
+    ? ["--cached", diffBase]
+    : [diffBase, headSha ?? head];
   const names = runGit(gitRoot, [
     "diff",
     "--no-color",
@@ -247,11 +301,14 @@ export function hygiene(options: HygieneOptions): HygieneResult {
   const changed = parseNameStatus(names.stdout);
 
   const showHead = (p: string): string | undefined => {
-    const r = runGit(gitRoot, ["show", staged ? `:${p}` : `${head}:${p}`]);
+    const r = runGit(gitRoot, [
+      "show",
+      staged ? `:${p}` : `${headSha ?? head}:${p}`,
+    ]);
     return r.error === undefined && r.status === 0 ? r.stdout : undefined;
   };
   const showBase = (p: string): string | undefined => {
-    const r = runGit(gitRoot, ["show", `${options.base}:${p}`]);
+    const r = runGit(gitRoot, ["show", `${diffBase}:${p}`]);
     return r.error === undefined && r.status === 0 ? r.stdout : undefined;
   };
 
@@ -367,6 +424,9 @@ export function hygiene(options: HygieneOptions): HygieneResult {
     status: findings.length > 0 ? "fail" : "ok",
     base: options.base,
     head,
+    baseSha,
+    headSha,
+    mergeBase: diffBase,
     maxDeletePercent: maxPct,
     extendOnly,
     findings,

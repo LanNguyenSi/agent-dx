@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `hygiene`: `--base` and `--head` are resolved to commit SHAs once and
+  the comparison starts at their merge-base (with `--staged`, the
+  merge-base of `--base` and `HEAD`), so a symbolic base that moved
+  after the branch point no longer reports the base side's later
+  changes, such as test cases it added, as dropped on the head side.
+  Without a merge-base the two trees are compared directly with a
+  warning, as in `drift`. The envelope gains `base_sha`, `head_sha` and
+  `merge_base` (task 3265952e).
+
 ## [0.13.0] - 2026-10-13
 
 - `drift`: `--base` and `--head` are resolved to commit SHAs once and

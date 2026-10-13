@@ -664,3 +664,114 @@ describe("hygiene CLI", () => {
     expect(JSON.parse(run.stdout).findings[0].kind).toBe("extend_only_rewrite");
   });
 });
+
+describe("hygiene from the merge-base", () => {
+  /** A repo where `feat` branched off, then the default branch gained two
+   * test cases in test/a.test.ts (3 -> 5). `feat` changes only src/a.ts
+   * and stays checked out. */
+  function movedBaseRepo(): {
+    repo: string;
+    main: string;
+    forkSha: string;
+    mainSha: string;
+  } {
+    const repo = initRepo();
+    const main = git(repo, ["rev-parse", "--abbrev-ref", "HEAD"]).trim();
+    const forkSha = git(repo, ["rev-parse", "HEAD"]).trim();
+    git(repo, ["checkout", "-q", "-b", "feat"]);
+    write(repo, "src/a.ts", "export const a = 2;\n");
+    commitAll(repo, "feat change");
+    git(repo, ["checkout", "-q", main]);
+    write(
+      repo,
+      "test/a.test.ts",
+      'it("one", () => {});\nit("two", () => {});\ntest("three", () => {});\nit("four", () => {});\nit("five", () => {});\n',
+    );
+    commitAll(repo, "main adds two cases");
+    const mainSha = git(repo, ["rev-parse", "HEAD"]).trim();
+    git(repo, ["checkout", "-q", "feat"]);
+    return { repo, main, forkSha, mainSha };
+  }
+
+  it("does not report test cases the moved base added after the branch point", () => {
+    const { repo, main, forkSha, mainSha } = movedBaseRepo();
+    const r = hygiene({ cwd: repo, base: main });
+    expect(r.findings).toEqual([]);
+    expect(r.status).toBe("ok");
+    expect(r.baseSha).toBe(mainSha);
+    expect(r.mergeBase).toBe(forkSha);
+    expect(r.counts.files).toBe(1);
+  });
+
+  it("gives the same result for the base name and its SHA", () => {
+    const { repo, main, mainSha } = movedBaseRepo();
+    const byName = hygiene({ cwd: repo, base: main });
+    const bySha = hygiene({ cwd: repo, base: mainSha });
+    expect(bySha.findings).toEqual(byName.findings);
+    expect(bySha.mergeBase).toBe(byName.mergeBase);
+    expect(bySha.counts).toEqual(byName.counts);
+  });
+
+  it("uses the merge-base with HEAD for --staged", () => {
+    const { repo, main, forkSha } = movedBaseRepo();
+    write(repo, "src/b.ts", "export const b = 1;\n");
+    git(repo, ["add", "src/b.ts"]);
+    const r = hygiene({ cwd: repo, base: main, staged: true });
+    expect(r.findings).toEqual([]);
+    expect(r.mergeBase).toBe(forkSha);
+    expect(r.headSha).toBeNull();
+  });
+
+  it("still reports a drop the head side made", () => {
+    const { repo, main } = movedBaseRepo();
+    write(repo, "test/a.test.ts", 'it("one", () => {});\n');
+    commitAll(repo, "feat drops cases");
+    const r = hygiene({ cwd: repo, base: main });
+    expect(r.findings).toEqual([
+      expect.objectContaining({
+        kind: "test_cases_dropped",
+        path: "test/a.test.ts",
+        baseCases: 3,
+        headCases: 1,
+      }),
+    ]);
+  });
+
+  it("warns and compares the trees directly when there is no merge-base", () => {
+    const { repo, main, mainSha } = movedBaseRepo();
+    git(repo, ["checkout", "-q", "--orphan", "other"]);
+    git(repo, ["rm", "-rq", "--cached", "."]);
+    write(repo, "test/a.test.ts", 'it("one", () => {});\n');
+    git(repo, ["add", "test/a.test.ts"]);
+    git(repo, ["commit", "-q", "-m", "orphan"]);
+    const r = hygiene({ cwd: repo, base: main });
+    expect(r.mergeBase).toBe(mainSha);
+    expect(r.warnings).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("no merge-base between"),
+      ]),
+    );
+    expect(r.warnings.join("\n")).toContain("no common ancestor");
+    expect(r.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "test_cases_dropped", baseCases: 5 }),
+      ]),
+    );
+  });
+
+  it("names the resolved commits in the CLI envelope", async () => {
+    const { repo, main, forkSha, mainSha } = movedBaseRepo();
+    const res = await spawnCli(["-C", repo, "hygiene", "--base", main]);
+    expect(res.code).toBe(0);
+    const out = JSON.parse(res.stdout) as {
+      base: string;
+      base_sha: string;
+      head_sha: string;
+      merge_base: string;
+    };
+    expect(out.base).toBe(main);
+    expect(out.base_sha).toBe(mainSha);
+    expect(out.merge_base).toBe(forkSha);
+    expect(out.head_sha).toBe(git(repo, ["rev-parse", "HEAD"]).trim());
+  });
+});

@@ -2082,6 +2082,9 @@ program
       extra: {
         base: result.base,
         head: result.head,
+        base_sha: result.baseSha,
+        head_sha: result.headSha,
+        merge_base: result.mergeBase,
         max_delete_percent: result.maxDeletePercent,
         extend_only: result.extendOnly,
         findings: result.findings,
