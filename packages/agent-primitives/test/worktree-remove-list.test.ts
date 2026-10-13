@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ignoredSymlinks, parseWorktreeList } from "../src/worktree/index.js";
+import { resolveRemoteBase } from "../src/worktree/git.js";
 import { FIXED_BIN_DIR, spawnCli } from "./helpers/spawn-cli.js";
 
 /**
@@ -1569,6 +1570,49 @@ describe("worktree list --base resolution", () => {
     // against the short spelling would give 0 and 0 here.
     expect(sec).toMatchObject({ ahead: 2, behind: 0 });
     expect(sha).toHaveLength(40);
+  });
+});
+
+describe("resolveRemoteBase: defence-in-depth checks", () => {
+  it("the control: origin/main resolves to its full remote-tracking ref", () => {
+    const f = makeFixture();
+    expect(resolveRemoteBase(f.repo, "origin/main")).toEqual({
+      ok: true,
+      base: {
+        ref: "refs/remotes/origin/main",
+        remote: "origin",
+        branch: "main",
+      },
+    });
+  });
+
+  it("refuses a value starting with a dash even when a remote of that name exists", () => {
+    const f = makeFixture();
+    git(f.repo, ["config", "remote.-origin.url", f.origin]);
+    git(f.repo, ["update-ref", "refs/remotes/-origin/x", f.mainSha]);
+    // The ref itself is well-formed and exists, so only the leading-dash
+    // check stands between this value and an ok result.
+    expect(
+      git(f.repo, ["show-ref", "--verify", "refs/remotes/-origin/x"]),
+    ).toContain(f.mainSha);
+    expect(resolveRemoteBase(f.repo, "-origin/x")).toEqual({
+      ok: false,
+      reason: "base_not_remote_branch",
+    });
+  });
+
+  it("refuses a remote-tracking ref that points at a tree instead of a commit", () => {
+    const f = makeFixture();
+    const tree = git(f.repo, ["rev-parse", "HEAD^{tree}"]).trim();
+    git(f.repo, ["update-ref", "refs/remotes/origin/tree", tree]);
+    // show-ref accepts it, so only the commit check refuses it.
+    expect(
+      git(f.repo, ["show-ref", "--verify", "refs/remotes/origin/tree"]),
+    ).toContain(tree);
+    expect(resolveRemoteBase(f.repo, "origin/tree")).toEqual({
+      ok: false,
+      reason: "base_not_found",
+    });
   });
 });
 
