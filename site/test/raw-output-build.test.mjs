@@ -10,6 +10,7 @@ import path from 'node:path'
 import vm from 'node:vm'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'vitepress'
+import { keptRelative, themeOffsite } from './link-cases.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'hardening')
 const LS = ' '
@@ -343,14 +344,33 @@ const section = (region, className) => {
 const hrefsOf = (region) => [...region.matchAll(/\shref="([^"]*)"/g)].map((m) => m[1])
 const targetsOf = (region) => [...region.matchAll(/\starget="([^"]*)"/g)].map((m) => m[1])
 const relsOf = (region) => [...region.matchAll(/\srel="([^"]*)"/g)].map((m) => m[1])
+// Every href of a rendered region as the browser would read it: a scheme must
+// be http(s) or mailto, and a link without one must not start with "//" and
+// must resolve to the origin of the page, whatever the site base.
+const pageUrl = new URL('https://site.invalid/agent-dx/dir/page')
+const hasScheme = (href) => /^[a-z][a-z0-9+.-]*:/i.test(href)
+const assertHrefsOnSite = (region) => {
+  for (const raw of hrefsOf(region)) {
+    const href = raw.replaceAll('&amp;', '&')
+    const url = new URL(href, pageUrl)
+    assert.ok(['https:', 'http:', 'mailto:'].includes(url.protocol), `${href} resolves to ${url.protocol}`)
+    if (hasScheme(href)) continue
+    assert.ok(!href.startsWith('//') && !href.startsWith('\\'), `${href} is a network path`)
+    assert.equal(url.origin, pageUrl.origin, `${href} resolves to ${url.href}`)
+  }
+}
 // What is left of a link that carried a script scheme: nothing reads as one.
 const assertNoScriptHref = (page, markers) => {
   assertNoRaw(page, markers)
-  for (const href of hrefsOf(app(page))) {
-    const url = new URL(href.replaceAll('&amp;', '&'), 'https://site.invalid/base/page')
-    assert.ok(['https:', 'http:', 'mailto:'].includes(url.protocol), `${href} resolves to ${url.protocol}`)
-  }
+  assertHrefsOnSite(app(page))
 }
+
+test('the href check fails a protocol-relative or off-site link and passes the site and explicit schemes', () => {
+  for (const href of ['//evil.example/x', '/\\evil.example', 'javascript:x', 'data:text/html,x']) {
+    assert.throws(() => assertHrefsOnSite(`<a href="${href}">x</a>`), assert.AssertionError, href)
+  }
+  assertHrefsOnSite('<a href="/agent-dx/a">x</a> <a href="../b?c=1&amp;d=2">x</a> <a href="https://example.com/">x</a> <a href="mailto:a@example.com">x</a> <a href="#f">x</a>')
+})
 
 test('a previous or next link with a script scheme is dropped, the text stays', () => {
   const page = pages['link-nav-bad']
@@ -416,6 +436,60 @@ test('a feature link with a script scheme, in every spelling a browser might rea
   assert.deepEqual(features[1], { title: 'Kept', link: 'https://example.com/kept', target: '_blank', rel: 'noreferrer' })
   assert.deepEqual(features[2], { title: 'Odd rel', link: '/nav/one' })
   for (const i of [3, 4, 5, 6, 7, 8, 9, 12, 13, 14, 15, 16]) assert.equal('link' in features[i], false, JSON.stringify(features[i]))
+})
+
+// A relative link is not written as typed: the theme parses it and writes the
+// parsed path back, so a link without a scheme can come out as "//host/...".
+// Each field is built into a site with the real base and both URL styles, with
+// the values that must be refused and the look-alikes that must stay. The site
+// is written next to the fixtures, so that it resolves the same packages.
+test('no link field writes a network path, and the look-alikes that stay on the site are kept', async () => {
+  const quoted = (value) => JSON.stringify(value)
+  const front = (lines) => `---\n${lines.join('\n')}\n---\n\n# Page\n`
+  for (const cleanUrls of [true, false]) {
+    const dir = fs.mkdtempSync(path.join(root, '..', `offsite-links-${cleanUrls}-`))
+    const outDir = path.join(work, `out-offsite-${cleanUrls}`)
+    fs.mkdirSync(path.join(dir, '.vitepress'), { recursive: true })
+    try {
+      fs.writeFileSync(
+        path.join(dir, '.vitepress', 'config.mjs'),
+        [
+          "import { markdownBase } from '../../../../.vitepress/site-helpers.mjs'",
+          "import { transformPageData } from '../../../../.vitepress/raw-output.mjs'",
+          `export default { title: 'offsite links', base: '/agent-dx/', cleanUrls: ${cleanUrls}, markdown: markdownBase, transformPageData, lastUpdated: false, cacheDir: ${JSON.stringify(path.join(work, `cache-offsite-${cleanUrls}`))} }`,
+          ''
+        ].join('\n')
+      )
+      const all = [...themeOffsite, ...keptRelative]
+      all.forEach((link, i) => {
+        fs.writeFileSync(path.join(dir, `nav-${i}.md`), front(['prev:', '  text: Before', `  link: ${quoted(link)}`, 'next:', '  text: After', `  link: ${quoted(link)}`]))
+      })
+      fs.writeFileSync(
+        path.join(dir, 'index.md'),
+        `---\nlayout: home\nhero:\n  name: Links\n  actions:\n${all.map((l, i) => `    - text: A${i}\n      link: ${quoted(l)}`).join('\n')}\nfeatures:\n${all.map((l, i) => `  - title: F${i}\n    link: ${quoted(l)}`).join('\n')}\n---\n`
+      )
+      await build(dir, { outDir })
+      const read = (name) => fs.readFileSync(path.join(outDir, `${name}.html`), 'utf8')
+
+      const home = read('index')
+      assertNoRaw(home, ['evil.example'])
+      assertHrefsOnSite(app(home))
+      // Only the links that stay are written: one button and one card each.
+      const hero = app(home).slice(app(home).indexOf('class="actions"'), app(home).indexOf('class="VPFeatures'))
+      assert.equal(hrefsOf(hero).length, keptRelative.length, `hero actions, cleanUrls ${cleanUrls}`)
+      assert.equal(hrefsOf(section(app(home), 'VPFeatures')).length, keptRelative.length, `features, cleanUrls ${cleanUrls}`)
+
+      all.forEach((link, i) => {
+        const page = read(`nav-${i}`)
+        assertNoRaw(page, ['evil.example'])
+        const footer = section(app(page), 'VPDocFooter')
+        assertHrefsOnSite(footer)
+        assert.equal(hrefsOf(footer).length, i < themeOffsite.length ? 0 : 2, `${link}, cleanUrls ${cleanUrls}`)
+      })
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  }
 })
 
 test('the page data the client hydrates from holds the same escaped frontmatter', () => {

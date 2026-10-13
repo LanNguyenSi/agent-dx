@@ -7,6 +7,7 @@ import assert from 'node:assert/strict'
 import { createMarkdownRenderer, resolveConfig } from 'vitepress'
 import { allowedAttributes, allowedDirs, allowedLayouts, allowedRelTokens, allowedTargets, defuseMustache, escapeDescriptionMeta, escapeText, isSafeLink, safeId, safeImage, sanitizeFrontmatter, transformPageData } from '../.vitepress/raw-output.mjs'
 import { escapeText as siteEscapeText, markdownBase } from '../.vitepress/site-helpers.mjs'
+import { keptRelative, themeOffsite } from './link-cases.mjs'
 
 let md
 let cfg
@@ -540,6 +541,40 @@ test('what a browser resolves from a refused link is never an http(s), mailto or
   }
   // The kept look-alikes resolve on the site.
   for (const link of ['%6Aavascript:x', 'javascript&colon;x']) assert.equal(new URL(link, base).origin, base.origin, link)
+})
+
+test('a relative link the theme would write as another site is refused, whatever the spelling', () => {
+  // None of these has a scheme or starts with "//", yet the theme writes each as "//evil.example/...".
+  for (const link of themeOffsite) assert.equal(isSafeLink(link), false, link)
+  // The same through every field that reaches an href.
+  for (const link of themeOffsite) {
+    assert.equal('link' in sanitizeFrontmatter({ prev: { text: 'P', link } }).prev, false, link)
+    assert.equal('link' in sanitizeFrontmatter({ next: { text: 'N', link } }).next, false, link)
+    assert.equal('link' in sanitizeFrontmatter({ hero: { actions: [{ text: 'a', link }] } }).hero.actions[0], false, link)
+    assert.equal('link' in sanitizeFrontmatter({ features: [{ title: 'f', link }] }).features[0], false, link)
+  }
+})
+
+test('relative links that stay on the site are kept, including look-alikes of the refused ones', () => {
+  for (const link of keptRelative) {
+    assert.equal(isSafeLink(link), true, link)
+    assert.equal(sanitizeFrontmatter({ prev: { link } }).prev.link, link)
+    assert.equal(sanitizeFrontmatter({ hero: { actions: [{ link }] } }).hero.actions[0].link, link)
+    assert.equal(sanitizeFrontmatter({ features: [{ link }] }).features[0].link, link)
+  }
+})
+
+test('a refused relative link is a network path once the dot segments are resolved or the $ pattern is expanded', () => {
+  // Cross-check of the rule against the two operations the theme applies: the URL parser resolves the dot segments, and String.replace expands "$" patterns.
+  const resolved = (link) => new URL(link, 'http://a.invalid/').pathname
+  for (const link of ['/.//evil.example/x', '/%2e//evil.example/x', '/a/..//evil.example/x', 'a/..//evil.example/x', '%2e%2e//evil.example/x', 'x/../..//evil.example/deep']) {
+    assert.ok(resolved(link).startsWith('//'), `${link} resolves to ${resolved(link)}`)
+    assert.equal(isSafeLink(link), false, link)
+  }
+  assert.equal('/$1/evil.example/x'.replace(/(?:(^\.+)\/)?.*$/, `$1${resolved('/$1/evil.example/x')}`), '//evil.example/x')
+  // A double slash inside the path stays on the site. After leading dots the theme keeps the dots, so the written link is still a path.
+  assert.ok(!resolved('/a//b').startsWith('//'))
+  for (const link of ['.//e/x', '..//e/x']) assert.ok(resolved(link).startsWith('//') && isSafeLink(link), link)
 })
 
 test('a previous or next link with a refused value is dropped, its text and a good link stay', () => {

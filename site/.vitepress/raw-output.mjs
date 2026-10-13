@@ -35,6 +35,8 @@
 // an attribute, a tag name) are handled by sanitizeFrontmatter, passed as
 // transformPageData.
 
+import { EXTERNAL_URL_RE } from 'vitepress/dist/client/shared.js'
+
 // Attributes a "{...}" block may set. Event handlers and everything else are
 // dropped by markdown-it-attrs. The shipped playbooks use none; "{#id}" and
 // "{.class}" are kept for future headings and blocks. VitePress reads the line
@@ -106,7 +108,8 @@ export function escapeDescriptionMeta(html, _file, { description }) {
 // an href. VitePress returns a URL it does not know unchanged, so a
 // `javascript:` link would run in the page origin on click (an explicit
 // `target: _self` makes that reliable). A link is kept only when it is
-// http(s), mailto or relative (see isSafeLink); otherwise the field is
+// http(s), mailto or relative, and a relative one only when the href the theme
+// writes for it stays on the site (see isSafeLink); otherwise the field is
 // dropped and the button or card renders without a link (a footer link falls
 // back to the one the sidebar gives). `target` on a hero action or a feature
 // is kept only when it is one of the four browsing-context keywords, and `rel`
@@ -140,13 +143,21 @@ const pageLink = (value) => (isRecord(value) ? withSafeLink(withText(value, ['te
 //   - absolute: the scheme (letters, digits, "+", "-", ".", after a letter) is
 //     http, https or mailto, read case-insensitively. Every other scheme is
 //     refused (javascript, data, vbscript, blob, file, tel, ...).
-//   - relative: no scheme, not a network-path reference, so it resolves on the
-//     site: a path (`a/b`, `./a`, `../a`), a root-relative path (`/a`), `#frag`,
-//     `?query` and the empty string. A first segment with a colon needs a
-//     leading `./` (`a:b` is a scheme, `./a:b` a path).
+//   - relative: no scheme, and the href the theme writes for it (see
+//     themeHrefs) is not a network-path reference either, so it resolves on
+//     the site: a path (`a/b`, `./a`, `../a`), a root-relative path (`/a`),
+//     `#frag`, `?query` and the empty string. A first segment with a colon
+//     needs a leading `./` (`a:b` is a scheme, `./a:b` a path).
 //   - refused as well: a scheme-relative `//host` and any backslash. They are
 //     not a path on this site, and the URL parser reads `\` as `/`, so `/\host`
 //     is the same host change as `//host`. Write the scheme to link elsewhere.
+//   - refused as well: a value the theme turns into `//host`. The theme does
+//     not write a relative link as typed: it parses the value and writes the
+//     parsed path back, so dot segments before a double slash
+//     (`/.//host/x`, `/a/..//host/x`) leave a leading `//`, and a `$` pattern
+//     in the path (`/$1/host/x`) is expanded by the replacement it goes
+//     through. Both reach the page as an off-site link without the external
+//     markers.
 //   - refused as well: any control character, space or DEL anywhere. The URL
 //     parser drops leading and trailing ones and removes tabs and newlines
 //     inside, so ` javascript:x`, `\tjavascript:x` and `java\nscript:x` all
@@ -158,6 +169,34 @@ const pageLink = (value) => (isRecord(value) ? withSafeLink(withText(value, ['te
 const linkSchemes = new Set(['http:', 'https:', 'mailto:'])
 const hiddenChars = /[\u0000-\u0020\u007f-\u009f\s]/
 const leadingScheme = /^[A-Za-z][A-Za-z0-9+.-]*:/
+
+// The href the default theme writes for a link without a scheme, before the
+// site base is added: normalizeLink in theme-default/support/utils.js. It
+// parses the value against a dummy origin and, unless the path ends in "/" or
+// ".html", writes pathname, search and hash back over the value with
+// String.replace (keeping a leading run of dots), which is where dot segments
+// are resolved and where a "$" in the path is read as a replacement pattern.
+// The theme then adds the base unless the result matches EXTERNAL_URL_RE
+// (withBase in client/app/utils.js), so a result that does is written as typed
+// and the browser reads it as another site. The extension rule (treatAsHtml)
+// and the cleanUrls setting only change the end of the result, so both are
+// tried and the extension rule is not consulted: a link the theme would leave
+// as typed is checked as rewritten too, which can refuse an on-site path to a
+// file with a known extension and never keeps an off-site one. The result of a
+// root-relative link gets the site base, which starts with "/" and never
+// makes it external.
+//
+// This copies the theme's computation; read both functions again after a
+// VitePress upgrade (docs/repo-layout.md names the coupling).
+const themeOrigin = 'http://a.com'
+function themeHrefs(value) {
+  const { pathname, search, hash } = new URL(value, themeOrigin)
+  return [false, true].map((cleanUrls) =>
+    value.replace(/(?:(^\.+)\/)?.*$/, `$1${pathname.replace(/(\.md)?$/, cleanUrls ? '' : '.html')}${search}${hash}`)
+  )
+}
+const staysOnSite = (href) => !EXTERNAL_URL_RE.test(href) && !leadingScheme.test(href) && !href.includes('\\')
+
 export function isSafeLink(value) {
   if (typeof value !== 'string' || hiddenChars.test(value) || value.includes('\\')) return false
   if (leadingScheme.test(value)) {
@@ -167,13 +206,18 @@ export function isSafeLink(value) {
       return false
     }
   }
-  return !value.startsWith('//')
+  try {
+    return [value, ...themeHrefs(value)].every(staysOnSite)
+  } catch {
+    return false
+  }
 }
 
 export const allowedTargets = new Set(['_blank', '_self', '_parent', '_top'])
-// Tokens of a `rel` that describe a link and weaken nothing. `opener` is left
-// out on purpose: the theme gives an external link `noreferrer` when no rel is
-// set, and an author-set rel replaces it.
+// Tokens of a `rel` that describe a link and weaken nothing. An author-set rel
+// replaces the theme's default `noreferrer` for an external link, so the list
+// the author writes is the whole list. `opener` is left out so that a link to a
+// new window never gives that window access to this page.
 export const allowedRelTokens = new Set([
   'noopener',
   'noreferrer',
