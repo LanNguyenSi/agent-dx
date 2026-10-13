@@ -31,7 +31,8 @@
 // Attribute names from markdown-it-attrs are limited by markdownBase.attrs
 // (see allowedAttributes below), not here. The description of a page is
 // escaped by escapeDescriptionMeta, which the site config passes to VitePress
-// as transformHtml.
+// as transformHtml. The frontmatter fields the theme writes as HTML are handled
+// by sanitizeFrontmatter, passed as transformPageData.
 
 // Attributes a "{...}" block may set. Event handlers and everything else are
 // dropped by markdown-it-attrs. The shipped playbooks use none; "{#id}" and
@@ -54,7 +55,9 @@ export const safeId = /^[A-Za-z0-9_-]+$/
 
 // transformHtml for the site config. VitePress writes the description of a
 // page into <meta name="description" content="..."> as typed; the same text in
-// the page data stays plain, since the client sets it through the DOM.
+// the page data stays plain, since the client sets it through the DOM. Every
+// copy of the tag is replaced, not the first one: a copy written earlier by
+// some other field must not use up the replacement and leave the real tag raw.
 export function escapeDescriptionMeta(html, _file, { description }) {
   if (!description) return html
   // Frontmatter YAML can give a number, a boolean or a list; VitePress writes
@@ -62,7 +65,49 @@ export function escapeDescriptionMeta(html, _file, { description }) {
   const text = String(description)
   const raw = `<meta name="description" content="${text}">`
   const escaped = `<meta name="description" content="${escapeText(text)}">`
-  return html.replace(raw, () => escaped)
+  return html.replaceAll(raw, () => escaped)
+}
+
+// Frontmatter fields the default theme writes as HTML (v-html), and what
+// transformPageData does to each. `head` is VitePress's documented raw
+// injection and is left alone on purpose.
+//
+//   - dir: written unescaped into <html dir="...">. Only ltr, rtl and auto are
+//     kept; any other value is dropped, so the page falls back to the site's
+//     direction.
+//   - prev and next: the footer link text, as a string or as { text, link }.
+//   - hero name, text and tagline; features title, details and icon (a string
+//     icon; an icon given as an image object is not HTML).
+//
+// For the text fields the value is HTML-escaped, so it shows as written (an
+// entity reference stays one). A number, a boolean or an empty value cannot
+// hold markup and is kept as it is, since `prev: false` hides a link.
+export const allowedDirs = new Set(['ltr', 'rtl', 'auto'])
+
+const asText = (value) =>
+  value == null || typeof value === 'number' || typeof value === 'boolean' ? value : escapeText(String(value))
+const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+const withText = (value, keys) =>
+  isRecord(value) ? { ...value, ...Object.fromEntries(keys.filter((k) => k in value).map((k) => [k, asText(value[k])])) } : value
+const pageLink = (value) => (isRecord(value) ? withText(value, ['text']) : asText(value))
+
+export function sanitizeFrontmatter(frontmatter) {
+  const safe = { ...frontmatter }
+  if (!allowedDirs.has(safe.dir)) delete safe.dir
+  for (const key of ['prev', 'next']) if (key in safe) safe[key] = pageLink(safe[key])
+  if ('hero' in safe) safe.hero = withText(safe.hero, ['name', 'text', 'tagline'])
+  if (Array.isArray(safe.features)) {
+    safe.features = safe.features.map((feature) => {
+      const item = withText(feature, ['title', 'details'])
+      return isRecord(item) && 'icon' in item && !isRecord(item.icon) ? { ...item, icon: asText(item.icon) } : item
+    })
+  }
+  return safe
+}
+
+// transformPageData for the site config.
+export function transformPageData(pageData) {
+  return { frontmatter: sanitizeFrontmatter(pageData.frontmatter) }
 }
 
 export function rawOutput(md) {

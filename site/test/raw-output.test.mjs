@@ -5,7 +5,7 @@
 import test, { before } from 'node:test'
 import assert from 'node:assert/strict'
 import { createMarkdownRenderer, resolveConfig } from 'vitepress'
-import { allowedAttributes, defuseMustache, escapeDescriptionMeta, escapeText, safeId } from '../.vitepress/raw-output.mjs'
+import { allowedAttributes, allowedDirs, defuseMustache, escapeDescriptionMeta, escapeText, safeId, sanitizeFrontmatter, transformPageData } from '../.vitepress/raw-output.mjs'
 import { escapeText as siteEscapeText, markdownBase } from '../.vitepress/site-helpers.mjs'
 
 let md
@@ -268,4 +268,75 @@ test('a description that YAML reads as a number, a boolean or a list is escaped 
 test('a description with replacement patterns is written as is', () => {
   const description = '$& $1 $$ <'
   assert.equal(escapeDescriptionMeta(meta(description), 'index.html', { description }), meta('$&amp; $1 $$ &lt;'))
+})
+
+test('a copy of the description tag written earlier does not use up the replacement', () => {
+  const description = 'a <b>'
+  const tag = `<meta name="description" content="${description}">`
+  const html = `<html dir="x">${tag}<head><title>t</title>${tag}</head>`
+  const out = escapeDescriptionMeta(html, 'index.html', { description })
+  assert.equal(out.split(tag).length, 1, out)
+  assert.equal(out.split('<meta name="description" content="a &lt;b&gt;">').length, 3, out)
+})
+
+// Frontmatter the default theme writes as HTML
+
+test('the site config passes the frontmatter sanitiser to VitePress', () => {
+  const out = cfg.userConfig.transformPageData({ frontmatter: { dir: 'x', hero: { name: '<b>' } } })
+  assert.deepEqual(out, { frontmatter: { hero: { name: '&lt;b&gt;' } } })
+})
+
+test('dir is limited to ltr, rtl and auto', () => {
+  assert.deepEqual([...allowedDirs].sort(), ['auto', 'ltr', 'rtl'])
+  for (const dir of ['ltr', 'rtl', 'auto']) assert.equal(sanitizeFrontmatter({ dir }).dir, dir)
+  for (const dir of ['RTL', ' rtl', 'rtl ', '"><img src=x onerror=1>', '', 0, null, true, ['rtl'], { toString: () => 'rtl' }]) {
+    assert.equal('dir' in sanitizeFrontmatter({ dir }), false, JSON.stringify(dir))
+  }
+})
+
+test('previous and next text is escaped in every form, the link is kept', () => {
+  const out = sanitizeFrontmatter({
+    prev: '<img src=x onerror=1> & "q"',
+    next: { text: '<b>x</b>', link: '/a?b=<c>' }
+  })
+  assert.equal(out.prev, '&lt;img src=x onerror=1&gt; &amp; &quot;q&quot;')
+  assert.deepEqual(out.next, { text: '&lt;b&gt;x&lt;/b&gt;', link: '/a?b=<c>' })
+  assert.deepEqual(sanitizeFrontmatter({ prev: { link: '/a' } }).prev, { link: '/a' })
+  assert.equal(sanitizeFrontmatter({ next: ['<b>'] }).next, '&lt;b&gt;')
+  assert.equal(sanitizeFrontmatter({ prev: { text: ['<b>x</b>'] } }).prev.text, '&lt;b&gt;x&lt;/b&gt;')
+})
+
+test('hero and feature text is escaped, an entity written in the source stays one', () => {
+  const out = sanitizeFrontmatter({
+    hero: { name: '<b>n</b>', text: 'R&D &copy;', tagline: '<i>t</i>', actions: [{ text: '<b>a</b>', link: '/x' }] },
+    features: [{ title: '<b>t</b>', details: '<i>d</i>', icon: '<u>i</u>', link: '/y' }]
+  })
+  assert.deepEqual(out.hero, { name: '&lt;b&gt;n&lt;/b&gt;', text: 'R&amp;D &copy;', tagline: '&lt;i&gt;t&lt;/i&gt;', actions: [{ text: '<b>a</b>', link: '/x' }] })
+  assert.deepEqual(out.features, [{ title: '&lt;b&gt;t&lt;/b&gt;', details: '&lt;i&gt;d&lt;/i&gt;', icon: '&lt;u&gt;i&lt;/u&gt;', link: '/y' }])
+})
+
+test('values that cannot hold markup are kept as they are', () => {
+  const icon = { src: '/i.svg', alt: 'a' }
+  const input = {
+    layout: 'home',
+    head: [['script', {}, 'raw()']],
+    prev: false,
+    next: 5,
+    hero: { name: 7, text: false, tagline: null },
+    features: [{ title: 1, details: true, icon }, 'plain', null]
+  }
+  const out = sanitizeFrontmatter(input)
+  assert.deepEqual(out, input)
+  assert.equal(out.features[0].icon, icon)
+  assert.equal(out.head, input.head, 'head stays the documented raw path')
+  assert.deepEqual(sanitizeFrontmatter({}), {})
+  assert.deepEqual(sanitizeFrontmatter({ hero: 'text', features: 'text' }), { hero: 'text', features: 'text' })
+})
+
+test('sanitising leaves its input alone and transformPageData returns only the frontmatter', () => {
+  const frontmatter = { dir: 'x', prev: '<b>', hero: { name: '<b>' } }
+  const out = transformPageData({ title: 'T', frontmatter })
+  assert.deepEqual(Object.keys(out), ['frontmatter'])
+  assert.deepEqual(frontmatter, { dir: 'x', prev: '<b>', hero: { name: '<b>' } })
+  assert.equal(out.frontmatter.hero.name, '&lt;b&gt;')
 })

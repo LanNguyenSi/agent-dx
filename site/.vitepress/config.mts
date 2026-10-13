@@ -3,7 +3,7 @@ import type MarkdownIt from 'markdown-it'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createSite, createTitleReader, githubBase, markdownBase } from './site-helpers.mjs'
-import { escapeDescriptionMeta } from './raw-output.mjs'
+import { escapeDescriptionMeta, transformPageData } from './raw-output.mjs'
 
 // The site is built from the Markdown in place. srcDir is the repository
 // root, and only the two playbooks plus site/index.md are pages.
@@ -73,6 +73,8 @@ export default defineConfig({
   lastUpdated: false,
   // A page description is written into a meta tag as typed; this escapes it.
   transformHtml: escapeDescriptionMeta,
+  // Frontmatter the default theme writes as HTML is escaped or limited; `head` stays raw.
+  transformPageData,
   // Raw HTML stays off so that placeholders like <version> render as text; HTML
   // comments in the playbooks are hidden by the htmlComments rules in markdownBase.
   markdown: { ...markdownBase, config: linkMapper },
