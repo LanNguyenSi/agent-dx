@@ -23,7 +23,11 @@ vi.mock("../src/drift/git.js", async (importOriginal) => {
       }
       // The same exit-0-with-error shape for one named git call.
       if (cut.failing !== "" && args[1].includes(cut.failing)) {
-        return { ...result, error: "spawnSync git ETIMEDOUT" };
+        // A config read that timed out after printing a usable value.
+        const value = args[1].includes("extensions.refStorage")
+          ? { status: 0, stdout: "files\n" }
+          : {};
+        return { ...result, ...value, error: "spawnSync git ETIMEDOUT" };
       }
       if (!cut.on || !args[1].includes("for-each-ref")) return result;
       // Only the first line is kept, so refs/remotes/zzz/self is lost.
@@ -120,7 +124,9 @@ describe("unpushedCommits: the lookups that come before the ref listing", () => 
     );
     tmpDirs.push(dir);
     const r = unpushedCommits(dir);
-    expect(r.status).not.toBe(0);
+    // git's own "fatal: not a git repository", not a made-up unknown state.
+    expect(r.status).toBe(128);
+    expect(r.stderr).toContain("not a git repository");
     expect(r.stdout).toBe("");
   });
 
