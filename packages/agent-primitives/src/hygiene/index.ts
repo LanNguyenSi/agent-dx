@@ -339,7 +339,9 @@ export function hygiene(options: HygieneOptions): HygieneResult {
     const baseContent = showBase(target);
     if (baseContent === undefined) {
       warnings.push(
-        `extend-only path ${target} does not exist at ${options.base}; skipped`,
+        diffBase === baseSha
+          ? `extend-only path ${target} does not exist at ${options.base}; skipped`
+          : `extend-only path ${target} does not exist at the merge-base ${diffBase} of ${options.base}; skipped`,
       );
       continue;
     }

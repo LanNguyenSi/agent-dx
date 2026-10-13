@@ -53,8 +53,9 @@ argument or revision is a usage error (exit `2`).
   `--plan`, the paths inside it are relative to the repository root) that
   loses more than
   `--max-delete-percent` (default `20`) of its base line count. A deleted
-  file counts as 100%. A path that does not exist at `--base` is skipped with a
-  warning. When the removed-line count cannot be measured (for example a
+  file counts as 100%. A path that does not exist at the comparison start (the merge-base, which is
+  `--base` itself when the base has not moved) is skipped with a
+  warning that names the merge-base. When the removed-line count cannot be measured (for example a
   binary file, which numstat reports as `-` instead of a count, or no
   numstat row at all), the path is not
   checked and a warning says so. Carries `baseLines`, `removedLines` and `removedPercent`.
@@ -81,7 +82,7 @@ argument or revision is a usage error (exit `2`).
 | --- | --- |
 | `--base <rev>` | Required. The revision the task started from. |
 | `--head <rev>` | Head revision, default `HEAD`. Ignored with `--staged`. |
-| `--staged` | Compare `--base` with the index. |
+| `--staged` | Compare the merge-base of `--base` and `HEAD` with the index. |
 | `--extend-only <path>` | A path the task may only extend; repeatable. |
 | `--extend-only-file <file>` | A file listing extend-only paths. |
 | `--max-delete-percent <n>` | Threshold from `0` to `100`, default `20`. |

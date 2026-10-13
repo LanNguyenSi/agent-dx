@@ -703,13 +703,82 @@ describe("hygiene from the merge-base", () => {
     expect(r.counts.files).toBe(1);
   });
 
-  it("gives the same result for the base name and its SHA", () => {
-    const { repo, main, mainSha } = movedBaseRepo();
+  it("gives the same result for the moved base name and the SHA it branched from", () => {
+    const { repo, main, forkSha } = movedBaseRepo();
     const byName = hygiene({ cwd: repo, base: main });
-    const bySha = hygiene({ cwd: repo, base: mainSha });
+    const bySha = hygiene({ cwd: repo, base: forkSha });
+    expect(byName.mergeBase).toBe(forkSha);
+    expect(bySha.mergeBase).toBe(forkSha);
     expect(bySha.findings).toEqual(byName.findings);
-    expect(bySha.mergeBase).toBe(byName.mergeBase);
     expect(bySha.counts).toEqual(byName.counts);
+  });
+
+  it("names the merge-base when an extend-only path is missing there", () => {
+    const { repo, main, forkSha, mainSha } = movedBaseRepo();
+    git(repo, ["checkout", "-q", main]);
+    write(repo, "docs/later.md", "x\n");
+    commitAll(repo, "main adds docs/later.md");
+    git(repo, ["checkout", "-q", "feat"]);
+    const r = hygiene({
+      cwd: repo,
+      base: main,
+      extendOnly: ["docs/later.md"],
+    });
+    expect(r.mergeBase).toBe(forkSha);
+    expect(r.baseSha).not.toBe(mainSha);
+    expect(r.warnings).toEqual([
+      `extend-only path docs/later.md does not exist at the merge-base ${forkSha} of ${main}; skipped`,
+    ]);
+  });
+
+  it("names a shallow clone as the likely cause when no merge-base is found", () => {
+    const parent = fs.mkdtempSync(
+      path.join(os.tmpdir(), "agent-primitives-hygiene-shallow-"),
+    );
+    tmpDirs.push(parent);
+    const origin = path.join(parent, "origin");
+    const clone = path.join(parent, "clone");
+    fs.mkdirSync(origin);
+    git(origin, ["init", "-q", "-b", "master"]);
+    git(origin, ["config", "user.email", "test@example.com"]);
+    git(origin, ["config", "user.name", "test"]);
+    write(origin, "src/a.ts", "export const a = 1;\n");
+    commitAll(origin, "one");
+    git(origin, ["checkout", "-q", "-b", "feat"]);
+    write(origin, "src/b.ts", "export const b = 1;\n");
+    commitAll(origin, "two");
+    git(origin, ["checkout", "-q", "master"]);
+    write(origin, "src/c.ts", "export const c = 1;\n");
+    commitAll(origin, "three");
+    git(parent, [
+      "clone",
+      "-q",
+      "--depth",
+      "1",
+      "--no-single-branch",
+      `file://${origin}`,
+      clone,
+    ]);
+    git(clone, ["checkout", "-q", "origin/feat"]);
+    const r = hygiene({ cwd: clone, base: "origin/master" });
+    const warning = r.warnings.find((w) => w.includes("no merge-base"));
+    expect(warning).toBeDefined();
+    expect(warning).toContain("shallow clone");
+  });
+
+  it("falls back to the base directly with --staged when HEAD is unborn", () => {
+    const { repo, main, mainSha } = movedBaseRepo();
+    git(repo, ["checkout", "-q", "--orphan", "fresh"]);
+    git(repo, ["rm", "-rq", "--cached", "."]);
+    write(repo, "src/n.ts", "export const n = 1;\n");
+    git(repo, ["add", "src/n.ts"]);
+    const r = hygiene({ cwd: repo, base: main, staged: true });
+    expect(r.mergeBase).toBe(mainSha);
+    expect(r.warnings).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("HEAD does not resolve to a commit"),
+      ]),
+    );
   });
 
   it("uses the merge-base with HEAD for --staged", () => {

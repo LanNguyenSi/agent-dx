@@ -2025,7 +2025,7 @@ program
   .option("--head <rev>", "head revision (default HEAD)")
   .option(
     "--staged",
-    "compare --base against the git index instead of a commit (run before git commit)",
+    "compare the merge-base of --base and HEAD against the git index instead of a commit (run before git commit)",
   )
   .option(
     "--extend-only <path>",
