@@ -81,16 +81,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   already written. `--dry-run` returns the same envelope with
   `would_write` and a unified diff preview. Paths outside the repository
   root are refused unless `--allow-outside`; paths inside a git directory
-  always: by a `.git` component in any letter case, by a directory above
+  always: by a `.git` component (by its name in any letter case, or as
+  the entry the filesystem finds as `.git`), by a directory above
   the target that is laid out like a git directory (git's own test, which
   runs no git here, so it holds for a bare repository git declines to
   open and under any `GIT_*` environment), and by the identity of the git
-  and common directories git names from the root. Above a target inside
-  a work tree the check stops at the work-tree root, so a work tree
-  checked out inside a bare repository is editable from inside it; a
-  bare repository nested in a work tree, and `-C` inside one, are
-  refused. A warning names an identity lookup that could not be made; a
-  symlink is followed and its target checked. `--break-hard-links` edits
+  and common directories git names from the root. Every directory above
+  a target is checked, up to the filesystem root; the one exception is
+  the root's own git directory or common directory, taken only when git
+  would open the root as a work tree and not when the root lies in one
+  of git's own directories there (such as `hooks`; looked up by the
+  filesystem and compared by device and inode, so under any spelling the
+  filesystem folds to that name, and through a symlink). So a work tree
+  checked out inside its own bare repository is editable, while a work
+  tree inside another repository's git directory is refused: a bare
+  repository nested in a work tree, `-C` inside one, and a
+  `<repo>/.git/hooks` made a repository of its own. A `commondir` path
+  and a `.git` file's `gitdir:` path are resolved by the filesystem, as
+  git resolves them (a symlink before a `..` is followed first), never
+  by folding the path lexically, and a `commondir` path ends at its
+  first NUL as it does for git. git's identity lookup runs with the
+  discovery variables (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`,
+  `GIT_OBJECT_DIRECTORY`, `GIT_CEILING_DIRECTORIES`,
+  `GIT_DISCOVERY_ACROSS_FILESYSTEM`) removed from its environment, for
+  at most 3 seconds with at most 64 KiB of output, in a process group of
+  its own that is killed when git does not end by itself, and is not run
+  when its repository discovery would read a `commondir` file that is
+  not a regular file of at most 64 KiB (git reads it whole), or a `.git`
+  file names its directory by a path that is not UTF-8 or does not
+  resolve. A warning names an identity
+  lookup that could not be made, a directory git names that is not laid
+  out like one, and a git directory name with a line break; a symlink is
+  followed and its target checked. `--break-hard-links` edits
   a hard-linked file. New
   envelope statuses: `ambiguous`, `overlap`, `fuzzy_side_effect` and
   `not_editable` (exit `1`), `would_write` (exit `0`). The matching engine

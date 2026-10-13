@@ -1,6 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import {
+  spawnSync,
+  type SpawnSyncOptionsWithStringEncoding,
+} from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { UsageError } from "../envelope.js";
 import { findGitRoot, isPathContained } from "../probe/containment.js";
@@ -241,6 +244,9 @@ export interface PatchOptions {
   breakHardLinks?: boolean;
   /** Test seam: replaces the rename that commits a written file. */
   renameFile?: (from: string, to: string) => void;
+  /** Test seam: how long git's identity lookup may run before it is
+   * stopped (default `GIT_LOOKUP_TIMEOUT_MS`). */
+  gitTimeoutMs?: number;
 }
 
 interface FileState {
@@ -264,8 +270,9 @@ interface FileState {
   diff?: string;
 }
 
-/** A `.git` path component in any letter case: on a case-insensitive
- * filesystem `.GIT` and `.Git` name the same directory. */
+/** A `.git` path component by its name, lower-cased (`.GIT`, `.Git`).
+ * `hasGitEntry` asks the filesystem instead, for every other spelling it
+ * folds or normalises to `.git`. */
 function hasGitSegment(rel: string): boolean {
   return rel.split(/[\\/]+/).some((seg) => seg.toLowerCase() === ".git");
 }
@@ -282,17 +289,198 @@ function identityOf(p: string): string | undefined {
   }
 }
 
+/** `dev:ino` of a directory entry itself: a symlink is not followed. */
+function entryIdentityOf(p: string): string | undefined {
+  try {
+    const st = fs.lstatSync(p, { bigint: true });
+    return `${String(st.dev)}:${String(st.ino)}`;
+  } catch {
+    return undefined;
+  }
+}
+
+/** True when a component of `full` below `from` (an ancestor of `full`,
+ * or the filesystem root for the whole path) is the entry the filesystem
+ * finds as `.git` in that component's parent directory. That is decided
+ * by the filesystem, not by a case map: whatever spelling the volume
+ * folds or normalises to `.git` (and a hard link of a `.git` file in the
+ * same directory) counts. */
+function hasGitEntry(from: string, full: string): boolean {
+  const rel = path.relative(from, full);
+  if (rel === "") return false;
+  let parent = from;
+  for (const seg of rel.split(path.sep)) {
+    const entry = path.join(parent, seg);
+    const id = entryIdentityOf(entry);
+    if (id !== undefined && id === entryIdentityOf(path.join(parent, ".git"))) {
+      return true;
+    }
+    parent = entry;
+  }
+  return false;
+}
+
 /** Environment variables that steer git's repository discovery. They are
  * removed from git's environment for the identity lookup, so that it
  * answers for the root itself, not for a repository the caller named or
- * a ceiling the caller set. */
+ * a ceiling the caller set, and so that git's discovery runs over the
+ * layout the pre-check (`gitDiscoveryHazard`, which reads no
+ * environment) modelled: `GIT_OBJECT_DIRECTORY` stands in for
+ * `objects` in git's test of a git directory, so a value that does not
+ * exist fails every directory and sends discovery past the root's
+ * repository. */
 const GIT_DISCOVERY_ENV = [
   "GIT_DIR",
   "GIT_WORK_TREE",
   "GIT_COMMON_DIR",
+  "GIT_OBJECT_DIRECTORY",
   "GIT_CEILING_DIRECTORIES",
   "GIT_DISCOVERY_ACROSS_FILESYSTEM",
 ];
+
+/** How long git's identity lookup may run. It answers in milliseconds;
+ * a layout that makes it wait (a FIFO it opens) ends here, and so does
+ * one that makes it grow (a configuration value of gigabytes, taken in
+ * at its parser's pace), so this time, times that pace, bounds git's
+ * memory. */
+const GIT_LOOKUP_TIMEOUT_MS = 3_000;
+
+/** The most output taken from git's identity lookup (two paths). */
+const GIT_LOOKUP_MAX_OUTPUT = 64 * 1024;
+
+/** The largest `commondir` file git may meet during its repository
+ * discovery for patch to run it: git reads the whole file
+ * (`get_common_dir_noenv` in git's `setup.c`), so a device, a FIFO or a
+ * large (also sparse) file there makes git wait or grow without bound,
+ * faster than a timeout can stop it. */
+const COMMONDIR_MAX = 64 * 1024;
+
+/** git's own limit on the size of a `.git` file (`read_gitfile_raw`). */
+const GITFILE_MAX = 1024 * 1024;
+
+/** Why git would read `<dir>/commondir` without bound, or undefined.
+ * git reads the file when an `lstat` finds it (`file_exists`), through
+ * a symlink; one that then cannot be opened stops git with an error.
+ * `dir` is a real path (the root, a directory above it, or one from
+ * `physicalPath`), so joining the name to it folds nothing. */
+function commondirHazard(dir: string): string | undefined {
+  const file = path.join(dir, "commondir");
+  let st: fs.Stats;
+  try {
+    fs.lstatSync(file);
+    st = fs.statSync(file);
+  } catch {
+    return undefined;
+  }
+  if (!st.isFile()) {
+    return `git would read ${file} whole, and it is not a regular file`;
+  }
+  if (st.size > COMMONDIR_MAX) {
+    return `git would read ${file} whole, and it holds ${String(st.size)} bytes`;
+  }
+  return undefined;
+}
+
+/** The path a `.git` file names, read as git reads it
+ * (`read_gitfile_raw`): after `gitdir: `, without trailing CR and LF,
+ * up to a NUL (git reads it as a C string; an empty result names the
+ * file's own directory). Undefined when git finds no path there; null
+ * when the bytes are not UTF-8, which this check cannot follow. */
+function gitfilePath(content: Buffer | undefined): string | null | undefined {
+  if (content === undefined) return undefined;
+  if (!content.subarray(0, 8).equals(Buffer.from("gitdir: "))) {
+    return undefined;
+  }
+  let end = content.length;
+  while (end > 0 && (content[end - 1] === 0x0a || content[end - 1] === 0x0d)) {
+    end--;
+  }
+  if (end < 9) return undefined;
+  let named = content.subarray(8, end);
+  const nul = named.indexOf(0);
+  if (nul >= 0) named = named.subarray(0, nul);
+  try {
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
+      named,
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** The real path of the directory git reaches by `named`, a path read
+ * from a file in `dir` (a `.git` file's `gitdir:` line, a `commondir`
+ * line) or from git's output. git keeps such bytes as they are, prefixed
+ * with `<dir>/` when relative (`read_gitfile_gently` and
+ * `get_common_dir_noenv` in git's `setup.c`), and lets the filesystem
+ * resolve them, so a `..` after a symlink applies to the symlink's
+ * target; `path.resolve` or `path.join` would fold it lexically and name
+ * another directory. Every path taken from on-disk content passes
+ * through here before a name is appended to it. Undefined when the
+ * filesystem cannot resolve it (a missing directory, a dangling symlink,
+ * a loop): git's own `lstat` of `<named>/HEAD` fails there the same
+ * way, so git reads nothing behind such a path. */
+function physicalPath(dir: string, named: string): string | undefined {
+  const joined = path.isAbsolute(named) ? named : `${dir}/${named}`;
+  try {
+    return fs.realpathSync.native(joined);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Follows git's repository discovery from `root` (`setup.c`,
+ * `repo_discovery_find_dir`) to the `commondir` files git would read
+ * on the way and names the first one that is not a regular file of at
+ * most `COMMONDIR_MAX` bytes. In each directory from `root` up: a `.git`
+ * directory (its `commondir`, and the walk ends when it passes git's
+ * test), a `.git` file (the `commondir` of the directory it names, that
+ * path resolved by the filesystem as git resolves it, `physicalPath`;
+ * git ends there either way, and a path the filesystem cannot resolve
+ * is named as a hazard, since this check cannot follow it), then the
+ * directory itself as a bare
+ * repository. It ends no earlier than git 2.39 or newer does: past a
+ * `.git` entry that is neither a file nor a directory, or one that
+ * cannot be stated, it goes on (git 2.39 does, newer git stops there
+ * with an error), and it does not stop at a filesystem boundary.
+ */
+function gitDiscoveryHazard(root: string): string | undefined {
+  let dir = root;
+  for (;;) {
+    const dotGit = path.join(dir, ".git");
+    let st: fs.Stats | undefined;
+    try {
+      st = fs.statSync(dotGit);
+    } catch {
+      // No .git here, or one that cannot be stated: look further up.
+    }
+    if (st?.isDirectory() === true) {
+      const hazard = commondirHazard(dotGit);
+      if (hazard !== undefined) return hazard;
+      if (isGitDirectory(dotGit, true)) return undefined;
+    } else if (st?.isFile() === true) {
+      // git refuses a larger .git file.
+      if (st.size > GITFILE_MAX) return undefined;
+      const named = gitfilePath(readRegular(dotGit, GITFILE_MAX));
+      if (named === undefined) return undefined;
+      if (named === null) {
+        return `${dotGit} names its git directory by a path that is not UTF-8, which this check cannot follow`;
+      }
+      const target = physicalPath(dir, named);
+      if (target === undefined) {
+        return `${dotGit} names its git directory by a path that does not resolve, which this check cannot follow`;
+      }
+      return commondirHazard(target);
+    }
+    const hazard = commondirHazard(dir);
+    if (hazard !== undefined) return hazard;
+    if (isGitDirectory(dir, true)) return undefined;
+    const parent = path.dirname(dir);
+    if (parent === dir) return undefined;
+    dir = parent;
+  }
+}
 
 /**
  * Identities of the git directory and common directory (they differ in a
@@ -300,13 +488,23 @@ const GIT_DISCOVERY_ENV = [
  * also when `root` has no work tree: inside a bare repository or a git
  * directory, git answers with that directory. The set is empty when git
  * finds no repository there, and then also carries a warning when the
- * check could not be made: git cannot be run, or `root` is a git work
- * tree (`inWorkTree`) and git fails there, or git names a directory that
- * cannot be read line by line or cannot be stated.
+ * check could not be made: git is not run because its discovery would
+ * read a `commondir` without bound (`gitDiscoveryHazard`), git cannot be
+ * run, does not finish within `timeoutMs`, writes more than
+ * `GIT_LOOKUP_MAX_OUTPUT` bytes or is ended by a signal, or `root` is a
+ * git work tree (`inWorkTree`) and git fails there. A directory git names
+ * is left out, with a warning, when it cannot be stated or is laid out
+ * neither like a git directory nor like a common directory; and an
+ * answer with a line break inside a name always warns.
+ *
+ * git runs in a process group of its own; when it does not end by
+ * itself, that whole group is sent SIGKILL, so no process of it outlives
+ * this call.
  */
 function gitDirIdentities(
   root: string,
   inWorkTree: boolean,
+  timeoutMs: number,
 ): { ids: Set<string>; warning?: string } {
   const ids = new Set<string>();
   const env = { ...process.env };
@@ -315,56 +513,124 @@ function gitDirIdentities(
     ids,
     warning: `the git directory check by identity was skipped (${why}); a .git path component and a directory laid out like a git directory are still refused`,
   });
-  let out: string;
-  try {
-    out = execFileSync(
-      "git",
-      ["rev-parse", "--absolute-git-dir", "--git-common-dir"],
-      { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
-    );
-  } catch (err) {
-    const e = err as NodeJS.ErrnoException & { status?: number | null };
-    if (typeof e.status !== "number") {
-      return skipped(`git could not be run: ${errnoDetail(err)}`);
+  const hazard = gitDiscoveryHazard(root);
+  if (hazard !== undefined) return skipped(`git was not run: ${hazard}`);
+  // `detached` gives git a process group of its own. spawnSync honours it
+  // (Node's normalizeSpawnArguments passes it on to libuv), though the
+  // typings list it for spawn only; the process-group test pins it.
+  const spawnOptions: SpawnSyncOptionsWithStringEncoding & {
+    detached: boolean;
+  } = {
+    cwd: root,
+    env,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+    timeout: timeoutMs,
+    killSignal: "SIGKILL",
+    maxBuffer: GIT_LOOKUP_MAX_OUTPUT,
+    detached: process.platform !== "win32",
+  };
+  const res = spawnSync(
+    "git",
+    ["rev-parse", "--absolute-git-dir", "--git-common-dir"],
+    spawnOptions,
+  );
+  if (res.error !== undefined || res.signal !== null) {
+    // spawnSync has killed git itself; end the rest of its group. A pid
+    // of 0 (git never started) must not reach kill: -0 is this process's
+    // own group.
+    if (process.platform !== "win32" && res.pid > 0) {
+      try {
+        process.kill(-res.pid, "SIGKILL");
+      } catch {
+        // The group is already gone.
+      }
     }
+    const e = res.error as NodeJS.ErrnoException | undefined;
+    if (e?.code === "ETIMEDOUT") {
+      return skipped(
+        `git rev-parse did not finish within ${String(timeoutMs)} ms and was stopped`,
+      );
+    }
+    if (e?.code === "ENOBUFS") {
+      return skipped(
+        `git rev-parse wrote more than ${String(GIT_LOOKUP_MAX_OUTPUT)} bytes and was stopped`,
+      );
+    }
+    if (res.error !== undefined) {
+      return skipped(`git could not be run: ${errnoDetail(res.error)}`);
+    }
+    return skipped(`git rev-parse was ended by ${String(res.signal)}`);
+  }
+  if (res.status !== 0) {
     // Outside any repository git exits non-zero: nothing to refuse.
     if (!inWorkTree) return { ids };
     return skipped(
-      `git rev-parse failed with exit code ${String(e.status)} in the work tree ${root}`,
+      `git rev-parse failed with exit code ${String(res.status)} in the work tree ${root}`,
     );
   }
+  const out = res.stdout;
   // One path per line, each as git spells it (a name may end in
-  // whitespace); only the final line break is dropped.
+  // whitespace); only the final line break is dropped. Git answers with
+  // exactly two lines, so any other count means a line break inside a
+  // name: then each piece is only a guess at a directory.
   const lines = out.split("\n");
   if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  const problems: string[] = [];
+  if (lines.length !== 2) {
+    problems.push(
+      "git named a directory with a line break in its name, which cannot be read line by line",
+    );
+  }
   for (const line of lines) {
-    if (line.length === 0) {
-      return skipped(
-        "git named a directory with a line break in its name, which cannot be read line by line",
-      );
+    if (line.length === 0) continue;
+    const named = physicalPath(root, line);
+    const id = named === undefined ? undefined : identityOf(named);
+    if (named === undefined || id === undefined) {
+      problems.push(`git named ${line}, which cannot be stated`);
+      continue;
     }
-    const id = identityOf(path.resolve(root, line));
-    if (id === undefined) {
-      return skipped(`git named ${line}, which cannot be stated`);
+    // A piece of a name split at a line break can name an unrelated
+    // directory; only one laid out like what git names is taken.
+    if (
+      !isGitDirectory(named, false) &&
+      !isWorktreeAdminDir(named) &&
+      !holdsObjectsAndRefs(named)
+    ) {
+      problems.push(
+        `git named ${line}, which is not laid out like a git directory or a common directory`,
+      );
+      continue;
     }
     ids.add(id);
+  }
+  if (problems.length > 0) {
+    return {
+      ids,
+      warning: `the git directory check by identity was skipped for part of git's answer (${problems.join("; ")}); a .git path component and a directory laid out like a git directory are still refused`,
+    };
   }
   return { ids };
 }
 
-/** Up to 255 bytes of a file, as much of `HEAD` as git reads (setup.c,
- * `validate_headref`); undefined when the file cannot be read. */
-function readHead(p: string): string | undefined {
+/** The bytes of a file, up to `max` (default: the whole file, if it is
+ * at most 64 KiB); undefined when it cannot be read or is larger. It is
+ * opened non-blocking, so a FIFO in a place the checks look at (any
+ * directory above a target) reads as empty instead of stalling the
+ * command. */
+function readRegular(p: string, max?: number): Buffer | undefined {
   let fd: number;
   try {
-    fd = fs.openSync(p, "r");
+    fd = fs.openSync(p, fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK ?? 0));
   } catch {
     return undefined;
   }
   try {
-    const buf = Buffer.alloc(255);
+    const st = fs.fstatSync(fd);
+    if (max === undefined && st.size > 65536) return undefined;
+    const buf = Buffer.alloc(max ?? st.size);
     const n = fs.readSync(fd, buf, 0, buf.length, 0);
-    return buf.toString("latin1", 0, n);
+    return buf.subarray(0, n);
   } catch {
     return undefined;
   } finally {
@@ -373,9 +639,11 @@ function readHead(p: string): string | undefined {
 }
 
 /** git's test of a `HEAD` entry (setup.c, `validate_headref`): a symlink
- * into `refs/`, or a file that holds `ref:`, optional whitespace and a
- * name under `refs/`, or that starts with a hexadecimal object id. */
-function validHeadRef(p: string): boolean {
+ * into `refs/`, or a file whose first 255 bytes hold `ref:`, optional
+ * whitespace and a name under `refs/`, or start with a hexadecimal object
+ * id. `strict` takes whitespace as git's `isspace` does (space, tab, LF,
+ * CR); otherwise form feed and vertical tab count too. */
+function validHeadRef(p: string, strict: boolean): boolean {
   let st: fs.Stats;
   try {
     st = fs.lstatSync(p);
@@ -389,29 +657,64 @@ function validHeadRef(p: string): boolean {
       return false;
     }
   }
-  const head = readHead(p);
+  const head = readRegular(p, 255)?.toString("latin1");
   if (head === undefined) return false;
-  if (head.startsWith("ref:")) return /^ref:[ \t\n\r\f\v]*refs\//.test(head);
+  if (head.startsWith("ref:")) {
+    return (
+      strict ? /^ref:[ \t\n\r]*refs\// : /^ref:[ \t\n\r\f\v]*refs\//
+    ).test(head);
+  }
   return /^[0-9a-fA-F]{40}/.test(head);
 }
 
 /** The directory holding `objects` and `refs` for the git directory
- * `dir`: the one its `commondir` file names, relative to `dir` (a linked
- * worktree's administrative directory names the repository's), else
- * `dir` itself (setup.c, `get_common_dir_noenv`). */
-function commonDirOf(dir: string): string {
-  let named: string;
+ * `dir`, as git finds it (setup.c, `get_common_dir_noenv`): the one its
+ * `commondir` file names (a linked worktree's administrative directory
+ * names the repository's), relative to `dir` and resolved by real path,
+ * so a symlink on it is followed before a `..` after it applies
+ * (`strbuf_add_real_path`); else `dir` itself. Where git would stop (a
+ * `commondir` entry that is empty, unreadable or names a path that does
+ * not resolve), `strict` gives undefined; otherwise an unreadable or
+ * empty file reads as none and an unresolvable path is taken lexically. */
+function commonDirOf(dir: string, strict: boolean): string | undefined {
+  const file = path.join(dir, "commondir");
   try {
-    named = fs.readFileSync(path.join(dir, "commondir"), "utf8");
+    fs.lstatSync(file);
   } catch {
     return dir;
   }
-  return path.resolve(dir, named.replace(/[\r\n]+$/, ""));
+  const content = readRegular(file);
+  if (content === undefined || content.length === 0) {
+    return strict ? undefined : dir;
+  }
+  // As `get_common_dir_noenv`: trailing CR and LF go first, then the path
+  // ends at the first NUL (git hands it on as a C string).
+  let end = content.length;
+  while (end > 0 && (content[end - 1] === 0x0a || content[end - 1] === 0x0d)) {
+    end--;
+  }
+  let bytes = content.subarray(0, end);
+  const nul = bytes.indexOf(0);
+  if (nul >= 0) bytes = bytes.subarray(0, nul);
+  const named = bytes.toString("utf8");
+  const resolved = physicalPath(dir, named);
+  if (resolved !== undefined) return resolved;
+  return strict ? undefined : path.resolve(dir, named);
 }
 
 function entryExists(p: string): boolean {
   try {
     fs.statSync(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** git's `access(path, X_OK)`: the entry exists and may be searched. */
+function isSearchable(p: string): boolean {
+  try {
+    fs.accessSync(p, fs.constants.X_OK);
     return true;
   } catch {
     return false;
@@ -426,22 +729,43 @@ function isRegularFile(p: string): boolean {
   }
 }
 
+/** `objects` and `refs` in `dir`: the half of git's test that a common
+ * directory has to pass. */
+function holdsObjectsAndRefs(dir: string): boolean {
+  return (
+    entryExists(path.join(dir, "objects")) &&
+    entryExists(path.join(dir, "refs"))
+  );
+}
+
 /** git's own test of a git directory (setup.c, `is_git_directory`): a
- * valid `HEAD`, plus `objects` and `refs` in the common directory. When
- * they are set, git takes `GIT_COMMON_DIR` as the common directory and
- * `GIT_OBJECT_DIRECTORY` for the objects instead; here the first adds a
- * second place to look and the second makes `objects` optional, so the
- * variables can widen the test but never narrow it. */
-function isGitDirectory(dir: string): boolean {
-  if (!validHeadRef(path.join(dir, "HEAD"))) return false;
-  const commons = [commonDirOf(dir)];
-  const envCommon = process.env.GIT_COMMON_DIR ?? "";
-  if (envCommon.length > 0) commons.push(path.resolve(envCommon));
-  const objectsElsewhere = (process.env.GIT_OBJECT_DIRECTORY ?? "").length > 0;
+ * valid `HEAD`, plus `objects` and `refs` in the common directory.
+ *
+ * `strict` applies it as git does without any `GIT_*` variable: `objects`
+ * and `refs` must be searchable, and a `commondir` git would stop at
+ * fails the test. It decides whether git opens a root as a work tree,
+ * which grants an exception (see `gitDirAbove`), so it must not be wider
+ * than git.
+ *
+ * Otherwise the test refuses, so it may be wider than git, never
+ * narrower: `objects` and `refs` only have to exist, and when the caller
+ * set them, `GIT_COMMON_DIR` adds a second place to look and
+ * `GIT_OBJECT_DIRECTORY` makes `objects` optional, as git looks there. */
+function isGitDirectory(dir: string, strict: boolean): boolean {
+  if (!validHeadRef(path.join(dir, "HEAD"), strict)) return false;
+  const own = commonDirOf(dir, strict);
+  const commons = own === undefined ? [] : [own];
+  let objectsElsewhere = false;
+  if (!strict) {
+    const envCommon = process.env.GIT_COMMON_DIR ?? "";
+    if (envCommon.length > 0) commons.push(path.resolve(envCommon));
+    objectsElsewhere = (process.env.GIT_OBJECT_DIRECTORY ?? "").length > 0;
+  }
+  const has = strict ? isSearchable : entryExists;
   return commons.some(
     (common) =>
-      (objectsElsewhere || entryExists(path.join(common, "objects"))) &&
-      entryExists(path.join(common, "refs")),
+      (objectsElsewhere || has(path.join(common, "objects"))) &&
+      has(path.join(common, "refs")),
   );
 }
 
@@ -459,14 +783,15 @@ function isWorktreeAdminDir(dir: string): boolean {
  * root, or it is laid out like one. */
 type GitDirEvidence = "named" | "layout" | "worktree_admin";
 
-/** The layout test, cached per directory for one `patch` call. */
+/** The layout test (the wide form, which refuses), cached per directory
+ * for one `patch` call. */
 function gitDirLayout(
   dir: string,
   cache: Map<string, GitDirEvidence | null>,
 ): GitDirEvidence | null {
   const known = cache.get(dir);
   if (known !== undefined) return known;
-  const result: GitDirEvidence | null = isGitDirectory(dir)
+  const result: GitDirEvidence | null = isGitDirectory(dir, false)
     ? "layout"
     : isWorktreeAdminDir(dir)
       ? "worktree_admin"
@@ -475,34 +800,88 @@ function gitDirLayout(
   return result;
 }
 
-/** True when `root` is a work tree git would open: its `.git` entry is a
- * directory laid out like a git directory, or a file naming one
- * (`gitdir: <path>`, relative to `root`; setup.c, `read_gitfile_gently`).
- * A `.git` that is neither makes no work tree, so the walk above a
- * target in it does not stop at `root`. */
-function isWorkTreeRoot(
-  root: string,
-  cache: Map<string, GitDirEvidence | null>,
-): boolean {
+/** The git directory that makes `root` a work tree git opens: its `.git`
+ * directory, or the directory its `.git` file names (`gitdir: <path>`,
+ * read as git reads it, `gitfilePath`, and resolved by the filesystem
+ * from `root` as git resolves it, `physicalPath`; setup.c,
+ * `read_gitfile_gently`), when that passes git's own test as git applies
+ * it. Undefined when `.git` is neither, names nothing, names a path that
+ * cannot be followed or resolved, or names a directory git would not
+ * open: git then stops (a `.git` file) or looks further up for another
+ * repository (a `.git` directory), so `root` has no git directory of its
+ * own. */
+function workTreeGitDir(root: string): string | undefined {
   const entry = path.join(root, ".git");
   let st: fs.Stats;
   try {
     st = fs.statSync(entry);
   } catch {
-    return false;
+    return undefined;
   }
-  if (st.isDirectory()) return gitDirLayout(entry, cache) === "layout";
-  if (!st.isFile()) return false;
-  let content: string;
-  try {
-    content = fs.readFileSync(entry, "utf8");
-  } catch {
-    return false;
+  if (st.isDirectory()) return isGitDirectory(entry, true) ? entry : undefined;
+  if (!st.isFile() || st.size > GITFILE_MAX) return undefined;
+  const named = gitfilePath(readRegular(entry, GITFILE_MAX));
+  if (named === undefined || named === null) return undefined;
+  const gitDir = physicalPath(root, named);
+  if (gitDir === undefined) return undefined;
+  return isGitDirectory(gitDir, true) ? gitDir : undefined;
+}
+
+/** Identities of the git directory `gitDir` and of its common directory
+ * (the same directory unless a `commondir` file names another). */
+function ownGitDirs(gitDir: string): Set<string> {
+  const ids = new Set<string>();
+  for (const dir of [gitDir, commonDirOf(gitDir, true)]) {
+    const id = dir === undefined ? undefined : identityOf(dir);
+    if (id !== undefined) ids.add(id);
   }
-  if (!content.startsWith("gitdir: ")) return false;
-  const named = content.slice("gitdir: ".length).replace(/[\r\n]+$/, "");
-  if (named.length === 0) return false;
-  return gitDirLayout(path.resolve(root, named), cache) === "layout";
+  return ids;
+}
+
+/** Directories git keeps inside a git directory (`gitrepository-layout`,
+ * plus the reftable store and the state of a rebase, cherry-pick or
+ * revert in progress). */
+const GIT_DIR_SUBDIRS = new Set([
+  "objects",
+  "refs",
+  "hooks",
+  "info",
+  "logs",
+  "worktrees",
+  "modules",
+  "branches",
+  "remotes",
+  "rr-cache",
+  "reftable",
+  "rebase-merge",
+  "rebase-apply",
+  "sequencer",
+]);
+
+/**
+ * True when `root`, below the git directory `dir`, lies in one of git's
+ * own directories there. Decided by the filesystem: for each reserved
+ * name, the entry it finds as `<dir>/<name>` (a symlink there followed)
+ * is compared by device and inode with `root` and every directory above
+ * it. So a spelling the filesystem folds to a reserved name (letter case,
+ * U+017F on APFS, a Unicode normalisation variant) counts, and so does a
+ * reserved entry that is a symlink to the root or above it. The first
+ * component's name, lower-cased, is compared too; on a case-sensitive
+ * filesystem that only adds refusals.
+ */
+function underGitSubdir(dir: string, root: string): boolean {
+  const first = path.relative(dir, root).split(path.sep)[0];
+  if (GIT_DIR_SUBDIRS.has(first.toLowerCase())) return true;
+  const reserved = new Set<string>();
+  for (const name of GIT_DIR_SUBDIRS) {
+    const id = identityOf(path.join(dir, name));
+    if (id !== undefined) reserved.add(id);
+  }
+  for (let d = root; ; d = path.dirname(d)) {
+    const id = identityOf(d);
+    if (id !== undefined && reserved.has(id)) return true;
+    if (path.dirname(d) === d) return false;
+  }
 }
 
 interface GitDirChecks {
@@ -510,9 +889,9 @@ interface GitDirChecks {
    * root. */
   ids: ReadonlySet<string>;
   root: string;
-  /** Whether `root` is a work tree git would open; only then does the
-   * walk above a target inside the root end at the root. */
-  rootIsWorkTree: boolean;
+  /** Identities of the root's own git directory and common directory
+   * (`workTreeGitDir`); empty when the root is no work tree git opens. */
+  own: ReadonlySet<string>;
   layout: Map<string, GitDirEvidence | null>;
 }
 
@@ -520,27 +899,35 @@ interface GitDirChecks {
  * The nearest directory above `real` that is a git directory: one git
  * named from the root (compared by identity, so under any name), or one
  * laid out like a git directory, whatever git says or is allowed to say.
- * Above a target inside a root that is a work tree, the walk ends at the
- * root, so a work tree checked out inside a bare repository is editable
- * from inside; above any other target (one outside the root, or inside a
- * root that is no work tree) it goes on to the filesystem root.
+ * The walk goes on to the filesystem root for every target. The one
+ * exception, for a target inside the root and only above the root: the
+ * root's own git directory and common directory are passed over, so a
+ * work tree checked out inside its own repository is editable; but not
+ * when the root lies in one of git's own directories there (a work tree
+ * made of `<repo>/hooks` stays refused).
  */
 function gitDirAbove(
   real: string,
-  contained: boolean,
   checks: GitDirChecks,
 ): { dir: string; evidence: GitDirEvidence } | undefined {
   let dir = path.dirname(real);
+  let aboveRoot = false;
   for (;;) {
     const id = identityOf(dir);
-    if (id !== undefined && checks.ids.has(id)) {
-      return { dir, evidence: "named" };
+    const ownRepository =
+      aboveRoot &&
+      id !== undefined &&
+      checks.own.has(id) &&
+      !underGitSubdir(dir, checks.root);
+    if (!ownRepository) {
+      if (id !== undefined && checks.ids.has(id)) {
+        return { dir, evidence: "named" };
+      }
+      const layout = gitDirLayout(dir, checks.layout);
+      if (layout !== null) return { dir, evidence: layout };
     }
-    const layout = gitDirLayout(dir, checks.layout);
-    if (layout !== null) return { dir, evidence: layout };
-    if (contained && checks.rootIsWorkTree && dir === checks.root) {
-      return undefined;
-    }
+    // The walk from a target inside the root passes the root itself.
+    if (dir === checks.root) aboveRoot = true;
     const parent = path.dirname(dir);
     if (parent === dir) return undefined;
     dir = parent;
@@ -625,13 +1012,17 @@ export function patch(options: PatchOptions): PatchResult {
   }
   // Asked whether or not a work tree was found: `-C` may lie in a bare
   // repository or a git directory, which has no work tree.
-  const gitDirs = gitDirIdentities(root, gitRoot !== undefined);
-  const layout = new Map<string, GitDirEvidence | null>();
+  const gitDirs = gitDirIdentities(
+    root,
+    gitRoot !== undefined,
+    options.gitTimeoutMs ?? GIT_LOOKUP_TIMEOUT_MS,
+  );
+  const ownGitDir = workTreeGitDir(root);
   const checks: GitDirChecks = {
     ids: gitDirs.ids,
     root,
-    rootIsWorkTree: gitRoot !== undefined && isWorkTreeRoot(root, layout),
-    layout,
+    own: ownGitDir !== undefined ? ownGitDirs(ownGitDir) : new Set(),
+    layout: new Map(),
   };
   const warnings: string[] =
     gitDirs.warning !== undefined ? [gitDirs.warning] : [];
@@ -703,14 +1094,18 @@ export function patch(options: PatchOptions): PatchResult {
           : real;
     if (real !== undefined && pathError === undefined) {
       const lexicalRel = path.relative(rootLexical, lexical);
+      const lexicalContained = isPathContained(rootLexical, lexical);
+      // By name, and by what the filesystem finds as `.git` in each
+      // component's directory; both on the same part of each path.
       const gitSegment =
         hasGitSegment(contained ? path.relative(root, real) : real) ||
-        hasGitSegment(
-          isPathContained(rootLexical, lexical) ? lexicalRel : lexical,
+        hasGitSegment(lexicalContained ? lexicalRel : lexical) ||
+        hasGitEntry(contained ? root : path.parse(real).root, real) ||
+        hasGitEntry(
+          lexicalContained ? rootLexical : path.parse(lexical).root,
+          lexical,
         );
-      const above = gitSegment
-        ? undefined
-        : gitDirAbove(real, contained, checks);
+      const above = gitSegment ? undefined : gitDirAbove(real, checks);
       if (gitSegment || above !== undefined) {
         pathError = {
           status: "refused",
