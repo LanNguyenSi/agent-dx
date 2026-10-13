@@ -314,6 +314,11 @@ program
           }
           futureSkewMinutes = n;
         }
+        if (opts.rule !== undefined && opts.rule.length === 0) {
+          throw new UsageError(
+            "--rule needs at least one rule id (an empty value is not 'every rule'; omit --rule for that)",
+          );
+        }
         const minSeverity =
           opts.minSeverity !== undefined
             ? parseMinSeverity(opts.minSeverity)

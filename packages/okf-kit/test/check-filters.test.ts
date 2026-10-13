@@ -2,6 +2,8 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { parseMinSeverity, runCheck } from "../src/cli.js";
 import { FIXTURES_DIR, runCli } from "./helpers.js";
+import fs from "node:fs";
+import os from "node:os";
 
 const BROKEN = path.join(FIXTURES_DIR, "broken-link");
 const ABSOLUTE = path.join(FIXTURES_DIR, "absolute-link");
@@ -132,5 +134,70 @@ describe("check --rule with --min-severity", () => {
     expect((JSON.parse(r.stdout) as { findings: unknown[] }).findings).toEqual(
       [],
     );
+  });
+});
+
+describe("check --min-severity at the notice boundary", () => {
+  // A bundle outside any git work tree whose doc has `sources`: the
+  // staleness rule then reports one notice ("staleness skipped"), and the
+  // absolute link reports one warning. The runGit stub makes repo-root
+  // detection fail, so no real git process is involved.
+  function noticeBundle(): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "okf-kit-notice-"));
+    fs.writeFileSync(
+      path.join(dir, "doc.md"),
+      "---\ntype: concept\nsources:\n  - src/x.ts\n---\n\n[Other](/other.md)\n",
+    );
+    fs.writeFileSync(
+      path.join(dir, "other.md"),
+      "---\ntype: concept\n---\n\n# Other\n",
+    );
+    return dir;
+  }
+  const noGit = () => null;
+
+  it("--min-severity warning drops the notice and keeps the warning", () => {
+    const dir = noticeBundle();
+    try {
+      const all = runCheck(dir, { runGit: noGit });
+      expect(all.findings.some((f) => f.severity === "notice")).toBe(true);
+      expect(all.findings.some((f) => f.severity === "warning")).toBe(true);
+      const filtered = runCheck(dir, {
+        runGit: noGit,
+        minSeverity: "warning",
+      });
+      expect(filtered.findings.some((f) => f.severity === "notice")).toBe(
+        false,
+      );
+      expect(filtered.findings.some((f) => f.severity === "warning")).toBe(
+        true,
+      );
+      expect(filtered.findings).toEqual(
+        all.findings.filter((f) => f.severity !== "notice"),
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("--min-severity notice keeps everything", () => {
+    const dir = noticeBundle();
+    try {
+      const all = runCheck(dir, { runGit: noGit });
+      const r = runCheck(dir, { runGit: noGit, minSeverity: "notice" });
+      expect(r.findings).toEqual(all.findings);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("check --rule with an empty value", () => {
+  it("is a usage error, not 'every rule'", () => {
+    for (const value of ["", ",", " , "]) {
+      const r = runCli(["check", BROKEN, "--rule", value]);
+      expect(r.status, `--rule "${value}"`).toBe(2);
+      expect(r.stderr).toContain("--rule needs at least one rule id");
+    }
   });
 });

@@ -63,13 +63,15 @@ Pass `--repo-root` explicitly to pin a specific root (useful in CI when the bund
 
 Both filters apply to the text and the JSON output alike, including the JSON `summary` counts, and the exit status is computed from the reported findings only: `okf-kit check <bundle> --rule no-absolute-links` exits `0` on a bundle whose only errors come from other rules, and `--strict --min-severity error` ignores warnings.
 
+An empty `--rule` value (`--rule ""`, `--rule ,`) is a usage error (exit `2`) rather than "every rule"; omit `--rule` to report every rule. A filtered run reports only what passes the filters, so the text output can say `clean, no findings` while filtered-out errors or skip notices exist (for example a `sources-fresh` notice that staleness was not checked); run without the filters to see everything.
+
 ## Exit codes
 
 | Code | Meaning |
 |------|---------|
 | 0 | No errors (and, under `--strict`, no warnings either). Only reported findings count (see [Filtering findings](#filtering-findings)). |
 | 1 | At least one error (or, under `--strict`, at least one warning). Only reported findings count (see [Filtering findings](#filtering-findings)). |
-| 2 | Invocation or tool error: the bundle directory does not exist or is not a directory; an invalid option value (`--future-skew-minutes` that is not a non-negative number, a malformed `--companion`, an unknown `--rule` id or an invalid `--min-severity` level, see above); `init`'s target is non-empty without `--force`, or exists and is not a directory; a `docs-for` usage error (see [Reverse lookup](docs-for.md)); a commander usage error (unknown option, missing argument, missing/unknown command); or any other error that stops the run, such as an unreadable bundle file. `--help` and `--version` still exit 0. |
+| 2 | Invocation or tool error: the bundle directory does not exist or is not a directory; an invalid option value (`--future-skew-minutes` that is not a non-negative number, a malformed `--companion`, an unknown or empty `--rule` id list or an invalid `--min-severity` level, see above); `init`'s target is non-empty without `--force`, or exists and is not a directory; a `docs-for` usage error (see [Reverse lookup](docs-for.md)); a commander usage error (unknown option, missing argument, missing/unknown command); or any other error that stops the run, such as an unreadable bundle file. `--help` and `--version` still exit 0. |
 
 ## Output
 
