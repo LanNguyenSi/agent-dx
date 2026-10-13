@@ -1417,6 +1417,81 @@ describe("drift (symbolic base that moved after the branch point)", () => {
     expect(bySha.mergeBase).toBe(branchPoint);
   });
 
+  it("matches --base <SHA origin/master resolves to> with --base origin/master", async () => {
+    const { worktree, movedTip } = buildMovedBaseFixture();
+    const resolved = gitOutput(worktree, ["rev-parse", "origin/master"]).trim();
+    expect(resolved).toBe(movedTip);
+    const byRef = await drift({
+      cwd: worktree,
+      base: "origin/master",
+      head: "HEAD",
+    });
+    const bySha = await drift({ cwd: worktree, base: resolved, head: "HEAD" });
+    expect(bySha.removedIdentifiers).toEqual(byRef.removedIdentifiers);
+    expect(bySha.sites).toEqual(byRef.sites);
+    expect(bySha.counts).toEqual(byRef.counts);
+    expect(bySha.mergeBase).toBe(byRef.mergeBase);
+  });
+
+  it("falls back to diffing the trees when base and head share no history", async () => {
+    const repo = initRepo();
+    git(repo, ["checkout", "-q", "-b", "main"]);
+    writeFile(
+      repo,
+      "src/a.ts",
+      "export function keep() {}\nexport function dropped() {}\n",
+    );
+    const baseSha = commit(repo, "base");
+    git(repo, ["checkout", "-q", "--orphan", "orphan"]);
+    git(repo, ["rm", "-rf", "-q", "."]);
+    writeFile(repo, "src/a.ts", "export function keep() {}\n");
+    writeFile(repo, "notes.md", "see dropped in these notes\n");
+    const orphanSha = commit(repo, "orphan");
+    const result = await drift({ cwd: repo, base: baseSha, head: "orphan" });
+    expect(result.baseSha).toBe(baseSha);
+    expect(result.headSha).toBe(orphanSha);
+    expect(result.mergeBase).toBe(baseSha);
+    expect(result.warnings).toContain(
+      `no merge-base between ${baseSha} and ${orphanSha} (no common ancestor): diffing the two trees directly`,
+    );
+    expect(result.removedIdentifiers.map((r) => r.name)).toContain("dropped");
+  });
+
+  it("names a shallow clone as the likely cause when no merge-base is found", async () => {
+    const parent = makeTmpDir();
+    const origin = path.join(parent, "origin");
+    const clone = path.join(parent, "clone");
+    fs.mkdirSync(origin);
+    git(origin, ["init", "-q", "-b", "master"]);
+    git(origin, ["config", "user.email", "test@example.com"]);
+    git(origin, ["config", "user.name", "test"]);
+    writeFile(origin, "src/a.ts", "export function keep() {}\n");
+    commit(origin, "one");
+    git(origin, ["checkout", "-q", "-b", "feat"]);
+    writeFile(origin, "src/b.ts", "export function other() {}\n");
+    commit(origin, "two");
+    git(origin, ["checkout", "-q", "master"]);
+    writeFile(origin, "src/c.ts", "export function third() {}\n");
+    commit(origin, "three");
+    git(parent, [
+      "clone",
+      "-q",
+      "--depth",
+      "1",
+      "--no-single-branch",
+      `file://${origin}`,
+      clone,
+    ]);
+    const result = await drift({
+      cwd: clone,
+      base: "origin/master",
+      head: "origin/feat",
+    });
+    const warning = result.warnings.find((w) => w.includes("no merge-base"));
+    expect(warning).toBeDefined();
+    expect(warning).toContain("shallow clone");
+  });
+
   it("names the resolved SHAs in the CLI envelope", async () => {
     const { worktree, branchPoint, movedTip } = buildMovedBaseFixture();
     const run = await spawnCli([

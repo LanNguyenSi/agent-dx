@@ -75,17 +75,40 @@ export function resolveCommit(cwd: string, rev: string): string | undefined {
   return sha === "" ? undefined : sha;
 }
 
-/** The best common ancestor of two commits, or `undefined` when they share
- * no history (or git could not compute it). */
-export function mergeBase(
-  cwd: string,
-  a: string,
-  b: string,
-): string | undefined {
+/** Outcome of `git merge-base a b`: the SHA, or why there is none.
+ * `no-common-ancestor` is git's exit 1; `error` is any other failure. */
+export type MergeBaseResult =
+  | { sha: string }
+  | { sha?: undefined; reason: "no-common-ancestor" | "error"; detail: string };
+
+/** The best common ancestor of two commits, or the reason there is none. */
+export function mergeBase(cwd: string, a: string, b: string): MergeBaseResult {
   const result = runGit(cwd, ["merge-base", a, b]);
-  if (result.error !== undefined || result.status !== 0) return undefined;
-  const sha = result.stdout.trim();
-  return sha === "" ? undefined : sha;
+  if (result.error !== undefined) {
+    return { reason: "error", detail: result.error };
+  }
+  if (result.status === 0) {
+    const sha = result.stdout.trim();
+    if (sha !== "") return { sha };
+    return { reason: "no-common-ancestor", detail: "" };
+  }
+  if (result.status === 1) {
+    return { reason: "no-common-ancestor", detail: result.stderr.trim() };
+  }
+  return {
+    reason: "error",
+    detail: `git exited ${String(result.status)}: ${result.stderr.trim()}`,
+  };
+}
+
+/** True when the repository at `cwd` is a shallow clone. */
+export function isShallowRepository(cwd: string): boolean {
+  const result = runGit(cwd, ["rev-parse", "--is-shallow-repository"]);
+  return (
+    result.error === undefined &&
+    result.status === 0 &&
+    result.stdout.trim() === "true"
+  );
 }
 
 /** `git diff --no-color -U0 base..head`: zero context lines, so every

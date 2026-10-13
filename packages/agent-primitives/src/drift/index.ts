@@ -3,6 +3,7 @@ import { findGitRoot } from "../probe/containment.js";
 import {
   diffText,
   grepIdentifier,
+  isShallowRepository,
   mergeBase,
   resolveCommit,
   showFile,
@@ -182,7 +183,7 @@ function classifySite(
 }
 
 /**
- * Given a git range (`base..head`), collects the identifiers whose
+ * Given a git range (merge-base(base, head)..head), collects the identifiers whose
  * declaration this range removed (see `parseDiff.ts`) and reports every
  * remaining mention of them, at `head`, in the repo's docs and source
  * comments (see `scan.ts`) - a doc or comment describing a removed
@@ -226,11 +227,19 @@ export async function drift(options: DriftOptions): Promise<DriftResult> {
   // after the branch point) reports the same removals as the SHA it
   // resolves to. A plain `base..head` diff would also count every change
   // the base side made since the branch point as a removal on the head side.
-  let diffBase = mergeBase(gitRoot, baseSha, headSha);
-  if (diffBase === undefined) {
+  let diffBase: string;
+  const mb = mergeBase(gitRoot, baseSha, headSha);
+  if (mb.sha !== undefined) {
+    diffBase = mb.sha;
+  } else {
     diffBase = baseSha;
+    const cause = isShallowRepository(gitRoot)
+      ? "shallow clone: the history needed to find a common ancestor may be missing, fetch more history"
+      : mb.reason === "no-common-ancestor"
+        ? "no common ancestor"
+        : `git merge-base failed: ${mb.detail}`;
     warnings.push(
-      `no merge-base between ${baseSha} and ${headSha}: diffing the two trees directly`,
+      `no merge-base between ${baseSha} and ${headSha} (${cause}): diffing the two trees directly`,
     );
   }
 

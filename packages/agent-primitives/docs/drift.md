@@ -37,7 +37,8 @@ same result as the SHA it resolves to, even when it moved after the
 branch point. (Earlier versions diffed the two trees directly, which
 reported every declaration the base side had added since the branch
 point as removed.) When the two share no history, the trees are diffed
-directly and a warning says so. The envelope carries `base` and `head`
+directly and a warning says so, naming a shallow clone as the likely cause
+when the repository is one (fetch more history, or `git fetch --unshallow`). The envelope carries `base` and `head`
 as given, plus `base_sha`, `head_sha` and `merge_base`, the commit the
 diff started from; it equals `base_sha` when `--base` is an ancestor of
 `--head`.
