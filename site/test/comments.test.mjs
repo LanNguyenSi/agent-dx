@@ -479,12 +479,14 @@ test('the closer search of a paragraph of unclosed openers runs once, not once p
   assert.ok(searches <= 10, `the render searched ${searches} times for -->`)
 })
 
-test('stripComments never scans text it has already scanned, whatever it searches with', (t) => {
+test('stripComments never rescans the text through exec or indexOf', (t) => {
   // The work of a scan is the span it reads, so linear total work means the
   // spans do not overlap: each search starts at or after where the previous
-  // one ended. Every regex route (exec, test, match, replace, search) goes
-  // through RegExp.prototype.exec, and the string route through indexOf, so
-  // these two spies see the searches however stripComments makes them. A
+  // one ended. The spies see regex searches of the full text (exec, and the
+  // test, match, replace and search calls that go through it) and indexOf
+  // searches of the text or a tail of it. A rescan through a slice and another
+  // primitive (search, match, split, includes) is not seen, so this pins the
+  // current implementation's routes rather than its complexity in general. A
   // search that finds nothing has read to the end of the text. Restarting a
   // lazy search at each opener that has no closer fails this, though its
   // result is the same.
