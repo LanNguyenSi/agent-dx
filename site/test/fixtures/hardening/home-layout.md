@@ -6,7 +6,7 @@ hero:
   tagline: '<svg onload=herotagline>'
 features:
   - title: '<img src=x onerror=featuretitle>'
-    details: '<script>featuredetails</script>'
+    details: '<iframe src=featuredetails></iframe>'
     icon: '<img src=x onerror=featureicon>'
   - title: Plain feature
     details: 'R&D <i>kept as text</i>'

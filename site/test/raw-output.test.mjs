@@ -5,7 +5,7 @@
 import test, { before } from 'node:test'
 import assert from 'node:assert/strict'
 import { createMarkdownRenderer, resolveConfig } from 'vitepress'
-import { allowedAttributes, allowedDirs, defuseMustache, escapeDescriptionMeta, escapeText, safeId, sanitizeFrontmatter, transformPageData } from '../.vitepress/raw-output.mjs'
+import { allowedAttributes, allowedDirs, allowedLayouts, defuseMustache, escapeDescriptionMeta, escapeText, safeId, safeImage, sanitizeFrontmatter, transformPageData } from '../.vitepress/raw-output.mjs'
 import { escapeText as siteEscapeText, markdownBase } from '../.vitepress/site-helpers.mjs'
 
 let md
@@ -327,10 +327,64 @@ test('values that cannot hold markup are kept as they are', () => {
   }
   const out = sanitizeFrontmatter(input)
   assert.deepEqual(out, input)
-  assert.equal(out.features[0].icon, icon)
+  assert.deepEqual(out.features[0].icon, icon)
   assert.equal(out.head, input.head, 'head stays the documented raw path')
   assert.deepEqual(sanitizeFrontmatter({}), {})
-  assert.deepEqual(sanitizeFrontmatter({ hero: 'text', features: 'text' }), { hero: 'text', features: 'text' })
+  assert.deepEqual(sanitizeFrontmatter({ hero: 'text' }), { hero: 'text' })
+})
+
+test('layout is limited to doc, home and page, and false', () => {
+  assert.deepEqual([...allowedLayouts].sort(), ['doc', 'home', 'page'])
+  for (const layout of ['doc', 'home', 'page', false]) assert.equal(sanitizeFrontmatter({ layout }).layout, layout)
+  for (const layout of ['svg onload=1//', 'img src=x onerror=1//', 'Content', 'VPHero', 'Home', ' home', '', 0, null, true, ['home'], { toString: () => 'home' }]) {
+    assert.equal('layout' in sanitizeFrontmatter({ layout }), false, JSON.stringify(layout))
+  }
+  assert.deepEqual(sanitizeFrontmatter({}), {})
+})
+
+test('features are kept as an array and dropped in any other shape', () => {
+  const item = { title: '<b>t</b>', details: '<i>d</i>', icon: '<u>i</u>' }
+  const escaped = { title: '&lt;b&gt;t&lt;/b&gt;', details: '&lt;i&gt;d&lt;/i&gt;', icon: '&lt;u&gt;i&lt;/u&gt;' }
+  assert.deepEqual(sanitizeFrontmatter({ features: [item] }).features, [escaped])
+  for (const features of [{ first: item }, { 0: item }, 'text', 5, true, null]) {
+    assert.equal('features' in sanitizeFrontmatter({ features }), false, JSON.stringify(features))
+  }
+})
+
+test('an image object keeps only the allowed keys with plain values', () => {
+  const image = safeImage({ src: '/a.png', alt: 'A', width: 10, height: '20', wrap: true, onerror: 'x()', style: 'x', class: 'c', is: 'script' })
+  assert.deepEqual(image, { src: '/a.png', alt: 'A', width: 10, height: '20', wrap: true })
+  assert.deepEqual(safeImage({ src: { toString: () => 'x' }, alt: ['a'], width: null, height: true, wrap: {} }), {})
+  assert.equal(safeImage('/a.png?x=1&y=2'), '/a.png?x=1&y=2', 'a source is an attribute value, it is not escaped twice')
+  for (const bad of [undefined, null, 5, true, ['/a.png'], () => 1]) assert.equal(safeImage(bad), undefined, String(bad))
+})
+
+test('a themed image keeps light and dark with the same rule, and nothing else', () => {
+  const themed = safeImage({ alt: 'A', light: { src: '/l.png', onerror: 'x()' }, dark: '/d.png', onload: 'x()', extra: { src: '/e.png' } })
+  assert.deepEqual(themed, { alt: 'A', light: { src: '/l.png' }, dark: '/d.png' })
+  const nested = safeImage({ light: { light: { src: '/n.png', onerror: 'x()' }, dark: 5 }, dark: [] })
+  assert.deepEqual(nested, { light: { light: { src: '/n.png' } } })
+  // The theme spreads an object with a src onto the image; light and dark would become attributes.
+  assert.deepEqual(safeImage({ src: '/a.png', light: '/l.png', dark: { src: '/d.png' } }), { src: '/a.png' })
+})
+
+test('hero.image and an icon object are limited, other hero and feature keys stay', () => {
+  const out = sanitizeFrontmatter({
+    hero: { name: 'N', image: { src: '/h.png', onerror: 'x()' }, actions: [{ text: 'a', link: '/x', target: '_self' }] },
+    features: [
+      { title: 'T', icon: { src: '/i.png', onerror: 'x()' }, link: '/y', linkText: 'more' },
+      { title: 'U', icon: { light: { src: '/l.png', onload: 'x()' }, dark: '/d.png', alt: 'u' } },
+      { title: 'V', icon: { onerror: 'x()' } },
+      { title: 'W', icon: ['<b>'] }
+    ]
+  })
+  assert.deepEqual(out.hero, { name: 'N', image: { src: '/h.png' }, actions: [{ text: 'a', link: '/x', target: '_self' }] })
+  assert.deepEqual(out.features[0], { title: 'T', icon: { src: '/i.png' }, link: '/y', linkText: 'more' })
+  assert.deepEqual(out.features[1], { title: 'U', icon: { alt: 'u', light: { src: '/l.png' }, dark: '/d.png' } })
+  assert.deepEqual(out.features[2], { title: 'V', icon: {} })
+  assert.deepEqual(out.features[3], { title: 'W', icon: '&lt;b&gt;' })
+  assert.deepEqual(sanitizeFrontmatter({ hero: { image: 5 } }).hero, {})
+  assert.deepEqual(sanitizeFrontmatter({ hero: { image: '/h.png?a=1&b=2' } }).hero, { image: '/h.png?a=1&b=2' })
 })
 
 test('sanitising leaves its input alone and transformPageData returns only the frontmatter', () => {

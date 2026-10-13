@@ -73,7 +73,8 @@ export default defineConfig({
   lastUpdated: false,
   // A page description is written into a meta tag as typed; this escapes it.
   transformHtml: escapeDescriptionMeta,
-  // Frontmatter the default theme writes as HTML is escaped or limited; `head` stays raw.
+  // Frontmatter the default theme turns into markup is escaped or limited. `head` and
+  // the link fields (href, target, rel) stay as typed, see raw-output.mjs.
   transformPageData,
   // Raw HTML stays off so that placeholders like <version> render as text; HTML
   // comments in the playbooks are hidden by the htmlComments rules in markdownBase.

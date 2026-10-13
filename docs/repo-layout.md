@@ -63,15 +63,20 @@ without a message, and an `id` that holds anything but letters, digits, `_` and
 always renders as text and is never evaluated, in prose, headings, tab titles
 and the contents list alike; a fenced block shows it as written.
 Frontmatter is mostly not trusted as HTML. `description` is escaped in the
-meta tag. `dir` is kept only when it is `ltr`, `rtl` or `auto`, and any other
-value is dropped. The `prev` and `next` link text (as a string or as
-`{ text, link }`) and the home layout's `hero` `name`, `text` and `tagline` and
-`features` `title`, `details` and a string `icon` are HTML-escaped, so they
-show as written; an entity reference such as `&copy;` stays one. The one field
-that stays raw is `head`: its entries are written into the page head as
-VitePress documents, so only trusted authors should write them. Links in
-frontmatter (`link` in `prev`, `next`, `hero.actions` and `features`) are not
-checked.
+meta tag. `dir` is kept only when it is `ltr`, `rtl` or `auto`, and `layout`
+only when it is `doc`, `home`, `page` or `false`; any other value is dropped.
+The `prev` and `next` link text (as a string or as `{ text, link }`) and the
+home layout's `hero` `name`, `text` and `tagline` and `features` `title`,
+`details` and a string `icon` are HTML-escaped, so they show as written; an
+entity reference such as `&copy;` stays one. `features` must be a list (any
+other shape is dropped), and an image given as an object (`hero.image`, an
+`icon`, and their `light` and `dark` sides) keeps only `src`, `alt`, `width`,
+`height` and `wrap`, so it cannot set an event handler or another attribute on
+the image. Two kinds of field stay as typed, and only trusted authors should
+write them: `head`, whose entries are written into the page head as VitePress
+documents, and the link fields (`link` in `prev`, `next`, `hero.actions` and
+`features`, with `target` and `rel`), which the theme writes into `href`,
+`target` and `rel` without checking the scheme, so a `javascript:` link works.
 
 ```bash
 cd site && npm ci && npm run build   # output in site/.vitepress/dist

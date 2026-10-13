@@ -69,7 +69,22 @@ before(async () => {
   html = fs.readFileSync(path.join(out, 'index.html'), 'utf8')
   sep = fs.readFileSync(path.join(out, `${separatorsPage}.html`), 'utf8')
   pages = Object.fromEntries(
-    ['dir-breakout', 'dir-rtl', 'dir-steer', 'nav/two', 'nav/three', 'home-layout'].map((name) => [
+    [
+      'dir-breakout',
+      'dir-rtl',
+      'dir-steer',
+      'nav/two',
+      'nav/three',
+      'home-layout',
+      'features-map',
+      'image-attrs',
+      'layout-tag',
+      'layout-svg',
+      'layout-page',
+      'layout-false',
+      'steer-fields',
+      'trusted-raw'
+    ].map((name) => [
       name,
       fs.readFileSync(path.join(out, `${name}.html`), 'utf8')
     ])
@@ -159,18 +174,54 @@ test('a page description is escaped in the meta tag and plain text in the page d
 // Frontmatter fields the default theme writes as HTML
 
 const htmlTag = (page) => /<html [^>]*>/.exec(page)?.[0]
-// The rendered page without the head and the script tags VitePress adds.
+
+// The rendered page between the app container and the script VitePress adds
+// after it. It holds the whole theme: navigation, content and the footer of a
+// doc page (which sits after </main>, so a slice of <main> would miss it).
 const app = (page) => {
   const from = page.indexOf('id="app"')
-  assert.ok(from > 0)
-  return page.slice(from, page.indexOf('<script', from))
+  const to = page.lastIndexOf('<script>window.__VP_HASH_MAP__')
+  assert.ok(from > 0 && to > from, `app region not found: ${from} ${to}`)
+  return page.slice(from, to)
+}
+
+// Every tag the default theme writes on these pages. A tag outside this set
+// is something the page author made, not the theme.
+const themeTags = new Set(['div', 'span', 'a', 'header', 'button', 'p', 'nav', 'ul', 'main', 'h1', 'footer', 'article', 'h2', 'img', 'code', 'pre', 'input', 'label', 'li', 'aside', 'section'])
+const imgAttributes = new Set(['class', 'src', 'alt', 'width', 'height', 'wrap'])
+const TAG = /<([a-zA-Z][\w-]*)((?:\s+[^\s=>/"'`]+(?:=(?:"[^"]*"|'[^']*'|[^\s>]+))?)*)\s*\/?>/g
+const ATTRIBUTE = /([^\s=>/"'`]+)(?:=(?:"[^"]*"|'[^']*'|[^\s>]+))?/g
+const tagsOf = (region) => {
+  const tags = [...region.matchAll(TAG)].map((m) => ({ name: m[1], attributes: [...m[2].matchAll(ATTRIBUTE)].map((a) => a[1]) }))
+  // Every "<" that opens a tag was read as one, so no tag is left unchecked.
+  assert.equal(region.match(/<[a-zA-Z]/g).length, tags.length, 'a tag was not parsed')
+  return tags
+}
+
+// The region holds the expected component, only theme tags, no event handler
+// and no attribute on an image beyond the ones the site allows.
+const assertNoLiveMarkup = (region, components) => {
+  assert.ok(region.length > 500, `region too small: ${region.length}`)
+  for (const component of components) assert.match(region, new RegExp(`class="[^"]*\\b${component}\\b`), `${component} not rendered`)
+  for (const { name, attributes } of tagsOf(region)) {
+    assert.ok(themeTags.has(name), `tag <${name}> is not a theme tag`)
+    assert.deepEqual(attributes.filter((a) => /^on/i.test(a)), [], `<${name}> has an event handler`)
+    if (name === 'img') {
+      const extra = attributes.filter((a) => !imgAttributes.has(a) && !a.startsWith('data-v-'))
+      assert.deepEqual(extra, [], `<img> has attribute ${extra}`)
+    }
+  }
+}
+// The strings an attack would need are not in the whole page, head included.
+const assertNoRaw = (page, raw) => {
+  for (const text of raw) assert.ok(!page.includes(text), `${text} is in the page`)
 }
 
 test('a frontmatter dir with a breakout payload is dropped', () => {
   const page = pages['dir-breakout']
   assert.match(htmlTag(page), /^<html lang="[^"]+" dir="ltr">$/)
-  assert.ok(!page.includes('onerror=dirbreakout'), htmlTag(page))
-  assert.deepEqual(liveTags(page), [])
+  assertNoRaw(page, ['onerror=dirbreakout'])
+  assertNoLiveMarkup(app(page), ['VPDoc'])
 })
 
 test('a frontmatter dir of rtl is kept', () => {
@@ -185,28 +236,100 @@ test('a dir carrying the description tag cannot steer the description escaping',
   assert.ok(!page.includes('content="Steer <b>'), head)
 })
 
+test('no other frontmatter field can steer the description escaping', () => {
+  const page = pages['steer-fields']
+  const head = page.slice(0, page.indexOf('</head>'))
+  assert.match(htmlTag(page), /dir="ltr">$/)
+  assert.equal(head.split('<meta name="description"').length, 2, head)
+  assert.ok(head.includes('<meta name="description" content="Steer fields &lt;b&gt;y&lt;/b&gt; &amp; more">'), head)
+  assertNoRaw(page, ['content="Steer fields <b>', '<meta name="description" content="Steer fields <b>'])
+  assertNoLiveMarkup(app(page), ['VPDoc'])
+  assert.equal(pageData('steer-fields').frontmatter.layout, undefined)
+})
+
 test('previous and next link text from frontmatter renders as text, as a string and as an object', () => {
-  const two = app(pages['nav/two'])
-  const three = app(pages['nav/three'])
-  for (const page of [two, three]) assert.deepEqual(liveTags(page), [], page)
-  assert.match(two, /<span class="title"[^>]*>&lt;img src=x onerror=prevstring&gt;<\/span>/)
-  assert.match(two, /<span class="title"[^>]*>Next &lt;i&gt;nextstring&lt;\/i&gt; &copy; R&amp;D<\/span>/)
-  assert.match(three, /<span class="title"[^>]*>&lt;b&gt;prevobject&lt;\/b&gt;<\/span>/)
-  assert.match(three, /<span class="title"[^>]*>&lt;svg onload=nextobject&gt;<\/span>/)
-  assert.match(three, /href="\/nav\/one(?:\.html)?"/)
+  const two = pages['nav/two']
+  const three = pages['nav/three']
+  for (const page of [two, three]) assertNoLiveMarkup(app(page), ['VPDocFooter', 'pager-link'])
+  assertNoRaw(two + three, ['<img src=x onerror=prevstring>', '<i>nextstring</i>', '<b>prevobject</b>', '<svg onload=nextobject>'])
+  const twoApp = app(two)
+  const threeApp = app(three)
+  assert.match(twoApp, /<span class="title"[^>]*>&lt;img src=x onerror=prevstring&gt;<\/span>/)
+  assert.match(twoApp, /<span class="title"[^>]*>Next &lt;i&gt;nextstring&lt;\/i&gt; &copy; R&amp;D<\/span>/)
+  assert.match(threeApp, /<span class="title"[^>]*>&lt;b&gt;prevobject&lt;\/b&gt;<\/span>/)
+  assert.match(threeApp, /<span class="title"[^>]*>&lt;svg onload=nextobject&gt;<\/span>/)
+  assert.match(threeApp, /href="\/nav\/one(?:\.html)?"/)
 })
 
 test('home hero and features from frontmatter render as text', () => {
-  const home = app(pages['home-layout'])
-  assert.deepEqual(liveTags(home), [], home)
-  assert.doesNotMatch(home, /<script/)
+  const page = pages['home-layout']
+  const home = app(page)
+  assertNoLiveMarkup(home, ['VPHero', 'VPFeatures', 'VPFeature'])
+  assertNoRaw(page, ['<img src=x onerror=heroname>', '<b>herotext</b>', '<svg onload=herotagline>', 'onerror=featuretitle>', '<iframe src=featuredetails>', 'onerror=featureicon>', '<i>kept as text</i>'])
   assert.match(home, /<span class="name clip"[^>]*>&lt;img src=x onerror=heroname&gt;<\/span>/)
   assert.match(home, /<span class="text"[^>]*>&lt;b&gt;herotext&lt;\/b&gt; &copy;<\/span>/)
   assert.match(home, /<p class="tagline"[^>]*>&lt;svg onload=herotagline&gt;<\/p>/)
   assert.match(home, /<h2 class="title"[^>]*>&lt;img src=x onerror=featuretitle&gt;<\/h2>/)
-  assert.match(home, /<p class="details"[^>]*>&lt;script&gt;featuredetails&lt;\/script&gt;<\/p>/)
+  assert.match(home, /<p class="details"[^>]*>&lt;iframe src=featuredetails&gt;&lt;\/iframe&gt;<\/p>/)
   assert.match(home, /<div class="icon"[^>]*>&lt;img src=x onerror=featureicon&gt;<\/div>/)
   assert.match(home, /<p class="details"[^>]*>R&amp;D &lt;i&gt;kept as text&lt;\/i&gt;<\/p>/)
+})
+
+test('features given as a mapping are dropped, not rendered through the theme', () => {
+  const page = pages['features-map']
+  const home = app(page)
+  assertNoLiveMarkup(home, ['VPHome'])
+  assert.doesNotMatch(home, /VPFeatures/)
+  assertNoRaw(page, ['mapfirst', 'mapsecond'])
+  assert.equal(pageData('features-map').frontmatter.features, undefined)
+})
+
+test('image objects keep no attribute beyond the allowed ones, in the hero, as an icon and as a themed icon', () => {
+  const page = pages['image-attrs']
+  const home = app(page)
+  assertNoLiveMarkup(home, ['VPHero', 'VPFeatures', 'VPImage'])
+  assertNoRaw(page, ['onerror', 'onload', 'heroimage', 'iconobject', 'iconlight', 'icondark', 'iconwrap'])
+  const images = tagsOf(home).filter((t) => t.name === 'img')
+  assert.equal(images.length, 5, JSON.stringify(images))
+  assert.match(home, /<img class="VPImage image-src" src="\/missing-hero\.png" alt="Hero"/)
+  assert.match(home, /<img class="VPImage" src="\/missing-icon\.png" height="48" width="48" alt/)
+  assert.match(home, /src="\/missing-light\.png"/)
+  assert.match(home, /src="\/missing-dark\.png"/)
+  assert.match(home, /<div class="icon"[^>]*><!--\[--><img class="VPImage" src="\/missing-wrap\.png" width="24" wrap="true"/)
+  const data = pageData('image-attrs').frontmatter
+  assert.deepEqual(data.hero.image, { src: '/missing-hero.png', alt: 'Hero' })
+  assert.deepEqual(data.features[0].icon, { src: '/missing-icon.png' })
+  assert.deepEqual(data.features[1].icon, { light: { src: '/missing-light.png' }, dark: { src: '/missing-dark.png' } })
+  assert.deepEqual(data.features[2].icon, { src: '/missing-wrap.png', wrap: true, width: 24 })
+})
+
+test('a layout that is not doc, home or page is dropped, so it cannot become a tag name', () => {
+  for (const [name, marker] of [['layout-tag', 'layouttag'], ['layout-svg', 'layoutsvg']]) {
+    const page = pages[name]
+    assertNoRaw(page, [marker, 'onload=', 'onerror='])
+    assertNoLiveMarkup(app(page), ['VPDoc', 'VPDocFooter'])
+    assert.equal(pageData(name).frontmatter.layout, undefined)
+  }
+  assert.match(app(pages['layout-page']), /class="VPPage"/)
+  assert.equal(pageData('layout-page').frontmatter.layout, 'page')
+})
+
+test('a layout of false is kept, so the page is written without the theme layout', () => {
+  const page = app(pages['layout-false'])
+  assert.doesNotMatch(page, /class="Layout"/)
+  assert.match(page, /<h1 id="layout-false"[^>]*>Layout false/)
+  assert.equal(pageData('layout-false').frontmatter.layout, false)
+})
+
+test('head entries and link fields stay as typed, the two raw paths the docs name', () => {
+  const page = pages['trusted-raw']
+  const head = page.slice(0, page.indexOf('</head>'))
+  assert.ok(head.includes('<meta name="trusted-head" content="kept">'), head)
+  assert.ok(head.includes('<script>window.trustedhead=1;</script>'), head)
+  const home = app(page)
+  assertNoLiveMarkup(home, ['VPHero', 'VPFeatures'])
+  assert.match(home, /<a class="VPLink link[^"]*" href="javascript:featurelink"[^>]* rel="trustedrel"/)
+  assert.match(home, /<a class="VPButton medium brand" href="javascript:heroaction" target="_self"/)
 })
 
 test('the page data the client hydrates from holds the same escaped frontmatter', () => {

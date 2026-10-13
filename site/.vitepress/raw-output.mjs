@@ -31,8 +31,9 @@
 // Attribute names from markdown-it-attrs are limited by markdownBase.attrs
 // (see allowedAttributes below), not here. The description of a page is
 // escaped by escapeDescriptionMeta, which the site config passes to VitePress
-// as transformHtml. The frontmatter fields the theme writes as HTML are handled
-// by sanitizeFrontmatter, passed as transformPageData.
+// as transformHtml. The frontmatter fields the theme turns into markup (HTML,
+// an attribute, a tag name) are handled by sanitizeFrontmatter, passed as
+// transformPageData.
 
 // Attributes a "{...}" block may set. Event handlers and everything else are
 // dropped by markdown-it-attrs. The shipped playbooks use none; "{#id}" and
@@ -68,39 +69,94 @@ export function escapeDescriptionMeta(html, _file, { description }) {
   return html.replaceAll(raw, () => escaped)
 }
 
-// Frontmatter fields the default theme writes as HTML (v-html), and what
-// transformPageData does to each. `head` is VitePress's documented raw
-// injection and is left alone on purpose.
+// Frontmatter the default theme turns into markup, and what transformPageData
+// does to each field. The list comes from reading every place the installed
+// theme and the page renderer use a frontmatter value; the inventory covers
+// the whole theme, not only the fields below.
 //
 //   - dir: written unescaped into <html dir="...">. Only ltr, rtl and auto are
 //     kept; any other value is dropped, so the page falls back to the site's
 //     direction.
-//   - prev and next: the footer link text, as a string or as { text, link }.
-//   - hero name, text and tagline; features title, details and icon (a string
-//     icon; an icon given as an image object is not HTML).
+//   - layout: VitePress renders any other value than doc, home and page as a
+//     component whose name is the value, and the server renderer writes an
+//     unknown name as a tag name as typed. Only those three and false (no
+//     layout) are kept; any other value is dropped, so the page is a doc.
+//   - prev and next: the footer link text, as a string or as { text, link },
+//     written with v-html.
+//   - hero name, text and tagline; features title, details and a string icon,
+//     all written with v-html.
+//   - features: an array. Any other shape (a YAML mapping, which Vue also
+//     iterates) is dropped, so a field cannot skip the item checks.
+//   - hero.image and an icon given as an object: the theme spreads the whole
+//     object onto an <img>, so every key becomes an attribute, an event
+//     handler included. Only src, alt, width, height and wrap with plain values
+//     are kept, and light and dark (themed images) with the same rule.
 //
 // For the text fields the value is HTML-escaped, so it shows as written (an
 // entity reference stays one). A number, a boolean or an empty value cannot
 // hold markup and is kept as it is, since `prev: false` hides a link.
+//
+// What stays as typed: `head` (VitePress's documented way to add tags) and
+// the link fields (prev and next link, hero action and feature link, target
+// and rel), which the theme writes into href, target and rel attributes
+// without checking the scheme. These are author-trusted, like head.
 export const allowedDirs = new Set(['ltr', 'rtl', 'auto'])
+export const allowedLayouts = new Set(['doc', 'home', 'page'])
 
 const asText = (value) =>
   value == null || typeof value === 'number' || typeof value === 'boolean' ? value : escapeText(String(value))
 const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+const isPlain = (value) => typeof value === 'string' || typeof value === 'number'
 const withText = (value, keys) =>
   isRecord(value) ? { ...value, ...Object.fromEntries(keys.filter((k) => k in value).map((k) => [k, asText(value[k])])) } : value
 const pageLink = (value) => (isRecord(value) ? withText(value, ['text']) : asText(value))
 
+// An image as the theme reads it: a string (a source), or an object. Returns
+// undefined for anything else, which the caller drops. The theme spreads an
+// object with a src onto an <img>, so only the keys below survive; an object
+// without a src is a themed image, and its light and dark sides get the same
+// treatment. A source is an attribute value, so a string stays as typed.
+export function safeImage(image) {
+  if (typeof image === 'string') return image
+  if (!isRecord(image)) return undefined
+  const safe = {}
+  for (const key of ['src', 'alt', 'width', 'height']) if (isPlain(image[key])) safe[key] = image[key]
+  if (isPlain(image.wrap) || typeof image.wrap === 'boolean') safe.wrap = image.wrap
+  if (!('src' in safe)) {
+    for (const key of ['light', 'dark']) {
+      const side = safeImage(image[key])
+      if (side !== undefined) safe[key] = side
+    }
+  }
+  return safe
+}
+
+const sanitizeFeature = (feature) => {
+  const item = withText(feature, ['title', 'details'])
+  if (!isRecord(item) || !('icon' in item)) return item
+  const icon = isRecord(item.icon) ? safeImage(item.icon) : asText(item.icon)
+  const { icon: _drop, ...rest } = item
+  return icon === undefined ? rest : { ...rest, icon }
+}
+
 export function sanitizeFrontmatter(frontmatter) {
   const safe = { ...frontmatter }
   if (!allowedDirs.has(safe.dir)) delete safe.dir
+  if ('layout' in safe && safe.layout !== false && !allowedLayouts.has(safe.layout)) delete safe.layout
   for (const key of ['prev', 'next']) if (key in safe) safe[key] = pageLink(safe[key])
-  if ('hero' in safe) safe.hero = withText(safe.hero, ['name', 'text', 'tagline'])
-  if (Array.isArray(safe.features)) {
-    safe.features = safe.features.map((feature) => {
-      const item = withText(feature, ['title', 'details'])
-      return isRecord(item) && 'icon' in item && !isRecord(item.icon) ? { ...item, icon: asText(item.icon) } : item
-    })
+  if ('hero' in safe) {
+    const hero = withText(safe.hero, ['name', 'text', 'tagline'])
+    if (isRecord(hero) && 'image' in hero) {
+      const { image: _drop, ...rest } = hero
+      const image = safeImage(hero.image)
+      safe.hero = image === undefined ? rest : { ...rest, image }
+    } else {
+      safe.hero = hero
+    }
+  }
+  if ('features' in safe) {
+    if (Array.isArray(safe.features)) safe.features = safe.features.map(sanitizeFeature)
+    else delete safe.features
   }
   return safe
 }
