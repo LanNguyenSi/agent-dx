@@ -2466,6 +2466,34 @@ describe("remove --delete-branch warns about a branch it deletes unmerged (#488)
     ).toBe(true);
   });
 
+  it("does not warn when the branch deletion itself fails", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    const failingBranchDelete = gitWrapper(
+      f,
+      "git-no-branch-delete",
+      `prev=
+for a in "$@"; do
+  if [ "$prev" = branch ] && [ "$a" = -D ]; then
+    echo "error: injected branch -D failure" >&2
+    exit 1
+  fi
+  prev=$a
+done`,
+    );
+    const r = await cli(
+      f.work,
+      ["remove", wt, "--delete-branch", "--base", "origin/main"],
+      { PATH: `${failingBranchDelete}${path.delimiter}${ghStub(f, "[]")}` },
+    );
+    expect(r.json.merged).toMatchObject({ merged: "no" });
+    expect(r.json.branch.deleted).toBe(false);
+    expect(r.json.branch.reason).toContain("injected branch -D failure");
+    expect(
+      r.json.warnings.some((w: string) => w.includes("deleted branch")),
+    ).toBe(false);
+  });
+
   it("does not warn when the branch is kept", async () => {
     const f = makeFixture();
     const { wt } = makeHotfix(f);
