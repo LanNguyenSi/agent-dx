@@ -356,6 +356,18 @@ export async function removeWorktree(
               ? `deleted ${entry.branch}`
               : `git branch -D ${entry.branch} failed`,
       };
+      if (ok && merged !== null && o.requireMerged !== true) {
+        const where = base?.label ?? "the default branch";
+        if (merged.merged === "no") {
+          warnings.push(
+            `deleted branch ${entry.branch}, which is not merged into ${where} (${merged.via}: ${merged.reason}); pass --require-merged to refuse instead`,
+          );
+        } else if (merged.merged === "unknown") {
+          warnings.push(
+            `deleted branch ${entry.branch}, but whether it is merged into ${where} is unknown (${merged.reason}); pass --require-merged to refuse instead`,
+          );
+        }
+      }
     }
   }
 

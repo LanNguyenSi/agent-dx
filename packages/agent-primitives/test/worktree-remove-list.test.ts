@@ -2372,3 +2372,88 @@ describe("resolveDefaultBase", () => {
     expect(resolveDefaultBase(f.repo)).toBeUndefined();
   });
 });
+
+describe("remove --delete-branch warns about a branch it deletes unmerged (#488)", () => {
+  const warnsUnmerged = (warnings: string[]): boolean =>
+    warnings.some(
+      (w) =>
+        w.includes("deleted branch hotfix/one") &&
+        w.includes("pass --require-merged to refuse instead"),
+    );
+
+  it("warns for merged: no against --base and still deletes", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    const r = await cli(
+      f.work,
+      ["remove", wt, "--delete-branch", "--base", "origin/main"],
+      { PATH: ghStub(f, "[]") },
+    );
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.status).toBe("ok");
+    expect(r.json.merged).toMatchObject({ merged: "no" });
+    expect(r.json.branch.deleted).toBe(true);
+    expect(warnsUnmerged(r.json.warnings)).toBe(true);
+    // An explicit --base is named by the full remote-tracking ref it
+    // measures against, which is what the warning shows.
+    expect(
+      r.json.warnings.some((w: string) =>
+        w.includes("not merged into refs/remotes/origin/main"),
+      ),
+    ).toBe(true);
+  });
+
+  it("warns for merged: no against the default base", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    const r = await cli(f.work, ["remove", wt, "--delete-branch"], {
+      PATH: ghStub(f, "[]"),
+    });
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.merged).toMatchObject({ merged: "no" });
+    expect(r.json.branch.deleted).toBe(true);
+    expect(warnsUnmerged(r.json.warnings)).toBe(true);
+  });
+
+  it("warns for merged: unknown", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    const r = await cli(
+      f.work,
+      ["remove", wt, "--delete-branch", "--base", "origin/main"],
+      { PATH: ghStub(f, null) },
+    );
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.merged).toMatchObject({ merged: "unknown" });
+    expect(r.json.branch.deleted).toBe(true);
+    expect(
+      r.json.warnings.some(
+        (w: string) =>
+          w.includes("deleted branch hotfix/one") && w.includes("is unknown"),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not warn for a merged branch", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeHotfix(f);
+    git(f.repo, ["push", "-q", "origin", `${sha}:refs/heads/main`]);
+    git(f.repo, ["fetch", "-q", "origin"]);
+    const r = await cli(f.work, ["remove", wt, "--delete-branch"]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.merged).toMatchObject({ merged: "yes" });
+    expect(r.json.branch.deleted).toBe(true);
+    expect(warnsUnmerged(r.json.warnings)).toBe(false);
+  });
+
+  it("does not warn when the branch is kept", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    const r = await cli(f.work, ["remove", wt], { PATH: ghStub(f, "[]") });
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.branch.deleted).toBe(false);
+    expect(
+      r.json.warnings.some((w: string) => w.includes("deleted branch")),
+    ).toBe(false);
+  });
+});

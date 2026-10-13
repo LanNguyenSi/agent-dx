@@ -197,7 +197,7 @@ The usual [envelope](output-shape.md) with `command: "worktree remove"`, plus:
 | `merged` | The merge verdict, or `null` when neither `--require-merged` nor `--delete-branch` asked for one: `merged` `yes`/`no`/`unknown`, `via` `ancestry`/`gh`/`none`, and a `reason`. |
 | `branch` | `deleted` and the `reason` (git's own message, or why the branch was kept). |
 | `pruned` | Whether `git worktree prune` ran and succeeded afterwards. |
-| `warnings` | What did not work but could not stop the removal (a link that could not be unlinked, a failed prune), and the commits of a merged branch that were not counted as unpushed. |
+| `warnings` | What did not work but could not stop the removal (a link that could not be unlinked, a failed prune), and the commits of a merged branch that were not counted as unpushed. Also, when --delete-branch deletes a branch whose merge verdict is no or unknown and --require-merged was not given, a warning names the branch, the base and the verdict, since the deletion itself is not refused (the unpushed check still guards the commits). |
 
 ### Refusals
 
