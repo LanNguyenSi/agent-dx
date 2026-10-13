@@ -24,16 +24,23 @@ export function containmentRoot(cwd: string): string {
   return findGitRoot(cwd) ?? path.resolve(cwd);
 }
 
+/** Whether a `path.relative(root, target)` result stays inside the root:
+ * `""` (the root itself) or a path that neither is `..`, nor starts with
+ * `..` plus the separator, nor is absolute. A name that merely starts
+ * with two dots (`..foo`) is inside. */
+export function isRelContained(rel: string): boolean {
+  return (
+    rel === "" ||
+    (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel))
+  );
+}
+
 /** True when `absTarget` resolves to `root` itself or a path underneath
  * it. Both inputs must already be absolute, resolved paths. Only a `..`
  * path component leaves the root: an entry whose name merely starts with
  * two dots (`..foo`) is inside it. */
 export function isPathContained(root: string, absTarget: string): boolean {
-  const rel = path.relative(root, absTarget);
-  return (
-    rel === "" ||
-    (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel))
-  );
+  return isRelContained(path.relative(root, absTarget));
 }
 
 /**

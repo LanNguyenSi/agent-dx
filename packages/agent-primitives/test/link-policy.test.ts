@@ -123,6 +123,16 @@ describe("linkRelPath: containment is judged on where a candidate SITS", () => {
 
     expect(linkRelPath(root, root)).toBe("");
   });
+
+  it("a directory named ..foo directly under the root, and one nested in it, are inside", () => {
+    const root = makeTmpDir();
+    fs.mkdirSync(path.join(root, "..foo", "x"), { recursive: true });
+    expect(linkRelPath(path.join(root, "..foo"), root)).toBe("..foo");
+    expect(linkRelPath(path.join(root, "..foo", "x"), root)).toBe(
+      path.join("..foo", "x"),
+    );
+    expect(linkRelPath(path.join(root, "..", "x"), root)).toBeUndefined();
+  });
 });
 
 describe("planLinks", () => {

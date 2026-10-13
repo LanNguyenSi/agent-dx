@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { isPidAlive } from "../lock.js";
 import {
   isPathContained,
+  isRelContained,
   resolveDeepestExisting,
   resolveLinkSourceTarget,
 } from "./containment.js";
@@ -585,6 +586,20 @@ function walkAutoLinkDirs(root: string): {
   }
   walk(root, 0);
   return { nodeModules, composer };
+}
+
+/**
+ * The root-relative form of every written path that sits inside the root;
+ * a path outside the root cannot be shadowed by an in-root link and is
+ * left out. A directory merely NAMED `..foo` is inside the root.
+ */
+export function writtenRelPathsInRoot(
+  rootReal: string,
+  writtenPaths: readonly string[],
+): string[] {
+  return writtenPaths
+    .map((written) => path.relative(rootReal, written))
+    .filter((rel) => isRelContained(rel));
 }
 
 /** Every `node_modules` directory or directory symlink `walkAutoLinkDirs`
@@ -1411,9 +1426,7 @@ export async function beginWorktree(
     resolveDeepestExisting(path.resolve(cwd)),
   ]
     .map((p) => path.relative(rootReal, p))
-    .filter(
-      (rel) => rel !== "" && !rel.startsWith("..") && !path.isAbsolute(rel),
-    );
+    .filter((rel) => rel !== "" && isRelContained(rel));
   // The SOURCE tree's own spelling of an in-root path, the mirror of
   // `canonicalRelPath` above: `canonicalDestRelPath` is anchored at
   // whichever directory it is given, and the tracked-TARGET half of rule
@@ -1815,9 +1828,7 @@ export async function beginWorktree(
     resolveDeepestExisting(path.resolve(cwd)),
     ...opts.mutatedPaths,
   ];
-  for (const written of writtenPaths) {
-    const rel = path.relative(rootReal, written);
-    if (rel.startsWith("..") || path.isAbsolute(rel)) continue;
+  for (const rel of writtenRelPathsInRoot(rootReal, writtenPaths)) {
     const resolved = resolveDeepestExisting(path.join(worktreePath, rel));
     if (isPathContained(wtReal, resolved)) continue;
     const through = created.find((c) =>
