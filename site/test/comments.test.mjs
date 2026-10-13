@@ -798,11 +798,16 @@ test('a quote that becomes an alert still hides a comment that closes after a fe
   }
 })
 
-test('text rendered inline with a blank line before a closer on a fence line keeps its opener', () => {
+test('text rendered inline with blank lines finds the line of a closer relative to its fences', () => {
   // Inline rendering takes the whole text as one paragraph, so it can hold a
   // blank line. The closer is on the line a fence opens on.
   const text = 'a <!-- x\n\nb\n``` y --> z\nc\n```'
   const out = md.renderInline(text, { relativePath: 'fixture.md' })
   assert.match(out, /&lt;!-- x/)
   assert.match(out, /y --&gt; z/)
+  // A blank line after the closer's line, which lies just before a fence: the
+  // fence starts on the line after the closer, so a miscount of the lines
+  // that follow would put the closer in it.
+  const closed = md.renderInline('a <!-- x\nb --> y\n```\nc\n\nd\n```', { relativePath: 'fixture.md' })
+  assert.ok(!closed.includes('x') && !closed.includes('&lt;!--'), closed)
 })
