@@ -339,3 +339,42 @@ test('the page data the client hydrates from holds the same escaped frontmatter'
   assert.equal(pageData('dir-breakout').frontmatter.dir, undefined)
   assert.equal(pageData('nav_three').frontmatter.prev.link, '/nav/one')
 })
+
+// A page whose frontmatter opens with a JavaScript block must fail the build
+// without running the block; a YAML page in the same kind of site builds. The
+// site is written next to the fixture, so that it resolves the same packages.
+test('a build refuses JavaScript frontmatter and does not run it, a YAML page builds', async () => {
+  const marker = 'agentDxBuildEvaluated'
+  delete globalThis[marker]
+  const cases = [
+    ['js', 'js', false],
+    ['javascript', 'javascript', false],
+    ['yaml', '', true]
+  ]
+  for (const [label, lang, ok] of cases) {
+    const dir = path.join(root, '..', `js-frontmatter-${label}-${process.pid}`)
+    const outDir = path.join(work, `out-${label}`)
+    fs.mkdirSync(path.join(dir, '.vitepress'), { recursive: true })
+    try {
+      fs.writeFileSync(
+        path.join(dir, '.vitepress', 'config.mjs'),
+        [
+          "import { markdownBase } from '../../../../.vitepress/site-helpers.mjs'",
+          `export default { title: 'js frontmatter', markdown: markdownBase, lastUpdated: false, cacheDir: ${JSON.stringify(path.join(work, `cache-${label}`))} }`,
+          ''
+        ].join('\n')
+      )
+      const block = ok ? 'title: Plain\n' : `{ title: (globalThis.${marker} = '${label}', 'Evaluated') }\n`
+      fs.writeFileSync(path.join(dir, 'index.md'), `---${lang}\n${block}---\n\n# Page\n`)
+      if (ok) {
+        await build(dir, { outDir })
+        assert.match(fs.readFileSync(path.join(outDir, 'index.html'), 'utf8'), /<title>Plain \| js frontmatter<\/title>/)
+      } else {
+        await assert.rejects(build(dir, { outDir }), /JavaScript frontmatter is not supported/, label)
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  }
+  assert.equal(globalThis[marker], undefined)
+})

@@ -397,3 +397,63 @@ test('sanitising leaves its input alone and transformPageData returns only the f
   assert.deepEqual(frontmatter, { dir: 'x', prev: '<b>', hero: { name: '<b>' } })
   assert.equal(out.frontmatter.hero.name, '&lt;b&gt;')
 })
+
+test('a date written in YAML is an ISO string in text fields and is not a record', () => {
+  const day = new Date('2024-05-01')
+  const out = sanitizeFrontmatter({
+    hero: { name: day, text: new Date('2024-05-01T10:20:30Z') },
+    prev: day,
+    next: { text: day, link: '/n' },
+    features: [{ title: day, details: day, icon: day }]
+  })
+  assert.equal(out.hero.name, '2024-05-01T00:00:00.000Z')
+  assert.equal(out.hero.text, '2024-05-01T10:20:30.000Z')
+  assert.equal(out.prev, '2024-05-01T00:00:00.000Z')
+  assert.deepEqual(out.next, { text: '2024-05-01T00:00:00.000Z', link: '/n' })
+  assert.deepEqual(out.features, [{ title: '2024-05-01T00:00:00.000Z', details: '2024-05-01T00:00:00.000Z', icon: '2024-05-01T00:00:00.000Z' }])
+  assert.equal(sanitizeFrontmatter({ prev: new Date(NaN) }).prev, 'Invalid Date')
+  // The text does not depend on the time zone of the machine that builds.
+  const saved = process.env.TZ
+  try {
+    for (const tz of ['Pacific/Auckland', 'America/Los_Angeles']) {
+      process.env.TZ = tz
+      assert.equal(sanitizeFrontmatter({ prev: day }).prev, '2024-05-01T00:00:00.000Z', tz)
+    }
+  } finally {
+    if (saved === undefined) delete process.env.TZ
+    else process.env.TZ = saved
+  }
+})
+
+// Frontmatter engines
+
+test('the site config hands the frontmatter engine options of markdownBase to VitePress', () => {
+  assert.deepEqual(Object.keys(markdownBase.frontmatter.grayMatterOptions.engines), ['javascript'])
+  // The config is loaded as its own module copy, so compare what the engines do.
+  assert.throws(() => cfg.userConfig.markdown.frontmatter.grayMatterOptions.engines.javascript.parse('{}'), /not supported/)
+})
+
+test('frontmatter that opens with a JavaScript block is refused and never evaluated', () => {
+  delete globalThis.agentDxEvaluated
+  for (const name of ['js', 'javascript', 'JS', 'JavaScript']) {
+    const src = `---${name}\n{ title: (globalThis.agentDxEvaluated = '${name}') }\n---\n# T\n`
+    assert.throws(() => render(src), /JavaScript frontmatter is not supported/, name)
+  }
+  assert.equal(globalThis.agentDxEvaluated, undefined)
+})
+
+test('the other engine names gray-matter knows run no code either', () => {
+  delete globalThis.agentDxEvaluated
+  for (const name of ['coffee', 'coffeescript', 'cson']) {
+    assert.throws(() => render(`---${name}\n{ title: 1 }\n---\n# T\n`), /not registered/, name)
+  }
+  assert.equal(globalThis.agentDxEvaluated, undefined)
+})
+
+test('YAML and JSON frontmatter are read as before', () => {
+  for (const [open, body] of [['---', 'title: Home\ndir: rtl'], ['---yaml', 'title: Home\ndir: rtl'], ['---yml', 'title: Home\ndir: rtl'], ['---json', '{"title":"Home","dir":"rtl"}']]) {
+    const env = { relativePath: 'fixture.md' }
+    md.render(`${open}\n${body}\n---\n# T\n`, env)
+    assert.deepEqual(env.frontmatter, { title: 'Home', dir: 'rtl' }, open)
+  }
+})

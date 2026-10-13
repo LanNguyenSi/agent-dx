@@ -70,9 +70,14 @@ export function escapeDescriptionMeta(html, _file, { description }) {
 }
 
 // Frontmatter the default theme turns into markup, and what transformPageData
-// does to each field. The list comes from reading every place the installed
-// theme and the page renderer use a frontmatter value; the inventory covers
-// the whole theme, not only the fields below.
+// does to each field. Every frontmatter field the installed theme and page
+// renderer read was checked. These are written as escaped text, in a class
+// binding or as an on/off switch, and need nothing here: title and
+// titleTemplate, pageClass, the text and theme of a hero action, linkText,
+// outline, aside, sidebar, editLink, footer and navbar. The theme version is
+// pinned; after a VitePress upgrade, read the sinks again. How the frontmatter
+// block is read is set in markdownBase (site-helpers.mjs): a JavaScript block
+// is refused there, because the bundled reader would run it as Node code.
 //
 //   - dir: written unescaped into <html dir="...">. Only ltr, rtl and auto are
 //     kept; any other value is dropped, so the page falls back to the site's
@@ -103,9 +108,17 @@ export function escapeDescriptionMeta(html, _file, { description }) {
 export const allowedDirs = new Set(['ltr', 'rtl', 'auto'])
 export const allowedLayouts = new Set(['doc', 'home', 'page'])
 
+// YAML reads `2024-05-01` as a date. It is written as an ISO string, which does
+// not depend on the time zone of the build machine, and is not a record.
+const isDate = (value) => Object.prototype.toString.call(value) === '[object Date]'
+const dateText = (date) => (Number.isNaN(date.getTime()) ? 'Invalid Date' : date.toISOString())
 const asText = (value) =>
-  value == null || typeof value === 'number' || typeof value === 'boolean' ? value : escapeText(String(value))
-const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value)
+  isDate(value)
+    ? dateText(value)
+    : value == null || typeof value === 'number' || typeof value === 'boolean'
+      ? value
+      : escapeText(String(value))
+const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value) && !isDate(value)
 const isPlain = (value) => typeof value === 'string' || typeof value === 'number'
 const withText = (value, keys) =>
   isRecord(value) ? { ...value, ...Object.fromEntries(keys.filter((k) => k in value).map((k) => [k, asText(value[k])])) } : value

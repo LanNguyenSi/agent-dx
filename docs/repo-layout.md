@@ -77,6 +77,10 @@ write them: `head`, whose entries are written into the page head as VitePress
 documents, and the link fields (`link` in `prev`, `next`, `hero.actions` and
 `features`, with `target` and `rel`), which the theme writes into `href`,
 `target` and `rel` without checking the scheme, so a `javascript:` link works.
+JavaScript frontmatter is refused: a page whose frontmatter opens with `---js`
+or `---javascript` fails the build, because VitePress would run it as Node code
+at build time. Write frontmatter as YAML (or JSON). A YAML date such as
+`2024-05-01` in a text field shows as an ISO timestamp.
 
 ```bash
 cd site && npm ci && npm run build   # output in site/.vitepress/dist

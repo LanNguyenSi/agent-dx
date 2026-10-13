@@ -29,6 +29,19 @@ export function sitePath(repoRel) {
   return repoRel.replace(/^packages\//, '').replace(/(^|\/)README\.md$/i, '$1index.md')
 }
 
+// VitePress reads frontmatter with a bundled gray-matter, which hands a block
+// that opens with `---js` or `---javascript` to eval: Node code, at build time,
+// from the first line of a page. The javascript engine is replaced by one that
+// refuses. gray-matter reads `js` as an alias of `javascript` when no engine is
+// registered under the written name, so this one key covers both spellings
+// (checked against the bundled copy: its only default engines are yaml, json
+// and javascript, and coffee/cson have none and fail as unregistered).
+export const refuseJavaScript = {
+  parse() {
+    throw new Error('JavaScript frontmatter is not supported')
+  }
+}
+
 // The site's own markdown options, shared by the page renderer and the title
 // reader: raw HTML stays off so that placeholders like <version> render as
 // text, and HTML comments are hidden by the htmlComments rules. Everything
@@ -37,6 +50,7 @@ export function sitePath(repoRel) {
 export const markdownBase = {
   html: false,
   attrs: { allowedAttributes },
+  frontmatter: { grayMatterOptions: { engines: { javascript: refuseJavaScript } } },
   config: (md) => {
     md.use(htmlComments)
     md.use(rawOutput)
