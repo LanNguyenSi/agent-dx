@@ -15,6 +15,7 @@ import {
   parseHeadings,
 } from "../src/drift/allowlist.js";
 import { classifyLine, parseGrepOutput } from "../src/drift/scan.js";
+import { mergeBase } from "../src/drift/git.js";
 import { spawnCli } from "./helpers/spawn-cli.js";
 
 const tmpDirs: string[] = [];
@@ -1339,5 +1340,215 @@ describe("drift CLI", () => {
     const parsed = JSON.parse(run.stdout) as Record<string, unknown>;
     expect(parsed.truncated).toBe(true);
     expect(parsed.counts).toEqual({ removed: 3, sites: 5, allowlisted: 5 });
+  });
+});
+
+// ---------------------------------------------------------------------
+// A symbolic --base that moved after the branch point.
+// ---------------------------------------------------------------------
+describe("drift (symbolic base that moved after the branch point)", () => {
+  /** A repo whose `origin/master` remote-tracking ref gained a declaration
+   * after `feat` branched off; `feat` lives in a linked worktree and only
+   * adds a note that mentions the name. */
+  function buildMovedBaseFixture(): {
+    worktree: string;
+    branchPoint: string;
+    movedTip: string;
+  } {
+    const parent = makeTmpDir();
+    const bare = path.join(parent, "origin.git");
+    const main = path.join(parent, "main");
+    const worktree = path.join(parent, "wt");
+    fs.mkdirSync(bare);
+    git(bare, ["init", "-q", "--bare", "-b", "master"]);
+    fs.mkdirSync(main);
+    git(main, ["init", "-q", "-b", "master"]);
+    git(main, ["config", "user.email", "test@example.com"]);
+    git(main, ["config", "user.name", "test"]);
+    git(main, ["config", "diff.noprefix", "false"]);
+    git(main, ["config", "diff.mnemonicPrefix", "false"]);
+    git(main, ["config", "core.autocrlf", "false"]);
+    git(main, ["remote", "add", "origin", bare]);
+    writeFile(main, "src/a.ts", "export function keep() {}\n");
+    const branchPoint = commit(main, "base");
+    git(main, ["push", "-q", "origin", "HEAD:master"]);
+    git(main, ["fetch", "-q", "origin"]);
+    git(main, [
+      "worktree",
+      "add",
+      "-q",
+      "-b",
+      "feat",
+      worktree,
+      "origin/master",
+    ]);
+    writeFile(worktree, "notes.md", "see addedLater in these notes\n");
+    commit(worktree, "feat");
+    writeFile(
+      main,
+      "src/a.ts",
+      "export function keep() {}\nexport function addedLater() {}\n",
+    );
+    const movedTip = commit(main, "master adds addedLater");
+    git(main, ["push", "-q", "origin", "HEAD:master"]);
+    git(main, ["fetch", "-q", "origin"]);
+    return { worktree, branchPoint, movedTip };
+  }
+
+  it("reports the same result for the ref and for its merge-base SHA", async () => {
+    const { worktree, branchPoint, movedTip } = buildMovedBaseFixture();
+    const byRef = await drift({
+      cwd: worktree,
+      base: "origin/master",
+      head: "HEAD",
+    });
+    const bySha = await drift({
+      cwd: worktree,
+      base: branchPoint,
+      head: "HEAD",
+    });
+    expect(byRef.removedIdentifiers).toEqual([]);
+    expect(byRef.sites).toEqual([]);
+    expect(byRef.status).toBe("ok");
+    expect(byRef.counts).toEqual(bySha.counts);
+    expect(byRef.status).toBe(bySha.status);
+    expect(byRef.baseSha).toBe(movedTip);
+    expect(byRef.mergeBase).toBe(branchPoint);
+    expect(bySha.baseSha).toBe(branchPoint);
+    expect(bySha.mergeBase).toBe(branchPoint);
+  });
+
+  it("matches --base <SHA origin/master resolves to> with --base origin/master", async () => {
+    const { worktree, movedTip } = buildMovedBaseFixture();
+    const resolved = gitOutput(worktree, ["rev-parse", "origin/master"]).trim();
+    expect(resolved).toBe(movedTip);
+    const byRef = await drift({
+      cwd: worktree,
+      base: "origin/master",
+      head: "HEAD",
+    });
+    const bySha = await drift({ cwd: worktree, base: resolved, head: "HEAD" });
+    expect(bySha.removedIdentifiers).toEqual(byRef.removedIdentifiers);
+    expect(bySha.sites).toEqual(byRef.sites);
+    expect(bySha.counts).toEqual(byRef.counts);
+    expect(bySha.mergeBase).toBe(byRef.mergeBase);
+  });
+
+  it("falls back to diffing the trees when base and head share no history", async () => {
+    const repo = initRepo();
+    git(repo, ["checkout", "-q", "-b", "main"]);
+    writeFile(
+      repo,
+      "src/a.ts",
+      "export function keep() {}\nexport function dropped() {}\n",
+    );
+    const baseSha = commit(repo, "base");
+    git(repo, ["checkout", "-q", "--orphan", "orphan"]);
+    git(repo, ["rm", "-rf", "-q", "."]);
+    writeFile(repo, "src/a.ts", "export function keep() {}\n");
+    writeFile(repo, "notes.md", "see dropped in these notes\n");
+    const orphanSha = commit(repo, "orphan");
+    const result = await drift({ cwd: repo, base: baseSha, head: "orphan" });
+    expect(result.baseSha).toBe(baseSha);
+    expect(result.headSha).toBe(orphanSha);
+    expect(result.mergeBase).toBe(baseSha);
+    expect(result.warnings).toContain(
+      `no merge-base between ${baseSha} and ${orphanSha} (no common ancestor): diffing the two trees directly`,
+    );
+    expect(result.removedIdentifiers.map((r) => r.name)).toContain("dropped");
+  });
+
+  it("names a shallow clone as the likely cause when no merge-base is found", async () => {
+    const parent = makeTmpDir();
+    const origin = path.join(parent, "origin");
+    const clone = path.join(parent, "clone");
+    fs.mkdirSync(origin);
+    git(origin, ["init", "-q", "-b", "master"]);
+    git(origin, ["config", "user.email", "test@example.com"]);
+    git(origin, ["config", "user.name", "test"]);
+    writeFile(origin, "src/a.ts", "export function keep() {}\n");
+    commit(origin, "one");
+    git(origin, ["checkout", "-q", "-b", "feat"]);
+    writeFile(origin, "src/b.ts", "export function other() {}\n");
+    commit(origin, "two");
+    git(origin, ["checkout", "-q", "master"]);
+    writeFile(origin, "src/c.ts", "export function third() {}\n");
+    commit(origin, "three");
+    git(parent, [
+      "clone",
+      "-q",
+      "--depth",
+      "1",
+      "--no-single-branch",
+      `file://${origin}`,
+      clone,
+    ]);
+    const result = await drift({
+      cwd: clone,
+      base: "origin/master",
+      head: "origin/feat",
+    });
+    const warning = result.warnings.find((w) => w.includes("no merge-base"));
+    expect(warning).toBeDefined();
+    expect(warning).toContain("shallow clone");
+  });
+
+  it("names the resolved SHAs in the CLI envelope", async () => {
+    const { worktree, branchPoint, movedTip } = buildMovedBaseFixture();
+    const run = await spawnCli([
+      "-C",
+      worktree,
+      "drift",
+      "--base",
+      "origin/master",
+      "--head",
+      "HEAD",
+    ]);
+    expect(run.code).toBe(0);
+    const parsed = JSON.parse(run.stdout) as Record<string, unknown>;
+    expect(parsed.base).toBe("origin/master");
+    expect(parsed.base_sha).toBe(movedTip);
+    expect(parsed.merge_base).toBe(branchPoint);
+    expect(parsed.head_sha).toBe(
+      gitOutput(worktree, ["rev-parse", "HEAD"]).trim(),
+    );
+    expect(parsed.counts).toEqual({ removed: 0, sites: 0, allowlisted: 0 });
+  });
+});
+
+describe("mergeBase: failure causes", () => {
+  it("reports a git failure other than exit 1 as an error, not as no common ancestor", () => {
+    const repo = fs.mkdtempSync(
+      path.join(os.tmpdir(), "drift-merge-base-err-"),
+    );
+    try {
+      execFileSync("git", ["init", "-q", "-b", "main", repo]);
+      execFileSync(
+        "git",
+        [
+          "-c",
+          "user.name=t",
+          "-c",
+          "user.email=t@example.com",
+          "commit",
+          "-q",
+          "--allow-empty",
+          "-m",
+          "init",
+        ],
+        { cwd: repo },
+      );
+      const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo })
+        .toString()
+        .trim();
+      const missing = "0123456789abcdef0123456789abcdef01234567";
+      const r = mergeBase(repo, missing, head);
+      if (!("reason" in r)) throw new Error(`expected a failure, got ${r.sha}`);
+      expect(r.reason).toBe("error");
+      expect(r.detail).toMatch(/^git exited \d+: /);
+      expect(r.detail).not.toMatch(/^git exited 1: /);
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
   });
 });

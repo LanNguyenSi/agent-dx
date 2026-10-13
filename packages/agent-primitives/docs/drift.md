@@ -12,8 +12,8 @@ agent-primitives drift --base <rev> --head <rev>
 agent-primitives drift --base <rev> --head <rev> --allow 'docs/legacy/**' --strict
 ```
 
-Given a git range (`--base`..`--head`), collects the identifiers whose
-declaration the range removed, then reports every mention of those
+Given a git range, collects the identifiers whose declaration the range
+removed, then reports every mention of those
 identifiers still present at `--head` in a Markdown/plain-text doc or in
 a source comment (never a code line). A doc site is any line of a
 `.md`/`.mdx`/`.txt` file; a comment site is a `//`, `/* ... */` or
@@ -28,6 +28,20 @@ mention only reports when the removed name reappears as its own word.
 against the git work tree's root, whatever subdirectory `-C`/`--cwd`
 itself points at: the whole work tree is always scanned, never only the
 named subdirectory.
+
+`--base` and `--head` are each resolved to a commit SHA once, and the
+diff runs from the merge-base of the two to `--head`: the change the
+head side made since it branched off, never the base side's later
+commits. A symbolic base such as `origin/master` therefore reports the
+same result as the SHA it resolves to, even when it moved after the
+branch point. (Earlier versions diffed the two trees directly, which
+reported every declaration the base side had added since the branch
+point as removed.) When the two share no history, the trees are diffed
+directly and a warning says so, naming a shallow clone as the likely cause
+when the repository is one (fetch more history, or `git fetch --unshallow`). The envelope carries `base` and `head`
+as given, plus `base_sha`, `head_sha` and `merge_base`, the commit the
+diff started from; it equals `base_sha` when `--base` is an ancestor of
+`--head`.
 
 Removed-identifier extraction is a regex over one diff line, not a
 parser, and is prototype scope: a top-level or exported TS/JS

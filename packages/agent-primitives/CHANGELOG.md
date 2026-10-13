@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `drift`: `--base` and `--head` are resolved to commit SHAs once and
+  the diff runs from their merge-base to `--head`, so a symbolic base
+  (`origin/master` that moved after the branch point) reports the same
+  result as its SHA instead of listing the base side's later
+  declarations as removed. Semantics change: the diff was two-dot
+  (`base..head`) before. The envelope gains `base_sha`, `head_sha` and
+  `merge_base` (tracker fe567f51).
 - `patch`: a new command that replaces exact text in one or more files
   from a JSON edit plan (`--plan <file>`, `{"edits":[{"file","old","new",
   "replaceAll"?}]}`) or one edit (`--file` with `--old`/`--old-file` and
