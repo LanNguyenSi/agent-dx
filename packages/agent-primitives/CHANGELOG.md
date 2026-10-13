@@ -28,8 +28,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `-m` bounds only the mutant lines of `--summary` (the totals line is
   always kept), and `--print` reads the full result, not the reduced one.
   The shipped skill text names both flags, so its digest changes.
-- `worktree remove`: without `--base`, the unpushed check no longer
-  follows symbolic refs under `refs/remotes` (a
 - `worktree remove`: the unpushed check, with or without `--base`, no
   longer follows symbolic refs under `refs/remotes` (a
   `git symbolic-ref refs/remotes/origin/self refs/heads/feat` made an
