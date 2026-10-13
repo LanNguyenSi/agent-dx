@@ -2,7 +2,12 @@ import { spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { UsageError } from "../envelope.js";
-import { runGit, type GitRunResult } from "../drift/git.js";
+import {
+  runGit,
+  runGitBytes,
+  type GitBytesResult,
+  type GitRunResult,
+} from "../drift/git.js";
 import { withoutRepoSelectionEnv } from "../git-env.js";
 import { probeGitArgv } from "../probe/git.js";
 import { isRelContained } from "../probe/containment.js";
@@ -362,31 +367,566 @@ export function resolveDefaultBase(cwd: string): DefaultBase | undefined {
   return undefined;
 }
 
+/** Upper bounds of the inspection of the ref store: a hostile or broken
+ * tree under `refs`, or a reftable stack past them, ends the inspection as
+ * "unknown" instead of running on. */
+export interface LooseRefBounds {
+  maxEntries: number;
+  maxDepth: number;
+}
+const LOOSE_REF_BOUNDS: LooseRefBounds = { maxEntries: 500_000, maxDepth: 64 };
+
+/** The largest `config` or `tables.list` the inspection reads: git has no
+ * bound of its own, and a file this large is not one git writes. */
+const MAX_INSPECTED_FILE_BYTES = 16 * 1024 * 1024;
+
+/**
+ * A path as the file system and git hold it: bytes, never a string. On
+ * Linux a name need not be UTF-8, and decoding one that is not replaces the
+ * offending bytes with U+FFFD, which names a different entry (or none): an
+ * inspection that walked decoded names would `lstat` a decoy named with
+ * U+FFFD twice and never the link beside it. So names are listed, joined
+ * and inspected as bytes, and rendered only for messages.
+ */
+export type BytePath = Buffer;
+
+const SEP = Buffer.from(path.sep);
+const SLASH = Buffer.from("/");
+
+function bytePath(p: BytePath | string): BytePath {
+  return typeof p === "string" ? Buffer.from(p) : p;
+}
+
+/** `<dir><sep><name>`, joined as bytes, never normalised. */
+function below(dir: BytePath, name: BytePath | string): BytePath {
+  return Buffer.concat([dir, SEP, bytePath(name)]);
+}
+
+/** `bytes` decoded as UTF-8 when the decoding is exact (encoding the text
+ * again gives the same bytes), otherwise `undefined`. */
+export function exactUtf8(bytes: Buffer): string | undefined {
+  const text = bytes.toString("utf8");
+  return Buffer.from(text, "utf8").equals(bytes) ? text : undefined;
+}
+
+/** `bytes` for a message: the text when it is UTF-8, otherwise every byte
+ * outside printable ASCII as `\xNN`, so the entry is named exactly either
+ * way. */
+export function renderBytes(bytes: Buffer): string {
+  const exact = exactUtf8(bytes);
+  if (exact !== undefined) return exact;
+  let out = "";
+  for (const byte of bytes) {
+    out +=
+      byte >= 0x20 && byte < 0x7f && byte !== 0x5c
+        ? String.fromCharCode(byte)
+        : `\\x${byte.toString(16).padStart(2, "0")}`;
+  }
+  return out;
+}
+
+/** The pieces of `bytes` between occurrences of `separator`, exactly as
+ * `String.prototype.split` cuts text: an empty input is one empty piece,
+ * and a trailing separator ends with one, so a value that is empty is seen
+ * and not dropped. */
+function splitBytes(bytes: Buffer, separator: number): Buffer[] {
+  const pieces: Buffer[] = [];
+  let start = 0;
+  for (let i = 0; i < bytes.length; i += 1) {
+    if (bytes[i] === separator) {
+      pieces.push(bytes.subarray(start, i));
+      start = i + 1;
+    }
+  }
+  pieces.push(bytes.subarray(start));
+  return pieces;
+}
+
+/** `bytes` quoted for a message: JSON-quoted text when it is UTF-8,
+ * otherwise the rendered bytes between plain quotes, so a `\xNN` is not
+ * escaped a second time. */
+function quoteBytes(bytes: Buffer): string {
+  const exact = exactUtf8(bytes);
+  return exact !== undefined
+    ? JSON.stringify(exact)
+    : `"${renderBytes(bytes)}"`;
+}
+
+/** One line of git output exactly as git printed it: only the newline git
+ * ends the line with comes off, so a path whose name ends in white space
+ * (or holds a newline of its own) keeps it. */
+export function gitOutputLine(stdout: string): string;
+export function gitOutputLine(stdout: Buffer): Buffer;
+export function gitOutputLine(stdout: string | Buffer): string | Buffer {
+  if (typeof stdout === "string") {
+    return stdout.endsWith("\n") ? stdout.slice(0, -1) : stdout;
+  }
+  return stdout.length > 0 && stdout[stdout.length - 1] === 0x0a
+    ? stdout.subarray(0, -1)
+    : stdout;
+}
+
+/**
+ * The path git printed in `cwd` (`rev-parse --git-common-dir` answers
+ * relative to the directory it ran in), as the file system reads it from
+ * there: the bytes git wrote, joined to the bytes of `cwd` (the same bytes
+ * the git child was started in). Joined as text, never normalised:
+ * `path.resolve` and `path.join` fold `..` against the preceding name,
+ * while git and the kernel step through whatever that name really is, a
+ * symlink included.
+ */
+export function gitPathIn(cwd: string, printed: Buffer): BytePath {
+  // latin1 maps every byte to one character, so `isAbsolute` judges the
+  // bytes as they are.
+  if (path.isAbsolute(printed.toString("latin1"))) return printed;
+  return below(Buffer.from(cwd), printed);
+}
+
+/** Why the common git directory `dir` cannot be inspected, or `undefined`.
+ * The directory itself is followed: a link to the whole git directory moves
+ * every ref with it and makes no two names meet. */
+function untrustedCommonDir(dir: BytePath): string | undefined {
+  let top: fs.BigIntStats;
+  try {
+    top = fs.statSync(dir, { bigint: true });
+  } catch (err) {
+    return `the common git directory ${quoteBytes(dir)} cannot be inspected: ${messageOf(err)}`;
+  }
+  if (!top.isDirectory()) {
+    return `the common git directory ${quoteBytes(dir)} is not a directory`;
+  }
+  return undefined;
+}
+
+/**
+ * Inspects the ref store of the files backend in `commonDir` with `lstat`,
+ * following nothing below the common directory, and returns why it cannot
+ * be trusted, or `undefined` when it holds only plain files and
+ * directories. git takes every path in the `refs` tree for a ref name, so
+ * two names that reach the same file are one ref: a link
+ * `refs/remotes/origin/self -> ../../heads/feat`, a directory link
+ * `refs/remotes/mirror -> ../heads`, and `refs/heads` (or a directory below
+ * it, such as `refs/heads/team`) linked into `refs/remotes` all make a local
+ * branch read as a remote-tracking ref, and deleting the branch deletes
+ * that "remote" copy with it. Anywhere in the whole tree, then, these make
+ * the store untrusted: a symbolic link; a directory reached a second time
+ * (the same device and inode, which a bind mount or a directory hard link
+ * gives); a directory on another device than `refs` (a mount point); a
+ * special file (fifo, socket, device); an entry that cannot be read; a tree
+ * past the entry or depth bound. `packed-refs` must be absent or a regular
+ * file: git reads a link there like the file it names, so a link to a file
+ * that removing the worktree deletes takes the remote-tracking refs listed
+ * in it along. The common directory and `refs` must both exist: a path git
+ * named that cannot be found is not "no refs". A missing `refs/remotes` is
+ * the ordinary layout of a repository whose remote refs are all packed, and
+ * simply not part of the tree. Every name is listed and inspected as bytes
+ * (`BytePath`), so a name that is not UTF-8 is the entry git reads, not a
+ * decoy spelled with U+FFFD. Nothing is opened, so a fifo cannot block the
+ * walk.
+ */
+export function untrustedFilesRefStore(
+  commonDir: BytePath | string,
+  bounds: LooseRefBounds = LOOSE_REF_BOUNDS,
+): string | undefined {
+  const dir = bytePath(commonDir);
+  const top = untrustedCommonDir(dir);
+  if (top !== undefined) return top;
+  let root: fs.BigIntStats;
+  try {
+    root = fs.lstatSync(below(dir, "refs"), { bigint: true });
+  } catch (err) {
+    return `refs cannot be inspected: ${messageOf(err)}`;
+  }
+  if (root.isSymbolicLink()) return "refs is a symbolic link";
+  if (!root.isDirectory()) return "refs is not a directory";
+  let packed: fs.BigIntStats | undefined;
+  try {
+    packed = fs.lstatSync(below(dir, "packed-refs"), { bigint: true });
+  } catch (err) {
+    // No packed refs at all is an ordinary layout.
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      return `packed-refs cannot be inspected: ${messageOf(err)}`;
+    }
+  }
+  if (packed !== undefined) {
+    if (packed.isSymbolicLink()) return "packed-refs is a symbolic link";
+    if (!packed.isFile()) return "packed-refs is not a regular file";
+  }
+  // Directories already walked, by device and inode (exact as bigints).
+  const seen = new Set<string>([`${String(root.dev)}:${String(root.ino)}`]);
+  let entries = 0;
+  const pending: { rel: BytePath; depth: number }[] = [
+    { rel: Buffer.from("refs"), depth: 0 },
+  ];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    let names: Buffer[];
+    try {
+      names = fs.readdirSync(below(dir, next.rel), { encoding: "buffer" });
+    } catch (err) {
+      return `${renderBytes(next.rel)} cannot be read: ${messageOf(err)}`;
+    }
+    for (const name of names) {
+      entries += 1;
+      if (entries > bounds.maxEntries) {
+        return `refs holds more than ${String(bounds.maxEntries)} entries`;
+      }
+      const rel = Buffer.concat([next.rel, SLASH, name]);
+      // A name that readdir listed and lstat then cannot find is a ref
+      // being rewritten: unreadable, like any other lstat failure.
+      let st: fs.BigIntStats;
+      try {
+        st = fs.lstatSync(below(dir, rel), { bigint: true });
+      } catch (err) {
+        return `${renderBytes(rel)} cannot be inspected: ${messageOf(err)}`;
+      }
+      if (st.isSymbolicLink()) return `${renderBytes(rel)} is a symbolic link`;
+      if (st.isDirectory()) {
+        if (st.dev !== root.dev) {
+          return `${renderBytes(rel)} is on another device than refs (a mount point)`;
+        }
+        const id = `${String(st.dev)}:${String(st.ino)}`;
+        if (seen.has(id)) {
+          return `${renderBytes(rel)} is a directory already reached under another name`;
+        }
+        seen.add(id);
+        if (next.depth + 1 > bounds.maxDepth) {
+          return `${renderBytes(rel)} is nested deeper than ${String(bounds.maxDepth)} levels`;
+        }
+        pending.push({ rel, depth: next.depth + 1 });
+      } else if (!st.isFile()) {
+        return `${renderBytes(rel)} is neither a regular file nor a directory`;
+      }
+    }
+  }
+  return undefined;
+}
+
+/** True when `name` is one plain file name: not empty, no `/` (nor `\`,
+ * which Windows also takes for a separator), no NUL, and neither `.` nor
+ * `..`. */
+function plainFileName(name: Buffer): boolean {
+  if (name.length === 0) return false;
+  if (name.equals(Buffer.from(".")) || name.equals(Buffer.from(".."))) {
+    return false;
+  }
+  return !name.some((byte) => byte === 0x2f || byte === 0x5c || byte === 0);
+}
+
+/**
+ * Inspects the reftable stack git reads in `commonDir` with `lstat`,
+ * following nothing below the common directory, and returns why it cannot
+ * be trusted, or `undefined` when it is made of plain files alone. git opens
+ * `<common-dir>/reftable/tables.list` and every table it lists (one name
+ * per line, taken relative to the `reftable` directory, empty lines
+ * skipped) through whatever is there, a link included: a table linked to an
+ * ignored file inside the worktree is the whole ref store until the removal
+ * deletes that file, and every ref with it. So `reftable` must be a real
+ * directory, `tables.list` and every listed table a regular file (no link,
+ * no special file, nothing missing) on the device of `reftable`, every
+ * name a plain file name (a name with a `/`, or an absolute one, which git
+ * would open as well, is not one git writes), and the list within the
+ * entry bound. `tables.list` is the one file opened, and only after `lstat`
+ * found it a regular file within the size bound, so nothing can block the
+ * inspection. The stray `refs` directory of such a repository is not read
+ * by git for refs and not walked.
+ */
+export function untrustedReftableStore(
+  commonDir: BytePath | string,
+  bounds: LooseRefBounds = LOOSE_REF_BOUNDS,
+): string | undefined {
+  const dir = bytePath(commonDir);
+  const top = untrustedCommonDir(dir);
+  if (top !== undefined) return top;
+  const stackDir = below(dir, "reftable");
+  let stack: fs.BigIntStats;
+  try {
+    stack = fs.lstatSync(stackDir, { bigint: true });
+  } catch (err) {
+    return `reftable cannot be inspected: ${messageOf(err)}`;
+  }
+  if (stack.isSymbolicLink()) return "reftable is a symbolic link";
+  if (!stack.isDirectory()) return "reftable is not a directory";
+  const listPath = below(stackDir, "tables.list");
+  let list: fs.BigIntStats;
+  try {
+    list = fs.lstatSync(listPath, { bigint: true });
+  } catch (err) {
+    return `reftable/tables.list cannot be inspected: ${messageOf(err)}`;
+  }
+  if (list.isSymbolicLink()) return "reftable/tables.list is a symbolic link";
+  if (!list.isFile()) return "reftable/tables.list is not a regular file";
+  if (list.dev !== stack.dev) {
+    return "reftable/tables.list is on another device than reftable (a mount point)";
+  }
+  if (list.size > BigInt(MAX_INSPECTED_FILE_BYTES)) {
+    return `reftable/tables.list is larger than ${String(MAX_INSPECTED_FILE_BYTES)} bytes`;
+  }
+  let listed: Buffer;
+  try {
+    listed = fs.readFileSync(listPath);
+  } catch (err) {
+    return `reftable/tables.list cannot be read: ${messageOf(err)}`;
+  }
+  let tables = 0;
+  for (const name of splitBytes(listed, 0x0a)) {
+    if (name.length === 0) continue;
+    tables += 1;
+    if (tables > bounds.maxEntries) {
+      return `reftable/tables.list names more than ${String(bounds.maxEntries)} tables`;
+    }
+    if (!plainFileName(name)) {
+      return `reftable/tables.list names ${quoteBytes(name)}, which is not a plain file name`;
+    }
+    const rel = `reftable/${renderBytes(name)}`;
+    let st: fs.BigIntStats;
+    try {
+      st = fs.lstatSync(below(stackDir, name), { bigint: true });
+    } catch (err) {
+      return `${rel} cannot be inspected: ${messageOf(err)}`;
+    }
+    if (st.isSymbolicLink()) return `${rel} is a symbolic link`;
+    if (!st.isFile()) return `${rel} is not a regular file`;
+    if (st.dev !== stack.dev) {
+      return `${rel} is on another device than reftable (a mount point)`;
+    }
+  }
+  return undefined;
+}
+
+function messageOf(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** A result that stands for "the unpushed state cannot be told": no git
+ * status, so the caller treats it like a failed listing. */
+function unknownUnpushed(message: string): GitRunResult {
+  return { status: null, stdout: "", stderr: "", error: message };
+}
+
+/** `gitBytes` with the bytes of stdout decoded, for a caller that only
+ * reports the failure. */
+function textResult(r: GitBytesResult): GitRunResult {
+  return {
+    status: r.status,
+    stdout: r.stdout.toString("utf8"),
+    stderr: r.stderr,
+    ...(r.error !== undefined ? { error: r.error } : {}),
+  };
+}
+
+/** `git`, with stdout as the bytes git wrote (`runGitBytes`); `input`,
+ * when given, is the child's whole stdin. */
+export function gitBytes(
+  cwd: string,
+  args: readonly string[],
+  input?: Buffer,
+): GitBytesResult {
+  return runGitBytes(cwd, probeGitArgv(args), withoutRepoSelectionEnv(), input);
+}
+
+/** The unknown result for a repository config the inspection could not
+ * take as git takes it: `what` says why, `err` the file system error. */
+function configUnreadable(
+  configPath: BytePath,
+  what: string,
+  err?: unknown,
+): GitRunResult {
+  const cause = err === undefined ? "" : `: ${messageOf(err)}`;
+  return unknownUnpushed(
+    `the repository config ${quoteBytes(configPath)} ${what}${cause}`,
+  );
+}
+
+/** `extensions.refStorage` and `GIT_REFERENCE_BACKEND` values that name a
+ * format and nothing else, so the refs stay in the common directory. */
+const PLAIN_REF_FORMATS: ReadonlySet<string> = new Set(["files", "reftable"]);
+
+/**
+ * A failed result when the refs git reads might live somewhere other than
+ * the common directory, otherwise `undefined`. git takes a location next to
+ * the format, `extensions.refStorage = files://<path>` or the same value in
+ * `GIT_REFERENCE_BACKEND`, and resolves a relative one from `$GIT_DIR`,
+ * which the worktree this check reads and the main checkout that deletes
+ * the branch do not share. No git command names that location, so any
+ * value that is more than a format name makes the answer unknown.
+ *
+ * The setting is read the way git's own repository-format reader reads it:
+ * from `<commonDir>/config` alone, parsed by `git config` itself from the
+ * file's bytes on stdin (`--file -`), without includes and without any
+ * other scope. `git config` asked across its scopes would answer from
+ * whatever `GIT_CONFIG`, `GIT_CONFIG_COUNT`/`GIT_CONFIG_PARAMETERS` or an
+ * included file say, and `GIT_CONFIG=/dev/null` in the caller's
+ * environment would hide the repository's own value, while git keeps
+ * reading the store it names. A config that cannot be inspected, read, or
+ * parsed is unknown. Nothing the config says ever skips the inspection of
+ * the store; this read only adds refusals.
+ */
+/** Environment variables git reads for the ref storage format, newest name
+ * first. */
+export const REF_STORAGE_ENV_VARS = [
+  "GIT_REF_STORAGE_FORMAT",
+  "GIT_REFERENCE_BACKEND",
+] as const;
+
+function refStoreElsewhere(
+  cwd: string,
+  commonDir: BytePath,
+): GitRunResult | undefined {
+  // Newer git reads GIT_REF_STORAGE_FORMAT first and keeps
+  // GIT_REFERENCE_BACKEND as a deprecated alias, so both are checked, and
+  // two different values are refused as well: which one wins depends on
+  // the git version.
+  const env = withoutRepoSelectionEnv();
+  const seen = new Set<string>();
+  for (const name of REF_STORAGE_ENV_VARS) {
+    const value = env[name];
+    if (value === undefined) continue;
+    if (!PLAIN_REF_FORMATS.has(value)) {
+      return unknownUnpushed(
+        `${name} is ${JSON.stringify(value)}, which can put the refs git reads outside the common git directory`,
+      );
+    }
+    seen.add(value);
+  }
+  if (seen.size > 1) {
+    return unknownUnpushed(
+      `${REF_STORAGE_ENV_VARS.join(" and ")} name different ref formats, so which store git reads depends on its version`,
+    );
+  }
+  const configPath = below(commonDir, "config");
+  let st: fs.BigIntStats;
+  try {
+    // Followed, as git opens it.
+    st = fs.statSync(configPath, { bigint: true });
+  } catch (err) {
+    return configUnreadable(configPath, "cannot be inspected", err);
+  }
+  if (!st.isFile())
+    return configUnreadable(configPath, "is not a regular file");
+  if (st.size > BigInt(MAX_INSPECTED_FILE_BYTES)) {
+    return configUnreadable(
+      configPath,
+      `is larger than ${String(MAX_INSPECTED_FILE_BYTES)} bytes`,
+    );
+  }
+  let bytes: Buffer;
+  try {
+    bytes = fs.readFileSync(configPath);
+  } catch (err) {
+    return configUnreadable(configPath, "cannot be read", err);
+  }
+  const config = gitBytes(
+    cwd,
+    [
+      "config",
+      "--file",
+      "-",
+      "--no-includes",
+      "--null",
+      "--get-all",
+      "extensions.refStorage",
+    ],
+    bytes,
+  );
+  // Exit status 1 is "no such key": the refs are in the common directory.
+  if (config.error === undefined && config.status === 1) return undefined;
+  if (config.error !== undefined || config.status !== 0) {
+    return textResult(config);
+  }
+  // Each value ends in a NUL; only that last terminator comes off, so an
+  // answer without any value reads as the empty name, which is refused.
+  const text =
+    config.stdout.length > 0 && config.stdout[config.stdout.length - 1] === 0
+      ? config.stdout.subarray(0, -1)
+      : config.stdout;
+  for (const value of splitBytes(text, 0)) {
+    const name = exactUtf8(value);
+    if (name === undefined || !PLAIN_REF_FORMATS.has(name)) {
+      return unknownUnpushed(
+        `extensions.refStorage is ${quoteBytes(value)}, which can put the refs git reads outside the common git directory`,
+      );
+    }
+  }
+  return undefined;
+}
+
 /**
  * `git rev-list HEAD --not <every real remote-tracking ref>` in `cwd`: the
  * commits no remote branch holds. A symbolic ref under `refs/remotes`
  * (`git symbolic-ref refs/remotes/origin/self refs/heads/feat`) is left
  * out, because `--remotes` would follow it to a local branch and count that
  * branch's commits as pushed, although deleting the branch leaves them on no
- * ref at all. Fails (non-zero status or `error`) when the refs cannot be
- * listed, so the caller treats the state as unknown. `error` counts even
- * with a status of 0: a listing that outgrows the output limit of `runGit`
- * comes back cut short, with `error` set, when git has already exited.
+ * ref at all. A file system link in the ref store does the same without
+ * git reporting anything as symbolic (a link under `refs/remotes` to a
+ * branch, `refs/heads` linked into `refs/remotes`, a `packed-refs` link to
+ * a file inside the worktree, a reftable table linked there), so the store
+ * in the common directory is inspected first, the files store
+ * (`untrustedFilesRefStore`: the whole `refs` tree and `packed-refs`)
+ * unless git itself reports the reftable backend, the reftable stack
+ * (`untrustedReftableStore`: `tables.list` and every table it names) when
+ * it does, and any link, or other layout git does not write, makes the
+ * answer unknown rather than a guess. The backend, the common directory and
+ * the ref listing are git's own answers in `cwd`, taken byte for byte
+ * (`gitBytes`), and a store git was told to keep anywhere else
+ * (`refStoreElsewhere`, read as git's format reader reads it) is unknown
+ * too, so what is inspected is the store git reads. A symbolic ref whose
+ * name is not UTF-8 cannot be handed to `--exclude` exactly (an argument is
+ * text) and is unknown as well. Fails (non-zero status or `error`) when the
+ * refs cannot be listed, so the caller treats the state as unknown. `error`
+ * counts even with a status of 0: a listing that outgrows the output limit
+ * of `runGit` comes back cut short, with `error` set, when git has already
+ * exited.
  */
 export function unpushedCommits(cwd: string): GitRunResult {
-  const refs = git(cwd, [
+  const commonDirResult = gitBytes(cwd, ["rev-parse", "--git-common-dir"]);
+  if (commonDirResult.error !== undefined || commonDirResult.status !== 0) {
+    return textResult(commonDirResult);
+  }
+  const printed = gitOutputLine(commonDirResult.stdout);
+  if (printed.length === 0) {
+    return unknownUnpushed("git did not name the common git directory");
+  }
+  const commonDir = gitPathIn(cwd, printed);
+  const elsewhere = refStoreElsewhere(cwd, commonDir);
+  if (elsewhere !== undefined) return elsewhere;
+  // The backend git really runs on, not a config value read beside it: git
+  // ignores `extensions.refStorage` in a repository without format version
+  // 1 and keeps reading loose files. An older git that does not know the
+  // option echoes it back, and anything but exactly `reftable` is walked
+  // as a files store.
+  const format = git(cwd, ["rev-parse", "--show-ref-format"]);
+  if (format.error !== undefined || format.status !== 0) return format;
+  const reftable = gitOutputLine(format.stdout) === "reftable";
+  const untrusted = reftable
+    ? untrustedReftableStore(commonDir)
+    : untrustedFilesRefStore(commonDir);
+  if (untrusted !== undefined) {
+    return unknownUnpushed(
+      `${untrusted}; git reads the ref store as it finds it, so a link or another entry git does not write there can make a local branch and a remote-tracking ref one file, or keep a remote-tracking ref where removing the worktree deletes it, and the branch could look pushed`,
+    );
+  }
+  const refs = gitBytes(cwd, [
     "for-each-ref",
     "--format=%(refname)%09%(symref)",
     "refs/remotes",
   ]);
-  if (refs.error !== undefined || refs.status !== 0) return refs;
+  if (refs.error !== undefined || refs.status !== 0) return textResult(refs);
   const excludes: string[] = [];
-  for (const line of refs.stdout.split("\n")) {
-    const [name = "", symref = ""] = line.split("\t");
-    if (symref.length === 0) continue;
+  for (const line of splitBytes(refs.stdout, 0x0a)) {
+    // A ref name holds neither a tab nor a newline, so the first tab ends
+    // the name; nothing after it means a plain ref.
+    const tab = line.indexOf(0x09);
+    if (tab < 0 || tab === line.length - 1) continue;
+    const name = line.subarray(0, tab);
+    const text = exactUtf8(name);
+    if (text === undefined) {
+      return unknownUnpushed(
+        `the symbolic ref ${renderBytes(name)} has a name that is not UTF-8, which cannot be excluded exactly from the remote-tracking refs`,
+      );
+    }
     // Ref names cannot hold glob characters, so the name is its own exact
     // `--exclude` pattern; for `--remotes` it is relative to `refs/remotes/`.
-    excludes.push(`--exclude=${name.replace(/^refs\/remotes\//, "")}`);
+    excludes.push(`--exclude=${text.replace(/^refs\/remotes\//, "")}`);
   }
   return git(cwd, ["rev-list", "HEAD", "--not", ...excludes, "--remotes"]);
 }

@@ -3,13 +3,20 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { GitRunResult } from "../src/drift/git.js";
+import type { GitBytesResult, GitRunResult } from "../src/drift/git.js";
 
-// `runGit` is the one place that runs git for the worktree commands. This
-// file replaces it with a wrapper that can hand back what `spawnSync` returns
-// for output past its limit, which no real git run produces on demand: git
-// has exited with status 0, `error` is ENOBUFS, and `stdout` is cut short.
-const cut = vi.hoisted(() => ({ on: false }));
+// `runGit` and `runGitBytes` are the two places that run git for the
+// worktree commands (the second keeps stdout as bytes). This file replaces
+// both with a wrapper that can hand back what `spawnSync` returns for output
+// past its limit, which no real git run produces on demand: git has exited
+// with status 0, `error` is ENOBUFS, and `stdout` is cut short.
+const cut = vi.hoisted(() => ({
+  on: false,
+  failing: "",
+  empty: "",
+  // The exit status the failing call reports alongside its error.
+  failingStatus: 0,
+}));
 
 vi.mock("../src/drift/git.js", async (importOriginal) => {
   const real = await importOriginal<typeof import("../src/drift/git.js")>();
@@ -17,9 +24,47 @@ vi.mock("../src/drift/git.js", async (importOriginal) => {
     ...real,
     runGit: (...args: Parameters<typeof real.runGit>): GitRunResult => {
       const result = real.runGit(...args);
+      // One named git call that exits 0 and prints nothing.
+      if (cut.empty !== "" && args[1].includes(cut.empty)) {
+        return { ...result, stdout: "" };
+      }
+      // The same exit-0-with-error shape for one named git call.
+      if (cut.failing !== "" && args[1].includes(cut.failing)) {
+        // A config read that timed out after printing a usable value, or
+        // with the status of a key that is not there.
+        const value = args[1].includes("extensions.refStorage")
+          ? cut.failingStatus === 1
+            ? { status: 1, stdout: "" }
+            : { status: 0, stdout: "files\0" }
+          : { status: cut.failingStatus };
+        return { ...result, ...value, error: "spawnSync git ETIMEDOUT" };
+      }
       if (!cut.on || !args[1].includes("for-each-ref")) return result;
       // Only the first line is kept, so refs/remotes/zzz/self is lost.
       const kept = result.stdout.slice(0, result.stdout.indexOf("\n", 0) + 1);
+      return {
+        ...result,
+        stdout: kept,
+        error: "spawnSync git ENOBUFS",
+      };
+    },
+    runGitBytes: (
+      ...args: Parameters<typeof real.runGitBytes>
+    ): GitBytesResult => {
+      const result = real.runGitBytes(...args);
+      if (cut.empty !== "" && args[1].includes(cut.empty)) {
+        return { ...result, stdout: Buffer.alloc(0) };
+      }
+      if (cut.failing !== "" && args[1].includes(cut.failing)) {
+        const value = args[1].includes("extensions.refStorage")
+          ? cut.failingStatus === 1
+            ? { status: 1, stdout: Buffer.alloc(0) }
+            : { status: 0, stdout: Buffer.from("files\0") }
+          : { status: cut.failingStatus };
+        return { ...result, ...value, error: "spawnSync git ETIMEDOUT" };
+      }
+      if (!cut.on || !args[1].includes("for-each-ref")) return result;
+      const kept = result.stdout.subarray(0, result.stdout.indexOf(0x0a) + 1);
       return {
         ...result,
         stdout: kept,
@@ -43,6 +88,9 @@ const GIT_ENV: NodeJS.ProcessEnv = {
 const tmpDirs: string[] = [];
 afterEach(() => {
   cut.on = false;
+  cut.failing = "";
+  cut.empty = "";
+  cut.failingStatus = 0;
   for (const dir of tmpDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -100,5 +148,55 @@ describe("unpushedCommits: a ref listing that comes back cut short", () => {
     expect(r.status).toBe(0);
     expect(r.error).toMatch(/ENOBUFS/);
     expect(r.stdout).not.toContain("zzz");
+  });
+});
+
+describe("unpushedCommits: the lookups that come before the ref listing", () => {
+  it("fails outside a repository with git's own status", () => {
+    const dir = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "agent-primitives-wt-norepo-")),
+    );
+    tmpDirs.push(dir);
+    const r = unpushedCommits(dir);
+    // git's own "fatal: not a git repository", not a made-up unknown state.
+    expect(r.status).toBe(128);
+    expect(r.stderr).toContain("not a git repository");
+    expect(r.stdout).toBe("");
+  });
+
+  it("fails on the error alone when naming the common directory, though git exited with status 0", () => {
+    const { repo } = makeRepo();
+    cut.failing = "--git-common-dir";
+    const r = unpushedCommits(repo);
+    expect(r.error).toMatch(/ETIMEDOUT/);
+  });
+
+  it("fails when git names no common directory, rather than reading the working directory", () => {
+    const { repo } = makeRepo();
+    cut.empty = "--git-common-dir";
+    const r = unpushedCommits(repo);
+    expect(r.error).toMatch(/did not name the common git directory/);
+  });
+
+  it("fails on the error alone when reading the ref storage, though git exited with status 0", () => {
+    const { repo } = makeRepo();
+    cut.failing = "extensions.refStorage";
+    const r = unpushedCommits(repo);
+    expect(r.error).toMatch(/ETIMEDOUT/);
+  });
+
+  it("fails on the error alone when the ref storage read reports no such key", () => {
+    const { repo } = makeRepo();
+    cut.failing = "extensions.refStorage";
+    cut.failingStatus = 1;
+    const r = unpushedCommits(repo);
+    expect(r.error).toMatch(/ETIMEDOUT/);
+  });
+
+  it("fails on the error alone when asking for the ref format, though git exited with status 0", () => {
+    const { repo } = makeRepo();
+    cut.failing = "--show-ref-format";
+    const r = unpushedCommits(repo);
+    expect(r.error).toMatch(/ETIMEDOUT/);
   });
 });

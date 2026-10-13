@@ -22,6 +22,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   warning, as in `drift`. The envelope gains `base_sha`, `head_sha` and
   `merge_base` (task 3265952e).
 
+- `worktree remove`: the unpushed check no longer calls a local branch
+  pushed because of a file system link in the ref store. git reads every
+  path under `refs` as a ref and follows links there, and opens
+  `packed-refs` and every reftable table through a link, so a link such
+  as `refs/remotes/origin/self -> ../../heads/feat`, a directory link
+  `refs/remotes/mirror -> ../heads`, `refs/heads` (or a directory below
+  it) linked into `refs/remotes`, or a `packed-refs`, `tables.list` or
+  table link to a file the removal deletes let `--delete-branch` delete
+  the branch and leave its commits on no ref. The store git reads is now
+  inspected with `lstat` before git is asked, with every input taken as
+  git takes it: the common directory and every name in it as the bytes
+  git and the file system hold (a link whose name is not UTF-8 beside a
+  decoy named with U+FFFD was inspected as the decoy before); whether the
+  store is kept elsewhere (`extensions.refStorage = <format>://<path>`)
+  from `<common-dir>/config` alone through `git config --file -
+  --no-includes`, the way git's format reader reads it, so
+  `GIT_CONFIG=/dev/null` or an included file in the caller's environment
+  can no longer hide or add the value; the backend from `rev-parse
+  --show-ref-format`, with the whole `refs` tree and `packed-refs`
+  inspected for a files store and `reftable/tables.list` plus every
+  listed table for a reftable store. A link, a directory reached twice or
+  on another device, a special file, an entry that cannot be inspected, a
+  common directory, `refs`, `reftable`, `tables.list` or table that cannot
+  be found, a listed table name that is not a plain file name, a tree or
+  list past its bound, a `config` that cannot be read, a store kept
+  elsewhere (also via `GIT_REF_STORAGE_FORMAT` or `GIT_REFERENCE_BACKEND`), and a symbolic ref under
+  `refs/remotes` whose name is not UTF-8 (it cannot be excluded exactly)
+  are the `unpushed_state_unknown` refusal (branch kept; `--force` still
+  removes) (tracker 84aff355).
+
 ## [0.13.0] - 2026-10-13
 
 - `drift`: `--base` and `--head` are resolved to commit SHAs once and
