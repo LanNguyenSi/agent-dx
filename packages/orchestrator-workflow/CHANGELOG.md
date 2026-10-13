@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Standing safety rule for runs against adversarial fixtures (tracker task
+  a8daf06a). The implementer prompt now requires repros, hang probes, fuzz
+  loops, and ad-hoc commands against an adversarial or circular fixture to
+  run in their own process group with a hard timeout and a memory cap, to
+  kill the whole group on either limit, and to verify that no process is left
+  afterwards; a test that spawns processes against such a fixture bounds
+  itself and kills the whole group, not only the direct child. The reviewer
+  prompt applies the same rule to its own runs and flags an unbounded
+  process-spawning test. The reason is one neutral fact: a timeout that kills
+  only the direct child leaves its children running, and a runaway child can
+  exhaust host memory. Installed implementer and reviewer files report as
+  outdated until refreshed.
+
+  Decision (not implemented here): recommend that agent-primitives gain a
+  `guard <timeout-s> <max-rss-MiB> -- <cmd...>` command, so a per-run shell
+  script is not copied between runs. Cross-platform notes for that command:
+  macOS has no `setsid(1)` and no effective per-child `ulimit -v`, so spawn
+  the child with the language runtime's process-group primitive (Node
+  `spawn` with `detached: true`, then `process.kill(-pid)`), and enforce the
+  memory cap by polling resident set size of the group from outside
+  (`ps -axo pgid=,rss=`) rather than by an rlimit; Linux can additionally use
+  `setsid`, `prlimit`, or a cgroup, but polling works on both. Polling has a
+  window, so a child that allocates faster than the poll interval can
+  overshoot the cap; keep the interval short (about 200 ms) and treat the cap
+  as a backstop, with a lower cap for fixtures known to be memory-hungry.
+  After the child exits, list group members still alive, kill them, and exit
+  with a distinct code (timeout, cap, leftover). Windows needs a job object
+  and is out of scope.
+
 - The package's runbook-sentence guard now also reads the last sentence of the
   paragraph or list item before a unit that opens with a sentence naming a
   runbook, a checklist, or the data authority, so a lead-in line above a list
