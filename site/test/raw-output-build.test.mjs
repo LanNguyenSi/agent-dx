@@ -366,7 +366,7 @@ const assertNoScriptHref = (page, markers) => {
 }
 
 test('the href check fails a protocol-relative or off-site link and passes the site and explicit schemes', () => {
-  for (const href of ['//evil.example/x', '/\\evil.example', 'javascript:x', 'data:text/html,x']) {
+  for (const href of ['//evil.example/x', '//site.invalid/agent-dx/x', '\\\\site.invalid/x', '/\\evil.example', 'javascript:x', 'data:text/html,x']) {
     assert.throws(() => assertHrefsOnSite(`<a href="${href}">x</a>`), assert.AssertionError, href)
   }
   assertHrefsOnSite('<a href="/agent-dx/a">x</a> <a href="../b?c=1&amp;d=2">x</a> <a href="https://example.com/">x</a> <a href="mailto:a@example.com">x</a> <a href="#f">x</a>')
