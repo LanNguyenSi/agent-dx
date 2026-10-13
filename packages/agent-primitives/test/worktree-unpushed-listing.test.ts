@@ -9,7 +9,13 @@ import type { GitRunResult } from "../src/drift/git.js";
 // file replaces it with a wrapper that can hand back what `spawnSync` returns
 // for output past its limit, which no real git run produces on demand: git
 // has exited with status 0, `error` is ENOBUFS, and `stdout` is cut short.
-const cut = vi.hoisted(() => ({ on: false, failing: "", empty: "" }));
+const cut = vi.hoisted(() => ({
+  on: false,
+  failing: "",
+  empty: "",
+  // The exit status the failing call reports alongside its error.
+  failingStatus: 0,
+}));
 
 vi.mock("../src/drift/git.js", async (importOriginal) => {
   const real = await importOriginal<typeof import("../src/drift/git.js")>();
@@ -23,10 +29,13 @@ vi.mock("../src/drift/git.js", async (importOriginal) => {
       }
       // The same exit-0-with-error shape for one named git call.
       if (cut.failing !== "" && args[1].includes(cut.failing)) {
-        // A config read that timed out after printing a usable value.
+        // A config read that timed out after printing a usable value, or
+        // with the status of a key that is not there.
         const value = args[1].includes("extensions.refStorage")
-          ? { status: 0, stdout: "files\n" }
-          : {};
+          ? cut.failingStatus === 1
+            ? { status: 1, stdout: "" }
+            : { status: 0, stdout: "files\0" }
+          : { status: cut.failingStatus };
         return { ...result, ...value, error: "spawnSync git ETIMEDOUT" };
       }
       if (!cut.on || !args[1].includes("for-each-ref")) return result;
@@ -57,6 +66,7 @@ afterEach(() => {
   cut.on = false;
   cut.failing = "";
   cut.empty = "";
+  cut.failingStatus = 0;
   for (const dir of tmpDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -147,6 +157,21 @@ describe("unpushedCommits: the lookups that come before the ref listing", () => 
   it("fails on the error alone when reading the ref storage, though git exited with status 0", () => {
     const { repo } = makeRepo();
     cut.failing = "extensions.refStorage";
+    const r = unpushedCommits(repo);
+    expect(r.error).toMatch(/ETIMEDOUT/);
+  });
+
+  it("fails on the error alone when the ref storage read reports no such key", () => {
+    const { repo } = makeRepo();
+    cut.failing = "extensions.refStorage";
+    cut.failingStatus = 1;
+    const r = unpushedCommits(repo);
+    expect(r.error).toMatch(/ETIMEDOUT/);
+  });
+
+  it("fails on the error alone when asking for the ref format, though git exited with status 0", () => {
+    const { repo } = makeRepo();
+    cut.failing = "--show-ref-format";
     const r = unpushedCommits(repo);
     expect(r.error).toMatch(/ETIMEDOUT/);
   });

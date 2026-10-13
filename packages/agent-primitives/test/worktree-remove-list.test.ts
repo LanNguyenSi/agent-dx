@@ -5,9 +5,11 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ignoredSymlinks, parseWorktreeList } from "../src/worktree/index.js";
 import {
+  gitOutputLine,
+  gitPathIn,
   resolveDefaultBase,
   resolveRemoteBase,
-  untrustedLooseRemoteRef,
+  untrustedFilesRefStore,
 } from "../src/worktree/git.js";
 import {
   buildSpawnEnv,
@@ -79,7 +81,12 @@ interface Fixture {
   mainSha: string;
 }
 
-function makeFixture(refFormat?: string): Fixture {
+/** `refFormat` is handed to `git init --ref-format`; `gitDirName` puts the
+ * main checkout's git directory at that name below `base` instead of
+ * `repo/.git` (`git init --separate-git-dir`). */
+function makeFixture(
+  opts: { refFormat?: string; gitDirName?: string } = {},
+): Fixture {
   const base = fs.realpathSync(
     fs.mkdtempSync(path.join(os.tmpdir(), "agent-primitives-wt-remove-")),
   );
@@ -92,7 +99,10 @@ function makeFixture(refFormat?: string): Fixture {
   git(base, [
     "init",
     "-q",
-    ...(refFormat === undefined ? [] : [`--ref-format=${refFormat}`]),
+    ...(opts.refFormat === undefined ? [] : [`--ref-format=${opts.refFormat}`]),
+    ...(opts.gitDirName === undefined
+      ? []
+      : ["--separate-git-dir", path.join(base, opts.gitDirName)]),
     "-b",
     "main",
     repo,
@@ -2520,28 +2530,40 @@ done`,
       r.json.warnings.some((w: string) => w.includes("deleted branch")),
     ).toBe(false);
 
+/** One line of git output as git printed it: only the final newline comes
+ * off, so a directory name that ends in a space keeps it. */
+function oneLine(out: string): string {
+  return out.endsWith("\n") ? out.slice(0, -1) : out;
+}
+
+interface Bounded {
+  code: number | null;
+  stdout: string;
+  stderr: string;
+  /** The limit passed and the process group was killed. */
+  timedOut: boolean;
+}
+
 /**
- * `cli`, bounded: the CLI runs in its own process group with a hard time
- * limit, and the whole group is killed when the limit passes, so a layout
- * that sends git into a long walk ends the test instead of the machine's
- * memory. The limit is far above a normal run and well below the test
- * timeout.
+ * Runs `command` in its own process group with a hard time limit. The whole
+ * group is killed when the limit passes, and again once the command has
+ * exited (anything it left behind, such as a git that outlived it), so a
+ * layout that sends git into a long walk ends the test instead of the
+ * machine's memory. The limits are far above a normal run and well below
+ * the test timeout.
  */
-async function cliBounded(
-  cwd: string,
+async function spawnBounded(
+  command: string,
   args: string[],
-  extraEnv: NodeJS.ProcessEnv = {},
-  limitMs = 45_000,
-): Promise<Cli> {
-  const child = spawn(
-    process.execPath,
-    [CLI_PATH, "-C", cwd, "worktree", ...args],
-    {
-      env: buildSpawnEnv({ ...GIT_ENV, ...extraEnv }),
-      stdio: ["ignore", "pipe", "pipe"],
-      detached: true,
-    },
-  );
+  opts: { cwd?: string; env: NodeJS.ProcessEnv },
+  limitMs: number,
+): Promise<Bounded> {
+  const child = spawn(command, args, {
+    ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
+    env: opts.env,
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: true,
+  });
   let stdout = "";
   let stderr = "";
   child.stdout.setEncoding("utf8");
@@ -2559,46 +2581,109 @@ async function cliBounded(
       // The group is already gone.
     }
   };
-  const timer = setTimeout(killGroup, limitMs);
-  const code = await new Promise<number | null>((resolve, reject) => {
-    child.on("error", reject);
-    child.on("close", (c) => {
-      resolve(c);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    killGroup();
+  }, limitMs);
+  try {
+    const code = await new Promise<number | null>((resolve, reject) => {
+      child.on("error", reject);
+      child.on("close", (c) => {
+        resolve(c);
+      });
     });
-  });
-  clearTimeout(timer);
-  // Anything the CLI left behind in its group (a git that outlived it).
-  killGroup();
+    return { code, stdout, stderr, timedOut };
+  } finally {
+    clearTimeout(timer);
+    killGroup();
+  }
+}
+
+/** `cli`, bounded by `spawnBounded`. */
+async function cliBounded(
+  cwd: string,
+  args: string[],
+  extraEnv: NodeJS.ProcessEnv = {},
+  limitMs = 45_000,
+): Promise<Cli> {
+  const r = await spawnBounded(
+    process.execPath,
+    [CLI_PATH, "-C", cwd, "worktree", ...args],
+    { env: buildSpawnEnv({ ...GIT_ENV, ...extraEnv }) },
+    limitMs,
+  );
   let json: Record<string, any> = {};
   try {
-    json = JSON.parse(stdout.trim()) as Record<string, any>;
+    json = JSON.parse(r.stdout.trim()) as Record<string, any>;
   } catch {
     json = {};
   }
-  return { code, json, stdout, stderr };
+  return { code: r.code, json, stdout: r.stdout, stderr: r.stderr };
 }
 
-/** The directory git keeps the shared refs in. */
+/** `git`, bounded by `spawnBounded`: every git call a test makes once it
+ * has made the ref store adversarial goes through here. Returns stdout; a
+ * non-zero exit, a signal or the time limit fails the test. */
+async function gitBounded(
+  cwd: string,
+  args: string[],
+  limitMs = 20_000,
+): Promise<string> {
+  const r = await spawnBounded(
+    "git",
+    args,
+    { cwd, env: { PATH: process.env.PATH, ...GIT_ENV } },
+    limitMs,
+  );
+  if (r.code !== 0) {
+    throw new Error(
+      `git ${args.join(" ")} in ${cwd} exited ${String(r.code)}${r.timedOut ? " (time limit)" : ""}: ${r.stderr}`,
+    );
+  }
+  return r.stdout;
+}
+
+/** What git itself counts as unpushed on `rev`, asked with a bound. */
+async function unpushedPerGit(repo: string, rev = "feat"): Promise<string> {
+  return (
+    await gitBounded(repo, ["rev-list", rev, "--not", "--remotes"])
+  ).trim();
+}
+
+/** The directory git keeps the shared refs in, exactly as git names it.
+ * Called while a test builds its layout, before anything is planted. */
 function commonDirOf(f: Fixture): string {
-  return absoluteGitPath(f.repo, "--git-common-dir");
+  return oneLine(
+    git(f.repo, ["rev-parse", "--path-format=absolute", "--git-common-dir"]),
+  );
 }
 
 /** Runs each flag set against the worktree and asserts the unknown-state
- * refusal, with the worktree and the branch at `sha` still in place. */
+ * refusal, with the worktree and `branch` at `sha` still in place. */
 async function expectUnknownState(
   f: Fixture,
   wt: string,
   sha: string,
   flagSets: string[][],
   env: NodeJS.ProcessEnv = {},
+  branch = "feat",
 ): Promise<void> {
   for (const flags of flagSets) {
     const r = await cliBounded(f.work, ["remove", wt, ...flags], env);
     const label = `${flags.join(" ")}: ${r.stdout}${r.stderr}`;
     expect(r.code, label).toBe(2);
     expect(r.json.reason, label).toBe("unpushed_state_unknown");
-    expect(listedWorktrees(f.repo), label).toContain(wt);
-    expect(git(f.repo, ["rev-parse", "feat"]).trim(), label).toBe(sha);
+    const listed = parseWorktreeList(
+      await gitBounded(f.repo, ["worktree", "list", "--porcelain"]),
+    ).map((w) => w.path);
+    expect(listed, label).toContain(wt);
+    const at = await gitBounded(f.repo, [
+      "rev-parse",
+      "--verify",
+      `refs/heads/${branch}`,
+    ]);
+    expect(at.trim(), label).toBe(sha);
   }
 }
 
@@ -2618,9 +2703,7 @@ describe("worktree remove: a file system symlink under refs/remotes", () => {
     );
     // git itself reads the link as a plain remote-tracking ref of the
     // branch, which is the whole problem.
-    expect(git(f.repo, ["rev-list", "feat", "--not", "--remotes"]).trim()).toBe(
-      "",
-    );
+    expect(await unpushedPerGit(f.repo)).toBe("");
     await expectUnknownState(f, wt, sha, [
       ...SYMLINK_FLAG_SETS,
       // The link as the base itself: it resolves, and the branch is
@@ -2654,9 +2737,7 @@ describe("worktree remove: a file system symlink under refs/remotes", () => {
       "../heads",
       path.join(commonDirOf(f), "refs/remotes/mirror"),
     );
-    expect(git(f.repo, ["rev-list", "feat", "--not", "--remotes"]).trim()).toBe(
-      "",
-    );
+    expect(await unpushedPerGit(f.repo)).toBe("");
     await expectUnknownState(f, wt, sha, [
       ...SYMLINK_FLAG_SETS,
       ["--delete-branch", "--base", "mirror/feat"],
@@ -2678,7 +2759,10 @@ describe("worktree remove: a file system symlink under refs/remotes", () => {
       "--force",
     ]);
     expect(r.code, r.stdout + r.stderr).toBe(0);
-    expect(listedWorktrees(f.repo)).not.toContain(wt);
+    const listed = parseWorktreeList(
+      await gitBounded(f.repo, ["worktree", "list", "--porcelain"]),
+    ).map((w) => w.path);
+    expect(listed).not.toContain(wt);
   });
 
   const LAYOUTS: [string, (f: Fixture, sha: string) => void][] = [
@@ -2734,13 +2818,11 @@ describe("worktree remove: a file system symlink under refs/remotes", () => {
         git(f.repo, ["pack-refs", "--all"]);
         // pack-refs took the branch with it; write it back as a loose ref
         // so the link has something to alias.
-        fs.writeFileSync(
-          path.join(commonDirOf(f), "refs/heads/feat"),
-          `${sha}\n`,
-        );
+        const common = commonDirOf(f);
+        fs.writeFileSync(path.join(common, "refs/heads/feat"), `${sha}\n`);
         fs.symlinkSync(
           "../../heads/feat",
-          path.join(commonDirOf(f), "refs/remotes/origin/dup"),
+          path.join(common, "refs/remotes/origin/dup"),
         );
       },
     ],
@@ -2774,6 +2856,30 @@ describe("worktree remove: a file system symlink under refs/remotes", () => {
         ]);
       },
     ],
+    [
+      "the branch's own ref file being a link to a file under refs/remotes",
+      (f) => {
+        const common = commonDirOf(f);
+        fs.mkdirSync(path.join(common, "refs/remotes/mirror"));
+        fs.renameSync(
+          path.join(common, "refs/heads/feat"),
+          path.join(common, "refs/remotes/mirror/feat"),
+        );
+        fs.symlinkSync(
+          "../remotes/mirror/feat",
+          path.join(common, "refs/heads/feat"),
+        );
+      },
+    ],
+    [
+      "a link in another namespace of the refs tree (refs/tags)",
+      (f) => {
+        fs.symlinkSync(
+          "../heads/feat",
+          path.join(commonDirOf(f), "refs/tags/alias"),
+        );
+      },
+    ],
   ];
 
   it.each(LAYOUTS)("keeps the branch next to %s", async (_name, build) => {
@@ -2802,17 +2908,16 @@ describe("worktree remove: a file system symlink under refs/remotes", () => {
     const f = makeFixture();
     const { wt, sha } = makeUnpushed(f);
     const privateDir = absoluteGitPath(wt, "--git-dir");
-    expect(privateDir).not.toBe(commonDirOf(f));
+    const common = commonDirOf(f);
+    expect(privateDir).not.toBe(common);
     fs.mkdirSync(path.join(privateDir, "refs/remotes/origin"), {
       recursive: true,
     });
     fs.symlinkSync(
-      path.join(commonDirOf(f), "refs/heads/feat"),
+      path.join(common, "refs/heads/feat"),
       path.join(privateDir, "refs/remotes/origin/self"),
     );
-    expect(git(f.repo, ["rev-list", "feat", "--not", "--remotes"]).trim()).toBe(
-      sha,
-    );
+    expect(await unpushedPerGit(f.repo)).toBe(sha);
     // Unchanged: the branch is plainly unpushed, not an unknown state.
     const r = await cliBounded(f.work, ["remove", wt, "--delete-branch"]);
     expect(r.code, r.stdout + r.stderr).toBe(2);
@@ -2820,38 +2925,101 @@ describe("worktree remove: a file system symlink under refs/remotes", () => {
   });
 });
 
-describe("worktree remove: the ref backend is read from the repository's own config", () => {
-  it("refuses a storage format it does not know, instead of skipping the walk", async () => {
+describe("worktree remove: local branches stored under refs/remotes through a link", () => {
+  it("keeps a branch whose refs/heads is a link into refs/remotes, with and without --base", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeUnpushed(f);
+    git(f.repo, ["config", "remote.mirror.url", f.origin]);
+    const common = commonDirOf(f);
+    // Every branch file now really lives under refs/remotes/mirror.
+    fs.renameSync(
+      path.join(common, "refs/heads"),
+      path.join(common, "refs/remotes/mirror"),
+    );
+    fs.symlinkSync("remotes/mirror", path.join(common, "refs/heads"));
+    expect(await unpushedPerGit(f.repo)).toBe("");
+    await expectUnknownState(f, wt, sha, [
+      ...SYMLINK_FLAG_SETS,
+      ["--delete-branch", "--base", "mirror/feat"],
+      ["--require-merged", "--delete-branch", "--base", "mirror/feat"],
+    ]);
+  });
+
+  it("keeps a branch in a directory of refs/heads that is a link into refs/remotes, with and without --base", async () => {
+    const f = makeFixture();
+    const { wt } = makeUnpushed(f);
+    git(f.repo, ["config", "remote.mirror.url", f.origin]);
+    const common = commonDirOf(f);
+    fs.mkdirSync(path.join(common, "refs/remotes/mirror"));
+    fs.symlinkSync("../remotes/mirror", path.join(common, "refs/heads/team"));
+    await gitBounded(wt, ["branch", "-m", "feat", "team/feat"]);
+    // The branch file was written through the link.
+    expect(
+      fs.lstatSync(path.join(common, "refs/remotes/mirror/feat")).isFile(),
+    ).toBe(true);
+    const sha = (
+      await gitBounded(f.repo, [
+        "rev-parse",
+        "--verify",
+        "refs/heads/team/feat",
+      ])
+    ).trim();
+    expect(await unpushedPerGit(f.repo, "refs/heads/team/feat")).toBe("");
+    await expectUnknownState(
+      f,
+      wt,
+      sha,
+      [...SYMLINK_FLAG_SETS, ["--delete-branch", "--base", "mirror/feat"]],
+      {},
+      "team/feat",
+    );
+  });
+});
+
+describe("worktree remove: the ref backend is the one git reports", () => {
+  /** A `gitWrapper` PATH whose git answers `rev-parse --show-ref-format`
+   * with the `FAKE_REF_FORMAT` line, or fails it when that is unset. */
+  function fakeRefFormat(f: Fixture): string {
+    return gitWrapper(
+      f,
+      "git-fake-ref-format",
+      `for a in "$@"; do
+  if [ "$a" = --show-ref-format ]; then
+    if [ -z "\${FAKE_REF_FORMAT+set}" ]; then echo 'fatal: injected' >&2; exit 3; fi
+    printf '%s\\n' "$FAKE_REF_FORMAT"; exit 0
+  fi
+done`,
+    );
+  }
+
+  it("walks the store for every answer that is not exactly reftable", async () => {
     const f = makeFixture();
     const { wt, sha } = makeUnpushed(f);
     fs.symlinkSync(
       "../../heads/feat",
       path.join(commonDirOf(f), "refs/remotes/origin/self"),
     );
-    const bogus = gitWrapper(
-      f,
-      "git-bogus-storage",
-      `for a in "$@"; do
-  if [ "$a" = extensions.refStorage ]; then echo bogus; exit 0; fi
-done`,
-    );
-    await expectUnknownState(f, wt, sha, [["--delete-branch"]], {
-      PATH: bogus,
-    });
+    const fake = fakeRefFormat(f);
+    // An older git that does not know the option echoes it back.
+    for (const answer of [
+      "--show-ref-format",
+      "bogus",
+      "reftable ",
+      " reftable",
+      "Reftable",
+    ]) {
+      await expectUnknownState(f, wt, sha, [["--delete-branch"]], {
+        PATH: fake,
+        FAKE_REF_FORMAT: answer,
+      });
+    }
   });
 
-  it("refuses when the config read fails with a status other than 'no such key'", async () => {
+  it("refuses when git cannot name the format", async () => {
     const f = makeFixture();
     const { wt, sha } = makeUnpushed(f);
-    const failing = gitWrapper(
-      f,
-      "git-failing-config",
-      `for a in "$@"; do
-  if [ "$a" = extensions.refStorage ]; then echo 'fatal: injected' >&2; exit 3; fi
-done`,
-    );
     await expectUnknownState(f, wt, sha, [["--delete-branch"]], {
-      PATH: failing,
+      PATH: fakeRefFormat(f),
     });
   });
 
@@ -2867,6 +3035,352 @@ done`,
       GIT_CONFIG_KEY_0: "extensions.refStorage",
       GIT_CONFIG_VALUE_0: "reftable",
     });
+  });
+
+  const CONFIG_SAYS_REFTABLE: [
+    string,
+    (f: Fixture, wt: string) => Promise<void>,
+  ][] = [
+    [
+      "the repository config without format version 1",
+      async (f) => {
+        await gitBounded(f.repo, [
+          "config",
+          "--unset",
+          "core.repositoryformatversion",
+        ]);
+        await gitBounded(f.repo, [
+          "config",
+          "extensions.refStorage",
+          "reftable",
+        ]);
+      },
+    ],
+    [
+      "an included config file",
+      async (f) => {
+        const inc = path.join(f.base, "reftable.cfg");
+        fs.writeFileSync(inc, "[extensions]\n\trefStorage = reftable\n");
+        await gitBounded(f.repo, [
+          "config",
+          "core.repositoryformatversion",
+          "1",
+        ]);
+        await gitBounded(f.repo, ["config", "include.path", inc]);
+      },
+    ],
+    [
+      "the worktree's own config",
+      async (f, wt) => {
+        await gitBounded(f.repo, [
+          "config",
+          "core.repositoryformatversion",
+          "1",
+        ]);
+        await gitBounded(f.repo, [
+          "config",
+          "extensions.worktreeConfig",
+          "true",
+        ]);
+        await gitBounded(wt, [
+          "config",
+          "--worktree",
+          "extensions.refStorage",
+          "reftable",
+        ]);
+      },
+    ],
+  ];
+
+  it.each(CONFIG_SAYS_REFTABLE)(
+    "walks the loose store git keeps using when %s names reftable, with and without --base",
+    async (_name, configure) => {
+      const f = makeFixture();
+      const { wt, sha } = makeUnpushed(f);
+      const common = commonDirOf(f);
+      await configure(f, wt);
+      fs.symlinkSync(
+        "../../heads/feat",
+        path.join(common, "refs/remotes/origin/self"),
+      );
+      expect(
+        oneLine(await gitBounded(wt, ["rev-parse", "--show-ref-format"])),
+      ).toBe("files");
+      expect(await unpushedPerGit(f.repo)).toBe("");
+      await expectUnknownState(f, wt, sha, [
+        ...SYMLINK_FLAG_SETS,
+        ["--delete-branch", "--base", "origin/self"],
+      ]);
+    },
+  );
+});
+
+describe("worktree remove: the common directory is git's own answer, byte for byte", () => {
+  it("walks a common directory whose name ends in a space, with and without --base", async () => {
+    const f = makeFixture({ gitDirName: "gd " });
+    const { wt, sha } = makeUnpushed(f);
+    const common = commonDirOf(f);
+    expect(common).toBe(path.join(f.base, "gd "));
+    fs.symlinkSync(
+      "../../heads/feat",
+      path.join(common, "refs/remotes/origin/self"),
+    );
+    expect(await unpushedPerGit(f.repo)).toBe("");
+    await expectUnknownState(f, wt, sha, [
+      ...SYMLINK_FLAG_SETS,
+      ["--delete-branch", "--base", "origin/self"],
+    ]);
+  });
+
+  it("removes a pushed branch of such a repository as before", async () => {
+    const f = makeFixture({ gitDirName: "gd " });
+    const { wt } = makeUnpushed(f);
+    git(wt, ["push", "-q", "origin", "feat"]);
+    git(f.repo, ["fetch", "-q", "origin"]);
+    const r = await cliBounded(f.work, ["remove", wt, "--delete-branch"]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.branch.deleted).toBe(true);
+  });
+
+  it("removes a pushed branch of a worktree linked with relative paths", async (ctx) => {
+    const f = makeFixture();
+    const wt = path.join(f.base, "wt-rel");
+    // `--relative-paths` is newer than some git this suite runs on.
+    if (
+      gitTry(f.repo, [
+        "worktree",
+        "add",
+        "-q",
+        "--relative-paths",
+        "-b",
+        "feat",
+        wt,
+      ]) === undefined
+    ) {
+      ctx.skip();
+    }
+    commitHere(wt, "feat.txt", "pushed work");
+    git(wt, ["push", "-q", "origin", "feat"]);
+    git(f.repo, ["fetch", "-q", "origin"]);
+    const r = await cliBounded(f.work, ["remove", wt, "--delete-branch"]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.branch.deleted).toBe(true);
+  });
+});
+
+/** A pushed branch: what a check that refuses for no reason would keep. */
+function makePushed(f: Fixture): { wt: string; sha: string } {
+  const made = makeUnpushed(f);
+  git(made.wt, ["push", "-q", "origin", "feat"]);
+  git(f.repo, ["fetch", "-q", "origin"]);
+  return made;
+}
+
+describe("worktree remove: packed-refs is read as git reads it", () => {
+  it("keeps a branch whose remote-tracking ref sits in a packed-refs link to a file inside the worktree, with and without --base", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeUnpushed(f);
+    const common = commonDirOf(f);
+    git(f.repo, ["pack-refs", "--all"]);
+    // An ignored file in the worktree: `git worktree remove` deletes it,
+    // and with it every ref git read through the link.
+    fs.mkdirSync(path.join(common, "info"), { recursive: true });
+    fs.appendFileSync(path.join(common, "info/exclude"), "\nstore.txt\n");
+    const store = path.join(wt, "store.txt");
+    // The header promises sorted lines (git looks single refs up by
+    // bisection), so the added ref goes in at its place. The fixture has no
+    // annotated tags, hence no peeled `^` lines.
+    const [header = "", ...lines] = fs
+      .readFileSync(path.join(common, "packed-refs"), "utf8")
+      .split("\n")
+      .filter((line) => line.length > 0);
+    lines.push(`${sha} refs/remotes/origin/feat`);
+    lines.sort((a, b) =>
+      a.slice(a.indexOf(" ")) < b.slice(b.indexOf(" ")) ? -1 : 1,
+    );
+    fs.writeFileSync(store, `${[header, ...lines].join("\n")}\n`);
+    fs.rmSync(path.join(common, "packed-refs"));
+    fs.symlinkSync(store, path.join(common, "packed-refs"));
+    expect(await unpushedPerGit(f.repo)).toBe("");
+    await expectUnknownState(f, wt, sha, [
+      ...SYMLINK_FLAG_SETS,
+      ["--delete-branch", "--base", "origin/feat"],
+    ]);
+  });
+
+  it("removes a pushed branch whose refs are all packed, as before", async () => {
+    const f = makeFixture();
+    const { wt } = makePushed(f);
+    git(f.repo, ["pack-refs", "--all"]);
+    expect(
+      fs.lstatSync(path.join(commonDirOf(f), "packed-refs")).isFile(),
+    ).toBe(true);
+    const r = await cliBounded(f.work, ["remove", wt, "--delete-branch"]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.branch.deleted).toBe(true);
+  });
+});
+
+describe("worktree remove: a ref store git was told to keep elsewhere", () => {
+  /** A copy of the refs of `f` in `<base>/store`, as git reads a store
+   * that `extensions.refStorage = files://<store>` or the same value in
+   * `GIT_REFERENCE_BACKEND` names, with a link in it that makes `feat`
+   * read as a remote-tracking ref. Set up before anything is moved. */
+  function storeElsewhere(f: Fixture, wt: string): string {
+    const common = commonDirOf(f);
+    const privateDir = absoluteGitPath(wt, "--git-dir");
+    const store = path.join(f.base, "store");
+    fs.cpSync(path.join(common, "refs"), path.join(store, "refs"), {
+      recursive: true,
+    });
+    fs.copyFileSync(path.join(common, "HEAD"), path.join(store, "HEAD"));
+    // git reads the worktree's own HEAD from the store as well.
+    const own = path.join(store, "worktrees", path.basename(privateDir));
+    fs.mkdirSync(own, { recursive: true });
+    fs.copyFileSync(path.join(privateDir, "HEAD"), path.join(own, "HEAD"));
+    fs.symlinkSync(
+      "../../heads/feat",
+      path.join(store, "refs/remotes/origin/self"),
+    );
+    return store;
+  }
+
+  it("keeps a branch when extensions.refStorage puts the refs in another directory, with and without --base", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeUnpushed(f);
+    const common = commonDirOf(f);
+    const store = storeElsewhere(f, wt);
+    await gitBounded(f.repo, ["config", "core.repositoryformatversion", "1"]);
+    await gitBounded(f.repo, [
+      "config",
+      "extensions.refStorage",
+      `files://${store}`,
+    ]);
+    // git reads the link in the other store, and the common directory's own
+    // refs tree holds nothing the walk would refuse.
+    expect(await unpushedPerGit(f.repo)).toBe("");
+    expect(fs.existsSync(path.join(common, "refs/remotes/origin/self"))).toBe(
+      false,
+    );
+    await expectUnknownState(f, wt, sha, [
+      ...SYMLINK_FLAG_SETS,
+      ["--delete-branch", "--base", "origin/self"],
+    ]);
+  });
+
+  it("keeps a branch when GIT_REFERENCE_BACKEND puts the refs in another directory, with and without --base", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeUnpushed(f);
+    const common = commonDirOf(f);
+    const env = { GIT_REFERENCE_BACKEND: `files://${storeElsewhere(f, wt)}` };
+    for (const flags of [
+      ...SYMLINK_FLAG_SETS,
+      ["--delete-branch", "--base", "origin/self"],
+    ]) {
+      const r = await cliBounded(f.work, ["remove", wt, ...flags], env);
+      const label = `${flags.join(" ")}: ${r.stdout}${r.stderr}`;
+      expect(r.code, label).toBe(2);
+      expect(r.json.reason, label).toBe("unpushed_state_unknown");
+      expect(r.json.message, label).toContain("GIT_REFERENCE_BACKEND");
+    }
+    // Neither store lost the worktree or the branch.
+    const listed = parseWorktreeList(
+      await gitBounded(f.repo, ["worktree", "list", "--porcelain"]),
+    ).map((w) => w.path);
+    expect(listed).toContain(wt);
+    expect(fs.readFileSync(path.join(common, "refs/heads/feat"), "utf8")).toBe(
+      `${sha}\n`,
+    );
+    expect(
+      fs.readFileSync(path.join(f.base, "store/refs/heads/feat"), "utf8"),
+    ).toBe(`${sha}\n`);
+  });
+
+  it("removes a pushed branch when GIT_REFERENCE_BACKEND or the config names a format alone", async () => {
+    for (const env of [
+      { GIT_REFERENCE_BACKEND: "files" },
+      {
+        GIT_CONFIG_COUNT: "1",
+        GIT_CONFIG_KEY_0: "extensions.refStorage",
+        GIT_CONFIG_VALUE_0: "files",
+      },
+    ]) {
+      const f = makeFixture();
+      const { wt } = makePushed(f);
+      const r = await cliBounded(
+        f.work,
+        ["remove", wt, "--delete-branch"],
+        env,
+      );
+      expect(r.code, JSON.stringify(env) + r.stdout + r.stderr).toBe(0);
+      expect(r.json.branch.deleted).toBe(true);
+    }
+  });
+
+  /** A `gitWrapper` PATH whose git answers the config read of
+   * `extensions.refStorage` with `FAKE_STORAGE` (printf format, so `\0`
+   * separates values) and exit status `FAKE_STORAGE_STATUS`. */
+  function fakeStorageConfig(f: Fixture): string {
+    return gitWrapper(
+      f,
+      "git-fake-storage",
+      `for a in "$@"; do
+  if [ "$a" = extensions.refStorage ]; then
+    printf "$FAKE_STORAGE"; echo 'fatal: injected' >&2; exit "$FAKE_STORAGE_STATUS"
+  fi
+done`,
+    );
+  }
+
+  it("refuses a pushed branch for every configured value that is more than a format name", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makePushed(f);
+    const fake = fakeStorageConfig(f);
+    for (const value of [
+      "files://elsewhere\\0",
+      "reftable:///elsewhere\\0",
+      "files\\0files://elsewhere\\0",
+      "Files\\0",
+      "\\0",
+      "",
+    ]) {
+      await expectUnknownState(f, wt, sha, [["--delete-branch"]], {
+        PATH: fake,
+        FAKE_STORAGE: value,
+        FAKE_STORAGE_STATUS: "0",
+      });
+    }
+  });
+
+  it("removes a pushed branch whose config names formats alone", async () => {
+    for (const value of ["files\\0", "reftable\\0", "files\\0reftable\\0"]) {
+      const f = makeFixture();
+      const { wt } = makePushed(f);
+      const r = await cliBounded(f.work, ["remove", wt, "--delete-branch"], {
+        PATH: fakeStorageConfig(f),
+        FAKE_STORAGE: value,
+        FAKE_STORAGE_STATUS: "0",
+      });
+      expect(r.code, value + r.stdout + r.stderr).toBe(0);
+      expect(r.json.branch.deleted).toBe(true);
+    }
+  });
+
+  it("refuses a pushed branch when the config read fails, whatever it printed", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makePushed(f);
+    const r = await cliBounded(f.work, ["remove", wt, "--delete-branch"], {
+      PATH: fakeStorageConfig(f),
+      FAKE_STORAGE: "files\\0",
+      FAKE_STORAGE_STATUS: "3",
+    });
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.reason).toBe("unpushed_state_unknown");
+    // git's own failure, not a judgement of the value it printed.
+    expect(r.json.message).toContain("fatal: injected");
+    expect(
+      (await gitBounded(f.repo, ["rev-parse", "--verify", "feat"])).trim(),
+    ).toBe(sha);
   });
 });
 
@@ -2899,6 +3413,22 @@ describe("worktree remove: plain layouts under refs/remotes are unchanged", () =
     expect(r.json.reason).toBe("unpushed_commits");
     expect(git(f.repo, ["rev-parse", "feat"]).trim()).toBe(sha);
   });
+
+  it("removes a pushed branch next to tags, nested branches and a stash", async () => {
+    const f = makeFixture();
+    const { wt } = makeUnpushed(f);
+    git(f.repo, ["tag", "v1"]);
+    git(f.repo, ["tag", "-a", "-m", "annotated", "v2"]);
+    git(f.repo, ["branch", "team/one"]);
+    git(f.repo, ["branch", "team/deep/two"]);
+    write(f.repo, "a.txt", "stashed\n");
+    git(f.repo, ["stash", "-q"]);
+    git(wt, ["push", "-q", "origin", "feat"]);
+    git(f.repo, ["fetch", "-q", "origin"]);
+    const r = await cliBounded(f.work, ["remove", wt, "--delete-branch"]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.branch.deleted).toBe(true);
+  });
 });
 
 const REFTABLE_SUPPORTED = (() => {
@@ -2921,7 +3451,7 @@ describe.skipIf(!REFTABLE_SUPPORTED)(
   "worktree remove: a reftable repository has no loose refs to walk",
   () => {
     it("behaves as before: a pushed branch goes, an unpushed one stays", async () => {
-      const f = makeFixture("reftable");
+      const f = makeFixture({ refFormat: "reftable" });
       expect(git(f.repo, ["config", "extensions.refStorage"]).trim()).toBe(
         "reftable",
       );
@@ -2942,14 +3472,12 @@ describe.skipIf(!REFTABLE_SUPPORTED)(
     });
 
     it("does not read a stray file system symlink under refs/remotes, which git ignores too", async () => {
-      const f = makeFixture("reftable");
+      const f = makeFixture({ refFormat: "reftable" });
       const { wt, sha } = makeUnpushed(f);
       const dir = path.join(commonDirOf(f), "refs/remotes/origin");
       fs.mkdirSync(dir, { recursive: true });
       fs.symlinkSync("../../heads/feat", path.join(dir, "self"));
-      expect(
-        git(f.repo, ["rev-list", "feat", "--not", "--remotes"]).trim(),
-      ).toBe(sha);
+      expect(await unpushedPerGit(f.repo)).toBe(sha);
       const r = await cliBounded(f.work, ["remove", wt, "--delete-branch"]);
       expect(r.code, r.stdout + r.stderr).toBe(2);
       expect(r.json.reason).toBe("unpushed_commits");
@@ -2957,53 +3485,144 @@ describe.skipIf(!REFTABLE_SUPPORTED)(
   },
 );
 
-describe("untrustedLooseRemoteRef: the walk", () => {
-  function tree(): string {
-    const dir = fs.realpathSync(
+describe("untrustedFilesRefStore: the walk", () => {
+  function tree(name = "store"): string {
+    const parent = fs.realpathSync(
       fs.mkdtempSync(path.join(os.tmpdir(), "agent-primitives-wt-walk-")),
     );
-    tmpDirs.push(dir);
+    tmpDirs.push(parent);
+    const dir = path.join(parent, name);
     fs.mkdirSync(path.join(dir, "refs/remotes/origin"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "refs/heads"));
     fs.writeFileSync(path.join(dir, "refs/remotes/origin/main"), "x\n");
     return dir;
   }
 
   it("accepts plain files and directories, and a repository without loose remote refs", () => {
     const dir = tree();
-    expect(untrustedLooseRemoteRef(dir)).toBeUndefined();
+    expect(untrustedFilesRefStore(dir)).toBeUndefined();
     fs.rmSync(path.join(dir, "refs/remotes"), { recursive: true });
-    expect(untrustedLooseRemoteRef(dir)).toBeUndefined();
+    expect(untrustedFilesRefStore(dir)).toBeUndefined();
   });
 
-  it("names refs or refs/remotes when it is a link, or not a directory", () => {
+  it("names refs/remotes or refs when it is a link, and refs when it is not a directory", () => {
     const dir = tree();
     fs.renameSync(
       path.join(dir, "refs/remotes"),
       path.join(dir, "remotes-real"),
     );
     fs.symlinkSync("../remotes-real", path.join(dir, "refs/remotes"));
-    expect(untrustedLooseRemoteRef(dir)).toBe(
-      "refs/remotes is a symbolic link",
-    );
+    expect(untrustedFilesRefStore(dir)).toBe("refs/remotes is a symbolic link");
+    // A plain file named refs/remotes is a ref named refs/remotes to git,
+    // outside every remote: it aliases nothing.
     fs.rmSync(path.join(dir, "refs/remotes"));
     fs.writeFileSync(path.join(dir, "refs/remotes"), "x\n");
-    expect(untrustedLooseRemoteRef(dir)).toBe(
-      "refs/remotes is not a directory",
-    );
+    expect(untrustedFilesRefStore(dir)).toBeUndefined();
     fs.rmSync(path.join(dir, "refs"), { recursive: true });
     fs.symlinkSync("remotes-real", path.join(dir, "refs"));
-    expect(untrustedLooseRemoteRef(dir)).toBe("refs is a symbolic link");
+    expect(untrustedFilesRefStore(dir)).toBe("refs is a symbolic link");
     fs.rmSync(path.join(dir, "refs"));
     fs.writeFileSync(path.join(dir, "refs"), "x\n");
-    expect(untrustedLooseRemoteRef(dir)).toBe("refs is not a directory");
+    expect(untrustedFilesRefStore(dir)).toBe("refs is not a directory");
+  });
+
+  it("walks the whole refs tree, not only refs/remotes", () => {
+    const heads = tree();
+    fs.symlinkSync("remotes/origin", path.join(heads, "refs/heads/team"));
+    expect(untrustedFilesRefStore(heads)).toBe(
+      "refs/heads/team is a symbolic link",
+    );
+    const whole = tree();
+    fs.rmSync(path.join(whole, "refs/heads"), { recursive: true });
+    fs.symlinkSync("remotes/origin", path.join(whole, "refs/heads"));
+    expect(untrustedFilesRefStore(whole)).toBe("refs/heads is a symbolic link");
+    const tags = tree();
+    fs.mkdirSync(path.join(tags, "refs/tags"));
+    fs.symlinkSync("../heads/feat", path.join(tags, "refs/tags/alias"));
+    expect(untrustedFilesRefStore(tags)).toBe(
+      "refs/tags/alias is a symbolic link",
+    );
+  });
+
+  it("fails closed when the common directory or refs cannot be found", () => {
+    const dir = tree("gd ");
+    expect(untrustedFilesRefStore(dir)).toBeUndefined();
+    // The name with its trailing space cut off, as a trimmed answer
+    // would have it, does not exist: that is not "no loose refs".
+    const cut = dir.slice(0, -1);
+    expect(untrustedFilesRefStore(cut)).toBe(
+      `the common git directory ${JSON.stringify(cut)} cannot be inspected: ENOENT: no such file or directory, stat '${cut}'`,
+    );
+    const file = path.join(path.dirname(dir), "a-file");
+    fs.writeFileSync(file, "x\n");
+    expect(untrustedFilesRefStore(file)).toBe(
+      `the common git directory ${JSON.stringify(file)} is not a directory`,
+    );
+    fs.rmSync(path.join(dir, "refs"), { recursive: true });
+    expect(untrustedFilesRefStore(dir)).toContain(
+      "refs cannot be inspected: ENOENT",
+    );
   });
 
   it("names a special file", () => {
     const dir = tree();
     execFileSync("mkfifo", [path.join(dir, "refs/remotes/origin/pipe")]);
-    expect(untrustedLooseRemoteRef(dir)).toBe(
+    expect(untrustedFilesRefStore(dir)).toBe(
       "refs/remotes/origin/pipe is neither a regular file nor a directory",
     );
+  });
+
+  it("accepts packed-refs as a regular file or absent, and names any other kind", () => {
+    const dir = tree();
+    const packed = path.join(dir, "packed-refs");
+    fs.writeFileSync(packed, "# pack-refs with: peeled fully-peeled sorted \n");
+    expect(untrustedFilesRefStore(dir)).toBeUndefined();
+    // A hard link is a second name of a file git replaces as a whole on
+    // every write: deleting the other name leaves this one intact.
+    fs.linkSync(packed, path.join(dir, "packed-copy"));
+    expect(untrustedFilesRefStore(dir)).toBeUndefined();
+    fs.rmSync(packed);
+    fs.symlinkSync("packed-copy", packed);
+    expect(untrustedFilesRefStore(dir)).toBe("packed-refs is a symbolic link");
+    fs.rmSync(packed);
+    fs.symlinkSync("gone", packed);
+    expect(untrustedFilesRefStore(dir)).toBe("packed-refs is a symbolic link");
+    fs.rmSync(packed);
+    fs.mkdirSync(packed);
+    expect(untrustedFilesRefStore(dir)).toBe(
+      "packed-refs is not a regular file",
+    );
+    fs.rmSync(packed, { recursive: true });
+    execFileSync("mkfifo", [packed]);
+    expect(untrustedFilesRefStore(dir)).toBe(
+      "packed-refs is not a regular file",
+    );
+  });
+
+  it("fails closed when packed-refs cannot be inspected", () => {
+    const dir = tree();
+    const real = fs.lstatSync.bind(fs) as (
+      p: fs.PathLike,
+      o?: fs.StatSyncOptions,
+    ) => fs.Stats | fs.BigIntStats;
+    const spy = vi.spyOn(fs, "lstatSync").mockImplementation(((
+      p: fs.PathLike,
+      o?: fs.StatSyncOptions,
+    ) => {
+      if (String(p).endsWith(`${path.sep}packed-refs`)) {
+        throw Object.assign(new Error("EACCES: permission denied"), {
+          code: "EACCES",
+        });
+      }
+      return real(p, o);
+    }) as typeof fs.lstatSync);
+    try {
+      expect(untrustedFilesRefStore(dir)).toBe(
+        "packed-refs cannot be inspected: EACCES: permission denied",
+      );
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it.skipIf(process.getuid?.() === 0)(
@@ -3014,19 +3633,17 @@ describe("untrustedLooseRemoteRef: the walk", () => {
       try {
         // Listed but not searchable: readdir works, lstat of the entries not.
         fs.chmodSync(origin, 0o444);
-        expect(untrustedLooseRemoteRef(dir)).toContain(
+        expect(untrustedFilesRefStore(dir)).toContain(
           "refs/remotes/origin/main cannot be inspected",
         );
         // Not even listable.
         fs.chmodSync(origin, 0o000);
-        expect(untrustedLooseRemoteRef(dir)).toContain(
+        expect(untrustedFilesRefStore(dir)).toContain(
           "refs/remotes/origin cannot be read",
         );
-        // The component itself cannot be inspected.
+        // refs itself cannot be listed.
         fs.chmodSync(path.join(dir, "refs"), 0o000);
-        expect(untrustedLooseRemoteRef(dir)).toContain(
-          "refs/remotes cannot be inspected",
-        );
+        expect(untrustedFilesRefStore(dir)).toContain("refs cannot be read");
       } finally {
         fs.chmodSync(path.join(dir, "refs"), 0o755);
         fs.chmodSync(origin, 0o755);
@@ -3037,9 +3654,70 @@ describe("untrustedLooseRemoteRef: the walk", () => {
   it("names a link and never descends into a looping directory link", () => {
     const dir = tree();
     fs.symlinkSync(".", path.join(dir, "refs/remotes/loop"));
-    expect(untrustedLooseRemoteRef(dir)).toBe(
+    expect(untrustedFilesRefStore(dir)).toBe(
       "refs/remotes/loop is a symbolic link",
     );
+  });
+
+  /** `fs.lstatSync` with the device or inode of the entries `fake` names
+   * replaced: a bind mount or a directory hard link, which a test cannot
+   * make without privileges, as the walk sees it. */
+  function fakeIdentity(
+    fake: (p: string) => Partial<Pick<fs.BigIntStats, "dev" | "ino">>,
+  ): { mockRestore: () => void } {
+    const real = fs.lstatSync.bind(fs) as (
+      p: fs.PathLike,
+      o?: fs.StatSyncOptions,
+    ) => fs.Stats | fs.BigIntStats;
+    return vi.spyOn(fs, "lstatSync").mockImplementation(((
+      p: fs.PathLike,
+      o?: fs.StatSyncOptions,
+    ) => {
+      const st = real(p, o);
+      const patch = fake(String(p));
+      if (Object.keys(patch).length === 0) return st;
+      return Object.assign(
+        Object.create(Object.getPrototypeOf(st) as object) as object,
+        st,
+        patch,
+      );
+    }) as typeof fs.lstatSync);
+  }
+
+  it("refuses a directory reached a second time under another name", () => {
+    const dir = tree();
+    fs.mkdirSync(path.join(dir, "refs/remotes/mirror"));
+    const heads = fs.lstatSync(path.join(dir, "refs/heads"), { bigint: true });
+    const spy = fakeIdentity((p) =>
+      p.endsWith(`${path.sep}refs${path.sep}remotes${path.sep}mirror`) ||
+      p.endsWith("refs/remotes/mirror")
+        ? { dev: heads.dev, ino: heads.ino }
+        : {},
+    );
+    try {
+      expect(untrustedFilesRefStore(dir)).toMatch(
+        /^refs\/(heads|remotes\/mirror) is a directory already reached under another name$/,
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    expect(untrustedFilesRefStore(dir)).toBeUndefined();
+  });
+
+  it("refuses a directory on another device than refs", () => {
+    const dir = tree();
+    fs.mkdirSync(path.join(dir, "refs/remotes/mnt"));
+    const root = fs.lstatSync(path.join(dir, "refs"), { bigint: true });
+    const spy = fakeIdentity((p) =>
+      p.endsWith("refs/remotes/mnt") ? { dev: root.dev + 1n } : {},
+    );
+    try {
+      expect(untrustedFilesRefStore(dir)).toBe(
+        "refs/remotes/mnt is on another device than refs (a mount point)",
+      );
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("stops at the entry bound", () => {
@@ -3048,10 +3726,13 @@ describe("untrustedLooseRemoteRef: the walk", () => {
       fs.writeFileSync(path.join(dir, "refs/remotes/origin", name), "x\n");
     }
     const bounds = { maxEntries: 4, maxDepth: 8 };
-    // origin, main, a, b, c, d: six entries.
-    expect(untrustedLooseRemoteRef(dir, bounds)).toContain("more than 4");
+    // heads, remotes, origin, main, a, b, c, d: eight entries.
+    expect(untrustedFilesRefStore(dir, bounds)).toContain("more than 4");
+    expect(untrustedFilesRefStore(dir, { ...bounds, maxEntries: 7 })).toContain(
+      "more than 7",
+    );
     expect(
-      untrustedLooseRemoteRef(dir, { ...bounds, maxEntries: 6 }),
+      untrustedFilesRefStore(dir, { ...bounds, maxEntries: 8 }),
     ).toBeUndefined();
   });
 
@@ -3060,11 +3741,29 @@ describe("untrustedLooseRemoteRef: the walk", () => {
     fs.mkdirSync(path.join(dir, "refs/remotes/origin/a/b/c"), {
       recursive: true,
     });
-    const bounds = { maxEntries: 100, maxDepth: 3 };
-    // origin is level 1, a 2, b 3, c 4.
-    expect(untrustedLooseRemoteRef(dir, bounds)).toContain("deeper than 3");
+    const bounds = { maxEntries: 100, maxDepth: 4 };
+    // remotes is level 1, origin 2, a 3, b 4, c 5.
+    expect(untrustedFilesRefStore(dir, bounds)).toContain("deeper than 4");
     expect(
-      untrustedLooseRemoteRef(dir, { ...bounds, maxDepth: 4 }),
+      untrustedFilesRefStore(dir, { ...bounds, maxDepth: 5 }),
     ).toBeUndefined();
+  });
+});
+
+describe("the path git names, read byte for byte", () => {
+  it("takes off only the newline git ends the line with", () => {
+    expect(gitOutputLine("/r/.git\n")).toBe("/r/.git");
+    expect(gitOutputLine("/r/gd \n")).toBe("/r/gd ");
+    expect(gitOutputLine("/r/gd\t\n")).toBe("/r/gd\t");
+    expect(gitOutputLine("/r/gd\nnl\n")).toBe("/r/gd\nnl");
+    expect(gitOutputLine("/r/gd\n\n")).toBe("/r/gd\n");
+    expect(gitOutputLine("/r/.git")).toBe("/r/.git");
+    expect(gitOutputLine("\n")).toBe("");
+  });
+
+  it("joins a relative answer to the directory git ran in without folding it", () => {
+    expect(gitPathIn("/x/link", "../.git")).toBe(`/x/link${path.sep}../.git`);
+    expect(gitPathIn("/x/wt", ".git ")).toBe(`/x/wt${path.sep}.git `);
+    expect(gitPathIn("/x/wt", "/abs/gd ")).toBe("/abs/gd ");
   });
 });

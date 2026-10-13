@@ -34,6 +34,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   kept; `--force` still removes). The reftable backend is not walked
   (tracker 84aff355).
 
+- `worktree remove`: the unpushed check no longer calls a local branch
+  pushed because of a file system link in the files ref store. git reads
+  every path under `refs` as a ref and follows links there, so a link
+  such as `refs/remotes/origin/self -> ../../heads/feat`, a directory
+  link `refs/remotes/mirror -> ../heads`, `refs/heads` (or a directory
+  below it) linked into `refs/remotes`, or a `packed-refs` link to a file
+  the removal deletes let `--delete-branch` delete the branch and leave
+  its commits on no ref. Unless git reports the reftable backend
+  (`rev-parse --show-ref-format`), the whole `refs` tree of the common
+  directory (git's own answer, taken byte for byte) and `packed-refs` are
+  now inspected with `lstat` before git is asked. A link, a directory
+  reached twice or on another device, a special file, an entry that
+  cannot be inspected, a common directory or `refs` that cannot be
+  found, a tree past the entry or depth bound, and a ref store kept
+  elsewhere (`extensions.refStorage = <format>://<path>`,
+  `GIT_REFERENCE_BACKEND`) are the `unpushed_state_unknown` refusal
+  (branch kept; `--force` still removes) (tracker 84aff355).
+
 ## [0.13.0] - 2026-10-13
 
 - `drift`: `--base` and `--head` are resolved to commit SHAs once and
