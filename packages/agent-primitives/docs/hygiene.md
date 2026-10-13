@@ -14,11 +14,19 @@ agent-primitives hygiene --base <rev> --staged
 agent-primitives hygiene --base <rev> --extend-only docs/log.md --extend-only-file extend-only.txt
 ```
 
-`--base` is the revision the task started from. Without `--staged` the range
-is `--base`..`--head` (`--head` defaults to `HEAD`). With `--staged` the
-comparison is `--base` against the git index, so it covers every commit since
-the base plus what is about to be committed; run it before `git commit` to
-refuse a bad commit, and again without `--staged` before handing back.
+`--base` is the revision the task started from. Both `--base` and `--head`
+(default `HEAD`) are resolved to commits once, and the comparison starts at
+their merge-base, so a base that moved after the branch point (an
+`origin/master` that gained commits since) gives the same result as the SHA
+the branch started from, and the base side's later changes (test cases it
+added, say) are not counted against the head. When the two have no merge-base
+(unrelated histories, or a shallow clone missing the history), the two trees
+are compared directly and a warning names the cause. With `--staged` the
+comparison is from the merge-base of `--base` and `HEAD` against the git
+index, so it covers every commit since the branch point plus what is about to
+be committed; run it before `git commit` to refuse a bad commit, and again
+without `--staged` before handing back. The envelope names the resolved
+commits as `base_sha`, `head_sha` (`null` with `--staged`) and `merge_base`.
 Renames are followed, so a moved test file is compared with its old
 content, not reported as a deletion plus an addition.
 
@@ -45,8 +53,9 @@ argument or revision is a usage error (exit `2`).
   `--plan`, the paths inside it are relative to the repository root) that
   loses more than
   `--max-delete-percent` (default `20`) of its base line count. A deleted
-  file counts as 100%. A path that does not exist at `--base` is skipped with a
-  warning. When the removed-line count cannot be measured (for example a
+  file counts as 100%. A path that does not exist at the comparison start (the merge-base, which is
+  `--base` itself when the base has not moved) is skipped with a
+  warning that names the merge-base. When the removed-line count cannot be measured (for example a
   binary file, which numstat reports as `-` instead of a count, or no
   numstat row at all), the path is not
   checked and a warning says so. Carries `baseLines`, `removedLines` and `removedPercent`.
@@ -73,7 +82,7 @@ argument or revision is a usage error (exit `2`).
 | --- | --- |
 | `--base <rev>` | Required. The revision the task started from. |
 | `--head <rev>` | Head revision, default `HEAD`. Ignored with `--staged`. |
-| `--staged` | Compare `--base` with the index. |
+| `--staged` | Compare the merge-base of `--base` and `HEAD` with the index. |
 | `--extend-only <path>` | A path the task may only extend; repeatable. |
 | `--extend-only-file <file>` | A file listing extend-only paths. |
 | `--max-delete-percent <n>` | Threshold from `0` to `100`, default `20`. |
