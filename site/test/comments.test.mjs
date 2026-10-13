@@ -452,11 +452,20 @@ test('one paragraph of unclosed openers renders in time that grows with its leng
   }
 })
 
+test('a comment opened in a quote whose closer lies after the quote stays visible', () => {
+  // The closer's line lies past the end of the quote, so the opener closes
+  // nowhere within it, and the lines of the quote are not hidden.
+  assert.equal(render('> <!-- a\n> b\n\nc -->\n'), '<blockquote>\n<p>&lt;!-- a\nb</p>\n</blockquote>\n<p>c --&gt;</p>\n')
+})
+
 test('stripComments takes the first closer after each opener and keeps an opener without one', () => {
   assert.equal(stripComments('a <!-- x --> b <!-- y --> c'), 'a  b  c')
   assert.equal(stripComments('a <!-- x --> b <!-- y'), 'a  b <!-- y')
   assert.equal(stripComments('<!--> x -->'), '')
   assert.equal(stripComments('<!---->z'), 'z')
+  // "-->" must start after the four characters of the opener.
+  assert.equal(stripComments('<!---> x'), '<!---> x')
+  assert.equal(stripComments('<!---> x --> y'), ' y')
   assert.equal(stripComments('`<!-- x -->` <!-- y -->'), '`<!-- x -->` ')
   assert.equal(stripComments('\\<!-- x --> y'), '\\<!-- x --> y')
   assert.equal(stripComments('<!-- a <!-- b --> c --> d'), ' c --> d')
