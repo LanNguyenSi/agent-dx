@@ -2586,7 +2586,7 @@ worktreeCommand
   )
   .option(
     "--path <dir>",
-    "the worktree to remove, as an alternative to the positional argument (the same flag `worktree create` takes); both forms together must name the same directory",
+    "the worktree to remove, as an alternative to the positional argument (the same flag `worktree create` takes); both forms together must resolve to the same path (symlinks are not followed)",
   )
   .option(
     "--force",

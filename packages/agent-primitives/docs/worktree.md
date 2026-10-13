@@ -150,7 +150,7 @@ agent-primitives worktree remove ~/wt/app-login --delete-branch --require-merged
 agent-primitives worktree remove --path ~/wt/app-login
 ```
 
-The worktree to remove, as one positional `<path>` or with `--path <dir>` (the flag `worktree create` takes). A relative value resolves against the invocation directory (`-C`), never against the repository. Both forms together must name the same directory, otherwise the command refuses with `option_invalid`; neither form is `option_invalid` too.
+The worktree to remove, as one positional `<path>` or with `--path <dir>` (the flag `worktree create` takes). A relative value resolves against the invocation directory (`-C`), never against the repository. Both forms together must resolve to the same path (compared after resolving against the invocation directory, without following symlinks), otherwise the command refuses with `option_invalid`; neither form is `option_invalid` too.
 
 | Option | Meaning |
 | --- | --- |
