@@ -3238,10 +3238,17 @@ done`,
   it("walks the store for every answer that is not exactly reftable", async () => {
     const f = makeFixture();
     const { wt, sha } = makeUnpushed(f);
+    const common = commonDirOf(f);
     fs.symlinkSync(
       "../../heads/feat",
-      path.join(commonDirOf(f), "refs/remotes/origin/self"),
+      path.join(common, "refs/remotes/origin/self"),
     );
+    // A stray, clean reftable stack beside the files store: an answer read
+    // as `reftable` would inspect this empty stack, trust it, and never
+    // reach the link under refs.
+    fs.mkdirSync(path.join(common, "reftable"));
+    fs.writeFileSync(path.join(common, "reftable/tables.list"), "");
+    expect(untrustedReftableStore(common)).toBeUndefined();
     const fake = fakeRefFormat(f);
     // An older git that does not know the option echoes it back.
     for (const answer of [
@@ -3255,6 +3262,13 @@ done`,
         PATH: fake,
         FAKE_REF_FORMAT: answer,
       });
+      const r = await cliBounded(f.work, ["remove", wt, "--delete-branch"], {
+        PATH: fake,
+        FAKE_REF_FORMAT: answer,
+      });
+      expect(r.json.message, answer).toContain(
+        "refs/remotes/origin/self is a symbolic link",
+      );
     }
   });
 
