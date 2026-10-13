@@ -133,7 +133,7 @@ export function safeImage(image) {
 
 const sanitizeFeature = (feature) => {
   const item = withText(feature, ['title', 'details'])
-  if (!isRecord(item) || !('icon' in item)) return item
+  if (!isRecord(item)) return item
   const icon = isRecord(item.icon) ? safeImage(item.icon) : asText(item.icon)
   const { icon: _drop, ...rest } = item
   return icon === undefined ? rest : { ...rest, icon }
@@ -142,13 +142,13 @@ const sanitizeFeature = (feature) => {
 export function sanitizeFrontmatter(frontmatter) {
   const safe = { ...frontmatter }
   if (!allowedDirs.has(safe.dir)) delete safe.dir
-  if ('layout' in safe && safe.layout !== false && !allowedLayouts.has(safe.layout)) delete safe.layout
+  if (safe.layout !== false && !allowedLayouts.has(safe.layout)) delete safe.layout
   for (const key of ['prev', 'next']) if (key in safe) safe[key] = pageLink(safe[key])
   if ('hero' in safe) {
     const hero = withText(safe.hero, ['name', 'text', 'tagline'])
-    if (isRecord(hero) && 'image' in hero) {
-      const { image: _drop, ...rest } = hero
-      const image = safeImage(hero.image)
+    if (isRecord(hero)) {
+      const { image: source, ...rest } = hero
+      const image = safeImage(source)
       safe.hero = image === undefined ? rest : { ...rest, image }
     } else {
       safe.hero = hero

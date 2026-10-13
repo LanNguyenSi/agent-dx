@@ -354,6 +354,9 @@ test('features are kept as an array and dropped in any other shape', () => {
 test('an image object keeps only the allowed keys with plain values', () => {
   const image = safeImage({ src: '/a.png', alt: 'A', width: 10, height: '20', wrap: true, onerror: 'x()', style: 'x', class: 'c', is: 'script' })
   assert.deepEqual(image, { src: '/a.png', alt: 'A', width: 10, height: '20', wrap: true })
+  assert.equal(safeImage({ wrap: 'yes' }).wrap, 'yes')
+  assert.equal(safeImage({ wrap: 1 }).wrap, 1)
+  assert.equal('wrap' in safeImage({ wrap: {} }), false)
   assert.deepEqual(safeImage({ src: { toString: () => 'x' }, alt: ['a'], width: null, height: true, wrap: {} }), {})
   assert.equal(safeImage('/a.png?x=1&y=2'), '/a.png?x=1&y=2', 'a source is an attribute value, it is not escaped twice')
   for (const bad of [undefined, null, 5, true, ['/a.png'], () => 1]) assert.equal(safeImage(bad), undefined, String(bad))
