@@ -3218,18 +3218,26 @@ describe("patch: git's identity lookup is bounded", () => {
           .map(Number);
       }
 
-      /** Running: signal 0 reaches it and `ps` does not show a zombie
-       * (killed, not yet reaped by its new parent). */
+      /** Running: signal 0 reaches it and it is no zombie (killed, not
+       * yet reaped by its new parent). When neither /proc nor `ps` can
+       * tell, it counts as running. */
       function alive(pid: number): boolean {
         try {
           process.kill(pid, 0);
         } catch {
           return false;
         }
+        try {
+          const stat = fs.readFileSync(`/proc/${String(pid)}/stat`, "utf8");
+          return stat[stat.lastIndexOf(")") + 2] !== "Z";
+        } catch {
+          // No /proc (macOS): ask ps.
+        }
         const ps = spawnSync("/bin/ps", ["-o", "stat=", "-p", String(pid)], {
           encoding: "utf8",
         });
-        return ps.status === 0 && !ps.stdout.trim().startsWith("Z");
+        if (ps.status !== 0) return true;
+        return !ps.stdout.trim().startsWith("Z");
       }
 
       function killRecorded(file: string): void {

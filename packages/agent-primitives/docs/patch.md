@@ -270,15 +270,18 @@ that would replace nothing is `missing`.
   than a timeout can stop it. Before git runs, patch follows git's own
   discovery from the root (in each directory from the root up: a `.git`
   directory, the directory a `.git` file names, read up to git's 1 MiB
-  limit, then the directory itself as a bare repository, ending where
-  git ends: at the first git directory, at any `.git` file, at a `.git`
-  entry that is neither a file nor a directory) and does not run git
-  when a `commondir` met on the way is not a regular file of at most 64
-  KiB, or a `.git` file names its directory by a path that is not UTF-8.
-  git then runs for at most 10 seconds, with at most 64 KiB of output,
-  in a process group of its own; when it does not end by itself (the
-  time or output bound, a signal), that whole group is killed, so no
-  process of it outlives the command.
+  limit, then the directory itself as a bare repository) and ends it no
+  earlier than git does: at the first directory that passes git's test
+  of a git directory, at any `.git` file, at a `.git` entry that is
+  neither a file nor a directory, and not at a filesystem boundary. It
+  does not run git when a `commondir` met on the way is not a regular
+  file of at most 64 KiB, or a `.git` file names its directory by a
+  path that is not UTF-8. git then runs for at most 10 seconds (a FIFO
+  it opens makes it wait), with at most 64 KiB of output, in a process
+  group of its own; when it does not end by itself (the time or output
+  bound, a signal), that whole group is killed, so no process of it
+  outlives the command (on Windows, which has no process groups, git
+  itself is killed).
 - When the identity lookup cannot be made, the name and layout checks
   still apply and the result carries a warning that the identity check
   was skipped, with the cause: git was not run (the `commondir` or `.git`
