@@ -17,7 +17,7 @@ In this order:
 
 1. Validates the options and every precondition below. A refusal changes nothing.
 2. Fetches `origin` (unless `--no-fetch`). This updates remote-tracking refs only.
-3. Resolves the base: `--base`, or `origin/<default branch>`.
+3. Resolves the base: `--base`, or `origin/<default branch>` (see Default base below).
 4. Runs `git worktree add --no-track -b <branch> -- <path> <base>` from the main checkout.
 5. Writes the `.ai/run` pointer (with `--run`), when git ignores that path.
 6. Creates the dependency links and excludes them.
@@ -27,13 +27,19 @@ Steps 5 to 7 never undo the worktree: what did not work is reported in the envel
 
 The main checkout is never switched, reset or stashed, and `git stash` is not used at all. Its HEAD, index, working tree and stash are the same before and after (the test suite asserts this on a checkout that has all four in use).
 
+## Default base
+
+Without `--base`, `worktree create`, `worktree remove` and `worktree list` use origin's default branch, resolved the same way in all three. The candidates, in order, are the target of `refs/remotes/origin/HEAD`, then `refs/remotes/origin/main`, then `refs/remotes/origin/master`. A candidate counts only when it passes the guard `remove --base` and `list --base` go through (`create --base` is unguarded): it is one exact, existing remote-tracking ref of the configured remote `origin`, a commit, and not a symbolic ref. So the `origin` remote has to be configured, and `origin/HEAD` is skipped (the next candidate is tried) when it points at a local branch, at a symbolic ref, at a ref of another remote or at a ref that does not exist. When no candidate passes there is no default base: `create` refuses with `default_branch_unresolved`, `list` reports `merged: unknown` with no `base`, and `remove` treats the merge state as unknown (`merge_state_unknown` under `--require-merged`; the unpushed check still applies, and `--delete-branch` of a branch with commits no remote branch holds is refused as unpushed).
+
+Everything that decides whether work may be discarded or measured (`remove`'s merge check, `list`'s `ahead`, `behind` and `merged`) reads the candidate by its full name, `refs/remotes/origin/<branch>`, so a local branch or a tag called `origin/main` cannot stand in for it. What is shown, and what `create` starts the branch from, is git's own unambiguous abbreviation of that ref: `origin/main` in a normal layout, `remotes/origin/main` where a local branch or tag of the name `origin/main` exists, or the full `refs/remotes/origin/<branch>` when no shorter name is unambiguous. In a layout where even the full name is ambiguous (local refs spelled like it as well as like the shorter forms), `create` refuses with `worktree_add_failed` rather than start from a different ref. A fallback to `origin/main` or `origin/master` names its source as `origin/HEAD is not set or not usable`.
+
 ## Options
 
 | Option | Meaning |
 | --- | --- |
 | `--branch <name>` | Required. The new branch. It must not exist yet. |
 | `--repo <path>` | Repository to branch from. Defaults to the invocation directory (`-C`). May be the main checkout, a subdirectory, or a linked worktree; the main checkout is found through git. |
-| `--base <rev>` | Start point of the branch: any revision that names a commit (`origin/develop`, a tag, a sha). Default: `origin/<default branch>`, read from `origin/HEAD`, else `origin/main`, else `origin/master`. An explicit local branch name is used as it is, not fetched ahead of time. |
+| `--base <rev>` | Start point of the branch: any revision that names a commit (`origin/develop`, a tag, a sha). Default: `origin/<default branch>`, the default base described under Default base below. An explicit local branch name is used as it is, not fetched ahead of time. |
 | `--path <dir>` | Exact worktree directory. |
 | `--root <dir>` | Directory to create `<branch>` in; the directory is named after the branch with every character outside `A-Za-z0-9._-` replaced by `-` (`feat/one` becomes `feat-one`). Exclusive with `--path`. |
 | `--run <dir>` | Run directory. Its absolute path is written, followed by a newline, to `.ai/run` in the worktree, but only when `git check-ignore --no-index` says `.ai/run` is ignored there. The directory must exist. |
@@ -133,7 +139,7 @@ A refusal is `status: "usage_error"` (exit 2) with a `reason`, a `message`, and 
 | `target_inside_worktree` | The target lies inside another working tree of the repository: the linked worktree `--repo` points into, or any registered worktree that git does not list as prunable (a locked entry counts even when its directory is missing). `details.worktree` names it. |
 | `path_and_root_conflict` | Both `--path` and `--root` were given. |
 | `base_not_found` | `--base` does not name a commit (or starts with `-`). |
-| `default_branch_unresolved` | No `--base`, and `origin/HEAD`, `origin/main` and `origin/master` all fail to resolve. Pass `--base`. |
+| `default_branch_unresolved` | No `--base`, and `origin/HEAD` is not set or not usable and neither `origin/main` nor `origin/master` is a plain remote-tracking branch of `origin` (see Default base). Pass `--base`. |
 | `fetch_failed` | `git fetch origin` failed. Pass `--no-fetch` to go on with the refs as they are. A repository with no `origin` remote skips the fetch with a warning instead. |
 | `run_dir_missing` | `--run` is not an existing directory. |
 | `link_invalid` | A link entry is unusable (see Links). |
@@ -169,8 +175,8 @@ In this order, with every check that can refuse before the first change:
 3. Nested worktree check: refuses when another registered worktree of the repository lies inside `<path>`, however its path is spelled, since `git worktree remove` would take that checkout and its uncommitted work with it. A prunable entry whose directory is gone does not count, since it has nothing inside to lose; a prunable entry whose directory is still there does.
 4. Submodule check: refuses a work tree that has a `.gitmodules` file without `--force`, which is what git itself cannot remove either. The check runs before the links are unlinked, so nothing is half-changed.
 5. Dirty check: `git status --porcelain --untracked-files=all`. Ignored paths are invisible here, which is what lets a worktree with its `.ai/run` pointer and its dependency links be removed without `--force`. A status that fails (non-zero, or a git that could not start) is the `status_unknown` refusal, never a clean reading.
-6. Merge check (only with `--require-merged` or `--delete-branch`): `merge-base --is-ancestor HEAD origin/<default>` (or the `--base` ref), and otherwise `gh pr list --state merged --head <branch> --base <default branch, or the branch part of --base> --json number,headRefOid,baseRefName`, where a merged pull request counts only when its `headRefOid` is the worktree's own commit and its `baseRefName` is that branch.
-7. Unpushed check: `git rev-list HEAD --not --remotes` counts the commits no remote branch has, and a rev-list that fails is the `unpushed_state_unknown` refusal, never zero. A branch the merge check called merged is not refused here: its commits are named in `warnings` and treated as safe, so a squash-merged branch whose remote branch was deleted and pruned is removable with `--require-merged` and without `--force`.
+6. Merge check (only with `--require-merged` or `--delete-branch`): `merge-base --is-ancestor HEAD refs/remotes/origin/<default>` (the full ref, or the `--base` ref; messages and `merged.reason` show git's abbreviation of it, `origin/<default>` in a normal layout), and otherwise `gh pr list --state merged --head <branch> --base <default branch, or the branch part of --base> --json number,headRefOid,baseRefName`, where a merged pull request counts only when its `headRefOid` is the worktree's own commit and its `baseRefName` is that branch.
+7. Unpushed check: `git for-each-ref refs/remotes` lists the symbolic refs under `refs/remotes`, and `git rev-list HEAD --not --exclude=<each symbolic ref> --remotes` counts the commits no remote branch has. A symbolic ref does not count as a push, with or without `--base`: `git symbolic-ref refs/remotes/origin/self refs/heads/feat` would otherwise make the unpushed `feat` look pushed, and deleting the branch would leave its commits on no ref. A for-each-ref or rev-list that fails is the `unpushed_state_unknown` refusal, never zero. A plain ref under `refs/remotes` still counts as a push, however it came there. Known limit: a file system symlink placed under `.git/refs/remotes` (with `ln -s`, not `git symbolic-ref`) is read by git as a plain ref, so it counts as a push and this check cannot tell it apart. A branch the merge check called merged is not refused here: its commits are named in `warnings` and treated as safe, so a squash-merged branch whose remote branch was deleted and pruned is removable with `--require-merged` and without `--force`.
 8. Branch guard: refuses to delete the branch the default base names, or the branch the main checkout is on.
 9. Unlinks the ignored symlinks in the work tree (the dependency links `create` made), each with `unlink`, which removes the link itself and never follows it, so the shared directory in the main checkout is left exactly as it was.
 10. `git worktree remove` from the main checkout (`--force` once, or twice for a locked entry, as git requires), then `git worktree prune`.
@@ -206,7 +212,7 @@ The usual [envelope](output-shape.md) with `command: "worktree remove"`, plus:
 | `worktree_dirty` | Uncommitted or untracked changes; `details.entries` lists the first 20 status lines. |
 | `status_unknown` | `git status` failed, so the dirty state could not be read; the message carries git's error. A failed check is never read as clean. |
 | `unpushed_commits` | Commits that no remote branch has; `details.commits` counts them. Not raised for a branch the merge verdict called merged: those commits are reported in `warnings` instead. |
-| `unpushed_state_unknown` | `git rev-list HEAD --not --remotes` failed, so the unpushed state could not be read; the message carries git's error. A failed check is never read as zero. |
+| `unpushed_state_unknown` | `git for-each-ref refs/remotes` or `git rev-list HEAD --not --exclude=<symbolic refs> --remotes` failed, so the unpushed state could not be read; the message carries git's error. A failed check is never read as zero, and neither is a failed for-each-ref read as "no symbolic refs". |
 | `base_not_found` | `--base <rev>` has the shape of a remote-tracking branch but no such ref exists. Nothing was removed. |
 | `base_not_remote_branch` | `--base <rev>` is not `<remote>/<branch>` or `refs/remotes/<remote>/<branch>` of a configured remote. Nothing was removed. |
 | `option_invalid` | `--base` without `--require-merged` or `--delete-branch`; no path given; or a positional path and `--path` that name different directories. |
@@ -217,7 +223,7 @@ The usual [envelope](output-shape.md) with `command: "worktree remove"`, plus:
 
 ### The merged rule
 
-Ancestry decides first (with `--base`, the base ref replaces `origin/<default branch>` here and the branch part of `--base` replaces the default branch below): `HEAD` is an ancestor of `origin/<default branch>`, which covers a merge and a fast forward. A squash or a rebase merge leaves no ancestry, so `gh pr list --state merged --head <branch> --base <default branch> --json number,headRefOid,baseRefName` is asked next, and one merged pull request is a `yes` with `via: "gh"` only when it was merged into the default branch (`--base <default branch>`) at the worktree's HEAD commit, that is, its `headRefOid` is that commit and its `baseRefName` is the default branch. The commit has to match: a branch that gained commits after the merge, or whose name was reused for new work, is not covered by the pull request that merged an older head of it. The base has to match too: a pull request merged into another branch (a stacked pull request merged into its parent branch, say) says nothing about this base. `details.merged.reason` says so in both cases. `gh` is only consulted when it is installed and only when the answer is needed; when it is absent, or fails, or answers something that is not JSON, the verdict is `unknown`, and `--require-merged` reports `merge_state_unknown` rather than removing the worktree on a guess. `--force` is what overrides both a `no` and an `unknown`.
+Ancestry decides first (with `--base`, the base ref replaces `origin/<default branch>` here and the branch part of `--base` replaces the default branch below): `HEAD` is an ancestor of `refs/remotes/origin/<default branch>`, which covers a merge and a fast forward. A squash or a rebase merge leaves no ancestry, so `gh pr list --state merged --head <branch> --base <default branch> --json number,headRefOid,baseRefName` is asked next, and one merged pull request is a `yes` with `via: "gh"` only when it was merged into the default branch (`--base <default branch>`) at the worktree's HEAD commit, that is, its `headRefOid` is that commit and its `baseRefName` is the default branch. The commit has to match: a branch that gained commits after the merge, or whose name was reused for new work, is not covered by the pull request that merged an older head of it. The base has to match too: a pull request merged into another branch (a stacked pull request merged into its parent branch, say) says nothing about this base. `details.merged.reason` says so in both cases. `gh` is only consulted when it is installed and only when the answer is needed; when it is absent, or fails, or answers something that is not JSON, the verdict is `unknown`, and `--require-merged` reports `merge_state_unknown` rather than removing the worktree on a guess. `--force` is what overrides both a `no` and an `unknown`.
 
 A branch that is merged into the base, by ancestry or by a merged pull request at the same commit, holds no work the base does not have, so it is not counted as unpushed even when its own remote branch was deleted and pruned; those commits are named in `warnings` instead of stopping the removal.
 
@@ -243,7 +249,7 @@ Per entry:
 | --- | --- |
 | `path`, `repo`, `main` | The directory, the basename of the main checkout it belongs to, and whether this entry is that main checkout (the only `main: true` of a repository). |
 | `branch`, `head` | From `git worktree list --porcelain`; `branch` is absent for a detached HEAD. |
-| `base` | The base the three fields below are measured against: the `--base` value, or else the default base (`origin/main`, say), absent when no default can be resolved. |
+| `base` | The base the three fields below are measured against: the `--base` value, or else the default base (`origin/main`, say; `remotes/origin/main` where a local branch or tag called `origin/main` exists), absent when no default can be resolved. |
 | `runPointer` | Trimmed content of `<path>/.ai/run`, `null` when absent. |
 | `dirty` | Whether `git status --porcelain --untracked-files=all` says anything, `null` when git could not answer. |
 | `ahead`, `behind` | `git rev-list --left-right --count <base>...HEAD`: commits only on `HEAD`, and commits only on the base. `null` when either could not be told. |

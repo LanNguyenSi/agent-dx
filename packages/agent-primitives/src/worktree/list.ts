@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import {
   WorktreeRefusal,
+  type DefaultBase,
   git,
   gitText,
   ignoredSymlinks,
@@ -108,11 +109,24 @@ function describeEntry(
   warnings: string[],
   baseFlag: string | undefined,
   resolutions: Map<string, RemoteBaseResolution>,
+  defaultBases: Map<string, DefaultBase | undefined>,
 ): ListedWorktree {
-  let base: { ref: string; ghBase?: string } | undefined;
+  // `ref` is what is measured against, `label` what is shown.
+  let base: { ref: string; ghBase: string; label: string } | undefined;
   let baseProblem: string | undefined;
   if (baseFlag === undefined) {
-    base = resolveDefaultBase(repo.mainCheckout);
+    // Resolved once per repository: it costs several git processes.
+    if (!defaultBases.has(repo.mainCheckout)) {
+      defaultBases.set(
+        repo.mainCheckout,
+        resolveDefaultBase(repo.mainCheckout),
+      );
+    }
+    const found = defaultBases.get(repo.mainCheckout);
+    base =
+      found === undefined
+        ? undefined
+        : { ref: found.fullRef, ghBase: found.ghBase, label: found.ref };
   } else {
     // Resolved once per repository, in its main checkout, to a full ref:
     // every worktree is measured against the same full ref.
@@ -129,7 +143,11 @@ function describeEntry(
       }
     }
     if (resolved.ok) {
-      base = { ref: resolved.base.ref, ghBase: resolved.base.branch };
+      base = {
+        ref: resolved.base.ref,
+        ghBase: resolved.base.branch,
+        label: resolved.base.ref,
+      };
     } else {
       baseProblem =
         resolved.reason === "base_not_found"
@@ -146,7 +164,7 @@ function describeEntry(
     ...(baseFlag !== undefined
       ? { base: baseFlag }
       : base !== undefined
-        ? { base: base.ref }
+        ? { base: base.label }
         : {}),
     runPointer: null,
     dirty: null,
@@ -185,6 +203,7 @@ function describeEntry(
       entry.branch,
       base.ref,
       base.ghBase,
+      base.label,
     );
     const countsOfBase = counts(entry.path, base.ref);
     listed.ahead = countsOfBase.ahead;
@@ -217,6 +236,7 @@ export async function listWorktrees(
   }
   const warnings: string[] = [];
   const resolutions = new Map<string, RemoteBaseResolution>();
+  const defaultBases = new Map<string, DefaultBase | undefined>();
 
   if (o.root === undefined) {
     const repo = resolveRepo(path.resolve(o.cwd, o.repo ?? "."));
@@ -236,7 +256,15 @@ export async function listWorktrees(
     return {
       status: "ok",
       worktrees: repo.worktrees.map((entry, index) =>
-        describeEntry(entry, repo, index === 0, warnings, o.base, resolutions),
+        describeEntry(
+          entry,
+          repo,
+          index === 0,
+          warnings,
+          o.base,
+          resolutions,
+          defaultBases,
+        ),
       ),
       warnings,
     };
@@ -285,6 +313,7 @@ export async function listWorktrees(
           warnings,
           o.base,
           resolutions,
+          defaultBases,
         ),
       );
     } catch (err) {

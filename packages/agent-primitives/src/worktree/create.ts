@@ -396,7 +396,7 @@ function resolveBase(
   const found = resolveDefaultBase(repo.mainCheckout);
   if (found === undefined) {
     throw new WorktreeRefusal(
-      "cannot tell the default branch: origin/HEAD is not set and neither origin/main nor origin/master exists; pass --base <rev>",
+      "cannot tell the default branch: origin/HEAD is not set or not usable (it must name a plain remote-tracking branch of origin), and neither origin/main nor origin/master is one; pass --base <rev>",
       "default_branch_unresolved",
     );
   }
