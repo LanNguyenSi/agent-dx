@@ -12574,3 +12574,44 @@ describe("README section pointers in shipped, fetched-raw agent docs stay valid"
     expect(extractHeadings(fixtureReadme).has("Run modes")).toBe(true);
   });
 });
+
+describe("the implementer and reviewer bound runs against adversarial fixtures (a mutant deleting any of these sentences must fail this)", () => {
+  const implementerMd = unwrap(readAsset("agents/implementer.md"));
+  const reviewerMd = unwrap(readAsset("agents/reviewer.md"));
+
+  it("implementer prompt requires its own process group, a hard timeout, a memory cap, group kill, and a leftover check", () => {
+    expect(implementerMd).toContain(
+      "Run every repro, hang probe, fuzz loop, and ad-hoc command against an adversarial or circular fixture",
+    );
+    expect(implementerMd).toContain(
+      "own process group with a hard wall-clock timeout and a memory cap",
+    );
+    expect(implementerMd).toContain("kill the whole group on either limit");
+    expect(implementerMd).toContain(
+      "verify afterwards that no process of yours is left running",
+    );
+    expect(implementerMd).toContain(
+      "bounds itself with a timeout and kills the whole group, not only the direct child",
+    );
+    expect(implementerMd).toContain("lack `setsid(1)`");
+  });
+
+  it("reviewer prompt flags unbounded process-spawning tests and bounds its own runs", () => {
+    expect(reviewerMd).toContain(
+      "must bound itself with a timeout and kill the whole process group, not only the direct child",
+    );
+    expect(reviewerMd).toContain("an unbounded one is a finding");
+    expect(reviewerMd).toContain(
+      "Run every repro, hang probe, fuzz loop, and ad-hoc command you execute against an adversarial or circular fixture in its own process group with a hard timeout and a memory cap, kill the whole group on either limit, and verify afterwards that no process of yours is left running",
+    );
+  });
+
+  it("the evidence-and-probes reference points the orchestrator's own runs at the implementer's bounded-run rule", () => {
+    const evidenceMd = unwrap(
+      readRawAsset("skill/references/evidence-and-probes.md"),
+    );
+    expect(evidenceMd).toContain(
+      "Repros, hang probes, fuzz loops, and ad-hoc runs against adversarial or circular fixtures, including the orchestrator's own runs, follow the installed `implementer.md` prompt's bounded-run rule: own process group, hard timeout, memory cap, group kill on either limit, and a leftover-process check afterwards.",
+    );
+  });
+});

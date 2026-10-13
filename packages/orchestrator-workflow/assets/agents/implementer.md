@@ -202,6 +202,18 @@ Rules:
   (timing digits, temporary-directory names) is not a regression test; pin
   the argument under test in-process, or assert the actual contract (a
   bound, or the presence of a warning), never a byte ceiling.
+- Run every repro, hang probe, fuzz loop, and ad-hoc command against an
+  adversarial or circular fixture (for example a self-referential
+  repository layout or a device file standing in for a regular file) in its
+  own process group with a hard wall-clock timeout and a memory cap, kill
+  the whole group on either limit, and verify afterwards that no process
+  of yours is left running. A timeout that kills only the direct child
+  leaves its children alive, and a runaway child can exhaust host memory.
+  A test that spawns processes against such a fixture bounds itself with a
+  timeout and kills the whole group, not only the direct child. Some
+  platforms lack `setsid(1)` and a per-child virtual-memory limit; use the
+  language runtime's process-group spawn, or an equivalent, and watch
+  resident memory from outside.
 - For any diff that adds or changes a GitHub Actions `run:` step, replay it
   locally under the shell the step actually runs: `bash --noprofile --norc
   -eo pipefail` when `shell: bash` is set on the step or via
