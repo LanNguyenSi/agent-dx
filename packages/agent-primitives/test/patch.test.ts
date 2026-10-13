@@ -3355,8 +3355,8 @@ describe("patch: git's identity lookup is bounded", () => {
     fs.mkdirSync(w);
     fs.writeFileSync(path.join(w, "a.txt"), "a\n");
     const cases = [
-      ["100 KiB", 100 * 1024, "would_write"],
-      ["over 1 MiB", 1024 * 1024 + 4096, "usage_error"],
+      ["exactly 1 MiB", 1024 * 1024, "would_write"],
+      ["1 MiB and one byte", 1024 * 1024 + 1, "usage_error"],
     ] as const;
     for (const [size, bytes, status] of cases) {
       fs.writeFileSync(
@@ -3405,6 +3405,28 @@ describe("patch: git's identity lookup is bounded", () => {
     expect(r.status).toBe("usage_error");
     expect(r.reason).toBe("git_dir");
     expect(read(root, "D/f.txt")).toBe("f\n");
+  });
+
+  it("strips a commondir's trailing line breaks before it cuts at the NUL, as git does", () => {
+    // `../C\n\0junk`: the line break sits before the NUL, so it is part of
+    // the path git reads (`C\n`, which does not exist): `D` is no git
+    // directory, although `C` holds objects and refs.
+    const root = repo({ "D/f.txt": "f\n" });
+    fs.writeFileSync(path.join(root, "D", "HEAD"), "ref: refs/heads/main\n");
+    fs.writeFileSync(
+      path.join(root, "D", "commondir"),
+      Buffer.concat([
+        Buffer.from("../C\n"),
+        Buffer.from([0]),
+        Buffer.from("junk"),
+      ]),
+    );
+    fs.mkdirSync(path.join(root, "C", "objects"), { recursive: true });
+    fs.mkdirSync(path.join(root, "C", "refs"), { recursive: true });
+    const r = run(root, [{ file: "D/f.txt", old: "f", new: "g" }], {
+      dryRun: true,
+    });
+    expect(r.status).toBe("would_write");
   });
 
   it.skipIf(process.platform === "win32")(
