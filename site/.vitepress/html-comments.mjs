@@ -123,6 +123,8 @@ function commentBlock(state, startLine, endLine, silent) {
 // The first line in [from, endLine) that ends at or after `close`, or -1. Line
 // ends only grow, so a binary search finds it; walking the lines one by one
 // would cost the distance to a far closer for each opener that has one.
+// `close` indexes a '-' of "-->", never a line break, so it can not equal a
+// line end: ">=" and ">" pick the same line.
 function lineEndingAfter(state, from, endLine, close) {
   let lo = from
   let hi = endLine - 1

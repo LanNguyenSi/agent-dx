@@ -479,6 +479,47 @@ test('the closer search of a paragraph of unclosed openers runs once, not once p
   assert.ok(searches <= 10, `the render searched ${searches} times for -->`)
 })
 
+test('stripComments never scans text it has already scanned, whatever it searches with', (t) => {
+  // The work of a scan is the span it reads, so linear total work means the
+  // spans do not overlap: each search starts at or after where the previous
+  // one ended. Every regex route (exec, test, match, replace, search) goes
+  // through RegExp.prototype.exec, and the string route through indexOf, so
+  // these two spies see the searches however stripComments makes them. A
+  // search that finds nothing has read to the end of the text. Restarting a
+  // lazy search at each opener that has no closer fails this, though its
+  // result is the same.
+  const spans = []
+  const exec = RegExp.prototype.exec
+  t.mock.method(RegExp.prototype, 'exec', function (subject) {
+    const start = this.global || this.sticky ? this.lastIndex : 0
+    const m = exec.call(this, subject)
+    if (subject === current) spans.push({ start, end: m ? m.index + m[0].length : current.length })
+    return m
+  })
+  const indexOf = String.prototype.indexOf
+  t.mock.method(String.prototype, 'indexOf', function (needle, from = 0) {
+    const at = indexOf.call(this, needle, from)
+    if (String(this) === current && needle === '-->') spans.push({ start: from, end: at === -1 ? current.length : at + 3 })
+    return at
+  })
+  let current = ''
+  const cases = {
+    'unclosed openers': 'text line\n<!-- o\n'.repeat(500),
+    'unclosed openers and a closer in a code span': '<!-- o `-->`\n'.repeat(500),
+    'comments': 'a <!-- x --> b <!-- y --> c\n'.repeat(500),
+    'comments and unclosed backticks': '`<!-- x --> `` <!-- y\n'.repeat(300)
+  }
+  for (const [name, src] of Object.entries(cases)) {
+    current = src
+    spans.length = 0
+    stripComments(src)
+    assert.ok(spans.length > 0, `${name}: the spies see the searches`)
+    for (let i = 1; i < spans.length; i++) {
+      assert.ok(spans[i].start >= spans[i - 1].end, `${name}: search ${i} started at ${spans[i].start}, inside the ${spans[i - 1].start}-${spans[i - 1].end} read before it`)
+    }
+  }
+})
+
 test('a comment opened in a quote whose closer lies after the quote stays visible', () => {
   // The closer's line lies past the end of the quote, so the opener closes
   // nowhere within it, and the lines of the quote are not hidden.
