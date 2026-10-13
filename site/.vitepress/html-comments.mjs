@@ -38,7 +38,9 @@ export function htmlComments(md) {
     alt: ['paragraph', 'reference', 'blockquote']
   })
   md.inline.ruler.before('html_inline', 'agent-dx-comment', commentInline)
-  md.core.ruler.before('inline', 'agent-dx-comment-lines', commentLines)
+  // Right after the block parse, before any other core rule can change a
+  // paragraph's text (see commentLines).
+  md.core.ruler.after('block', 'agent-dx-comment-lines', commentLines)
   md.core.ruler.after('inline', 'agent-dx-comment-text', commentText)
 }
 
@@ -120,9 +122,11 @@ function findClose(state, from) {
 // A comment inside text is skipped without a token, so the text around it
 // joins as if the comment had never been written. As for a comment that starts
 // a line, it is not one when its first "-->" lies in a fence markdown-it finds
-// in the page: a hidden comment earlier on the page can leave the opener in a
-// paragraph that holds the lines of that fence, or a code span can hold the
-// closer, and the opener then stays visible.
+// in the page. The fence shows up in the text of a paragraph when a hidden
+// comment earlier on the page regroups the lines, and the text then holds the
+// opener and the fence lines, with the fence's opening line as a code span. A
+// "-->" in an ordinary code span still closes the comment, as it does where
+// no fence is involved.
 function commentInline(state) {
   if (!state.src.startsWith('<!--', state.pos)) return false
   const close = findClose(state, state.pos + 4)
@@ -132,15 +136,22 @@ function commentInline(state) {
   return true
 }
 
-// The inline rule sees the text of one paragraph, not the page. Before inline
-// parsing, the page and the first line of each paragraph are kept under the
-// array that the paragraph's tokens are put into, which is what the rule
-// reaches through its state. The lines of the text are the lines of the page
-// from there on.
+// The inline rule sees the text of one paragraph, not the page. Right after
+// the block parse, before any other rule can change the text, the page, the
+// first line of each paragraph, and the number of lines its text has are kept
+// under the array that the paragraph's tokens are put into, which is what the
+// rule reaches through its state. Later a core rule can cut lines off the
+// front of the text without changing the lines the token spans, as VitePress
+// does when it takes the "[!NOTE]" line out of a quote's first paragraph. The
+// text the inline rule sees is then shorter than the text kept here, and the
+// difference is the number of lines to skip, so the lines of the text are the
+// lines of the page from the first line plus that difference.
 const textStart = new WeakMap()
 function commentLines(state) {
   for (const tok of state.tokens) {
-    if (tok.type === 'inline' && tok.map) textStart.set(tok.children, { line: tok.map[0], src: state.src })
+    if (tok.type === 'inline' && tok.map) {
+      textStart.set(tok.children, { line: tok.map[0], lines: tok.content.split('\n').length, src: state.src })
+    }
   }
 }
 
@@ -150,20 +161,13 @@ function closesInFenceText(state, close) {
   if (!text) return false
   const closeLine = lineAt(state, close)
   if (closeLine === lineAt(state, state.pos)) return false
-  return inFence(fenceSpans(state.md, state.env, text.src), text.line + closeLine)
+  const cut = text.lines - lineStartsOf(state).length
+  return inFence(fenceSpans(state.md, state.env, text.src), text.line + cut + closeLine)
 }
 
-// The line of the text that holds position `at`, counted from 0. The line
-// starts are found once per paragraph, so a paragraph with many openers is not
-// searched again for each one.
-const lineStarts = new WeakMap()
+// The line of the text that holds position `at`, counted from 0.
 function lineAt(state, at) {
-  let starts = lineStarts.get(state)
-  if (!starts) {
-    starts = [0]
-    for (let i = state.src.indexOf('\n'); i !== -1; i = state.src.indexOf('\n', i + 1)) starts.push(i + 1)
-    lineStarts.set(state, starts)
-  }
+  const starts = lineStartsOf(state)
   let lo = 0
   let hi = starts.length - 1
   while (lo < hi) {
@@ -172,6 +176,19 @@ function lineAt(state, at) {
     else hi = mid - 1
   }
   return lo
+}
+
+// The start of each line of the text. They are found once per paragraph, so a
+// paragraph with many openers is not searched again for each one.
+const lineStarts = new WeakMap()
+function lineStartsOf(state) {
+  let starts = lineStarts.get(state)
+  if (!starts) {
+    starts = [0]
+    for (let i = state.src.indexOf('\n'); i !== -1; i = state.src.indexOf('\n', i + 1)) starts.push(i + 1)
+    lineStarts.set(state, starts)
+  }
+  return starts
 }
 
 // After inline parsing. Comments in link, image, and container titles are

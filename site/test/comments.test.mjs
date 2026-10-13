@@ -764,3 +764,45 @@ test('the lines of a paragraph are found once, not once per opener', (t) => {
   assert.ok(searches.length < 3 * lines, `${searches.length} searches for a newline`)
   assert.ok(searches.length > 0)
 })
+
+test('a quote that becomes an alert does not shift the lines of its first paragraph', () => {
+  // VitePress takes the "[!NOTE]" line out of the first paragraph of a quote
+  // without changing the lines that paragraph spans. The paragraph below holds
+  // a list item with an opener and a fence, after a hidden comment that ends
+  // the first item. The alert must treat the opener as the plain quote does.
+  const shown = (marker, tail) =>
+    `> 1. <!-- a\n> b -->\n> ${marker}\n> 10. item <!-- typo\n${tail}`
+  const fenceInfo = '>     ``` x --> y\n>     code\n>     ```\n'
+  for (const marker of ['[!NOTE]', '[!WARNING] Heads up', 'plain']) {
+    const src = shown(marker, fenceInfo)
+    assert.match(render(src), /&lt;!-- typo/, src)
+    assert.match(render(src), /x --&gt; y/, src)
+    // The fence's info string is shown by the page and dropped by the plain
+    // renderer, so only the first comment and the alert marker are missing.
+    assertOnlyHiddenLost(src, ['<!--', 'a', 'b', ...(marker === 'plain' ? [] : [marker.split(' ')[0]])])
+  }
+  // The alert and the plain quote show the same paragraph.
+  const para = (src) => render(src).match(/<p>(?:plain\n)?10\. item[\s\S]*?<\/p>/)[0].replace('<p>plain\n', '<p>')
+  assert.equal(para(shown('[!NOTE]', fenceInfo)), para(shown('plain', fenceInfo)))
+})
+
+test('a quote that becomes an alert still hides a comment that closes after a fence', () => {
+  // The closer lies on the line after the fence, so the comment closes there
+  // and is hidden, in the alert as in the plain quote.
+  const after = '>     ```\n>     code\n>     ```\n>     --> y\n'
+  for (const marker of ['[!NOTE]', '[!CAUTION] Careful', 'plain']) {
+    const src = `> 1. <!-- a\n> b -->\n> ${marker}\n> 10. item <!-- typo\n${after}`
+    const out = render(src)
+    assert.ok(!out.includes('typo') && !out.includes('code'), src)
+    assert.match(out, /10\. item {2}y/, src)
+  }
+})
+
+test('text rendered inline with a blank line before a closer on a fence line keeps its opener', () => {
+  // Inline rendering takes the whole text as one paragraph, so it can hold a
+  // blank line. The closer is on the line a fence opens on.
+  const text = 'a <!-- x\n\nb\n``` y --> z\nc\n```'
+  const out = md.renderInline(text, { relativePath: 'fixture.md' })
+  assert.match(out, /&lt;!-- x/)
+  assert.match(out, /y --&gt; z/)
+})
