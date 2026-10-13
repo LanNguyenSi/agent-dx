@@ -47,6 +47,49 @@ export function runGit(
   }
 }
 
+/** `runGit` with stdout kept as the bytes git wrote. */
+export interface GitBytesResult {
+  status: number | null;
+  stdout: Buffer;
+  stderr: string;
+  error?: string;
+}
+
+/**
+ * `runGit`, except that stdout comes back as the bytes git wrote, not
+ * decoded: a path or a ref name git prints is then the one the file system
+ * holds, where decoding would turn a byte that is not UTF-8 into U+FFFD and
+ * name another entry. `input`, when given, is the child's whole stdin.
+ */
+export function runGitBytes(
+  cwd: string,
+  args: string[],
+  env?: NodeJS.ProcessEnv,
+  input?: Buffer,
+): GitBytesResult {
+  try {
+    const result = spawnSync("git", args, {
+      cwd,
+      ...(env !== undefined ? { env } : {}),
+      ...(input !== undefined ? { input } : {}),
+      maxBuffer: GIT_MAX_BUFFER,
+    });
+    return {
+      status: result.status,
+      stdout: result.stdout ?? Buffer.alloc(0),
+      stderr: (result.stderr ?? Buffer.alloc(0)).toString("utf8"),
+      ...(result.error !== undefined ? { error: result.error.message } : {}),
+    };
+  } catch (err) {
+    return {
+      status: null,
+      stdout: Buffer.alloc(0),
+      stderr: "",
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 /** True only when `rev` resolves to a real commit in the repo at `cwd`.
  * Used to turn a bad `--base`/`--head` into a usage error before any diff
  * or grep runs, rather than letting git's own exit code surface as an

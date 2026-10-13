@@ -3,12 +3,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { GitRunResult } from "../src/drift/git.js";
+import type { GitBytesResult, GitRunResult } from "../src/drift/git.js";
 
-// `runGit` is the one place that runs git for the worktree commands. This
-// file replaces it with a wrapper that can hand back what `spawnSync` returns
-// for output past its limit, which no real git run produces on demand: git
-// has exited with status 0, `error` is ENOBUFS, and `stdout` is cut short.
+// `runGit` and `runGitBytes` are the two places that run git for the
+// worktree commands (the second keeps stdout as bytes). This file replaces
+// both with a wrapper that can hand back what `spawnSync` returns for output
+// past its limit, which no real git run produces on demand: git has exited
+// with status 0, `error` is ENOBUFS, and `stdout` is cut short.
 const cut = vi.hoisted(() => ({
   on: false,
   failing: "",
@@ -41,6 +42,29 @@ vi.mock("../src/drift/git.js", async (importOriginal) => {
       if (!cut.on || !args[1].includes("for-each-ref")) return result;
       // Only the first line is kept, so refs/remotes/zzz/self is lost.
       const kept = result.stdout.slice(0, result.stdout.indexOf("\n", 0) + 1);
+      return {
+        ...result,
+        stdout: kept,
+        error: "spawnSync git ENOBUFS",
+      };
+    },
+    runGitBytes: (
+      ...args: Parameters<typeof real.runGitBytes>
+    ): GitBytesResult => {
+      const result = real.runGitBytes(...args);
+      if (cut.empty !== "" && args[1].includes(cut.empty)) {
+        return { ...result, stdout: Buffer.alloc(0) };
+      }
+      if (cut.failing !== "" && args[1].includes(cut.failing)) {
+        const value = args[1].includes("extensions.refStorage")
+          ? cut.failingStatus === 1
+            ? { status: 1, stdout: Buffer.alloc(0) }
+            : { status: 0, stdout: Buffer.from("files\0") }
+          : { status: cut.failingStatus };
+        return { ...result, ...value, error: "spawnSync git ETIMEDOUT" };
+      }
+      if (!cut.on || !args[1].includes("for-each-ref")) return result;
+      const kept = result.stdout.subarray(0, result.stdout.indexOf(0x0a) + 1);
       return {
         ...result,
         stdout: kept,
