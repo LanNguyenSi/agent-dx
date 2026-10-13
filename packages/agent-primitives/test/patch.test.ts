@@ -95,7 +95,7 @@ describe("patch: matching tiers", () => {
 
   it("unicode tier for typographic quotes, dashes and special spaces", () => {
     const dir = repo({
-      "a.txt": "a\nsay(“hi”) – x y\nz “q”\n",
+      "a.txt": "a\nsay(“hi”) – x\u00A0y\nz “q”\n",
     });
     const r = run(dir, [
       { file: "a.txt", old: 'say("hi") - x y', new: 'say("bye")' },
@@ -1001,7 +1001,7 @@ describe("patch: one file, every spelling", () => {
 
   it("groups an NFD and an NFC spelling of one name", () => {
     const nfc = "café.txt";
-    const nfd = "café.txt";
+    const nfd = "cafe\u0301.txt";
     const dir = repo({ [nfc]: "one two\n" });
     if (!fs.existsSync(path.join(dir, nfd))) return; // normalisation-sensitive FS
     const r = run(dir, [
@@ -1161,7 +1161,7 @@ describe("patch: fuzzy matches change nothing outside the match", () => {
   ];
 
   it("keeps a literal gap between two fuzzy matches and splits at the real match ends", () => {
-    const before = "a-b x-c‐d\n";
+    const before = "a-b\u00A0x-c\u2010d\n";
     const dir = repo({ "a.txt": before });
     const r = run(dir, gapInsideMatch);
     expect(r.status).toBe("written");
@@ -1181,7 +1181,7 @@ describe("patch: fuzzy matches change nothing outside the match", () => {
   it("refuses a replaceAll whose gaps between fuzzy matches are not literal", () => {
     // Each "a-b c" is matched through its no-break space; the en dashes
     // between the matches read "-" only in the normalized text.
-    const before = "a-b c–a-b c–a-b c\n";
+    const before = "a-b\u00A0c–a-b\u00A0c–a-b\u00A0c\n";
     const dir = repo({ "a.txt": before });
     const r = run(dir, [
       { file: "a.txt", old: "a-b c", new: "Z", replaceAll: true },
@@ -1192,7 +1192,7 @@ describe("patch: fuzzy matches change nothing outside the match", () => {
   });
 
   it("applies a replaceAll of three fuzzy matches on one line with literal gaps", () => {
-    const dir = repo({ "a.txt": "a-b c-a-b c-a-b c\n" });
+    const dir = repo({ "a.txt": "a-b\u00A0c-a-b\u00A0c-a-b\u00A0c\n" });
     const r = run(dir, [
       { file: "a.txt", old: "a-b c", new: "Z", replaceAll: true },
     ]);
@@ -1340,14 +1340,19 @@ describe("patch: modes, line breaks and path checks", () => {
 });
 
 describe("patch: source hygiene", () => {
-  it("src/patch holds no invisible literal characters (they are written as escapes)", () => {
-    const dir = path.join(path.dirname(CLI_PATH), "..", "src", "patch");
-    for (const name of fs.readdirSync(dir)) {
-      const text = fs.readFileSync(path.join(dir, name), "utf8");
+  it("src/patch and its tests hold no invisible or combining literal characters (they are written as escapes)", () => {
+    const pkg = path.join(path.dirname(CLI_PATH), "..");
+    const dir = path.join(pkg, "src", "patch");
+    const files = [
+      ...fs.readdirSync(dir).map((name) => path.join(dir, name)),
+      path.join(pkg, "test", "patch.test.ts"),
+    ];
+    for (const file of files) {
+      const text = fs.readFileSync(file, "utf8");
       const invisible = [...text].filter(
-        (ch) => ch !== " " && /[\p{Cf}\p{Zs}\p{Zl}\p{Zp}]/u.test(ch),
+        (ch) => ch !== " " && /[\p{Cf}\p{Zs}\p{Zl}\p{Zp}\p{M}]/u.test(ch),
       );
-      expect(invisible, name).toEqual([]);
+      expect(invisible, file).toEqual([]);
     }
   });
 });
@@ -1391,7 +1396,7 @@ describe("patch CLI: findings", () => {
   it("refuses two fuzzy matches whose gap is not literal, even when the gap text occurs inside a match", async () => {
     // The en dash between the matches is outside both; the normalized
     // gap "-" also occurs inside the first match's original text.
-    const before = "a-b x–c‐d\n";
+    const before = "a-b\u00A0x–c\u2010d\n";
     const dir = repo({ "a.txt": before });
     const scratch = tmpDir();
     const plan = path.join(scratch, "plan.json");
@@ -1452,5 +1457,296 @@ describe("patch CLI: findings", () => {
     expect(ok.code).toBe(0);
     expect(read(dir, "a.txt")).toBe("A\n");
     expect(read(dir, "b.txt")).toBe("a\n");
+  });
+});
+
+describe("patch: replaceAll under the line-end rule", () => {
+  // "a a" occurs at 0 and, overlapping, at 2 in "a a a"; old ends in
+  // whitespace, so a fuzzy match must end at a line end: only 2 counts.
+  it("replaces the occurrence the line-end rule keeps although an overlapping one before it is dropped", () => {
+    const dir = repo({ "all.txt": "a a a \n", "one.txt": "a a a \n" });
+    const single = run(dir, [{ file: "one.txt", old: "a a\t", new: "X" }]);
+    const all = run(dir, [
+      { file: "all.txt", old: "a a\t", new: "X", replaceAll: true },
+    ]);
+    expect(single.status).toBe("written");
+    expect(all.status).toBe("written");
+    expect(all.edits[0]).toMatchObject({
+      status: "written",
+      tier: "trailing_whitespace",
+      occurrences: 1,
+      line_ranges: [{ start: 1, end: 1 }],
+    });
+    expect(read(dir, "all.txt")).toBe(read(dir, "one.txt"));
+    expect(read(dir, "all.txt")).toBe("a X\n");
+  });
+
+  it("replaces the kept occurrence of every line", () => {
+    const dir = repo({
+      "all.txt": "a a a \nb a a \n",
+      "l1.txt": "a a a \n",
+      "l2.txt": "b a a \n",
+    });
+    const all = run(dir, [
+      { file: "all.txt", old: "a a\t", new: "X", replaceAll: true },
+    ]);
+    expect(all.status).toBe("written");
+    expect(all.edits[0]).toMatchObject({
+      tier: "trailing_whitespace",
+      occurrences: 2,
+      line_ranges: [
+        { start: 1, end: 1 },
+        { start: 2, end: 2 },
+      ],
+    });
+    // Each candidate on its own, without replaceAll, decides the same.
+    for (const file of ["l1.txt", "l2.txt"]) {
+      expect(run(dir, [{ file, old: "a a\t", new: "X" }]).status).toBe(
+        "written",
+      );
+    }
+    expect(read(dir, "all.txt")).toBe(
+      read(dir, "l1.txt") + read(dir, "l2.txt"),
+    );
+    expect(read(dir, "all.txt")).toBe("a X\nb X\n");
+  });
+});
+
+/** A bare repository `repo.git` (cloned from a one-commit repository)
+ * with a linked worktree `wt` next to it, all in one temporary dir. */
+function bareRepoWithWorktree(): { bare: string; wt: string } {
+  const base = tmpDir();
+  const src = path.join(base, "src");
+  fs.mkdirSync(src);
+  execFileSync("git", ["init", "-q"], { cwd: src });
+  fs.writeFileSync(path.join(src, "a.txt"), "a\n");
+  execFileSync("git", ["add", "a.txt"], { cwd: src, env: gitEnv });
+  execFileSync("git", ["commit", "-q", "-m", "init"], {
+    cwd: src,
+    env: gitEnv,
+  });
+  execFileSync("git", ["clone", "-q", "--bare", "src", "repo.git"], {
+    cwd: base,
+    env: gitEnv,
+  });
+  const bare = path.join(base, "repo.git");
+  execFileSync("git", ["worktree", "add", "-q", "../wt"], {
+    cwd: bare,
+    env: gitEnv,
+  });
+  return { bare, wt: path.join(base, "wt") };
+}
+
+describe("patch: git directories without a work tree", () => {
+  it("refuses -C <bare repository> --file config, also as a dry run", async () => {
+    const { bare } = bareRepoWithWorktree();
+    const config = read(bare, "config");
+    const edit = { file: "config", old: "[core]", new: "[x]" };
+    for (const dryRun of [false, true]) {
+      const r = run(bare, [edit], { dryRun });
+      expect(r.status).toBe("usage_error");
+      expect(r.reason).toBe("git_dir");
+      expect(r.warnings).toEqual([]);
+    }
+    const res = await spawnCli([
+      "-C",
+      bare,
+      "patch",
+      "--file",
+      "config",
+      "--old",
+      "[core]",
+      "--new",
+      "[x]",
+    ]);
+    expect(res.code).toBe(2);
+    expect(JSON.parse(res.stdout)).toMatchObject({
+      status: "usage_error",
+      reason: "git_dir",
+    });
+    expect(read(bare, "config")).toBe(config);
+  });
+
+  it("refuses -C <bare repository>/worktrees/<wt> --file HEAD", () => {
+    const { bare } = bareRepoWithWorktree();
+    const gitDir = path.join(bare, "worktrees", "wt");
+    const head = read(gitDir, "HEAD");
+    const r = run(gitDir, [{ file: "HEAD", old: "ref:", new: "x" }]);
+    expect(r.reason).toBe("git_dir");
+    expect(read(gitDir, "HEAD")).toBe(head);
+  });
+
+  it("refuses the common directory of a linked worktree of a bare repository, even with allowOutside", () => {
+    const { bare, wt } = bareRepoWithWorktree();
+    const config = read(bare, "config");
+    const r = run(
+      wt,
+      [{ file: "../repo.git/config", old: "[core]", new: "[x]" }],
+      { allowOutside: true },
+    );
+    expect(r.status).toBe("usage_error");
+    expect(r.reason).toBe("git_dir");
+    expect(read(bare, "config")).toBe(config);
+  });
+
+  it("outside any repository the check finds nothing and warns of nothing", () => {
+    const dir = tmpDir();
+    fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+    const r = run(dir, [{ file: "a.txt", old: "a", new: "b" }]);
+    expect(r.status).toBe("written");
+    expect(r.warnings).toEqual([]);
+  });
+});
+
+describe("patch: a git directory check that cannot be made is reported", () => {
+  it("warns when git cannot be run", () => {
+    const dir = tmpDir();
+    execFileSync("git", ["init", "-q", "--separate-git-dir", "gd", "."], {
+      cwd: dir,
+    });
+    const config = read(dir, "gd/config");
+    const res = spawnSync(
+      process.execPath,
+      [
+        CLI_PATH,
+        "-C",
+        dir,
+        "--json",
+        "patch",
+        "--file",
+        "gd/config",
+        "--old",
+        "[core]",
+        "--new",
+        "[x]",
+        "--dry-run",
+      ],
+      { env: { PATH: path.join(dir, "no-such-bin") }, encoding: "utf8" },
+    );
+    const out = JSON.parse(res.stdout) as { warnings: string[] };
+    expect(out.warnings.join("\n")).toContain(
+      "the git directory check by identity was skipped (git could not be run",
+    );
+    expect(read(dir, "gd/config")).toBe(config);
+  });
+
+  it("warns when the root is a work tree but git fails there", () => {
+    const dir = tmpDir();
+    fs.writeFileSync(path.join(dir, ".git"), "gitdir: no-such-git-dir\n");
+    fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+    const r = run(dir, [{ file: "a.txt", old: "a", new: "b" }], {
+      dryRun: true,
+    });
+    expect(r.status).toBe("would_write");
+    expect(r.warnings.join("\n")).toContain(
+      "the git directory check by identity was skipped (git rev-parse failed",
+    );
+  });
+});
+
+describe("patch: write and dry run agree", () => {
+  it("a fuzzy-tier dry-run diff applies with git apply to the same result as the write, keeping trailing whitespace after the match", () => {
+    const content = "keep\nx  \ny  \nz\n";
+    const dir = repo({ "a.txt": content, "b.txt": content });
+    const edits = (file: string): PatchEditSpec[] => [
+      { file, old: "x\ny", new: "N" },
+    ];
+    const dry = run(dir, edits("a.txt"), { dryRun: true });
+    expect(dry.status).toBe("would_write");
+    expect(dry.edits[0].tier).toBe("trailing_whitespace");
+    fs.writeFileSync(path.join(dir, "a.diff"), dry.files[0].diff ?? "");
+    execFileSync("git", ["apply", "--whitespace=nowarn", "a.diff"], {
+      cwd: dir,
+    });
+    const real = run(dir, edits("b.txt"));
+    expect(real.status).toBe("written");
+    expect(read(dir, "b.txt")).toBe("keep\nN  \nz\n");
+    expect(read(dir, "a.txt")).toBe(read(dir, "b.txt"));
+  });
+
+  it("applies a trailing_whitespace-tier match with typographic quotes inside the match", () => {
+    const dir = repo({ "a.txt": "say \u201Chi\u201D  \nnext\nend\n" });
+    const r = run(dir, [
+      { file: "a.txt", old: "say \u201Chi\u201D\nnext", new: "N" },
+    ]);
+    expect(r.status).toBe("written");
+    expect(r.edits[0].tier).toBe("trailing_whitespace");
+    expect(read(dir, "a.txt")).toBe("N\nend\n");
+  });
+
+  it("refuses a hard-linked file on a dry run too", () => {
+    const dir = repo({ "a.txt": "a\n" });
+    fs.linkSync(path.join(dir, "a.txt"), path.join(dir, "b.txt"));
+    const r = run(dir, [{ file: "a.txt", old: "a", new: "A" }], {
+      dryRun: true,
+    });
+    expect(r.status).toBe("not_editable");
+    expect(r.reason).toBe("hard_link");
+    expect(r.edits[0]).toMatchObject({
+      status: "not_editable",
+      reason: "hard_link",
+    });
+  });
+
+  it("refuses to write when a symlink spelling the plan used was retargeted after the read", () => {
+    const dir = repo({
+      "A/f.txt": "one\n",
+      "t.txt": "two\n",
+      "u.txt": "two\n",
+    });
+    fs.symlinkSync("t.txt", path.join(dir, "link.txt"));
+    let calls = 0;
+    const r = patch({
+      cwd: dir,
+      edits: [
+        { file: "A/f.txt", old: "one", new: "ONE" },
+        { file: "link.txt", old: "two", new: "TWO" },
+      ],
+      renameFile: (from, to) => {
+        fs.renameSync(from, to);
+        if (calls++ === 0) {
+          fs.rmSync(path.join(dir, "link.txt"));
+          fs.symlinkSync("u.txt", path.join(dir, "link.txt"));
+        }
+      },
+    });
+    expect(r.status).toBe("error");
+    expect(r.files[1]).toMatchObject({
+      path: "t.txt",
+      status: "error",
+      reason: "path_changed",
+    });
+    expect(r.writtenFiles).toEqual([path.join("A", "f.txt")]);
+    expect(read(dir, "t.txt")).toBe("two\n");
+    expect(read(dir, "u.txt")).toBe("two\n");
+  });
+});
+
+describe("patch: growth bound of the fuzzy split", () => {
+  // NFKC of L + U+0304 has two characters; with U+0323 appended it is the
+  // one character U+1E38. The bound stops the first match at the longer
+  // prefix, so this plan is refused although a split exists.
+  const edits = [
+    { file: "a.txt", old: "\u1E38", new: "A" },
+    { file: "a.txt", old: "Z", new: "B" },
+  ];
+
+  it("refuses two adjacent unicode matches when the first passes a longer normalized prefix (documented false refusal)", () => {
+    const before = "L\u0304\u0323\uFF3A\n";
+    const dir = repo({ "a.txt": before });
+    const r = run(dir, edits);
+    expect(r.status).toBe("fuzzy_side_effect");
+    expect(r.edits.map((e) => [e.status, e.tier])).toEqual([
+      ["fuzzy_side_effect", "unicode"],
+      ["fuzzy_side_effect", "unicode"],
+    ]);
+    expect(readBuf(dir, "a.txt").equals(Buffer.from(before))).toBe(true);
+  });
+
+  it("applies the same edits when a literal gap separates the matches", () => {
+    const dir = repo({ "a.txt": "L\u0304\u0323 \uFF3A\n" });
+    const r = run(dir, edits);
+    expect(r.status).toBe("written");
+    expect(read(dir, "a.txt")).toBe("A B\n");
   });
 });

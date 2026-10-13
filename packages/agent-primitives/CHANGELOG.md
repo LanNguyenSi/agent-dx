@@ -33,16 +33,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `would_write` and a unified diff preview. Paths outside the repository
   root are refused unless `--allow-outside`; paths inside a git directory
   always, by a `.git` component in any letter case and by the identity of
-  the repository's git and common directories; a symlink is followed and
+  the git and common directories git finds from the root (a bare
+  repository or git directory as `-C` included; a warning names an
+  identity check that could not be made); a symlink is followed and
   its target checked. `--break-hard-links` edits a hard-linked file. New
   envelope statuses: `ambiguous`, `overlap`, `fuzzy_side_effect` and
   `not_editable` (exit `1`), `would_write` (exit `0`). The matching engine
   is ported from pi-mono's `edit-diff.ts` (MIT); its notice is kept in
   `src/patch/engine.ts`. The shipped skill text gains a section on
   `patch`, so its digest changes.
-- `probe`: a file directly under the containment root whose name starts
-  with two dots (`..foo`) counts as inside the root; only a `..` path
-  component leaves it.
+- `isPathContained`, the shared containment check used by `probe`,
+  `init` and `doctor`, treats an entry whose name starts with two dots
+  (`..foo`) as inside the root; only a `..` path component leaves it.
 
 ## [0.12.0] - 2026-10-12
 

@@ -100,12 +100,18 @@ superscript or a fullwidth letter elsewhere on a line the match touches,
 the edit is refused as `fuzzy_side_effect` instead of rewriting those
 characters, and nothing is written; the edit's `side_effect` names the
 lines and characters and, when it can find it, the `exact_text` of the
-file to use as `old` for an exact match. The result carries a warning
+file to use as `old` for an exact match. Rarely, an edit is refused this
+way although its match could be placed: when two fuzzy matches on one
+line have no literal text between them and the first ends in combining
+marks that are not in canonical order. The result carries a warning
 whenever a fuzzy tier matched. A fuzzy match covers whole lines, so
 another edit on one of those lines is reported as `overlap`.
 
 `replaceAll` replaces every non-overlapping occurrence in the matching
-tier; `occurrences` and `line_ranges` list them all.
+tier, taken from left to right among the matches the tier counts (after
+the line-end rule above, so a dropped match never hides an overlapping
+one that counts); `occurrences` and `line_ranges` list them all. An edit
+that would replace nothing is `missing`.
 
 ## Line endings and bytes
 
@@ -149,14 +155,27 @@ tier; `occurrences` and `line_ranges` list them all.
   `--allow-outside` or not. Refused are: a path with a `.git` component in
   any letter case (`.GIT`, `.Git`), both as given (resolved against the
   `-C` directory, before following symlinks) and after resolving
-  symlinks, where each component is read as it is stored on disk; and,
-  when the root is a git work tree, a path whose resolved location lies
-  below the repository's git directory or common directory (as
-  `git rev-parse --absolute-git-dir --git-common-dir` reports them,
-  compared by device and inode, so a git directory under another name is
-  covered too). Not covered: another repository's git directory that is
-  not named `.git` (a `--separate-git-dir` elsewhere) when it is not this
-  repository's own, and the identity check when `git` is not available.
+  symlinks, where each component is read as it is stored on disk; and a
+  path whose resolved location lies below the git directory or common
+  directory git finds from the root (as
+  `git rev-parse --absolute-git-dir --git-common-dir` run there reports
+  them, compared by device and inode, so a git directory under another
+  name is covered too). That lookup runs also when the root has no work
+  tree: with `-C` inside a bare repository (`repo.git`) or a git directory
+  (`repo.git/worktrees/<name>`), git names that directory and its
+  content is refused. Not covered: another repository's git directory
+  that is not named `.git` (a bare repository or a `--separate-git-dir`
+  elsewhere) when it is not the one git finds from the root.
+- When the identity lookup cannot be made, the `.git` component check
+  still applies and the result carries a warning that the identity check
+  was skipped, with the cause: `git` cannot be run (not installed or not
+  on `PATH`), whatever the root; the root is a git work tree but
+  `git rev-parse` fails there (a broken `.git` file, a repository git
+  refuses as unsafe, a damaged repository); or git names a directory that
+  cannot be stated. Outside any repository git fails as well; that is
+  read as "no git directory here", with no warning, so a bare repository
+  that git refuses to open from a root without a work tree is not
+  detected either.
 - A symlink is followed: its resolved target is checked against the root
   and edited in place, and the link stays a link. A symlink whose target
   lies outside the root is refused like any other outside path.

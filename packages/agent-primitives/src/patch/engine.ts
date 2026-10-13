@@ -260,10 +260,15 @@ function trailingInlineWhitespace(text: string): string {
  * and remembers each failed (match, start) pair, so its work is
  * polynomial in the group size. It finds a split whenever one exists,
  * with one bound: a match is not extended once its normalized original is
- * longer than the text it matched. No text whose normalisation in these
- * tiers gets shorter when it is extended is known; if one existed, the
- * bound could only refuse a split, never return one that breaks the
- * invariant.
+ * longer than the text it matched. NFKC is not monotone under appending:
+ * a combining mark appended to a non-canonically ordered sequence can be
+ * reordered and composed into fewer characters (NFKC of `L` + U+0304 has
+ * two characters, with U+0323 appended it is the one character U+1E38).
+ * When a match's original passes through such a longer prefix, the bound
+ * stops before the end that would normalize to its text and the group is
+ * refused (`fuzzy_side_effect`) although a split exists. The bound can
+ * only cause such false refusals: every split it returns was checked
+ * against the invariant above.
  */
 function matchesInOriginal(
   original: string,
@@ -487,8 +492,8 @@ export function applyReplacementsPreservingUnchangedLines(
 }
 
 /** Start offsets of `needle` in `haystack`. `overlapping` steps by one
- * character (for counting ambiguity), otherwise by the needle length
- * (the occurrences `replaceAll` replaces). */
+ * character (every match, as ambiguity counts them), otherwise by the
+ * needle length. */
 export function findOccurrences(
   haystack: string,
   needle: string,
@@ -502,6 +507,23 @@ export function findOccurrences(
     if (idx === -1) break;
     out.push(idx);
     from = idx + (overlapping ? 1 : needle.length);
+  }
+  return out;
+}
+
+/** From sorted start offsets of matches of length `length`, the ones a
+ * left-to-right replacement takes: each start at or after the end of the
+ * previous one taken. */
+export function nonOverlapping(
+  starts: readonly number[],
+  length: number,
+): number[] {
+  const out: number[] = [];
+  let end = -Infinity;
+  for (const o of starts) {
+    if (o < end) continue;
+    out.push(o);
+    end = o + length;
   }
   return out;
 }
@@ -635,8 +657,8 @@ export function resolveFileEdits(
         view.content[o + needle.length] === "\n";
       const all = findOccurrences(view.content, needle, true).filter(atLineEnd);
       if (all.length === 0) continue;
-      found = true;
       if (all.length > 1 && !edit.replaceAll) {
+        found = true;
         resolutions.push({
           index: edit.index,
           status: "ambiguous",
@@ -646,9 +668,13 @@ export function resolveFileEdits(
         });
         break;
       }
-      const used = edit.replaceAll
-        ? findOccurrences(view.content, needle, false).filter(atLineEnd)
-        : all;
+      // replaceAll takes the non-overlapping occurrences from the same
+      // filtered list the ambiguity count sees, so an occurrence the
+      // line-end rule drops never hides an overlapping one it keeps.
+      const used = edit.replaceAll ? nonOverlapping(all, needle.length) : all;
+      // An edit that would replace nothing is not resolved (it is missing).
+      if (used.length === 0) break;
+      found = true;
       const replacements = used.map((o) => ({
         matchIndex: o,
         matchLength: needle.length,

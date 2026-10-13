@@ -282,15 +282,29 @@ function identityOf(p: string): string | undefined {
   }
 }
 
-/** Identities of the repository's git directory and common directory
- * (they differ in a linked worktree), whatever they are named. Empty
- * outside a git work tree or when git cannot answer. */
-function gitDirIdentities(root: string): Set<string> {
+/**
+ * Identities of the git directory and common directory (they differ in a
+ * linked worktree) git finds from `root`, whatever they are named. Asked
+ * also when `root` has no work tree: inside a bare repository or a git
+ * directory, git answers with that directory. The set is empty when git
+ * finds no repository there, and then also carries a warning when the
+ * check could not be made: git cannot be run, or `root` is a git work
+ * tree (`inWorkTree`) and git fails or names a directory that cannot be
+ * stated there.
+ */
+function gitDirIdentities(
+  root: string,
+  inWorkTree: boolean,
+): { ids: Set<string>; warning?: string } {
   const ids = new Set<string>();
   const env = { ...process.env };
   for (const key of ["GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR"]) {
     delete env[key];
   }
+  const skipped = (why: string): { ids: Set<string>; warning: string } => ({
+    ids,
+    warning: `the git directory check by identity was skipped (${why}); only a .git path component is refused`,
+  });
   let out: string;
   try {
     out = execFileSync(
@@ -298,15 +312,32 @@ function gitDirIdentities(root: string): Set<string> {
       ["rev-parse", "--absolute-git-dir", "--git-common-dir"],
       { cwd: root, env, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
     );
-  } catch {
-    return ids;
+  } catch (err) {
+    const e = err as NodeJS.ErrnoException & { status?: number | null };
+    if (typeof e.status !== "number") {
+      return skipped(`git could not be run: ${errnoDetail(err)}`);
+    }
+    // Outside any repository git exits non-zero: nothing to refuse.
+    if (!inWorkTree) return { ids };
+    return skipped(
+      `git rev-parse failed with exit code ${String(e.status)} in the work tree ${root}`,
+    );
   }
-  for (const line of out.split("\n")) {
-    if (line.trim().length === 0) continue;
-    const id = identityOf(path.resolve(root, line.trim()));
-    if (id !== undefined) ids.add(id);
+  const lines = out
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  for (const line of lines) {
+    const id = identityOf(path.resolve(root, line));
+    if (id === undefined) {
+      return skipped(`git named ${line}, which cannot be stated`);
+    }
+    ids.add(id);
   }
-  return ids;
+  if (ids.size === 0 && inWorkTree) {
+    return skipped("git named no git directory for the work tree");
+  }
+  return { ids };
 }
 
 /** True when a directory above `real` is one of the git directories in
@@ -383,9 +414,12 @@ export function patch(options: PatchOptions): PatchResult {
       `patch: cannot resolve root ${rootLexical}: ${errnoDetail(err)}`,
     );
   }
-  const gitIds =
-    gitRoot !== undefined ? gitDirIdentities(root) : new Set<string>();
-  const warnings: string[] = [];
+  // Asked whether or not a work tree was found: `-C` may lie in a bare
+  // repository or a git directory, which has no work tree.
+  const gitDirs = gitDirIdentities(root, gitRoot !== undefined);
+  const gitIds = gitDirs.ids;
+  const warnings: string[] =
+    gitDirs.warning !== undefined ? [gitDirs.warning] : [];
   const rename =
     options.renameFile ?? ((a: string, b: string) => fs.renameSync(a, b));
 
