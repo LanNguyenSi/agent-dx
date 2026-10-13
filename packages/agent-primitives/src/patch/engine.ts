@@ -243,58 +243,117 @@ function trailingInlineWhitespace(text: string): string {
 }
 
 /**
- * Where the matches of a group lie in its original text, when the
- * original text outside the matches reads exactly as the normalized text
- * does: `original` must read `pre`, then some matched text, then the
- * literal gap to the next match, and so on, ending in the literal text
- * after the last match. Returns the replacement of each matched original
- * text (offsets into `original`), or undefined when there is no such
- * split, because writing the normalized rewrite would then change
- * characters outside the matched text. The gaps are located leftmost
- * first, which finds a split whenever one exists.
+ * Where the matches of a group lie in its original text. A split reads
+ * `original` as `pre`, the original text of match 1, the literal gap to
+ * match 2, and so on, ending in the literal text after the last match,
+ * where `pre`, every gap and the text after are the normalized text
+ * itself, and the original text of each match normalizes (`normalize`,
+ * the normalisation of the tier the matches were found in) to exactly the
+ * text it matched. Returns the replacement of each matched original text
+ * (offsets into `original`), or undefined when there is no such split, so
+ * writing would change characters outside the matched text.
+ *
+ * Every returned split satisfies that invariant, because each candidate
+ * end is checked against it: a gap text that also occurs inside a
+ * match's original cannot shift a match onto other text. The search is
+ * depth first over the possible end of each match, in increasing order,
+ * and remembers each failed (match, start) pair, so its work is
+ * polynomial in the group size. It finds a split whenever one exists,
+ * with one bound: a match is not extended once its normalized original is
+ * longer than the text it matched. No text whose normalisation in these
+ * tiers gets shorter when it is extended is known; if one existed, the
+ * bound could only refuse a split, never return one that breaks the
+ * invariant.
  */
 function matchesInOriginal(
   original: string,
   base: string,
   sorted: readonly FuzzyReplacement[],
   offset: number,
+  normalize: (text: string) => string,
 ): Array<{ start: number; end: number; text: string }> | undefined {
-  const pre = base.slice(0, sorted[0].matchIndex - offset);
-  if (!original.startsWith(pre)) return undefined;
-  const parts: Array<{ start: number; end: number; text: string }> = [];
-  let origPos = pre.length;
-  for (let i = 0; i < sorted.length; i++) {
+  const n = sorted.length;
+  const targets: string[] = [];
+  const gaps: string[] = [];
+  for (let i = 0; i < n; i++) {
     const r = sorted[i];
-    const baseEnd = r.matchIndex - offset + r.matchLength;
+    const baseStart = r.matchIndex - offset;
+    const baseEnd = baseStart + r.matchLength;
     const next = sorted[i + 1] as FuzzyReplacement | undefined;
     if (next !== undefined && next.matchIndex - offset < baseEnd) {
       throw new Error("Replacements overlap; refusing to apply them.");
     }
-    const gap =
+    targets.push(base.slice(baseStart, baseEnd));
+    gaps.push(
       next === undefined
         ? base.slice(baseEnd)
-        : base.slice(baseEnd, next.matchIndex - offset);
-    let gapAt: number;
-    if (next === undefined) {
-      gapAt = original.length - gap.length;
-      if (gapAt < origPos + 1 || !original.endsWith(gap)) return undefined;
-    } else {
-      gapAt =
-        gap.length === 0 ? origPos + 1 : original.indexOf(gap, origPos + 1);
-      if (gapAt === -1) return undefined;
-    }
-    let end = gapAt;
-    if (r.keepTrailingWhitespace === true) {
-      end -= trailingInlineWhitespace(original.slice(origPos, gapAt)).length;
-    }
-    parts.push({
-      start: origPos,
-      end: Math.max(origPos, end),
-      text: r.newText,
-    });
-    origPos = gapAt + gap.length;
+        : base.slice(baseEnd, next.matchIndex - offset),
+    );
   }
-  return parts;
+  const pre = base.slice(0, sorted[0].matchIndex - offset);
+  const post = gaps[n - 1];
+  const lastEnd = original.length - post.length;
+  if (
+    !original.startsWith(pre) ||
+    !original.endsWith(post) ||
+    lastEnd < pre.length
+  ) {
+    return undefined;
+  }
+
+  // The first end `e >= from` at which match `i`, starting at `s`, can
+  // end: its original normalizes to its target and its gap follows
+  // literally (the last match ends where the literal text after it
+  // starts). -1 if there is none.
+  const nextEnd = (i: number, s: number, from: number): number => {
+    const target = targets[i];
+    const gap = gaps[i];
+    const last = i === n - 1;
+    let e = last ? lastEnd : from;
+    while (e >= from && e <= original.length - gap.length) {
+      if (!last && gap.length > 0) {
+        e = original.indexOf(gap, e);
+        if (e === -1) return -1;
+      }
+      const normalized = normalize(original.slice(s, e));
+      if (normalized === target) return e;
+      if (last || normalized.length > target.length) return -1;
+      e += 1;
+    }
+    return -1;
+  };
+
+  // Iterative depth-first search (a group can hold many thousand matches
+  // of one replaceAll, too deep for recursion).
+  const failed: Array<Set<number>> = targets.map(() => new Set<number>());
+  const starts: number[] = [pre.length];
+  const ends: number[] = [];
+  let i = 0;
+  let from = pre.length;
+  while (i < n) {
+    const s = starts[i];
+    const e = failed[i].has(s) ? -1 : nextEnd(i, s, from);
+    if (e === -1) {
+      failed[i].add(s);
+      if (i === 0) return undefined;
+      i -= 1;
+      from = ends[i] + 1;
+      continue;
+    }
+    ends[i] = e;
+    starts[i + 1] = e + gaps[i].length;
+    i += 1;
+    from = starts[i];
+  }
+
+  return sorted.map((r, k) => {
+    const s = starts[k];
+    let end = ends[k];
+    if (r.keepTrailingWhitespace === true) {
+      end -= trailingInlineWhitespace(original.slice(s, end)).length;
+    }
+    return { start: s, end: Math.max(s, end), text: r.newText };
+  });
 }
 
 /**
@@ -314,6 +373,7 @@ export function lineRegionsPreservingUnchangedLines(
   originalContent: string,
   baseContent: string,
   replacements: readonly FuzzyReplacement[],
+  tier: MatchTier,
 ): Region[] {
   const originalLines = getLineSpans(originalContent);
   const baseLines = getLineSpans(baseContent);
@@ -355,6 +415,7 @@ export function lineRegionsPreservingUnchangedLines(
       base,
       group.replacements,
       groupStartOffset,
+      (text) => normalizeForTier(text, tier),
     );
     if (parts !== undefined) {
       return {
@@ -402,14 +463,17 @@ export function applyRegions(
 }
 
 /**
- * Apply replacements matched against `baseContent` to `originalContent`
- * while preserving unchanged line blocks from the original (see
+ * Apply replacements matched against `baseContent` (the `tier`
+ * normalisation of `originalContent`; by default `unicode`, the one
+ * fuzzy normalisation of the ported original) to `originalContent` while
+ * preserving unchanged line blocks from the original (see
  * `lineRegionsPreservingUnchangedLines`).
  */
 export function applyReplacementsPreservingUnchangedLines(
   originalContent: string,
   baseContent: string,
   replacements: readonly TextReplacement[],
+  tier: MatchTier = "unicode",
 ): string {
   return applyRegions(
     originalContent,
@@ -417,6 +481,7 @@ export function applyReplacementsPreservingUnchangedLines(
       originalContent,
       baseContent,
       replacements.map((r) => ({ ...r, editIndex: 0 })),
+      tier,
     ),
   );
 }
@@ -681,6 +746,7 @@ export function resolveFileEdits(
           keepTrailingWhitespace: m.keepTrailingWhitespace,
         })),
       ),
+      tier,
     );
     // One at a time: spreading many thousand regions into push() would
     // exceed the call stack.

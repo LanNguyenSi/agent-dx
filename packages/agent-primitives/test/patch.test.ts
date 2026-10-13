@@ -1152,6 +1152,54 @@ describe("patch: fuzzy matches change nothing outside the match", () => {
     expect(r.edits[0].tier).toBe("trailing_whitespace");
     expect(read(dir, "a.txt")).toBe("X\n   ");
   });
+
+  // Two unicode-tier matches on one line whose normalized gap ("-") also
+  // occurs inside the first match's original text.
+  const gapInsideMatch = [
+    { file: "a.txt", old: "a-b x", new: "X" },
+    { file: "a.txt", old: "c-d", new: "Y" },
+  ];
+
+  it("keeps a literal gap between two fuzzy matches and splits at the real match ends", () => {
+    const before = "a-b x-c‐d\n";
+    const dir = repo({ "a.txt": before });
+    const r = run(dir, gapInsideMatch);
+    expect(r.status).toBe("written");
+    expect(r.edits.map((e) => e.tier)).toEqual(["unicode", "unicode"]);
+    expect(read(dir, "a.txt")).toBe("X-Y\n");
+
+    const resolved = resolveFileEdits(
+      before,
+      gapInsideMatch.map((e, index) => ({ index, ...e, replaceAll: false })),
+    );
+    expect(resolved.regions[0].parts).toEqual([
+      { start: 0, end: 5, text: "X" },
+      { start: 6, end: 9, text: "Y" },
+    ]);
+  });
+
+  it("refuses a replaceAll whose gaps between fuzzy matches are not literal", () => {
+    // Each "a-b c" is matched through its no-break space; the en dashes
+    // between the matches read "-" only in the normalized text.
+    const before = "a-b c–a-b c–a-b c\n";
+    const dir = repo({ "a.txt": before });
+    const r = run(dir, [
+      { file: "a.txt", old: "a-b c", new: "Z", replaceAll: true },
+    ]);
+    expect(r.status).toBe("fuzzy_side_effect");
+    expect(r.edits[0]).toMatchObject({ tier: "unicode", occurrences: 3 });
+    expect(readBuf(dir, "a.txt").equals(Buffer.from(before))).toBe(true);
+  });
+
+  it("applies a replaceAll of three fuzzy matches on one line with literal gaps", () => {
+    const dir = repo({ "a.txt": "a-b c-a-b c-a-b c\n" });
+    const r = run(dir, [
+      { file: "a.txt", old: "a-b c", new: "Z", replaceAll: true },
+    ]);
+    expect(r.status).toBe("written");
+    expect(r.edits[0]).toMatchObject({ tier: "unicode", occurrences: 3 });
+    expect(read(dir, "a.txt")).toBe("Z-Z-Z\n");
+  });
 });
 
 describe("patch: modes, line breaks and path checks", () => {
@@ -1338,6 +1386,36 @@ describe("patch CLI: findings", () => {
     ]);
     expect(text.stdout).toContain("edits[0] a.js: fuzzy_side_effect");
     expect(text.stdout).toContain("line 1 normalized:");
+  });
+
+  it("refuses two fuzzy matches whose gap is not literal, even when the gap text occurs inside a match", async () => {
+    // The en dash between the matches is outside both; the normalized
+    // gap "-" also occurs inside the first match's original text.
+    const before = "a-b x–c‐d\n";
+    const dir = repo({ "a.txt": before });
+    const scratch = tmpDir();
+    const plan = path.join(scratch, "plan.json");
+    fs.writeFileSync(
+      plan,
+      JSON.stringify({
+        edits: [
+          { file: "a.txt", old: "a-b x", new: "X" },
+          { file: "a.txt", old: "c-d", new: "Y" },
+        ],
+      }),
+    );
+    const res = await spawnCli(["-C", dir, "patch", "--plan", plan]);
+    expect(res.code).toBe(1);
+    const out = JSON.parse(res.stdout) as {
+      status: string;
+      edits: Array<{ status: string; tier: string }>;
+    };
+    expect(out.status).toBe("fuzzy_side_effect");
+    expect(out.edits.map((e) => [e.status, e.tier])).toEqual([
+      ["fuzzy_side_effect", "unicode"],
+      ["fuzzy_side_effect", "unicode"],
+    ]);
+    expect(readBuf(dir, "a.txt").equals(Buffer.from(before))).toBe(true);
   });
 
   it("--break-hard-links edits a hard-linked file", async () => {
