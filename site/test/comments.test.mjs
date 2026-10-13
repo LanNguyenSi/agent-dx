@@ -499,7 +499,13 @@ test('stripComments never scans text it has already scanned, whatever it searche
   const indexOf = String.prototype.indexOf
   t.mock.method(String.prototype, 'indexOf', function (needle, from = 0) {
     const at = indexOf.call(this, needle, from)
-    if (String(this) === current && needle === '-->') spans.push({ start: from, end: at === -1 ? current.length : at + 3 })
+    // A search of a tail of the text, such as a slice, is a search of the text
+    // from where the tail starts.
+    const str = String(this)
+    if (needle === '-->' && current.endsWith(str)) {
+      const base = current.length - str.length
+      spans.push({ start: base + from, end: at === -1 ? current.length : base + at + 3 })
+    }
     return at
   })
   let current = ''
