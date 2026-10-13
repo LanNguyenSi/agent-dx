@@ -6,6 +6,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createMarkdownRenderer, resolveConfig } from 'vitepress'
+import { stripComments } from '../.vitepress/html-comments.mjs'
 
 let md
 before(async () => {
@@ -420,6 +421,46 @@ test('a long page of unclosed openers renders within a coarse time bound', () =>
   render(page(32000))
   const ms = performance.now() - start
   assert.ok(ms < 3000, `rendering 32000 unclosed openers took ${Math.round(ms)} ms`)
+})
+
+// The fastest of a few renders, so a busy machine slows a measurement less
+// than it slows the ratio of two measurements taken apart.
+const bestOf = (runs, fn) => {
+  let best = Infinity
+  for (let i = 0; i < runs; i++) {
+    const start = performance.now()
+    fn()
+    best = Math.min(best, performance.now() - start)
+  }
+  return best
+}
+
+test('one paragraph of unclosed openers renders in time that grows with its length', () => {
+  // Every other line is an opener. With the closer far below, inside a fence
+  // (each opener is then refused) or absent, the cost per opener must not grow
+  // with the page: four times the lines takes about four times as long, where
+  // a rule that searches the rest of the page again for each opener takes
+  // about sixteen times as long. The bound sits between the two and compares
+  // two renders on the same machine, so it holds on a slow runner.
+  const lines = (n) => 'text line\n<!-- o\n'.repeat(n / 2)
+  for (const [name, tail] of [['absent', ''], ['in a fence', '```\n-->\n```\n']]) {
+    const small = lines(16000) + tail
+    const large = lines(64000) + tail
+    render(small.slice(0, 2000))
+    const ratio = bestOf(3, () => render(large)) / bestOf(3, () => render(small))
+    assert.ok(ratio < 8, `closer ${name}: 4x the lines took ${ratio.toFixed(1)}x as long`)
+  }
+})
+
+test('stripComments takes the first closer after each opener and keeps an opener without one', () => {
+  assert.equal(stripComments('a <!-- x --> b <!-- y --> c'), 'a  b  c')
+  assert.equal(stripComments('a <!-- x --> b <!-- y'), 'a  b <!-- y')
+  assert.equal(stripComments('<!--> x -->'), '')
+  assert.equal(stripComments('<!---->z'), 'z')
+  assert.equal(stripComments('`<!-- x -->` <!-- y -->'), '`<!-- x -->` ')
+  assert.equal(stripComments('\\<!-- x --> y'), '\\<!-- x --> y')
+  assert.equal(stripComments('<!-- a <!-- b --> c --> d'), ' c --> d')
+  assert.equal(stripComments('`<!-- x` --> <!-- y'), '`<!-- x` --> <!-- y')
 })
 
 test('a backtick line indented four columns after a comment line is not a fence', () => {
