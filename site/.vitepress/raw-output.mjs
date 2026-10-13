@@ -144,7 +144,7 @@ const pageLink = (value) => (isRecord(value) ? withSafeLink(withText(value, ['te
 //     http, https or mailto, read case-insensitively. Every other scheme is
 //     refused (javascript, data, vbscript, blob, file, tel, ...).
 //   - relative: no scheme, and the href the theme writes for it (see
-//     themeHrefs) is not a network-path reference either, so it resolves on
+//     themeHref) is not a network-path reference either, so it resolves on
 //     the site: a path (`a/b`, `./a`, `../a`), a root-relative path (`/a`),
 //     `#frag`, `?query` and the empty string. A first segment with a colon
 //     needs a leading `./` (`a:b` is a scheme, `./a:b` a path).
@@ -179,23 +179,20 @@ const leadingScheme = /^[A-Za-z][A-Za-z0-9+.-]*:/
 // The theme then adds the base unless the result matches EXTERNAL_URL_RE
 // (withBase in client/app/utils.js), so a result that does is written as typed
 // and the browser reads it as another site. The extension rule (treatAsHtml)
-// and the cleanUrls setting only change the end of the result, so both are
-// tried and the extension rule is not consulted: a link the theme would leave
-// as typed is checked as rewritten too, which can refuse an on-site path to a
-// file with a known extension and never keeps an off-site one. The result of a
-// root-relative link gets the site base, which starts with "/" and never
-// makes it external.
+// and the cleanUrls setting only change the end of the result, never its
+// start, which is what EXTERNAL_URL_RE reads, so ".html" is used and neither is
+// consulted: a link the theme would leave as typed is checked as rewritten
+// too, which can refuse an on-site path to a file with a known extension and
+// never keeps an off-site one. The base starts with "/" and joinPath collapses
+// slashes, so adding it never makes a result external.
 //
 // This copies the theme's computation; read both functions again after a
 // VitePress upgrade (docs/repo-layout.md names the coupling).
 const themeOrigin = 'http://a.com'
-function themeHrefs(value) {
+function themeHref(value) {
   const { pathname, search, hash } = new URL(value, themeOrigin)
-  return [false, true].map((cleanUrls) =>
-    value.replace(/(?:(^\.+)\/)?.*$/, `$1${pathname.replace(/(\.md)?$/, cleanUrls ? '' : '.html')}${search}${hash}`)
-  )
+  return value.replace(/(?:(^\.+)\/)?.*$/, `$1${pathname.replace(/(\.md)?$/, '.html')}${search}${hash}`)
 }
-const staysOnSite = (href) => !EXTERNAL_URL_RE.test(href) && !leadingScheme.test(href) && !href.includes('\\')
 
 export function isSafeLink(value) {
   if (typeof value !== 'string' || hiddenChars.test(value) || value.includes('\\')) return false
@@ -207,7 +204,7 @@ export function isSafeLink(value) {
     }
   }
   try {
-    return [value, ...themeHrefs(value)].every(staysOnSite)
+    return [value, themeHref(value)].every((href) => !EXTERNAL_URL_RE.test(href))
   } catch {
     return false
   }

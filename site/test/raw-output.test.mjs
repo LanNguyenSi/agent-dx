@@ -555,6 +555,10 @@ test('a relative link the theme would write as another site is refused, whatever
   }
 })
 
+test('a relative value the URL parser cannot read is refused', () => {
+  for (const link of ['//', '///', '//[x', '//:', '//%']) assert.equal(isSafeLink(link), false, link)
+})
+
 test('relative links that stay on the site are kept, including look-alikes of the refused ones', () => {
   for (const link of keptRelative) {
     assert.equal(isSafeLink(link), true, link)
