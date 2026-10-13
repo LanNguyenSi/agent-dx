@@ -456,6 +456,9 @@ test('a comment opened in a quote whose closer lies after the quote stays visibl
   // The closer's line lies past the end of the quote, so the opener closes
   // nowhere within it, and the lines of the quote are not hidden.
   assert.equal(render('> <!-- a\n> b\n\nc -->\n'), '<blockquote>\n<p>&lt;!-- a\nb</p>\n</blockquote>\n<p>c --&gt;</p>\n')
+  // After a line of text the opener is no paragraph of its own: the quote keeps
+  // one paragraph.
+  assert.equal(render('> a\n> <!-- a\n> b\n\nc -->\n'), '<blockquote>\n<p>a\n&lt;!-- a\nb</p>\n</blockquote>\n<p>c --&gt;</p>\n')
 })
 
 test('stripComments takes the first closer after each opener and keeps an opener without one', () => {
