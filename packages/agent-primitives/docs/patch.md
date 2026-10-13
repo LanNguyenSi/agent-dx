@@ -154,9 +154,14 @@ that would replace nothing is `missing`.
 - A path inside a git directory is refused (`reason: "git_dir"`),
   `--allow-outside` or not, by three checks; the edit's `detail` names the
   one that applied.
-  1. Its name: a `.git` component in any letter case (`.GIT`, `.Git`) in
-     the part of the path below the root, or anywhere in the path of a
-     target outside the root. It is checked both in the path as given
+  1. Its name: a `.git` component in the part of the path below the root,
+     or anywhere in the path of a target outside the root. A component
+     counts when its name, lower-cased, is `.git` (`.GIT`, `.Git`), or
+     when it is the same directory entry (device and inode, a symlink
+     not followed) as the one the filesystem finds as `.git` in its
+     parent directory: whatever spelling the filesystem folds or
+     normalises to `.git` counts, and so does a hard link of a `.git`
+     file in the same directory. It is checked both in the path as given
      (resolved against the `-C` directory, before following symlinks, and
      taken below the root as found from `-C`) and after resolving
      symlinks, where each component is read as it is stored on disk. A
@@ -198,11 +203,20 @@ that would replace nothing is `missing`.
   up to the filesystem root, for every target. There is one exception,
   for a target inside the root: a directory above the root is passed over
   when it is the root's own git directory or that directory's common
-  directory, unless the root lies in one of git's own directories there
-  (the root's first path component below it is `objects`, `refs`,
-  `hooks`, `info`, `logs`, `worktrees`, `modules`, `branches`, `remotes`,
-  `rr-cache`, `reftable`, `rebase-merge`, `rebase-apply` or `sequencer`,
-  in any letter case). The root's own git directory is its `.git`
+  directory, unless the root lies in one of git's own directories there:
+  `objects`, `refs`, `hooks`, `info`, `logs`, `worktrees`, `modules`,
+  `branches`, `remotes`, `rr-cache`, `reftable`, `rebase-merge`,
+  `rebase-apply` or `sequencer`. That is decided by the filesystem: each
+  of these names is looked up in that directory (a symlink there
+  followed), and the root lies in one when the root or a directory above
+  it is that entry (same device and inode). So a spelling the filesystem
+  folds to one of these names counts (on a case-insensitive APFS volume
+  `Hooks`, and `hook` followed by U+017F, are `hooks`), and so does an
+  entry that is a symlink to the root or to a directory above it. The
+  root's first path component below that directory is also compared by
+  name, lower-cased; on a case-sensitive filesystem that only adds
+  refusals (`Hooks` there is another directory than git's `hooks`). The
+  root's own git directory is its `.git`
   directory, or the directory its `.git` file names (`gitdir: <path>`),
   and only when git would open it: it passes git's own test as git
   applies it, without the `GIT_*` variables above, with `objects` and
@@ -230,25 +244,48 @@ that would replace nothing is `missing`.
     `repo.git/hooks`), nothing is passed over: the repository around a
     work tree is refused as an outside target.
 - Not covered: a directory git reads only because configuration or a
-  tool names it (`core.hooksPath` pointing into a git directory, a `hooks`
-  symlink to another directory, a tool's directory such as `lfs`), when a
-  work tree of the same repository is checked out there; setting that
-  configuration takes a write into the git directory first. A directory
+  tool names it (`core.hooksPath` pointing into a git directory, a tool's
+  directory such as `lfs`), when a work tree of the same repository is
+  checked out there, and one of git's own directories that is a symlink
+  to a directory inside the work tree (a `hooks` linked to
+  `main/githooks` leaves the work tree `main` editable, as in any
+  repository whose `hooks` links into its work tree); setting either up
+  takes a write into the git directory first. A directory
   that git opens as a git directory although it passes neither the layout
   test nor the identity lookup: the layout test is git's own, wider where
   it differs, and the one known case is a `commondir` file whose content
-  is not valid UTF-8. And the window between the check and the write.
+  is not valid UTF-8. A configuration file git reads while it sets up
+  (or one it includes) holding a value of many gigabytes: the bound on
+  git is then only its 10 seconds. And the window between the check and
+  the write.
 - Refused although git would not object: a `-C` inside a submodule (or
   another repository) nested in a work tree that is checked out inside
   its bare repository, since the submodule's own git directory is not
   that bare repository (a `-C` at the work tree root edits the same
   file); a directory above the target that holds files named `gitdir`
   and `commondir`.
+- The identity lookup is bounded. git reads a `commondir` file whole
+  while it looks for the repository, so one that is a device, a FIFO or
+  a large (also sparse) file makes it wait or grow without bound, faster
+  than a timeout can stop it. Before git runs, patch follows git's own
+  discovery from the root (in each directory from the root up: a `.git`
+  directory, the directory a `.git` file names, read up to git's 1 MiB
+  limit, then the directory itself as a bare repository, ending where
+  git ends: at the first git directory, at any `.git` file, at a `.git`
+  entry that is neither a file nor a directory) and does not run git
+  when a `commondir` met on the way is not a regular file of at most 64
+  KiB, or a `.git` file names its directory by a path that is not UTF-8.
+  git then runs for at most 10 seconds, with at most 64 KiB of output,
+  in a process group of its own; when it does not end by itself (the
+  time or output bound, a signal), that whole group is killed, so no
+  process of it outlives the command.
 - When the identity lookup cannot be made, the name and layout checks
   still apply and the result carries a warning that the identity check
-  was skipped, with the cause: `git` cannot be run (not installed or not
-  on `PATH`), whatever the root; or the root is a git work tree but
-  `git rev-parse` fails there (a broken `.git` file, a repository git
+  was skipped, with the cause: git was not run (the `commondir` or `.git`
+  file above, named), `git` cannot be run (not installed or not on
+  `PATH`), it did not finish in time, wrote more than its bound, or was
+  ended by a signal, whatever the root; or the root is a git work tree
+  but `git rev-parse` fails there (a broken `.git` file, a repository git
   refuses as unsafe, a damaged repository). Outside any work tree, git
   failing is read as "git names no directory here", with no warning; a
   bare repository git declines to open is then refused by its layout.

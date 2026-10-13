@@ -1,7 +1,8 @@
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   parsePatchPlan,
@@ -2712,4 +2713,595 @@ describe("patch: every directory above a target is checked, up to the filesystem
     expect(inGitDir.reason).toBe("git_dir");
     expect(read(gitDir, "config")).toBe(config);
   });
+});
+
+/** The built `patch` module, run by `patchInChild`. */
+const DIST_PATCH_URL = pathToFileURL(
+  path.join(path.dirname(CLI_PATH), "patch", "index.js"),
+).href;
+
+const CHILD_PATCH_SCRIPT = [
+  "const [url, json] = process.argv.slice(1);",
+  "const { patch } = await import(url);",
+  "process.stdout.write(JSON.stringify(patch(JSON.parse(json))));",
+].join("\n");
+
+/** git on PATH with no global or system configuration. */
+const GIT_CHILD_ENV: NodeJS.ProcessEnv = {
+  ...gitEnv,
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_NOSYSTEM: "1",
+};
+
+interface ChildPatchRun {
+  out: PatchJson;
+  ms: number;
+}
+
+/**
+ * Runs `patch` from the built package in a child node process with a
+ * process group of its own, for layouts where git (or a check that
+ * regressed) could wait forever: a run still going after `limitMs` is
+ * ended by SIGKILL to that whole group and fails the test. git started by
+ * patch runs in a group of its own; what a regressed bound would leave
+ * behind there is released by the caller (`releaseFifo`, `killRecorded`).
+ * The group is not killed after a normal exit, so that a test can see
+ * what patch itself left running.
+ */
+async function patchInChild(
+  options: {
+    cwd: string;
+    edits: PatchEditSpec[];
+    dryRun?: boolean;
+    gitTimeoutMs?: number;
+  },
+  env: NodeJS.ProcessEnv,
+  limitMs = 30_000,
+): Promise<ChildPatchRun> {
+  const start = Date.now();
+  const child = spawn(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      CHILD_PATCH_SCRIPT,
+      DIST_PATCH_URL,
+      JSON.stringify(options),
+    ],
+    { env, detached: true, stdio: ["ignore", "pipe", "pipe"] },
+  );
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8").on("data", (d: string) => (stdout += d));
+  child.stderr.setEncoding("utf8").on("data", (d: string) => (stderr += d));
+  const killGroup = (): void => {
+    if (child.pid === undefined) return;
+    try {
+      process.kill(-child.pid, "SIGKILL");
+    } catch {
+      // The group is gone.
+    }
+  };
+  let stalled = false;
+  const timer = setTimeout(() => {
+    stalled = true;
+    killGroup();
+  }, limitMs);
+  await new Promise<void>((resolve) => child.on("close", () => resolve()));
+  clearTimeout(timer);
+  const ms = Date.now() - start;
+  if (stalled)
+    throw new Error(`patch did not return within ${String(limitMs)} ms`);
+  if (stdout === "") throw new Error(`patch printed nothing: ${stderr}`);
+  return { out: JSON.parse(stdout) as PatchJson, ms };
+}
+
+/** Opens a FIFO for writing without waiting and closes it, so that a
+ * process blocked opening it for reading goes on (and reads EOF). */
+function releaseFifo(fifo: string): void {
+  try {
+    fs.closeSync(
+      fs.openSync(fifo, fs.constants.O_RDWR | fs.constants.O_NONBLOCK),
+    );
+  } catch {
+    // Gone already.
+  }
+}
+
+/** A directory laid out like a git directory (HEAD, objects, refs). */
+function gitDirLayout(dir: string): string {
+  fs.mkdirSync(path.join(dir, "objects"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "refs"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "HEAD"), "ref: refs/heads/main\n");
+  return dir;
+}
+
+/** git's own directories in a git directory, as patch reserves them. */
+const RESERVED_GIT_SUBDIRS = [
+  "objects",
+  "refs",
+  "hooks",
+  "info",
+  "logs",
+  "worktrees",
+  "modules",
+  "branches",
+  "remotes",
+  "rr-cache",
+  "reftable",
+  "rebase-merge",
+  "rebase-apply",
+  "sequencer",
+];
+
+/** Whether this filesystem finds `hooks` as `hook` + U+017F (as
+ * case-insensitive APFS does); a case-sensitive one (Linux CI) does not. */
+function filesystemFoldsLongS(): boolean {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-primitives-fold-"));
+  try {
+    fs.mkdirSync(path.join(dir, "hookſ"));
+    const folded = fs.statSync(path.join(dir, "hookſ"));
+    const ascii = fs.statSync(path.join(dir, "hooks"));
+    return folded.dev === ascii.dev && folded.ino === ascii.ino;
+  } catch {
+    return false;
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Whether a hard link of a symlink is a link to the symlink itself (as
+ * on Linux), not refused or made to its target (as on macOS). */
+function hardLinksSymlinks(): boolean {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-primitives-ln-"));
+  try {
+    fs.mkdirSync(path.join(dir, "d"));
+    fs.symlinkSync("d", path.join(dir, "s"));
+    fs.linkSync(path.join(dir, "s"), path.join(dir, "h"));
+    const s = fs.lstatSync(path.join(dir, "s"));
+    const h = fs.lstatSync(path.join(dir, "h"));
+    return h.isSymbolicLink() && s.ino === h.ino;
+  } catch {
+    return false;
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const LONG_S_FOLDS = filesystemFoldsLongS();
+const HARD_LINKS_SYMLINKS = hardLinksSymlinks();
+
+describe("patch: git's own directories and .git are found by the filesystem, under any spelling", () => {
+  it("refuses -C in each of git's own directories made a work tree of its repository by a .git file, in either letter case", async () => {
+    const { base, src } = committedSource();
+    gitIn(base, "clone", "-q", src, "n1");
+    const gitDir = path.join(base, "n1", ".git");
+    for (const [i, name] of RESERVED_GIT_SUBDIRS.entries()) {
+      // Every other name with a capital first letter: the same directory
+      // on a case-insensitive filesystem, another one on Linux.
+      const spelling =
+        i % 2 === 0 ? name : `${name[0].toUpperCase()}${name.slice(1)}`;
+      const dir = path.join(gitDir, spelling);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, ".git"), "gitdir: ..\n");
+      fs.writeFileSync(path.join(dir, "x.txt"), "x\n");
+      const { out } = await patchInChild(
+        { cwd: dir, edits: [{ file: "x.txt", old: "x", new: "y" }] },
+        GIT_CHILD_ENV,
+      );
+      expect(out.status, spelling).toBe("usage_error");
+      expect(out.reason, spelling).toBe("git_dir");
+      expect(read(dir, "x.txt"), spelling).toBe("x\n");
+    }
+  }, 120_000);
+
+  it.skipIf(!LONG_S_FOLDS)(
+    "refuses a work tree whose name the filesystem folds to hooks (U+017F), as a worktree of its bare repository and by a .git file",
+    async () => {
+      const longS = "hookſ";
+      const { base, src } = committedSource();
+      gitIn(base, "init", "-q", "--bare", "--template=", "b.git");
+      const bare = path.join(base, "b.git");
+      gitIn(bare, "fetch", "-q", src, "+refs/heads/*:refs/heads/*");
+      const branch = execFileSync("git", ["symbolic-ref", "--short", "HEAD"], {
+        cwd: src,
+        encoding: "utf8",
+      }).trim();
+      gitIn(bare, "symbolic-ref", "HEAD", `refs/heads/${branch}`);
+      gitIn(bare, "worktree", "add", "-q", "-f", longS, branch);
+      // As stored, and typed in ASCII.
+      for (const spelling of [longS, "hooks"]) {
+        const { out } = await patchInChild(
+          {
+            cwd: path.join(bare, spelling),
+            edits: [{ file: "a.txt", old: "a", new: "b" }],
+          },
+          GIT_CHILD_ENV,
+        );
+        expect(out.reason, spelling).toBe("git_dir");
+      }
+      expect(read(bare, `${longS}/a.txt`)).toBe("a\n");
+      // A worktree nested in that directory: its root lies below it.
+      const nested = path.join(bare, longS, "wt");
+      gitIn(bare, "worktree", "add", "-q", "-b", "wt", nested, branch);
+      const below = await patchInChild(
+        { cwd: nested, edits: [{ file: "a.txt", old: "a", new: "b" }] },
+        GIT_CHILD_ENV,
+      );
+      expect(below.out.reason).toBe("git_dir");
+      expect(read(nested, "a.txt")).toBe("a\n");
+      gitIn(base, "clone", "-q", src, "n1");
+      const gitDir = path.join(base, "n1", ".git");
+      fs.rmSync(path.join(gitDir, "hooks"), { recursive: true, force: true });
+      fs.mkdirSync(path.join(gitDir, longS));
+      fs.writeFileSync(path.join(gitDir, longS, ".git"), "gitdir: ..\n");
+      fs.writeFileSync(path.join(gitDir, longS, "pre-commit"), "#!/bin/sh\n");
+      const { out } = await patchInChild(
+        {
+          cwd: path.join(gitDir, longS),
+          edits: [{ file: "pre-commit", old: "#", new: "X" }],
+        },
+        GIT_CHILD_ENV,
+      );
+      expect(out.reason).toBe("git_dir");
+      expect(read(gitDir, "hooks/pre-commit")).toBe("#!/bin/sh\n");
+    },
+    60_000,
+  );
+
+  it("refuses a work tree inside its own bare repository when that repository's hooks is a symlink to it or to a directory above it", async () => {
+    const { bare, main } = workTreeInsideBare();
+    gitIn(bare, "worktree", "add", "-q", "-b", "w2", path.join("nest", "w2"));
+    const nested = path.join(bare, "nest", "w2");
+    fs.rmSync(path.join(bare, "hooks"), { recursive: true });
+    for (const [target, root] of [
+      ["main", main],
+      ["nest", nested],
+    ]) {
+      fs.rmSync(path.join(bare, "hooks"), { force: true });
+      fs.symlinkSync(target, path.join(bare, "hooks"));
+      const { out } = await patchInChild(
+        { cwd: root, edits: [{ file: "a.txt", old: "a", new: "b" }] },
+        GIT_CHILD_ENV,
+      );
+      expect(out.status, target).toBe("usage_error");
+      expect(out.reason, target).toBe("git_dir");
+      expect(read(root, "a.txt"), target).toBe("a\n");
+    }
+  });
+
+  it("refuses a hard link of a .git file, also through a symlink to it, as the entry the filesystem finds as .git", () => {
+    const dir = tmpDir();
+    gitIn(dir, "init", "-q", "--separate-git-dir", "gd", ".");
+    fs.linkSync(path.join(dir, ".git"), path.join(dir, "alias"));
+    fs.symlinkSync("alias", path.join(dir, "via-symlink"));
+    const before = read(dir, ".git");
+    for (const file of ["alias", "via-symlink"]) {
+      const r = run(dir, [{ file, old: "gitdir", new: "x" }], {
+        breakHardLinks: true,
+      });
+      expect(r.reason, file).toBe("git_dir");
+      expect(r.edits[0].detail, file).toContain("has a .git path component");
+    }
+    expect(read(dir, ".git")).toBe(before);
+  });
+
+  it.skipIf(!HARD_LINKS_SYMLINKS)(
+    "refuses a path through a hard link of a .git symlink as a .git path component",
+    () => {
+      const base = tmpDir();
+      gitIn(base, "init", "-q", "--bare", "gd");
+      const wt = path.join(base, "wt");
+      fs.mkdirSync(wt);
+      fs.symlinkSync(path.join(base, "gd"), path.join(wt, ".git"));
+      fs.linkSync(path.join(wt, ".git"), path.join(wt, "alias"));
+      const config = read(base, "gd/config");
+      const r = run(wt, [{ file: "alias/config", old: "[core]", new: "[x]" }], {
+        allowOutside: true,
+      });
+      expect(r.reason).toBe("git_dir");
+      expect(r.edits[0].detail).toContain("has a .git path component");
+      expect(read(base, "gd/config")).toBe(config);
+    },
+  );
+});
+
+describe("patch: git's identity lookup is bounded", () => {
+  const NO_GIT_ENV = (): NodeJS.ProcessEnv => ({
+    PATH: path.join(tmpDir(), "no-git-bin"),
+  });
+  const notRun =
+    "the git directory check by identity was skipped (git was not run: ";
+
+  it.skipIf(process.platform === "win32")(
+    "does not run git when its discovery would read a commondir that is no small regular file",
+    async () => {
+      // Without git on PATH: a check that regressed reports git missing.
+      const zero = repo({ "a.txt": "a\n" });
+      fs.symlinkSync("/dev/zero", path.join(zero, ".git", "commondir"));
+      const big = repo({ "a.txt": "a\n" });
+      const bigFile = path.join(big, ".git", "commondir");
+      fs.writeFileSync(bigFile, "");
+      fs.truncateSync(bigFile, 128 * 1024);
+      // A .git file naming a git directory with a FIFO commondir, its path
+      // followed by line breaks past 64 KiB (git drops them).
+      const padded = tmpDir();
+      const g1 = gitDirLayout(path.join(padded, "g"));
+      execFileSync("mkfifo", [path.join(g1, "commondir")]);
+      const w1 = path.join(padded, "w");
+      fs.mkdirSync(w1);
+      fs.writeFileSync(
+        path.join(w1, ".git"),
+        `gitdir: ../g${"\n".repeat(100 * 1024)}`,
+      );
+      fs.writeFileSync(path.join(w1, "a.txt"), "a\n");
+      // A .git file whose path ends at a NUL: git reads it as naming the
+      // file's own directory.
+      const nul = gitDirLayout(path.join(tmpDir(), "n"));
+      execFileSync("mkfifo", [path.join(nul, "commondir")]);
+      fs.writeFileSync(path.join(nul, ".git"), "gitdir: \0junk\n");
+      fs.writeFileSync(path.join(nul, "a.txt"), "a\n");
+      // A .git file whose path is not UTF-8.
+      const bytes = tmpDir();
+      fs.writeFileSync(
+        path.join(bytes, ".git"),
+        Buffer.concat([Buffer.from("gitdir: "), Buffer.from([0xff, 0xfe])]),
+      );
+      fs.writeFileSync(path.join(bytes, "a.txt"), "a\n");
+      const cases: [string, string, string][] = [
+        [zero, "commondir whole, and it is not a regular file", "/dev/zero"],
+        [big, "commondir whole, and it holds 131072 bytes", "sparse"],
+        [w1, "commondir whole, and it is not a regular file", "padded"],
+        [nul, "commondir whole, and it is not a regular file", "nul"],
+        [bytes, "by a path that is not UTF-8", "not utf-8"],
+      ];
+      for (const [cwd, why, label] of cases) {
+        const { out } = await patchInChild(
+          {
+            cwd,
+            edits: [{ file: "a.txt", old: "a", new: "b" }],
+            dryRun: true,
+          },
+          NO_GIT_ENV(),
+        );
+        expect(out.warnings.join("\n"), label).toContain(notRun);
+        expect(out.warnings.join("\n"), label).toContain(why);
+      }
+      releaseFifo(path.join(g1, "commondir"));
+      releaseFifo(path.join(nul, "commondir"));
+    },
+    60_000,
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "does not run git when a FIFO commondir is in a .git file's git directory or in a bare repository above the root",
+    async () => {
+      const viaGitfile = tmpDir();
+      const g = gitDirLayout(path.join(viaGitfile, "g"));
+      execFileSync("mkfifo", [path.join(g, "commondir")]);
+      const w = path.join(viaGitfile, "w");
+      fs.mkdirSync(w);
+      fs.writeFileSync(path.join(w, ".git"), "gitdir: ../g\n");
+      fs.writeFileSync(path.join(w, "a.txt"), "a\n");
+      const above = gitDirLayout(path.join(tmpDir(), "z"));
+      execFileSync("mkfifo", [path.join(above, "commondir")]);
+      const below = path.join(above, "w");
+      fs.mkdirSync(below);
+      fs.writeFileSync(path.join(below, "a.txt"), "a\n");
+      try {
+        for (const cwd of [w, below]) {
+          const { out } = await patchInChild(
+            {
+              cwd,
+              edits: [{ file: "a.txt", old: "a", new: "b" }],
+              dryRun: true,
+              gitTimeoutMs: 3000,
+            },
+            GIT_CHILD_ENV,
+          );
+          expect(out.warnings.join("\n"), cwd).toContain(notRun);
+          expect(out.warnings.join("\n"), cwd).toContain(
+            "commondir whole, and it is not a regular file",
+          );
+        }
+      } finally {
+        releaseFifo(path.join(g, "commondir"));
+        releaseFifo(path.join(above, "commondir"));
+      }
+    },
+    90_000,
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "looks no further up than git's discovery goes: a .git directory, a .git file, another .git entry, a bare repository",
+    async () => {
+      const cases: [string, (dir: string) => void][] = [
+        ["git dir", (dir) => gitIn(dir, "init", "-q")],
+        [
+          "git file",
+          (dir) => {
+            gitIn(path.dirname(dir), "init", "-q", "--bare", "sep.git");
+            fs.writeFileSync(path.join(dir, ".git"), "gitdir: ../sep.git\n");
+          },
+        ],
+        [
+          "fifo .git",
+          (dir) => execFileSync("mkfifo", [path.join(dir, ".git")]),
+        ],
+        ["bare", (dir) => gitDirLayout(dir)],
+      ];
+      for (const [label, make] of cases) {
+        // A parent laid out like a git directory with a FIFO commondir:
+        // git never gets there, so neither does the check. The FIFO is
+        // made last, after every git command of the setup.
+        const parent = gitDirLayout(path.join(tmpDir(), "p"));
+        const dir = path.join(parent, "r");
+        fs.mkdirSync(dir);
+        make(dir);
+        fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+        const fifo = path.join(parent, "commondir");
+        execFileSync("mkfifo", [fifo]);
+        try {
+          const { out } = await patchInChild(
+            {
+              cwd: dir,
+              edits: [{ file: "a.txt", old: "a", new: "b" }],
+              dryRun: true,
+              gitTimeoutMs: 3000,
+            },
+            GIT_CHILD_ENV,
+          );
+          expect(out.warnings.join("\n"), label).not.toContain(notRun);
+          expect(out.warnings.join("\n"), label).not.toContain(
+            "did not finish",
+          );
+        } finally {
+          releaseFifo(fifo);
+          if (label === "fifo .git") releaseFifo(path.join(dir, ".git"));
+        }
+      }
+    },
+    120_000,
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "stops git when it waits on a FIFO HEAD and warns, the name and layout checks still applying",
+    async () => {
+      const dir = repo({ "a.txt": "a\n" });
+      const head = path.join(dir, ".git", "HEAD");
+      fs.rmSync(head);
+      execFileSync("mkfifo", [head]);
+      try {
+        const { out, ms } = await patchInChild(
+          {
+            cwd: dir,
+            edits: [{ file: "a.txt", old: "a", new: "b" }],
+            dryRun: true,
+            gitTimeoutMs: 1000,
+          },
+          GIT_CHILD_ENV,
+        );
+        expect(out.status).toBe("would_write");
+        expect(out.warnings.join("\n")).toContain(
+          "the git directory check by identity was skipped (git rev-parse did not finish within 1000 ms and was stopped)",
+        );
+        expect(ms).toBeLessThan(20_000);
+      } finally {
+        releaseFifo(head);
+      }
+    },
+    60_000,
+  );
+
+  describe.skipIf(process.platform === "win32")(
+    "with a git that misbehaves",
+    () => {
+      /** A `git` on PATH that runs `body` (a POSIX sh script) and records
+       * the PIDs it names in `pids`. */
+      function fakeGit(body: string): { env: NodeJS.ProcessEnv; pids: string } {
+        const bin = tmpDir();
+        const pids = path.join(bin, "pids");
+        fs.writeFileSync(
+          path.join(bin, "git"),
+          `#!/bin/sh\nPIDS='${pids}'\n${body}\n`,
+          { mode: 0o755 },
+        );
+        return { env: { PATH: bin }, pids };
+      }
+
+      function recordedPids(file: string): number[] {
+        if (!fs.existsSync(file)) return [];
+        return fs
+          .readFileSync(file, "utf8")
+          .split("\n")
+          .filter((l) => l !== "")
+          .map(Number);
+      }
+
+      /** Running: signal 0 reaches it and `ps` does not show a zombie
+       * (killed, not yet reaped by its new parent). */
+      function alive(pid: number): boolean {
+        try {
+          process.kill(pid, 0);
+        } catch {
+          return false;
+        }
+        const ps = spawnSync("/bin/ps", ["-o", "stat=", "-p", String(pid)], {
+          encoding: "utf8",
+        });
+        return ps.status === 0 && !ps.stdout.trim().startsWith("Z");
+      }
+
+      function killRecorded(file: string): void {
+        for (const pid of recordedPids(file)) {
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch {
+            // Already gone.
+          }
+        }
+      }
+
+      it("ends git and everything in its process group after the timeout", async () => {
+        const { env, pids } = fakeGit(
+          'echo $$ >> "$PIDS"\n/bin/sleep 300 &\necho $! >> "$PIDS"\nexec /bin/sleep 300',
+        );
+        const dir = tmpDir();
+        fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+        try {
+          const { out } = await patchInChild(
+            {
+              cwd: dir,
+              edits: [{ file: "a.txt", old: "a", new: "b" }],
+              dryRun: true,
+              gitTimeoutMs: 1000,
+            },
+            env,
+          );
+          expect(out.warnings.join("\n")).toContain(
+            "git rev-parse did not finish within 1000 ms and was stopped",
+          );
+          const recorded = recordedPids(pids);
+          expect(recorded).toHaveLength(2);
+          // A killed process can stay a zombie for a moment until it is reaped.
+          const deadline = Date.now() + 5000;
+          while (recorded.some(alive) && Date.now() < deadline) {
+            await new Promise((r) => setTimeout(r, 50));
+          }
+          expect(recorded.filter(alive)).toEqual([]);
+        } finally {
+          killRecorded(pids);
+        }
+      }, 60_000);
+
+      it("stops git when it writes more than its answer can hold, and when a signal ends it", async () => {
+        const line = "a".repeat(99);
+        const chatty = fakeGit(
+          `i=0\nwhile [ $i -lt 2000 ]; do echo ${line}; i=$((i+1)); done`,
+        );
+        const signalled = fakeGit("kill -TERM $$");
+        const dir = tmpDir();
+        fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+        const cases: [NodeJS.ProcessEnv, string][] = [
+          [
+            chatty.env,
+            "git rev-parse wrote more than 65536 bytes and was stopped",
+          ],
+          [signalled.env, "git rev-parse was ended by SIGTERM"],
+        ];
+        for (const [env, warning] of cases) {
+          const { out } = await patchInChild(
+            {
+              cwd: dir,
+              edits: [{ file: "a.txt", old: "a", new: "b" }],
+              dryRun: true,
+            },
+            env,
+          );
+          expect(out.status, warning).toBe("would_write");
+          expect(out.warnings.join("\n"), warning).toContain(warning);
+        }
+      }, 60_000);
+    },
+  );
 });

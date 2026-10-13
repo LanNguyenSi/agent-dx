@@ -81,7 +81,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   already written. `--dry-run` returns the same envelope with
   `would_write` and a unified diff preview. Paths outside the repository
   root are refused unless `--allow-outside`; paths inside a git directory
-  always: by a `.git` component in any letter case, by a directory above
+  always: by a `.git` component (by its name in any letter case, or as
+  the entry the filesystem finds as `.git`), by a directory above
   the target that is laid out like a git directory (git's own test, which
   runs no git here, so it holds for a bare repository git declines to
   open and under any `GIT_*` environment), and by the identity of the git
@@ -89,12 +90,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a target is checked, up to the filesystem root; the one exception is
   the root's own git directory or common directory, taken only when git
   would open the root as a work tree and not when the root lies in one
-  of git's own directories there (such as `hooks`). So a work tree
+  of git's own directories there (such as `hooks`; looked up by the
+  filesystem and compared by device and inode, so under any spelling the
+  filesystem folds to that name, and through a symlink). So a work tree
   checked out inside its own bare repository is editable, while a work
   tree inside another repository's git directory is refused: a bare
   repository nested in a work tree, `-C` inside one, and a
   `<repo>/.git/hooks` made a repository of its own. A `commondir` path
-  is resolved by its real path, as git does. A warning names an identity
+  is resolved by its real path, as git does. git's identity lookup runs
+  for at most 10 seconds with at most 64 KiB of output, in a process
+  group of its own that is killed when git does not end by itself, and
+  is not run when its repository discovery would read a `commondir` file
+  that is not a regular file of at most 64 KiB (git reads it whole). A
+  warning names an identity
   lookup that could not be made, a directory git names that is not laid
   out like one, and a git directory name with a line break; a symlink is
   followed and its target checked. `--break-hard-links` edits
