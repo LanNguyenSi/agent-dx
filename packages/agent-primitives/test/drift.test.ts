@@ -15,6 +15,7 @@ import {
   parseHeadings,
 } from "../src/drift/allowlist.js";
 import { classifyLine, parseGrepOutput } from "../src/drift/scan.js";
+import { mergeBase } from "../src/drift/git.js";
 import { spawnCli } from "./helpers/spawn-cli.js";
 
 const tmpDirs: string[] = [];
@@ -1512,5 +1513,42 @@ describe("drift (symbolic base that moved after the branch point)", () => {
       gitOutput(worktree, ["rev-parse", "HEAD"]).trim(),
     );
     expect(parsed.counts).toEqual({ removed: 0, sites: 0, allowlisted: 0 });
+  });
+});
+
+describe("mergeBase: failure causes", () => {
+  it("reports a git failure other than exit 1 as an error, not as no common ancestor", () => {
+    const repo = fs.mkdtempSync(
+      path.join(os.tmpdir(), "drift-merge-base-err-"),
+    );
+    try {
+      execFileSync("git", ["init", "-q", "-b", "main", repo]);
+      execFileSync(
+        "git",
+        [
+          "-c",
+          "user.name=t",
+          "-c",
+          "user.email=t@example.com",
+          "commit",
+          "-q",
+          "--allow-empty",
+          "-m",
+          "init",
+        ],
+        { cwd: repo },
+      );
+      const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo })
+        .toString()
+        .trim();
+      const missing = "0123456789abcdef0123456789abcdef01234567";
+      const r = mergeBase(repo, missing, head);
+      if (!("reason" in r)) throw new Error(`expected a failure, got ${r.sha}`);
+      expect(r.reason).toBe("error");
+      expect(r.detail).toMatch(/^git exited \d+: /);
+      expect(r.detail).not.toMatch(/^git exited 1: /);
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
   });
 });
