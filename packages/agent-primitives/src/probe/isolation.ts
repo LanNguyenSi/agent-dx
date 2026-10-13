@@ -588,10 +588,6 @@ function walkAutoLinkDirs(root: string): {
   return { nodeModules, composer };
 }
 
-/** Every `node_modules` directory or directory symlink `walkAutoLinkDirs`
- * finds; see that function's own docblock for the depth and cycle rules.
- * Exported (and kept to this exact behaviour) for the existing unit
- * tests and for any caller that wants node_modules alone. */
 /**
  * The root-relative form of every written path that sits inside the root;
  * a path outside the root cannot be shadowed by an in-root link and is
@@ -606,6 +602,10 @@ export function writtenRelPathsInRoot(
     .filter((rel) => isRelContained(rel));
 }
 
+/** Every `node_modules` directory or directory symlink `walkAutoLinkDirs`
+ * finds; see that function's own docblock for the depth and cycle rules.
+ * Exported (and kept to this exact behaviour) for the existing unit
+ * tests and for any caller that wants node_modules alone. */
 export function findNodeModulesDirs(root: string): string[] {
   return walkAutoLinkDirs(root).nodeModules;
 }
