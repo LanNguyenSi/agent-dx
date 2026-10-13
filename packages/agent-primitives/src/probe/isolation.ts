@@ -592,6 +592,20 @@ function walkAutoLinkDirs(root: string): {
  * finds; see that function's own docblock for the depth and cycle rules.
  * Exported (and kept to this exact behaviour) for the existing unit
  * tests and for any caller that wants node_modules alone. */
+/**
+ * The root-relative form of every written path that sits inside the root;
+ * a path outside the root cannot be shadowed by an in-root link and is
+ * left out. A directory merely NAMED `..foo` is inside the root.
+ */
+export function writtenRelPathsInRoot(
+  rootReal: string,
+  writtenPaths: readonly string[],
+): string[] {
+  return writtenPaths
+    .map((written) => path.relative(rootReal, written))
+    .filter((rel) => isRelContained(rel));
+}
+
 export function findNodeModulesDirs(root: string): string[] {
   return walkAutoLinkDirs(root).nodeModules;
 }
@@ -1814,9 +1828,7 @@ export async function beginWorktree(
     resolveDeepestExisting(path.resolve(cwd)),
     ...opts.mutatedPaths,
   ];
-  for (const written of writtenPaths) {
-    const rel = path.relative(rootReal, written);
-    if (!isRelContained(rel)) continue;
+  for (const rel of writtenRelPathsInRoot(rootReal, writtenPaths)) {
     const resolved = resolveDeepestExisting(path.join(worktreePath, rel));
     if (isPathContained(wtReal, resolved)) continue;
     const through = created.find((c) =>

@@ -31,6 +31,7 @@ import {
   parseWorktreeListZ,
   readScratchOwner,
   SCRATCH_OWNER_FILE,
+  writtenRelPathsInRoot,
 } from "../src/probe/isolation.js";
 import { runArgv } from "../src/probe/run.js";
 import { caseInsensitiveVolume } from "./helpers/case-fs.js";
@@ -4158,6 +4159,20 @@ describe("probe(): worktree isolation, a destination the copy spells differently
           w.includes("would have written to the source tree"),
       ),
     ).toBe(true);
+  });
+
+  it("writtenRelPathsInRoot keeps a path under a directory named ..foo and drops one outside the root", () => {
+    const root = path.join(path.sep, "src", "repo");
+    expect(
+      writtenRelPathsInRoot(root, [
+        path.join(root, "..foo", "sub", "fixture.js"),
+        path.join(root, "a", "b.js"),
+        path.join(root, "..", "elsewhere", "x.js"),
+      ]),
+    ).toEqual([
+      path.join("..foo", "sub", "fixture.js"),
+      path.join("a", "b.js"),
+    ]);
   });
 
   it("a --link over the mutated file's own directory named ..foo is refused as a protected path", async () => {
