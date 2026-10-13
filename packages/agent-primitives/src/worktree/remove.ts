@@ -10,6 +10,7 @@ import {
   resolveDefaultBase,
   resolveRemoteBase,
   resolveRepo,
+  unpushedCommits,
   type MergeVerdict,
 } from "./git.js";
 
@@ -195,13 +196,17 @@ export async function removeWorktree(
   }
 
   const defaultBase = resolveDefaultBase(repo.mainCheckout);
-  // resolveRemoteBase above is the single guard for an explicit base: it
-  // only ever yields an existing remote-tracking ref, which is what lets a
-  // merged verdict excuse commits no remote has (below). Without --base the
-  // base is origin's default branch, an `origin/<default>` ref by
-  // construction.
-  const base: { ref: string; ghBase?: string } | undefined =
-    explicitBase ?? defaultBase;
+  // resolveRemoteBase is the single guard for a base: it only ever yields
+  // an existing, plain remote-tracking ref, which is what lets a merged
+  // verdict excuse commits no remote has (below). An explicit --base goes
+  // through it above; the default base does inside resolveDefaultBase, and
+  // is measured by its full `refs/remotes/origin/<branch>` ref so that a
+  // local branch named `origin/<branch>` cannot stand in for it.
+  const base: { ref: string; ghBase: string } | undefined =
+    explicitBase ??
+    (defaultBase === undefined
+      ? undefined
+      : { ref: defaultBase.fullRef, ghBase: defaultBase.ghBase });
   // Asked only when a flag needs the answer: the `gh` lookup of a verdict is
   // a network call where `gh` happens to be installed. Computed before the
   // unpushed check, because a branch that is merged into the base has no
@@ -233,7 +238,7 @@ export async function removeWorktree(
     }
   }
 
-  const unpushed = git(target, ["rev-list", "HEAD", "--not", "--remotes"]);
+  const unpushed = unpushedCommits(target);
   if (
     (unpushed.error !== undefined || unpushed.status !== 0) &&
     o.force !== true
@@ -253,10 +258,7 @@ export async function removeWorktree(
     );
   }
 
-  const defaultBranch =
-    defaultBase === undefined
-      ? undefined
-      : defaultBase.ref.replace(/^origin\//, "");
+  const defaultBranch = defaultBase?.ghBase;
   const mainBranch = repo.worktrees[0]?.branch;
   if (o.deleteBranch === true && entry.branch !== undefined) {
     const protectedName =

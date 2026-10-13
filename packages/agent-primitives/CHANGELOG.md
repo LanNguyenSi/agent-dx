@@ -28,6 +28,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `-m` bounds only the mutant lines of `--summary` (the totals line is
   always kept), and `--print` reads the full result, not the reduced one.
   The shipped skill text names both flags, so its digest changes.
+- `worktree remove`: without `--base`, the unpushed check no longer
+  follows symbolic refs under `refs/remotes` (a
+  `git symbolic-ref refs/remotes/origin/self refs/heads/feat` made an
+  unpushed `feat` look pushed, so `--delete-branch` deleted it), and the
+  default base is resolved to the full `refs/remotes/origin/<branch>` ref
+  through the same guard as `--base`, so a local branch or tag named
+  `origin/main` can no longer excuse unpushed commits as merged. An
+  `origin/HEAD` that points at a local branch, a symbolic ref, another
+  remote or a missing ref is skipped for the `origin/main` and
+  `origin/master` fallback; a default base that cannot be resolved this
+  way is treated as unknown, which keeps the branch. A merge verdict for the
+  default base now names the full ref. Normal layouts behave as before.
 - `patch`: a new command that replaces exact text in one or more files
   from a JSON edit plan (`--plan <file>`, `{"edits":[{"file","old","new",
   "replaceAll"?}]}`) or one edit (`--file` with `--old`/`--old-file` and

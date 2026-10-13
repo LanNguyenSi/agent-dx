@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ignoredSymlinks, parseWorktreeList } from "../src/worktree/index.js";
-import { resolveRemoteBase } from "../src/worktree/git.js";
+import { resolveDefaultBase, resolveRemoteBase } from "../src/worktree/git.js";
 import { FIXED_BIN_DIR, spawnCli } from "./helpers/spawn-cli.js";
 
 /**
@@ -1675,5 +1675,399 @@ describe("ignoredSymlinks", () => {
     fs.symlinkSync(path.join(wt, "real-dir"), path.join(wt, "link-dir"));
 
     expect(ignoredSymlinks(wt)).toEqual(["link-dir"]);
+  });
+});
+
+/** A worktree on `feat` carrying one commit that no remote has. Returns the
+ * worktree and the commit. */
+function makeUnpushed(f: Fixture): { wt: string; sha: string } {
+  const wt = addWorktree(f, "feat", path.join(f.base, "wt-feat"));
+  commitHere(wt, "feat.txt", "unpushed work");
+  return { wt, sha: git(wt, ["rev-parse", "HEAD"]).trim() };
+}
+
+/** Runs `remove` without --base and without --force, once with
+ * --delete-branch (refused as unpushed) and once with --require-merged
+ * --delete-branch (refused as not provably merged: no `gh` is installed in
+ * the spawned CLI), and asserts that every run leaves the worktree and the
+ * branch at `sha` untouched. */
+async function expectKept(
+  f: Fixture,
+  wt: string,
+  branch: string,
+  sha: string,
+): Promise<void> {
+  const runs: [string[], string][] = [
+    [["--delete-branch"], "unpushed_commits"],
+    [["--require-merged", "--delete-branch"], "merge_state_unknown"],
+  ];
+  for (const [flags, reason] of runs) {
+    const r = await cli(f.work, ["remove", wt, ...flags]);
+    expect(r.code, `${flags.join(" ")}: ${r.stdout}${r.stderr}`).toBe(2);
+    expect(r.json.reason, flags.join(" ")).toBe(reason);
+    expect(listedWorktrees(f.repo)).toContain(wt);
+    expect(git(f.repo, ["rev-parse", branch]).trim()).toBe(sha);
+  }
+}
+
+describe("worktree remove without --base: symbolic refs under refs/remotes", () => {
+  it("keeps a branch that a symbolic remote-tracking ref points at", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeUnpushed(f);
+    // `--remotes` follows this to the local branch and would call its
+    // commit pushed; deleting the branch would then leave it on no ref.
+    git(f.repo, [
+      "symbolic-ref",
+      "refs/remotes/origin/self",
+      "refs/heads/feat",
+    ]);
+    await expectKept(f, wt, "feat", sha);
+    // Without --delete-branch the symref alone is refused as well.
+    const plain = await cli(f.work, ["remove", wt]);
+    expect(plain.code, plain.stdout + plain.stderr).toBe(2);
+    expect(plain.json.reason).toBe("unpushed_commits");
+    expect(plain.json.details.commits).toBe(1);
+  });
+
+  it("keeps a branch whose work is only reachable through a symbolic ref to another local branch", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeUnpushed(f);
+    git(f.repo, ["branch", "elsewhere", "feat"]);
+    git(f.repo, [
+      "symbolic-ref",
+      "refs/remotes/origin/other",
+      "refs/heads/elsewhere",
+    ]);
+    await expectKept(f, wt, "feat", sha);
+  });
+
+  it("keeps a branch at the end of a chain of symbolic remote-tracking refs", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeUnpushed(f);
+    git(f.repo, [
+      "symbolic-ref",
+      "refs/remotes/origin/tail",
+      "refs/heads/feat",
+    ]);
+    git(f.repo, [
+      "symbolic-ref",
+      "refs/remotes/origin/mid",
+      "refs/remotes/origin/tail",
+    ]);
+    git(f.repo, [
+      "symbolic-ref",
+      "refs/remotes/origin/top",
+      "refs/remotes/origin/mid",
+    ]);
+    await expectKept(f, wt, "feat", sha);
+  });
+
+  it("keeps a branch when the symbolic ref sits in packed state next to packed plain refs", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeUnpushed(f);
+    git(f.repo, [
+      "symbolic-ref",
+      "refs/remotes/origin/self",
+      "refs/heads/feat",
+    ]);
+    // Plain refs go into packed-refs; a symbolic ref cannot, and must still
+    // be told apart from them.
+    git(f.repo, ["pack-refs", "--all"]);
+    expect(
+      fs.readFileSync(
+        path.join(absoluteGitPath(f.repo, "--git-common-dir"), "packed-refs"),
+        "utf8",
+      ),
+    ).toContain("refs/remotes/origin/main");
+    await expectKept(f, wt, "feat", sha);
+  });
+
+  it("keeps counting a plain remote-tracking ref beside a symbolic one as a push", async () => {
+    const f = makeFixture();
+    const { wt } = makeUnpushed(f);
+    git(wt, ["push", "-q", "origin", "feat"]);
+    git(f.repo, [
+      "symbolic-ref",
+      "refs/remotes/origin/self",
+      "refs/heads/feat",
+    ]);
+    // An alias of a real remote-tracking ref is harmless: the commit is on
+    // the remote, so the branch goes as it always did.
+    git(f.repo, [
+      "symbolic-ref",
+      "refs/remotes/origin/alias",
+      "refs/remotes/origin/feat",
+    ]);
+    git(f.repo, ["pack-refs", "--all"]);
+    const r = await cli(f.work, ["remove", wt, "--delete-branch"]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.branch.deleted).toBe(true);
+    expect(git(f.repo, ["branch", "--list", "feat"]).trim()).toBe("");
+  });
+
+  it("keeps a branch whose only copy is a local branch spelled like a remote-tracking ref", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeUnpushed(f);
+    git(f.repo, ["update-ref", "refs/heads/refs/remotes/origin/ghost", sha]);
+    await expectKept(f, wt, "feat", sha);
+  });
+
+  it("still lets --force remove the unpushed branch, as before", async () => {
+    const f = makeFixture();
+    const { wt } = makeUnpushed(f);
+    git(f.repo, [
+      "symbolic-ref",
+      "refs/remotes/origin/self",
+      "refs/heads/feat",
+    ]);
+    const r = await cli(f.work, ["remove", wt, "--delete-branch", "--force"]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(listedWorktrees(f.repo)).not.toContain(wt);
+  });
+});
+
+describe("worktree remove without --base: a local branch named like the default base", () => {
+  /** `origin/HEAD` removed, so only the short-name fallback is left. */
+  function unsetOriginHead(f: Fixture): void {
+    git(f.repo, ["symbolic-ref", "--delete", "refs/remotes/origin/HEAD"]);
+  }
+
+  it("keeps a branch that only a local branch called origin/main contains", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeUnpushed(f);
+    unsetOriginHead(f);
+    // `origin/main` now names this local branch, which holds the commit.
+    git(f.repo, ["branch", "origin/main", "feat"]);
+    expect(git(f.repo, ["rev-parse", "origin/main"]).trim()).toBe(sha);
+    await expectKept(f, wt, "feat", sha);
+    // With a gh that finds no merged pull request the verdict is a plain
+    // "no", and names the ref it measured against.
+    const merged = await cli(f.work, ["remove", wt, "--require-merged"], {
+      PATH: ghStub(f, "[]"),
+    });
+    expect(merged.code, merged.stdout + merged.stderr).toBe(2);
+    expect(merged.json.reason).toBe("branch_not_merged");
+    expect(merged.json.details.merged.reason).toContain(
+      "refs/remotes/origin/main",
+    );
+    expect(git(f.repo, ["rev-parse", "feat"]).trim()).toBe(sha);
+  });
+
+  it("keeps a branch that only a local branch called origin/master contains", async () => {
+    const f = makeFixture();
+    // A repository whose default branch is `master` on the remote.
+    git(f.repo, ["push", "-q", "origin", "main:master"]);
+    git(f.origin, ["symbolic-ref", "HEAD", "refs/heads/master"]);
+    git(f.repo, ["push", "-q", "origin", "--delete", "main"]);
+    git(f.repo, ["fetch", "-q", "--prune", "origin"]);
+    unsetOriginHead(f);
+    expect(
+      gitTry(f.repo, [
+        "rev-parse",
+        "--verify",
+        "-q",
+        "refs/remotes/origin/main",
+      ]),
+    ).toBeUndefined();
+    const wt = path.join(f.base, "wt-feat");
+    git(f.repo, [
+      "worktree",
+      "add",
+      "--no-track",
+      "-b",
+      "feat",
+      wt,
+      "origin/master",
+    ]);
+    commitHere(wt, "feat.txt", "unpushed work");
+    const sha = git(wt, ["rev-parse", "HEAD"]).trim();
+    git(f.repo, ["branch", "origin/master", "feat"]);
+    await expectKept(f, wt, "feat", sha);
+  });
+
+  it("keeps a branch contained by a tag spelled origin/main", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeUnpushed(f);
+    unsetOriginHead(f);
+    git(f.repo, ["tag", "origin/main", "feat"]);
+    await expectKept(f, wt, "feat", sha);
+  });
+
+  it("measures against the remote-tracking ref when origin/HEAD is set and a local branch shadows it", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeUnpushed(f);
+    git(f.repo, ["branch", "origin/main", "feat"]);
+    await expectKept(f, wt, "feat", sha);
+  });
+
+  it("still trusts a merged pull request that gh reports for a shadowed default base", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeUnpushed(f);
+    unsetOriginHead(f);
+    git(f.repo, ["branch", "origin/main", "feat"]);
+    const r = await cli(f.work, ["remove", wt, "--delete-branch"], {
+      PATH: ghStub(
+        f,
+        `[{"number":9,"headRefOid":"${sha}","baseRefName":"main"}]`,
+        { recordArgs: true },
+      ),
+    });
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.merged).toMatchObject({ merged: "yes", via: "gh" });
+    expect(r.json.branch.deleted).toBe(true);
+    expect(ghArgs(f)).toHaveLength(1);
+    expect(ghArgs(f)[0]).toContain("--base main");
+  });
+
+  it("keeps a branch when no default base can be told", async () => {
+    const f = makeFixture();
+    const { wt, sha } = makeUnpushed(f);
+    unsetOriginHead(f);
+    git(f.repo, ["branch", "origin/main", "feat"]);
+    git(f.repo, ["update-ref", "-d", "refs/remotes/origin/main"]);
+    await expectKept(f, wt, "feat", sha);
+  });
+});
+
+describe("resolveDefaultBase", () => {
+  const MAIN = "refs/remotes/origin/main";
+
+  it("reads origin/HEAD and keeps the short name for display in a normal layout", () => {
+    const f = makeFixture();
+    expect(resolveDefaultBase(f.repo)).toEqual({
+      ref: "origin/main",
+      fullRef: MAIN,
+      ghBase: "main",
+      source: "origin/HEAD",
+    });
+  });
+
+  it("falls back to origin/main, then origin/master, when origin/HEAD is unset", () => {
+    const f = makeFixture();
+    git(f.repo, ["symbolic-ref", "--delete", "refs/remotes/origin/HEAD"]);
+    expect(resolveDefaultBase(f.repo)).toMatchObject({
+      ref: "origin/main",
+      fullRef: MAIN,
+      ghBase: "main",
+      source: "origin/main (origin/HEAD is not set)",
+    });
+    git(f.repo, ["push", "-q", "origin", "main:master"]);
+    git(f.repo, ["fetch", "-q", "origin"]);
+    // main wins while both exist.
+    expect(resolveDefaultBase(f.repo)?.fullRef).toBe(MAIN);
+    git(f.repo, ["update-ref", "-d", MAIN]);
+    expect(resolveDefaultBase(f.repo)).toMatchObject({
+      ref: "origin/master",
+      fullRef: "refs/remotes/origin/master",
+      ghBase: "master",
+      source: "origin/master (origin/HEAD is not set)",
+    });
+  });
+
+  it("reads origin/HEAD that names another branch", () => {
+    const f = makeFixture();
+    git(f.repo, ["push", "-q", "origin", "main:release/1"]);
+    git(f.repo, ["fetch", "-q", "origin"]);
+    git(f.repo, ["remote", "set-head", "origin", "release/1"]);
+    expect(resolveDefaultBase(f.repo)).toEqual({
+      ref: "origin/release/1",
+      fullRef: "refs/remotes/origin/release/1",
+      ghBase: "release/1",
+      source: "origin/HEAD",
+    });
+  });
+
+  it("names the full ref for display when a local branch or tag shadows the short name", () => {
+    const f = makeFixture();
+    git(f.repo, ["symbolic-ref", "--delete", "refs/remotes/origin/HEAD"]);
+    makeUnpushed(f);
+    git(f.repo, ["branch", "origin/main", "feat"]);
+    expect(resolveDefaultBase(f.repo)).toMatchObject({
+      ref: MAIN,
+      fullRef: MAIN,
+    });
+    git(f.repo, ["branch", "-D", "origin/main"]);
+    git(f.repo, ["tag", "origin/main", "feat"]);
+    expect(resolveDefaultBase(f.repo)).toMatchObject({
+      ref: MAIN,
+      fullRef: MAIN,
+    });
+  });
+
+  it("skips an origin/HEAD that names a local branch, and uses the fallback", () => {
+    const f = makeFixture();
+    git(f.repo, [
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/heads/main",
+    ]);
+    expect(resolveDefaultBase(f.repo)).toMatchObject({
+      fullRef: MAIN,
+      source: "origin/main (origin/HEAD is not set)",
+    });
+    git(f.repo, ["update-ref", "-d", MAIN]);
+    expect(resolveDefaultBase(f.repo)).toBeUndefined();
+  });
+
+  it("skips an origin/HEAD that names a missing ref or another remote", () => {
+    const f = makeFixture();
+    git(f.repo, [
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/origin/gone",
+    ]);
+    expect(resolveDefaultBase(f.repo)).toMatchObject({
+      fullRef: MAIN,
+      source: "origin/main (origin/HEAD is not set)",
+    });
+    git(f.repo, ["remote", "add", "upstream", f.origin]);
+    git(f.repo, ["fetch", "-q", "upstream"]);
+    git(f.repo, [
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/upstream/main",
+    ]);
+    expect(resolveDefaultBase(f.repo)).toMatchObject({
+      fullRef: MAIN,
+      source: "origin/main (origin/HEAD is not set)",
+    });
+  });
+
+  it("refuses an origin/main that is itself symbolic", () => {
+    const f = makeFixture();
+    makeUnpushed(f);
+    git(f.repo, ["update-ref", "-d", MAIN]);
+    git(f.repo, ["symbolic-ref", MAIN, "refs/heads/feat"]);
+    expect(resolveDefaultBase(f.repo)).toBeUndefined();
+    // Nor does origin/HEAD get around it.
+    git(f.repo, ["symbolic-ref", "refs/remotes/origin/HEAD", MAIN]);
+    expect(resolveDefaultBase(f.repo)).toBeUndefined();
+  });
+
+  it("refuses a ref of a remote whose name only starts with origin/", () => {
+    const f = makeFixture();
+    git(f.repo, ["symbolic-ref", "--delete", "refs/remotes/origin/HEAD"]);
+    git(f.repo, ["update-ref", "-d", MAIN]);
+    // `origin/foo` is a remote of its own here, so this is its `main`, not
+    // the branch `foo/main` of `origin`.
+    git(f.repo, ["config", "remote.origin/foo.url", f.origin]);
+    git(f.repo, ["update-ref", "refs/remotes/origin/foo/main", f.mainSha]);
+    expect(resolveDefaultBase(f.repo)).toBeUndefined();
+    git(f.repo, [
+      "symbolic-ref",
+      "refs/remotes/origin/HEAD",
+      "refs/remotes/origin/foo/main",
+    ]);
+    expect(resolveDefaultBase(f.repo)).toBeUndefined();
+  });
+
+  it("is undefined without any remote, and with a stale ref of a removed remote", () => {
+    const f = makeFixture();
+    git(f.repo, ["config", "--unset", "remote.origin.url"]);
+    git(f.repo, ["config", "--unset-all", "remote.origin.fetch"]);
+    expect(git(f.repo, ["remote"]).trim()).toBe("");
+    // The refs are still there, but no configured remote owns them.
+    expect(gitTry(f.repo, ["rev-parse", "--verify", "-q", MAIN])).toBeDefined();
+    expect(resolveDefaultBase(f.repo)).toBeUndefined();
   });
 });

@@ -281,31 +281,100 @@ export function isWithin(root: string, candidate: string): boolean {
   }
 }
 
-/** The short name of the remote's default branch as `origin/<name>`
- * resolves it, or `undefined` when it cannot be told without asking the
- * remote. Reads `refs/remotes/origin/HEAD` first, then falls back to
- * `origin/main` and `origin/master`, in that order. */
-export function resolveDefaultBase(
+/** The default branch of `origin`, resolved to one exact remote-tracking
+ * ref. */
+export interface DefaultBase {
+  /** The name to show and to hand to commands that only display it:
+   * `origin/<branch>` when that short spelling reaches the same commit as
+   * the full ref, otherwise the full ref (a local branch or tag of the same
+   * name shadows the short spelling). */
+  ref: string;
+  /** The full ref, `refs/remotes/origin/<branch>`: what every check that
+   * decides whether work may be discarded measures against, so a local
+   * `origin/<branch>` branch cannot stand in for it. */
+  fullRef: string;
+  /** The branch part after `origin/`: the base a pull request names. */
+  ghBase: string;
+  source: string;
+}
+
+/** `fullRef` as a default base, or `undefined` when it is not a plain,
+ * existing remote-tracking branch of the remote `origin` (the same guard
+ * `--base` goes through, so a symbolic ref, a local branch, a missing ref
+ * and a remote whose name merely starts with `origin/` are all refused). */
+function defaultBaseOf(
   cwd: string,
-): { ref: string; source: string } | undefined {
+  fullRef: string,
+  source: string,
+): DefaultBase | undefined {
+  const resolved = resolveRemoteBase(cwd, fullRef);
+  if (!resolved.ok) return undefined;
+  if (resolved.base.remote !== "origin") return undefined;
+  const sha = commitSha(cwd, resolved.base.ref);
+  if (sha === undefined) return undefined;
+  const short = resolved.base.ref.slice("refs/remotes/".length);
+  return {
+    ref: commitSha(cwd, short) === sha ? short : resolved.base.ref,
+    fullRef: resolved.base.ref,
+    ghBase: resolved.base.branch,
+    source,
+  };
+}
+
+/** The remote's default branch as `origin/<name>` resolves it, or
+ * `undefined` when it cannot be told without asking the remote. Reads
+ * `refs/remotes/origin/HEAD` first, then falls back to
+ * `refs/remotes/origin/main` and `refs/remotes/origin/master`, in that
+ * order. Only a plain remote-tracking branch of `origin` qualifies: an
+ * `origin/HEAD` that points at a local branch, at a symbolic ref or at
+ * nothing is skipped, and a local branch named `origin/main` is never read
+ * for it. */
+export function resolveDefaultBase(cwd: string): DefaultBase | undefined {
   const head = gitText(cwd, [
     "symbolic-ref",
     "--quiet",
-    "--short",
     "refs/remotes/origin/HEAD",
   ]);
-  if (head !== undefined && head.length > 0 && refExists(cwd, head)) {
-    return { ref: head, source: "origin/HEAD" };
+  if (head !== undefined && head.length > 0) {
+    const found = defaultBaseOf(cwd, head, "origin/HEAD");
+    if (found !== undefined) return found;
   }
-  for (const candidate of ["origin/main", "origin/master"]) {
-    if (refExists(cwd, candidate)) {
-      return {
-        ref: candidate,
-        source: `${candidate} (origin/HEAD is not set)`,
-      };
-    }
+  for (const candidate of ["main", "master"]) {
+    const found = defaultBaseOf(
+      cwd,
+      `refs/remotes/origin/${candidate}`,
+      `origin/${candidate} (origin/HEAD is not set)`,
+    );
+    if (found !== undefined) return found;
   }
   return undefined;
+}
+
+/**
+ * `git rev-list HEAD --not <every real remote-tracking ref>` in `cwd`: the
+ * commits no remote branch holds. A symbolic ref under `refs/remotes`
+ * (`git symbolic-ref refs/remotes/origin/self refs/heads/feat`) is left
+ * out, because `--remotes` would follow it to a local branch and count that
+ * branch's commits as pushed, although deleting the branch leaves them on no
+ * ref at all. Fails (non-zero status or `error`) when the refs cannot be
+ * listed, so the caller treats the state as unknown.
+ */
+export function unpushedCommits(cwd: string): GitRunResult {
+  const refs = git(cwd, [
+    "for-each-ref",
+    "--format=%(refname)%09%(symref)",
+    "refs/remotes",
+  ]);
+  if (refs.error !== undefined || refs.status !== 0) return refs;
+  const excludes: string[] = [];
+  for (const line of refs.stdout.split("\n")) {
+    const [name = "", symref = ""] = line.split("\t");
+    if (symref.length === 0) continue;
+    // Ref names cannot hold glob characters, so the name is its own exact
+    // `--exclude` pattern; for `--remotes` it is relative to `refs/remotes/`.
+    excludes.push(`--exclude=${name.replace(/^refs\/remotes\//, "")}`);
+  }
+  return git(cwd, ["rev-list", "HEAD", "--not", ...excludes, "--remotes"]);
 }
 
 /** A `--base` value resolved to a remote-tracking branch. */
