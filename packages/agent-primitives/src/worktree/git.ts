@@ -288,7 +288,7 @@ export interface DefaultBase {
    * start a branch from it: git's own unambiguous abbreviation of
    * `fullRef` (`origin/main` in a normal layout, `remotes/origin/main` when
    * a local branch or tag of the name `origin/main` exists), and `fullRef`
-   * itself when the abbreviation would not reach the same commit. */
+   * itself when git gives no abbreviation. */
   ref: string;
   /** The full ref, `refs/remotes/origin/<branch>`: what every check that
    * decides whether work may be discarded measures against, so a local
@@ -311,17 +311,16 @@ function defaultBaseOf(
   const resolved = resolveRemoteBase(cwd, fullRef);
   if (!resolved.ok) return undefined;
   if (resolved.base.remote !== "origin") return undefined;
-  const sha = commitSha(cwd, resolved.base.ref);
-  if (sha === undefined) return undefined;
-  // git's strict abbreviation never spells a ref the way another ref of the
-  // repository is spelled, so it stays unambiguous where `origin/main` would
-  // name a local branch or a tag; the sha check keeps the full ref should
-  // git's configuration make the abbreviation ambiguous after all.
-  const short = gitText(cwd, ["rev-parse", "--abbrev-ref", resolved.base.ref]);
+  // Strict mode only names a ref by a spelling that no other ref of the
+  // repository matches, so a local branch or tag called `origin/main` makes
+  // it `remotes/origin/main`. Should git not answer, the full ref is shown.
+  const short = gitText(cwd, [
+    "rev-parse",
+    "--abbrev-ref=strict",
+    resolved.base.ref,
+  ]);
   const display =
-    short !== undefined && short.length > 0 && commitSha(cwd, short) === sha
-      ? short
-      : resolved.base.ref;
+    short !== undefined && short.length > 0 ? short : resolved.base.ref;
   return {
     ref: display,
     fullRef: resolved.base.ref,

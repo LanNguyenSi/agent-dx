@@ -1674,6 +1674,9 @@ describe("worktree list: the default base", () => {
       ahead: 1,
       behind: 0,
     });
+    expect(entries[0].merged).toMatchObject({
+      reason: "HEAD is an ancestor of origin/main",
+    });
   });
 
   it("shows git's unambiguous name and measures the remote-tracking ref when a local branch shadows it at the same commit", async () => {
@@ -1691,6 +1694,10 @@ describe("worktree list: the default base", () => {
     });
     expect(entries.find((w) => w.path === ahead)?.merged).toMatchObject({
       merged: "unknown",
+    });
+    expect(entries[0].merged).toMatchObject({
+      merged: "yes",
+      reason: "HEAD is an ancestor of remotes/origin/main",
     });
   });
 
@@ -1714,6 +1721,30 @@ describe("worktree list: the default base", () => {
     });
     expect(entry?.merged.merged).not.toBe("yes");
   });
+
+  it.each([
+    ["fails", "echo 'fatal: injected abbrev failure' >&2; exit 128"],
+    ["prints nothing", "exit 0"],
+  ])(
+    "falls back to the full ref as the shown base when git's abbreviation %s",
+    async (_name, action) => {
+      const f = makeFixture();
+      const PATH = gitWrapper(
+        f,
+        "git-no-abbrev",
+        `for a in "$@"; do
+  case "$a" in --abbrev-ref*) ${action};; esac
+done`,
+      );
+      const r = await cli(f.work, ["list", "--repo", f.repo], { PATH });
+      expect(r.code, r.stdout + r.stderr).toBe(0);
+      const entries = r.json.worktrees as Record<string, any>[];
+      expect(entries.every((w) => w.base === "refs/remotes/origin/main")).toBe(
+        true,
+      );
+      expect(entries[0].merged).toMatchObject({ merged: "yes" });
+    },
+  );
 
   it("reads origin's default base once per repository, not once per worktree", async () => {
     const f = makeFixture();
