@@ -2531,6 +2531,8 @@ done`,
     expect(
       r.json.warnings.some((w: string) => w.includes("deleted branch")),
     ).toBe(false);
+  });
+});
 
 /** One line of git output as git printed it: only the final newline comes
  * off, so a directory name that ends in a space keeps it. */

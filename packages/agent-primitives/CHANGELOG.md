@@ -22,18 +22,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   warning, as in `drift`. The envelope gains `base_sha`, `head_sha` and
   `merge_base` (task 3265952e).
 
-- `worktree remove`: a file system symlink under the loose
-  `refs/remotes` of the files ref backend (a file link such as
-  `refs/remotes/origin/self -> ../../heads/feat`, a directory link, or a
-  link on `refs` or `refs/remotes` itself) no longer lets the unpushed
-  check call a local branch pushed. git reads such a link as a plain
-  remote-tracking ref, so `--delete-branch` deleted the branch and left
-  its commits on no ref. The loose refs are now walked with `lstat`
-  before git is asked, and a symlink, a special file or a tree past the
-  entry or depth bound is the `unpushed_state_unknown` refusal (branch
-  kept; `--force` still removes). The reftable backend is not walked
-  (tracker 84aff355).
-
 - `worktree remove`: the unpushed check no longer calls a local branch
   pushed because of a file system link in the ref store. git reads every
   path under `refs` as a ref and follows links there, and opens
