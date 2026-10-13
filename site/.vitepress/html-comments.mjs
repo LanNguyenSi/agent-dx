@@ -27,10 +27,25 @@
 // length), then the comment itself. Used to remove comments from text that
 // markdown-it keeps as raw source: the heading text the permalink label is
 // built from, link titles, container titles, and comment lines.
-const COMMENT_OUTSIDE_CODE = /\\[!-\/:-@[-`{-~]|(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)|`+|<!--[\s\S]*?-->/g
+const OUTSIDE_CODE = /\\[!-\/:-@[-`{-~]|(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)|`+|<!--/g
 
+// A comment runs from its opener to the first "-->" after the opener's four
+// characters. The opener is matched on its own and its closer looked up with
+// indexOf, so an opener with no closer ends the search at once instead of
+// being scanned to the end of the text again for each one that follows.
 export function stripComments(text) {
-  return text.replace(COMMENT_OUTSIDE_CODE, (m) => (m.startsWith('<!--') ? '' : m))
+  if (!text.includes('<!--')) return text
+  const re = new RegExp(OUTSIDE_CODE.source, 'g')
+  let out = ''
+  let from = 0
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    if (m[0] !== '<!--') continue
+    const close = text.indexOf('-->', m.index + 4)
+    if (close === -1) break
+    out += text.slice(from, m.index)
+    from = re.lastIndex = close + 3
+  }
+  return out + text.slice(from)
 }
 
 export function htmlComments(md) {
@@ -70,10 +85,8 @@ function commentBlock(state, startLine, endLine, silent) {
   let close = findClose(state, start + 4)
   for (;;) {
     if (close === -1) return false
-    while (state.eMarks[line] < close) {
-      line++
-      if (line >= endLine) return false
-    }
+    line = lineEndingAfter(state, line, endLine, close)
+    if (line === -1) return false
     // A comment that follows on the same line continues the run.
     let next = close + 3
     while (next < state.eMarks[line] && (state.src[next] === ' ' || state.src[next] === '\t')) next++
@@ -105,6 +118,22 @@ function commentBlock(state, startLine, endLine, silent) {
     state.push('paragraph_close', 'p', -1)
   }
   return true
+}
+
+// The first line in [from, endLine) that ends at or after `close`, or -1. Line
+// ends only grow, so a binary search finds it; walking the lines one by one
+// would cost the distance to a far closer for each opener that has one.
+// `close` indexes a '-' of "-->", never a line break, so it can not equal a
+// line end: ">=" and ">" pick the same line.
+function lineEndingAfter(state, from, endLine, close) {
+  let lo = from
+  let hi = endLine - 1
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1
+    if (state.eMarks[mid] >= close) hi = mid
+    else lo = mid + 1
+  }
+  return state.eMarks[lo] >= close ? lo : -1
 }
 
 // The first "-->" at or after `from`, or -1. A page with many openers and no

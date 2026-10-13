@@ -6,6 +6,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createMarkdownRenderer, resolveConfig } from 'vitepress'
+import { stripComments } from '../.vitepress/html-comments.mjs'
 
 let md
 before(async () => {
@@ -411,15 +412,146 @@ test('a page of unclosed openers is searched for a closer once, not once per ope
   assert.ok(searches.length <= 2, `the page was searched ${searches.length} times for -->`)
 })
 
-test('a long page of unclosed openers renders within a coarse time bound', () => {
-  // One search over the page answers every opener; a search that starts over
-  // at each opener grows with the square of the page's length. The bound
-  // assumes a runner with at least one full core.
-  const page = (n) => Array.from({ length: n }, (_, i) => `<!-- opener ${i}\ntext ${i}`).join('\n\n') + '\n'
-  const start = performance.now()
-  render(page(32000))
-  const ms = performance.now() - start
-  assert.ok(ms < 3000, `rendering 32000 unclosed openers took ${Math.round(ms)} ms`)
+// Counts the work the comment rules do instead of timing it, so the checks do
+// not depend on how busy the machine is. A block rule placed ahead of the
+// comment rule swaps each parser state's line-end array for a proxy that
+// counts reads; the comment rule reads that array once per step of its closer
+// search.
+let countReads = null
+let spyAdded = false
+const SPY = 'test-line-end-spy'
+const spied = new WeakSet()
+const spy = (state) => {
+  if (countReads && !spied.has(state)) {
+    spied.add(state)
+    state.eMarks = new Proxy(state.eMarks, {
+      get(target, key) {
+        if (typeof key === 'string' && /^\d+$/.test(key)) countReads.n++
+        return target[key]
+      }
+    })
+  }
+  return false
+}
+const lineEndReads = (src) => {
+  if (!spyAdded) {
+    md.block.ruler.before('agent-dx-comment-block', SPY, spy, { alt: ['paragraph', 'reference', 'blockquote'] })
+    spyAdded = true
+  }
+  md.block.ruler.enable(SPY)
+  countReads = { n: 0 }
+  try {
+    render(src)
+    return countReads.n
+  } finally {
+    countReads = null
+    md.block.ruler.disable(SPY)
+  }
+}
+
+test('the line search for a far closer reads a number of line ends that grows with the page length', () => {
+  // Every other line is an opener. With the closer far below, inside a fence
+  // (each opener is then refused) or absent, the reads per opener must not
+  // grow with the page: four times the lines takes about four times the reads
+  // (a binary search adds a logarithm), where walking the lines from each
+  // opener to the closer takes about sixteen times as many.
+  const lines = (n) => 'text line\n<!-- o\n'.repeat(n / 2)
+  for (const [name, tail] of [['absent', ''], ['in a fence', '```\n-->\n```\n']]) {
+    const small = lineEndReads(lines(4000) + tail)
+    const large = lineEndReads(lines(16000) + tail)
+    assert.ok(small > 0, 'the spy counts reads')
+    assert.ok(large / small < 8, `closer ${name}: 4x the lines took ${(large / small).toFixed(1)}x the line-end reads`)
+  }
+})
+
+test('the closer search of a paragraph of unclosed openers runs once, not once per opener', (t) => {
+  // Counts every search for "-->", in the page and in the text of the paragraph
+  // alike. A text scan that keeps going after an opener has no closer would
+  // search again for each opener that follows.
+  const src = 'text line\n<!-- o\n'.repeat(1000)
+  const indexOf = t.mock.method(String.prototype, 'indexOf')
+  assert.equal(stripComments(src), src)
+  const direct = indexOf.mock.calls.filter((c) => c.arguments[0] === '-->').length
+  assert.ok(direct <= 2, `stripComments searched ${direct} times for -->`)
+  indexOf.mock.resetCalls()
+  render(src)
+  const searches = indexOf.mock.calls.filter((c) => c.arguments[0] === '-->').length
+  assert.ok(searches <= 10, `the render searched ${searches} times for -->`)
+})
+
+test('stripComments never rescans the text through exec or indexOf', (t) => {
+  // The work of a scan is the span it reads, so linear total work means the
+  // spans do not overlap: each search starts at or after where the previous
+  // one ended. The spies see regex searches of the full text (exec, and the
+  // test, match, replace and search calls that go through it) and indexOf
+  // searches of the text or a tail of it. A rescan through a slice and another
+  // primitive (search, match, split, includes) is not seen, so this pins the
+  // current implementation's routes rather than its complexity in general. A
+  // search that finds nothing has read to the end of the text. Restarting a
+  // lazy search at each opener that has no closer fails this, though its
+  // result is the same.
+  const spans = []
+  const exec = RegExp.prototype.exec
+  t.mock.method(RegExp.prototype, 'exec', function (subject) {
+    const start = this.global || this.sticky ? this.lastIndex : 0
+    const m = exec.call(this, subject)
+    if (subject === current) spans.push({ start, end: m ? m.index + m[0].length : current.length })
+    return m
+  })
+  const indexOf = String.prototype.indexOf
+  t.mock.method(String.prototype, 'indexOf', function (needle, from = 0) {
+    const at = indexOf.call(this, needle, from)
+    // A search of a tail of the text, such as a slice, is a search of the text
+    // from where the tail starts.
+    const str = String(this)
+    if (needle === '-->' && current.endsWith(str)) {
+      const base = current.length - str.length
+      spans.push({ start: base + from, end: at === -1 ? current.length : base + at + 3 })
+    }
+    return at
+  })
+  let current = ''
+  const cases = {
+    'unclosed openers': 'text line\n<!-- o\n'.repeat(500),
+    'unclosed openers and a closer in a code span': '<!-- o `-->`\n'.repeat(500),
+    'comments': 'a <!-- x --> b <!-- y --> c\n'.repeat(500),
+    'comments and unclosed backticks': '`<!-- x --> `` <!-- y\n'.repeat(300)
+  }
+  for (const [name, src] of Object.entries(cases)) {
+    current = src
+    spans.length = 0
+    stripComments(src)
+    assert.ok(spans.length > 0, `${name}: the spies see the searches`)
+    for (let i = 1; i < spans.length; i++) {
+      assert.ok(spans[i].start >= spans[i - 1].end, `${name}: search ${i} started at ${spans[i].start}, inside the ${spans[i - 1].start}-${spans[i - 1].end} read before it`)
+    }
+  }
+})
+
+test('a comment opened in a quote whose closer lies after the quote stays visible', () => {
+  // The closer's line lies past the end of the quote, so the opener closes
+  // nowhere within it, and the lines of the quote are not hidden.
+  assert.equal(render('> <!-- a\n> b\n\nc -->\n'), '<blockquote>\n<p>&lt;!-- a\nb</p>\n</blockquote>\n<p>c --&gt;</p>\n')
+  // After a line of text the opener is no paragraph of its own: the quote keeps
+  // one paragraph.
+  assert.equal(render('> a\n> <!-- a\n> b\n\nc -->\n'), '<blockquote>\n<p>a\n&lt;!-- a\nb</p>\n</blockquote>\n<p>c --&gt;</p>\n')
+  // The closer sits on the line that ends the quote (a heading cannot continue
+  // the quote's paragraph), which still lies outside the quote.
+  assert.equal(render('> <!-- a\n# h -->\n'), '<blockquote>\n<p>&lt;!-- a</p>\n</blockquote>\n<h1 id="h" tabindex="-1">h --&gt; <a class="header-anchor" href="#h" aria-label="Permalink to &quot;h --&gt;&quot;">&ZeroWidthSpace;</a></h1>\n')
+})
+
+test('stripComments takes the first closer after each opener and keeps an opener without one', () => {
+  assert.equal(stripComments('a <!-- x --> b <!-- y --> c'), 'a  b  c')
+  assert.equal(stripComments('a <!-- x --> b <!-- y'), 'a  b <!-- y')
+  assert.equal(stripComments('<!--> x -->'), '')
+  assert.equal(stripComments('<!---->z'), 'z')
+  // "-->" must start after the four characters of the opener.
+  assert.equal(stripComments('<!---> x'), '<!---> x')
+  assert.equal(stripComments('<!---> x --> y'), ' y')
+  assert.equal(stripComments('`<!-- x -->` <!-- y -->'), '`<!-- x -->` ')
+  assert.equal(stripComments('\\<!-- x --> y'), '\\<!-- x --> y')
+  assert.equal(stripComments('<!-- a <!-- b --> c --> d'), ' c --> d')
+  assert.equal(stripComments('`<!-- x` --> <!-- y'), '`<!-- x` --> <!-- y')
 })
 
 test('a backtick line indented four columns after a comment line is not a fence', () => {
