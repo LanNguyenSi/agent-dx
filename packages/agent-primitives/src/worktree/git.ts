@@ -315,8 +315,9 @@ function defaultBaseOf(
   // ref: a local branch or tag called `origin/main` makes it
   // `remotes/origin/main`. Unlike `rev-parse --abbrev-ref`, it does not
   // resolve a name, so a ref spelled `refs/heads/refs/remotes/origin/main`
-  // cannot make the answer ambiguous. Should git not answer, the full ref is
-  // shown.
+  // cannot make the lookup ambiguous. Should git not answer, the full ref is
+  // shown; where even the full name is ambiguous as a revision, `create`
+  // refuses instead of starting from another ref.
   const listed = gitText(cwd, [
     "for-each-ref",
     "--format=%(refname:short)",
