@@ -47,7 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   common directory, `refs`, `reftable`, `tables.list` or table that cannot
   be found, a listed table name that is not a plain file name, a tree or
   list past its bound, a `config` that cannot be read, a store kept
-  elsewhere (also via `GIT_REFERENCE_BACKEND`), and a symbolic ref under
+  elsewhere (also via `GIT_REF_STORAGE_FORMAT` or `GIT_REFERENCE_BACKEND`), and a symbolic ref under
   `refs/remotes` whose name is not UTF-8 (it cannot be excluded exactly)
   are the `unpushed_state_unknown` refusal (branch kept; `--force` still
   removes) (tracker 84aff355).

@@ -761,14 +761,36 @@ const PLAIN_REF_FORMATS: ReadonlySet<string> = new Set(["files", "reftable"]);
  * parsed is unknown. Nothing the config says ever skips the inspection of
  * the store; this read only adds refusals.
  */
+/** Environment variables git reads for the ref storage format, newest name
+ * first. */
+export const REF_STORAGE_ENV_VARS = [
+  "GIT_REF_STORAGE_FORMAT",
+  "GIT_REFERENCE_BACKEND",
+] as const;
+
 function refStoreElsewhere(
   cwd: string,
   commonDir: BytePath,
 ): GitRunResult | undefined {
-  const fromEnv = withoutRepoSelectionEnv().GIT_REFERENCE_BACKEND;
-  if (fromEnv !== undefined && !PLAIN_REF_FORMATS.has(fromEnv)) {
+  // Newer git reads GIT_REF_STORAGE_FORMAT first and keeps
+  // GIT_REFERENCE_BACKEND as a deprecated alias, so both are checked, and
+  // two different values are refused as well: which one wins depends on
+  // the git version.
+  const env = withoutRepoSelectionEnv();
+  const seen = new Set<string>();
+  for (const name of REF_STORAGE_ENV_VARS) {
+    const value = env[name];
+    if (value === undefined) continue;
+    if (!PLAIN_REF_FORMATS.has(value)) {
+      return unknownUnpushed(
+        `${name} is ${JSON.stringify(value)}, which can put the refs git reads outside the common git directory`,
+      );
+    }
+    seen.add(value);
+  }
+  if (seen.size > 1) {
     return unknownUnpushed(
-      `GIT_REFERENCE_BACKEND is ${JSON.stringify(fromEnv)}, which can put the refs git reads outside the common git directory`,
+      `${REF_STORAGE_ENV_VARS.join(" and ")} name different ref formats, so which store git reads depends on its version`,
     );
   }
   const configPath = below(commonDir, "config");

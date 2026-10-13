@@ -3723,6 +3723,49 @@ describe("worktree remove: a ref store git was told to keep elsewhere", () => {
     },
   );
 
+  it("keeps a branch when GIT_REF_STORAGE_FORMAT names a store, with and without --base", async () => {
+    // Not gated: newer git reads this variable first (released git ignores
+    // it), and the guard refuses on the value alone.
+    const f = makeFixture();
+    const { wt, sha } = makeUnpushed(f);
+    const env = {
+      GIT_REF_STORAGE_FORMAT: `files://${storeElsewhere(f, wt)}`,
+    };
+    for (const flags of SYMLINK_FLAG_SETS) {
+      const r = await cliBounded(f.work, ["remove", wt, ...flags], env);
+      const label = `${flags.join(" ")}: ${r.stdout}${r.stderr}`;
+      expect(r.code, label).toBe(2);
+      expect(r.json.reason, label).toBe("unpushed_state_unknown");
+      expect(r.json.message, label).toContain("GIT_REF_STORAGE_FORMAT");
+    }
+    expect(
+      fs.readFileSync(path.join(commonDirOf(f), "refs/heads/feat"), "utf8"),
+    ).toBe(`${sha}\n`);
+  });
+
+  it("refuses when GIT_REF_STORAGE_FORMAT and GIT_REFERENCE_BACKEND name different formats", async () => {
+    const f = makeFixture();
+    const { wt } = makePushed(f);
+    const r = await cliBounded(f.work, ["remove", wt, "--delete-branch"], {
+      GIT_REF_STORAGE_FORMAT: "reftable",
+      GIT_REFERENCE_BACKEND: "files",
+    });
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.reason).toBe("unpushed_state_unknown");
+    expect(r.json.message).toContain("name different ref formats");
+  });
+
+  it("removes a pushed branch when both ref-format variables say files", async () => {
+    const f = makeFixture();
+    const { wt } = makePushed(f);
+    const r = await cliBounded(f.work, ["remove", wt, "--delete-branch"], {
+      GIT_REF_STORAGE_FORMAT: "files",
+      GIT_REFERENCE_BACKEND: "files",
+    });
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect(r.json.branch.deleted).toBe(true);
+  });
+
   it("removes a pushed branch when GIT_REFERENCE_BACKEND or the config names a format alone", async () => {
     for (const env of [
       { GIT_REFERENCE_BACKEND: "files" },
