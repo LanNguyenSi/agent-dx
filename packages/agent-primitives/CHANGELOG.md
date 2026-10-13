@@ -85,12 +85,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the target that is laid out like a git directory (git's own test, which
   runs no git here, so it holds for a bare repository git declines to
   open and under any `GIT_*` environment), and by the identity of the git
-  and common directories git names from the root. Above a target inside
-  a work tree the check stops at the work-tree root, so a work tree
-  checked out inside a bare repository is editable from inside it; a
-  bare repository nested in a work tree, and `-C` inside one, are
-  refused. A warning names an identity lookup that could not be made; a
-  symlink is followed and its target checked. `--break-hard-links` edits
+  and common directories git names from the root. Every directory above
+  a target is checked, up to the filesystem root; the one exception is
+  the root's own git directory or common directory, taken only when git
+  would open the root as a work tree and not when the root lies in one
+  of git's own directories there (such as `hooks`). So a work tree
+  checked out inside its own bare repository is editable, while a work
+  tree inside another repository's git directory is refused: a bare
+  repository nested in a work tree, `-C` inside one, and a
+  `<repo>/.git/hooks` made a repository of its own. A `commondir` path
+  is resolved by its real path, as git does. A warning names an identity
+  lookup that could not be made, a directory git names that is not laid
+  out like one, and a git directory name with a line break; a symlink is
+  followed and its target checked. `--break-hard-links` edits
   a hard-linked file. New
   envelope statuses: `ambiguous`, `overlap`, `fuzzy_side_effect` and
   `not_editable` (exit `1`), `would_write` (exit `0`). The matching engine

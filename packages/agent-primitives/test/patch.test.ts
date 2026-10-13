@@ -2097,7 +2097,7 @@ describe("patch: git directories recognised by their layout", () => {
     expect(ok.warnings).toEqual([]);
   });
 
-  it("reports a git directory git names but cannot be stated, and still refuses it by its layout", () => {
+  it("reports a git directory git names but cannot be stated, and still refuses it", () => {
     const { base, src } = committedSource();
     gitIn(base, "clone", "-q", "--bare", src, "gd\n");
     const bare = path.join(base, "gd\n");
@@ -2106,14 +2106,27 @@ describe("patch: git directories recognised by their layout", () => {
     const r = run(bare, [cfg], { dryRun: true });
     expect(r.status).toBe("usage_error");
     expect(r.reason).toBe("git_dir");
-    expect(r.edits[0].detail).toContain("looks like a git directory");
+    // Git's answer is the repository's path with its line break, then
+    // `.` for the common directory: that last line names the repository.
+    expect(r.edits[0].detail).toContain("which git names");
     expect(r.warnings.join("\n")).toContain("which cannot be stated");
+    expect(r.warnings.join("\n")).toContain("line break in its name");
     // Next to a directory named like the line before the break, git's
-    // output reads as that directory, a blank line and the rest.
+    // output reads as that directory, a blank line and the rest; that
+    // directory is no git directory and is not refused for its identity.
     fs.mkdirSync(path.join(base, "gd"));
+    fs.writeFileSync(path.join(base, "gd", "y.txt"), "y\n");
     const again = run(bare, [cfg], { dryRun: true });
     expect(again.reason).toBe("git_dir");
     expect(again.warnings.join("\n")).toContain("line break in its name");
+    expect(again.warnings.join("\n")).toContain(
+      "which is not laid out like a git directory",
+    );
+    const sibling = run(bare, [{ file: "../gd/y.txt", old: "y", new: "z" }], {
+      dryRun: true,
+      allowOutside: true,
+    });
+    expect(sibling.status).toBe("would_write");
     expect(read(bare, "config")).toBe(config);
   });
 
@@ -2242,7 +2255,7 @@ describe("patch: the layout test of a git directory (no git on PATH)", () => {
     expect(out.edits[0].detail).toContain("looks like a git directory");
   });
 
-  it("the walk from a target inside a work tree ends at the work-tree root, from any other target at the filesystem root", () => {
+  it("above a target inside a work tree the walk passes over only the root's own repository, above any other target nothing", () => {
     const fake = gitLike();
     // A work tree inside the git directory, as `git worktree add` lays
     // it out: `.git` names an administrative directory whose commondir
@@ -2322,5 +2335,378 @@ describe("patch: the layout test of a git directory (no git on PATH)", () => {
       status: "usage_error",
       reason: "git_dir",
     });
+  });
+
+  it("a commondir naming a path through a symlink and then .. is resolved as git does, symlink first", () => {
+    const base = tmpDir();
+    fs.mkdirSync(path.join(base, "deep", "real"), { recursive: true });
+    fs.mkdirSync(path.join(base, "deep", "repo.git", "objects"), {
+      recursive: true,
+    });
+    fs.mkdirSync(path.join(base, "deep", "repo.git", "refs"));
+    fs.symlinkSync(path.join("deep", "real"), path.join(base, "lnk"));
+    const admin = path.join(base, "admin");
+    fs.mkdirSync(admin);
+    fs.writeFileSync(path.join(admin, "HEAD"), "ref: refs/heads/main\n");
+    // Read lexically this is <base>/repo.git, which does not exist; git
+    // follows lnk to deep/real first and lands on deep/repo.git.
+    fs.writeFileSync(path.join(admin, "commondir"), "../lnk/../repo.git\n");
+    fs.writeFileSync(path.join(admin, "config"), "[core]\n");
+    const { code, out } = editConfig(admin);
+    expect(code).toBe(2);
+    expect(out).toMatchObject({ status: "usage_error", reason: "git_dir" });
+    expect(out.edits[0].detail).toContain("looks like a git directory");
+    expect(read(admin, "config")).toBe("[core]\n");
+  });
+
+  it("a root's .git grants its own repository only when git would open it, so a crafted one passes over nothing", () => {
+    /** Runs a dry-run edit with `-C <p>/x`, where `x` holds `a.txt` and
+     * a `.git` that `make` builds, inside the git directory `p`. */
+    function inside(
+      p: string,
+      make: (dotGit: string) => void,
+      env: NodeJS.ProcessEnv = {},
+    ): PatchJson {
+      const x = path.join(p, "x");
+      fs.mkdirSync(x);
+      fs.writeFileSync(path.join(x, "a.txt"), "a\n");
+      make(path.join(x, ".git"));
+      return cliWithoutGit(
+        [
+          "-C",
+          x,
+          "patch",
+          "--file",
+          "a.txt",
+          "--old",
+          "a",
+          "--new",
+          "b",
+          "--dry-run",
+        ],
+        env,
+      ).out;
+    }
+    /** A `.git` directory holding `HEAD` and `commondir`, as a linked
+     * worktree's administrative directory does. */
+    const adminLike =
+      (head: string, commondir: string) =>
+      (dotGit: string): void => {
+        fs.mkdirSync(dotGit);
+        fs.writeFileSync(path.join(dotGit, "HEAD"), head);
+        fs.writeFileSync(path.join(dotGit, "commondir"), commondir);
+      };
+    const ref = "ref: refs/heads/main\n";
+    // The control: a .git git opens, whose common directory is the git
+    // directory around it, makes x a work tree inside its own repository.
+    expect(inside(gitLike(), adminLike(ref, "../..\n")).status).toBe(
+      "would_write",
+    );
+    // A form feed after `ref:` is no whitespace to git.
+    expect(
+      inside(gitLike(), adminLike("ref:\frefs/heads/main\n", "../..\n")).reason,
+      "form feed in HEAD",
+    ).toBe("git_dir");
+    // `refs` a plain file git cannot search.
+    const plainRefs = gitLike({ refs: false });
+    fs.writeFileSync(path.join(plainRefs, "refs"), "x\n");
+    expect(
+      inside(plainRefs, adminLike(ref, "../..\n")).reason,
+      "refs is a plain file",
+    ).toBe("git_dir");
+    // A commondir through a dangling symlink, which git cannot resolve
+    // (read lexically it names the git directory around x).
+    expect(
+      inside(gitLike(), (dotGit) => {
+        adminLike(ref, "../dangling/../..\n")(dotGit);
+        fs.symlinkSync("nowhere", path.join(path.dirname(dotGit), "dangling"));
+      }).reason,
+      "commondir through a dangling symlink",
+    ).toBe("git_dir");
+    // A directory that is a git directory only by the caller's
+    // GIT_COMMON_DIR: refused, and never the root's own.
+    expect(
+      inside(
+        gitLike({ objects: false, refs: false }),
+        adminLike(ref, "../..\n"),
+        {
+          GIT_COMMON_DIR: gitLike(),
+        },
+      ).reason,
+      "common directory by GIT_COMMON_DIR only",
+    ).toBe("git_dir");
+    // A .git file naming the git directory around x, whose commondir file
+    // is empty: git stops there.
+    const emptyCommon = gitLike();
+    fs.writeFileSync(path.join(emptyCommon, "commondir"), "");
+    expect(
+      inside(emptyCommon, (dotGit) => {
+        fs.writeFileSync(dotGit, "gitdir: ..\n");
+      }).reason,
+      "empty commondir",
+    ).toBe("git_dir");
+    // A .git file naming a directory without HEAD.
+    expect(
+      inside(gitLike(), (dotGit) => {
+        const adm = path.join(path.dirname(dotGit), "adm");
+        fs.mkdirSync(adm);
+        fs.writeFileSync(path.join(adm, "commondir"), "../..\n");
+        fs.writeFileSync(dotGit, "gitdir: adm\n");
+      }).reason,
+      "gitdir naming no git directory",
+    ).toBe("git_dir");
+  }, 60_000);
+
+  it.skipIf(process.platform === "win32")(
+    "a FIFO in a directory above the target is read without waiting",
+    () => {
+      for (const fifo of ["HEAD", "commondir"]) {
+        const base = tmpDir();
+        if (fifo === "commondir") {
+          fs.writeFileSync(path.join(base, "HEAD"), "ref: refs/heads/main\n");
+        }
+        execFileSync("mkfifo", [path.join(base, fifo)]);
+        const dir = path.join(base, "w");
+        fs.mkdirSync(dir);
+        gitIn(dir, "init", "-q");
+        fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+        const res = spawnSync(
+          process.execPath,
+          [
+            CLI_PATH,
+            "-C",
+            dir,
+            "--json",
+            "patch",
+            "--file",
+            "a.txt",
+            "--old",
+            "a",
+            "--new",
+            "b",
+            "--dry-run",
+          ],
+          {
+            env: { PATH: path.join(base, "no-git-bin") },
+            encoding: "utf8",
+            timeout: 20000,
+          },
+        );
+        expect(res.signal, fifo).toBeNull();
+        expect(JSON.parse(res.stdout), fifo).toMatchObject({
+          status: "would_write",
+        });
+      }
+    },
+    60_000,
+  );
+});
+
+describe("patch: every directory above a target is checked, up to the filesystem root", () => {
+  it("refuses -C <repo>/.git/hooks and -C <bare>/hooks made a repository of their own by git init, also as a dry run", () => {
+    const { base, src } = committedSource();
+    gitIn(base, "clone", "-q", src, "n1");
+    gitIn(base, "clone", "-q", "--bare", src, "b1.git");
+    for (const gitDir of [
+      path.join(base, "n1", ".git"),
+      path.join(base, "b1.git"),
+    ]) {
+      addHook(gitDir);
+      const hooks = path.join(gitDir, "hooks");
+      gitIn(hooks, "init", "-q");
+      for (const dryRun of [false, true]) {
+        const r = run(hooks, [{ file: "pre-commit", old: "#", new: "X" }], {
+          dryRun,
+        });
+        expect(r.status, gitDir).toBe("usage_error");
+        expect(r.reason, gitDir).toBe("git_dir");
+        expect(r.edits[0].detail, gitDir).toContain(
+          `is inside ${gitDir}, which looks like a git directory`,
+        );
+      }
+      expect(read(hooks, "pre-commit")).toBe("#!/bin/sh\n");
+    }
+  });
+
+  it("refuses a work tree of a repository that is one of git's own directories in it", () => {
+    const { base, src } = committedSource();
+    // <repo>/.git/hooks/.git naming the git directory around it: git
+    // takes hooks as a work tree of that repository.
+    gitIn(base, "clone", "-q", src, "n1");
+    const gitDir = path.join(base, "n1", ".git");
+    addHook(gitDir);
+    fs.writeFileSync(path.join(gitDir, "hooks", ".git"), "gitdir: ..\n");
+    const viaGitfile = run(path.join(gitDir, "hooks"), [
+      { file: "pre-commit", old: "#", new: "X" },
+    ]);
+    expect(viaGitfile.status).toBe("usage_error");
+    expect(viaGitfile.reason).toBe("git_dir");
+    expect(read(gitDir, "hooks/pre-commit")).toBe("#!/bin/sh\n");
+    // A linked worktree checked out as a bare repository's hooks.
+    gitIn(base, "clone", "-q", "--bare", src, "b1.git");
+    const bare = path.join(base, "b1.git");
+    fs.rmSync(path.join(bare, "hooks"), { recursive: true });
+    gitIn(bare, "worktree", "add", "-q", "hooks");
+    const linked = run(path.join(bare, "hooks"), [
+      { file: "a.txt", old: "a", new: "b" },
+    ]);
+    expect(linked.status).toBe("usage_error");
+    expect(linked.reason).toBe("git_dir");
+    expect(read(bare, "hooks/a.txt")).toBe("a\n");
+  });
+
+  it("edits a work tree inside its own repository from -C below its root, and a linked worktree inside a .git directory", () => {
+    const { main } = workTreeInsideBare();
+    fs.mkdirSync(path.join(main, "sub"));
+    fs.writeFileSync(path.join(main, "sub", "q.txt"), "q\n");
+    const sub = run(path.join(main, "sub"), [
+      { file: "q.txt", old: "q", new: "r" },
+    ]);
+    expect(sub.status).toBe("written");
+    expect(sub.warnings).toEqual([]);
+    expect(read(main, "sub/q.txt")).toBe("r\n");
+    const { base, src } = committedSource();
+    gitIn(base, "clone", "-q", src, "n2");
+    const n2 = path.join(base, "n2");
+    gitIn(n2, "worktree", "add", "-q", path.join(".git", "wt"));
+    const wt = path.join(n2, ".git", "wt");
+    const inGitDir = run(wt, [{ file: "a.txt", old: "a", new: "b" }]);
+    expect(inGitDir.status).toBe("written");
+    expect(inGitDir.warnings).toEqual([]);
+    // Its repository's own files stay refused from there.
+    const config = run(wt, [{ file: "../config", old: "[core]", new: "[x]" }], {
+      allowOutside: true,
+    });
+    expect(config.reason).toBe("git_dir");
+  });
+
+  it("an empty .git directory, or one holding only a commondir file, makes no work tree: the repository around it is refused", () => {
+    const { base, src } = committedSource();
+    gitIn(base, "clone", "-q", "--bare", src, "b.git");
+    const bare = path.join(base, "b.git");
+    addHook(bare);
+    fs.mkdirSync(path.join(bare, "hooks", ".git"));
+    for (const dryRun of [false, true]) {
+      const empty = run(
+        path.join(bare, "hooks"),
+        [{ file: "pre-commit", old: "#", new: "X" }],
+        { dryRun },
+      );
+      expect(empty.status).toBe("usage_error");
+      expect(empty.reason).toBe("git_dir");
+    }
+    // A .git directory whose commondir names the repository, without a
+    // HEAD: git does not open it (it names the repository around it).
+    const sub = path.join(bare, "sub");
+    fs.mkdirSync(path.join(sub, ".git"), { recursive: true });
+    fs.writeFileSync(path.join(sub, ".git", "commondir"), "../..\n");
+    fs.writeFileSync(path.join(sub, "s.txt"), "s\n");
+    const named = run(sub, [{ file: "s.txt", old: "s", new: "t" }]);
+    expect(named.status).toBe("usage_error");
+    expect(named.reason).toBe("git_dir");
+    expect(read(bare, "hooks/pre-commit")).toBe("#!/bin/sh\n");
+    expect(read(sub, "s.txt")).toBe("s\n");
+  });
+
+  it("a .git file with an empty gitdir path makes no work tree: the repository around it is refused", () => {
+    const { base, src } = committedSource();
+    gitIn(base, "clone", "-q", "--bare", src, "b.git");
+    const x = path.join(base, "b.git", "x");
+    fs.mkdirSync(x);
+    fs.writeFileSync(path.join(x, ".git"), "gitdir: \n");
+    // Next to a commondir file naming the repository: an empty gitdir
+    // must not be read as naming x itself.
+    fs.writeFileSync(path.join(x, "commondir"), "..\n");
+    fs.writeFileSync(path.join(x, "x.txt"), "x\n");
+    const r = run(x, [{ file: "x.txt", old: "x", new: "y" }]);
+    expect(r.status).toBe("usage_error");
+    expect(r.reason).toBe("git_dir");
+    expect(read(x, "x.txt")).toBe("x\n");
+  });
+
+  it("refuses a work-tree root that is itself laid out like a git directory", () => {
+    const dir = repo({ "a.txt": "a\n" });
+    fs.writeFileSync(path.join(dir, "HEAD"), "ref: refs/heads/main\n");
+    fs.mkdirSync(path.join(dir, "objects"));
+    fs.mkdirSync(path.join(dir, "refs"));
+    const r = run(dir, [{ file: "a.txt", old: "a", new: "b" }]);
+    expect(r.status).toBe("usage_error");
+    expect(r.reason).toBe("git_dir");
+    expect(r.edits[0].detail).toContain(
+      `is inside ${dir}, which looks like a git directory`,
+    );
+    expect(read(dir, "a.txt")).toBe("a\n");
+  });
+
+  it("a caller's GIT_COMMON_DIR does not reach git's identity lookup", async () => {
+    const dir = repo({ "a.txt": "a\n" });
+    const { code, out } = await cliWithGit(
+      [
+        "-C",
+        dir,
+        "patch",
+        "--file",
+        "a.txt",
+        "--old",
+        "a",
+        "--new",
+        "b",
+        "--dry-run",
+      ],
+      { GIT_COMMON_DIR: "/nonexistent" },
+    );
+    expect(code).toBe(0);
+    expect(out).toMatchObject({ status: "would_write", warnings: [] });
+  });
+
+  it("refuses a common directory git names by its identity even when its HEAD is broken", () => {
+    const { bare, wt } = bareRepoWithWorktree();
+    fs.writeFileSync(path.join(bare, "HEAD"), "garbage\n");
+    const config = read(bare, "config");
+    const r = run(
+      wt,
+      [{ file: "../repo.git/config", old: "[core]", new: "[x]" }],
+      { allowOutside: true },
+    );
+    expect(r.status).toBe("usage_error");
+    expect(r.reason).toBe("git_dir");
+    expect(r.edits[0].detail).toContain("which git names");
+    expect(r.warnings).toEqual([]);
+    expect(read(bare, "config")).toBe(config);
+  });
+
+  it("takes the pieces of a git directory name with a line break only where they are laid out like one, and warns", () => {
+    const base = tmpDir();
+    const wt = path.join(base, "wt");
+    fs.mkdirSync(wt);
+    const gitDir = path.join(base, "g\nd");
+    gitIn(wt, "init", "-q", "--separate-git-dir", gitDir, ".");
+    // Git's answer reads as <base>/g and d (relative to the root), twice.
+    fs.mkdirSync(path.join(base, "g"));
+    fs.writeFileSync(path.join(base, "g", "y.txt"), "y\n");
+    fs.mkdirSync(path.join(wt, "d"));
+    fs.writeFileSync(path.join(wt, "d", "x.txt"), "x\n");
+    const inTree = run(wt, [{ file: "d/x.txt", old: "x", new: "z" }], {
+      dryRun: true,
+    });
+    expect(inTree.status).toBe("would_write");
+    expect(inTree.warnings.join("\n")).toContain("line break in its name");
+    expect(inTree.warnings.join("\n")).toContain(
+      "which is not laid out like a git directory",
+    );
+    const sibling = run(wt, [{ file: "../g/y.txt", old: "y", new: "z" }], {
+      dryRun: true,
+      allowOutside: true,
+    });
+    expect(sibling.status).toBe("would_write");
+    const config = read(gitDir, "config");
+    const inGitDir = run(
+      wt,
+      [{ file: "../g\nd/config", old: "[core]", new: "[x]" }],
+      { allowOutside: true },
+    );
+    expect(inGitDir.status).toBe("usage_error");
+    expect(inGitDir.reason).toBe("git_dir");
+    expect(read(gitDir, "config")).toBe(config);
   });
 });
