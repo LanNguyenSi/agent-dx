@@ -7,7 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createMarkdownRenderer, disposeMdItInstance } from 'vitepress'
-import { createSite, createTitleReader, escapeLiteral, escapeText, githubBase, markdownBase } from '../.vitepress/site-helpers.mjs'
+import { createSite, createTitleReader, escapeLiteral, escapeText, githubBase, markdownBase, refuseIncludes } from '../.vitepress/site-helpers.mjs'
 
 let root
 let site
@@ -31,6 +31,7 @@ before(async () => {
   write('docs/pic.png', 'x')
   write('packages/other/README.md')
   write('docs/note.md')
+  write('site/index.md')
   // The renderer the site builds its titles with: VitePress's, from the site's
   // own markdown options.
   renderer = await createMarkdownRenderer(root, markdownBase, '/agent-dx/')
@@ -228,6 +229,47 @@ test('escapeText keeps entities and escapes everything else, escapeLiteral escap
 
 test('createSite refuses to run without a title reader', () => {
   assert.throws(() => createSite(root), /readTitle/)
+})
+
+test('a page with an include directive is refused with its path, in any spelling and place', () => {
+  const variants = {
+    plain: '<!--@include: ../docs/note.md-->',
+    spaced: '<!--   @include:   ../docs/note.md   -->',
+    newline: '<!--\n@include: ../docs/note.md-->',
+    fenced: '```md\n<!--@include: ../docs/note.md-->\n```',
+    indented: '    <!--@include: ../docs/note.md-->'
+  }
+  for (const [name, directive] of Object.entries(variants)) {
+    const rel = `${AE}/inc-${name}.md`
+    write(rel, `# T\n\n${directive}\n`)
+    try {
+      assert.throws(() => createSite(root, readTitle), new RegExp(`Include directives are not supported: ${rel.replaceAll('/', '\\/')}`), name)
+    } finally {
+      fs.rmSync(path.join(root, rel))
+    }
+  }
+  assert.doesNotThrow(() => createSite(root, readTitle))
+})
+
+test('an include directive in site/index.md is refused too', () => {
+  const index = path.join(root, 'site/index.md')
+  const clean = fs.readFileSync(index, 'utf8')
+  fs.writeFileSync(index, `${clean}\r\n<!--\t@include: ../docs/note.md-->\r\n`)
+  try {
+    assert.throws(() => createSite(root, readTitle), /Include directives are not supported: site\/index\.md/)
+  } finally {
+    fs.writeFileSync(index, clean)
+  }
+  assert.doesNotThrow(() => createSite(root, readTitle))
+})
+
+test('refuseIncludes passes a page that mentions includes without the directive', () => {
+  write(`${AE}/inc-text.md`, '# T\n\nThe @include: syntax and <!-- a comment --> are fine.\n')
+  try {
+    assert.doesNotThrow(() => refuseIncludes(root, { [`${AE}/inc-text.md`]: 'x.md' }))
+  } finally {
+    fs.rmSync(path.join(root, `${AE}/inc-text.md`))
+  }
 })
 
 test('sidebar links every playbook page exactly once', () => {

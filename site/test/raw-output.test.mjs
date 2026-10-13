@@ -5,7 +5,7 @@
 import test, { before } from 'node:test'
 import assert from 'node:assert/strict'
 import { createMarkdownRenderer, resolveConfig } from 'vitepress'
-import { allowedAttributes, defuseMustache, escapeDescriptionMeta, escapeText, safeId } from '../.vitepress/raw-output.mjs'
+import { allowedAttributes, allowedDirs, allowedLayouts, defuseMustache, escapeDescriptionMeta, escapeText, safeId, safeImage, sanitizeFrontmatter, transformPageData } from '../.vitepress/raw-output.mjs'
 import { escapeText as siteEscapeText, markdownBase } from '../.vitepress/site-helpers.mjs'
 
 let md
@@ -268,4 +268,192 @@ test('a description that YAML reads as a number, a boolean or a list is escaped 
 test('a description with replacement patterns is written as is', () => {
   const description = '$& $1 $$ <'
   assert.equal(escapeDescriptionMeta(meta(description), 'index.html', { description }), meta('$&amp; $1 $$ &lt;'))
+})
+
+test('a copy of the description tag written earlier does not use up the replacement', () => {
+  const description = 'a <b>'
+  const tag = `<meta name="description" content="${description}">`
+  const html = `<html dir="x">${tag}<head><title>t</title>${tag}</head>`
+  const out = escapeDescriptionMeta(html, 'index.html', { description })
+  assert.equal(out.split(tag).length, 1, out)
+  assert.equal(out.split('<meta name="description" content="a &lt;b&gt;">').length, 3, out)
+})
+
+// Frontmatter the default theme writes as HTML
+
+test('the site config passes the frontmatter sanitiser to VitePress', () => {
+  const out = cfg.userConfig.transformPageData({ frontmatter: { dir: 'x', hero: { name: '<b>' } } })
+  assert.deepEqual(out, { frontmatter: { hero: { name: '&lt;b&gt;' } } })
+})
+
+test('dir is limited to ltr, rtl and auto', () => {
+  assert.deepEqual([...allowedDirs].sort(), ['auto', 'ltr', 'rtl'])
+  for (const dir of ['ltr', 'rtl', 'auto']) assert.equal(sanitizeFrontmatter({ dir }).dir, dir)
+  for (const dir of ['RTL', ' rtl', 'rtl ', '"><img src=x onerror=1>', '', 0, null, true, ['rtl'], { toString: () => 'rtl' }]) {
+    assert.equal('dir' in sanitizeFrontmatter({ dir }), false, JSON.stringify(dir))
+  }
+})
+
+test('previous and next text is escaped in every form, the link is kept', () => {
+  const out = sanitizeFrontmatter({
+    prev: '<img src=x onerror=1> & "q"',
+    next: { text: '<b>x</b>', link: '/a?b=<c>' }
+  })
+  assert.equal(out.prev, '&lt;img src=x onerror=1&gt; &amp; &quot;q&quot;')
+  assert.deepEqual(out.next, { text: '&lt;b&gt;x&lt;/b&gt;', link: '/a?b=<c>' })
+  assert.deepEqual(sanitizeFrontmatter({ prev: { link: '/a' } }).prev, { link: '/a' })
+  assert.equal(sanitizeFrontmatter({ next: ['<b>'] }).next, '&lt;b&gt;')
+  assert.equal(sanitizeFrontmatter({ prev: { text: ['<b>x</b>'] } }).prev.text, '&lt;b&gt;x&lt;/b&gt;')
+})
+
+test('hero and feature text is escaped, an entity written in the source stays one', () => {
+  const out = sanitizeFrontmatter({
+    hero: { name: '<b>n</b>', text: 'R&D &copy;', tagline: '<i>t</i>', actions: [{ text: '<b>a</b>', link: '/x' }] },
+    features: [{ title: '<b>t</b>', details: '<i>d</i>', icon: '<u>i</u>', link: '/y' }]
+  })
+  assert.deepEqual(out.hero, { name: '&lt;b&gt;n&lt;/b&gt;', text: 'R&amp;D &copy;', tagline: '&lt;i&gt;t&lt;/i&gt;', actions: [{ text: '<b>a</b>', link: '/x' }] })
+  assert.deepEqual(out.features, [{ title: '&lt;b&gt;t&lt;/b&gt;', details: '&lt;i&gt;d&lt;/i&gt;', icon: '&lt;u&gt;i&lt;/u&gt;', link: '/y' }])
+})
+
+test('values that cannot hold markup are kept as they are', () => {
+  const icon = { src: '/i.svg', alt: 'a' }
+  const input = {
+    layout: 'home',
+    head: [['script', {}, 'raw()']],
+    prev: false,
+    next: 5,
+    hero: { name: 7, text: false, tagline: null, extra: undefined },
+    features: [{ title: 1, details: true, icon }, { title: 'no icon', details: undefined }, 'plain', null]
+  }
+  const out = sanitizeFrontmatter(input)
+  assert.deepEqual(out, input)
+  assert.deepEqual(out.features[0].icon, icon)
+  assert.equal(out.head, input.head, 'head stays the documented raw path')
+  assert.deepEqual(sanitizeFrontmatter({}), {})
+  assert.deepEqual(sanitizeFrontmatter({ hero: 'text' }), { hero: 'text' })
+})
+
+test('layout is limited to doc, home and page, and false', () => {
+  assert.deepEqual([...allowedLayouts].sort(), ['doc', 'home', 'page'])
+  for (const layout of ['doc', 'home', 'page', false]) assert.equal(sanitizeFrontmatter({ layout }).layout, layout)
+  for (const layout of ['svg onload=1//', 'img src=x onerror=1//', 'Content', 'VPHero', 'Home', ' home', '', 0, null, true, ['home'], { toString: () => 'home' }]) {
+    assert.equal('layout' in sanitizeFrontmatter({ layout }), false, JSON.stringify(layout))
+  }
+  assert.deepEqual(sanitizeFrontmatter({}), {})
+})
+
+test('features are kept as an array and dropped in any other shape', () => {
+  const item = { title: '<b>t</b>', details: '<i>d</i>', icon: '<u>i</u>' }
+  const escaped = { title: '&lt;b&gt;t&lt;/b&gt;', details: '&lt;i&gt;d&lt;/i&gt;', icon: '&lt;u&gt;i&lt;/u&gt;' }
+  assert.deepEqual(sanitizeFrontmatter({ features: [item] }).features, [escaped])
+  for (const features of [{ first: item }, { 0: item }, 'text', 5, true, null]) {
+    assert.equal('features' in sanitizeFrontmatter({ features }), false, JSON.stringify(features))
+  }
+})
+
+test('an image object keeps only the allowed keys with plain values', () => {
+  const image = safeImage({ src: '/a.png', alt: 'A', width: 10, height: '20', wrap: true, onerror: 'x()', style: 'x', class: 'c', is: 'script' })
+  assert.deepEqual(image, { src: '/a.png', alt: 'A', width: 10, height: '20', wrap: true })
+  assert.equal(safeImage({ wrap: 'yes' }).wrap, 'yes')
+  assert.equal(safeImage({ wrap: 1 }).wrap, 1)
+  assert.equal('wrap' in safeImage({ wrap: {} }), false)
+  assert.deepEqual(safeImage({ src: { toString: () => 'x' }, alt: ['a'], width: null, height: true, wrap: {} }), {})
+  assert.equal(safeImage('/a.png?x=1&y=2'), '/a.png?x=1&y=2', 'a source is an attribute value, it is not escaped twice')
+  for (const bad of [undefined, null, 5, true, ['/a.png'], () => 1]) assert.equal(safeImage(bad), undefined, String(bad))
+})
+
+test('a themed image keeps light and dark with the same rule, and nothing else', () => {
+  const themed = safeImage({ alt: 'A', light: { src: '/l.png', onerror: 'x()' }, dark: '/d.png', onload: 'x()', extra: { src: '/e.png' } })
+  assert.deepEqual(themed, { alt: 'A', light: { src: '/l.png' }, dark: '/d.png' })
+  const nested = safeImage({ light: { light: { src: '/n.png', onerror: 'x()' }, dark: 5 }, dark: [] })
+  assert.deepEqual(nested, { light: { light: { src: '/n.png' } } })
+  // The theme spreads an object with a src onto the image; light and dark would become attributes.
+  assert.deepEqual(safeImage({ src: '/a.png', light: '/l.png', dark: { src: '/d.png' } }), { src: '/a.png' })
+})
+
+test('hero.image and an icon object are limited, other hero and feature keys stay', () => {
+  const out = sanitizeFrontmatter({
+    hero: { name: 'N', image: { src: '/h.png', onerror: 'x()' }, actions: [{ text: 'a', link: '/x', target: '_self' }] },
+    features: [
+      { title: 'T', icon: { src: '/i.png', onerror: 'x()' }, link: '/y', linkText: 'more' },
+      { title: 'U', icon: { light: { src: '/l.png', onload: 'x()' }, dark: '/d.png', alt: 'u' } },
+      { title: 'V', icon: { onerror: 'x()' } },
+      { title: 'W', icon: ['<b>'] }
+    ]
+  })
+  assert.deepEqual(out.hero, { name: 'N', image: { src: '/h.png' }, actions: [{ text: 'a', link: '/x', target: '_self' }] })
+  assert.deepEqual(out.features[0], { title: 'T', icon: { src: '/i.png' }, link: '/y', linkText: 'more' })
+  assert.deepEqual(out.features[1], { title: 'U', icon: { alt: 'u', light: { src: '/l.png' }, dark: '/d.png' } })
+  assert.deepEqual(out.features[2], { title: 'V', icon: {} })
+  assert.deepEqual(out.features[3], { title: 'W', icon: '&lt;b&gt;' })
+  assert.deepEqual(sanitizeFrontmatter({ hero: { image: 5 } }).hero, {})
+  assert.deepEqual(sanitizeFrontmatter({ hero: { image: '/h.png?a=1&b=2' } }).hero, { image: '/h.png?a=1&b=2' })
+})
+
+test('sanitising leaves its input alone and transformPageData returns only the frontmatter', () => {
+  const frontmatter = { dir: 'x', prev: '<b>', hero: { name: '<b>' } }
+  const out = transformPageData({ title: 'T', frontmatter })
+  assert.deepEqual(Object.keys(out), ['frontmatter'])
+  assert.deepEqual(frontmatter, { dir: 'x', prev: '<b>', hero: { name: '<b>' } })
+  assert.equal(out.frontmatter.hero.name, '&lt;b&gt;')
+})
+
+test('a date written in YAML is an ISO string in text fields and is not a record', () => {
+  const day = new Date('2024-05-01')
+  const out = sanitizeFrontmatter({
+    hero: { name: day, text: new Date('2024-05-01T10:20:30Z') },
+    prev: day,
+    next: { text: day, link: '/n' },
+    features: [{ title: day, details: day, icon: day }]
+  })
+  assert.equal(out.hero.name, '2024-05-01T00:00:00.000Z')
+  assert.equal(out.hero.text, '2024-05-01T10:20:30.000Z')
+  assert.equal(out.prev, '2024-05-01T00:00:00.000Z')
+  assert.deepEqual(out.next, { text: '2024-05-01T00:00:00.000Z', link: '/n' })
+  assert.deepEqual(out.features, [{ title: '2024-05-01T00:00:00.000Z', details: '2024-05-01T00:00:00.000Z', icon: '2024-05-01T00:00:00.000Z' }])
+  assert.equal(sanitizeFrontmatter({ prev: new Date(NaN) }).prev, 'Invalid Date')
+  // The text does not depend on the time zone of the machine that builds.
+  const saved = process.env.TZ
+  try {
+    for (const tz of ['Pacific/Auckland', 'America/Los_Angeles']) {
+      process.env.TZ = tz
+      assert.equal(sanitizeFrontmatter({ prev: day }).prev, '2024-05-01T00:00:00.000Z', tz)
+    }
+  } finally {
+    if (saved === undefined) delete process.env.TZ
+    else process.env.TZ = saved
+  }
+})
+
+// Frontmatter engines
+
+test('the site config hands the frontmatter engine options of markdownBase to VitePress', () => {
+  assert.deepEqual(Object.keys(markdownBase.frontmatter.grayMatterOptions.engines), ['javascript'])
+  // The config is loaded as its own module copy, so compare what the engines do.
+  assert.throws(() => cfg.userConfig.markdown.frontmatter.grayMatterOptions.engines.javascript.parse('{}'), /not supported/)
+})
+
+test('frontmatter that opens with a JavaScript block is refused and never evaluated', () => {
+  delete globalThis.agentDxEvaluated
+  for (const name of ['js', 'javascript', 'JS', 'JavaScript']) {
+    const src = `---${name}\n{ title: (globalThis.agentDxEvaluated = '${name}') }\n---\n# T\n`
+    assert.throws(() => render(src), /JavaScript frontmatter is not supported/, name)
+  }
+  assert.equal(globalThis.agentDxEvaluated, undefined)
+})
+
+test('the other engine names gray-matter knows run no code either', () => {
+  delete globalThis.agentDxEvaluated
+  for (const name of ['coffee', 'coffeescript', 'cson']) {
+    assert.throws(() => render(`---${name}\n{ title: 1 }\n---\n# T\n`), /not registered/, name)
+  }
+  assert.equal(globalThis.agentDxEvaluated, undefined)
+})
+
+test('YAML and JSON frontmatter are read as before', () => {
+  for (const [open, body] of [['---', 'title: Home\ndir: rtl'], ['---yaml', 'title: Home\ndir: rtl'], ['---yml', 'title: Home\ndir: rtl'], ['---json', '{"title":"Home","dir":"rtl"}']]) {
+    const env = { relativePath: 'fixture.md' }
+    md.render(`${open}\n${body}\n---\n# T\n`, env)
+    assert.deepEqual(env.frontmatter, { title: 'Home', dir: 'rtl' }, open)
+  }
 })

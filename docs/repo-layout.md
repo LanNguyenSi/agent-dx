@@ -62,9 +62,30 @@ without a message, and an `id` that holds anything but letters, digits, `_` and
 `-` is dropped too, so the heading keeps the id derived from its text. `{{ }}`
 always renders as text and is never evaluated, in prose, headings, tab titles
 and the contents list alike; a fenced block shows it as written.
-Frontmatter is trusted: only `description` is escaped, while `head`, `dir`,
-`prev`/`next` and the home layout's `hero` and `features` are written as HTML,
-as VitePress does.
+Frontmatter is mostly not trusted as HTML. `description` is escaped in the
+meta tag. `dir` is kept only when it is `ltr`, `rtl` or `auto`, and `layout`
+only when it is `doc`, `home`, `page` or `false`; any other value is dropped.
+The `prev` and `next` link text (as a string or as `{ text, link }`) and the
+home layout's `hero` `name`, `text` and `tagline` and `features` `title`,
+`details` and a string `icon` are HTML-escaped, so they show as written; an
+entity reference such as `&copy;` stays one. `features` must be a list (any
+other shape is dropped), and an image given as an object (`hero.image`, an
+`icon`, and their `light` and `dark` sides) keeps only `src`, `alt`, `width`,
+`height` and `wrap`, so it cannot set an event handler or another attribute on
+the image. Two kinds of field stay as typed, and only trusted authors should
+write them: `head`, whose entries are written into the page head as VitePress
+documents, and the link fields (`link` in `prev`, `next`, `hero.actions` and
+`features`, with `target` and `rel`), which the theme writes into `href`,
+`target` and `rel` without checking the scheme, so a `javascript:` link works.
+JavaScript frontmatter is refused: a page whose frontmatter opens with `---js`
+or `---javascript` fails the build, because VitePress would run it as Node code
+at build time. Write frontmatter as YAML (or JSON). A YAML date such as
+`2024-05-01` in a text field shows as an ISO timestamp. Include directives
+(`<!--@include: file.md-->`) are refused anywhere in a page and fail the build,
+because VitePress reads the included file's frontmatter without that refusal
+and can embed any readable file. The check runs when the site config
+loads (build and dev-server start); a running dev server does not re-check
+pages edited later, so do not point one at untrusted content.
 
 ```bash
 cd site && npm ci && npm run build   # output in site/.vitepress/dist
