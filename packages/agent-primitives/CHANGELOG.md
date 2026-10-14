@@ -15,10 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   0 and deleted the branch (`--require-merged` and `list` could call it
   merged the same way). The calls that decide (the unpushed `rev-list`, the
   `merge-base --is-ancestor` and the `rev-parse` of the HEAD commit) now run
-  with git's `--no-replace-objects`, which a caller's
-  `GIT_NO_REPLACE_OBJECTS=0` or `GIT_REPLACE_REF_BASE` cannot undo. The
-  option does not switch off grafts, so an `info/grafts` entry in the common
-  git directory, a `GIT_GRAFT_FILE` in the environment (any value) and a
+  with git's `--no-replace-objects` and `-c core.useReplaceRefs=false`, so the
+  real graph is read whatever the caller's configuration or environment
+  (`core.useReplaceRefs`, `GIT_NO_REPLACE_OBJECTS`, `GIT_REPLACE_REF_BASE`)
+  says. The option does not switch off grafts, so an `info/grafts` entry in
+  the common git directory, a `GIT_GRAFT_FILE` in the environment (any value) and a
   `GIT_REPLACE_REF_BASE` other than `refs/replace/` are the
   `unpushed_state_unknown` refusal, and make the merge verdict `unknown`
   (`merge_state_unknown` with `--require-merged`, `unknown` in `list`);

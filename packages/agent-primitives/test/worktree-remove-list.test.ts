@@ -2547,34 +2547,65 @@ interface Bounded {
   stderr: string;
   /** The limit passed and the process group was killed. */
   timedOut: boolean;
-  /** The group's resident memory passed `rssLimitKb` and it was killed. */
+  /** The memory of the run's processes (the group and every descendant)
+   * passed `rssLimitKb` and they were killed. */
   rssExceeded: boolean;
 }
 
-/** The resident memory, in KiB, of every process in the group `pgid`
- * (`ps` lists them with their group; the same call works on macOS and
- * Linux). `0` when `ps` cannot answer, which the guard reads as "under the
- * limit": the time limit is the guard that cannot be skipped. */
-async function groupRssKb(pgid: number): Promise<number> {
+/** The processes of one `ps` listing that belong to the run started as
+ * `rootPid`: the root, every descendant found by following the parent pids
+ * (a git the CLI started sits in a process group of its own, so the group
+ * alone would miss it), and whatever else is left in the root's group (a
+ * child whose parent has exited belongs to init now, not to the root). */
+function treeOf(
+  listing: string,
+  rootPid: number,
+): { pid: number; rssKb: number }[] {
+  const procs: { pid: number; ppid: number; pgid: number; rssKb: number }[] =
+    [];
+  for (const line of listing.split("\n")) {
+    const [pid, ppid, pgid, rss] = line.trim().split(/\s+/).map(Number);
+    if (pid === undefined || ppid === undefined || pgid === undefined) continue;
+    if (!Number.isInteger(pid) || !Number.isInteger(ppid)) continue;
+    procs.push({ pid, ppid, pgid, rssKb: rss ?? 0 });
+  }
+  const inTree = new Set<number>([rootPid]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const p of procs) {
+      if (!inTree.has(p.pid) && inTree.has(p.ppid)) {
+        inTree.add(p.pid);
+        grew = true;
+      }
+    }
+  }
+  return procs
+    .filter((p) => inTree.has(p.pid) || p.pgid === rootPid)
+    .map((p) => ({ pid: p.pid, rssKb: p.rssKb }));
+}
+
+/** The processes of the run started as `rootPid` and their resident memory
+ * in KiB (`ps` lists every process with its parent and group; the same call
+ * works on macOS and Linux). Empty when `ps` cannot answer, which the guard
+ * reads as "under the limit": the time limit is the guard that cannot be
+ * skipped. */
+async function runTree(
+  rootPid: number,
+): Promise<{ pid: number; rssKb: number }[]> {
   const out = await new Promise<string>((resolve) => {
     execFile(
       "ps",
-      ["-axo", "pgid=,rss="],
+      ["-axo", "pid=,ppid=,pgid=,rss="],
       { encoding: "utf8" },
       (err, stdout) => {
         resolve(err === null ? stdout : "");
       },
     );
   });
-  let total = 0;
-  for (const line of out.split("\n")) {
-    const [group, rss] = line.trim().split(/\s+/);
-    if (Number(group) === pgid) total += Number(rss) || 0;
-  }
-  return total;
+  return treeOf(out, rootPid);
 }
 
-/** How often a guarded run samples the group's memory. */
+/** How often a guarded run samples the memory of its processes. */
 const RSS_POLL_MS = 100;
 
 /**
@@ -2608,11 +2639,21 @@ async function spawnBounded(
   child.stderr.on("data", (chunk: string) => {
     stderr += chunk;
   });
+  // Processes of the run seen by the memory sampler, so a descendant in a
+  // group of its own (the CLI starts each git in one) ends with the run.
+  const seen = new Set<number>();
   const killGroup = (): void => {
     try {
       if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
     } catch {
       // The group is already gone.
+    }
+    for (const pid of seen) {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
     }
   };
   let timedOut = false;
@@ -2620,8 +2661,9 @@ async function spawnBounded(
     timedOut = true;
     killGroup();
   }, limitMs);
-  // The memory guard: sampled while the group runs, and the whole group is
-  // killed the first time it holds more than `rssLimitKb`.
+  // The memory guard: sampled while the run lives, and the group and every
+  // process seen are killed the first time the tree holds more than
+  // `rssLimitKb`.
   let rssExceeded = false;
   let sampling = false;
   const sampler =
@@ -2630,8 +2672,13 @@ async function spawnBounded(
       : setInterval(() => {
           if (sampling) return;
           sampling = true;
-          void groupRssKb(child.pid as number).then((kb) => {
+          void runTree(child.pid as number).then((tree) => {
             sampling = false;
+            let kb = 0;
+            for (const p of tree) {
+              kb += p.rssKb;
+              seen.add(p.pid);
+            }
             if (kb > rssLimitKb && !rssExceeded) {
               rssExceeded = true;
               killGroup();
@@ -4772,6 +4819,54 @@ describe("the guards every adversarial graph fixture runs under", () => {
     expect(Date.now() - started).toBeLessThan(25_000);
   });
 
+  it("counts the memory of a descendant that sits in a process group of its own", async () => {
+    // The CLI starts each git in a group of its own: its memory is not the
+    // group's. The parent stays small; its detached child holds 300 MiB.
+    const started = Date.now();
+    const r = await spawnBounded(
+      process.execPath,
+      [
+        "-e",
+        `const { spawn } = require("node:child_process");
+const c = spawn(process.execPath, ["-e", "const b = Buffer.alloc(300 * 1024 * 1024, 1); setTimeout(() => {}, 60000);"], { detached: true, stdio: "ignore" });
+console.log(c.pid);
+setTimeout(() => {}, 60000);`,
+      ],
+      { env: ENV },
+      12_000,
+      200 * 1024,
+    );
+    const pid = Number(r.stdout.trim());
+    try {
+      expect(Number.isInteger(pid) && pid > 0).toBe(true);
+      expect(r.timedOut).toBe(false);
+      expect(r.rssExceeded).toBe(true);
+      expect(Date.now() - started).toBeLessThan(11_000);
+      // The child outside the group ends with the run.
+      expect(await processGone(pid)).toBe(true);
+    } finally {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // Gone, as it should be.
+      }
+    }
+  });
+
+  it("counts a descendant through its parent pids, and what is left in the group of the root", () => {
+    const listing = [
+      "100 1 100 50", // root
+      "101 100 100 60", // child in the group
+      "102 100 102 70", // child in a group of its own
+      "103 102 103 80", // its child, in another group again
+      "104 1 100 90", // left in the group, parent gone
+      "105 1 105 999", // unrelated
+    ].join("\n");
+    const tree = treeOf(listing, 100);
+    expect(tree.map((p) => p.pid).sort()).toEqual([100, 101, 102, 103, 104]);
+    expect(tree.reduce((sum, p) => sum + p.rssKb, 0)).toBe(350);
+  });
+
   it("leaves a run under both limits alone", async () => {
     const r = await spawnBounded(
       process.execPath,
@@ -4789,14 +4884,44 @@ describe("the guards every adversarial graph fixture runs under", () => {
   });
 });
 
-/** git reads `info/grafts` (a deprecated file, still read by git 2.54 with a
- * hint): the tests of a grafted graph skip on a git that no longer does. */
-const GRAFTS_SUPPORTED = gitCan((repo) => {
-  git(repo, ["commit", "-q", "--allow-empty", "-m", "two"]);
-  const tip = oneLine(git(repo, ["rev-parse", "HEAD"]));
+/**
+ * `gitCan` for a probe that plants a grafts file: its git calls run bounded,
+ * in a process group of their own and under the memory limit, like the
+ * fixtures that follow, because a graph that loops is what git may walk
+ * without end.
+ */
+async function gitCanBounded(
+  check: (repo: string) => Promise<boolean>,
+): Promise<boolean> {
+  const scratch = fs.mkdtempSync(
+    path.join(os.tmpdir(), "agent-primitives-gitcan-"),
+  );
+  try {
+    const repo = path.join(scratch, "repo");
+    const run = (cwd: string, args: string[]): Promise<string> =>
+      gitBounded(cwd, args, 20_000, {}, GRAPH_RSS_LIMIT_KB);
+    await run(scratch, ["init", "-q", "-b", "main", "repo"]);
+    write(repo, "a.txt", "one\n");
+    await run(repo, ["add", "-A"]);
+    await run(repo, ["commit", "-q", "-m", "init"]);
+    return await check(repo);
+  } catch {
+    return false;
+  } finally {
+    fs.rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+/** git reads `info/grafts` (a deprecated file, still read by newer git with
+ * a hint): the tests of a grafted graph skip on a git that no longer does. */
+const GRAFTS_SUPPORTED = await gitCanBounded(async (repo) => {
+  const run = (args: string[]): Promise<string> =>
+    gitBounded(repo, args, 20_000, {}, GRAPH_RSS_LIMIT_KB);
+  await run(["commit", "-q", "--allow-empty", "-m", "two"]);
+  const tip = oneLine(await run(["rev-parse", "HEAD"]));
   fs.mkdirSync(path.join(repo, ".git/info"), { recursive: true });
   fs.writeFileSync(path.join(repo, ".git/info/grafts"), `${tip}\n`);
-  return oneLine(git(repo, ["rev-list", "HEAD"])).split("\n").length === 1;
+  return oneLine(await run(["rev-list", "HEAD"])).split("\n").length === 1;
 });
 
 /**
@@ -4932,14 +5057,48 @@ describe("worktree remove: replace refs", () => {
     await expectRefusals(g, REAL_GRAPH_CASES);
   });
 
-  it("refuses the same graph when the caller turns the replacement back on in its environment", async () => {
-    const g = makeGraph();
-    await plantGraft(g);
-    // The flag is on the git command line, so a caller's setting cannot
-    // undo it; an environment variable set for the child would be undone by
-    // the opposite value.
-    await expectRefusals(g, REAL_GRAPH_CASES, { GIT_NO_REPLACE_OBJECTS: "0" });
-  });
+  // Each way a caller can set `core.useReplaceRefs=true`. A git that reads
+  // that value after `--no-replace-objects` turns replace refs back on, so
+  // each case holds only while the call also carries
+  // `-c core.useReplaceRefs=false`.
+  const TURNED_BACK_ON: [string, (g: Graph) => Promise<NodeJS.ProcessEnv>][] = [
+    [
+      "core.useReplaceRefs=true in the repository configuration",
+      async (g) => {
+        await gg(g.f.repo, ["config", "core.useReplaceRefs", "true"], {});
+        return {};
+      },
+    ],
+    [
+      "core.useReplaceRefs=true in GIT_CONFIG_PARAMETERS",
+      () =>
+        Promise.resolve({
+          GIT_CONFIG_PARAMETERS: "'core.usereplacerefs'='true'",
+        }),
+    ],
+    [
+      "core.useReplaceRefs=true in GIT_CONFIG_COUNT, GIT_CONFIG_KEY_0 and GIT_CONFIG_VALUE_0",
+      () =>
+        Promise.resolve({
+          GIT_CONFIG_COUNT: "1",
+          GIT_CONFIG_KEY_0: "core.useReplaceRefs",
+          GIT_CONFIG_VALUE_0: "true",
+        }),
+    ],
+  ];
+
+  it.each(TURNED_BACK_ON)(
+    "refuses the same graph when the caller sets %s, with and without --base",
+    async (_name, turnOn) => {
+      const g = makeGraph();
+      await plantGraft(g);
+      const env = await turnOn(g);
+      // The premise: git without the call's own settings still reads the
+      // replacement.
+      expect(await guardedUnpushed(g, env)).toBe("");
+      await expectRefusals(g, REAL_GRAPH_CASES, env);
+    },
+  );
 
   it("removes the branch with --force like any unknown state, though it counts the commit", async () => {
     const g = makeGraph();

@@ -130,26 +130,36 @@ export interface GitCallOptions {
    * the pipes (0 included), so a timeout is told by `timedOut` or `error`,
    * never by `status`. */
   onTimeout?: "refuse" | "report";
-  /** Run git with its top-level `--no-replace-objects` option, so no
-   * replace ref (`git replace`, in `refs/replace/` or wherever
-   * `GIT_REPLACE_REF_BASE` points) changes the commit graph or an object
-   * the call reads. The option itself wins over `GIT_NO_REPLACE_OBJECTS=0`,
-   * `core.useReplaceRefs` and `GIT_REPLACE_REF_BASE` in the caller's
-   * environment, which a variable set for the child would not. For a call
-   * whose answer decides whether commits are on a remote or in a base. It
-   * does not switch off `info/grafts` (see `alteredCommitGraph`). */
+  /** Run git with its top-level `--no-replace-objects` option and
+   * `-c core.useReplaceRefs=false`, so no replace ref (`git replace`, in
+   * `refs/replace/` or wherever `GIT_REPLACE_REF_BASE` points) changes the
+   * commit graph or an object the call reads, whatever the caller's
+   * configuration or environment says: the option alone loses to a
+   * `core.useReplaceRefs=true` that an older git reads after it, and a
+   * `-c` on the command line is applied last. For a call whose answer
+   * decides whether commits are on a remote or in a base. It does not
+   * switch off `info/grafts` (see `alteredCommitGraph`). */
   noReplaceObjects?: true;
 }
 
 /** git's top-level option that ignores every replace ref. */
 export const NO_REPLACE_OBJECTS_FLAG = "--no-replace-objects";
 
-/** The argv of one call: `--no-replace-objects` when the call asks for it,
- * then the probe-wide settings, then `args`. */
+/** The setting that keeps the option above in force: some git versions read
+ * a `core.useReplaceRefs=true` from the configuration or the environment
+ * after the option and turn replace refs back on, and a `-c` is applied
+ * after both. */
+export const NO_REPLACE_REFS_CONFIG = [
+  "-c",
+  "core.useReplaceRefs=false",
+] as const;
+
+/** The argv of one call: the two replace-ref settings when the call asks for
+ * them, then the probe-wide settings, then `args`. */
 function callArgv(args: readonly string[], options: GitCallOptions): string[] {
   const argv = probeGitArgv(args);
   return options.noReplaceObjects === true
-    ? [NO_REPLACE_OBJECTS_FLAG, ...argv]
+    ? [NO_REPLACE_OBJECTS_FLAG, ...NO_REPLACE_REFS_CONFIG, ...argv]
     : argv;
 }
 
@@ -1046,9 +1056,10 @@ const DEFAULT_REPLACE_REF_BASE = "refs/replace/";
  * no remote holds can read as pushed (or as merged into the base):
  *
  * - replace refs (`git replace --graft`, `git replace`): switched off for the
- *   calls that decide, by `--no-replace-objects` (`noReplaceObjects`), which
- *   the caller's `GIT_NO_REPLACE_OBJECTS`, `core.useReplaceRefs` and
- *   `GIT_REPLACE_REF_BASE` cannot override. A `GIT_REPLACE_REF_BASE` other
+ *   calls that decide, by `--no-replace-objects` together with
+ *   `-c core.useReplaceRefs=false` (`noReplaceObjects`), whatever the
+ *   caller's `GIT_NO_REPLACE_OBJECTS`, `core.useReplaceRefs` and
+ *   `GIT_REPLACE_REF_BASE` say. A `GIT_REPLACE_REF_BASE` other
  *   than the default is refused as well: it says the caller's git reads
  *   replacements from somewhere else, and the answer is not worth a guess.
  * - the grafts file, `info/grafts` in the common git directory (not the

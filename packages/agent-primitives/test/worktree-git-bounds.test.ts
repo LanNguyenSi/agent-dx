@@ -592,7 +592,7 @@ describe("worktree remove: a git call that does not finish ends in a refusal", (
   );
 
   it.concurrent(
-    "runs exactly the calls that decide with --no-replace-objects, before any other option",
+    "runs exactly the calls that decide with --no-replace-objects and core.useReplaceRefs=false, before any other option",
     async () => {
       const f = makeFixture();
       const wt = addWorktree(f, "feat", true);
@@ -605,8 +605,10 @@ describe("worktree remove: a git call that does not finish ends in a refusal", (
       expect(r.code, r.stdout + r.stderr).toBe(2);
       expect(r.json.reason, r.stdout).toBe("unpushed_commits");
       const calls = spy.calls?.() ?? [];
-      const FLAG = "--no-replace-objects";
-      const withFlag = calls.filter((c) => c.includes(FLAG));
+      // The option, and the setting that keeps it in force on a git that
+      // reads core.useReplaceRefs=true after it.
+      const FLAG = "--no-replace-objects -c core.useReplaceRefs=false";
+      const withFlag = calls.filter((c) => c.startsWith(`${FLAG} `));
       // The unpushed walk, the ancestry and the sha a merged pull request
       // must match: nothing else reads the graph for a verdict.
       expect(withFlag).toEqual([
@@ -616,7 +618,7 @@ describe("worktree remove: a git call that does not finish ends in a refusal", (
       ]);
       // Every other call keeps the argv it had, replace refs included.
       for (const call of calls) {
-        if (call.includes(FLAG)) continue;
+        if (call.startsWith(`${FLAG} `)) continue;
         expect(
           call.startsWith("-c maintenance.auto=false -c gc.auto=0 "),
           call,
