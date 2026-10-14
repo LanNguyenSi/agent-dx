@@ -1,10 +1,17 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import {
   spawnSync,
   type SpawnSyncOptionsWithStringEncoding,
 } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import {
+  boundedCommand,
+  boundedSpawnOptions,
+  endGroupIfAbnormal,
+  isTimeoutError,
+} from "../bounded-spawn.js";
 import { UsageError } from "../envelope.js";
 import { findGitRoot, isPathContained } from "../probe/containment.js";
 import {
@@ -497,9 +504,11 @@ function gitDiscoveryHazard(root: string): string | undefined {
  * neither like a git directory nor like a common directory; and an
  * answer with a line break inside a name always warns.
  *
- * git runs in a process group of its own; when it does not end by
- * itself, that whole group is sent SIGKILL, so no process of it outlives
- * this call.
+ * git runs bounded, like the worktree commands do (`bounded-spawn.ts`):
+ * in a process group of its own that is sent SIGKILL whole when the run
+ * does not end by itself, and through a watcher in that group that ends
+ * it when this process dies, so no process of git outlives this call nor
+ * a killed caller.
  */
 function gitDirIdentities(
   root: string,
@@ -515,52 +524,65 @@ function gitDirIdentities(
   });
   const hazard = gitDiscoveryHazard(root);
   if (hazard !== undefined) return skipped(`git was not run: ${hazard}`);
-  // `detached` gives git a process group of its own. spawnSync honours it
-  // (Node's normalizeSpawnArguments passes it on to libuv), though the
-  // typings list it for spawn only; the process-group test pins it.
-  const spawnOptions: SpawnSyncOptionsWithStringEncoding & {
-    detached: boolean;
-  } = {
+  // git runs through the parent-death trampoline (`bounded-spawn.ts`): in
+  // a process group of its own that a watcher in that group ends when this
+  // process dies (the watcher waits on the fd 3 pipe `spawnSync` holds),
+  // so no git outlives a caller that is killed mid-call; at the bound or
+  // the output limit `endGroupIfAbnormal` ends the group here. The
+  // process-group test pins it.
+  const spawnOptions: SpawnSyncOptionsWithStringEncoding = {
     cwd: root,
     env,
     encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-    timeout: timeoutMs,
-    killSignal: "SIGKILL",
     maxBuffer: GIT_LOOKUP_MAX_OUTPUT,
-    detached: process.platform !== "win32",
+    ...boundedSpawnOptions(timeoutMs),
   };
-  const res = spawnSync(
-    "git",
-    ["rev-parse", "--absolute-git-dir", "--git-common-dir"],
-    spawnOptions,
-  );
-  if (res.error !== undefined || res.signal !== null) {
-    // spawnSync has killed git itself; end the rest of its group. A pid
-    // of 0 (git never started) must not reach kill: -0 is this process's
-    // own group.
-    if (process.platform !== "win32" && res.pid > 0) {
-      try {
-        process.kill(-res.pid, "SIGKILL");
-      } catch {
-        // The group is already gone.
-      }
-    }
-    const e = res.error as NodeJS.ErrnoException | undefined;
-    if (e?.code === "ETIMEDOUT") {
-      return skipped(
-        `git rev-parse did not finish within ${String(timeoutMs)} ms and was stopped`,
-      );
-    }
-    if (e?.code === "ENOBUFS") {
-      return skipped(
-        `git rev-parse wrote more than ${String(GIT_LOOKUP_MAX_OUTPUT)} bytes and was stopped`,
-      );
-    }
-    if (res.error !== undefined) {
-      return skipped(`git could not be run: ${errnoDetail(res.error)}`);
-    }
+  const run = boundedCommand("git", [
+    "rev-parse",
+    "--absolute-git-dir",
+    "--git-common-dir",
+  ]);
+  const res = spawnSync(run.command, run.args, spawnOptions);
+  // A run that did not end by itself (the bound, the output limit, a
+  // signal, and through the trampoline a status above 128) leaves no
+  // process of git's group behind.
+  endGroupIfAbnormal(res);
+  const e = res.error as NodeJS.ErrnoException | undefined;
+  if (isTimeoutError(e)) {
+    return skipped(
+      `git rev-parse did not finish within ${String(timeoutMs)} ms and was stopped`,
+    );
+  }
+  if (e?.code === "ENOBUFS") {
+    return skipped(
+      `git rev-parse wrote more than ${String(GIT_LOOKUP_MAX_OUTPUT)} bytes and was stopped`,
+    );
+  }
+  if (res.error !== undefined) {
+    return skipped(`git could not be run: ${errnoDetail(res.error)}`);
+  }
+  if (res.signal !== null) {
     return skipped(`git rev-parse was ended by ${String(res.signal)}`);
+  }
+  // Through the trampoline the direct child is the shell, so a git that a
+  // signal ends comes back as 128 plus the signal number rather than as a
+  // signal, and a git that is not there or not runnable as the shell's 127
+  // or 126 rather than as a spawn error. Neither is an answer: they are
+  // failed lookups, never the empty output of "no repository here" (which
+  // is git's own exit 128). That is why the signal mapping below starts
+  // strictly above 128.
+  if (process.platform !== "win32" && res.status !== null && res.status > 128) {
+    return skipped(
+      `git rev-parse was ended by ${signalName(res.status - 128)}`,
+    );
+  }
+  if (
+    process.platform !== "win32" &&
+    (res.status === 126 || res.status === 127)
+  ) {
+    return skipped(
+      `git could not be run: ${res.status === 127 ? "no git on PATH for /bin/sh to run" : "git is not runnable by /bin/sh"} (status ${String(res.status)})`,
+    );
   }
   if (res.status !== 0) {
     // Outside any repository git exits non-zero: nothing to refuse.
@@ -983,6 +1005,16 @@ function decodeFile(
 function errnoDetail(err: unknown): string {
   const e = err as NodeJS.ErrnoException;
   return e instanceof Error ? e.message : String(err);
+}
+
+/** The name of signal number `signo`, for the shell status of 128 plus
+ * the signal number with which the trampoline of `bounded-spawn.ts`
+ * reports a git that a signal ended. */
+function signalName(signo: number): string {
+  for (const [name, number] of Object.entries(os.constants.signals)) {
+    if (number === signo) return name;
+  }
+  return `signal ${String(signo)}`;
 }
 
 /**

@@ -292,12 +292,21 @@ that would replace nothing is `missing`.
   of at most 64 KiB, or a `.git` file names its directory by a path
   that is not UTF-8 or that the filesystem cannot resolve (the check
   cannot follow it; git itself stops at such a file). git then runs for
-  at most 3 seconds (a FIFO
-  it opens makes it wait), with at most 64 KiB of output, in a process
-  group of its own; when it does not end by itself (the time or output
+  at most 3 seconds (a FIFO it opens makes it wait), with at most 64 KiB
+  of output, its stdout and stderr counted together, in a process group
+  of its own; when it does not end by itself (the time or output
   bound, a signal), that whole group is killed, so no process of it
-  outlives the command (on Windows, which has no process groups, git
-  itself is killed).
+  outlives the command. The lookup is bounded the way `worktree` bounds
+  its git calls (`bounded-spawn.ts`): git is started through a `/bin/sh`
+  wrapper whose watcher waits on a pipe the patch process holds and
+  kills git's group when the kernel closes it, which happens when the
+  patch process dies even if nothing reaps it, so a patch ended by
+  SIGKILL or SIGHUP while git hangs leaves no git behind. A git that a
+  signal ends is reported with the shell's status for it (128 plus the
+  signal number), and one the wrapper cannot find or run with 127 or
+  126; both are failed lookups, never an empty answer. On Windows,
+  which has no process groups, git itself is killed and there is no
+  wrapper.
 - When the identity lookup cannot be made, the name and layout checks
   still apply and the result carries a warning that the identity check
   was skipped, with the cause: git was not run (the `commondir` or `.git`
@@ -306,7 +315,9 @@ that would replace nothing is `missing`.
   ended by a signal, whatever the root; or the root is a git work tree
   but `git rev-parse` fails there (a broken `.git` file, a repository git
   refuses as unsafe, a damaged repository). Outside any work tree, git
-  failing is read as "git names no directory here", with no warning; a
+  failing is read as "git names no directory here", with no warning,
+  except for a status the wrapper reports for a signal or for a git it
+  cannot run (126, 127, above 128): those warn wherever the root is. A
   bare repository git declines to open is then refused by its layout.
   A line of git's answer naming a directory that cannot be stated, or
   one laid out like none of the three above, is left out with a warning
