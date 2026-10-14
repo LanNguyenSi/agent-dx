@@ -43,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   byte-identical to before (pinned by a content snapshot). A bundle with
   no `okf_version` key checks exactly as before (pinned by a full findings
   snapshot over every pre-existing fixture, `test/v01-baseline.test.ts`).
-  See [Check catalog](docs/check-catalog.md#spec-version-spec) and
+  See [Check catalog](docs/check-catalog.md#spec-version---spec) and
   [Staleness](docs/staleness.md) for the rule text.
 
 - `check --rule <ids>` and `check --min-severity <level>` report only the

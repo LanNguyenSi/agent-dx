@@ -266,7 +266,7 @@ describe("v0.2 generated.at freshness", () => {
 
   it("a same-instant rewrite from timestamp into generated.at is a rewrite, not a re-stamp", () => {
     // Same instant, different key: the timestamp identity carries the
-    // generated-at provenance prefix, so this is the D-009 same-instant
+    // generated-at provenance prefix, so this is the same-instant
     // notice (the stamp was touched but never moved), not "restamped".
     repo.commitFile(
       "source.ts",

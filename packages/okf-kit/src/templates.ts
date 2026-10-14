@@ -3,7 +3,7 @@
  * stamp value, which the caller (src/init.ts) fills in with the real
  * current instant at generation time: never hardcode an artificial
  * midnight datetime here, that is exactly the lesson this kit is built to
- * enforce (see FRONTMATTER_GUIDANCE below).
+ * enforce (see frontmatterGuidance() below).
  *
  * Every template takes the OKF spec version (default `v0.1`, byte-identical
  * to every release before the `--spec` flag existed). Under `v0.2` the

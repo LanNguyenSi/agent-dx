@@ -59,7 +59,7 @@ export const generatedShapeRule: Rule = {
       // 8601 date-time with an explicit offset"), so a designator-less
       // value is an error naming the value; the value is still assessed
       // for staleness as the UTC instant `sources-fresh` resolves it to
-      // (same D-016 rule as a designator-less `timestamp`). A native YAML
+      // (designator-less values are read as UTC, as for `timestamp`). A native YAML
       // date carries its instant and needs no designator.
       if (ctx.specVersion === "v0.2") {
         const at = getGeneratedAtValue(parsed);

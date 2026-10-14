@@ -272,7 +272,7 @@ describe("generated.at as the effective stamp (OKF v0.2)", () => {
       getTimestampEpoch({ generated: { at: new Date("not-a-date") } }),
     ).toBeUndefined();
     // A designator-less generated.at is forced UTC exactly like a
-    // designator-less timestamp (D-016).
+    // designator-less timestamp.
     expect(
       getTimestampEpoch({ generated: { at: "2026-01-01T13:00:00" } }),
     ).toBe(Date.parse("2026-01-01T13:00:00Z") / 1000);
