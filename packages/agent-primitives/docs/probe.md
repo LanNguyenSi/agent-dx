@@ -2175,10 +2175,13 @@ test's captured output tails that looks like a failing test (`FAIL`,
 none does or the verdict is not `killed` (a survived mutant passed, so
 error-shaped output it printed is not a failing test); it is a heuristic over free text,
 because the envelope has no structured failing-test field. `log=` is the
-mutant run's log, or the baseline's when no mutant run happened. The cases above say what an early stop prints. `-m` bounds the mutant lines only: when they do not fit, the
-last ones are replaced by a marker line naming how many were omitted, and
-the `totals:` line is always printed (the `note:` line is dropped before
-the totals line if even those two do not fit).
+mutant run's log, or the baseline's when no mutant run happened. The cases above say what an early stop prints. `-m` is a character budget for the printed summary, not a line count: when
+the mutant lines do not fit, the last ones are replaced by a marker line
+naming how many were omitted and, when the run saved one, the path of the
+full result (`result-full-*.json`) if it fits within `-m` beside the totals
+line (otherwise the marker says the path did not fit); without a saved full
+result the marker says so. The `totals:` line is always printed (the `note:` line is dropped
+before the totals line if even those two do not fit).
 
 `--print <field,...>` prints one JSON object on one line, one key per
 requested field in the order given. A name is a top-level envelope field

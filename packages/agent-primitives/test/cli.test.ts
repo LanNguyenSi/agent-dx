@@ -361,6 +361,31 @@ describe("cli", () => {
     expect(tightEnvelope.logs).toContain(tightEnvelope.fullResult);
     const saved = JSON.parse(fs.readFileSync(tightEnvelope.fullResult, "utf8"));
     expect(saved.plan.results).toHaveLength(count);
+
+    // --summary under the same tight budget: the marker for the omitted
+    // mutant lines names the full result the run saved.
+    const summary = await spawnCli([
+      "-C",
+      repo,
+      "-l",
+      logs,
+      "-m",
+      "600",
+      "probe",
+      "--plan",
+      plan,
+      "--summary",
+    ]);
+    const named = /raise -m or read the full result: (\S+)/.exec(
+      summary.stdout,
+    );
+    expect(named, summary.stdout).not.toBeNull();
+    const savedPath = named?.[1] ?? "";
+    expect(path.isAbsolute(savedPath)).toBe(true);
+    expect(path.basename(savedPath)).toMatch(/^result-full-.*\.json$/);
+    expect(
+      JSON.parse(fs.readFileSync(savedPath, "utf8")).plan.results,
+    ).toHaveLength(count);
   }, 120000);
 
   it("prints parseable JSON with status: usage_error on stdout and exits 2 for a mistyped flag", async () => {

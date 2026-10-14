@@ -3789,13 +3789,18 @@ describe("worktree remove: a ref store git was told to keep elsewhere", () => {
 
   /** A `gitWrapper` PATH whose git answers the config read of
    * `extensions.refStorage` with `FAKE_STORAGE` (printf format, so `\0`
-   * separates values) and exit status `FAKE_STORAGE_STATUS`. */
+   * separates values) and exit status `FAKE_STORAGE_STATUS`. It reads the
+   * config bytes on stdin to the end first, as git does: exiting before the
+   * CLI has written them makes the write fail with EPIPE, which the check
+   * rightly reads as unknown, so the outcome would hang on scheduling. The
+   * loop is a shell builtin because the fixed PATH holds no `cat`. */
   function fakeStorageConfig(f: Fixture): string {
     return gitWrapper(
       f,
       "git-fake-storage",
       `for a in "$@"; do
   if [ "$a" = extensions.refStorage ]; then
+    while IFS= read -r line || [ -n "$line" ]; do :; done
     printf "$FAKE_STORAGE"; echo 'fatal: injected' >&2; exit "$FAKE_STORAGE_STATUS"
   fi
 done`,

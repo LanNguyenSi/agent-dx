@@ -24,6 +24,27 @@ export const themeOffsite = [
   '/$1/evil.example/x?q=1#h'
 ]
 
+// Relative values with a backtick. "$" followed by a backtick is the pattern
+// that inserts the text before the match, which is empty, so the first value
+// is written as "//evil.example/x" by an engine that leaves the backtick in a
+// path (the URL standard encodes it as "%60", so Node does not). All of them
+// are refused, wherever the backtick sits, since the guard does not rely on
+// that encoding.
+export const backtickRefused = [
+  '/$`/evil.example/x',
+  '$`/evil.example/x',
+  './$`/evil.example/x',
+  '/a/$`/evil.example/x?q=1#h',
+  '/$`/evil.example/x.md',
+  '/a`b/evil.example',
+  '`/evil.example/x',
+  '/evil.example`',
+  '/x?q=`evil.example',
+  '/x#`evil.example',
+  '?`evil.example',
+  '#`evil.example'
+]
+
 // Values that stay: they resolve on the site however the theme rewrites them.
 // Each carries no "evil.example", so a build test can look for that text.
 export const keptRelative = [
@@ -41,6 +62,8 @@ export const keptRelative = [
   '/a/b?x=1#h',
   '/a/b.md',
   '/x/$$/y',
+  '/$%60/ok',
+  '/a%60b/ok',
   '/a?$&',
   '#frag',
   '?q=1'

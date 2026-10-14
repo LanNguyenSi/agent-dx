@@ -35,6 +35,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   would put on the terminal fails instead of waiting and Ctrl-C does not
   reach it while the CLI waits for it (task a1768165).
 
+- `probe --summary`: the marker for omitted mutant lines names the saved
+  full result (`result-full-*.json`) when one was written, and says that
+  none was written otherwise, instead of pointing at "the result-full
+  log". The docs and the `--summary` help state that `-m` is a character
+  budget for the printed summary, with the totals line always kept
+  (#501, task d5fb35da).
+
+- `patch`: the missing-edit hint reports `new_text_at_line` ("edit
+  applied already?") only for a distinctive `new`: one that is not part
+  of `old` and has at least 8 non-whitespace characters; a short or
+  common `new` such as `x` no longer triggers it (#501, task 5fc22752).
+
+- `patch`: a refused fuzzy match's `changed_characters` no longer lists
+  a plain inner space (U+0020), which the tier does not change, and a
+  special space such as U+00A0 shows the plain space it becomes;
+  `trailing whitespace` is reported as before (#501, task 6cfe9277).
+
+- `probe --summary`: `failing=` now names PHPUnit's numbered failure
+  line (`1) Ns\Class::testMethod`) for a killed mutant instead of `-`;
+  the lines other runners print are matched as before (#501, task
+  8d84322e).
+
 - `worktree remove --delete-branch` now adds a warning when it deletes a
   branch whose merge verdict is `no` or `unknown` (without
   `--require-merged`, or with `--force` overriding it), naming the branch,

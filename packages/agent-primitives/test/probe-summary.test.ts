@@ -405,6 +405,62 @@ describe("summary helpers", () => {
     expect(firstFailingLine(undefined)).toBe("-");
   });
 
+  it("firstFailingLine names the numbered PHPUnit failure line", () => {
+    const stdoutTail = [
+      "PHPUnit 10.5.20 by Sebastian Bergmann and contributors.",
+      "",
+      "....F                                                               5 / 5 (100%)",
+      "",
+      "Time: 00:00.012, Memory: 8.00 MB",
+      "",
+      "There was 1 failure:",
+      "",
+      "1) App\\Tests\\CartTest::testTotal",
+      "Failed asserting that 41 matches expected 42.",
+      "",
+      "/app/tests/CartTest.php:17",
+      "",
+      "FAILURES!",
+      "Tests: 5, Assertions: 6, Failures: 1.",
+    ].join("\n");
+    expect(firstFailingLine({ stdoutTail, stderrTail: "" })).toBe(
+      "1) App\\Tests\\CartTest::testTotal",
+    );
+  });
+
+  it("firstFailingLine keeps each runner's line and finds none in a passing PHPUnit tail", () => {
+    const cases: Array<[string, string]> = [
+      [" FAIL  test/a.test.ts > adds", "FAIL test/a.test.ts > adds"],
+      ["ok 1 - a\nnot ok 2 - b", "not ok 2 - b"],
+      [
+        "=== RUN   TestAdd\n--- FAIL: TestAdd (0.00s)",
+        "--- FAIL: TestAdd (0.00s)",
+      ],
+      [
+        "FAILED tests/test_a.py::test_add - assert 1 == 2",
+        "FAILED tests/test_a.py::test_add - assert 1 == 2",
+      ],
+      ["  ● adds › two numbers", "● adds › two numbers"],
+      [
+        "AssertionError: expected 1 to be 2",
+        "AssertionError: expected 1 to be 2",
+      ],
+    ];
+    for (const [stdoutTail, expected] of cases) {
+      expect(firstFailingLine({ stdoutTail, stderrTail: "" })).toBe(expected);
+    }
+    const passing = [
+      "PHPUnit 10.5.20 by Sebastian Bergmann and contributors.",
+      "",
+      ".....                                                               5 / 5 (100%)",
+      "",
+      "Time: 00:00.010, Memory: 8.00 MB",
+      "",
+      "OK (5 tests, 6 assertions)",
+    ].join("\n");
+    expect(firstFailingLine({ stdoutTail: passing, stderrTail: "" })).toBe("-");
+  });
+
   it("renderProbeSummary prints failing only for a killed verdict", () => {
     const test = { stdoutTail: "Error: noise\nFAIL x", stderrTail: "" };
     const killed = renderProbeSummary({
@@ -473,6 +529,60 @@ describe("summary helpers", () => {
       expect(text).toMatch(/\.\.\. \d+ more mutant lines omitted/);
     }
     expect(renderProbeSummary(input)).not.toContain("omitted");
+  });
+
+  it("renderProbeSummary's marker names the full result file when one was written", () => {
+    const results = Array.from({ length: 40 }, (_, index) => ({
+      index,
+      mutant: { file: "src/some/long/path/file.ts", line: index + 1 },
+      mutation_probe: { result: "killed", expectation: "met" },
+      test: { logPath: "/logs/exec-123.log" },
+    }));
+    const plan = { results, summary: { total: 40, killed: 40, met: 40 } };
+    const withFile = renderProbeSummary(
+      {
+        status: "killed",
+        plan,
+        fullResult: "/logs/result-full-abc.json",
+      },
+      600,
+    );
+    expect(withFile.length).toBeLessThanOrEqual(600);
+    expect(withFile).toContain(
+      "characters); raise -m or read the full result: /logs/result-full-abc.json",
+    );
+    const withoutFile = renderProbeSummary({ status: "killed", plan }, 600);
+    expect(withoutFile.length).toBeLessThanOrEqual(600);
+    expect(withoutFile).toContain(
+      "characters); raise -m (no full result file was written)",
+    );
+    expect(withoutFile).not.toContain("read the full result");
+  });
+
+  it("renderProbeSummary drops a long full result path rather than exceed -m", () => {
+    const results = Array.from({ length: 40 }, (_, index) => ({
+      index,
+      mutant: { file: "src/some/long/path/file.ts", line: index + 1 },
+      mutation_probe: { result: "killed", expectation: "met" },
+      test: { logPath: "/logs/exec-123.log" },
+    }));
+    const plan = { results, summary: { total: 40, killed: 40, met: 40 } };
+    const longPath = `/var/folders/8v/${"x".repeat(40)}/T/agent-primitives/${"y".repeat(36)}/result-full-${"z".repeat(36)}.json`;
+    for (const max of [250, 300]) {
+      const text = renderProbeSummary(
+        { status: "killed", plan, fullResult: longPath },
+        max,
+      );
+      expect(text.length, text).toBeLessThanOrEqual(max);
+      expect(text).toContain("raise -m; the full result path did not fit");
+      expect(text).not.toContain(longPath);
+    }
+    const roomy = renderProbeSummary(
+      { status: "killed", plan, fullResult: longPath },
+      1200,
+    );
+    expect(roomy.length).toBeLessThanOrEqual(1200);
+    expect(roomy).toContain(`raise -m or read the full result: ${longPath}`);
   });
 
   it("renderProbeSummary keeps the totals line and drops the note under a tiny maxChars", () => {

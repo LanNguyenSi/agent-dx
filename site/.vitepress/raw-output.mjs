@@ -160,6 +160,14 @@ const pageLink = (value) => (isRecord(value) ? withSafeLink(withText(value, ['te
 //     in the path (`/$1/host/x`) is expanded by the replacement it goes
 //     through. Both reach the page as an off-site link without the external
 //     markers.
+//   - refused as well: a backtick in a relative value. The `$` + backtick
+//     pattern of String.replace inserts the text before the match, which is
+//     empty here, so `/$`/host/x` is written as `//host/x` whenever the URL
+//     parser leaves the backtick in the path. The URL standard percent-encodes
+//     it there, which is the only thing that keeps such a value on the site; an
+//     engine that did not would turn it into an off-site link. A backtick has
+//     no use in a link that stays on the site (write `%60`), so every relative
+//     value with one is refused instead of relying on that.
 //   - refused as well: any control character, space or DEL anywhere. The URL
 //     parser drops leading and trailing ones and removes tabs and newlines
 //     inside, so ` javascript:x`, `\tjavascript:x` and `java\nscript:x` all
@@ -189,9 +197,12 @@ const leadingScheme = /^[A-Za-z][A-Za-z0-9+.-]*:/
 // slashes, so adding it never makes a result external.
 //
 // This copies the theme's computation; read both functions again after a
-// VitePress upgrade (docs/repo-layout.md names the coupling).
+// VitePress upgrade (docs/repo-layout.md names the coupling). The site tests
+// run the installed theme's own normalizeLink and withBase over a generated
+// corpus and compare them with this copy, so an upgrade that changes the
+// rewrite fails the suite.
 const themeOrigin = 'http://a.com'
-function themeHref(value) {
+export function themeHref(value) {
   const { pathname, search, hash } = new URL(value, themeOrigin)
   return value.replace(/(?:(^\.+)\/)?.*$/, `$1${pathname.replace(/(\.md)?$/, '.html')}${search}${hash}`)
 }
@@ -205,6 +216,7 @@ export function isSafeLink(value) {
       return false
     }
   }
+  if (value.includes('`')) return false
   try {
     return [value, themeHref(value)].every((href) => !EXTERNAL_URL_RE.test(href))
   } catch {
