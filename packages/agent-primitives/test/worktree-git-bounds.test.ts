@@ -1632,24 +1632,18 @@ describe("the bounded git runner", () => {
   });
 });
 
-/** Whether a process of the group `pgid` is still there, waiting up to
- * `withinMs` for the last one to go (an exited watcher can linger as a
- * zombie for a moment before it is reaped). */
-async function groupLingers(pgid: number, withinMs = 3000): Promise<boolean> {
-  const until = Date.now() + withinMs;
-  for (;;) {
-    try {
-      process.kill(-pgid, 0);
-    } catch {
-      return false;
-    }
-    if (Date.now() > until) return true;
-    await new Promise((r) => setTimeout(r, 50));
+/** Whether any process of the group `pgid` is there, a zombie included. */
+function groupExists(pgid: number): boolean {
+  try {
+    process.kill(-pgid, 0);
+    return true;
+  } catch {
+    return false;
   }
 }
 
 describe("the trampoline", () => {
-  it("stops its watcher when the command ends, so a finished call leaves nothing", async () => {
+  it("stops its watcher when the command ends, so a finished call leaves nothing", () => {
     const f = makeFixture();
     const env = { PATH: process.env.PATH, ...GIT_ENV };
     // A watcher still running would hold the call open until its bound.
@@ -1670,7 +1664,10 @@ describe("the trampoline", () => {
       expect(r.error, args.join(" ")).toBeUndefined();
       expect(Date.now() - started, args.join(" ")).toBeLessThan(boundMs / 2);
       expect(r.pid).toBeGreaterThan(0);
-      expect(await groupLingers(r.pid), args.join(" ")).toBe(false);
+      // Gone at once, not even a zombie: the trampoline reaps its watcher
+      // before it exits, so nothing is left for the first process of the
+      // system to reap (which, in some containers, reaps nothing).
+      expect(groupExists(r.pid), args.join(" ")).toBe(false);
     }
     // The same through `runGit`, the path every worktree call takes.
     for (let i = 0; i < 3; i++) {

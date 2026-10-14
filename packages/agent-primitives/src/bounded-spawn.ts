@@ -83,9 +83,11 @@ export function boundedSpawnOptions(timeoutMs: number): {
  *   that the command it starts inherits.)
  * - The command runs in the foreground, so its stdin, stdout, stderr,
  *   environment and exit status pass through.
- * - When the command ends, the watcher is stopped and the trampoline exits
- *   with the command's status (128 plus the signal number for a command
- *   that a signal ended).
+ * - When the command ends, the watcher is stopped and reaped (a watcher left
+ *   for the first process of the system to reap stays a zombie where that
+ *   process reaps nothing, one per call), and the trampoline exits with the
+ *   command's status (128 plus the signal number for a command that a
+ *   signal ended).
  */
 const TRAMPOLINE = [
   "{ set +aemvx; } 2>/dev/null",
@@ -94,6 +96,7 @@ const TRAMPOLINE = [
   "exec 3<&-",
   'command "$@"; s=$?',
   'command kill "$w" 2>/dev/null',
+  'command wait "$w" 2>/dev/null',
   "exit $s",
 ].join("\n");
 
