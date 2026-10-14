@@ -124,8 +124,11 @@ test('the site data stubs answer only what the theme code reads today', () => {
 // normalizeLink. If a sink stops using it, the corpus above no longer describes
 // what the theme writes there.
 //
-// The check reads the template the way a template compiler would: comments are
-// removed, and the opening tags are cut into their attributes. The expected text
+// The check is a simplified reading of the template, not a compiler: comments
+// are removed, and the opening tags are cut into their attributes. It does not
+// model attribute modifiers (`:href.prop`), dynamic arguments (`:[name]`) or
+// kebab-case tag names; the pinned VitePress version check is the backstop for
+// a theme that starts to use them. The expected text
 // is matched against the attribute of the sink element, never against the file,
 // so the old binding left in a comment, a static attribute or the script cannot
 // hide a changed one. Each sink element must carry exactly one attribute that
