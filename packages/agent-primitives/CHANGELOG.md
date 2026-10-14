@@ -12,6 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of `old` and has at least 8 non-whitespace characters; a short or
   common `new` such as `x` no longer triggers it (#501, task 5fc22752).
 
+- `patch`: a refused fuzzy match's `changed_characters` no longer lists
+  a plain inner space (U+0020), which the tier does not change, and a
+  special space such as U+00A0 shows the plain space it becomes;
+  `trailing whitespace` is reported as before (#501, task 6cfe9277).
+
+- `probe --summary`: `failing=` now names PHPUnit's numbered failure
+  line (`1) Ns\Class::testMethod`) for a killed mutant instead of `-`;
+  the lines other runners print are matched as before (#501, task
+  8d84322e).
+
 - `worktree remove --delete-branch` now adds a warning when it deletes a
   branch whose merge verdict is `no` or `unknown` (without
   `--require-merged`, or with `--force` overriding it), naming the branch,

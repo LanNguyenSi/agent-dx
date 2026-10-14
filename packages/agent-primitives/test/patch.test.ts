@@ -14,7 +14,11 @@ import {
   applyReplacementsPreservingUnchangedLines,
   resolveFileEdits,
 } from "../src/patch/engine.js";
-import { notFoundHint, visualizeWhitespace } from "../src/patch/hint.js";
+import {
+  fuzzySideEffectHint,
+  notFoundHint,
+  visualizeWhitespace,
+} from "../src/patch/hint.js";
 import { statusClass } from "../src/envelope.js";
 import { buildSpawnEnv, CLI_PATH, spawnCli } from "./helpers/spawn-cli.js";
 
@@ -1119,6 +1123,39 @@ describe("patch: fuzzy matches change nothing outside the match", () => {
     expect(hint?.exact_text).toBe("run(‘1’)");
     expect(hint?.lines[0].line).toBe(1);
     expect(read(dir, "a.js")).toBe(before);
+  });
+
+  it("lists only the characters the tier rewrites, not inner plain spaces", () => {
+    const content = "say(“hi”) – run(‘1’) and\u00A0more  \n";
+    const hint = fuzzySideEffectHint(
+      content,
+      { start: 1, end: 1 },
+      "unicode",
+      "run('1')",
+    );
+    const chars = hint.changed_characters;
+    expect(chars).toEqual(
+      expect.arrayContaining([
+        '“ (U+201C) -> "',
+        '” (U+201D) -> "',
+        "‘ (U+2018) -> '",
+        "’ (U+2019) -> '",
+        "– (U+2013) -> -",
+        "\u00A0 (U+00A0) ->  ",
+        "trailing whitespace",
+      ]),
+    );
+    expect(chars.filter((c) => c.includes("U+0020"))).toEqual([]);
+  });
+
+  it("reports no space for a trailing_whitespace tier line with inner spaces", () => {
+    const hint = fuzzySideEffectHint(
+      "a b c   \n",
+      { start: 1, end: 1 },
+      "trailing_whitespace",
+      "a b c",
+    );
+    expect(hint.changed_characters).toEqual(["trailing whitespace"]);
   });
 
   it("refuses when NFKC would change a superscript or fullwidth text outside the match", () => {
