@@ -130,6 +130,37 @@ export interface GitCallOptions {
    * the pipes (0 included), so a timeout is told by `timedOut` or `error`,
    * never by `status`. */
   onTimeout?: "refuse" | "report";
+  /** Run git with its top-level `--no-replace-objects` option and
+   * `-c core.useReplaceRefs=false`, so no replace ref (`git replace`, in
+   * `refs/replace/` or wherever `GIT_REPLACE_REF_BASE` points) changes the
+   * commit graph or an object the call reads, whatever the caller's
+   * configuration or environment says: the option alone loses to a
+   * `core.useReplaceRefs=true` that an older git reads after it, and a
+   * `-c` on the command line is applied last. For a call whose answer
+   * decides whether commits are on a remote or in a base. It does not
+   * switch off `info/grafts` (see `alteredCommitGraph`). */
+  noReplaceObjects?: true;
+}
+
+/** git's top-level option that ignores every replace ref. */
+export const NO_REPLACE_OBJECTS_FLAG = "--no-replace-objects";
+
+/** The setting that keeps the option above in force: some git versions read
+ * a `core.useReplaceRefs=true` from the configuration or the environment
+ * after the option and turn replace refs back on, and a `-c` is applied
+ * after both. */
+export const NO_REPLACE_REFS_CONFIG = [
+  "-c",
+  "core.useReplaceRefs=false",
+] as const;
+
+/** The argv of one call: the two replace-ref settings when the call asks for
+ * them, then the probe-wide settings, then `args`. */
+function callArgv(args: readonly string[], options: GitCallOptions): string[] {
+  const argv = probeGitArgv(args);
+  return options.noReplaceObjects === true
+    ? [NO_REPLACE_OBJECTS_FLAG, ...NO_REPLACE_REFS_CONFIG, ...argv]
+    : argv;
 }
 
 /** The two options of a call that reports a timeout instead of refusing. */
@@ -217,7 +248,7 @@ export function git(
   const boundMs = effectiveBoundMs(options.boundMs ?? GIT_BOUND_MS);
   const result = runGit(
     cwd,
-    probeGitArgv(args),
+    callArgv(args, options),
     withoutRepoSelectionEnv(),
     boundMs,
   );
@@ -875,7 +906,7 @@ export function gitBytes(
   const boundMs = effectiveBoundMs(options.boundMs ?? GIT_BOUND_MS);
   const result = runGitBytes(
     cwd,
-    probeGitArgv(args),
+    callArgv(args, options),
     withoutRepoSelectionEnv(),
     options.input,
     boundMs,
@@ -1015,6 +1046,52 @@ function refStoreElsewhere(
   return undefined;
 }
 
+/** The value `GIT_REPLACE_REF_BASE` has when it is not set. */
+const DEFAULT_REPLACE_REF_BASE = "refs/replace/";
+
+/**
+ * Why the commit graph git reads in this repository cannot be taken as the
+ * real one, or `undefined`. Two things change what `git rev-list` and
+ * `git merge-base` see without touching a ref or a commit, so a commit that
+ * no remote holds can read as pushed (or as merged into the base):
+ *
+ * - replace refs (`git replace --graft`, `git replace`): switched off for the
+ *   calls that decide, by `--no-replace-objects` together with
+ *   `-c core.useReplaceRefs=false` (`noReplaceObjects`), whatever the
+ *   caller's `GIT_NO_REPLACE_OBJECTS`, `core.useReplaceRefs` and
+ *   `GIT_REPLACE_REF_BASE` say. A `GIT_REPLACE_REF_BASE` other
+ *   than the default is refused as well: it says the caller's git reads
+ *   replacements from somewhere else, and the answer is not worth a guess.
+ * - the grafts file, `info/grafts` in the common git directory (not the
+ *   private directory of a linked worktree, which git does not read), or the
+ *   file `GIT_GRAFT_FILE` names. git still reads both, with a deprecation
+ *   hint, and `--no-replace-objects` does not switch them off, so their
+ *   presence makes the answer unknown. Any entry named `info/grafts` counts,
+ *   an empty file, a link or a directory included; only its absence does
+ *   not, and an entry that cannot be inspected is not absent.
+ */
+export function alteredCommitGraph(grafts: BytePath): string | undefined {
+  const env = withoutRepoSelectionEnv();
+  const graftFile = env.GIT_GRAFT_FILE;
+  if (graftFile !== undefined) {
+    return `GIT_GRAFT_FILE is set (${JSON.stringify(graftFile)}), so git reads the commit graph with the grafts that file lists`;
+  }
+  const refBase = env.GIT_REPLACE_REF_BASE;
+  if (refBase !== undefined && refBase !== DEFAULT_REPLACE_REF_BASE) {
+    return `GIT_REPLACE_REF_BASE is ${JSON.stringify(refBase)}, so git reads replace refs from somewhere other than refs/replace/`;
+  }
+  try {
+    fs.lstatSync(grafts);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    // No grafts file is the ordinary layout; a missing `info` directory is
+    // the same.
+    if (code === "ENOENT" || code === "ENOTDIR") return undefined;
+    return `${quoteBytes(grafts)} cannot be inspected: ${messageOf(err)}`;
+  }
+  return `${quoteBytes(grafts)} exists, so git reads the commit graph with the grafts it lists`;
+}
+
 /**
  * `git rev-list HEAD --not <every real remote-tracking ref>` in `cwd`: the
  * commits no remote branch holds. A symbolic ref under `refs/remotes`
@@ -1032,7 +1109,9 @@ function refStoreElsewhere(
  * it does, and any link, or other layout git does not write, makes the
  * answer unknown rather than a guess. The backend, the common directory and
  * the ref listing are git's own answers in `cwd`, taken byte for byte
- * (`gitBytes`), and a store git was told to keep anywhere else
+ * (`gitBytes`), a replaced or grafted commit graph
+ * (`alteredCommitGraph`; the walk itself runs with `--no-replace-objects`)
+ * is unknown, and a store git was told to keep anywhere else
  * (`refStoreElsewhere`, read as git's format reader reads it) is unknown
  * too, so what is inspected is the store git reads. A symbolic ref whose
  * name is not UTF-8 cannot be handed to `--exclude` exactly (an argument is
@@ -1060,6 +1139,12 @@ export function unpushedCommits(cwd: string): GitRunResult {
     return unknownUnpushed("git did not name the common git directory");
   }
   const commonDir = gitPathIn(cwd, printed);
+  const altered = alteredCommitGraph(below(below(commonDir, "info"), "grafts"));
+  if (altered !== undefined) {
+    return unknownUnpushed(
+      `${altered}; the commits git counts as pushed come from that graph, not from the commits themselves, so an unpushed commit could look pushed`,
+    );
+  }
   const elsewhere = refStoreElsewhere(cwd, commonDir);
   if (elsewhere !== undefined) return elsewhere;
   // The backend git really runs on, not a config value read beside it: git
@@ -1101,11 +1186,10 @@ export function unpushedCommits(cwd: string): GitRunResult {
     // `--exclude` pattern; for `--remotes` it is relative to `refs/remotes/`.
     excludes.push(`--exclude=${text.replace(/^refs\/remotes\//, "")}`);
   }
-  return git(
-    cwd,
-    ["rev-list", "HEAD", "--not", ...excludes, "--remotes"],
-    REPORT_TIMEOUT_WALK,
-  );
+  return git(cwd, ["rev-list", "HEAD", "--not", ...excludes, "--remotes"], {
+    ...REPORT_TIMEOUT_WALK,
+    noReplaceObjects: true,
+  });
 }
 
 /** A `--base` value resolved to a remote-tracking branch. */
@@ -1325,8 +1409,34 @@ function decideMerge(
   baseBranchName: string | undefined,
   baseLabel: string,
 ): MergeVerdict {
+  // A grafted graph can make a branch look merged, and neither the
+  // ancestry nor a pull request can be weighed against a graph that is not
+  // the real one: the verdict is unknown. Replace refs are switched off for
+  // the calls below instead.
+  const graftsAt = gitBytes(cwd, ["rev-parse", "--git-path", "info/grafts"]);
+  const printed = gitOutputLine(graftsAt.stdout);
+  if (
+    graftsAt.error !== undefined ||
+    graftsAt.status !== 0 ||
+    printed.length === 0
+  ) {
+    return {
+      merged: "unknown",
+      via: "none",
+      reason: `cannot tell whether the commit graph is altered: ${gitFailure(textResult(graftsAt))}`,
+    };
+  }
+  const altered = alteredCommitGraph(gitPathIn(cwd, printed));
+  if (altered !== undefined) {
+    return {
+      merged: "unknown",
+      via: "none",
+      reason: `${altered}; ancestry read from that graph could call an unmerged branch merged`,
+    };
+  }
   const anc = git(cwd, ["merge-base", "--is-ancestor", head, baseRef], {
     boundMs: GIT_WALK_BOUND_MS,
+    noReplaceObjects: true,
   });
   if (anc.error === undefined && anc.status === 0) {
     return {
@@ -1346,7 +1456,7 @@ function decideMerge(
   // The commit a merged pull request must be at: a branch whose name was
   // reused, or that gained commits after the merge, is not covered by a
   // pull request that merged an older head of it.
-  const headSha = commitSha(cwd, head);
+  const headSha = commitSha(cwd, head, { noReplaceObjects: true });
   if (headSha === undefined) {
     return {
       merged: "unknown",

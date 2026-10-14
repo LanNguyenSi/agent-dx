@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `worktree remove` and `list`: a replaced or grafted commit graph no longer
+  makes an unpushed commit look pushed or merged. With
+  `git replace --graft <origin/main tip> <unpushed commit>`, a plain
+  `git replace` object, or a line in `info/grafts`, `git rev-list HEAD --not
+  --remotes` counted the commit as pushed and `remove --delete-branch` exited
+  0 and deleted the branch (`--require-merged` and `list` could call it
+  merged the same way). The calls that decide (the unpushed `rev-list`, the
+  `merge-base --is-ancestor` and the `rev-parse` of the HEAD commit) now run
+  with git's `--no-replace-objects` and `-c core.useReplaceRefs=false`, so the
+  real graph is read whatever the caller's configuration or environment
+  (`core.useReplaceRefs`, `GIT_NO_REPLACE_OBJECTS`, `GIT_REPLACE_REF_BASE`)
+  says. The option does not switch off grafts, so an `info/grafts` entry in
+  the common git directory, a `GIT_GRAFT_FILE` in the environment (any value) and a
+  `GIT_REPLACE_REF_BASE` other than `refs/replace/` are the
+  `unpushed_state_unknown` refusal, and make the merge verdict `unknown`
+  (`merge_state_unknown` with `--require-merged`, `unknown` in `list`);
+  `--force` still overrides them. Normal layouts behave as before. The
+  "not covered" note on a replaced commit graph in `docs/worktree.md` is
+  replaced by the description of this check; a shallow repository stays
+  listed there.
 - `worktree create`, `remove` and `list`: every git call is bounded, so a
   repository git cannot read (a fifo among the refs, which some git
   versions block on; a hook or credential helper waiting for input) ends
