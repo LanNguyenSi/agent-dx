@@ -117,6 +117,9 @@ export interface SummaryInput {
   baseline?: { logPath?: string };
   /** The invocation cwd (`-C`); mutant file paths under it print relative. */
   cwd?: string;
+  /** The saved full result (`result-full-*.json`) when one was written;
+   * the truncation marker names it. */
+  fullResult?: string;
   plan?: {
     baseline?: { logPath?: string };
     results: SummaryMutantLike[];
@@ -268,7 +271,11 @@ export function renderProbeSummary(
   // Drop the note before the totals when even the tail does not fit.
   while (tail.length > 1 && size(tail) > maxChars) tail.pop();
   const marker = (omitted: number): string =>
-    `... ${omitted} more mutant line${omitted === 1 ? "" : "s"} omitted (-m ${maxChars}); raise -m or read the result-full log`;
+    `... ${omitted} more mutant line${omitted === 1 ? "" : "s"} omitted (-m ${maxChars} characters); ${
+      input.fullResult !== undefined
+        ? `raise -m or read the full result: ${input.fullResult}`
+        : "raise -m (no full result file was written)"
+    }`;
   let kept = lines.length;
   if (size(lines) + size(tail) > maxChars) {
     while (

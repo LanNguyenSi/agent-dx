@@ -475,6 +475,34 @@ describe("summary helpers", () => {
     expect(renderProbeSummary(input)).not.toContain("omitted");
   });
 
+  it("renderProbeSummary's marker names the full result file when one was written", () => {
+    const results = Array.from({ length: 40 }, (_, index) => ({
+      index,
+      mutant: { file: "src/some/long/path/file.ts", line: index + 1 },
+      mutation_probe: { result: "killed", expectation: "met" },
+      test: { logPath: "/logs/exec-123.log" },
+    }));
+    const plan = { results, summary: { total: 40, killed: 40, met: 40 } };
+    const withFile = renderProbeSummary(
+      {
+        status: "killed",
+        plan,
+        fullResult: "/logs/result-full-abc.json",
+      },
+      600,
+    );
+    expect(withFile.length).toBeLessThanOrEqual(600);
+    expect(withFile).toContain(
+      "characters); raise -m or read the full result: /logs/result-full-abc.json",
+    );
+    const withoutFile = renderProbeSummary({ status: "killed", plan }, 600);
+    expect(withoutFile.length).toBeLessThanOrEqual(600);
+    expect(withoutFile).toContain(
+      "characters); raise -m (no full result file was written)",
+    );
+    expect(withoutFile).not.toContain("read the full result");
+  });
+
   it("renderProbeSummary keeps the totals line and drops the note under a tiny maxChars", () => {
     const planInput = {
       status: "usage_error",

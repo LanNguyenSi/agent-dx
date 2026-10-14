@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `probe --summary`: the marker for omitted mutant lines names the saved
+  full result (`result-full-*.json`) when one was written, and says that
+  none was written otherwise, instead of pointing at "the result-full
+  log". The docs and the `--summary` help state that `-m` is a character
+  budget for the printed summary, with the totals line always kept
+  (#501, task d5fb35da).
+
 - `worktree remove --delete-branch` now adds a warning when it deletes a
   branch whose merge verdict is `no` or `unknown` (without
   `--require-merged`, or with `--force` overriding it), naming the branch,
