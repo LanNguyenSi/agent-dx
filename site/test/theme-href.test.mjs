@@ -45,17 +45,26 @@ function functionSource(file, name) {
 }
 
 // An object that answers only the listed keys. Any other read throws, a symbol
-// included, so an upgraded function cannot take a different path on undefined.
+// included, and so does every other way to look at the object (the "in"
+// operator, Object.keys, Object.hasOwn, spread, a descriptor, the prototype) or
+// to change it, so an upgraded function cannot take a different path on
+// undefined or on a key list that happens to be short.
 function strict(target, label) {
+  const refuse = (what) => (_object, key) => {
+    throw new Error(`the installed theme code ${what} ${label}${key === undefined ? '' : `.${String(key)}`}, which the test does not provide; read the theme again (docs/repo-layout.md)`)
+  }
   return new Proxy(target, {
     get(object, key) {
       if (typeof key === 'string' && Object.hasOwn(object, key)) return object[key]
-      throw new Error(`the installed theme code reads ${label}.${String(key)}, which the test does not provide; read the theme again (docs/repo-layout.md)`)
+      return refuse('reads')(object, key)
     },
-    has(object, key) {
-      if (typeof key === 'string' && Object.hasOwn(object, key)) return true
-      throw new Error(`the installed theme code probes ${label}.${String(key)}`)
-    }
+    has: refuse('probes'),
+    ownKeys: refuse('lists the keys of'),
+    getOwnPropertyDescriptor: refuse('inspects'),
+    getPrototypeOf: refuse('reads the prototype of'),
+    set: refuse('writes'),
+    defineProperty: refuse('defines'),
+    deleteProperty: refuse('deletes')
   })
 }
 
@@ -93,7 +102,17 @@ test('the site data stubs answer only what the theme code reads today', () => {
   assert.throws(() => stub.cleanUrls, /reads siteDataRef\.value\.cleanUrls/)
   assert.throws(() => stub.toString, /reads siteDataRef\.value\.toString/)
   assert.throws(() => stub[Symbol.toPrimitive], /Symbol\(Symbol\.toPrimitive\)/)
-  assert.throws(() => 'lang' in stub, /probes/)
+  assert.throws(() => 'base' in stub, /probes siteDataRef\.value\.base/)
+  assert.throws(() => Object.hasOwn(stub, 'lang'), /inspects siteDataRef\.value\.lang/)
+  assert.throws(() => Object.hasOwn(stub, 'base'), /inspects/)
+  assert.throws(() => Object.keys(stub), /lists the keys of siteDataRef\.value/)
+  assert.throws(() => Reflect.ownKeys(stub), /lists the keys of/)
+  assert.throws(() => ({ ...stub }), /lists the keys of/)
+  assert.throws(() => Object.entries(stub), /lists the keys of/)
+  assert.throws(() => Object.getPrototypeOf(stub), /reads the prototype of/)
+  assert.throws(() => (stub.base = '/y/'), /writes siteDataRef\.value\.base/)
+  assert.throws(() => delete stub.base, /deletes/)
+  assert.throws(() => Object.defineProperty(stub, 'lang', { value: 1 }), /defines/)
   // Through the evaluated functions: the current code reads exactly these keys, so both run.
   const theme = installedTheme({ base: '/x/', cleanUrls: true })
   assert.equal(theme.normalizeLink('/a'), '/x/a')
@@ -104,15 +123,62 @@ test('the site data stubs answer only what the theme code reads today', () => {
 // (previous and next link, hero action, feature), and the way each reaches
 // normalizeLink. If a sink stops using it, the corpus above no longer describes
 // what the theme writes there.
+//
+// The check reads the template the way a template compiler would: comments are
+// removed, and the opening tags are cut into their attributes. The expected text
+// is matched against the attribute of the sink element, never against the file,
+// so the old binding left in a comment, a static attribute or the script cannot
+// hide a changed one. Each sink element must carry exactly one attribute that
+// sets an href (`href`, `:href` or `v-bind:href`) and no `v-bind` object, which
+// could carry another.
+const withoutComments = (text) => text.replace(/<!--[\s\S]*?-->/g, '')
+const attributeTag = (name) =>
+  new RegExp(`<${name}(?![\\w-])((?:\\s+[^\\s=>"'/]+(?:\\s*=\\s*(?:"[^"]*"|'[^']*'|[^\\s>"']+))?)*)\\s*/?>`, 'g')
+const attributesOf = (source) =>
+  [...source.matchAll(/([^\s=>"'/]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>"']+)))?/g)].map((m) => [m[1], m[2] ?? m[3] ?? m[4] ?? true])
+// The opening tags of a template element, as lists of [name, value].
+function openingTags(text, name) {
+  const template = withoutComments(text).replace(/<script[\s\S]*?<\/script>/g, '')
+  return [...template.matchAll(attributeTag(name))].map((m) => attributesOf(m[1]))
+}
+const hrefAttributes = (attributes) => attributes.filter(([n]) => ['href', ':href', 'v-bind:href'].includes(n))
+const spreads = (attributes) => attributes.filter(([n]) => n === 'v-bind')
+
+test('the template reader reports the href of the element, not text that merely resembles it', () => {
+  const sink = ':href="href ? normalizeLink(href) : undefined"'
+  const read = (template) => openingTags(`<template>${template}</template>`, 'component')
+  // The binding as shipped.
+  assert.deepEqual(hrefAttributes(read(`<component :is="tag" ${sink} class="a>b"><slot /></component>`)[0]), [[':href', 'href ? normalizeLink(href) : undefined']])
+  // The old text in a comment, in a static attribute or in a text node does not stand in for the binding.
+  for (const template of [
+    `<!-- ${sink} --><component :is="tag" :href="href">x</component>`,
+    `<component :is="tag" :href="href" title='${sink}'>x</component>`,
+    `<component :is="tag" :href="href" data-old='${sink}'>x</component>`,
+    `<component :is="tag" :href="href">${sink}</component>`
+  ]) {
+    assert.deepEqual(hrefAttributes(read(template)[0]), [[':href', 'href']], template)
+  }
+  // A second href next to the matched one, and an object spread, are both seen.
+  assert.equal(hrefAttributes(read(`<component :is="tag" ${sink} href="//evil.example/x">x</component>`)[0]).length, 2)
+  assert.equal(hrefAttributes(read(`<component ${sink} :href="other">x</component>`)[0]).length, 2)
+  assert.equal(hrefAttributes(read(`<component ${sink} v-bind:href="other">x</component>`)[0]).length, 2)
+  assert.equal(spreads(read(`<component ${sink} v-bind="props">x</component>`)[0]).length, 1)
+  // A component name that is a prefix of another is not the same element.
+  assert.equal(openingTags('<template><VPLinkExtra :href="a" /><VPLink :href="b" /></template>', 'VPLink').length, 1)
+})
+
 test('the installed components for the guarded link fields write their href through normalizeLink', () => {
   const components = path.join(path.dirname(themeUtils), '..', 'components')
   const read = (name) => fs.readFileSync(path.join(components, name), 'utf8')
-  const imports = /import \{ normalizeLink \} from '\.\.\/support\/utils'/
-  const hrefBinding = /:href="href \? normalizeLink\(href\) : undefined"/
+  const script = (text) => withoutComments(text).match(/<script\b[^>]*>([\s\S]*?)<\/script>/)?.[1] ?? ''
   for (const name of ['VPLink.vue', 'VPButton.vue']) {
     const text = read(name)
-    assert.match(text, imports, `${name} no longer imports normalizeLink from ../support/utils`)
-    assert.match(text, hrefBinding, `${name} no longer writes its href through normalizeLink`)
+    assert.match(script(text), /^import \{ normalizeLink \} from '\.\.\/support\/utils'$/m, `${name} no longer imports normalizeLink from ../support/utils`)
+    // The element that carries the href is the dynamic <component>; there is one.
+    const tags = openingTags(text, 'component')
+    assert.equal(tags.length, 1, `${name} has ${tags.length} <component> elements`)
+    assert.deepEqual(hrefAttributes(tags[0]), [[':href', 'href ? normalizeLink(href) : undefined']], `${name} no longer writes its href through normalizeLink, and only through it`)
+    assert.deepEqual(spreads(tags[0]), [], `${name} spreads an object onto its link`)
   }
   // Which component each field reaches, and the value it passes as the href.
   const routes = [
@@ -121,11 +187,17 @@ test('the installed components for the guarded link fields write their href thro
     ['VPFeature.vue', 'VPLink', 'link', 'feature link'],
     ['VPHero.vue', 'VPButton', 'action.link', 'hero action link']
   ]
-  const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   for (const [file, component, value, field] of routes) {
     const text = read(file)
-    assert.match(text, new RegExp(`import ${component} from '\\./${component}\\.vue'`), `${file} (${field}) no longer imports ${component}`)
-    assert.match(text, new RegExp(`<${component}\\b[^>]*?:href="${escape(value)}"`, 's'), `${file} (${field}) no longer passes ${value} as the href of ${component}`)
+    assert.match(script(text), new RegExp(`^import ${component} from '\\./${component}\\.vue'$`, 'm'), `${file} (${field}) no longer imports ${component}`)
+    const tags = openingTags(text, component)
+    // Every use of the component sets one href and spreads nothing, and exactly one of them is this field's.
+    for (const tag of tags) {
+      assert.equal(hrefAttributes(tag).length, 1, `${file}: a <${component}> sets ${hrefAttributes(tag).length} hrefs`)
+      assert.deepEqual(spreads(tag), [], `${file}: a <${component}> spreads an object onto its link`)
+    }
+    const carrying = tags.filter((tag) => hrefAttributes(tag).some(([n, v]) => n === ':href' && v === value))
+    assert.equal(carrying.length, 1, `${file} (${field}) no longer passes ${value} as the :href of exactly one ${component}`)
   }
 })
 
