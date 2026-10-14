@@ -163,13 +163,20 @@ export function analyzeSources(parsed: unknown): SourcesAnalysis {
  * absent or not a list.
  */
 export function getDeclaredSourceIds(parsed: unknown): string[] {
+  return getDeclaredSourceIdPositions(parsed).map((d) => d.id);
+}
+
+/** Like `getDeclaredSourceIds`, with each id's 1-based position in the `sources` list. */
+export function getDeclaredSourceIdPositions(
+  parsed: unknown,
+): { id: string; position: number }[] {
   if (!isRecord(parsed) || !Array.isArray(parsed.sources)) return [];
-  const ids: string[] = [];
-  for (const item of parsed.sources as unknown[]) {
-    if (!isRecord(item) || !("id" in item)) continue;
+  const ids: { id: string; position: number }[] = [];
+  (parsed.sources as unknown[]).forEach((item, i) => {
+    if (!isRecord(item) || !("id" in item)) return;
     const id = normalizeSourceId(item.id);
-    if (id !== undefined) ids.push(id);
-  }
+    if (id !== undefined) ids.push({ id, position: i + 1 });
+  });
   return ids;
 }
 

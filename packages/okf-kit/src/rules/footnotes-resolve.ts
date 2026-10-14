@@ -1,5 +1,5 @@
 import { scanFootnotes } from "../footnotes.js";
-import { analyzeSources, getDeclaredSourceIds } from "../util.js";
+import { analyzeSources, getDeclaredSourceIdPositions } from "../util.js";
 import type { Finding, Rule } from "../types.js";
 
 const RULE_ID = "footnotes-resolve";
@@ -16,6 +16,9 @@ const RULE_ID = "footnotes-resolve";
  *    unreferenced (a definition no prose points at renders nowhere), and a
  *    definition line is likewise never itself a reference to resolve --
  *    only the `[^id]` tokens in prose (and inside a definition's text) are.
+ *
+ * Two `sources` entries with the same `id` are an error, one finding per
+ * duplicated id naming the entry positions.
  *
  * Footnote ids are case-sensitive. Fenced code, inline code and a
  * backslash-escaped `[^id]` are not references (see `src/footnotes.ts`).
@@ -40,7 +43,21 @@ export const footnotesResolveRule: Rule = {
     for (const doc of ctx.docs) {
       if (doc.isReserved) continue;
       const parsed = doc.frontmatter.parsed;
-      const declared = new Set(getDeclaredSourceIds(parsed));
+      const declaredAt = getDeclaredSourceIdPositions(parsed);
+      const declared = new Set(declaredAt.map((d) => d.id));
+      const positionsById = new Map<string, number[]>();
+      for (const { id, position } of declaredAt) {
+        positionsById.set(id, [...(positionsById.get(id) ?? []), position]);
+      }
+      for (const [id, positions] of positionsById) {
+        if (positions.length < 2) continue;
+        findings.push({
+          ruleId: RULE_ID,
+          severity: "error",
+          file: doc.relPath,
+          message: `\`sources\` entries ${positions.join(", ")} share \`id: ${id}\`; a footnote \`[^${id}]\` cannot tell them apart`,
+        });
+      }
       const { references } = scanFootnotes(doc.body);
       const referenced = new Set(references);
 

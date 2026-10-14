@@ -105,6 +105,44 @@ describe("footnotes-resolve", () => {
     expect(run()).toEqual([]);
   });
 
+  it("an unpaired backtick does not hide a dangling footnote in a later paragraph", () => {
+    v02Bundle(
+      doc(
+        SRC_ID_A,
+        "Use the ` character.[^a]\n\nSecond.[^ghost]\n\nThird `code`.",
+      ),
+    );
+    const findings = run();
+    expect(findings).toHaveLength(1);
+    expect(findings[0].severity).toBe("error");
+    expect(findings[0].message).toContain("[^ghost]");
+  });
+
+  it("does not read a footnote inside an HTML comment as a reference", () => {
+    v02Bundle(
+      doc(SRC_ID_A, "Cited.[^a]\n\n<!-- [^todo] -->\n\n<!--\n[^todo2]\n-->"),
+    );
+    expect(run()).toEqual([]);
+  });
+
+  it("reports a duplicated sources id once, naming both entry positions", () => {
+    v02Bundle(
+      doc(
+        `${SRC_ID_A}\n  - id: b\n    resource: src/b.ts\n  - id: a\n    resource: src/c.ts`,
+        "Cited.[^a][^b]",
+      ),
+    );
+    const findings = run();
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      ruleId: "footnotes-resolve",
+      severity: "error",
+      file: "doc.md",
+    });
+    expect(findings[0].message).toContain("entries 1, 3");
+    expect(findings[0].message).toContain("`id: a`");
+  });
+
   it("accepts a numeric YAML id for a numeric footnote", () => {
     v02Bundle(doc("  - id: 1\n    resource: src/a.ts", "Cited.[^1]"));
     expect(run()).toEqual([]);

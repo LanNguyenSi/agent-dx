@@ -15,8 +15,9 @@
  *    continuation lines under it. The `[^id]:` marker is not a reference;
  *  - a REFERENCE is any other `[^id]` (including one inside a definition's
  *    text);
- *  - fenced code blocks (``` and ~~~) and inline code spans are not
- *    scanned, and a `[^id]` written with a leading backslash is escaped
+ *  - fenced code blocks (``` and ~~~), inline code spans (which never
+ *    cross a blank line) and HTML comments are not scanned; indented
+ *    code blocks are not excluded, and a `[^id]` written with a leading backslash is escaped
  *    text, not a reference.
  */
 
@@ -66,9 +67,23 @@ function blankFences(body: string): string {
     .join("\n");
 }
 
-/** `text` with inline code spans blanked: a run of N backticks closes at the next run of exactly N. */
+/**
+ * `text` with inline code spans blanked: a run of N backticks closes at the
+ * next run of exactly N. A span never crosses a blank line (a paragraph
+ * boundary), so one unpaired backtick only affects its own paragraph.
+ */
 function blankInlineCode(text: string): string {
-  return text.replace(/(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g, (span) => blank(span));
+  return text
+    .split(/(\n[ \t]*\n)/)
+    .map((part) =>
+      part.replace(/(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g, (span) => blank(span)),
+    )
+    .join("");
+}
+
+/** `text` with HTML comments (single- and multi-line) blanked, keeping line structure. */
+function blankHtmlComments(text: string): string {
+  return text.replace(/<!--[\s\S]*?-->/g, (c) => blank(c));
 }
 
 /** The definition at `lines[i]` (marker match plus the indices of its continuation lines), or undefined. */
@@ -89,7 +104,9 @@ export function scanFootnotes(body: string): FootnoteScan {
   // `withCode` keeps inline code (a definition's text names line ranges in
   // backticks); `noCode` is what references are searched in. Blanking
   // preserves line structure, so index i is the same line in both.
-  const fenceFree = blankFences(body.replace(/\r\n?/g, "\n"));
+  const fenceFree = blankHtmlComments(
+    blankFences(body.replace(/\r\n?/g, "\n")),
+  );
   const withCode = fenceFree.split("\n");
   const noCode = blankInlineCode(fenceFree).split("\n");
   const references: string[] = [];

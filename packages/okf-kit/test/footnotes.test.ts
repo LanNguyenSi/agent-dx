@@ -84,4 +84,23 @@ describe("scanFootnotes", () => {
     expect(scan.references).toEqual(["a"]);
     expect(scan.definitions).toEqual([{ id: "a", text: "Text." }]);
   });
+
+  it("an unpaired backtick does not hide references in later paragraphs", () => {
+    const scan = scanFootnotes(
+      "Use the ` character as a separator.[^a]\n\nLater.[^b]\n\nMore `code` here.[^c]\n",
+    );
+    expect(scan.references).toEqual(["a", "b", "c"]);
+  });
+
+  it("still blanks an inline code span that wraps across a single newline", () => {
+    const scan = scanFootnotes("Text `a\n[^hidden] b` end.[^x]\n");
+    expect(scan.references).toEqual(["x"]);
+  });
+
+  it("ignores references in single- and multi-line HTML comments", () => {
+    const scan = scanFootnotes(
+      "<!-- [^one] -->\nReal.[^real]\n<!--\n[^two]\n-->\nAfter.[^after]\n",
+    );
+    expect(scan.references).toEqual(["real", "after"]);
+  });
 });
