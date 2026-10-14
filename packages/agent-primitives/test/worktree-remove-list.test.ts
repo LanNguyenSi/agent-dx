@@ -4924,6 +4924,41 @@ const GRAFTS_SUPPORTED = await gitCanBounded(async (repo) => {
   return oneLine(await run(["rev-list", "HEAD"])).split("\n").length === 1;
 });
 
+describe("the grafts capability gate", () => {
+  it("agrees with what this git does with a grafts file, so the grafts tests never skip by mistake", async () => {
+    // `gitCanBounded` reads any failure (a bound hit under load included)
+    // as "no grafts", which would skip the grafts tests silently. This test
+    // is never skipped and asks git again, through GIT_GRAFT_FILE, without
+    // swallowing a failure.
+    const scratch = fs.mkdtempSync(
+      path.join(os.tmpdir(), "agent-primitives-gitcan-check-"),
+    );
+    try {
+      const repo = path.join(scratch, "repo");
+      const run = (
+        cwd: string,
+        args: string[],
+        env: NodeJS.ProcessEnv = {},
+      ): Promise<string> =>
+        gitBounded(cwd, args, 20_000, env, GRAPH_RSS_LIMIT_KB);
+      await run(scratch, ["init", "-q", "-b", "main", "repo"]);
+      write(repo, "a.txt", "one\n");
+      await run(repo, ["add", "-A"]);
+      await run(repo, ["commit", "-q", "-m", "init"]);
+      await run(repo, ["commit", "-q", "--allow-empty", "-m", "two"]);
+      const tip = oneLine(await run(repo, ["rev-parse", "HEAD"]));
+      const graftFile = path.join(scratch, "grafts");
+      fs.writeFileSync(graftFile, `${tip}\n`);
+      const listed = oneLine(
+        await run(repo, ["rev-list", "HEAD"], { GIT_GRAFT_FILE: graftFile }),
+      ).split("\n").length;
+      expect(GRAFTS_SUPPORTED).toBe(listed === 1);
+    } finally {
+      fs.rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+});
+
 /**
  * A branch `feat` whose one commit no remote branch holds, in a worktree,
  * while `origin/main` has moved on by a commit that is not a parent of it:
