@@ -166,8 +166,8 @@ okf-kit init guidance (delete this comment once the doc is written):
 ",
   "index.md": "# Knowledge bundle index
 
-Scaffolded by \`okf-kit init\`. Replace this placeholder index with a real
-map of the docs in this bundle as you add and rename them.
+<!-- Scaffolded by \`okf-kit init\`. Replace this placeholder index with a real
+map of the docs in this bundle as you add and rename them. -->
 
 ## Overview
 
@@ -243,7 +243,9 @@ against a source in \`sources:\` above.
 ",
   "log.md": "# Log
 
-<!-- Add new entries at the top, newest first. -->
+<!-- Add new entries under a \`## YYYY-MM-DD\` heading, newest first. -->
+
+## 2030-05-17
 
 - 2030-05-17T08:15:30.000Z, bundle scaffolded by \`okf-kit init\`.
 ",

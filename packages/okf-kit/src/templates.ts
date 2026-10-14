@@ -113,8 +113,8 @@ export function indexTemplate(spec: SpecVersion = "v0.1"): string {
     spec === "v0.2" ? '---\nokf_version: "0.2"\n---\n\n' : "";
   return `${versionDeclaration}# Knowledge bundle index
 
-Scaffolded by \`okf-kit init\`. Replace this placeholder index with a real
-map of the docs in this bundle as you add and rename them.
+<!-- Scaffolded by \`okf-kit init\`. Replace this placeholder index with a real
+map of the docs in this bundle as you add and rename them. -->
 
 ## Overview
 
@@ -143,9 +143,15 @@ map of the docs in this bundle as you add and rename them.
 }
 
 export function logTemplate(timestamp: string): string {
+  // OKF reserves `log.md` with entries grouped under a level-2 ISO date
+  // heading (`## YYYY-MM-DD`, newest first), so the scaffold opens its first
+  // entry under the scaffold date rather than as a bare bullet.
+  const date = timestamp.slice(0, 10);
   return `# Log
 
-<!-- Add new entries at the top, newest first. -->
+<!-- Add new entries under a \`## YYYY-MM-DD\` heading, newest first. -->
+
+## ${date}
 
 - ${timestamp}, bundle scaffolded by \`okf-kit init\`.
 `;

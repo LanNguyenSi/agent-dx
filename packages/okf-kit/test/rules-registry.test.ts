@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { allRules } from "../src/rules/index.js";
 
 describe("rules registry", () => {
-  it("maps to exactly the twelve expected rule ids", () => {
+  it("maps to exactly the thirteen expected rule ids", () => {
     const ids = allRules.map((rule) => rule.id).sort();
     expect(ids).toEqual([
       "citations-resolve",
@@ -14,6 +14,7 @@ describe("rules registry", () => {
       "no-absolute-links",
       "prose-line-references",
       "reserved-files-bare",
+      "reserved-files-structure",
       "sources-fresh",
       "sources-fresh-future",
       "sources-shape",
