@@ -11,12 +11,17 @@
 // compiled source and evaluated in a context that holds only what the function
 // names: the URL class, the theme's own isExternal and treatAsHtml (imported
 // from the installed shared.js, not copied), and two stubs for the site data
-// (the base and the cleanUrls switch). A function that starts to name anything
-// else throws a ReferenceError, and a function that cannot be cut out fails
-// with a message; both fail the suite instead of passing on a stale copy.
+// (the base and the cleanUrls switch). The stubs are strict: every object on
+// the path to a value (siteDataRef and its value, the useData() result, its
+// site and the value of that) throws on any key the current code does not
+// read, so a function that starts to read another field fails instead of
+// getting undefined. A function that starts to name anything else throws a
+// ReferenceError, and a function that cannot be cut out fails with a message;
+// all of these fail the suite instead of passing on a stale copy.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
+import path from 'node:path'
 import vm from 'node:vm'
 import { fileURLToPath } from 'node:url'
 import { EXTERNAL_URL_RE, isExternal, treatAsHtml } from 'vitepress/dist/client/shared.js'
@@ -39,16 +44,32 @@ function functionSource(file, name) {
   return text.slice(start, end + 2).replace(/^export /, '')
 }
 
+// An object that answers only the listed keys. Any other read throws, a symbol
+// included, so an upgraded function cannot take a different path on undefined.
+function strict(target, label) {
+  return new Proxy(target, {
+    get(object, key) {
+      if (typeof key === 'string' && Object.hasOwn(object, key)) return object[key]
+      throw new Error(`the installed theme code reads ${label}.${String(key)}, which the test does not provide; read the theme again (docs/repo-layout.md)`)
+    },
+    has(object, key) {
+      if (typeof key === 'string' && Object.hasOwn(object, key)) return true
+      throw new Error(`the installed theme code probes ${label}.${String(key)}`)
+    }
+  })
+}
+
 // normalizeLink and withBase of the installed theme, for one site base and
-// cleanUrls setting.
+// cleanUrls setting. withBase reads siteDataRef.value.base; normalizeLink reads
+// useData().site.value.cleanUrls. Nothing else is provided.
 function installedTheme({ base, cleanUrls }) {
   const context = vm.createContext({
     URL,
     EXTERNAL_URL_RE,
     isExternal,
     treatAsHtml,
-    siteDataRef: { value: { base } },
-    useData: () => ({ site: { value: { cleanUrls } } })
+    siteDataRef: strict({ value: strict({ base }, 'siteDataRef.value') }, 'siteDataRef'),
+    useData: () => strict({ site: strict({ value: strict({ cleanUrls }, 'site.value') }, 'site') }, 'useData()')
   })
   const source = ['joinPath', 'withBase'].map((n) => functionSource(appUtils, n)).join('\n') + '\n' + functionSource(themeUtils, 'normalizeLink')
   return vm.runInContext(`${source}\n;({ normalizeLink, withBase })`, context)
@@ -65,6 +86,51 @@ test('the installed theme code is the code the site runs', () => {
   assert.equal(installedTheme({ base: '/agent-dx/', cleanUrls: false }).normalizeLink('x/../y'), '/agent-dx/y.html')
   assert.equal(installedTheme({ base: '/agent-dx/', cleanUrls: true }).normalizeLink('/a/b'), '/agent-dx/a/b')
 })
+
+test('the site data stubs answer only what the theme code reads today', () => {
+  const stub = strict({ base: '/x/' }, 'siteDataRef.value')
+  assert.equal(stub.base, '/x/')
+  assert.throws(() => stub.cleanUrls, /reads siteDataRef\.value\.cleanUrls/)
+  assert.throws(() => stub.toString, /reads siteDataRef\.value\.toString/)
+  assert.throws(() => stub[Symbol.toPrimitive], /Symbol\(Symbol\.toPrimitive\)/)
+  assert.throws(() => 'lang' in stub, /probes/)
+  // Through the evaluated functions: the current code reads exactly these keys, so both run.
+  const theme = installedTheme({ base: '/x/', cleanUrls: true })
+  assert.equal(theme.normalizeLink('/a'), '/x/a')
+  assert.equal(theme.withBase('/a'), '/x/a')
+})
+
+// The components that write the href of the three link fields the guard covers
+// (previous and next link, hero action, feature), and the way each reaches
+// normalizeLink. If a sink stops using it, the corpus above no longer describes
+// what the theme writes there.
+test('the installed components for the guarded link fields write their href through normalizeLink', () => {
+  const components = path.join(path.dirname(themeUtils), '..', 'components')
+  const read = (name) => fs.readFileSync(path.join(components, name), 'utf8')
+  const imports = /import \{ normalizeLink \} from '\.\.\/support\/utils'/
+  const hrefBinding = /:href="href \? normalizeLink\(href\) : undefined"/
+  for (const name of ['VPLink.vue', 'VPButton.vue']) {
+    const text = read(name)
+    assert.match(text, imports, `${name} no longer imports normalizeLink from ../support/utils`)
+    assert.match(text, hrefBinding, `${name} no longer writes its href through normalizeLink`)
+  }
+  // Which component each field reaches, and the value it passes as the href.
+  const routes = [
+    ['VPDocFooter.vue', 'VPLink', 'control.prev.link', 'previous link'],
+    ['VPDocFooter.vue', 'VPLink', 'control.next.link', 'next link'],
+    ['VPFeature.vue', 'VPLink', 'link', 'feature link'],
+    ['VPHero.vue', 'VPButton', 'action.link', 'hero action link']
+  ]
+  const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  for (const [file, component, value, field] of routes) {
+    const text = read(file)
+    assert.match(text, new RegExp(`import ${component} from '\\./${component}\\.vue'`), `${file} (${field}) no longer imports ${component}`)
+    assert.match(text, new RegExp(`<${component}\\b[^>]*?:href="${escape(value)}"`, 's'), `${file} (${field}) no longer passes ${value} as the href of ${component}`)
+  }
+})
+
+// The seed is an arbitrary constant. A failure names the value, which comes back on every run.
+const corpusSeed = 0x5eed
 
 // A seeded generator, so a failure names a value that comes back on every run.
 function mulberry32(seed) {
@@ -90,7 +156,7 @@ function corpus() {
     for (const v of level) values.add(v)
   }
   // Longer sequences, drawn at random.
-  const next = mulberry32(20241014)
+  const next = mulberry32(corpusSeed)
   for (let i = 0; i < 20000; i++) {
     const length = 5 + Math.floor(next() * 5)
     let v = ''
