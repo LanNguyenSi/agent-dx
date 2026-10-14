@@ -8,7 +8,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { boundedCommand, boundedSpawnOptions } from "../src/bounded-spawn.js";
+import {
+  boundedCommand,
+  boundedSpawnOptions,
+  endProcessGroup,
+} from "../src/bounded-spawn.js";
 import { runGit, runGitBytes } from "../src/drift/git.js";
 import { createWorktree } from "../src/worktree/create.js";
 import {
@@ -1632,6 +1636,67 @@ describe("the bounded git runner", () => {
   });
 });
 
+/** Makes the process a child subreaper, then execs `argv[1:]` in it. */
+const SET_SUBREAPER_AND_EXEC = [
+  "import ctypes, os, sys",
+  "libc = ctypes.CDLL(None, use_errno=True)",
+  "if libc.prctl(36, 1, 0, 0, 0) != 0:",
+  "    sys.exit('prctl(PR_SET_CHILD_SUBREAPER) failed: errno %d' % ctypes.get_errno())",
+  "os.execv(sys.argv[1], sys.argv[1:])",
+].join("\n");
+
+/** Run by node under a subreaper as `calls.mjs <built drift/git.js> <repo>`:
+ * makes bounded calls, then prints the zombie children it has, and a control
+ * that orphans a short `sleep` and reports the state it is seen in. */
+const SUBREAPER_CALLS = `
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import { pathToFileURL } from "node:url";
+const [gitJs, repo] = process.argv.slice(2);
+const { runGit } = await import(pathToFileURL(gitJs).href);
+const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+function children() {
+  const found = [];
+  for (const name of fs.readdirSync("/proc")) {
+    if (!/^[0-9]+$/.test(name)) continue;
+    let stat;
+    try {
+      stat = fs.readFileSync("/proc/" + name + "/stat", "utf8");
+    } catch {
+      continue;
+    }
+    const [state, ppid] = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+    if (Number(ppid) === process.pid) found.push({ pid: Number(name), state });
+  }
+  return found;
+}
+for (let i = 0; i < 10; i++) {
+  for (const [args, status] of [
+    [["rev-parse", "--is-inside-work-tree"], 0],
+    [["rev-parse", "--verify", "nope"], 128],
+  ]) {
+    const r = runGit(repo, args, process.env, 20000);
+    if (r.status !== status || r.timedOut !== undefined) {
+      console.error(JSON.stringify(r));
+      process.exit(2);
+    }
+  }
+}
+pause(500);
+const zombies = children().filter((c) => c.state === "Z");
+const sh = spawnSync(
+  "/bin/sh",
+  ["-c", "/bin/sleep 0.2 </dev/null >/dev/null 2>&1 & echo $!"],
+  { encoding: "utf8" },
+);
+const control = { pid: Number(sh.stdout.trim()), state: undefined };
+for (let i = 0; i < 100 && control.state !== "Z"; i++) {
+  pause(50);
+  control.state = children().find((c) => c.pid === control.pid)?.state;
+}
+console.log(JSON.stringify({ zombies, control }));
+`;
+
 /** Whether any process of the group `pgid` is there, a zombie included. */
 function groupExists(pgid: number): boolean {
   try {
@@ -1664,9 +1729,12 @@ describe("the trampoline", () => {
       expect(r.error, args.join(" ")).toBeUndefined();
       expect(Date.now() - started, args.join(" ")).toBeLessThan(boundMs / 2);
       expect(r.pid).toBeGreaterThan(0);
-      // Gone at once, not even a zombie: the trampoline reaps its watcher
-      // before it exits, so nothing is left for the first process of the
-      // system to reap (which, in some containers, reaps nothing).
+      // Nothing of the call's group is left once it returns. On a host whose
+      // first process reaps orphans, a watcher the trampoline left unreaped
+      // would be reaped there too, so this checks that the watcher stopped,
+      // not who reaped it; that the trampoline reaps it itself is checked by
+      // the Linux case below, which runs the calls under a subreaper that
+      // reaps nothing.
       expect(groupExists(r.pid), args.join(" ")).toBe(false);
     }
     // The same through `runGit`, the path every worktree call takes.
@@ -1676,6 +1744,56 @@ describe("the trampoline", () => {
       expect(r.status).toBe(0);
     }
   });
+
+  // A caller that is a child subreaper (PR_SET_CHILD_SUBREAPER, Linux only)
+  // gets every orphan of its descendants instead of the first process of the
+  // system, and node reaps only the children it started itself. A watcher the
+  // trampoline left unreaped would stay there as a zombie, whatever the
+  // host's first process does, so this pins the reap where the case above
+  // cannot. python3 sets the attribute, which survives the exec into node.
+  it.skipIf(process.platform !== "linux")(
+    "reaps its watcher itself, so a caller that is a subreaper gets no zombie",
+    () => {
+      const f = makeFixture();
+      const dir = scratchDir("subreaper");
+      const script = path.join(dir, "calls.mjs");
+      fs.writeFileSync(script, SUBREAPER_CALLS);
+      const r = spawnSync(
+        "python3",
+        [
+          "-I",
+          "-c",
+          SET_SUBREAPER_AND_EXEC,
+          process.execPath,
+          script,
+          path.join(path.dirname(CLI_PATH), "drift", "git.js"),
+          f.repo,
+        ],
+        {
+          encoding: "utf8",
+          env: { PATH: process.env.PATH, ...GIT_ENV },
+          timeout: 60_000,
+          killSignal: "SIGKILL",
+          // A group of its own, so whatever is left is ended with it.
+          detached: true,
+        } as SpawnSyncOptions & { encoding: "utf8" },
+      );
+      try {
+        expect(r.error).toBeUndefined();
+        expect(r.status, r.stderr).toBe(0);
+        const seen = JSON.parse(r.stdout) as {
+          zombies: { pid: number; state: string }[];
+          control: { pid: number; state?: string };
+        };
+        // The control: a process orphaned in the caller turns up as its
+        // zombie child, so the caller is a subreaper and the check sees one.
+        expect(seen.control.state).toBe("Z");
+        expect(seen.zombies).toEqual([]);
+      } finally {
+        endProcessGroup(r.pid);
+      }
+    },
+  );
 
   it("gives the command no copy of its pipe, so what the command leaves running does not hold the call", () => {
     const dir = scratchDir("daemon-git");
@@ -1817,6 +1935,45 @@ describe("the trampoline", () => {
     expect(r.status).toBe(137);
     expect(r.timedOut).toBeUndefined();
     await expectGone([Number(fs.readFileSync(pidFile, "utf8").trim())]);
+  });
+
+  it("leaves alone what a git that exited 128 by itself left behind", async () => {
+    // 128 is git's own status for a fatal error; only a status above it is
+    // how the shell reports a command that a signal ended.
+    const dir = scratchDir("fatal-git");
+    const pidFile = path.join(dir, "pid");
+    fs.writeFileSync(
+      path.join(dir, "git"),
+      [
+        "#!/bin/sh",
+        "/bin/sleep 30 </dev/null >/dev/null 2>&1 &",
+        `echo $! > '${pidFile}'`,
+        "exit 128",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const r = runGit(
+      dir,
+      ["status"],
+      { PATH: `${dir}${path.delimiter}${process.env.PATH ?? ""}` },
+      20_000,
+    );
+    const pid = Number(fs.readFileSync(pidFile, "utf8").trim());
+    try {
+      expect(r.status).toBe(128);
+      expect(r.timedOut).toBeUndefined();
+      // A kill of the group would have reached it by now, leaving it gone or
+      // a zombie.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(processState(pid)).toMatch(/^[^Z]/);
+    } finally {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // Gone.
+      }
+    }
   });
 });
 

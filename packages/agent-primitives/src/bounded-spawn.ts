@@ -64,7 +64,9 @@ export function boundedSpawnOptions(timeoutMs: number): {
  *   at the bound, and `xtrace`, `verbose` and `allexport` would add to the
  *   command's stderr or environment. The command still gets the
  *   variable. (`noexec` there runs nothing at all; no line of the
- *   trampoline can switch it off.)
+ *   trampoline can switch it off. `verbose` prints each line before it
+ *   runs, so with it the first line itself still reaches the command's
+ *   stderr; stdout and the exit status are not affected.)
  * - `unset -f command`: a `/bin/sh` that is bash also imports the functions
  *   exported in its environment (`BASH_FUNC_git%%`), and every name below is
  *   run through `command`, which skips them; `unset` itself cannot be
