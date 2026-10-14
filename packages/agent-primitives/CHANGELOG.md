@@ -27,6 +27,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "not covered" note on a replaced commit graph in `docs/worktree.md` is
   replaced by the description of this check; a shallow repository stays
   listed there.
+
+- `patch`: the git identity lookup (`git rev-parse --absolute-git-dir
+  --git-common-dir`) is bounded through the same wrapper the `worktree`
+  and `drift` commands use (`bounded-spawn.ts`): git runs in a process
+  group of its own, and the `/bin/sh` wrapper starts a watcher inside
+  that group which waits on a pipe the patch process holds and kills the
+  group when the kernel closes it, which happens when the patch process
+  dies even if nothing reaps it, so a patch ended by SIGKILL or SIGHUP
+  while git hangs (a FIFO it opens) leaves no git behind. The 3 second
+  bound, the 64 KiB output bound and their warnings are unchanged, and a
+  git that a signal ends (reported by the wrapper with the shell's
+  status for it, 128 plus the signal number) or that the wrapper cannot
+  find or run (the shell's 127 and 126) is still a failed lookup, never
+  read as an empty answer.
 - `worktree create`, `remove` and `list`: every git call is bounded, so a
   repository git cannot read (a fifo among the refs, which some git
   versions block on; a hook or credential helper waiting for input) ends

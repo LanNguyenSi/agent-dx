@@ -296,8 +296,17 @@ that would replace nothing is `missing`.
   it opens makes it wait), with at most 64 KiB of output, in a process
   group of its own; when it does not end by itself (the time or output
   bound, a signal), that whole group is killed, so no process of it
-  outlives the command (on Windows, which has no process groups, git
-  itself is killed).
+  outlives the command. The lookup is bounded the way `worktree` bounds
+  its git calls (`bounded-spawn.ts`): git is started through a `/bin/sh`
+  wrapper whose watcher waits on a pipe the patch process holds and
+  kills git's group when the kernel closes it, which happens when the
+  patch process dies even if nothing reaps it, so a patch ended by
+  SIGKILL or SIGHUP while git hangs leaves no git behind. A git that a
+  signal ends is reported with the shell's status for it (128 plus the
+  signal number), and one the wrapper cannot find or run with 127 or
+  126; both are failed lookups, never an empty answer. On Windows,
+  which has no process groups, git itself is killed and there is no
+  wrapper.
 - When the identity lookup cannot be made, the name and layout checks
   still apply and the result carries a warning that the identity check
   was skipped, with the cause: git was not run (the `commondir` or `.git`
