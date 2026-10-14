@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 - `patch`: a refused fuzzy match's `changed_characters` no longer lists
-  a plain inner space (` (U+0020) -> `) the tier does not change, and a
+  a plain inner space (U+0020), which the tier does not change, and a
   special space such as U+00A0 shows the plain space it becomes;
   `trailing whitespace` is reported as before (#501, task 6cfe9277).
 
