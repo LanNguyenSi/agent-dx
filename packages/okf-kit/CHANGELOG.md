@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-14
+
 - OKF v0.2 support, step 2 (`sources` mappings and footnote citations, so a
   v0.1 bundle can migrate without losing `sources-fresh`, `docs-for` or
   citation drift checks). A `sources` list may now mix v0.1 path strings
