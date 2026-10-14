@@ -70,6 +70,38 @@ The colon form does not have this problem, but still needs a gate: a candidate `
 
 Like `sources-fresh`, this rule requires a repo root (explicit `--repo-root` or auto-detected): without one, it emits a single bundle-level notice (`citation resolution skipped: not inside a git work tree`) rather than silently reporting nothing.
 
+## Footnote citations (OKF v0.2)
+
+OKF v0.2 replaces the v0.1 `# Citations` section with body footnotes: a reference `[^id]` in the prose resolves to the `sources` mapping entry whose `id` is `id` (see [Sources entries](check-catalog.md#sources-entries-strings-and-v02-mappings)). Two rules cover it, both active for spec v0.2 bundles only (`okf_version: "0.2"` on the root `index.md`, or `check --spec v0.2`), so a v0.1 bundle that uses plain markdown footnotes for its own purposes is unaffected.
+
+**`footnotes-resolve`** (error / warning, needs no repo root):
+
+- every `[^id]` reference in the body must match a `sources` entry with that `id` (error, once per distinct id, however often it is cited);
+- every `sources` entry that has an `id` must be referenced at least once (warning, once per entry);
+- two `sources` entries must not share an `id` (error, once per duplicated id, naming the entry positions).
+
+Grammar: an id is one or more characters other than whitespace and `]`, and ids are case-sensitive (`[^A]` is not `[^a]`). A **definition** is a line that starts (after at most three spaces) with `[^id]:`; its text is the rest of the line plus the indented continuation lines below it. A definition is not a reference to resolve, and a definition alone does not count as referencing its `sources` entry: an entry cited only by a definition no prose points at is reported unreferenced. A `[^id]` inside a definition's text is a reference. Fenced code blocks, inline code spans (a span never crosses a blank line, so one unpaired backtick only affects its own paragraph), HTML comments (`<!-- ... -->`, single- or multi-line) and a backslash-escaped `\[^id]` are not scanned; indented (4-space) code blocks are NOT excluded, because a definition's continuation lines are indented too. YAML normalises a bare numeric `id: 01` to the number 1, so `[^01]` would dangle: quote numeric ids (`id: "01"`). The ids of a mapping that has another defect (no `resource`) still count as declared, so its footnote is not reported dangling on top of the `sources-shape` error. Reserved files (`index.md`, `log.md`) are not scanned.
+
+**Line-precise code citations in v0.2.** Inline `` `path:N-M` `` citations (with `#anchor`) remain an okf-kit extension and are checked as described above under every spec version. In a v0.2 doc the portable way to cite lines is a footnote: the `sources` entry names the file and the footnote's definition text names the lines in backticks.
+
+```markdown
+---
+sources:
+  - id: retry
+    resource: src/client.ts
+---
+
+Requests are retried three times.[^retry]
+
+[^retry]: Retry loop, `L2-4`.
+```
+
+Under spec v0.2, `citations-resolve` takes every backticked line number or range in a footnote definition (`` `42` ``, `` `42-57` ``, or with an `L` prefix: `` `L42` ``, `` `L42-57` ``, `` `L42-L57` ``) and checks it exactly like an inline citation of that file: the same finding ids (`range-exceeds-file`, `inverted-range`, `blank-start-line`, `closing-brace-start-line`, `unreadable-target`), labelled `` `src/client.ts:2-4 (footnote [^retry])` `` so the footnote is named. So a bundle migrated from inline citations keeps its drift detection: the lines moved, the footnote's range now lands on a blank line or past the end, and the finding appears. Limits of the footnote form:
+
+- only the base line checks run; there are no anchors, continuations or short forms in a footnote, and `--require-anchors` does not apply to it;
+- it is checked only when the footnote's `sources` entry has an `id`, a path (not URL) `resource` that stays in the repo root and is an existing file; a missing or escaping resource is `sources-shape`'s finding, and a URL has no lines to check;
+- write the range as its own backticked token. Backticked numbers in a definition are read as line numbers, so keep other numbers out of backticks there; and avoid the shapes the continuation grammar above claims for itself (`` (`N`) ``, `` -`M` ``, `` `:N-M` ``), which are read as continuations of the nearest earlier inline citation instead.
+
 ## Anchor strictness (opt-in, `--require-anchors`)
 
 Everything above is on by default. `--require-anchors` opts into five additional, stricter checks against `citations-resolve`, all `warning`-severity, off unless the flag is passed -- an existing bundle's findings under a plain `check` are byte-for-byte unaffected by this section existing. `--require-anchors` (and its sibling `--require-anchors-allow`) is a CLI flag only; okf-kit has no bundle-level config file today (no `.okf.yml`, no `okf-kit.config`, no frontmatter field), so there is no other way to turn this on. All five checks are also exempt for a citing doc that is a reserved file (`index.md`, `log.md`), the same carve-out `citations-resolve` already gives reserved docs for short-form matching elsewhere: a reserved doc's citations still get the unconditional base checks (`missing-file`, `inverted-range`, `anchor-not-found-in-range`, and so on), just none of the five opt-in ones:

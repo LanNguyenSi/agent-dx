@@ -119,7 +119,8 @@ Modules under `src/`:
 - `rules/`: one file per rule (`sources-fresh.ts` holds both `sources-fresh` and `sources-fresh-future`); `rules/index.ts` registers them in `allRules`.
 - `report.ts`: `summarize`, and the text (`renderText`) and JSON (`renderJson`) output of `check`.
 - `git.ts`: `runGit`, the git child-process wrapper, and `detectRepoRoot`.
-- `util.ts`: frontmatter `sources`/`applies_to` getters, `resolveRepoPath`, and `timestamp` parsing.
+- `util.ts`: frontmatter `sources` (string and v0.2 mapping entries)/`applies_to` getters, `resolveRepoPath`, and `timestamp` parsing.
+- `footnotes.ts`: `scanFootnotes`, the `[^id]` reference and definition scanner shared by `footnotes-resolve` and `citations-resolve`.
 - `links.ts`: `extractMarkdownLinks`, shared by `links-resolve` and `no-absolute-links`.
 - `companions.ts`: `--companion` parsing (`parseCompanions`).
 - `docs-for.ts`: `runDocsFor` and its text and JSON output.

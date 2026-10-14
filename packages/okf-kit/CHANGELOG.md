@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- OKF v0.2 support, step 2 (`sources` mappings and footnote citations, so a
+  v0.1 bundle can migrate without losing `sources-fresh`, `docs-for` or
+  citation drift checks). A `sources` list may now mix v0.1 path strings
+  and v0.2 mappings (`resource` required; optional `id`; `title`, `author`,
+  `usage_count`, `last_modified` are accepted and unread), under either
+  spec version. A mapping `resource` that is not a `scheme://` URL is a
+  repo-relative path resolved per `--repo-root` exactly like a string
+  entry, with the same containment, existence, staleness and `docs-for`
+  behavior; a URL `resource` is skipped for all of them and never fetched.
+  A mapping without a non-empty `resource` is one `sources-shape` error per
+  mapping (the doc's other entries are still checked and assessed); an `id`
+  that is not a non-empty string or number is an error too. The list-level
+  error keeps its exact v0.1 text unless the list contains a mapping. The
+  shared reader is `analyzeSources` in `src/util.ts`; `getValidSources`
+  keeps its `string[]` shape and now returns the path entries of both
+  forms, so `sources-fresh`, `docs-for`, `citations-resolve` and
+  `prose-line-references` need no change for string lists. New rule
+  `footnotes-resolve` (spec v0.2 only): every body `[^id]` must resolve to a
+  `sources` entry with that `id` (error, once per id) and every `sources`
+  `id` must be referenced (warning). A definition line `[^id]: ...`, fenced
+  and inline code and a backslash-escaped `[^id]` are not references; a
+  definition alone does not count as referencing its entry; ids are
+  case-sensitive. Line-precise code citations in v0.2 are written as a
+  footnote whose `sources` entry names the file and whose definition text
+  carries the lines in backticks (`` `L42-57` ``); under v0.2
+  `citations-resolve` checks them like an inline `path:N-M` citation, so
+  drift detection survives migration (inline `path:N-M` with `#anchor`
+  stays an okf-kit extension). A bundle on v0.1 checks exactly as before
+  (full findings snapshot unchanged). See [Check catalog](docs/check-catalog.md#sources-entries-strings-and-v02-mappings)
+  and [Citation resolution](docs/citations.md#footnote-citations-okf-v02).
+
 - OKF v0.2 support, step 1 (spec version + the `generated: { by, at }`
   stamp; v0.2 `sources` mappings and citations are later steps). `check`
   now resolves the spec version a bundle is checked against from the

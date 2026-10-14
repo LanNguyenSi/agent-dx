@@ -6,6 +6,7 @@ import { noAbsoluteLinksRule } from "./no-absolute-links.js";
 import { sourcesShapeRule } from "./sources-shape.js";
 import { sourcesFreshRule, sourcesFreshFutureRule } from "./sources-fresh.js";
 import { generatedShapeRule } from "./generated-shape.js";
+import { footnotesResolveRule } from "./footnotes-resolve.js";
 import { citationsResolveRule } from "./citations-resolve.js";
 import { proseLineReferencesRule } from "./prose-line-references.js";
 import { frontmatterRefsResolveRule } from "./frontmatter-refs-resolve.js";
@@ -29,6 +30,7 @@ export const allRules: Rule[] = [
   sourcesFreshRule,
   sourcesFreshFutureRule,
   generatedShapeRule,
+  footnotesResolveRule,
   citationsResolveRule,
   proseLineReferencesRule,
   frontmatterRefsResolveRule,
@@ -43,6 +45,7 @@ export {
   sourcesFreshRule,
   sourcesFreshFutureRule,
   generatedShapeRule,
+  footnotesResolveRule,
   citationsResolveRule,
   proseLineReferencesRule,
   frontmatterRefsResolveRule,

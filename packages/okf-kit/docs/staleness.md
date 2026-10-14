@@ -19,6 +19,10 @@
 
 STALE findings are warnings, so they are advisory by default; run with `--strict` to fail the build on them.
 
+## Mapping sources (OKF v0.2)
+
+A `sources` entry written as a v0.2 mapping is assessed through its `resource`: a path `resource` gets exactly the verdicts of a string entry in the table above (its last commit against the effective stamp, the re-stamp rule, `untracked by git`), and the `STALE` message names the `resource` text. A URL `resource` (`scheme://`) is skipped entirely, with no finding and no notice, and a mapping without a usable `resource` is left to `sources-shape`. The re-stamp rule compares the doc's stamp value across the commit boundary and does not read `sources` from the historical blob, so mapping and string entries are judged identically on both sides of it. See [Sources entries](check-catalog.md#sources-entries-strings-and-v02-mappings).
+
 ## The effective stamp (`generated.at`, OKF v0.2)
 
 OKF v0.2 replaces the v0.1 `timestamp` with `generated: { by, at }`, where `generated.at` carries the same "last verified" instant and `generated.by` names who or what wrote the doc. Everywhere these two rules read a stamp -- the day-wide staleness comparison, the re-stamp direction check over historical blobs, and `sources-fresh-future`'s clock-skew comparison -- they read the EFFECTIVE stamp: **`generated.at` when the doc has one, else `timestamp`** (the fallback the spec allows consumers). Both sides of a re-stamp comparison use it, so a re-stamp that migrates a stamp between the two keys is judged by instant, not missed: a doc whose last commit moved `timestamp: Jan 2` to `generated: {at: Jan 3}` reads as a forward re-stamp, moving it to `Jan 1` reads as a backwards move, and rewriting it to the same Jan 2 instant through the new key gets the same-instant notice (the stamp's identity carries its key, so the key change is visible). `generated.at` inherits every quirk of `timestamp` handling -- native-YAML-date values, designator-less values (forced UTC in `sources-fresh`), whitespace padding.
