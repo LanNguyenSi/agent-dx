@@ -1,4 +1,3 @@
-import { scanFenceLines } from "./citations-resolve.js";
 import type { Finding, Rule, Severity } from "../types.js";
 
 const RULE_ID = "reserved-files-structure";
@@ -53,6 +52,62 @@ function parseHeading(line: string): Heading | null {
   if (!m) return null;
   const text = (m[2] ?? "").replace(/[ \t]+#+[ \t]*$/, "").trim();
   return { level: m[1].length, text };
+}
+
+// The start of a fence delimiter line: up to 3 leading spaces, then 3 or
+// more backticks or 3 or more tildes. Group 1 is that run of fence
+// characters, group 2 the rest of the line (an opener's info string, or a
+// closer's trailing whitespace). 4+ leading spaces is an indented code
+// block, not a fence, hence the space cap.
+const FENCE_RUN_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+
+/**
+ * Per-line "inside a fenced code block" flags (delimiter lines included),
+ * following the CommonMark fence rules:
+ *  - opener: `FENCE_RUN_RE`, any info string may follow the run; the one
+ *    exception is a backtick fence whose info string contains a backtick,
+ *    which is not a fence at all (a plain paragraph line);
+ *  - closer: up to 3 leading spaces, the SAME character as the opener's run,
+ *    at least as many of them as the opener had, followed by nothing but
+ *    whitespace (only an opener may carry an info string);
+ *  - an unclosed fence runs to the end of the file.
+ *
+ * This is deliberately its own scanner rather than `citations-resolve`'s
+ * `scanFenceLines`, which is stricter than CommonMark there (it rejects any
+ * info string with a space, so `` ``` bash `` would not open a fence and its
+ * closing marker would flip the state of the whole rest of the file); the
+ * reserved files show real documents inside fences and must follow the real
+ * rules. A fence line is neither a heading nor prose here, and the callers
+ * only ever ask "is this line fence content or a delimiter", so flat flags
+ * are all this returns.
+ */
+function scanFences(lines: string[]): boolean[] {
+  const fences: boolean[] = [];
+  let openRun: string | undefined;
+  for (let i = 0; i < lines.length; i++) {
+    const m = FENCE_RUN_RE.exec(lines[i] ?? "");
+    if (openRun === undefined) {
+      const backtickInfoWithBacktick =
+        m !== null && m[1][0] === "`" && m[2].includes("`");
+      if (m !== null && !backtickInfoWithBacktick) {
+        openRun = m[1];
+        fences.push(true);
+      } else {
+        fences.push(false);
+      }
+      continue;
+    }
+    if (
+      m !== null &&
+      m[1][0] === openRun[0] &&
+      m[1].length >= openRun.length &&
+      m[2].trim() === ""
+    ) {
+      openRun = undefined;
+    }
+    fences.push(true);
+  }
+  return fences;
 }
 
 /** The epoch (ms) of `text` when it is a real calendar ISO date, else null. */
@@ -145,15 +200,16 @@ function checkLog(
   const severity: Severity = specVersion === "v0.2" ? "error" : "warning";
   const offset = bodyLineOffset(raw, body);
   const lines = maskHtmlComments(body).split(/\r?\n/);
-  // One shared fence state machine (see `scanFenceLines`): delimiter lines and
-  // the lines between them all read `fenced`, and a fence closes only on the
-  // marker that opened it, so a `~~~` line inside a ``` block stays content.
-  const fenceStates = scanFenceLines(lines);
+  // One fence scan for the whole body (see `scanFences`): delimiter lines and
+  // the lines between them all read fenced, and a fence closes only on a run
+  // of the same character that is at least as long as the opener's, so a
+  // `~~~` line inside a ``` block stays content.
+  const fences = scanFences(lines);
   const validDates: { epoch: number; text: string; line: number }[] = [];
   let perHeadingFindings = 0;
 
   for (let i = 0; i < lines.length; i++) {
-    if (fenceStates[i].fenced) continue;
+    if (fences[i]) continue;
 
     const heading = parseHeading(lines[i]);
     if (!heading) continue;
@@ -228,10 +284,10 @@ function checkIndex(file: string, raw: string, body: string): Finding[] {
   const offset = bodyLineOffset(raw, body);
   const masked = maskHtmlComments(body);
   const lines = masked.split(/\r?\n/);
-  // Same fence state machine as `checkLog` (see `scanFenceLines`): every line
-  // of a fenced block, delimiters included, reads `fenced`, and a fence
-  // closes only on the marker that opened it.
-  const fenceStates = scanFenceLines(lines);
+  // Same fence scan as `checkLog` (see `scanFences`): every line of a fenced
+  // block, delimiters included, reads fenced, and a fence closes only on a
+  // run of the same character that is at least as long as the opener's.
+  const fences = scanFences(lines);
   let i = 0;
 
   // True when `index` is not a line that continues the block currently open:
@@ -240,7 +296,7 @@ function checkIndex(file: string, raw: string, body: string): Finding[] {
   // (an entry never lives inside a prose paragraph).
   const closesBlock = (index: number, forProse: boolean): boolean => {
     if (index >= lines.length) return true;
-    if (fenceStates[index].fenced) return true;
+    if (fences[index]) return true;
     const trimmed = lines[index].trim();
     if (trimmed === "") return true;
     if (parseHeading(lines[index])) return true;
@@ -249,7 +305,7 @@ function checkIndex(file: string, raw: string, body: string): Finding[] {
   };
 
   while (i < lines.length) {
-    if (fenceStates[i].fenced) {
+    if (fences[i]) {
       i++;
       continue;
     }

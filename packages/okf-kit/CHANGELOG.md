@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case-sensitive. Line-precise code citations in v0.2 are written as a
   footnote whose `sources` entry names the file and whose definition text
   carries the lines in backticks (`` `L42-57` ``); under v0.2
-  `citations-resolve` checks them like an inline `path:N-M` citation,   so
+  `citations-resolve` checks them like an inline `path:N-M` citation, so
   drift detection survives migration (inline `path:N-M` with `#anchor`
   stays an okf-kit extension). A bundle on v0.1 checks exactly as before
   under the rules this step changed (the full findings snapshot is

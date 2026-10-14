@@ -426,7 +426,7 @@ type FenceLineState = {
  * only needs one line's state (see `isFenceOpeningLine`) can safely ignore
  * the rest of the array without re-deriving the logic itself.
  */
-export function scanFenceLines(lines: string[]): FenceLineState[] {
+function scanFenceLines(lines: string[]): FenceLineState[] {
   const states: FenceLineState[] = [];
   let fenceMarker: string | undefined;
   for (let i = 0; i < lines.length; i++) {

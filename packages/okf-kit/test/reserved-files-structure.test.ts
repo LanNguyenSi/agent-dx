@@ -208,13 +208,152 @@ describe("reserved-files-structure", () => {
   it("fences: a ~~~ line inside a ``` block stays content and never closes the fence", () => {
     // The old per-rule toggle closed the ``` block on the ~~~ line, which
     // then exposed the heading-shaped line in log.md (and the prose-shaped
-    // line in index.md) as real content. One shared fence state machine
-    // (citations-resolve's `scanFenceLines`) closes a fence only on the
-    // marker that opened it.
+    // line in index.md) as real content. The rule's own fence scanner closes
+    // a fence only on a run of the same character as the opener.
     expect(
       reservedFilesStructureRule.run(
         loadFixture("reserved-structure-fence-marker"),
       ),
     ).toEqual([]);
+  });
+
+  it("fences: a ``` bash opener with an info string is a real fence (log.md)", () => {
+    // CommonMark allows an info string with spaces (```` ``` bash ````); the
+    // scanner must open a fence here, or the closing ``` would read as a new
+    // opener and flip the fence state of the rest of the file. Exactly one
+    // finding: line 7 (extra text after the date); line 4 is fence content.
+    const log =
+      "## 2026-01-02\n\n``` bash\n## not a heading\n```\n\n## 2026-01-01 bad\n";
+    const findings = reservedFilesStructureRule.run(
+      inlineBundle({ "log.md": log }, "v0.2"),
+    );
+    expect(findings).toHaveLength(1);
+    expect(lines(findings)).toEqual([7]);
+    expect(findings[0].message).toContain("`## 2026-01-01 bad`");
+  });
+
+  it("fences: a ```ts title fence with attributes is a real fence (index.md)", () => {
+    const index = [
+      "# Bundle index",
+      "",
+      '```ts title="x"',
+      "free prose inside the fence",
+      "- plain bullet inside the fence",
+      "```",
+      "",
+      "- [Concept A](concept-a.md)",
+      "",
+    ].join("\n");
+    expect(
+      reservedFilesStructureRule.run(inlineBundle({ "index.md": index })),
+    ).toEqual([]);
+  });
+
+  it("fences: a 4-backtick fence is closed only by a run of 4, not by 3", () => {
+    const log = [
+      "## 2026-01-01",
+      "",
+      "````",
+      "```",
+      "## 2026-01-01 bad",
+      "````",
+      "",
+    ].join("\n");
+    expect(
+      reservedFilesStructureRule.run(inlineBundle({ "log.md": log }, "v0.2")),
+    ).toEqual([]);
+  });
+
+  it("fences: a ~~~ fence is closed only by ~~~, not by ```", () => {
+    const log = [
+      "## 2026-01-01",
+      "",
+      "~~~",
+      "```",
+      "## 2026-01-01 bad",
+      "~~~",
+      "",
+    ].join("\n");
+    expect(
+      reservedFilesStructureRule.run(inlineBundle({ "log.md": log }, "v0.2")),
+    ).toEqual([]);
+  });
+
+  it("fences: a ``` bash line inside an open ``` fence does not close it", () => {
+    // A closing fence never carries an info string, so the ```` ``` bash ````
+    // line is fence content and the heading-shaped line after it too.
+    const log = [
+      "## 2026-01-01",
+      "",
+      "```",
+      "``` bash",
+      "## 2026-01-01 bad",
+      "```",
+      "",
+    ].join("\n");
+    expect(
+      reservedFilesStructureRule.run(inlineBundle({ "log.md": log }, "v0.2")),
+    ).toEqual([]);
+  });
+
+  it("fences: a backtick line with a backtick in its info string is not an opener", () => {
+    // `` ``` info ` with a backtick ``` `` is not a fence under CommonMark, so
+    // the heading line after it is real content and must be reported.
+    const log = [
+      "## 2026-01-02",
+      "",
+      "``` info ` with a backtick ```",
+      "## 2026-01-01 bad",
+      "",
+    ].join("\n");
+    const findings = reservedFilesStructureRule.run(
+      inlineBundle({ "log.md": log }, "v0.2"),
+    );
+    expect(findings).toHaveLength(1);
+    expect(lines(findings)).toEqual([4]);
+  });
+
+  it("fences: an unclosed fence runs to the end of the file", () => {
+    const log = ["## 2026-01-01", "", "``` bash", "## 2026-01-01 bad"].join(
+      "\n",
+    );
+    expect(
+      reservedFilesStructureRule.run(inlineBundle({ "log.md": log }, "v0.2")),
+    ).toEqual([]);
+  });
+
+  it("fences: a fence directly after a list item or prose closes the block", () => {
+    // A link entry followed with no blank line by a fence: without the fence
+    // check the list walk continues into the fence and reports the plain-text
+    // bullet inside it as free prose.
+    const afterItem = [
+      "# Bundle index",
+      "",
+      "- [Concept A](concept-a.md)",
+      "```",
+      "- plain bullet inside the fence",
+      "```",
+      "",
+    ].join("\n");
+    expect(
+      reservedFilesStructureRule.run(inlineBundle({ "index.md": afterItem })),
+    ).toEqual([]);
+
+    // Same for a prose paragraph: the paragraph is one warning at its own
+    // line, and the prose line inside the fence adds no second finding.
+    const afterProse = [
+      "# Bundle index",
+      "",
+      "A prose paragraph running straight into a fence.",
+      "```",
+      "plain prose inside the fence",
+      "```",
+      "",
+    ].join("\n");
+    const findings = reservedFilesStructureRule.run(
+      inlineBundle({ "index.md": afterProse }),
+    );
+    expect(findings).toHaveLength(1);
+    expect(lines(findings)).toEqual([3]);
   });
 });
