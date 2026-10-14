@@ -270,12 +270,23 @@ export function renderProbeSummary(
     rows.reduce((n, r) => n + r.length + 1, 0);
   // Drop the note before the totals when even the tail does not fit.
   while (tail.length > 1 && size(tail) > maxChars) tail.pop();
-  const marker = (omitted: number): string =>
-    `... ${omitted} more mutant line${omitted === 1 ? "" : "s"} omitted (-m ${maxChars} characters); ${
-      input.fullResult !== undefined
-        ? `raise -m or read the full result: ${input.fullResult}`
-        : "raise -m (no full result file was written)"
-    }`;
+  const markerWith = (omitted: number, hint: string): string =>
+    `... ${omitted} more mutant line${omitted === 1 ? "" : "s"} omitted (-m ${maxChars} characters); ${hint}`;
+  // The path joins the marker only when the marker with it fits beside the
+  // tail even with no mutant line kept: a long path must not push the
+  // summary past -m. Otherwise a short hint says the path did not fit.
+  const pathHint =
+    input.fullResult !== undefined
+      ? `raise -m or read the full result: ${input.fullResult}`
+      : undefined;
+  const hint =
+    pathHint !== undefined &&
+    markerWith(lines.length, pathHint).length + 1 + size(tail) <= maxChars
+      ? pathHint
+      : input.fullResult !== undefined
+        ? "raise -m; the full result path did not fit"
+        : "raise -m (no full result file was written)";
+  const marker = (omitted: number): string => markerWith(omitted, hint);
   let kept = lines.length;
   if (size(lines) + size(tail) > maxChars) {
     while (

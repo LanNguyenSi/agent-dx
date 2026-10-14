@@ -503,6 +503,32 @@ describe("summary helpers", () => {
     expect(withoutFile).not.toContain("read the full result");
   });
 
+  it("renderProbeSummary drops a long full result path rather than exceed -m", () => {
+    const results = Array.from({ length: 40 }, (_, index) => ({
+      index,
+      mutant: { file: "src/some/long/path/file.ts", line: index + 1 },
+      mutation_probe: { result: "killed", expectation: "met" },
+      test: { logPath: "/logs/exec-123.log" },
+    }));
+    const plan = { results, summary: { total: 40, killed: 40, met: 40 } };
+    const longPath = `/var/folders/8v/${"x".repeat(40)}/T/agent-primitives/${"y".repeat(36)}/result-full-${"z".repeat(36)}.json`;
+    for (const max of [250, 300]) {
+      const text = renderProbeSummary(
+        { status: "killed", plan, fullResult: longPath },
+        max,
+      );
+      expect(text.length, text).toBeLessThanOrEqual(max);
+      expect(text).toContain("raise -m; the full result path did not fit");
+      expect(text).not.toContain(longPath);
+    }
+    const roomy = renderProbeSummary(
+      { status: "killed", plan, fullResult: longPath },
+      1200,
+    );
+    expect(roomy.length).toBeLessThanOrEqual(1200);
+    expect(roomy).toContain(`raise -m or read the full result: ${longPath}`);
+  });
+
   it("renderProbeSummary keeps the totals line and drops the note under a tiny maxChars", () => {
     const planInput = {
       status: "usage_error",
