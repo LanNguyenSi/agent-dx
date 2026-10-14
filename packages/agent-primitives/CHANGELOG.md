@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `patch`: the missing-edit hint reports `new_text_at_line` ("edit
+  applied already?") only for a distinctive `new`: one that is not part
+  of `old` and has at least 8 non-whitespace characters; a short or
+  common `new` such as `x` no longer triggers it (#501, task 5fc22752).
+
 - `worktree remove --delete-branch` now adds a warning when it deletes a
   branch whose merge verdict is `no` or `unknown` (without
   `--require-merged`, or with `--force` overriding it), naming the branch,

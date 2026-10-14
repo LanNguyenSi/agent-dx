@@ -403,7 +403,10 @@ A `missing` edit carries `hint`:
   differing lines with whitespace made visible (a space as `·`, a tab as
   `→`, any other whitespace or invisible character as `⟨U+XXXX⟩`).
 - `new_text_at_line`: set when `new` already occurs in the file, which
-  usually means the edit was applied before.
+  usually means the edit was applied before. Only a distinctive `new`
+  counts: it must not be part of `old` and must have at least 8
+  non-whitespace characters, since a short text such as `x` occurs
+  almost anywhere.
 - `message`: one line summing up the above.
 
 An `ambiguous` edit lists its `match_lines` and the tier they were
