@@ -127,8 +127,12 @@ export interface SummaryInput {
   };
 }
 
+// The last alternative is PHPUnit's numbered failure line,
+// `1) Ns\Class::testMethod`: a number, `)`, a class name (namespace
+// separators allowed) and `::` before the method. PHPUnit's closing
+// `FAILURES!` and `Tests: ..., Failures: 1.` lines name no test.
 const FAILURE_LINE =
-  /^\s*(FAIL\b|FAILED\b|not ok\b|--- FAIL\b|[✗×✖●]|(?:\w*Error|AssertionError)\b)/;
+  /^\s*(FAIL\b|FAILED\b|not ok\b|--- FAIL\b|[✗×✖●]|(?:\w*Error|AssertionError)\b|\d+\) [\w\\]+::\w+)/;
 
 /** The first line of the test's output tails that looks like a failing
  * test, else `-`. A heuristic over free text: the envelope has no

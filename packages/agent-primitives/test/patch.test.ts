@@ -14,7 +14,11 @@ import {
   applyReplacementsPreservingUnchangedLines,
   resolveFileEdits,
 } from "../src/patch/engine.js";
-import { notFoundHint, visualizeWhitespace } from "../src/patch/hint.js";
+import {
+  fuzzySideEffectHint,
+  notFoundHint,
+  visualizeWhitespace,
+} from "../src/patch/hint.js";
 import { statusClass } from "../src/envelope.js";
 import { buildSpawnEnv, CLI_PATH, spawnCli } from "./helpers/spawn-cli.js";
 
@@ -610,6 +614,43 @@ describe("patch: hints", () => {
     expect(h.message).toContain("already in the file at line 2");
   });
 
+  it("does not say the edit was applied for a short new text", () => {
+    const h = notFoundHint("let x = 1;\nfoo(x);\n", "not here", "x");
+    expect(h.new_text_at_line).toBeUndefined();
+    expect(h.message).not.toContain("already in the file");
+  });
+
+  it("does not say the edit was applied when new is part of old", () => {
+    const h = notFoundHint(
+      "return value + 1;\n",
+      "return value + 1; // gone",
+      "return value + 1;",
+    );
+    expect(h.new_text_at_line).toBeUndefined();
+    expect(h.message).not.toContain("already in the file");
+  });
+
+  it("needs eight non-whitespace characters in the new text", () => {
+    const content = "a\nab cd efg\nab cd efgh\n";
+    expect(
+      notFoundHint(content, "not here", "ab cd efg").new_text_at_line,
+    ).toBeUndefined();
+    expect(
+      notFoundHint(content, "not here", "ab cd efgh").new_text_at_line,
+    ).toBe(3);
+  });
+
+  it("still names the line of a distinctive multi-line new text", () => {
+    const content = "start\nconst total = sum(items);\nreturn total;\nend\n";
+    const h = notFoundHint(
+      content,
+      "const total = 0;",
+      "const total = sum(items);\nreturn total;",
+    );
+    expect(h.new_text_at_line).toBe(2);
+    expect(h.message).toContain("already in the file at line 2");
+  });
+
   it("finds no candidate in unrelated content", () => {
     const h = notFoundHint("zzz\nqqq\n", "completely different", "x");
     expect(h.candidates).toEqual([]);
@@ -1082,6 +1123,39 @@ describe("patch: fuzzy matches change nothing outside the match", () => {
     expect(hint?.exact_text).toBe("run(‘1’)");
     expect(hint?.lines[0].line).toBe(1);
     expect(read(dir, "a.js")).toBe(before);
+  });
+
+  it("lists only the characters the tier rewrites, not inner plain spaces", () => {
+    const content = "say(“hi”) – run(‘1’) and\u00A0more  \n";
+    const hint = fuzzySideEffectHint(
+      content,
+      { start: 1, end: 1 },
+      "unicode",
+      "run('1')",
+    );
+    const chars = hint.changed_characters;
+    expect(chars).toEqual(
+      expect.arrayContaining([
+        '“ (U+201C) -> "',
+        '” (U+201D) -> "',
+        "‘ (U+2018) -> '",
+        "’ (U+2019) -> '",
+        "– (U+2013) -> -",
+        "\u00A0 (U+00A0) ->  ",
+        "trailing whitespace",
+      ]),
+    );
+    expect(chars.filter((c) => c.includes("U+0020"))).toEqual([]);
+  });
+
+  it("reports no space for a trailing_whitespace tier line with inner spaces", () => {
+    const hint = fuzzySideEffectHint(
+      "a b c   \n",
+      { start: 1, end: 1 },
+      "trailing_whitespace",
+      "a b c",
+    );
+    expect(hint.changed_characters).toEqual(["trailing whitespace"]);
   });
 
   it("refuses when NFKC would change a superscript or fullwidth text outside the match", () => {
