@@ -13,6 +13,14 @@
  * The own group also means the child has no controlling terminal (libuv
  * starts a detached child in a new session), so a prompt that git or ssh
  * would put on the terminal fails instead of waiting for someone to answer.
+ *
+ * It also means that no signal sent to the caller's process group reaches
+ * the child: when the caller is killed (SIGKILL, SIGHUP, a harness timeout),
+ * a child blocked on a fifo would run on with nobody left to enforce the
+ * bound. So the child is started through `boundedCommand`, a `/bin/sh`
+ * trampoline that runs a parent-death watcher inside the child's group: when
+ * the calling process is gone, the watcher kills the group, within half a
+ * second.
  */
 
 /** The spawn options that bound a run to `timeoutMs`. */
@@ -25,6 +33,42 @@ export function boundedSpawnOptions(timeoutMs: number): {
     timeout: timeoutMs,
     killSignal: "SIGKILL",
     detached: process.platform !== "win32",
+  };
+}
+
+/**
+ * The watcher half of the trampoline runs in a subshell with no stdin, stdout
+ * or stderr (so it never holds the caller's pipes): it polls the caller's pid
+ * every half second and, once the caller is gone, kills its own process group,
+ * which is the child's group. The command itself runs in the foreground, so
+ * its stdin, stdout, stderr, environment and exit status pass through
+ * unchanged; the watcher is stopped when the command ends. A `sleep` that
+ * cannot be run ends the watcher without killing anything.
+ */
+const TRAMPOLINE = [
+  "p=$1; shift",
+  "(trap 'kill $sp 2>/dev/null; exit 0' TERM;" +
+    ' while kill -0 "$p" 2>/dev/null; do' +
+    " /bin/sleep 0.5 & sp=$!; wait $sp || exit 0; done; kill -KILL 0)" +
+    " </dev/null >/dev/null 2>&1 & w=$!",
+  '"$@"; s=$?',
+  'kill "$w" 2>/dev/null',
+  "exit $s",
+].join("\n");
+
+/**
+ * `command args` run through the parent-death trampoline (see above) on
+ * platforms that have `/bin/sh`; unchanged on Windows, where the child has no
+ * group of its own either.
+ */
+export function boundedCommand(
+  command: string,
+  args: readonly string[],
+): { command: string; args: string[] } {
+  if (process.platform === "win32") return { command, args: [...args] };
+  return {
+    command: "/bin/sh",
+    args: ["-c", TRAMPOLINE, "sh", String(process.pid), command, ...args],
   };
 }
 

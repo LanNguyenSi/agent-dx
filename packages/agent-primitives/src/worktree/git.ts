@@ -2,6 +2,7 @@ import { spawnSync, type SpawnSyncOptions } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import {
+  boundedCommand,
   boundedSpawnOptions,
   endProcessGroup,
   isTimeoutError,
@@ -99,7 +100,7 @@ export const FETCH_TIMEOUT_MS = 120_000;
 /** The bound of the `gh` lookup of a merged pull request. */
 export const GH_TIMEOUT_MS = 30_000;
 
-/** Test seam, undocumented as a CLI feature: a number of milliseconds that
+/** Documented as a test seam only: a number of milliseconds that
  * shortens every bound above to at most that value. It can only shorten (a
  * value at or above a bound, or one that is not a positive integer, changes
  * nothing), so setting it can make the commands refuse sooner but never wait
@@ -1242,7 +1243,8 @@ export interface GhRun {
  * with it; `undefined` when it cannot be started. */
 export function runGh(cwd: string, args: readonly string[]): GhRun | undefined {
   const boundMs = effectiveBoundMs(GH_TIMEOUT_MS);
-  const r = spawnSync("gh", [...args], {
+  const run = boundedCommand("gh", args);
+  const r = spawnSync(run.command, run.args, {
     cwd,
     encoding: "utf8",
     env: withoutRepoSelectionEnv(),
@@ -1253,6 +1255,9 @@ export function runGh(cwd: string, args: readonly string[]): GhRun | undefined {
     return { status: null, stdout: "", stderr: "", timedOut: true };
   }
   if (r.error !== undefined) return undefined;
+  // The trampoline's shell could not find or run `gh` (127, 126), which is
+  // how a missing `gh` shows now that it is not the spawned file itself.
+  if (r.status === 127 || r.status === 126) return undefined;
   return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
 

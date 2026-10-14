@@ -41,12 +41,17 @@ const GIT_ENV: NodeJS.ProcessEnv = {
   GIT_COMMITTER_EMAIL: "test@example.com",
 };
 
-vi.setConfig({ testTimeout: 90_000 });
+vi.setConfig({ testTimeout: 90_000, maxConcurrency: 10 });
 
-/** The bound every case runs with, in milliseconds. */
-const SHORT_BOUND_MS = 2000;
+/** The bound every CLI case runs with, in milliseconds. It applies to the
+ * healthy calls the stand-in passes on as well, so it is far above what a
+ * healthy git needs even on a loaded machine; the hung call is simply waited
+ * out. */
+const SHORT_BOUND_MS = 6000;
 /** How long a hung stand-in stays asleep if nothing kills it. */
-const HANG_SECONDS = 60;
+const HANG_SECONDS = 120;
+/** How long a slow stand-in delays one call that must still finish. */
+const SLOW_SECONDS = 2;
 /** The most a spawned CLI may run in a case before it is killed. */
 const CLI_LIMIT_MS = 60_000;
 
@@ -142,6 +147,10 @@ interface Hang {
   match: string;
   nth?: number;
   exact?: boolean;
+  /** Instead of waiting for its `sleep`, the stand-in prints nothing and
+   * exits 0 at once while the `sleep` keeps the inherited pipes: a git that
+   * is done but not finished as far as the pipes go. */
+  exitsZero?: boolean;
 }
 
 interface Hanging {
@@ -183,7 +192,7 @@ function hangingGit(hang: Hang, hangSeconds = HANG_SECONDS): Hanging {
       `      echo $$ >> '${pidFile}'`,
       `      /bin/sleep ${String(hangSeconds)} &`,
       `      echo $! >> '${pidFile}'`,
-      `      wait`,
+      hang.exitsZero === true ? `      exit 0` : `      wait`,
       `    fi`,
       `    ;;`,
       `esac`,
@@ -368,7 +377,7 @@ async function expectKilled(r: CliResult, hung: Hanging): Promise<void> {
   await expectGone(pids);
 }
 
-const TIMEOUT_TEXT = "did not finish within 2 s and was stopped";
+const TIMEOUT_TEXT = `did not finish within ${String(SHORT_BOUND_MS / 1000)} s and was stopped`;
 
 // ---------------------------------------------------------------------------
 // remove
@@ -406,6 +415,12 @@ const REMOVE_REFUSALS: RemoveRow[] = [
   {
     name: "dirty check: status",
     hang: { match: "gc.auto=0 status --porcelain" },
+    reason: "status_unknown",
+    message: TIMEOUT_TEXT,
+  },
+  {
+    name: "dirty check: status exits 0 while a descendant holds the pipes",
+    hang: { match: "gc.auto=0 status --porcelain", exitsZero: true },
     reason: "status_unknown",
     message: TIMEOUT_TEXT,
   },
@@ -488,6 +503,12 @@ const REMOVE_REFUSALS: RemoveRow[] = [
     message: TIMEOUT_TEXT,
   },
   {
+    name: "unpushed check: rev-list exits 0 while a descendant holds the pipes",
+    hang: { match: "gc.auto=0 rev-list HEAD --not", exitsZero: true },
+    reason: "unpushed_state_unknown",
+    message: TIMEOUT_TEXT,
+  },
+  {
     name: "ignored links: ls-files",
     hang: { match: "gc.auto=0 ls-files" },
     reason: "git_timeout",
@@ -551,7 +572,9 @@ describe("worktree remove: a git call that does not finish ends in a refusal", (
       await expectKilled(r, hung);
       expect(r.code, r.stdout + r.stderr).toBe(2);
       expect(r.json.reason, r.stdout).toBe("merge_state_unknown");
-      expect(r.json.message).toContain("gh pr list did not finish within 2 s");
+      expect(r.json.message).toContain(
+        `gh pr list did not finish within ${String(SHORT_BOUND_MS / 1000)} s`,
+      );
       expect(listed(f.repo)).toContain(wt);
     },
   );
@@ -649,7 +672,10 @@ describe("worktree remove: a git call that does not finish ends in a refusal", (
     const f = makeFixture();
     const wt = addWorktree(f, "feat");
     // One second on the status, under the 2 s bound.
-    const slow = hangingGit({ match: "gc.auto=0 status --porcelain" }, 1);
+    const slow = hangingGit(
+      { match: "gc.auto=0 status --porcelain" },
+      SLOW_SECONDS,
+    );
     const r = await runCli(f.work, ["remove", wt, ...REMOVE_FLAGS], {
       ...boundEnv(),
       PATH: slow.PATH,
@@ -837,7 +863,7 @@ describe("worktree create: a git call that does not finish ends in a refusal or 
   it.concurrent("a slow but finishing fetch is not refused", async () => {
     const f = makeFixture();
     const target = path.join(f.base, "wt-new");
-    const slow = hangingGit({ match: "gc.auto=0 fetch " }, 1);
+    const slow = hangingGit({ match: "gc.auto=0 fetch " }, SLOW_SECONDS);
     const r = await runCli(
       f.work,
       ["create", "--repo", f.repo, "--branch", "b-new", "--path", target],
@@ -957,6 +983,120 @@ describe("worktree list: a git call that does not finish ends the report", () =>
 });
 
 // ---------------------------------------------------------------------------
+// the CLI is signalled while git hangs
+
+interface LiveCli {
+  child: ReturnType<typeof spawn>;
+  closed: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
+}
+
+/** The built CLI in a process group of its own, left running so that a case
+ * can signal it. The group is killed by the case's `finally`. */
+function startCli(
+  cwd: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+): LiveCli {
+  const child = spawn(
+    process.execPath,
+    [CLI_PATH, "-C", cwd, "worktree", ...args],
+    {
+      env: buildSpawnEnv({ ...GIT_ENV, ...env }),
+      stdio: ["ignore", "ignore", "ignore"],
+      detached: true,
+    },
+  );
+  const closed = new Promise<{
+    code: number | null;
+    signal: NodeJS.Signals | null;
+  }>((resolve, reject) => {
+    child.on("error", reject);
+    child.on("close", (code, signal) => {
+      resolve({ code, signal });
+    });
+  });
+  return { child, closed };
+}
+
+/** Waits until the stand-in has hung (it recorded its two pids). */
+async function untilHung(hung: Hanging, withinMs = 30_000): Promise<number[]> {
+  const until = Date.now() + withinMs;
+  while (Date.now() < until) {
+    const pids = hung.pids();
+    if (pids.length === 2) return pids;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  throw new Error("the git call never hung");
+}
+
+function killGroup(live: LiveCli, signal: NodeJS.Signals): void {
+  try {
+    if (live.child.pid !== undefined) process.kill(-live.child.pid, signal);
+  } catch {
+    // Already gone.
+  }
+}
+
+describe("a CLI that is signalled while its git hangs", () => {
+  // git runs in a group of its own, so a signal to the CLI's group never
+  // reaches it. A watcher in git's group ends it once the CLI is gone.
+  it.each(["SIGKILL", "SIGHUP"] as const)(
+    "%s of the CLI's group does not leave git behind",
+    async (signal) => {
+      const f = makeFixture();
+      const hung = hangingGit({ match: "gc.auto=0 worktree list" });
+      // The real bounds: the bound does not end the hang here.
+      const live = startCli(f.work, ["list", "--repo", f.repo], {
+        PATH: hung.PATH,
+      });
+      let pids: number[] = [];
+      try {
+        pids = await untilHung(hung);
+        expect(isAlive(live.child.pid ?? 0)).toBe(true);
+        killGroup(live, signal);
+        const ended = await live.closed;
+        expect(ended.code === null ? ended.signal : ended.code).not.toBeNull();
+        // The stand-in is in the group of its own: still there right now,
+        // gone within the watcher's interval and a margin.
+        await expectGone(pids);
+      } finally {
+        killGroup(live, "SIGKILL");
+        for (const pid of pids) {
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch {
+            // Gone.
+          }
+        }
+      }
+    },
+  );
+
+  it("SIGTERM waits for the call to end, here at its bound, and leaves nothing", async () => {
+    const f = makeFixture();
+    const hung = hangingGit({ match: "gc.auto=0 worktree list" });
+    const live = startCli(f.work, ["list", "--repo", f.repo], {
+      ...boundEnv(),
+      PATH: hung.PATH,
+    });
+    let pids: number[] = [];
+    try {
+      pids = await untilHung(hung);
+      killGroup(live, "SIGTERM");
+      await new Promise((r) => setTimeout(r, 1000));
+      // The handler cannot run while the CLI waits for git, and git does not
+      // see the signal: both are still there a second later.
+      expect(live.child.exitCode).toBeNull();
+      expect(pids.every(isAlive)).toBe(true);
+      await live.closed;
+      await expectGone(pids);
+    } finally {
+      killGroup(live, "SIGKILL");
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // a fifo among the refs
 
 /** Whether this host can create a fifo. */
@@ -991,7 +1131,7 @@ describe("worktree remove: a fifo among the refs", () => {
       const r = await runCli(
         f.work,
         ["remove", wt, "--delete-branch"],
-        boundEnv({ [GIT_BOUND_ENV]: "3000" }),
+        boundEnv({ [GIT_BOUND_ENV]: "8000" }),
         30_000,
       );
       expect(r.timedOut, r.stdout + r.stderr).toBe(false);
@@ -1041,7 +1181,10 @@ describe("the bound", () => {
 
 /** A directory with a `git` that starts a background `sleep` (holding the
  * pipes it inherited) and waits for it; it records both pids. */
-function sleepingGitDir(): { dir: string; pids: () => number[] } {
+function sleepingGitDir(exitsZero = false): {
+  dir: string;
+  pids: () => number[];
+} {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-primitives-slow-"));
   tmpDirs.push(dir);
   const pidFile = path.join(dir, "pids");
@@ -1052,7 +1195,7 @@ function sleepingGitDir(): { dir: string; pids: () => number[] } {
       `echo $$ >> '${pidFile}'`,
       `/bin/sleep ${String(HANG_SECONDS)} &`,
       `echo $! >> '${pidFile}'`,
-      `wait`,
+      exitsZero ? `exit 0` : `wait`,
       ``,
     ].join("\n"),
     { mode: 0o755 },
@@ -1100,6 +1243,77 @@ describe("the bounded git runner", () => {
     expect(r.status).toBeNull();
     expect(slow.pids()).toHaveLength(2);
     await expectGone(slow.pids());
+  });
+
+  it("kills the group of a git that exited 0 while a descendant holds the pipes", async () => {
+    const slow = sleepingGitDir(true);
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "agent-primitives-cwd-"));
+    tmpDirs.push(cwd);
+    const r = runGit(cwd, ["status"], { PATH: slow.dir }, 700);
+    // The shell the trampoline runs git in has exited 0 by the time the
+    // bound passes: no signal, a status of 0, and still a timeout.
+    expect(r.timedOut).toBe(true);
+    expect(r.status).toBe(0);
+    expect(r.error).toBeDefined();
+    expect(slow.pids()).toHaveLength(2);
+    await expectGone(slow.pids());
+  });
+
+  it("does the same for the bytes variant", async () => {
+    const slow = sleepingGitDir(true);
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "agent-primitives-cwd-"));
+    tmpDirs.push(cwd);
+    const r = runGitBytes(
+      cwd,
+      ["config", "--file", "-"],
+      { PATH: slow.dir },
+      Buffer.from("[a]\n"),
+      700,
+    );
+    expect(r.timedOut).toBe(true);
+    expect(r.status).toBe(0);
+    expect(slow.pids()).toHaveLength(2);
+    await expectGone(slow.pids());
+  });
+
+  it("passes git's exit status, stdout and stdin through the trampoline", () => {
+    const f = makeFixture();
+    const env = { PATH: process.env.PATH, ...GIT_ENV };
+    const ok = runGit(
+      f.repo,
+      ["rev-parse", "--is-inside-work-tree"],
+      env,
+      30_000,
+    );
+    expect(ok).toMatchObject({ status: 0, stdout: "true\n" });
+    expect(ok.timedOut).toBeUndefined();
+    const failed = runGit(
+      f.repo,
+      ["rev-parse", "--verify", "nope"],
+      env,
+      30_000,
+    );
+    expect(failed.status).toBe(128);
+    expect(failed.stderr).toContain("fatal");
+    // `git config --file -` reads its stdin: the bytes come through, a NUL
+    // included, and the exit status is git's own.
+    const config = runGitBytes(
+      f.repo,
+      ["config", "--file", "-", "--null", "--get-all", "a.b"],
+      env,
+      Buffer.from("[a]\n\tb = one\n\tb = two\n"),
+      30_000,
+    );
+    expect(config.status).toBe(0);
+    expect(config.stdout.toString("utf8")).toBe("one\0two\0");
+    const none = runGitBytes(
+      f.repo,
+      ["config", "--file", "-", "--get-all", "a.c"],
+      env,
+      Buffer.from("[a]\n\tb = one\n"),
+      30_000,
+    );
+    expect(none.status).toBe(1);
   });
 
   it("leaves a run without a bound as it was", () => {
@@ -1214,10 +1428,10 @@ describe("git() in a worktree command", () => {
     const wt = addWorktree(f, "feat", true);
     const hung = hangingGit({ match: "gc.auto=0 for-each-ref" });
     const r = withPath(hung.PATH, () =>
-      withBound("700", () => unpushedCommits(wt)),
+      withBound("3000", () => unpushedCommits(wt)),
     );
     expect(r.timedOut).toBe(true);
-    expect(r.error).toContain("did not finish within 700 ms");
+    expect(r.error).toContain("did not finish within 3 s");
     expect(r.stdout).toBe("");
     expect(hung.pids()).toHaveLength(2);
     await expectGone(hung.pids());

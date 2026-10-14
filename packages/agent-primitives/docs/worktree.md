@@ -267,16 +267,22 @@ Every git call of `create`, `remove` and `list` has a hard time bound, so that a
 
 | Calls | Bound |
 | --- | --- |
-| Reads of refs, config or one object (`rev-parse`, `show-ref`, `for-each-ref`, `remote`, `symbolic-ref`, `check-ref-format`, `check-ignore`, `config`, `worktree list`, `worktree prune`, `branch -D`) | 5 minutes |
+| Reads of refs, config or one object (`rev-parse`, `show-ref`, `for-each-ref`, `remote`, `symbolic-ref`, `check-ref-format`, `check-ignore`, `config`, `worktree list`) | 5 minutes |
+| Small writes (`worktree prune`, `branch -D`) | 5 minutes |
 | Walks of a whole work tree or the history, and calls that write one (`status`, `ls-files`, `rev-list`, `merge-base`, `worktree add`, `worktree remove`) | 30 minutes |
 | `git fetch origin` | 2 minutes |
 | `gh pr list` of the merge verdict | 30 seconds |
 
-When a bound passes, the git call is killed with SIGKILL together with every process it started: git runs in a process group of its own and the whole group is killed, so a `ssh`, hook or filter that git started does not outlive the command. Because git runs in its own session, a prompt it would put on the terminal (an ssh passphrase, a host key question) fails at once instead of waiting for an answer, and a Ctrl-C or a signal sent to the CLI's process group does not reach it while the CLI waits: the bound ends it. (On Windows git gets no process group of its own and only git itself is stopped at the bound.)
+When a bound passes, the git call is killed with SIGKILL together with every process it started: git runs in a process group of its own and the whole group is killed, so a `ssh`, hook or filter that git started does not outlive the command. (On Windows git gets no process group of its own and only git itself is stopped at the bound.)
+
+Because git runs in a session of its own, a prompt it would put on the terminal (an ssh passphrase, a host key question) fails at once instead of waiting for an answer, and no signal sent to the CLI's process group reaches it. What that means for interrupting the command:
+
+- Ctrl-C (SIGINT) and SIGTERM sent to the CLI are handled when the current git call ends or its bound passes, not before; the CLI waits for git while a call runs, and git does not see the signal.
+- SIGKILL and SIGHUP end the CLI at once (a harness timeout, `timeout -s KILL`, a closed terminal), and git does not outlive it by more than half a second: git is started through a small `/bin/sh` wrapper that also runs a watcher in git's group, which checks every half second that the CLI is still there and kills the group when it is not. The wrapper passes git's exit status, stdin, stdout and stderr through unchanged, and adds only the variables a shell sets (`PWD`, `SHLVL`, `_`) to git's environment; it costs about 2 ms per call. Without `/bin/sh` (Windows) there is no wrapper and no watcher.
 
 A call that did not finish is never read as an answer. Before the first change it is a refusal: `git_timeout` for the calls whose result would otherwise be taken as "no such ref", "no origin" or an empty listing, and the existing reasons where a check already has one (`status_unknown`, `unpushed_state_unknown`, `merge_state_unknown`, `fetch_failed`, `worktree_add_failed`, `worktree_remove_failed`). `--force` overrides the `status_unknown`, `unpushed_state_unknown` and `merge_state_unknown` readings as it does any other failure of those checks, and nothing else. After the first change nothing can refuse any more, so a call that did not finish is reported instead: a warning in `create` (the head, the upstream, the pointer and the link manifest are then reported as what could not be read), and `pruned: false` or `branch.deleted: false` with the reason in `remove`.
 
-A git killed this way gets no chance to clean up, so a lock file can remain in the repository (`git worktree add` and `git fetch` are the calls that write). The `worktree_add_failed` refusal says so; after a fetch that was stopped, look for `*.lock` files in the repository before trying again.
+A git killed this way gets no chance to clean up, so a lock file or a partly written state can remain in the repository after any call that writes: `git worktree add`, `git fetch`, `git worktree remove`, `git worktree prune` and `git branch -D`. The `worktree_add_failed` and `worktree_remove_failed` refusals say so; after a stopped fetch, prune or branch deletion, look for `*.lock` files in the repository before trying again.
 
 The bounds are constants, not options. The environment variable `AGENT_PRIMITIVES_WORKTREE_GIT_BOUND_MS` exists for tests: a positive integer number of milliseconds that shortens every bound to at most that value; a value at or above a bound, or anything that is not a positive integer, changes nothing, so it can make the commands refuse sooner but never wait longer. A repository whose single git call legitimately needs longer than 30 minutes is outside what these commands are meant for; run git there directly.
 

@@ -1,5 +1,6 @@
 import { spawnSync, type SpawnSyncOptions } from "node:child_process";
 import {
+  boundedCommand,
   boundedSpawnOptions,
   endProcessGroup,
   isTimeoutError,
@@ -27,8 +28,10 @@ export interface GitRunResult {
  *
  * With `timeoutMs` the run is bounded: git gets a process group of its own
  * and, when the bound passes, git and everything it started are killed (see
- * `bounded-spawn.ts`); the result then carries `timedOut`, a null `status`
- * and an `error`. Without it the run is unbounded, as it always was. */
+ * `bounded-spawn.ts`); the result then carries `timedOut` and an `error`, and
+ * a `status` that is null, or git's own when git had already exited and only
+ * a descendant still held the pipes. Without it the run is unbounded, as it
+ * always was. */
 export function runGit(
   cwd: string,
   args: string[],
@@ -36,7 +39,11 @@ export function runGit(
   timeoutMs?: number,
 ): GitRunResult {
   try {
-    const result = spawnSync("git", args, {
+    const run =
+      timeoutMs !== undefined
+        ? boundedCommand("git", args)
+        : { command: "git", args };
+    const result = spawnSync(run.command, run.args, {
       cwd,
       ...(env !== undefined ? { env } : {}),
       ...(timeoutMs !== undefined ? boundedSpawnOptions(timeoutMs) : {}),
@@ -91,7 +98,11 @@ export function runGitBytes(
   timeoutMs?: number,
 ): GitBytesResult {
   try {
-    const result = spawnSync("git", args, {
+    const run =
+      timeoutMs !== undefined
+        ? boundedCommand("git", args)
+        : { command: "git", args };
+    const result = spawnSync(run.command, run.args, {
       cwd,
       ...(env !== undefined ? { env } : {}),
       ...(input !== undefined ? { input } : {}),

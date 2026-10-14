@@ -32,8 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   skips the fifo. The bounds are constants; the environment variable
   `AGENT_PRIMITIVES_WORKTREE_GIT_BOUND_MS` can only shorten them and is
   meant for tests. git now runs in a session of its own, so a prompt it
-  would put on the terminal fails instead of waiting and Ctrl-C does not
-  reach it while the CLI waits for it (task a1768165).
+  would put on the terminal fails instead of waiting. Because no signal
+  sent to the CLI's process group reaches it, Ctrl-C and SIGTERM take
+  effect when the current git call ends or its bound passes, and git is
+  started through a `/bin/sh` wrapper whose watcher kills its group half a
+  second after the CLI is gone, so a CLI ended by SIGKILL or SIGHUP leaves
+  no git behind (task a1768165).
 
 - `probe --summary`: the marker for omitted mutant lines names the saved
   full result (`result-full-*.json`) when one was written, and says that

@@ -3007,7 +3007,7 @@ describe("worktree remove: a file system symlink under refs/remotes", () => {
       wt,
       sha,
       [["--delete-branch"]],
-      mayBlockGit ? { AGENT_PRIMITIVES_WORKTREE_GIT_BOUND_MS: "3000" } : {},
+      mayBlockGit ? { AGENT_PRIMITIVES_WORKTREE_GIT_BOUND_MS: "8000" } : {},
       "feat",
       mayBlockGit
         ? ["unpushed_state_unknown", "git_timeout"]
