@@ -1,4 +1,4 @@
-import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -2700,12 +2700,13 @@ async function expectUnknownState(
   flagSets: string[][],
   env: NodeJS.ProcessEnv = {},
   branch = "feat",
+  reasons: string[] = ["unpushed_state_unknown"],
 ): Promise<void> {
   for (const flags of flagSets) {
     const r = await cliBounded(f.work, ["remove", wt, ...flags], env);
     const label = `${flags.join(" ")}: ${r.stdout}${r.stderr}`;
     expect(r.code, label).toBe(2);
-    expect(r.json.reason, label).toBe("unpushed_state_unknown");
+    expect(reasons, label).toContain(r.json.reason);
     const listed = parseWorktreeList(
       await gitBounded(f.repo, ["worktree", "list", "--porcelain"]),
     ).map((w) => w.path);
@@ -2799,21 +2800,13 @@ const REFERENCE_BACKEND_ENV_SUPPORTED = gitCan((repo, scratch) => {
   return out.trim() === "refs/heads/marker";
 });
 
-/** git lists the refs beside a fifo under `refs` without opening it (git
- * 2.54 does; git 2.39 blocks in `for-each-ref` and `rev-list`, which the
- * CLI runs before its own inspection, so the fifo layout would time out
- * there rather than be refused). Probed with a hard kill. */
-const FIFO_REFS_TOLERATED = gitCan((repo) => {
-  execFileSync("mkfifo", [path.join(repo, ".git/refs/heads/pipe")]);
-  const r = spawnSync("git", ["for-each-ref", "--format=%(refname)"], {
-    cwd: repo,
-    encoding: "utf8",
-    env: { PATH: process.env.PATH, ...GIT_ENV },
-    timeout: 5_000,
-    killSignal: "SIGKILL",
-  });
-  return r.status === 0 && r.stdout.includes("refs/heads/main");
-});
+/** The layout whose fifo a git may block on (git 2.54 lists the refs beside
+ * a fifo under `refs` without opening it; git 2.39 blocks in `for-each-ref`
+ * and `rev-list`, which the CLI runs before its own inspection). The CLI
+ * bounds every git call, so on such a git the layout ends in the
+ * `git_timeout` refusal instead of the `unpushed_state_unknown` one; the
+ * test runs on every git, with a short bound, and accepts either. */
+const FIFO_LAYOUT = "a fifo where a ref should be";
 
 describe("worktree remove: a file system symlink under refs/remotes", () => {
   it("keeps a branch that a file symlink in refs/remotes aliases, with and without --base", async () => {
@@ -2970,18 +2963,14 @@ describe("worktree remove: a file system symlink under refs/remotes", () => {
         fs.symlinkSync("refs-real", path.join(common, "refs"));
       },
     ],
-    ...(FIFO_REFS_TOLERATED
-      ? ([
-          [
-            "a fifo where a ref should be",
-            (f) => {
-              execFileSync("mkfifo", [
-                path.join(commonDirOf(f), "refs/remotes/origin/pipe"),
-              ]);
-            },
-          ],
-        ] as [string, (f: Fixture, sha: string) => void][])
-      : []),
+    [
+      FIFO_LAYOUT,
+      (f) => {
+        execFileSync("mkfifo", [
+          path.join(commonDirOf(f), "refs/remotes/origin/pipe"),
+        ]);
+      },
+    ],
     [
       "the branch's own ref file being a link to a file under refs/remotes",
       (f) => {
@@ -3008,11 +2997,22 @@ describe("worktree remove: a file system symlink under refs/remotes", () => {
     ],
   ];
 
-  it.each(LAYOUTS)("keeps the branch next to %s", async (_name, build) => {
+  it.each(LAYOUTS)("keeps the branch next to %s", async (name, build) => {
     const f = makeFixture();
     const { wt, sha } = makeUnpushed(f);
     build(f, sha);
-    await expectUnknownState(f, wt, sha, [["--delete-branch"]]);
+    const mayBlockGit = name === FIFO_LAYOUT;
+    await expectUnknownState(
+      f,
+      wt,
+      sha,
+      [["--delete-branch"]],
+      mayBlockGit ? { AGENT_PRIMITIVES_WORKTREE_GIT_BOUND_MS: "3000" } : {},
+      "feat",
+      mayBlockGit
+        ? ["unpushed_state_unknown", "git_timeout"]
+        : ["unpushed_state_unknown"],
+    );
   });
 
   it("is not fooled by GIT_COMMON_DIR or GIT_DIR in the caller's environment", async () => {

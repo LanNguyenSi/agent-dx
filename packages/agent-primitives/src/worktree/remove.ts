@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  REPORT_TIMEOUT,
+  REPORT_TIMEOUT_WALK,
   WorktreeRefusal,
   git,
   gitFailure,
@@ -176,11 +178,13 @@ export async function removeWorktree(
     );
   }
 
-  const status = git(target, [
-    "status",
-    "--porcelain",
-    "--untracked-files=all",
-  ]);
+  // A status that did not finish is a failed status: `status_unknown`
+  // below, which `--force` overrides like any other unknown state.
+  const status = git(
+    target,
+    ["status", "--porcelain", "--untracked-files=all"],
+    REPORT_TIMEOUT_WALK,
+  );
   if ((status.error !== undefined || status.status !== 0) && o.force !== true) {
     throw new WorktreeRefusal(
       `cannot read the status of ${target}: ${gitFailure(status)}; pass --force to remove it anyway`,
@@ -311,21 +315,24 @@ export async function removeWorktree(
     // git needs the flag twice to remove a locked worktree.
     if (entry.locked) forceFlags.push("--force");
   }
-  const removed = git(repo.mainCheckout, [
-    "worktree",
-    "remove",
-    ...forceFlags,
-    target,
-  ]);
+  const removed = git(
+    repo.mainCheckout,
+    ["worktree", "remove", ...forceFlags, target],
+    REPORT_TIMEOUT_WALK,
+  );
   if (removed.error !== undefined || removed.status !== 0) {
     throw new WorktreeRefusal(
-      `git worktree remove failed: ${gitFailure(removed)}`,
+      `git worktree remove failed: ${gitFailure(removed)}${
+        removed.timedOut === true
+          ? `. It was stopped part way, so ${target} may be partly removed; check \`git worktree list\` and the directory before trying again`
+          : ""
+      }`,
       "worktree_remove_failed",
       { path: target },
     );
   }
 
-  const prune = git(repo.mainCheckout, ["worktree", "prune"]);
+  const prune = git(repo.mainCheckout, ["worktree", "prune"], REPORT_TIMEOUT);
   const pruned = prune.error === undefined && prune.status === 0;
   if (!pruned) {
     warnings.push(`git worktree prune failed: ${gitFailure(prune)}`);
@@ -342,7 +349,11 @@ export async function removeWorktree(
       // `-D` cannot lose work here: an unpushed branch was already refused
       // above, unless `--force` said otherwise or the verdict said the
       // branch is merged into the base, which warned about those commits.
-      const deleted = git(repo.mainCheckout, ["branch", "-D", entry.branch]);
+      const deleted = git(
+        repo.mainCheckout,
+        ["branch", "-D", entry.branch],
+        REPORT_TIMEOUT,
+      );
       const ok = deleted.error === undefined && deleted.status === 0;
       const text = [deleted.stdout.trim(), deleted.stderr.trim()]
         .filter((part) => part.length > 0)
@@ -354,7 +365,9 @@ export async function removeWorktree(
             ? text
             : ok
               ? `deleted ${entry.branch}`
-              : `git branch -D ${entry.branch} failed`,
+              : deleted.timedOut === true
+                ? `git branch -D ${entry.branch} failed: ${gitFailure(deleted)}`
+                : `git branch -D ${entry.branch} failed`,
       };
       if (ok && merged !== null) {
         const where = base?.label ?? "the default branch";

@@ -1,6 +1,11 @@
-import { spawnSync } from "node:child_process";
+import { spawnSync, type SpawnSyncOptions } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import {
+  boundedSpawnOptions,
+  endProcessGroup,
+  isTimeoutError,
+} from "../bounded-spawn.js";
 import { UsageError } from "../envelope.js";
 import {
   runGit,
@@ -43,6 +48,7 @@ export type WorktreeRefusalReason =
   | "links_file_inside_repo"
   | "option_invalid"
   | "worktree_add_failed"
+  | "git_timeout"
   | "not_a_worktree"
   | "remove_main_checkout"
   | "worktree_locked"
@@ -58,10 +64,10 @@ export type WorktreeRefusalReason =
   | "worktree_remove_failed";
 
 /** A precondition that was not met. Nothing has been changed when one is
- * thrown, with the single exception of `worktree_add_failed` and
- * `fetch_failed`, which name git's own failure. Reported as
- * `status: "usage_error"` (exit 2) with the `reason` and, when present,
- * the structured `details`. */
+ * thrown, with the exceptions of `worktree_add_failed`, `fetch_failed` and
+ * `worktree_remove_failed`, which name git's own failure (a git that did not
+ * finish in time is one of them). Reported as `status: "usage_error"`
+ * (exit 2) with the `reason` and, when present, the structured `details`. */
 export class WorktreeRefusal extends UsageError {
   constructor(
     message: string,
@@ -72,36 +78,153 @@ export class WorktreeRefusal extends UsageError {
   }
 }
 
+/** The bound of one git call that reads refs, config or one object: five
+ * minutes. A healthy repository answers in milliseconds, a very large one
+ * on a cold disk in seconds; a git that is still silent after this long is
+ * blocked (a fifo under `refs`, a hook or a credential helper waiting for
+ * input), not slow. */
+export const GIT_BOUND_MS = 300_000;
+
+/** The bound of one git call that walks a whole work tree or the history
+ * (`status`, `ls-files`, `rev-list`, `merge-base`) or writes one
+ * (`worktree add`, `worktree remove`): thirty minutes, since a checkout or a
+ * status of a very large repository on a cold or remote file system can take
+ * minutes. */
+export const GIT_WALK_BOUND_MS = 1_800_000;
+
 /** One generous bound for the network step so a dead remote cannot hang
  * the command for good. */
 export const FETCH_TIMEOUT_MS = 120_000;
 
+/** The bound of the `gh` lookup of a merged pull request. */
+export const GH_TIMEOUT_MS = 30_000;
+
+/** Test seam, undocumented as a CLI feature: a number of milliseconds that
+ * shortens every bound above to at most that value. It can only shorten (a
+ * value at or above a bound, or one that is not a positive integer, changes
+ * nothing), so setting it can make the commands refuse sooner but never wait
+ * longer. */
+export const GIT_BOUND_ENV = "AGENT_PRIMITIVES_WORKTREE_GIT_BOUND_MS";
+
+/** `boundMs`, or the value of `GIT_BOUND_ENV` when that is shorter. */
+export function effectiveBoundMs(boundMs: number): number {
+  const raw = process.env[GIT_BOUND_ENV];
+  if (raw === undefined || !/^[1-9][0-9]*$/.test(raw)) return boundMs;
+  const shorter = Number(raw);
+  return Number.isSafeInteger(shorter) && shorter < boundMs ? shorter : boundMs;
+}
+
+/** What a git call does when its bound passes. */
+export interface GitCallOptions {
+  /** The bound of this call; `GIT_BOUND_MS` when absent. */
+  boundMs?: number;
+  /** `refuse` (the default) throws the `git_timeout` refusal, so no caller
+   * can read a git that never answered as an empty answer, a missing ref or a
+   * clean state. `report` comes back as a result with `timedOut`, a null
+   * `status` and an `error`, for a caller that maps a failed call to a
+   * refusal of its own (`status_unknown`, `unpushed_state_unknown`,
+   * `fetch_failed`, ...) or runs after the first change and cannot refuse. */
+  onTimeout?: "refuse" | "report";
+}
+
+/** The two options of a call that reports a timeout instead of refusing. */
+export const REPORT_TIMEOUT: GitCallOptions = { onTimeout: "report" };
+export const REPORT_TIMEOUT_WALK: GitCallOptions = {
+  onTimeout: "report",
+  boundMs: GIT_WALK_BOUND_MS,
+};
+
+/** `git <first two words>` of an argv, for a message. */
+function describeGit(args: readonly string[]): string {
+  let at = 0;
+  while (args[at] === "-c") at += 2;
+  return `git ${args.slice(at, at + 2).join(" ")}`;
+}
+
+function describeBound(ms: number): string {
+  return ms % 1000 === 0 ? `${String(ms / 1000)} s` : `${String(ms)} ms`;
+}
+
+/** The sentence a timed out call is reported with. */
+function timeoutMessage(what: string, boundMs: number): string {
+  return `${what} did not finish within ${describeBound(boundMs)} and was stopped, together with the processes it started`;
+}
+
+/** Applies `onTimeout` to the result of a bounded git call. */
+function settleTimeout<T extends { timedOut?: true; error?: string }>(
+  result: T,
+  cwd: string,
+  args: readonly string[],
+  boundMs: number,
+  onTimeout: "refuse" | "report",
+): T {
+  if (result.timedOut !== true) return result;
+  const message = timeoutMessage(describeGit(args), boundMs);
+  if (onTimeout === "report") return { ...result, error: message };
+  throw new WorktreeRefusal(
+    `${message}; the repository is broken, or something in it blocks git (a fifo among the refs, a hook or a credential helper waiting for input)`,
+    "git_timeout",
+    { git: describeGit(args), boundMs, cwd },
+  );
+}
+
+/** The refusal a git call that did not finish ends in. */
+export type GitTimeoutRefusal = WorktreeRefusal & { reason: "git_timeout" };
+
+/** True for the refusal a git call that did not finish ends in. */
+export function isGitTimeout(err: unknown): err is GitTimeoutRefusal {
+  return err instanceof WorktreeRefusal && err.reason === "git_timeout";
+}
+
 /** Runs `git <args>` in `cwd` with the repository-selection environment
- * removed. Process-wide maintenance is switched off for the call (the
- * same settings `probe` uses), so a fetch or an add cannot leave a
- * background `gc` touching a repository while the caller reads it. */
+ * removed, bounded: a git that has not finished when the bound passes is
+ * killed with every process it started and ends in the `git_timeout`
+ * refusal, or (`onTimeout: "report"`) in a result with `timedOut`.
+ * Process-wide maintenance is switched off for the call (the same settings
+ * `probe` uses), so a fetch or an add cannot leave a background `gc`
+ * touching a repository while the caller reads it. */
 export function git(
   cwd: string,
   args: readonly string[],
-  timeoutMs?: number,
+  options: GitCallOptions = {},
 ): GitRunResult {
-  return runGit(cwd, probeGitArgv(args), withoutRepoSelectionEnv(), timeoutMs);
+  const boundMs = effectiveBoundMs(options.boundMs ?? GIT_BOUND_MS);
+  const result = runGit(
+    cwd,
+    probeGitArgv(args),
+    withoutRepoSelectionEnv(),
+    boundMs,
+  );
+  return settleTimeout(
+    result,
+    cwd,
+    args,
+    boundMs,
+    options.onTimeout ?? "refuse",
+  );
 }
 
-/** Trimmed stdout of a successful git call, otherwise `undefined`. */
+/** Trimmed stdout of a successful git call, otherwise `undefined` (a
+ * timeout is the `git_timeout` refusal, never `undefined`, unless `options`
+ * ask for it to be reported). */
 export function gitText(
   cwd: string,
   args: readonly string[],
+  options: GitCallOptions = {},
 ): string | undefined {
-  const r = git(cwd, args);
+  const r = git(cwd, args, options);
   if (r.error !== undefined || r.status !== 0) return undefined;
   return r.stdout.trim();
 }
 
 /** The message to show for a failed git call: its stderr, or its spawn
- * error, or the exit status. */
+ * error, or the exit status. A call that did not finish says so first,
+ * whatever it had printed by then. */
 export function gitFailure(r: GitRunResult): string {
   const text = r.stderr.trim();
+  if (r.timedOut === true && r.error !== undefined) {
+    return text.length > 0 ? `${r.error} (stderr: ${text})` : r.error;
+  }
   if (text.length > 0) return text;
   if (r.error !== undefined) return r.error;
   return `git exited with status ${String(r.status)}`;
@@ -711,17 +834,33 @@ function textResult(r: GitBytesResult): GitRunResult {
     stdout: r.stdout.toString("utf8"),
     stderr: r.stderr,
     ...(r.error !== undefined ? { error: r.error } : {}),
+    ...(r.timedOut === true ? { timedOut: true as const } : {}),
   };
 }
 
-/** `git`, with stdout as the bytes git wrote (`runGitBytes`); `input`,
- * when given, is the child's whole stdin. */
+/** `git`, with stdout as the bytes git wrote (`runGitBytes`), bounded and
+ * settled the way `git` is; `input`, when given, is the child's whole
+ * stdin. */
 export function gitBytes(
   cwd: string,
   args: readonly string[],
-  input?: Buffer,
+  options: GitCallOptions & { input?: Buffer } = {},
 ): GitBytesResult {
-  return runGitBytes(cwd, probeGitArgv(args), withoutRepoSelectionEnv(), input);
+  const boundMs = effectiveBoundMs(options.boundMs ?? GIT_BOUND_MS);
+  const result = runGitBytes(
+    cwd,
+    probeGitArgv(args),
+    withoutRepoSelectionEnv(),
+    options.input,
+    boundMs,
+  );
+  return settleTimeout(
+    result,
+    cwd,
+    args,
+    boundMs,
+    options.onTimeout ?? "refuse",
+  );
 }
 
 /** The unknown result for a repository config the inspection could not
@@ -826,7 +965,7 @@ function refStoreElsewhere(
       "--get-all",
       "extensions.refStorage",
     ],
-    bytes,
+    { ...REPORT_TIMEOUT, input: bytes },
   );
   // Exit status 1 is "no such key": the refs are in the common directory.
   if (config.error === undefined && config.status === 1) return undefined;
@@ -875,10 +1014,16 @@ function refStoreElsewhere(
  * refs cannot be listed, so the caller treats the state as unknown. `error`
  * counts even with a status of 0: a listing that outgrows the output limit
  * of `runGit` comes back cut short, with `error` set, when git has already
- * exited.
+ * exited. A git call that does not finish within its bound is killed with
+ * the processes it started and comes back the same way (`timedOut`, no
+ * status, an `error` that says so), never as an empty listing.
  */
 export function unpushedCommits(cwd: string): GitRunResult {
-  const commonDirResult = gitBytes(cwd, ["rev-parse", "--git-common-dir"]);
+  const commonDirResult = gitBytes(
+    cwd,
+    ["rev-parse", "--git-common-dir"],
+    REPORT_TIMEOUT,
+  );
   if (commonDirResult.error !== undefined || commonDirResult.status !== 0) {
     return textResult(commonDirResult);
   }
@@ -894,7 +1039,7 @@ export function unpushedCommits(cwd: string): GitRunResult {
   // 1 and keeps reading loose files. An older git that does not know the
   // option echoes it back, and anything but exactly `reftable` is walked
   // as a files store.
-  const format = git(cwd, ["rev-parse", "--show-ref-format"]);
+  const format = git(cwd, ["rev-parse", "--show-ref-format"], REPORT_TIMEOUT);
   if (format.error !== undefined || format.status !== 0) return format;
   const reftable = gitOutputLine(format.stdout) === "reftable";
   const untrusted = reftable
@@ -905,11 +1050,11 @@ export function unpushedCommits(cwd: string): GitRunResult {
       `${untrusted}; git reads the ref store as it finds it, so a link or another entry git does not write there can make a local branch and a remote-tracking ref one file, or keep a remote-tracking ref where removing the worktree deletes it, and the branch could look pushed`,
     );
   }
-  const refs = gitBytes(cwd, [
-    "for-each-ref",
-    "--format=%(refname)%09%(symref)",
-    "refs/remotes",
-  ]);
+  const refs = gitBytes(
+    cwd,
+    ["for-each-ref", "--format=%(refname)%09%(symref)", "refs/remotes"],
+    REPORT_TIMEOUT,
+  );
   if (refs.error !== undefined || refs.status !== 0) return textResult(refs);
   const excludes: string[] = [];
   for (const line of splitBytes(refs.stdout, 0x0a)) {
@@ -928,7 +1073,11 @@ export function unpushedCommits(cwd: string): GitRunResult {
     // `--exclude` pattern; for `--remotes` it is relative to `refs/remotes/`.
     excludes.push(`--exclude=${text.replace(/^refs\/remotes\//, "")}`);
   }
-  return git(cwd, ["rev-list", "HEAD", "--not", ...excludes, "--remotes"]);
+  return git(
+    cwd,
+    ["rev-list", "HEAD", "--not", ...excludes, "--remotes"],
+    REPORT_TIMEOUT_WALK,
+  );
 }
 
 /** A `--base` value resolved to a remote-tracking branch. */
@@ -999,13 +1148,16 @@ export function refExists(cwd: string, rev: string): boolean {
 }
 
 /** The full commit sha `rev` resolves to, or `undefined`. */
-export function commitSha(cwd: string, rev: string): string | undefined {
-  const out = gitText(cwd, [
-    "rev-parse",
-    "--verify",
-    "--quiet",
-    `${rev}^{commit}`,
-  ]);
+export function commitSha(
+  cwd: string,
+  rev: string,
+  options: GitCallOptions = {},
+): string | undefined {
+  const out = gitText(
+    cwd,
+    ["rev-parse", "--verify", "--quiet", `${rev}^{commit}`],
+    options,
+  );
   return out !== undefined && /^[0-9a-f]{40,64}$/.test(out) ? out : undefined;
 }
 
@@ -1019,10 +1171,15 @@ export function branchExists(cwd: string, name: string): boolean {
  * Whether git ignores `rel` in the work tree at `cwd`, asked with
  * `--no-index` so a tracked path is judged by the ignore patterns alone,
  * the way a freshly created untracked path would be. `undefined` when
- * git could not answer (exit 128 or a spawn failure).
+ * git could not answer (exit 128 or a spawn failure, or, with
+ * `onTimeout: "report"`, a git that did not finish).
  */
-export function isIgnored(cwd: string, rel: string): boolean | undefined {
-  const r = git(cwd, ["check-ignore", "--no-index", "-q", "--", rel]);
+export function isIgnored(
+  cwd: string,
+  rel: string,
+  options: GitCallOptions = {},
+): boolean | undefined {
+  const r = git(cwd, ["check-ignore", "--no-index", "-q", "--", rel], options);
   if (r.error !== undefined) return undefined;
   if (r.status === 0) return true;
   if (r.status === 1) return false;
@@ -1071,17 +1228,30 @@ export interface MergeVerdict {
   reason: string;
 }
 
-/** Runs `gh` with a bound; `undefined` when it cannot be started. */
-export function runGh(
-  cwd: string,
-  args: readonly string[],
-): { status: number | null; stdout: string; stderr: string } | undefined {
+/** What `runGh` reports. */
+export interface GhRun {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+  /** `gh` did not finish within its bound and was stopped with the
+   * processes it started; `status` is null. */
+  timedOut?: true;
+}
+
+/** Runs `gh` with a bound, in a process group of its own that is killed
+ * with it; `undefined` when it cannot be started. */
+export function runGh(cwd: string, args: readonly string[]): GhRun | undefined {
+  const boundMs = effectiveBoundMs(GH_TIMEOUT_MS);
   const r = spawnSync("gh", [...args], {
     cwd,
     encoding: "utf8",
     env: withoutRepoSelectionEnv(),
-    timeout: 30_000,
-  });
+    ...boundedSpawnOptions(boundMs),
+  } as SpawnSyncOptions & { encoding: "utf8" });
+  if (r.error !== undefined || r.signal !== null) endProcessGroup(r.pid);
+  if (isTimeoutError(r.error)) {
+    return { status: null, stdout: "", stderr: "", timedOut: true };
+  }
   if (r.error !== undefined) return undefined;
   return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 }
@@ -1104,7 +1274,28 @@ export function mergeVerdict(
   baseBranchName?: string,
   baseLabel: string = baseRef,
 ): MergeVerdict {
-  const anc = git(cwd, ["merge-base", "--is-ancestor", head, baseRef]);
+  try {
+    return decideMerge(cwd, head, branch, baseRef, baseBranchName, baseLabel);
+  } catch (err) {
+    // A git call that did not finish cannot say whether the branch is
+    // merged: the verdict is unknown, which `remove --require-merged`
+    // refuses (`merge_state_unknown`) and `list` reports as it is.
+    if (!isGitTimeout(err)) throw err;
+    return { merged: "unknown", via: "none", reason: err.message };
+  }
+}
+
+function decideMerge(
+  cwd: string,
+  head: string,
+  branch: string | undefined,
+  baseRef: string,
+  baseBranchName: string | undefined,
+  baseLabel: string,
+): MergeVerdict {
+  const anc = git(cwd, ["merge-base", "--is-ancestor", head, baseRef], {
+    boundMs: GIT_WALK_BOUND_MS,
+  });
   if (anc.error === undefined && anc.status === 0) {
     return {
       merged: "yes",
@@ -1155,6 +1346,13 @@ export function mergeVerdict(
       via: "none",
       reason:
         "not an ancestor of the base, and gh is not available to check for a squash merge",
+    };
+  }
+  if (gh.timedOut === true) {
+    return {
+      merged: "unknown",
+      via: "none",
+      reason: `not an ancestor of the base, and ${timeoutMessage("gh pr list", effectiveBoundMs(GH_TIMEOUT_MS))}`,
     };
   }
   if (gh.status !== 0) {
@@ -1210,14 +1408,18 @@ export function mergeVerdict(
  * Repository-relative paths.
  */
 export function ignoredSymlinks(cwd: string): string[] {
-  const r = git(cwd, [
-    "ls-files",
-    "-z",
-    "--others",
-    "--ignored",
-    "--exclude-standard",
-    "--directory",
-  ]);
+  const r = git(
+    cwd,
+    [
+      "ls-files",
+      "-z",
+      "--others",
+      "--ignored",
+      "--exclude-standard",
+      "--directory",
+    ],
+    { boundMs: GIT_WALK_BOUND_MS },
+  );
   if (r.error !== undefined || r.status !== 0) return [];
   const out: string[] = [];
   for (const entry of r.stdout.split("\0")) {

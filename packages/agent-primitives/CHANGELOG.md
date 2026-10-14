@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `worktree create`, `remove` and `list`: every git call is bounded, so a
+  repository git cannot read (a fifo among the refs, which some git
+  versions block on; a hook or credential helper waiting for input) ends
+  the command in a refusal instead of hanging it. Reads of refs, config or
+  one object stop after 5 minutes, walks of a work tree or of the history
+  and the calls that write one (`status`, `ls-files`, `rev-list`,
+  `merge-base`, `worktree add`, `worktree remove`) after 30 minutes, the
+  fetch after 2 minutes (as before) and the `gh` lookup after 30 seconds.
+  A call that passes its bound is killed with SIGKILL together with the
+  whole process group it ran in (a git of its own process group, so the
+  ssh, hook or filter it started goes too; `spawnSync`'s own timeout ends
+  only the direct child), and it is never read as an answer: the new
+  `git_timeout` refusal where the result would otherwise read as "no such
+  ref", "no origin" or an empty listing, `status_unknown`,
+  `unpushed_state_unknown`, `merge_state_unknown`, `fetch_failed`,
+  `worktree_add_failed` and `worktree_remove_failed` where a check already
+  has a reason (`--force` still overrides only the first three), and a
+  warning for a call that did not finish after the first change (head,
+  upstream, `.ai/run` pointer and link manifest in `create`; prune and
+  branch deletion in `remove`). `remove`'s default base lookup, which ran
+  before every guard without a bound, now refuses instead of hanging on a
+  fifo under `refs`, and the fifo layout test no longer needs a git that
+  skips the fifo. The bounds are constants; the environment variable
+  `AGENT_PRIMITIVES_WORKTREE_GIT_BOUND_MS` can only shorten them and is
+  meant for tests. git now runs in a session of its own, so a prompt it
+  would put on the terminal fails instead of waiting and Ctrl-C does not
+  reach it while the CLI waits for it (task a1768165).
+
 - `worktree remove --delete-branch` now adds a warning when it deletes a
   branch whose merge verdict is `no` or `unknown` (without
   `--require-merged`, or with `--force` overriding it), naming the branch,

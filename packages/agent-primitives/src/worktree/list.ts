@@ -1,11 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  GIT_WALK_BOUND_MS,
   WorktreeRefusal,
   type DefaultBase,
   git,
   gitText,
   ignoredSymlinks,
+  isGitTimeout,
   isWithin,
   mergeVerdict,
   resolveDefaultBase,
@@ -86,12 +88,11 @@ function counts(
   worktree: string,
   baseRef: string,
 ): { ahead: number | null; behind: number | null } {
-  const out = gitText(worktree, [
-    "rev-list",
-    "--left-right",
-    "--count",
-    `${baseRef}...HEAD`,
-  ]);
+  const out = gitText(
+    worktree,
+    ["rev-list", "--left-right", "--count", `${baseRef}...HEAD`],
+    { boundMs: GIT_WALK_BOUND_MS },
+  );
   if (out === undefined) return { ahead: null, behind: null };
   const [left, right] = out.split("\t");
   const behind = Number(left);
@@ -183,11 +184,11 @@ function describeEntry(
   // stays null, and the merged verdict says why.
   if (entry.prunable) return listed;
 
-  const status = git(entry.path, [
-    "status",
-    "--porcelain",
-    "--untracked-files=all",
-  ]);
+  const status = git(
+    entry.path,
+    ["status", "--porcelain", "--untracked-files=all"],
+    { boundMs: GIT_WALK_BOUND_MS },
+  );
   if (status.error !== undefined || status.status !== 0) {
     warnings.push(
       `git status failed in ${entry.path}; its state is reported as unknown`,
@@ -318,6 +319,10 @@ export async function listWorktrees(
       );
     } catch (err) {
       if (!(err instanceof WorktreeRefusal)) throw err;
+      // A child whose git did not answer is not a child that cannot be
+      // described (a bare repository, say): leaving it out of the report
+      // with a warning would read as a listing that is complete.
+      if (isGitTimeout(err)) throw err;
       warnings.push(`skipped ${child}: ${err.message}`);
     }
   }
