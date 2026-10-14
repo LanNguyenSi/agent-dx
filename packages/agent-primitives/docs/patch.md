@@ -291,11 +291,10 @@ that would replace nothing is `missing`.
   not run git when a `commondir` met on the way is not a regular file
   of at most 64 KiB, or a `.git` file names its directory by a path
   that is not UTF-8 or that the filesystem cannot resolve (the check
-   cannot follow it; git itself stops at such a file). git then runs for
-   at most 3 seconds (a FIFO
-   it opens makes it wait), with at most 64 KiB of output, its stdout
-   and stderr counted together, in a process
-   group of its own; when it does not end by itself (the time or output
+  cannot follow it; git itself stops at such a file). git then runs for
+  at most 3 seconds (a FIFO it opens makes it wait), with at most 64 KiB
+  of output, its stdout and stderr counted together, in a process group
+  of its own; when it does not end by itself (the time or output
   bound, a signal), that whole group is killed, so no process of it
   outlives the command. The lookup is bounded the way `worktree` bounds
   its git calls (`bounded-spawn.ts`): git is started through a `/bin/sh`
@@ -315,11 +314,11 @@ that would replace nothing is `missing`.
   `PATH`), it did not finish in time, wrote more than its bound, or was
   ended by a signal, whatever the root; or the root is a git work tree
   but `git rev-parse` fails there (a broken `.git` file, a repository git
-   refuses as unsafe, a damaged repository). Outside any work tree, git
-   failing is read as "git names no directory here", with no warning,
-   except for a status the wrapper reports for a signal or for a git it
-   cannot run (126, 127, above 128): those warn wherever the root is; a
-   bare repository git declines to open is then refused by its layout.
+  refuses as unsafe, a damaged repository). Outside any work tree, git
+  failing is read as "git names no directory here", with no warning,
+  except for a status the wrapper reports for a signal or for a git it
+  cannot run (126, 127, above 128): those warn wherever the root is. A
+  bare repository git declines to open is then refused by its layout.
   A line of git's answer naming a directory that cannot be stated, or
   one laid out like none of the three above, is left out with a warning
   that names it; and an answer with more lines than the two asked for
