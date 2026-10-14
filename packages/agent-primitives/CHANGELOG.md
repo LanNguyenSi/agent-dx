@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `probe --summary`: `failing=` now names PHPUnit's numbered failure
+  line (`1) Ns\Class::testMethod`) for a killed mutant instead of `-`;
+  the lines other runners print are matched as before (#501, task
+  8d84322e).
+
 - `worktree remove --delete-branch` now adds a warning when it deletes a
   branch whose merge verdict is `no` or `unknown` (without
   `--require-merged`, or with `--force` overriding it), naming the branch,
