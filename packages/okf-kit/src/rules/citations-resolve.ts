@@ -1,11 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
-import { getValidSources, resolveRepoPath } from "../util.js";
+import { scanFootnotes } from "../footnotes.js";
+import {
+  analyzeSources,
+  getValidSources,
+  isWithinRepoRoot,
+  resolveRepoPath,
+} from "../util.js";
+import type { SourceEntry } from "../util.js";
 import type {
   BundleDoc,
   Finding,
   RequireAnchorsOptions,
   Rule,
+  SpecVersion,
 } from "../types.js";
 
 const RULE_ID = "citations-resolve";
@@ -2251,6 +2259,7 @@ function scanDoc(
   bundleDir: string,
   doc: BundleDoc,
   requireAnchors?: RequireAnchorsOptions,
+  specVersion?: SpecVersion,
 ): Finding[] {
   const findings: Finding[] = [];
   const content = doc.raw;
@@ -2806,13 +2815,87 @@ function scanDoc(
     }
   }
 
+  if (specVersion === "v0.2") {
+    scanFootnoteLineCitations(root, doc, findings);
+  }
+
   return findings;
+}
+
+/**
+ * Line-precise code citations in the OKF v0.2 footnote form. The footnote's
+ * `sources` entry names the file (its `resource`), and the footnote's
+ * DEFINITION text names the lines, as backticked line numbers or ranges:
+ *
+ *     Retries are capped.[^retry]
+ *
+ *     [^retry]: Retry loop, `L42-57`.
+ *
+ * with `- id: retry` / `resource: src/client.ts` under `sources`. Each
+ * backticked `N`, `N-M` or the `L`-prefixed spelling (`L42`, `L42-57`,
+ * `L42-L57`) in the definition text is checked exactly like an inline
+ * `resource:N-M` citation of that file, by the same line checks and with the
+ * same finding shape (the citation is labelled `resource:N-M (footnote
+ * [^id])`). Only these checks run: the footnote form has no anchors,
+ * continuations or short forms. Skipped silently, because `sources-shape`
+ * already reports them: an entry whose resource escapes the repo root or
+ * does not exist, and a resource that is not a file (a directory). A URL
+ * resource has no lines to check and is skipped. Runs for spec v0.2 only,
+ * matching `footnotes-resolve`.
+ */
+const FOOTNOTE_LINE_RE = /`L?(\d+)(?:-L?(\d+))?`/g;
+function scanFootnoteLineCitations(
+  root: string,
+  doc: BundleDoc,
+  findings: Finding[],
+): void {
+  if (doc.isReserved) return;
+  const analysis = analyzeSources(doc.frontmatter.parsed);
+  if (!analysis.usable) return;
+  const byId = new Map<string, SourceEntry>();
+  for (const entry of analysis.entries) {
+    if (entry.id !== undefined && entry.kind === "path" && !byId.has(entry.id))
+      byId.set(entry.id, entry);
+  }
+  if (byId.size === 0) return;
+  for (const def of scanFootnotes(doc.body).definitions) {
+    const entry = byId.get(def.id);
+    if (!entry || !isWithinRepoRoot(root, entry.resource)) continue;
+    const resolved = path.resolve(resolveRepoPath(root, entry.resource));
+    if (!isFile(resolved)) continue;
+    const re = new RegExp(FOOTNOTE_LINE_RE.source, "g");
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(def.text)) !== null) {
+      const startLine = Number(m[1]);
+      const endLine = m[2] ? Number(m[2]) : null;
+      const citation = `${entry.resource}:${startLine}${endLine ? "-" + endLine : ""} (footnote [^${def.id}])`;
+      const problem = checkTarget(entry.resource, startLine, endLine, resolved);
+      if (problem?.rule === "unreadable-target") {
+        pushUnreadable(
+          findings,
+          doc.relPath,
+          citation,
+          path.relative(root, resolved),
+          problem.code ?? "UNKNOWN",
+        );
+      } else if (problem) {
+        pushDrift(
+          findings,
+          doc.relPath,
+          citation,
+          problem.rule,
+          problem.message,
+          path.relative(root, resolved),
+        );
+      }
+    }
+  }
 }
 
 export const citationsResolveRule: Rule = {
   id: RULE_ID,
   description:
-    "`path:N`/`path:N-M` citations (recognised target extensions: .ts, .js, .mjs, .md, .yml, .yaml, .json; and their `:N`, -`M`/–`M`, (`N`) continuations), and backtick-delimited `` `path:#heading` `` heading-section citations (`.md` targets only), must resolve to a real target file and land on real, non-blank content. Mechanical only: does not verify the cited line is semantically correct.",
+    "`path:N`/`path:N-M` citations (recognised target extensions: .ts, .js, .mjs, .md, .yml, .yaml, .json; and their `:N`, -`M`/–`M`, (`N`) continuations), and backtick-delimited `` `path:#heading` `` heading-section citations (`.md` targets only), must resolve to a real target file and land on real, non-blank content. Under spec v0.2 the backticked line numbers or ranges (`N`, `N-M`, `L42-57`) in a footnote definition are also checked against the file named by that footnote's `sources` entry. Mechanical only: does not verify the cited line is semantically correct.",
   run(ctx) {
     if (!ctx.repoRoot) {
       // Never silently skip: mirrors sources-fresh's posture so a "clean"
@@ -2832,7 +2915,14 @@ export const citationsResolveRule: Rule = {
     // is not held at module scope.
     const cache: BasenameCache = new Map();
     return ctx.docs.flatMap((doc) =>
-      scanDoc(cache, root, ctx.bundleDir, doc, ctx.requireAnchors),
+      scanDoc(
+        cache,
+        root,
+        ctx.bundleDir,
+        doc,
+        ctx.requireAnchors,
+        ctx.specVersion,
+      ),
     );
   },
 };

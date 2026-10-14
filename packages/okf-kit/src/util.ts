@@ -12,8 +12,8 @@ export function hasSourcesKey(parsed: unknown): boolean {
 /**
  * Returns the frontmatter list under `key` when it is shaped correctly (a
  * non-empty array of non-empty strings), or undefined otherwise (absent, or
- * present but malformed). The one shape check behind `getValidSources` and
- * `getValidAppliesTo`.
+ * present but malformed). The shape check behind `getValidAppliesTo`; the
+ * `sources` list has its own two-shape reader, `analyzeSources`.
  */
 export function getValidPathList(
   parsed: unknown,
@@ -28,16 +28,170 @@ export function getValidPathList(
   return isValidShape ? (list as string[]) : undefined;
 }
 
+/** How a `sources` entry resolves: a repo-relative path, or a URL that is never touched on disk. */
+export type SourceKind = "path" | "url";
+
 /**
- * Returns the frontmatter `sources` array when it is shaped correctly (a
- * non-empty array of non-empty strings), or undefined otherwise (absent, or
- * present but malformed). Shared between sources-shape (which reports the
- * shape violation) and sources-fresh (which only assesses staleness for a
- * validly-shaped sources list, leaving the shape error itself to
- * sources-shape).
+ * One usable `sources` entry. OKF v0.1 writes an entry as a plain string
+ * (`form: "string"`, always a repo-relative path); OKF v0.2 writes it as a
+ * mapping (`form: "mapping"`) with a required `resource`, an optional `id`
+ * (the key a body footnote `[^id]` resolves by) and descriptive fields this
+ * tool does not read (`title`, `author`, `usage_count`, `last_modified`,
+ * ...). Both shapes are accepted under either spec version.
+ */
+export interface SourceEntry {
+  /** The path or URL: the string itself, or the mapping's `resource`. */
+  resource: string;
+  /** The mapping's `id` (a YAML number is accepted and stringified); undefined for a string entry or a mapping without a usable `id`. */
+  id?: string;
+  form: "string" | "mapping";
+  /** `url` only for a MAPPING `resource` that is a `scheme://` URL; a string entry is always a `path`, exactly as before v0.2. */
+  kind: SourceKind;
+}
+
+/** A defect in one `sources` item that leaves the rest of the list usable. */
+export interface SourceItemProblem {
+  /** 1-based position in the `sources` list. */
+  position: number;
+  message: string;
+}
+
+export interface SourcesAnalysis {
+  /**
+   * False when the list as a whole is malformed (not an array, empty, or an
+   * item that is neither a non-blank string nor a mapping): the one failure
+   * `sources-shape` reports as a single list-level error and every
+   * staleness/lookup consumer skips the doc for, as before v0.2.
+   */
+  usable: boolean;
+  /** True when at least one item is a mapping (decides which list-level message applies). */
+  hasMapping: boolean;
+  /** Every item that yielded a resource, in list order (empty when `usable` is false). */
+  entries: SourceEntry[];
+  /** Per-item defects of a mapping (no/blank/non-string `resource`, unusable `id`); only populated when `usable` is true. */
+  problems: SourceItemProblem[];
+}
+
+/**
+ * Whether a mapping `resource` is a URL (`https://...`, `file://...`, any
+ * `scheme://`) rather than a repo-relative path. Deliberately narrow: only
+ * `scheme://` counts, the scheme needs at least two characters (so a
+ * Windows drive letter `C://` is not one), and the test is anchored at the
+ * start, so a path that merely contains `://` further in (`docs/a://b.md`)
+ * or starts with `./` or `..` is still a path and still goes through
+ * `isWithinRepoRoot`. A `urn:`/`mailto:` style resource has no `//` and so
+ * counts as a path (it then fails the existence check, loudly).
+ */
+export function isUrlResource(resource: string): boolean {
+  return /^[A-Za-z][A-Za-z0-9+.-]+:\/\//.test(resource.trim());
+}
+
+/** A mapping `id` as the footnote key it names, or undefined when it is not a usable id (a string or a finite number, non-blank). */
+function normalizeSourceId(id: unknown): string | undefined {
+  if (typeof id === "string") return id.trim() === "" ? undefined : id.trim();
+  if (typeof id === "number" && Number.isFinite(id)) return String(id);
+  return undefined;
+}
+
+/**
+ * Reads the frontmatter `sources` list in both OKF shapes. A string item is
+ * valid when non-blank (as in v0.1); a mapping item yields an entry when its
+ * `resource` is a non-blank string and is otherwise reported as an item
+ * problem WITHOUT invalidating the list, so one broken mapping neither
+ * hides the doc's other sources from the staleness rules nor turns into a
+ * second list-level finding. Anything else (a number, a nested list, a
+ * blank string) makes the whole list unusable, the v0.1 behavior.
+ */
+export function analyzeSources(parsed: unknown): SourcesAnalysis {
+  const unusable: SourcesAnalysis = {
+    usable: false,
+    hasMapping: false,
+    entries: [],
+    problems: [],
+  };
+  if (!isRecord(parsed) || !("sources" in parsed)) return unusable;
+  const list = parsed.sources;
+  if (!Array.isArray(list) || list.length === 0) return unusable;
+  const hasMapping = list.some(isRecord);
+  const entries: SourceEntry[] = [];
+  const problems: SourceItemProblem[] = [];
+  for (let i = 0; i < list.length; i++) {
+    const item: unknown = list[i];
+    const position = i + 1;
+    if (typeof item === "string") {
+      if (item.trim() === "") return { ...unusable, hasMapping };
+      entries.push({ resource: item, form: "string", kind: "path" });
+      continue;
+    }
+    if (!isRecord(item)) return { ...unusable, hasMapping };
+    const resource = item.resource;
+    if (typeof resource !== "string" || resource.trim() === "") {
+      problems.push({
+        position,
+        message:
+          "resource" in item
+            ? `\`sources\` entry ${position} is a mapping whose \`resource\` is not a non-empty string`
+            : `\`sources\` entry ${position} is a mapping without a \`resource\``,
+      });
+      continue;
+    }
+    let id: string | undefined;
+    if ("id" in item) {
+      id = normalizeSourceId(item.id);
+      if (id === undefined) {
+        problems.push({
+          position,
+          message: `\`sources\` entry ${position} (\`${resource}\`) has an \`id\` that is not a non-empty string or number`,
+        });
+      }
+    }
+    entries.push({
+      resource,
+      ...(id === undefined ? {} : { id }),
+      form: "mapping",
+      kind: isUrlResource(resource) ? "url" : "path",
+    });
+  }
+  return { usable: true, hasMapping, entries, problems };
+}
+
+/**
+ * The `id` of every mapping item in the raw `sources` list, whether or not
+ * the item is otherwise usable (a mapping without a `resource` still names
+ * the footnote that cites it, so a footnote pointing at it is not ALSO
+ * reported as dangling on top of the shape error). Empty when `sources` is
+ * absent or not a list.
+ */
+export function getDeclaredSourceIds(parsed: unknown): string[] {
+  if (!isRecord(parsed) || !Array.isArray(parsed.sources)) return [];
+  const ids: string[] = [];
+  for (const item of parsed.sources as unknown[]) {
+    if (!isRecord(item) || !("id" in item)) continue;
+    const id = normalizeSourceId(item.id);
+    if (id !== undefined) ids.push(id);
+  }
+  return ids;
+}
+
+/**
+ * The repo-relative PATH entries of the frontmatter `sources` list, or
+ * undefined when the list is absent or malformed as a whole (see
+ * `analyzeSources`). This is the one view the path-driven consumers share:
+ * `sources-fresh` (staleness), `docs-for` (reverse lookup),
+ * `citations-resolve` and `prose-line-references` (allowed citation
+ * targets). Each entry is the string itself (OKF v0.1) or the `resource` of
+ * a mapping entry (OKF v0.2); a URL `resource` and a mapping without a
+ * usable `resource` are left out, so none of those consumers ever resolves
+ * them against the file system. For a list of plain strings the result is
+ * exactly what it was before v0.2 support. `sources-shape` and
+ * `footnotes-resolve` need more than paths and read `analyzeSources`.
  */
 export function getValidSources(parsed: unknown): string[] | undefined {
-  return getValidPathList(parsed, "sources");
+  const analysis = analyzeSources(parsed);
+  if (!analysis.usable) return undefined;
+  return analysis.entries
+    .filter((entry) => entry.kind === "path")
+    .map((entry) => entry.resource);
 }
 
 /** Whether parsed frontmatter has an `applies_to` key at all, regardless of shape validity. */

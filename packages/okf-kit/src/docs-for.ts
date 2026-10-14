@@ -59,7 +59,10 @@ export interface DocsForResult {
  * Reuses the shape validation `sources-shape` applies (`getValidSources`,
  * `getValidAppliesTo`): a doc with no such key, or a malformed one,
  * contributes no matches through that field -- that shape error is
- * `sources-shape`'s job to report, not this command's.
+ * `sources-shape`'s job to report, not this command's. A `sources` entry
+ * may be a string or an OKF v0.2 mapping; `getValidSources` hands back the
+ * path of each (the string, or the mapping's `resource`), leaves out a URL
+ * `resource`, and everything below treats them identically.
  *
  * Matching a `sources` or `applies_to` entry against a given path:
  *  - exact match: the given path resolves to the exact same path the
