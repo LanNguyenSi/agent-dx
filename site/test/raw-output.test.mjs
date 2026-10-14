@@ -5,9 +5,9 @@
 import test, { before } from 'node:test'
 import assert from 'node:assert/strict'
 import { createMarkdownRenderer, resolveConfig } from 'vitepress'
-import { allowedAttributes, allowedDirs, allowedLayouts, allowedRelTokens, allowedTargets, defuseMustache, escapeDescriptionMeta, escapeText, isSafeLink, safeId, safeImage, sanitizeFrontmatter, transformPageData } from '../.vitepress/raw-output.mjs'
+import { allowedAttributes, allowedDirs, allowedLayouts, allowedRelTokens, allowedTargets, defuseMustache, escapeDescriptionMeta, escapeText, isSafeLink, safeId, safeImage, sanitizeFrontmatter, themeHref, transformPageData } from '../.vitepress/raw-output.mjs'
 import { escapeText as siteEscapeText, markdownBase } from '../.vitepress/site-helpers.mjs'
-import { keptRelative, themeOffsite } from './link-cases.mjs'
+import { backtickRefused, keptRelative, themeOffsite } from './link-cases.mjs'
 
 let md
 let cfg
@@ -564,6 +564,35 @@ test('a relative link the theme would write as another site is refused, whatever
     assert.equal('link' in sanitizeFrontmatter({ hero: { actions: [{ text: 'a', link }] } }).hero.actions[0], false, link)
     assert.equal('link' in sanitizeFrontmatter({ features: [{ title: 'f', link }] }).features[0], false, link)
   }
+})
+
+test('a relative link with a backtick is refused wherever the backtick sits, in every field', () => {
+  for (const link of backtickRefused) {
+    assert.equal(isSafeLink(link), false, link)
+    assert.equal('link' in sanitizeFrontmatter({ prev: { text: 'P', link } }).prev, false, link)
+    assert.equal('link' in sanitizeFrontmatter({ next: { text: 'N', link } }).next, false, link)
+    assert.equal('link' in sanitizeFrontmatter({ hero: { actions: [{ text: 'a', link }] } }).hero.actions[0], false, link)
+    assert.equal('link' in sanitizeFrontmatter({ features: [{ title: 'f', link }] }).features[0], false, link)
+  }
+  // A lone backtick and the "$" pattern with nothing after it.
+  for (const link of ['`', '$`', '/`', '/$`', '%60`']) assert.equal(isSafeLink(link), false, link)
+})
+
+test('the percent escape of a backtick is a plain character and stays', () => {
+  for (const link of ['/$%60/ok', '/a%60b', '%60', '$%60/ok', '/x?q=%60#%60']) assert.equal(isSafeLink(link), true, link)
+})
+
+test('an absolute link is not rewritten by the theme, so a backtick in it is not the relative case', () => {
+  for (const link of ['https://example.com/a`b', 'mailto:a`b@example.com']) assert.equal(isSafeLink(link), true, link)
+})
+
+test('"$" followed by a backtick would put the path at the start of the written link if the backtick stayed in it', () => {
+  // The URL parser percent-encodes the backtick of a path, so themeHref keeps such a value on the site. Replaying
+  // the rewrite with the path as an engine that leaves the backtick alone would give it shows why the value is refused.
+  const link = '/$`/evil.example/x'
+  assert.ok(!themeHref(link).startsWith('//'), themeHref(link))
+  assert.equal(link.replace(/(?:(^\.+)\/)?.*$/, `$1${link}`), '//evil.example/x')
+  assert.equal(isSafeLink(link), false)
 })
 
 test('a relative value the URL parser cannot read is refused', () => {
