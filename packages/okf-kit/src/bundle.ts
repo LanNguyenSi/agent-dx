@@ -1,11 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
+import { isRecord } from "./util.js";
 import type {
   BundleContext,
   BundleDoc,
   FrontmatterInfo,
   RunGit,
+  SpecVersion,
 } from "./types.js";
 
 const RESERVED_BASENAMES = new Set(["index.md", "log.md"]);
@@ -31,7 +33,39 @@ export function loadBundle(
     };
   });
   docs.sort((a, b) => a.relPath.localeCompare(b.relPath));
-  return { bundleDir, repoRoot, docs, runGit };
+  return {
+    bundleDir,
+    repoRoot,
+    docs,
+    runGit,
+    specVersion: detectSpecVersion(docs),
+  };
+}
+
+/**
+ * The OKF spec version declared by the bundle: the bundle-root `index.md`
+ * frontmatter's `okf_version` key (OKF v0.2), accepted in both the YAML
+ * number form (`okf_version: 0.2`) and the quoted-string form
+ * (`okf_version: "0.2"`). No key, no frontmatter, an unparseable block, a
+ * non-root `index.md` (only the BUNDLE ROOT declares the version), or a
+ * value that is neither `0.1` nor `0.2` all resolve to `v0.1`: the absent
+ * case is the entire existing corpus, which predates the key, and an
+ * unrecognized value (a future `0.3`, a typo) must not silently promote the
+ * bundle to v0.2 rule semantics. `runCheck` may replace this with the
+ * explicit `--spec` override.
+ */
+function detectSpecVersion(docs: BundleDoc[]): SpecVersion {
+  const rootIndex = docs.find((doc) => doc.relPath === "index.md");
+  const parsed = rootIndex?.frontmatter.parsed;
+  if (!isRecord(parsed) || !("okf_version" in parsed)) return "v0.1";
+  const value = parsed.okf_version;
+  const text =
+    typeof value === "number"
+      ? String(value)
+      : typeof value === "string"
+        ? value.trim()
+        : "";
+  return text === "0.2" ? "v0.2" : "v0.1";
 }
 
 function walkMarkdownFiles(dir: string): string[] {

@@ -118,6 +118,77 @@ function parseTimestampInstantMs(raw: string): number | undefined {
 }
 
 /**
+ * The frontmatter `generated` mapping (OKF v0.2: `generated: { by, at }`,
+ * the replacement for the v0.1 `timestamp`), or undefined when the key is
+ * absent or present but not a mapping (`generated: some string`). Readers:
+ * the effective-stamp helpers below and the `generated-shape` rule.
+ */
+export function getGenerated(
+  parsed: unknown,
+): Record<string, unknown> | undefined {
+  if (!isRecord(parsed)) return undefined;
+  return isRecord(parsed.generated) ? parsed.generated : undefined;
+}
+
+/**
+ * The frontmatter `generated` mapping's `at` value -- an ISO 8601 date-time
+ * with an explicit offset -- or undefined when it is absent, or present but
+ * not a Date/string this tool can read (a number, null, a nested mapping, a
+ * blank string). A value that cannot be read counts as "absent" here, which
+ * is the spec's own fallback posture: consumers MAY fall back to `timestamp`
+ * when `generated.at` is missing. A native `Date` (a `!!timestamp`-tagged
+ * scalar or a programmatically constructed frontmatter) passes through
+ * exactly like the `timestamp` helpers accept one.
+ */
+export function getGeneratedAtValue(
+  parsed: unknown,
+): Date | string | undefined {
+  const generated = getGenerated(parsed);
+  if (!generated) return undefined;
+  const at = generated.at;
+  if (at instanceof Date) return at;
+  if (typeof at === "string" && at.trim() !== "") return at;
+  return undefined;
+}
+
+/** The raw frontmatter `timestamp` value (Date or non-blank string), or undefined. NOT the effective stamp -- this ignores `generated.at` and exists for the divergence check below. */
+function getTimestampValue(parsed: unknown): Date | string | undefined {
+  if (!isRecord(parsed)) return undefined;
+  const timestamp = parsed.timestamp;
+  if (timestamp instanceof Date) return timestamp;
+  if (typeof timestamp === "string" && timestamp.trim() !== "")
+    return timestamp;
+  return undefined;
+}
+
+/**
+ * THE one effective stamp value every timestamp reader in this package
+ * uses: the OKF v0.2 `generated.at` when present, else the v0.1
+ * `timestamp`. Keeping the precedence in this single private helper is
+ * what makes every consumer -- `sources-fresh`'s day-wide staleness
+ * comparison, its re-stamp direction comparison over historical blobs
+ * (`git show <sha>:<path>` parsed with the IDENTICAL `parseFrontmatter`),
+ * `sources-fresh-future`'s clock-skew comparison, and every one of the
+ * public helpers below -- judge a doc by the SAME stamp, so a re-stamp that
+ * moves from `timestamp` to `generated.at` (either direction, on either
+ * side of the commit boundary) can never be judged by two different
+ * notions of "the stamp". A v0.1 bundle (no `generated` key) resolves to
+ * `timestamp` unchanged.
+ */
+function getEffectiveStampValue(parsed: unknown): Date | string | undefined {
+  return getGeneratedAtValue(parsed) ?? getTimestampValue(parsed);
+}
+
+/** The effective stamp value resolved to milliseconds since the epoch, or undefined when it is not parseable to an instant (same undefined cases the public helpers document). */
+function stampValueToMs(stamp: Date | string): number | undefined {
+  if (stamp instanceof Date) {
+    const ms = stamp.getTime();
+    return Number.isNaN(ms) ? undefined : ms;
+  }
+  return parseTimestampInstantMs(stamp);
+}
+
+/**
  * Returns the frontmatter `timestamp` as a Unix epoch (seconds), or
  * undefined when absent, not a Date/string, or not parseable as a date.
  * Used by sources-fresh to compare against a source path's last-commit
@@ -128,17 +199,16 @@ function parseTimestampInstantMs(raw: string): number | undefined {
  * degrade to the no-valid-timestamp notice. A designator-less STRING is
  * parsed via `parseTimestampInstantMs`, i.e. as UTC, so this epoch never
  * depends on the machine's local timezone (D-016).
+ *
+ * Reads the EFFECTIVE stamp: the OKF v0.2 `generated.at` when the doc
+ * carries one, else the v0.1 `timestamp` (see
+ * `getEffectiveStampValue`; same `Date` vs. string and same designator-less
+ * handling for either).
  */
 export function getTimestampEpoch(parsed: unknown): number | undefined {
-  if (!isRecord(parsed)) return undefined;
-  const timestamp = parsed.timestamp;
-  if (timestamp instanceof Date) {
-    const ms = timestamp.getTime();
-    return Number.isNaN(ms) ? undefined : Math.floor(ms / 1000);
-  }
-  if (typeof timestamp !== "string" || timestamp.trim() === "")
-    return undefined;
-  const ms = parseTimestampInstantMs(timestamp);
+  const stamp = getEffectiveStampValue(parsed);
+  if (stamp === undefined) return undefined;
+  const ms = stampValueToMs(stamp);
   return ms === undefined ? undefined : Math.floor(ms / 1000);
 }
 
@@ -155,22 +225,20 @@ export function getTimestampEpoch(parsed: unknown): number | undefined {
  * exists for immaterial there, so there was no reason to touch them. Read
  * as an instant at millisecond resolution, exactly like `getTimestampEpoch`
  * otherwise -- same `Date` vs. string handling, same undefined cases, same
- * UTC-forcing treatment of a designator-less string (D-016).
+ * UTC-forcing treatment of a designator-less string (D-016), and the same
+ * EFFECTIVE stamp (`generated.at` when present, else `timestamp`), which is
+ * what lets a re-stamp that moves between the two keys be judged for
+ * direction like any other re-stamp.
  */
 export function getTimestampEpochMs(parsed: unknown): number | undefined {
-  if (!isRecord(parsed)) return undefined;
-  const timestamp = parsed.timestamp;
-  if (timestamp instanceof Date) {
-    const ms = timestamp.getTime();
-    return Number.isNaN(ms) ? undefined : ms;
-  }
-  if (typeof timestamp !== "string" || timestamp.trim() === "")
-    return undefined;
-  return parseTimestampInstantMs(timestamp);
+  const stamp = getEffectiveStampValue(parsed);
+  if (stamp === undefined) return undefined;
+  return stampValueToMs(stamp);
 }
 
 /**
- * The frontmatter `timestamp`'s raw string form, or undefined when it is
+ * The effective stamp's raw string form (see `getEffectiveStampValue`:
+ * `generated.at` when present, else `timestamp`), or undefined when it is
  * absent, blank, or not a string -- notably, a native `Date` instance (see
  * `getTimestampEpoch`'s doc comment) returns undefined here too, since a
  * `Date`'s `getTime()` already names one instant on every machine, so
@@ -181,11 +249,9 @@ export function getTimestampEpochMs(parsed: unknown): number | undefined {
  * same-instant notice.
  */
 export function getRawTimestampString(parsed: unknown): string | undefined {
-  if (!isRecord(parsed)) return undefined;
-  const timestamp = parsed.timestamp;
-  if (typeof timestamp !== "string" || timestamp.trim() === "")
-    return undefined;
-  return timestamp;
+  const stamp = getEffectiveStampValue(parsed);
+  if (typeof stamp !== "string") return undefined;
+  return stamp;
 }
 
 /**
@@ -213,10 +279,11 @@ export function hasUtcDesignator(raw: string): boolean {
 }
 
 /**
- * A canonical identity string for the frontmatter `timestamp` VALUE, or
- * undefined when the key is absent, blank, or not a scalar this tool
- * understands. Two docs (or two revisions of one doc) are "stamped the
- * same" iff this returns the same value for both.
+ * A canonical identity string for the effective stamp VALUE (`generated.at`
+ * when present, else the frontmatter `timestamp`), or undefined when it is
+ * absent, blank, or not a scalar this tool understands. Two docs (or two
+ * revisions of one doc) are "stamped the same" iff this returns the same
+ * value for both.
  *
  * `compareRestampDirection` (sources-fresh) consults it in exactly two
  * places, both of them comparing identities rather than instants:
@@ -249,15 +316,60 @@ export function hasUtcDesignator(raw: string): boolean {
  * chronological one. Whether the new value is CORRECT is a separate
  * question this function deliberately does not answer (see docs/staleness.md's
  * known limitations).
+ *
+ * Reads the EFFECTIVE stamp (`generated.at` when present, else `timestamp`),
+ * and prefixes a `generated.at` value with `generated-at:` so switching the
+ * very same instant from the `timestamp:` line to the `generated.at:` line
+ * (the OKF v0.2 migration of a stamp) reads as a CHANGED identity, exactly
+ * like a string rewritten to a native `Date` does, and never as the
+ * byte-identical value that gets no same-instant notice at all.
  */
 export function getTimestampIdentity(parsed: unknown): string | undefined {
-  if (!isRecord(parsed)) return undefined;
-  const timestamp = parsed.timestamp;
-  if (timestamp instanceof Date) {
-    const ms = timestamp.getTime();
-    return Number.isNaN(ms) ? undefined : `date:${ms}`;
+  const stamp = getEffectiveStampValue(parsed);
+  if (stamp === undefined) return undefined;
+  const sourcePrefix =
+    getGeneratedAtValue(parsed) === undefined ? "" : "generated-at:";
+  if (stamp instanceof Date) {
+    const ms = stamp.getTime();
+    return Number.isNaN(ms) ? undefined : `${sourcePrefix}date:${ms}`;
   }
-  if (typeof timestamp !== "string" || timestamp.trim() === "")
+  return `${sourcePrefix}string:${stamp.trim()}`;
+}
+
+/**
+ * One side of the `generated.at` vs `timestamp` divergence check, as the
+ * `generated-shape` rule reports it: both raw values, for quoting in the
+ * finding text, and both resolved instants, for the ISO rendering a native
+ * `Date` needs (it has no raw spelling).
+ */
+export interface StampDivergence {
+  generatedAt: Date | string;
+  timestamp: Date | string;
+  generatedAtMs: number;
+  timestampMs: number;
+}
+
+/**
+ * Whether the frontmatter carries BOTH an OKF v0.2 `generated.at` and a
+ * v0.1 `timestamp`, each parseable to an instant, and those two instants
+ * DIFFER: the doc then claims two different "last verified" moments at
+ * once, and `generated.at` (which every effective-stamp reader uses)
+ * silently wins. Undefined when either key is absent or unparseable (there
+ * is no second instant to disagree with, and the effective-stamp rules
+ * already say which value is read), and undefined when both keys name the
+ * SAME instant -- a doc mid-migration that set both to the same moment is
+ * redundant, not contradictory.
+ */
+export function getStampDivergence(
+  parsed: unknown,
+): StampDivergence | undefined {
+  const generatedAt = getGeneratedAtValue(parsed);
+  const timestamp = getTimestampValue(parsed);
+  if (generatedAt === undefined || timestamp === undefined) return undefined;
+  const generatedAtMs = stampValueToMs(generatedAt);
+  const timestampMs = stampValueToMs(timestamp);
+  if (generatedAtMs === undefined || timestampMs === undefined)
     return undefined;
-  return `string:${timestamp.trim()}`;
+  if (generatedAtMs === timestampMs) return undefined;
+  return { generatedAt, timestamp, generatedAtMs, timestampMs };
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   getRawTimestampString,
+  getStampDivergence,
   getTimestampEpoch,
   getTimestampEpochMs,
   getTimestampIdentity,
@@ -239,5 +240,126 @@ describe("getTimestampIdentity", () => {
     expect(
       getTimestampIdentity({ timestamp: new Date("not-a-date") }),
     ).toBeUndefined();
+  });
+});
+
+describe("generated.at as the effective stamp (OKF v0.2)", () => {
+  it("reads the instant from generated.at instead of timestamp", () => {
+    expect(
+      getTimestampEpoch({
+        timestamp: "2020-01-01T00:00:00Z",
+        generated: { by: "okf-kit/1.0.0", at: "2026-03-04T05:06:07Z" },
+      }),
+    ).toBe(Date.parse("2026-03-04T05:06:07Z") / 1000);
+    expect(
+      getTimestampEpochMs({
+        generated: { at: "2026-03-04T05:06:07.500Z" },
+      }),
+    ).toBe(Date.parse("2026-03-04T05:06:07.500Z"));
+  });
+
+  it("keeps the Date vs string handling for generated.at identical to timestamp's", () => {
+    const date = new Date("2026-01-01T00:00:00Z");
+    expect(getTimestampEpoch({ generated: { at: date } })).toBe(
+      Date.parse("2026-01-01T00:00:00Z") / 1000,
+    );
+    // A core-schema YAML parse hands back a string; the same instant must
+    // produce the same epoch either way.
+    expect(
+      getTimestampEpoch({ generated: { at: "2026-01-01T00:00:00Z" } }),
+    ).toBe(getTimestampEpoch({ generated: { at: date } }));
+    expect(
+      getTimestampEpoch({ generated: { at: new Date("not-a-date") } }),
+    ).toBeUndefined();
+    // A designator-less generated.at is forced UTC exactly like a
+    // designator-less timestamp.
+    expect(
+      getTimestampEpoch({ generated: { at: "2026-01-01T13:00:00" } }),
+    ).toBe(Date.parse("2026-01-01T13:00:00Z") / 1000);
+  });
+
+  it("falls back to timestamp when generated.at is absent or unreadable, not when it is merely alongside generated.by", () => {
+    expect(getTimestampEpoch({ timestamp: "2026-01-01T00:00:00Z" })).toBe(
+      Date.parse("2026-01-01T00:00:00Z") / 1000,
+    );
+    expect(
+      getTimestampEpoch({
+        timestamp: "2026-01-01T00:00:00Z",
+        generated: { by: "human:alice" },
+      }),
+    ).toBe(Date.parse("2026-01-01T00:00:00Z") / 1000);
+    // Unreadable `at` shapes (number, blank string) count as absent.
+    expect(
+      getTimestampEpoch({
+        timestamp: "2026-01-01T00:00:00Z",
+        generated: { at: 12345 },
+      }),
+    ).toBe(Date.parse("2026-01-01T00:00:00Z") / 1000);
+    expect(
+      getTimestampEpoch({
+        timestamp: "2026-01-01T00:00:00Z",
+        generated: { at: "   " },
+      }),
+    ).toBe(Date.parse("2026-01-01T00:00:00Z") / 1000);
+  });
+
+  it("exposes generated.at's raw spelling, and none for a native date", () => {
+    expect(
+      getRawTimestampString({
+        timestamp: "2020-01-01T00:00:00Z",
+        generated: { at: "2026-01-01T00:00:00" },
+      }),
+    ).toBe("2026-01-01T00:00:00");
+    expect(
+      getRawTimestampString({
+        generated: { at: new Date("2026-01-01T00:00:00Z") },
+      }),
+    ).toBeUndefined();
+  });
+
+  it("prefixes a generated.at identity so migrating the same instant off timestamp reads as changed", () => {
+    expect(
+      getTimestampIdentity({ generated: { at: "2026-01-01T00:00:00Z" } }),
+    ).not.toBe(getTimestampIdentity({ timestamp: "2026-01-01T00:00:00Z" }));
+    expect(
+      getTimestampIdentity({ generated: { at: "2026-01-01T00:00:00Z" } }),
+    ).toBe(
+      getTimestampIdentity({ generated: { at: " 2026-01-01T00:00:00Z " } }),
+    );
+  });
+
+  describe("getStampDivergence", () => {
+    it("reports only a both-parseable, genuinely different pair", () => {
+      expect(
+        getStampDivergence({
+          timestamp: "2026-01-02T00:00:00Z",
+          generated: { at: "2026-01-05T00:00:00Z" },
+        }),
+      ).toMatchObject({ generatedAtMs: Date.parse("2026-01-05T00:00:00Z") });
+      expect(
+        getStampDivergence({
+          timestamp: "2026-01-02T00:00:00Z",
+          generated: { at: "2026-01-02T00:00:00.000Z" },
+        }),
+      ).toBeUndefined(); // same instant, redundant not contradictory
+      expect(
+        getStampDivergence({ timestamp: "2026-01-02T00:00:00Z" }),
+      ).toBeUndefined();
+      expect(
+        getStampDivergence({ generated: { at: "2026-01-02T00:00:00Z" } }),
+      ).toBeUndefined();
+      expect(
+        getStampDivergence({
+          timestamp: "not-a-date",
+          generated: { at: "2026-01-02T00:00:00Z" },
+        }),
+      ).toBeUndefined(); // unparseable side: no second instant to disagree with
+      expect(
+        getStampDivergence({
+          timestamp: new Date("2026-01-02T00:00:00Z"),
+          generated: { at: "2026-01-05T00:00:00Z" },
+        }),
+      ).toBeDefined(); // a native date timestamp diverges just the same
+    });
   });
 });

@@ -1,17 +1,53 @@
 /**
  * Scaffold content for `okf-kit init`. Everything here is static except the
- * `timestamp` value, which the caller (src/init.ts) fills in with the real
+ * stamp value, which the caller (src/init.ts) fills in with the real
  * current instant at generation time: never hardcode an artificial
  * midnight datetime here, that is exactly the lesson this kit is built to
- * enforce (see FRONTMATTER_GUIDANCE below).
+ * enforce (see frontmatterGuidance() below).
+ *
+ * Every template takes the OKF spec version (default `v0.1`, byte-identical
+ * to every release before the `--spec` flag existed). Under `v0.2` the
+ * bundle-root index.md declares `okf_version: "0.2"` and the doc templates
+ * write the `generated: {by, at}` block that replaces `timestamp`, plus one
+ * extra guidance bullet about it.
  */
 
-const FRONTMATTER_GUIDANCE = `<!--
+import type { SpecVersion } from "./types.js";
+
+/**
+ * The frontmatter stamp block for one template doc: the v0.1
+ * `timestamp:` line, or the v0.2 `generated: {by, at}` mapping that
+ * replaces it (spec v0.2: "timestamp is replaced by generated: { by, at }",
+ * with `at` carrying the same instant semantics and `by` naming the
+ * producer). The `human:<id>` placeholder matches the `human:<id>` shape
+ * `generated-shape` accepts, so the scaffold checks clean and reads as an
+ * obvious "replace me" marker, consistent with every other placeholder
+ * here.
+ */
+function stampBlock(spec: SpecVersion, timestamp: string): string {
+  return spec === "v0.2"
+    ? `generated:\n  by: human:<id>\n  at: ${timestamp}`
+    : `timestamp: ${timestamp}`;
+}
+
+/** The guidance bullet explaining the v0.2 `generated` block, appended to every doc's guidance comment under spec v0.2 only. */
+function generatedGuidanceNote(spec: SpecVersion): string {
+  if (spec !== "v0.2") return "";
+  return `
+- \`generated\` (OKF v0.2) replaces \`timestamp\` in this doc: \`generated.at\`
+  means exactly what \`timestamp\` meant, and \`generated.by\` names who or what
+  wrote the doc, in one of the shapes \`<producer>/<version>\` (e.g.
+  \`okf-kit/0.19.0\`), \`human:<id>\` or \`process:<id>\`. Replace the \`human:<id>\`
+  placeholder; \`generated.at\` must carry an explicit offset (\`Z\` or \`+02:00\`).`;
+}
+
+function frontmatterGuidance(spec: SpecVersion): string {
+  return `<!--
 okf-kit init guidance (delete this comment once the doc is written):
 - \`timestamp\` means "last verified against sources", not "created on".
   Bump it (and add a line to this bundle's log.md) every time you
   re-verify this doc against its sources; never hand-write an artificial
-  midnight datetime, use the real instant you did the verification.
+  midnight datetime, use the real instant you did the verification.${generatedGuidanceNote(spec)}
 - \`sources\` lists the repo-root-relative paths this doc DESCRIBES (code,
   config, or other docs elsewhere in the repo). Never list this bundle's
   own directory: a bundle directory changes on every doc edit, so a
@@ -21,12 +57,14 @@ okf-kit init guidance (delete this comment once the doc is written):
   path: \`okf-kit check\` will report that placeholder as a missing source
   path until you replace it, and that is intentional, not a bug.
 -->`;
+}
 
-const BENCHMARK_FRONTMATTER_GUIDANCE = `<!--
+function benchmarkGuidance(spec: SpecVersion): string {
+  return `<!--
 okf-kit init guidance (delete this comment once the doc is written):
 - \`timestamp\` means "last verified", not "created on"; bump it (and add a
   line to this bundle's log.md) whenever this record is updated. Never
-  hand-write an artificial midnight datetime.
+  hand-write an artificial midnight datetime.${generatedGuidanceNote(spec)}
 - This template intentionally has no \`sources:\` key. A benchmark record
   documents a measurement protocol and its results, not a piece of the
   codebase, so there is nothing it "describes" in the sources-shape sense.
@@ -35,15 +73,17 @@ okf-kit init guidance (delete this comment once the doc is written):
   edit to the bundle and was permanently, uselessly stale. Don't repeat
   that mistake: omit \`sources\` here rather than pointing it at yourself.
 -->`;
+}
 
-const INCIDENT_FRONTMATTER_GUIDANCE = `<!--
+function incidentGuidance(spec: SpecVersion): string {
+  return `<!--
 okf-kit init guidance (delete this comment once the doc is written):
 - This template intentionally has no \`sources:\` key. An incident analysis
   is a historical record of what broke and why, not a description of the
   current code, so it must not go stale when that code changes later.
 - \`timestamp\` means "last updated"; bump it (and add a line to this
   bundle's log.md) whenever the record or a lesson's status changes. Never
-  hand-write an artificial midnight datetime.
+  hand-write an artificial midnight datetime.${generatedGuidanceNote(spec)}
 - No personal data: name roles ("the on-call reviewer"), never people.
   Reference tickets and trackers by key, do not copy their content.
 - \`lessons[].status\` is one of proposed | adopted | rejected. Once a
@@ -54,6 +94,7 @@ okf-kit init guidance (delete this comment once the doc is written):
   never the reverse, so a shipped runbook does not reveal that internal
   analyses exist.
 -->`;
+}
 
 const BODY_GUIDANCE = `<!--
 Write dense, source-verified prose: name exact mechanisms (function/class/
@@ -63,8 +104,14 @@ naming the function that does it. Every sentence here should be checkable
 against a source in \`sources:\` above.
 -->`;
 
-export function indexTemplate(): string {
-  return `# Knowledge bundle index
+export function indexTemplate(spec: SpecVersion = "v0.1"): string {
+  // OKF v0.2 lets exactly one file carry frontmatter: the bundle-root
+  // index.md, with exactly one key, the version declaration itself (the
+  // reserved-files-bare exception; the quoted form keeps YAML handing back
+  // the string "0.2", the form the spec spells).
+  const versionDeclaration =
+    spec === "v0.2" ? '---\nokf_version: "0.2"\n---\n\n' : "";
+  return `${versionDeclaration}# Knowledge bundle index
 
 Scaffolded by \`okf-kit init\`. Replace this placeholder index with a real
 map of the docs in this bundle as you add and rename them.
@@ -104,18 +151,21 @@ export function logTemplate(timestamp: string): string {
 `;
 }
 
-export function overviewTemplate(timestamp: string): string {
+export function overviewTemplate(
+  timestamp: string,
+  spec: SpecVersion = "v0.1",
+): string {
   return `---
 type: overview
 title: <component/area> overview
 description: Orientation doc, what this area covers and where to start reading.
 tags: [overview]
-timestamp: ${timestamp}
+${stampBlock(spec, timestamp)}
 sources:
   - path/to/covered/source
 ---
 
-${FRONTMATTER_GUIDANCE}
+${frontmatterGuidance(spec)}
 
 # <Component/area> overview
 
@@ -135,18 +185,21 @@ ${BODY_GUIDANCE}
 `;
 }
 
-export function moduleTemplate(timestamp: string): string {
+export function moduleTemplate(
+  timestamp: string,
+  spec: SpecVersion = "v0.1",
+): string {
   return `---
 type: module
 title: <module name>
 description: What this module owns, its entry points, and its key files.
 tags: [module]
-timestamp: ${timestamp}
+${stampBlock(spec, timestamp)}
 sources:
   - path/to/covered/source
 ---
 
-${FRONTMATTER_GUIDANCE}
+${frontmatterGuidance(spec)}
 
 # <Module name>
 
@@ -170,18 +223,21 @@ ${BODY_GUIDANCE}
 `;
 }
 
-export function invariantTemplate(timestamp: string): string {
+export function invariantTemplate(
+  timestamp: string,
+  spec: SpecVersion = "v0.1",
+): string {
   return `---
 type: invariant
 title: <invariant name>
 description: A falsifiable invariant, where it is enforced, and what breaks it.
 tags: [invariant]
-timestamp: ${timestamp}
+${stampBlock(spec, timestamp)}
 sources:
   - path/to/covered/source
 ---
 
-${FRONTMATTER_GUIDANCE}
+${frontmatterGuidance(spec)}
 
 # <Invariant name>
 
@@ -210,18 +266,21 @@ edit there. Use \`sources\` instead (or as well) when the runbook cites
 concrete lines that must stay true: a change there then marks it stale.
 -->`;
 
-export function runbookTemplate(timestamp: string): string {
+export function runbookTemplate(
+  timestamp: string,
+  spec: SpecVersion = "v0.1",
+): string {
   return `---
 type: runbook
 title: <runbook name>
 description: Step-by-step operational procedure with preconditions and verification.
 tags: [runbook]
-timestamp: ${timestamp}
+${stampBlock(spec, timestamp)}
 applies_to:
   - path/to/covered/source
 ---
 
-${FRONTMATTER_GUIDANCE}
+${frontmatterGuidance(spec)}
 
 ${RUNBOOK_APPLIES_TO_GUIDANCE}
 
@@ -248,13 +307,16 @@ ${BODY_GUIDANCE}
 `;
 }
 
-export function incidentTemplate(timestamp: string): string {
+export function incidentTemplate(
+  timestamp: string,
+  spec: SpecVersion = "v0.1",
+): string {
   return `---
 type: incident
 title: <short symptom>
 description: <one line>
 tags: [incident]
-timestamp: ${timestamp}
+${stampBlock(spec, timestamp)}
 area: <cluster key, ideally the topic of a runbook>
 root_cause: <term from the bundle's vocabulary>
 escape_reason: <why checks before release did not catch it>
@@ -268,7 +330,7 @@ lessons:
 related: []
 ---
 
-${INCIDENT_FRONTMATTER_GUIDANCE}
+${incidentGuidance(spec)}
 
 # <Short symptom>
 
@@ -294,16 +356,19 @@ ${INCIDENT_FRONTMATTER_GUIDANCE}
 `;
 }
 
-export function benchmarkTemplate(timestamp: string): string {
+export function benchmarkTemplate(
+  timestamp: string,
+  spec: SpecVersion = "v0.1",
+): string {
   return `---
 type: benchmark
 title: <bundle name> discovery benchmark
 description: Before/after measurement of discovery quality for this bundle.
 tags: [benchmark]
-timestamp: ${timestamp}
+${stampBlock(spec, timestamp)}
 ---
 
-${BENCHMARK_FRONTMATTER_GUIDANCE}
+${benchmarkGuidance(spec)}
 
 # <Bundle name> discovery benchmark
 

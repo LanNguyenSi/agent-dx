@@ -57,6 +57,11 @@ okf-kit check path/to/bundle --companion shipped=path/to/other/bundle
 
 # report only some rules and/or a minimum severity (the exit status counts only what is reported)
 okf-kit check path/to/bundle --rule citations-resolve,links-resolve --min-severity warning
+
+# check against a specific OKF spec version (default: detected from the bundle-root index.md
+# `okf_version` frontmatter; v0.1 when that key is absent; see docs/check-catalog.md's
+# "Spec version (--spec)")
+okf-kit check path/to/bundle --spec v0.2
 ```
 
 `check` exits `0` with no errors (and, under `--strict`, no warnings), `1` when it finds one, and `2` on an invocation or tool error; see [check catalog](docs/check-catalog.md#exit-codes) for the full table and [Output](docs/check-catalog.md#output) for the text and JSON formats.

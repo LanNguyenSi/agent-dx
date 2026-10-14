@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { UsageError } from "./errors.js";
+import type { SpecVersion } from "./types.js";
 import {
   benchmarkTemplate,
   incidentTemplate,
@@ -14,6 +15,15 @@ import {
 
 export interface InitOptions {
   force?: boolean;
+  /**
+   * The OKF spec version to scaffold for (CLI: `init --spec v0.1|v0.2`).
+   * Undefined means `v0.1`, and a `v0.1` run writes byte-identical output
+   * to every okf-kit release before the `--spec` flag existed. `v0.2`
+   * additionally declares `okf_version: "0.2"` in the bundle-root index.md
+   * and writes a `generated: {by, at}` block instead of `timestamp` in
+   * every template doc.
+   */
+  spec?: SpecVersion;
   /** Test-only override for "now"; production code uses the real clock. */
   now?: () => Date;
 }
@@ -42,6 +52,7 @@ export function runInit(
   const resolvedDir = path.resolve(targetDir);
   const now = options.now ?? (() => new Date());
   const timestamp = now().toISOString();
+  const spec: SpecVersion = options.spec ?? "v0.1";
 
   if (fs.existsSync(resolvedDir)) {
     if (!fs.statSync(resolvedDir).isDirectory()) {
@@ -63,14 +74,14 @@ export function runInit(
 
   const contentByFilename: Record<(typeof SCAFFOLD_FILENAMES)[number], string> =
     {
-      "index.md": indexTemplate(),
+      "index.md": indexTemplate(spec),
       "log.md": logTemplate(timestamp),
-      "overview-template.md": overviewTemplate(timestamp),
-      "module-template.md": moduleTemplate(timestamp),
-      "invariant-template.md": invariantTemplate(timestamp),
-      "runbook-template.md": runbookTemplate(timestamp),
-      "incident-template.md": incidentTemplate(timestamp),
-      "benchmark-template.md": benchmarkTemplate(timestamp),
+      "overview-template.md": overviewTemplate(timestamp, spec),
+      "module-template.md": moduleTemplate(timestamp, spec),
+      "invariant-template.md": invariantTemplate(timestamp, spec),
+      "runbook-template.md": runbookTemplate(timestamp, spec),
+      "incident-template.md": incidentTemplate(timestamp, spec),
+      "benchmark-template.md": benchmarkTemplate(timestamp, spec),
     };
 
   const filesWritten: string[] = [];

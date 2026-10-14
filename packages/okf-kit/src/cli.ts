@@ -16,7 +16,7 @@ import { detectRepoRoot } from "./git.js";
 import { formatInitSummary, runInit } from "./init.js";
 import { allRules } from "./rules/index.js";
 import { renderJson, renderText, summarize } from "./report.js";
-import type { Finding, RunGit, Severity } from "./types.js";
+import type { Finding, RunGit, Severity, SpecVersion } from "./types.js";
 
 export { UsageError };
 
@@ -89,6 +89,13 @@ export interface CheckOptions {
    * (error > warning > notice). Undefined: every severity is reported.
    */
   minSeverity?: Severity;
+  /**
+   * `--spec v0.1|v0.2`: check the bundle against this OKF spec version,
+   * overriding the `okf_version` detection from the bundle-root `index.md`
+   * (see `detectSpecVersion` in `src/bundle.ts`). An invalid value is a
+   * UsageError. Stored on `ctx.specVersion`.
+   */
+  spec?: string;
   /** Test-only override for git access; production code shells out to the real `git` binary. */
   runGit?: RunGit;
 }
@@ -114,6 +121,23 @@ export function parseMinSeverity(value: string): Severity {
   throw new UsageError(
     `--min-severity must be one of error, warning, notice, got \`${value}\``,
   );
+}
+
+/**
+ * Parses a `--spec` value (on `check` and on `init`); a UsageError names the
+ * valid versions. `check` uses it to OVERRIDE the spec version detected
+ * from the bundle-root `index.md` `okf_version` frontmatter; `init` uses it
+ * to pick which spec's scaffold to write. The bare number forms (`0.2`)
+ * that the FRONTMATTER accepts are deliberately not accepted here: this
+ * flag names a spec version, and only one spelling of each stays
+ * unambiguous in a shell history.
+ */
+export function parseSpecVersion(value: string): SpecVersion {
+  const trimmed = value.trim();
+  if (trimmed === "v0.1" || trimmed === "v0.2") {
+    return trimmed;
+  }
+  throw new UsageError(`--spec must be one of v0.1, v0.2, got \`${value}\``);
 }
 
 /** Rejects a `--rule` id that names no registered rule, listing the valid ids. */
@@ -150,6 +174,13 @@ export function runCheck(
     : detectRepoRoot(resolvedBundleDir, options.runGit);
   const companions = parseCompanions(options.companions ?? []);
   const ctx = loadBundle(resolvedBundleDir, repoRoot, options.runGit);
+  // `--spec` replaces the version loadBundle detected from the bundle-root
+  // index.md frontmatter; the same override flows to every rule through
+  // ctx.specVersion. An invalid value is the same usage error (exit 2) an
+  // invalid --min-severity gets.
+  if (options.spec !== undefined) {
+    ctx.specVersion = parseSpecVersion(options.spec);
+  }
   if (options.requireAnchors) {
     ctx.requireAnchors = { allow: options.requireAnchorsAllow ?? [] };
   }
@@ -279,6 +310,11 @@ program
     "Report only findings at this severity or above: error, warning or notice (default: all); the exit " +
       "status counts only the reported findings",
   )
+  .option(
+    "--spec <version>",
+    "Check against this OKF spec version: v0.1 or v0.2. Overrides the `okf_version` frontmatter of the " +
+      "bundle-root index.md (v0.1 when that key is absent); an invalid value is a usage error (exit 2)",
+  )
   .exitOverride()
   .action(
     (
@@ -297,6 +333,7 @@ program
         skipCompanionRefs?: boolean;
         rule?: string[];
         minSeverity?: string;
+        spec?: string;
       },
     ) => {
       try {
@@ -336,6 +373,7 @@ program
           skipCompanionRefs: opts.skipCompanionRefs,
           rules: opts.rule,
           minSeverity,
+          spec: opts.spec,
         });
         const output = opts.json
           ? renderJson(result.bundleDir, result.findings)
@@ -407,23 +445,35 @@ program
     "-f, --force",
     "Overwrite the scaffold files in a non-empty target directory (other existing files are left alone)",
   )
+  .option(
+    "--spec <version>",
+    'Scaffold for this OKF spec version: v0.1 or v0.2 (default v0.1). v0.2 writes `okf_version: "0.2"` ' +
+      "in the bundle-root index.md and a `generated: {by, at}` block instead of `timestamp` in every " +
+      "template doc; an invalid value is a usage error (exit 2)",
+  )
   .exitOverride()
-  .action((dir: string | undefined, opts: { force?: boolean }) => {
-    try {
-      const result = runInit(dir ?? "docs/okf", { force: opts.force });
-      process.stdout.write(formatInitSummary(result));
-      process.exitCode = 0;
-      return;
-    } catch (err) {
-      if (err instanceof UsageError) {
-        process.stderr.write(`okf-kit: ${err.message}\n`);
+  .action(
+    (dir: string | undefined, opts: { force?: boolean; spec?: string }) => {
+      try {
+        const result = runInit(dir ?? "docs/okf", {
+          force: opts.force,
+          spec:
+            opts.spec === undefined ? undefined : parseSpecVersion(opts.spec),
+        });
+        process.stdout.write(formatInitSummary(result));
+        process.exitCode = 0;
+        return;
+      } catch (err) {
+        if (err instanceof UsageError) {
+          process.stderr.write(`okf-kit: ${err.message}\n`);
+          process.exit(2);
+        }
+        const msg = err instanceof Error ? err.message : String(err);
+        process.stderr.write(`okf-kit: ${msg}\n`);
         process.exit(2);
       }
-      const msg = err instanceof Error ? err.message : String(err);
-      process.stderr.write(`okf-kit: ${msg}\n`);
-      process.exit(2);
-    }
-  });
+    },
+  );
 
 // Commander codes for an explicit `-h`/`--help` or `-V`/`--version` flag:
 // keep commander's own exit code (0) for these. Note `commander.help` is

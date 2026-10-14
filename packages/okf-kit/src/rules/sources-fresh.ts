@@ -3,6 +3,7 @@ import path from "node:path";
 import { parseFrontmatter } from "../bundle.js";
 import { runGit as defaultRunGit } from "../git.js";
 import {
+  getGeneratedAtValue,
   getRawTimestampString,
   getTimestampEpoch,
   getTimestampEpochMs,
@@ -34,6 +35,7 @@ export const DEFAULT_FUTURE_SKEW_SECONDS = 600;
 export const sourcesFreshRule: Rule = {
   id: RULE_ID,
   description:
+    "The doc's timestamp below is its EFFECTIVE stamp: the OKF v0.2 `generated.at` when present, else the v0.1 `timestamp` -- the same effective stamp on both sides of every comparison, including the historical blobs the re-stamp check parses. " +
     "Frontmatter `sources` paths must not have a last-commit time newer than the doc's `timestamp`, unless the doc's own last commit lands at/after the source's and that same commit actually re-stamped the doc: the doc's parsed frontmatter `timestamp` VALUE at that commit is strictly LATER than its value in the commit's first parent (rename-aware; creating the doc counts as re-stamping it). A commit that moves the stamp BACKWARDS is not a re-stamp: the affected sources stay STALE, and the doc additionally gets a `re-stamp moved backwards` warning naming the previous and new values. Creation is trusted only in a genuinely unshallow repository: in a shallow clone, a commit with no parents can simply be where history was cut off, not a real root commit, so it gets the same `not assessable` notice instead of being assumed created. When git cannot answer the question at all, the doc gets a `not assessable` notice instead of either a STALE warning or a silent pass.",
   run(ctx) {
     const findings: Finding[] = [];
@@ -333,7 +335,8 @@ export const sourcesFreshRule: Rule = {
 export const sourcesFreshFutureRule: Rule = {
   id: FUTURE_RULE_ID,
   description:
-    "A doc's frontmatter `timestamp` must not be later than the doc file's own last commit time by more than a clock-skew allowance (default 10 minutes, `--future-skew-minutes`); catches a local time mistakenly written with a `Z`/UTC suffix. Skipped (notice) for a timestamp with no explicit UTC designator (`Z`) or numeric offset, since that parses in the local timezone and cannot be compared reliably against a minutes-wide allowance. Assessed for the same docs as `sources-fresh` (a `sources` list and a repo root); see docs/staleness.md for how the two rules relate.",
+    "The doc's timestamp below is its EFFECTIVE stamp: the OKF v0.2 `generated.at` when present, else the v0.1 `timestamp`. " +
+    "A doc's frontmatter `timestamp` must not be later than the doc file's own last commit time by more than a clock-skew allowance (default 10 minutes, `--future-skew-minutes`); catches a local time mistakenly written with a `Z`/UTC suffix. Skipped (notice) for a timestamp with no explicit UTC designator (`Z`) or numeric offset, since that parses in the local timezone and cannot be compared reliably against a minutes-wide allowance (the one exception: under spec v0.2 a designator-less `generated.at` is an error reported by `generated-shape`, so it is skipped here silently rather than noticed twice). Assessed for the same docs as `sources-fresh` (a `sources` list and a repo root); see docs/staleness.md for how the two rules relate.",
   run(ctx) {
     const findings: Finding[] = [];
 
@@ -361,13 +364,27 @@ export const sourcesFreshFutureRule: Rule = {
       // to that rule.
       const rawTimestamp = getRawTimestampString(doc.frontmatter.parsed);
       if (rawTimestamp !== undefined && !hasUtcDesignator(rawTimestamp)) {
-        findings.push({
-          ruleId: FUTURE_RULE_ID,
-          severity: "notice",
-          file: doc.relPath,
-          message:
-            "future-dated check skipped: timestamp has no UTC designator (`Z`) or numeric offset, can't be compared reliably across timezones",
-        });
+        // One exception: under spec v0.2 a designator-less `generated.at`
+        // is not "skip, unknowable", it is a spec violation, and
+        // `generated-shape` reports it as an ERROR naming the same value.
+        // Emitting this notice too would report the same defect twice, once
+        // as an error and once as a notice; the check is still skipped
+        // (the `continue` below), just silently, with the error carrying
+        // the message. A designator-less v0.1 `timestamp` (the fallback a
+        // v0.2 doc without `generated.at` also gets) keeps the notice,
+        // byte-identical to before this exception existed.
+        if (!(
+          ctx.specVersion === "v0.2" &&
+          getGeneratedAtValue(doc.frontmatter.parsed) !== undefined
+        )) {
+          findings.push({
+            ruleId: FUTURE_RULE_ID,
+            severity: "notice",
+            file: doc.relPath,
+            message:
+              "future-dated check skipped: timestamp has no UTC designator (`Z`) or numeric offset, can't be compared reliably across timezones",
+          });
+        }
         continue;
       }
 
