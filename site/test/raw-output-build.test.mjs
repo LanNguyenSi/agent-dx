@@ -10,7 +10,7 @@ import path from 'node:path'
 import vm from 'node:vm'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'vitepress'
-import { keptRelative, themeOffsite } from './link-cases.mjs'
+import { backtickRefused, keptRelative, themeOffsite } from './link-cases.mjs'
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'hardening')
 const LS = ' '
@@ -444,7 +444,8 @@ test('a feature link with a script scheme, in every spelling a browser might rea
 // A relative link is not written as typed: the theme parses it and writes the
 // parsed path back, so a link without a scheme can come out as "//host/...".
 // Each field is built into a site with the real base and both URL styles, with
-// the values that must be refused and the look-alikes that must stay. The site
+// the values that must be refused (the ones the theme writes as another site,
+// and the ones with a backtick) and the look-alikes that must stay. The site
 // is written next to the fixtures, so that it resolves the same packages.
 test('no link field writes a network path, and the look-alikes that stay on the site are kept', async () => {
   const quoted = (value) => JSON.stringify(value)
@@ -463,7 +464,8 @@ test('no link field writes a network path, and the look-alikes that stay on the 
           ''
         ].join('\n')
       )
-      const all = [...themeOffsite, ...keptRelative]
+      const refused = [...themeOffsite, ...backtickRefused]
+      const all = [...refused, ...keptRelative]
       all.forEach((link, i) => {
         fs.writeFileSync(path.join(dir, `nav-${i}.md`), front(['prev:', '  text: Before', `  link: ${quoted(link)}`, 'next:', '  text: After', `  link: ${quoted(link)}`]))
       })
@@ -487,7 +489,7 @@ test('no link field writes a network path, and the look-alikes that stay on the 
         assertNoRaw(page, ['evil.example'])
         const footer = section(app(page), 'VPDocFooter')
         assertHrefsOnSite(footer)
-        assert.equal(hrefsOf(footer).length, i < themeOffsite.length ? 0 : 2, `${link}, cleanUrls ${cleanUrls}`)
+        assert.equal(hrefsOf(footer).length, i < refused.length ? 0 : 2, `${link}, cleanUrls ${cleanUrls}`)
       })
     } finally {
       fs.rmSync(dir, { recursive: true, force: true })

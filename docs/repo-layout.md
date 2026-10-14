@@ -97,9 +97,16 @@ for example `/.//host/x`, `/a/..//host/x` (dot segments before a double
 slash) and `/$1/host/x` (a `$` pattern in the path). Without this the link
 would point at another site and carry none of the markers the theme gives an
 external link. A `//` inside a path (`/a//b`) and leading dots (`..//a`) stay
-on the site and are kept. The check repeats the theme's own computation
-(`normalizeLink` and `withBase` in the VitePress default theme), so after a
-VitePress upgrade read both again and run the site tests. `target` on a hero
+on the site and are kept. A relative value with a backtick is dropped as well
+(write `%60`): `$` followed by a backtick is a replacement pattern that
+inserts the text before the match, so ``/$`/host/x`` would be written as
+`//host/x` by an engine that leaves the backtick in the path. The URL
+standard percent-encodes it there, and the check does not rely on that. The
+check repeats the theme's own computation (`normalizeLink` and `withBase` in
+the VitePress default theme). The site tests (`site/test/theme-href.test.mjs`)
+run the installed theme's functions over a generated corpus and compare them
+with that copy, so a VitePress upgrade that changes the rewrite fails the
+suite; after an upgrade read both functions again as well. `target` on a hero
 action or a feature is kept only as `_blank`, `_self`, `_parent` or `_top`,
 and `rel` only when every space-separated token is one of `noopener`,
 `noreferrer`, `nofollow`, `external`, `sponsored`, `ugc`, `me`, `author`,
