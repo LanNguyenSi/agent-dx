@@ -234,6 +234,14 @@ function killGroup(pgid: number): void {
 const HANGING =
   'echo $$ >> "$PIDS"\n/bin/sleep 300 &\necho $! >> "$PIDS"\nwait';
 
+/** Not hanging at all: the stand-in exits 0 at once while a background
+ * child keeps the inherited pipes open. The trampoline then ends, stops
+ * its watcher and exits; `spawnSync` waits for the pipes until the bound
+ * and only returns with its timeout error; nothing but
+ * `endGroupIfAbnormal` ends the child. */
+const EXITS_ZERO_HOLDING_PIPES =
+  'echo $$ >> "$PIDS"\n/bin/sleep 300 &\necho $! >> "$PIDS"\nexit 0';
+
 describe.skipIf(process.platform === "win32")(
   "patch: the bounded git identity lookup (bounded-spawn)",
   () => {
@@ -299,6 +307,44 @@ describe.skipIf(process.platform === "win32")(
       } finally {
         killGroup(live.pid);
         for (const pid of hung.pids()) {
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch {
+            // Gone.
+          }
+        }
+      }
+    }, 60_000);
+
+    it("ends a stand-in git that exits 0 while a descendant holds the pipes and leaves nothing of it running", async () => {
+      // The only case where `endGroupIfAbnormal` matters: the run ends
+      // normally as far as the direct child goes, so the watcher is
+      // already stopped and the kill at the bound finds a dead child;
+      // just the group kill after `spawnSync` returns ends the
+      // descendant that holds the pipes. Drop that call and the
+      // recorded child sleeps on for its 300 seconds while every
+      // warning stays as expected.
+      const held = fakeGit(EXITS_ZERO_HOLDING_PIPES);
+      const dir = tmpDir();
+      fs.writeFileSync(path.join(dir, "a.txt"), "a\n");
+      try {
+        const { out, ms } = await runPatchChild(
+          { cwd: dir, edits: EDIT, dryRun: true, gitTimeoutMs: 1000 },
+          held.env,
+        );
+        expect(out.status).toBe("would_write");
+        expect((out.warnings ?? []).join("\n")).toContain(
+          "did not finish within",
+        );
+        // Ended at the bound (the pipe never drained), not by the
+        // stand-in's sleep ending.
+        expect(ms).toBeGreaterThanOrEqual(900);
+        expect(ms).toBeLessThan(20_000);
+        const recorded = held.pids();
+        expect(recorded).toHaveLength(2);
+        await expectGone(recorded);
+      } finally {
+        for (const pid of held.pids()) {
           try {
             process.kill(pid, "SIGKILL");
           } catch {

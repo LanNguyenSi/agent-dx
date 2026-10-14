@@ -36,11 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   group when the kernel closes it, which happens when the patch process
   dies even if nothing reaps it, so a patch ended by SIGKILL or SIGHUP
   while git hangs (a FIFO it opens) leaves no git behind. The 3 second
-  bound, the 64 KiB output bound and their warnings are unchanged, and a
-  git that a signal ends (reported by the wrapper with the shell's
-  status for it, 128 plus the signal number) or that the wrapper cannot
-  find or run (the shell's 127 and 126) is still a failed lookup, never
-  read as an empty answer.
+  bound and the warnings are unchanged; the 64 KiB output bound now
+  covers git's stdout and stderr together (the wrapper captures stderr,
+  which used to be ignored). A git that a signal ends (reported by the
+  wrapper with the shell's status for it, 128 plus the signal number) or
+  that the wrapper cannot find or run (the shell's 127 and 126) is still
+  a failed lookup, never read as an empty answer.
+
 - `worktree create`, `remove` and `list`: every git call is bounded, so a
   repository git cannot read (a fifo among the refs, which some git
   versions block on; a hook or credential helper waiting for input) ends

@@ -569,7 +569,8 @@ function gitDirIdentities(
   // signal, and a git that is not there or not runnable as the shell's 127
   // or 126 rather than as a spawn error. Neither is an answer: they are
   // failed lookups, never the empty output of "no repository here" (which
-  // is git's own exit 1).
+  // is git's own exit 128). That is why the signal mapping below starts
+  // strictly above 128.
   if (process.platform !== "win32" && res.status !== null && res.status > 128) {
     return skipped(
       `git rev-parse was ended by ${signalName(res.status - 128)}`,
