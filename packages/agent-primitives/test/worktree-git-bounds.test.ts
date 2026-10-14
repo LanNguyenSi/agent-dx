@@ -1,19 +1,30 @@
-import { execFileSync, spawn } from "node:child_process";
+import {
+  execFileSync,
+  spawn,
+  spawnSync,
+  type SpawnSyncOptions,
+} from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
+import { boundedCommand, boundedSpawnOptions } from "../src/bounded-spawn.js";
 import { runGit, runGitBytes } from "../src/drift/git.js";
+import { createWorktree } from "../src/worktree/create.js";
 import {
   GIT_BOUND_ENV,
   GIT_BOUND_MS,
   GIT_WALK_BOUND_MS,
+  WorktreeRefusal,
   effectiveBoundMs,
   git,
   gitFailure,
   isGitTimeout,
+  mergeVerdict,
+  runGh,
   unpushedCommits,
 } from "../src/worktree/git.js";
+import { removeWorktree } from "../src/worktree/remove.js";
 import { buildSpawnEnv, CLI_PATH, FIXED_BIN_DIR } from "./helpers/spawn-cli.js";
 
 /**
@@ -158,6 +169,8 @@ interface Hanging {
   PATH: string;
   /** The pids the hung stand-in recorded: the wrapper and its sleep. */
   pids: () => number[];
+  /** The command line of every call the stand-in saw, in order. */
+  calls?: () => string[];
 }
 
 /** A fresh directory of its own, outside every fixture (a stand-in kept
@@ -177,11 +190,13 @@ function hangingGit(hang: Hang, hangSeconds = HANG_SECONDS): Hanging {
   const dir = scratchDir("hang-git");
   const pidFile = path.join(dir, "pids");
   const counter = path.join(dir, "count");
+  const callLog = path.join(dir, "calls");
   const tail = hang.exact === true ? "" : "*";
   fs.writeFileSync(
     path.join(dir, "git"),
     [
       "#!/bin/sh",
+      `echo "$*" >> '${callLog}'`,
       `case " $* " in`,
       `  *"${hang.match}"${tail})`,
       `    n=0`,
@@ -211,6 +226,13 @@ function hangingGit(hang: Hang, hangSeconds = HANG_SECONDS): Hanging {
         .filter((l) => l !== "")
         .map(Number);
     },
+    calls: () =>
+      fs.existsSync(callLog)
+        ? fs
+            .readFileSync(callLog, "utf8")
+            .split("\n")
+            .filter((l) => l !== "")
+        : [],
   };
 }
 
@@ -575,6 +597,22 @@ describe("worktree remove: a git call that does not finish ends in a refusal", (
       expect(r.json.message).toContain(
         `gh pr list did not finish within ${String(SHORT_BOUND_MS / 1000)} s`,
       );
+      expect(listed(f.repo)).toContain(wt);
+    },
+  );
+
+  it.concurrent(
+    "a gh that is not installed leaves the verdict unknown and says why",
+    async () => {
+      const f = makeFixture();
+      const wt = addWorktree(f, "feat", true);
+      // The fixed PATH of a spawned CLI holds git but no gh.
+      const r = await runCli(f.work, ["remove", wt, "--require-merged"], {
+        ...boundEnv(),
+      });
+      expect(r.code, r.stdout + r.stderr).toBe(2);
+      expect(r.json.reason, r.stdout).toBe("merge_state_unknown");
+      expect(r.json.message).toContain("gh is not available");
       expect(listed(f.repo)).toContain(wt);
     },
   );
@@ -1039,7 +1077,9 @@ function killGroup(live: LiveCli, signal: NodeJS.Signals): void {
 
 describe("a CLI that is signalled while its git hangs", () => {
   // git runs in a group of its own, so a signal to the CLI's group never
-  // reaches it. A watcher in git's group ends it once the CLI is gone.
+  // reaches it. A watcher in git's group ends it once the CLI is gone: the
+  // watcher reads a pipe the CLI holds, which the kernel closes when the CLI
+  // dies.
   it.each(["SIGKILL", "SIGHUP"] as const)(
     "%s of the CLI's group does not leave git behind",
     async (signal) => {
@@ -1057,7 +1097,7 @@ describe("a CLI that is signalled while its git hangs", () => {
         const ended = await live.closed;
         expect(ended.code === null ? ended.signal : ended.code).not.toBeNull();
         // The stand-in is in the group of its own: still there right now,
-        // gone within the watcher's interval and a margin.
+        // gone as soon as the watcher sees the pipe close.
         await expectGone(pids);
       } finally {
         killGroup(live, "SIGKILL");
@@ -1093,6 +1133,250 @@ describe("a CLI that is signalled while its git hangs", () => {
     } finally {
       killGroup(live, "SIGKILL");
     }
+  });
+});
+
+/** The state `ps` reports for `pid` (`Z` for a zombie), or `undefined`
+ * when there is no such process. */
+function processState(pid: number): string | undefined {
+  try {
+    return execFileSync("ps", ["-o", "stat=", "-p", String(pid)], {
+      encoding: "utf8",
+      timeout: 10_000,
+    }).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+describe("a CLI that is killed and never reaped while its git hangs", () => {
+  it("does not leave git behind", async () => {
+    const f = makeFixture();
+    const hung = hangingGit({ match: "gc.auto=0 worktree list" });
+    const pidFile = path.join(scratchDir("cli-pid"), "pid");
+    // The intermediary starts the CLI in the background, notes its pid and
+    // becomes a sleep that never waits for it: once killed, the CLI stays a
+    // zombie, so whatever asks whether its pid exists is told yes until the
+    // sleep ends (a container whose first process does not reap, a parent
+    // that never waits).
+    const parent = spawn(
+      "/bin/sh",
+      [
+        "-c",
+        '"$@" & echo $! > "$CLI_PID_FILE"; exec /bin/sleep 60',
+        "sh",
+        process.execPath,
+        CLI_PATH,
+        "-C",
+        f.work,
+        "worktree",
+        "list",
+        "--repo",
+        f.repo,
+      ],
+      {
+        env: buildSpawnEnv({
+          ...GIT_ENV,
+          PATH: hung.PATH,
+          CLI_PID_FILE: pidFile,
+        }),
+        stdio: "ignore",
+        detached: true,
+      },
+    );
+    let pids: number[] = [];
+    try {
+      pids = await untilHung(hung);
+      const cli = Number(fs.readFileSync(pidFile, "utf8").trim());
+      process.kill(cli, "SIGKILL");
+      const until = Date.now() + 5000;
+      while (processState(cli)?.startsWith("Z") !== true) {
+        if (Date.now() > until) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(processState(cli), "the CLI is a zombie").toMatch(/^Z/);
+      await expectGone(pids);
+    } finally {
+      try {
+        if (parent.pid !== undefined) process.kill(-parent.pid, "SIGKILL");
+      } catch {
+        // Already gone.
+      }
+      for (const pid of pids) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          // Gone.
+        }
+      }
+    }
+  });
+});
+
+/** The exit code of a CLI that a signal stopped before its first change. */
+const SIGNAL_CODE = { SIGINT: 130, SIGTERM: 143 } as const;
+
+describe("a SIGINT or SIGTERM before the first change", () => {
+  // git calls are synchronous, so the CLI's handler cannot run while one
+  // does; the commands give it its turn before the first change. A slow but
+  // finishing git keeps the signal pending until then.
+  it.each(["SIGINT", "SIGTERM"] as const)(
+    "remove: %s while the status runs removes nothing",
+    async (signal) => {
+      const f = makeFixture();
+      const wt = addWorktree(f, "feat");
+      // An ignored dependency link: unlinking it is the first change.
+      const link = path.join(wt, "node_modules");
+      fs.symlinkSync(path.join(f.repo, "a.txt"), link);
+      const slow = hangingGit(
+        { match: "gc.auto=0 status --porcelain" },
+        SLOW_SECONDS,
+      );
+      const live = startCli(f.work, ["remove", wt, ...REMOVE_FLAGS], {
+        ...boundEnv(),
+        PATH: slow.PATH,
+      });
+      let pids: number[] = [];
+      try {
+        pids = await untilHung(slow);
+        killGroup(live, signal);
+        const ended = await live.closed;
+        expect(ended.code).toBe(SIGNAL_CODE[signal]);
+        expect(listed(f.repo)).toContain(wt);
+        expect(branchExists(f.repo, "feat")).toBe(true);
+        expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+        const writes = slow.calls!().filter((c) =>
+          / (worktree remove|worktree prune|branch -D) /.test(` ${c} `),
+        );
+        expect(writes).toEqual([]);
+        await expectGone(pids);
+      } finally {
+        killGroup(live, "SIGKILL");
+      }
+    },
+  );
+
+  it.each(["SIGINT", "SIGTERM"] as const)(
+    "create: %s while the fetch runs creates nothing",
+    async (signal) => {
+      const f = makeFixture();
+      const target = path.join(f.base, "wt-new");
+      const slow = hangingGit({ match: "gc.auto=0 fetch " }, SLOW_SECONDS);
+      const live = startCli(
+        f.work,
+        ["create", "--repo", f.repo, "--branch", "b-new", "--path", target],
+        { ...boundEnv(), PATH: slow.PATH },
+      );
+      let pids: number[] = [];
+      try {
+        pids = await untilHung(slow);
+        killGroup(live, signal);
+        const ended = await live.closed;
+        expect(ended.code).toBe(SIGNAL_CODE[signal]);
+        expect(fs.existsSync(target)).toBe(false);
+        expect(branchExists(f.repo, "b-new")).toBe(false);
+        expect(slow.calls!().filter((c) => c.includes("worktree add"))).toEqual(
+          [],
+        );
+        await expectGone(pids);
+      } finally {
+        killGroup(live, "SIGKILL");
+      }
+    },
+  );
+
+  it("create: a SIGTERM while a check before the fetch runs stops it before the fetch", async () => {
+    const f = makeFixture();
+    const target = path.join(f.base, "wt-new");
+    const slow = hangingGit(
+      { match: "gc.auto=0 show-ref --verify --quiet refs/heads/b-new" },
+      SLOW_SECONDS,
+    );
+    const live = startCli(
+      f.work,
+      ["create", "--repo", f.repo, "--branch", "b-new", "--path", target],
+      { ...boundEnv(), PATH: slow.PATH },
+    );
+    let pids: number[] = [];
+    try {
+      pids = await untilHung(slow);
+      killGroup(live, "SIGTERM");
+      const ended = await live.closed;
+      expect(ended.code).toBe(143);
+      expect(fs.existsSync(target)).toBe(false);
+      expect(slow.calls!().filter((c) => / fetch /.test(` ${c} `))).toEqual([]);
+      await expectGone(pids);
+    } finally {
+      killGroup(live, "SIGKILL");
+    }
+  });
+});
+
+describe("removeWorktree and createWorktree called with an aborted signal", () => {
+  async function withGitEnv<T>(fn: () => Promise<T>): Promise<T> {
+    const saved: Record<string, string | undefined> = {};
+    for (const [key, value] of Object.entries(GIT_ENV)) {
+      saved[key] = process.env[key];
+      process.env[key] = value;
+    }
+    try {
+      return await fn();
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  }
+
+  it("refuse with interrupted and change nothing", async () => {
+    const f = makeFixture();
+    const wt = addWorktree(f, "feat");
+    const link = path.join(wt, "node_modules");
+    fs.symlinkSync(path.join(f.repo, "a.txt"), link);
+    const aborted = AbortSignal.abort();
+    const removed = await withGitEnv(() =>
+      removeWorktree({ cwd: f.work, path: wt, signal: aborted }).then(
+        () => undefined,
+        (err: unknown) => err,
+      ),
+    );
+    expect(removed).toBeInstanceOf(WorktreeRefusal);
+    expect((removed as WorktreeRefusal).reason).toBe("interrupted");
+    expect((removed as WorktreeRefusal).message).toContain(
+      "nothing was removed",
+    );
+    expect(listed(f.repo)).toContain(wt);
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+
+    const target = path.join(f.base, "wt-new");
+    const created = await withGitEnv(() =>
+      createWorktree({
+        cwd: f.work,
+        repo: f.repo,
+        branch: "b-new",
+        path: target,
+        fetch: false,
+        logDir: scratchDir("create-log"),
+        signal: aborted,
+      }).then(
+        () => undefined,
+        (err: unknown) => err,
+      ),
+    );
+    expect(created).toBeInstanceOf(WorktreeRefusal);
+    expect((created as WorktreeRefusal).reason).toBe("interrupted");
+    expect(fs.existsSync(target)).toBe(false);
+    expect(branchExists(f.repo, "b-new")).toBe(false);
+
+    // The control: a signal that is not aborted changes nothing about the
+    // commands.
+    const live = new AbortController().signal;
+    const done = await withGitEnv(() =>
+      removeWorktree({ cwd: f.work, path: wt, signal: live }),
+    );
+    expect(done.status).toBe("ok");
+    expect(listed(f.repo)).not.toContain(wt);
   });
 });
 
@@ -1348,6 +1632,151 @@ describe("the bounded git runner", () => {
   });
 });
 
+/** Whether a process of the group `pgid` is still there, waiting up to
+ * `withinMs` for the last one to go (an exited watcher can linger as a
+ * zombie for a moment before it is reaped). */
+async function groupLingers(pgid: number, withinMs = 3000): Promise<boolean> {
+  const until = Date.now() + withinMs;
+  for (;;) {
+    try {
+      process.kill(-pgid, 0);
+    } catch {
+      return false;
+    }
+    if (Date.now() > until) return true;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+describe("the trampoline", () => {
+  it("stops its watcher when the command ends, so a finished call leaves nothing", async () => {
+    const f = makeFixture();
+    const env = { PATH: process.env.PATH, ...GIT_ENV };
+    // A watcher still running would hold the call open until its bound.
+    const boundMs = 15_000;
+    for (const args of [
+      ["rev-parse", "--is-inside-work-tree"],
+      ["rev-parse", "--verify", "nope"],
+      ["status", "--porcelain"],
+    ]) {
+      const run = boundedCommand("git", args);
+      const started = Date.now();
+      const r = spawnSync(run.command, run.args, {
+        cwd: f.repo,
+        env,
+        encoding: "utf8",
+        ...boundedSpawnOptions(boundMs),
+      } as SpawnSyncOptions & { encoding: "utf8" });
+      expect(r.error, args.join(" ")).toBeUndefined();
+      expect(Date.now() - started, args.join(" ")).toBeLessThan(boundMs / 2);
+      expect(r.pid).toBeGreaterThan(0);
+      expect(await groupLingers(r.pid), args.join(" ")).toBe(false);
+    }
+    // The same through `runGit`, the path every worktree call takes.
+    for (let i = 0; i < 3; i++) {
+      const r = runGit(f.repo, ["rev-parse", "HEAD"], env, boundMs);
+      expect(r.timedOut).toBeUndefined();
+      expect(r.status).toBe(0);
+    }
+  });
+
+  it("gives the command no copy of its pipe, so what the command leaves running does not hold the call", () => {
+    const dir = scratchDir("daemon-git");
+    const pidFile = path.join(dir, "pid");
+    fs.writeFileSync(
+      path.join(dir, "git"),
+      [
+        "#!/bin/sh",
+        "/bin/sleep 30 </dev/null >/dev/null 2>&1 &",
+        `echo $! > '${pidFile}'`,
+        "exit 0",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const started = Date.now();
+    const r = runGit(
+      dir,
+      ["status"],
+      { PATH: `${dir}${path.delimiter}${process.env.PATH ?? ""}` },
+      20_000,
+    );
+    const elapsed = Date.now() - started;
+    const pid = Number(fs.readFileSync(pidFile, "utf8").trim());
+    try {
+      expect(r.timedOut).toBeUndefined();
+      expect(r.status).toBe(0);
+      expect(elapsed).toBeLessThan(10_000);
+      // git exited by itself, so what it left behind on purpose is not
+      // ended.
+      expect(isAlive(pid)).toBe(true);
+    } finally {
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch {
+        // Gone.
+      }
+    }
+  });
+
+  // bash, which /bin/sh is on macOS and on some Linux systems, imports the
+  // functions exported in its environment; dash does not.
+  const shImportsFunctions =
+    spawnSync("/bin/sh", ["-c", "probe_fn"], {
+      encoding: "utf8",
+      env: {
+        PATH: process.env.PATH,
+        "BASH_FUNC_probe_fn%%": "() { echo imported; }",
+      },
+    }).stdout?.trim() === "imported";
+
+  it.skipIf(!shImportsFunctions)(
+    "runs git and its own builtins past shell functions exported in the environment",
+    () => {
+      const f = makeFixture();
+      const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, ...GIT_ENV };
+      for (const name of ["git", "command", "read", "kill"]) {
+        env[`BASH_FUNC_${name}%%`] = "() { echo function; }";
+      }
+      const r = runGit(
+        f.repo,
+        ["rev-parse", "--is-inside-work-tree"],
+        env,
+        20_000,
+      );
+      expect(r.timedOut).toBeUndefined();
+      expect(r.status).toBe(0);
+      expect(r.stdout).toBe("true\n");
+    },
+  );
+
+  it("ends what a git that a signal ended had started", async () => {
+    const dir = scratchDir("killed-git");
+    const pidFile = path.join(dir, "pid");
+    fs.writeFileSync(
+      path.join(dir, "git"),
+      [
+        "#!/bin/sh",
+        "/bin/sleep 120 </dev/null >/dev/null 2>&1 &",
+        `echo $! > '${pidFile}'`,
+        "kill -KILL $$",
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const r = runGit(
+      dir,
+      ["status"],
+      { PATH: `${dir}${path.delimiter}${process.env.PATH ?? ""}` },
+      20_000,
+    );
+    // The shell reports a command a signal ended as 128 plus its number.
+    expect(r.status).toBe(137);
+    expect(r.timedOut).toBeUndefined();
+    await expectGone([Number(fs.readFileSync(pidFile, "utf8").trim())]);
+  });
+});
+
 describe("git() in a worktree command", () => {
   function withBound<T>(ms: string, fn: () => T): T {
     const saved = process.env[GIT_BOUND_ENV];
@@ -1421,6 +1850,25 @@ describe("git() in a worktree command", () => {
     expect(gitFailure({ status: 128, stdout: "", stderr: "fatal: no\n" })).toBe(
       "fatal: no",
     );
+  });
+
+  it("runGh reports a gh that is not installed as one it cannot start", () => {
+    const f = makeFixture();
+    const wt = addWorktree(f, "feat", true);
+    // git is there, gh is not: the trampoline's shell exits 127 for it.
+    const verdict = withPath(FIXED_BIN_DIR, () => {
+      expect(runGh(wt, ["--version"])).toBeUndefined();
+      return mergeVerdict(
+        wt,
+        "HEAD",
+        "feat",
+        "refs/remotes/origin/main",
+        "main",
+        "origin/main",
+      );
+    });
+    expect(verdict.merged).toBe("unknown");
+    expect(verdict.reason).toContain("gh is not available");
   });
 
   it("unpushedCommits reports a timeout instead of an empty listing", async () => {

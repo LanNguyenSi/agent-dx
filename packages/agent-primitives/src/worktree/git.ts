@@ -4,7 +4,7 @@ import path from "node:path";
 import {
   boundedCommand,
   boundedSpawnOptions,
-  endProcessGroup,
+  endGroupIfAbnormal,
   isTimeoutError,
 } from "../bounded-spawn.js";
 import { UsageError } from "../envelope.js";
@@ -50,6 +50,7 @@ export type WorktreeRefusalReason =
   | "option_invalid"
   | "worktree_add_failed"
   | "git_timeout"
+  | "interrupted"
   | "not_a_worktree"
   | "remove_main_checkout"
   | "worktree_locked"
@@ -121,10 +122,13 @@ export interface GitCallOptions {
   boundMs?: number;
   /** `refuse` (the default) throws the `git_timeout` refusal, so no caller
    * can read a git that never answered as an empty answer, a missing ref or a
-   * clean state. `report` comes back as a result with `timedOut`, a null
-   * `status` and an `error`, for a caller that maps a failed call to a
-   * refusal of its own (`status_unknown`, `unpushed_state_unknown`,
-   * `fetch_failed`, ...) or runs after the first change and cannot refuse. */
+   * clean state. `report` comes back as a result with `timedOut` and an
+   * `error`, for a caller that maps a failed call to a refusal of its own
+   * (`status_unknown`, `unpushed_state_unknown`, `fetch_failed`, ...) or runs
+   * after the first change and cannot refuse. Its `status` is null, or git's
+   * own when git had already exited and only a process it started still held
+   * the pipes (0 included), so a timeout is told by `timedOut` or `error`,
+   * never by `status`. */
   onTimeout?: "refuse" | "report";
 }
 
@@ -167,6 +171,27 @@ function settleTimeout<T extends { timedOut?: true; error?: string }>(
     "git_timeout",
     { git: describeGit(args), boundMs, cwd },
   );
+}
+
+/**
+ * Gives a SIGINT or SIGTERM that arrived while the synchronous git calls ran
+ * the chance to be handled, before a command makes its first change. Those
+ * calls block the event loop, so the CLI's signal handler cannot run during
+ * them; this yields to the loop once, where a signal that is pending runs the
+ * handler, which ends the CLI with 130 or 143 like every other command. A
+ * caller that handles the signal itself sees it as `signal` aborted, and the
+ * command refuses with `interrupted` and `message`, having changed nothing.
+ */
+export async function stopIfInterrupted(
+  signal: AbortSignal | undefined,
+  message: string,
+): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setImmediate(resolve);
+  });
+  if (signal?.aborted === true) {
+    throw new WorktreeRefusal(message, "interrupted");
+  }
 }
 
 /** The refusal a git call that did not finish ends in. */
@@ -1016,8 +1041,10 @@ function refStoreElsewhere(
  * counts even with a status of 0: a listing that outgrows the output limit
  * of `runGit` comes back cut short, with `error` set, when git has already
  * exited. A git call that does not finish within its bound is killed with
- * the processes it started and comes back the same way (`timedOut`, no
- * status, an `error` that says so), never as an empty listing.
+ * the processes it started and comes back the same way, with `timedOut` and
+ * an `error` that says so, never as an empty listing; its `status` can be
+ * git's own, 0 included (git had exited and only a process it started still
+ * held the pipes), so a caller tells it by `error`, never by `status`.
  */
 export function unpushedCommits(cwd: string): GitRunResult {
   const commonDirResult = gitBytes(
@@ -1250,7 +1277,7 @@ export function runGh(cwd: string, args: readonly string[]): GhRun | undefined {
     env: withoutRepoSelectionEnv(),
     ...boundedSpawnOptions(boundMs),
   } as SpawnSyncOptions & { encoding: "utf8" });
-  if (r.error !== undefined || r.signal !== null) endProcessGroup(r.pid);
+  endGroupIfAbnormal(r);
   if (isTimeoutError(r.error)) {
     return { status: null, stdout: "", stderr: "", timedOut: true };
   }

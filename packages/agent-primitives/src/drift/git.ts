@@ -2,7 +2,7 @@ import { spawnSync, type SpawnSyncOptions } from "node:child_process";
 import {
   boundedCommand,
   boundedSpawnOptions,
-  endProcessGroup,
+  endGroupIfAbnormal,
   isTimeoutError,
 } from "../bounded-spawn.js";
 import { withoutPathspecEnv } from "../git-env.js";
@@ -50,12 +50,7 @@ export function runGit(
       encoding: "utf8",
       maxBuffer: GIT_MAX_BUFFER,
     } as SpawnSyncOptions & { encoding: "utf8" });
-    if (
-      timeoutMs !== undefined &&
-      (result.error !== undefined || result.signal !== null)
-    ) {
-      endProcessGroup(result.pid);
-    }
+    if (timeoutMs !== undefined) endGroupIfAbnormal(result);
     return {
       status: result.status,
       stdout: result.stdout ?? "",
@@ -109,12 +104,7 @@ export function runGitBytes(
       ...(timeoutMs !== undefined ? boundedSpawnOptions(timeoutMs) : {}),
       maxBuffer: GIT_MAX_BUFFER,
     } as SpawnSyncOptions);
-    if (
-      timeoutMs !== undefined &&
-      (result.error !== undefined || result.signal !== null)
-    ) {
-      endProcessGroup(result.pid);
-    }
+    if (timeoutMs !== undefined) endGroupIfAbnormal(result);
     return {
       status: result.status,
       stdout: (result.stdout ?? Buffer.alloc(0)) as Buffer,

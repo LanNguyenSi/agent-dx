@@ -32,12 +32,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   skips the fifo. The bounds are constants; the environment variable
   `AGENT_PRIMITIVES_WORKTREE_GIT_BOUND_MS` can only shorten them and is
   meant for tests. git now runs in a session of its own, so a prompt it
-  would put on the terminal fails instead of waiting. Because no signal
-  sent to the CLI's process group reaches it, Ctrl-C and SIGTERM take
-  effect when the current git call ends or its bound passes, and git is
-  started through a `/bin/sh` wrapper whose watcher kills its group half a
-  second after the CLI is gone, so a CLI ended by SIGKILL or SIGHUP leaves
-  no git behind (task a1768165).
+  would put on the terminal fails instead of waiting. No signal sent to the
+  CLI's process group reaches git, and the CLI cannot handle one while a
+  git call runs, so `remove` and `create` handle a SIGINT or SIGTERM that
+  arrived during their checks before their first change (`create` before
+  the fetch and again before `git worktree add`): the command ends there
+  with exit 130 or 143 and no output, having removed or created nothing,
+  and a program that calls `removeWorktree` or `createWorktree` with an
+  aborted `signal` gets the new `interrupted` refusal there; `list` runs to
+  its end. git is started through a `/bin/sh` wrapper whose watcher waits
+  on a pipe the CLI holds and kills git's group when the kernel closes it,
+  which happens when the CLI dies even if nothing reaps it, so a CLI ended
+  by SIGKILL or SIGHUP leaves no git behind, also in a container whose
+  first process does not reap. A git that a signal ends has what it started
+  killed with it (task a1768165).
 
 - `probe --summary`: the marker for omitted mutant lines names the saved
   full result (`result-full-*.json`) when one was written, and says that

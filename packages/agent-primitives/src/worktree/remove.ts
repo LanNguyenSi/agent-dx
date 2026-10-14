@@ -12,6 +12,7 @@ import {
   resolveDefaultBase,
   resolveRemoteBase,
   resolveRepo,
+  stopIfInterrupted,
   unpushedCommits,
   type MergeVerdict,
 } from "./git.js";
@@ -37,6 +38,9 @@ export interface RemoveWorktreeOptions {
    * branch. Needs `requireMerged` or `deleteBranch`, the two options that
    * run the check; alone it is a usage error rather than a silent no-op. */
   base?: string;
+  /** Aborted when the run is interrupted (SIGINT, SIGTERM): checked before
+   * the first change, which then refuses with `interrupted`. */
+  signal?: AbortSignal;
 }
 
 export interface RemoveWorktreeResult {
@@ -72,9 +76,11 @@ function sameDirectory(a: string, b: string): boolean {
  * Removes one linked worktree: the locked, nested-worktree, submodule,
  * status, merged and unpushed checks first, each of the last three failing
  * closed so that a git command which cannot answer is a refusal rather than
- * a clean, unpushed or unmerged reading. Then the ignored dependency links
- * (unlinked, never followed), then `git worktree remove` and
- * `git worktree prune`, and finally the optional `git branch -D`.
+ * a clean, unpushed or unmerged reading. Then, once a SIGINT or SIGTERM
+ * that arrived during the checks has had its chance to stop the command
+ * (`stopIfInterrupted`), the ignored dependency links (unlinked, never
+ * followed), then `git worktree remove` and `git worktree prune`, and finally
+ * the optional `git branch -D`.
  *
  * The main checkout is never modified: its HEAD, index, working tree and
  * stash are untouched, and `git stash`, `checkout`, `switch` and `reset`
@@ -297,8 +303,18 @@ export async function removeWorktree(
       `${String(unpushedLines.length)} commit(s) are on no remote branch, but the branch is merged into ${base?.label ?? "the default branch"} (${merged.via}); not counted as unpushed`,
     );
   }
+  const links = ignoredSymlinks(target);
+
+  // Everything above only read. A SIGINT or SIGTERM that arrived while it
+  // ran is handled here, before the first change; after this point the
+  // removal runs to its end.
+  await stopIfInterrupted(
+    o.signal,
+    `worktree remove of ${target} was interrupted (SIGINT or SIGTERM) before its first change; nothing was removed`,
+  );
+
   const linksRemoved: string[] = [];
-  for (const rel of ignoredSymlinks(target)) {
+  for (const rel of links) {
     // `unlink` removes the link itself and never follows it, so the shared
     // directory it points at in the main checkout is left alone.
     try {
