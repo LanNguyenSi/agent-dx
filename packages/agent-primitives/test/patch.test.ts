@@ -614,6 +614,43 @@ describe("patch: hints", () => {
     expect(h.message).toContain("already in the file at line 2");
   });
 
+  it("does not say the edit was applied for a short new text", () => {
+    const h = notFoundHint("let x = 1;\nfoo(x);\n", "not here", "x");
+    expect(h.new_text_at_line).toBeUndefined();
+    expect(h.message).not.toContain("already in the file");
+  });
+
+  it("does not say the edit was applied when new is part of old", () => {
+    const h = notFoundHint(
+      "return value + 1;\n",
+      "return value + 1; // gone",
+      "return value + 1;",
+    );
+    expect(h.new_text_at_line).toBeUndefined();
+    expect(h.message).not.toContain("already in the file");
+  });
+
+  it("needs eight non-whitespace characters in the new text", () => {
+    const content = "a\nab cd efg\nab cd efgh\n";
+    expect(
+      notFoundHint(content, "not here", "ab cd efg").new_text_at_line,
+    ).toBeUndefined();
+    expect(
+      notFoundHint(content, "not here", "ab cd efgh").new_text_at_line,
+    ).toBe(3);
+  });
+
+  it("still names the line of a distinctive multi-line new text", () => {
+    const content = "start\nconst total = sum(items);\nreturn total;\nend\n";
+    const h = notFoundHint(
+      content,
+      "const total = 0;",
+      "const total = sum(items);\nreturn total;",
+    );
+    expect(h.new_text_at_line).toBe(2);
+    expect(h.message).toContain("already in the file at line 2");
+  });
+
   it("finds no candidate in unrelated content", () => {
     const h = notFoundHint("zzz\nqqq\n", "completely different", "x");
     expect(h.candidates).toEqual([]);

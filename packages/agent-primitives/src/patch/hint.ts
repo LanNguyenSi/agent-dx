@@ -37,6 +37,10 @@ export interface NotFoundHint {
 const MAX_CANDIDATES = 3;
 const MAX_DIFFERENCES = 6;
 const MIN_SIMILARITY = 0.5;
+/** Non-whitespace characters a new text needs before finding it in the
+ * file counts as a sign the edit was applied already; a shorter one
+ * (`x`, `}`) occurs almost anywhere. */
+const MIN_APPLIED_NEW_CHARS = 8;
 /** Lines of the old text that take part in scoring a window. */
 const MAX_WINDOW_LINES = 40;
 /** Visualised line length kept in a difference. */
@@ -93,6 +97,15 @@ function splitOld(old: string): string[] {
   const lines = old.split("\n");
   if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
   return lines;
+}
+
+/** Whether `newText` occurring in the file says something about the
+ * edit: it must not be part of `old` (then it is found wherever old
+ * would be) and must have at least `MIN_APPLIED_NEW_CHARS`
+ * non-whitespace characters. */
+function newTextIsDistinctive(newText: string, old: string): boolean {
+  if (old.includes(newText)) return false;
+  return newText.replace(/\s+/g, "").length >= MIN_APPLIED_NEW_CHARS;
 }
 
 /**
@@ -181,7 +194,7 @@ export function notFoundHint(
     });
 
   let newTextAtLine: number | undefined;
-  if (newText.length > 0) {
+  if (newText.length > 0 && newTextIsDistinctive(newText, old)) {
     const at = content.indexOf(newText);
     if (at !== -1) {
       newTextAtLine = content.slice(0, at).split("\n").length;

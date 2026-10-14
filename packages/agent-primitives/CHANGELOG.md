@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `patch`: the missing-edit hint reports `new_text_at_line` ("edit
+  applied already?") only for a distinctive `new`: one that is not part
+  of `old` and has at least 8 non-whitespace characters; a short or
+  common `new` such as `x` no longer triggers it (#501, task 5fc22752).
+
 - `patch`: a refused fuzzy match's `changed_characters` no longer lists
   a plain inner space (U+0020), which the tier does not change, and a
   special space such as U+00A0 shows the plain space it becomes;
