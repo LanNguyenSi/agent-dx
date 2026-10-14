@@ -224,4 +224,44 @@ describe("okf-kit cli init", () => {
       "pre-existing\n",
     );
   });
+
+  it("init --spec v0.2 output passes check through the built CLI", () => {
+    const bundleDir = path.join(workDir, "docs-v02", "okf");
+    const fakeRepoRoot = path.join(workDir, "fake-repo-root");
+
+    const initResult = runCli(["init", "--spec", "v0.2", bundleDir]);
+    expect(initResult.status).toBe(0);
+    const indexRaw = fs.readFileSync(path.join(bundleDir, "index.md"), "utf8");
+    expect(indexRaw.startsWith('---\nokf_version: "0.2"\n---\n')).toBe(true);
+
+    // Same placeholder-resolution trick as the v0.1 round trip above, so
+    // the run does not depend on ambient git.
+    fs.mkdirSync(path.join(fakeRepoRoot, "path", "to", "covered"), {
+      recursive: true,
+    });
+    fs.writeFileSync(
+      path.join(fakeRepoRoot, "path", "to", "covered", "source"),
+      "placeholder\n",
+    );
+
+    const checkResult = runCli([
+      "check",
+      bundleDir,
+      "--repo-root",
+      fakeRepoRoot,
+      "--json",
+    ]);
+    expect(checkResult.status).toBe(0);
+    const parsed = JSON.parse(checkResult.stdout) as JsonReport;
+    expect(parsed.summary.errors).toBe(0);
+    expect(parsed.summary.warnings).toBe(0);
+  });
+
+  it("init --spec with an invalid version is a usage error (exit 2)", () => {
+    const bundleDir = path.join(workDir, "docs-badspec", "okf");
+    const result = runCli(["init", "--spec", "v0.3", bundleDir]);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("--spec must be one of v0.1, v0.2");
+    expect(fs.existsSync(bundleDir)).toBe(false);
+  });
 });

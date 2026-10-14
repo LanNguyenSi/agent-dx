@@ -1,5 +1,14 @@
 export type Severity = "error" | "warning" | "notice";
 
+/**
+ * The OKF spec version a bundle is checked against. Detected from the
+ * bundle-root `index.md` frontmatter `okf_version` key (OKF v0.2; the YAML
+ * number and the quoted-string form of `0.1`/`0.2` both count), overridden
+ * by `check --spec` (`src/cli.ts`), and `v0.1` for every bundle with no key
+ * and no frontmatter, exactly as before the key existed.
+ */
+export type SpecVersion = "v0.1" | "v0.2";
+
 export interface Finding {
   ruleId: string;
   severity: Severity;
@@ -73,6 +82,15 @@ export interface BundleContext {
   bundleDir: string;
   repoRoot?: string;
   docs: BundleDoc[];
+  /**
+   * The OKF spec version every rule judges this bundle against: detected
+   * by `loadBundle` from the bundle-root `index.md` frontmatter
+   * `okf_version` key (absent key, absent frontmatter, or an unrecognized
+   * value all mean `v0.1`), replaced by `check --spec <version>` when that
+   * option is passed (`runCheck` in `src/cli.ts`). Rules that branch on the
+   * spec version read it here; rules that do not care stay untouched.
+   */
+  specVersion: SpecVersion;
   /** Defaults to a real `git` child-process call (see src/git.ts) when a rule needs it and none was injected. */
   runGit?: RunGit;
   /** See `RequireAnchorsOptions`. Undefined when `--require-anchors` was not passed. */

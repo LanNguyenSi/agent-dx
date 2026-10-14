@@ -209,4 +209,64 @@ describe("runInit", () => {
       expect(raw).not.toContain("](/");
     }
   });
+
+  it("v0.1 scaffold content is pinned byte-for-byte (default and explicit --spec v0.1)", () => {
+    const fixed = new Date("2030-05-17T08:15:30.000Z");
+    const defaultDir = path.join(workDir, "v01-default");
+    const explicitDir = path.join(workDir, "v01-explicit");
+    runInit(defaultDir, { now: () => fixed });
+    runInit(explicitDir, { now: () => fixed, spec: "v0.1" });
+
+    const contents: Record<string, string> = {};
+    for (const name of SCAFFOLD_FILENAMES) {
+      const raw = fs.readFileSync(path.join(defaultDir, name), "utf8");
+      // The explicit flag and its absence write identical bytes.
+      expect(fs.readFileSync(path.join(explicitDir, name), "utf8"), name).toBe(
+        raw,
+      );
+      contents[name] = raw;
+    }
+    // Snapshot of the exact v0.1 bytes, so no refactor of the template
+    // functions (which all grew a spec parameter) can silently move the
+    // v0.1 scaffold.
+    expect(contents).toMatchSnapshot();
+  });
+
+  it("--spec v0.2 declares okf_version in the root index.md and uses generated instead of timestamp", () => {
+    const fixed = new Date("2030-05-17T08:15:30.000Z");
+    const targetDir = path.join(workDir, "v02");
+    runInit(targetDir, { now: () => fixed, spec: "v0.2" });
+
+    const ctx = loadBundle(targetDir);
+    expect(ctx.specVersion).toBe("v0.2");
+
+    const index = ctx.docs.find((d) => d.relPath === "index.md");
+    expect(index?.frontmatter.present).toBe(true);
+    expect(index?.frontmatter.parsed).toEqual({ okf_version: "0.2" });
+
+    const log = ctx.docs.find((d) => d.relPath === "log.md");
+    expect(log?.frontmatter.present).toBe(false);
+
+    for (const filename of Object.keys(TYPE_BY_TEMPLATE)) {
+      const doc = ctx.docs.find((d) => d.relPath === filename);
+      const parsed = doc?.frontmatter.parsed as Record<string, unknown>;
+      expect("timestamp" in parsed, filename).toBe(false);
+      const generated = parsed.generated as Record<string, unknown>;
+      expect(generated.at, filename).toBe(fixed.toISOString());
+      // A placeholder that already matches the human:<id> shape, so the
+      // scaffold itself checks clean under generated-shape.
+      expect(generated.by, filename).toBe("human:<id>");
+    }
+
+    // The v0.2 scaffold must differ from the v0.1 bytes only where the
+    // version block and the stamp block live; every other line matches.
+    const v01Dir = path.join(workDir, "v02-vs-v01");
+    runInit(v01Dir, { now: () => fixed });
+    const indexV01 = fs.readFileSync(path.join(v01Dir, "index.md"), "utf8");
+    const indexV02 = fs.readFileSync(path.join(targetDir, "index.md"), "utf8");
+    expect(indexV02).toBe('---\nokf_version: "0.2"\n---\n\n' + indexV01);
+    expect(fs.readFileSync(path.join(targetDir, "log.md"), "utf8")).toBe(
+      fs.readFileSync(path.join(v01Dir, "log.md"), "utf8"),
+    );
+  });
 });

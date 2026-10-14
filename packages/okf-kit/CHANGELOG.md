@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- OKF v0.2 support, step 1 (spec version + the `generated: { by, at }`
+  stamp; v0.2 `sources` mappings and citations are later steps). `check`
+  now resolves the spec version a bundle is checked against from the
+  bundle-root `index.md` frontmatter `okf_version` key (both the quoted-
+  string and the YAML number form of `0.1`/`0.2` are accepted; absent key,
+  absent frontmatter or an unrecognized value mean `v0.1`, byte-identical
+  to before), and `check --spec v0.1|v0.2` overrides that detection in
+  either direction (any other value is a usage error, exit 2). The
+  resolved version is exposed to rules as `ctx.specVersion`. A
+  bundle-root `index.md` whose frontmatter carries exactly the one
+  `okf_version` key is now clean under `reserved-files-bare` under v0.2;
+  every other reserved-file block stays an error, including any other key
+  next to it and the key on a non-root `index.md` or `log.md`.
+  `sources-fresh` and `sources-fresh-future` now read the doc's EFFECTIVE
+  stamp, `generated.at` when present and `timestamp` otherwise, through
+  one shared resolution in `src/util.ts` (`getTimestampEpoch`,
+  `getTimestampEpochMs`, `getRawTimestampString`, `getTimestampIdentity`),
+  so the re-stamp check's historical-blob side sees the same stamp as the
+  current-file side: a re-stamp that migrates a stamp between the two
+  keys is judged by instant (forward move rescues, backwards move gets the
+  `re-stamp moved backwards` warning, same-instant rewrite gets the
+  same-instant notice, because the stamp identity carries its key). New
+  rule `generated-shape`: `generated.by` must match `<producer>/<version>`,
+  `human:<id>` or `process:<id>` (warning); under v0.2 a `generated.at`
+  without an explicit UTC designator or numeric offset is an error (and
+  `sources-fresh-future`'s designator-less skip notice is suppressed for
+  it, so the error is the only finding for that value); a `generated.at`
+  and `timestamp` naming different instants is reported once as a warning
+  (`generated.at` is what the freshness rules read; equal instants are a
+  redundant mid-migration state, not a finding). `init --spec v0.1|v0.2`
+  scaffolds for the chosen version: v0.2 writes `okf_version: "0.2"` in
+  the bundle-root `index.md` and `generated: {by, at}` instead of
+  `timestamp` in the template docs; the default `v0.1` scaffold is
+  byte-identical to before (pinned by a content snapshot). A bundle with
+  no `okf_version` key checks exactly as before (pinned by a full findings
+  snapshot over every pre-existing fixture, `test/v01-baseline.test.ts`).
+  See [Check catalog](docs/check-catalog.md#spec-version-spec) and
+  [Staleness](docs/staleness.md) for the rule text.
+
 - `check --rule <ids>` and `check --min-severity <level>` report only the
   selected rule ids and/or findings at or above a severity, in text and
   JSON output (JSON `summary` included); the exit status counts only the
