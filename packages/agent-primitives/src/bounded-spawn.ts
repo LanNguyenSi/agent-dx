@@ -56,7 +56,15 @@ export function boundedSpawnOptions(timeoutMs: number): {
 /**
  * The trampoline, run as `sh -c TRAMPOLINE sh <command> <args...>`.
  *
- * - `unset -f command` first: a `/bin/sh` that is bash imports the functions
+ * - The shell options a `/bin/sh` that is bash takes from an exported
+ *   `SHELLOPTS` are switched off first: `errexit` would end the trampoline
+ *   at a failing command with the watcher still running (the call would
+ *   then wait for its bound), `monitor` would give the watcher a process
+ *   group of its own, and `xtrace`, `verbose` and `allexport` would add to
+ *   the command's stderr or environment. The command still gets the
+ *   variable. (`noexec` there runs nothing at all; no line of the
+ *   trampoline can switch it off.)
+ * - `unset -f command`: a `/bin/sh` that is bash also imports the functions
  *   exported in its environment (`BASH_FUNC_git%%`), and every name below is
  *   run through `command`, which skips them; `unset` itself cannot be
  *   replaced by one.
@@ -76,6 +84,7 @@ export function boundedSpawnOptions(timeoutMs: number): {
  *   that a signal ended).
  */
 const TRAMPOLINE = [
+  "{ set +aemvx; } 2>/dev/null",
   "unset -f command",
   "(command read -r x <&3; command kill -KILL 0) </dev/null >/dev/null 2>&1 & w=$!",
   "exec 3<&-",

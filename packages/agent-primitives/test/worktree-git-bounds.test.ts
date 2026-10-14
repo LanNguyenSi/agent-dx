@@ -1750,6 +1750,37 @@ describe("the trampoline", () => {
     },
   );
 
+  it("is not changed by shell options exported in SHELLOPTS", () => {
+    const f = makeFixture();
+    // bash takes these from the environment at startup; dash ignores them.
+    const env: NodeJS.ProcessEnv = {
+      PATH: process.env.PATH,
+      ...GIT_ENV,
+      SHELLOPTS: "errexit:monitor:xtrace",
+    };
+    const started = Date.now();
+    const failed = runGit(
+      f.repo,
+      ["rev-parse", "--verify", "nope"],
+      env,
+      15_000,
+    );
+    // errexit would end the trampoline at git's failure with the watcher
+    // still holding the call open until the bound.
+    expect(failed.timedOut).toBeUndefined();
+    expect(Date.now() - started).toBeLessThan(7500);
+    expect(failed.status).toBe(128);
+    // xtrace would add the trampoline's own commands to git's stderr.
+    expect(failed.stderr).not.toMatch(/^\+ /m);
+    const ok = runGit(
+      f.repo,
+      ["rev-parse", "--is-inside-work-tree"],
+      env,
+      15_000,
+    );
+    expect(ok).toMatchObject({ status: 0, stdout: "true\n", stderr: "" });
+  });
+
   it("ends what a git that a signal ended had started", async () => {
     const dir = scratchDir("killed-git");
     const pidFile = path.join(dir, "pid");
