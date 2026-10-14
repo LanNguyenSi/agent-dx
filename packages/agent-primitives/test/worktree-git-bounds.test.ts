@@ -1781,6 +1781,21 @@ describe("the trampoline", () => {
     expect(ok).toMatchObject({ status: 0, stdout: "true\n", stderr: "" });
   });
 
+  it("kills the command's group at the bound with SHELLOPTS=monitor too", async () => {
+    // monitor (job control) would start git in a group of its own, which
+    // neither the watcher nor the kill at the bound would reach.
+    const slow = sleepingGitDir();
+    const r = runGit(
+      slow.dir,
+      ["status"],
+      { PATH: slow.dir, SHELLOPTS: "monitor" },
+      1000,
+    );
+    expect(r.timedOut).toBe(true);
+    expect(slow.pids()).toHaveLength(2);
+    await expectGone(slow.pids());
+  });
+
   it("ends what a git that a signal ended had started", async () => {
     const dir = scratchDir("killed-git");
     const pidFile = path.join(dir, "pid");

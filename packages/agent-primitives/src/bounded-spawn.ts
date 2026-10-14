@@ -59,9 +59,10 @@ export function boundedSpawnOptions(timeoutMs: number): {
  * - The shell options a `/bin/sh` that is bash takes from an exported
  *   `SHELLOPTS` are switched off first: `errexit` would end the trampoline
  *   at a failing command with the watcher still running (the call would
- *   then wait for its bound), `monitor` would give the watcher a process
- *   group of its own, and `xtrace`, `verbose` and `allexport` would add to
- *   the command's stderr or environment. The command still gets the
+ *   then wait for its bound), `monitor` would start the command in a
+ *   process group of its own, out of reach of the watcher and of the kill
+ *   at the bound, and `xtrace`, `verbose` and `allexport` would add to the
+ *   command's stderr or environment. The command still gets the
  *   variable. (`noexec` there runs nothing at all; no line of the
  *   trampoline can switch it off.)
  * - `unset -f command`: a `/bin/sh` that is bash also imports the functions
@@ -70,8 +71,11 @@ export function boundedSpawnOptions(timeoutMs: number): {
  *   replaced by one.
  * - The watcher is a background subshell with no stdin, stdout or stderr (so
  *   it never holds the caller's pipes) that reads fd 3. When the read
- *   returns, the caller's end is gone, and the watcher kills its own process
- *   group, which is the command's.
+ *   returns, the caller's end is gone, and the watcher kills the process
+ *   group whose id is the trampoline's pid (`$$`), which is the command's
+ *   group: `detached` makes the trampoline the leader of a new one. Started
+ *   without `detached`, the trampoline leads no group, and the kill finds
+ *   nothing instead of ending the caller's own group.
  * - The trampoline then closes its own fd 3 with `exec`, so the command
  *   inherits no copy of the pipe and nothing it starts can hold it. (A
  *   redirection on the command line itself would not do: `command` is a
@@ -86,7 +90,7 @@ export function boundedSpawnOptions(timeoutMs: number): {
 const TRAMPOLINE = [
   "{ set +aemvx; } 2>/dev/null",
   "unset -f command",
-  "(command read -r x <&3; command kill -KILL 0) </dev/null >/dev/null 2>&1 & w=$!",
+  "(command read -r x <&3; command kill -s KILL -- -$$) </dev/null >/dev/null 2>&1 & w=$!",
   "exec 3<&-",
   'command "$@"; s=$?',
   'command kill "$w" 2>/dev/null',
