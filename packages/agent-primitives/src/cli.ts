@@ -1197,8 +1197,31 @@ function emitProbe(
     return;
   }
   if (opts.summary) {
+    // `fullResult` is set only on an envelope the reduction could fit; one
+    // cut to its fixed fields still names the saved file in `logs`, which
+    // is never reduced.
+    const savedLog = Array.isArray(envelope.logs)
+      ? envelope.logs.find(
+          (l): l is string =>
+            typeof l === "string" &&
+            /^result-full-.*\.json$/.test(path.basename(l)),
+        )
+      : undefined;
+    const fullResult =
+      typeof envelope.fullResult === "string"
+        ? envelope.fullResult
+        : savedLog === undefined
+          ? undefined
+          : path.resolve(savedLog);
     writeAndExit(
-      renderProbeSummary({ ...summary, cwd: global.cwd }, global.maxChars),
+      renderProbeSummary(
+        {
+          ...summary,
+          cwd: global.cwd,
+          ...(fullResult !== undefined ? { fullResult } : {}),
+        },
+        global.maxChars,
+      ),
       exitCode,
     );
     return;
@@ -1630,7 +1653,7 @@ program
   )
   .option(
     "--summary",
-    "print one line per mutant (id, verdict, expectation, restored_verified, first failing test, log path) and a totals line instead of the JSON envelope; exit codes unchanged",
+    "print one line per mutant (id, verdict, expectation, restored_verified, first failing test, log path) and a totals line instead of the JSON envelope; -m bounds its characters and the totals line is always kept; exit codes unchanged",
   )
   .option(
     "--print <fields>",
