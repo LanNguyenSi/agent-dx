@@ -1,6 +1,7 @@
 import type { Rule } from "../types.js";
 import { frontmatterRequiredRule } from "./frontmatter-required.js";
 import { reservedFilesBareRule } from "./reserved-files-bare.js";
+import { reservedFilesStructureRule } from "./reserved-files-structure.js";
 import { linksResolveRule } from "./links-resolve.js";
 import { noAbsoluteLinksRule } from "./no-absolute-links.js";
 import { sourcesShapeRule } from "./sources-shape.js";
@@ -24,6 +25,7 @@ import { frontmatterRefsResolveRule } from "./frontmatter-refs-resolve.js";
 export const allRules: Rule[] = [
   frontmatterRequiredRule,
   reservedFilesBareRule,
+  reservedFilesStructureRule,
   linksResolveRule,
   noAbsoluteLinksRule,
   sourcesShapeRule,
@@ -39,6 +41,7 @@ export const allRules: Rule[] = [
 export {
   frontmatterRequiredRule,
   reservedFilesBareRule,
+  reservedFilesStructureRule,
   linksResolveRule,
   noAbsoluteLinksRule,
   sourcesShapeRule,

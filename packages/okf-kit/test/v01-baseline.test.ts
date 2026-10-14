@@ -59,7 +59,16 @@ function checkFixture(name: string): Finding[] {
   // A stub runGit that fails every call: repoRoot is explicit, so the only
   // git reads left are the staleness lookups, which then deterministically
   // answer "no history" for every source and doc.
-  return runCheck(dir, { repoRoot: dir, runGit: () => null }).findings;
+  //
+  // `reserved-files-structure` is dropped from the comparison on purpose: it
+  // is a new rule that warns about the body shape of the reserved files, and
+  // several pre-existing fixtures carry a non-conformant `log.md` (for example
+  // `valid-bundle`'s bullet-only log). This baseline predates that rule and is
+  // meant to pin the OLD rules only, so its snapshot is left untouched rather
+  // than folded around findings the fixtures were never written to satisfy.
+  return runCheck(dir, { repoRoot: dir, runGit: () => null }).findings.filter(
+    (finding) => finding.ruleId !== "reserved-files-structure",
+  );
 }
 
 describe("v0.1 fixture baseline", () => {

@@ -38,6 +38,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (full findings snapshot unchanged). See [Check catalog](docs/check-catalog.md#sources-entries-strings-and-v02-mappings)
   and [Citation resolution](docs/citations.md#footnote-citations-okf-v02).
 
+- New rule `reserved-files-structure`: the body structure of the reserved
+  files, on top of `reserved-files-bare` (which only checks their frontmatter).
+  `log.md` entries must group under level-2 `## YYYY-MM-DD` headings (a real
+  calendar date, nothing after it), strictly newest first: one finding per
+  non-date level-2 heading, per date heading at the wrong level, and per date
+  heading that is not strictly older than the one before it, plus one file-level
+  finding when a non-empty `log.md` has no date heading at all; fenced code
+  blocks never contribute a heading. `index.md` should be headings plus
+  `- [Title](url) - description` entries, so a free-prose paragraph is one
+  warning per paragraph (a list item that begins with a link is an entry, its
+  optional description and separator unchecked, nested link items and wrapped
+  descriptions allowed, an optional `#` title, fences and HTML comments
+  exempt). A `log.md` violation is an error under OKF v0.2 and a warning under
+  v0.1 (the existing corpus predates the log format); the `index.md` warning is
+  a warning under both. Each finding names the file and line. `init` now
+  scaffolds a conformant `log.md` (first entry under a date heading) and
+  `index.md` (placeholder intro in an HTML comment) so a fresh bundle checks
+  clean; the v0.1 scaffold content snapshot is refreshed to match. See
+  [Check catalog](docs/check-catalog.md#reserved-file-bodies-reserved-files-structure).
+
 - OKF v0.2 support, step 1 (spec version + the `generated: { by, at }`
   stamp; v0.2 `sources` mappings and citations are later steps). `check`
   now resolves the spec version a bundle is checked against from the
