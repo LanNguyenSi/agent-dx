@@ -232,6 +232,23 @@ describe("reserved-files-structure", () => {
     expect(findings[0].message).toContain("`## 2026-01-01 bad`");
   });
 
+  it("fences: a ``` indented by four spaces is not a fence, by three it is (log.md)", () => {
+    // Four leading spaces make an indented code block line, not a fence
+    // opener, so the heading below it is still read and reported.
+    const fourSpaces = "## 2026-01-01\n\n    ```\n## 2026-01-01 bad\n";
+    const four = reservedFilesStructureRule.run(
+      inlineBundle({ "log.md": fourSpaces }, "v0.2"),
+    );
+    expect(lines(four)).toEqual([4]);
+    // Three leading spaces still open a fence, so the heading is content.
+    const threeSpaces = "## 2026-01-01\n\n   ```\n## 2026-01-01 bad\n";
+    expect(
+      reservedFilesStructureRule.run(
+        inlineBundle({ "log.md": threeSpaces }, "v0.2"),
+      ),
+    ).toEqual([]);
+  });
+
   it("fences: a ```ts title fence with attributes is a real fence (index.md)", () => {
     const index = [
       "# Bundle index",
