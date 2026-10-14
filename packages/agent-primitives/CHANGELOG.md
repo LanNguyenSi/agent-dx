@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-14
+
 - `worktree remove` and `list`: a replaced or grafted commit graph no longer
   makes an unpushed commit look pushed or merged. With
   `git replace --graft <origin/main tip> <unpushed commit>`, a plain
