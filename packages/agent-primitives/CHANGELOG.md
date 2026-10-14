@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `patch`: a refused fuzzy match's `changed_characters` no longer lists
+  a plain inner space (U+0020), which the tier does not change, and a
+  special space such as U+00A0 shows the plain space it becomes;
+  `trailing whitespace` is reported as before (#501, task 6cfe9277).
+
 - `probe --summary`: `failing=` now names PHPUnit's numbered failure
   line (`1) Ns\Class::testMethod`) for a killed mutant instead of `-`;
   the lines other runners print are matched as before (#501, task

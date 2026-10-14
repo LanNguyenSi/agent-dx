@@ -258,6 +258,14 @@ function exactTextOnLine(
   return [...found];
 }
 
+/** What `tier` turns the single character `ch` into inside a line. A
+ * sentinel after it keeps the per-line trailing-whitespace strip from
+ * removing a space on its own: a plain inner space stays a space, and a
+ * special space shows the plain space it becomes. */
+function normalizeCharForTier(ch: string, tier: MatchTier): string {
+  return normalizeForTier(`${ch}x`, tier).slice(0, -1);
+}
+
 /**
  * The hint for a fuzzy-tier match refused because rewriting its lines
  * would change text outside the matched text: the touched lines as they
@@ -285,7 +293,7 @@ export function fuzzySideEffectHint(
     const core = original.trimEnd();
     if (core !== original) changed.add("trailing whitespace");
     for (const ch of core) {
-      const to = normalizeForTier(ch, tier);
+      const to = normalizeCharForTier(ch, tier);
       if (to !== ch) changed.add(`${ch} (${codePoint(ch)}) -> ${to}`);
     }
   }
