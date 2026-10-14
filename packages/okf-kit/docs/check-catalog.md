@@ -77,7 +77,7 @@ The OKF spec reserves `log.md` and `index.md` at any depth and constrains their 
   - a heading at another level whose text is a bare ISO date (`### 2026-10-03`) is one finding: date headings must be level 2;
   - a non-empty `log.md` with no valid date heading at all and no bad heading to point at (a flat bullet list, a lone `#` title) is one file-level finding;
   - a date heading that is not strictly older than the previous valid date heading (out of order, or the same date twice) is one finding naming the heading and line;
-  - lines inside a fenced code block are never headings, so a date heading shown as an example inside a fence is not reported.
+  - lines inside a fenced code block are never headings, so a date heading shown as an example inside a fence is not reported; a fence closes only on the marker that opened it (a `~~~` line inside a ```` ``` ```` block is content). An HTML comment contributes no heading either, and masking it out does not shift the other lines' numbers.
 - `index.md` (warning, both versions): a run of free-prose lines (one paragraph) is one warning naming its first line. The shape the spec recommends is headings plus `- [Title](url) - description` entries, so:
   - a list item is a conformant entry when its content begins with a markdown link; the trailing ` - description` is optional and its separator (or a description that wraps onto following lines) is not enforced (the spec only says SHOULD);
   - nested list items are allowed when they are link entries, and their wrapped descriptions are absorbed into the item;

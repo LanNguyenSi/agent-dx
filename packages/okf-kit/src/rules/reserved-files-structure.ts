@@ -1,3 +1,4 @@
+import { scanFenceLines } from "./citations-resolve.js";
 import type { Finding, Rule, Severity } from "../types.js";
 
 const RULE_ID = "reserved-files-structure";
@@ -40,8 +41,9 @@ const LIST_ITEM_RE = /^ *([-*+]|\d{1,9}[.)])[ \t]+(.*)$/;
 // only says SHOULD.
 const LINK_AT_START_RE = /^\[[^\]]*\]\([^)]*\)/;
 
-// An HTML comment span, blanked out of the body before classification so a
-// comment line never reads as free prose (mirrors `prose-line-references`).
+// An HTML comment span, blanked out of both bodies before classification so
+// a comment line never reads as free prose or as a heading (the index-side
+// masking mirrors `prose-line-references`).
 const HTML_COMMENT_RE = /<!--[\s\S]*?-->/g;
 
 type Heading = { level: number; text: string };
@@ -70,10 +72,6 @@ function isoDateEpoch(text: string): number | null {
     return null;
   }
   return date.getTime();
-}
-
-function isFenceToggle(trimmed: string): boolean {
-  return trimmed.startsWith("```") || trimmed.startsWith("~~~");
 }
 
 function isListItem(line: string): { content: string } | null {
@@ -121,7 +119,9 @@ export const reservedFilesStructureRule: Rule = {
 /**
  * `log.md`: entries are grouped under level-2 ISO date headings, newest first.
  * Content under a heading is free, so only headings are inspected. Fenced code
- * blocks never contribute headings.
+ * blocks and HTML comments never contribute headings (the comment masking
+ * blanks the comment text out line for line, exactly as in `checkIndex`, so
+ * the line numbers of everything outside the comment stay the raw-file lines).
  *
  * Findings:
  *  - one per level-2 heading whose text is not exactly a real ISO date (extra
@@ -144,18 +144,16 @@ function checkLog(
   const findings: Finding[] = [];
   const severity: Severity = specVersion === "v0.2" ? "error" : "warning";
   const offset = bodyLineOffset(raw, body);
-  const lines = body.split(/\r?\n/);
-  let inFence = false;
+  const lines = maskHtmlComments(body).split(/\r?\n/);
+  // One shared fence state machine (see `scanFenceLines`): delimiter lines and
+  // the lines between them all read `fenced`, and a fence closes only on the
+  // marker that opened it, so a `~~~` line inside a ``` block stays content.
+  const fenceStates = scanFenceLines(lines);
   const validDates: { epoch: number; text: string; line: number }[] = [];
   let perHeadingFindings = 0;
 
   for (let i = 0; i < lines.length; i++) {
-    const trimmed = lines[i].trim();
-    if (isFenceToggle(trimmed)) {
-      inFence = !inFence;
-      continue;
-    }
-    if (inFence) continue;
+    if (fenceStates[i].fenced) continue;
 
     const heading = parseHeading(lines[i]);
     if (!heading) continue;
@@ -230,31 +228,33 @@ function checkIndex(file: string, raw: string, body: string): Finding[] {
   const offset = bodyLineOffset(raw, body);
   const masked = maskHtmlComments(body);
   const lines = masked.split(/\r?\n/);
-  let inFence = false;
+  // Same fence state machine as `checkLog` (see `scanFenceLines`): every line
+  // of a fenced block, delimiters included, reads `fenced`, and a fence
+  // closes only on the marker that opened it.
+  const fenceStates = scanFenceLines(lines);
   let i = 0;
 
   // True when `index` is not a line that continues the block currently open:
-  // a blank line, a fence edge or a heading always closes any block; a list
-  // item additionally closes a free-prose paragraph (an entry never lives
-  // inside a prose paragraph).
+  // a blank line, a fence (opening, closing, or inside) or a heading always
+  // closes any block; a list item additionally closes a free-prose paragraph
+  // (an entry never lives inside a prose paragraph).
   const closesBlock = (index: number, forProse: boolean): boolean => {
     if (index >= lines.length) return true;
+    if (fenceStates[index].fenced) return true;
     const trimmed = lines[index].trim();
     if (trimmed === "") return true;
-    if (isFenceToggle(trimmed)) return true;
     if (parseHeading(lines[index])) return true;
     if (forProse && isListItem(lines[index])) return true;
     return false;
   };
 
   while (i < lines.length) {
-    const trimmed = lines[i].trim();
-    if (isFenceToggle(trimmed)) {
-      inFence = !inFence;
+    if (fenceStates[i].fenced) {
       i++;
       continue;
     }
-    if (inFence || trimmed === "" || parseHeading(lines[i])) {
+    const trimmed = lines[i].trim();
+    if (trimmed === "" || parseHeading(lines[i])) {
       i++;
       continue;
     }

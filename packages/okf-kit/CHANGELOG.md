@@ -32,10 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   case-sensitive. Line-precise code citations in v0.2 are written as a
   footnote whose `sources` entry names the file and whose definition text
   carries the lines in backticks (`` `L42-57` ``); under v0.2
-  `citations-resolve` checks them like an inline `path:N-M` citation, so
+  `citations-resolve` checks them like an inline `path:N-M` citation,   so
   drift detection survives migration (inline `path:N-M` with `#anchor`
   stays an okf-kit extension). A bundle on v0.1 checks exactly as before
-  (full findings snapshot unchanged). See [Check catalog](docs/check-catalog.md#sources-entries-strings-and-v02-mappings)
+  under the rules this step changed (the full findings snapshot is
+  unchanged for every rule that existed when it landed; the newer
+  `reserved-files-structure` adds v0.1 warnings on top of it). See
+  [Check catalog](docs/check-catalog.md#sources-entries-strings-and-v02-mappings)
   and [Citation resolution](docs/citations.md#footnote-citations-okf-v02).
 
 - New rule `reserved-files-structure`: the body structure of the reserved
@@ -52,7 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   descriptions allowed, an optional `#` title, fences and HTML comments
   exempt). A `log.md` violation is an error under OKF v0.2 and a warning under
   v0.1 (the existing corpus predates the log format); the `index.md` warning is
-  a warning under both. Each finding names the file and line. `init` now
+  a warning under both. Each finding names the file and line. A `check
+  --strict` run treats the new v0.1 warnings as failures, since `--strict`
+  exits non-zero on any warning. `init` now
   scaffolds a conformant `log.md` (first entry under a date heading) and
   `index.md` (placeholder intro in an HTML comment) so a fresh bundle checks
   clean; the v0.1 scaffold content snapshot is refreshed to match. See
@@ -91,7 +96,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scaffolds for the chosen version: v0.2 writes `okf_version: "0.2"` in
   the bundle-root `index.md` and `generated: {by, at}` instead of
   `timestamp` in the template docs; the default `v0.1` scaffold is
-  byte-identical to before (pinned by a content snapshot). A bundle with
+  unchanged except for the reserved-file bodies (see
+  `reserved-files-structure`; pinned by a content snapshot). A bundle with
   no `okf_version` key checks exactly as before (pinned by a full findings
   snapshot over every pre-existing fixture, `test/v01-baseline.test.ts`).
   See [Check catalog](docs/check-catalog.md#spec-version---spec) and
