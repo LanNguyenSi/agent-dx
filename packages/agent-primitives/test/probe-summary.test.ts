@@ -405,6 +405,62 @@ describe("summary helpers", () => {
     expect(firstFailingLine(undefined)).toBe("-");
   });
 
+  it("firstFailingLine names the numbered PHPUnit failure line", () => {
+    const stdoutTail = [
+      "PHPUnit 10.5.20 by Sebastian Bergmann and contributors.",
+      "",
+      "....F                                                               5 / 5 (100%)",
+      "",
+      "Time: 00:00.012, Memory: 8.00 MB",
+      "",
+      "There was 1 failure:",
+      "",
+      "1) App\\Tests\\CartTest::testTotal",
+      "Failed asserting that 41 matches expected 42.",
+      "",
+      "/app/tests/CartTest.php:17",
+      "",
+      "FAILURES!",
+      "Tests: 5, Assertions: 6, Failures: 1.",
+    ].join("\n");
+    expect(firstFailingLine({ stdoutTail, stderrTail: "" })).toBe(
+      "1) App\\Tests\\CartTest::testTotal",
+    );
+  });
+
+  it("firstFailingLine keeps each runner's line and finds none in a passing PHPUnit tail", () => {
+    const cases: Array<[string, string]> = [
+      [" FAIL  test/a.test.ts > adds", "FAIL test/a.test.ts > adds"],
+      ["ok 1 - a\nnot ok 2 - b", "not ok 2 - b"],
+      [
+        "=== RUN   TestAdd\n--- FAIL: TestAdd (0.00s)",
+        "--- FAIL: TestAdd (0.00s)",
+      ],
+      [
+        "FAILED tests/test_a.py::test_add - assert 1 == 2",
+        "FAILED tests/test_a.py::test_add - assert 1 == 2",
+      ],
+      ["  ● adds › two numbers", "● adds › two numbers"],
+      [
+        "AssertionError: expected 1 to be 2",
+        "AssertionError: expected 1 to be 2",
+      ],
+    ];
+    for (const [stdoutTail, expected] of cases) {
+      expect(firstFailingLine({ stdoutTail, stderrTail: "" })).toBe(expected);
+    }
+    const passing = [
+      "PHPUnit 10.5.20 by Sebastian Bergmann and contributors.",
+      "",
+      ".....                                                               5 / 5 (100%)",
+      "",
+      "Time: 00:00.010, Memory: 8.00 MB",
+      "",
+      "OK (5 tests, 6 assertions)",
+    ].join("\n");
+    expect(firstFailingLine({ stdoutTail: passing, stderrTail: "" })).toBe("-");
+  });
+
   it("renderProbeSummary prints failing only for a killed verdict", () => {
     const test = { stdoutTail: "Error: noise\nFAIL x", stderrTail: "" };
     const killed = renderProbeSummary({
