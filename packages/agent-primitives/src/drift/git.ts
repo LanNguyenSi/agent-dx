@@ -1,4 +1,10 @@
-import { spawnSync } from "node:child_process";
+import { spawnSync, type SpawnSyncOptions } from "node:child_process";
+import {
+  boundedCommand,
+  boundedSpawnOptions,
+  endGroupIfAbnormal,
+  isTimeoutError,
+} from "../bounded-spawn.js";
 import { withoutPathspecEnv } from "../git-env.js";
 
 /** Generous enough for a whole-repo diff or a doc file's contents without
@@ -11,12 +17,21 @@ export interface GitRunResult {
   stdout: string;
   stderr: string;
   error?: string;
+  /** Set when the run ended because `timeoutMs` passed. */
+  timedOut?: true;
 }
 
 /** Runs `git <args>` in `cwd`, synchronously. Never throws: a spawn
  * failure (git missing, cwd unreadable) comes back as `error` instead,
  * the same shape doctor's own `runWorktreeList` uses for its synchronous
- * git calls. */
+ * git calls.
+ *
+ * With `timeoutMs` the run is bounded: git gets a process group of its own
+ * and, when the bound passes, git and everything it started are killed (see
+ * `bounded-spawn.ts`); the result then carries `timedOut` and an `error`, and
+ * a `status` that is null, or git's own when git had already exited and only
+ * a descendant still held the pipes. Without it the run is unbounded, as it
+ * always was. */
 export function runGit(
   cwd: string,
   args: string[],
@@ -24,18 +39,24 @@ export function runGit(
   timeoutMs?: number,
 ): GitRunResult {
   try {
-    const result = spawnSync("git", args, {
+    const run =
+      timeoutMs !== undefined
+        ? boundedCommand("git", args)
+        : { command: "git", args };
+    const result = spawnSync(run.command, run.args, {
       cwd,
       ...(env !== undefined ? { env } : {}),
-      ...(timeoutMs !== undefined ? { timeout: timeoutMs } : {}),
+      ...(timeoutMs !== undefined ? boundedSpawnOptions(timeoutMs) : {}),
       encoding: "utf8",
       maxBuffer: GIT_MAX_BUFFER,
-    });
+    } as SpawnSyncOptions & { encoding: "utf8" });
+    if (timeoutMs !== undefined) endGroupIfAbnormal(result);
     return {
       status: result.status,
       stdout: result.stdout ?? "",
       stderr: result.stderr ?? "",
       ...(result.error !== undefined ? { error: result.error.message } : {}),
+      ...(isTimeoutError(result.error) ? { timedOut: true as const } : {}),
     };
   } catch (err) {
     return {
@@ -53,6 +74,8 @@ export interface GitBytesResult {
   stdout: Buffer;
   stderr: string;
   error?: string;
+  /** Set when the run ended because `timeoutMs` passed. */
+  timedOut?: true;
 }
 
 /**
@@ -60,25 +83,34 @@ export interface GitBytesResult {
  * decoded: a path or a ref name git prints is then the one the file system
  * holds, where decoding would turn a byte that is not UTF-8 into U+FFFD and
  * name another entry. `input`, when given, is the child's whole stdin.
+ * `timeoutMs` bounds the run exactly as it does for `runGit`.
  */
 export function runGitBytes(
   cwd: string,
   args: string[],
   env?: NodeJS.ProcessEnv,
   input?: Buffer,
+  timeoutMs?: number,
 ): GitBytesResult {
   try {
-    const result = spawnSync("git", args, {
+    const run =
+      timeoutMs !== undefined
+        ? boundedCommand("git", args)
+        : { command: "git", args };
+    const result = spawnSync(run.command, run.args, {
       cwd,
       ...(env !== undefined ? { env } : {}),
       ...(input !== undefined ? { input } : {}),
+      ...(timeoutMs !== undefined ? boundedSpawnOptions(timeoutMs) : {}),
       maxBuffer: GIT_MAX_BUFFER,
-    });
+    } as SpawnSyncOptions);
+    if (timeoutMs !== undefined) endGroupIfAbnormal(result);
     return {
       status: result.status,
-      stdout: result.stdout ?? Buffer.alloc(0),
-      stderr: (result.stderr ?? Buffer.alloc(0)).toString("utf8"),
+      stdout: (result.stdout ?? Buffer.alloc(0)) as Buffer,
+      stderr: ((result.stderr ?? Buffer.alloc(0)) as Buffer).toString("utf8"),
       ...(result.error !== undefined ? { error: result.error.message } : {}),
+      ...(isTimeoutError(result.error) ? { timedOut: true as const } : {}),
     };
   } catch (err) {
     return {

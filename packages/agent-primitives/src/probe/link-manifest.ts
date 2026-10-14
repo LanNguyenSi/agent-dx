@@ -112,13 +112,27 @@ export type AdminDirResult =
  * "the two git dirs differ": the administration directory must be
  * `<common git dir>/worktrees/<id>`, which is what `git worktree add`
  * makes and what a submodule's `.git/modules/<name>` is not.
+ *
+ * `timeoutMs` bounds the one git call (it is killed with everything it
+ * started when the bound passes, and the answer is `ok: false`); without
+ * it the call is unbounded, as the probe's reader has always run it.
  */
-export function linkedWorktreeAdminDir(root: string): AdminDirResult {
+export function linkedWorktreeAdminDir(
+  root: string,
+  timeoutMs?: number,
+): AdminDirResult {
   const run = runGit(
     root,
     probeGitArgv(["rev-parse", "--absolute-git-dir", "--git-common-dir"]),
     withoutRepoSelectionEnv(),
+    timeoutMs,
   );
+  if (run.timedOut === true) {
+    return {
+      ok: false,
+      reason: "git did not report the git directory in time and was stopped",
+    };
+  }
   if (run.error !== undefined || run.status !== 0) {
     return { ok: false, reason: "git could not report the git directory" };
   }
@@ -175,8 +189,9 @@ export function writeLinkManifest(
   worktree: string,
   links: readonly ManifestLink[],
   toolVersion: string,
+  gitTimeoutMs?: number,
 ): ManifestWriteResult {
-  const admin = linkedWorktreeAdminDir(worktree);
+  const admin = linkedWorktreeAdminDir(worktree, gitTimeoutMs);
   if (!admin.ok) return { status: "failed", reason: admin.reason };
   const file = path.join(admin.dir, LINK_MANIFEST_FILE);
   const unrecorded: UnrecordedLink[] = [];

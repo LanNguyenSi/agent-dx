@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  REPORT_TIMEOUT,
+  REPORT_TIMEOUT_WALK,
   WorktreeRefusal,
   git,
   gitFailure,
@@ -10,6 +12,7 @@ import {
   resolveDefaultBase,
   resolveRemoteBase,
   resolveRepo,
+  stopIfInterrupted,
   unpushedCommits,
   type MergeVerdict,
 } from "./git.js";
@@ -35,6 +38,9 @@ export interface RemoveWorktreeOptions {
    * branch. Needs `requireMerged` or `deleteBranch`, the two options that
    * run the check; alone it is a usage error rather than a silent no-op. */
   base?: string;
+  /** Aborted when the run is interrupted (SIGINT, SIGTERM): checked before
+   * the first change, which then refuses with `interrupted`. */
+  signal?: AbortSignal;
 }
 
 export interface RemoveWorktreeResult {
@@ -70,9 +76,11 @@ function sameDirectory(a: string, b: string): boolean {
  * Removes one linked worktree: the locked, nested-worktree, submodule,
  * status, merged and unpushed checks first, each of the last three failing
  * closed so that a git command which cannot answer is a refusal rather than
- * a clean, unpushed or unmerged reading. Then the ignored dependency links
- * (unlinked, never followed), then `git worktree remove` and
- * `git worktree prune`, and finally the optional `git branch -D`.
+ * a clean, unpushed or unmerged reading. Then, once a SIGINT or SIGTERM
+ * that arrived during the checks has had its chance to stop the command
+ * (`stopIfInterrupted`), the ignored dependency links (unlinked, never
+ * followed), then `git worktree remove` and `git worktree prune`, and finally
+ * the optional `git branch -D`.
  *
  * The main checkout is never modified: its HEAD, index, working tree and
  * stash are untouched, and `git stash`, `checkout`, `switch` and `reset`
@@ -176,11 +184,13 @@ export async function removeWorktree(
     );
   }
 
-  const status = git(target, [
-    "status",
-    "--porcelain",
-    "--untracked-files=all",
-  ]);
+  // A status that did not finish is a failed status: `status_unknown`
+  // below, which `--force` overrides like any other unknown state.
+  const status = git(
+    target,
+    ["status", "--porcelain", "--untracked-files=all"],
+    REPORT_TIMEOUT_WALK,
+  );
   if ((status.error !== undefined || status.status !== 0) && o.force !== true) {
     throw new WorktreeRefusal(
       `cannot read the status of ${target}: ${gitFailure(status)}; pass --force to remove it anyway`,
@@ -293,8 +303,18 @@ export async function removeWorktree(
       `${String(unpushedLines.length)} commit(s) are on no remote branch, but the branch is merged into ${base?.label ?? "the default branch"} (${merged.via}); not counted as unpushed`,
     );
   }
+  const links = ignoredSymlinks(target);
+
+  // Everything above only read. A SIGINT or SIGTERM that arrived while it
+  // ran is handled here, before the first change; after this point the
+  // removal runs to its end.
+  await stopIfInterrupted(
+    o.signal,
+    `worktree remove of ${target} was interrupted (SIGINT or SIGTERM) before its first change; nothing was removed`,
+  );
+
   const linksRemoved: string[] = [];
-  for (const rel of ignoredSymlinks(target)) {
+  for (const rel of links) {
     // `unlink` removes the link itself and never follows it, so the shared
     // directory it points at in the main checkout is left alone.
     try {
@@ -311,21 +331,24 @@ export async function removeWorktree(
     // git needs the flag twice to remove a locked worktree.
     if (entry.locked) forceFlags.push("--force");
   }
-  const removed = git(repo.mainCheckout, [
-    "worktree",
-    "remove",
-    ...forceFlags,
-    target,
-  ]);
+  const removed = git(
+    repo.mainCheckout,
+    ["worktree", "remove", ...forceFlags, target],
+    REPORT_TIMEOUT_WALK,
+  );
   if (removed.error !== undefined || removed.status !== 0) {
     throw new WorktreeRefusal(
-      `git worktree remove failed: ${gitFailure(removed)}`,
+      `git worktree remove failed: ${gitFailure(removed)}${
+        removed.timedOut === true
+          ? `. It was stopped part way, so ${target} may be partly removed; check \`git worktree list\` and the directory before trying again`
+          : ""
+      }`,
       "worktree_remove_failed",
       { path: target },
     );
   }
 
-  const prune = git(repo.mainCheckout, ["worktree", "prune"]);
+  const prune = git(repo.mainCheckout, ["worktree", "prune"], REPORT_TIMEOUT);
   const pruned = prune.error === undefined && prune.status === 0;
   if (!pruned) {
     warnings.push(`git worktree prune failed: ${gitFailure(prune)}`);
@@ -342,7 +365,11 @@ export async function removeWorktree(
       // `-D` cannot lose work here: an unpushed branch was already refused
       // above, unless `--force` said otherwise or the verdict said the
       // branch is merged into the base, which warned about those commits.
-      const deleted = git(repo.mainCheckout, ["branch", "-D", entry.branch]);
+      const deleted = git(
+        repo.mainCheckout,
+        ["branch", "-D", entry.branch],
+        REPORT_TIMEOUT,
+      );
       const ok = deleted.error === undefined && deleted.status === 0;
       const text = [deleted.stdout.trim(), deleted.stderr.trim()]
         .filter((part) => part.length > 0)
@@ -354,7 +381,9 @@ export async function removeWorktree(
             ? text
             : ok
               ? `deleted ${entry.branch}`
-              : `git branch -D ${entry.branch} failed`,
+              : deleted.timedOut === true
+                ? `git branch -D ${entry.branch} failed: ${gitFailure(deleted)}`
+                : `git branch -D ${entry.branch} failed`,
       };
       if (ok && merged !== null) {
         const where = base?.label ?? "the default branch";

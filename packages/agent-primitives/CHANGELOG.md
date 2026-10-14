@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `worktree create`, `remove` and `list`: every git call is bounded, so a
+  repository git cannot read (a fifo among the refs, which some git
+  versions block on; a hook or credential helper waiting for input) ends
+  the command in a refusal instead of hanging it. Reads of refs, config or
+  one object stop after 5 minutes, walks of a work tree or of the history
+  and the calls that write one (`status`, `ls-files`, `rev-list`,
+  `merge-base`, `worktree add`, `worktree remove`) after 30 minutes, the
+  fetch after 2 minutes (as before) and the `gh` lookup after 30 seconds.
+  A call that passes its bound is killed with SIGKILL together with the
+  whole process group it ran in (a git of its own process group, so the
+  ssh, hook or filter it started goes too; `spawnSync`'s own timeout ends
+  only the direct child), and it is never read as an answer: the new
+  `git_timeout` refusal where the result would otherwise read as "no such
+  ref", "no origin" or an empty listing, `status_unknown`,
+  `unpushed_state_unknown`, `merge_state_unknown`, `fetch_failed`,
+  `worktree_add_failed` and `worktree_remove_failed` where a check already
+  has a reason (`--force` still overrides only the first three), and a
+  warning for a call that did not finish after the first change (head,
+  upstream, `.ai/run` pointer and link manifest in `create`; prune and
+  branch deletion in `remove`). `remove`'s default base lookup, which ran
+  before every guard without a bound, now refuses instead of hanging on a
+  fifo under `refs`, and the fifo layout test no longer needs a git that
+  skips the fifo. The bounds are constants; the environment variable
+  `AGENT_PRIMITIVES_WORKTREE_GIT_BOUND_MS` can only shorten them and is
+  meant for tests. git now runs in a session of its own, so a prompt it
+  would put on the terminal fails instead of waiting. No signal sent to the
+  CLI's process group reaches git, and the CLI cannot handle one while a
+  git call runs, so `remove` and `create` handle a SIGINT or SIGTERM that
+  arrived during their checks before their first change (`create` before
+  the fetch and again before `git worktree add`): the command ends there
+  with exit 130 or 143 and no output, having removed or created nothing,
+  and a program that calls `removeWorktree` or `createWorktree` with an
+  aborted `signal` gets the new `interrupted` refusal there; `list` runs to
+  its end. git is started through a `/bin/sh` wrapper whose watcher waits
+  on a pipe the CLI holds and kills git's group when the kernel closes it,
+  which happens when the CLI dies even if nothing reaps it, so a CLI ended
+  by SIGKILL or SIGHUP leaves no git behind, also in a container whose
+  first process does not reap. A git that a signal ends has what it started
+  killed with it (task a1768165).
+
 - `probe --summary`: the marker for omitted mutant lines names the saved
   full result (`result-full-*.json`) when one was written, and says that
   none was written otherwise, instead of pointing at "the result-full

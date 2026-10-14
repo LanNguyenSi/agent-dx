@@ -12,10 +12,14 @@ import {
 import type { ExecLike } from "../verify/types.js";
 import {
   FETCH_TIMEOUT_MS,
+  GIT_BOUND_MS,
+  GIT_WALK_BOUND_MS,
+  REPORT_TIMEOUT,
   WorktreeRefusal,
   addToExclude,
   branchExists,
   commitSha,
+  effectiveBoundMs,
   excludePatternFor,
   git,
   gitFailure,
@@ -24,6 +28,7 @@ import {
   isWithin,
   resolveDefaultBase,
   resolveRepo,
+  stopIfInterrupted,
   type RepoContext,
 } from "./git.js";
 import { smokeVerdict } from "./readiness.js";
@@ -52,6 +57,9 @@ export interface CreateWorktreeOptions {
   logDir: string;
   /** The tool version recorded in the link manifest. */
   toolVersion?: string;
+  /** Aborted when the run is interrupted (SIGINT, SIGTERM): checked before
+   * the fetch and before the add, which then refuse with `interrupted`, and
+   * handed to `--setup` and `--smoke`, which it stops. */
   signal?: AbortSignal;
   execFn?: ExecLike;
 }
@@ -365,7 +373,7 @@ function fetchOrigin(
   const r = git(
     repo.mainCheckout,
     ["fetch", "--quiet", "--no-recurse-submodules", "origin"],
-    FETCH_TIMEOUT_MS,
+    { boundMs: FETCH_TIMEOUT_MS, onTimeout: "report" },
   );
   if (r.error !== undefined || r.status !== 0) {
     throw new WorktreeRefusal(
@@ -417,7 +425,7 @@ function writePointer(
   if (runDir === undefined) return { status: "not_requested" };
   const rel = ".ai/run";
   const file = path.join(worktree, rel);
-  const ignored = isIgnored(worktree, rel);
+  const ignored = isIgnored(worktree, rel, REPORT_TIMEOUT);
   if (ignored !== true) {
     return {
       status: "skipped",
@@ -547,7 +555,7 @@ function makeLinks(
     // Asked after the link exists: git judges a symbolic link as a file,
     // so a directory-only pattern such as `vendor/` does not cover it.
     let exclude: MadeLink["exclude"] = "already_ignored";
-    if (isIgnored(worktree, rel) !== true) {
+    if (isIgnored(worktree, rel, REPORT_TIMEOUT) !== true) {
       try {
         addToExclude(repo.commonDir, excludePatternFor(rel));
         exclude = "added";
@@ -612,7 +620,12 @@ function recordLinks(
     );
     return { status: "failed", reason };
   }
-  const written = writeLinkManifest(worktree, recordable, toolVersion);
+  const written = writeLinkManifest(
+    worktree,
+    recordable,
+    toolVersion,
+    effectiveBoundMs(GIT_BOUND_MS),
+  );
   if (written.status === "written") {
     const unrecorded = [...unresolved, ...written.unrecorded];
     if (unrecorded.length > 0) {
@@ -662,7 +675,9 @@ async function runStep(
  * Creates a linked worktree on a new branch, off a base the main checkout
  * is never moved to. Every check that can refuse runs before the first
  * change (the one exception is the fetch, which only updates remote
- * tracking refs); once the worktree exists, a step that does not work
+ * tracking refs); a SIGINT or SIGTERM that arrived during them is given
+ * its chance to stop the command before the fetch and again before the add
+ * (`stopIfInterrupted`). Once the worktree exists, a step that does not work
  * (a pointer that cannot be written, a link whose source is missing, a
  * failed `--setup`) is reported in the result instead of undoing the
  * worktree.
@@ -719,48 +734,88 @@ export async function createWorktree(
   }
   const linkRels = collectLinks(options, repo);
 
+  // The checks above only read. A SIGINT or SIGTERM that arrived while they
+  // ran is handled here, before the fetch, and once more before the add,
+  // after the fetch and the base lookup.
+  const interrupted = `worktree create was interrupted (SIGINT or SIGTERM) before it created anything; neither a worktree nor the branch ${options.branch} was made`;
+  await stopIfInterrupted(options.signal, interrupted);
+
   const warnings: string[] = [];
   const fetchReport: CreateWorktreeResult["fetch"] =
     options.fetch === false
       ? { status: "skipped", reason: "--no-fetch" }
       : fetchOrigin(repo, warnings);
   const base = resolveBase(options, repo);
+  await stopIfInterrupted(options.signal, interrupted);
 
   // `--no-track` is what keeps a branch started from `origin/<default>`
   // from inheriting that branch as its upstream, where a bare `git push`
   // would then aim at the default branch. The start point stays a ref
   // name (not its sha) because only a ref can be tracked.
-  const added = git(repo.mainCheckout, [
-    "worktree",
-    "add",
-    "--no-track",
-    "-b",
-    options.branch,
-    "--",
-    target,
-    base.ref,
-  ]);
+  const added = git(
+    repo.mainCheckout,
+    [
+      "worktree",
+      "add",
+      "--no-track",
+      "-b",
+      options.branch,
+      "--",
+      target,
+      base.ref,
+    ],
+    { boundMs: GIT_WALK_BOUND_MS, onTimeout: "report" },
+  );
   if (added.error !== undefined || added.status !== 0) {
     throw new WorktreeRefusal(
-      `git worktree add failed: ${gitFailure(added)}`,
+      `git worktree add failed: ${gitFailure(added)}${
+        added.timedOut === true
+          ? `. It was stopped part way, so ${target} and the branch ${options.branch} may exist in part, and a lock file may remain; check \`git worktree list\` and run \`git worktree prune\` before trying again`
+          : ""
+      }`,
       "worktree_add_failed",
       { target },
     );
   }
 
-  const head = gitText(target, ["rev-parse", "HEAD"]) ?? base.sha;
+  // From here on the worktree exists: nothing refuses any more, and a git
+  // call that does not finish is a warning and a value that says so.
+  const headRun = git(target, ["rev-parse", "HEAD"], REPORT_TIMEOUT);
+  const headText =
+    headRun.error === undefined && headRun.status === 0
+      ? headRun.stdout.trim()
+      : "";
+  if (headRun.timedOut === true) {
+    warnings.push(
+      `could not read HEAD of the new worktree: ${gitFailure(headRun)}; head is reported as ${base.sha}`,
+    );
+  }
+  const head = headText.length > 0 ? headText : base.sha;
   if (head !== base.sha) {
     warnings.push(
       `the new worktree is at ${head}, not at the ${base.sha} that ${base.ref} resolved to a moment earlier; the ref moved while the worktree was being created`,
     );
   }
-  const upstream =
-    gitText(target, [
+  const upstreamRun = git(
+    target,
+    [
       "rev-parse",
       "--abbrev-ref",
       "--symbolic-full-name",
       `${options.branch}@{upstream}`,
-    ]) ?? null;
+    ],
+    REPORT_TIMEOUT,
+  );
+  if (upstreamRun.timedOut === true) {
+    warnings.push(
+      `could not tell whether branch ${options.branch} tracks an upstream: ${gitFailure(upstreamRun)}; run \`git branch --unset-upstream\` in the worktree before pushing if it does`,
+    );
+  }
+  const upstreamText =
+    upstreamRun.error === undefined && upstreamRun.status === 0
+      ? upstreamRun.stdout.trim()
+      : "";
+  const upstream = upstreamText.length > 0 ? upstreamText : null;
   if (upstream !== null) {
     warnings.push(
       `branch ${options.branch} tracks ${upstream}; run \`git branch --unset-upstream\` in the worktree before pushing`,

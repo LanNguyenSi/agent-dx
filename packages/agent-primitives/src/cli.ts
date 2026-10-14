@@ -661,7 +661,8 @@ export function signalExitCode(signal: "SIGINT" | "SIGTERM"): number {
  * process group, so a check's own worker dies with this CLI instead of
  * being orphaned by the exit: `detached: true` puts each command in a
  * group of its own, which means a terminal's Ctrl-C reaches this process
- * alone.
+ * alone. `worktree create` and `worktree remove` also get it for the check
+ * they make before their first change.
  *
  * `probe` is deliberately not wired to it: it installs its own handler
  * for the same two signals, because it has a mutated file to restore and
@@ -2771,6 +2772,7 @@ worktreeCommand
           deleteBranch: opts.deleteBranch,
           requireMerged: opts.requireMerged,
           base: opts.base,
+          signal: shutdownController.signal,
         });
       } catch (err) {
         if (!(err instanceof WorktreeRefusal)) throw err;
