@@ -499,6 +499,12 @@ const REMOVE_REFUSALS: RemoveRow[] = [
     ahead: true,
   },
   {
+    name: "merge verdict: where git reads the grafts file",
+    hang: { match: "gc.auto=0 rev-parse --git-path info/grafts" },
+    reason: "merge_state_unknown",
+    message: TIMEOUT_TEXT,
+  },
+  {
     name: "unpushed check: rev-parse --git-common-dir",
     hang: { match: "gc.auto=0 rev-parse --git-common-dir", nth: 2 },
     reason: "unpushed_state_unknown",
@@ -581,6 +587,40 @@ describe("worktree remove: a git call that does not finish ends in a refusal", (
         // Nothing was changed: the worktree and its branch are still there.
         expect(listed(f.repo)).toContain(wt);
         expect(git2(f.repo, ["rev-parse", "refs/heads/feat"]).trim()).toBe(sha);
+      }
+    },
+  );
+
+  it.concurrent(
+    "runs exactly the calls that decide with --no-replace-objects, before any other option",
+    async () => {
+      const f = makeFixture();
+      const wt = addWorktree(f, "feat", true);
+      // A stand-in that never hangs: it only records the calls.
+      const spy = hangingGit({ match: "no-such-subcommand" });
+      const r = await runCli(f.work, ["remove", wt, "--delete-branch"], {
+        ...boundEnv(),
+        PATH: spy.PATH,
+      });
+      expect(r.code, r.stdout + r.stderr).toBe(2);
+      expect(r.json.reason, r.stdout).toBe("unpushed_commits");
+      const calls = spy.calls?.() ?? [];
+      const FLAG = "--no-replace-objects";
+      const withFlag = calls.filter((c) => c.includes(FLAG));
+      // The unpushed walk, the ancestry and the sha a merged pull request
+      // must match: nothing else reads the graph for a verdict.
+      expect(withFlag).toEqual([
+        `${FLAG} -c maintenance.auto=false -c gc.auto=0 merge-base --is-ancestor HEAD refs/remotes/origin/main`,
+        `${FLAG} -c maintenance.auto=false -c gc.auto=0 rev-parse --verify --quiet HEAD^{commit}`,
+        `${FLAG} -c maintenance.auto=false -c gc.auto=0 rev-list HEAD --not --exclude=origin/HEAD --remotes`,
+      ]);
+      // Every other call keeps the argv it had, replace refs included.
+      for (const call of calls) {
+        if (call.includes(FLAG)) continue;
+        expect(
+          call.startsWith("-c maintenance.auto=false -c gc.auto=0 "),
+          call,
+        ).toBe(true);
       }
     },
   );
