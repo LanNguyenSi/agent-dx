@@ -552,7 +552,7 @@ export async function guard(options: GuardOptions): Promise<GuardResult> {
           warnings.push(
             "the process table could not be read during the kill sweeps; it is not known whether everything is gone",
           );
-          killGroup(leaderPid);
+          // This round's `killTree` already ended the group.
           break;
         }
         remaining = collectTree(table, leaderPid, tracked);
