@@ -3328,101 +3328,124 @@ done`,
   });
 });
 
-describe("worktree remove: a symbolic ref of a reftable common stack whose name is not ASCII", () => {
-  // The same visible name in both Unicode normalization forms. git converts
-  // a command-line argument to NFC where core.precomposeunicode is on (macOS
-  // sets it at init) but a reftable record keeps the bytes it was written
-  // with, so a decomposed name could never be matched by an `--exclude`
-  // argument and the walk would follow the ref to the branch.
-  const NFD_NAME = "cafe\u0301";
-  const NFC_NAME = "caf\u00e9";
-
-  /** Writes `refs/remotes/origin/<name>` as a symbolic ref (or, when
-   * `symbolic` is false, a plain one at the sha `to`) with precompose off,
-   * so the stored bytes are the ones in `name` on every platform. */
-  function writeRef(f: Fixture, name: string, symbolic: boolean, to: string) {
-    git(f.repo, [
-      "-c",
-      "core.precomposeunicode=false",
-      symbolic ? "symbolic-ref" : "update-ref",
-      `refs/remotes/origin/${name}`,
-      to,
-    ]);
-  }
-
-  it.each([
-    ["decomposed (NFD)", NFD_NAME],
-    ["precomposed (NFC)", NFC_NAME],
-  ])(
-    "keeps the branch a symbolic ref with a %s name points at, with and without --base",
-    async (_form, name) => {
-      const f = makeFixture({ refFormat: "reftable" });
-      const { wt, sha } = makeUnpushed(f);
-      writeRef(f, name, true, "refs/heads/feat");
-      // The stored name is the one written, in the form written.
-      const stored = execFileSync(
-        "git",
-        [
-          "-c",
-          "core.precomposeunicode=false",
-          "for-each-ref",
-          "--format=%(refname)",
-          "refs/remotes",
-        ],
-        { cwd: f.repo, encoding: "utf8", env: { ...process.env, ...GIT_ENV } },
-      );
-      expect(stored.split("\n")).toContain(`refs/remotes/origin/${name}`);
-      await expectUnknownState(f, wt, sha, SYMLINK_FLAG_SETS);
-      const r = await cliBounded(f.work, ["remove", wt, "--delete-branch"]);
-      expect(r.json.message).toContain("non-ASCII character");
-      expect(fs.existsSync(wt)).toBe(true);
-      // Every refusal can be overridden, as for any unknown state.
-      const forced = await cliBounded(f.work, [
-        "remove",
-        wt,
-        "--delete-branch",
-        "--force",
-      ]);
-      expect(forced.code, forced.stdout + forced.stderr).toBe(0);
-      expect(forced.json.branch.deleted).toBe(true);
-    },
-  );
-
-  it("still reports the unpushed commits behind a symbolic ref with an ASCII name", async () => {
-    const f = makeFixture({ refFormat: "reftable" });
-    const { wt, sha } = makeUnpushed(f);
-    git(f.repo, [
-      "symbolic-ref",
-      "refs/remotes/origin/self",
-      "refs/heads/feat",
-    ]);
-    for (const flags of SYMLINK_FLAG_SETS.filter((s) => s.length > 0)) {
-      const r = await cliBounded(f.work, ["remove", wt, ...flags]);
-      expect(r.code, r.stdout + r.stderr).toBe(2);
-      expect(r.json.reason).toBe("unpushed_commits");
+const REFTABLE_SUPPORTED = (() => {
+  try {
+    const probe = fs.mkdtempSync(
+      path.join(os.tmpdir(), "agent-primitives-rt-"),
+    );
+    try {
+      git(probe, ["init", "-q", "--ref-format=reftable", "probe"]);
+      return true;
+    } finally {
+      fs.rmSync(probe, { recursive: true, force: true });
     }
-    expect(git(f.repo, ["rev-parse", "refs/heads/feat"]).trim()).toBe(sha);
-    expect(fs.existsSync(wt)).toBe(true);
-  });
+  } catch {
+    return false;
+  }
+})();
 
-  it.each([
-    ["decomposed (NFD)", NFD_NAME],
-    ["precomposed (NFC)", NFC_NAME],
-  ])(
-    "removes a pushed branch beside a plain remote-tracking ref with a %s non-ASCII name",
-    async (_form, name) => {
+describe.skipIf(!REFTABLE_SUPPORTED)(
+  "worktree remove: a symbolic ref of a reftable common stack whose name is not ASCII",
+  () => {
+    // The same visible name in both Unicode normalization forms. git converts
+    // a command-line argument to NFC where core.precomposeunicode is on (macOS
+    // sets it at init) but a reftable record keeps the bytes it was written
+    // with, so a decomposed name could never be matched by an `--exclude`
+    // argument and the walk would follow the ref to the branch.
+    const NFD_NAME = "cafe\u0301";
+    const NFC_NAME = "caf\u00e9";
+
+    /** Writes `refs/remotes/origin/<name>` as a symbolic ref (or, when
+     * `symbolic` is false, a plain one at the sha `to`) with precompose off,
+     * so the stored bytes are the ones in `name` on every platform. */
+    function writeRef(f: Fixture, name: string, symbolic: boolean, to: string) {
+      git(f.repo, [
+        "-c",
+        "core.precomposeunicode=false",
+        symbolic ? "symbolic-ref" : "update-ref",
+        `refs/remotes/origin/${name}`,
+        to,
+      ]);
+    }
+
+    it.each([
+      ["decomposed (NFD)", NFD_NAME],
+      ["precomposed (NFC)", NFC_NAME],
+    ])(
+      "keeps the branch a symbolic ref with a %s name points at, with and without --base",
+      async (_form, name) => {
+        const f = makeFixture({ refFormat: "reftable" });
+        const { wt, sha } = makeUnpushed(f);
+        writeRef(f, name, true, "refs/heads/feat");
+        // The stored name is the one written, in the form written.
+        const stored = execFileSync(
+          "git",
+          [
+            "-c",
+            "core.precomposeunicode=false",
+            "for-each-ref",
+            "--format=%(refname)",
+            "refs/remotes",
+          ],
+          {
+            cwd: f.repo,
+            encoding: "utf8",
+            env: { ...process.env, ...GIT_ENV },
+          },
+        );
+        expect(stored.split("\n")).toContain(`refs/remotes/origin/${name}`);
+        await expectUnknownState(f, wt, sha, SYMLINK_FLAG_SETS);
+        const r = await cliBounded(f.work, ["remove", wt, "--delete-branch"]);
+        expect(r.json.message).toContain("non-ASCII character");
+        expect(fs.existsSync(wt)).toBe(true);
+        // Every refusal can be overridden, as for any unknown state.
+        const forced = await cliBounded(f.work, [
+          "remove",
+          wt,
+          "--delete-branch",
+          "--force",
+        ]);
+        expect(forced.code, forced.stdout + forced.stderr).toBe(0);
+        expect(forced.json.branch.deleted).toBe(true);
+      },
+    );
+
+    it("still reports the unpushed commits behind a symbolic ref with an ASCII name", async () => {
       const f = makeFixture({ refFormat: "reftable" });
       const { wt, sha } = makeUnpushed(f);
-      // A plain ref is not excluded, so `--remotes` counts it as the push it
-      // is, and the commit is on a remote-tracking ref.
-      writeRef(f, name, false, sha);
-      const r = await cliBounded(f.work, ["remove", wt, "--delete-branch"]);
-      expect(r.code, r.stdout + r.stderr).toBe(0);
-      expect(r.json.branch.deleted).toBe(true);
-      expect(fs.existsSync(wt)).toBe(false);
-    },
-  );
-});
+      git(f.repo, [
+        "symbolic-ref",
+        "refs/remotes/origin/self",
+        "refs/heads/feat",
+      ]);
+      for (const flags of SYMLINK_FLAG_SETS.filter((s) => s.length > 0)) {
+        const r = await cliBounded(f.work, ["remove", wt, ...flags]);
+        expect(r.code, r.stdout + r.stderr).toBe(2);
+        expect(r.json.reason).toBe("unpushed_commits");
+      }
+      expect(git(f.repo, ["rev-parse", "refs/heads/feat"]).trim()).toBe(sha);
+      expect(fs.existsSync(wt)).toBe(true);
+    });
+
+    it.each([
+      ["decomposed (NFD)", NFD_NAME],
+      ["precomposed (NFC)", NFC_NAME],
+    ])(
+      "removes a pushed branch beside a plain remote-tracking ref with a %s non-ASCII name",
+      async (_form, name) => {
+        const f = makeFixture({ refFormat: "reftable" });
+        const { wt, sha } = makeUnpushed(f);
+        // A plain ref is not excluded, so `--remotes` counts it as the push it
+        // is, and the commit is on a remote-tracking ref.
+        writeRef(f, name, false, sha);
+        const r = await cliBounded(f.work, ["remove", wt, "--delete-branch"]);
+        expect(r.code, r.stdout + r.stderr).toBe(0);
+        expect(r.json.branch.deleted).toBe(true);
+        expect(fs.existsSync(wt)).toBe(false);
+      },
+    );
+  },
+);
 
 describe.skipIf(process.platform !== "linux")(
   "worktree remove: ref names that are not UTF-8, which a Linux file system allows",
@@ -4157,22 +4180,6 @@ describe("worktree remove: plain layouts under refs/remotes are unchanged", () =
     expect(r.json.branch.deleted).toBe(true);
   });
 });
-
-const REFTABLE_SUPPORTED = (() => {
-  try {
-    const probe = fs.mkdtempSync(
-      path.join(os.tmpdir(), "agent-primitives-rt-"),
-    );
-    try {
-      git(probe, ["init", "-q", "--ref-format=reftable", "probe"]);
-      return true;
-    } finally {
-      fs.rmSync(probe, { recursive: true, force: true });
-    }
-  } catch {
-    return false;
-  }
-})();
 
 describe.skipIf(!REFTABLE_SUPPORTED)(
   "worktree remove: a reftable repository has no loose refs to walk",
