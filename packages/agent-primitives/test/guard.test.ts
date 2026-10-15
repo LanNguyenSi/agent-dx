@@ -1269,6 +1269,32 @@ describe("guard: a process table that cannot be read", () => {
     expect(marked(mem.cmd)).toEqual([]);
   });
 
+  it("a descendant of an escapee, outside the group and not leading a group of its own, is killed by pid from the last table", async () => {
+    // `sh` leaves the group (detached) and leads its own; its `sleep` is in
+    // that group, so no group with the `sleep`'s pid exists, and only the
+    // table's word (found by the parent chain) tells guard to kill it.
+    const kid = fx(7199);
+    const flag = path.join(tmp(), "flag");
+    const ps = installFakePs({ flag, fails: 10_000 });
+    const script =
+      "const {spawn}=require('child_process');" +
+      `spawn('sh',['-c','sleep ${kid.arg} & wait'],{detached:true,stdio:'ignore'});` +
+      `setTimeout(()=>require('fs').writeFileSync(${JSON.stringify(flag)},''),800);` +
+      "setTimeout(()=>process.exit(0),1200)";
+    let r;
+    try {
+      r = await run(process.execPath, ["-e", script], { pollMs: 100 });
+    } finally {
+      ps.restore();
+    }
+    expect(r.reason).toBe("leftover");
+    expect(r.leftoverCheckFailed).toBe(true);
+    expect(r.leftovers.some((p) => p.command === kid.cmd && !p.inGroup)).toBe(
+      true,
+    );
+    expect(marked(kid.cmd)).toEqual([]);
+  });
+
   it("an escapee the last table showed that the command ended itself is not listed: the kill by pid did not reach it, and the run says it could not check", async () => {
     const esc = fx(7197);
     const flag = path.join(tmp(), "flag");
