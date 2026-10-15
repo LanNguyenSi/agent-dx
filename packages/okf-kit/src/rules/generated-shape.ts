@@ -50,7 +50,11 @@ export const generatedShapeRule: Rule = {
       if (doc.isReserved || !doc.frontmatter.present) continue;
       const parsed = doc.frontmatter.parsed;
       const generated = getGenerated(parsed);
-      if (!generated) {
+      // A native YAML date (`generated: !!timestamp ...`) is an object, so
+      // `isRecord` accepts it and `getGenerated` hands it back as if it were
+      // the mapping; a Date is the non-mapping it spells, reported here
+      // rather than below as a mapping missing both keys.
+      if (!generated || generated instanceof Date) {
         // v0.2 made `generated: { by, at }` THE stamp, so a `generated` key
         // this tool cannot read (a v0.1-style scalar stamp, a list, an empty
         // value) means the doc declares a stamp it has no usable form of:

@@ -119,6 +119,28 @@ describe("malformed generated stamp under v0.2", () => {
     );
   });
 
+  it("reports a native YAML date generated value, once, naming it as a date", () => {
+    // `!!timestamp` resolves to a JS Date, which `isRecord` accepts, so a
+    // Date must be reported as the non-mapping it spells rather than as a
+    // mapping missing both keys.
+    const findings = runDoc("generated: !!timestamp 2026-01-01T00:00:00Z\n");
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      ruleId: "generated-shape",
+      severity: "warning",
+      file: "doc.md",
+    });
+    expect(findings[0].message).toContain("generated must be a mapping");
+    expect(findings[0].message).toContain("a native YAML date");
+  });
+
+  it("reports nothing for a doc with no generated key, or one still on timestamp alone", () => {
+    // The shape contract binds a doc that CARRIES the key; v0.2 explicitly
+    // allows a mid-migration doc to keep stamping itself with `timestamp`.
+    expect(runDoc("")).toEqual([]);
+    expect(runDoc("timestamp: 2026-01-01T00:00:00Z\n")).toEqual([]);
+  });
+
   it("reports a generated mapping without by, once", () => {
     const findings = runDoc("generated:\n  at: 2026-01-05T00:00:00Z\n");
     expect(findings).toHaveLength(1);

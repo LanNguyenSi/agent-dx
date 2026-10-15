@@ -23,8 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Under OKF spec v0.2, `generated-shape` now checks the `generated` key itself
   and not only the `by` and `at` it could read: a `generated` that is not a
-  mapping (a scalar stamp, a list, an empty value) is one warning naming what
-  was found, and a mapping is reported once per missing key (`by`, `at`),
+  mapping (a scalar stamp, a native YAML date, a list, an empty value) is one
+  warning naming what was found, and a mapping is reported once per missing
+  key (`by`, `at`),
   because such a doc carries the key while the freshness rules read no stamp at
   all. Severity is `warning` (the doc stays checkable, and a `check --strict`
   run is the switch that fails on it). Under v0.1 the key is not that version's
