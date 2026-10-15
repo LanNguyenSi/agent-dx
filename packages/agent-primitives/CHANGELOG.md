@@ -26,10 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an abort or the command's exit reads the process table once, and when that
   read fails the group is killed at once without it; processes outside the
   group are then killed as a later read, or else the last readable table,
-  shows them, and the run says it could not check (`leftoverCheckFailed`,
-  and after an exit of the command's own accord the reason
-  `leftover_check_failed` with exit `2`), never a pass. All reads from the first
-  limit, abort or exit on share a budget of about 2 s, so a `ps` that hangs
+  shows them (unless that table is older than 10 s: then they are left alive
+  and named in a warning), and the run says it could not check
+  (`leftoverCheckFailed`, and after an exit of the command's own accord the
+  reason `leftover_check_failed` with exit `2`), never a pass. All reads from
+  the first limit, abort or exit on share a budget of about 2 s, so a `ps` that hangs
   delays `guard` by seconds, not by multiples of its own bound. An abort
   (the API's `signal`, SIGINT or SIGTERM to the CLI) kills synchronously
   until `guard` returns, also while it looks for leftovers after the command

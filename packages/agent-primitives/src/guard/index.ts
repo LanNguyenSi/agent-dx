@@ -59,7 +59,9 @@ import {
  *   back by more than `MIN_READ_MS`.
  * - Processes outside the group are killed by pid as a table read within the
  *   budget shows them; when none could be read, as the last table that could
- *   be read showed them.
+ *   be read showed them, unless that table is older than
+ *   `STALE_TABLE_MAX_MS` (a pid may have been reused since): then they are
+ *   left alone and named in a warning.
  * - One accounting (`accountTerminal`): every process a table showed and a
  *   kill was aimed at is listed once, under `killed` after a limit or an
  *   abort and under `leftovers` after an exit of the command's own accord.
@@ -184,6 +186,9 @@ const LIMIT_READ_BUDGET_MS = 1000;
  * made even when the budget is spent; a further try is made only when this
  * much is left after its pause. */
 const MIN_READ_MS = 250;
+/** The oldest a process table may be for a kill by pid to be aimed from it
+ * (`killFromLatest`): past this a pid may belong to an unrelated process. */
+const STALE_TABLE_MAX_MS = 10_000;
 
 const LIMIT_READ_FAILED =
   "the process table could not be read at the limit; the group was killed without it, so its members are not listed";
@@ -267,6 +272,15 @@ const TRAMPOLINE_COMMAND_PREFIX = "/bin/sh -c { set +aemvx; }";
  * table so far. */
 export interface OwnIdentities {
   leader?: string;
+  /** The trampoline's full command line, as the first table that showed it
+   * readable printed it; its watcher shows exactly the same text. */
+  leaderCommand?: string;
+  /** How every command line of the trampoline ends: the program and the
+   * arguments `guard` handed to it, which `ps` prints after the script. For
+   * when no table showed the trampoline readable (the first look often
+   * catches it as `(bash)`, in the middle of a fork). A command with
+   * characters `ps` escapes in its arguments does not match it. */
+  commandTail?: string;
   watcher?: string;
   candidate?: string;
 }
@@ -295,6 +309,7 @@ export function captureOwn(
   if (leader === undefined) return;
   own.leader ??= procKey(leader);
   if (!leader.command.startsWith(TRAMPOLINE_COMMAND_PREFIX)) return;
+  own.leaderCommand ??= leader.command;
   const watchers = table.filter(
     (p) =>
       p.ppid === leaderPid &&
@@ -313,9 +328,12 @@ export function captureOwn(
  * before any table showed the two side by side (a command that kills its
  * parent within its first milliseconds). The watcher then outlives it, still
  * in the group and waiting on its pipe, reparented to a process outside the
- * tree. It is taken to be the one group member with the trampoline's command
- * line whose parent is not in the tree; with none or more than one such
- * process nothing is learned, and all of them are reported. Only for a
+ * tree. It is taken to be the one group member whose parent is not in the
+ * tree and whose command line is exactly the trampoline's, as an earlier
+ * table showed it (`own.leaderCommand`); when no table showed it readable,
+ * the trampoline's leading text and the end it must have (`commandTail`)
+ * have to do. With none or more than one such process nothing is learned,
+ * and all of them are reported. Only for a
  * trampoline that died of a signal: one that exits normally has already
  * stopped its watcher, so such a process could only be the caller's. Writes
  * only to `own`.
@@ -332,7 +350,10 @@ export function captureOrphanedWatcher(
   const orphans = tree.filter(
     (p) =>
       p.pgid === leaderPid &&
-      p.command.startsWith(TRAMPOLINE_COMMAND_PREFIX) &&
+      (own.leaderCommand === undefined
+        ? p.command.startsWith(TRAMPOLINE_COMMAND_PREFIX) &&
+          (own.commandTail === undefined || p.command.endsWith(own.commandTail))
+        : p.command === own.leaderCommand) &&
       !inTree.has(p.ppid),
   );
   if (orphans.length === 1) own.watcher = procKey(orphans[0] as ProcInfo);
@@ -610,7 +631,9 @@ async function supervise(
 
   // What the process table has shown.
   const tracked = new Set<string>();
-  const own: OwnIdentities = {};
+  const own: OwnIdentities = {
+    commandTail: ` sh ${[options.command, ...options.args].join(" ")}`,
+  };
   let latest: ProcInfo[] | undefined;
   let latestAt = 0;
   let peakRssMiB = 0;
@@ -705,18 +728,33 @@ async function supervise(
   };
 
   /** Ends the group, and by pid every process outside it that the last table
-   * read showed: for when no table can be read now. Returns the processes
-   * outside the group the kill reached (one that was gone is left out). */
+   * read showed: for when no table can be read now. A table older than
+   * `STALE_TABLE_MAX_MS` is not trusted for that (its pids may be reused by
+   * now): the group is still killed, the run says it could not check, and the
+   * warning names what was not killed. Returns the processes outside the
+   * group the kill reached (one that was gone is left out). */
   const killFromLatest = (): ProcInfo[] => {
     killGroup(leaderPid);
     if (latest === undefined) return [];
-    const reached: ProcInfo[] = [];
-    for (const proc of collectTree(latest, leaderPid, tracked)) {
-      if (proc.pgid !== leaderPid && killPid(proc.pid)) reached.push(proc);
+    const outside = collectTree(latest, leaderPid, tracked).filter(
+      (proc) => proc.pgid !== leaderPid,
+    );
+    if (outside.length === 0) return [];
+    const ageMs = Date.now() - latestAt;
+    if (ageMs > STALE_TABLE_MAX_MS) {
+      checkFailed = true;
+      const named = outside
+        .slice(0, 5)
+        .map((proc) => `${proc.pid} (${toGuardProc(proc, leaderPid).command})`);
+      warnings.push(
+        `${outside.length} process(es) outside the group were NOT killed: the last table that could be read is ${ageMs} ms old, older than ${STALE_TABLE_MAX_MS} ms, and their pids may belong to other processes by now: ${named.join(", ")}`,
+      );
+      return [];
     }
+    const reached = outside.filter((proc) => killPid(proc.pid));
     if (reached.length > 0) {
       warnings.push(
-        `${reached.length} process(es) outside the group were killed by pid as the last table that could be read showed them, ${Date.now() - latestAt} ms earlier`,
+        `${reached.length} process(es) outside the group were killed by pid as the last table that could be read showed them, ${ageMs} ms earlier`,
       );
     }
     return reached;

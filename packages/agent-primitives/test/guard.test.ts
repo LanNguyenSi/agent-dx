@@ -379,6 +379,32 @@ describe("guard: leftovers", () => {
   });
 });
 
+describe("guard: a trampoline killed before it was read", () => {
+  it("a process that shows only the trampoline's leading text is reported, not taken for the watcher, when the trampoline's full text was seen", async () => {
+    // The command sets up the impostor, then kills the watcher and the
+    // trampoline before the second poll (every 1.5 s); only the first poll saw
+    // the trampoline. The impostor is the one orphan with the leading text,
+    // but not with the full text.
+    const arg = `60.7183${NONCE}`;
+    const impostor = register(
+      `/bin/sh -c { set +aemvx; } impostor-${NONCE} ${arg}`,
+    );
+    const r = await run(
+      "bash",
+      [
+        "-c",
+        `( (exec -a "/bin/sh -c { set +aemvx; } impostor-${NONCE}" sleep ${arg}) & ); ` +
+          `w=$(ps -A -o pid=,ppid= | awk -v p=$PPID -v me=$$ '$2==p && $1!=me {print $1}'); ` +
+          "kill -9 $w $PPID; sleep 0.2; exit 0",
+      ],
+      { pollMs: 1500 },
+    );
+    expect(r.reason).toBe("leftover");
+    expect(r.leftovers.map((p) => p.command)).toContain(impostor);
+    expect(exactly(impostor)).toEqual([]);
+  });
+});
+
 describe("guard: runs that cannot start", () => {
   it("refuses before running anything when ps is unavailable, exit 2", async () => {
     const s = fx(7115);
@@ -427,6 +453,11 @@ interface FakePsOptions {
   /** Every counted call shows the table as the first counted call saw it, so
    * whatever was alive then looks alive however often it is killed. */
   freeze?: boolean;
+  /** With `freeze`: every counted call also shows one more process, a copy of
+   * the frozen row whose command line is exactly `late`, under the command
+   * line `late-<n>` and a pid no host has, where <n> is the number of the
+   * call. So each look shows a process no earlier look showed. */
+  late?: string;
   watch?: string;
   observed?: string;
 }
@@ -468,6 +499,11 @@ if [ -e "$FLAG" ]; then
   if [ ${options.freeze === true ? 1 : 0} -eq 1 ]; then
     [ -e ${quote(frozen)} ] || "$REAL" "$@" > ${quote(frozen)} || exit 1
     cat ${quote(frozen)}
+    ${
+      options.late === undefined
+        ? ":"
+        : `awk -v n="$n" -v want=${quote(options.late)} '{ c = $11; for (i = 12; i <= NF; i++) c = c " " $i; if (c == want) { printf "%d %s %s %s %s %s %s %s %s %s late-%d\\n", 9990000 + n, $2, $3, $4, $5, $6, $7, $8, $9, $10, n; exit } }' ${quote(frozen)}`
+    }
     exit 0
   fi
   if [ "$n" -gt ${skip} ] && [ "$n" -le ${skip + options.fails} ]; then
@@ -605,6 +641,38 @@ describe("guard: a process table that cannot be read", () => {
     expect(r.survivorCount).toBe(1);
     expect(r.warnings.join(" ")).toContain("still alive after the kill sweeps");
     expect(r.leftoverCheckFailed).toBe(false);
+    expect(marked(s.cmd)).toEqual([]);
+  });
+
+  it("a process first shown by the last look is a survivor and also in the leftovers: each survivor is in one of the two lists", async () => {
+    // Every look shows the frozen table plus one process that no earlier look
+    // showed (late-<n> for look n), so the process of the last look is seen
+    // there for the first time.
+    const s = fx(7178);
+    const flag = path.join(tmp(), "flag");
+    const ps = installFakePs({
+      flag,
+      fails: 0,
+      freeze: true,
+      late: s.cmd,
+    });
+    let r;
+    try {
+      r = await run(
+        "sh",
+        ["-c", `sleep ${s.arg} & sleep 0.8; : > '${flag}'; exit 0`],
+        { pollMs: 1500 },
+      );
+    } finally {
+      ps.restore();
+    }
+    const lastLook = `late-${ps.calls()}`;
+    expect(r.reason).toBe("leftover");
+    expect(r.survivors.map((p) => p.command)).toContain(lastLook);
+    expect(r.leftovers.map((p) => p.command)).toContain(lastLook);
+    for (const survivor of r.survivors) {
+      expect(r.leftovers.map((p) => p.pid)).toContain(survivor.pid);
+    }
     expect(marked(s.cmd)).toEqual([]);
   });
 
@@ -850,7 +918,12 @@ describe("guard: a process table that cannot be read", () => {
       .map(Number);
     expect(stamps.length).toBeGreaterThan(3);
     expect((stamps.at(-1) as number) - t0).toBeLessThan(2600);
-    expect(took).toBeLessThan(5000);
+    // From the first terminal event (the timeout) on, every read shares one
+    // budget of about 2 s, so guard returns about 2.3 s after it at most; the
+    // reads after the exit get only what the kill at the limit left of it,
+    // not a budget of their own (that would make it about 3.3 s).
+    expect(took - 1000).toBeLessThan(2800);
+    expect(t0 + took - (stamps.at(-1) as number)).toBeLessThan(1500);
     expect(marked(t)).toEqual([]);
   });
 
@@ -891,6 +964,62 @@ describe("guard: a process table that cannot be read", () => {
     expect(r.warnings.join(" ")).toContain("as the last table");
     expect(marked(esc.cmd)).toEqual([]);
     expect(marked(grp.cmd)).toEqual([]);
+  });
+
+  /** A command that starts an escapee and a group member, is seen by polls
+   * every 100 ms, arms the stand-in `ps` at 1 s and exits at `exitMs`, so the
+   * last table that could be read is about `exitMs - 1000` ms old when the
+   * run ends. */
+  async function escapeeWithOldTable(
+    id: number,
+    exitMs: number,
+  ): Promise<{
+    r: Awaited<ReturnType<typeof run>>;
+    esc: { arg: string; cmd: string };
+    grp: { arg: string; cmd: string };
+  }> {
+    const esc = fx(id);
+    const grp = fx(id + 1);
+    const flag = path.join(tmp(), "flag");
+    const ps = installFakePs({ flag, fails: 10_000 });
+    const script =
+      "const {spawn}=require('child_process');" +
+      `spawn('sleep',['${esc.arg}'],{detached:true,stdio:'ignore'});` +
+      `spawn('sleep',['${grp.arg}'],{stdio:'ignore'});` +
+      `setTimeout(()=>require('fs').writeFileSync(${JSON.stringify(flag)},''),1000);` +
+      `setTimeout(()=>process.exit(0),${exitMs})`;
+    try {
+      const r = await run(process.execPath, ["-e", script], { pollMs: 100 });
+      return { r, esc, grp };
+    } finally {
+      ps.restore();
+    }
+  }
+
+  it("kills by pid from a last table that is about 6 s old", async () => {
+    const { r, esc, grp } = await escapeeWithOldTable(7179, 7000);
+    expect(r.reason).toBe("leftover");
+    expect(r.leftoverCheckFailed).toBe(true);
+    expect(r.leftovers.some((p) => p.command === esc.cmd && !p.inGroup)).toBe(
+      true,
+    );
+    expect(r.warnings.join(" ")).toContain("killed by pid");
+    expect(marked(esc.cmd)).toEqual([]);
+    expect(marked(grp.cmd)).toEqual([]);
+  });
+
+  it("does not kill by pid from a last table older than the age cap (10 s): the group is ended, the escapee is left alone and named, and the run says it could not check", async () => {
+    const { r, esc, grp } = await escapeeWithOldTable(7181, 12_000);
+    expect(r.reason).toBe("leftover_check_failed");
+    expect(r.exitCode).toBe(2);
+    expect(r.leftoverCheckFailed).toBe(true);
+    expect(r.leftovers).toEqual([]);
+    const warning = r.warnings.find((w) => w.includes("NOT killed"));
+    expect(warning).toContain("older than 10000 ms");
+    expect(warning).toContain(esc.cmd);
+    expect(marked(grp.cmd)).toEqual([]);
+    // Not killed: it was last seen too long ago to be sure of its pid.
+    expect(marked(esc.cmd).length).toBe(1);
   });
 
   it("an abort after the command ended, while the table is tried again, kills the group and the escapee the last table showed at once", async () => {
@@ -991,6 +1120,20 @@ describe("guard: abort and parent death", () => {
     const r = await pending;
     expect(r.reason).toBe("aborted");
     expect(r.exitCode).toBe(130);
+    expect(marked(s.cmd)).toEqual([]);
+  });
+
+  it("a signal that is already aborted when guard is called stops the run at once", async () => {
+    const s = fx(7182);
+    const controller = new AbortController();
+    controller.abort();
+    const r = await run("sleep", [s.arg], {
+      signal: controller.signal,
+      timeoutMs: 8000,
+    });
+    expect(r.reason).toBe("aborted");
+    expect(r.exitCode).toBe(130);
+    expect(r.durationMs).toBeLessThan(4000);
     expect(marked(s.cmd)).toEqual([]);
   });
 

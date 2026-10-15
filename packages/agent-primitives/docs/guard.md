@@ -125,7 +125,10 @@ What is reported then:
 Killing by pid from an earlier table has one limit: a process that ended
 after that table was read, and whose pid the system gave to an unrelated
 process since, would be hit. That table is usually the last poll's, older
-when polls were failing too; the warning names its age.
+when polls were failing too; the warning names its age. A table older than
+10 s is not used for it: the group is still killed, but the processes outside
+it are left alive, `leftoverCheckFailed` is `true`, and a warning names them
+(pid and command) and says they were not killed.
 
 ### A child that calls `setsid`
 
@@ -223,9 +226,12 @@ run, or its leftovers could not be checked). Besides the common fields:
   parent. Before that, they are recognised by their place (the group's
   leader, and its direct child in the group, with the trampoline's command
   line); and when the trampoline died of a signal before any table showed
-  the two together, the one group member with the trampoline's command line
-  whose parent is outside the tree is taken for the watcher. A process that
-  merely shows the same command line elsewhere is reported.
+  the two together, the one group member whose parent is outside the tree
+  and whose command line is exactly the trampoline's (as an earlier table
+  showed it, else: starts like it and ends with the program and arguments
+  `guard` handed to it) is taken for the watcher. A process that merely
+  shows the same command line elsewhere, or only its first words, is
+  reported.
 - `leftoverCheckFailed`: `true` when a read of the process table that
   `guard` needed failed for good: at a limit, after the command ended, or
   after a kill sweep (see above). The group was killed anyway; the lists may

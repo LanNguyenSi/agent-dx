@@ -222,6 +222,39 @@ describe("captureOwn, captureOrphanedWatcher and isOwnProcess", () => {
     expect(parented.watcher).toBeUndefined();
   });
 
+  it("records the trampoline's full text from the first table that shows it readable", () => {
+    const own: OwnIdentities = {};
+    captureOwn([{ ...trampoline, command: "(sh)" }], leader, own);
+    expect(own.leaderCommand).toBeUndefined();
+    captureOwn([trampoline], leader, own);
+    expect(own.leaderCommand).toBe(tramp);
+    captureOwn([{ ...trampoline, command: `${tramp} later` }], leader, own);
+    expect(own.leaderCommand).toBe(tramp);
+  });
+
+  it("takes an orphan for the watcher only if its text is exactly the recorded trampoline text", () => {
+    const own: OwnIdentities = { leaderCommand: tramp };
+    const impostor = proc(102, 1, 100, { command: `${tramp} impostor` });
+    captureOrphanedWatcher([impostor], leader, new Set(), own);
+    expect(own.watcher).toBeUndefined();
+    // With the real watcher beside it the impostor does not make it two.
+    const orphan = { ...watcher, ppid: 1 };
+    captureOrphanedWatcher([impostor, orphan], leader, new Set(), own);
+    expect(own.watcher).toBe(procKey(orphan));
+    expect(isOwnProcess(impostor, leader, own)).toBe(false);
+  });
+
+  it("without a recorded text, an orphan has to end like the trampoline's command line too", () => {
+    const tail = " sh sleep 5";
+    const impostor = proc(102, 1, 100, { command: `${tramp} impostor` });
+    const without: OwnIdentities = { commandTail: tail };
+    captureOrphanedWatcher([impostor], leader, new Set(), without);
+    expect(without.watcher).toBeUndefined();
+    const orphan = proc(101, 1, 100, { command: `${tramp}${tail}` });
+    captureOrphanedWatcher([impostor, orphan], leader, new Set(), without);
+    expect(without.watcher).toBe(procKey(orphan));
+  });
+
   it("knows the watcher by identity after it lost its parent", () => {
     const own = learned([trampoline, watcher]);
     const orphan = { ...watcher, ppid: 1 };
