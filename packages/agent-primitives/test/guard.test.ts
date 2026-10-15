@@ -1185,7 +1185,7 @@ describe("guard: a process table that cannot be read", () => {
     expect(r.exitCode).toBe(2);
     expect(r.leftoverCheckFailed).toBe(true);
     expect(r.warnings.join(" ")).toContain(
-      "member(s) of it that may have left",
+      "member(s) of the group that may have left it",
     );
     expect(marked(esc.cmd)).toEqual([]);
     // The leader was reaped, so its pid is never signalled by pid.

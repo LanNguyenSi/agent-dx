@@ -498,6 +498,19 @@ function killTree(leaderPid: number, tree: readonly ProcInfo[]): void {
   }
 }
 
+/** Words for the processes a kill by pid was aimed at: those found outside
+ * the group, and members of the group that may have left it. */
+function whoIs(outside: number, inGroup: number): string {
+  return [
+    outside > 0 ? `${outside} process(es) outside the group` : "",
+    inGroup > 0
+      ? `${inGroup} member(s) of the group that may have left it`
+      : "",
+  ]
+    .filter((part) => part !== "")
+    .join(" and ");
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -802,9 +815,8 @@ async function supervise(
       const named = outside
         .slice(0, 5)
         .map((proc) => `${proc.pid} (${toGuardProc(proc, leaderPid).command})`);
-      const inGroup = fresh.length - outside.length;
       warnings.push(
-        `${outside.length} process(es) outside the group${inGroup > 0 ? `, and ${inGroup} member(s) of it that may have left it,` : ""} were NOT killed by pid: the last table that could be read is ${ageMs} ms old, older than ${STALE_TABLE_MAX_MS} ms, and their pids may belong to other processes by now${named.length > 0 ? `: ${named.join(", ")}` : ""}`,
+        `${whoIs(outside.length, fresh.length - outside.length)} were NOT killed by pid: the last table that could be read is ${ageMs} ms old, older than ${STALE_TABLE_MAX_MS} ms, and their pids may belong to other processes by now${named.length > 0 ? `: ${named.join(", ")}` : ""}`,
       );
       return [];
     }
@@ -812,10 +824,9 @@ async function supervise(
     // Tried once, reached or not: one that was gone is not tried again.
     for (const proc of members) killedByPid.add(procKey(proc));
     const outside = outsideOf(reached);
-    const inGroup = reached.length - outside.length;
     if (reached.length > 0) {
       warnings.push(
-        `${outside.length} process(es) outside the group${inGroup > 0 ? `, and ${inGroup} member(s) of it that may have left it,` : ""} were killed by pid as the last table that could be read showed them, ${ageMs} ms earlier`,
+        `${whoIs(outside.length, reached.length - outside.length)} were killed by pid as the last table that could be read showed them, ${ageMs} ms earlier`,
       );
     }
     return outside;
