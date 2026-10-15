@@ -81,8 +81,11 @@ those fixed fields)`, not `-m` unconditionally; when even that cannot be
   length, and below the marker's own size the marker itself is cut short.
 - `-l, --log-dir <dir>`: directory for logs and full (untruncated)
   results (defaults to `$AGENT_PRIMITIVES_LOG_DIR`, or a fresh directory
-  under the OS temp dir otherwise). Relative values are supported and are
-  resolved once against the invocation cwd, including `./` and `../`.
+  under the OS temp dir otherwise). A relative value, from the option or
+  from the environment variable, is resolved once against the directory
+  the command was started in (`process.cwd()`), not against `-C, --cwd`,
+  including `./` and `../`; every path the envelope's `logs` carries is
+  therefore absolute.
 - `--json`: a no-op alias for `-f json` (already the default), for the
   common instinct to ask for JSON explicitly. Combined with an explicit
   `-f text` it is `status: "usage_error"`, `reason: "format_conflict"`,
