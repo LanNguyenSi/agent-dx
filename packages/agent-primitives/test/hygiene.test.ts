@@ -791,6 +791,22 @@ describe("hygiene from the merge-base", () => {
     expect(r.headSha).toBeNull();
   });
 
+  it("reports a drop staged in the index, counted from the merge-base", () => {
+    const { repo, main, forkSha } = movedBaseRepo();
+    write(repo, "test/a.test.ts", 'it("one", () => {});\n');
+    git(repo, ["add", "test/a.test.ts"]);
+    const r = hygiene({ cwd: repo, base: main, staged: true });
+    expect(r.mergeBase).toBe(forkSha);
+    expect(r.findings).toEqual([
+      expect.objectContaining({
+        kind: "test_cases_dropped",
+        path: "test/a.test.ts",
+        baseCases: 3,
+        headCases: 1,
+      }),
+    ]);
+  });
+
   it("still reports a drop the head side made", () => {
     const { repo, main } = movedBaseRepo();
     write(repo, "test/a.test.ts", 'it("one", () => {});\n');
