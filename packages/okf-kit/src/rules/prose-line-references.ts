@@ -157,7 +157,8 @@ const RULE_ID = "prose-line-references";
 // without this lookahead a real `foo.json` mention would silently match
 // as `foo.js` (the `on` left dangling) -- `(?!\w)` rejects that truncated
 // match outright, so the engine backtracks to the real extension instead.
-const FILE_MENTION_RE = /[\w./-]+\.(?:ts|js|mjs|md|yml|yaml|json)(?!\w)/g;
+const FILE_MENTION_RE =
+  /[\w./-]+\.(?:ts|js|mjs|md|yml|yaml|json|prisma)(?!\w)/g;
 
 // "line N" / "lines N-M" / "lines N-M" (en-/em-dash) / "lines N to M".
 // Deliberately requires the literal keyword right before the digits -- see

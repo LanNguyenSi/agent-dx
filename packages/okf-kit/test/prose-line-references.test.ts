@@ -22,6 +22,7 @@ const AMBIGUOUS_ROOT = path.join(
 );
 const NEGATIVE_ROOT = path.join(FIXTURES_DIR, "prose-line-references-negative");
 const JSON_EXT_ROOT = path.join(FIXTURES_DIR, "prose-line-references-json-ext");
+const PRISMA_EXT_ROOT = path.join(FIXTURES_DIR, "prose-line-references-prisma");
 const BINDER_ROOT = path.join(FIXTURES_DIR, "prose-line-references-binder");
 const RANGES_ROOT = path.join(FIXTURES_DIR, "prose-line-references-ranges");
 const RESERVED_ROOT = path.join(FIXTURES_DIR, "prose-line-references-reserved");
@@ -53,6 +54,10 @@ function loadNegative() {
 
 function loadJsonExt() {
   return loadFixture("prose-line-references-json-ext/docs/okf", JSON_EXT_ROOT);
+}
+
+function loadPrismaExt() {
+  return loadFixture("prose-line-references-prisma/docs/okf", PRISMA_EXT_ROOT);
 }
 
 function loadBinder() {
@@ -205,6 +210,19 @@ describe("prose-line-references", () => {
     ctx.proseLineReferences = { strict: false };
     const findings = proseLineReferencesRule.run(ctx);
     expect(findings).toEqual([]);
+  });
+
+  // FILE_MENTION_RE must stay the same extension set CITATION_RE recognises
+  // (see the comment at its definition): a `.prisma` mention has to resolve
+  // like any other, so an out-of-range prose line reference bound to it is
+  // reported as drifted `out-of-bounds`, not as an `unresolvable` notice for
+  // a file mention the rule refused to even see.
+  it("a `.prisma` file mention resolves and its drifted line reference is reported out-of-bounds", () => {
+    const ctx = loadPrismaExt();
+    ctx.proseLineReferences = { strict: false };
+    const findings = proseLineReferencesRule.run(ctx);
+    expect(findings).toHaveLength(1);
+    expect(findings[0]?.message).toContain("[out-of-bounds]");
   });
 
   // -- binding-rule discrimination (nearest-in-sentence vs. paragraph

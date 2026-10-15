@@ -241,7 +241,7 @@ jobs:
               echo "closing-brace-start-line, missing-file, inverted-range,"
               echo "range-exceeds-file, path-traversal-rejected) means a"
               echo "\`path:N\`/\`path:N-M\` citation (recognised"
-              echo "extensions: .ts, .js, .mjs, .md, .yml, .yaml, .json)"
+              echo "extensions: .ts, .js, .mjs, .md, .yml, .yaml, .json, .prisma)"
               echo "in the doc's prose no longer points at real content, even"
               echo "though the source file itself is not stale: re-check the"
               echo "citation against the file's current line numbers and"
