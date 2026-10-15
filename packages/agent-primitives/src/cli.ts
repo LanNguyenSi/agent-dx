@@ -452,10 +452,17 @@ function parseMaxFailures(value: string): string {
 function bestEffortGlobal(opts: GlobalOptions): ResolvedGlobal {
   const cwd = opts.cwd ? path.resolve(opts.cwd) : process.cwd();
   const maxChars = Number(opts.maxChars);
+  const requestedLogDir = opts.logDir ?? process.env.AGENT_PRIMITIVES_LOG_DIR;
+  // A relative log dir resolves against the directory the command was
+  // started in (`process.cwd()`), never against `-C/--cwd`: checks run
+  // under `cwd`, and resolving there too would bury the caller's own logs
+  // inside the verified checkout. Resolving here, once, keeps every path
+  // the envelope's `logs` carries absolute. The tmpdir default is already
+  // absolute and stays untouched.
   const logDir =
-    opts.logDir ??
-    process.env.AGENT_PRIMITIVES_LOG_DIR ??
-    path.join(os.tmpdir(), "agent-primitives", currentRunId());
+    requestedLogDir !== undefined
+      ? path.resolve(requestedLogDir)
+      : path.join(os.tmpdir(), "agent-primitives", currentRunId());
   return { format: opts.format, cwd, maxChars, logDir };
 }
 
@@ -812,7 +819,7 @@ program
   )
   .option(
     "-l, --log-dir <dir>",
-    "directory for logs and full (untruncated) results (defaults to $AGENT_PRIMITIVES_LOG_DIR or <tmpdir>/agent-primitives/<run-id>/)",
+    "directory for logs and full (untruncated) results (defaults to $AGENT_PRIMITIVES_LOG_DIR or <tmpdir>/agent-primitives/<run-id>/); a relative value resolves against the invocation directory, not --cwd",
   )
   .option(
     "--json",

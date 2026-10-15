@@ -55,6 +55,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the log of every run that started. macOS and Linux; Windows is not
   supported. The shipped skill names the command for repro, hang and fuzz
   runs.
+- `-l, --log-dir` and `AGENT_PRIMITIVES_LOG_DIR`: a relative value now
+  resolves against the directory the command was started in
+  (`process.cwd()`), not against `-C, --cwd`, for every command, so the
+  envelope's `logs` always carry absolute paths and a relative log
+  directory never lands inside the checkout being verified. `snapshot`
+  and `delta` already resolved this way; the default (a fresh directory
+  under the OS temp dir) is unchanged. The option help and
+  `docs/output-shape.md` name the directory a relative value is read
+  against.
 
 ## [0.14.0] - 2026-10-14
 
