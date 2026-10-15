@@ -1118,37 +1118,14 @@ export function alteredCommitGraph(grafts: BytePath): string | undefined {
 }
 
 /** What `git for-each-ref` prints per remote-tracking ref when two views of
- * the refs are compared: the name, then `symbolic` for a symbolic ref or what
- * a plain ref points at. A symbolic ref prints no object name and no target:
- * it resolves through the view that asks, so the two views disagree about a
- * symbolic ref to `HEAD` (the branch the asking worktree is on) or to a ref
- * of the worktree itself, with nothing forged. */
-const REMOTE_REF_VIEW =
-  "--format=%(refname)%09%(if)%(symref)%(then)symbolic%(else)%(objectname)%(end)";
-
-const SYMBOLIC_LINE_END = Buffer.from("\tsymbolic");
-
-/**
- * The lines of a `REMOTE_REF_VIEW` listing that two views of the same
- * common stack must agree on: the plain refs. A symbolic ref is left out.
- * One to a ref of the worktree itself (`refs/worktree/x`) is listed only by
- * the view that holds the target, and none can make a commit look pushed,
- * because `unpushedCommits` excludes every symbolic ref from `--remotes`. A
- * plain ref that shadows a symbolic one, or one that hides it, still shows
- * up as a difference.
- */
-function comparableRemoteRefs(listing: Buffer): Buffer {
-  const kept = splitBytes(listing, 0x0a).filter(
-    (line) =>
-      line.length > 0 &&
-      !line
-        .subarray(Math.max(0, line.length - SYMBOLIC_LINE_END.length))
-        .equals(SYMBOLIC_LINE_END),
-  );
-  return Buffer.concat(
-    kept.map((line) => Buffer.concat([line, Buffer.from("\n")])),
-  );
-}
+ * the refs are compared: the name, what it points at and what it is a
+ * symbolic ref to. Nothing is left out of either view before the byte
+ * comparison, symbolic refs included: a symbolic ref that one view resolves
+ * differently from the other (a target of `HEAD`, or a ref under
+ * `refs/worktree`) is a difference and is refused, since a private record
+ * that shadows a common symbolic ref can make the separate exclusion of the
+ * symbolic refs miss it. */
+const REMOTE_REF_VIEW = "--format=%(refname)%09%(objectname)%09%(symref)";
 
 /**
  * A failed result when the remote-tracking refs git lists in `cwd` are not
@@ -1162,9 +1139,8 @@ function comparableRemoteRefs(listing: Buffer): Buffer {
  * `rev-list --remotes` in the worktree would count the commit it points at
  * as pushed, and removing the worktree deletes the private stack and that
  * ref with it. The listing in `cwd` is therefore compared byte for byte
- * (`comparableRemoteRefs`) with the listing of the common directory alone
- * (`--git-dir`), and any difference, an added, a hidden or a re-pointed ref,
- * is unknown. The common directory is an argument, so one whose name is not
+ * with the listing of the common directory alone (`--git-dir`), and any
+ * difference, an added, a hidden or a re-pointed ref, is unknown. The common directory is an argument, so one whose name is not
  * UTF-8 cannot be handed over exactly and is unknown as well, and so is one
  * that holds an entry named `commondir`: git never writes one there, and
  * with it `--git-dir=<common-dir>` reads the refs of another directory as
@@ -1212,11 +1188,7 @@ export function privateStackRemoteRefs(
   if (common.error !== undefined || common.status !== 0) {
     return textResult(common);
   }
-  if (
-    comparableRemoteRefs(own.stdout).equals(comparableRemoteRefs(common.stdout))
-  ) {
-    return undefined;
-  }
+  if (own.stdout.equals(common.stdout)) return undefined;
   return unknownUnpushed(
     "the remote-tracking refs git lists in this worktree are not the ones the common reftable stack holds, so its own reftable stack (worktrees/<name>/reftable) adds, hides or re-points a ref that no push or fetch wrote there, and a commit could look pushed that only that stack's ref holds, which the removal deletes",
   );

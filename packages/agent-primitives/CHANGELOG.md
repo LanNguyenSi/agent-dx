@@ -21,12 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   as is a common directory whose name is not UTF-8 and one that holds an entry
   named `commondir` (git never writes one there, and it makes
   `--git-dir=<common-dir>` read the refs of another directory as the common
-  stack). A plain ref in the private stack that shadows a symbolic
-  remote-tracking ref of the common stack is a difference too. Symbolic
-  remote-tracking refs are left out of the comparison, since they resolve
-  per worktree (a symbolic ref to `HEAD`, or to a ref under `refs/worktree`)
-  and the walk already excludes every one of them. A worktree whose refs git
-  wrote itself lists the same plain refs in both views and is unaffected.
+  stack). Nothing is left out of either listing before the comparison, so a
+  plain ref in the private stack that shadows a symbolic remote-tracking ref
+  of the common stack is a difference too. The same holds for a symbolic
+  remote-tracking ref of the common stack to `HEAD` or to a ref under
+  `refs/worktree`, which the two listings resolve differently although
+  nothing is forged: that layout is refused (`--force` removes anyway). A
+  worktree whose refs git wrote itself, with no such symbolic ref, lists the
+  same in both views and is unaffected.
 - `worktree remove` and `list`: a forged commit-graph file no longer makes an
   unpushed commit look pushed or merged. git reads parents from
   `objects/info/commit-graph` without checking them against the commit

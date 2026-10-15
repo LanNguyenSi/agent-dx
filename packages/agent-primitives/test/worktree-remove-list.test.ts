@@ -4216,6 +4216,19 @@ describe.skipIf(!REFTABLE_SUPPORTED)(
       wt: string,
       refs: { name: string; sha: string }[],
     ): string {
+      return forgePrivateStackWith(f, wt, (donor) => {
+        for (const ref of refs) {
+          git(donor, ["update-ref", ref.name, ref.sha]);
+        }
+      });
+    }
+
+    /** `forgePrivateStack` with the donor repository left to `fill`. */
+    function forgePrivateStackWith(
+      f: Fixture,
+      wt: string,
+      fill: (donor: string) => void,
+    ): string {
       const privateDir = absoluteGitPath(wt, "--git-dir");
       expect(privateDir).not.toBe(commonDirOf(f));
       expect(fs.statSync(path.join(privateDir, "reftable")).isDirectory()).toBe(
@@ -4230,9 +4243,7 @@ describe.skipIf(!REFTABLE_SUPPORTED)(
       // The donor's tables carry its HEAD, which would replace the
       // worktree's own: point it where the worktree's already points.
       git(donor, ["symbolic-ref", "HEAD", "refs/heads/feat"]);
-      for (const ref of refs) {
-        git(donor, ["update-ref", ref.name, ref.sha]);
-      }
+      fill(donor);
       const listed = fs
         .readFileSync(path.join(donor, ".git/reftable/tables.list"), "utf8")
         .split("\n")
@@ -4335,7 +4346,7 @@ describe.skipIf(!REFTABLE_SUPPORTED)(
       expect(r.json.message).toContain("worktrees/<name>/reftable");
     });
 
-    it("removes a pushed branch when the common stack holds symbolic remote-tracking refs to refs of the worktree itself", async () => {
+    it("refuses, fail closed, when the common stack holds symbolic remote-tracking refs that resolve differently in the worktree, and --force removes", async () => {
       const f = makeFixture({ refFormat: "reftable" });
       const { wt, sha } = makeUnpushed(f);
       git(wt, ["push", "-q", "origin", "feat"]);
@@ -4343,6 +4354,8 @@ describe.skipIf(!REFTABLE_SUPPORTED)(
       // under `refs/worktree` exists in the worktree's own stack alone:
       // nothing is forged, yet the two listings differ in what these
       // symbolic refs resolve to and in whether the second one is listed.
+      // The comparison leaves nothing out, so the layout is a documented
+      // false refusal rather than a hole.
       git(f.repo, ["symbolic-ref", "refs/remotes/origin/self", "HEAD"]);
       git(f.repo, [
         "symbolic-ref",
@@ -4363,10 +4376,58 @@ describe.skipIf(!REFTABLE_SUPPORTED)(
       expect((await listedAs(f, wt, "refs/remotes/origin/wtx")).common).toBe(
         "",
       );
-      const r = await cliBounded(f.work, ["remove", wt, "--delete-branch"]);
-      expect(r.code, r.stdout + r.stderr).toBe(0);
-      expect(r.json.branch.deleted).toBe(true);
+      await expectUnknownState(f, wt, sha, [
+        ["--delete-branch"],
+        ["--delete-branch", "--base", "origin/main"],
+      ]);
+      const forced = await cliBounded(f.work, [
+        "remove",
+        wt,
+        "--delete-branch",
+        "--force",
+      ]);
+      expect(forced.code, forced.stdout + forced.stderr).toBe(0);
+      expect(forced.json.branch.deleted).toBe(true);
+      expect(fs.existsSync(wt)).toBe(false);
     });
+
+    // git does not show a private record that shadows a symbolic ref of the
+    // common stack the same way on every run (the symbolic ref target of the
+    // listing is unreliable), so one attempt cannot show that the removal is
+    // refused every time: the refusal is asserted over a loop.
+    it.each([
+      [
+        "a symbolic ref to HEAD, shadowed by a private record that points at the branch",
+        ["symbolic-ref", "refs/remotes/origin/self", "HEAD"],
+        ["symbolic-ref", "refs/remotes/origin/self", "refs/heads/feat"],
+      ],
+      [
+        "a symbolic ref to a ref of the worktree, shadowed by a private record that points at HEAD",
+        ["symbolic-ref", "refs/remotes/origin/selfself", "refs/worktree/x"],
+        ["symbolic-ref", "refs/remotes/origin/selfself", "HEAD"],
+      ],
+    ])(
+      "never removes the unpushed branch of a worktree whose private stack holds a symbolic record that shadows %s",
+      async (_what, common, forged) => {
+        const f = makeFixture({ refFormat: "reftable" });
+        const { wt, sha } = makeUnpushed(f);
+        git(wt, ["update-ref", "refs/worktree/x", sha]);
+        git(f.repo, common);
+        forgePrivateStackWith(f, wt, (donor) => git(donor, forged));
+        for (let attempt = 1; attempt <= 20; attempt += 1) {
+          const r = await cliBounded(f.work, ["remove", wt, "--delete-branch"]);
+          const label = `attempt ${attempt}: ${r.stdout}${r.stderr}`;
+          expect(r.code, label).toBe(2);
+          expect(r.json.reason, label).toBe("unpushed_state_unknown");
+          expect(fs.existsSync(wt), label).toBe(true);
+          expect(
+            git(f.repo, ["rev-parse", "--verify", "refs/heads/feat"]).trim(),
+            label,
+          ).toBe(sha);
+        }
+      },
+      120_000,
+    );
 
     it("keeps a branch when the common git directory holds a commondir entry that points git at another stack", async () => {
       const f = makeFixture({ refFormat: "reftable" });
