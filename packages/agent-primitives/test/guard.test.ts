@@ -320,6 +320,13 @@ describe("guard: leftovers", () => {
     expect(r.exitCode).toBe(122);
     expect(r.leftovers.map((p) => p.command)).toContain(s.cmd);
     expect(marked(s.cmd)).toEqual([]);
+    // Once guard has let go of the pipe the surviving watcher (it has the
+    // trampoline's command line) ends the group and itself: none is left.
+    const watchers = () =>
+      (readProcesses() ?? []).filter(
+        (p) => !isZombie(p) && p.command.includes(`sleep ${s.arg} &`),
+      );
+    expect(await waitFor(() => watchers().length === 0, 5000)).toBe(true);
   });
 });
 
