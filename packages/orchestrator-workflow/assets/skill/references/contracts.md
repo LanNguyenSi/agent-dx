@@ -230,6 +230,16 @@ commits:
   - ""
 ```
 
+Before handback the implementer runs, scoped to its delta, the knowledge
+bundle check when the repository has a configured bundle and the drift check
+when one is connected, and reports their outcome in `tests.executed`; an
+unavailable check is reported as a limitation, not a pass. Every claimed check
+result in `tests.executed`, `summary`, or `criterion_evidence` carries the path
+of a recorded verify envelope or the exact command plus its exit code. These
+use the existing fields; no field is added. The reviewer verifies claimed
+checks against that envelope or command output rather than the prose, and a
+claim without either is a finding.
+
 Follow [evidence-and-probes.md workflow step 6](evidence-and-probes.md#workflow)
 for implementation evidence, verification, mutation probes, and replay. For
 commit reporting, follow the installed implementer role prompt. A return that
