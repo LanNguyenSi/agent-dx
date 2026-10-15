@@ -13,10 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   before a `.prisma` path was never treated as a citation at all, so e.g.
   `schema.prisma:999` past the last line passed the check in silence. The
   recognised set is `.ts`, `.js`, `.mjs`, `.md`, `.yml`, `.yaml`, `.json`,
-  `.prisma`, one allowlist shared by `prose-line-references`' file-mention
-  matching; `.prisma` is also a closing-brace target (its blocks end in `}`),
-  so a citation starting on a lone `}` is flagged `closing-brace-start-line`
-  like in a `.ts` file. See
+  `.prisma`, the same set `prose-line-references` uses for its file-mention
+  matching (two regexes kept in step); `.prisma` is also a closing-brace
+  target (its blocks end in `}`), so a citation starting on a lone `}` is
+  flagged `closing-brace-start-line` like in a `.ts` file. See
   [Check catalog](docs/check-catalog.md#rules).
 
 - An unrecognized `okf_version` on the bundle-root `index.md` now names itself.
