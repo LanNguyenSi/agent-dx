@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { guard, type GuardOptions } from "../src/guard/index.js";
-import { isZombie, readProcesses } from "../src/guard/ps.js";
+import { isZombie, readProcesses, type ProcInfo } from "../src/guard/ps.js";
 import { CLI_PATH } from "./helpers/spawn-cli.js";
 
 /**
@@ -59,10 +59,12 @@ function register(command: string): string {
  * started this suite when its own command text mentions the marker. The
  * marker must have been registered (`fx`, `tag`, `register`). */
 function marked(marker: string): { pid: number; command: string }[] {
-  return (readProcesses() ?? []).filter(
-    (p) =>
-      !isZombie(p) &&
-      (p.command === marker || p.command.endsWith(` ${marker}`)),
+  return (readProcesses() ?? []).filter((p) => showsMarker(p, marker));
+}
+
+function showsMarker(p: ProcInfo, marker: string): boolean {
+  return (
+    !isZombie(p) && (p.command === marker || p.command.endsWith(` ${marker}`))
   );
 }
 
@@ -73,14 +75,15 @@ function exactly(command: string): { pid: number }[] {
   );
 }
 
+/** One look at the table for all markers: this runs after every case, and a
+ * look per marker made it slow enough to time out its hook on a loaded host. */
 function killMarked(): void {
-  for (const marker of markers) {
-    for (const p of marked(marker)) {
-      try {
-        process.kill(p.pid, "SIGKILL");
-      } catch {
-        // gone
-      }
+  for (const p of readProcesses() ?? []) {
+    if (!markers.some((marker) => showsMarker(p, marker))) continue;
+    try {
+      process.kill(p.pid, "SIGKILL");
+    } catch {
+      // gone
     }
   }
 }
