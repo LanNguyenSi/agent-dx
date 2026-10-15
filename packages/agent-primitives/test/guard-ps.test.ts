@@ -11,6 +11,7 @@ import {
   captureOrphanedWatcher,
   captureOwn,
   collectTree,
+  endsWithTail,
   guardExitCode,
   isOwnProcess,
   type OwnIdentities,
@@ -255,6 +256,20 @@ describe("captureOwn, captureOrphanedWatcher and isOwnProcess", () => {
     expect(without.watcher).toBe(procKey(orphan));
   });
 
+  it("takes an orphan whose arguments `ps` printed escaped for the watcher, on both platforms' escapes", () => {
+    const base = "/bin/sh -c { set +aemvx; } 2>/dev/null\\012unset -f command";
+    const tail = " sh sleep 5 \u00dcbung\n";
+    for (const shown of [
+      " sh sleep 5 M-CM^\\bung\\012", // macOS
+      " sh sleep 5 ??bung ", // Linux
+    ]) {
+      const own: OwnIdentities = { commandTail: tail };
+      const orphan = proc(101, 1, 100, { command: `${base}${shown}` });
+      captureOrphanedWatcher([orphan], leader, new Set(), own);
+      expect(own.watcher).toBe(procKey(orphan));
+    }
+  });
+
   it("knows the watcher by identity after it lost its parent", () => {
     const own = learned([trampoline, watcher]);
     const orphan = { ...watcher, ppid: 1 };
@@ -321,5 +336,71 @@ describe("accountTerminal", () => {
       isOwn: own,
     });
     expect(r).toEqual({ killed: [], leftovers: [], survivors: [] });
+  });
+});
+
+describe("endsWithTail", () => {
+  it("is an exact ending when the tail is printable ASCII", () => {
+    expect(endsWithTail("x -c script sh sleep 5", " sh sleep 5")).toBe(true);
+    expect(endsWithTail("x -c script sh sleep 50", " sh sleep 5")).toBe(false);
+    expect(endsWithTail("x -c script sh sleep 5 more", " sh sleep 5")).toBe(
+      false,
+    );
+    expect(endsWithTail("x sh sleep 5", ".*")).toBe(false);
+  });
+
+  it("lets a run of characters outside printable ASCII stand for what `ps` printed for it", () => {
+    const tail = " sh cmd \u00dcbung\n";
+    // macOS (octal and meta escapes) and Linux (`?` per byte, a space).
+    expect(endsWithTail("x sh cmd M-CM^\\bung\\012", tail)).toBe(true);
+    expect(endsWithTail("x sh cmd ??bung ", tail)).toBe(true);
+    // Nothing printed for it at all (a trimmed line).
+    expect(endsWithTail("x sh cmd bung", tail)).toBe(true);
+    // The printable characters around the run still have to match.
+    expect(endsWithTail("x sh cmd ??bunk ", tail)).toBe(false);
+    expect(endsWithTail("x sh cmd2 ??bung ", tail)).toBe(false);
+    expect(endsWithTail("x sh cmd ??bung and more", tail)).toBe(false);
+  });
+
+  it("takes time linear in the command line, whatever the number of runs: a `?` per byte rendering of 200 runs", () => {
+    // Linux prints one `?` per byte: a two-byte letter becomes `??`. A
+    // back-tracking matcher takes seconds at 34 such runs.
+    const tail = ` sh cmd ${"\u00e9a".repeat(200)}`;
+    const command = `x sh cmd ${"??a".repeat(200)}`;
+    const started = performance.now();
+    expect(endsWithTail(command, tail)).toBe(true);
+    expect(endsWithTail(`${command}b`, tail)).toBe(false);
+    expect(endsWithTail(command.replace(/a$/, "b"), tail)).toBe(false);
+    // The same size, and no ending that matches: every window is tried.
+    expect(endsWithTail(`x sh cmd ${"??b".repeat(200)}`, tail)).toBe(false);
+    expect(performance.now() - started).toBeLessThan(200);
+  });
+
+  it("matches runs next to each other, at the start of the tail, and across several windows", () => {
+    // A tail that starts with a run: the match may start anywhere.
+    expect(endsWithTail("anything ??ab", "\u00dcab")).toBe(true);
+    expect(endsWithTail("ab", "\u00dcab")).toBe(true);
+    expect(endsWithTail("aXb", "\u00dcab")).toBe(false);
+    // Runs are told apart by the literals between them, each with a window.
+    const two = "a\u00dcb\u00dcc";
+    expect(endsWithTail("a??b??c", two)).toBe(true);
+    expect(endsWithTail("a??bc", two)).toBe(true);
+    expect(endsWithTail("a??d??c", two)).toBe(false);
+    expect(endsWithTail("a??b??d", two)).toBe(false);
+    // A one-byte run takes four characters at most, each of its windows.
+    const one = "a\nb\nc";
+    expect(endsWithTail("a1234b9c", one)).toBe(true);
+    expect(endsWithTail("a12345b9c", one)).toBe(false);
+    expect(endsWithTail("a1b1234c", one)).toBe(true);
+    expect(endsWithTail("a1b12345c", one)).toBe(false);
+  });
+
+  it("allows four characters per byte of the run and no more", () => {
+    // One newline is one byte: up to four characters, such as `\\012`.
+    expect(endsWithTail("sh a \\012", "sh a \n")).toBe(true);
+    expect(endsWithTail("sh a \\0123", "sh a \n")).toBe(false);
+    // A two-byte character: up to eight.
+    expect(endsWithTail("sh a M-CM^\\", "sh a \u00dc")).toBe(true);
+    expect(endsWithTail("sh a 123456789", "sh a \u00dc")).toBe(false);
   });
 });

@@ -52,9 +52,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   until `guard` returns, also while it looks for leftovers after the command
   ended; the CLI then ends with `130` or `143`, with no output. The envelope
   carries the reason, both peak sizes, the killed and leftover processes and
-  the log of every run that started. macOS and Linux; Windows is not
-  supported. The shipped skill names the command for repro, hang and fuzz
-  runs.
+  the log of every run that started. When no table can be read, the members
+  of the group that the last readable table showed and that now lead a
+  process group of their own are killed by pid too, within the same 10 s age
+  cap (counted from the start of the read), so a member that called `setsid`
+  in place after that table is not left alive, while a group member whose pid
+  leads no process group is not signalled by its pid;
+  each process is aimed at and warned about once per run. The trampoline's
+  orphaned watcher is recognised when the command's arguments contain a
+  newline, a tab or a non-ASCII character, which `ps` prints escaped.
+  macOS and Linux; Windows is not supported. The shipped skill names the
+  command for repro, hang and fuzz runs.
 - `-l, --log-dir` and `AGENT_PRIMITIVES_LOG_DIR`: a relative value now
   resolves against the directory the command was started in
   (`process.cwd()`), not against `-C, --cwd`, for every command, so the
