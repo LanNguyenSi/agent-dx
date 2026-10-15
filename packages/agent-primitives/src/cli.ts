@@ -72,6 +72,7 @@ import {
   outsideCheckout,
 } from "./snapshot/index.js";
 import { checkoutIdentity } from "./snapshot/git.js";
+import { guard, type GuardResult } from "./guard/index.js";
 import {
   createWorktree,
   listWorktrees,
@@ -793,7 +794,7 @@ program.configureOutput({
 program
   .name("agent-primitives")
   .description(
-    "Agent-first CLI primitives: bounded JSON envelopes, a mutation-probe runner, a verify runner, a PATH doctor, an identifier-drift guard, a commit-hygiene guard, an exact-text patcher, checkout snapshot/delta, and a skill installer (init)",
+    "Agent-first CLI primitives: bounded JSON envelopes, a mutation-probe runner, a verify runner, a PATH doctor, an identifier-drift guard, a commit-hygiene guard, an exact-text patcher, checkout snapshot/delta, a bounded-run guard, and a skill installer (init)",
   )
   .version(VERSION)
   .option(
@@ -875,6 +876,148 @@ program
         exitCode,
         { format: global.format, maxChars: global.maxChars },
         () => renderDoctorText(result),
+      );
+    },
+  );
+
+/** Longest wall-clock limit `guard` accepts, seconds: the timer is a 32-bit
+ * millisecond value. */
+const MAX_GUARD_TIMEOUT_S = Math.floor(MAX_TIMEOUT_MS / 1000);
+
+function parseGuardTimeout(value: string): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0 || n > MAX_GUARD_TIMEOUT_S) {
+    throw new InvalidArgumentError(
+      `timeout-s must be a positive number of seconds, at most ${MAX_GUARD_TIMEOUT_S} (got "${value}")`,
+    );
+  }
+  return n;
+}
+
+function parseGuardMaxRss(value: string): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) {
+    throw new InvalidArgumentError(
+      `max-rss-MiB must be a positive number of mebibytes (got "${value}")`,
+    );
+  }
+  return n;
+}
+
+function parseGuardPollMs(value: string): number {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 20 || n > 60000) {
+    throw new InvalidArgumentError(
+      `--poll-ms must be an integer from 20 to 60000 (got "${value}")`,
+    );
+  }
+  return n;
+}
+
+function renderGuardText(result: GuardResult, command: string): string {
+  const lines = [
+    `guard ${result.status}: ${result.reason} (exit ${result.exitCode})`,
+    `command: ${command}`,
+    `duration: ${result.durationMs} ms, peak rss: ${result.peakRssMiB} MiB (largest process ${result.peakProcessRssMiB} MiB) of ${result.limits.maxRssMiB} MiB, ${result.polls} polls`,
+  ];
+  const listing = (title: string, list: GuardResult["killed"], n: number) => {
+    if (n === 0) return;
+    lines.push(`${title}: ${n}`);
+    for (const p of list) {
+      lines.push(
+        `  ${p.pid} ${p.inGroup ? "group" : "escaped"} ${p.rssMiB} MiB ${p.command}`,
+      );
+    }
+  };
+  listing("killed at the limit", result.killed, result.killedCount);
+  listing("leftovers killed", result.leftovers, result.leftoverCount);
+  listing("survivors", result.survivors, result.survivorCount);
+  for (const w of result.warnings) lines.push(`warning: ${w}`);
+  lines.push(`log: ${result.logPath}`);
+  if (result.outputTail) lines.push("output tail:", result.outputTail);
+  return lines.join("\n") + "\n";
+}
+
+program
+  .command("guard")
+  .description(
+    "Run a command (after --) with a wall-clock timeout and a resident-memory cap in its own process group; kill the whole group at either limit, then find, kill and report anything the command left running. Exit codes: 124 timeout, 123 memory cap, 122 leftovers, 2 could not run or could not check for leftovers, 130 or 143 on SIGINT or SIGTERM (no output), otherwise the command's own code",
+  )
+  .argument("<timeout-s>", "wall-clock limit in seconds", parseGuardTimeout)
+  .argument(
+    "<max-rss-MiB>",
+    "cap on the summed resident memory of the command's process tree, in MiB",
+    parseGuardMaxRss,
+  )
+  .argument("<cmd...>", "the command and its arguments; put them after `--`")
+  .option(
+    "--poll-ms <n>",
+    "how often the process table is sampled, in milliseconds (a spike between two samples can overshoot the cap)",
+    parseGuardPollMs,
+    200,
+  )
+  .action(
+    async (
+      timeoutS: number,
+      maxRssMiB: number,
+      cmd: string[],
+      opts: { pollMs: number },
+      command: Command,
+    ) => {
+      const start = Date.now();
+      const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
+      const [executable, ...args] = cmd as [string, ...string[]];
+      const result = await guard({
+        command: executable,
+        args,
+        timeoutMs: Math.round(timeoutS * 1000),
+        maxRssMiB,
+        pollMs: opts.pollMs,
+        cwd: global.cwd,
+        logDir: global.logDir,
+        runId: currentRunId(),
+        signal: shutdownController.signal,
+      });
+      const { envelope } = buildEnvelope({
+        version: VERSION,
+        command: "guard",
+        status: result.status,
+        durationMs: Date.now() - start,
+        cwd: global.cwd,
+        warnings: result.warnings,
+        // The log exists whenever the command ran, whatever the outcome
+        // (`leftover_check_failed` included); only a run that never started
+        // has none.
+        logs: result.childExitCode !== null ? [result.logPath] : [],
+        extra: {
+          reason: result.reason,
+          exitCode: result.exitCode,
+          childExitCode: result.childExitCode,
+          limits: result.limits,
+          peakRssMiB: result.peakRssMiB,
+          peakProcessRssMiB: result.peakProcessRssMiB,
+          polls: result.polls,
+          failedPolls: result.failedPolls,
+          killedCount: result.killedCount,
+          killed: result.killed,
+          leftoverCount: result.leftoverCount,
+          leftovers: result.leftovers,
+          survivorCount: result.survivorCount,
+          survivors: result.survivors,
+          leftoverCheckFailed: result.leftoverCheckFailed,
+          outputTail: result.outputTail,
+        },
+        maxChars: global.maxChars,
+        logDir: global.logDir,
+      });
+      // The exit code is guard's own (see the command description), not the
+      // status class's 0/1/2: a caller tells a timeout from a cap from a
+      // leftover from the wrapped command's failure without parsing JSON.
+      emit(
+        envelope,
+        result.exitCode,
+        { format: global.format, maxChars: global.maxChars },
+        () => renderGuardText(result, cmd.join(" ")),
       );
     },
   );

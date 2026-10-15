@@ -23,6 +23,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   speed: on a very large history they take longer when the branch forks far
   below the remote tip. The "not covered" note on a forged commit-graph file
   in `docs/worktree.md` is replaced by the description of this setting.
+- `guard <timeout-s> <max-rss-MiB> -- <cmd...>`: runs a command in a process
+  group of its own under a wall-clock timeout and a memory cap, so a repro, a
+  hang probe or a fuzz loop against an adversarial fixture is bounded by one
+  portable command instead of a per-run shell script. The cap is checked by
+  polling `ps -A` (`--poll-ms`, default 200) against the summed resident
+  size of the group and of every descendant found by parent pid, because
+  `ulimit -v` does not bind children on macOS; a spike between two polls can
+  overshoot it. At either limit the whole group is ended with `SIGKILL`. When
+  the command ends on its own, anything still alive in its group or below it
+  is listed, killed and reported as a leftover. A descendant that calls
+  `setsid` is followed through the parent chain and killed too, as long as a
+  poll saw it while the chain was intact; one cut loose within a single poll
+  interval is not found (documented in `docs/guard.md`). Exit codes: `124`
+  timeout, `123` memory cap, `122` leftovers, otherwise the command's own
+  code; a usage or setup problem is `2`, and so is a `ps` that cannot be read
+  after the command ended. `guard` kills before it waits for `ps`: a limit,
+  an abort or the command's exit reads the process table once, and when that
+  read fails the group is killed at once without it; processes outside the
+  group are then killed as a later read, or else the last readable table,
+  shows them (unless that table is older than 10 s: then they are left alive
+  and named in a warning), and the run says it could not check
+  (`leftoverCheckFailed`, and after an exit of the command's own accord the
+  reason `leftover_check_failed` with exit `2`), never a pass. All reads from
+  the first limit, abort or exit on share a budget of about 2 s, so a `ps` that hangs
+  delays `guard` by seconds, not by multiples of its own bound. An abort
+  (the API's `signal`, SIGINT or SIGTERM to the CLI) kills synchronously
+  until `guard` returns, also while it looks for leftovers after the command
+  ended; the CLI then ends with `130` or `143`, with no output. The envelope
+  carries the reason, both peak sizes, the killed and leftover processes and
+  the log of every run that started. macOS and Linux; Windows is not
+  supported. The shipped skill names the command for repro, hang and fuzz
+  runs.
 
 ## [0.14.0] - 2026-10-14
 
