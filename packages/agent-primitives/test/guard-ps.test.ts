@@ -123,6 +123,7 @@ describe("guardExitCode", () => {
     expect(guardExitCode("timeout", 137)).toBe(124);
     expect(guardExitCode("rss_cap", 137)).toBe(123);
     expect(guardExitCode("leftover", 0)).toBe(122);
+    expect(guardExitCode("leftover_check_failed", 0)).toBe(2);
     expect(guardExitCode("aborted", 137)).toBe(130);
     expect(guardExitCode("none", 0)).toBe(0);
     expect(guardExitCode("child_exit", 7)).toBe(7);

@@ -39,6 +39,12 @@ import { isZombie, procKey, readProcesses, type ProcInfo } from "./ps.js";
  * - When the command ends on its own, whatever is still alive in the group
  *   or below it is a leftover: it is listed, killed, and reported with its
  *   own exit code. A zombie is dead and not counted.
+ * - `ps` can fail exactly when it matters (a fork bomb leaves no pid to start
+ *   it with). A failed read is retried a few times with a short backoff; when
+ *   the table still cannot be read after the command ended, the group is
+ *   killed without it (`kill(-pgid)` needs no table), what was alive cannot
+ *   be listed, and the run is an error (`leftover_check_failed`), never a
+ *   pass.
  */
 
 /** Distinct exit codes of `guard`, chosen away from the codes common
@@ -46,6 +52,9 @@ import { isZombie, procKey, readProcesses, type ProcInfo } from "./ps.js";
 export const GUARD_EXIT_TIMEOUT = 124;
 export const GUARD_EXIT_RSS_CAP = 123;
 export const GUARD_EXIT_LEFTOVER = 122;
+/** `leftover_check_failed` ends with 2, the "could not conclude" code of the
+ * CLI: 122 would claim leftovers exist, and the point is that it is unknown. */
+export const GUARD_EXIT_LEFTOVER_CHECK_FAILED = 2;
 /** Exit code of a `guard` that was itself told to stop (SIGINT). */
 export const GUARD_EXIT_ABORTED = 130;
 
@@ -55,6 +64,7 @@ export type GuardReason =
   | "timeout"
   | "rss_cap"
   | "leftover"
+  | "leftover_check_failed"
   | "aborted"
   | "ps_unavailable"
   | "spawn_failed"
@@ -112,6 +122,10 @@ export interface GuardResult {
   /** Alive even after the kill sweeps (first entries only). */
   survivors: GuardProc[];
   survivorCount: number;
+  /** True when the process table could not be read after the command ended
+   * (or during the kill sweeps), so what was alive could not be checked. The
+   * group was killed anyway; the lists above may be incomplete. */
+  leftoverCheckFailed: boolean;
   logPath: string;
   outputTail: string;
   warnings: string[];
@@ -123,6 +137,10 @@ const TAIL_BYTES = 4000;
 const TAIL_LINES = 40;
 const SWEEP_ROUNDS = 10;
 const SWEEP_WAIT_MS = 50;
+/** A failed read of the process table is tried this many times in all, with
+ * a doubling pause (50, 100, 200 ms) between tries. */
+const TABLE_ATTEMPTS = 4;
+const TABLE_BACKOFF_MS = 50;
 
 const SIGNAL_NUMBERS = os.constants.signals as Record<string, number>;
 
@@ -139,6 +157,8 @@ export function guardExitCode(
       return GUARD_EXIT_RSS_CAP;
     case "leftover":
       return GUARD_EXIT_LEFTOVER;
+    case "leftover_check_failed":
+      return GUARD_EXIT_LEFTOVER_CHECK_FAILED;
     case "aborted":
       return GUARD_EXIT_ABORTED;
     case "none":
@@ -189,11 +209,20 @@ function sumRssMiB(tree: readonly ProcInfo[]): number {
   return kib / 1024;
 }
 
-/** The trampoline (and its parent-death watcher, a subshell of it) is part of
- * every run and in the group; it is not something the caller started, so the
- * reports leave it out. It is still counted in the memory sum. */
-function isTrampoline(proc: ProcInfo): boolean {
-  return proc.command.startsWith("/bin/sh -c { set +aemvx; }");
+const TRAMPOLINE_COMMAND_PREFIX = "/bin/sh -c { set +aemvx; }";
+
+/** The trampoline (the leader of the group) and its parent-death watcher (a
+ * subshell of it, same command line, same group) are part of every run; they
+ * are not something the caller started, so the reports leave them out. They
+ * are still counted in the memory sum. They are identified by where they sit,
+ * not by the command line alone: any other process that merely shows the same
+ * text (`exec -a`, a nested bounded run) is the caller's and is reported. */
+function isTrampoline(proc: ProcInfo, leaderPid: number): boolean {
+  if (!proc.command.startsWith(TRAMPOLINE_COMMAND_PREFIX)) return false;
+  return (
+    proc.pid === leaderPid ||
+    (proc.ppid === leaderPid && proc.pgid === leaderPid)
+  );
 }
 
 function toGuardProc(proc: ProcInfo, leaderPid: number): GuardProc {
@@ -217,12 +246,17 @@ function killPid(pid: number): void {
   }
 }
 
-function killTree(leaderPid: number, tree: readonly ProcInfo[]): void {
+/** Ends the whole group. Needs no process table. */
+function killGroup(leaderPid: number): void {
   try {
     process.kill(-leaderPid, "SIGKILL");
   } catch {
     // The group is already gone.
   }
+}
+
+function killTree(leaderPid: number, tree: readonly ProcInfo[]): void {
+  killGroup(leaderPid);
   for (const proc of tree) {
     if (proc.pgid !== leaderPid) killPid(proc.pid);
   }
@@ -230,6 +264,35 @@ function killTree(leaderPid: number, tree: readonly ProcInfo[]): void {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Blocks the thread for `ms`; `fire` must finish its kills before it returns
+ * (the CLI ends the process right after an abort), so it cannot await. */
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** The process table, read again (after a short pause) when a read fails. */
+async function readProcessesRetrying(
+  attempts: number = TABLE_ATTEMPTS,
+): Promise<ProcInfo[] | undefined> {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (attempt > 0) await sleep(TABLE_BACKOFF_MS * 2 ** (attempt - 1));
+    const table = readProcesses();
+    if (table !== undefined) return table;
+  }
+  return undefined;
+}
+
+/** `readProcessesRetrying` for code that cannot await. `tried` is the number
+ * of reads already made by the caller. */
+function readProcessesRetryingSync(tried: number): ProcInfo[] | undefined {
+  for (let attempt = tried; attempt < TABLE_ATTEMPTS; attempt++) {
+    sleepSync(TABLE_BACKOFF_MS * 2 ** (attempt - 1));
+    const table = readProcesses();
+    if (table !== undefined) return table;
+  }
+  return undefined;
 }
 
 function readTail(logPath: string): string {
@@ -279,6 +342,7 @@ function emptyResult(
     leftoverCount: 0,
     survivors: [],
     survivorCount: 0,
+    leftoverCheckFailed: false,
     logPath,
     outputTail: "",
     warnings: [warning],
@@ -376,9 +440,20 @@ export async function guard(options: GuardOptions): Promise<GuardResult> {
     if (limitReason !== undefined || leaderPid === undefined) return;
     limitReason = reason;
     stopTimers();
-    const table = readProcesses();
+    let table = readProcesses();
+    if (table === undefined) {
+      // The group needs no table: end it first (which also frees the pids a
+      // fork bomb was holding, so the table can be read again), then try
+      // again to find what escaped it.
+      killGroup(leaderPid);
+      table = readProcessesRetryingSync(1);
+    }
     if (table !== undefined) {
       killedTree = collectTree(table, leaderPid, tracked);
+    } else {
+      warnings.push(
+        "the process table could not be read at the limit; escaped processes are looked for once the group has ended",
+      );
     }
     killTree(leaderPid, killedTree);
   };
@@ -416,96 +491,128 @@ export async function guard(options: GuardOptions): Promise<GuardResult> {
   const outcome = await outcomePromise;
   stopTimers();
   options.signal?.removeEventListener("abort", onAbort);
-  child.stdio[3]?.destroy();
 
-  if (outcome.kind === "error" || leaderPid === undefined) {
-    const message =
-      outcome.kind === "error" ? outcome.message : "no process was started";
-    return {
-      ...emptyResult(
-        options,
-        logPath,
-        "spawn_failed",
-        `could not start the command: ${message}`,
-        started,
-      ),
-      outputTail: readTail(logPath),
-    };
-  }
-
-  const childExitCode =
-    outcome.code ??
-    (outcome.signal !== null ? 128 + (SIGNAL_NUMBERS[outcome.signal] ?? 0) : 1);
-
-  // Whatever is alive now: after a limit it is what survived the kill, after
-  // an exit of the command's own accord it is what the command left behind.
-  // The sweep kills it and looks again until nothing is left.
-  let found: ProcInfo[] = [];
-  let remaining: ProcInfo[] = [];
-  let table = readProcesses();
-  if (table === undefined) {
-    warnings.push(
-      "the final process table could not be read; leftovers were not looked for",
-    );
-  } else {
-    remaining = collectTree(table, leaderPid, tracked);
-    found = remaining;
-    for (let round = 0; round < SWEEP_ROUNDS && remaining.length > 0; round++) {
-      killTree(leaderPid, remaining);
-      await sleep(SWEEP_WAIT_MS);
-      table = readProcesses();
-      if (table === undefined) {
-        warnings.push("the process table could not be read during the sweep");
-        break;
-      }
-      remaining = collectTree(table, leaderPid, tracked);
+  // Fd 3 stays open until the sweep is done. If the command killed the
+  // trampoline, the watcher is still waiting on it, and closing it earlier
+  // would have the watcher end the group before the leftovers were listed.
+  try {
+    if (outcome.kind === "error" || leaderPid === undefined) {
+      const message =
+        outcome.kind === "error" ? outcome.message : "no process was started";
+      return {
+        ...emptyResult(
+          options,
+          logPath,
+          "spawn_failed",
+          `could not start the command: ${message}`,
+          started,
+        ),
+        outputTail: readTail(logPath),
+      };
     }
+
+    const childExitCode =
+      outcome.code ??
+      (outcome.signal !== null
+        ? 128 + (SIGNAL_NUMBERS[outcome.signal] ?? 0)
+        : 1);
+
+    // Whatever is alive now: after a limit it is what survived the kill, after
+    // an exit of the command's own accord it is what the command left behind.
+    // The sweep kills it and looks again until nothing is left. A table that
+    // cannot be read is no reason to leave the group running: it is ended
+    // regardless, and the run is then not a pass.
+    let leftoverCheckFailed = false;
+    let found: ProcInfo[] = [];
+    let remaining: ProcInfo[] = [];
+    let table = await readProcessesRetrying();
+    if (table === undefined) {
+      leftoverCheckFailed = true;
+      warnings.push(
+        "the process table could not be read after the command ended; its group was killed without it and what was alive could not be listed",
+      );
+      killGroup(leaderPid);
+      // The group is gone, which may have made room for `ps` to run again:
+      // one more look for processes that had left it.
+      table = await readProcessesRetrying();
+    }
+    if (table !== undefined) {
+      remaining = collectTree(table, leaderPid, tracked);
+      found = remaining;
+      for (
+        let round = 0;
+        round < SWEEP_ROUNDS && remaining.length > 0;
+        round++
+      ) {
+        killTree(leaderPid, remaining);
+        await sleep(SWEEP_WAIT_MS);
+        table = await readProcessesRetrying();
+        if (table === undefined) {
+          leftoverCheckFailed = true;
+          warnings.push(
+            "the process table could not be read during the kill sweeps; it is not known whether everything is gone",
+          );
+          killGroup(leaderPid);
+          break;
+        }
+        remaining = collectTree(table, leaderPid, tracked);
+      }
+    }
+
+    const callers = (list: readonly ProcInfo[]): ProcInfo[] =>
+      list.filter((p) => !isTrampoline(p, leaderPid));
+    if (callers(remaining).length > 0) {
+      warnings.push(
+        `${callers(remaining).length} process(es) were still alive after the kill sweeps (see survivors)`,
+      );
+    }
+    if (failedPolls > 0) {
+      warnings.push(
+        `${failedPolls} of ${polls + failedPolls} memory polls could not read the process table; the cap was not checked at those polls`,
+      );
+    }
+
+    const killed = limitReason !== undefined ? callers(killedTree) : [];
+    const leftovers = limitReason === undefined ? callers(found) : [];
+    const survivors = callers(remaining);
+
+    let reason: GuardReason;
+    if (limitReason !== undefined) reason = limitReason;
+    else if (leftovers.length > 0) reason = "leftover";
+    else if (leftoverCheckFailed) reason = "leftover_check_failed";
+    else reason = childExitCode === 0 ? "none" : "child_exit";
+
+    const asProcs = (list: readonly ProcInfo[]): GuardProc[] =>
+      list.slice(0, LIST_LIMIT).map((proc) => toGuardProc(proc, leaderPid));
+
+    return {
+      status:
+        reason === "none"
+          ? "pass"
+          : reason === "leftover_check_failed"
+            ? "error"
+            : "fail",
+      reason,
+      exitCode: guardExitCode(reason, childExitCode),
+      childExitCode,
+      durationMs: Date.now() - started,
+      limits,
+      peakRssMiB: Math.round(peakRssMiB * 10) / 10,
+      peakProcessRssMiB: Math.round(peakProcessRssMiB * 10) / 10,
+      polls,
+      failedPolls,
+      killed: asProcs(killed),
+      killedCount: killed.length,
+      leftovers: asProcs(leftovers),
+      leftoverCount: leftovers.length,
+      survivors: asProcs(survivors),
+      survivorCount: survivors.length,
+      leftoverCheckFailed,
+      logPath,
+      outputTail: readTail(logPath),
+      warnings,
+    };
+  } finally {
+    child.stdio[3]?.destroy();
   }
-
-  if (remaining.some((p) => !isTrampoline(p))) {
-    warnings.push(
-      `${remaining.filter((p) => !isTrampoline(p)).length} process(es) were still alive after the kill sweeps (see survivors)`,
-    );
-  }
-  if (failedPolls > 0) {
-    warnings.push(
-      `${failedPolls} of ${polls + failedPolls} memory polls could not read the process table; the cap was not checked at those polls`,
-    );
-  }
-
-  const killed =
-    limitReason !== undefined ? killedTree.filter((p) => !isTrampoline(p)) : [];
-  const leftovers =
-    limitReason === undefined ? found.filter((p) => !isTrampoline(p)) : [];
-  const survivors = remaining.filter((p) => !isTrampoline(p));
-
-  let reason: GuardReason;
-  if (limitReason !== undefined) reason = limitReason;
-  else if (leftovers.length > 0) reason = "leftover";
-  else reason = childExitCode === 0 ? "none" : "child_exit";
-
-  const asProcs = (list: readonly ProcInfo[]): GuardProc[] =>
-    list.slice(0, LIST_LIMIT).map((proc) => toGuardProc(proc, leaderPid));
-
-  return {
-    status: reason === "none" ? "pass" : "fail",
-    reason,
-    exitCode: guardExitCode(reason, childExitCode),
-    childExitCode,
-    durationMs: Date.now() - started,
-    limits,
-    peakRssMiB: Math.round(peakRssMiB * 10) / 10,
-    peakProcessRssMiB: Math.round(peakProcessRssMiB * 10) / 10,
-    polls,
-    failedPolls,
-    killed: asProcs(killed),
-    killedCount: killed.length,
-    leftovers: asProcs(leftovers),
-    leftoverCount: leftovers.length,
-    survivors: asProcs(survivors),
-    survivorCount: survivors.length,
-    logPath,
-    outputTail: readTail(logPath),
-    warnings,
-  };
 }

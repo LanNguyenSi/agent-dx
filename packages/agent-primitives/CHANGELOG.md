@@ -21,7 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   poll saw it while the chain was intact; one cut loose within a single poll
   interval is not found (documented in `docs/guard.md`). Exit codes: `124`
   timeout, `123` memory cap, `122` leftovers, otherwise the command's own
-  code; a usage or setup problem is `2`. The envelope carries the reason,
+  code; a usage or setup problem is `2`, and so is a `ps` that cannot be read
+  after the command ended (the group is ended anyway, the run is an error,
+  `reason: "leftover_check_failed"`, never a pass; a failed read is first tried
+  again a few times). The CLI ends with `130` on SIGINT and `143` on SIGTERM,
+  with no output, after ending the group. The envelope carries the reason,
   both peak sizes and the killed and leftover processes. macOS and Linux;
   Windows is not supported. The shipped skill names the command for
   repro, hang and fuzz runs.

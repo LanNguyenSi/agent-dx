@@ -941,7 +941,7 @@ function renderGuardText(result: GuardResult, command: string): string {
 program
   .command("guard")
   .description(
-    "Run a command (after --) with a wall-clock timeout and a resident-memory cap in its own process group; kill the whole group at either limit, then find, kill and report anything the command left running. Exit codes: 124 timeout, 123 memory cap, 122 leftovers, otherwise the command's own code",
+    "Run a command (after --) with a wall-clock timeout and a resident-memory cap in its own process group; kill the whole group at either limit, then find, kill and report anything the command left running. Exit codes: 124 timeout, 123 memory cap, 122 leftovers, 2 could not run or could not check for leftovers, 130 or 143 on SIGINT or SIGTERM (no output), otherwise the command's own code",
   )
   .argument("<timeout-s>", "wall-clock limit in seconds", parseGuardTimeout)
   .argument(
@@ -1001,6 +1001,7 @@ program
           leftovers: result.leftovers,
           survivorCount: result.survivorCount,
           survivors: result.survivors,
+          leftoverCheckFailed: result.leftoverCheckFailed,
           outputTail: result.outputTail,
         },
         maxChars: global.maxChars,

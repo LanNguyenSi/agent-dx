@@ -8,7 +8,8 @@ reporting, each returning one bounded JSON result instead of raw tool output.
 
 `agent-primitives` is an agent-first CLI: JSON on stdout by default, one
 bounded result object per invocation, and stable exit codes (`0` ok, `1`
-finding, `2` cannot conclude, including a usage error). It exists to remove a
+finding, `2` cannot conclude, including a usage error; `guard` differs, see
+[docs/guard.md](docs/guard.md)). It exists to remove a
 few recurring failure classes in agent-driven review and implementation work:
 hand-edited mutation probes that forget to restore a file, verify output that
 blows past a harness's output cap, and "which binary is even on PATH"

@@ -11,8 +11,9 @@ description: Use before searching a codebase, before claiming a check passed, wh
 prints one bounded JSON result object on stdout by default (`-f text` for a
 human-readable rendering instead) and uses a stable exit-code contract: `0`
 ok, `1` a real finding, `2` the run could not conclude, including a usage
-error. Run `agent-primitives <command> --help` for the full flag list of
-any subcommand.
+error (`guard` is the exception: see the package's docs/guard.md). Run
+`agent-primitives <command> --help` for the full flag list of any
+subcommand.
 
 ## 1. Search order
 
@@ -160,7 +161,8 @@ automatically either way).
 ## 5. Output conventions
 
 - JSON on stdout by default; one bounded result object per invocation.
-- Exit codes: `0` ok, `1` a finding, `2` the run could not conclude.
+- Exit codes: `0` ok, `1` a finding, `2` the run could not conclude
+  (`guard`: see docs/guard.md).
 - CLI `verify`, `probe`, and `probe --plan` always save the complete
   pre-envelope-reduction result to `result-full-*.json` in `logs` when
   the log destination is writable, even with `truncated: false`.
@@ -373,8 +375,8 @@ adversarial fixture through `agent-primitives guard <timeout-s>
 `timeout`. It runs the command in its own process group, kills the whole
 group at the timeout or when the summed resident memory of the command and
 its descendants passes the cap, then kills and reports anything the command
-left running. Exit `124` timeout, `123` memory cap, `122` leftovers; any
-other code is the command's own. Memory is polled, so a fast spike can
-overshoot the cap, and a child that leaves the process group (`setsid`) is
-followed only while a poll sees its parent chain. See the agent-primitives
-package's docs/guard.md.
+left running. Exit `124` timeout, `123` memory cap, `122` leftovers, `2`
+when `ps` could not be read to check; any other code is the command's own.
+Memory is polled, so a fast spike can overshoot the cap, and a child that
+leaves the process group (`setsid`) is followed only while a poll sees its
+parent chain. See the agent-primitives package's docs/guard.md.
