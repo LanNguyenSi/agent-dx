@@ -785,7 +785,8 @@ export function buildEnvelope(input: EnvelopeInput): EnvelopeOutput {
   base.truncated = true;
   // A reduced result names the complete one in a field of its own: the
   // path also sits in `logs`, but only as the last entry of a list that
-  // may be long, and relative when `--log-dir` was. It joins every
+  // may be long (relative only for a library caller that passes a
+  // relative logDir; the CLI resolves it first). It joins every
   // reduced candidate below (so the bound accounts for its size) but not
   // the fixed-field skeleton, which stays the same shape for every result.
   const pointer: Record<string, unknown> =
