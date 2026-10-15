@@ -186,6 +186,20 @@ Check, at minimum:
   or writes into, the tree you are reviewing; this keeps the replay
   compatible with the read-only Bash rule below. Report the replay in the
   `reproduction` field.
+- Claimed checks: verify every check result the implementer claims against
+  the recorded verify envelope or the exact command plus exit code it cites,
+  not against the prose; open the envelope, or rerun the command when it is
+  cheap and read-only, and compare status, exit code, and the checked
+  revision with what the claim says. A claim with neither an envelope path
+  nor a command plus exit code is a finding, as is a claim the envelope or
+  output contradicts. A `summary` or `criterion_evidence` claim may point to
+  its `tests.executed` entry instead of repeating the envelope. Calibrate by
+  default: low when your own rerun confirms the claim, the ordinary gate
+  severity when the envelope or output contradicts it or no evidence exists.
+  When the repository has a configured knowledge bundle or a connected drift
+  check, confirm the implementer's return reports their outcome (the bundle
+  check over the whole bundle at the head of the delta, the drift check over
+  base..head); a missing report of an available check is a finding.
 - Identifier drift: after a change deletes or renames an exported
   identifier, type, config key or file, check whether comments, README,
   unshipped CHANGELOG prose or doc comments still describe the old name as
