@@ -409,10 +409,11 @@ function sleepMs(ms: number): Promise<void> {
 
 describe("guard: a process table that cannot be read", () => {
   /** Runs a shell command that leaves a background `sleep` in its group and
-   * exits 0.7 s after starting. The stand-in `ps` is armed as soon as the
-   * `sleep` is seen, so every read after that fails or not as `ps` says; the
-   * poll interval is long enough that no poll falls between arming and the
-   * exit, so only the reads after the exit are counted. */
+   * exits 0.8 s after starting. The stand-in `ps` is armed once the `sleep`
+   * is seen and the first poll (made at the start) is certainly over, so every
+   * read after that fails or not as `ps` says. The poll interval is longer
+   * than the command, so no poll falls between arming and the exit: only the
+   * reads after the exit are counted. */
   async function leaveAndExit(
     s: { arg: string; cmd: string },
     ps: { skip?: number; fails: number },
@@ -420,10 +421,11 @@ describe("guard: a process table that cannot be read", () => {
     const flag = path.join(tmp(), "flag");
     const fake = installFakePs({ flag, ...ps });
     try {
-      const pending = run("sh", ["-c", `sleep ${s.arg} & sleep 0.7; exit 0`], {
-        pollMs: 1000,
+      const pending = run("sh", ["-c", `sleep ${s.arg} & sleep 0.8; exit 0`], {
+        pollMs: 1500,
       });
       expect(await waitFor(() => marked(s.cmd).length > 0, 10_000)).toBe(true);
+      await sleepMs(250);
       fs.writeFileSync(flag, "");
       return await pending;
     } finally {
