@@ -1244,6 +1244,31 @@ describe("guard: a process table that cannot be read", () => {
     expect(pids.filter((pid) => pid > 0)).toEqual([]);
   });
 
+  it("a group member still alive when the group is ended is not signalled by its own pid either: the group kill reaches it", async () => {
+    const mem = fx(7198);
+    const flag = path.join(tmp(), "flag");
+    const ps = installFakePs({ flag, fails: 10_000 });
+    const kill = vi.spyOn(process, "kill");
+    let r;
+    let pids: number[];
+    try {
+      r = await run(
+        "sh",
+        ["-c", `sleep ${mem.arg} & sleep 0.5; : > '${flag}'; exit 0`],
+        { pollMs: 100 },
+      );
+      pids = kill.mock.calls.map(([pid]) => pid);
+    } finally {
+      kill.mockRestore();
+      ps.restore();
+    }
+    expect(r.reason).toBe("leftover_check_failed");
+    expect(r.leftoverCheckFailed).toBe(true);
+    expect(r.warnings.join(" ")).not.toContain("killed by pid");
+    expect(pids.filter((pid) => pid > 0)).toEqual([]);
+    expect(marked(mem.cmd)).toEqual([]);
+  });
+
   it("an escapee the last table showed that the command ended itself is not listed: the kill by pid did not reach it, and the run says it could not check", async () => {
     const esc = fx(7197);
     const flag = path.join(tmp(), "flag");
