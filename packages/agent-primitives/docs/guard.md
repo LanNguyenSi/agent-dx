@@ -108,7 +108,11 @@ What is reported then:
   `killed`. If none answers, the processes outside the group that the last
   readable table showed are killed by pid, and those the kill reached are
   listed under `killed`, with a warning that names the age of that table.
-  `leftoverCheckFailed` is `true`.
+  The members of the group that table showed are killed by pid too, in case
+  one had left the group since (`setsid` or `setpgid` called in place, which
+  keeps its pid) and the group kill missed it; they are not listed, because
+  the table does not say whether they were still alive. `leftoverCheckFailed`
+  is `true`.
 - **After the command ended on its own**: the group is killed unseen, so what
   was alive in it cannot be listed. The run is an **error, never a pass**:
   `status: "error"`, `reason: "leftover_check_failed"`, exit `2`,
@@ -124,11 +128,21 @@ What is reported then:
 
 Killing by pid from an earlier table has one limit: a process that ended
 after that table was read, and whose pid the system gave to an unrelated
-process since, would be hit. That table is usually the last poll's, older
-when polls were failing too; the warning names its age. A table older than
+process since, would be hit. That holds for the group's members as well as
+for the processes outside it, so a command that starts and ends processes
+fast makes it more likely, and this is the price of not leaving a group
+member that changed group alive. The group's leader is never killed this way:
+`guard` has reaped it, so its pid may be anyone's. That table is usually the
+last poll's, older when polls were failing too; the warning names its age,
+which is counted from the start of the read that produced the table (`ps`
+may have taken its snapshot at any point of the read). A table older than
 10 s is not used for it: the group is still killed, but the processes outside
-it are left alive, `leftoverCheckFailed` is `true`, and a warning names them
-(pid and command) and says they were not killed.
+it, and the members of the group that may have left it, are left alive,
+`leftoverCheckFailed` is `true`, and a warning names the processes outside
+(pid and command) and says they were not killed. Each process is aimed at by
+pid once per run, and warned about once, however many of the fallbacks above
+a run goes through (at the timeout and again after the command ended, for
+example).
 
 ### A child that calls `setsid`
 
@@ -231,7 +245,16 @@ run, or its leftovers could not be checked). Besides the common fields:
   showed it, else: starts like it and ends with the program and arguments
   `guard` handed to it) is taken for the watcher. A process that merely
   shows the same command line elsewhere, or only its first words, is
-  reported.
+  reported. `ps` does not print every character of an argument as it is
+  (a newline is `\012` on macOS and a space on Linux, a byte outside ASCII is
+  `M-C` and the like on macOS and `?` on Linux), so in that last comparison
+  each run of characters outside printable ASCII in the arguments stands for
+  whatever `ps` printed for it, up to four characters per byte or none. The
+  limit of that: an impostor whose command line differs from the trampoline's
+  only in such characters is taken for the watcher too, and a `ps` that
+  prints an argument in some other way than those two (or cuts a very long
+  command line) leaves the real watcher unrecognised, so it is listed as a
+  leftover.
 - `leftoverCheckFailed`: `true` when a read of the process table that
   `guard` needed failed for good: at a limit, after the command ended, or
   after a kill sweep (see above). The group was killed anyway; the lists may

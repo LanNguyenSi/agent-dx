@@ -59,9 +59,11 @@ import {
  *   back by more than `MIN_READ_MS`.
  * - Processes outside the group are killed by pid as a table read within the
  *   budget shows them; when none could be read, as the last table that could
- *   be read showed them, unless that table is older than
- *   `STALE_TABLE_MAX_MS` (a pid may have been reused since): then they are
- *   left alone and named in a warning.
+ *   be read showed them, together with the group's members in it (one may
+ *   have left the group since), unless that table is older than
+ *   `STALE_TABLE_MAX_MS` counted from the start of its read (a pid may have
+ *   been reused since): then they are left alone and named in a warning.
+ *   Each is aimed at, and warned about, once per run.
  * - One accounting (`accountTerminal`): every process a table showed and a
  *   kill was aimed at is listed once, under `killed` after a limit or an
  *   abort and under `leftovers` after an exit of the command's own accord.
@@ -278,11 +280,44 @@ export interface OwnIdentities {
   /** How every command line of the trampoline ends: the program and the
    * arguments `guard` handed to it, which `ps` prints after the script. For
    * when no table showed the trampoline readable (the first look often
-   * catches it as `(bash)`, in the middle of a fork). A command with
-   * characters `ps` escapes in its arguments does not match it. */
+   * catches it as `(bash)`, in the middle of a fork). Compared with
+   * `endsWithTail`, which allows for the characters `ps` escapes. */
   commandTail?: string;
   watcher?: string;
   candidate?: string;
+}
+
+/** The most characters `ps` prints for one byte it cannot show as it is: the
+ * macOS meta notation (`M-^\`) or an octal escape (`\012`) takes four. */
+const PS_ESCAPE_MAX_CHARS = 4;
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * True when the command line `command`, as `ps` printed it, ends with `tail`,
+ * the text `guard` handed to the trampoline. `ps` does not print every
+ * character as it is: a control character becomes a space, a dot or an
+ * escape (`\012` for a newline on macOS), and a byte outside ASCII becomes
+ * `?` or a meta escape (`M-C`), depending on the platform. So every run of
+ * characters outside printable ASCII in `tail` stands for whatever `ps` made
+ * of its bytes, up to four characters per byte or none; every other character
+ * has to match exactly. That is looser than an exact comparison for exactly
+ * those characters: a command line that differs from the tail only in them
+ * matches too. Pure.
+ */
+export function endsWithTail(command: string, tail: string): boolean {
+  const parts = tail.split(/([^\x20-\x7e]+)/);
+  if (parts.length === 1) return command.endsWith(tail);
+  const pattern = parts
+    .map((part, index) =>
+      index % 2 === 0
+        ? escapeRegExp(part)
+        : `[\\s\\S]{0,${PS_ESCAPE_MAX_CHARS * Buffer.byteLength(part)}}`,
+    )
+    .join("");
+  return new RegExp(`${pattern}$`).test(command);
 }
 
 /**
@@ -352,7 +387,8 @@ export function captureOrphanedWatcher(
       p.pgid === leaderPid &&
       (own.leaderCommand === undefined
         ? p.command.startsWith(TRAMPOLINE_COMMAND_PREFIX) &&
-          (own.commandTail === undefined || p.command.endsWith(own.commandTail))
+          (own.commandTail === undefined ||
+            endsWithTail(p.command, own.commandTail))
         : p.command === own.leaderCommand) &&
       !inTree.has(p.ppid),
   );
@@ -651,14 +687,21 @@ async function supervise(
   let survivors: ProcInfo[] = [];
   let checkFailed = false;
   let abortedAfterExit = false;
+  // Aimed at by pid from the last table that could be read, or warned about
+  // for not being: once per run each (`killFromLatest` can run twice).
+  const killedByPid = new Set<string>();
+  const warnedStale = new Set<string>();
 
   /** Every read of the table goes through here: it keeps the last table that
    * could be read and learns the identities of guard's own processes. */
   const readTable = (boundMs: number): ProcInfo[] | undefined => {
+    // The table's age counts from before the call: `ps` may have taken its
+    // snapshot at any point of it.
+    const readStarted = Date.now();
     const table = readProcesses(boundMs);
     if (table !== undefined) {
       latest = table;
-      latestAt = Date.now();
+      latestAt = readStarted;
       captureOwn(table, leaderPid, own);
     }
     return table;
@@ -727,37 +770,55 @@ async function supervise(
     }
   };
 
-  /** Ends the group, and by pid every process outside it that the last table
-   * read showed: for when no table can be read now. A table older than
-   * `STALE_TABLE_MAX_MS` is not trusted for that (its pids may be reused by
-   * now): the group is still killed, the run says it could not check, and the
-   * warning names what was not killed. Returns the processes outside the
-   * group the kill reached (one that was gone is left out). */
+  /** Ends the group, and by pid every process the last table read showed
+   * below the group's leader: for when no table can be read now. Those
+   * outside the group were found by following the parent chain; those in it
+   * are killed by pid as well, because one of them may have left the group
+   * (`setsid`, `setpgid`) after that table was read, and the group kill does
+   * not reach it. A table older than `STALE_TABLE_MAX_MS` is not trusted for
+   * that (its pids may be reused by now): the group is still killed, the run
+   * says it could not check, and the warning names what was not killed. The
+   * leader is never killed by pid: it has been reaped by now. A process is
+   * killed by pid once per run, and warned about once. Returns the processes
+   * outside the group the kill reached (one that was gone is left out); the
+   * members of the group are not listed, since the table does not tell
+   * whether they were still alive. */
   const killFromLatest = (): ProcInfo[] => {
     killGroup(leaderPid);
     if (latest === undefined) return [];
-    const outside = collectTree(latest, leaderPid, tracked).filter(
-      (proc) => proc.pgid !== leaderPid,
+    const members = collectTree(latest, leaderPid, tracked).filter(
+      (proc) => proc.pid !== leaderPid && !killedByPid.has(procKey(proc)),
     );
-    if (outside.length === 0) return [];
+    if (members.length === 0) return [];
     const ageMs = Date.now() - latestAt;
+    const outsideOf = (list: readonly ProcInfo[]): ProcInfo[] =>
+      list.filter((proc) => proc.pgid !== leaderPid);
     if (ageMs > STALE_TABLE_MAX_MS) {
       checkFailed = true;
+      const fresh = members.filter((proc) => !warnedStale.has(procKey(proc)));
+      if (fresh.length === 0) return [];
+      for (const proc of fresh) warnedStale.add(procKey(proc));
+      const outside = outsideOf(fresh);
       const named = outside
         .slice(0, 5)
         .map((proc) => `${proc.pid} (${toGuardProc(proc, leaderPid).command})`);
+      const inGroup = fresh.length - outside.length;
       warnings.push(
-        `${outside.length} process(es) outside the group were NOT killed: the last table that could be read is ${ageMs} ms old, older than ${STALE_TABLE_MAX_MS} ms, and their pids may belong to other processes by now: ${named.join(", ")}`,
+        `${outside.length} process(es) outside the group${inGroup > 0 ? `, and ${inGroup} member(s) of it that may have left it,` : ""} were NOT killed by pid: the last table that could be read is ${ageMs} ms old, older than ${STALE_TABLE_MAX_MS} ms, and their pids may belong to other processes by now${named.length > 0 ? `: ${named.join(", ")}` : ""}`,
       );
       return [];
     }
-    const reached = outside.filter((proc) => killPid(proc.pid));
+    const reached = members.filter((proc) => killPid(proc.pid));
+    // Tried once, reached or not: one that was gone is not tried again.
+    for (const proc of members) killedByPid.add(procKey(proc));
+    const outside = outsideOf(reached);
+    const inGroup = reached.length - outside.length;
     if (reached.length > 0) {
       warnings.push(
-        `${reached.length} process(es) outside the group were killed by pid as the last table that could be read showed them, ${ageMs} ms earlier`,
+        `${outside.length} process(es) outside the group${inGroup > 0 ? `, and ${inGroup} member(s) of it that may have left it,` : ""} were killed by pid as the last table that could be read showed them, ${ageMs} ms earlier`,
       );
     }
-    return reached;
+    return outside;
   };
 
   /** A limit, or an abort before the command ended: one read at most (none

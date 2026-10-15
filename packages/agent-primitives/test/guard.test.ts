@@ -341,6 +341,31 @@ describe("guard: leftovers", () => {
     expect(r.leftoverCount).toBe(0);
   });
 
+  // `ps` does not print every character of an argument as it is (a newline is
+  // `\012` on macOS and a space on Linux, a non-ASCII byte `M-C` on macOS and
+  // `?` on Linux). With a poll interval longer than the command, no table
+  // shows the trampoline readable, so the ending `guard` expects of its
+  // command line (`endsWithTail`) is all that tells the orphaned watcher.
+  for (const [label, arg] of [
+    ["a non-ASCII argument", "\u00dcbung"],
+    ["an argument with a trailing newline", "x\n"],
+    [
+      "an argument with a tab, a newline and a non-ASCII character",
+      "a\tb\u00e9\n",
+    ],
+  ] as const) {
+    it(`a command that kills the trampoline at once, run with ${label}, reports child_exit and no watcher`, async () => {
+      const r = await run("sh", ["-c", "kill -9 $PPID; exit 0", arg], {
+        pollMs: 1500,
+      });
+      expect(r.reason).toBe("child_exit");
+      expect(r.childExitCode).toBe(137);
+      expect(r.exitCode).toBe(137);
+      expect(r.leftovers).toEqual([]);
+      expect(r.leftoverCount).toBe(0);
+    });
+  }
+
   it("after a quick, normal exit, a leftover that shows the trampoline's text is reported, not taken for the watcher", async () => {
     // The trampoline exited normally (it stops its watcher first), and no two
     // polls saw the watcher: the orphaned decoy must not be taken for it.
@@ -380,11 +405,15 @@ describe("guard: leftovers", () => {
 });
 
 describe("guard: a trampoline killed before it was read", () => {
-  it("a process that shows only the trampoline's leading text is reported, not taken for the watcher, when the trampoline's full text was seen", async () => {
+  it("a process that shows only the trampoline's leading text is reported, not taken for the watcher, whether or not the one poll before the kill read the trampoline's full text", async () => {
     // The command sets up the impostor, then kills the watcher and the
-    // trampoline before the second poll (every 1.5 s); only the first poll saw
-    // the trampoline. The impostor is the one orphan with the leading text,
-    // but not with the full text.
+    // trampoline before the second poll (every 1.5 s); only the first poll
+    // saw the trampoline. That poll catches it either readable (then its full
+    // text is on record) or in the middle of a fork (then only the ending
+    // `guard` expects is), depending on timing, so this test exercises
+    // whichever one the run got; the unit tests of `captureOrphanedWatcher`
+    // in guard-ps.test.ts pin each of the two. Either way the impostor is the
+    // one orphan with the leading text but not with the rest.
     const arg = `60.7183${NONCE}`;
     const impostor = register(
       `/bin/sh -c { set +aemvx; } impostor-${NONCE} ${arg}`,
@@ -447,6 +476,9 @@ interface FakePsOptions {
   fails: number;
   /** Every counted call first waits this long (a slow `ps`). */
   delaySec?: number;
+  /** Only the first counted call waits this long, then answers like the
+   * others: a table whose read takes a while. */
+  delayFirstSec?: number;
   /** A failing call hangs (until guard's bound on the call kills it) instead
    * of exiting 1 at once. */
   hang?: boolean;
@@ -496,6 +528,7 @@ if [ -e "$FLAG" ]; then
   n=$((n + 1))
   echo "$n" > "$COUNT"
   ${options.delaySec !== undefined ? `sleep ${options.delaySec}` : ":"}
+  ${options.delayFirstSec !== undefined ? `[ "$n" -eq 1 ] && sleep ${options.delayFirstSec}` : ":"}
   if [ ${options.freeze === true ? 1 : 0} -eq 1 ]; then
     [ -e ${quote(frozen)} ] || "$REAL" "$@" > ${quote(frozen)} || exit 1
     cat ${quote(frozen)}
@@ -973,6 +1006,10 @@ describe("guard: a process table that cannot be read", () => {
   async function escapeeWithOldTable(
     id: number,
     exitMs: number,
+    over: {
+      ps?: Partial<FakePsOptions>;
+      run?: Partial<GuardOptions>;
+    } = {},
   ): Promise<{
     r: Awaited<ReturnType<typeof run>>;
     esc: { arg: string; cmd: string };
@@ -981,7 +1018,7 @@ describe("guard: a process table that cannot be read", () => {
     const esc = fx(id);
     const grp = fx(id + 1);
     const flag = path.join(tmp(), "flag");
-    const ps = installFakePs({ flag, fails: 10_000 });
+    const ps = installFakePs({ flag, fails: 10_000, ...over.ps });
     const script =
       "const {spawn}=require('child_process');" +
       `spawn('sleep',['${esc.arg}'],{detached:true,stdio:'ignore'});` +
@@ -989,7 +1026,10 @@ describe("guard: a process table that cannot be read", () => {
       `setTimeout(()=>require('fs').writeFileSync(${JSON.stringify(flag)},''),1000);` +
       `setTimeout(()=>process.exit(0),${exitMs})`;
     try {
-      const r = await run(process.execPath, ["-e", script], { pollMs: 100 });
+      const r = await run(process.execPath, ["-e", script], {
+        pollMs: 100,
+        ...over.run,
+      });
       return { r, esc, grp };
     } finally {
       ps.restore();
@@ -1019,6 +1059,39 @@ describe("guard: a process table that cannot be read", () => {
     expect(warning).toContain(esc.cmd);
     expect(marked(grp.cmd)).toEqual([]);
     // Not killed: it was last seen too long ago to be sure of its pid.
+    expect(marked(esc.cmd).length).toBe(1);
+  });
+
+  it("the age of the last table counts from before the read that produced it: a read that took 3 s does not make it younger", async () => {
+    // The first counted look answers after 3 s, at about 4 s; every look after
+    // it fails. The command ends at 12 s, so when guard has to decide the table
+    // is 11 to 12 s old counted from before that look (stale: over the cap of
+    // 10 s) and 8 to 9 s old counted from after it (young enough to kill from).
+    const { r, esc, grp } = await escapeeWithOldTable(7183, 12_000, {
+      ps: { skip: 1, delayFirstSec: 3 },
+    });
+    expect(r.reason).toBe("leftover_check_failed");
+    expect(r.leftoverCheckFailed).toBe(true);
+    expect(r.leftovers).toEqual([]);
+    expect(r.warnings.find((w) => w.includes("NOT killed"))).toContain(esc.cmd);
+    expect(r.warnings.join(" ")).not.toContain("killed by pid as");
+    expect(marked(grp.cmd)).toEqual([]);
+    expect(marked(esc.cmd).length).toBe(1);
+  });
+
+  it("a process left alone because the last table is stale is warned about once, however many times the terminal phase looks for it", async () => {
+    // The timeout fires at 12 s with no readable table and a last table 11 s
+    // old: the fallback at the limit finds the escapee stale. The command is
+    // gone by then, and the fallback after the exit finds it stale again.
+    const { r, esc, grp } = await escapeeWithOldTable(7185, 60_000, {
+      run: { timeoutMs: 12_000 },
+    });
+    expect(r.reason).toBe("timeout");
+    expect(r.leftoverCheckFailed).toBe(true);
+    const notKilled = r.warnings.filter((w) => w.includes("NOT killed"));
+    expect(notKilled.length).toBe(1);
+    expect(notKilled[0]).toContain(esc.cmd);
+    expect(marked(grp.cmd)).toEqual([]);
     expect(marked(esc.cmd).length).toBe(1);
   });
 
@@ -1058,6 +1131,80 @@ describe("guard: a process table that cannot be read", () => {
     );
     expect(marked(grp.cmd)).toEqual([]);
     expect(marked(esc.cmd)).toEqual([]);
+  });
+
+  /** A command that starts a group member (a `perl`, so that it keeps its
+   * pid when it changes group) which, a second later, arms the stand-in `ps`
+   * (the file `flag`), calls `setsid` in place and becomes `sleep <arg>`. The
+   * polls saw it in the group; every table after that fails. The command
+   * ends at `endMs`, or never when that is undefined. */
+  function leavesGroupInPlace(
+    arg: string,
+    flag: string,
+    endMs: number | undefined,
+  ): string {
+    const perl =
+      'select(undef,undef,undef,1); open(F,">",$ARGV[0]) or die; close F; ' +
+      'POSIX::setsid() or die; exec {"sleep"} "sleep", $ARGV[1];';
+    return (
+      "const {spawn}=require('child_process');" +
+      `spawn('perl',['-MPOSIX','-e',${JSON.stringify(perl)},${JSON.stringify(flag)},'${arg}'],{stdio:'ignore'});` +
+      (endMs === undefined
+        ? "setInterval(()=>{},1000)"
+        : `setTimeout(()=>process.exit(0),${endMs})`)
+    );
+  }
+
+  /** Runs `leavesGroupInPlace` under the stand-in `ps`, and returns the
+   * result with every pid `process.kill` was called with. */
+  async function runLeavingGroup(
+    arg: string,
+    endMs: number | undefined,
+    over: Partial<GuardOptions>,
+  ) {
+    const flag = path.join(tmp(), "flag");
+    const ps = installFakePs({ flag, fails: 10_000 });
+    const kill = vi.spyOn(process, "kill");
+    try {
+      const r = await run(
+        process.execPath,
+        ["-e", leavesGroupInPlace(arg, flag, endMs)],
+        { pollMs: 100, ...over },
+      );
+      return { r, pids: kill.mock.calls.map(([pid]) => pid) };
+    } finally {
+      kill.mockRestore();
+      ps.restore();
+    }
+  }
+
+  it("a group member that left the group in place (setsid) as the table stopped answering is killed by pid after the command ended", async () => {
+    const esc = fx(7190);
+    const { r, pids } = await runLeavingGroup(esc.arg, 2500, {});
+    expect(r.reason).toBe("leftover_check_failed");
+    expect(r.exitCode).toBe(2);
+    expect(r.leftoverCheckFailed).toBe(true);
+    expect(r.warnings.join(" ")).toContain(
+      "member(s) of it that may have left",
+    );
+    expect(marked(esc.cmd)).toEqual([]);
+    // The leader was reaped, so its pid is never signalled by pid.
+    const leaders = pids.filter((pid) => pid < 0).map((pid) => -pid);
+    expect(leaders.length).toBeGreaterThan(0);
+    for (const leader of leaders) expect(pids).not.toContain(leader);
+  });
+
+  it("the same at the timeout, and no pid is signalled twice by the two fallbacks", async () => {
+    const esc = fx(7191);
+    const { r, pids } = await runLeavingGroup(esc.arg, undefined, {
+      timeoutMs: 3000,
+    });
+    expect(r.reason).toBe("timeout");
+    expect(r.leftoverCheckFailed).toBe(true);
+    expect(marked(esc.cmd)).toEqual([]);
+    const byPid = pids.filter((pid) => pid > 0);
+    expect(byPid.length).toBeGreaterThan(0);
+    expect(new Set(byPid).size).toBe(byPid.length);
   });
 
   it("SIGINT to the CLI after the command ended, while the table is tried again, still kills the group and the escapee", async () => {
