@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- An unrecognized `okf_version` on the bundle-root `index.md` now names itself.
+  Such a value resolved to v0.1 in silence before, leaving the author with the
+  generic `reserved-files-bare` error "must not carry a frontmatter block" as
+  the only hint; the finding now quotes the value the doc declares and lists
+  the supported versions (`0.1`, `0.2`). Version detection itself is unchanged
+  (the value still resolves to v0.1, so no bundle's rules move), and a
+  recognized value keeps the generic error, since under v0.1 no reserved file
+  may carry a block at all, version block included. The comparison reads the
+  frontmatter's own spelling, so the YAML number `0.20`, which YAML resolves to
+  `0.2`, is no longer accepted as the `0.2` number form; a trailing comment
+  (`0.2 # current spec`) is still `0.2`, and the quoted-string form
+  (`okf_version: "0.2"`) is unchanged. See
+  [Check catalog](docs/check-catalog.md#spec-version---spec).
+
+- Under OKF spec v0.2, `generated-shape` now checks the `generated` key itself
+  and not only the `by` and `at` it could read: a `generated` that is not a
+  mapping (a scalar stamp, a list, an empty value) is one warning naming what
+  was found, and a mapping is reported once per missing key (`by`, `at`),
+  because such a doc carries the key while the freshness rules read no stamp at
+  all. Severity is `warning` (the doc stays checkable, and a `check --strict`
+  run is the switch that fails on it). Under v0.1 the key is not that version's
+  own, so every one of these shapes keeps passing exactly as before. See
+  [Check catalog](docs/check-catalog.md#rules).
+
 ## [0.19.0] - 2026-10-14
 
 - OKF v0.2 support, step 2 (`sources` mappings and footnote citations, so a
