@@ -17,6 +17,7 @@ import {
   resolveRemoteBase,
   unpushedCommits,
   untrustedFilesRefStore,
+  privateStackRemoteRefs,
   untrustedReftableStore,
 } from "../src/worktree/git.js";
 import {
@@ -4181,6 +4182,170 @@ describe.skipIf(!REFTABLE_SUPPORTED)(
       expect(r.code, r.stdout + r.stderr).toBe(0);
       expect(r.json.branch.deleted).toBe(true);
     });
+
+    /** What `git for-each-ref refs/remotes` lists from the common stack
+     * alone (`--git-dir`), asked with a bound. */
+    async function commonRemoteRefs(f: Fixture): Promise<string> {
+      return gitBounded(f.repo, [
+        `--git-dir=${commonDirOf(f)}`,
+        "for-each-ref",
+        "--format=%(refname) %(objectname)",
+        "refs/remotes",
+      ]);
+    }
+
+    /** What `git for-each-ref refs/remotes` lists in the worktree, whose
+     * own reftable stack git merges in. */
+    async function worktreeRemoteRefs(wt: string): Promise<string> {
+      return gitBounded(wt, [
+        "for-each-ref",
+        "--format=%(refname) %(objectname)",
+        "refs/remotes",
+      ]);
+    }
+
+    /**
+     * Writes `refs` (name, sha) into the linked worktree's own reftable
+     * stack, which no git command does for a remote-tracking ref: the tables
+     * come from a scratch repository that reads the fixture's objects
+     * through an alternate, and are listed after the tables the stack
+     * holds. Returns the worktree's private git directory.
+     */
+    function forgePrivateStack(
+      f: Fixture,
+      wt: string,
+      refs: { name: string; sha: string }[],
+    ): string {
+      const privateDir = absoluteGitPath(wt, "--git-dir");
+      expect(privateDir).not.toBe(commonDirOf(f));
+      expect(fs.statSync(path.join(privateDir, "reftable")).isDirectory()).toBe(
+        true,
+      );
+      const donor = path.join(f.base, "donor");
+      git(f.base, ["init", "-q", "--ref-format=reftable", donor]);
+      fs.writeFileSync(
+        path.join(donor, ".git/objects/info/alternates"),
+        `${path.join(commonDirOf(f), "objects")}\n`,
+      );
+      // The donor's tables carry its HEAD, which would replace the
+      // worktree's own: point it where the worktree's already points.
+      git(donor, ["symbolic-ref", "HEAD", "refs/heads/feat"]);
+      for (const ref of refs) {
+        git(donor, ["update-ref", ref.name, ref.sha]);
+      }
+      const listed = fs
+        .readFileSync(path.join(donor, ".git/reftable/tables.list"), "utf8")
+        .split("\n")
+        .filter((line) => line.length > 0);
+      expect(listed.length).toBeGreaterThan(0);
+      for (const table of listed) {
+        fs.copyFileSync(
+          path.join(donor, ".git/reftable", table),
+          path.join(privateDir, "reftable", table),
+        );
+      }
+      fs.appendFileSync(
+        path.join(privateDir, "reftable/tables.list"),
+        `${listed.join("\n")}\n`,
+      );
+      return privateDir;
+    }
+
+    it("keeps a branch whose only remote-tracking ref sits in the worktree's own reftable stack, with and without --base", async () => {
+      const f = makeFixture({ refFormat: "reftable" });
+      const { wt, sha } = makeUnpushed(f);
+      forgePrivateStack(f, wt, [{ name: "refs/remotes/origin/feat", sha }]);
+      // The premise: git lists the ref in the worktree and counts the commit
+      // as pushed, while the common stack holds no such ref, so removing the
+      // worktree would drop the only ref that holds the commit.
+      expect(await worktreeRemoteRefs(wt)).toContain(
+        `refs/remotes/origin/feat ${sha}`,
+      );
+      expect(await commonRemoteRefs(f)).not.toContain("origin/feat");
+      expect(await unpushedPerGit(wt)).toBe("");
+      await expectUnknownState(f, wt, sha, [
+        ...SYMLINK_FLAG_SETS,
+        ["--delete-branch", "--base", "origin/main"],
+      ]);
+      const r = await cliBounded(f.work, ["remove", wt, "--delete-branch"]);
+      expect(r.json.message).toContain("worktrees/<name>/reftable");
+    });
+
+    it("keeps a branch when the worktree's own reftable stack re-points a remote-tracking ref of the common stack", async () => {
+      const f = makeFixture({ refFormat: "reftable" });
+      const { wt, sha } = makeUnpushed(f);
+      forgePrivateStack(f, wt, [{ name: "refs/remotes/origin/main", sha }]);
+      // Both stacks name origin/main, at different commits.
+      expect(await commonRemoteRefs(f)).toContain(
+        `refs/remotes/origin/main ${f.mainSha}`,
+      );
+      expect(await worktreeRemoteRefs(wt)).not.toBe(await commonRemoteRefs(f));
+      await expectUnknownState(f, wt, sha, [
+        ["--delete-branch"],
+        ["--delete-branch", "--base", "origin/main"],
+      ]);
+    });
+
+    it("is unknown when either listing of the comparison fails, with and without --base", async () => {
+      const f = makeFixture({ refFormat: "reftable" });
+      const { wt, sha } = makeUnpushed(f);
+      // The listing made in the worktree carries the object name; the one
+      // of the common stack alone is told apart by `--git-dir`.
+      const failOwn = gitWrapper(
+        f,
+        "git-own-listing-fails",
+        `for a in "$@"; do
+  if [ "$a" = '--format=%(refname)%09%(objectname)%09%(symref)' ]; then
+    case " $* " in *' --git-dir='*) ;; *) echo 'fatal: own listing' >&2; exit 128;; esac
+  fi
+done`,
+      );
+      const failCommon = gitWrapper(
+        f,
+        "git-common-listing-fails",
+        `for a in "$@"; do
+  case "$a" in --git-dir=*) echo 'fatal: common listing' >&2; exit 128;; esac
+done`,
+      );
+      for (const [fake, why] of [
+        [failOwn, "own listing"],
+        [failCommon, "common listing"],
+      ] as const) {
+        await expectUnknownState(
+          f,
+          wt,
+          sha,
+          [["--delete-branch"], ["--delete-branch", "--base", "origin/main"]],
+          { PATH: fake },
+        );
+        const r = await cliBounded(f.work, ["remove", wt, "--delete-branch"], {
+          PATH: fake,
+        });
+        expect(r.json.message, why).toContain(why);
+      }
+    });
+
+    it("writes the remote-tracking refs of a linked worktree to the common stack, where removal keeps them", async () => {
+      const f = makeFixture({ refFormat: "reftable" });
+      const { wt, sha } = makeUnpushed(f);
+      // The ways a linked worktree gets a remote-tracking ref: a push that
+      // updates the tracking ref, a fetch, and a ref written by hand.
+      git(wt, ["push", "-q", "origin", "feat"]);
+      git(wt, ["fetch", "-q", "origin"]);
+      git(wt, ["update-ref", "refs/remotes/origin/by-hand", sha]);
+      git(wt, ["update-ref", "refs/worktree/private", sha]);
+      const common = await commonRemoteRefs(f);
+      expect(common).toContain(`refs/remotes/origin/feat ${sha}`);
+      expect(common).toContain(`refs/remotes/origin/by-hand ${sha}`);
+      // The worktree-private namespace is the one the private stack holds.
+      expect(await gitBounded(f.repo, ["for-each-ref", "refs/worktree"])).toBe(
+        "",
+      );
+      expect(await worktreeRemoteRefs(wt)).toBe(common);
+      const r = await cliBounded(f.work, ["remove", wt, "--delete-branch"]);
+      expect(r.code, r.stdout + r.stderr).toBe(0);
+      expect(r.json.branch.deleted).toBe(true);
+    });
   },
 );
 
@@ -4529,6 +4694,20 @@ describe("untrustedFilesRefStore: the walk", () => {
     }
     // Without the link, the decoy is a plain ref and the store is fine.
     expect(untrustedFilesRefStore(dir)).toBeUndefined();
+  });
+});
+
+describe("privateStackRemoteRefs: the common directory is an argument", () => {
+  it("is unknown for a common directory whose name is not UTF-8, before any git call", () => {
+    // A directory that does not exist: the name is judged first, so no git
+    // is asked about it, and the answer carries the byte as git printed it.
+    const result = privateStackRemoteRefs(
+      os.tmpdir(),
+      Buffer.concat([Buffer.from("/gone/gd"), Buffer.from([0xff])]),
+    );
+    expect(result?.status).toBeNull();
+    expect(result?.error).toContain("/gone/gd\\xff");
+    expect(result?.error).toContain("has a name that is not UTF-8");
   });
 });
 

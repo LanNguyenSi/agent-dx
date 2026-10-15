@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `worktree remove`: a linked worktree of a reftable repository has a ref stack
+  of its own (`<common-dir>/worktrees/<name>/reftable`) that git merges into
+  every ref listing made in that worktree, `refs/remotes/*` entries included
+  (measured with git 2.54; the files backend never reads
+  `worktrees/<name>/refs/remotes`). git itself writes remote-tracking refs to
+  the common stack, so a table in the private stack that names one is forged:
+  `git rev-list HEAD --not --remotes` counted the commit as pushed, and the
+  removal deleted the stack and the ref with it. The unpushed check now
+  compares the remote-tracking refs listed in the worktree with those of the
+  common stack alone (`git --git-dir=<common-dir> for-each-ref refs/remotes`),
+  byte for byte, and any difference is the `unpushed_state_unknown` refusal,
+  as is a common directory whose name is not UTF-8. A worktree whose refs git
+  wrote itself lists the same in both views and is unaffected.
 - `worktree remove` and `list`: a forged commit-graph file no longer makes an
   unpushed commit look pushed or merged. git reads parents from
   `objects/info/commit-graph` without checking them against the commit

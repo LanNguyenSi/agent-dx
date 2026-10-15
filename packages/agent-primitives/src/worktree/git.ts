@@ -1117,6 +1117,63 @@ export function alteredCommitGraph(grafts: BytePath): string | undefined {
   return `${quoteBytes(grafts)} exists, so git reads the commit graph with the grafts it lists`;
 }
 
+/** What `git for-each-ref` prints per remote-tracking ref when two views of
+ * the refs are compared: the name, what it points at and what it is a
+ * symbolic ref to. */
+const REMOTE_REF_VIEW = "--format=%(refname)%09%(objectname)%09%(symref)";
+
+/**
+ * A failed result when the remote-tracking refs git lists in `cwd` are not
+ * the ones the common reftable stack holds, otherwise `undefined`. Under the
+ * reftable backend a linked worktree has a ref stack of its own,
+ * `<common-dir>/worktrees/<name>/reftable`, and git merges it into every
+ * ref listing made in that worktree, `refs/remotes/*` entries included
+ * (the files backend never reads `worktrees/<name>/refs/remotes`). git
+ * writes remote-tracking refs to the common stack alone, so a table in the
+ * private stack that names one is not something a push or a fetch made:
+ * `rev-list --remotes` in the worktree would count the commit it points at
+ * as pushed, and removing the worktree deletes the private stack and that
+ * ref with it. The listing in `cwd` is therefore compared byte for byte
+ * with the listing of the common directory alone (`--git-dir`), and any
+ * difference, an added, a hidden or a re-pointed ref, is unknown. The
+ * common directory is an argument, so one whose name is not UTF-8 cannot be
+ * handed over exactly and is unknown as well.
+ */
+export function privateStackRemoteRefs(
+  cwd: string,
+  commonDir: BytePath,
+): GitRunResult | undefined {
+  const commonText = exactUtf8(commonDir);
+  if (commonText === undefined) {
+    return unknownUnpushed(
+      `the common git directory ${quoteBytes(commonDir)} has a name that is not UTF-8, so the remote-tracking refs of the worktree cannot be compared with the ones in the common reftable stack`,
+    );
+  }
+  const own = gitBytes(
+    cwd,
+    ["for-each-ref", REMOTE_REF_VIEW, "refs/remotes"],
+    REPORT_TIMEOUT,
+  );
+  if (own.error !== undefined || own.status !== 0) return textResult(own);
+  const common = gitBytes(
+    cwd,
+    [
+      `--git-dir=${commonText}`,
+      "for-each-ref",
+      REMOTE_REF_VIEW,
+      "refs/remotes",
+    ],
+    REPORT_TIMEOUT,
+  );
+  if (common.error !== undefined || common.status !== 0) {
+    return textResult(common);
+  }
+  if (own.stdout.equals(common.stdout)) return undefined;
+  return unknownUnpushed(
+    "the remote-tracking refs git lists in this worktree are not the ones the common reftable stack holds, so its own reftable stack (worktrees/<name>/reftable) adds, hides or re-points a ref that no push or fetch wrote there, and a commit could look pushed that only that stack's ref holds, which the removal deletes",
+  );
+}
+
 /**
  * `git rev-list HEAD --not <every real remote-tracking ref>` in `cwd`: the
  * commits no remote branch holds. A symbolic ref under `refs/remotes`
@@ -1187,6 +1244,10 @@ export function unpushedCommits(cwd: string): GitRunResult {
     return unknownUnpushed(
       `${untrusted}; git reads the ref store as it finds it, so a link or another entry git does not write there can make a local branch and a remote-tracking ref one file, or keep a remote-tracking ref where removing the worktree deletes it, and the branch could look pushed`,
     );
+  }
+  if (reftable) {
+    const leaked = privateStackRemoteRefs(cwd, commonDir);
+    if (leaked !== undefined) return leaked;
   }
   const refs = gitBytes(
     cwd,
