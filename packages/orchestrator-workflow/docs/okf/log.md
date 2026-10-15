@@ -1,5 +1,16 @@
 # Bundle log
 
+- 2026-10-15T04:30:04Z, handback checks, fix round: the bundle check is now run over the whole configured bundle at
+  the head of the delta (only the identifier drift check stays scoped to `base..head`), because a
+  source edit shifts lines cited by docs the delta did not touch. `implementer.md`, `reviewer.md`,
+  and `contracts.md` carry the split; the envelope is expected under the run directory's `evidence/`
+  directory, a `summary` or `criterion_evidence` claim may point to its `tests.executed` entry, and
+  the reviewer calibrates a claim without envelope by whether its own rerun confirms it.
+  `subagent-contracts-superset.md` gained one sentence in the verification-set paragraph describing
+  the handback checks and the envelope requirement, anchored to the three role files. Every citation
+  the edits shifted was re-pointed by locating its anchor, and the three docs listing the changed
+  sources were re-stamped.
+
 - 2026-10-15T04:14:42Z, handback checks and claim traceability: `implementer.md` gained two rules bullets
   (delta-scoped documentation checks, and an envelope or command plus exit code for every claimed
   check), `reviewer.md` gained a claimed-checks review item, and `contracts.md` gained one paragraph
@@ -2312,7 +2323,7 @@
   violated | not_applicable` now, not just `met | violated`, since a
   `not_applicable` probe (the mutant could not be applied, so no `result`
   was measured) has nothing for `met`/`violated` to report
-  (`implementer.md:343#"expectation: met | violated | not_applicable"`,
+  (`implementer.md:347#"expectation: met | violated | not_applicable"`,
   `packages/orchestrator-workflow/assets/skill/references/contracts.md:207#"expectation: met | violated | not_applicable"`).
   The two `not_applicable` verdicts that used to share one bare label
   (a probe with no reapplicable definition, not a regression, versus a
