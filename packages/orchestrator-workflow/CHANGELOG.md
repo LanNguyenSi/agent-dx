@@ -9,10 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Implementer handback now includes the documentation checks that exist, and
   claimed check results are traceable. Before returning, the implementer runs
-  the configured knowledge-bundle check and a connected identifier drift
-  check over its delta (both conditional on availability; an unavailable
-  check is a reported limitation), and every claimed check result carries the
-  path of a recorded verify envelope or the exact command plus exit code. The
+  the configured knowledge-bundle check over the whole bundle and a connected
+  identifier drift check over base..head (both conditional on availability;
+  an unavailable check is a reported limitation), and every claimed check
+  result carries a recorded verify envelope path or command plus exit code. The
   reviewer verifies claimed checks against that envelope or command output
   instead of prose, and a claim without either is a finding. No return field
   is added. The aim is to catch citation drift and unmeasured claims, the two
