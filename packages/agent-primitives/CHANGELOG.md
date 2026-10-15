@@ -14,21 +14,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `worktrees/<name>/refs/remotes`). git itself writes remote-tracking refs to
   the common stack, so a table in the private stack that names one is forged:
   `git rev-list HEAD --not --remotes` counted the commit as pushed, and the
-  removal deleted the stack and the ref with it. The unpushed check now
-  compares the remote-tracking refs listed in the worktree with those of the
-  common stack alone (`git --git-dir=<common-dir> for-each-ref refs/remotes`),
-  byte for byte, and any difference is the `unpushed_state_unknown` refusal,
-  as is a common directory whose name is not UTF-8 and one that holds an entry
-  named `commondir` (git never writes one there, and it makes
-  `--git-dir=<common-dir>` read the refs of another directory as the common
-  stack). Nothing is left out of either listing before the comparison, so a
-  plain ref in the private stack that shadows a symbolic remote-tracking ref
-  of the common stack is a difference too. The same holds for a symbolic
-  remote-tracking ref of the common stack to `HEAD` or to a ref under
-  `refs/worktree`, which the two listings resolve differently although
-  nothing is forged: that layout is refused (`--force` removes anyway). A
-  worktree whose refs git wrote itself, with no such symbolic ref, lists the
-  same in both views and is unaffected.
+  removal deleted the stack and the ref with it. For a reftable store the
+  unpushed walk now runs in the common directory, from the commit the
+  worktree's `HEAD` points at (`git rev-parse --verify HEAD^{commit}` in the
+  worktree, then `git --git-dir=<common-dir> rev-list <commit> --not
+  --exclude=<symbolic refs> --remotes`), and the symbolic refs it leaves out
+  come from the listing of the common directory
+  (`git --git-dir=<common-dir> for-each-ref refs/remotes`), not from the
+  worktree's: for a record in the private stack that shadows a symbolic
+  remote-tracking ref of the common stack, git can print a symbolic ref target
+  in the worktree's listing that is not the record's, an empty one included,
+  and the walk would then follow that record. A worktree whose `HEAD` names no
+  commit (an unborn branch) and a symbolic ref target in the common listing
+  that is not a ref name are the `unpushed_state_unknown` refusal. Before the
+  walk, the remote-tracking refs listed in the worktree are still compared
+  with those of the common stack alone, byte for byte and with nothing left
+  out of either listing, as a tripwire that fails closed: any difference is
+  the `unpushed_state_unknown` refusal, as is a common directory whose name is
+  not UTF-8 and one that holds an entry named `commondir` (git never writes
+  one there, and it makes `--git-dir=<common-dir>` read the refs of another
+  directory as the common stack). Listings that agree do not show that the
+  private stack holds no remote-tracking ref, which is why the walk does not
+  read the worktree's refs. A symbolic remote-tracking ref of the common stack
+  to `HEAD` or to a ref under `refs/worktree`, which the two listings resolve
+  differently although nothing is forged, is refused (`--force` removes
+  anyway). A worktree whose refs git wrote itself, with no such symbolic ref,
+  lists the same in both views and is unaffected.
 - `worktree remove` and `list`: a forged commit-graph file no longer makes an
   unpushed commit look pushed or merged. git reads parents from
   `objects/info/commit-graph` without checking them against the commit

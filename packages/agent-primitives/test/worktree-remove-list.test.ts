@@ -17,6 +17,7 @@ import {
   resolveRemoteBase,
   unpushedCommits,
   untrustedFilesRefStore,
+  plausibleRefTarget,
   privateStackRemoteRefs,
   untrustedReftableStore,
 } from "../src/worktree/git.js";
@@ -4543,8 +4544,414 @@ esac`,
       expect(r.code, r.stdout + r.stderr).toBe(0);
       expect(r.json.branch.deleted).toBe(true);
     });
+
+    /** The git the wrappers below hand every other call on to. */
+    const realGit = path.join(FIXED_BIN_DIR, "git");
+
+    /**
+     * A `gitWrapper` PATH that changes what git prints in the worktree (a
+     * call without `--git-dir`) for the two listings of the remote-tracking
+     * refs, standing in for the symbolic ref targets git can print there
+     * for a private record that shadows a symbolic ref of the common stack.
+     * With `blindComparison` the listing the comparison makes in the
+     * worktree is answered from the common stack alone, so the comparison
+     * sees no difference whatever the private stack holds; with
+     * `emptyOwnTargets` the listing of the symbolic refs made in the
+     * worktree comes back with every target taken off, so read there no ref
+     * is symbolic. A call with `--git-dir` passes unchanged.
+     */
+    function worktreeListings(
+      f: Fixture,
+      name: string,
+      opts: { blindComparison: boolean; emptyOwnTargets: boolean },
+    ): string {
+      const blind = opts.blindComparison
+        ? `  *' for-each-ref --format=%(refname)%09%(objectname)%09%(symref) refs/remotes '*)
+    exec '${realGit}' '--git-dir=${commonDirOf(f)}' "$@";;
+`
+        : "";
+      const empty = opts.emptyOwnTargets
+        ? `  *' for-each-ref --format=%(refname)%09%(symref) refs/remotes '*)
+    out=$('${realGit}' "$@") || exit $?
+    tab=$(printf '\\t')
+    printf '%s\\n' "$out" | while IFS= read -r line; do
+      printf '%s\\t\\n' "\${line%%"$tab"*}"
+    done
+    exit 0;;
+`
+        : "";
+      return gitWrapper(
+        f,
+        name,
+        `case " $* " in
+  *' --git-dir='*) ;;
+${blind}${empty}esac`,
+      );
+    }
+
+    /** Runs `remove --delete-branch`, with and without --base, and asserts
+     * the `unpushed_commits` refusal with `commits` counted, the worktree
+     * kept and `feat` still at `sha`. */
+    async function expectUnpushed(
+      f: Fixture,
+      wt: string,
+      sha: string,
+      commits: number,
+      env: NodeJS.ProcessEnv = {},
+      flagSets: string[][] = [
+        ["--delete-branch"],
+        ["--delete-branch", "--base", "origin/main"],
+      ],
+    ): Promise<void> {
+      for (const flags of flagSets) {
+        const r = await cliBounded(f.work, ["remove", wt, ...flags], env);
+        const label = `${flags.join(" ")}: ${r.stdout}${r.stderr}`;
+        expect(r.code, label).toBe(2);
+        expect(r.json.reason, label).toBe("unpushed_commits");
+        expect(r.json.details.commits, label).toBe(commits);
+        expect(fs.existsSync(wt), label).toBe(true);
+        expect(
+          git(f.repo, ["rev-parse", "--verify", "refs/heads/feat"]).trim(),
+          label,
+        ).toBe(sha);
+      }
+    }
+
+    // git can print, in the worktree, a symbolic ref target for a private
+    // record that shadows a symbolic ref of the common stack that is not
+    // the record's (empty included), and on some runs the two listings of
+    // the comparison then agree. The wrapper makes that deterministic: the
+    // comparison sees no difference, and what decides is the walk, which
+    // reads the common stack alone from the commit the worktree's HEAD
+    // points at.
+    it.each([
+      [
+        "a private symbolic record to HEAD shadows a symbolic ref of the common stack to the branch",
+        (f: Fixture, wt: string, _sha: string): void => {
+          git(f.repo, [
+            "symbolic-ref",
+            "refs/remotes/origin/self",
+            "refs/heads/feat",
+          ]);
+          forgePrivateStackWith(f, wt, (donor) =>
+            git(donor, ["symbolic-ref", "refs/remotes/origin/self", "HEAD"]),
+          );
+        },
+        { blindComparison: true, emptyOwnTargets: true },
+      ],
+      [
+        "a private plain remote-tracking ref holds the branch tip",
+        (f: Fixture, wt: string, sha: string): void => {
+          forgePrivateStack(f, wt, [{ name: "refs/remotes/origin/feat", sha }]);
+        },
+        { blindComparison: true, emptyOwnTargets: false },
+      ],
+    ])(
+      "keeps the unpushed branch when %s and the comparison of the listings sees no difference",
+      async (_what, plant, listings) => {
+        const f = makeFixture({ refFormat: "reftable" });
+        const { wt, sha } = makeUnpushed(f);
+        plant(f, wt, sha);
+        // The premise: a walk in the worktree counts the commit as pushed.
+        expect(await unpushedPerGit(wt)).toBe("");
+        await expectUnpushed(f, wt, sha, 1, {
+          PATH: worktreeListings(f, "git-worktree-listings", listings),
+        });
+      },
+    );
+
+    it("walks from the commit the worktree's HEAD points at, not from the HEAD of the common directory, which is the main checkout's", async () => {
+      const f = makeFixture({ refFormat: "reftable" });
+      const { wt } = makeUnpushed(f);
+      commitHere(wt, "more.txt", "more unpushed work");
+      const tip = git(wt, ["rev-parse", "HEAD"]).trim();
+      // The premise: read in the common directory, HEAD is the main
+      // checkout's, on main, which origin has.
+      expect(
+        await gitBounded(wt, [
+          `--git-dir=${commonDirOf(f)}`,
+          "rev-list",
+          "HEAD",
+          "--not",
+          "--remotes",
+        ]),
+      ).toBe("");
+      await expectUnpushed(f, wt, tip, 2, {}, [
+        [],
+        ["--delete-branch"],
+        ["--delete-branch", "--base", "origin/main"],
+      ]);
+    });
+
+    it.each([
+      ["as git lists them", false],
+      [
+        "when the listing made in the worktree shows no symbolic ref targets",
+        true,
+      ],
+    ])(
+      "keeps a branch that a symbolic remote-tracking ref of the common stack points at, excluding the symbolic refs of the common listing %s",
+      async (_what, emptyOwnTargets) => {
+        const f = makeFixture({ refFormat: "reftable" });
+        const { wt, sha } = makeUnpushed(f);
+        git(f.repo, [
+          "symbolic-ref",
+          "refs/remotes/origin/self",
+          "refs/heads/feat",
+        ]);
+        // The premise: a walk that follows the symbolic ref counts the
+        // commit as pushed.
+        expect(await unpushedPerGit(wt)).toBe("");
+        const env: NodeJS.ProcessEnv = {};
+        if (emptyOwnTargets) {
+          env.PATH = worktreeListings(f, "git-own-targets-empty", {
+            blindComparison: false,
+            emptyOwnTargets: true,
+          });
+          expect(
+            await gitBounded(
+              wt,
+              [
+                "for-each-ref",
+                "--format=%(refname)%09%(symref)",
+                "refs/remotes",
+              ],
+              20_000,
+              env,
+            ),
+          ).toContain("refs/remotes/origin/self\t\n");
+        }
+        await expectUnpushed(f, wt, sha, 1, env);
+      },
+    );
+
+    /** A `gitWrapper` PATH whose git prints `printed` (a `printf` format)
+     * in place of the line of refs/remotes/origin/self in the listing of
+     * the symbolic refs made in the common directory (`--git-dir`). */
+    function garbledCommonListing(f: Fixture, printed: string): string {
+      return gitWrapper(
+        f,
+        "git-common-listing-garbled",
+        `case " $* " in
+  *' --git-dir='*' for-each-ref --format=%(refname)%09%(symref) refs/remotes '*)
+    out=$('${realGit}' "$@") || exit $?
+    tab=$(printf '\\t')
+    printf '%s\\n' "$out" | while IFS= read -r line; do
+      case "$line" in
+        "refs/remotes/origin/self$tab"*) printf '${printed}' ;;
+        *) printf '%s\\n' "$line" ;;
+      esac
+    done
+    exit 0;;
+esac`,
+      );
+    }
+
+    it.each([
+      [
+        "the tail of another name as its target",
+        "refs/remotes/origin/self\\tgin/main\\n",
+        'git named "gin/main" as the target of the symbolic ref refs/remotes/origin/self',
+      ],
+      [
+        "a control byte as its target",
+        "refs/remotes/origin/self\\t\\003\\n",
+        'git named "\\u0003" as the target of the symbolic ref refs/remotes/origin/self',
+      ],
+      [
+        "no target column at all",
+        "refs/remotes/origin/self\\n",
+        'git listed "refs/remotes/origin/self" among the remote-tracking refs of the common reftable stack',
+      ],
+    ])(
+      "is unknown when the listing of the common stack shows refs/remotes/origin/self with %s",
+      async (_what, printed, message) => {
+        const f = makeFixture({ refFormat: "reftable" });
+        const { wt, sha } = makeUnpushed(f);
+        git(f.repo, [
+          "symbolic-ref",
+          "refs/remotes/origin/self",
+          "refs/heads/feat",
+        ]);
+        const env = { PATH: garbledCommonListing(f, printed) };
+        await expectUnknownState(
+          f,
+          wt,
+          sha,
+          [["--delete-branch"], ["--delete-branch", "--base", "origin/main"]],
+          env,
+        );
+        const r = await cliBounded(
+          f.work,
+          ["remove", wt, "--delete-branch"],
+          env,
+        );
+        expect(r.json.message).toContain(message);
+      },
+    );
+
+    it("is unknown for a symbolic ref of the common stack whose name is not UTF-8, which no --exclude names exactly", async () => {
+      const f = makeFixture({ refFormat: "reftable" });
+      const { wt, sha } = makeUnpushed(f);
+      // A reftable table holds any ref name git accepts, whatever the file
+      // system allows.
+      await shBounded(
+        f.repo,
+        `git symbolic-ref "refs/remotes/origin/$(printf 'x\\377')" refs/heads/feat`,
+      );
+      expect(await unpushedPerGit(wt)).toBe("");
+      await expectUnknownState(f, wt, sha, [
+        ["--delete-branch"],
+        ["--delete-branch", "--base", "origin/main"],
+      ]);
+      const r = await cliBounded(f.work, ["remove", wt, "--delete-branch"]);
+      expect(r.json.message).toContain(
+        "the symbolic ref refs/remotes/origin/x\\xff has a name that is not UTF-8",
+      );
+    });
+
+    it("is unknown for a worktree on an unborn branch, whose HEAD names no commit", async () => {
+      const f = makeFixture({ refFormat: "reftable" });
+      const wt = path.join(f.base, "wt-lonely");
+      git(f.repo, ["worktree", "add", "-q", "--orphan", "-b", "lonely", wt]);
+      const r = await cliBounded(f.work, ["remove", wt]);
+      expect(r.code, r.stdout + r.stderr).toBe(2);
+      expect(r.json.reason).toBe("unpushed_state_unknown");
+      expect(r.json.message).toContain(
+        "git cannot name the commit HEAD points at in this worktree",
+      );
+      expect(listedWorktrees(f.repo)).toContain(wt);
+    });
+
+    it("is unknown when git names something other than an object name for the commit HEAD points at", async () => {
+      const f = makeFixture({ refFormat: "reftable" });
+      const { wt, sha } = makeUnpushed(f);
+      // An answer the walk would read as an option that selects no commit,
+      // so a walk from it would count nothing as unpushed.
+      const env = {
+        PATH: gitWrapper(
+          f,
+          "git-head-not-an-oid",
+          `case " $* " in
+  *' rev-parse --verify HEAD^{commit} '*)
+    printf '%s\\n' '--branches=no-such-branch'
+    exit 0;;
+esac`,
+        ),
+      };
+      await expectUnknownState(
+        f,
+        wt,
+        sha,
+        [["--delete-branch"], ["--delete-branch", "--base", "origin/main"]],
+        env,
+      );
+      const r = await cliBounded(
+        f.work,
+        ["remove", wt, "--delete-branch"],
+        env,
+      );
+      expect(r.json.message).toContain(
+        'git named "--branches=no-such-branch" as the commit HEAD points at in this worktree',
+      );
+    });
+
+    it("removes a pushed branch of a worktree with the symbolic origin/HEAD, fetched refs, a ref under refs/worktree and a bisect ref", async () => {
+      const f = makeFixture({ refFormat: "reftable" });
+      const { wt, sha } = makeUnpushed(f);
+      git(wt, ["push", "-q", "origin", "feat"]);
+      git(wt, ["fetch", "-q", "origin"]);
+      git(wt, ["update-ref", "refs/worktree/x", sha]);
+      git(wt, ["update-ref", "refs/bisect/bad", sha]);
+      // The premise: origin/HEAD is a symbolic ref of the common stack, and
+      // the worktree's own stack holds the refs only that worktree lists.
+      expect(
+        oneLine(
+          await gitBounded(f.repo, [
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+          ]),
+        ),
+      ).toBe("refs/remotes/origin/main");
+      expect(
+        await gitBounded(f.repo, [
+          "for-each-ref",
+          "refs/bisect",
+          "refs/worktree",
+        ]),
+      ).toBe("");
+      expect(
+        await gitBounded(wt, [
+          "for-each-ref",
+          "--format=%(refname)",
+          "refs/bisect",
+          "refs/worktree",
+        ]),
+      ).toBe("refs/bisect/bad\nrefs/worktree/x\n");
+      const r = await cliBounded(f.work, ["remove", wt, "--delete-branch"]);
+      expect(r.code, r.stdout + r.stderr).toBe(0);
+      expect(r.json.branch.deleted).toBe(true);
+      expect(fs.existsSync(wt)).toBe(false);
+      expect(
+        await gitBounded(f.repo, ["for-each-ref", "refs/heads/feat"]),
+      ).toBe("");
+    });
   },
 );
+
+describe("plausibleRefTarget: what the listing of the common stack may name as a symbolic ref target", () => {
+  it("accepts a name below refs/ that git allows, bytes outside ASCII included, and a name at the top level such as HEAD", () => {
+    for (const target of [
+      "refs/heads/feat",
+      "refs/remotes/origin/main",
+      "refs/worktree/x",
+      "refs/heads/team/a-b_c.d",
+      "HEAD",
+      "FETCH_HEAD",
+      "ORIG_HEAD",
+    ]) {
+      expect(plausibleRefTarget(Buffer.from(target)), target).toBe(true);
+    }
+    expect(
+      plausibleRefTarget(
+        Buffer.concat([Buffer.from("refs/heads/x"), Buffer.from([0xff])]),
+      ),
+    ).toBe(true);
+  });
+
+  it("refuses what git never prints as a symbolic ref target", () => {
+    for (const target of [
+      "",
+      "gin/main",
+      "main",
+      "Head",
+      "\x03",
+      "refs/heads/a b",
+      "refs/heads/a\tb",
+      "refs/heads/a\x7f",
+      "refs/heads/a~1",
+      "refs/heads/a^",
+      "refs/heads/a:b",
+      "refs/heads/a?",
+      "refs/heads/a*",
+      "refs/heads/a[",
+      "refs/heads/a\\b",
+      "refs/heads/a..b",
+      "refs/heads/a@{1}",
+      "refs/heads/a.",
+      "refs/heads/",
+      "refs/",
+      "refs//x",
+      "refs/heads/.x",
+      "refs/heads/x.lock",
+    ]) {
+      expect(
+        plausibleRefTarget(Buffer.from(target)),
+        JSON.stringify(target),
+      ).toBe(false);
+    }
+  });
+});
 
 /** `fs.lstatSync` with the device, inode or size of the entries `fake`
  * names replaced: a bind mount, a directory hard link or an oversized

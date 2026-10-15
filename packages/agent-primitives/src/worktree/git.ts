@@ -1122,9 +1122,12 @@ export function alteredCommitGraph(grafts: BytePath): string | undefined {
  * symbolic ref to. Nothing is left out of either view before the byte
  * comparison, symbolic refs included: a symbolic ref that one view resolves
  * differently from the other (a target of `HEAD`, or a ref under
- * `refs/worktree`) is a difference and is refused, since a private record
- * that shadows a common symbolic ref can make the separate exclusion of the
- * symbolic refs miss it. */
+ * `refs/worktree`) is a difference and is refused. The comparison is a
+ * tripwire that fails closed, not what keeps the private stack out of the
+ * walk: for a private record that shadows a symbolic ref of the common
+ * stack, git can print a symbolic ref target in the worktree's listing that
+ * is not the record's, so the two listings can agree although the private
+ * stack shadows a ref (see `unpushedInCommonStack`). */
 const REMOTE_REF_VIEW = "--format=%(refname)%09%(objectname)%09%(symref)";
 
 /**
@@ -1140,11 +1143,16 @@ const REMOTE_REF_VIEW = "--format=%(refname)%09%(objectname)%09%(symref)";
  * as pushed, and removing the worktree deletes the private stack and that
  * ref with it. The listing in `cwd` is therefore compared byte for byte
  * with the listing of the common directory alone (`--git-dir`), and any
- * difference, an added, a hidden or a re-pointed ref, is unknown. The common directory is an argument, so one whose name is not
- * UTF-8 cannot be handed over exactly and is unknown as well, and so is one
- * that holds an entry named `commondir`: git never writes one there, and
- * with it `--git-dir=<common-dir>` reads the refs of another directory as
- * the common stack, so the comparison would be made against that stack.
+ * difference, an added, a hidden or a re-pointed ref, is unknown. Listings
+ * that agree do not prove that the private stack holds no remote-tracking
+ * ref (git can print an unreliable symbolic ref target in the worktree's
+ * listing), so the walk does not read the private stack either
+ * (`unpushedInCommonStack`). The common directory is an argument, so one
+ * whose name is not UTF-8 cannot be handed over exactly and is unknown as
+ * well, and so is one that holds an entry named `commondir`: git never
+ * writes one there, and with it `--git-dir=<common-dir>` reads the refs of
+ * another directory as the common stack, so the comparison and the walk
+ * would be made against that stack.
  */
 export function privateStackRemoteRefs(
   cwd: string,
@@ -1194,6 +1202,143 @@ export function privateStackRemoteRefs(
   );
 }
 
+/** The characters `git check-ref-format` never allows in a ref name, next
+ * to the control characters, the space and DEL. */
+const FORBIDDEN_REF_CHARACTERS: ReadonlySet<number> = new Set(
+  Array.from("~^:?*[\\", (c) => c.charCodeAt(0)),
+);
+
+/**
+ * True when `target`, what git printed as the symbolic ref target of a
+ * remote-tracking ref of the common stack, has the shape of a name git
+ * prints there: a name below `refs/` that `git check-ref-format` accepts,
+ * or a name at the top level such as `HEAD` or `FETCH_HEAD` (upper case
+ * letters, `_` and `-` only; a symbolic ref to a detached `HEAD` resolves
+ * to `HEAD`). Bytes outside ASCII are allowed, as git allows them in a ref
+ * name. Anything else (a control byte, the tail of another name such as
+ * `gin/main`, an empty part) is no name git wrote for that ref, and a
+ * listing that holds one cannot be trusted to tell the symbolic refs from
+ * the plain ones.
+ */
+export function plausibleRefTarget(target: Buffer): boolean {
+  // One character per byte, so the checks below read the bytes git printed.
+  const text = target.toString("latin1");
+  if (/^[A-Z_-]+$/.test(text)) return true;
+  if (!text.startsWith("refs/")) return false;
+  for (const byte of target) {
+    if (byte <= 0x20 || byte === 0x7f || FORBIDDEN_REF_CHARACTERS.has(byte)) {
+      return false;
+    }
+  }
+  if (text.includes("..") || text.includes("@{") || text.endsWith(".")) {
+    return false;
+  }
+  return text
+    .split("/")
+    .every(
+      (part) =>
+        part.length > 0 && !part.startsWith(".") && !part.endsWith(".lock"),
+    );
+}
+
+/**
+ * `unpushedCommits` for a reftable store, whose linked worktrees have a ref
+ * stack of their own that git merges into every ref listing made in the
+ * worktree, `refs/remotes/*` included. The walk reads nothing of that stack
+ * but the commit the worktree's `HEAD` points at:
+ *
+ * - `git rev-parse --verify HEAD^{commit}` in `cwd` names the commit (an
+ *   unborn branch, or an answer that is not an object name, is unknown);
+ * - the symbolic refs to leave out come from
+ *   `git --git-dir=<common-dir> for-each-ref refs/remotes`, the common
+ *   stack alone, since git can print a symbolic ref target in the
+ *   worktree's own listing that is not the record's (a private record that
+ *   shadows a symbolic ref of the common stack), empty included, which
+ *   would let the walk follow that record; a line of the common listing
+ *   that is not a name with a plausible target (`plausibleRefTarget`) is
+ *   unknown rather than read as a plain ref;
+ * - `git --git-dir=<common-dir> rev-list <commit> --not --exclude=<each
+ *   symbolic ref> --remotes` counts the commits no remote-tracking ref of
+ *   the common stack holds, with the settings the files walk has
+ *   (`noReplaceObjects`, the walk bound).
+ *
+ * The comparison of the two listings (`privateStackRemoteRefs`) runs first
+ * and refuses any difference, as a tripwire that fails closed.
+ */
+function unpushedInCommonStack(cwd: string, commonDir: BytePath): GitRunResult {
+  const leaked = privateStackRemoteRefs(cwd, commonDir);
+  if (leaked !== undefined) return leaked;
+  // Exact: `privateStackRemoteRefs` refuses a name that is not UTF-8.
+  const commonText = commonDir.toString("utf8");
+  const head = git(cwd, ["rev-parse", "--verify", "HEAD^{commit}"], {
+    ...REPORT_TIMEOUT,
+    noReplaceObjects: true,
+  });
+  if (head.error !== undefined || head.status !== 0) {
+    return unknownUnpushed(
+      `git cannot name the commit HEAD points at in this worktree (an unborn branch has none): ${gitFailure(head)}`,
+    );
+  }
+  const oid = gitOutputLine(head.stdout);
+  if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(oid)) {
+    return unknownUnpushed(
+      `git named ${JSON.stringify(oid)} as the commit HEAD points at in this worktree, which is not an object name`,
+    );
+  }
+  const refs = gitBytes(
+    cwd,
+    [
+      `--git-dir=${commonText}`,
+      "for-each-ref",
+      "--format=%(refname)%09%(symref)",
+      "refs/remotes",
+    ],
+    REPORT_TIMEOUT,
+  );
+  if (refs.error !== undefined || refs.status !== 0) return textResult(refs);
+  const excludes: string[] = [];
+  for (const line of splitBytes(refs.stdout, 0x0a)) {
+    // The end of the output; every line git prints has a tab.
+    if (line.length === 0) continue;
+    const tab = line.indexOf(0x09);
+    if (tab < 0) {
+      return unknownUnpushed(
+        `git listed ${quoteBytes(line)} among the remote-tracking refs of the common reftable stack, which is not a ref name and a symbolic ref target, so the symbolic refs cannot be told from the plain ones`,
+      );
+    }
+    // Nothing after the tab means a plain ref.
+    if (tab === line.length - 1) continue;
+    const name = line.subarray(0, tab);
+    const target = line.subarray(tab + 1);
+    const text = exactUtf8(name);
+    if (text === undefined) {
+      return unknownUnpushed(
+        `the symbolic ref ${renderBytes(name)} has a name that is not UTF-8, which cannot be excluded exactly from the remote-tracking refs`,
+      );
+    }
+    if (!plausibleRefTarget(target)) {
+      return unknownUnpushed(
+        `git named ${quoteBytes(target)} as the target of the symbolic ref ${text} in the common reftable stack, which is no ref name, so the listing cannot be trusted to tell the symbolic refs from the plain ones`,
+      );
+    }
+    // Ref names cannot hold glob characters, so the name is its own exact
+    // `--exclude` pattern; for `--remotes` it is relative to `refs/remotes/`.
+    excludes.push(`--exclude=${text.replace(/^refs\/remotes\//, "")}`);
+  }
+  return git(
+    cwd,
+    [
+      `--git-dir=${commonText}`,
+      "rev-list",
+      oid,
+      "--not",
+      ...excludes,
+      "--remotes",
+    ],
+    { ...REPORT_TIMEOUT_WALK, noReplaceObjects: true },
+  );
+}
+
 /**
  * `git rev-list HEAD --not <every real remote-tracking ref>` in `cwd`: the
  * commits no remote branch holds. A symbolic ref under `refs/remotes`
@@ -1215,7 +1360,11 @@ export function privateStackRemoteRefs(
  * (`alteredCommitGraph`; the walk itself runs with `--no-replace-objects`)
  * is unknown, and a store git was told to keep anywhere else
  * (`refStoreElsewhere`, read as git's format reader reads it) is unknown
- * too, so what is inspected is the store git reads. A symbolic ref whose
+ * too, so what is inspected is the store git reads. For a reftable store
+ * the listing and the walk run in the common directory instead, with the
+ * commit the worktree's `HEAD` points at (`unpushedInCommonStack`), since
+ * a linked worktree's own reftable stack is merged into every listing made
+ * in the worktree. A symbolic ref whose
  * name is not UTF-8 cannot be handed to `--exclude` exactly (an argument is
  * text) and is unknown as well. Fails (non-zero status or `error`) when the
  * refs cannot be listed, so the caller treats the state as unknown. `error`
@@ -1265,10 +1414,7 @@ export function unpushedCommits(cwd: string): GitRunResult {
       `${untrusted}; git reads the ref store as it finds it, so a link or another entry git does not write there can make a local branch and a remote-tracking ref one file, or keep a remote-tracking ref where removing the worktree deletes it, and the branch could look pushed`,
     );
   }
-  if (reftable) {
-    const leaked = privateStackRemoteRefs(cwd, commonDir);
-    if (leaked !== undefined) return leaked;
-  }
+  if (reftable) return unpushedInCommonStack(cwd, commonDir);
   const refs = gitBytes(
     cwd,
     ["for-each-ref", "--format=%(refname)%09%(symref)", "refs/remotes"],
