@@ -22,13 +22,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   interval is not found (documented in `docs/guard.md`). Exit codes: `124`
   timeout, `123` memory cap, `122` leftovers, otherwise the command's own
   code; a usage or setup problem is `2`, and so is a `ps` that cannot be read
-  after the command ended (the group is ended anyway, the run is an error,
-  `reason: "leftover_check_failed"`, never a pass; a failed read is first tried
-  again a few times). The CLI ends with `130` on SIGINT and `143` on SIGTERM,
-  with no output, after ending the group. The envelope carries the reason,
-  both peak sizes and the killed and leftover processes. macOS and Linux;
-  Windows is not supported. The shipped skill names the command for
-  repro, hang and fuzz runs.
+  after the command ended. `guard` kills before it waits for `ps`: a limit,
+  an abort or the command's exit reads the process table once, and when that
+  read fails the group is killed at once without it; processes outside the
+  group are then killed as a later read, or else the last readable table,
+  shows them, and the run says it could not check (`leftoverCheckFailed`,
+  and after an exit of the command's own accord the reason
+  `leftover_check_failed` with exit `2`), never a pass. All reads from the first
+  limit, abort or exit on share a budget of about 2 s, so a `ps` that hangs
+  delays `guard` by seconds, not by multiples of its own bound. An abort
+  (the API's `signal`, SIGINT or SIGTERM to the CLI) kills synchronously
+  until `guard` returns, also while it looks for leftovers after the command
+  ended; the CLI then ends with `130` or `143`, with no output. The envelope
+  carries the reason, both peak sizes, the killed and leftover processes and
+  the log of every run that started. macOS and Linux; Windows is not
+  supported. The shipped skill names the command for repro, hang and fuzz
+  runs.
 
 ## [0.14.0] - 2026-10-14
 

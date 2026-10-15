@@ -52,18 +52,20 @@ export function parsePs(text: string): ProcInfo[] {
   return rows;
 }
 
-/** How long one `ps` call may take before it is killed. */
-const PS_BOUND_MS = 5000;
+/** The longest one `ps` call may take before it is killed. */
+export const PS_BOUND_MS = 5000;
 
 /**
  * The process table, or `undefined` when `ps` is missing, fails, times out or
- * prints nothing parseable. Bounded, and run in the C locale so the start
- * time is parsed the same way everywhere.
+ * prints nothing parseable. Bounded by `boundMs` (at most `PS_BOUND_MS`), and
+ * run in the C locale so the start time is parsed the same way everywhere.
  */
-export function readProcesses(): ProcInfo[] | undefined {
+export function readProcesses(
+  boundMs: number = PS_BOUND_MS,
+): ProcInfo[] | undefined {
   const result = spawnSync("ps", [...PS_ARGS], {
     encoding: "utf8",
-    timeout: PS_BOUND_MS,
+    timeout: Math.max(1, Math.min(Math.round(boundMs), PS_BOUND_MS)),
     killSignal: "SIGKILL",
     maxBuffer: 64 * 1024 * 1024,
     env: { ...process.env, LC_ALL: "C" },

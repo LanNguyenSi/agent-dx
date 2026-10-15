@@ -985,7 +985,10 @@ program
         durationMs: Date.now() - start,
         cwd: global.cwd,
         warnings: result.warnings,
-        logs: result.status === "error" ? [] : [result.logPath],
+        // The log exists whenever the command ran, whatever the outcome
+        // (`leftover_check_failed` included); only a run that never started
+        // has none.
+        logs: result.childExitCode !== null ? [result.logPath] : [],
         extra: {
           reason: result.reason,
           exitCode: result.exitCode,
