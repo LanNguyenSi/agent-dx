@@ -128,21 +128,26 @@ What is reported then:
 
 Killing by pid from an earlier table has one limit: a process that ended
 after that table was read, and whose pid the system gave to an unrelated
-process since, would be hit. That holds for the group's members as well as
-for the processes outside it, so a command that starts and ends processes
-fast makes it more likely, and this is the price of not leaving a group
-member that changed group alive. The group's leader is never killed this way:
-`guard` has reaped it, so its pid may be anyone's. That table is usually the
-last poll's, older when polls were failing too; the warning names its age,
-which is counted from the start of the read that produced the table (`ps`
-may have taken its snapshot at any point of the read). A table older than
-10 s is not used for it: the group is still killed, but the processes outside
-it, and the members of the group that may have left it, are left alive,
-`leftoverCheckFailed` is `true`, and a warning names the processes outside
-(pid and command) and says they were not killed. Each process is aimed at by
-pid once per run, and warned about once, however many of the fallbacks above
-a run goes through (at the timeout and again after the command ended, for
-example).
+process since, would be hit. A process outside the group is killed by pid on
+the table's word. A member of the group is killed by pid only when a process
+group with its pid exists at that moment (`kill(-pid, 0)`), which is what a
+member that left the group in place (`setsid`, `setpgid`) looks like; a member
+without such a group was reached by the group kill or is gone, and nothing is
+signalled by its pid. The limit that remains: a member that joined another
+existing group is not reached, and a freed pid that has become the leader of a
+group of its own would still be hit. The group's leader is never killed by
+pid: the group kill ends it, and once the command's exit is seen `guard` has
+reaped it, so its pid may be anyone's. The table is usually the last poll's,
+older when polls were failing too; the warning names its age, which is
+counted from the start of the read that produced the table (`ps` may have
+taken its snapshot at any point of the read). A table older than 10 s is not
+used for it, for members of the group as well as for the processes outside it:
+the group is still killed, but the processes outside it, and the members of
+the group that left it, are left alive, `leftoverCheckFailed` is `true`, and
+a warning names the processes outside (pid and command) and says they were not
+killed. Each process is aimed at by pid once per run, and warned about once,
+however many of the fallbacks above a run goes through (at the timeout and
+again after the command ended, for example).
 
 ### A child that calls `setsid`
 
@@ -249,7 +254,8 @@ run, or its leftovers could not be checked). Besides the common fields:
   (a newline is `\012` on macOS and a space on Linux, a byte outside ASCII is
   `M-C` and the like on macOS and `?` on Linux), so in that last comparison
   each run of characters outside printable ASCII in the arguments stands for
-  whatever `ps` printed for it, up to four characters per byte or none. The
+  whatever `ps` printed for it: any characters (printable ones too), none or
+  up to four per byte. The
   limit of that: an impostor whose command line differs from the trampoline's
   only in such characters is taken for the watcher too, and a `ps` that
   prints an argument in some other way than those two (or cuts a very long

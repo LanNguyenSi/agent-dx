@@ -288,36 +288,63 @@ export interface OwnIdentities {
 }
 
 /** The most characters `ps` prints for one byte it cannot show as it is: the
- * macOS meta notation (`M-^\`) or an octal escape (`\012`) takes four. */
+ * octal escape (`\012`, `\011`) takes four; the macOS meta notation (`M-C`,
+ * `M^\`) takes three. */
 const PS_ESCAPE_MAX_CHARS = 4;
-
-function escapeRegExp(text: string): string {
-  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 /**
  * True when the command line `command`, as `ps` printed it, ends with `tail`,
  * the text `guard` handed to the trampoline. `ps` does not print every
  * character as it is: a control character becomes a space, a dot or an
- * escape (`\012` for a newline on macOS), and a byte outside ASCII becomes
- * `?` or a meta escape (`M-C`), depending on the platform. So every run of
- * characters outside printable ASCII in `tail` stands for whatever `ps` made
- * of its bytes, up to four characters per byte or none; every other character
- * has to match exactly. That is looser than an exact comparison for exactly
- * those characters: a command line that differs from the tail only in them
- * matches too. Pure.
+ * escape (`\012` or `\011` on macOS: four characters), and a byte outside ASCII
+ * becomes `?` or a meta escape (`M-C`), depending on the platform. So every
+ * run of characters outside printable ASCII in `tail` stands for whatever
+ * `ps` made of its bytes: any characters (printable ones too), none or up to
+ * four per byte; every other character has to match exactly. That is looser
+ * than an exact comparison for exactly those characters: a command line that
+ * differs from the tail only in them matches too. Pure.
+ *
+ * No regular expression: one window per run would back-track exponentially
+ * on a `?` per byte rendering. The parts of the tail are walked from its end,
+ * keeping the set of positions of `command` the part after the current one
+ * can start at. A literal part has to match exactly at each of them; a run of
+ * `n` bytes moves each back by 0 to `4n` characters, done with prefix sums.
+ * Time is O(length of `command` x length of `tail`) at most (a literal is
+ * compared at each position once), whatever the window sizes.
  */
 export function endsWithTail(command: string, tail: string): boolean {
   const parts = tail.split(/([^\x20-\x7e]+)/);
   if (parts.length === 1) return command.endsWith(tail);
-  const pattern = parts
-    .map((part, index) =>
-      index % 2 === 0
-        ? escapeRegExp(part)
-        : `[\\s\\S]{0,${PS_ESCAPE_MAX_CHARS * Buffer.byteLength(part)}}`,
-    )
-    .join("");
-  return new RegExp(`${pattern}$`).test(command);
+  const size = command.length;
+  // reachable[p] is 1 when the parts walked so far can start at position p.
+  let reachable = new Uint8Array(size + 1);
+  reachable[size] = 1;
+  for (let index = parts.length - 1; index >= 0; index--) {
+    const part = parts[index] as string;
+    const next = new Uint8Array(size + 1);
+    if (index % 2 === 0) {
+      for (let at = part.length; at <= size; at++) {
+        if (reachable[at] === 1 && command.startsWith(part, at - part.length)) {
+          next[at - part.length] = 1;
+        }
+      }
+    } else {
+      const window = PS_ESCAPE_MAX_CHARS * Buffer.byteLength(part);
+      // before[p]: how many reachable positions lie below p.
+      const before = new Int32Array(size + 2);
+      for (let at = 0; at <= size; at++) {
+        before[at + 1] = (before[at] as number) + (reachable[at] as number);
+      }
+      for (let at = 0; at <= size; at++) {
+        const last = Math.min(at + window, size);
+        if ((before[last + 1] as number) - (before[at] as number) > 0) {
+          next[at] = 1;
+        }
+      }
+    }
+    reachable = next;
+  }
+  return reachable.includes(1);
 }
 
 /**
@@ -476,6 +503,18 @@ function toGuardProc(proc: ProcInfo, leaderPid: number): GuardProc {
 function killPid(pid: number): boolean {
   try {
     process.kill(pid, "SIGKILL");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** True when a process group with id `pid` exists (signal 0 to `-pid`): a
+ * process in the table that leads a group of its own. Needs no process
+ * table. */
+function groupExists(pid: number): boolean {
+  try {
+    process.kill(-pid, 0);
     return true;
   } catch {
     return false;
@@ -783,24 +822,34 @@ async function supervise(
     }
   };
 
-  /** Ends the group, and by pid every process the last table read showed
-   * below the group's leader: for when no table can be read now. Those
-   * outside the group were found by following the parent chain; those in it
-   * are killed by pid as well, because one of them may have left the group
-   * (`setsid`, `setpgid`) after that table was read, and the group kill does
-   * not reach it. A table older than `STALE_TABLE_MAX_MS` is not trusted for
-   * that (its pids may be reused by now): the group is still killed, the run
-   * says it could not check, and the warning names what was not killed. The
-   * leader is never killed by pid: it has been reaped by now. A process is
-   * killed by pid once per run, and warned about once. Returns the processes
-   * outside the group the kill reached (one that was gone is left out); the
-   * members of the group are not listed, since the table does not tell
-   * whether they were still alive. */
+  /** Ends the group, and by pid what the last table read showed below the
+   * group's leader and the group kill may not have reached: those outside the
+   * group were found by following the parent chain. A member of the group is
+   * killed by pid only when a group with its pid exists now
+   * (`process.kill(-pid, 0)`): it left the group by `setsid` or `setpgid`
+   * after that table was read and leads a group of its own. One that has no
+   * such group was reached by the group kill or is gone, and its pid may be
+   * anyone's by now (a freed pid is not signalled); one that joined another
+   * existing group is not reached. A table older than `STALE_TABLE_MAX_MS` is
+   * not trusted for any of this (its pids may be reused by now): the group is
+   * still killed, the run says it could not check, and the warning names what
+   * was not killed. The age cap stays 10 s for members as well: the group
+   * check removes the pids known to be free, and a tighter cap would only
+   * shorten the window for a member that left its group in place. The leader
+   * is never killed by pid: the group kill ended it, and once the command's
+   * exit was seen guard has reaped it, so its pid may be anyone's. A process
+   * is killed by pid once per run, and warned about once. Returns the
+   * processes outside the group the kill reached (one that was gone is left
+   * out); the members of the group are not listed, since the table does not
+   * tell whether they were still alive. */
   const killFromLatest = (): ProcInfo[] => {
     killGroup(leaderPid);
     if (latest === undefined) return [];
     const members = collectTree(latest, leaderPid, tracked).filter(
-      (proc) => proc.pid !== leaderPid && !killedByPid.has(procKey(proc)),
+      (proc) =>
+        proc.pid !== leaderPid &&
+        !killedByPid.has(procKey(proc)) &&
+        (proc.pgid !== leaderPid || groupExists(proc.pid)),
     );
     if (members.length === 0) return [];
     const ageMs = Date.now() - latestAt;

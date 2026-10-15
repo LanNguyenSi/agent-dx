@@ -1070,7 +1070,7 @@ describe("guard: a process table that cannot be read", () => {
     // it fails. The command ends at 12 s, so when guard has to decide the table
     // is 11 to 12 s old counted from before that look (stale: over the cap of
     // 10 s) and 8 to 9 s old counted from after it (young enough to kill from).
-    const { r, esc, grp } = await escapeeWithOldTable(7183, 12_000, {
+    const { r, esc, grp } = await escapeeWithOldTable(7195, 12_000, {
       ps: { skip: 1, delayFirstSec: 3 },
     });
     expect(r.reason).toBe("leftover_check_failed");
@@ -1174,7 +1174,13 @@ describe("guard: a process table that cannot be read", () => {
         ["-e", leavesGroupInPlace(arg, flag, endMs)],
         { pollMs: 100, ...over },
       );
-      return { r, pids: kill.mock.calls.map(([pid]) => pid) };
+      // Signal 0 only asks whether a group exists; the kills are the rest.
+      return {
+        r,
+        pids: kill.mock.calls
+          .filter(([, signal]) => signal !== 0)
+          .map(([pid]) => pid),
+      };
     } finally {
       kill.mockRestore();
       ps.restore();
@@ -1208,6 +1214,60 @@ describe("guard: a process table that cannot be read", () => {
     const byPid = pids.filter((pid) => pid > 0);
     expect(byPid.length).toBeGreaterThan(0);
     expect(new Set(byPid).size).toBe(byPid.length);
+  });
+
+  it("a run that leaves nothing, with the table failing after the exit, signals no process by pid: the pids of what ended are anyone's", async () => {
+    // The last table showed the command and a `sleep` in the group; both are
+    // gone when the reads after the exit fail. The group is ended (a negative
+    // pid), and neither of them is signalled by its own pid.
+    const flag = path.join(tmp(), "flag");
+    const ps = installFakePs({ flag, fails: 10_000 });
+    const kill = vi.spyOn(process, "kill");
+    let r;
+    let pids: number[];
+    try {
+      r = await run(
+        "sh",
+        ["-c", `sleep 0.8 & sleep 0.3; : > '${flag}'; wait; exit 0`],
+        { pollMs: 100 },
+      );
+      pids = kill.mock.calls.map(([pid]) => pid);
+    } finally {
+      kill.mockRestore();
+      ps.restore();
+    }
+    expect(r.reason).toBe("leftover_check_failed");
+    expect(r.leftoverCheckFailed).toBe(true);
+    expect(r.leftovers).toEqual([]);
+    expect(r.warnings.join(" ")).not.toContain("killed by pid");
+    expect(pids.some((pid) => pid < 0)).toBe(true);
+    expect(pids.filter((pid) => pid > 0)).toEqual([]);
+  });
+
+  it("an escapee the last table showed that the command ended itself is not listed: the kill by pid did not reach it, and the run says it could not check", async () => {
+    const esc = fx(7197);
+    const flag = path.join(tmp(), "flag");
+    const ps = installFakePs({ flag, fails: 10_000 });
+    // The escapee is seen by the polls; the stand-in is armed at 0.8 s, and
+    // the command kills the escapee itself at 1.2 s, before it ends.
+    const script =
+      "const {spawn}=require('child_process');" +
+      `const e=spawn('sleep',['${esc.arg}'],{detached:true,stdio:'ignore'});` +
+      `setTimeout(()=>require('fs').writeFileSync(${JSON.stringify(flag)},''),800);` +
+      "setTimeout(()=>process.kill(e.pid,'SIGKILL'),1200);" +
+      "setTimeout(()=>process.exit(0),1500)";
+    let r;
+    try {
+      r = await run(process.execPath, ["-e", script], { pollMs: 100 });
+    } finally {
+      ps.restore();
+    }
+    expect(r.reason).toBe("leftover_check_failed");
+    expect(r.exitCode).toBe(2);
+    expect(r.leftoverCheckFailed).toBe(true);
+    expect(r.leftovers).toEqual([]);
+    expect(r.killed).toEqual([]);
+    expect(marked(esc.cmd)).toEqual([]);
   });
 
   it("SIGINT to the CLI after the command ended, while the table is tried again, still kills the group and the escapee", async () => {

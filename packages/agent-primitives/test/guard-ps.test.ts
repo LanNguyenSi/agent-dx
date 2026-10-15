@@ -362,6 +362,39 @@ describe("endsWithTail", () => {
     expect(endsWithTail("x sh cmd ??bung and more", tail)).toBe(false);
   });
 
+  it("takes time linear in the command line, whatever the number of runs: a `?` per byte rendering of 200 runs", () => {
+    // Linux prints one `?` per byte: a two-byte letter becomes `??`. A
+    // back-tracking matcher takes seconds at 34 such runs.
+    const tail = ` sh cmd ${"\u00e9a".repeat(200)}`;
+    const command = `x sh cmd ${"??a".repeat(200)}`;
+    const started = performance.now();
+    expect(endsWithTail(command, tail)).toBe(true);
+    expect(endsWithTail(`${command}b`, tail)).toBe(false);
+    expect(endsWithTail(command.replace(/a$/, "b"), tail)).toBe(false);
+    // The same size, and no ending that matches: every window is tried.
+    expect(endsWithTail(`x sh cmd ${"??b".repeat(200)}`, tail)).toBe(false);
+    expect(performance.now() - started).toBeLessThan(200);
+  });
+
+  it("matches runs next to each other, at the start of the tail, and across several windows", () => {
+    // A tail that starts with a run: the match may start anywhere.
+    expect(endsWithTail("anything ??ab", "\u00dcab")).toBe(true);
+    expect(endsWithTail("ab", "\u00dcab")).toBe(true);
+    expect(endsWithTail("aXb", "\u00dcab")).toBe(false);
+    // Runs are told apart by the literals between them, each with a window.
+    const two = "a\u00dcb\u00dcc";
+    expect(endsWithTail("a??b??c", two)).toBe(true);
+    expect(endsWithTail("a??bc", two)).toBe(true);
+    expect(endsWithTail("a??d??c", two)).toBe(false);
+    expect(endsWithTail("a??b??d", two)).toBe(false);
+    // A one-byte run takes four characters at most, each of its windows.
+    const one = "a\nb\nc";
+    expect(endsWithTail("a1234b9c", one)).toBe(true);
+    expect(endsWithTail("a12345b9c", one)).toBe(false);
+    expect(endsWithTail("a1b1234c", one)).toBe(true);
+    expect(endsWithTail("a1b12345c", one)).toBe(false);
+  });
+
   it("allows four characters per byte of the run and no more", () => {
     // One newline is one byte: up to four characters, such as `\\012`.
     expect(endsWithTail("sh a \\012", "sh a \n")).toBe(true);
