@@ -108,9 +108,10 @@ What is reported then:
   `killed`. If none answers, the processes outside the group that the last
   readable table showed are killed by pid, and those the kill reached are
   listed under `killed`, with a warning that names the age of that table.
-  The members of the group that table showed are killed by pid too, in case
-  one had left the group since (`setsid` or `setpgid` called in place, which
-  keeps its pid) and the group kill missed it; they are not listed, because
+  The members of the group that table showed and that now lead a process
+  group of their own (`setsid` or `setpgid(0, 0)` called in place, which keeps
+  the pid) are killed by pid too, since the group kill missed them; a member
+  that joined another existing group is not reached. They are not listed, because
   the table does not say whether they were still alive. `leftoverCheckFailed`
   is `true`.
 - **After the command ended on its own**: the group is killed unseen, so what

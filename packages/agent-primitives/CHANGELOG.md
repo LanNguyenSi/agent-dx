@@ -56,8 +56,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of the group that the last readable table showed and that now lead a
   process group of their own are killed by pid too, within the same 10 s age
   cap (counted from the start of the read), so a member that called `setsid`
-  in place after that table is not left alive, while a pid that is no longer a
-  group leader is never signalled;
+  in place after that table is not left alive, while a group member whose pid
+  leads no process group is not signalled by its pid;
   each process is aimed at and warned about once per run. The trampoline's
   orphaned watcher is recognised when the command's arguments contain a
   newline, a tab or a non-ASCII character, which `ps` prints escaped.
