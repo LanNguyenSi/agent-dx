@@ -263,6 +263,27 @@ Rules:
   `sed -i ''` and GNU needs `sed -i`, and a bare `sed -i -E` or `sed -i -e`
   on macOS treats the flag as the backup suffix and leaves a `<file>-E` or
   `<file>-e` copy behind.
+- Before handback, run the documentation checks that exist and include their
+  outcome in `tests.executed`: when the repository has a configured
+  knowledge bundle (`knowledge` in `.ai/workflow/manifest.json`; default
+  `docs/okf/`), run its bundle check over the whole configured bundle at the
+  head of your delta, not only the files you changed, because a source edit
+  can shift lines that an untouched doc cites; when a drift check that lists
+  docs and comments still naming a removed or renamed identifier is
+  connected, run it over base..head and fix or report every site it lists.
+  Both are conditional on availability: when neither is configured or
+  connected, say so in one line and skip them. A check that cannot run is a
+  limitation, not a pass. These checks are not extra verification-set
+  members; a complete verification set that already includes the bundle
+  check satisfies the bundle half.
+- Every check result you claim in `tests.executed`, `summary`, or
+  `criterion_evidence` carries either the path of a recorded verify envelope
+  (the verify runner's JSON output saved under the run directory's
+  `evidence/` directory) or the exact command plus its exit code; an
+  envelope saved only in the scratchpad counts only together with the exact
+  command plus its exit code. A `summary` or `criterion_evidence` claim may
+  point to its `tests.executed` entry instead of repeating the envelope. A
+  claim with neither is prose, and the reviewer treats it as a finding.
 - Verification plans, probe plans, and repeat tallies run in the foreground,
   and the implementer reports their returns in the same turn as the last
   check. A background monitor is no substitute for those returns.

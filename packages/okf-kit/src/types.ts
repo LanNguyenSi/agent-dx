@@ -2,10 +2,12 @@ export type Severity = "error" | "warning" | "notice";
 
 /**
  * The OKF spec version a bundle is checked against. Detected from the
- * bundle-root `index.md` frontmatter `okf_version` key (OKF v0.2; the YAML
- * number and the quoted-string form of `0.1`/`0.2` both count), overridden
- * by `check --spec` (`src/cli.ts`), and `v0.1` for every bundle with no key
- * and no frontmatter, exactly as before the key existed.
+ * bundle-root `index.md` frontmatter `okf_version` key (OKF v0.2; the quoted-
+ * string form and the YAML number form of `0.1`/`0.2` both count, the number
+ * only when the frontmatter spells it exactly like that -- `0.20` parses to
+ * `0.2` but is not the `0.2` anyone declared), overridden by `check --spec`
+ * (`src/cli.ts`), and `v0.1` for every bundle with no key and no frontmatter,
+ * exactly as before the key existed.
  */
 export type SpecVersion = "v0.1" | "v0.2";
 
@@ -22,6 +24,15 @@ export interface FrontmatterInfo {
   present: boolean;
   parsed?: unknown;
   parseError?: string;
+  /**
+   * The frontmatter block's own YAML source text, the lines between the two
+   * `---` delimiters (and only those: a body that mentions a frontmatter key
+   * is never part of it). `parsed` alone cannot answer "how was this value
+   * spelled" -- YAML resolves the number `0.20` to `0.2` -- so a reader that
+   * judges the spelling reads it here (see `readOkfVersion`). Undefined when
+   * no block is present.
+   */
+  yaml?: string;
 }
 
 export interface BundleDoc {

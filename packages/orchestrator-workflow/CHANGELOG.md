@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Implementer handback now includes the documentation checks that exist, and
+  claimed check results are traceable. Before returning, the implementer runs
+  the configured knowledge-bundle check over the whole bundle and a connected
+  identifier drift check over base..head (both conditional on availability;
+  an unavailable check is a reported limitation), and every claimed check
+  result carries a recorded verify envelope path or command plus exit code. The
+  reviewer verifies claimed checks against that envelope or command output
+  instead of prose, and a claim without either is a finding. No return field
+  is added. The aim is to catch citation drift and unmeasured claims, the two
+  largest recurring review-finding classes, before review instead of in it
+  (pattern-mining measurement, recorded outside this kit). Installed
+  implementer and reviewer files report as outdated until refreshed.
+
 - Standing safety rule for runs against adversarial fixtures (tracker task
   a8daf06a). The implementer prompt now requires repros, hang probes, fuzz
   loops, and ad-hoc commands against an adversarial or circular fixture to

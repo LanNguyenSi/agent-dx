@@ -281,8 +281,10 @@ function parseTimestampInstantMs(raw: string): number | undefined {
 /**
  * The frontmatter `generated` mapping (OKF v0.2: `generated: { by, at }`,
  * the replacement for the v0.1 `timestamp`), or undefined when the key is
- * absent or present but not a mapping (`generated: some string`). Readers:
- * the effective-stamp helpers below and the `generated-shape` rule.
+ * absent OR present but not a mapping (`generated: some string`): the two
+ * cases are deliberately not told apart here, which is why `generated-shape`
+ * tests the key's presence itself when it reports a malformed value under
+ * v0.2. Readers: the effective-stamp helpers below and that rule.
  */
 export function getGenerated(
   parsed: unknown,
