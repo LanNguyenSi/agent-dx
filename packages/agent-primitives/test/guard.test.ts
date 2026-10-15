@@ -25,10 +25,24 @@ function tmp(): string {
   return dir;
 }
 
+/** Processes whose command line IS `marker` (a `sleep` with a distinctive
+ * length) or ENDS with it (a node child given a distinctive last argument).
+ * A match anywhere in the line would also catch the shell or runner that
+ * started this suite when its own command text mentions the marker. */
 function marked(marker: string): { pid: number; command: string }[] {
   if (!markers.includes(marker)) markers.push(marker);
   return (readProcesses() ?? []).filter(
-    (p) => !isZombie(p) && p.command.includes(marker),
+    (p) =>
+      !isZombie(p) &&
+      (p.command === marker || p.command.endsWith(` ${marker}`)),
+  );
+}
+
+/** Processes whose whole command line is exactly `command`. */
+function exactly(command: string): { pid: number }[] {
+  if (!markers.includes(command)) markers.push(command);
+  return (readProcesses() ?? []).filter(
+    (p) => !isZombie(p) && p.command === command,
   );
 }
 
@@ -120,6 +134,9 @@ describe("guard: wall-clock timeout", () => {
     expect(took).toBeGreaterThanOrEqual(900);
     expect(took).toBeLessThan(15_000);
     expect(r.killed.map((p) => p.command)).toContain("sleep 7101");
+    // The trampoline and its watcher are in the group but are not the
+    // caller's processes: they are not reported.
+    expect(r.killed.some((p) => p.command.includes("set +aemvx"))).toBe(false);
     expect(marked("sleep 7101")).toEqual([]);
   });
 
@@ -228,6 +245,33 @@ describe("guard: leftovers", () => {
   });
 });
 
+describe("guard: runs that cannot start", () => {
+  it("refuses before running anything when ps is unavailable, exit 2", async () => {
+    const saved = process.env.PATH;
+    process.env.PATH = tmp();
+    try {
+      const r = await run("sleep", ["7115"]);
+      expect(r.status).toBe("error");
+      expect(r.reason).toBe("ps_unavailable");
+      expect(r.exitCode).toBe(2);
+    } finally {
+      process.env.PATH = saved;
+    }
+    expect(marked("sleep 7115")).toEqual([]);
+  });
+
+  it("reports a working directory that does not exist as spawn_failed, exit 2", async () => {
+    const r = await run("sleep", ["7116"], {
+      cwd: path.join(tmp(), "no-such-dir"),
+    });
+    expect(r.status).toBe("error");
+    expect(r.reason).toBe("spawn_failed");
+    expect(r.exitCode).toBe(2);
+    expect(r.warnings.join(" ")).toContain("could not start");
+    expect(marked("sleep 7116")).toEqual([]);
+  });
+});
+
 describe("guard: abort and parent death", () => {
   it("an abort signal kills the group at once", async () => {
     const controller = new AbortController();
@@ -253,12 +297,12 @@ describe("guard: abort and parent death", () => {
       },
     );
     try {
-      expect(await waitFor(() => marked("sleep 7106").length > 0, 15_000)).toBe(
-        true,
-      );
+      expect(
+        await waitFor(() => exactly("sleep 7106").length > 0, 15_000),
+      ).toBe(true);
       cli.kill("SIGKILL");
       expect(
-        await waitFor(() => marked("sleep 7106").length === 0, 15_000),
+        await waitFor(() => exactly("sleep 7106").length === 0, 15_000),
       ).toBe(true);
     } finally {
       cli.kill("SIGKILL");
