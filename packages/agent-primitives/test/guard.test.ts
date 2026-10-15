@@ -608,6 +608,34 @@ describe("guard: a process table that cannot be read", () => {
     expect(marked(s.cmd)).toEqual([]);
   });
 
+  it("an abort during the kill sweeps ends them at once: no further read, and what was found is listed under killed", async () => {
+    // The frozen table keeps the sweeps going (the leftover looks alive).
+    const s = fx(7176);
+    const flag = path.join(tmp(), "flag");
+    const ps = installFakePs({ flag, fails: 0, freeze: true });
+    const controller = new AbortController();
+    let r;
+    try {
+      const pending = run(
+        "sh",
+        ["-c", `sleep ${s.arg} & sleep 0.8; : > '${flag}'; exit 0`],
+        { pollMs: 1500, signal: controller.signal },
+      );
+      // The read after the exit and the first sweep's look have been made.
+      expect(await waitFor(() => ps.calls() >= 2, 15_000)).toBe(true);
+      const callsAtAbort = ps.calls();
+      controller.abort();
+      r = await pending;
+      expect(ps.calls()).toBe(callsAtAbort);
+    } finally {
+      ps.restore();
+    }
+    expect(r.reason).toBe("aborted");
+    expect(r.killed.map((p) => p.command)).toContain(s.cmd);
+    expect(r.leftovers).toEqual([]);
+    expect(marked(s.cmd)).toEqual([]);
+  });
+
   /** An abort with a failing `ps` from the abort on. The flag is written and
    * the abort follows in the same tick, so the limit's first read is the
    * first failure. An escapee is tracked first (polls every 50 ms). Returns
