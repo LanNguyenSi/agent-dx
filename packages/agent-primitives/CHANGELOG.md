@@ -253,6 +253,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `refs/remotes` whose name is not UTF-8 (it cannot be excluded exactly)
   are the `unpushed_state_unknown` refusal (branch kept; `--force` still
   removes) (tracker 84aff355).
+- `worktree remove`: in a reftable repository, a symbolic ref of the common
+  stack under `refs/remotes` whose name holds a non-ASCII character is the
+  `unpushed_state_unknown` refusal (branch kept; `--force` still removes).
+  The name is handed to `git rev-list` as an exact `--exclude`, but on macOS
+  git converts a command-line argument to NFC (`core.precomposeunicode`),
+  while a reftable record keeps the bytes it was written with, so a symbolic
+  ref stored with a decomposed name was never excluded, `--remotes` followed
+  it to the local branch, the walk printed nothing and `--delete-branch`
+  deleted unpushed commits without `--force`. The refusal covers both
+  normalization forms and does not depend on the platform. A plain
+  remote-tracking ref with a non-ASCII name and the files backend are
+  unchanged.
 
 ## [0.13.0] - 2026-10-13
 

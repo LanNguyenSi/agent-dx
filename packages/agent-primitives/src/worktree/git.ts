@@ -1321,6 +1321,18 @@ function unpushedInCommonStack(cwd: string, commonDir: BytePath): GitRunResult {
         `git named ${quoteBytes(target)} as the target of the symbolic ref ${text} in the common reftable stack, which is no ref name, so the listing cannot be trusted to tell the symbolic refs from the plain ones`,
       );
     }
+    // A name with a byte at or above 0x80 cannot be handed to git as an
+    // exact `--exclude` on every platform: git converts a command-line
+    // argument to NFC when `core.precomposeunicode` is on (macOS sets it at
+    // init), while a reftable record keeps the bytes it was written with, so
+    // a name stored decomposed is never matched and `--remotes` follows the
+    // symbolic ref to the branch. NFC names are refused as well, since the
+    // result must not depend on how the name was written or on the platform.
+    if (/[^\x00-\x7f]/.test(text)) {
+      return unknownUnpushed(
+        `the symbolic ref ${text} in the common reftable stack has a name with a non-ASCII character, which cannot be passed to git as an exact exclusion on every platform (git may convert the argument to another Unicode normalization form than the one stored), so the walk could follow it to a local branch and count that branch's commits as pushed`,
+      );
+    }
     // Ref names cannot hold glob characters, so the name is its own exact
     // `--exclude` pattern; for `--remotes` it is relative to `refs/remotes/`.
     excludes.push(`--exclude=${text.replace(/^refs\/remotes\//, "")}`);
@@ -1366,8 +1378,11 @@ function unpushedInCommonStack(cwd: string, commonDir: BytePath): GitRunResult {
  * a linked worktree's own reftable stack is merged into every listing made
  * in the worktree. A symbolic ref whose
  * name is not UTF-8 cannot be handed to `--exclude` exactly (an argument is
- * text) and is unknown as well. Fails (non-zero status or `error`) when the
- * refs cannot be listed, so the caller treats the state as unknown. `error`
+ * text) and is unknown as well; so is one of the common reftable stack whose
+ * name holds any non-ASCII character, since git may convert the argument to
+ * another Unicode normalization form than the stored one. Fails (non-zero
+ * status or `error`) when the refs cannot be listed, so the caller treats
+ * the state as unknown. `error`
  * counts even with a status of 0: a listing that outgrows the output limit
  * of `runGit` comes back cut short, with `error` set, when git has already
  * exited. A git call that does not finish within its bound is killed with
