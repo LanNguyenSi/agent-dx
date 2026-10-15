@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `guard <timeout-s> <max-rss-MiB> -- <cmd...>`: runs a command in a process
+  group of its own under a wall-clock timeout and a memory cap, so a repro, a
+  hang probe or a fuzz loop against an adversarial fixture is bounded by one
+  portable command instead of a per-run shell script. The cap is checked by
+  polling `ps -A` (`--poll-ms`, default 200) against the summed resident
+  size of the group and of every descendant found by parent pid, because
+  `ulimit -v` does not bind children on macOS; a spike between two polls can
+  overshoot it. At either limit the whole group is ended with `SIGKILL`. When
+  the command ends on its own, anything still alive in its group or below it
+  is listed, killed and reported as a leftover. A descendant that calls
+  `setsid` is followed through the parent chain and killed too, as long as a
+  poll saw it while the chain was intact; one cut loose within a single poll
+  interval is not found (documented in `docs/guard.md`). Exit codes: `124`
+  timeout, `123` memory cap, `122` leftovers, otherwise the command's own
+  code; a usage or setup problem is `2`. The envelope carries the reason,
+  both peak sizes and the killed and leftover processes. macOS and Linux;
+  Windows is not supported. The shipped skill names the command for
+  repro, hang and fuzz runs.
+
 ## [0.14.0] - 2026-10-14
 
 - `worktree remove` and `list`: a replaced or grafted commit graph no longer

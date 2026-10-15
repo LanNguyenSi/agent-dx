@@ -5,9 +5,9 @@ description: Use before searching a codebase, before claiming a check passed, wh
 
 # agent-primitives
 
-`agent-primitives` is a CLI with ten subcommands: `probe`, `verify`,
+`agent-primitives` is a CLI with eleven subcommands: `probe`, `verify`,
 `doctor`, `init`, `drift`, `snapshot`, `delta`, `hygiene`, `worktree`,
-`patch`. Every invocation
+`patch`, `guard`. Every invocation
 prints one bounded JSON result object on stdout by default (`-f text` for a
 human-readable rendering instead) and uses a stable exit-code contract: `0`
 ok, `1` a real finding, `2` the run could not conclude, including a usage
@@ -186,6 +186,7 @@ agent-primitives probe -p <patch> -t '<test command>'
 agent-primitives probe --plan <plan.json>
 agent-primitives verify -c build,typecheck,lint,test
 agent-primitives doctor
+agent-primitives guard <timeout-s> <max-rss-MiB> -- <command...>
 ```
 
 To read a probe's verdict, add `--summary` to any `probe` form instead
@@ -363,3 +364,17 @@ exact text to use as `old`. A hard-linked or read-only file is refused as
 `not_editable`. Paths outside the repository root and inside a git
 directory are refused. See the agent-primitives package's
 docs/patch.md.
+
+## 12. Bounded runs
+
+Run a repro, a hang probe, a fuzz loop or any command against an
+adversarial fixture through `agent-primitives guard <timeout-s>
+<max-rss-MiB> -- <cmd...>` instead of a per-run shell script or a bare
+`timeout`. It runs the command in its own process group, kills the whole
+group at the timeout or when the summed resident memory of the command and
+its descendants passes the cap, then kills and reports anything the command
+left running. Exit `124` timeout, `123` memory cap, `122` leftovers; any
+other code is the command's own. Memory is polled, so a fast spike can
+overshoot the cap, and a child that leaves the process group (`setsid`) is
+followed only while a poll sees its parent chain. See the agent-primitives
+package's docs/guard.md.

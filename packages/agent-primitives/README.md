@@ -1,7 +1,7 @@
 # agent-primitives
 
 Agent-first CLI primitives for narrow subagents: a mutation-probe runner, a
-verify runner, a PATH doctor, an identifier-drift guard, a commit-hygiene guard, an all-or-nothing exact-text patcher, checkout snapshot/delta, and linked-worktree creation, removal and
+verify runner, a PATH doctor, an identifier-drift guard, a commit-hygiene guard, a bounded-run guard, an all-or-nothing exact-text patcher, checkout snapshot/delta, and linked-worktree creation, removal and
 reporting, each returning one bounded JSON result instead of raw tool output.
 
 ## Overview
@@ -35,6 +35,11 @@ for teams shipping with AI agents.
 - `hygiene`: refuses staged or committed backup files (`*.bak`, `*.orig`,
   `*~`, and the BSD `sed -i` leftovers `*-e`, `*-E`, `*-n`, `*-r`, `*-s`)
   and flags rewrites of extend-only files and dropped test cases.
+- `guard`: runs a command under a wall-clock timeout and a memory cap in its
+  own process group, kills the whole group at either limit, then finds, kills
+  and reports anything the command left running, with a distinct exit code
+  for each of timeout, cap and leftovers; for repros, hang probes and fuzz
+  loops.
 - `patch`: replaces exact text in one or more files from a JSON edit plan
   (or one `--file`/`--old`/`--new` edit), resolving every edit first and
   writing nothing when one is missing, ambiguous or overlapping; reports
@@ -109,6 +114,8 @@ file, and reports whether the test caught it (`killed`) or missed it
   extend-only rewrites and dropped test cases.
 - [`patch`](docs/patch.md): all-or-nothing exact-text edits, the matching
   tiers, refusals and the result shape.
+- [`guard`](docs/guard.md): bounded runs for repros, hangs and fuzz loops:
+  timeout, memory cap, leftovers and the exit codes.
 - [`snapshot`](docs/snapshot.md): read-only checkout fingerprints.
 - [`delta`](docs/delta.md): compare the same checkout with a saved snapshot.
 - [`worktree`](docs/worktree.md): create, list and remove linked worktrees
@@ -134,6 +141,7 @@ maps the status to the exit code. Each command lives in its own module:
 | `drift` | `src/drift/` |
 | `hygiene` | `src/hygiene/index.ts`, using `src/drift/git.ts` |
 | `patch` | `src/patch/` (`index.ts` plan and write phase, `engine.ts` matching, `hint.ts`, `diff.ts`) |
+| `guard` | `src/guard/` (`index.ts` run, limits and sweeps; `ps.ts` the process table), spawning through `src/bounded-spawn.ts` |
 | `snapshot`, `delta` | `src/snapshot/` |
 | `worktree` | `src/worktree/` (`create.ts`, `remove.ts`, `list.ts`; shared git helpers in `git.ts`, the smoke verdict in `readiness.ts`) |
 
