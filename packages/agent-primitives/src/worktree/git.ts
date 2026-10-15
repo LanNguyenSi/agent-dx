@@ -136,9 +136,13 @@ export interface GitCallOptions {
    * commit graph or an object the call reads, whatever the caller's
    * configuration or environment says: the option alone loses to a
    * `core.useReplaceRefs=true` that an older git reads after it, and a
-   * `-c` on the command line is applied last. For a call whose answer
-   * decides whether commits are on a remote or in a base. It does not
-   * switch off `info/grafts` (see `alteredCommitGraph`). */
+   * `-c` on the command line is applied last. It also carries
+   * `-c core.commitGraph=false`, so git reads parents from the commit
+   * objects and not from the `objects/info/commit-graph` file, which holds
+   * parents of its own and is trusted without being checked against the
+   * objects. For a call whose answer decides whether commits are on a
+   * remote or in a base. It does not switch off `info/grafts` (see
+   * `alteredCommitGraph`). */
   noReplaceObjects?: true;
 }
 
@@ -154,12 +158,27 @@ export const NO_REPLACE_REFS_CONFIG = [
   "core.useReplaceRefs=false",
 ] as const;
 
-/** The argv of one call: the two replace-ref settings when the call asks for
- * them, then the probe-wide settings, then `args`. */
+/** The setting that makes git ignore the commit-graph file
+ * (`objects/info/commit-graph`, or the chain below `commit-graphs/`) and
+ * read each commit's parents from the commit object. git trusts the file's
+ * parent data without checking it against the objects, so a forged file can
+ * make an unpushed commit an ancestor of a remote-tracking ref; as a `-c` on
+ * the command line it also wins over a `core.commitGraph=true` from the
+ * configuration or the environment. */
+export const NO_COMMIT_GRAPH_CONFIG = ["-c", "core.commitGraph=false"] as const;
+
+/** The argv of one call: the replace-ref settings and the commit-graph
+ * setting when the call asks for them, then the probe-wide settings, then
+ * `args`. */
 function callArgv(args: readonly string[], options: GitCallOptions): string[] {
   const argv = probeGitArgv(args);
   return options.noReplaceObjects === true
-    ? [NO_REPLACE_OBJECTS_FLAG, ...NO_REPLACE_REFS_CONFIG, ...argv]
+    ? [
+        NO_REPLACE_OBJECTS_FLAG,
+        ...NO_REPLACE_REFS_CONFIG,
+        ...NO_COMMIT_GRAPH_CONFIG,
+        ...argv,
+      ]
     : argv;
 }
 
@@ -1051,7 +1070,7 @@ const DEFAULT_REPLACE_REF_BASE = "refs/replace/";
 
 /**
  * Why the commit graph git reads in this repository cannot be taken as the
- * real one, or `undefined`. Two things change what `git rev-list` and
+ * real one, or `undefined`. Three things change what `git rev-list` and
  * `git merge-base` see without touching a ref or a commit, so a commit that
  * no remote holds can read as pushed (or as merged into the base):
  *
@@ -1062,6 +1081,12 @@ const DEFAULT_REPLACE_REF_BASE = "refs/replace/";
  *   `GIT_REPLACE_REF_BASE` say. A `GIT_REPLACE_REF_BASE` other
  *   than the default is refused as well: it says the caller's git reads
  *   replacements from somewhere else, and the answer is not worth a guess.
+ * - the commit-graph file (`objects/info/commit-graph`): git reads parents
+ *   from it without checking them against the commit objects, so a forged
+ *   file can make an unpushed commit an ancestor of a remote-tracking ref.
+ *   The calls that decide switch it off with `-c core.commitGraph=false`
+ *   (`noReplaceObjects`), whatever the caller's configuration or environment
+ *   says, and read the parents from the commit objects.
  * - the grafts file, `info/grafts` in the common git directory (not the
  *   private directory of a linked worktree, which git does not read), or the
  *   file `GIT_GRAFT_FILE` names. git still reads both, with a deprecation

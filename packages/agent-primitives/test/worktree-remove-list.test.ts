@@ -1,4 +1,9 @@
-import { execFile, execFileSync, spawn } from "node:child_process";
+import {
+  execFile,
+  execFileSync,
+  spawn,
+  type ChildProcess,
+} from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -2552,23 +2557,38 @@ interface Bounded {
   rssExceeded: boolean;
 }
 
-/** The processes of one `ps` listing that belong to the run started as
- * `rootPid`: the root, every descendant found by following the parent pids
- * (a git the CLI started sits in a process group of its own, so the group
- * alone would miss it), and whatever else is left in the root's group (a
- * child whose parent has exited belongs to init now, not to the root). */
-function treeOf(
-  listing: string,
-  rootPid: number,
-): { pid: number; rssKb: number }[] {
-  const procs: { pid: number; ppid: number; pgid: number; rssKb: number }[] =
-    [];
+interface ListedProcess {
+  pid: number;
+  ppid: number;
+  pgid: number;
+  rssKb: number;
+}
+
+/** The processes of one `ps -axo pid=,ppid=,pgid=,rss=` listing. */
+function parseListing(listing: string): ListedProcess[] {
+  const procs: ListedProcess[] = [];
   for (const line of listing.split("\n")) {
     const [pid, ppid, pgid, rss] = line.trim().split(/\s+/).map(Number);
     if (pid === undefined || ppid === undefined || pgid === undefined) continue;
     if (!Number.isInteger(pid) || !Number.isInteger(ppid)) continue;
+    if (!Number.isInteger(pgid)) continue;
     procs.push({ pid, ppid, pgid, rssKb: rss ?? 0 });
   }
+  return procs;
+}
+
+/** The processes of one `ps` listing that belong to the run started as
+ * `rootPid`: the root, every descendant found by following the parent pids
+ * (a git the CLI started sits in a process group of its own, so the group
+ * alone would miss it), and whatever else is left in the root's group (a
+ * child whose parent has exited belongs to init now, not to the root). Each
+ * comes with its process group, so a later kill can tell the process it
+ * saw from another one that was given the same pid since. */
+function treeOf(
+  listing: string,
+  rootPid: number,
+): { pid: number; pgid: number; rssKb: number }[] {
+  const procs = parseListing(listing);
   const inTree = new Set<number>([rootPid]);
   for (let grew = true; grew;) {
     grew = false;
@@ -2581,18 +2601,13 @@ function treeOf(
   }
   return procs
     .filter((p) => inTree.has(p.pid) || p.pgid === rootPid)
-    .map((p) => ({ pid: p.pid, rssKb: p.rssKb }));
+    .map((p) => ({ pid: p.pid, pgid: p.pgid, rssKb: p.rssKb }));
 }
 
-/** The processes of the run started as `rootPid` and their resident memory
- * in KiB (`ps` lists every process with its parent and group; the same call
- * works on macOS and Linux). Empty when `ps` cannot answer, which the guard
- * reads as "under the limit": the time limit is the guard that cannot be
- * skipped. */
-async function runTree(
-  rootPid: number,
-): Promise<{ pid: number; rssKb: number }[]> {
-  const out = await new Promise<string>((resolve) => {
+/** Every process on the machine as `ps` lists it (the same call works on
+ * macOS and Linux). Empty when `ps` cannot answer. */
+async function listProcesses(): Promise<string> {
+  return await new Promise<string>((resolve) => {
     execFile(
       "ps",
       ["-axo", "pid=,ppid=,pgid=,rss="],
@@ -2602,7 +2617,50 @@ async function runTree(
       },
     );
   });
-  return treeOf(out, rootPid);
+}
+
+/** The processes of the run started as `rootPid` and their resident memory
+ * in KiB. Empty when `ps` cannot answer, which the guard reads as "under the
+ * limit": the time limit is the guard that cannot be skipped. */
+async function runTree(
+  rootPid: number,
+): Promise<{ pid: number; pgid: number; rssKb: number }[]> {
+  return treeOf(await listProcesses(), rootPid);
+}
+
+/**
+ * Ends a guarded run: the process group of the root, and the processes the
+ * memory sampler saw outside it (`seen`, pid to the group it was in). A pid
+ * is a name that is given out again once its process has been reaped, so
+ * nothing is signalled by a pid alone: a seen process is signalled only when
+ * a fresh listing still shows that pid in the group it was seen in, and
+ * never the root pid by itself. The group is signalled while the root has
+ * not been reaped (its pid is then still ours) or while a member of it is
+ * listed (the group id cannot be given out again before that member is
+ * gone). Without a listing, only a root that is still unreaped is signalled.
+ */
+async function killRun(
+  rootPid: number | undefined,
+  rootReaped: boolean,
+  seen: ReadonlyMap<number, number>,
+): Promise<void> {
+  const listed = parseListing(await listProcesses());
+  const signal = (target: number): void => {
+    try {
+      process.kill(target, "SIGKILL");
+    } catch {
+      // Already gone.
+    }
+  };
+  if (
+    rootPid !== undefined &&
+    (!rootReaped || listed.some((p) => p.pgid === rootPid))
+  ) {
+    signal(-rootPid);
+  }
+  for (const [pid, pgid] of seen) {
+    if (listed.some((p) => p.pid === pid && p.pgid === pgid)) signal(pid);
+  }
 }
 
 /** How often a guarded run samples the memory of its processes. */
@@ -2639,27 +2697,20 @@ async function spawnBounded(
   child.stderr.on("data", (chunk: string) => {
     stderr += chunk;
   });
-  // Processes of the run seen by the memory sampler, so a descendant in a
-  // group of its own (the CLI starts each git in one) ends with the run.
-  const seen = new Set<number>();
-  const killGroup = (): void => {
-    try {
-      if (child.pid !== undefined) process.kill(-child.pid, "SIGKILL");
-    } catch {
-      // The group is already gone.
-    }
-    for (const pid of seen) {
-      try {
-        process.kill(pid, "SIGKILL");
-      } catch {
-        // Already gone.
-      }
-    }
-  };
+  // Processes of the run seen by the memory sampler, with the group each was
+  // in, so a descendant in a group of its own (the CLI starts each git in
+  // one) ends with the run, and only while it is still that process.
+  const seen = new Map<number, number>();
+  const killGroup = (): Promise<void> =>
+    killRun(
+      child.pid,
+      child.exitCode !== null || child.signalCode !== null,
+      seen,
+    );
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
-    killGroup();
+    void killGroup();
   }, limitMs);
   // The memory guard: sampled while the run lives, and the group and every
   // process seen are killed the first time the tree holds more than
@@ -2677,11 +2728,11 @@ async function spawnBounded(
             let kb = 0;
             for (const p of tree) {
               kb += p.rssKb;
-              seen.add(p.pid);
+              seen.set(p.pid, p.pgid);
             }
             if (kb > rssLimitKb && !rssExceeded) {
               rssExceeded = true;
-              killGroup();
+              void killGroup();
             }
           });
         }, RSS_POLL_MS);
@@ -2696,7 +2747,7 @@ async function spawnBounded(
   } finally {
     clearTimeout(timer);
     if (sampler !== undefined) clearInterval(sampler);
-    killGroup();
+    await killGroup();
   }
 }
 
@@ -4867,6 +4918,85 @@ setTimeout(() => {}, 60000);`,
     expect(tree.reduce((sum, p) => sum + p.rssKb, 0)).toBe(350);
   });
 
+  describe("ending a run signals only a process that is still the one that was seen", () => {
+    const sleepers: ChildProcess[] = [];
+    afterEach(() => {
+      vi.restoreAllMocks();
+      for (const c of sleepers.splice(0)) {
+        try {
+          if (c.pid !== undefined) process.kill(c.pid, "SIGKILL");
+        } catch {
+          // Gone, as it should be.
+        }
+      }
+    });
+
+    /** A `sleep` in a process group of its own, as the CLI starts a git. */
+    function sleeper(): number {
+      const c = spawn("sleep", ["60"], { detached: true, stdio: "ignore" });
+      sleepers.push(c);
+      if (c.pid === undefined) throw new Error("sleep did not start");
+      return c.pid;
+    }
+
+    /** The pid of a process that has exited and been reaped. */
+    async function reapedPid(): Promise<number> {
+      const c = spawn("true", [], { detached: true, stdio: "ignore" });
+      const pid = c.pid;
+      await new Promise<void>((resolve) => {
+        c.on("close", () => {
+          resolve();
+        });
+      });
+      if (pid === undefined) throw new Error("true did not start");
+      return pid;
+    }
+
+    function alive(pid: number): boolean {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    it("never signals a pid that is not in the group it was seen in, nor the root pid alone", async () => {
+      const root = await reapedPid();
+      const member = sleeper();
+      // A process that is listed under a pid the sampler saw, but in
+      // another group than the one it was seen in: what a recycled pid
+      // looks like.
+      const recycled = sleeper();
+      expect(alive(member) && alive(recycled)).toBe(true);
+      const kill = vi.spyOn(process, "kill");
+      await killRun(
+        root,
+        true,
+        new Map([
+          [member, member],
+          [recycled, root],
+        ]),
+      );
+      const targets = kill.mock.calls
+        .filter(([, sig]) => sig === "SIGKILL")
+        .map(([pid]) => pid);
+      // The root is reaped and nothing is left in its group: no group
+      // signal, and no signal to the root pid by itself.
+      expect(targets).toEqual([member]);
+      expect(await processGone(member)).toBe(true);
+      expect(alive(recycled)).toBe(true);
+    });
+
+    it("signals the group of a root that has not been reaped, and a seen process still in its group", async () => {
+      const root = sleeper();
+      const other = sleeper();
+      await killRun(root, false, new Map([[other, other]]));
+      expect(await processGone(root)).toBe(true);
+      expect(await processGone(other)).toBe(true);
+    });
+  });
+
   it("leaves a run under both limits alone", async () => {
     const r = await spawnBounded(
       process.execPath,
@@ -5189,6 +5319,184 @@ describe("worktree remove: replace refs", () => {
     expect(r.code, r.stdout + r.stderr).toBe(0);
     expect(r.json.branch.deleted).toBe(true);
   });
+});
+
+/**
+ * Rewrites the commit-graph file `file` so that its entry for `child` names
+ * `parent` as its first parent, leaving the commit objects alone. git reads
+ * parents from this file without checking them against the objects, so the
+ * commits then read as parent and child to `rev-list` and `merge-base`. Only
+ * the first parent of the entry is changed; the file's checksum is not
+ * updated (git checks it only in `commit-graph verify`).
+ */
+function forgeCommitGraphParent(
+  file: string,
+  child: string,
+  parent: string,
+): void {
+  const data = fs.readFileSync(file);
+  expect(data.subarray(0, 4).toString("latin1")).toBe("CGPH");
+  const hashLen = data[5] === 1 ? 20 : 32;
+  const chunkCount = data[6] ?? 0;
+  const chunks = new Map<string, number>();
+  for (let i = 0; i <= chunkCount; i += 1) {
+    const at = 8 + 12 * i;
+    chunks.set(
+      data.subarray(at, at + 4).toString("latin1"),
+      Number(data.readBigUInt64BE(at + 4)),
+    );
+  }
+  const fanout = chunks.get("OIDF");
+  const oids = chunks.get("OIDL");
+  const commitData = chunks.get("CDAT");
+  if (fanout === undefined || oids === undefined || commitData === undefined) {
+    throw new Error("the commit-graph file has no OIDF, OIDL or CDAT chunk");
+  }
+  const count = data.readUInt32BE(fanout + 255 * 4);
+  const indexOf = (sha: string): number => {
+    for (let i = 0; i < count; i += 1) {
+      const at = oids + i * hashLen;
+      if (data.subarray(at, at + hashLen).toString("hex") === sha) return i;
+    }
+    throw new Error(`${sha} is not in the commit-graph file`);
+  };
+  const entry = commitData + indexOf(child) * (hashLen + 16);
+  data.writeUInt32BE(indexOf(parent), entry + hashLen);
+  fs.writeFileSync(file, data);
+}
+
+describe("worktree remove: a forged commit-graph file", () => {
+  /** The commit-graph file `git commit-graph write` makes in the common
+   * directory, with M1 given the parent U, so that U reads as an ancestor
+   * of `origin/main`. */
+  async function plantForgedGraph(g: Graph): Promise<void> {
+    await gg(g.f.repo, [
+      "-c",
+      "commitGraph.generationVersion=1",
+      "commit-graph",
+      "write",
+      "--reachable",
+      "--no-progress",
+    ]);
+    const file = path.join(commonDirOf(g.f), "objects/info/commit-graph");
+    fs.chmodSync(file, 0o644);
+    forgeCommitGraphParent(file, g.m1, g.sha);
+    // The premise: git reads the forged parent, and reads the real one
+    // without the file.
+    expect(await guardedUnpushed(g)).toBe("");
+    expect(
+      (
+        await gg(g.f.repo, [
+          "-c",
+          "core.commitGraph=false",
+          "rev-list",
+          "feat",
+          "--not",
+          "--remotes",
+        ])
+      ).trim(),
+    ).toBe(g.sha);
+  }
+
+  it("refuses a branch whose commit a forged commit-graph file hides under origin/main, with and without --base", async () => {
+    const g = makeGraph();
+    await plantForgedGraph(g);
+    await expectRefusals(g, REAL_GRAPH_CASES);
+  });
+
+  // Each way a caller can set `core.commitGraph=true`. The call's own
+  // `-c core.commitGraph=false` is applied after all of them.
+  const GRAPH_TURNED_ON: [string, (g: Graph) => Promise<NodeJS.ProcessEnv>][] =
+    [
+      [
+        "core.commitGraph=true in the repository configuration",
+        async (g) => {
+          await gg(g.f.repo, ["config", "core.commitGraph", "true"], {});
+          return {};
+        },
+      ],
+      [
+        "core.commitGraph=true in GIT_CONFIG_PARAMETERS",
+        () =>
+          Promise.resolve({
+            GIT_CONFIG_PARAMETERS: "'core.commitgraph'='true'",
+          }),
+      ],
+      [
+        "core.commitGraph=true in GIT_CONFIG_COUNT, GIT_CONFIG_KEY_0 and GIT_CONFIG_VALUE_0",
+        () =>
+          Promise.resolve({
+            GIT_CONFIG_COUNT: "1",
+            GIT_CONFIG_KEY_0: "core.commitGraph",
+            GIT_CONFIG_VALUE_0: "true",
+          }),
+      ],
+    ];
+
+  it.each(GRAPH_TURNED_ON)(
+    "refuses the same graph when the caller sets %s",
+    async (_name, turnOn) => {
+      const g = makeGraph();
+      await plantForgedGraph(g);
+      const env = await turnOn(g);
+      expect(await guardedUnpushed(g, env)).toBe("");
+      await expectRefusals(g, REAL_GRAPH_CASES, env);
+    },
+  );
+
+  it("does not call the branch merged in list because of the forged parent", async () => {
+    const g = makeGraph();
+    await plantForgedGraph(g);
+    const r = await cliBounded(
+      g.f.work,
+      ["list", "--repo", g.f.repo],
+      {},
+      45_000,
+      GRAPH_RSS_LIMIT_KB,
+    );
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    const entry = (r.json.worktrees as Record<string, any>[]).find(
+      (w) => w.path === g.wt,
+    );
+    if (entry === undefined) throw new Error(`no entry for ${g.wt}`);
+    expect(entry.merged.merged).toBe("unknown");
+    expect(entry.merged.via).toBe("none");
+  });
+
+  it.each([
+    [["--delete-branch"]],
+    [["--delete-branch", "--base", "origin/main"]],
+  ])(
+    "removes a pushed branch as before when a genuine commit-graph file is there (%j)",
+    async (flags) => {
+      const f = makeFixture();
+      const { wt } = makeUnpushed(f);
+      git(wt, ["push", "-q", "origin", "feat"]);
+      await gg(f.repo, [
+        "commit-graph",
+        "write",
+        "--reachable",
+        "--no-progress",
+      ]);
+      expect(
+        fs.existsSync(
+          path.join(
+            absoluteGitPath(f.repo, "--git-common-dir"),
+            "objects/info/commit-graph",
+          ),
+        ),
+      ).toBe(true);
+      const r = await cliBounded(
+        f.work,
+        ["remove", wt, ...flags],
+        {},
+        45_000,
+        GRAPH_RSS_LIMIT_KB,
+      );
+      expect(r.code, r.stdout + r.stderr).toBe(0);
+      expect(r.json.branch.deleted).toBe(true);
+    },
+  );
 });
 
 describe.skipIf(!GRAFTS_SUPPORTED)("worktree remove: a grafts file", () => {

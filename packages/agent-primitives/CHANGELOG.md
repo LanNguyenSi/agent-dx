@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `worktree remove` and `list`: a forged commit-graph file no longer makes an
+  unpushed commit look pushed or merged. git reads parents from
+  `objects/info/commit-graph` without checking them against the commit
+  objects, so a file in which a remote-tracking tip names the unpushed commit
+  as its parent made `git rev-list HEAD --not --remotes` count 0 even with
+  `--no-replace-objects -c core.useReplaceRefs=false`, and `remove
+  --delete-branch` deleted the branch. Writing such a file needs write access
+  to the git directory. The calls that decide (the unpushed `rev-list`, the
+  `merge-base --is-ancestor` and the `rev-parse` of the HEAD commit) now also
+  run with `-c core.commitGraph=false`, which wins over a
+  `core.commitGraph=true` from the repository configuration,
+  `GIT_CONFIG_PARAMETERS` or `GIT_CONFIG_COUNT`, so the parents are read from
+  the commit objects. These calls no longer use the commit-graph file for
+  speed: on a very large history they take longer when the branch forks far
+  below the remote tip. The "not covered" note on a forged commit-graph file
+  in `docs/worktree.md` is replaced by the description of this setting.
+
 ## [0.14.0] - 2026-10-14
 
 - `worktree remove` and `list`: a replaced or grafted commit graph no longer

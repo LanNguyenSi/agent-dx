@@ -592,7 +592,7 @@ describe("worktree remove: a git call that does not finish ends in a refusal", (
   );
 
   it.concurrent(
-    "runs exactly the calls that decide with --no-replace-objects and core.useReplaceRefs=false, before any other option",
+    "runs exactly the calls that decide with --no-replace-objects, core.useReplaceRefs=false and core.commitGraph=false, before any other option",
     async () => {
       const f = makeFixture();
       const wt = addWorktree(f, "feat", true);
@@ -605,9 +605,12 @@ describe("worktree remove: a git call that does not finish ends in a refusal", (
       expect(r.code, r.stdout + r.stderr).toBe(2);
       expect(r.json.reason, r.stdout).toBe("unpushed_commits");
       const calls = spy.calls?.() ?? [];
-      // The option, and the setting that keeps it in force on a git that
-      // reads core.useReplaceRefs=true after it.
-      const FLAG = "--no-replace-objects -c core.useReplaceRefs=false";
+      // The option, the setting that keeps it in force on a git that reads
+      // core.useReplaceRefs=true after it, and the setting that makes git
+      // read parents from the commit objects and not from the commit-graph
+      // file.
+      const FLAG =
+        "--no-replace-objects -c core.useReplaceRefs=false -c core.commitGraph=false";
       const withFlag = calls.filter((c) => c.startsWith(`${FLAG} `));
       // The unpushed walk, the ancestry and the sha a merged pull request
       // must match: nothing else reads the graph for a verdict.
