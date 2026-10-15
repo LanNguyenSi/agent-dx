@@ -52,8 +52,11 @@ import {
  *   There is no SIGTERM grace: a runaway allocation cannot be waited out.
  * - One read budget. Every read from the first terminal event on shares one
  *   deadline (`TERMINAL_READ_BUDGET_MS`), and each `ps` call is bounded by
- *   what is left of it; the kill at a limit, which is synchronous, reads for
- *   at most `LIMIT_READ_BUDGET_MS`.
+ *   what is left of it (the one read a decision needs still gets
+ *   `MIN_READ_MS` when it is spent); the kill at a limit, which is
+ *   synchronous, reads for at most `LIMIT_READ_BUDGET_MS`. A poll's read is
+ *   bounded by the time left to the timeout, so it cannot hold the timer
+ *   back by more than `MIN_READ_MS`.
  * - Processes outside the group are killed by pid as a table read within the
  *   budget shows them; when none could be read, as the last table that could
  *   be read showed them.

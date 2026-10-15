@@ -162,8 +162,11 @@ the abort call returns:
   read is made. The result's `reason` is `aborted`, and what was found and
   killed after the exit is listed under `killed`.
 
-A process outside the group that no table ever showed is not reached by an
-abort.
+Reads are synchronous, so an abort or a signal takes effect between two
+reads, up to one read late: a poll's read is bounded at 5 s (and by the time
+left to the timeout), a read at a limit at about 1 s, and a read after the
+command ended by the rest of the budget. A process outside the group that no
+table ever showed is not reached by an abort.
 
 ## Exit codes
 

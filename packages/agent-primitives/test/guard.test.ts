@@ -754,14 +754,33 @@ describe("guard: a process table that cannot be read", () => {
     expect(marked(esc.cmd)).toEqual([]);
   });
 
-  it("a failed read is tried four times in all, with growing pauses, at the limit and again after the exit", async () => {
-    const { r, abortMs, calls } = await abortWithFailingPs(7144, 10_000);
+  it("at a limit, a failed read is tried again after pauses of 50, 100 and 200 ms, within its 1 s", async () => {
+    const { r, abortMs } = await abortWithFailingPs(7144, 10_000);
     expect(r.reason).toBe("aborted");
-    // Four reads at the limit, four after the exit, none after that.
-    expect(calls).toBe(8);
-    // The limit's tries pause 50, 100 and 200 ms (the abort waits for them).
+    // The abort waits for the limit's tries and their pauses.
     expect(abortMs).toBeGreaterThanOrEqual(300);
     expect(abortMs).toBeLessThan(1500);
+  });
+
+  it("after the exit, a failed read is tried four times in all and no more", async () => {
+    // The budget after the exit leaves room for every try even on a slow
+    // host, so the count is exact.
+    const s = fx(7177);
+    const flag = path.join(tmp(), "flag");
+    const ps = installFakePs({ flag, fails: 10_000 });
+    let r;
+    try {
+      r = await run(
+        "sh",
+        ["-c", `sleep ${s.arg} & sleep 0.8; : > '${flag}'; exit 0`],
+        { pollMs: 1500 },
+      );
+    } finally {
+      ps.restore();
+    }
+    expect(ps.calls()).toBe(4);
+    expect(r.reason).toBe("leftover_check_failed");
+    expect(marked(s.cmd)).toEqual([]);
   });
 
   it("the kill at a limit reads for about 1 s at most, however long ps hangs", async () => {
