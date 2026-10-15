@@ -610,7 +610,7 @@ function checkAnchor(
 // can exclude a real citations-resolve citation span from its own
 // extraction, rather than re-deriving this grammar itself.
 export const CITATION_RE =
-  /([\w./-]+\.(?:ts|js|mjs|md|yml|yaml|json)):(\d+)(?:-(\d+))?(?:#(\[?\w(?:[\w.-]*\w)?\]?|"[^"\n`]*"))?/g;
+  /([\w./-]+\.(?:ts|js|mjs|md|yml|yaml|json|prisma)):(\d+)(?:-(\d+))?(?:#(\[?\w(?:[\w.-]*\w)?\]?|"[^"\n`]*"))?/g;
 
 /**
  * Heading-section citations. A CHANGELOG.md that grows by insertion at the
@@ -701,7 +701,15 @@ const HEADING_SECTION_MALFORMED_RE = /`([\w./-]+):#([^`\n]*)`/g;
 const CONT_COLON_RE = /`:(\d+)(?:-(\d+))?`/g;
 const CONT_DASH_RE = /[-–]`(\d+)`/g;
 const CONT_PAREN_RE = /\(`(\d+)`\)/g;
-const CLOSING_ONLY_EXTS = new Set(["ts", "js", "mjs", "yml", "yaml", "json"]);
+const CLOSING_ONLY_EXTS = new Set([
+  "ts",
+  "js",
+  "mjs",
+  "yml",
+  "yaml",
+  "json",
+  "prisma",
+]);
 const CLOSING_BRACE_RE = /^[)\]}][;,]?$/;
 // Short-form (paragraph-bound) citation form, see the "Short-form
 // citations" doc block below. Requires an explicit N-M range: a bare single
@@ -2895,7 +2903,7 @@ function scanFootnoteLineCitations(
 export const citationsResolveRule: Rule = {
   id: RULE_ID,
   description:
-    "`path:N`/`path:N-M` citations (recognised target extensions: .ts, .js, .mjs, .md, .yml, .yaml, .json; and their `:N`, -`M`/–`M`, (`N`) continuations), and backtick-delimited `` `path:#heading` `` heading-section citations (`.md` targets only), must resolve to a real target file and land on real, non-blank content. Under spec v0.2 the backticked line numbers or ranges (`N`, `N-M`, `L42-57`) in a footnote definition are also checked against the file named by that footnote's `sources` entry. Mechanical only: does not verify the cited line is semantically correct.",
+    "`path:N`/`path:N-M` citations (recognised target extensions: .ts, .js, .mjs, .md, .yml, .yaml, .json, .prisma; and their `:N`, -`M`/–`M`, (`N`) continuations), and backtick-delimited `` `path:#heading` `` heading-section citations (`.md` targets only), must resolve to a real target file and land on real, non-blank content. Under spec v0.2 the backticked line numbers or ranges (`N`, `N-M`, `L42-57`) in a footnote definition are also checked against the file named by that footnote's `sources` entry. Mechanical only: does not verify the cited line is semantically correct.",
   run(ctx) {
     if (!ctx.repoRoot) {
       // Never silently skip: mirrors sources-fresh's posture so a "clean"

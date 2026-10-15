@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `citations-resolve` now recognises `.prisma` among its citation target
+  extensions: a `` `path:N` ``/`` `path:N-M` `` citation into a `.prisma` file
+  is collected and checked like the same citation into `.ts` or `.json`, where
+  before a `.prisma` path was never treated as a citation at all, so e.g.
+  `schema.prisma:999` past the last line passed the check in silence. The
+  recognised set is `.ts`, `.js`, `.mjs`, `.md`, `.yml`, `.yaml`, `.json`,
+  `.prisma`, one allowlist shared by `prose-line-references`' file-mention
+  matching; `.prisma` is also a closing-brace target (its blocks end in `}`),
+  so a citation starting on a lone `}` is flagged `closing-brace-start-line`
+  like in a `.ts` file. See
+  [Check catalog](docs/check-catalog.md#rules).
+
 - An unrecognized `okf_version` on the bundle-root `index.md` now names itself.
   Such a value resolved to v0.1 in silence before, leaving the author with the
   generic `reserved-files-bare` error "must not carry a frontmatter block" as
