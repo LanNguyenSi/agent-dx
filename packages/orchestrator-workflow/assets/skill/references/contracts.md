@@ -230,9 +230,10 @@ commits:
   - ""
 ```
 
-Before handback the implementer runs, scoped to its delta, the knowledge
-bundle check when the repository has a configured bundle and the drift check
-when one is connected, and reports their outcome in `tests.executed`; an
+Before handback the implementer runs the knowledge bundle check over the
+whole configured bundle at the head of its delta when the repository has a
+configured bundle, and the drift check over base..head when one is connected,
+and reports their outcome in `tests.executed`; an
 unavailable check is reported as a limitation, not a pass. Every claimed check
 result in `tests.executed`, `summary`, or `criterion_evidence` carries the path
 of a recorded verify envelope or the exact command plus its exit code. These

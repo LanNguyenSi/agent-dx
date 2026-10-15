@@ -192,10 +192,14 @@ Check, at minimum:
   cheap and read-only, and compare status, exit code, and the checked
   revision with what the claim says. A claim with neither an envelope path
   nor a command plus exit code is a finding, as is a claim the envelope or
-  output contradicts. When the repository has a configured knowledge bundle
-  or a connected drift check, confirm the implementer's return reports their
-  outcome over the delta; a missing report of an available check is a
-  finding.
+  output contradicts. A `summary` or `criterion_evidence` claim may point to
+  its `tests.executed` entry instead of repeating the envelope. Calibrate by
+  default: low when your own rerun confirms the claim, the ordinary gate
+  severity when the envelope or output contradicts it or no evidence exists.
+  When the repository has a configured knowledge bundle or a connected drift
+  check, confirm the implementer's return reports their outcome (the bundle
+  check over the whole bundle at the head of the delta, the drift check over
+  base..head); a missing report of an available check is a finding.
 - Identifier drift: after a change deletes or renames an exported
   identifier, type, config key or file, check whether comments, README,
   unshipped CHANGELOG prose or doc comments still describe the old name as

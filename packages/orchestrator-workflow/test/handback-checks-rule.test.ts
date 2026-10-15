@@ -11,22 +11,31 @@ import { runInit } from "../src/init.js";
 const unwrap = (text: string) => text.replace(/\\n/g, " ").replace(/\s+/g, " ");
 
 const IMPLEMENTER_SENTENCES = [
-  "run the documentation checks that exist, scoped to your delta",
-  "run its bundle check",
+  "run the documentation checks that exist and include their outcome in `tests.executed`",
+  "run its bundle check over the whole configured bundle at the head of your delta, not only the files you changed",
+  "Both are conditional on availability: when neither is configured or connected, say so in one line and skip them",
   "a drift check that lists docs and comments still naming a removed or renamed identifier is connected, run it over base..head",
   "A check that cannot run is a limitation, not a pass",
   "carries either the path of a recorded verify envelope",
   "or the exact command plus its exit code",
+  "under the run directory's `evidence/` directory",
+  "an envelope saved only in the scratchpad counts only together with the exact command plus its exit code",
+  "may point to its `tests.executed` entry instead of repeating the envelope",
 ];
 
 const REVIEWER_SENTENCES = [
   "Claimed checks: verify every check result the implementer claims against the recorded verify envelope or the exact command plus exit code it cites, not against the prose",
   "A claim with neither an envelope path nor a command plus exit code is a finding",
+  "a missing report of an available check is a finding",
+  "may point to its `tests.executed` entry instead of repeating the envelope",
+  "low when your own rerun confirms the claim, the ordinary gate severity when the envelope or output contradicts it or no evidence exists",
+  "the bundle check over the whole bundle at the head of the delta, the drift check over base..head",
 ];
 
 const CONTRACT_SENTENCES = [
   "Every claimed check result in `tests.executed`, `summary`, or `criterion_evidence` carries the path of a recorded verify envelope or the exact command plus its exit code",
   "a claim without either is a finding",
+  "runs the knowledge bundle check over the whole configured bundle at the head of its delta",
 ];
 
 describe("handback checks and claim traceability rule", () => {
