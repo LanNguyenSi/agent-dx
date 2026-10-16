@@ -674,6 +674,115 @@ describe("endsWithTail: equivalence with the whole comparison", () => {
     });
   }
 
+  it("counts a space or a tilde as printable and a control character or DEL as not, whatever its place in the tail: the boundaries of what makes a run", () => {
+    // `ps` prints a command line as `x sh other ...`; the tail says `prog`.
+    // The difference is before the last TAIL_MAX_RUNS runs when the
+    // separators make runs, and inside the part that is compared when they
+    // do not (a printable separator is no run, however many there are).
+    const printed = (tail: string) =>
+      `x${tail
+        .replace(/[^\x20-\x7e]+/g, (run) => "?".repeat(Buffer.byteLength(run)))
+        .replace("prog", "other")}`;
+    for (const [label, separator, makesRuns] of [
+      ["a space", " ", false],
+      ["a tilde", "~", false],
+      ["a character below the space", "\u001f", true],
+      ["DEL", "\u007f", true],
+    ] as const) {
+      let tail = " sh prog \u00e9";
+      for (let i = 0; i < 2 * TAIL_MAX_RUNS + 8; i++) {
+        tail += `${separator}w${i}`;
+      }
+      const command = printed(tail);
+      expect(runCount(tail) <= TAIL_MAX_RUNS, label).toBe(!makesRuns);
+      // The whole comparison sees the difference in every one of them.
+      expect(wholeTailMatch(command, tail), label).toBe(false);
+      expect(endsWithTail(command, tail), label).toBe(makesRuns);
+      // The same tail with the difference removed matches, as it must.
+      expect(endsWithTail(printed(tail).replace("other", "prog"), tail)).toBe(
+        true,
+      );
+    }
+    // The table case that found the boundary: one run, more than the cap of
+    // spaces after it.
+    const words = Array.from({ length: 40 }, (_, i) => `w${i + 1}`).join(" ");
+    expect(
+      endsWithTail(`x sh other ?? ${words}`, ` sh prog \u00e9 ${words}`),
+    ).toBe(false);
+    expect(
+      endsWithTail(`x sh prog ?? ${words}`, ` sh prog \u00e9 ${words}`),
+    ).toBe(true);
+  });
+
+  it("ends a run at the character after it, whatever that character is, as long as it is printable: a space or a tilde after each of more runs than the cap", () => {
+    for (const next of [" ", "~", "w"]) {
+      let tail = " sh prog ";
+      for (let i = 0; i < TAIL_MAX_RUNS + 8; i++) tail += `\u00e9${next}`;
+      expect(runCount(tail)).toBe(TAIL_MAX_RUNS + 8);
+      const command = `x sh other ${"??"}${next}`.concat(
+        `??${next}`.repeat(TAIL_MAX_RUNS + 7),
+      );
+      expect(wholeTailMatch(command, tail), JSON.stringify(next)).toBe(false);
+      expect(endsWithTail(command, tail), JSON.stringify(next)).toBe(true);
+      // A difference inside the last runs is seen.
+      const inside = `${command.slice(0, -1)}!`;
+      expect(endsWithTail(inside, tail), JSON.stringify(next)).toBe(false);
+    }
+  });
+
+  it("gives the answer of the compared end of a long tail, on tails of up to 120 characters with many spaces and tildes, a change anywhere", () => {
+    const pick = lcg(424242);
+    const printable = ["a", "b", " ", " ", " ", "~", "~"];
+    const unprintable = ["\n", "\u00e9", "\u001f", "\u007f"];
+    let manyPrintable = 0;
+    let past = 0;
+    let matches = 0;
+    let misses = 0;
+    for (let round = 0; round < 5000; round++) {
+      const length = 1 + Math.floor(pick() * 120);
+      const units = pick() < 0.4;
+      // How many of the characters are outside printable ASCII varies from
+      // round to round, so that both many spaces and many runs occur; in
+      // some rounds every run is followed by one or two printable ones, so
+      // that the runs do not merge and there can be more than the cap.
+      const share = 0.05 + pick() * 0.6;
+      let tail = "";
+      while (tail.length < length) {
+        if (units) {
+          tail += unprintable[Math.floor(pick() * unprintable.length)];
+          for (let n = 1 + Math.floor(pick() * 2); n > 0; n--) {
+            tail += printable[Math.floor(pick() * printable.length)];
+          }
+          continue;
+        }
+        const kinds = pick() < share ? unprintable : printable;
+        tail += kinds[Math.floor(pick() * kinds.length)];
+      }
+      // Mostly changes in the first half, which the cap can leave out.
+      let command = `${"x".repeat(Math.floor(pick() * 3))}${render(tail, pick)}`;
+      if (pick() < 0.7) command = mutate(command, pick);
+      const answer = endsWithTail(command, tail);
+      expect(answer, JSON.stringify({ command, tail })).toBe(
+        wholeTailMatch(command, comparedTail(tail)),
+      );
+      if (wholeTailMatch(command, tail)) expect(answer).toBe(true);
+      if (runCount(tail) <= TAIL_MAX_RUNS) {
+        expect(answer, JSON.stringify({ command, tail })).toBe(
+          wholeTailMatch(command, tail),
+        );
+        if ((tail.match(/[ ~]/g) ?? []).length > TAIL_MAX_RUNS) manyPrintable++;
+      } else past++;
+      if (answer) matches++;
+      else misses++;
+    }
+    // The cases that matter occur: more spaces and tildes than the cap but
+    // not more runs, and more runs than the cap; and both answers.
+    expect(manyPrintable).toBeGreaterThan(100);
+    expect(past).toBeGreaterThan(100);
+    expect(matches).toBeGreaterThan(200);
+    expect(misses).toBeGreaterThan(200);
+  });
+
   it("finds a literal wherever it occurs, however it overlaps itself", () => {
     // Letters from two, so that a literal is its own prefix and its own
     // suffix in many ways, and the text has near matches everywhere.
@@ -734,6 +843,18 @@ describe("endsWithTail: cost", () => {
       }
     });
   }
+
+  it("takes no time for runs that are each followed by a space: more than the cap of them, 20000 of them", () => {
+    const tail = ` sh prog ${"\u00e9 ".repeat(20_000)}`;
+    const mac = `x sh prog ${"M-CM-) ".repeat(20_000)}`;
+    const linux = `x sh prog ${"?? ".repeat(20_000)}`;
+    const started = performance.now();
+    expect(endsWithTail(mac, tail)).toBe(true);
+    expect(endsWithTail(linux, tail)).toBe(true);
+    expect(endsWithTail(`${linux}b`, tail)).toBe(false);
+    expect(endsWithTail(`x sh other ${"?? ".repeat(20_000)}`, tail)).toBe(true);
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
 
   it("takes no time for a long literal next to a wide window: the literal is found in one pass, not compared at each position", () => {
     // 45000 letters, a run of 20000 two-byte characters (a window wider than
