@@ -352,6 +352,8 @@ describe("guard: leftovers", () => {
   for (const [label, arg] of [
     ["a non-ASCII argument", "\u00dcbung"],
     ["an argument with a trailing newline", "x\n"],
+    ["an empty last argument", ""],
+    ["a last argument that is one space", " "],
     [
       "an argument with a tab, a newline and a non-ASCII character",
       "a\tb\u00e9\n",
