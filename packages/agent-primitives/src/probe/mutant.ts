@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { scratchGitEnv } from "../git-env.js";
 import { probeGitArgv } from "./git.js";
 import { createHash } from "node:crypto";
 import { runArgv } from "./run.js";
@@ -557,6 +558,7 @@ export async function listPatchTouchedPaths(
     probeGitArgv(["apply", "--numstat", "--", absPatchPath]),
     {
       cwd: scratchDir,
+      env: scratchGitEnv(scratchDir),
       logDir: scratchDir,
       timeoutMs: gitApply.timeoutMs ?? DEFAULT_GIT_APPLY_TIMEOUT_MS,
       ...(gitApply.signal ? { signal: gitApply.signal } : {}),
@@ -1115,7 +1117,7 @@ async function computePatch(
   const numstatResult = await runArgv(
     "git",
     probeGitArgv(["apply", "--numstat", "--", absPatchPath]),
-    { cwd: scratchDir, ...runOptions },
+    { cwd: scratchDir, env: scratchGitEnv(scratchDir), ...runOptions },
   );
   if (numstatResult.exitCode !== 0) {
     const stopped = stoppedReason(numstatResult);
@@ -1173,7 +1175,7 @@ async function computePatch(
       "--",
       absPatchPath,
     ]),
-    { cwd: scratchDir, ...runOptions },
+    { cwd: scratchDir, env: scratchGitEnv(scratchDir), ...runOptions },
   );
   const logPaths = [numstatResult.logPath, result.logPath];
   if (result.exitCode !== 0) {

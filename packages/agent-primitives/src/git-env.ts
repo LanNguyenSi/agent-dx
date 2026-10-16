@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+
 /**
  * The ambient `GIT_*_PATHSPECS` switches change how git reads every
  * pathspec it is handed (glob, no-glob, case-insensitive, literal). A git
@@ -53,5 +56,34 @@ export function withoutRepoSelectionEnv(): NodeJS.ProcessEnv {
   const env = withoutPathspecEnv();
   for (const name of REPO_SELECTION_ENV_VARS) delete env[name];
   env.GIT_TERMINAL_PROMPT = "0";
+  return env;
+}
+
+/**
+ * The environment for a git child that runs in a scratch directory which
+ * is deliberately not a repository: `withoutRepoSelectionEnv()` plus a
+ * `GIT_CEILING_DIRECTORIES` entry for the scratch directory's parent, so
+ * git's upward repository discovery stops before it can find an
+ * enclosing work tree. Without the ceiling, a scratch directory that sits
+ * under a repository (a log directory inside the checkout, such as
+ * `-l .ap-logs`) makes `git apply` resolve the patch's paths relative to
+ * that repository and silently skip every path outside the scratch
+ * directory's own subtree: the apply exits 0 and changes nothing.
+ * The parent is real-path resolved first because git compares ceiling
+ * entries against the resolved current directory.
+ */
+export function scratchGitEnv(scratchDir: string): NodeJS.ProcessEnv {
+  const env = withoutRepoSelectionEnv();
+  let parent = path.dirname(path.resolve(scratchDir));
+  try {
+    parent = fs.realpathSync(parent);
+  } catch {
+    // The unresolved parent is still the best available ceiling.
+  }
+  const ambient = env.GIT_CEILING_DIRECTORIES;
+  env.GIT_CEILING_DIRECTORIES =
+    ambient !== undefined && ambient !== ""
+      ? `${parent}${path.delimiter}${ambient}`
+      : parent;
   return env;
 }

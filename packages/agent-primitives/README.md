@@ -29,6 +29,11 @@ for teams shipping with AI agents.
 - `probe`: runs one mutation probe (or a `--plan` of several), confirms the
   baseline passes first, and reports whether the target test caught the
   mutant, restoring the file afterward either way.
+  A mutant can be a line edit (`-r`, `-M`/`-w`) or a unified diff (`-p/--patch`,
+  also `"patch"` in a plan entry): the diff may use `a/` and `b/` prefixed or
+  plain paths relative to the repository root (not to `-C`), may touch only the
+  `--file` target, and applies the same in `inplace` and `worktree` isolation,
+  including when the log directory is inside the checkout.
 - `init`: installs the package's own skill document into a harness's skill
   directory.
 - `drift`: finds prose and comments that still cite an identifier a change
