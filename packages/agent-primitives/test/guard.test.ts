@@ -369,6 +369,37 @@ describe("guard: leftovers", () => {
     });
   }
 
+  it("a command that kills the trampoline at once, run with a 96 KB non-ASCII argument, is read in a moment and never stalls the event loop", async () => {
+    // 32000 two-byte letters, each followed by a letter: 96000 bytes. Matching
+    // that ending against the orphaned watcher's command line used to take
+    // seconds on the thread that serves the abort and the signal handlers.
+    const arg = "\u00e9a".repeat(32_000);
+    let stalledMs = 0;
+    let last = Date.now();
+    const beat = setInterval(() => {
+      const now = Date.now();
+      stalledMs = Math.max(stalledMs, now - last);
+      last = now;
+    }, 20);
+    let r;
+    const started = Date.now();
+    try {
+      r = await run("sh", ["-c", "kill -9 $PPID; exit 0", arg], {
+        pollMs: 1500,
+      });
+    } finally {
+      clearInterval(beat);
+    }
+    expect(r.reason).toBe("child_exit");
+    expect(r.childExitCode).toBe(137);
+    expect(r.leftovers).toEqual([]);
+    expect(r.leftoverCount).toBe(0);
+    // Generous bounds: the run takes about the poll interval, and used to
+    // take 15 s or more.
+    expect(Date.now() - started).toBeLessThan(8000);
+    expect(stalledMs).toBeLessThan(1500);
+  });
+
   it("after a quick, normal exit, a leftover that shows the trampoline's text is reported, not taken for the watcher", async () => {
     // The trampoline exited normally (it stops its watcher first), and no two
     // polls saw the watcher: the orphaned decoy must not be taken for it.

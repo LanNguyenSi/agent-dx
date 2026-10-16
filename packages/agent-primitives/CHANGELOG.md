@@ -93,7 +93,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   leads no process group is not signalled by its pid;
   each process is aimed at and warned about once per run. The trampoline's
   orphaned watcher is recognised when the command's arguments contain a
-  newline, a tab or a non-ASCII character, which `ps` prints escaped.
+  newline, a tab or a non-ASCII character, which `ps` prints escaped. Telling
+  it by the ending of its command line takes time linear in the length of the
+  command line and of the arguments (a 96 KB non-ASCII argument used to keep
+  `guard` busy for seconds, delaying the reports and the forwarding of a
+  signal): only the last 32 runs of such characters, with the text around
+  them, are compared, so a command line that differs from the arguments only
+  before those is taken for the watcher too.
   macOS and Linux; Windows is not supported. The shipped skill names the
   command for repro, hang and fuzz runs.
 - `-l, --log-dir` and `AGENT_PRIMITIVES_LOG_DIR`: a relative value now

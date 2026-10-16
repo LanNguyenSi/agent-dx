@@ -14,6 +14,7 @@ import {
   endsWithTail,
   guardExitCode,
   isOwnProcess,
+  TAIL_MAX_RUNS,
   type OwnIdentities,
 } from "../src/guard/index.js";
 
@@ -402,5 +403,312 @@ describe("endsWithTail", () => {
     // A two-byte character: up to eight.
     expect(endsWithTail("sh a M-CM^\\", "sh a \u00dc")).toBe(true);
     expect(endsWithTail("sh a 123456789", "sh a \u00dc")).toBe(false);
+  });
+});
+
+/** The whole comparison, one pass over the command line per part of the tail:
+ * what `endsWithTail` computed before it was bounded. Kept here as the
+ * oracle; it takes time quadratic in the lengths, so only small inputs. */
+function wholeTailMatch(command: string, tail: string): boolean {
+  const parts = tail.split(/([^\x20-\x7e]+)/);
+  if (parts.length === 1) return command.endsWith(tail);
+  const size = command.length;
+  let reachable = new Uint8Array(size + 1);
+  reachable[size] = 1;
+  for (let index = parts.length - 1; index >= 0; index--) {
+    const part = parts[index] as string;
+    const next = new Uint8Array(size + 1);
+    if (index % 2 === 0) {
+      for (let at = part.length; at <= size; at++) {
+        if (reachable[at] === 1 && command.startsWith(part, at - part.length)) {
+          next[at - part.length] = 1;
+        }
+      }
+    } else {
+      const window = 4 * Buffer.byteLength(part);
+      for (let at = 0; at <= size; at++) {
+        for (let to = at; to <= Math.min(at + window, size); to++) {
+          if (reachable[to] === 1) {
+            next[at] = 1;
+            break;
+          }
+        }
+      }
+    }
+    reachable = next;
+  }
+  return reachable.includes(1);
+}
+
+/** Small deterministic generator, so a failure repeats. */
+function lcg(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    return state / 2 ** 32;
+  };
+}
+
+function runCount(tail: string): number {
+  return (tail.match(/[^\x20-\x7e]+/g) ?? []).length;
+}
+
+/** What `endsWithTail` is specified to compare: the tail itself, or, past
+ * `TAIL_MAX_RUNS` runs, its end from the literal after the run that is one
+ * too many. */
+function comparedTail(tail: string): string {
+  const parts = tail.split(/([^\x20-\x7e]+)/);
+  return parts.length <= 2 * TAIL_MAX_RUNS + 1
+    ? tail
+    : parts.slice(-(2 * TAIL_MAX_RUNS + 1)).join("");
+}
+
+describe("endsWithTail: equivalence with the whole comparison", () => {
+  // Characters of the tail: printable (two letters, so that literals repeat
+  // and overlap), a space, and the non-printable kinds that make a run: a
+  // newline, a tab, a two-byte, a three-byte and a four-byte character.
+  const tailChars = [
+    "a",
+    "a",
+    "b",
+    " ",
+    "\n",
+    "\t",
+    "\u00e9",
+    "\u20ac",
+    "\u{1f600}",
+  ];
+  // What `ps` can print for a byte or a run, and plain noise.
+  const renderings = [
+    (n: number) => "?".repeat(n),
+    (n: number) => "M-C".repeat(Math.ceil(n / 2)),
+    (n: number) => "\\012".repeat(n),
+    () => "M^\\",
+    () => "",
+    () => " ",
+    (n: number) => "a".repeat(n),
+    (n: number) => "ab".repeat(n),
+  ];
+
+  function render(tail: string, pick: () => number): string {
+    return tail.replace(/[^\x20-\x7e]+/g, (run) => {
+      const fn = renderings[Math.floor(pick() * renderings.length)] as (
+        n: number,
+      ) => string;
+      return fn(Buffer.byteLength(run));
+    });
+  }
+
+  function mutate(text: string, pick: () => number): string {
+    if (text.length === 0) return "a";
+    const at = Math.floor(pick() * text.length);
+    switch (Math.floor(pick() * 4)) {
+      case 0:
+        return text.slice(0, at) + text.slice(at + 1);
+      case 1:
+        return text.slice(0, at) + "a" + text.slice(at + 1);
+      case 2:
+        return text.slice(0, at) + "b" + text.slice(at);
+      default:
+        return text.slice(0, at) + "?" + text.slice(at);
+    }
+  }
+
+  it("gives the whole comparison's answer on random tails and command lines, with every kind of rendering and one change anywhere", () => {
+    const pick = lcg(20261016);
+    let matches = 0;
+    let misses = 0;
+    for (let round = 0; round < 6000; round++) {
+      const length = 1 + Math.floor(pick() * 14);
+      let tail = "";
+      for (let i = 0; i < length; i++) {
+        tail += tailChars[Math.floor(pick() * tailChars.length)];
+      }
+      let command = `${"x".repeat(Math.floor(pick() * 3))}${render(tail, pick)}`;
+      if (pick() < 0.7) command = mutate(command, pick);
+      const expected = wholeTailMatch(command, tail);
+      expect(
+        endsWithTail(command, tail),
+        JSON.stringify({ command, tail }),
+      ).toBe(expected);
+      if (expected) matches++;
+      else misses++;
+    }
+    // Both answers occur in numbers, so the comparison tests something.
+    expect(matches).toBeGreaterThan(500);
+    expect(misses).toBeGreaterThan(500);
+  });
+
+  it("gives the whole comparison's answer on repeated characters, where literals overlap and many positions are reachable", () => {
+    const pick = lcg(7);
+    const sizes = [0, 1, 2, 3, 4, 5, 7, 8, 9, 12, 17, 33];
+    for (const left of sizes) {
+      for (const right of [0, 1, 2, 5]) {
+        for (const run of ["\n", "\u00e9", "\u20ac\n"]) {
+          const tail = `${"a".repeat(left)}${run}${"a".repeat(right)}`;
+          for (const size of sizes) {
+            for (const noise of ["", "b", "?"]) {
+              const command = `${"a".repeat(size)}${noise}${"a".repeat(
+                Math.floor(pick() * 3),
+              )}`;
+              expect(
+                endsWithTail(command, tail),
+                JSON.stringify({ command, tail }),
+              ).toBe(wholeTailMatch(command, tail));
+            }
+          }
+        }
+      }
+    }
+    // A literal that is its own prefix, against text that nearly matches it.
+    for (const tail of [
+      "aab\n",
+      "aab\naab",
+      "ab\u00e9ab\u00e9ab",
+      "aaab\naaab",
+    ]) {
+      for (const command of [
+        "aaab",
+        "aaaab??aab",
+        "aab?aab",
+        "aabaab",
+        "aaabaaab",
+        "aaaabaaab",
+        "ab??ab??ab",
+        "ab??abab",
+        "aab\\012aab",
+      ]) {
+        expect(
+          endsWithTail(command, tail),
+          JSON.stringify({ command, tail }),
+        ).toBe(wholeTailMatch(command, tail));
+      }
+    }
+  });
+
+  it("compares the end of a tail with more than the cap of runs, and a match of the whole tail is always a match", () => {
+    const pick = lcg(99);
+    const cap = TAIL_MAX_RUNS;
+    let past = 0;
+    for (let round = 0; round < 400; round++) {
+      // From a few runs below the cap to well above it.
+      const runs = cap - 3 + Math.floor(pick() * 12);
+      let tail = ` sh ${"q".repeat(Math.floor(pick() * 3))}`;
+      for (let i = 0; i < runs; i++) {
+        tail += `${pick() < 0.5 ? "\u00e9" : "\n"}${pick() < 0.5 ? "a" : "ab"}`;
+      }
+      expect(runCount(tail)).toBe(runs);
+      let command = `x sh ${render(tail.slice(4), pick)}`;
+      if (pick() < 0.5) command = mutate(command, pick);
+      const answer = endsWithTail(command, tail);
+      // The answer is the whole comparison's on the part of the tail that is
+      // compared, and so it is `true` wherever the whole tail matches.
+      expect(answer, JSON.stringify({ command, tail })).toBe(
+        wholeTailMatch(command, comparedTail(tail)),
+      );
+      if (wholeTailMatch(command, tail)) expect(answer).toBe(true);
+      if (runs <= cap) {
+        expect(answer, JSON.stringify({ command, tail })).toBe(
+          wholeTailMatch(command, tail),
+        );
+      } else past++;
+    }
+    expect(past).toBeGreaterThan(100);
+  });
+
+  it("compares exactly the last TAIL_MAX_RUNS runs: a difference before them is not seen, one inside them is", () => {
+    const unit = (i: number) => `\u00e9${String.fromCharCode(97 + (i % 20))}`;
+    const body = (from: number, to: number) => {
+      let text = "";
+      for (let i = from; i < to; i++) text += unit(i);
+      return text;
+    };
+    const rendered = (from: number, to: number) => {
+      let text = "";
+      for (let i = from; i < to; i++) {
+        text += `??${String.fromCharCode(97 + (i % 20))}`;
+      }
+      return text;
+    };
+    const total = TAIL_MAX_RUNS + 5;
+    const tail = ` sh ${body(0, total)}`;
+    const command = `x sh ${rendered(0, total)}`;
+    expect(endsWithTail(command, tail)).toBe(true);
+    // The comparison starts at the letter after the run that is one too many:
+    // the letter of unit `first - 1`. The one before it is not looked at.
+    const first = total - TAIL_MAX_RUNS;
+    const broken = (at: number) => {
+      const good = rendered(0, total);
+      const pos = at * 3 + 2;
+      return `x sh ${good.slice(0, pos)}Z${good.slice(pos + 1)}`;
+    };
+    expect(endsWithTail(broken(first - 2), tail)).toBe(true);
+    expect(endsWithTail(broken(first - 1), tail)).toBe(false);
+    expect(endsWithTail(broken(first), tail)).toBe(false);
+    expect(endsWithTail(broken(total - 1), tail)).toBe(false);
+    // The whole comparison tells the broken one apart; this is the limit.
+    expect(wholeTailMatch(broken(first - 2), tail)).toBe(false);
+    // At the cap itself nothing is left out.
+    const atCap = ` sh ${body(0, TAIL_MAX_RUNS)}`;
+    const full = rendered(0, TAIL_MAX_RUNS);
+    const cutAt = `x sh ${full.slice(0, 2)}Z${full.slice(3)}`;
+    expect(endsWithTail(cutAt, atCap)).toBe(wholeTailMatch(cutAt, atCap));
+    expect(endsWithTail(cutAt, atCap)).toBe(false);
+  });
+});
+
+describe("endsWithTail: cost", () => {
+  // Arguments from a reported case: a letter outside ASCII followed by a
+  // letter, repeated; two-byte letters make 3 bytes a pair, so 16000 pairs
+  // are 48 KB and 32000 are 96 KB. The bound is generous: the work takes
+  // milliseconds, and the quadratic comparison took seconds.
+  for (const pairs of [16_000, 32_000]) {
+    it(`matches the ending of ${pairs * 3} bytes of non-ASCII arguments, as macOS and as Linux print them, and rejects a wrong one, each in well under a second`, () => {
+      const tail = ` sh sleep ${"\u00e9a".repeat(pairs)}`;
+      const mac = `/bin/sh -c script sh sleep ${"M-CM-)a".repeat(pairs)}`;
+      const linux = `/bin/sh -c script sh sleep ${"??a".repeat(pairs)}`;
+      const cases: [string, boolean][] = [
+        [mac, true],
+        [linux, true],
+        [`${linux}b`, false],
+        [linux.replace(/a$/, "b"), false],
+        [linux.replace(/\?\?a$/, "?a"), true],
+        [`x sh sleep ${"??b".repeat(pairs)}`, false],
+        // The text before the compared end is not looked at.
+        [`/bin/sh -c script sh sleep Z${linux.slice(25)}`, true],
+      ];
+      for (const [command, expected] of cases) {
+        const started = performance.now();
+        expect(endsWithTail(command, tail)).toBe(expected);
+        expect(performance.now() - started).toBeLessThan(1000);
+      }
+    });
+  }
+
+  it("takes no time for a long literal next to a wide window: the literal is found in one pass, not compared at each position", () => {
+    // 45000 letters, a run of 20000 two-byte characters (a window wider than
+    // the command), then a letter. Every position is reachable at the literal,
+    // and comparing it there is 45000 steps each.
+    const literal = "a".repeat(45_000);
+    const tail = `${literal}${"\u00e9".repeat(20_000)}a`;
+    const command = "a".repeat(100_000);
+    let started = performance.now();
+    expect(endsWithTail(command, tail)).toBe(true);
+    expect(endsWithTail(`${"a".repeat(30_000)}`, tail)).toBe(false);
+    expect(endsWithTail(`${"a".repeat(99_999)}b`, tail)).toBe(false);
+    expect(performance.now() - started).toBeLessThan(1000);
+    // The same with a literal that has to back off at nearly every step.
+    const hard = `${"a".repeat(44_999)}b`;
+    started = performance.now();
+    expect(
+      endsWithTail("a".repeat(100_000), `${hard}${"\u00e9".repeat(20_000)}a`),
+    ).toBe(false);
+    expect(
+      endsWithTail(
+        `${"a".repeat(54_000)}${hard}${"a".repeat(500)}`,
+        `${hard}${"\u00e9".repeat(100)}a`,
+      ),
+    ).toBe(true);
+    expect(performance.now() - started).toBeLessThan(1000);
   });
 });

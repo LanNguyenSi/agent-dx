@@ -256,7 +256,12 @@ run, or its leftovers could not be checked). Besides the common fields:
   `M-C` and the like on macOS and `?` on Linux), so in that last comparison
   each run of characters outside printable ASCII in the arguments stands for
   whatever `ps` printed for it: any characters (printable ones too), none or
-  up to four per byte. The
+  up to four per byte. The comparison takes time linear in the length of
+  the command line and of the arguments, however long and however
+  non-ASCII they are: it looks at the last 32 such runs (and the text
+  between and after them) and at the end of the command line they can
+  reach, so a command line that differs from the arguments only before
+  those is taken for the watcher too. The
   limit of that: an impostor whose command line differs from the trampoline's
   only in such characters is taken for the watcher too, and a `ps` that
   prints an argument in some other way than those two (or cuts a very long
