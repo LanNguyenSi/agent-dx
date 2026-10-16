@@ -69,8 +69,9 @@ export function withoutRepoSelectionEnv(): NodeJS.ProcessEnv {
  * `-l .ap-logs`) makes `git apply` resolve the patch's paths relative to
  * that repository and silently skip every path outside the scratch
  * directory's own subtree: the apply exits 0 and changes nothing.
- * The parent is real-path resolved first because git compares ceiling
- * entries against the resolved current directory.
+ * The parent is real-path resolved as defence in depth: git canonicalises
+ * ceiling entries itself, but a symlinked parent (a macOS temp directory)
+ * is then matched whichever spelling the caller passed.
  */
 export function scratchGitEnv(scratchDir: string): NodeJS.ProcessEnv {
   const env = withoutRepoSelectionEnv();

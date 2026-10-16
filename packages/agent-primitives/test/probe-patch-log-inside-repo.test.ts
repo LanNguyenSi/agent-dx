@@ -218,6 +218,120 @@ describe("probe(): -p patch with the log directory inside the checkout", () => {
   }
 });
 
+function relativePatchLines(): string[] {
+  return fixturePatchLines().map((l) => l.replaceAll("pkg/", ""));
+}
+
+describe("probe(): -p patch not made from the repository root", () => {
+  const HINT = "patch paths are relative to the repository root";
+
+  for (const isolation of ["inplace", "worktree"] as const) {
+    it(`names the root-relative contract when a --relative patch meets --file (${isolation})`, async () => {
+      useLockDir();
+      const repo = initMonorepo();
+      const patchPath = writePatch(relativePatchLines());
+
+      const result = await probe(options(repo, patchPath, { isolation }));
+
+      expect(result.status).toBe("inconclusive");
+      expect(result.reason).toBe("mutant_not_applicable");
+      const warning = result.warnings.join("\n");
+      expect(warning).toContain("patch touches paths other than --file");
+      expect(warning).toContain(HINT);
+      expect(warning).toContain("--relative");
+      expect(
+        fs.readFileSync(path.join(repo, "pkg", "fixture.js"), "utf8"),
+      ).toBe(FIXTURE_JS);
+    });
+
+    it(`names the root-relative contract when a --relative patch derives a missing --file (${isolation})`, async () => {
+      useLockDir();
+      const repo = initMonorepo();
+      const patchPath = writePatch(relativePatchLines());
+
+      const result = await probe(
+        options(repo, patchPath, { isolation, file: undefined }),
+      );
+
+      expect(result.status).toBe("usage_error");
+      expect(result.reason).toBe("file_not_found");
+      const warning = result.warnings.join("\n");
+      expect(warning).toContain(path.join(repo, "fixture.js"));
+      expect(warning).toContain(HINT);
+    });
+  }
+
+  it("recognises a real --no-prefix patch of a subdirectory file", async () => {
+    useLockDir();
+    const repo = initMonorepo();
+    const target = path.join(repo, "pkg", "fixture.js");
+    fs.writeFileSync(target, FIXTURE_JS.replace("n > 0", "false"));
+    const diff = execFileSync("git", ["diff", "--no-prefix"], { cwd: repo });
+    fs.writeFileSync(target, FIXTURE_JS);
+    const patchPath = path.join(makeTmpDir(), "np.patch");
+    fs.writeFileSync(patchPath, diff);
+
+    const withFile = await probe(options(repo, patchPath, {}));
+    expect(withFile.status).toBe("inconclusive");
+    expect(withFile.warnings.join("\n")).toContain(HINT);
+
+    const derived = await probe(options(repo, patchPath, { file: undefined }));
+    expect(derived.reason).toBe("file_not_found");
+    expect(derived.warnings.join("\n")).toContain(HINT);
+  });
+
+  it("adds no hint to an unrelated extra-path refusal or a plain missing file", async () => {
+    useLockDir();
+    const repo = initMonorepo();
+    const extra = await probe(
+      options(
+        repo,
+        writePatch([...fixturePatchLines(), ...otherPatchLines()]),
+        {},
+      ),
+    );
+    expect(extra.warnings.join("\n")).not.toContain(HINT);
+
+    const missing = writePatch(
+      fixturePatchLines().map((l) => l.replaceAll("pkg/fixture", "pkg/nope")),
+    );
+    const result = await probe(options(repo, missing, { file: undefined }));
+    expect(result.warnings.join("\n")).not.toContain(HINT);
+  });
+
+  for (const isolation of ["inplace", "worktree"] as const) {
+    it(`kills and restores a multi-hunk patch with the log directory inside the checkout (${isolation})`, async () => {
+      useLockDir();
+      const repo = initMonorepo();
+      const lines = FIXTURE_JS.split("\n");
+      const patchPath = writePatch([
+        "diff --git a/pkg/fixture.js b/pkg/fixture.js",
+        "index 0000000..0000000 100644",
+        "--- a/pkg/fixture.js",
+        "+++ b/pkg/fixture.js",
+        "@@ -1,3 +1,3 @@",
+        ` ${lines[0]}`,
+        `-${lines[1]}`,
+        "+  return false;",
+        ` ${lines[2]}`,
+        "@@ -4,3 +4,3 @@",
+        ` ${lines[3]}`,
+        `-${lines[4]}`,
+        "+  return 0;",
+        ` ${lines[5]}`,
+      ]);
+
+      const result = await probe(options(repo, patchPath, { isolation }));
+
+      expect(result.status).toBe("killed");
+      expect(result.mutation_probe?.restored_verified).toBe(true);
+      expect(
+        fs.readFileSync(path.join(repo, "pkg", "fixture.js"), "utf8"),
+      ).toBe(FIXTURE_JS);
+    });
+  }
+});
+
 describe("scratchGitEnv()", () => {
   it("sets a ceiling at the scratch directory's real parent, keeps an ambient ceiling, and drops repository selection", () => {
     const saved = {

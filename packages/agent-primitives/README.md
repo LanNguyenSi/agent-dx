@@ -30,8 +30,10 @@ for teams shipping with AI agents.
   baseline passes first, and reports whether the target test caught the
   mutant, restoring the file afterward either way.
   A mutant can be a line edit (`-r`, `-M`/`-w`) or a unified diff (`-p/--patch`,
-  also `"patch"` in a plan entry): the diff may use `a/` and `b/` prefixed or
-  plain paths relative to the repository root (not to `-C`), may touch only the
+  also `"patch"` in a plan entry): the diff's paths must be `a/` and `b/`
+  prefixed and relative to the repository root (not to `-C`), as plain
+  `git diff` produces (not `--no-prefix` or `--relative`; such a patch is
+  refused with a hint), may touch only the
   `--file` target, and applies the same in `inplace` and `worktree` isolation,
   including when the log directory is inside the checkout.
 - `init`: installs the package's own skill document into a harness's skill
