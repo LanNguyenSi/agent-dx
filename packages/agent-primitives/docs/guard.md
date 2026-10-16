@@ -263,7 +263,7 @@ run, or its leftovers could not be checked). Besides the common fields:
   unrecognised, so it is listed as a leftover. The comparison takes time
   linear in the length of the command line and of the arguments, however
   long and however non-ASCII they are: it looks at the last 32 such runs
-  (and the text between and after them) and at the end of the command line
+  (and the text around them, back to the run before them) and at the end of the command line
   they can reach, so a difference only before those is not seen.
 - `leftoverCheckFailed`: `true` when a read of the process table that
   `guard` needed failed for good: at a limit, after the command ended, or
