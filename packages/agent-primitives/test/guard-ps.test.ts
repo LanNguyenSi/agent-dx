@@ -363,6 +363,52 @@ describe("endsWithTail", () => {
     expect(endsWithTail("x sh cmd ??bung and more", tail)).toBe(false);
   });
 
+  it("lets the spaces that end the tail be missing: Linux `ps` drops the empty last arguments, separators included", () => {
+    // An empty last argument leaves the tail ending in a space; procps prints
+    // the command line without it, BSD `ps` with it.
+    const tail = " sh sleep 5 ";
+    expect(endsWithTail("x sh sleep 5 ", tail)).toBe(true);
+    expect(endsWithTail("x sh sleep 5", tail)).toBe(true);
+    // Two empty last arguments: both separators may be missing, or only one.
+    const two = " sh sleep 5  ";
+    expect(endsWithTail("x sh sleep 5  ", two)).toBe(true);
+    expect(endsWithTail("x sh sleep 5 ", two)).toBe(true);
+    expect(endsWithTail("x sh sleep 5", two)).toBe(true);
+    // A last argument that ends in a space keeps it; only the separators of
+    // the empty arguments after it go.
+    const spaced = " sh sleep 5 x  ";
+    expect(endsWithTail("y sh sleep 5 x ", spaced)).toBe(true);
+    expect(endsWithTail("y sh sleep 5 x", spaced)).toBe(true);
+    // The text before the spaces still has to match, and no more spaces than
+    // the tail has are accepted.
+    expect(endsWithTail("x sh sleep 6", tail)).toBe(false);
+    expect(endsWithTail("x sh sleep 5  ", tail)).toBe(false);
+    expect(endsWithTail("x sh sleep 55", tail)).toBe(false);
+    expect(endsWithTail("x sh sleep 5x", tail)).toBe(false);
+    expect(endsWithTail("x sh sleep 5", " sh sleep 5")).toBe(true);
+    expect(endsWithTail("x sh sleep 5 ", " sh sleep 5")).toBe(false);
+    // Next to a run of characters outside printable ASCII.
+    const run = " sh cmd x\n ";
+    expect(endsWithTail("x sh cmd x ", run)).toBe(true);
+    expect(endsWithTail("x sh cmd x", run)).toBe(true);
+    expect(endsWithTail("x sh cmd y", run)).toBe(false);
+    // A run before the last literal: the spaces after it are still capped at
+    // the tail's own count.
+    expect(endsWithTail("y sh ?? x ", " sh \u00e9 x ")).toBe(true);
+    expect(endsWithTail("y sh ?? x", " sh \u00e9 x ")).toBe(true);
+    expect(endsWithTail("y sh ?? x  ", " sh \u00e9 x ")).toBe(false);
+  });
+
+  it("takes time linear in the command line when the tail ends in many spaces: many empty last arguments", () => {
+    const tail = ` sh cmd ${"a".repeat(100_000)}${" ".repeat(100_000)}`;
+    const command = `x sh cmd ${"a".repeat(100_000)}`;
+    const started = performance.now();
+    expect(endsWithTail(command, tail)).toBe(true);
+    expect(endsWithTail(`${command}b`, tail)).toBe(false);
+    expect(endsWithTail(`${command}${" ".repeat(100_000)}`, tail)).toBe(true);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
   it("takes time linear in the command line, whatever the number of runs: a `?` per byte rendering of 200 runs", () => {
     // Linux prints one `?` per byte: a two-byte letter becomes `??`. A
     // back-tracking matcher takes seconds at 34 such runs.
@@ -407,9 +453,24 @@ describe("endsWithTail", () => {
 });
 
 /** The whole comparison, one pass over the command line per part of the tail:
- * what `endsWithTail` computed before it was bounded. Kept here as the
- * oracle; it takes time quadratic in the lengths, so only small inputs. */
+ * what `endsWithTail` computed before it was bounded, with the spaces that end
+ * the tail allowed to be missing (any number of them up to its own: `ps` on
+ * Linux drops the empty last arguments, separators included). Kept here as
+ * the oracle; it takes time quadratic in the lengths, so only small inputs. */
 function wholeTailMatch(command: string, tail: string): boolean {
+  let trailing = 0;
+  while (trailing < tail.length && tail[tail.length - 1 - trailing] === " ") {
+    trailing++;
+  }
+  for (let missing = 0; missing <= trailing; missing++) {
+    if (exactTailMatch(command, tail.slice(0, tail.length - missing))) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function exactTailMatch(command: string, tail: string): boolean {
   const parts = tail.split(/([^\x20-\x7e]+)/);
   if (parts.length === 1) return command.endsWith(tail);
   const size = command.length;
@@ -724,9 +785,12 @@ describe("endsWithTail: equivalence with the whole comparison", () => {
       );
       expect(wholeTailMatch(command, tail), JSON.stringify(next)).toBe(false);
       expect(endsWithTail(command, tail), JSON.stringify(next)).toBe(true);
-      // A difference inside the last runs is seen.
+      // A difference in the printable character after the last run is seen.
+      // A space there may be missing, so changing it is no difference.
       const inside = `${command.slice(0, -1)}!`;
-      expect(endsWithTail(inside, tail), JSON.stringify(next)).toBe(false);
+      expect(endsWithTail(inside, tail), JSON.stringify(next)).toBe(
+        next === " ",
+      );
     }
   });
 
@@ -851,7 +915,7 @@ describe("endsWithTail: cost", () => {
     const started = performance.now();
     expect(endsWithTail(mac, tail)).toBe(true);
     expect(endsWithTail(linux, tail)).toBe(true);
-    expect(endsWithTail(`${linux}b`, tail)).toBe(false);
+    expect(endsWithTail(`${linux}${"b".repeat(12)}`, tail)).toBe(false);
     expect(endsWithTail(`x sh other ${"?? ".repeat(20_000)}`, tail)).toBe(true);
     expect(performance.now() - started).toBeLessThan(1000);
   });

@@ -258,7 +258,10 @@ run, or its leftovers could not be checked). Besides the common fields:
   whatever `ps` printed for it: any characters (printable ones too), none or
   up to four per byte. The limit of that: an impostor whose command line
   differs from the trampoline's only in such characters is taken for the
-  watcher too, and a `ps` that prints an argument in some other way than
+  watcher too. An empty last argument leaves the arguments ending in a space
+  that `ps` on Linux does not print (macOS does), so the spaces that end them
+  may be missing as well, and an impostor that differs only in those is taken
+  for the watcher too. A `ps` that prints an argument in some other way than
   those two (or cuts a very long command line) leaves the real watcher
   unrecognised, so it is listed as a leftover. The comparison takes time
   linear in the length of the command line and of the arguments, however

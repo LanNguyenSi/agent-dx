@@ -306,7 +306,10 @@ export const TAIL_MAX_RUNS = 32;
  * `ps` made of its bytes: any characters (printable ones too), none or up to
  * four per byte; every other character has to match exactly. That is looser
  * than an exact comparison for exactly those characters: a command line that
- * differs from the tail only in them matches too. Pure.
+ * differs from the tail only in them matches too. The same goes for the
+ * spaces that end the tail (an empty last argument is a space and nothing):
+ * Linux `ps` prints none of them, macOS `ps` prints all, so any number of them
+ * up to the tail's own may be missing from `command`. Pure.
  *
  * No regular expression: one window per run would back-track exponentially
  * on a `?` per byte rendering. The parts of the tail are walked from its end,
@@ -331,10 +334,18 @@ export const TAIL_MAX_RUNS = 32;
  */
 export function endsWithTail(command: string, tail: string): boolean {
   const kept = tail.slice(lastRunsStart(tail));
-  const parts = kept.split(/([^\x20-\x7e]+)/);
-  if (parts.length === 1) return command.endsWith(kept);
+  // The spaces that end the tail stand for empty last arguments, each with the
+  // space before it. procps `ps` (Linux) prints none of them: it drops the
+  // empty arguments at the end of a command line, separators included, while
+  // BSD `ps` (macOS) prints them. Up to that many of them may be missing.
+  let bodyEnd = kept.length;
+  while (bodyEnd > 0 && kept.charCodeAt(bodyEnd - 1) === 0x20) bodyEnd--;
+  const optional = kept.length - bodyEnd;
+  const body = kept.slice(0, bodyEnd);
+  const parts = body.split(/([^\x20-\x7e]+)/);
+  if (parts.length === 1 && optional === 0) return command.endsWith(kept);
   // The farthest back from the end of `command` the whole of `kept` can reach.
-  let reach = 0;
+  let reach = optional;
   for (let index = 0; index < parts.length; index++) {
     const part = parts[index] as string;
     reach +=
@@ -347,6 +358,10 @@ export function endsWithTail(command: string, tail: string): boolean {
   // reachable[p] is 1 when the parts walked so far can start at position p.
   let reachable: Uint8Array = new Uint8Array(size + 1);
   reachable[size] = 1;
+  for (let missing = 1; missing <= optional && missing <= size; missing++) {
+    if (text.charCodeAt(size - missing) !== 0x20) break;
+    reachable[size - missing] = 1;
+  }
   for (let index = parts.length - 1; index >= 0; index--) {
     const part = parts[index] as string;
     let next: Uint8Array;
