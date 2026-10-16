@@ -392,6 +392,11 @@ describe("endsWithTail", () => {
     expect(endsWithTail("x sh cmd x ", run)).toBe(true);
     expect(endsWithTail("x sh cmd x", run)).toBe(true);
     expect(endsWithTail("x sh cmd y", run)).toBe(false);
+    // A run before the last literal: the spaces after it are still capped at
+    // the tail's own count.
+    expect(endsWithTail("y sh ?? x ", " sh \u00e9 x ")).toBe(true);
+    expect(endsWithTail("y sh ?? x", " sh \u00e9 x ")).toBe(true);
+    expect(endsWithTail("y sh ?? x  ", " sh \u00e9 x ")).toBe(false);
   });
 
   it("takes time linear in the command line when the tail ends in many spaces: many empty last arguments", () => {
