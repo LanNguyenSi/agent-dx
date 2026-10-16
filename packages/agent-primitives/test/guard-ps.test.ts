@@ -616,44 +616,94 @@ describe("endsWithTail: equivalence with the whole comparison", () => {
     expect(past).toBeGreaterThan(100);
   });
 
-  it("compares exactly the last TAIL_MAX_RUNS runs: a difference before them is not seen, one inside them is", () => {
-    const unit = (i: number) => `\u00e9${String.fromCharCode(97 + (i % 20))}`;
-    const body = (from: number, to: number) => {
+  for (const [label, runFirst, runChars] of [
+    ["a run and then a letter, runs of one character", true, 1],
+    ["a letter and then a run, runs of one character", false, 1],
+    ["a run and then a letter, runs of three characters", true, 3],
+    ["a letter and then a run, runs of three characters", false, 3],
+  ] as const) {
+    it(`compares exactly the last TAIL_MAX_RUNS runs, for ${label}: a difference before them is not seen, one inside them is`, () => {
+      const letter = (i: number) => String.fromCharCode(97 + (i % 20));
+      const run = "\u00e9".repeat(runChars);
+      const shown = "?".repeat(2 * runChars);
+      const unitLength = shown.length + 1;
+      const letterAt = runFirst ? shown.length : 0;
+      const body = (to: number) => {
+        let text = "";
+        for (let i = 0; i < to; i++) {
+          text += runFirst ? `${run}${letter(i)}` : `${letter(i)}${run}`;
+        }
+        return text;
+      };
+      const rendered = (to: number) => {
+        let text = "";
+        for (let i = 0; i < to; i++) {
+          text += runFirst ? `${shown}${letter(i)}` : `${letter(i)}${shown}`;
+        }
+        return text;
+      };
+      // `Z` for the letter of unit `at`.
+      const broken = (to: number, at: number) => {
+        const good = rendered(to);
+        const pos = at * unitLength + letterAt;
+        return `x sh ${good.slice(0, pos)}Z${good.slice(pos + 1)}`;
+      };
+      const total = TAIL_MAX_RUNS + 5;
+      const tail = ` sh ${body(total)}`;
+      expect(runCount(tail)).toBe(total);
+      expect(endsWithTail(`x sh ${rendered(total)}`, tail)).toBe(true);
+      // The comparison starts at the first literal after the run that is one
+      // too many: with the run first, the letter of the unit before the first
+      // one that is kept; with the letter first, the letter of that unit.
+      const first = total - TAIL_MAX_RUNS;
+      const lastUnseen = runFirst ? first - 2 : first - 1;
+      expect(endsWithTail(broken(total, 0), tail)).toBe(true);
+      expect(endsWithTail(broken(total, lastUnseen), tail)).toBe(true);
+      expect(endsWithTail(broken(total, lastUnseen + 1), tail)).toBe(false);
+      expect(endsWithTail(broken(total, total - 1), tail)).toBe(false);
+      // The whole comparison tells the broken one apart; this is the limit.
+      expect(wholeTailMatch(broken(total, lastUnseen), tail)).toBe(false);
+      // At the cap itself nothing is left out.
+      const atCap = ` sh ${body(TAIL_MAX_RUNS)}`;
+      expect(runCount(atCap)).toBe(TAIL_MAX_RUNS);
+      expect(endsWithTail(broken(TAIL_MAX_RUNS, 0), atCap)).toBe(false);
+      expect(endsWithTail(`x sh ${rendered(TAIL_MAX_RUNS)}`, atCap)).toBe(true);
+      // One run more than the cap leaves out the first literal.
+      const over = ` sh ${body(TAIL_MAX_RUNS + 1)}`;
+      expect(endsWithTail(broken(TAIL_MAX_RUNS + 1, 0), over)).toBe(!runFirst);
+    });
+  }
+
+  it("finds a literal wherever it occurs, however it overlaps itself", () => {
+    // Letters from two, so that a literal is its own prefix and its own
+    // suffix in many ways, and the text has near matches everywhere.
+    const pick = lcg(31);
+    const word = (max: number, letters: string) => {
       let text = "";
-      for (let i = from; i < to; i++) text += unit(i);
-      return text;
-    };
-    const rendered = (from: number, to: number) => {
-      let text = "";
-      for (let i = from; i < to; i++) {
-        text += `??${String.fromCharCode(97 + (i % 20))}`;
+      for (let i = 1 + Math.floor(pick() * max); i > 0; i--) {
+        text += letters[Math.floor(pick() * letters.length)];
       }
       return text;
     };
-    const total = TAIL_MAX_RUNS + 5;
-    const tail = ` sh ${body(0, total)}`;
-    const command = `x sh ${rendered(0, total)}`;
-    expect(endsWithTail(command, tail)).toBe(true);
-    // The comparison starts at the letter after the run that is one too many:
-    // the letter of unit `first - 1`. The one before it is not looked at.
-    const first = total - TAIL_MAX_RUNS;
-    const broken = (at: number) => {
-      const good = rendered(0, total);
-      const pos = at * 3 + 2;
-      return `x sh ${good.slice(0, pos)}Z${good.slice(pos + 1)}`;
-    };
-    expect(endsWithTail(broken(first - 2), tail)).toBe(true);
-    expect(endsWithTail(broken(first - 1), tail)).toBe(false);
-    expect(endsWithTail(broken(first), tail)).toBe(false);
-    expect(endsWithTail(broken(total - 1), tail)).toBe(false);
-    // The whole comparison tells the broken one apart; this is the limit.
-    expect(wholeTailMatch(broken(first - 2), tail)).toBe(false);
-    // At the cap itself nothing is left out.
-    const atCap = ` sh ${body(0, TAIL_MAX_RUNS)}`;
-    const full = rendered(0, TAIL_MAX_RUNS);
-    const cutAt = `x sh ${full.slice(0, 2)}Z${full.slice(3)}`;
-    expect(endsWithTail(cutAt, atCap)).toBe(wholeTailMatch(cutAt, atCap));
-    expect(endsWithTail(cutAt, atCap)).toBe(false);
+    let hits = 0;
+    for (let round = 0; round < 6000; round++) {
+      const tail = `${word(9, "ab")}\n${word(3, "ab")}\u00e9${word(9, "ab")}`;
+      // Half of them are the tail as `ps` could print it, with letters of
+      // the same two kinds in front, the other half are noise.
+      const command =
+        pick() < 0.5
+          ? word(40, "aab?")
+          : `${word(12, "ab")}${tail.replace(/[^\x20-\x7e]+/g, () =>
+              "?".repeat(Math.floor(pick() * 4)),
+            )}`;
+      const expected = wholeTailMatch(command, tail);
+      expect(
+        endsWithTail(command, tail),
+        JSON.stringify({ command, tail }),
+      ).toBe(expected);
+      if (expected) hits++;
+    }
+    expect(hits).toBeGreaterThan(100);
   });
 });
 
