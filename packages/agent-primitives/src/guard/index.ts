@@ -292,6 +292,10 @@ export interface OwnIdentities {
  * `M^\`) takes three. */
 const PS_ESCAPE_MAX_CHARS = 4;
 
+/** How many runs of characters outside printable ASCII, counted from the end
+ * of the tail, `endsWithTail` compares. */
+export const TAIL_MAX_RUNS = 32;
+
 /**
  * True when the command line `command`, as `ps` printed it, ends with `tail`,
  * the text `guard` handed to the trampoline. `ps` does not print every
@@ -307,28 +311,50 @@ const PS_ESCAPE_MAX_CHARS = 4;
  * No regular expression: one window per run would back-track exponentially
  * on a `?` per byte rendering. The parts of the tail are walked from its end,
  * keeping the set of positions of `command` the part after the current one
- * can start at. A literal part has to match exactly at each of them; a run of
- * `n` bytes moves each back by 0 to `4n` characters, done with prefix sums.
- * Time is O(length of `command` x length of `tail`) at most (a literal is
- * compared at each position once), whatever the window sizes.
+ * can start at. A literal part has to match exactly at each of them (found
+ * with one pass of a prefix-function matcher, not one comparison per
+ * position); a run of `n` bytes moves each back by 0 to `4n` characters, done
+ * with prefix sums.
+ *
+ * Cost: matching the whole tail takes a pass over the command line for each
+ * part, which is quadratic when both are long (a long non-ASCII argument). So
+ * only the last `TAIL_MAX_RUNS` runs of the tail are compared, with the
+ * literals between and after them, and only the last characters of `command`
+ * they can reach (at most `4n` for a run of `n` bytes, and the length of a
+ * literal). That is O(length of `command` + length of `tail`) times a
+ * constant: at most `2 * TAIL_MAX_RUNS + 1` parts, each one pass over the part
+ * and the reachable end of `command`. A tail with no more runs than that gets
+ * the answer the whole comparison gives; for a longer tail the text before
+ * the last runs is not compared, so a command line that differs from the tail
+ * only there matches too. The match is one condition among the several that
+ * `captureOrphanedWatcher` needs before it takes a process for the watcher.
  */
 export function endsWithTail(command: string, tail: string): boolean {
-  const parts = tail.split(/([^\x20-\x7e]+)/);
-  if (parts.length === 1) return command.endsWith(tail);
-  const size = command.length;
+  const kept = tail.slice(lastRunsStart(tail));
+  const parts = kept.split(/([^\x20-\x7e]+)/);
+  if (parts.length === 1) return command.endsWith(kept);
+  // The farthest back from the end of `command` the whole of `kept` can reach.
+  let reach = 0;
+  for (let index = 0; index < parts.length; index++) {
+    const part = parts[index] as string;
+    reach +=
+      index % 2 === 0
+        ? part.length
+        : PS_ESCAPE_MAX_CHARS * Buffer.byteLength(part);
+  }
+  const text = command.length > reach ? command.slice(-reach) : command;
+  const size = text.length;
   // reachable[p] is 1 when the parts walked so far can start at position p.
-  let reachable = new Uint8Array(size + 1);
+  let reachable: Uint8Array = new Uint8Array(size + 1);
   reachable[size] = 1;
   for (let index = parts.length - 1; index >= 0; index--) {
     const part = parts[index] as string;
-    const next = new Uint8Array(size + 1);
+    let next: Uint8Array;
     if (index % 2 === 0) {
-      for (let at = part.length; at <= size; at++) {
-        if (reachable[at] === 1 && command.startsWith(part, at - part.length)) {
-          next[at - part.length] = 1;
-        }
-      }
+      next =
+        part.length === 0 ? reachable : startsOfLiteral(text, part, reachable);
     } else {
+      next = new Uint8Array(size + 1);
       const window = PS_ESCAPE_MAX_CHARS * Buffer.byteLength(part);
       // before[p]: how many reachable positions lie below p.
       const before = new Int32Array(size + 2);
@@ -345,6 +371,72 @@ export function endsWithTail(command: string, tail: string): boolean {
     reachable = next;
   }
   return reachable.includes(1);
+}
+
+/** Where in `tail` the last `TAIL_MAX_RUNS` runs of characters outside
+ * printable ASCII, with the literal after the run before them, begin: just
+ * after the run that is one too many, or 0 when there are not that many.
+ * Walks back from the end and stops there, so it costs the part it keeps. */
+function lastRunsStart(tail: string): number {
+  let runs = 0;
+  for (let at = tail.length - 1; at >= 0; at--) {
+    const code = tail.charCodeAt(at);
+    if (code >= 0x20 && code <= 0x7e) continue;
+    // `at` is the last character of a run when the one after it is printable
+    // or there is none.
+    const after = at + 1 < tail.length ? tail.charCodeAt(at + 1) : 0x20;
+    if (after < 0x20 || after > 0x7e) continue;
+    runs++;
+    if (runs > TAIL_MAX_RUNS) return at + 1;
+  }
+  return 0;
+}
+
+/** The positions `q` where `part` starts in `text` and the position `q +
+ * part.length` is marked in `ends`. One pass over `text` between the lowest
+ * and the highest marked position, whatever the length of `part` (the
+ * prefix function of `part` never lets the scan step back). */
+function startsOfLiteral(
+  text: string,
+  part: string,
+  ends: Uint8Array,
+): Uint8Array {
+  const size = text.length;
+  const length = part.length;
+  const starts = new Uint8Array(size + 1);
+  let low = -1;
+  let high = -1;
+  for (let at = length; at <= size; at++) {
+    if (ends[at] === 1) {
+      if (low < 0) low = at;
+      high = at;
+    }
+  }
+  if (low < 0) return starts;
+  // fallback[i]: the length of the longest proper prefix of part[0..i] that
+  // is also its suffix.
+  const fallback = new Int32Array(length);
+  for (let i = 1, matched = 0; i < length; i++) {
+    while (matched > 0 && part.charCodeAt(i) !== part.charCodeAt(matched)) {
+      matched = fallback[matched - 1] as number;
+    }
+    if (part.charCodeAt(i) === part.charCodeAt(matched)) matched++;
+    fallback[i] = matched;
+  }
+  let matched = 0;
+  for (let at = low - length; at < high; at++) {
+    const code = text.charCodeAt(at);
+    while (matched > 0 && code !== part.charCodeAt(matched)) {
+      matched = fallback[matched - 1] as number;
+    }
+    if (code === part.charCodeAt(matched)) matched++;
+    if (matched === length) {
+      const end = at + 1;
+      if (ends[end] === 1) starts[end - length] = 1;
+      matched = fallback[length - 1] as number;
+    }
+  }
+  return starts;
 }
 
 /**
