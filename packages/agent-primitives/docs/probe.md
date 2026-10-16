@@ -411,11 +411,15 @@ content at all (a rename-only patch, say) has nothing for a mutation
 probe to mutate: its derived `--file` is the rename's destination, which
 does not exist yet, so it ends in `reason: "file_not_found"`.
 
-A patch made with `git diff --relative` from a subdirectory records
-paths relative to that subdirectory, not the repository root; the
+Patch paths must be `a/`/`b/` prefixed and relative to the repository
+root, as plain `git diff` produces, not relative to `-C` and not made
+with `--no-prefix` or `--relative`. A patch made that way (from a
+subdirectory with `git diff --relative`, say) records shorter paths; the
 derivation above always resolves the derived `--file` against the
-containment root, so a patch made that way ends in
-`reason: "file_not_found"` rather than being detected as mis-based.
+containment root, so such a patch ends in `reason: "file_not_found"`
+(derived `--file`) or in the "patch touches paths other than --file"
+refusal (explicit `--file`), and both messages carry a hint to
+regenerate the patch from the repository root.
 
 `file_required` and `line_required` are `reason` values a library
 caller of `probe()` can see when it omits `--file`/`-n` for a form that

@@ -19,6 +19,7 @@ import { linkRelPath, linkSourceIsOperatorInput } from "./link-policy.js";
 import {
   DEFAULT_GIT_APPLY_TIMEOUT_MS,
   listPatchTouchedPaths,
+  derivedFileBaseHint,
   PATCH_MAX_BYTES,
   type MutantForm,
 } from "./mutant.js";
@@ -680,6 +681,19 @@ async function runProbePipeline(
       };
     }
     displayFile = path.resolve(root, listing.paths[0]);
+    const baseHint = derivedFileBaseHint(listing.paths[0], root, cwd);
+    if (baseHint !== undefined) {
+      return {
+        status: "usage_error",
+        reason: "file_not_found",
+        warnings: [
+          ...warnings,
+          `--file (derived from the patch) not found: ${displayFile}; ${baseHint}`,
+        ],
+        isolation: isolationField,
+        dryRunLogPaths: derivationLogPaths,
+      };
+    }
   } else {
     return {
       status: "usage_error",

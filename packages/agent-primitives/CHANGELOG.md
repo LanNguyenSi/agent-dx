@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `probe -p/--patch` (and a plan entry's `"patch"`): a patch for the `--file`
+  target ended `inconclusive`/`mutant_not_applicable` ("patch applied cleanly
+  but produced no content change"), or without `--file` was refused as touching
+  no path, whenever the log directory was inside a git work tree (for example
+  `-l .ap-logs` in the checkout, which is also where `worktree` isolation puts
+  its copy). The dry run and the `--file` derivation run `git apply` in a
+  scratch directory under the log directory; git discovered the enclosing
+  repository from there, resolved the patch paths relative to it and silently
+  skipped every path outside the scratch directory's own subtree, so `git
+  apply` exited 0 having changed nothing and `--numstat` listed nothing, which
+  also let a patch touching a second file pass the extra-path check unseen.
+  These `git apply` calls now set `GIT_CEILING_DIRECTORIES` to the scratch
+  directory's parent (and drop the repository-selection variables), so the
+  scratch directory is never mistaken for a subdirectory of the checkout.
+  A patch whose paths are relative to `-C` or the package directory (made with
+  `git diff --relative` or `--no-prefix`) is still refused, since `-p` paths
+  are `a/`/`b/` prefixed and relative to the repository root; both refusals
+  (the "patch touches paths other than --file" one and the derived `--file`
+  `file_not_found`) now say so and tell the caller to regenerate the patch.
+
 - `worktree remove`: a linked worktree of a reftable repository has a ref stack
   of its own (`<common-dir>/worktrees/<name>/reftable`) that git merges into
   every ref listing made in that worktree, `refs/remotes/*` entries included

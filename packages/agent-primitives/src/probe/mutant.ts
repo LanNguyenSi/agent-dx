@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { scratchGitEnv } from "../git-env.js";
 import { probeGitArgv } from "./git.js";
 import { createHash } from "node:crypto";
 import { runArgv } from "./run.js";
@@ -557,6 +558,7 @@ export async function listPatchTouchedPaths(
     probeGitArgv(["apply", "--numstat", "--", absPatchPath]),
     {
       cwd: scratchDir,
+      env: scratchGitEnv(scratchDir),
       logDir: scratchDir,
       timeoutMs: gitApply.timeoutMs ?? DEFAULT_GIT_APPLY_TIMEOUT_MS,
       ...(gitApply.signal ? { signal: gitApply.signal } : {}),
@@ -1091,6 +1093,44 @@ function boundHunksUnder(
   };
 }
 
+/**
+ * The hint appended to a patch-path refusal when the patch looks like it
+ * was not made from the repository root: `-p` paths are `a/`/`b/`
+ * prefixed and relative to the repository root, and a patch made with
+ * `git diff --relative` or `--no-prefix` records the same file under a
+ * shorter path.
+ */
+export function patchBaseHint(root: string): string {
+  return (
+    `patch paths are relative to the repository root (${root}); this patch ` +
+    "looks relative to a subdirectory or made with --no-prefix. Regenerate " +
+    "it from the repository root with plain git diff (no --relative, no " +
+    "--no-prefix)"
+  );
+}
+
+/** Whether `touched` is the root-relative `relPath` with leading
+ * components removed: what `--relative` (the `-C` directory stripped) or
+ * `--no-prefix` (the first component stripped by `git apply -p1`) leaves. */
+function isTrimmedRelPath(touched: string, relPath: string): boolean {
+  if (touched === relPath || touched === "") return false;
+  const norm = (v: string): string => v.split(path.sep).join("/");
+  return norm(relPath).endsWith(`/${norm(touched)}`);
+}
+
+/** The hint to append when a derived `--file` is missing at the
+ * root-relative location but exists where a patch relative to `cwd`
+ * would have put it; `undefined` when the patch does not look mis-based. */
+export function derivedFileBaseHint(
+  touched: string,
+  root: string,
+  cwd: string,
+): string | undefined {
+  if (fs.existsSync(path.resolve(root, touched))) return undefined;
+  if (!fs.existsSync(path.resolve(cwd, touched))) return undefined;
+  return patchBaseHint(root);
+}
+
 async function computePatch(
   originalContent: string,
   absFile: string,
@@ -1115,7 +1155,7 @@ async function computePatch(
   const numstatResult = await runArgv(
     "git",
     probeGitArgv(["apply", "--numstat", "--", absPatchPath]),
-    { cwd: scratchDir, ...runOptions },
+    { cwd: scratchDir, env: scratchGitEnv(scratchDir), ...runOptions },
   );
   if (numstatResult.exitCode !== 0) {
     const stopped = stoppedReason(numstatResult);
@@ -1142,11 +1182,15 @@ async function computePatch(
   const touchedPaths = parseNumstatPaths(numstatResult.stdout);
   const extraPaths = touchedPaths.filter((p) => p !== relPath);
   if (extraPaths.length > 0) {
+    const hint = extraPaths.some((p) => isTrimmedRelPath(p, relPath))
+      ? `; ${patchBaseHint(root)}`
+      : "";
     return {
       applicable: false,
       reason:
         `patch touches paths other than --file (${relPath}): ` +
-        extraPaths.join(", "),
+        extraPaths.join(", ") +
+        hint,
       logPaths: [numstatResult.logPath],
     };
   }
@@ -1173,7 +1217,7 @@ async function computePatch(
       "--",
       absPatchPath,
     ]),
-    { cwd: scratchDir, ...runOptions },
+    { cwd: scratchDir, env: scratchGitEnv(scratchDir), ...runOptions },
   );
   const logPaths = [numstatResult.logPath, result.logPath];
   if (result.exitCode !== 0) {
