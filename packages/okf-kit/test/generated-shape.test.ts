@@ -130,4 +130,79 @@ describe("generated-shape", () => {
       expect(generatedShapeRule.run(ctx)).toEqual([]);
     });
   });
+
+  describe("generated.at shapes", () => {
+    let dir: string;
+
+    beforeEach(() => {
+      dir = fs.mkdtempSync(path.join(os.tmpdir(), "okf-kit-genat-"));
+    });
+
+    afterEach(() => {
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
+
+    // A valid `generated.by` throughout, so any finding names `generated.at`.
+    function runWithAt(
+      at: { present: boolean; value?: unknown },
+      spec: SpecVersion = "v0.2",
+    ): ReturnType<typeof generatedShapeRule.run> {
+      fs.rmSync(dir, { recursive: true, force: true });
+      dir = fs.mkdtempSync(path.join(os.tmpdir(), "okf-kit-genat-"));
+      fs.writeFileSync(path.join(dir, "index.md"), "# Index\n");
+      const generated: Record<string, unknown> = { by: "okf-kit/0.19.0" };
+      if (at.present) generated.at = at.value;
+      writeDoc(dir, "doc.md", { type: "concept", generated });
+      const ctx: BundleContext = loadBundle(dir);
+      ctx.specVersion = spec;
+      return generatedShapeRule.run(ctx);
+    }
+
+    it("warns when the at key is absent (unchanged)", () => {
+      const findings = runWithAt({ present: false });
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        ruleId: "generated-shape",
+        severity: "warning",
+      });
+      expect(findings[0].message).toContain("generated has no `at`");
+    });
+
+    it("warns when at is present but null", () => {
+      const findings = runWithAt({ present: true, value: null });
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        ruleId: "generated-shape",
+        severity: "warning",
+      });
+      expect(findings[0].message).toContain("names no instant");
+    });
+
+    it("warns when at is present but an empty string", () => {
+      const findings = runWithAt({ present: true, value: "" });
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        ruleId: "generated-shape",
+        severity: "warning",
+      });
+      expect(findings[0].message).toContain("names no instant");
+    });
+
+    it("warns (not the designator error) when at is a non-date string", () => {
+      const findings = runWithAt({ present: true, value: "not-a-date" });
+      expect(findings).toHaveLength(1);
+      expect(findings[0]).toMatchObject({
+        ruleId: "generated-shape",
+        severity: "warning",
+      });
+      expect(findings[0].message).toContain("names no instant");
+      expect(findings[0].message).not.toContain("UTC designator");
+    });
+
+    it("a valid ISO date-time stays clean", () => {
+      expect(
+        runWithAt({ present: true, value: "2026-01-05T00:00:00Z" }),
+      ).toEqual([]);
+    });
+  });
 });

@@ -411,38 +411,85 @@ type FenceLineState = {
 };
 
 /**
+ * A fenced code block's opening or closing delimiter line (already trimmed):
+ * a run of 3 or more backticks or 3 or more tildes (group 1, the fence run),
+ * then the rest of the line (group 2: an opener's info string, or a closer's
+ * trailing whitespace -- an opener may carry one, a closer may not). Reused by
+ * `fenceOpenerRun` and `isFenceCloserLine` below, and by the reserved-files
+ * scanner's CommonMark rules (see `reserved-files-structure.ts`); applied to an
+ * already-trimmed line, so an up-to-three-space indent is folded away and a
+ * deeper one, being indented code rather than a fence, still fails the run.
+ */
+const FENCE_RUN_RE = /^(`{3,}|~{3,})(.*)$/;
+
+/**
+ * The fence run a trimmed line OPENS a fence with, or `null` when it opens
+ * none: the run, unless it is a backtick fence whose info string itself
+ * contains a backtick (CommonMark: that line is a paragraph, not a fence; the
+ * info string of a tilde fence may hold backticks). Any info string -- spaces
+ * included -- opens a fence, unlike the earlier `MD_FENCE_DELIM_RE`-based
+ * scanner, which rejected any info string with a space and so mistook a
+ * `` ``` bash `` opener for prose and let its real closing marker flip the
+ * fence state of the whole rest of the file.
+ */
+function fenceOpenerRun(trimmed: string): string | null {
+  const m = FENCE_RUN_RE.exec(trimmed);
+  if (!m) return null;
+  if (m[1][0] === "`" && m[2].includes("`")) return null;
+  return m[1];
+}
+
+/**
+ * Whether `trimmed` is the closing delimiter of a fence opened by `openRun`:
+ * the SAME fence character as the opener, at least as many of them as the
+ * opener used, then nothing but whitespace (only an opener may carry an info
+ * string). A 4-backtick fence therefore ignores a bare ``` ``` ``` line, and a
+ * ``` ``` ``` opener ignores a `~~~` line -- neither a shorter run nor the
+ * wrong character nor a trailing info string closes a fence.
+ */
+function isFenceCloserLine(trimmed: string, openRun: string): boolean {
+  const m = FENCE_RUN_RE.exec(trimmed);
+  if (!m) return false;
+  if (m[1][0] !== openRun[0]) return false;
+  if (m[1].length < openRun.length) return false;
+  if (m[2].trim() !== "") return false;
+  return true;
+}
+
+/**
  * The single fence state machine every fence-aware consumer in this file
- * derives from: one forward pass over `lines`, replaying the same
- * open/close logic (a line matching `MD_FENCE_DELIM_RE` opens a fence when
- * none is open, a line starting with the *same* marker closes it) that
- * `computeFencedSpans`, `computeFencedLineIndices`, and `isFenceOpeningLine`
- * each used to implement as their own, independently-maintained copy --
- * nothing enforced the three staying in agreement with each other. An
- * unterminated fence (no matching close before the end of `lines`) is
- * reflected by every remaining line coming back `fenced: true` -- each line
- * is marked while the scan is still inside the open fence, so no separate
- * post-loop fixup is needed the way the three original copies each had.
- * State at line `i` never depends on any line after `i`, so a caller that
- * only needs one line's state (see `isFenceOpeningLine`) can safely ignore
- * the rest of the array without re-deriving the logic itself.
+ * derives from: one forward pass over `lines`, replaying the CommonMark
+ * open/close rules (`fenceOpenerRun` / `isFenceCloserLine` -- any info string
+ * opens, only a same-character run at least as long as the opener's and with
+ * nothing but trailing whitespace closes) that `computeFencedSpans`,
+ * `computeFencedLineIndices`, and `isFenceOpeningLine` each used to implement
+ * as their own, independently-maintained copy -- nothing enforced the three
+ * staying in agreement with each other. An unterminated fence (no matching
+ * close before the end of `lines`) is reflected by every remaining line coming
+ * back `fenced: true` -- each line is marked while the scan is still inside
+ * the open fence, so no separate post-loop fixup is needed the way the three
+ * original copies each had. State at line `i` never depends on any line after
+ * `i`, so a caller that only needs one line's state (see `isFenceOpeningLine`)
+ * can safely ignore the rest of the array without re-deriving the logic itself.
  */
 function scanFenceLines(lines: string[]): FenceLineState[] {
   const states: FenceLineState[] = [];
-  let fenceMarker: string | undefined;
+  let openRun: string | undefined;
   for (let i = 0; i < lines.length; i++) {
     const trimmed = (lines[i] ?? "").trim();
-    if (!fenceMarker && MD_FENCE_DELIM_RE.test(trimmed)) {
-      fenceMarker = trimmed.slice(0, 3);
-      states.push({ fenced: true, opensFence: true, closesFence: false });
-    } else if (fenceMarker && trimmed.startsWith(fenceMarker)) {
+    if (openRun === undefined) {
+      const opener = fenceOpenerRun(trimmed);
+      if (opener !== null) {
+        openRun = opener;
+        states.push({ fenced: true, opensFence: true, closesFence: false });
+      } else {
+        states.push({ fenced: false, opensFence: false, closesFence: false });
+      }
+    } else if (isFenceCloserLine(trimmed, openRun)) {
       states.push({ fenced: true, opensFence: false, closesFence: true });
-      fenceMarker = undefined;
+      openRun = undefined;
     } else {
-      states.push({
-        fenced: fenceMarker !== undefined,
-        opensFence: false,
-        closesFence: false,
-      });
+      states.push({ fenced: true, opensFence: false, closesFence: false });
     }
   }
   return states;
@@ -736,12 +783,14 @@ const TEST_BLOCK_HEAD_RE =
   /^\s*(?:describe|it|test)(?:\.(?:only|skip|each))?\s*\(/;
 // Markdown block-boundary check (see checkRangeBoundary): a range boundary
 // line that is nothing but a bracket (open or close), optionally with a
-// trailing `,`/`;`, is always a drift signal. A bare code-fence delimiter is
+// trailing `,`/`;`, is always a drift signal. A code-fence delimiter is
 // its own, separate signal (see MD_FENCE_DELIM_RE): unlike a bracket, a
 // fence line is sometimes the deliberately-correct start of a citation (see
-// checkRangeBoundary's markdown branch for the opening-fence exception).
+// checkRangeBoundary's markdown branch for the opening-fence exception). The
+// delimiter is judged on an already-trimmed line, and a fence run may be
+// followed by an info string (spaces included), matching FENCE_RUN_RE above.
 const MD_BARE_BRACKET_RE = /^(?:[)\]}][;,]?|[[({])$/;
-const MD_FENCE_DELIM_RE = /^(?:`{3,}\S*|~{3,}\S*)$/;
+const MD_FENCE_DELIM_RE = /^(?:`{3,}|~{3,})/;
 const EXCLUDED_DIRS = new Set([
   "node_modules",
   ".git",
@@ -1467,23 +1516,24 @@ function isFenceOpeningLine(lines: string[], lineIndex: number): boolean {
  * True when `lines[endLineIndex]` is the closing delimiter that matches
  * the *opening* fence at `lines[startLineIndex]` (the caller must already
  * have confirmed the start line is a genuine opening fence, via
- * isFenceOpeningLine, before calling this) -- the first line after the
- * opener whose trimmed text starts with the same fence marker. Used by
- * checkRangeBoundary's markdown branch to also exempt a range's END from
- * the fence-as-drift-signal check when the range legitimately cites a
- * whole fenced code block from its own opening delimiter to its own
- * closing delimiter: the natural, correct way to cite such a block, not
- * drift, the same reasoning the start-side exception already applies.
+ * isFenceOpeningLine, before calling this) -- the first line after the opener
+ * that is a valid closer of that fence under isFenceCloserLine (the same
+ * fence character, at least as many of them as the opener used, nothing but
+ * trailing whitespace). Used by checkRangeBoundary's markdown branch to also
+ * exempt a range's END from the fence-as-drift-signal check when the range
+ * legitimately cites a whole fenced code block from its own opening delimiter
+ * to its own closing delimiter: the natural, correct way to cite such a block,
+ * not drift, the same reasoning the start-side exception already applies.
  */
 function isMatchingFenceClosingLine(
   lines: string[],
   startLineIndex: number,
   endLineIndex: number,
 ): boolean {
-  const fenceMarker = (lines[startLineIndex] ?? "").trim().slice(0, 3);
+  const openRun = fenceOpenerRun((lines[startLineIndex] ?? "").trim());
+  if (openRun === null) return false;
   for (let i = startLineIndex + 1; i < lines.length; i++) {
-    const trimmed = (lines[i] ?? "").trim();
-    if (trimmed.startsWith(fenceMarker)) {
+    if (isFenceCloserLine((lines[i] ?? "").trim(), openRun)) {
       return i === endLineIndex;
     }
   }

@@ -36,6 +36,13 @@ export interface FootnoteScan {
 const DEFINITION_RE = /^ {0,3}\[\^([^\]\s]+)\]:[ \t]?(.*)$/;
 const REFERENCE_RE = /\[\^([^\]\s]+)\]/g;
 const FENCE_OPEN_RE = /^ {0,3}(`{3,}|~{3,})/;
+/**
+ * An HTML comment span. Besides the ordinary `<!-- ... -->`, it accepts the
+ * HTML5 abrupt closing form `<!-->` as a complete (empty) comment -- the `>`
+ * branch is tried first, so `<!-->` closes itself rather than opening a
+ * comment that reaches for a `-->` further down.
+ */
+const HTML_COMMENT_RE = /<!--(?:>|[\s\S]*?-->)/g;
 
 /** Replaces every character of `text` except newlines with a space, keeping offsets and line structure. */
 function blank(text: string): string {
@@ -81,9 +88,30 @@ function blankInlineCode(text: string): string {
     .join("");
 }
 
-/** `text` with HTML comments (single- and multi-line) blanked, keeping line structure. */
-function blankHtmlComments(text: string): string {
-  return text.replace(/<!--[\s\S]*?-->/g, (c) => blank(c));
+/**
+ * `text` with every HTML comment blanked (keeping line structure), but only
+ * where a comment is actually a comment: an HTML comment span is located on a
+ * code-span-masked copy of `text`, so a `<!--` written inside an inline code
+ * span is code, not a comment opener, and never swallows the prose (and any
+ * `[^id]` reference) between it and a later `-->`. The comment spans found on
+ * the masked copy are then blanked in the ORIGINAL `text`, which is what keeps
+ * inline code itself intact for a definition's text (a code span that merely
+ * overlaps a comment's real body stays because the comment's own `<!--` was
+ * outside code and its blank range covers the whole span either way).
+ */
+function blankCommentsOutsideCode(text: string): string {
+  const codeMask = blankInlineCode(text);
+  const re = new RegExp(HTML_COMMENT_RE.source, "g");
+  let out = "";
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(codeMask)) !== null) {
+    const start = m.index;
+    const end = m.index + m[0].length;
+    out += text.slice(last, start) + blank(text.slice(start, end));
+    last = end;
+  }
+  return out + text.slice(last);
 }
 
 /** The definition at `lines[i]` (marker match plus the indices of its continuation lines), or undefined. */
@@ -104,9 +132,15 @@ export function scanFootnotes(body: string): FootnoteScan {
   // `withCode` keeps inline code (a definition's text names line ranges in
   // backticks); `noCode` is what references are searched in. Blanking
   // preserves line structure, so index i is the same line in both.
-  const fenceFree = blankHtmlComments(
-    blankFences(body.replace(/\r\n?/g, "\n")),
-  );
+  //
+  // The constructs are blanked in dependency order: a code-span-masked
+  // comment pass runs first, so a `<!--` written inside an inline code span is
+  // treated as code rather than opening a comment that reaches for a later
+  // `-->`; HTML comments are gone before fences, so a fence marker written
+  // inside a comment never opens a fence; inline code is blanked last, only
+  // for the reference view.
+  const commentFree = blankCommentsOutsideCode(body.replace(/\r\n?/g, "\n"));
+  const fenceFree = blankFences(commentFree);
   const withCode = fenceFree.split("\n");
   const noCode = blankInlineCode(fenceFree).split("\n");
   const references: string[] = [];

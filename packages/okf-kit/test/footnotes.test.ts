@@ -103,4 +103,28 @@ describe("scanFootnotes", () => {
     );
     expect(scan.references).toEqual(["real", "after"]);
   });
+
+  it("does not treat an HTML comment marker inside an inline code span as a comment", () => {
+    // The `<!--` sits inside an inline code span; a real (prose) `-->` comes
+    // later. Code spans are recognised first, so the `<!--` is code, the
+    // comment never starts, and the `[^a]` reference in between survives.
+    const scan = scanFootnotes(
+      "Use the `<!--` marker inline. See [^a]. Then a stray --> later.\n",
+    );
+    expect(scan.references).toEqual(["a"]);
+  });
+
+  it("does not let a fence marker written inside an HTML comment open a fence", () => {
+    // The ``` is comment text, not a fence opener: the comment is blanked
+    // before fences, so it never swallows the reference that follows it.
+    const scan = scanFootnotes("<!--\n```\n-->\nReal.[^real]\n");
+    expect(scan.references).toEqual(["real"]);
+  });
+
+  it("treats `<!-->` as a complete (empty) comment", () => {
+    // `<!-->` closes itself, so what follows is prose: the `[^real]` survives
+    // and the later `-->` is just text, not a comment terminator reaching back.
+    const scan = scanFootnotes("<!-->\nReal.[^real]\n-->\nMore.[^more]\n");
+    expect(scan.references).toEqual(["real", "more"]);
+  });
 });

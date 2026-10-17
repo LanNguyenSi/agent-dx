@@ -2609,3 +2609,146 @@ describe("citations-resolve: anchor-required-continuation's own exemptions", () 
     );
   });
 });
+
+// The single fence state machine (scanFenceLines) every fence-aware check in
+// this rule shares must follow the real CommonMark fence rules, which the
+// local scanner used to get wrong in four ways: an info string containing a
+// space was never recognised as an opener, a longer fence was closed by any
+// line merely starting with three fence characters (ignoring both the fence
+// length and any trailing text), and the same character had to match. Each
+// case below drives the target-side anchor heading search (computeFencedLineIndices)
+// over a target whose only level-1/level-2 heading sits ABOVE a fence holding
+// a `# not a heading` line: if the fence is not scanned correctly, that `#`
+// line is mistaken for the nearest enclosing heading and the citation below
+// the fence comes back anchor-heading-mismatch.
+describe("citations-resolve: CommonMark fence scanning (scanFenceLines)", () => {
+  function runFenceCase(
+    name: string,
+    targetLines: string[],
+    citation: string,
+  ): Finding[] {
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-fence-"),
+    );
+    try {
+      fs.mkdirSync(path.join(tmpRoot, "docs/okf"), { recursive: true });
+      fs.mkdirSync(path.join(tmpRoot, "src"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpRoot, `src/${name}`),
+        targetLines.join("\n") + "\n",
+      );
+      fs.writeFileSync(
+        path.join(tmpRoot, "docs/okf/doc.md"),
+        [
+          "---",
+          "type: reference",
+          `title: Fence scanning fixture ${name}`,
+          "---",
+          "",
+          `Heading anchor past a fence in \`src/${name}:${citation}\`.`,
+          "",
+        ].join("\n"),
+      );
+      const ctx = loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot);
+      return citationsResolveRule.run(ctx);
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  }
+
+  it("opens a fence whose info string contains spaces", () => {
+    const findings = runFenceCase(
+      "fence-info.md",
+      [
+        "## [3.0.0] - 2026-03-01",
+        "",
+        "``` js title foo",
+        "# not a heading",
+        "echo hi",
+        "```",
+        "",
+        "More content.",
+      ],
+      "8-8#3.0.0",
+    );
+    expect(findingFor(findings, "src/fence-info.md:8-8#3.0.0")).toBeUndefined();
+  });
+
+  it("does not close a longer fence on a shorter marker of the same character", () => {
+    const findings = runFenceCase(
+      "fence-long.md",
+      [
+        "## [3.0.0] - 2026-03-01",
+        "",
+        "````md",
+        "```",
+        "# not a heading",
+        "```",
+        "````",
+        "More content.",
+      ],
+      "8-8#3.0.0",
+    );
+    expect(findingFor(findings, "src/fence-long.md:8-8#3.0.0")).toBeUndefined();
+  });
+
+  it("does not close a fence on a same-length marker carrying text", () => {
+    const findings = runFenceCase(
+      "fence-trailing.md",
+      [
+        "## [3.0.0] - 2026-03-01",
+        "",
+        "```",
+        "``` js",
+        "# not a heading",
+        "```",
+        "",
+        "More content.",
+      ],
+      "8-8#3.0.0",
+    );
+    expect(
+      findingFor(findings, "src/fence-trailing.md:8-8#3.0.0"),
+    ).toBeUndefined();
+  });
+
+  it("opens and closes a tilde fence with an info string containing spaces", () => {
+    const findings = runFenceCase(
+      "fence-tilde.md",
+      [
+        "## [3.0.0] - 2026-03-01",
+        "",
+        "~~~ text extra",
+        "# not a heading",
+        "echo hi",
+        "~~~",
+        "",
+        "More content.",
+      ],
+      "8-8#3.0.0",
+    );
+    expect(
+      findingFor(findings, "src/fence-tilde.md:8-8#3.0.0"),
+    ).toBeUndefined();
+  });
+
+  it("does not close a backtick fence on a tilde marker (the closer must reuse the fence's character)", () => {
+    const findings = runFenceCase(
+      "fence-mismatched.md",
+      [
+        "## [3.0.0] - 2026-03-01",
+        "",
+        "```",
+        "~~~",
+        "# not a heading",
+        "```",
+        "",
+        "More content.",
+      ],
+      "8-8#3.0.0",
+    );
+    expect(
+      findingFor(findings, "src/fence-mismatched.md:8-8#3.0.0"),
+    ).toBeUndefined();
+  });
+});
