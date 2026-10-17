@@ -294,4 +294,11 @@ describe("scanFootnotes", () => {
     );
     expect(scan.references).toEqual(["a", "b"]);
   });
+
+  it("ends an unclosed inline code span at a line-start comment indented up to three spaces", () => {
+    const scan = scanFootnotes(
+      "Press ` x.[^a]\n  <!-- TODO -->\nMore `foo`.[^b]\n",
+    );
+    expect(scan.references).toEqual(["a", "b"]);
+  });
 });

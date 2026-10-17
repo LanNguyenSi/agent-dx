@@ -78,8 +78,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   comments. A `<!--` opens a comment only when a `-->` outside fenced code
   follows it, as before: an unclosed `<!--` in prose, inline or at line start,
   is plain text and hides nothing, and so is a `<!--` whose only later `-->`
-  sits inside a fenced block. A `<!--` at the start of a line ends an inline
-  code span left open by an unpaired backtick, as an HTML block interrupts the
+  sits inside a fenced block. A comment that fills its own line (at most three
+  spaces before the `<!--`, nothing after the `-->`) ends an inline code span
+  left open by an unpaired backtick, as an HTML block interrupts the
   paragraph. A fence marker inside an open comment no longer
   opens a fence. A comment counts as open only once a `-->` outside fenced
   code licenses it, so a fence marker inside a comment whose block (read

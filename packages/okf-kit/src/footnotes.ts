@@ -16,7 +16,8 @@
  *  - a REFERENCE is any other `[^id]` (including one inside a definition's
  *    text);
  *  - fenced code blocks (``` and ~~~), inline code spans (which never
- *    cross a blank line) and HTML comments are not scanned; indented
+ *    cross a blank line or a comment that fills its own lines) and HTML
+ *    comments are not scanned; indented
  *    code blocks are not excluded, and a `[^id]` written with a leading backslash is escaped
  *    text, not a reference.
  */
@@ -121,7 +122,8 @@ function maskLine(line: string, s: MaskState): string {
     return s.comment ? blank(line) : line;
   }
   // A line-start `<!--` starts an HTML block, which interrupts the paragraph,
-  // so an inline code span cannot run across it.
+  // so an inline code span cannot run across it. This holds in the reference
+  // view only when the comment fills its lines (nothing after the `-->`).
   if (!s.comment && /^ {0,3}<!--/.test(line)) s.openRun = 0;
   if (!s.comment) {
     const open = fenceOpenedBy(line);
