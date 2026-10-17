@@ -3,7 +3,10 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { loadBundle } from "../src/bundle.js";
-import { citationsResolveRule } from "../src/rules/citations-resolve.js";
+import {
+  citationsResolveRule,
+  computeFencedSpans,
+} from "../src/rules/citations-resolve.js";
 import type { Finding } from "../src/types.js";
 import { FIXTURES_DIR, loadFixture, runCli } from "./helpers.js";
 
@@ -1120,6 +1123,137 @@ describe("citations-resolve: short-form citations", () => {
         "[markdown-range-boundary-bracket-or-fence]",
       );
       expect(f?.message).toContain("range start is a bare bracket/fence line");
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("the fence-closing exemption matches only the start fence's own closer: an info-string or shorter marker inside the fence is NOT exempt", () => {
+    // isMatchingFenceClosingLine must replay the real closer rule (same
+    // character, at least as long, nothing but trailing whitespace), not
+    // mere line-prefix equality: a range ending on the opener's OWN closer
+    // is exempt, one ending on a same-length marker still carrying an info
+    // string (line 5, which does not close the fence) is not, and one
+    // ending on a shorter marker inside a longer fence is not either.
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-fence-close-exact-"),
+    );
+    try {
+      fs.mkdirSync(path.join(tmpRoot, "docs/okf"), { recursive: true });
+      fs.mkdirSync(path.join(tmpRoot, "src"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpRoot, "src/fenced-close.md"),
+        [
+          "Intro line.",
+          "",
+          "``` js title",
+          "body",
+          "``` extra",
+          "```",
+          "",
+          "```` md",
+          "body",
+          "```",
+          "````",
+          "",
+        ].join("\n"),
+      );
+      fs.writeFileSync(
+        path.join(tmpRoot, "docs/okf/doc.md"),
+        [
+          "---",
+          "type: reference",
+          "sources:",
+          "  - src/fenced-close.md",
+          "---",
+          "",
+          "Own closer: `src/fenced-close.md:1-11` names the target, and the",
+          "sub-citation from the opener to its own closing delimiter is (:3-6).",
+          "",
+          "Info-string marker: `src/fenced-close.md:1-11` names the target,",
+          "and the sub-citation ending on the info-string marker that does",
+          "not close the fence is (:3-5).",
+          "",
+          "Shorter marker: `src/fenced-close.md:1-11` names the target, and",
+          "the sub-citation ending on the shorter marker inside the longer",
+          "fence is (:8-10).",
+          "",
+        ].join("\n"),
+      );
+
+      const ctx = loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot);
+      const findings = citationsResolveRule.run(ctx);
+
+      expect(
+        findingFor(findings, "src/fenced-close.md:3-6 (short-form)"),
+      ).toBeUndefined();
+
+      const infoString = findingFor(
+        findings,
+        "src/fenced-close.md:3-5 (short-form)",
+      );
+      expect(infoString).toBeDefined();
+      expect(infoString?.severity).toBe("notice");
+      expect(infoString?.message).toContain(
+        "[markdown-range-boundary-bracket-or-fence]",
+      );
+      expect(infoString?.message).toContain(
+        "range end is a bare bracket/fence",
+      );
+
+      const shorter = findingFor(
+        findings,
+        "src/fenced-close.md:8-10 (short-form)",
+      );
+      expect(shorter).toBeDefined();
+      expect(shorter?.message).toContain("range end is a bare bracket/fence");
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("a range starting on a `` ``` js `` marker that is fence CONTENT (not an opener) draws the boundary notice", () => {
+    // MD_FENCE_DELIM_RE sees a marker line even with an info string, and
+    // isFenceOpeningLine says this one is not an opener: line 2 sits inside
+    // the longer fence opened on line 1, so citing from it is citing a
+    // fence line as if it were prose.
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-citations-resolve-fence-content-"),
+    );
+    try {
+      fs.mkdirSync(path.join(tmpRoot, "docs/okf"), { recursive: true });
+      fs.mkdirSync(path.join(tmpRoot, "src"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpRoot, "src/fenced-content.md"),
+        ["```` md", "``` js", "body", "````", ""].join("\n"),
+      );
+      fs.writeFileSync(
+        path.join(tmpRoot, "docs/okf/doc.md"),
+        [
+          "---",
+          "type: reference",
+          "sources:",
+          "  - src/fenced-content.md",
+          "---",
+          "",
+          "Non-opener start: `src/fenced-content.md:1-4` names the target,",
+          "and the sub-citation starting on the marker line inside the fence",
+          "is (:2-3).",
+          "",
+        ].join("\n"),
+      );
+
+      const ctx = loadBundle(path.join(tmpRoot, "docs/okf"), tmpRoot);
+      const findings = citationsResolveRule.run(ctx);
+
+      const f = findingFor(findings, "src/fenced-content.md:2-3 (short-form)");
+      expect(f).toBeDefined();
+      expect(f?.severity).toBe("notice");
+      expect(f?.message).toContain(
+        "[markdown-range-boundary-bracket-or-fence]",
+      );
+      expect(f?.message).toContain("range start is a bare bracket/fence line");
+      expect(f?.message).toContain("``` js");
     } finally {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
@@ -2750,5 +2884,85 @@ describe("citations-resolve: CommonMark fence scanning (scanFenceLines)", () => 
     expect(
       findingFor(findings, "src/fence-mismatched.md:8-8#3.0.0"),
     ).toBeUndefined();
+  });
+
+  it("does not open a backtick fence whose info string contains a backtick (CommonMark: that line is a paragraph)", () => {
+    // Treated as an opener, this line would fence everything after it, the
+    // `#` line would be skipped, and the citation below would resolve
+    // against the release heading. As a paragraph (the required reading),
+    // the `#` line is the nearest enclosing heading and the anchor does not
+    // match it.
+    const findings = runFenceCase(
+      "fence-backtick-info.md",
+      [
+        "## [3.0.0] - 2026-03-01",
+        "",
+        "```foo`bar",
+        "# not a heading",
+        "",
+        "More content.",
+      ],
+      "6-6#3.0.0",
+    );
+    const f = findingFor(findings, "src/fence-backtick-info.md:6-6#3.0.0");
+    expect(f).toBeDefined();
+    expect(f?.message).toContain("[anchor-heading-mismatch]");
+    expect(f?.message).toContain("not a heading");
+  });
+
+  it("opens a fence on a 4-space-indented marker (this scanner trims; the indent is ignored)", () => {
+    // Documents the deliberate difference from CommonMark and from
+    // reserved-files-structure (which caps the indent at 0-3 spaces): this
+    // file trims each line before matching fences, so indentation never
+    // changes which lines are fenced. Under the CommonMark reading the `#`
+    // line below would be prose and a heading, and the citation would come
+    // back anchor-heading-mismatch.
+    const findings = runFenceCase(
+      "fence-indented.md",
+      [
+        "## [3.0.0] - 2026-03-01",
+        "",
+        "    ```",
+        "    # not a heading",
+        "    ```",
+        "",
+        "More content.",
+      ],
+      "7-7#3.0.0",
+    );
+    expect(
+      findingFor(findings, "src/fence-indented.md:7-7#3.0.0"),
+    ).toBeUndefined();
+  });
+
+  it("still opens a tilde fence whose info string contains a backtick", () => {
+    const findings = runFenceCase(
+      "fence-tilde-backtick.md",
+      [
+        "## [3.0.0] - 2026-03-01",
+        "",
+        "~~~ a`b",
+        "# not a heading",
+        "~~~",
+        "",
+        "More content.",
+      ],
+      "7-7#3.0.0",
+    );
+    expect(
+      findingFor(findings, "src/fence-tilde-backtick.md:7-7#3.0.0"),
+    ).toBeUndefined();
+  });
+});
+
+describe("computeFencedSpans (citing-doc side)", () => {
+  it("does not open a fence on a backtick marker whose info string contains a backtick", () => {
+    const content = ["intro", "```foo`bar", "```"].join("\n");
+    // The info-string line is a paragraph, not a delimiter: only the bare
+    // marker on the last line opens a fence (unterminated, running to the
+    // end). An opener taken on line 2 would instead span lines 2-3.
+    const line2Start = "intro\n".length;
+    const line3Start = line2Start + "```foo`bar\n".length;
+    expect(computeFencedSpans(content)).toEqual([[line3Start, content.length]]);
   });
 });

@@ -73,13 +73,15 @@ const FENCE_RUN_RE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
  *  - an unclosed fence runs to the end of the file.
  *
  * This is deliberately its own scanner rather than `citations-resolve`'s
- * `scanFenceLines`, not because the two follow different fence rules (they now
- * apply the same CommonMark rules) but because they need different output: the
- * reserved files only ever ask "is this line fence content or a delimiter", so
- * this returns flat per-line flags, while `citations-resolve` needs each
- * delimiter's open/close direction for its anchor-heading search and boundary
- * checks and so returns per-line state. A fence line is neither a heading nor
- * prose here.
+ * `scanFenceLines`: no code is shared, and the two agree on the fence
+ * character, length and info-string rules but differ on indentation -- this
+ * scanner caps the indent at 0-3 spaces (per CommonMark), while
+ * `citations-resolve` trims each line before matching and so ignores leading
+ * indentation entirely. They also need different output: the reserved files
+ * only ever ask "is this line fence content or a delimiter", so this returns
+ * flat per-line flags, while `citations-resolve` needs each delimiter's
+ * open/close direction for its anchor-heading search and boundary checks and
+ * so returns per-line state. A fence line is neither a heading nor prose here.
  */
 function scanFences(lines: string[]): boolean[] {
   const fences: boolean[] = [];

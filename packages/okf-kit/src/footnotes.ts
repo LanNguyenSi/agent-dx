@@ -36,41 +36,115 @@ export interface FootnoteScan {
 const DEFINITION_RE = /^ {0,3}\[\^([^\]\s]+)\]:[ \t]?(.*)$/;
 const REFERENCE_RE = /\[\^([^\]\s]+)\]/g;
 const FENCE_OPEN_RE = /^ {0,3}(`{3,}|~{3,})/;
-/**
- * An HTML comment span. Besides the ordinary `<!-- ... -->`, it accepts the
- * HTML5 abrupt closing form `<!-->` as a complete (empty) comment -- the `>`
- * branch is tried first, so `<!-->` closes itself rather than opening a
- * comment that reaches for a `-->` further down.
- */
-const HTML_COMMENT_RE = /<!--(?:>|[\s\S]*?-->)/g;
+const COMMENT_OPENER = "<!--";
+const COMMENT_CLOSER = "-->";
 
 /** Replaces every character of `text` except newlines with a space, keeping offsets and line structure. */
 function blank(text: string): string {
   return text.replace(/[^\n]/g, " ");
 }
 
+/** The state carried from line to line by `maskFencesAndComments`. */
+interface MaskState {
+  /** The open fence, if any; it closes only on its own marker shape. */
+  fence?: { char: string; len: number };
+  /** True inside an open HTML comment, where only `-->` is looked for. */
+  comment: boolean;
+  /** Length of the open inline code delimiter run, 0 when outside one. */
+  openRun: number;
+}
+
 /**
- * `body` with fenced code blocks blanked out. A fence closes on a line of
- * the same character with at least as many characters as the opener; an
- * unclosed fence runs to the end of the doc.
+ * One line through the fence/comment scanner, updating the carried state and
+ * returning the masked line. The order of checks is the whole design: in a
+ * fence only the fence closer is looked for (a `<!--` in fence code is code);
+ * in a comment only `-->` is looked for (a fence marker in comment text
+ * never opens a fence); outside both, a fence opener at line start opens a
+ * fence, and elsewhere an inline code span is crossed before a `<!--`
+ * outside a span is taken as a comment opener (the HTML5 abrupt form `<!-->`
+ * closes itself and masks nothing else). An unclosed fence or comment runs
+ * to the end of the doc.
  */
-function blankFences(body: string): string {
-  let fence: { char: string; len: number } | undefined;
+function maskLine(line: string, s: MaskState): string {
+  if (s.fence) {
+    const close = new RegExp(`^ {0,3}${s.fence.char}{${s.fence.len},}\\s*$`);
+    if (close.test(line)) s.fence = undefined;
+    return blank(line);
+  }
+  if (/^[ \t]*$/.test(line)) {
+    // A blank line ends an inline code span, never a comment.
+    s.openRun = 0;
+    return s.comment ? blank(line) : line;
+  }
+  if (!s.comment) {
+    const open = FENCE_OPEN_RE.exec(line);
+    if (open) {
+      s.fence = { char: open[1][0], len: open[1].length };
+      s.openRun = 0;
+      return blank(line);
+    }
+  }
+  let out = "";
+  let i = 0;
+  while (i < line.length) {
+    if (s.comment) {
+      const end = line.indexOf(COMMENT_CLOSER, i);
+      if (end < 0) break;
+      out += blank(line.slice(i, end + COMMENT_CLOSER.length));
+      s.comment = false;
+      s.openRun = 0;
+      i = end + COMMENT_CLOSER.length;
+      continue;
+    }
+    if (s.openRun > 0) {
+      const j = line.indexOf("`", i);
+      if (j < 0) break;
+      let k = j;
+      while (k < line.length && line[k] === "`") k++;
+      if (k - j === s.openRun) s.openRun = 0;
+      out += line.slice(i, k);
+      i = k;
+      continue;
+    }
+    if (line.startsWith(COMMENT_OPENER, i)) {
+      if (line[i + COMMENT_OPENER.length] === ">") {
+        out += blank(COMMENT_OPENER + ">");
+        i += COMMENT_OPENER.length + 1;
+        continue;
+      }
+      s.comment = true;
+      out += blank(line.slice(i, i + COMMENT_OPENER.length));
+      i += COMMENT_OPENER.length;
+      continue;
+    }
+    if (line[i] === "`") {
+      let k = i;
+      while (k < line.length && line[k] === "`") k++;
+      s.openRun = k - i;
+      out += line.slice(i, k);
+      i = k;
+      continue;
+    }
+    out += line[i];
+    i++;
+  }
+  // Left open in a comment: the rest of the line is comment. Left open in an
+  // inline code span: inline code survives this pass (it is blanked later).
+  return out + (s.comment ? blank(line.slice(i)) : line.slice(i));
+}
+
+/**
+ * `body` with fenced code blocks and HTML comment spans blanked (line
+ * structure kept), decided by ONE line-by-line pass that tracks fence state
+ * and comment state together, so neither construct can swallow the other's
+ * region. Inline code is only consulted to decide whether a `<!--` is a
+ * comment opener; blanking inline code is a separate step.
+ */
+function maskFencesAndComments(body: string): string {
+  const s: MaskState = { comment: false, openRun: 0 };
   return body
     .split("\n")
-    .map((line) => {
-      if (fence) {
-        const close = new RegExp(`^ {0,3}${fence.char}{${fence.len},}\\s*$`);
-        if (close.test(line)) fence = undefined;
-        return blank(line);
-      }
-      const open = FENCE_OPEN_RE.exec(line);
-      if (open) {
-        fence = { char: open[1][0], len: open[1].length };
-        return blank(line);
-      }
-      return line;
-    })
+    .map((line) => maskLine(line, s))
     .join("\n");
 }
 
@@ -86,32 +160,6 @@ function blankInlineCode(text: string): string {
       part.replace(/(`+)(?!`)([\s\S]*?[^`])\1(?!`)/g, (span) => blank(span)),
     )
     .join("");
-}
-
-/**
- * `text` with every HTML comment blanked (keeping line structure), but only
- * where a comment is actually a comment: an HTML comment span is located on a
- * code-span-masked copy of `text`, so a `<!--` written inside an inline code
- * span is code, not a comment opener, and never swallows the prose (and any
- * `[^id]` reference) between it and a later `-->`. The comment spans found on
- * the masked copy are then blanked in the ORIGINAL `text`, which is what keeps
- * inline code itself intact for a definition's text (a code span that merely
- * overlaps a comment's real body stays because the comment's own `<!--` was
- * outside code and its blank range covers the whole span either way).
- */
-function blankCommentsOutsideCode(text: string): string {
-  const codeMask = blankInlineCode(text);
-  const re = new RegExp(HTML_COMMENT_RE.source, "g");
-  let out = "";
-  let last = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(codeMask)) !== null) {
-    const start = m.index;
-    const end = m.index + m[0].length;
-    out += text.slice(last, start) + blank(text.slice(start, end));
-    last = end;
-  }
-  return out + text.slice(last);
 }
 
 /** The definition at `lines[i]` (marker match plus the indices of its continuation lines), or undefined. */
@@ -133,16 +181,14 @@ export function scanFootnotes(body: string): FootnoteScan {
   // backticks); `noCode` is what references are searched in. Blanking
   // preserves line structure, so index i is the same line in both.
   //
-  // The constructs are blanked in dependency order: a code-span-masked
-  // comment pass runs first, so a `<!--` written inside an inline code span is
-  // treated as code rather than opening a comment that reaches for a later
-  // `-->`; HTML comments are gone before fences, so a fence marker written
-  // inside a comment never opens a fence; inline code is blanked last, only
-  // for the reference view.
-  const commentFree = blankCommentsOutsideCode(body.replace(/\r\n?/g, "\n"));
-  const fenceFree = blankFences(commentFree);
-  const withCode = fenceFree.split("\n");
-  const noCode = blankInlineCode(fenceFree).split("\n");
+  // One pass blanks fences and comments together, tracking both states at
+  // once: a `<!--` inside an open fence is code and never opens a comment, a
+  // fence marker inside an open comment never opens a fence, and outside both
+  // a `<!--` inside an inline code span is code rather than a comment opener.
+  // Inline code is blanked last, only for the reference view.
+  const masked = maskFencesAndComments(body.replace(/\r\n?/g, "\n"));
+  const withCode = masked.split("\n");
+  const noCode = blankInlineCode(masked).split("\n");
   const references: string[] = [];
   const definitions: FootnoteDefinition[] = [];
   for (let i = 0; i < withCode.length; i++) {

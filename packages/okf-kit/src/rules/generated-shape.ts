@@ -4,6 +4,7 @@ import {
   getStampDivergence,
   hasUtcDesignator,
   isRecord,
+  parseTimestampInstantMs,
 } from "../util.js";
 import type { Finding, Rule } from "../types.js";
 
@@ -24,21 +25,19 @@ const GENERATED_BY_SHAPE_RE = /^(?:human:\S+|process:\S+|\S+\/\S+)$/;
 
 /**
  * Whether a `generated.at` value names a usable instant: a native YAML date,
- * or a string that parses to one (forcing UTC for a designator-less string,
- * exactly as every timestamp reader in this package does, so a real date that
- * merely omits its offset is still recognised as a date here and left to the
- * designator error below). Anything else -- a present-but-null value, a blank
- * string, a string that is not a date at all, a number, a nested mapping --
- * names no instant: the doc spells `generated.at` but carries no stamp anyone
- * can read from it.
+ * or a string `parseTimestampInstantMs` resolves to one (forcing UTC for a
+ * designator-less string, exactly as every timestamp reader in this package
+ * does, so a real date that merely omits its offset is still recognised as a
+ * date here and left to the designator error below; "parses" means what
+ * `Date.parse` accepts, not a stricter date-time grammar). Anything else --
+ * a present-but-null value, a blank string, a string that is not a parseable
+ * date-time, a number, a nested mapping -- names no instant: the doc spells
+ * `generated.at` but carries no stamp anyone can read from it.
  */
 function atNamesInstant(value: unknown): boolean {
   if (value instanceof Date) return !Number.isNaN(value.getTime());
   if (typeof value !== "string") return false;
-  const trimmed = value.trim();
-  if (trimmed === "") return false;
-  const ms = Date.parse(hasUtcDesignator(trimmed) ? trimmed : `${trimmed}Z`);
-  return !Number.isNaN(ms);
+  return parseTimestampInstantMs(value) !== undefined;
 }
 
 /** How one side of the divergence finding names a stamp value: its raw spelling quoted, or, for a native YAML date (no raw spelling), the instant it resolved to. */
@@ -60,7 +59,7 @@ function describeGeneratedValue(value: unknown): string {
 export const generatedShapeRule: Rule = {
   id: RULE_ID,
   description:
-    "Frontmatter `generated` (the OKF v0.2 replacement for `timestamp`): `generated.by` must match one of `<producer>/<version>`, `human:<id>`, `process:<id>` (warning, any spec version, since only a v0.2 bundle may carry the key at all); under spec v0.2 the mapping itself is checked too -- `generated` must be a mapping and must carry both `by` and `at` (warning each, and again for an `at` present but naming no instant: null, blank, or not a date-time), and `generated.at` must carry an explicit UTC designator (`Z`) or numeric offset (error); and a `generated.at` and a `timestamp` naming DIFFERENT instants on one doc is reported once (warning), because the freshness rules read `generated.at` and silently leave the other behind.",
+    "Frontmatter `generated` (the OKF v0.2 replacement for `timestamp`): `generated.by` must match one of `<producer>/<version>`, `human:<id>`, `process:<id>` (warning, any spec version, since only a v0.2 bundle may carry the key at all); under spec v0.2 the mapping itself is checked too -- `generated` must be a mapping and must carry both `by` and `at` (warning each, and again for an `at` present but naming no instant: null, blank, or not a parseable date-time), and `generated.at` must carry an explicit UTC designator (`Z`) or numeric offset (error); and a `generated.at` and a `timestamp` naming DIFFERENT instants on one doc is reported once (warning), because the freshness rules read `generated.at` and silently leave the other behind.",
   run(ctx) {
     const findings: Finding[] = [];
     for (const doc of ctx.docs) {
@@ -127,7 +126,7 @@ export const generatedShapeRule: Rule = {
           severity: "warning",
           file: doc.relPath,
           message:
-            "generated has an `at` that names no instant (null, blank, or not an ISO 8601 date-time); OKF v0.2 requires it to name the instant as an ISO 8601 date-time with an explicit offset",
+            "generated has an `at` that names no instant (null, blank, or not a parseable date-time); OKF v0.2 requires it to name the instant as an ISO 8601 date-time with an explicit offset",
         });
       }
 

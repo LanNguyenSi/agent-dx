@@ -121,6 +121,24 @@ describe("scanFootnotes", () => {
     expect(scan.references).toEqual(["real"]);
   });
 
+  it("does not let a `<!--` inside a fenced block open a comment", () => {
+    // The fence contains a blank line, so no inline code span covers the
+    // `<!--`: fence state must be what keeps it code. A comment opened here
+    // would swallow the prose (both references) up to the later `-->`.
+    const body = [
+      "```html",
+      "<!-- your note here",
+      "",
+      "```",
+      "claim.[^a] dangling.[^missing]",
+      "<!-- reviewer note -->",
+      "[^a]: Source text.",
+    ].join("\n");
+    const scan = scanFootnotes(body);
+    expect(scan.references).toEqual(["a", "missing"]);
+    expect(scan.definitions).toEqual([{ id: "a", text: "Source text." }]);
+  });
+
   it("treats `<!-->` as a complete (empty) comment", () => {
     // `<!-->` closes itself, so what follows is prose: the `[^real]` survives
     // and the later `-->` is just text, not a comment terminator reaching back.

@@ -272,7 +272,7 @@ export function isWithinRepoRoot(repoRoot: string, entry: string): boolean {
  * the same as its untrimmed form (both `hasUtcDesignator` and `Date.parse`
  * would otherwise treat the padding as part of the value).
  */
-function parseTimestampInstantMs(raw: string): number | undefined {
+export function parseTimestampInstantMs(raw: string): number | undefined {
   const trimmed = raw.trim();
   const ms = Date.parse(hasUtcDesignator(trimmed) ? trimmed : `${trimmed}Z`);
   return Number.isNaN(ms) ? undefined : ms;
