@@ -8,9 +8,10 @@ import { installEpipeGuard } from "../src/epipe.js";
 
 const PKG = join(import.meta.dirname, "..");
 // Real-process tests spawn tsx; give them more than vitest's 5 s default and
-// keep every kill timer below that bound so a hung child never outlives a test.
+// keep the kill timers (two sequential children at most) below that bound so a
+// hung child never outlives a test.
 const REAL_PROCESS_TEST_MS = 40_000;
-const CHILD_KILL_MS = 30_000;
+const CHILD_KILL_MS = 15_000;
 let dir: string;
 let env: NodeJS.ProcessEnv;
 let dbPath: string;
