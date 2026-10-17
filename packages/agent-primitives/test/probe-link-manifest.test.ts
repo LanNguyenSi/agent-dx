@@ -846,6 +846,85 @@ describe("worktree create: a link whose target does not resolve", () => {
   });
 });
 
+describe("worktree create: the writer fails while another link dangles", () => {
+  it("tells the dangling link to get its target and the backslash link to use --link, and reports unresolved", async () => {
+    const f = makeFixture();
+    fs.symlinkSync(path.join(f.base, "nowhere"), path.join(f.repo, "lib2"));
+    fs.writeFileSync(path.join(f.repo, "we\\ird"), "x\n");
+    const wt = path.join(f.base, "wt-writer-failed");
+    const r = await spawnCli(
+      [
+        "-C",
+        f.base,
+        "worktree",
+        "create",
+        "--repo",
+        f.repo,
+        "--branch",
+        "wt-writer-failed",
+        "--base",
+        "main",
+        "--path",
+        wt,
+        "--link",
+        "lib2",
+        "--link",
+        "we\\ird",
+      ],
+      { env: GIT_ENV },
+    );
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    const out = JSON.parse(r.stdout) as {
+      links: {
+        manifest: {
+          status: string;
+          unresolved?: { path: string; reason: string }[];
+        };
+      };
+      warnings: string[];
+    };
+
+    expect(out.links.manifest.status).toBe("failed");
+    expect(out.links.manifest.unresolved?.map((u) => u.path)).toEqual(["lib2"]);
+    const warning = out.warnings.find((w) => w.includes("could not record"))!;
+    expect(warning).toContain("pass --link to probe to link we\\ird");
+    expect(warning).not.toContain("link lib2");
+    expect(warning).toContain(
+      "lib2 does not resolve to a target: create the target in the main checkout first",
+    );
+  });
+
+  it("reports unresolved too when no link resolves", async () => {
+    const f = makeFixture();
+    fs.rmSync(path.join(f.repo, "lib"), { recursive: true });
+    fs.symlinkSync(path.join(f.base, "nowhere"), path.join(f.repo, "lib"));
+    const wt = path.join(f.base, "wt-none-resolve");
+    const r = await spawnCli(
+      [
+        "-C",
+        f.base,
+        "worktree",
+        "create",
+        "--repo",
+        f.repo,
+        "--branch",
+        "wt-none-resolve",
+        "--base",
+        "main",
+        "--path",
+        wt,
+        "--link",
+        "lib",
+      ],
+      { env: GIT_ENV },
+    );
+    const out = JSON.parse(r.stdout) as {
+      links: { manifest: { unresolved?: { path: string }[] } };
+    };
+    expect(out.links.manifest.unresolved?.map((u) => u.path)).toEqual(["lib"]);
+  });
+});
+
 describe("the writer only writes what the reader accepts", () => {
   it("writeLinkManifest leaves out an entry the reader would reject and reports it, keeping the others", async () => {
     const f = makeFixture();

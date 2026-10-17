@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `worktree create`: when `git worktree add` fails after creating the new
+  branch (a `--path` through a dangling symlink into the checkout, say),
+  the branch this call created is deleted again instead of being left as
+  an orphan. A branch that existed before the call is never deleted, nor
+  one that has moved off its start commit; the refusal message says
+  whether the branch was removed.
+- `worktree create`: when the link manifest cannot be written while
+  another link dangles, the warning no longer tells the operator to pass
+  `--link` for the dangling link. It names the links to pass with
+  `--link` and, separately, the ones that need their target created
+  first, and the `failed` manifest report lists them under `unresolved`.
+- `worktree list` and `worktree create`: a prunable entry whose directory
+  still exists (only its `.git` file is gone) is no longer described as
+  "the directory is gone"; the wording follows the file system and
+  carries git's own reason when it printed one.
+- `worktree list --root --base <rev>`: a value that can never be a
+  remote-tracking branch (empty, option-like, `HEAD`, a sha, rev syntax)
+  is refused up front as `base_not_remote_branch`, as it already was
+  without `--root`, instead of exiting 0 with `merged: unknown` and a
+  warning per repository. A missing remote or ref stays a warning.
 - `-l, --log-dir` and `AGENT_PRIMITIVES_LOG_DIR`: an empty value (`-l ''`
   or `AGENT_PRIMITIVES_LOG_DIR=`) resolved as `path.resolve("")`, which is
   the invocation directory, so the run wrote its logs into the checkout it

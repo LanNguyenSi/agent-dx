@@ -314,9 +314,29 @@ export interface WorktreeEntry {
   branch?: string;
   bare: boolean;
   detached: boolean;
-  /** git considers the entry stale (its directory is gone). */
+  /** git considers the entry stale: its directory is gone, or it no longer
+   * holds a usable link back to the repository (see `describePrunable`). */
   prunable: boolean;
+  /** git's own reason for `prunable`, when it printed one. */
+  prunableReason?: string;
   locked: boolean;
+}
+
+/**
+ * Says why git lists `entry` as prunable. git marks an entry prunable when
+ * its directory is gone, but also when the directory is still there and
+ * only its `.git` file is missing or points elsewhere, so the wording
+ * follows the file system, not the flag: a directory that still exists may
+ * hold work.
+ */
+export function describePrunable(entry: WorktreeEntry): string {
+  const reason =
+    entry.prunableReason !== undefined && entry.prunableReason.length > 0
+      ? ` (git: ${entry.prunableReason})`
+      : "";
+  return fs.existsSync(entry.path)
+    ? `the directory still exists but git no longer treats it as a worktree${reason}; check it for work before running \`git worktree prune\``
+    : `the directory is gone${reason}`;
 }
 
 /** Parses `git worktree list --porcelain`. The first entry is always the
@@ -340,8 +360,11 @@ export function parseWorktreeList(porcelain: string): WorktreeEntry[] {
         entry.branch = line.slice(7).replace(/^refs\/heads\//, "");
       } else if (line === "bare") entry.bare = true;
       else if (line === "detached") entry.detached = true;
-      else if (line.startsWith("prunable")) entry.prunable = true;
-      else if (line.startsWith("locked")) entry.locked = true;
+      else if (line === "prunable" || line.startsWith("prunable ")) {
+        entry.prunable = true;
+        const reason = line.slice("prunable".length).trim();
+        if (reason.length > 0) entry.prunableReason = reason;
+      } else if (line.startsWith("locked")) entry.locked = true;
     }
     if (entry.path.length > 0) entries.push(entry);
   }
@@ -1519,6 +1542,24 @@ export function resolveRemoteBase(
     return { ok: false, reason: "base_not_found" };
   }
   return { ok: true, base: { ref: full, remote, branch } };
+}
+
+/**
+ * True when `rev` can never be the `--base` of a remote-tracking branch in
+ * any repository: empty, option-like, not `<remote>/<branch>` in shape
+ * (no slash after an optional `refs/remotes/`: `HEAD`, a sha, a local
+ * branch without a slash), a `<name>/HEAD` pair, or no valid ref name
+ * (rev syntax). Needs no repository; a missing remote or ref is a per
+ * repository matter and not decided here.
+ */
+export function baseNeverRemoteBranch(cwd: string, rev: string): boolean {
+  if (rev.length === 0 || rev.startsWith("-")) return true;
+  const full = rev.startsWith("refs/remotes/") ? rev : `refs/remotes/${rev}`;
+  const rest = full.slice("refs/remotes/".length);
+  const parts = rest.split("/");
+  if (parts.length < 2) return true;
+  if (parts.length === 2 && parts[1] === "HEAD") return true;
+  return git(cwd, ["check-ref-format", full]).status !== 0;
 }
 
 /** True when `rev` names a commit in the repository at `cwd`. */

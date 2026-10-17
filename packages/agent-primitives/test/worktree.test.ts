@@ -10,6 +10,7 @@ import {
   parseWorktreeList,
   smokeVerdict,
 } from "../src/worktree/index.js";
+import { discardCreatedBranch } from "../src/worktree/create.js";
 import { excludePatternFor } from "../src/worktree/git.js";
 import { caseInsensitiveVolume } from "./helpers/case-fs.js";
 import { spawnCli } from "./helpers/spawn-cli.js";
@@ -732,6 +733,135 @@ describe("worktree create: refusals", () => {
       "--no-fetch",
     ]);
     expect(ok.code, ok.stdout).toBe(0);
+  });
+});
+
+describe("worktree create: a failed add leaves no branch of its own behind", () => {
+  it("removes the branch it created when --path goes through a dangling symlink into the checkout", async () => {
+    const f = makeFixture();
+    const dangling = path.join(f.base, "dangling");
+    fs.symlinkSync(path.join(f.repo, "not-there"), dangling);
+    const branchesBefore = git(f.repo, ["branch", "--list"]);
+
+    const r = await run(f.work, [
+      "--repo",
+      f.repo,
+      "--branch",
+      "orphan",
+      "--path",
+      path.join(dangling, "wt"),
+    ]);
+
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.reason).toBe("worktree_add_failed");
+    expect(r.json.message).toContain("was removed again");
+    expect(
+      gitStatus(f.repo, ["rev-parse", "--verify", "refs/heads/orphan"]),
+    ).not.toBe(0);
+    expect(git(f.repo, ["branch", "--list"])).toBe(branchesBefore);
+    expect(fs.existsSync(path.join(f.repo, "not-there"))).toBe(false);
+  });
+
+  it("discardCreatedBranch removes a branch this call made, at the commit it started at", () => {
+    const f = makeFixture();
+    git(f.repo, ["branch", "mine"]);
+    expect(discardCreatedBranch(f.repo, "mine", false, f.mainSha)).toBe(
+      "removed",
+    );
+    expect(
+      gitStatus(f.repo, ["rev-parse", "--verify", "refs/heads/mine"]),
+    ).not.toBe(0);
+  });
+
+  it("discardCreatedBranch never deletes a branch that existed before the call", () => {
+    const f = makeFixture();
+    git(f.repo, ["branch", "older"]);
+    expect(discardCreatedBranch(f.repo, "older", true, f.mainSha)).toBe("kept");
+    expect(
+      gitStatus(f.repo, ["rev-parse", "--verify", "refs/heads/older"]),
+    ).toBe(0);
+  });
+
+  it("discardCreatedBranch leaves a branch alone that has moved off the start commit", () => {
+    const f = makeFixture();
+    git(f.repo, ["branch", "moved"]);
+    git(f.repo, ["checkout", "-q", "moved"]);
+    write(f.repo, "extra.txt", "x\n");
+    git(f.repo, ["add", "-A"]);
+    git(f.repo, ["commit", "-q", "-m", "more"]);
+    git(f.repo, ["checkout", "-q", "main"]);
+    expect(discardCreatedBranch(f.repo, "moved", false, f.mainSha)).toBe(
+      "failed",
+    );
+    expect(
+      gitStatus(f.repo, ["rev-parse", "--verify", "refs/heads/moved"]),
+    ).toBe(0);
+  });
+
+  it("discardCreatedBranch has nothing to do when the add left no branch", () => {
+    const f = makeFixture();
+    expect(discardCreatedBranch(f.repo, "never", false, f.mainSha)).toBe(
+      "kept",
+    );
+  });
+});
+
+describe("worktree create: a prunable holder of the branch", () => {
+  it("does not claim the directory is gone when it is still there", async () => {
+    const f = makeFixture();
+    const holder = path.join(f.base, "wt-holder");
+    const first = await run(f.work, [
+      "--repo",
+      f.repo,
+      "--branch",
+      "held",
+      "--path",
+      holder,
+    ]);
+    expect(first.code, first.stdout).toBe(0);
+    fs.rmSync(path.join(holder, ".git"));
+
+    const r = await run(f.work, [
+      "--repo",
+      f.repo,
+      "--branch",
+      "held",
+      "--path",
+      path.join(f.base, "wt-second"),
+    ]);
+
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.reason).toBe("branch_checked_out");
+    expect(r.json.message).toContain("prunable");
+    expect(r.json.message).toContain("still exists");
+    expect(r.json.message).not.toContain("is gone");
+  });
+
+  it("says the directory is gone when it is", async () => {
+    const f = makeFixture();
+    const holder = path.join(f.base, "wt-holder");
+    const first = await run(f.work, [
+      "--repo",
+      f.repo,
+      "--branch",
+      "held",
+      "--path",
+      holder,
+    ]);
+    expect(first.code, first.stdout).toBe(0);
+    fs.rmSync(holder, { recursive: true, force: true });
+
+    const r = await run(f.work, [
+      "--repo",
+      f.repo,
+      "--branch",
+      "held",
+      "--path",
+      path.join(f.base, "wt-second"),
+    ]);
+
+    expect(r.json.reason).toBe("branch_checked_out");
+    expect(r.json.message).toContain("the directory is gone");
   });
 });
 
