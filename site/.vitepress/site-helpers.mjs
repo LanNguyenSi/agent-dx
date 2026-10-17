@@ -78,6 +78,39 @@ export function refuseIncludes(repoRoot, pages) {
   }
 }
 
+// VitePress runs Node code at build time from files that sit next to the pages:
+// a dynamic route's `[name].paths.*` file is imported to list its pages, and a
+// script file next to a page can be pulled in by one. Playbook content is
+// Markdown, images and YAML or JSON data, so the files below fail the build
+// instead: any `*.paths.*` file and anything ending in .js, .mjs, .cjs, .ts,
+// .mts or .cts, matched on the file name without regard to case. The check
+// looks at names only: it never opens or imports an offending file, and a
+// symbolic link is judged by its own name and not followed (walk lists a link
+// as an entry, it does not descend into it). `createSite` runs it while the
+// config loads, which is before VitePress resolves any page and so before any
+// such file could be imported.
+const pathsFile = /\.paths\./i
+const codeFile = /\.(?:js|mjs|cjs|ts|mts|cts)$/i
+
+// Fails with the repository-relative path of the first offending file, in
+// sorted order, when a playbook directory holds a build-time code file.
+export function refuseBuildTimeCode(repoRoot) {
+  const offending = playbooks
+    .flatMap((pb) => {
+      const dir = path.join(repoRoot, 'packages', pb)
+      return fs.existsSync(dir) ? walk(dir) : []
+    })
+    .map((f) => path.relative(repoRoot, f).split(path.sep).join('/'))
+    .filter((f) => {
+      const name = path.posix.basename(f)
+      return pathsFile.test(name) || codeFile.test(name)
+    })
+    .sort()
+  if (offending.length > 0) {
+    throw new Error(`Build-time code is not supported in playbook content: ${offending[0]}`)
+  }
+}
+
 // A leading byte order mark and front matter are stripped before the body is
 // parsed, as VitePress does.
 const FRONT_MATTER = /^---[ \t]*\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/
@@ -140,6 +173,7 @@ export function createSite(repoRoot, readTitle) {
   })
   const rewrites = { 'site/index.md': 'index.md' }
   for (const p of pages) rewrites[p] = sitePath(p)
+  refuseBuildTimeCode(repoRoot)
   refuseIncludes(repoRoot, rewrites)
   const isPage = (repoRel) => pages.includes(repoRel)
 

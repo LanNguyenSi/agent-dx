@@ -7,7 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createMarkdownRenderer, disposeMdItInstance } from 'vitepress'
-import { createSite, createTitleReader, escapeLiteral, escapeText, githubBase, markdownBase, refuseIncludes } from '../.vitepress/site-helpers.mjs'
+import { createSite, createTitleReader, escapeLiteral, escapeText, githubBase, markdownBase, refuseBuildTimeCode, refuseIncludes } from '../.vitepress/site-helpers.mjs'
 
 let root
 let site
@@ -269,6 +269,110 @@ test('refuseIncludes passes a page that mentions includes without the directive'
     assert.doesNotThrow(() => refuseIncludes(root, { [`${AE}/inc-text.md`]: 'x.md' }))
   } finally {
     fs.rmSync(path.join(root, `${AE}/inc-text.md`))
+  }
+})
+
+const AC = 'packages/agentic-coding-playbook'
+const codeNames = [
+  `${AE}/[x].paths.mjs`,
+  `${AE}/[x].paths.js`,
+  `${AE}/x.paths.ts`,
+  `${AE}/x.PATHS.json`,
+  `${AE}/foo.js`,
+  `${AE}/foo.mjs`,
+  `${AE}/foo.cjs`,
+  `${AE}/foo.ts`,
+  `${AE}/foo.mts`,
+  `${AE}/foo.cts`,
+  `${AE}/FOO.JS`,
+  `${AE}/Foo.Mjs`,
+  `${AC}/a/b/c.mjs`,
+  `${AC}/[y].paths.mjs`
+]
+
+test('a build-time code file in a playbook directory is refused with its path', () => {
+  for (const rel of codeNames) {
+    write(rel, 'export default {}\n')
+    try {
+      assert.throws(
+        () => createSite(root, readTitle),
+        (e) => e.message === `Build-time code is not supported in playbook content: ${rel}`,
+        rel
+      )
+    } finally {
+      fs.rmSync(path.join(root, rel))
+    }
+  }
+  fs.rmSync(path.join(root, AC), { recursive: true, force: true })
+  assert.doesNotThrow(() => createSite(root, readTitle))
+})
+
+test('only data and Markdown files, and code outside the playbook directories, pass', () => {
+  const fine = [
+    `${AE}/data.json`,
+    `${AE}/data.yaml`,
+    `${AE}/data.yml`,
+    `${AE}/img/other.svg`,
+    `${AE}/notes.md`,
+    `${AE}/js.md`,
+    `${AE}/mjs/page.md`,
+    `${AE}/paths.md`,
+    `${AE}/pathsfile.json`,
+    `${AC}/guide.md`,
+    'site/index.md',
+    'site/x.js',
+    'site/.vitepress/x.mjs',
+    'packages/other/x.js',
+    'packages/other/[x].paths.mjs',
+    'docs/x.ts'
+  ]
+  // A tree of its own, so that nothing has to be cleaned out of the shared one.
+  const tree = fs.mkdtempSync(path.join(os.tmpdir(), 'site-links-clean-'))
+  try {
+    for (const rel of fine) {
+      fs.mkdirSync(path.dirname(path.join(tree, rel)), { recursive: true })
+      fs.writeFileSync(path.join(tree, rel), rel.endsWith('.md') ? '# T\n' : 'x\n')
+    }
+    assert.doesNotThrow(() => refuseBuildTimeCode(tree))
+    assert.doesNotThrow(() => createSite(tree, readTitle))
+  } finally {
+    fs.rmSync(tree, { recursive: true, force: true })
+  }
+})
+
+test('with several offenders the first in sorted order is named', () => {
+  const rels = [`${AC}/z.mjs`, `${AE}/b.js`, `${AE}/a/a.cjs`, `${AE}/a.ts`]
+  for (const rel of rels) write(rel, 'x\n')
+  try {
+    assert.throws(() => refuseBuildTimeCode(root), /: packages\/agent-engineering-playbook\/a\.ts$/)
+  } finally {
+    for (const rel of rels) fs.rmSync(path.join(root, rel))
+    fs.rmSync(path.join(root, AC), { recursive: true, force: true })
+    fs.rmSync(path.join(root, `${AE}/a`), { recursive: true, force: true })
+  }
+})
+
+test('a symbolic link is judged by its name and never followed', () => {
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'site-links-outside-'))
+  const aside = path.join(outside, 'aside')
+  fs.mkdirSync(aside)
+  fs.writeFileSync(path.join(aside, 'payload.mjs'), 'x\n')
+  const link = (target, rel) => fs.symlinkSync(target, path.join(root, rel))
+  try {
+    // A dangling link named like a code file is refused without opening it.
+    link(path.join(outside, 'missing'), `${AE}/dangling.mjs`)
+    assert.throws(() => refuseBuildTimeCode(root), /: packages\/agent-engineering-playbook\/dangling\.mjs$/)
+    fs.rmSync(path.join(root, `${AE}/dangling.mjs`))
+    // A link to a directory is one entry: not entered, so nothing inside it
+    // is seen, and a link back up the tree cannot make the walk run forever.
+    link(aside, `${AE}/aside`)
+    link('.', `${AE}/loop`)
+    assert.doesNotThrow(() => refuseBuildTimeCode(root))
+  } finally {
+    fs.rmSync(path.join(root, `${AE}/dangling.mjs`), { force: true })
+    fs.rmSync(path.join(root, `${AE}/aside`), { force: true })
+    fs.rmSync(path.join(root, `${AE}/loop`), { force: true })
+    fs.rmSync(outside, { recursive: true, force: true })
   }
 })
 

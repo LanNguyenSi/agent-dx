@@ -126,6 +126,18 @@ and can embed any readable file. The check runs when the site config
 loads (build and dev-server start); a running dev server does not re-check
 pages edited later, so do not point one at untrusted content.
 
+Playbook content under `packages/agent-engineering-playbook` and
+`packages/agentic-coding-playbook` is Markdown with YAML or JSON frontmatter,
+images, and YAML or JSON data files. Anything that would run Node code during
+the build fails it, naming the file: a `*.paths.*` file (VitePress imports it
+to list the pages of a dynamic route such as `[name].md`) and any file ending
+in `.js`, `.mjs`, `.cjs`, `.ts`, `.mts` or `.cts`, matched without regard to
+case and at any depth. The check looks at file names only, runs when the site
+config loads before VitePress reads any page, and does not follow symbolic
+links. Like the checks above it runs at dev-server start and not again for
+files added while the server runs, so a running dev server still must not be
+pointed at untrusted content.
+
 ```bash
 cd site && npm ci && npm run build   # output in site/.vitepress/dist
 cd site && npm test                  # rendering checks for comments and raw HTML

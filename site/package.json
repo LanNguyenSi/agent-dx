@@ -7,7 +7,7 @@
     "dev": "vitepress dev",
     "build": "vitepress build",
     "preview": "vitepress preview",
-    "test": "node --test test/comments.test.mjs test/links.test.mjs test/config.test.mjs test/raw-output.test.mjs test/raw-output-build.test.mjs test/script-safe.test.mjs test/theme-href.test.mjs"
+    "test": "node --test test/comments.test.mjs test/links.test.mjs test/config.test.mjs test/raw-output.test.mjs test/raw-output-build.test.mjs test/script-safe.test.mjs test/theme-href.test.mjs test/build-time-code.test.mjs"
   },
   "devDependencies": {
     "vitepress": "1.6.4"
