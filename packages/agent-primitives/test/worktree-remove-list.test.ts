@@ -1664,6 +1664,7 @@ describe("worktree list --root: a --base that can never be a remote-tracking bra
   it.each([
     ["empty", ""],
     ["leading dash", "-x"],
+    ["leading dash with a slash", "-x/main"],
     ["HEAD", "HEAD"],
     ["a sha", "0123456789abcdef0123456789abcdef01234567"],
     ["remote HEAD", "origin/HEAD"],

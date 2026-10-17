@@ -1546,14 +1546,14 @@ export function resolveRemoteBase(
 
 /**
  * True when `rev` can never be the `--base` of a remote-tracking branch in
- * any repository: empty, option-like, not `<remote>/<branch>` in shape
- * (no slash after an optional `refs/remotes/`: `HEAD`, a sha, a local
+ * any repository: option-like, not `<remote>/<branch>` in shape
+ * (no slash after an optional `refs/remotes/`: empty, `HEAD`, a sha, a local
  * branch without a slash), a `<name>/HEAD` pair, or no valid ref name
  * (rev syntax). Needs no repository; a missing remote or ref is a per
  * repository matter and not decided here.
  */
 export function baseNeverRemoteBranch(cwd: string, rev: string): boolean {
-  if (rev.length === 0 || rev.startsWith("-")) return true;
+  if (rev.startsWith("-")) return true;
   const full = rev.startsWith("refs/remotes/") ? rev : `refs/remotes/${rev}`;
   const rest = full.slice("refs/remotes/".length);
   const parts = rest.split("/");
