@@ -44,6 +44,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   own, so every one of these shapes keeps passing exactly as before. See
   [Check catalog](docs/check-catalog.md#rules).
 
+- The staleness docs now state that a comment-only edit to a cited source (a
+  comment, whitespace or formatting change) still makes the doc stale and needs
+  the usual re-verify-and-re-stamp, and recommend the merge order: land the pull
+  request that changes the cited files before the one that re-stamps the bundle,
+  or re-stamp in the same pull request, so the bundle pull request is not stale
+  on arrival. Docs only; no behaviour change. See
+  [Comment-only source edits](docs/staleness.md#comment-only-source-edits).
+
 ## [0.19.0] - 2026-10-14
 
 - OKF v0.2 support, step 2 (`sources` mappings and footnote citations, so a

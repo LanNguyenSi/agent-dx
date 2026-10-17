@@ -19,6 +19,10 @@
 
 STALE findings are warnings, so they are advisory by default; run with `--strict` to fail the build on them.
 
+## Comment-only source edits
+
+A commit that only changes comments, whitespace or formatting in a cited source still makes the doc stale: `sources-fresh` compares commit times and does not inspect what changed. The remedy is the normal one: re-verify the doc against the source and re-stamp it (move the effective stamp forward and add a line to the bundle's `log.md`), in the same commit as the source change when possible, so the re-stamp rule above treats the doc as fresh. There is no comment-only or line-range-aware mode: a suppression mode could hide a real change and would need a comment parser per file type. When a pull request edits files that a bundle cites (for example code comments touched by a docs sweep), merge it before the pull request that re-stamps the bundle, or re-stamp in the same pull request; otherwise the bundle pull request is stale on arrival.
+
 ## Mapping sources (OKF v0.2)
 
 A `sources` entry written as a v0.2 mapping is assessed through its `resource`: a path `resource` gets exactly the verdicts of a string entry in the table above (its last commit against the effective stamp, the re-stamp rule, `untracked by git`), and the `STALE` message names the `resource` text. A URL `resource` (`scheme://`) is skipped entirely, with no finding and no notice, and a mapping without a usable `resource` is left to `sources-shape`. The re-stamp rule compares the doc's stamp value across the commit boundary and does not read `sources` from the historical blob, so mapping and string entries are judged identically on both sides of it. See [Sources entries](check-catalog.md#sources-entries-strings-and-v02-mappings).
