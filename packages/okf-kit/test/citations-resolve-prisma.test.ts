@@ -1,5 +1,8 @@
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
+import { loadBundle } from "../src/bundle.js";
 import { citationsResolveRule } from "../src/rules/citations-resolve.js";
 import type { Finding } from "../src/types.js";
 import { FIXTURES_DIR, loadFixture } from "./helpers.js";
@@ -53,5 +56,59 @@ describe("citations-resolve .prisma targets", () => {
     const f = findingFor(findings, "prisma/schema.prisma:10");
     expect(f).toBeDefined();
     expect(f?.message).toContain("[closing-brace-start-line]");
+  });
+
+  it("a v0.2 footnote into the same lone closing brace gets the same closing-brace-start-line verdict as the inline citation above", () => {
+    // Mirror of the inline `prisma/schema.prisma:10` case, reached through the
+    // OKF v0.2 footnote path (the footnote's `sources` entry names the file,
+    // its DEFINITION text names the line) rather than prose. Both routes run
+    // the identical checkTarget start-line checks, so the verdict must match.
+    const tmpRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), "okf-kit-prisma-footnote-"),
+    );
+    try {
+      fs.mkdirSync(path.join(tmpRoot, "prisma"), { recursive: true });
+      fs.copyFileSync(
+        path.join(
+          FIXTURES_DIR,
+          "citations-resolve-prisma",
+          "prisma",
+          "schema.prisma",
+        ),
+        path.join(tmpRoot, "prisma", "schema.prisma"),
+      );
+      fs.mkdirSync(path.join(tmpRoot, "docs"), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpRoot, "docs", "index.md"),
+        '---\nokf_version: "0.2"\n---\n\n# Index\n',
+      );
+      fs.writeFileSync(
+        path.join(tmpRoot, "docs", "doc.md"),
+        [
+          "---",
+          "type: reference",
+          "sources:",
+          "  - id: post",
+          "    resource: prisma/schema.prisma",
+          "---",
+          "",
+          "The Post model closes here.[^post]",
+          "",
+          "[^post]: Post model, `L10`.",
+          "",
+        ].join("\n"),
+      );
+      const ctx = loadBundle(path.join(tmpRoot, "docs"), tmpRoot);
+      ctx.specVersion = "v0.2";
+      const findings = citationsResolveRule.run(ctx);
+      const f = findingFor(
+        findings,
+        "prisma/schema.prisma:10 (footnote [^post])",
+      );
+      expect(f).toBeDefined();
+      expect(f?.message).toContain("[closing-brace-start-line]");
+    } finally {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
   });
 });

@@ -52,6 +52,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on arrival. Docs only; no behaviour change. See
   [Comment-only source edits](docs/staleness.md#comment-only-source-edits).
 
+### Fixed
+
+- `citations-resolve` now maps fenced code blocks with the CommonMark fence
+  rules (one scanner now backs both the target-side heading search and the
+  Markdown range-boundary check). An info string containing a space (for
+  example an opener reading "three backticks then `js title`") now opens a
+  fence, where before such a line was not recognised as a delimiter at all and
+  its own closing marker silently flipped the fence state of the whole rest of
+  the file. A fence now closes only on a line that uses the same fence character
+  as the opener, has at least as many of them, and carries nothing but trailing
+  spaces: a shorter backtick run or a tilde line inside a backtick block, or a
+  same-length marker carrying an info string, is content rather than a closer.
+  These are the rules `reserved-files-structure` already applied; no code is
+  shared, the two scanners agree on the fence character, length and info-string
+  rules, and they differ on indentation: `reserved-files-structure` caps the
+  indent at 0-3 spaces, while `citations-resolve` trims each line before
+  matching fences and so ignores leading indentation (unchanged behavior).
+  See [Citation drift checks](docs/citations.md).
+
+- A body footnote is scanned with fenced code blocks and HTML comments tracked
+  in one pass. An `<!--` written inside an inline code span no longer opens a
+  comment that swallows the following prose (and the `[^id]` references in it)
+  up to a later `-->`, and `<!-->` and `<!--->` are now complete empty
+  comments. A `<!--` opens a comment only when a `-->` outside fenced code
+  follows it, as before: an unclosed `<!--` in prose, inline or at line start,
+  is plain text and hides nothing, and so is a `<!--` whose only later `-->`
+  sits inside a fenced block. A comment that fills its own line (at most three
+  spaces before the `<!--`, nothing after the `-->`) ends an inline code span
+  left open by an unpaired backtick, as an HTML block interrupts the
+  paragraph. A fence marker inside an open comment no longer
+  opens a fence. A comment counts as open only once a `-->` outside fenced
+  code licenses it, so a fence marker inside a comment whose block (read
+  without regard to comments) holds every later `-->` still opens a fence, as
+  before. See [Footnote citations](docs/citations.md#footnote-citations-okf-v02).
+
+- Under OKF v0.2, `generated-shape` now also warns when `generated.at` is
+  present but names no instant (a null value, a blank string, or a string that
+  is not a parseable date-time, that is, one `Date.parse` does not accept),
+  reporting it as a missing stamp in the same
+  style as an absent `at` rather than passing it in silence. Previously only an
+  absent `at` warned, a null or blank `at` passed clean, and a non-date string
+  drew only the missing-offset error. An `at` that really is a date-time but
+  omits its UTC designator keeps that error, and a valid date-time stays clean.
+  See [Check catalog](docs/check-catalog.md#rules).
+
 ## [0.19.0] - 2026-10-14
 
 - OKF v0.2 support, step 2 (`sources` mappings and footnote citations, so a

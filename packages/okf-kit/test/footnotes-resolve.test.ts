@@ -125,6 +125,26 @@ describe("footnotes-resolve", () => {
     expect(run()).toEqual([]);
   });
 
+  it("a prose `<!--` whose only later `-->` is in a fenced example hides no reference", () => {
+    // The `-->` inside the ```html block is code and closes nothing, so the
+    // prose `<!--` is plain text: `[^a]` stays referenced (no unreferenced
+    // warning) and the dangling `[^missing]` is still reported.
+    v02Bundle(
+      doc(
+        SRC_ID_A,
+        "In prose, write <!-- to start an HTML comment. The real claim.[^a]\n\n```html\n<!-- example -->\n```\n\nA dangling one.[^missing]\n\n[^a]: see the source.",
+      ),
+    );
+    const findings = run();
+    expect(findings).toHaveLength(1);
+    expect(findings[0]).toMatchObject({
+      ruleId: "footnotes-resolve",
+      severity: "error",
+      file: "doc.md",
+    });
+    expect(findings[0].message).toContain("[^missing]");
+  });
+
   it("reports a duplicated sources id once, naming both entry positions", () => {
     v02Bundle(
       doc(
