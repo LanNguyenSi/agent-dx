@@ -8,7 +8,9 @@
   locating its anchor on the new line. The `CHANGELOG.md` entry shifted this file's two live
   self-citations into `CHANGELOG.md`, re-pointed across every occurrence. No doc claim changed;
   the three docs listing the changed sources were re-read and re-stamped
-  (`run-state-lifecycle-and-markers.md` cites only released `CHANGELOG.md` sections).
+  (`run-state-lifecycle-and-markers.md` cites only released `CHANGELOG.md` sections). A later
+  wording fix to the new `CHANGELOG.md` bullet kept its line count; the three docs were re-read
+  against it and re-stamped again.
 
 - 2026-10-15T04:30:04Z, handback checks, fix round: the bundle check is now run over the whole configured bundle at
   the head of the delta (only the identifier drift check stays scoped to `base..head`), because a
