@@ -449,6 +449,13 @@ export class FrictionDb {
     const tx = this.db.transaction((fid: number) => {
       this.db.prepare(`DELETE FROM tasks WHERE friction_id = ?`).run(fid);
       this.db.prepare(`DELETE FROM tags WHERE friction_id = ?`).run(fid);
+      // Rows recorded as recurrences of this friction keep existing; only the
+      // reference is cleared so the foreign key does not block the delete.
+      this.db
+        .prepare(
+          `UPDATE frictions SET recurrence_of_id = NULL WHERE recurrence_of_id = ?`,
+        )
+        .run(fid);
       return (
         this.db.prepare(`DELETE FROM frictions WHERE id = ?`).run(fid).changes >
         0
