@@ -128,16 +128,22 @@ pages edited later, so do not point one at untrusted content.
 
 Playbook content under `packages/agent-engineering-playbook` and
 `packages/agentic-coding-playbook` is Markdown with YAML or JSON frontmatter,
-images, and YAML or JSON data files. Anything that would run Node code during
-the build fails it, naming the file: a `*.paths.*` file (VitePress imports it
-to list the pages of a dynamic route such as `[name].md`) and any file ending
-in `.js`, `.mjs`, `.cjs`, `.ts`, `.mts` or `.cts`, matched without regard to
-case and at any depth. A symbolic link anywhere under those directories also
-fails the build, whatever it points at, because VitePress follows a link to a
-directory when it looks for pages. The check looks at file names and entry
-types only, never opens or follows anything, and runs when the site config
-loads before VitePress reads any page. Like the checks above it runs at
-dev-server start and not again for files added while the server runs, so a
+images, and YAML or JSON data files. The build fails, naming the path, when
+the config loads and finds under those directories a `*.paths.*` file or
+directory (VitePress imports it to list the pages of a dynamic route such as
+`[name].md`, and a directory resolves to its `index.*` file or to the
+`main` file of its `package.json`), or a file or directory whose name ends in
+`.js`, `.mjs`, `.cjs`, `.ts`, `.mts`, `.cts`, `.jsx` or `.tsx`. Names are
+matched without regard to case and at any depth, and a matching directory is
+refused without looking inside. A symbolic link anywhere under those
+directories also fails the build, whatever it points at, because VitePress
+follows a link to a directory when it looks for pages. That is all the check
+covers: it looks at entry names and entry types only, never opens or follows
+anything, and runs before VitePress reads any page. Other ways for content to
+run code or read files at build time are not covered by it, such as a
+`<script>` block in a page or a data loader; the sentences above cover
+JavaScript frontmatter and include directives. Like those checks it runs at
+dev-server start and not again for entries added while the server runs, so a
 running dev server still must not be pointed at untrusted content.
 
 ```bash

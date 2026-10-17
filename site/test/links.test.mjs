@@ -286,6 +286,10 @@ const codeNames = [
   `${AE}/foo.cts`,
   `${AE}/FOO.JS`,
   `${AE}/Foo.Mjs`,
+  `${AE}/foo.jsx`,
+  `${AE}/foo.tsx`,
+  `${AE}/FOO.TSX`,
+  `${AE}/Foo.Jsx`,
   `${AC}/a/b/c.mjs`,
   `${AC}/[y].paths.mjs`
 ]
@@ -304,6 +308,68 @@ test('a build-time code file in a playbook directory is refused with its path', 
     }
   }
   fs.rmSync(path.join(root, AC), { recursive: true, force: true })
+  assert.doesNotThrow(() => createSite(root, readTitle))
+})
+
+test('a directory is refused by its name and never entered', () => {
+  // Each case is a set of files; the first in sorted order is the directory
+  // that must be named. esbuild resolves a directory to its index file or to
+  // the package.json `main`, which is how these run when VitePress takes the
+  // directory for a paths file.
+  const cases = {
+    'paths directory with index.jsx': {
+      files: { [`${AC}/[x].paths.mjs/index.jsx`]: 'x\n' },
+      named: `${AC}/[x].paths.mjs`
+    },
+    'paths directory with index.tsx': {
+      files: { [`${AC}/[x].paths.mjs/index.tsx`]: 'x\n' },
+      named: `${AC}/[x].paths.mjs`
+    },
+    'paths directory with package.json main lib.tsx': {
+      files: {
+        [`${AC}/[x].paths.mjs/package.json`]: '{"main":"lib.tsx"}\n',
+        [`${AC}/[x].paths.mjs/lib.tsx`]: 'x\n'
+      },
+      named: `${AC}/[x].paths.mjs`
+    },
+    'paths directory holding only data': {
+      files: { [`${AE}/dyn/[y].paths.ts/data.json`]: '{}\n' },
+      named: `${AE}/dyn/[y].paths.ts`
+    },
+    'paths directory in upper case': {
+      files: { [`${AE}/X.PATHS.JSON/data.json`]: '{}\n' },
+      named: `${AE}/X.PATHS.JSON`
+    },
+    'directory named like a code file, holding only data': {
+      files: { [`${AE}/x.mjs/data.json`]: '{}\n' },
+      named: `${AE}/x.mjs`
+    },
+    'directory named like a jsx file, holding only data': {
+      files: { [`${AE}/x.JSX/data.json`]: '{}\n' },
+      named: `${AE}/x.JSX`
+    },
+    'directory named like a tsx file, holding only data': {
+      files: { [`${AE}/deep/x.tsx/data.json`]: '{}\n' },
+      named: `${AE}/deep/x.tsx`
+    }
+  }
+  for (const [label, { files, named }] of Object.entries(cases)) {
+    for (const [rel, text] of Object.entries(files)) write(rel, text)
+    try {
+      assert.throws(
+        () => createSite(root, readTitle),
+        (e) => e.message === `Build-time code is not supported in playbook content: ${named}`,
+        label
+      )
+    } finally {
+      for (const top of new Set(Object.keys(files).map((rel) => rel.split('/').slice(0, 3).join('/')))) {
+        fs.rmSync(path.join(root, top), { recursive: true, force: true })
+      }
+    }
+  }
+  fs.rmSync(path.join(root, AC), { recursive: true, force: true })
+  fs.rmSync(path.join(root, `${AE}/dyn`), { recursive: true, force: true })
+  fs.rmSync(path.join(root, `${AE}/deep`), { recursive: true, force: true })
   assert.doesNotThrow(() => createSite(root, readTitle))
 })
 

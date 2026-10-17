@@ -81,9 +81,18 @@ export function refuseIncludes(repoRoot, pages) {
 // VitePress runs Node code at build time from files that sit next to the pages:
 // a dynamic route's `[name].paths.*` file is imported to list its pages, and a
 // script file next to a page can be pulled in by one. Playbook content is
-// Markdown, images and YAML or JSON data, so the files below fail the build
-// instead: any `*.paths.*` file and anything ending in .js, .mjs, .cjs, .ts,
-// .mts or .cts, matched on the file name without regard to case.
+// Markdown, images and YAML or JSON data, so the entries below fail the build
+// instead: any `*.paths.*` entry and anything ending in .js, .mjs, .cjs, .ts,
+// .mts, .cts, .jsx or .tsx, matched on the entry name without regard to case.
+//
+// The name test applies to every entry, directories included, and a matching
+// directory is refused without being entered. VitePress finds a paths file with
+// `fs.existsSync`, which is also true for a directory, and its loader bundles
+// the path with esbuild, which resolves a directory to its `index.*` file or to
+// the file named by `main` in its package.json. So `[x].paths.mjs/` holding an
+// `index.jsx` runs as code although no file inside carries a `.paths.` name.
+// A directory named like a code file (`x.mjs/`) is refused for the same reason:
+// it resolves the same way when something imports it.
 //
 // A symbolic link is refused whatever it points at. VitePress follows a link to
 // a directory when it looks for pages, so a link to a directory holding a
@@ -92,27 +101,28 @@ export function refuseIncludes(repoRoot, pages) {
 // the walk finite when a link points back up the tree.
 //
 // The check looks at names and entry types only: it never opens or imports an
-// offending file or follows a link. `createSite` runs it while the config
+// offending entry or follows a link. `createSite` runs it while the config
 // loads, which is before VitePress resolves any page and so before any such
 // file could be imported.
-const pathsFile = /\.paths\./i
-const codeFile = /\.(?:js|mjs|cjs|ts|mts|cts)$/i
+const pathsEntry = /\.paths\./i
+const codeEntry = /\.(?:js|mjs|cjs|ts|mts|cts|jsx|tsx)$/i
 
 // Lists the repository-relative paths (with a flag for symbolic links) under
-// `dir` that the check refuses. A link is reported and not entered.
+// `dir` that the check refuses. A link or a directory with a refused name is
+// reported and not entered.
 function buildTimeCodeIn(repoRoot, dir) {
   const rel = (full) => path.relative(repoRoot, full).split(path.sep).join('/')
   if (fs.lstatSync(dir).isSymbolicLink()) return [{ path: rel(dir), link: true }]
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
     const full = path.join(dir, e.name)
     if (e.isSymbolicLink()) return [{ path: rel(full), link: true }]
-    if (e.isDirectory()) return buildTimeCodeIn(repoRoot, full)
-    return pathsFile.test(e.name) || codeFile.test(e.name) ? [{ path: rel(full), link: false }] : []
+    if (pathsEntry.test(e.name) || codeEntry.test(e.name)) return [{ path: rel(full), link: false }]
+    return e.isDirectory() ? buildTimeCodeIn(repoRoot, full) : []
   })
 }
 
 // Fails with the repository-relative path of the first offending entry, in
-// sorted order, when a playbook directory holds a build-time code file or a
+// sorted order, when a playbook directory holds a build-time code entry or a
 // symbolic link.
 export function refuseBuildTimeCode(repoRoot) {
   const offending = playbooks

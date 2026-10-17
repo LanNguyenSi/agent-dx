@@ -6,7 +6,9 @@
 // written. A second build with the check taken out of the copied config proves
 // the payload does run when nothing stops it, so a missing marker means the
 // check worked and not that the setup could not run the payload. The same pair
-// runs with the route reached through a directory link, which VitePress follows.
+// runs with the route reached through a directory link, which VitePress follows,
+// and with the paths "file" being a directory whose index.jsx holds the payload,
+// which VitePress also takes for a paths file and esbuild resolves to the index.
 import test, { before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
@@ -24,8 +26,9 @@ let work
 // A repository of its own under tmp: site/.vitepress copied (without its cache
 // and output), site/node_modules linked, a home page, the two playbook READMEs
 // the config reads, a dynamic route and its paths file (in a playbook
-// directory, or behind a directory link in one). The marker lives in tmp.
-function fixture(name, { bypassCheck, linkedRoute = false }) {
+// directory, behind a directory link in one, or as a directory with an index
+// file). The marker lives in tmp.
+function fixture(name, { bypassCheck, linkedRoute = false, dirPaths = false }) {
   const repo = path.join(work, name)
   const marker = path.join(repo, 'MARKER')
   const siteCopy = path.join(repo, 'site')
@@ -50,6 +53,9 @@ function fixture(name, { bypassCheck, linkedRoute = false }) {
     write('elsewhere/[z].md', '# Page {{ $params.z }}\n')
     write('elsewhere/[z].paths.mjs', payload('z'))
     fs.symlinkSync('../../elsewhere', path.join(repo, LINK))
+  } else if (dirPaths) {
+    write('packages/agentic-coding-playbook/[x].md', '# Page {{ $params.x }}\n')
+    write(`${PAYLOAD}/index.jsx`, payload('x'))
   } else {
     write('packages/agentic-coding-playbook/[x].md', '# Page {{ $params.x }}\n')
     write(PAYLOAD, payload('x'))
@@ -106,6 +112,20 @@ test('a directory link to a dynamic route is refused too, before the route runs'
 
 test('negative control: with the check taken out, the linked route runs the payload', () => {
   const { siteCopy, marker } = fixture('linked-bypassed', { bypassCheck: true, linkedRoute: true })
+  const { output } = build(siteCopy)
+  assert.equal(fs.existsSync(marker) && fs.readFileSync(marker, 'utf8'), 'ran', output)
+})
+
+test('a paths directory with an index.jsx is refused too, before it runs', () => {
+  const { siteCopy, marker } = fixture('dir-paths', { bypassCheck: false, dirPaths: true })
+  const { status, output } = build(siteCopy)
+  assert.notEqual(status, 0, output)
+  assert.ok(output.includes(`Build-time code is not supported in playbook content: ${PAYLOAD}`), output)
+  assert.equal(fs.existsSync(marker), false, 'the payload ran')
+})
+
+test('negative control: with the check taken out, the paths directory runs the payload', () => {
+  const { siteCopy, marker } = fixture('dir-paths-bypassed', { bypassCheck: true, dirPaths: true })
   const { output } = build(siteCopy)
   assert.equal(fs.existsSync(marker) && fs.readFileSync(marker, 'utf8'), 'ran', output)
 })
