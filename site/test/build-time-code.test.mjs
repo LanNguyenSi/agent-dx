@@ -9,6 +9,10 @@
 // runs with the route reached through a directory link, which VitePress follows,
 // and with the paths "file" being a directory whose index.jsx holds the payload,
 // which VitePress also takes for a paths file and esbuild resolves to the index.
+// A last pair puts dynamic routes with payloads in directories beside the
+// allowed ones (names that start like an allowed directory): those are not
+// pages, so the build never loads their paths files; with the page list taken
+// back to the negation patterns that used to carry it, the payloads run.
 import test, { before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
@@ -21,6 +25,12 @@ const site = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const PAYLOAD = 'packages/agentic-coding-playbook/[x].paths.mjs'
 const LINK = 'packages/agentic-coding-playbook/linked'
 const CALL = '  refuseBuildTimeCode(repoRoot)\n'
+const EXCLUDE = 'srcExclude: [...pageExclude(repoRoot), '
+// Directories beside the allowed ones. The first three were pages under the
+// negation patterns; site/index.mdx is ignored by those too, and stays in the
+// tree as one more place a page must not come from.
+const SIBLINGS = ['packages/agentic-coding-playbook-x', 'sitex', 'packagesX']
+const IGNORED = ['site/index.mdx']
 let work
 
 // True when the output holds the refusal for exactly this path: the message
@@ -33,7 +43,7 @@ const refusal = (output, rel, suffix = '') =>
 // the config reads, a dynamic route and its paths file (in a playbook
 // directory, behind a directory link in one, or as a directory with an index
 // file). The marker lives in tmp.
-function fixture(name, { bypassCheck, linkedRoute = false, dirPaths = false }) {
+function fixture(name, { bypassCheck, bypassExclude = false, linkedRoute = false, dirPaths = false, siblings = false }) {
   const repo = path.join(work, name)
   const marker = path.join(repo, 'MARKER')
   const siteCopy = path.join(repo, 'site')
@@ -50,9 +60,18 @@ function fixture(name, { bypassCheck, linkedRoute = false, dirPaths = false }) {
   write('site/index.md', '# Home\n')
   write('packages/agent-engineering-playbook/README.md', '# Engineering\n')
   write('packages/agentic-coding-playbook/README.md', '# Playbook\n')
-  const payload = (param) =>
-    `import fs from 'node:fs'\nfs.writeFileSync(${JSON.stringify(marker)}, 'ran')\nexport default { paths: () => [{ params: { ${param}: 'a' } }] }\n`
-  if (linkedRoute) {
+  const payload = (param, file = marker) =>
+    `import fs from 'node:fs'\nfs.writeFileSync(${JSON.stringify(file)}, 'ran')\nexport default { paths: () => [{ params: { ${param}: 'a' } }] }\n`
+  const markers = []
+  if (siblings) {
+    // Dynamic routes in directories that are not playbooks, each with its own marker.
+    for (const [i, dir] of [...SIBLINGS, ...IGNORED].entries()) {
+      const file = path.join(repo, `MARKER-${i}`)
+      markers.push({ dir, file })
+      write(`${dir}/[x].md`, '# Page {{ $params.x }}\n')
+      write(`${dir}/[x].paths.mjs`, payload('x', file))
+    }
+  } else if (linkedRoute) {
     // The dynamic route sits outside the playbook directories, reached through
     // a directory link inside one.
     write('elsewhere/[z].md', '# Page {{ $params.z }}\n')
@@ -72,7 +91,14 @@ function fixture(name, { bypassCheck, linkedRoute = false, dirPaths = false }) {
     assert.equal(source.split(CALL).length - 1, 1, 'the config calls refuseBuildTimeCode exactly once')
     fs.writeFileSync(helpers, source.replace(CALL, ''))
   }
-  return { siteCopy, marker }
+  if (bypassExclude) {
+    // The page list as it was before pageExclude: negation patterns only.
+    const config = path.join(siteCopy, '.vitepress/config.mts')
+    const source = fs.readFileSync(config, 'utf8')
+    assert.equal(source.split(EXCLUDE).length - 1, 1, 'the config lists the pageExclude entries once')
+    fs.writeFileSync(config, source.replace(EXCLUDE, 'srcExclude: ['))
+  }
+  return { siteCopy, marker, markers }
 }
 
 function build(siteCopy) {
@@ -133,4 +159,21 @@ test('negative control: with the check taken out, the paths directory runs the p
   const { siteCopy, marker } = fixture('dir-paths-bypassed', { bypassCheck: true, dirPaths: true })
   const { output } = build(siteCopy)
   assert.equal(fs.existsSync(marker) && fs.readFileSync(marker, 'utf8'), 'ran', output)
+})
+
+test('a dynamic route beside the playbook directories is not a page: the build never loads its paths file', () => {
+  const { siteCopy, markers } = fixture('siblings', { bypassCheck: false, siblings: true })
+  const { status, output } = build(siteCopy)
+  assert.equal(status, 0, output)
+  for (const { dir, file } of markers) {
+    assert.equal(fs.existsSync(file), false, `the payload in ${dir} ran`)
+  }
+})
+
+test('negative control: with the page list back at the negation patterns, the payloads beside the playbooks run', () => {
+  const { siteCopy, markers } = fixture('siblings-negations', { bypassCheck: false, bypassExclude: true, siblings: true })
+  const { output } = build(siteCopy)
+  for (const { dir, file } of markers.filter(({ dir }) => SIBLINGS.includes(dir))) {
+    assert.equal(fs.existsSync(file) && fs.readFileSync(file, 'utf8'), 'ran', `${dir}: ${output}`)
+  }
 })

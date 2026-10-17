@@ -145,6 +145,51 @@ function isLink(p) {
   }
 }
 
+// The pages are the Markdown under the two playbook directories plus
+// site/index.md, and nothing else. VitePress takes every Markdown file under
+// srcDir that no srcExclude pattern ignores, and loads a `[name].paths.*` file
+// next to a dynamic route, so a page outside the list below would run code at
+// build time. Negation patterns alone (`!(a|b)/**`) do not carry this: they
+// compile to a lookahead that rejects any name that merely starts with an
+// allowed one, so a sibling such as `packages/agentic-coding-playbook-x/`,
+// `packagesX/` or `sitex/` was not ignored and stayed a source of pages. So the
+// ignore list is written out instead: every entry that sits beside an allowed
+// one (the repository root, `packages/` and `site/`) is ignored by its literal
+// name with glob characters escaped, and nothing relies on how a negation reads
+// a name. The negations stay in the config as a second layer for a name that
+// appears after the config loaded.
+//
+// The list is read from the directories when the config loads, like the other
+// checks here; an entry added while a dev server runs is not covered until the
+// config reloads. test/page-set.test.mjs runs VitePress's own page glob over a
+// tree with such siblings to show that the pages are exactly the allowed ones.
+const globEscape = (name) => name.replace(/[\\*?[\]{}()!+@|,]/g, '\\$&')
+
+function entriesBeside(repoRoot, dir, keep) {
+  const full = path.join(repoRoot, dir)
+  let names
+  try {
+    names = fs.readdirSync(full)
+  } catch {
+    return []
+  }
+  return names
+    .filter((n) => !keep.includes(n))
+    .sort()
+    .flatMap((n) => {
+      const p = (dir ? `${dir}/` : '') + globEscape(n)
+      return [p, `${p}/**`]
+    })
+}
+
+export function pageExclude(repoRoot) {
+  return [
+    ...entriesBeside(repoRoot, '', ['packages', 'site']),
+    ...entriesBeside(repoRoot, 'packages', playbooks),
+    ...entriesBeside(repoRoot, 'site', ['index.md'])
+  ]
+}
+
 // A leading byte order mark and front matter are stripped before the body is
 // parsed, as VitePress does.
 const FRONT_MATTER = /^---[ \t]*\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/
@@ -197,6 +242,8 @@ export function createTitleReader(md) {
 // createTitleReader). It is a parameter so these helpers load without VitePress.
 export function createSite(repoRoot, readTitle) {
   if (typeof readTitle !== 'function') throw new TypeError('createSite needs a readTitle function')
+  // First, so that a refused entry is named before anything else reads the tree.
+  refuseBuildTimeCode(repoRoot)
   const pages = playbooks.flatMap((pb) => {
     const dir = path.join(repoRoot, 'packages', pb)
     return fs.existsSync(dir)
@@ -207,7 +254,6 @@ export function createSite(repoRoot, readTitle) {
   })
   const rewrites = { 'site/index.md': 'index.md' }
   for (const p of pages) rewrites[p] = sitePath(p)
-  refuseBuildTimeCode(repoRoot)
   refuseIncludes(repoRoot, rewrites)
   const isPage = (repoRel) => pages.includes(repoRel)
 

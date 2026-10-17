@@ -146,6 +146,21 @@ JavaScript frontmatter and include directives. Like those checks it runs at
 dev-server start and not again for entries added while the server runs, so a
 running dev server still must not be pointed at untrusted content.
 
+The pages are the Markdown files under `packages/agent-engineering-playbook`
+and `packages/agentic-coding-playbook`, plus `site/index.md`, and nothing
+else. Every other path is excluded: all other directories and files in the
+repository root, everything else under `packages/` (a directory whose name only
+starts like a playbook's, such as `packages/agentic-coding-playbook-x/`,
+included) and everything else under `site/`. VitePress would load a Markdown
+file anywhere it is not excluded as a page, and run the paths file of a
+dynamic route there, so `site/.vitepress/config.mts` excludes the other
+entries by their literal names (`pageExclude` in `site-helpers.mjs`), listed
+from the directories when the config loads. A test runs VitePress's own page
+resolution over a tree with such look-alike directories and compares the pages
+with this list. The list is built when the config loads, so a look-alike
+directory added while a dev server runs is not excluded until the config
+reloads.
+
 ```bash
 cd site && npm ci && npm run build   # output in site/.vitepress/dist
 cd site && npm test                  # rendering checks for comments and raw HTML

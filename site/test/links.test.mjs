@@ -373,6 +373,46 @@ test('a directory is refused by its name and never entered', () => {
   assert.doesNotThrow(() => createSite(root, readTitle))
 })
 
+test('a refused directory is never read, by the check or by anything after it', () => {
+  // The refusal names the directory and the walk must not go into it: a
+  // directory that holds a further offender sorts after its parent, so the
+  // message alone cannot tell a walk that went in from one that did not. This
+  // records every directory listing instead. Both entry points are covered:
+  // createSite also lists the playbook pages, and that must not run first.
+  const refused = [`${AE}/x.mjs`, `${AC}/[x].paths.mjs`, `${AE}/deep/y.tsx`]
+  for (const dir of refused) {
+    write(`${dir}/inner.js`, 'x\n')
+    write(`${dir}/data.json`, '{}\n')
+  }
+  const read = []
+  const readdirSync = fs.readdirSync
+  fs.readdirSync = (dir, ...rest) => {
+    read.push(String(dir))
+    return readdirSync.call(fs, dir, ...rest)
+  }
+  try {
+    for (const run of [() => refuseBuildTimeCode(root), () => createSite(root, readTitle)]) {
+      read.length = 0
+      // The first refused directory in sorted order is the one named.
+      assert.throws(run, (e) => e.message === `Build-time code is not supported in playbook content: ${[...refused].sort()[0]}`)
+      assert.ok(read.length > 0, 'the playbook directories were listed')
+      for (const dir of refused) {
+        assert.equal(
+          read.some((r) => r === path.join(root, dir) || r.startsWith(path.join(root, dir) + path.sep)),
+          false,
+          `${dir} was entered`
+        )
+      }
+    }
+  } finally {
+    fs.readdirSync = readdirSync
+    fs.rmSync(path.join(root, AC), { recursive: true, force: true })
+    fs.rmSync(path.join(root, `${AE}/x.mjs`), { recursive: true, force: true })
+    fs.rmSync(path.join(root, `${AE}/deep`), { recursive: true, force: true })
+  }
+  assert.doesNotThrow(() => createSite(root, readTitle))
+})
+
 test('only data and Markdown files, and code outside the playbook directories, pass', () => {
   const fine = [
     `${AE}/data.json`,
