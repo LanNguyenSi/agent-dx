@@ -131,6 +131,23 @@ test('pageExclude lists every entry beside an allowed one by its literal name', 
   ])
 })
 
+test('pageExclude does not depend on the order the file system lists entries in', () => {
+  const tree = fs.mkdtempSync(path.join(work, 'order-'))
+  for (const rel of ['a.md', 'b.md', 'c.md', 'packages/z.md', 'packages/y.md', 'site/index.md', 'site/q.md', 'site/p.md']) {
+    fs.mkdirSync(path.dirname(path.join(tree, rel)), { recursive: true })
+    fs.writeFileSync(path.join(tree, rel), '# T\n')
+  }
+  const sorted = pageExclude(tree)
+  const readdirSync = fs.readdirSync
+  fs.readdirSync = (...args) => readdirSync.apply(fs, args).reverse()
+  try {
+    assert.deepEqual(pageExclude(tree), sorted)
+  } finally {
+    fs.readdirSync = readdirSync
+  }
+  assert.equal(sorted[0], 'a.md')
+})
+
 test('pageExclude of a tree with no entries at all is empty', () => {
   const tree = fs.mkdtempSync(path.join(work, 'bare-'))
   assert.deepEqual(pageExclude(tree), [])
