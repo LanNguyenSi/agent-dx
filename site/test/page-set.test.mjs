@@ -50,7 +50,12 @@ const siblings = [
   '(paren)/y.md',
   'a|b/y.md',
   'sq[x]/y.md',
-  `${AC}-[x]/y.md`
+  `${AC}-[x]/y.md`,
+  // picomatch strips quotes when it compiles a pattern, so an unescaped quote
+  // would make these names exclude the allowed directory they spell.
+  '"packages"/y.md',
+  '"site"/y.md',
+  `packages/"${AC.split('/')[1]}"/y.md`
 ]
 
 // A repository of its own under tmp with the real site/.vitepress copied (not
@@ -109,11 +114,13 @@ test('the real tree resolves the same way: only the playbooks and site/index.md'
 
 test('pageExclude lists every entry beside an allowed one by its literal name', () => {
   const tree = fs.mkdtempSync(path.join(work, 'tree-'))
-  for (const rel of ['packages/agent-engineering-playbook/a.md', 'packages/agentic-coding-playbook/a.md', 'packages/pk[g]/a.md', 'packages/z.md', 'site/index.md', 'site/test/t.md', 'site/a(b).md', 'docs/a.md', 'x.md', 'a b/c.md']) {
+  for (const rel of ['packages/agent-engineering-playbook/a.md', 'packages/agentic-coding-playbook/a.md', 'packages/pk[g]/a.md', 'packages/z.md', 'site/index.md', 'site/test/t.md', 'site/a(b).md', 'docs/a.md', 'x.md', 'a b/c.md', '"q"/c.md']) {
     fs.mkdirSync(path.dirname(path.join(tree, rel)), { recursive: true })
     fs.writeFileSync(path.join(tree, rel), '# T\n')
   }
   assert.deepEqual(pageExclude(tree), [
+    '\\"q\\"',
+    '\\"q\\"/**',
     'a b',
     'a b/**',
     'docs',

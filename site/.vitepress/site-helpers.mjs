@@ -163,7 +163,7 @@ function isLink(p) {
 // checks here; an entry added while a dev server runs is not covered until the
 // config reloads. test/page-set.test.mjs runs VitePress's own page glob over a
 // tree with such siblings to show that the pages are exactly the allowed ones.
-const globEscape = (name) => name.replace(/[\\*?[\]{}()!+@|,]/g, '\\$&')
+const globEscape = (name) => name.replace(/[\\*?[\]{}()!+@|,"]/g, '\\$&')
 
 function entriesBeside(repoRoot, dir, keep) {
   const full = path.join(repoRoot, dir)
