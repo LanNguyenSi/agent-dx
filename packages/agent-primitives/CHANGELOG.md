@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-16
+
 - `probe -p/--patch` (and a plan entry's `"patch"`): a patch for the `--file`
   target ended `inconclusive`/`mutant_not_applicable` ("patch applied cleanly
   but produced no content change"), or without `--file` was refused as touching
