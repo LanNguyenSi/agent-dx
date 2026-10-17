@@ -23,6 +23,11 @@ const LINK = 'packages/agentic-coding-playbook/linked'
 const CALL = '  refuseBuildTimeCode(repoRoot)\n'
 let work
 
+// True when the output holds the refusal for exactly this path: the message
+// ends the line, so a longer path with the same start does not count.
+const refusal = (output, rel, suffix = '') =>
+  output.split('\n').some((line) => line.trimEnd().endsWith(`Build-time code is not supported in playbook content: ${rel}${suffix}`))
+
 // A repository of its own under tmp: site/.vitepress copied (without its cache
 // and output), site/node_modules linked, a home page, the two playbook READMEs
 // the config reads, a dynamic route and its paths file (in a playbook
@@ -92,7 +97,7 @@ test('a paths file in playbook content fails the build with its path, before it 
   const { siteCopy, marker } = fixture('guarded', { bypassCheck: false })
   const { status, output } = build(siteCopy)
   assert.notEqual(status, 0, output)
-  assert.ok(output.includes(`Build-time code is not supported in playbook content: ${PAYLOAD}`), output)
+  assert.ok(refusal(output, PAYLOAD), output)
   assert.equal(fs.existsSync(marker), false, 'the payload ran')
 })
 
@@ -106,7 +111,7 @@ test('a directory link to a dynamic route is refused too, before the route runs'
   const { siteCopy, marker } = fixture('linked', { bypassCheck: false, linkedRoute: true })
   const { status, output } = build(siteCopy)
   assert.notEqual(status, 0, output)
-  assert.ok(output.includes(`Build-time code is not supported in playbook content: ${LINK} (symbolic link)`), output)
+  assert.ok(refusal(output, LINK, ' (symbolic link)'), output)
   assert.equal(fs.existsSync(marker), false, 'the payload ran')
 })
 
@@ -120,7 +125,7 @@ test('a paths directory with an index.jsx is refused too, before it runs', () =>
   const { siteCopy, marker } = fixture('dir-paths', { bypassCheck: false, dirPaths: true })
   const { status, output } = build(siteCopy)
   assert.notEqual(status, 0, output)
-  assert.ok(output.includes(`Build-time code is not supported in playbook content: ${PAYLOAD}`), output)
+  assert.ok(refusal(output, PAYLOAD), output)
   assert.equal(fs.existsSync(marker), false, 'the payload ran')
 })
 
