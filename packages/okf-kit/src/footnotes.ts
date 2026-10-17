@@ -120,6 +120,9 @@ function maskLine(line: string, s: MaskState): string {
     s.openRun = 0;
     return s.comment ? blank(line) : line;
   }
+  // A line-start `<!--` starts an HTML block, which interrupts the paragraph,
+  // so an inline code span cannot run across it.
+  if (!s.comment && /^ {0,3}<!--/.test(line)) s.openRun = 0;
   if (!s.comment) {
     const open = fenceOpenedBy(line);
     if (open) {

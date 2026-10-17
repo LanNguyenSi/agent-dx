@@ -285,4 +285,13 @@ describe("scanFootnotes", () => {
     );
     expect(scan.references).toEqual(["a"]);
   });
+
+  it("ends an unclosed inline code span at a line-start comment", () => {
+    // An HTML block interrupts the paragraph, so the unpaired backtick does
+    // not swallow the comment or the references after it.
+    const scan = scanFootnotes(
+      "Press ` to open.[^a]\n<!-- TODO -->\nMore `foo`.[^b]\n",
+    );
+    expect(scan.references).toEqual(["a", "b"]);
+  });
 });
