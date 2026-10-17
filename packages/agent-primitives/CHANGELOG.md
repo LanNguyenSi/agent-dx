@@ -16,8 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   points at its start commit. A branch that existed before the call is
   never deleted. A worktree that exists after the failure (a failing
   post-checkout hook leaves one) keeps its branch, as does a branch
-  another worktree holds or one that has moved on; the refusal message
-  says which of these happened.
+  another worktree holds, one that has moved on, or one whose use could
+  not be checked because the list of worktrees could not be read; the
+  refusal message says which of these happened, and names the branch or
+  detached HEAD a created worktree is on when a hook moved it off the
+  new branch.
 - `worktree create`: when the link manifest cannot be written while
   another link dangles, the warning no longer tells the operator to pass
   `--link` for the dangling link. It names the links to pass with

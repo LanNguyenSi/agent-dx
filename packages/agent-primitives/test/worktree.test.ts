@@ -833,7 +833,11 @@ describe("worktree create: a failed add leaves no branch of its own behind", () 
     // branch, says the target exists.
     git(target, ["checkout", "-q", "--detach"]);
     const d = discardCreatedBranch(f.repo, "mine", false, f.mainSha, target);
-    expect(d).toEqual({ outcome: "worktree_exists", worktree: target });
+    expect(d).toEqual({
+      outcome: "worktree_exists",
+      worktree: target,
+      branch: undefined,
+    });
     expect(
       gitStatus(f.repo, ["rev-parse", "--verify", "refs/heads/mine"]),
     ).toBe(0);
@@ -904,10 +908,32 @@ describe("worktree create: a failed add leaves no branch of its own behind", () 
       describeDiscard(d, "feat", "/t");
     expect(say({ outcome: "kept" })).toBe("");
     expect(say({ outcome: "removed" })).toContain("was removed again");
-    const exists = say({ outcome: "worktree_exists", worktree: "/t" });
+    const exists = say({
+      outcome: "worktree_exists",
+      worktree: "/t",
+      branch: "feat",
+    });
+    expect(exists).toContain("has the branch feat checked out");
     expect(exists).toContain("post-checkout hook");
     expect(exists).toContain("were kept");
     expect(exists).not.toContain("removed again");
+    const detached = say({
+      outcome: "worktree_exists",
+      worktree: "/t",
+      branch: undefined,
+    });
+    expect(detached).toContain("on a detached HEAD and not on the branch feat");
+    expect(detached).not.toContain("has the branch feat checked out");
+    expect(detached).toContain("branch feat were kept");
+    const switched = say({
+      outcome: "worktree_exists",
+      worktree: "/t",
+      branch: "other",
+    });
+    expect(switched).toContain(
+      "on the branch other and not on the branch feat",
+    );
+    expect(switched).not.toContain("has the branch feat checked out");
     const held = say({ outcome: "checked_out", worktree: "/other" });
     expect(held).toContain("checked out in /other");
     expect(held).toContain("kept");
@@ -985,11 +1011,44 @@ describe("worktree create: a failed add leaves no branch of its own behind", () 
     expect(r.code, r.stdout + r.stderr).toBe(2);
     expect(r.json.reason).toBe("worktree_add_failed");
     expect(r.json.message).toContain("were kept");
+    expect(r.json.message).toContain("on a detached HEAD");
+    expect(r.json.message).not.toContain("has the branch detached checked out");
     expect(
       gitStatus(f.repo, ["rev-parse", "--verify", "refs/heads/detached"]),
     ).toBe(0);
     expect(gitStatus(target, ["symbolic-ref", "-q", "HEAD"])).not.toBe(0);
     expect(git(target, ["rev-parse", "HEAD"]).trim()).toBe(f.mainSha);
+  });
+
+  it("removes the new branch when the target is a prunable registration whose directory was deleted", async () => {
+    const f = makeFixture();
+    const target = path.join(f.base, "wt-stale");
+    git(f.repo, ["worktree", "add", "-q", "-b", "old", target, "main"]);
+    fs.rmSync(target, { recursive: true, force: true });
+    expect(git(f.repo, ["worktree", "list", "--porcelain"])).toContain(
+      "prunable",
+    );
+
+    const r = await run(f.work, [
+      "--repo",
+      f.repo,
+      "--branch",
+      "fresh",
+      "--path",
+      target,
+    ]);
+
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.reason).toBe("worktree_add_failed");
+    expect(r.json.message).toContain("removed again");
+    expect(r.json.message).not.toContain("were kept");
+    expect(
+      gitStatus(f.repo, ["rev-parse", "--verify", "refs/heads/fresh"]),
+    ).not.toBe(0);
+    // The old registration's own branch is none of this call's.
+    expect(gitStatus(f.repo, ["rev-parse", "--verify", "refs/heads/old"])).toBe(
+      0,
+    );
   });
 });
 

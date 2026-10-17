@@ -691,9 +691,11 @@ export type BranchDiscard =
    * or the add left none. */
   | { outcome: "kept" }
   | { outcome: "removed" }
-  /** The target is a registered worktree: the add got as far as creating it
-   * (a failing post-checkout hook does that), so its branch is in use. */
-  | { outcome: "worktree_exists"; worktree: string }
+  /** The target is a live registered worktree: the add got as far as
+   * creating it (a failing post-checkout hook does that). `branch` is what
+   * it is on now (undefined when its HEAD is detached), which a hook may
+   * have changed. */
+  | { outcome: "worktree_exists"; worktree: string; branch: string | undefined }
   /** Another worktree has the branch checked out (a concurrent create of the
    * same branch, say). */
   | { outcome: "checked_out"; worktree: string }
@@ -728,9 +730,17 @@ export function discardCreatedBranch(
   }
   const entries = parseWorktreeList(listing.stdout);
   if (target !== undefined) {
-    const made = entries.find((e) => samePath(e.path, target));
+    // Only a live registration was made by this add: resolveTarget refuses
+    // a target that exists, and a prunable entry (its directory deleted,
+    // not yet pruned) is an old registration that makes git refuse the add
+    // before any worktree exists.
+    const made = entries.find((e) => samePath(e.path, target) && !e.prunable);
     if (made !== undefined) {
-      return { outcome: "worktree_exists", worktree: made.path };
+      return {
+        outcome: "worktree_exists",
+        worktree: made.path,
+        branch: made.branch,
+      };
     }
   }
   const holder = entries.find((e) => e.branch === branch);
@@ -760,8 +770,15 @@ export function describeDiscard(
       return "";
     case "removed":
       return `. The branch ${branch} that this call had created was removed again`;
-    case "worktree_exists":
-      return `. The worktree ${d.worktree} was created and has the branch ${branch} checked out; git failed after that (most likely a post-checkout hook, whose output is above), so the worktree and the branch were kept. Fix the cause and use the worktree, or remove it with \`git worktree remove ${target}\` first`;
+    case "worktree_exists": {
+      const fix = `Fix the cause and use the worktree, or remove it with \`git worktree remove ${target}\` first`;
+      if (d.branch === branch) {
+        return `. The worktree ${d.worktree} was created and has the branch ${branch} checked out; git failed after that (most likely a post-checkout hook, whose output is above), so the worktree and the branch were kept. ${fix}`;
+      }
+      const now =
+        d.branch === undefined ? "a detached HEAD" : `the branch ${d.branch}`;
+      return `. The worktree ${d.worktree} was created, but it is on ${now} and not on the branch ${branch}; git failed after that (most likely a post-checkout hook, whose output is above), so the worktree and the branch ${branch} were kept. ${fix}`;
+    }
     case "checked_out":
       return `. The branch ${branch} is checked out in ${d.worktree} (a concurrent create of the same branch, say), so it was kept`;
     case "moved":
