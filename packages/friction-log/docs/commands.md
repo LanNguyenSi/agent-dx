@@ -15,7 +15,7 @@ Reference for every `friction-log` subcommand and its main flags. Run any comman
 | `file <id>` | Push a friction through a sink. Default sink is `markdown-file`, default template matches the friction's category and falls back to `workflow-friction`. See [Sinks](./sinks.md). |
 | `scan` | Parse a transcript and extract candidate frictions (tool-call errors, non-zero Bash exits, friction phrases). Flags: `--transcript <path>`, `--session <id>`, `--adapter claude-code`, `--silent`, `--stdin-payload`. Idempotent on re-run. |
 | `bilanz` | Print a session-boundary summary: tools exercised, frictions noticed, tasks filed, plus a highlighted list of open frictions that have not been filed yet. `--session <id>` defaults to the most recent session. |
-| `rm <id>` | Delete a friction and any task and tag rows pointing at it from the local store. Fails with `FOREIGN KEY constraint failed` while another friction still records it as its recurrence root. |
+| `rm <id>` | Delete a friction and any task and tag rows pointing at it from the local store. Frictions that record it as their recurrence root are kept and their `recurrence_of_id` is cleared, so they become roots themselves (see [Storage](./storage.md)). |
 | `update <id> --status <open\|filed\|resolved\|wontfix>` | Change a friction's status. `list`, `search` and `export` take the same values for `--status`. |
 
 ## Auto-capture via Claude Code Stop-hook

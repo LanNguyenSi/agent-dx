@@ -156,9 +156,14 @@ describe("FrictionDb.deleteFriction with recurrence references", () => {
     try {
       const a = db.insertFriction({ ...base, title: "a" });
       const b = db.insertFriction({ ...base, title: "b" });
+      // An unrelated recurrence link must survive deleting another friction.
+      const x = db.insertFriction({ ...base, title: "pair" });
+      const y = db.insertFriction({ ...base, title: "pair" });
+      expect(y.recurrenceOfId).toBe(x.id);
       expect(db.deleteFriction(a.id)).toBe(true);
       expect(db.getFriction(a.id)).toBeNull();
       expect(db.getFriction(b.id)?.recurrenceOfId).toBeNull();
+      expect(db.getFriction(y.id)?.recurrenceOfId).toBe(x.id);
     } finally {
       db.close();
     }
