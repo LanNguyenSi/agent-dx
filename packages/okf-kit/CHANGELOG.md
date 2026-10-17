@@ -72,14 +72,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   See [Citation drift checks](docs/citations.md).
 
 - A body footnote is scanned with fenced code blocks and HTML comments tracked
-  in one pass, so neither can swallow the other. An `<!--` written inside an
-  inline code span no longer opens a comment that swallows the following prose
-  (and the `[^id]` references in it) up to a later `-->`, and a fence marker
-  written inside an HTML comment no longer opens a fence that hides everything
-  after it. `<!-->` and `<!--->` are now complete empty comments. A `<!--`
-  opens a comment only when a `-->` follows it later in the doc, as before: an
-  unclosed `<!--` in prose, inline or at line start, is plain text and hides
-  nothing. See [Footnote citations](docs/citations.md#footnote-citations-okf-v02).
+  in one pass. An `<!--` written inside an inline code span no longer opens a
+  comment that swallows the following prose (and the `[^id]` references in it)
+  up to a later `-->`, and `<!-->` and `<!--->` are now complete empty
+  comments. A `<!--` opens a comment only when a `-->` outside fenced code
+  follows it, as before: an unclosed `<!--` in prose, inline or at line start,
+  is plain text and hides nothing, and so is a `<!--` whose only later `-->`
+  sits inside a fenced block. A fence marker inside an open comment no longer
+  opens a fence. A comment counts as open only once a `-->` outside fenced
+  code licenses it, so a fence marker inside a comment whose block (read
+  without regard to comments) holds every later `-->` still opens a fence, as
+  before. See [Footnote citations](docs/citations.md#footnote-citations-okf-v02).
 
 - Under OKF v0.2, `generated-shape` now also warns when `generated.at` is
   present but names no instant (a null value, a blank string, or a string that

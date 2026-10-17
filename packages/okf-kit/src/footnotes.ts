@@ -44,15 +44,54 @@ function blank(text: string): string {
   return text.replace(/[^\n]/g, " ");
 }
 
+/** An open fenced code block: its marker character and the opener's run length. */
+interface Fence {
+  char: string;
+  len: number;
+}
+
+/** The fence `line` opens (at most three spaces, then 3+ backticks or tildes), or undefined. */
+function fenceOpenedBy(line: string): Fence | undefined {
+  const open = FENCE_OPEN_RE.exec(line);
+  return open ? { char: open[1][0], len: open[1].length } : undefined;
+}
+
+/** Whether `line` closes `fence`: the same character, at least as many, then only whitespace. */
+function closesFence(line: string, fence: Fence): boolean {
+  return new RegExp(`^ {0,3}${fence.char}{${fence.len},}\\s*$`).test(line);
+}
+
+/**
+ * `body` with its fenced code blocks blanked and nothing else: HTML comments
+ * are not consulted, so a fence marker inside a comment opens a fence here.
+ * This fence-only view decides which `-->` can license a `<!--` opener (see
+ * `maskFencesAndComments`): a `-->` inside a fenced block is code and never
+ * licenses an opener outside it, as in the earlier two-pass scanner.
+ */
+function blankFences(body: string): string {
+  let fence: Fence | undefined;
+  return body
+    .split("\n")
+    .map((line) => {
+      if (fence) {
+        if (closesFence(line, fence)) fence = undefined;
+        return blank(line);
+      }
+      fence = fenceOpenedBy(line);
+      return fence ? blank(line) : line;
+    })
+    .join("\n");
+}
+
 /** The state carried from line to line by `maskFencesAndComments`. */
 interface MaskState {
   /** The open fence, if any; it closes only on its own marker shape. */
-  fence?: { char: string; len: number };
+  fence?: Fence;
   /** True inside an open HTML comment, where only `-->` is looked for. */
   comment: boolean;
   /** Length of the open inline code delimiter run, 0 when outside one. */
   openRun: number;
-  /** True when a `-->` occurs on a later line of the doc (fences not considered). */
+  /** True when a `-->` outside fenced code occurs on a later line of the doc. */
   closerLater: boolean;
 }
 
@@ -64,15 +103,16 @@ interface MaskState {
  * never opens a fence); outside both, a fence opener at line start opens a
  * fence, and elsewhere an inline code span is crossed before a `<!--`
  * outside a span is taken as a comment opener only when a `-->` follows it
- * somewhere later in the doc (so a stray `<!--` in prose hides nothing); the
- * forms `<!-->` and `<!--->` are complete empty comments on their own. An
- * unclosed fence runs to the end of the doc, and so does a comment that was
- * opened because a later `-->` existed.
+ * on the same line or outside fenced code on a later line (so a stray `<!--`
+ * in prose hides nothing, and neither does one whose only later `-->` is
+ * fenced code); the forms `<!-->` and `<!--->` are complete empty comments
+ * on their own. An unclosed fence runs to the end of the doc. An opened
+ * comment always ends: the `-->` that licensed it lies ahead, and inside a
+ * comment every `-->` is looked for.
  */
 function maskLine(line: string, s: MaskState): string {
   if (s.fence) {
-    const close = new RegExp(`^ {0,3}${s.fence.char}{${s.fence.len},}\\s*$`);
-    if (close.test(line)) s.fence = undefined;
+    if (closesFence(line, s.fence)) s.fence = undefined;
     return blank(line);
   }
   if (/^[ \t]*$/.test(line)) {
@@ -81,9 +121,9 @@ function maskLine(line: string, s: MaskState): string {
     return s.comment ? blank(line) : line;
   }
   if (!s.comment) {
-    const open = FENCE_OPEN_RE.exec(line);
+    const open = fenceOpenedBy(line);
     if (open) {
-      s.fence = { char: open[1][0], len: open[1].length };
+      s.fence = open;
       s.openRun = 0;
       return blank(line);
     }
@@ -121,7 +161,8 @@ function maskLine(line: string, s: MaskState): string {
         i += empty.length;
         continue;
       }
-      // Any other `<!--` opens a comment only when a `-->` follows it.
+      // Any other `<!--` opens a comment only when a `-->` follows it: on
+      // this line, or outside fenced code on a later line.
       const from = i + COMMENT_OPENER.length;
       if (s.closerLater || line.indexOf(COMMENT_CLOSER, from) >= 0) {
         s.comment = true;
@@ -149,16 +190,23 @@ function maskLine(line: string, s: MaskState): string {
 /**
  * `body` with fenced code blocks and HTML comment spans blanked (line
  * structure kept), decided by ONE line-by-line pass that tracks fence state
- * and comment state together, so neither construct can swallow the other's
- * region. Inline code is only consulted to decide whether a `<!--` is a
- * comment opener; blanking inline code is a separate step.
+ * and comment state together. Inline code is only consulted to decide
+ * whether a `<!--` is a comment opener; blanking inline code is a separate
+ * step. Whether a `-->` lies ahead is read from the fence-only view
+ * (`blankFences`), so a `-->` inside a fenced block never licenses a `<!--`
+ * outside it. The price: when a fence marker inside a comment opens a fence
+ * that swallows the comment's own `-->` on that view, the `<!--` is plain
+ * text and the marker opens a fence here too, as in the earlier two-pass
+ * scanner.
  */
 function maskFencesAndComments(body: string): string {
   const lines = body.split("\n");
   let lastCloser = -1;
-  lines.forEach((l, n) => {
-    if (l.includes(COMMENT_CLOSER)) lastCloser = n;
-  });
+  blankFences(body)
+    .split("\n")
+    .forEach((l, n) => {
+      if (l.includes(COMMENT_CLOSER)) lastCloser = n;
+    });
   const s: MaskState = { comment: false, openRun: 0, closerLater: false };
   return lines
     .map((line, n) => {
@@ -205,7 +253,8 @@ export function scanFootnotes(body: string): FootnoteScan {
   // once: a `<!--` inside an open fence is code and never opens a comment, a
   // fence marker inside an open comment never opens a fence, and outside both
   // a `<!--` inside an inline code span is code rather than a comment opener.
-  // Inline code is blanked last, only for the reference view.
+  // A `<!--` opens a comment only when a `-->` outside fenced code follows
+  // it. Inline code is blanked last, only for the reference view.
   const masked = maskFencesAndComments(body.replace(/\r\n?/g, "\n"));
   const withCode = masked.split("\n");
   const noCode = blankInlineCode(masked).split("\n");

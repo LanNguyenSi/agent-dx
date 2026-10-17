@@ -416,12 +416,14 @@ type FenceLineState = {
  * then the rest of the line (group 2: an opener's info string, or a closer's
  * trailing whitespace -- an opener may carry one, a closer may not). Used by
  * `fenceOpenerRun` and `isFenceCloserLine` below. `reserved-files-structure.ts`
- * applies the same fence rules in its own code (no code is shared); applied here to an
- * already-trimmed line, so leading indentation is ignored here: a 4-space or
- * tab-indented marker passes the run just like an unindented one. That differs
- * from CommonMark (and from `reserved-files-structure.ts`, which caps the indent
- * at 0-3 spaces) and is deliberate -- this file has always trimmed before
- * matching fences, and tightening it now would change which citations resolve.
+ * has its own fence scanner (no code is shared): the two agree on the fence
+ * character, run length and info-string rules, and their one rule difference
+ * is indentation. That scanner caps the indent at 0-3 spaces, as CommonMark
+ * does; this file ignores indentation, because it matches an already-trimmed
+ * line, so a 4-space or tab-indented marker passes the run just like an
+ * unindented one. The difference is deliberate -- this file has always
+ * trimmed before matching fences, and tightening it now would change which
+ * citations resolve.
  */
 const FENCE_RUN_RE = /^(`{3,}|~{3,})(.*)$/;
 

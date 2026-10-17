@@ -54,6 +54,15 @@ describe("scanFootnotes", () => {
     ]);
   });
 
+  it("a fence is not closed by a run of the other fence character", () => {
+    expect(scanFootnotes("```\n~~~\n[^x]\n```\n[^y]\n").references).toEqual([
+      "y",
+    ]);
+    expect(scanFootnotes("~~~\n```\n[^x]\n~~~\n[^y]\n").references).toEqual([
+      "y",
+    ]);
+  });
+
   it("ignores a backslash-escaped reference", () => {
     expect(scanFootnotes("Literal \\[^a] and real [^b]\n").references).toEqual([
       "b",
@@ -114,11 +123,80 @@ describe("scanFootnotes", () => {
     expect(scan.references).toEqual(["a"]);
   });
 
-  it("does not let a fence marker written inside an HTML comment open a fence", () => {
-    // The ``` is comment text, not a fence opener: the comment is blanked
-    // before fences, so it never swallows the reference that follows it.
+  it("keeps a fence marker that swallows its comment's `-->` opening a fence", () => {
+    // Pinned trade-off: whether a `-->` lies ahead is read with fenced blocks
+    // blanked, and on that view the ``` opens a fence that holds the `-->`.
+    // So no `-->` licenses the `<!--`, which stays plain text, and the ```
+    // opens a fence that runs to the end of the doc, hiding `[^real]`.
     const scan = scanFootnotes("<!--\n```\n-->\nReal.[^real]\n");
-    expect(scan.references).toEqual(["real"]);
+    expect(scan.references).toEqual([]);
+  });
+
+  it("does not let a fence marker open a fence inside a comment that a `-->` outside fenced code licenses", () => {
+    // The `-->` on the last line lies outside every fenced block, so the
+    // first `<!--` opens a comment. Inside it the unpaired ``` is comment
+    // text: the comment ends at the next `-->`, the claim after it is prose,
+    // and the ```js block below is an ordinary fence.
+    const body = [
+      "<!-- old example, keep for later:",
+      "```",
+      "-->",
+      "Claim.[^a]",
+      "",
+      "```js",
+      "code",
+      "```",
+      "<!-- note -->",
+    ].join("\n");
+    expect(scanFootnotes(body).references).toEqual(["a"]);
+  });
+
+  it("does not let a `-->` inside a later ``` fence license an inline `<!--`", () => {
+    // The only `-->` after the `<!--` is fence content, so the `<!--` is
+    // plain text: the references before and after the fence survive.
+    const scan = scanFootnotes(
+      "Write <!-- here.[^a]\n\n```\n-->\n```\nText.[^b]\n",
+    );
+    expect(scan.references).toEqual(["a", "b"]);
+  });
+
+  it("does not let a `-->` inside a later ~~~ fence license an inline `<!--`", () => {
+    const scan = scanFootnotes("a <!-- b [^a]\n~~~\n-->\n~~~\nText.[^b]\n");
+    expect(scan.references).toEqual(["a", "b"]);
+  });
+
+  it("does not let a `-->` on a fence opener line license a `<!--`", () => {
+    // The opener line belongs to the fenced block, info string included.
+    const scan = scanFootnotes(
+      "Write <!-- x.[^a]\n\n```html -->\ncode\n```\nText.[^b]\n",
+    );
+    expect(scan.references).toEqual(["a", "b"]);
+  });
+
+  it("lets a `-->` after a closed fence license a later `<!--`", () => {
+    // The fenced block ends before the comment, so it hides nothing after
+    // it: the `-->` on the last line closes the comment as usual.
+    const scan = scanFootnotes(
+      "```\ncode\n```\nWrite <!-- hidden [^h]\nmore --> shown.[^a]\n",
+    );
+    expect(scan.references).toEqual(["a"]);
+  });
+
+  it("finds every reference in a doc that writes `<!--` in prose and shows a comment in a fenced example", () => {
+    const body = [
+      "In prose, write <!-- to start an HTML comment. The real claim.[^a]",
+      "",
+      "```html",
+      "<!-- example -->",
+      "```",
+      "",
+      "A dangling one.[^missing]",
+      "",
+      "[^a]: see `L99`.",
+    ].join("\n");
+    const scan = scanFootnotes(body);
+    expect(scan.references).toEqual(["a", "missing"]);
+    expect(scan.definitions).toEqual([{ id: "a", text: "see `L99`." }]);
   });
 
   it("does not let a `<!--` inside a fenced block open a comment", () => {
