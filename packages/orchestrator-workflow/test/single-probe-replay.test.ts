@@ -121,11 +121,14 @@ describe("single-mode probe replay", () => {
     expect(REVIEWER_DUTY).toContain(NAMED_PROBE_FORMS);
     expect(reviewer).toContain(REVIEWER_DUTY);
     expect(reviewer).toContain(
-      "Do not skip a named probe in that mode, under any `review_method`; a probe that cannot run through the runner is reported `not_applicable`, not skipped; any mismatch also sets `matches_implementer_claim: mismatched`.",
+      "Do not skip a named probe in that mode, under any `review_method`; a probe that cannot run through the runner is reported `not_applicable`, not skipped.",
     );
     expect(reviewer).toContain(
-      "A mismatch is a finding of at least `high`; a probe given only by id is `not_applicable` and is missing evidence, not a pass, and so is a briefing in that mode that names no probe.",
+      "A probe given only by id is `not_applicable` and is missing evidence, not a pass, and so is a briefing in that mode that names no probe.",
     );
+    // The mismatch consequence is stated once, in the per-probe report sentence.
+    expect(reviewer.split("a finding of at least `high`")).toHaveLength(2);
+    expect(reviewer.split("`matches_implementer_claim: mismatched`")).toHaveLength(2);
     expect(reviewer).toContain(
       "Without that mode line in the briefing this obligation does not exist.",
     );

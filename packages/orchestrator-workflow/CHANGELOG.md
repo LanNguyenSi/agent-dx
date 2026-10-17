@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Implementer and reviewer prompts state two rules once instead of twice: the
+  foreground rule for verification plans, probe plans, and repeat tallies now
+  sits with the other foreground-run rule, and the single-mode probe duty
+  names the mismatch consequence once.
 - Implementer handback now includes the documentation checks that exist, and
   claimed check results are traceable. Before returning, the implementer runs
   the configured knowledge-bundle check over the whole bundle and a connected
