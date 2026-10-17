@@ -126,9 +126,19 @@ describe("single-mode probe replay", () => {
     expect(reviewer).toContain(
       "A probe given only by id is `not_applicable` and is missing evidence, not a pass, and so is a briefing in that mode that names no probe.",
     );
-    // The mismatch consequence is stated once, in the per-probe report sentence.
-    expect(reviewer.split("a finding of at least `high`")).toHaveLength(2);
-    expect(reviewer.split("`matches_implementer_claim: mismatched`")).toHaveLength(2);
+    // The mismatch consequence is stated once in the single-mode duty span,
+    // in the per-probe report sentence.
+    const dutySpan = reviewer.slice(
+      reviewer.indexOf("When the briefing names run mode `single`"),
+      reviewer.indexOf("Return exactly this structure"),
+    );
+    expect(dutySpan).toContain(
+      "whether the measured `result` and `expectation` match the recorded fields; a mismatch is a finding of at least `high` and sets `matches_implementer_claim: mismatched`.",
+    );
+    expect(dutySpan.split("a finding of at least `high`")).toHaveLength(2);
+    expect(
+      dutySpan.split("`matches_implementer_claim: mismatched`"),
+    ).toHaveLength(2);
     expect(reviewer).toContain(
       "Without that mode line in the briefing this obligation does not exist.",
     );
