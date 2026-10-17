@@ -12,9 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `worktree create`: when `git worktree add` fails after creating the new
   branch (a `--path` through a dangling symlink into the checkout, say),
   the branch this call created is deleted again instead of being left as
-  an orphan. A branch that existed before the call is never deleted, nor
-  one that has moved off its start commit; the refusal message says
-  whether the branch was removed.
+  an orphan, but only when no worktree has it checked out and it still
+  points at its start commit. A branch that existed before the call is
+  never deleted. A worktree that exists after the failure (a failing
+  post-checkout hook leaves one) keeps its branch, as does a branch
+  another worktree holds or one that has moved on; the refusal message
+  says which of these happened.
 - `worktree create`: when the link manifest cannot be written while
   another link dangles, the warning no longer tells the operator to pass
   `--link` for the dangling link. It names the links to pass with

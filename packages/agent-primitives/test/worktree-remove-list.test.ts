@@ -1692,6 +1692,55 @@ describe("worktree list --root: a --base that can never be a remote-tracking bra
     expect(r.json.reason).toBe("base_not_remote_branch");
   });
 
+  it("accepts a branch name with slashes: origin/hotfix/one is measured, not refused", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    const wts = path.join(f.base, "wts");
+    fs.mkdirSync(wts);
+    fs.renameSync(wt, path.join(wts, "moved"));
+    git(f.repo, ["worktree", "repair", path.join(wts, "moved")]);
+    const r = await cli(f.work, [
+      "list",
+      "--root",
+      wts,
+      "--base",
+      "origin/hotfix/one",
+    ]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    const entries = r.json.worktrees as Record<string, any>[];
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      base: "origin/hotfix/one",
+      ahead: 0,
+      behind: 0,
+    });
+    expect(entries[0].merged).toMatchObject({ merged: "yes", via: "ancestry" });
+    expect(r.json.warnings as string[]).toEqual([]);
+  });
+
+  it("accepts a remote name with a dot and a dash", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    git(f.repo, ["remote", "add", "up.stream-1", f.origin]);
+    git(f.repo, ["fetch", "-q", "up.stream-1"]);
+    const wts = path.join(f.base, "wts");
+    fs.mkdirSync(wts);
+    fs.renameSync(wt, path.join(wts, "moved"));
+    git(f.repo, ["worktree", "repair", path.join(wts, "moved")]);
+    const r = await cli(f.work, [
+      "list",
+      "--root",
+      wts,
+      "--base",
+      "refs/remotes/up.stream-1/hotfixbase",
+    ]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    const entries = r.json.worktrees as Record<string, any>[];
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ ahead: 1, behind: 0 });
+    expect(r.json.warnings as string[]).toEqual([]);
+  });
+
   it("control: a well-formed value for a ref a repository lacks stays a warning", async () => {
     const f = makeFixture();
     const { wt } = makeHotfix(f);

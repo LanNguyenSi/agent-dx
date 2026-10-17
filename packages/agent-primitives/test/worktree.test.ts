@@ -10,10 +10,13 @@ import {
   parseWorktreeList,
   smokeVerdict,
 } from "../src/worktree/index.js";
-import { discardCreatedBranch } from "../src/worktree/create.js";
+import {
+  describeDiscard,
+  discardCreatedBranch,
+} from "../src/worktree/create.js";
 import { excludePatternFor } from "../src/worktree/git.js";
 import { caseInsensitiveVolume } from "./helpers/case-fs.js";
-import { spawnCli } from "./helpers/spawn-cli.js";
+import { resolveBinary, spawnCli } from "./helpers/spawn-cli.js";
 
 /**
  * Hermetic: every git call, in-process and inside the spawned CLI, runs
@@ -765,9 +768,9 @@ describe("worktree create: a failed add leaves no branch of its own behind", () 
   it("discardCreatedBranch removes a branch this call made, at the commit it started at", () => {
     const f = makeFixture();
     git(f.repo, ["branch", "mine"]);
-    expect(discardCreatedBranch(f.repo, "mine", false, f.mainSha)).toBe(
-      "removed",
-    );
+    expect(discardCreatedBranch(f.repo, "mine", false, f.mainSha)).toEqual({
+      outcome: "removed",
+    });
     expect(
       gitStatus(f.repo, ["rev-parse", "--verify", "refs/heads/mine"]),
     ).not.toBe(0);
@@ -776,7 +779,9 @@ describe("worktree create: a failed add leaves no branch of its own behind", () 
   it("discardCreatedBranch never deletes a branch that existed before the call", () => {
     const f = makeFixture();
     git(f.repo, ["branch", "older"]);
-    expect(discardCreatedBranch(f.repo, "older", true, f.mainSha)).toBe("kept");
+    expect(discardCreatedBranch(f.repo, "older", true, f.mainSha)).toEqual({
+      outcome: "kept",
+    });
     expect(
       gitStatus(f.repo, ["rev-parse", "--verify", "refs/heads/older"]),
     ).toBe(0);
@@ -790,9 +795,9 @@ describe("worktree create: a failed add leaves no branch of its own behind", () 
     git(f.repo, ["add", "-A"]);
     git(f.repo, ["commit", "-q", "-m", "more"]);
     git(f.repo, ["checkout", "-q", "main"]);
-    expect(discardCreatedBranch(f.repo, "moved", false, f.mainSha)).toBe(
-      "failed",
-    );
+    expect(discardCreatedBranch(f.repo, "moved", false, f.mainSha)).toEqual({
+      outcome: "moved",
+    });
     expect(
       gitStatus(f.repo, ["rev-parse", "--verify", "refs/heads/moved"]),
     ).toBe(0);
@@ -800,9 +805,191 @@ describe("worktree create: a failed add leaves no branch of its own behind", () 
 
   it("discardCreatedBranch has nothing to do when the add left no branch", () => {
     const f = makeFixture();
-    expect(discardCreatedBranch(f.repo, "never", false, f.mainSha)).toBe(
-      "kept",
+    expect(discardCreatedBranch(f.repo, "never", false, f.mainSha)).toEqual({
+      outcome: "kept",
+    });
+  });
+
+  it("discardCreatedBranch keeps a branch another worktree has checked out, even at the start commit", () => {
+    const f = makeFixture();
+    const winner = path.join(f.base, "wt-winner");
+    git(f.repo, ["worktree", "add", "-q", "-b", "raced", winner, "main"]);
+    const d = discardCreatedBranch(f.repo, "raced", false, f.mainSha);
+    expect(d.outcome).toBe("checked_out");
+    expect((d as { worktree: string }).worktree).toBe(winner);
+    expect(
+      gitStatus(f.repo, ["rev-parse", "--verify", "refs/heads/raced"]),
+    ).toBe(0);
+    expect(git(winner, ["symbolic-ref", "HEAD"]).trim()).toBe(
+      "refs/heads/raced",
     );
+  });
+
+  it("discardCreatedBranch keeps the branch when the target is itself a registered worktree", () => {
+    const f = makeFixture();
+    const target = path.join(f.base, "wt-target");
+    git(f.repo, ["worktree", "add", "-q", "-b", "mine", target, "main"]);
+    // Detach the worktree so only the registration, not a checked-out
+    // branch, says the target exists.
+    git(target, ["checkout", "-q", "--detach"]);
+    const d = discardCreatedBranch(f.repo, "mine", false, f.mainSha, target);
+    expect(d).toEqual({ outcome: "worktree_exists", worktree: target });
+    expect(
+      gitStatus(f.repo, ["rev-parse", "--verify", "refs/heads/mine"]),
+    ).toBe(0);
+  });
+
+  it("discardCreatedBranch removes the branch when the target is not registered", () => {
+    const f = makeFixture();
+    git(f.repo, ["branch", "mine"]);
+    const d = discardCreatedBranch(
+      f.repo,
+      "mine",
+      false,
+      f.mainSha,
+      path.join(f.base, "wt-not-there"),
+    );
+    expect(d).toEqual({ outcome: "removed" });
+  });
+
+  it("discardCreatedBranch reports a delete that git refuses, apart from a moved branch", () => {
+    const f = makeFixture();
+    git(f.repo, ["branch", "mine"]);
+    // A lock file on the ref makes `update-ref -d` fail while the branch
+    // still sits at the start commit.
+    fs.writeFileSync(
+      path.join(f.repo, ".git", "refs", "heads", "mine.lock"),
+      "",
+    );
+    const d = discardCreatedBranch(f.repo, "mine", false, f.mainSha);
+    expect(d.outcome).toBe("failed");
+    expect((d as { reason: string }).reason.length).toBeGreaterThan(0);
+    expect(
+      gitStatus(f.repo, ["rev-parse", "--verify", "refs/heads/mine"]),
+    ).toBe(0);
+  });
+
+  it("discardCreatedBranch keeps the branch when the worktree list cannot be read", () => {
+    const f = makeFixture();
+    git(f.repo, ["branch", "mine"]);
+    const realGit = resolveBinary("git")!;
+    const shimDir = path.join(f.base, "shim");
+    fs.mkdirSync(shimDir);
+    fs.writeFileSync(
+      path.join(shimDir, "git"),
+      [
+        "#!/bin/sh",
+        `case " $* " in *" worktree list "*) echo list-broke >&2; exit 1;; esac`,
+        `exec '${realGit}' "$@"`,
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    vi.stubEnv("PATH", `${shimDir}${path.delimiter}${process.env.PATH ?? ""}`);
+    let d: ReturnType<typeof discardCreatedBranch>;
+    try {
+      d = discardCreatedBranch(f.repo, "mine", false, f.mainSha);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(d.outcome).toBe("unchecked");
+    expect((d as { reason: string }).reason).toContain("list-broke");
+    expect(
+      gitStatus(f.repo, ["rev-parse", "--verify", "refs/heads/mine"]),
+    ).toBe(0);
+  });
+
+  it("describeDiscard words each outcome apart", () => {
+    const say = (d: Parameters<typeof describeDiscard>[0]): string =>
+      describeDiscard(d, "feat", "/t");
+    expect(say({ outcome: "kept" })).toBe("");
+    expect(say({ outcome: "removed" })).toContain("was removed again");
+    const exists = say({ outcome: "worktree_exists", worktree: "/t" });
+    expect(exists).toContain("post-checkout hook");
+    expect(exists).toContain("were kept");
+    expect(exists).not.toContain("removed again");
+    const held = say({ outcome: "checked_out", worktree: "/other" });
+    expect(held).toContain("checked out in /other");
+    expect(held).toContain("kept");
+    const moved = say({ outcome: "moved" });
+    expect(moved).toContain("no longer points");
+    expect(moved).toContain("may hold commits");
+    expect(moved).not.toContain("git branch -D");
+    const unchecked = say({ outcome: "unchecked", reason: "boom" });
+    expect(unchecked).toContain("boom");
+    expect(unchecked).toContain("was kept");
+    const failed = say({ outcome: "failed", reason: "lock held" });
+    expect(failed).toContain("lock held");
+    expect(failed).toContain("could not be removed");
+    expect(failed).toContain("only if nothing uses it");
+  });
+
+  it("keeps the worktree and its branch when git worktree add fails in a post-checkout hook", async () => {
+    const f = makeFixture();
+    const hook = path.join(f.repo, ".git", "hooks", "post-checkout");
+    fs.mkdirSync(path.dirname(hook), { recursive: true });
+    fs.writeFileSync(hook, "#!/bin/sh\necho hook-says-no >&2\nexit 1\n", {
+      mode: 0o755,
+    });
+    const target = path.join(f.base, "wt-hooked");
+
+    const r = await run(f.work, [
+      "--repo",
+      f.repo,
+      "--branch",
+      "hooked",
+      "--path",
+      target,
+    ]);
+
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.reason).toBe("worktree_add_failed");
+    expect(r.json.message).toContain("hook-says-no");
+    expect(r.json.message).toContain("post-checkout hook");
+    expect(r.json.message).toContain("was created");
+    expect(r.json.message).toContain("were kept");
+    expect(r.json.message).not.toContain("was removed again");
+    // The branch is still there, the worktree is on it and not unborn.
+    expect(
+      gitStatus(f.repo, ["rev-parse", "--verify", "refs/heads/hooked"]),
+    ).toBe(0);
+    expect(git(target, ["symbolic-ref", "HEAD"]).trim()).toBe(
+      "refs/heads/hooked",
+    );
+    expect(git(target, ["rev-parse", "HEAD"]).trim()).toBe(f.mainSha);
+    expect(git(f.repo, ["worktree", "list", "--porcelain"])).toContain(target);
+  });
+
+  it("keeps the worktree when the failing hook has left it on a detached HEAD", async () => {
+    const f = makeFixture();
+    const hook = path.join(f.repo, ".git", "hooks", "post-checkout");
+    fs.mkdirSync(path.dirname(hook), { recursive: true });
+    // No branch is checked out any more, so only the registration of the
+    // target says the worktree is in use.
+    fs.writeFileSync(
+      hook,
+      '#!/bin/sh\ngit update-ref --no-deref HEAD "$(git rev-parse HEAD)"\nexit 1\n',
+      { mode: 0o755 },
+    );
+    const target = path.join(f.base, "wt-detached");
+
+    const r = await run(f.work, [
+      "--repo",
+      f.repo,
+      "--branch",
+      "detached",
+      "--path",
+      target,
+    ]);
+
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.reason).toBe("worktree_add_failed");
+    expect(r.json.message).toContain("were kept");
+    expect(
+      gitStatus(f.repo, ["rev-parse", "--verify", "refs/heads/detached"]),
+    ).toBe(0);
+    expect(gitStatus(target, ["symbolic-ref", "-q", "HEAD"])).not.toBe(0);
+    expect(git(target, ["rev-parse", "HEAD"]).trim()).toBe(f.mainSha);
   });
 });
 
@@ -835,6 +1022,9 @@ describe("worktree create: a prunable holder of the branch", () => {
     expect(r.json.message).toContain("prunable");
     expect(r.json.message).toContain("still exists");
     expect(r.json.message).not.toContain("is gone");
+    // The prune advice is given once, not once by the description and once
+    // again by the message.
+    expect(r.json.message.split("git worktree prune")).toHaveLength(2);
   });
 
   it("says the directory is gone when it is", async () => {
@@ -862,6 +1052,7 @@ describe("worktree create: a prunable holder of the branch", () => {
 
     expect(r.json.reason).toBe("branch_checked_out");
     expect(r.json.message).toContain("the directory is gone");
+    expect(r.json.message.split("git worktree prune")).toHaveLength(2);
   });
 });
 

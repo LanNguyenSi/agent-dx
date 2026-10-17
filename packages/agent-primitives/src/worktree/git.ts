@@ -466,6 +466,14 @@ function canonicalDeepest(p: string): string {
   }
 }
 
+/** True when `a` and `b` spell the same path once each is resolved through
+ * its deepest existing prefix (see `canonicalDeepest`). */
+export function samePath(a: string, b: string): boolean {
+  return (
+    canonicalDeepest(path.resolve(a)) === canonicalDeepest(path.resolve(b))
+  );
+}
+
 function lexicallyWithin(root: string, candidate: string): boolean {
   return isRelContained(path.relative(root, candidate));
 }
