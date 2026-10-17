@@ -452,7 +452,11 @@ function parseMaxFailures(value: string): string {
 function bestEffortGlobal(opts: GlobalOptions): ResolvedGlobal {
   const cwd = opts.cwd ? path.resolve(opts.cwd) : process.cwd();
   const maxChars = Number(opts.maxChars);
-  const requestedLogDir = opts.logDir ?? process.env.AGENT_PRIMITIVES_LOG_DIR;
+  // An empty value, from the flag or from the env, counts as unset:
+  // `path.resolve("")` is the invocation directory, which would bury the
+  // caller's logs inside the checkout rather than fall back to the default.
+  const requestedLogDir =
+    opts.logDir || process.env.AGENT_PRIMITIVES_LOG_DIR || undefined;
   // A relative log dir resolves against the directory the command was
   // started in (`process.cwd()`), never against `-C/--cwd`: checks run
   // under `cwd`, and resolving there too would bury the caller's own logs
@@ -819,7 +823,7 @@ program
   )
   .option(
     "-l, --log-dir <dir>",
-    "directory for logs and full (untruncated) results (defaults to $AGENT_PRIMITIVES_LOG_DIR or <tmpdir>/agent-primitives/<run-id>/); a relative value resolves against the invocation directory, not --cwd",
+    "directory for logs and full (untruncated) results (defaults to $AGENT_PRIMITIVES_LOG_DIR or <tmpdir>/agent-primitives/<run-id>/); a relative value resolves against the invocation directory, not --cwd; an empty value means unset and falls back to the default",
   )
   .option(
     "--json",

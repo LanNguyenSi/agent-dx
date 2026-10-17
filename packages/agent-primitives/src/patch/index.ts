@@ -141,7 +141,8 @@ export function parsePatchPlan(text: string, source = "plan"): PatchEditSpec[] {
  * Per-edit status. `written`, `would_write` (dry run) and `unchanged` are
  * ok; `missing`, `ambiguous`, `overlap`, `fuzzy_side_effect` (a fuzzy
  * match whose lines would change outside the matched text) and
- * `not_editable` (a hard-linked or read-only file) are findings; `refused`
+ * `not_editable` (a hard-linked or read-only file, or one in a directory
+ * that cannot be written) are findings; `refused`
  * (a path outside the root or inside a git directory) is a usage error;
  * `error` is a file that could not be read, decoded or written;
  * `not_written` is an edit that resolved but was not written because the
@@ -1171,6 +1172,12 @@ export function patch(options: PatchOptions): PatchResult {
           status: "not_editable",
           reason: "read_only",
           detail: `${spec.file} is not writable; patch does not change a read-only file`,
+        };
+      } else if (!isWritable(path.dirname(real))) {
+        pathError = {
+          status: "not_editable",
+          reason: "dir_read_only",
+          detail: `${spec.file} sits in the directory ${path.dirname(real)}, which is not writable; patch writes a temporary file next to the target, so it does not change files in a read-only directory`,
         };
       }
     }
