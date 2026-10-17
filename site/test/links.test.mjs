@@ -7,7 +7,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createMarkdownRenderer, disposeMdItInstance } from 'vitepress'
-import { createSite, createTitleReader, escapeLiteral, escapeText, githubBase, markdownBase, refuseIncludes } from '../.vitepress/site-helpers.mjs'
+import { createSite, createTitleReader, escapeLiteral, escapeText, githubBase, markdownBase, refuseBuildTimeCode, refuseIncludes } from '../.vitepress/site-helpers.mjs'
 
 let root
 let site
@@ -270,6 +270,247 @@ test('refuseIncludes passes a page that mentions includes without the directive'
   } finally {
     fs.rmSync(path.join(root, `${AE}/inc-text.md`))
   }
+})
+
+const AC = 'packages/agentic-coding-playbook'
+const codeNames = [
+  `${AE}/[x].paths.mjs`,
+  `${AE}/[x].paths.js`,
+  `${AE}/x.paths.ts`,
+  `${AE}/x.PATHS.json`,
+  `${AE}/foo.js`,
+  `${AE}/foo.mjs`,
+  `${AE}/foo.cjs`,
+  `${AE}/foo.ts`,
+  `${AE}/foo.mts`,
+  `${AE}/foo.cts`,
+  `${AE}/FOO.JS`,
+  `${AE}/Foo.Mjs`,
+  `${AE}/foo.jsx`,
+  `${AE}/foo.tsx`,
+  `${AE}/FOO.TSX`,
+  `${AE}/Foo.Jsx`,
+  `${AC}/a/b/c.mjs`,
+  `${AC}/[y].paths.mjs`
+]
+
+test('a build-time code file in a playbook directory is refused with its path', () => {
+  for (const rel of codeNames) {
+    write(rel, 'export default {}\n')
+    try {
+      assert.throws(
+        () => createSite(root, readTitle),
+        (e) => e.message === `Build-time code is not supported in playbook content: ${rel}`,
+        rel
+      )
+    } finally {
+      fs.rmSync(path.join(root, rel))
+    }
+  }
+  fs.rmSync(path.join(root, AC), { recursive: true, force: true })
+  assert.doesNotThrow(() => createSite(root, readTitle))
+})
+
+test('a directory is refused by its name and never entered', () => {
+  // Each case is a set of files; the first in sorted order is the directory
+  // that must be named. esbuild resolves a directory to its index file or to
+  // the package.json `main`, which is how these run when VitePress takes the
+  // directory for a paths file.
+  const cases = {
+    'paths directory with index.jsx': {
+      files: { [`${AC}/[x].paths.mjs/index.jsx`]: 'x\n' },
+      named: `${AC}/[x].paths.mjs`
+    },
+    'paths directory with index.tsx': {
+      files: { [`${AC}/[x].paths.mjs/index.tsx`]: 'x\n' },
+      named: `${AC}/[x].paths.mjs`
+    },
+    'paths directory with package.json main lib.tsx': {
+      files: {
+        [`${AC}/[x].paths.mjs/package.json`]: '{"main":"lib.tsx"}\n',
+        [`${AC}/[x].paths.mjs/lib.tsx`]: 'x\n'
+      },
+      named: `${AC}/[x].paths.mjs`
+    },
+    'paths directory holding only data': {
+      files: { [`${AE}/dyn/[y].paths.ts/data.json`]: '{}\n' },
+      named: `${AE}/dyn/[y].paths.ts`
+    },
+    'paths directory in upper case': {
+      files: { [`${AE}/X.PATHS.JSON/data.json`]: '{}\n' },
+      named: `${AE}/X.PATHS.JSON`
+    },
+    'directory named like a code file, holding only data': {
+      files: { [`${AE}/x.mjs/data.json`]: '{}\n' },
+      named: `${AE}/x.mjs`
+    },
+    'directory named like a jsx file, holding only data': {
+      files: { [`${AE}/x.JSX/data.json`]: '{}\n' },
+      named: `${AE}/x.JSX`
+    },
+    'directory named like a tsx file, holding only data': {
+      files: { [`${AE}/deep/x.tsx/data.json`]: '{}\n' },
+      named: `${AE}/deep/x.tsx`
+    }
+  }
+  for (const [label, { files, named }] of Object.entries(cases)) {
+    for (const [rel, text] of Object.entries(files)) write(rel, text)
+    try {
+      assert.throws(
+        () => createSite(root, readTitle),
+        (e) => e.message === `Build-time code is not supported in playbook content: ${named}`,
+        label
+      )
+    } finally {
+      for (const top of new Set(Object.keys(files).map((rel) => rel.split('/').slice(0, 3).join('/')))) {
+        fs.rmSync(path.join(root, top), { recursive: true, force: true })
+      }
+    }
+  }
+  fs.rmSync(path.join(root, AC), { recursive: true, force: true })
+  fs.rmSync(path.join(root, `${AE}/dyn`), { recursive: true, force: true })
+  fs.rmSync(path.join(root, `${AE}/deep`), { recursive: true, force: true })
+  assert.doesNotThrow(() => createSite(root, readTitle))
+})
+
+test('a refused directory is never read, by the check or by anything after it', () => {
+  // The refusal names the directory and the walk must not go into it: a
+  // directory that holds a further offender sorts after its parent, so the
+  // message alone cannot tell a walk that went in from one that did not. This
+  // records every directory listing instead. Both entry points are covered:
+  // createSite also lists the playbook pages, and that must not run first.
+  const refused = [`${AE}/x.mjs`, `${AC}/[x].paths.mjs`, `${AE}/deep/y.tsx`]
+  for (const dir of refused) {
+    write(`${dir}/inner.js`, 'x\n')
+    write(`${dir}/data.json`, '{}\n')
+  }
+  const read = []
+  const readdirSync = fs.readdirSync
+  fs.readdirSync = (dir, ...rest) => {
+    read.push(String(dir))
+    return readdirSync.call(fs, dir, ...rest)
+  }
+  try {
+    for (const run of [() => refuseBuildTimeCode(root), () => createSite(root, readTitle)]) {
+      read.length = 0
+      // The first refused directory in sorted order is the one named.
+      assert.throws(run, (e) => e.message === `Build-time code is not supported in playbook content: ${[...refused].sort()[0]}`)
+      assert.ok(read.length > 0, 'the playbook directories were listed')
+      for (const dir of refused) {
+        assert.equal(
+          read.some((r) => r === path.join(root, dir) || r.startsWith(path.join(root, dir) + path.sep)),
+          false,
+          `${dir} was entered`
+        )
+      }
+    }
+  } finally {
+    fs.readdirSync = readdirSync
+    fs.rmSync(path.join(root, AC), { recursive: true, force: true })
+    fs.rmSync(path.join(root, `${AE}/x.mjs`), { recursive: true, force: true })
+    fs.rmSync(path.join(root, `${AE}/deep`), { recursive: true, force: true })
+  }
+  assert.doesNotThrow(() => createSite(root, readTitle))
+})
+
+test('only data and Markdown files, and code outside the playbook directories, pass', () => {
+  const fine = [
+    `${AE}/data.json`,
+    `${AE}/data.yaml`,
+    `${AE}/data.yml`,
+    `${AE}/img/other.svg`,
+    `${AE}/notes.md`,
+    `${AE}/js.md`,
+    `${AE}/mjs/page.md`,
+    `${AE}/paths.md`,
+    `${AE}/pathsfile.json`,
+    `${AC}/guide.md`,
+    'site/index.md',
+    'site/x.js',
+    'site/.vitepress/x.mjs',
+    'packages/other/x.js',
+    'packages/other/[x].paths.mjs',
+    'docs/x.ts'
+  ]
+  // A tree of its own, so that nothing has to be cleaned out of the shared one.
+  const tree = fs.mkdtempSync(path.join(os.tmpdir(), 'site-links-clean-'))
+  try {
+    for (const rel of fine) {
+      fs.mkdirSync(path.dirname(path.join(tree, rel)), { recursive: true })
+      fs.writeFileSync(path.join(tree, rel), rel.endsWith('.md') ? '# T\n' : 'x\n')
+    }
+    assert.doesNotThrow(() => refuseBuildTimeCode(tree))
+    assert.doesNotThrow(() => createSite(tree, readTitle))
+  } finally {
+    fs.rmSync(tree, { recursive: true, force: true })
+  }
+})
+
+test('with several offenders the first in sorted order is named', () => {
+  const rels = [`${AC}/z.mjs`, `${AE}/b.js`, `${AE}/a/a.cjs`, `${AE}/a.ts`]
+  for (const rel of rels) write(rel, 'x\n')
+  try {
+    assert.throws(() => refuseBuildTimeCode(root), /: packages\/agent-engineering-playbook\/a\.ts$/)
+  } finally {
+    for (const rel of rels) fs.rmSync(path.join(root, rel))
+    fs.rmSync(path.join(root, AC), { recursive: true, force: true })
+    fs.rmSync(path.join(root, `${AE}/a`), { recursive: true, force: true })
+  }
+})
+
+test('any symbolic link in a playbook directory is refused by its path and never followed', () => {
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'site-links-outside-'))
+  const aside = path.join(outside, 'aside')
+  fs.mkdirSync(aside)
+  fs.writeFileSync(path.join(aside, 'payload.mjs'), 'x\n')
+  fs.writeFileSync(path.join(outside, 'plain.txt'), 'x\n')
+  const refused = (name) => `Build-time code is not supported in playbook content: ${AE}/${name} (symbolic link)`
+  // Each link has an innocuous name, so only its being a link can refuse it.
+  const links = {
+    'a-dir-link': aside,
+    'a-file-link': path.join(outside, 'plain.txt'),
+    'a-dangling-link': path.join(outside, 'missing'),
+    'a-cyclic-link': '.'
+  }
+  try {
+    for (const [name, target] of Object.entries(links)) {
+      fs.symlinkSync(target, path.join(root, AE, name))
+      try {
+        assert.throws(
+          () => createSite(root, readTitle),
+          (e) => e.message === refused(name),
+          name
+        )
+      } finally {
+        fs.rmSync(path.join(root, AE, name), { force: true })
+      }
+    }
+    // A link below a subdirectory is found too, and the path is the link's own.
+    fs.mkdirSync(path.join(root, AE, 'deep'))
+    fs.symlinkSync(aside, path.join(root, AE, 'deep', 'a-dir-link'))
+    assert.throws(() => refuseBuildTimeCode(root), (e) => e.message === refused('deep/a-dir-link'))
+    fs.rmSync(path.join(root, AE, 'deep'), { recursive: true })
+    // A playbook directory that is itself a link is refused as well.
+    const moved = path.join(root, 'packages/agentic-coding-playbook')
+    fs.symlinkSync(aside, moved)
+    assert.throws(
+      () => refuseBuildTimeCode(root),
+      (e) => e.message === 'Build-time code is not supported in playbook content: packages/agentic-coding-playbook (symbolic link)'
+    )
+    fs.rmSync(moved)
+    // ... also when it points nowhere, where existsSync would call it absent.
+    fs.symlinkSync(path.join(outside, 'missing'), moved)
+    assert.throws(
+      () => refuseBuildTimeCode(root),
+      (e) => e.message === 'Build-time code is not supported in playbook content: packages/agentic-coding-playbook (symbolic link)'
+    )
+    fs.rmSync(moved)
+  } finally {
+    fs.rmSync(path.join(root, AE, 'deep'), { recursive: true, force: true })
+    fs.rmSync(path.join(root, 'packages/agentic-coding-playbook'), { recursive: true, force: true })
+    fs.rmSync(outside, { recursive: true, force: true })
+  }
+  assert.doesNotThrow(() => createSite(root, readTitle))
 })
 
 test('sidebar links every playbook page exactly once', () => {

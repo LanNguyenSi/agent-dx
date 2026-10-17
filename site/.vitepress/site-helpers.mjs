@@ -78,6 +78,118 @@ export function refuseIncludes(repoRoot, pages) {
   }
 }
 
+// VitePress runs Node code at build time from files that sit next to the pages:
+// a dynamic route's `[name].paths.*` file is imported to list its pages, and a
+// script file next to a page can be pulled in by one. Playbook content is
+// Markdown, images and YAML or JSON data, so the entries below fail the build
+// instead: any `*.paths.*` entry and anything ending in .js, .mjs, .cjs, .ts,
+// .mts, .cts, .jsx or .tsx, matched on the entry name without regard to case.
+//
+// The name test applies to every entry, directories included, and a matching
+// directory is refused without being entered. VitePress finds a paths file with
+// `fs.existsSync`, which is also true for a directory, and its loader bundles
+// the path with esbuild, which resolves a directory to its `index.*` file or to
+// the file named by `main` in its package.json. So `[x].paths.mjs/` holding an
+// `index.jsx` runs as code although no file inside carries a `.paths.` name.
+// A directory named like a code file (`x.mjs/`) is refused for the same reason:
+// it resolves the same way when something imports it.
+//
+// A symbolic link is refused whatever it points at. VitePress follows a link to
+// a directory when it looks for pages, so a link to a directory holding a
+// paths file would run it; the check cannot follow the link to look inside
+// (the target may sit anywhere), so it refuses the link itself. This also keeps
+// the walk finite when a link points back up the tree.
+//
+// The check looks at names and entry types only: it never opens or imports an
+// offending entry or follows a link. `createSite` runs it while the config
+// loads, which is before VitePress resolves any page and so before any such
+// file could be imported.
+const pathsEntry = /\.paths\./i
+const codeEntry = /\.(?:js|mjs|cjs|ts|mts|cts|jsx|tsx)$/i
+
+// Lists the repository-relative paths (with a flag for symbolic links) under
+// `dir` that the check refuses. A link or a directory with a refused name is
+// reported and not entered.
+function buildTimeCodeIn(repoRoot, dir) {
+  const rel = (full) => path.relative(repoRoot, full).split(path.sep).join('/')
+  if (fs.lstatSync(dir).isSymbolicLink()) return [{ path: rel(dir), link: true }]
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const full = path.join(dir, e.name)
+    if (e.isSymbolicLink()) return [{ path: rel(full), link: true }]
+    if (pathsEntry.test(e.name) || codeEntry.test(e.name)) return [{ path: rel(full), link: false }]
+    return e.isDirectory() ? buildTimeCodeIn(repoRoot, full) : []
+  })
+}
+
+// Fails with the repository-relative path of the first offending entry, in
+// sorted order, when a playbook directory holds a build-time code entry or a
+// symbolic link.
+export function refuseBuildTimeCode(repoRoot) {
+  const offending = playbooks
+    .flatMap((pb) => {
+      const dir = path.join(repoRoot, 'packages', pb)
+      return fs.existsSync(dir) || isLink(dir) ? buildTimeCodeIn(repoRoot, dir) : []
+    })
+    .sort((x, y) => (x.path < y.path ? -1 : x.path > y.path ? 1 : 0))
+  if (offending.length > 0) {
+    const { path: rel, link } = offending[0]
+    throw new Error(`Build-time code is not supported in playbook content: ${rel}${link ? ' (symbolic link)' : ''}`)
+  }
+}
+
+function isLink(p) {
+  try {
+    return fs.lstatSync(p).isSymbolicLink()
+  } catch {
+    return false
+  }
+}
+
+// The pages are the Markdown under the two playbook directories plus
+// site/index.md, and nothing else. VitePress takes every Markdown file under
+// srcDir that no srcExclude pattern ignores, and loads a `[name].paths.*` file
+// next to a dynamic route, so a page outside the list below would run code at
+// build time. Negation patterns alone (`!(a|b)/**`) do not carry this: they
+// compile to a lookahead that rejects any name that merely starts with an
+// allowed one, so a sibling such as `packages/agentic-coding-playbook-x/`,
+// `packagesX/` or `sitex/` was not ignored and stayed a source of pages. So the
+// ignore list is written out instead: every entry that sits beside an allowed
+// one (the repository root, `packages/` and `site/`) is ignored by its literal
+// name with glob characters escaped, and nothing relies on how a negation reads
+// a name. The negations stay in the config as a second layer for a name that
+// appears after the config loaded.
+//
+// The list is read from the directories when the config loads, like the other
+// checks here; an entry added while a dev server runs is not covered until the
+// config reloads. test/page-set.test.mjs runs VitePress's own page glob over a
+// tree with such siblings to show that the pages are exactly the allowed ones.
+const globEscape = (name) => name.replace(/[\\*?[\]{}()!+@|,"]/g, '\\$&')
+
+function entriesBeside(repoRoot, dir, keep) {
+  const full = path.join(repoRoot, dir)
+  let names
+  try {
+    names = fs.readdirSync(full)
+  } catch {
+    return []
+  }
+  return names
+    .filter((n) => !keep.includes(n))
+    .sort()
+    .flatMap((n) => {
+      const p = (dir ? `${dir}/` : '') + globEscape(n)
+      return [p, `${p}/**`]
+    })
+}
+
+export function pageExclude(repoRoot) {
+  return [
+    ...entriesBeside(repoRoot, '', ['packages', 'site']),
+    ...entriesBeside(repoRoot, 'packages', playbooks),
+    ...entriesBeside(repoRoot, 'site', ['index.md'])
+  ]
+}
+
 // A leading byte order mark and front matter are stripped before the body is
 // parsed, as VitePress does.
 const FRONT_MATTER = /^---[ \t]*\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/
@@ -130,6 +242,8 @@ export function createTitleReader(md) {
 // createTitleReader). It is a parameter so these helpers load without VitePress.
 export function createSite(repoRoot, readTitle) {
   if (typeof readTitle !== 'function') throw new TypeError('createSite needs a readTitle function')
+  // First, so that a refused entry is named before anything else reads the tree.
+  refuseBuildTimeCode(repoRoot)
   const pages = playbooks.flatMap((pb) => {
     const dir = path.join(repoRoot, 'packages', pb)
     return fs.existsSync(dir)

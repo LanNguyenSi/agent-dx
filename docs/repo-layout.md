@@ -126,6 +126,41 @@ and can embed any readable file. The check runs when the site config
 loads (build and dev-server start); a running dev server does not re-check
 pages edited later, so do not point one at untrusted content.
 
+Playbook content under `packages/agent-engineering-playbook` and
+`packages/agentic-coding-playbook` is Markdown with YAML or JSON frontmatter,
+images, and YAML or JSON data files. The build fails, naming the path, when
+the config loads and finds under those directories a `*.paths.*` file or
+directory (VitePress imports it to list the pages of a dynamic route such as
+`[name].md`, and a directory resolves to its `index.*` file or to the
+`main` file of its `package.json`), or a file or directory whose name ends in
+`.js`, `.mjs`, `.cjs`, `.ts`, `.mts`, `.cts`, `.jsx` or `.tsx`. Names are
+matched without regard to case and at any depth, and a matching directory is
+refused without looking inside. A symbolic link anywhere under those
+directories also fails the build, whatever it points at, because VitePress
+follows a link to a directory when it looks for pages. That is all the check
+covers: it looks at entry names and entry types only, never opens or follows
+anything, and runs before VitePress reads any page. Other ways for content to
+run code or read files at build time are not covered by it, such as a
+`<script>` block in a page or a data loader; the sentences above cover
+JavaScript frontmatter and include directives. Like those checks it runs at
+dev-server start and not again for entries added while the server runs, so a
+running dev server still must not be pointed at untrusted content.
+
+The pages are the Markdown files under `packages/agent-engineering-playbook`
+and `packages/agentic-coding-playbook`, plus `site/index.md`, and nothing
+else. Every other path is excluded: all other directories and files in the
+repository root, everything else under `packages/` (a directory whose name only
+starts like a playbook's, such as `packages/agentic-coding-playbook-x/`,
+included) and everything else under `site/`. VitePress would load a Markdown
+file anywhere it is not excluded as a page, and run the paths file of a
+dynamic route there, so `site/.vitepress/config.mts` excludes the other
+entries by their literal names (`pageExclude` in `site-helpers.mjs`), listed
+from the directories when the config loads. A test runs VitePress's own page
+resolution over a tree with such look-alike directories and compares the pages
+with this list. The list is built when the config loads, so a look-alike
+directory added while a dev server runs is not excluded until the config
+reloads.
+
 ```bash
 cd site && npm ci && npm run build   # output in site/.vitepress/dist
 cd site && npm test                  # rendering checks for comments and raw HTML

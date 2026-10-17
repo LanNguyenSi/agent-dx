@@ -2,7 +2,7 @@ import { createMarkdownRenderer, defineConfig, disposeMdItInstance } from 'vitep
 import type MarkdownIt from 'markdown-it'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createSite, createTitleReader, githubBase, markdownBase } from './site-helpers.mjs'
+import { createSite, createTitleReader, githubBase, markdownBase, pageExclude } from './site-helpers.mjs'
 import { escapeDescriptionMeta, transformPageData } from './raw-output.mjs'
 import { scriptSafePageData } from './script-safe.mjs'
 
@@ -52,8 +52,11 @@ export default defineConfig({
   description: 'Agent Engineering Playbook and Agentic Coding Playbook from agent-dx',
   base,
   srcDir: '..',
-  // Only the two playbooks and the site home page are pages.
-  srcExclude: ['*.md', '!(packages|site)/**', 'packages/!(agent-engineering-playbook|agentic-coding-playbook)/**', 'site/!(index.md)', '.*/**'],
+  // Only the two playbooks and the site home page are pages. pageExclude lists
+  // every other entry by its literal name (see site-helpers.mjs); the negation
+  // patterns cover a name that appears after the config loaded, but they do not
+  // ignore a name that starts like an allowed one, so they are not relied on.
+  srcExclude: [...pageExclude(repoRoot), '*.md', '!(packages|site)/**', 'packages/!(agent-engineering-playbook|agentic-coding-playbook)/**', 'site/!(index.md)', '.*/**'],
   rewrites,
   cleanUrls: true,
   // The Markdown lives outside site/, so bare imports compiled into those
