@@ -334,11 +334,9 @@ Rules:
   mismatch is a finding of at least `high` and sets
   `matches_implementer_claim: mismatched`. Do not skip a named probe in
   that mode, under any `review_method`; a probe that cannot run through the
-  runner is reported `not_applicable`, not skipped; any mismatch also sets
-  `matches_implementer_claim: mismatched`. A mismatch is a finding of at
-  least `high`; a probe given only by id is `not_applicable` and is
-  missing evidence, not a pass, and so is a briefing in that mode that
-  names no probe. Without that mode line in the briefing this obligation
+  runner is reported `not_applicable`, not skipped. A probe given only by
+  id is `not_applicable` and is missing evidence, not a pass, and so is a
+  briefing in that mode that names no probe. Without that mode line in the briefing this obligation
   does not exist.
 
 Return exactly this structure as your final output, nothing else:

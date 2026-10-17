@@ -197,6 +197,9 @@ Rules:
   and report its result before ending your turn; never end your turn with
   the run still outstanding, since a run that outlives your turn is not
   evidence you can report.
+  Verification plans, probe plans, and repeat tallies run in the foreground,
+  and the implementer reports their returns in the same turn as the last
+  check. A background monitor is no substitute for those returns.
 - A test that spawns a CLI and asserts its output against a byte-count
   ceiling calibrated to sit inside the output's own run-to-run noise
   (timing digits, temporary-directory names) is not a regression test; pin
@@ -284,9 +287,6 @@ Rules:
   command plus its exit code. A `summary` or `criterion_evidence` claim may
   point to its `tests.executed` entry instead of repeating the envelope. A
   claim with neither is prose, and the reviewer treats it as a finding.
-- Verification plans, probe plans, and repeat tallies run in the foreground,
-  and the implementer reports their returns in the same turn as the last
-  check. A background monitor is no substitute for those returns.
 - Only write a verification claim (for example "Verified by ...") in a code
   comment, commit message, or your report for a check you actually ran and
   measured yourself; never claim a run you did not execute. Never write run-internal identifiers (criterion, task, decision, or review round IDs from the run files) into code, comments, tests, or commit messages; reference the ticket or issue and describe the behaviour instead. evidence-and-probes.md's Run-internal identifiers section defines these IDs and documents a check for them.
