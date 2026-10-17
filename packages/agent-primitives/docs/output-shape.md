@@ -86,7 +86,9 @@ those fixed fields)`, not `-m` unconditionally; when even that cannot be
   the command was started in (`process.cwd()`), not against `-C, --cwd`,
   including `./` and `../`; every path the envelope's `logs` carries is
   therefore absolute. An empty value, from the option or from the
-  environment variable, is treated as unset and falls back to the default.
+  environment variable, is treated as unset and falls back to the default;
+  an empty `-l` with a non-empty `AGENT_PRIMITIVES_LOG_DIR` therefore uses the
+  environment variable.
 - `--json`: a no-op alias for `-f json` (already the default), for the
   common instinct to ask for JSON explicitly. Combined with an explicit
   `-f text` it is `status: "usage_error"`, `reason: "format_conflict"`,

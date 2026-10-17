@@ -126,6 +126,21 @@ describe("an empty -l / AGENT_PRIMITIVES_LOG_DIR means unset", () => {
     expectLogsUnder(defaultRoot(tmp), envelope.logs);
     expect(fs.readdirSync(invocation)).toEqual([]);
   });
+
+  it("-l '' with AGENT_PRIMITIVES_LOG_DIR set: the empty flag is unset, so the env directory wins", () => {
+    const invocation = temp();
+    const tmp = temp();
+    const envDir = temp();
+    const res = runAt(invocation, ["-l", "", ...PASSING_VERIFY], {
+      AGENT_PRIMITIVES_LOG_DIR: envDir,
+      TMPDIR: tmp,
+    });
+    expect(res.status, res.stdout + res.stderr).toBe(0);
+    const envelope = JSON.parse(res.stdout);
+    expect(envelope.status).toBe("pass");
+    expectLogsUnder(envDir, envelope.logs);
+    expect(fs.readdirSync(invocation)).toEqual([]);
+  });
 });
 
 /** A committed `fixture.js` whose test command fails once the probe
