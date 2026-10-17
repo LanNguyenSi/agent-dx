@@ -3,6 +3,8 @@ import path from "node:path";
 import {
   GIT_WALK_BOUND_MS,
   WorktreeRefusal,
+  baseNeverRemoteBranch,
+  describePrunable,
   type DefaultBase,
   git,
   gitText,
@@ -174,15 +176,23 @@ function describeEntry(
     merged: {
       merged: "unknown",
       via: "none",
-      reason: "prunable: the directory is gone",
+      reason: "not measured yet",
     },
     links: [],
     prunable: entry.prunable,
     locked: entry.locked,
   };
-  // A prunable entry has no directory to read: everything that needs one
-  // stays null, and the merged verdict says why.
-  if (entry.prunable) return listed;
+  // A prunable entry has no directory git can read (it is gone, or its
+  // `.git` file is): everything that needs one stays null, and the merged
+  // verdict says which of the two it is.
+  if (entry.prunable) {
+    listed.merged = {
+      merged: "unknown",
+      via: "none",
+      reason: `prunable: ${describePrunable(entry)}`,
+    };
+    return listed;
+  }
 
   const status = git(
     entry.path,
@@ -271,6 +281,16 @@ export async function listWorktrees(
     };
   }
 
+  // A value that can never be a remote-tracking branch is refused before
+  // any repository is looked at, as it is without --root; only a missing
+  // remote or ref is left to a per-repository warning.
+  if (o.base !== undefined && baseNeverRemoteBranch(o.cwd, o.base)) {
+    throw new WorktreeRefusal(
+      `--base ${o.base} is not a remote-tracking branch; pass <remote>/<branch> or refs/remotes/<remote>/<branch> of a configured remote`,
+      "base_not_remote_branch",
+      { base: o.base },
+    );
+  }
   const root = path.resolve(o.cwd, o.root);
   let names: string[];
   try {

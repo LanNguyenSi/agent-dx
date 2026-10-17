@@ -1609,14 +1609,20 @@ describe("worktree list --base resolution", () => {
     }
   });
 
-  it("with --root, a repository where the value is no remote-tracking branch gives unknown and a warning", async () => {
+  it("with --root, a repository that lacks the remote gives unknown and a warning", async () => {
     const f = makeFixture();
     const { wt } = makeHotfix(f);
     const wts = path.join(f.base, "wts");
     fs.mkdirSync(wts);
     fs.renameSync(wt, path.join(wts, "moved"));
     git(f.repo, ["worktree", "repair", path.join(wts, "moved")]);
-    const r = await cli(f.work, ["list", "--root", wts, "--base", "HEAD"]);
+    const r = await cli(f.work, [
+      "list",
+      "--root",
+      wts,
+      "--base",
+      "elsewhere/main",
+    ]);
     expect(r.code, r.stdout + r.stderr).toBe(0);
     const entries = r.json.worktrees as Record<string, any>[];
     expect(entries).toHaveLength(1);
@@ -1651,6 +1657,137 @@ describe("worktree list --base resolution", () => {
     // against the short spelling would give 0 and 0 here.
     expect(sec).toMatchObject({ ahead: 2, behind: 0 });
     expect(sha).toHaveLength(40);
+  });
+});
+
+describe("worktree list --root: a --base that can never be a remote-tracking branch", () => {
+  it.each([
+    ["empty", ""],
+    ["leading dash", "-x"],
+    ["leading dash with a slash", "-x/main"],
+    ["HEAD", "HEAD"],
+    ["a sha", "0123456789abcdef0123456789abcdef01234567"],
+    ["remote HEAD", "origin/HEAD"],
+    ["rev syntax", "origin/main~1"],
+  ])("refuses %s up front, with no repository looked at", async (_n, bad) => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    const wts = path.join(f.base, "wts");
+    fs.mkdirSync(wts);
+    fs.renameSync(wt, path.join(wts, "moved"));
+    git(f.repo, ["worktree", "repair", path.join(wts, "moved")]);
+    const r = await cli(f.work, ["list", "--root", wts, `--base=${bad}`]);
+    expect(r.code, r.stdout + r.stderr).toBe(2);
+    expect(r.json.reason).toBe("base_not_remote_branch");
+  });
+
+  it("refuses before --root is read, so a missing directory does not mask it", async () => {
+    const f = makeFixture();
+    const r = await cli(f.work, [
+      "list",
+      "--root",
+      path.join(f.base, "no-such-dir"),
+      "--base=HEAD",
+    ]);
+    expect(r.json.reason).toBe("base_not_remote_branch");
+  });
+
+  it("accepts a branch name with slashes: origin/hotfix/one is measured, not refused", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    const wts = path.join(f.base, "wts");
+    fs.mkdirSync(wts);
+    fs.renameSync(wt, path.join(wts, "moved"));
+    git(f.repo, ["worktree", "repair", path.join(wts, "moved")]);
+    const r = await cli(f.work, [
+      "list",
+      "--root",
+      wts,
+      "--base",
+      "origin/hotfix/one",
+    ]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    const entries = r.json.worktrees as Record<string, any>[];
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      base: "origin/hotfix/one",
+      ahead: 0,
+      behind: 0,
+    });
+    expect(entries[0].merged).toMatchObject({ merged: "yes", via: "ancestry" });
+    expect(r.json.warnings as string[]).toEqual([]);
+  });
+
+  it("accepts a remote name with a dot and a dash", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    git(f.repo, ["remote", "add", "up.stream-1", f.origin]);
+    git(f.repo, ["fetch", "-q", "up.stream-1"]);
+    const wts = path.join(f.base, "wts");
+    fs.mkdirSync(wts);
+    fs.renameSync(wt, path.join(wts, "moved"));
+    git(f.repo, ["worktree", "repair", path.join(wts, "moved")]);
+    const r = await cli(f.work, [
+      "list",
+      "--root",
+      wts,
+      "--base",
+      "refs/remotes/up.stream-1/hotfixbase",
+    ]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    const entries = r.json.worktrees as Record<string, any>[];
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ ahead: 1, behind: 0 });
+    expect(r.json.warnings as string[]).toEqual([]);
+  });
+
+  it("control: a well-formed value for a ref a repository lacks stays a warning", async () => {
+    const f = makeFixture();
+    const { wt } = makeHotfix(f);
+    const wts = path.join(f.base, "wts");
+    fs.mkdirSync(wts);
+    fs.renameSync(wt, path.join(wts, "moved"));
+    git(f.repo, ["worktree", "repair", path.join(wts, "moved")]);
+    const r = await cli(f.work, [
+      "list",
+      "--root",
+      wts,
+      "--base",
+      "origin/nothere",
+    ]);
+    expect(r.code, r.stdout + r.stderr).toBe(0);
+    expect((r.json.warnings as string[]).length).toBe(1);
+  });
+});
+
+describe("worktree list: why an entry is prunable", () => {
+  it("says the directory is gone when it is", async () => {
+    const f = makeFixture();
+    const wt = addWorktree(f, "gone", path.join(f.base, "wt-gone"));
+    fs.rmSync(wt, { recursive: true, force: true });
+    const r = await cli(f.work, ["list", "--repo", f.repo]);
+    const entry = (r.json.worktrees as Record<string, any>[]).find(
+      (w) => w.path === wt,
+    )!;
+    expect(entry.prunable).toBe(true);
+    expect(entry.merged.reason).toContain("prunable: the directory is gone");
+  });
+
+  it("does not say the directory is gone when it still exists", async () => {
+    const f = makeFixture();
+    const wt = addWorktree(f, "kept", path.join(f.base, "wt-kept"));
+    fs.rmSync(path.join(wt, ".git"));
+    write(wt, "work.txt", "work\n");
+    const r = await cli(f.work, ["list", "--repo", f.repo]);
+    const entry = (r.json.worktrees as Record<string, any>[]).find(
+      (w) => w.path === wt,
+    )!;
+    expect(entry.prunable).toBe(true);
+    expect(entry.dirty).toBeNull();
+    expect(entry.merged.merged).toBe("unknown");
+    expect(entry.merged.reason).toContain("still exists");
+    expect(entry.merged.reason).not.toContain("is gone");
+    expect(fs.existsSync(path.join(wt, "work.txt"))).toBe(true);
   });
 });
 

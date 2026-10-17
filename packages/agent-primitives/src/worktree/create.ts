@@ -19,6 +19,7 @@ import {
   addToExclude,
   branchExists,
   commitSha,
+  describePrunable,
   effectiveBoundMs,
   excludePatternFor,
   git,
@@ -26,8 +27,10 @@ import {
   gitText,
   isIgnored,
   isWithin,
+  parseWorktreeList,
   resolveDefaultBase,
   resolveRepo,
+  samePath,
   stopIfInterrupted,
   type RepoContext,
 } from "./git.js";
@@ -94,6 +97,11 @@ export interface LinkManifestReport {
   /** Links made but left out of a written manifest because the reader
    * would reject their entry; `probe` needs `--link` for these. */
   unrecorded?: { path: string; reason: string }[];
+  /** Links made whose target does not resolve, so none of them could be
+   * recorded; the remedy is to create the target first, then pass
+   * `--link`. Set on a `failed` report; on a `written` one they are part
+   * of `unrecorded`. */
+  unresolved?: { path: string; reason: string }[];
 }
 
 export interface SkippedLink {
@@ -291,7 +299,13 @@ function validateBranch(repo: RepoContext, branch: string): void {
     throw new WorktreeRefusal(
       `branch ${branch} is already checked out in ${holder.path}` +
         (holder.prunable
-          ? " (git lists that worktree as prunable: its directory is gone; run `git worktree prune` in the repository if it is stale)"
+          ? // describePrunable already advises on `git worktree prune` for a
+            // directory that still exists; a gone one needs the advice here.
+            ` (git lists that worktree as prunable: ${describePrunable(holder)}${
+              fs.existsSync(holder.path)
+                ? ""
+                : "; run `git worktree prune` in the repository if it is stale"
+            })`
           : ""),
       "branch_checked_out",
       { branch, worktree: holder.path, prunable: holder.prunable },
@@ -618,7 +632,11 @@ function recordLinks(
     warnings.push(
       `could not record the links for probe: ${reason}; create the targets in the main checkout, then pass --link to probe`,
     );
-    return { status: "failed", reason };
+    return {
+      status: "failed",
+      reason,
+      ...(unresolved.length > 0 ? { unresolved } : {}),
+    };
   }
   const written = writeLinkManifest(
     worktree,
@@ -645,14 +663,131 @@ function recordLinks(
       ...(unrecorded.length > 0 ? { unrecorded } : {}),
     };
   }
-  warnings.push(
-    `could not record the links for probe: ${written.reason}; pass --link to probe to link them`,
-  );
+  // The links left out are of two kinds with different remedies: a
+  // dangling one needs its target created first, the others `--link`.
+  // `recordable` is never empty here: that case returned above.
+  const parts = [
+    `could not record the links for probe: ${written.reason}`,
+    `pass --link to probe to link ${recordable.map((l) => l.path).join(", ")}`,
+  ];
+  if (unresolved.length > 0) {
+    parts.push(
+      `${unresolved.map((u) => u.path).join(", ")} ${unresolved.length === 1 ? "does" : "do"} not resolve to a target: create the target in the main checkout first, then pass --link`,
+    );
+  }
+  warnings.push(parts.join("; "));
   return {
     status: "failed",
     ...(written.path !== undefined ? { path: written.path } : {}),
     reason: written.reason,
+    ...(unresolved.length > 0 ? { unresolved } : {}),
   };
+}
+
+/** What became of the branch `git worktree add -b` created, once the add
+ * failed. Only `removed` deletes anything. */
+export type BranchDiscard =
+  /** Nothing of this call's to remove: the branch existed before the add,
+   * or the add left none. */
+  | { outcome: "kept" }
+  | { outcome: "removed" }
+  /** The target is a live registered worktree: the add got as far as
+   * creating it (a failing post-checkout hook does that). `branch` is what
+   * it is on now (undefined when its HEAD is detached), which a hook may
+   * have changed. */
+  | { outcome: "worktree_exists"; worktree: string; branch: string | undefined }
+  /** Another worktree has the branch checked out (a concurrent create of the
+   * same branch, say). */
+  | { outcome: "checked_out"; worktree: string }
+  /** The branch no longer points at the commit the add started it at. */
+  | { outcome: "moved" }
+  /** The worktree list could not be read, so use of the branch is unknown. */
+  | { outcome: "unchecked"; reason: string }
+  /** git refused the delete for a reason other than a moved branch. */
+  | { outcome: "failed"; reason: string };
+
+/**
+ * Takes back the branch `git worktree add -b` created before it failed.
+ * Only a branch this call made, and nothing is using, is touched: one that
+ * existed before the add (`existedBefore`) is never deleted; neither is one
+ * that any worktree has checked out (read again here, since `git worktree
+ * add` also exits non-zero when a post-checkout hook fails after the
+ * worktree exists, and a concurrent create may have won the branch), the
+ * `target` included; nor one that has moved off the commit the add started
+ * it at (`expectedSha`), since the delete is conditional on that value.
+ */
+export function discardCreatedBranch(
+  cwd: string,
+  branch: string,
+  existedBefore: boolean,
+  expectedSha: string,
+  target?: string,
+): BranchDiscard {
+  if (existedBefore || !branchExists(cwd, branch)) return { outcome: "kept" };
+  const listing = git(cwd, ["worktree", "list", "--porcelain"], REPORT_TIMEOUT);
+  if (listing.error !== undefined || listing.status !== 0) {
+    return { outcome: "unchecked", reason: gitFailure(listing) };
+  }
+  const entries = parseWorktreeList(listing.stdout);
+  if (target !== undefined) {
+    // Only a live registration was made by this add: resolveTarget refuses
+    // a target that exists, and a prunable entry (its directory deleted,
+    // not yet pruned) is an old registration that makes git refuse the add
+    // before any worktree exists.
+    const made = entries.find((e) => samePath(e.path, target) && !e.prunable);
+    if (made !== undefined) {
+      return {
+        outcome: "worktree_exists",
+        worktree: made.path,
+        branch: made.branch,
+      };
+    }
+  }
+  const holder = entries.find((e) => e.branch === branch);
+  if (holder !== undefined) {
+    return { outcome: "checked_out", worktree: holder.path };
+  }
+  const ref = `refs/heads/${branch}`;
+  const r = git(cwd, ["update-ref", "-d", ref, expectedSha]);
+  if (r.error === undefined && r.status === 0) return { outcome: "removed" };
+  // The delete is conditional on the start commit, so a branch that moved
+  // fails it; reading the branch again tells that from a real git error.
+  const now = commitSha(cwd, ref);
+  if (now === undefined) return { outcome: "kept" };
+  if (now !== expectedSha) return { outcome: "moved" };
+  return { outcome: "failed", reason: gitFailure(r) };
+}
+
+/** The sentence that closes a `worktree_add_failed` message and says what
+ * was done about the branch. */
+export function describeDiscard(
+  d: BranchDiscard,
+  branch: string,
+  target: string,
+): string {
+  switch (d.outcome) {
+    case "kept":
+      return "";
+    case "removed":
+      return `. The branch ${branch} that this call had created was removed again`;
+    case "worktree_exists": {
+      const fix = `Fix the cause and use the worktree, or remove it with \`git worktree remove ${target}\` first`;
+      if (d.branch === branch) {
+        return `. The worktree ${d.worktree} was created and has the branch ${branch} checked out; git failed after that (most likely a post-checkout hook, whose output is above), so the worktree and the branch were kept. ${fix}`;
+      }
+      const now =
+        d.branch === undefined ? "a detached HEAD" : `the branch ${d.branch}`;
+      return `. The worktree ${d.worktree} was created, but it is on ${now} and not on the branch ${branch}; git failed after that (most likely a post-checkout hook, whose output is above), so the worktree and the branch ${branch} were kept. ${fix}`;
+    }
+    case "checked_out":
+      return `. The branch ${branch} is checked out in ${d.worktree} (a concurrent create of the same branch, say), so it was kept`;
+    case "moved":
+      return `. The branch ${branch} was kept: it no longer points at the commit this call created it at, so it may hold commits; inspect it before deleting it`;
+    case "unchecked":
+      return `. The branch ${branch} that this call created was kept because the list of worktrees could not be read (${d.reason}); check \`git worktree list\` and delete the branch only if no worktree uses it and it holds no work`;
+    case "failed":
+      return `. The branch ${branch} that this call created could not be removed (${d.reason}); check \`git worktree list\` and \`git branch --list ${branch}\`, and delete it with \`git branch -D ${branch}\` only if nothing uses it and it holds no work`;
+  }
 }
 
 async function runStep(
@@ -752,6 +887,9 @@ export async function createWorktree(
   // from inheriting that branch as its upstream, where a bare `git push`
   // would then aim at the default branch. The start point stays a ref
   // name (not its sha) because only a ref can be tracked.
+  // Whether this call is the one that makes the branch: only then may it
+  // take the branch away again when the add fails.
+  const branchExistedBefore = branchExists(repo.mainCheckout, options.branch);
   const added = git(
     repo.mainCheckout,
     [
@@ -767,11 +905,23 @@ export async function createWorktree(
     { boundMs: GIT_WALK_BOUND_MS, onTimeout: "report" },
   );
   if (added.error !== undefined || added.status !== 0) {
+    // A timed-out add is left as it is: the message below tells the
+    // operator to inspect it.
+    const discarded: BranchDiscard =
+      added.timedOut === true
+        ? { outcome: "kept" }
+        : discardCreatedBranch(
+            repo.mainCheckout,
+            options.branch,
+            branchExistedBefore,
+            base.sha,
+            target,
+          );
     throw new WorktreeRefusal(
       `git worktree add failed: ${gitFailure(added)}${
         added.timedOut === true
           ? `. It was stopped part way, so ${target} and the branch ${options.branch} may exist in part, and a lock file may remain; check \`git worktree list\` and run \`git worktree prune\` before trying again`
-          : ""
+          : describeDiscard(discarded, options.branch, target)
       }`,
       "worktree_add_failed",
       { target },

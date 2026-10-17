@@ -166,6 +166,9 @@ interface Hang {
    * exits 0 at once while the `sleep` keeps the inherited pipes: a git that
    * is done but not finished as far as the pipes go. */
   exitsZero?: boolean;
+  /** Arguments of a real git call the stand-in makes just before it hangs:
+   * a git that did part of its work (made a branch, say) and then blocked. */
+  beforeHang?: readonly string[];
 }
 
 interface Hanging {
@@ -208,6 +211,13 @@ function hangingGit(hang: Hang, hangSeconds = HANG_SECONDS): Hanging {
       `    n=$((n + 1))`,
       `    echo "$n" > '${counter}'`,
       `    if [ "$n" -eq ${String(hang.nth ?? 1)} ]; then`,
+      ...(hang.beforeHang !== undefined
+        ? [
+            `      '${path.join(FIXED_BIN_DIR, "git")}' ${hang.beforeHang
+              .map((a) => `'${a}'`)
+              .join(" ")} || exit 99`,
+          ]
+        : []),
       `      echo $$ >> '${pidFile}'`,
       `      /bin/sleep ${String(hangSeconds)} &`,
       `      echo $! >> '${pidFile}'`,
@@ -944,6 +954,40 @@ describe("worktree create: a git call that does not finish ends in a refusal or 
           expect(JSON.stringify(r.json), r.stdout).toContain(message);
         }
       }
+    },
+  );
+
+  it.concurrent(
+    "a git worktree add stopped after it made the branch keeps the branch",
+    async () => {
+      const f = makeFixture();
+      const target = path.join(f.base, "wt-new");
+      const hung = hangingGit({
+        match: "gc.auto=0 worktree add",
+        beforeHang: ["-C", f.repo, "branch", "b-new", "origin/main"],
+      });
+      const r = await runCli(
+        f.work,
+        [
+          "create",
+          "--repo",
+          f.repo,
+          "--branch",
+          "b-new",
+          "--path",
+          target,
+          "--no-fetch",
+        ],
+        { ...boundEnv(), PATH: hung.PATH },
+      );
+      await expectKilled(r, hung);
+      expect(r.code, r.stdout + r.stderr).toBe(2);
+      expect(r.json.reason, r.stdout).toBe("worktree_add_failed");
+      expect(r.json.message, r.stdout).toContain("stopped part way");
+      expect(r.json.message, r.stdout).not.toContain("removed again");
+      // The stopped add is left as it is: the branch it made is still there.
+      expect(branchExists(f.repo, "b-new")).toBe(true);
+      expect(fs.existsSync(target)).toBe(false);
     },
   );
 
