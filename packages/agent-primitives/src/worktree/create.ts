@@ -657,12 +657,11 @@ function recordLinks(
   }
   // The links left out are of two kinds with different remedies: a
   // dangling one needs its target created first, the others `--link`.
-  const parts = [`could not record the links for probe: ${written.reason}`];
-  if (recordable.length > 0) {
-    parts.push(
-      `pass --link to probe to link ${recordable.map((l) => l.path).join(", ")}`,
-    );
-  }
+  // `recordable` is never empty here: that case returned above.
+  const parts = [
+    `could not record the links for probe: ${written.reason}`,
+    `pass --link to probe to link ${recordable.map((l) => l.path).join(", ")}`,
+  ];
   if (unresolved.length > 0) {
     parts.push(
       `${unresolved.map((u) => u.path).join(", ")} ${unresolved.length === 1 ? "does" : "do"} not resolve to a target: create the target in the main checkout first, then pass --link`,
