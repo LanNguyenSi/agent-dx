@@ -414,9 +414,9 @@ type FenceLineState = {
  * A fenced code block's opening or closing delimiter line (already trimmed):
  * a run of 3 or more backticks or 3 or more tildes (group 1, the fence run),
  * then the rest of the line (group 2: an opener's info string, or a closer's
- * trailing whitespace -- an opener may carry one, a closer may not). Reused by
- * `fenceOpenerRun` and `isFenceCloserLine` below, and by the reserved-files
- * scanner's CommonMark rules (see `reserved-files-structure.ts`); applied to an
+ * trailing whitespace -- an opener may carry one, a closer may not). Used by
+ * `fenceOpenerRun` and `isFenceCloserLine` below. `reserved-files-structure.ts`
+ * applies the same fence rules in its own code (no code is shared); applied here to an
  * already-trimmed line, so leading indentation is ignored here: a 4-space or
  * tab-indented marker passes the run just like an unindented one. That differs
  * from CommonMark (and from `reserved-files-structure.ts`, which caps the indent

@@ -145,4 +145,66 @@ describe("scanFootnotes", () => {
     const scan = scanFootnotes("<!-->\nReal.[^real]\n-->\nMore.[^more]\n");
     expect(scan.references).toEqual(["real", "more"]);
   });
+
+  it("treats `<!--->` as a complete (empty) comment", () => {
+    const scan = scanFootnotes("<!--->\nReal.[^real]\n-->\nMore.[^more]\n");
+    expect(scan.references).toEqual(["real", "more"]);
+  });
+
+  it("treats `<!---->` as a closed comment hiding nothing after it", () => {
+    const scan = scanFootnotes("a <!----> b.[^a]\n\nMore.[^b]\n");
+    expect(scan.references).toEqual(["a", "b"]);
+  });
+
+  it("does not open a comment on an unclosed inline `<!--` in prose", () => {
+    // No `-->` follows anywhere, so the `<!--` is plain text and hides
+    // nothing: every reference and the definition are found.
+    const scan = scanFootnotes(
+      "Write <!-- to start a comment.[^a]\n\nLater.[^b]\n\n[^a]: Text A.\n[^b]: Text B.\n",
+    );
+    expect(scan.references).toEqual(["a", "b"]);
+    expect(scan.definitions.map((d) => d.id)).toEqual(["a", "b"]);
+  });
+
+  it("does not open a comment on an unclosed line-start `<!--`", () => {
+    // Same rule at line start: no closing `-->` anywhere, so not a comment.
+    const scan = scanFootnotes(
+      "<!-- unclosed\nReal.[^real]\n\n[^real]: Text.\n",
+    );
+    expect(scan.references).toEqual(["real"]);
+    expect(scan.definitions).toEqual([{ id: "real", text: "Text." }]);
+  });
+
+  it("opens a comment on `<!--` when a `-->` follows on a later line", () => {
+    const scan = scanFootnotes(
+      "Note <!-- hidden [^h]\nmore [^h2]\n-->\nShown.[^a]\n",
+    );
+    expect(scan.references).toEqual(["a"]);
+  });
+
+  it("does not count a `-->` that comes before the `<!--`", () => {
+    // The only `-->` sits before the opener (on the same line), so nothing
+    // closes the comment: the `<!--` is text and `[^s]` is a reference.
+    const scan = scanFootnotes("a --> b <!-- c [^s]\n\nMore.[^m]\n");
+    expect(scan.references).toEqual(["s", "m"]);
+  });
+
+  it("opens a comment on `<!--` when a `-->` follows on the same line", () => {
+    const scan = scanFootnotes("x <!-- hidden [^h] --> shown.[^a]\n");
+    expect(scan.references).toEqual(["a"]);
+  });
+
+  it("ends an unclosed inline code span at a blank line before a comment", () => {
+    // The lone backtick must not carry over the blank line: the comment
+    // below is a real comment, so its reference stays hidden.
+    const scan = scanFootnotes("a ` b\n\n<!-- hidden [^h] -->\nshown.[^a]\n");
+    expect(scan.references).toEqual(["a"]);
+  });
+
+  it("ends an unclosed inline code span at a fence opener before a comment", () => {
+    const scan = scanFootnotes(
+      "a `x\n```\n```\n<!-- hidden [^h] -->\nshown.[^a]\n",
+    );
+    expect(scan.references).toEqual(["a"]);
+  });
 });

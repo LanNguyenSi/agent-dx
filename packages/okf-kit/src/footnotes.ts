@@ -52,6 +52,8 @@ interface MaskState {
   comment: boolean;
   /** Length of the open inline code delimiter run, 0 when outside one. */
   openRun: number;
+  /** True when a `-->` occurs on a later line of the doc (fences not considered). */
+  closerLater: boolean;
 }
 
 /**
@@ -61,9 +63,11 @@ interface MaskState {
  * in a comment only `-->` is looked for (a fence marker in comment text
  * never opens a fence); outside both, a fence opener at line start opens a
  * fence, and elsewhere an inline code span is crossed before a `<!--`
- * outside a span is taken as a comment opener (the HTML5 abrupt form `<!-->`
- * closes itself and masks nothing else). An unclosed fence or comment runs
- * to the end of the doc.
+ * outside a span is taken as a comment opener only when a `-->` follows it
+ * somewhere later in the doc (so a stray `<!--` in prose hides nothing); the
+ * forms `<!-->` and `<!--->` are complete empty comments on their own. An
+ * unclosed fence runs to the end of the doc, and so does a comment that was
+ * opened because a later `-->` existed.
  */
 function maskLine(line: string, s: MaskState): string {
   if (s.fence) {
@@ -92,7 +96,6 @@ function maskLine(line: string, s: MaskState): string {
       if (end < 0) break;
       out += blank(line.slice(i, end + COMMENT_CLOSER.length));
       s.comment = false;
-      s.openRun = 0;
       i = end + COMMENT_CLOSER.length;
       continue;
     }
@@ -107,15 +110,25 @@ function maskLine(line: string, s: MaskState): string {
       continue;
     }
     if (line.startsWith(COMMENT_OPENER, i)) {
-      if (line[i + COMMENT_OPENER.length] === ">") {
-        out += blank(COMMENT_OPENER + ">");
-        i += COMMENT_OPENER.length + 1;
+      // `<!-->` and `<!--->` are complete empty comments (CommonMark 0.31).
+      const empty = line.startsWith("<!-->", i)
+        ? "<!-->"
+        : line.startsWith("<!--->", i)
+          ? "<!--->"
+          : undefined;
+      if (empty) {
+        out += blank(empty);
+        i += empty.length;
         continue;
       }
-      s.comment = true;
-      out += blank(line.slice(i, i + COMMENT_OPENER.length));
-      i += COMMENT_OPENER.length;
-      continue;
+      // Any other `<!--` opens a comment only when a `-->` follows it.
+      const from = i + COMMENT_OPENER.length;
+      if (s.closerLater || line.indexOf(COMMENT_CLOSER, from) >= 0) {
+        s.comment = true;
+        out += blank(COMMENT_OPENER);
+        i = from;
+        continue;
+      }
     }
     if (line[i] === "`") {
       let k = i;
@@ -141,10 +154,17 @@ function maskLine(line: string, s: MaskState): string {
  * comment opener; blanking inline code is a separate step.
  */
 function maskFencesAndComments(body: string): string {
-  const s: MaskState = { comment: false, openRun: 0 };
-  return body
-    .split("\n")
-    .map((line) => maskLine(line, s))
+  const lines = body.split("\n");
+  let lastCloser = -1;
+  lines.forEach((l, n) => {
+    if (l.includes(COMMENT_CLOSER)) lastCloser = n;
+  });
+  const s: MaskState = { comment: false, openRun: 0, closerLater: false };
+  return lines
+    .map((line, n) => {
+      s.closerLater = n < lastCloser;
+      return maskLine(line, s);
+    })
     .join("\n");
 }
 

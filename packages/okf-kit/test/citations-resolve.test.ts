@@ -2914,16 +2914,17 @@ describe("citations-resolve: CommonMark fence scanning (scanFenceLines)", () => 
     // Documents the deliberate difference from CommonMark and from
     // reserved-files-structure (which caps the indent at 0-3 spaces): this
     // file trims each line before matching fences, so indentation never
-    // changes which lines are fenced. Under the CommonMark reading the `#`
-    // line below would be prose and a heading, and the citation would come
-    // back anchor-heading-mismatch.
+    // changes which lines are fenced. Under the CommonMark reading a 4-space
+    // marker is indented code, not a fence, so the unindented `#` line below
+    // would be a real heading and the citation would come back
+    // anchor-heading-mismatch.
     const findings = runFenceCase(
       "fence-indented.md",
       [
         "## [3.0.0] - 2026-03-01",
         "",
         "    ```",
-        "    # not a heading",
+        "# not a heading",
         "    ```",
         "",
         "More content.",
