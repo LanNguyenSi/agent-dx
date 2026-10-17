@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `file --sink stdout-json` now writes its two status lines to stderr, so stdout carries only the JSON record and `| jq .` parses. Other sinks still print the status lines to stdout.
+- The CLI exits 0 without a stack trace when the reader of its stdout closes the pipe early (`EPIPE`), for example `friction-log file 7 --sink stdout-json | head -c 1`.
+- `rm` no longer fails with `FOREIGN KEY constraint failed` when other frictions record the removed one as their `recurrence_of_id`. Those frictions are kept and their `recurrence_of_id` is cleared (they become roots) instead of being re-pointed or deleted.
+
 ## [0.6.1] - 2026-10-10
 
 First release cut for the tag-driven `publish-npm.yml` workflow (npm Trusted Publishing), which publishes with `--provenance`.

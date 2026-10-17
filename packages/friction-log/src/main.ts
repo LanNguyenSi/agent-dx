@@ -21,6 +21,7 @@ import { runSearch } from "./commands/search.js";
 import { runSyncExport } from "./commands/sync-export.js";
 import { runUpdate } from "./commands/update.js";
 import { parseSinkOpts } from "./config.js";
+import { installEpipeGuard } from "./epipe.js";
 import type { DigestGroupBy } from "./db.js";
 import { availableSinks } from "./sinks/index.js";
 import type { FrictionSource, FrictionStatus, Severity } from "./types.js";
@@ -49,6 +50,8 @@ const DIGEST_GROUP_CHOICES = [
 ] as const;
 const EXPORT_FORMAT_CHOICES = ["json", "csv", "md"] as const;
 const IMPORT_FORMAT_CHOICES = ["markdown-frontmatter"] as const;
+
+installEpipeGuard(process.stdout);
 
 const program = new Command();
 
@@ -201,7 +204,11 @@ program
         configPath: opts.config as string | undefined,
         dbPath: opts.db as string | undefined,
       });
-      process.stdout.write(
+      // stdout-json owns stdout for the JSON record, so its status lines go
+      // to stderr and a downstream `jq` sees only JSON.
+      const statusStream =
+        out.sinkName === "stdout-json" ? process.stderr : process.stdout;
+      statusStream.write(
         `filed friction id=${id} via sink=${out.sinkName} target=${out.sinkTarget}\n${out.message}\n`,
       );
     } catch (err) {

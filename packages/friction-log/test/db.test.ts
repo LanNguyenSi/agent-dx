@@ -147,3 +147,58 @@ describe("FrictionDb", () => {
     }
   });
 });
+
+describe("FrictionDb.deleteFriction with recurrence references", () => {
+  const base = { title: "t", source: "manual" as const };
+
+  it("deletes an unreferenced friction and leaves others untouched", () => {
+    const db = memDb();
+    try {
+      const a = db.insertFriction({ ...base, title: "a" });
+      const b = db.insertFriction({ ...base, title: "b" });
+      expect(db.deleteFriction(a.id)).toBe(true);
+      expect(db.getFriction(a.id)).toBeNull();
+      expect(db.getFriction(b.id)?.recurrenceOfId).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("clears recurrence_of_id on rows that pointed at the deleted friction", () => {
+    const db = memDb();
+    try {
+      const a = db.insertFriction({ ...base, title: "dup" });
+      const b = db.insertFriction({ ...base, title: "dup" });
+      expect(b.recurrenceOfId).toBe(a.id);
+      expect(db.deleteFriction(a.id)).toBe(true);
+      const kept = db.getFriction(b.id);
+      expect(kept).not.toBeNull();
+      expect(kept?.recurrenceOfId).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  it("handles a chain A <- B <- C when B is deleted", () => {
+    const db = memDb();
+    try {
+      const a = db.insertFriction({ ...base, title: "a" });
+      const b = db.insertFriction({
+        ...base,
+        title: "b",
+        recurrenceOfId: a.id,
+      });
+      const c = db.insertFriction({
+        ...base,
+        title: "c",
+        recurrenceOfId: b.id,
+      });
+      expect(db.deleteFriction(b.id)).toBe(true);
+      expect(db.getFriction(b.id)).toBeNull();
+      expect(db.getFriction(a.id)).not.toBeNull();
+      expect(db.getFriction(c.id)?.recurrenceOfId).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+});

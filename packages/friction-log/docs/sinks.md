@@ -22,13 +22,13 @@ Writes a markdown file under `~/.local/share/friction-log/frictions/` (override 
 
 ## `stdout-json`
 
-Emits a single-line JSON record to stdout. The `file` command then prints two status lines to stdout, so take the first line when piping into custom workflows:
+Emits a single-line JSON record to stdout. The `file` command writes its two status lines to stderr for this sink, so stdout carries only the JSON record and can be piped straight into a parser:
 
 ```bash
-friction-log file 7 --sink stdout-json | sed -n 1p | jq '.rendered.body'
+friction-log file 7 --sink stdout-json | jq '.rendered.body'
 ```
 
-`sed -n 1p` reads the whole stream; a reader that closes the pipe early, such as `head -n 1`, can make the CLI fail with `EPIPE` while it writes the status lines.
+A reader that closes the pipe early, such as `head -n 1` or `head -c 1`, ends the command quietly with exit code 0 instead of an `EPIPE` stack trace. The friction is already recorded as filed at that point.
 
 The schema is stable: any future field is additive.
 

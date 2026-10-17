@@ -13,7 +13,7 @@ A friction has one of four statuses: `open`, `filed`, `resolved`, `wontfix`.
 - `log`, `scan` and `import` insert new frictions as `open`.
 - `file` sets `filed` after the sink call succeeds. It does not check the current status: filing the same friction again records another `tasks` row and leaves it `filed`.
 - `update --status` sets any of the four statuses from any other; there are no transition rules.
-- `rm` deletes the friction together with its `tasks` and `tags` rows. It fails with `FOREIGN KEY constraint failed` while another friction still records it as its `recurrence_of_id`.
+- `rm` deletes the friction together with its `tasks` and `tags` rows. Frictions that recorded it as their `recurrence_of_id` are kept and get that reference cleared (set to `NULL`), so they become roots; they are not re-pointed to a grandparent. For a chain A <- B <- C, deleting B leaves A and C, with C's `recurrence_of_id` cleared.
 
 Only an open root collects auto-linked recurrences (see below), so once a root is filed, resolved or wontfix, the next matching friction starts a new chain.
 
