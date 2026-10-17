@@ -95,7 +95,7 @@ Pin the exact version and use a full (non-shallow) checkout; [CI usage](docs/ci.
 - [Check catalog](docs/check-catalog.md): all 10 rules, repo-root auto-detection, exit codes, output format.
 - [Scaffold a bundle (`init`)](docs/init.md): generated files, placeholder sources, authoring guidance.
 - [Reverse lookup (`docs-for`)](docs/docs-for.md): matching rules, path resolution, output formats.
-- [Staleness (`sources-fresh`)](docs/staleness.md): the re-stamp rule, designator-less timestamps, squash-merge interaction, `--dirty-as-now`, `sources-fresh-future`.
+- [Staleness (`sources-fresh`)](docs/staleness.md): the re-stamp rule, comment-only source edits, designator-less timestamps, squash-merge interaction, `--dirty-as-now`, `sources-fresh-future`.
 - [Citation resolution (`citations-resolve`)](docs/citations.md): every finding id, anchor forms, continuation and short-form citations, `--require-anchors`.
 - [Prose line references](docs/prose-line-references.md): the opt-in `--prose-line-references` check for line numbers written outside `citations-resolve`'s own grammar.
 - [CI usage](docs/ci.md): shallow-clone caveats, the pinned-version rationale, the template's pin, and the `templates/okf-staleness.yml` warn-only workflow template.
