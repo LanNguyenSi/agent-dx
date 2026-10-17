@@ -1320,6 +1320,44 @@ describe("patch: modes, line breaks and path checks", () => {
     },
   );
 
+  // Skipped as root because `fs.accessSync(dir, W_OK)` always succeeds
+  // there: a 0o555 directory would refuse nothing and the run would
+  // legitimately write both files.
+  it.skipIf(process.getuid?.() === 0)(
+    "refuses a writable file in a read-only directory before writing any earlier file, dry run alike",
+    () => {
+      const dir = repo({ "a.txt": "one\n", "ro/b.txt": "two\n" });
+      const ro = path.join(dir, "ro");
+      fs.chmodSync(ro, 0o555);
+      try {
+        const edits = [
+          { file: "a.txt", old: "one", new: "ONE" },
+          { file: path.join("ro", "b.txt"), old: "two", new: "TWO" },
+        ];
+        const r = run(dir, edits);
+        expect(r.status).toBe("not_editable");
+        expect(r.reason).toBe("dir_read_only");
+        expect(r.files[1]).toMatchObject({
+          status: "not_editable",
+          reason: "dir_read_only",
+        });
+        expect(r.edits[0].status).toBe("not_written");
+        expect(r.writtenFiles).toEqual([]);
+        expect(read(dir, "a.txt")).toBe("one\n");
+        expect(read(dir, path.join("ro", "b.txt"))).toBe("two\n");
+        const dry = run(dir, edits, { dryRun: true });
+        expect(dry.status).toBe("not_editable");
+        expect(dry.reason).toBe("dir_read_only");
+        expect(dry.files[1]).toMatchObject({
+          status: "not_editable",
+          reason: "dir_read_only",
+        });
+      } finally {
+        fs.chmodSync(ro, 0o755);
+      }
+    },
+  );
+
   it("edits a file whose name starts with two dots at the root", () => {
     const dir = repo({ "..foo.txt": "x\n" });
     const r = run(dir, [{ file: "..foo.txt", old: "x", new: "y" }]);

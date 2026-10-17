@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `-l, --log-dir` and `AGENT_PRIMITIVES_LOG_DIR`: an empty value (`-l ''`
+  or `AGENT_PRIMITIVES_LOG_DIR=`) resolved as `path.resolve("")`, which is
+  the invocation directory, so the run wrote its logs into the checkout it
+  was started from instead of the default location. An empty value, from
+  the flag or from the environment variable, is now treated as unset and
+  falls back to the `<tmpdir>/agent-primitives/<run-id>/` default.
+- `probe -C <dir>` with a relative `-l`: where the probe's log files land
+  for this combination is now pinned by a CLI test, which runs a real
+  probe from a separate invocation directory and checks that the log
+  directory sits under that directory and not under the `-C` directory
+  (the resolver itself was already covered only at unit-test level).
+- `patch`: a writable file inside a directory the process may not write
+  passed the path checks (`--dry-run` reported `would_write`), and the
+  real run wrote the earlier files of the plan before failing with
+  `write_failed` when its temporary file could not be created next to the
+  target. Such a file is now refused in the path phase
+  (`status: "not_editable"`, `reason: "dir_read_only"`) before any file of
+  the plan is written, and `--dry-run` reports the same refusal.
+
 ## [0.15.0] - 2026-10-16
 
 - `probe -p/--patch` (and a plan entry's `"patch"`): a patch for the `--file`

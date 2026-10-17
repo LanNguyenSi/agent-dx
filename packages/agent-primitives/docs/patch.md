@@ -134,6 +134,11 @@ that would replace nothing is `missing`.
   path gets the new content.
 - A file the process may not write is refused (`status: "not_editable"`,
   `reason: "read_only"`) rather than replaced through its directory.
+- A writable file in a directory the process may not write is refused in
+  the same path phase (`status: "not_editable"`,
+  `reason: "dir_read_only"`), under `--dry-run` too and before any file of
+  the plan is written: the temporary file is written next to the target,
+  and a read-only directory refuses it.
 - Right before a file is written, its resolved path must still resolve to
   itself and every spelling the plan used must still name the same file
   (a directory on the path swapped for a symlink, for example), or it is
@@ -388,7 +393,7 @@ preview (three lines of context, endings shown as LF).
 | `ambiguous` | finding | `1` | An edit's `old` text matches more than once without `replaceAll`. |
 | `overlap` | finding | `1` | Two edits of one file overlap. |
 | `fuzzy_side_effect` | finding | `1` | A fuzzy-tier match would change text outside the matched text. |
-| `not_editable` | finding | `1` | A target has more than one hard link (`hard_link`) or is not writable (`read_only`). |
+| `not_editable` | finding | `1` | A target has more than one hard link (`hard_link`), is not writable (`read_only`), or sits in a directory that is not writable (`dir_read_only`). |
 | `usage_error` | cannot conclude | `2` | A refused path (`outside_root`, `git_dir`) or a bad invocation or plan. |
 | `error` | cannot conclude | `2` | A file could not be read, decoded or written. |
 
