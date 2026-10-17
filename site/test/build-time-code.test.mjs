@@ -5,7 +5,8 @@
 // check fires first: the build fails naming the file and the marker is never
 // written. A second build with the check taken out of the copied config proves
 // the payload does run when nothing stops it, so a missing marker means the
-// check worked and not that the setup could not run the payload.
+// check worked and not that the setup could not run the payload. The same pair
+// runs with the route reached through a directory link, which VitePress follows.
 import test, { before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
@@ -16,13 +17,15 @@ import { fileURLToPath } from 'node:url'
 
 const site = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const PAYLOAD = 'packages/agentic-coding-playbook/[x].paths.mjs'
+const LINK = 'packages/agentic-coding-playbook/linked'
 const CALL = '  refuseBuildTimeCode(repoRoot)\n'
 let work
 
 // A repository of its own under tmp: site/.vitepress copied (without its cache
 // and output), site/node_modules linked, a home page, the two playbook READMEs
-// the config reads, a dynamic route and its paths file. The marker lives in tmp, outside the tree.
-function fixture(name, { bypassCheck }) {
+// the config reads, a dynamic route and its paths file (in a playbook
+// directory, or behind a directory link in one). The marker lives in tmp.
+function fixture(name, { bypassCheck, linkedRoute = false }) {
   const repo = path.join(work, name)
   const marker = path.join(repo, 'MARKER')
   const siteCopy = path.join(repo, 'site')
@@ -39,11 +42,18 @@ function fixture(name, { bypassCheck }) {
   write('site/index.md', '# Home\n')
   write('packages/agent-engineering-playbook/README.md', '# Engineering\n')
   write('packages/agentic-coding-playbook/README.md', '# Playbook\n')
-  write('packages/agentic-coding-playbook/[x].md', '# Page {{ $params.x }}\n')
-  write(
-    PAYLOAD,
-    `import fs from 'node:fs'\nfs.writeFileSync(${JSON.stringify(marker)}, 'ran')\nexport default { paths: () => [{ params: { x: 'a' } }] }\n`
-  )
+  const payload = (param) =>
+    `import fs from 'node:fs'\nfs.writeFileSync(${JSON.stringify(marker)}, 'ran')\nexport default { paths: () => [{ params: { ${param}: 'a' } }] }\n`
+  if (linkedRoute) {
+    // The dynamic route sits outside the playbook directories, reached through
+    // a directory link inside one.
+    write('elsewhere/[z].md', '# Page {{ $params.z }}\n')
+    write('elsewhere/[z].paths.mjs', payload('z'))
+    fs.symlinkSync('../../elsewhere', path.join(repo, LINK))
+  } else {
+    write('packages/agentic-coding-playbook/[x].md', '# Page {{ $params.x }}\n')
+    write(PAYLOAD, payload('x'))
+  }
   if (bypassCheck) {
     // Take the call out of the copy only, and make sure that is what happened.
     const helpers = path.join(siteCopy, '.vitepress/site-helpers.mjs')
@@ -82,6 +92,20 @@ test('a paths file in playbook content fails the build with its path, before it 
 
 test('negative control: with the check taken out, the same build runs the payload', () => {
   const { siteCopy, marker } = fixture('bypassed', { bypassCheck: true })
+  const { output } = build(siteCopy)
+  assert.equal(fs.existsSync(marker) && fs.readFileSync(marker, 'utf8'), 'ran', output)
+})
+
+test('a directory link to a dynamic route is refused too, before the route runs', () => {
+  const { siteCopy, marker } = fixture('linked', { bypassCheck: false, linkedRoute: true })
+  const { status, output } = build(siteCopy)
+  assert.notEqual(status, 0, output)
+  assert.ok(output.includes(`Build-time code is not supported in playbook content: ${LINK} (symbolic link)`), output)
+  assert.equal(fs.existsSync(marker), false, 'the payload ran')
+})
+
+test('negative control: with the check taken out, the linked route runs the payload', () => {
+  const { siteCopy, marker } = fixture('linked-bypassed', { bypassCheck: true, linkedRoute: true })
   const { output } = build(siteCopy)
   assert.equal(fs.existsSync(marker) && fs.readFileSync(marker, 'utf8'), 'ran', output)
 })

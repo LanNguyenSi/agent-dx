@@ -352,28 +352,59 @@ test('with several offenders the first in sorted order is named', () => {
   }
 })
 
-test('a symbolic link is judged by its name and never followed', () => {
+test('any symbolic link in a playbook directory is refused by its path and never followed', () => {
   const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'site-links-outside-'))
   const aside = path.join(outside, 'aside')
   fs.mkdirSync(aside)
   fs.writeFileSync(path.join(aside, 'payload.mjs'), 'x\n')
-  const link = (target, rel) => fs.symlinkSync(target, path.join(root, rel))
+  fs.writeFileSync(path.join(outside, 'plain.txt'), 'x\n')
+  const refused = (name) => `Build-time code is not supported in playbook content: ${AE}/${name} (symbolic link)`
+  // Each link has an innocuous name, so only its being a link can refuse it.
+  const links = {
+    'a-dir-link': aside,
+    'a-file-link': path.join(outside, 'plain.txt'),
+    'a-dangling-link': path.join(outside, 'missing'),
+    'a-cyclic-link': '.'
+  }
   try {
-    // A dangling link named like a code file is refused without opening it.
-    link(path.join(outside, 'missing'), `${AE}/dangling.mjs`)
-    assert.throws(() => refuseBuildTimeCode(root), /: packages\/agent-engineering-playbook\/dangling\.mjs$/)
-    fs.rmSync(path.join(root, `${AE}/dangling.mjs`))
-    // A link to a directory is one entry: not entered, so nothing inside it
-    // is seen, and a link back up the tree cannot make the walk run forever.
-    link(aside, `${AE}/aside`)
-    link('.', `${AE}/loop`)
-    assert.doesNotThrow(() => refuseBuildTimeCode(root))
+    for (const [name, target] of Object.entries(links)) {
+      fs.symlinkSync(target, path.join(root, AE, name))
+      try {
+        assert.throws(
+          () => createSite(root, readTitle),
+          (e) => e.message === refused(name),
+          name
+        )
+      } finally {
+        fs.rmSync(path.join(root, AE, name), { force: true })
+      }
+    }
+    // A link below a subdirectory is found too, and the path is the link's own.
+    fs.mkdirSync(path.join(root, AE, 'deep'))
+    fs.symlinkSync(aside, path.join(root, AE, 'deep', 'a-dir-link'))
+    assert.throws(() => refuseBuildTimeCode(root), (e) => e.message === refused('deep/a-dir-link'))
+    fs.rmSync(path.join(root, AE, 'deep'), { recursive: true })
+    // A playbook directory that is itself a link is refused as well.
+    const moved = path.join(root, 'packages/agentic-coding-playbook')
+    fs.symlinkSync(aside, moved)
+    assert.throws(
+      () => refuseBuildTimeCode(root),
+      (e) => e.message === 'Build-time code is not supported in playbook content: packages/agentic-coding-playbook (symbolic link)'
+    )
+    fs.rmSync(moved)
+    // ... also when it points nowhere, where existsSync would call it absent.
+    fs.symlinkSync(path.join(outside, 'missing'), moved)
+    assert.throws(
+      () => refuseBuildTimeCode(root),
+      (e) => e.message === 'Build-time code is not supported in playbook content: packages/agentic-coding-playbook (symbolic link)'
+    )
+    fs.rmSync(moved)
   } finally {
-    fs.rmSync(path.join(root, `${AE}/dangling.mjs`), { force: true })
-    fs.rmSync(path.join(root, `${AE}/aside`), { force: true })
-    fs.rmSync(path.join(root, `${AE}/loop`), { force: true })
+    fs.rmSync(path.join(root, AE, 'deep'), { recursive: true, force: true })
+    fs.rmSync(path.join(root, 'packages/agentic-coding-playbook'), { recursive: true, force: true })
     fs.rmSync(outside, { recursive: true, force: true })
   }
+  assert.doesNotThrow(() => createSite(root, readTitle))
 })
 
 test('sidebar links every playbook page exactly once', () => {

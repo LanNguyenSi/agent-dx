@@ -83,31 +83,55 @@ export function refuseIncludes(repoRoot, pages) {
 // script file next to a page can be pulled in by one. Playbook content is
 // Markdown, images and YAML or JSON data, so the files below fail the build
 // instead: any `*.paths.*` file and anything ending in .js, .mjs, .cjs, .ts,
-// .mts or .cts, matched on the file name without regard to case. The check
-// looks at names only: it never opens or imports an offending file, and a
-// symbolic link is judged by its own name and not followed (walk lists a link
-// as an entry, it does not descend into it). `createSite` runs it while the
-// config loads, which is before VitePress resolves any page and so before any
-// such file could be imported.
+// .mts or .cts, matched on the file name without regard to case.
+//
+// A symbolic link is refused whatever it points at. VitePress follows a link to
+// a directory when it looks for pages, so a link to a directory holding a
+// paths file would run it; the check cannot follow the link to look inside
+// (the target may sit anywhere), so it refuses the link itself. This also keeps
+// the walk finite when a link points back up the tree.
+//
+// The check looks at names and entry types only: it never opens or imports an
+// offending file or follows a link. `createSite` runs it while the config
+// loads, which is before VitePress resolves any page and so before any such
+// file could be imported.
 const pathsFile = /\.paths\./i
 const codeFile = /\.(?:js|mjs|cjs|ts|mts|cts)$/i
 
-// Fails with the repository-relative path of the first offending file, in
-// sorted order, when a playbook directory holds a build-time code file.
+// Lists the repository-relative paths (with a flag for symbolic links) under
+// `dir` that the check refuses. A link is reported and not entered.
+function buildTimeCodeIn(repoRoot, dir) {
+  const rel = (full) => path.relative(repoRoot, full).split(path.sep).join('/')
+  if (fs.lstatSync(dir).isSymbolicLink()) return [{ path: rel(dir), link: true }]
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+    const full = path.join(dir, e.name)
+    if (e.isSymbolicLink()) return [{ path: rel(full), link: true }]
+    if (e.isDirectory()) return buildTimeCodeIn(repoRoot, full)
+    return pathsFile.test(e.name) || codeFile.test(e.name) ? [{ path: rel(full), link: false }] : []
+  })
+}
+
+// Fails with the repository-relative path of the first offending entry, in
+// sorted order, when a playbook directory holds a build-time code file or a
+// symbolic link.
 export function refuseBuildTimeCode(repoRoot) {
   const offending = playbooks
     .flatMap((pb) => {
       const dir = path.join(repoRoot, 'packages', pb)
-      return fs.existsSync(dir) ? walk(dir) : []
+      return fs.existsSync(dir) || isLink(dir) ? buildTimeCodeIn(repoRoot, dir) : []
     })
-    .map((f) => path.relative(repoRoot, f).split(path.sep).join('/'))
-    .filter((f) => {
-      const name = path.posix.basename(f)
-      return pathsFile.test(name) || codeFile.test(name)
-    })
-    .sort()
+    .sort((x, y) => (x.path < y.path ? -1 : x.path > y.path ? 1 : 0))
   if (offending.length > 0) {
-    throw new Error(`Build-time code is not supported in playbook content: ${offending[0]}`)
+    const { path: rel, link } = offending[0]
+    throw new Error(`Build-time code is not supported in playbook content: ${rel}${link ? ' (symbolic link)' : ''}`)
+  }
+}
+
+function isLink(p) {
+  try {
+    return fs.lstatSync(p).isSymbolicLink()
+  } catch {
+    return false
   }
 }
 
