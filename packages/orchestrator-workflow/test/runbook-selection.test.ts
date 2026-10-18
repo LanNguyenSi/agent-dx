@@ -745,6 +745,39 @@ describe("the runbook rule text is a closed, vetted set of sentences", () => {
     ]);
   });
 
+  it("the segmentation does not let a fence line with an info string close a fence", () => {
+    // CommonMark: a closing fence may carry only trailing whitespace, so the
+    // "``` js" line stays inside the fence and its code is never prose.
+    expect(
+      proseUnits("```\nThe runbook binds.\n``` js\ncode still.\n```\nAfter."),
+    ).toEqual(["After."]);
+  });
+
+  it("the segmentation accepts a fence indented by up to three spaces but not by four", () => {
+    expect(
+      proseUnits("Before.\n   ```\nThe runbook binds.\n   ```\nAfter."),
+    ).toEqual(["Before.", "After."]);
+    // Four spaces of indentation is an indented code line, so the opening
+    // fence-looking line is plain text and never swallows the prose after it.
+    expect(proseUnits("Para.\n\n    ```\n\nThe runbook binds.")).toEqual([
+      "Para.",
+      "```",
+      "The runbook binds.",
+    ]);
+    // A four-space-indented fence-looking line does not close a fence either.
+    expect(
+      proseUnits("Before.\n~~~\nThe runbook binds.\n    ~~~\nAfter."),
+    ).toEqual(["Before."]);
+  });
+
+  it("the segmentation treats a number and a parenthesis as a list marker", () => {
+    expect(proseUnits("1) One. Two.\n2) Three.\n\nPara.")).toEqual([
+      "One. Two.",
+      "Three.",
+      "Para.",
+    ]);
+  });
+
   it("the segmentation keeps a question with the sentence after it", () => {
     // Over-inclusion is the safe direction for a guard: "mandatory, right?" must
     // stay in the window of the runbook sentence that follows.
