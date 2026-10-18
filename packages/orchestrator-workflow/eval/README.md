@@ -336,8 +336,9 @@ reviewer`) and runs as the main thread of its own session, with the
   because every session runs with `--setting-sources ""` (see Settings
   sources). `--bare` (default; `--no-bare` omits it) also skips hooks, plugin
   sync and auto-memory; without `--bare`, managed-policy hooks and plugin sync
-  run and the session binds an inbox socket (inbound messages are still
-  refused). The home directory stays the scratch one in both modes, and both
+  run, a managed (policy) `CLAUDE.md` and managed rules are loaded if the
+  machine has any, and the session binds an inbox socket (inbound messages are
+  still refused). The home directory stays the scratch one in both modes, and both
   authenticate with the API key.
 - The sandbox, the deny rules and the reduced environment above are not part
   of the production route: a command that needs the network or a file outside
