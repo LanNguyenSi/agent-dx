@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-10-18
+
 - The package's runbook-sentence guard keeps its wording, and its segmenter
   closes three CommonMark gaps in `test/runbook-sentences.ts`: a fence line
   with an info string no longer closes a fence (only trailing whitespace may
