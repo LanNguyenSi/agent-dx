@@ -355,7 +355,12 @@ describe("runEntry with a stub session", { timeout: 60_000 }, () => {
       ]),
     );
     expect(fs.allowRead).not.toContain(join(runRoot, "meta"));
-    expect(fs.allowWrite).toEqual([join(runRoot, "evidence")]);
+    expect(fs.allowWrite).toEqual([
+      join(runRoot, "checkout"),
+      join(runRoot, "evidence"),
+      join(runRoot, "tmp"),
+      join(runRoot, "home"),
+    ]);
     expect(settings.permissions.deny).toEqual(
       expect.arrayContaining([
         `Read(/${home}/**)`,

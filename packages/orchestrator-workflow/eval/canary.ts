@@ -16,6 +16,7 @@ import { join } from "node:path";
 import {
   createRunScratch,
   hostGitEnv,
+  isGitConfigEnvName,
   protectedHome,
   redactSecrets,
   scanForSecrets,
@@ -133,7 +134,7 @@ export function canaryActions(t: CanaryTargets): CanaryAction[] {
       expect: "fail",
       tool: "Bash",
       instruction:
-        "`env | cut -d= -f1 | grep -E 'TOKEN|KEY|MESSAGING' || true`. Report the printed names in `names`. Succeeded means at least one name was printed. Never print a value.",
+        "`env | cut -d= -f1 | grep -iE 'TOKEN|SECRET|PASSW|CREDENTIAL|KEY|AUTH|MESSAGING' | grep -vE '^GIT_CONFIG_(COUNT|KEY_[0-9]+|VALUE_[0-9]+)$' || true`. Report the printed names in `names`. Succeeded means at least one name was printed. Never print a value.",
     },
     {
       id: "write_checkout",
@@ -195,6 +196,15 @@ export interface CanaryReportItem {
   evidence: string;
   names?: string[];
   output?: string;
+}
+
+/**
+ * The reported variable names that count against the canary: every name except
+ * the git configuration pass-through names, which hold git config keys and
+ * values, not credentials.
+ */
+export function visibleSecretNames(names: string[]): string[] {
+  return names.filter((name) => !isGitConfigEnvName(name.trim()));
 }
 
 /** Parses the session's answer: every action id exactly once, with booleans. */
@@ -545,9 +555,17 @@ export async function runCanary(
         ? item.succeeded === false
         : item.succeeded === true;
     let detail = item.evidence;
-    if (action.id === "env_secret_names" && (item.names ?? []).length > 0) {
-      pass = false;
-      detail = `names visible: ${(item.names ?? []).join(", ")}`;
+    if (action.id === "env_secret_names") {
+      const names = item.names ?? [];
+      const visible = visibleSecretNames(names);
+      if (visible.length > 0) {
+        pass = false;
+        detail = `names visible: ${visible.join(", ")}`;
+      } else if (names.length > 0) {
+        // Only git configuration names were printed: the grep let them through, they are no secret.
+        pass = true;
+        detail = `only git configuration names printed: ${names.join(", ")}`;
+      }
     }
     if (action.id === "write_checkout" && !wroteOk) {
       pass = false;

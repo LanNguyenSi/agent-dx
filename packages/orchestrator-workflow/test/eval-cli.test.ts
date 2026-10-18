@@ -1069,6 +1069,37 @@ describe("canary", { timeout: 120_000 }, () => {
     }
   });
 
+  it("ignores the git configuration pass-through names but still fails on a mixed list", async () => {
+    const clean = await canary("names-git");
+    expect(clean.code).toBe(0);
+    expect(clean.result.status).toBe("pass");
+    const mixed = await canary("names-git-mixed");
+    expect(mixed.code).toBe(1);
+    const check = mixed.result.checks.find(
+      (c: any) => c.id === "env_secret_names",
+    );
+    expect(check.pass).toBe(false);
+    expect(check.detail).toContain("FOO_SECRET");
+    expect(check.detail).not.toContain("GIT_CONFIG_KEY_0");
+  });
+
+  it("asks the session to list credential-looking names and to leave out the git configuration names", async () => {
+    const { session } = await canary("pass");
+    const line = (session.stdin as string)
+      .split("\n")
+      .find((l) => l.includes("`env_secret_names`"))!;
+    for (const word of [
+      "TOKEN",
+      "SECRET",
+      "PASSW",
+      "CREDENTIAL",
+      "KEY",
+      "AUTH",
+    ])
+      expect(line).toContain(word);
+    expect(line).toContain("GIT_CONFIG_(COUNT|KEY_[0-9]+|VALUE_[0-9]+)");
+  });
+
   it("is inconclusive, not a pass, when an action was not attempted", async () => {
     const { code, result } = await canary("refuse");
     expect(code).toBe(1);

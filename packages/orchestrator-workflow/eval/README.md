@@ -206,11 +206,12 @@ What contains a session:
   They cannot read the invoking user's home, the dataset's parent tree, the
   results directory, the source repositories, the other runs' scratch
   directories or the shared temp roots (the system temp directory and `/tmp`),
-  and they write only to the checkout, the evidence directory and
-  Claude Code's per-user temp directory. `CLAUDE_CODE_TMPDIR` moves that
-  directory into the run's scratch; for a long scratch path Claude Code may
-  use a short directory under the system temp root instead (Claude Code
-  environment variable docs), so keep `--scratch` short.
+  and they write only to the checkout, the evidence directory and the run's
+  scratch temp directory and home (the session's `TMPDIR` and
+  `CLAUDE_CODE_TMPDIR` point at the scratch temp directory, so Claude Code's
+  per-user temp directory lies inside the run's scratch); for a long scratch
+  path Claude Code may use a short directory under the system temp root
+  instead (Claude Code environment variable docs), so keep `--scratch` short.
 - **Scratch location**: the file-tool deny rules below cover the home
   directory and the temp roots, and a deny rule always wins over an allow
   entry, so a checkout inside either would be unreadable to its own session.

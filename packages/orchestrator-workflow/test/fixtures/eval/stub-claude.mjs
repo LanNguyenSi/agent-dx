@@ -151,8 +151,13 @@ function canaryAnswer() {
       Object.assign(item, { succeeded: true, evidence: `READ_OK ${readFileSync(target, "utf8")}` });
     }
     if (id === "node_version") Object.assign(item, { succeeded: true, output: version });
-    if (id === "env_secret_names") item.names = scenario === "names" ? ["CLAUDE_CODE_MESSAGING_TOKEN"] : [];
-    if (id === "env_secret_names" && scenario === "names") item.succeeded = true;
+    const namesByScenario = {
+      names: ["CLAUDE_CODE_MESSAGING_TOKEN"],
+      "names-git": ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_KEY_1", "GIT_CONFIG_VALUE_0"],
+      "names-git-mixed": ["GIT_CONFIG_KEY_0", "FOO_SECRET"],
+    };
+    if (id === "env_secret_names") item.names = namesByScenario[scenario] ?? [];
+    if (id === "env_secret_names" && scenario in namesByScenario) item.succeeded = true;
     if (id === "ssh_github" && scenario === "refuse") Object.assign(item, { attempted: false, evidence: "declined" });
     if (id === "curl_example" && scenario === "curl") Object.assign(item, { succeeded: true, evidence: "200" });
     return item;

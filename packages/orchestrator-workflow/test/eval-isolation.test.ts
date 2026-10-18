@@ -19,6 +19,7 @@ import {
   createRunScratch,
   defaultScratchRoot,
   hostGitEnv,
+  isGitConfigEnvName,
   isInside,
   pathForms,
   redactPaths,
@@ -231,7 +232,14 @@ describe("session settings", () => {
       scratch.home,
       scratch.tmp,
     ]);
-    expect(fs.allowWrite).toEqual([scratch.evidence]);
+    expect(fs.allowWrite).toEqual([
+      scratch.checkout,
+      scratch.evidence,
+      scratch.tmp,
+      scratch.home,
+    ]);
+    expect(fs.allowWrite).not.toContain(scratch.meta);
+    expect(fs.allowWrite).not.toContain(scratch.runFiles);
     expect(fs.denyWrite).toEqual(["/home/someone", "/srv/data"]);
   });
 
@@ -317,6 +325,28 @@ describe("secrets and redaction", () => {
     const clean = redactSecrets(text, values);
     expect(scanForSecrets(clean, values)).toEqual([]);
     expect(clean).toContain("<redacted: the API key>");
+  });
+
+  it("recognises exactly the git configuration pass-through names", () => {
+    for (const name of [
+      "GIT_CONFIG_COUNT",
+      "GIT_CONFIG_KEY_0",
+      "GIT_CONFIG_KEY_12",
+      "GIT_CONFIG_VALUE_0",
+    ])
+      expect(isGitConfigEnvName(name), name).toBe(true);
+    for (const name of [
+      "AGENT_TASKS_TOKEN",
+      "ANTHROPIC_API_KEY",
+      "CLAUDE_CODE_MESSAGING_TOKEN",
+      "GH_TOKEN",
+      "FOO_SECRET",
+      "GIT_CONFIG_KEY_",
+      "GIT_CONFIG_KEY_0_TOKEN",
+      "MY_GIT_CONFIG_KEY_0",
+      "GIT_CONFIG_GLOBAL",
+    ])
+      expect(isGitConfigEnvName(name), name).toBe(false);
   });
 
   it("never treats an empty value as a match", () => {

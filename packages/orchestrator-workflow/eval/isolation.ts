@@ -408,9 +408,17 @@ export function sessionSettings(
         // settings-reference#sandbox-filesystem-allowread: the narrower path wins (sandboxing docs,
         // "Configure sandboxing"), so this re-opens only this run's own directories; meta stays denied.
         allowRead: own,
-        // settings-reference#sandbox-filesystem-allowwrite: the evidence directory, besides the
-        // working directory (the checkout) that is writable by default.
-        allowWrite: [scratch.evidence],
+        // settings-reference#sandbox-filesystem-allowwrite: the checkout, the evidence directory, the
+        // scratch tmp and the scratch home. With only the evidence directory listed, a sandboxed
+        // command can write neither the checkout nor the temp directory, and Claude Code falls
+        // back to a per-user directory under the shared temp root, which is denied (measured on
+        // Claude Code 2.1.302). meta, the run files and the other runs' scratch stay unwritable.
+        allowWrite: [
+          scratch.checkout,
+          scratch.evidence,
+          scratch.tmp,
+          scratch.home,
+        ],
         // settings-reference#sandbox-filesystem-denywrite: never the protected trees.
         denyWrite: denied,
       },
@@ -439,6 +447,19 @@ export function sessionSettings(
 
 const SECRET_NAME = /TOKEN|SECRET|PASSW|CREDENTIAL|API_?KEY|_KEY$|AUTH/i;
 const MIN_SECRET_VALUE = 12;
+
+/**
+ * Names the sandbox and git use to pass git configuration through the
+ * environment (`GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>`, `GIT_CONFIG_VALUE_<n>`).
+ * They hold git config key names and values, not credentials, so a name check
+ * that matches on "KEY" must not count them.
+ */
+const GIT_CONFIG_ENV_NAME = /^GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+)$/;
+
+/** True for the git configuration pass-through names (never a secret by name). */
+export function isGitConfigEnvName(name: string): boolean {
+  return GIT_CONFIG_ENV_NAME.test(name);
+}
 
 export const SECRET_PATTERNS: { name: string; pattern: RegExp }[] = [
   { name: "private key block", pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----/ },
