@@ -1,5 +1,19 @@
 # Bundle log
 
+- 2026-10-18T20:37:11Z, re-stamp after the squashed verification-set change landed on master: on the pull
+  request's merge ref, master's squash commit is the last change of every file that change
+  touched, later than the docs' previous stamps. The content is the one already verified at the
+  previous stamps, so the claims are unchanged. Re-stamped: `install-fence-mechanics.md`,
+  `model-preselection.md`, `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and
+  `subagent-contracts-superset.md`.
+
+- 2026-10-18T20:32:06Z, re-stamp after the squashed test-pin change landed on master: on the pull request's
+  merge ref, master's squash commit is the last change of `review-and-recovery.md` and
+  `decision-authority.test.ts`, later than the docs' previous stamps. The content is the one
+  already verified at the previous stamps, so the claims are unchanged. Re-stamped:
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and
+  `subagent-contracts-superset.md`.
+
 - 2026-10-18T20:23:00Z, merge of the single acceptance contract with master: master's `[Unreleased]` bullets now sit above
   this change's, so every historical log citation into the released `CHANGELOG.md` entries moved
   by both insertions together; each was re-pointed and its anchor text confirmed on the new line.
