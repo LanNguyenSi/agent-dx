@@ -1,5 +1,12 @@
 # Bundle log
 
+- 2026-10-18T20:32:06Z, re-stamp after the squashed test-pin change landed on master: on the pull request's
+  merge ref, master's squash commit is the last change of `review-and-recovery.md` and
+  `decision-authority.test.ts`, later than the docs' previous stamps. The content is the one
+  already verified at the previous stamps, so the claims are unchanged. Re-stamped:
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and
+  `subagent-contracts-superset.md`.
+
 - 2026-10-18T20:21:39Z, merge of the conditional verification-set rules with master: master's
   `[Unreleased]` bullets now sit above this change's, so every historical log citation into the
   released `CHANGELOG.md` entries moved by both insertions together; each was re-pointed and its
