@@ -5545,7 +5545,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     paragraphLine: 614,
     uncitedLines: [100],
     claim:
-      "line 130 cites the 'agents-md-section per-role routing bullet lists every role' test; uncited 100 is the same array-equality pattern inside the separate 'INSTALL-AGENT.md write-surface brace lists name every role' test, which this sentence does not name.",
+      "line 130 cites the 'delegation-and-tiers per-role routing bullet lists every role' test; uncited 100 is the same array-equality pattern inside the separate 'INSTALL-AGENT.md write-surface brace lists name every role' test, which this sentence does not name.",
   },
   {
     doc: "model-preselection.md",
@@ -5557,7 +5557,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     paragraphLine: 618,
     uncitedLines: [130],
     claim:
-      "line 100 cites the 'INSTALL-AGENT.md write-surface brace lists name every role' test; uncited 130 is the same array-equality pattern inside the separate 'agents-md-section per-role routing bullet lists every role' test, which this sentence does not name.",
+      "line 100 cites the 'INSTALL-AGENT.md write-surface brace lists name every role' test; uncited 130 is the same array-equality pattern inside the separate 'delegation-and-tiers per-role routing bullet lists every role' test, which this sentence does not name.",
   },
   {
     doc: "operator-install-and-registry.md",

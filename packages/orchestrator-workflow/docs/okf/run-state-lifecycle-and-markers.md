@@ -521,5 +521,5 @@ this marker's reference subsection are pinned as contract; and a guard checks
 that no retired class token appears in the kit text. The pointers in
 `SKILL.md`, the agent prompts, `contracts.md`, the misfire rule, and the
 orchestrator's mechanical cross-check carry no sentence pin, and
-`test/charter.test.ts` rejects a second copy of a charter or
-trust-and-outward.md sentence in the skill.
+`test/charter.test.ts` rejects an exact second copy (sentences of 8 or more
+words) of a charter or trust-and-outward.md sentence in the skill.

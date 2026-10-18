@@ -171,6 +171,12 @@ describe("a rule-holding reference states each of its sentences once", () => {
     expect(sitesOf(rule)).toEqual(["references/review-and-recovery.md"]);
   });
 
+  it("the definition of non-trivial work sits only in run-state-and-harness.md", () => {
+    const rule =
+      "Slicing and, in run modes `delegated` and `batch`, implementer subagents are for non-trivial work: multiple files, real logic, or anything that benefits from decomposition or a fresh context.";
+    expect(sitesOf(rule)).toEqual(["references/run-state-and-harness.md"]);
+  });
+
   it("the runbook selection rule sits only in trust-and-outward.md", () => {
     const rule =
       "In every run, in every run mode, and whether or not discovery runs, the orchestrator selects the applicable runbooks";

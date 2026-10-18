@@ -18,7 +18,7 @@ handoffs.
 Scale the ceremony to the task. Who implements non-trivial work depends on the run mode (see Run mode, the last section). The workflow below is the default for
 non-trivial work; a trivial change (a typo, a one-line fix) may be done
 directly by the orchestrator and reviewed by it, without slicing or spawning
-subagents. Review judgment still applies to every change; only the size of
+subagents. Slicing and, in run modes `delegated` and `batch`, implementer subagents are for non-trivial work: multiple files, real logic, or anything that benefits from decomposition or a fresh context. Review judgment still applies to every change; only the size of
 the apparatus changes. When tier variants are installed, this same
 per-task discretion applies to every subagent spawn, including Discover
 and Slice tasks, not just the Delegate implementation and Delegate review
@@ -213,7 +213,7 @@ opencode agent frontmatter, to the install `profile`, and to a briefing's
 
 - `single`: one coherent workstream that the orchestrator implements itself,
   with its own verification set and mutation probes. The orchestrator takes
-  over the implementer's obligations and evidence fields for that work. The conditional rules a briefing would carry for that work, the [verification set rules](verification-set-rules.md) for its verification set and the [GitHub Actions replay rules](github-actions-replay.md) for a diff that touches the paths step 6 of [evidence and probes](evidence-and-probes.md) names, apply to the orchestrator directly.
+  over the implementer's obligations and evidence fields for that work. The conditional rules a briefing would carry for that work, the [verification set rules](verification-set-rules.md) for its verification set and the implementer part of the [GitHub Actions replay rules](github-actions-replay.md) for a diff that touches the paths step 6 of [evidence and probes](evidence-and-probes.md) names, apply to the orchestrator directly; the reviewer part still travels in the reviewer briefing.
 - `delegated`: the orchestrator plans and slices, then assigns one implementer
   per slice, sequentially. This is the default and the flow the rest of this
   skill describes.

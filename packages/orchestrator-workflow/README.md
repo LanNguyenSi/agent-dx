@@ -117,7 +117,7 @@ example.
     templates/        00-goal.md ... 06-handoff.md (canonical run templates)
     manifest.json     kit version, harnesses, profile, legacy models, exact routing
   runs/               one directory per unit of work, newest = active
-AGENTS.md             marker-fenced "Agentic Coding Workflow" charter (under 800 words; detail lives in the skill references)
+AGENTS.md             marker-fenced "Agentic Coding Workflow" charter (at most 800 words; detail lives in the skill references)
 ```
 
 The orchestrator writes a `.ai/run` pointer file in every worktree a run

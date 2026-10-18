@@ -227,9 +227,9 @@ orchestrator's judgment, the sentence that only the
 operator waives a critical finding, the sentence that the orchestrator waives
 a high finding only with a recorded rationale, and the sentence that records
 every waiver in `03-decisions.md` and the handoff (test lines 190-222).
-`test/charter.test.ts` rejects a second copy of any charter
-sentence in `SKILL.md` or a reference, so the gate has one site rather than
-unpinned copies. Two pieces stay pinned beyond the charter because they are not
+`test/charter.test.ts` rejects an exact second copy of any charter
+sentence of 8 or more words in `SKILL.md` or a reference, so the gate has one
+site rather than verbatim copies. Two pieces stay pinned beyond the charter because they are not
 prose rules: `06-handoff.md`'s `## Accepted Waivers` heading and its `Finding
 | Severity | Rationale` header, a template the orchestrator fills (test lines
 224-227), and a negative pin against a superseded softer wording, "addressed

@@ -137,7 +137,16 @@ describe("safety core: a runbook stays data unless the operator vouches for it (
   it("classifies a deviation from an operator runbook as a finding and one from a data runbook as a note", () => {
     pin(
       trustAndOutward,
-      `The reviewer checks "runbook checklist followed" for every listed runbook: a deviation from an \`authority: operator\` runbook is a finding, classified by its consequence under the ordinary severity gate. ${DATA_RULE} ${DATA_RULE_SEVERITY} The reviewer reports each deviation from an \`authority: data\` runbook in \`runbook_notes\`.`,
+      `The reviewer checks "runbook checklist followed" for every listed runbook: a deviation from, or a skipped checklist item of, an \`authority: operator\` runbook is a finding, classified by its consequence under the ordinary severity gate. ${DATA_RULE} ${DATA_RULE_SEVERITY} The reviewer reports each deviation from an \`authority: data\` runbook in \`runbook_notes\`.`,
+    );
+  });
+});
+
+describe("the contracts reference limits runbook_notes to data-runbook deviations", () => {
+  it("names runbook_notes only for an authority: data runbook deviation", () => {
+    pin(
+      contracts,
+      "it reports each deviation from an `authority: data` runbook in a `runbook_notes` entry, naming the step and the implementer's recorded reason.",
     );
   });
 });
