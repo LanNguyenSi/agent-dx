@@ -33,13 +33,20 @@ import {
   type IsolationMode,
   type ProbePlanResult,
 } from "./probe/index.js";
-import { parsePlanFile, type ProbePlanSpec } from "./probe/plan.js";
+import {
+  parsePlanFile,
+  type PlanMutantSpec,
+  type ProbePlanSpec,
+} from "./probe/plan.js";
 import { compilePassRegex } from "./pass-regex.js";
 import { reconcileEnvelopeDiffTruncation } from "./probe/mutant.js";
 import {
+  mutationProbeReportItem,
+  mutationProbeReportItems,
   parsePrintFields,
   renderPrint,
   renderProbeSummary,
+  type ReportItemDefinition,
   type SummaryInput,
 } from "./probe/summary.js";
 import { linkEntryUsageError } from "./probe/link-list.js";
@@ -633,6 +640,52 @@ export function boundText(text: string, maxChars: number): string {
   const marker = textTruncationMarker(text.length);
   if (marker.length >= maxChars) return marker.slice(0, Math.max(0, maxChars));
   return text.slice(0, maxChars - marker.length) + marker;
+}
+
+/**
+ * Bounds a `--report` JSON array to `maxChars` without ever cutting it
+ * into invalid JSON (which is exactly what `boundText` does to it, and a
+ * report is evidence meant to be pasted). When the whole array fits it
+ * is returned verbatim; otherwise only the WHOLE leading items that fit
+ * are kept, printed as a valid array (possibly empty), and the number of
+ * items left out is returned as `omitted` so the caller can warn about
+ * it and name the full, untruncated result (which `probe` saves to its
+ * log dir on every run).
+ */
+export function fitReportItems<T>(
+  items: readonly T[],
+  maxChars: number,
+): { text: string; omitted: number } {
+  const full = JSON.stringify(items, null, 2) + "\n";
+  if (full.length <= maxChars) return { text: full, omitted: 0 };
+  for (let kept = items.length - 1; kept >= 0; kept--) {
+    const text = JSON.stringify(items.slice(0, kept), null, 2) + "\n";
+    if (text.length <= maxChars) return { text, omitted: items.length - kept };
+  }
+  return { text: "[]\n", omitted: items.length };
+}
+
+/** The path of the full, untruncated result the run saved, the same
+ * pointer `--summary` reads: `fullResult` when the envelope's own
+ * reduction set it, else the `result-full-*.json` entry of `logs` (which
+ * a persisting command like `probe` lists even when the envelope itself
+ * fit). Undefined when no such file was written (no log dir, or a failed
+ * write, which the envelope says in a warning of its own). */
+function fullResultPathOf(
+  envelope: Record<string, unknown>,
+): string | undefined {
+  const savedLog = Array.isArray(envelope.logs)
+    ? envelope.logs.find(
+        (l): l is string =>
+          typeof l === "string" &&
+          /^result-full-.*\.json$/.test(path.basename(l)),
+      )
+    : undefined;
+  return typeof envelope.fullResult === "string"
+    ? envelope.fullResult
+    : savedLog === undefined
+      ? undefined
+      : path.resolve(savedLog);
 }
 
 /**
@@ -1299,6 +1352,13 @@ interface ProbeCliOptions {
   passRegex?: RegExp;
   summary?: boolean;
   print?: string[];
+  /** The selected `--report` kind (validated while the options are
+   * parsed; `REPORT_KINDS` is the only accepted vocabulary). */
+  report?: string;
+  /** `--replayed`: the `--report mutation-probes` items describe replays
+   * of prior-round definitions (`replayed: true`) rather than newly run
+   * probes (`replayed: false`, the default). */
+  replayed?: boolean;
 }
 
 /** `--print` value: validated while the options are parsed, so an unknown
@@ -1311,9 +1371,58 @@ function parsePrintOption(value: string): string[] {
   }
 }
 
-/** Emits a probe envelope, or, with `--summary` / `--print`, the compact
- * view of it instead. The exit code is the one already computed for the
- * envelope; the envelope itself is built unchanged either way. */
+/** The report kinds `--report` accepts, in the option's own vocabulary.
+ * `mutation-probes` prints the orchestrator implementer contract's
+ * `mutation_probes` items, one per mutant. */
+const REPORT_KINDS: readonly string[] = ["mutation-probes"];
+
+/** `--report` value: validated while the options are parsed, so an
+ * unknown kind is a usage error before the probe spends a run (the same
+ * rule `--print` applies to an unknown field). */
+function parseReportOption(value: string): string {
+  if (!REPORT_KINDS.includes(value)) {
+    throw new InvalidArgumentError(
+      `--report: unknown report "${value}" (known reports: ${REPORT_KINDS.join(", ")})`,
+    );
+  }
+  return value;
+}
+
+/** The view options `probe` accepts together, checked once the whole
+ * option set is in: `--summary`, `--print` and `--report` are three
+ * renderings of one result, so naming more than one has no honest
+ * winner (a usage error, exactly as `--summary` with `--print` already
+ * was); `--replayed` shapes only the `--report mutation-probes` items,
+ * so it is refused outright rather than silently ignored without them. */
+function requireExclusiveViews(opts: ProbeCliOptions): void {
+  if (opts.summary && opts.print !== undefined) {
+    throw new UsageError("probe: --summary and --print are mutually exclusive");
+  }
+  if (opts.report !== undefined && (opts.summary || opts.print !== undefined)) {
+    throw new UsageError(
+      "probe: --report is mutually exclusive with --summary and --print",
+    );
+  }
+  if (opts.replayed && opts.report === undefined) {
+    throw new UsageError(
+      "probe: --replayed requires --report (it only shapes the printed " +
+        "report items; the JSON envelope and the other views are unchanged " +
+        "by it)",
+    );
+  }
+}
+
+/** Emits a probe envelope, or, with `--summary` / `--print` / `--report`,
+ * the selected view of it instead. The exit code is the one already
+ * computed for the envelope; the envelope itself is built unchanged
+ * either way. The three views are mutually exclusive (checked by
+ * `requireExclusiveViews` before any run starts). A `--report` array
+ * that does not fit `-m` prints only whole items (always valid JSON)
+ * and says on stderr how many were left out and where the full result
+ * is; the exit code is unchanged by that too. `reportDefinitions` is
+ * the `--plan` mutant list, per entry, for the report's
+ * definition-fill of rows that never computed a `mutant` record (a
+ * single probe's definition comes from `opts` itself). */
 function emitProbe(
   opts: ProbeCliOptions,
   envelope: Record<string, unknown>,
@@ -1321,7 +1430,55 @@ function emitProbe(
   global: ResolvedGlobal,
   summary: SummaryInput,
   envelopeInput: EnvelopeInput,
+  reportDefinitions?: readonly (ReportItemDefinition | undefined)[],
 ): void {
+  if (opts.report === "mutation-probes") {
+    // The same full-result source `--print` reads, so a field the `-m`
+    // reduction cut from the JSON view still reports whole here: the
+    // report is evidence meant to be pasted, not a summary of it. The
+    // printed text is bounded too, but only at item boundaries, so the
+    // paste target stays parseable; what fell out is named on stderr
+    // beside the path of the full, untruncated result.
+    const unreduced = buildEnvelope({
+      ...envelopeInput,
+      persistFullResult: false,
+      maxChars: Number.MAX_SAFE_INTEGER,
+    }).envelope;
+    const replayed = opts.replayed === true;
+    const items =
+      opts.plan !== undefined
+        ? mutationProbeReportItems(
+            unreduced.plan as { results?: unknown } | undefined,
+            replayed,
+            reportDefinitions,
+            // The envelope's top-level reason is the fallback for rows
+            // the stopped plan never reached: they carry no reason of
+            // their own, and the contract requires one with every
+            // `not_applicable` result.
+            typeof unreduced.reason === "string" ? unreduced.reason : undefined,
+          )
+        : [
+            mutationProbeReportItem(
+              unreduced,
+              replayed,
+              singleReportDefinition(opts),
+            ),
+          ];
+    const report = fitReportItems(items, global.maxChars);
+    if (report.omitted > 0) {
+      const fullResult = fullResultPathOf(envelope);
+      process.stderr.write(
+        `agent-primitives probe: --report: ${report.omitted} item${
+          report.omitted === 1 ? "" : "s"
+        } omitted from the printed report (-m ${global.maxChars} ` +
+          (fullResult === undefined
+            ? "characters); no full result file was written, raise -m)\n"
+            : `characters); full result: ${fullResult})\n`),
+      );
+    }
+    writeAndExit(report.text, exitCode);
+    return;
+  }
   if (opts.print !== undefined) {
     // The same payload the result-full file carries, not the `-m`-reduced
     // envelope: a field that exists must not print as null or shortened
@@ -1355,19 +1512,7 @@ function emitProbe(
     // `fullResult` is set only on an envelope the reduction could fit; one
     // cut to its fixed fields still names the saved file in `logs`, which
     // is never reduced.
-    const savedLog = Array.isArray(envelope.logs)
-      ? envelope.logs.find(
-          (l): l is string =>
-            typeof l === "string" &&
-            /^result-full-.*\.json$/.test(path.basename(l)),
-        )
-      : undefined;
-    const fullResult =
-      typeof envelope.fullResult === "string"
-        ? envelope.fullResult
-        : savedLog === undefined
-          ? undefined
-          : path.resolve(savedLog);
+    const fullResult = fullResultPathOf(envelope);
     writeAndExit(
       renderProbeSummary(
         {
@@ -1384,6 +1529,39 @@ function emitProbe(
   emit(envelope, exitCode, {
     format: global.format,
     maxChars: global.maxChars,
+  });
+}
+
+/** The `--report` definition-fill for a single probe with no `mutant`
+ * record: the probe's own `--file`/`-n` and the mutant form it was
+ * given. A whole-line `-r/--replace` has no `before` substring, so
+ * `before` stays empty and `after` is the replacement; `-p/--patch` has
+ * neither text nor (until a mutant record exists) a derived file/line,
+ * so those fields stay the not-recorded empty string. */
+function singleReportDefinition(opts: ProbeCliOptions): ReportItemDefinition {
+  const definition: ReportItemDefinition = {};
+  if (opts.file !== undefined) definition.file = opts.file;
+  if (opts.line !== undefined) definition.line = opts.line;
+  if (opts.match !== undefined) definition.before = opts.match;
+  const after = opts.with ?? opts.replace;
+  if (after !== undefined) definition.after = after;
+  return definition;
+}
+
+/** The same fill for a `--plan` run: one entry per plan mutant, indexed
+ * by the position that is also every `plan.results[]` row's `index`. A
+ * `patch` entry carries no before/after text, and a `replace` entry has
+ * no `before` substring (empty `before`, the replacement as `after`). */
+function planReportDefinitions(
+  mutants: readonly PlanMutantSpec[],
+): ReportItemDefinition[] {
+  return mutants.map((mutant) => {
+    const definition: ReportItemDefinition = { file: mutant.file };
+    if (mutant.line !== undefined) definition.line = mutant.line;
+    if (mutant.matchText !== undefined) definition.before = mutant.matchText;
+    const after = mutant.withText ?? mutant.replaceText;
+    if (after !== undefined) definition.after = after;
+    return definition;
   });
 }
 
@@ -1727,6 +1905,7 @@ async function runProbePlanCommand(
       },
     },
     envelopeInput,
+    planReportDefinitions(plan.mutants),
   );
 }
 
@@ -1815,14 +1994,19 @@ program
     "print only these comma-separated top-level envelope fields (dotted paths descend, e.g. mutation_probe.result) as one JSON object instead of the envelope; an unknown field is a usage error; exit codes unchanged",
     parsePrintOption,
   )
+  .option(
+    "--report <kind>",
+    "print a ready-to-paste report instead of the envelope: mutation-probes prints the orchestrator implementer contract's mutation_probes items as one JSON array (one item per mutant, the eleven fields merged from the mutant record and mutation_probe; --replayed marks them replays); when the array does not fit -m it prints only whole items (always valid JSON) and names the omitted count and the full result file on stderr; mutually exclusive with --summary and --print; an unknown kind is a usage error; exit codes unchanged",
+    parseReportOption,
+  )
+  .option(
+    "--replayed",
+    "with --report: print replayed: true (replays of prior-round definitions) instead of the default false; without --report it is a usage error",
+  )
   .action(async (opts: ProbeCliOptions, command: Command) => {
     const start = Date.now();
     const global = resolveGlobal(command.optsWithGlobals<GlobalOptions>());
-    if (opts.summary && opts.print !== undefined) {
-      throw new UsageError(
-        "probe: --summary and --print are mutually exclusive",
-      );
-    }
+    requireExclusiveViews(opts);
     if (opts.plan !== undefined) {
       await runProbePlanCommand(opts, command, global, start);
       return;

@@ -2,11 +2,12 @@ import path from "node:path";
 import { combinedOutput } from "../exec.js";
 
 /**
- * Compact renderings of a finished probe for `probe --summary` and
- * `probe --print <field,...>`. Both read the same envelope-shaped value
- * the JSON output is built from and change nothing about it: they are a
- * second view, selected by a flag, so a caller does not have to write its
- * own reader of the envelope. The exit code is decided before either runs.
+ * Compact renderings of a finished probe for `probe --summary`,
+ * `probe --print <field,...>` and `probe --report mutation-probes`. All
+ * three read the same envelope-shaped value the JSON output is built from
+ * and change nothing about it: they are a second view, selected by a
+ * flag, so a caller does not have to write its own reader of the
+ * envelope. The exit code is decided before any of them runs.
  */
 
 /** Top-level envelope fields `--print` accepts. A name outside this set is
@@ -307,4 +308,193 @@ export function renderProbeSummary(
   const out = lines.slice(0, kept);
   if (kept < lines.length) out.push(marker(lines.length - kept));
   return [...out, ...tail].join("\n") + "\n";
+}
+
+/** The internal refusal reason that says the dry run found the mutant
+ * cannot be applied at all: `MutantNotApplicable.reasonCode` in
+ * `src/probe/mutant.ts`, reported verbatim as the result's own `reason`
+ * (and as `mutation_probe.reason` at the mutant-phase site). Target text
+ * that can no longer be found is only ONE of its causes: the same code
+ * covers a replacement identical to the original line or to the matched
+ * text, an empty `-M`, a line out of range, and a patch that does not
+ * apply, touches other paths, or overflows the numstat check; the
+ * default envelope's `warnings` name the specific cause
+ * (`MutantNotApplicable.reason`). The report spells every cause in the
+ * implementer contract's own words instead. */
+const MUTANT_NOT_APPLICABLE = "mutant_not_applicable";
+
+/** The contract's canonical reason for that case (see the orchestrator
+ * implementer contract: `reason` carries `target text no longer present`
+ * for a probe whose mutant can no longer be applied, whatever the
+ * internal cause named in the default envelope's `warnings`). */
+export const TARGET_TEXT_NO_LONGER_PRESENT = "target text no longer present";
+
+/** One item of the `--report mutation-probes` array: the eleven fields
+ * of one orchestrator implementer `mutation_probes` entry, merged from
+ * the mutant record and the `mutation_probe` object, so a caller pastes
+ * the printed item instead of merging the two sibling records by hand.
+ * A field whose source record is absent prints as the empty string (a
+ * missing sibling record is never invented), except for the four replay
+ * definition fields (`file`, `anchor`, `before`, `after`), which fall
+ * back to the probe's own inputs when no `mutant` record exists (see
+ * `ReportItemDefinition`); `restored_verified` is then `""` too, the
+ * contract's own not-recorded spelling, never a boolean the probe did
+ * not measure. Key order is the contract order. */
+export interface MutationProbeReportItem {
+  mutant: string;
+  file: string;
+  anchor: number | string;
+  before: string;
+  after: string;
+  verified_applied_via: string;
+  result: "killed" | "survived" | "not_applicable";
+  expectation: "met" | "violated" | "not_applicable";
+  reason: string;
+  restored_verified: boolean | string;
+  replayed: boolean;
+}
+
+/** The replay definition as the probe received it, used to fill `file`,
+ * `anchor`, `before` and `after` of an item whose `mutant` record was
+ * never computed: `--file` and `-n` (or the plan entry's file and line),
+ * with `before`/`after` from `-M`/`-w` (or the entry's match/with). A
+ * whole-line replacement (`-r`, an entry's `replace`) has no `before`
+ * substring: `before` stays empty and `after` is the replacement text.
+ * Without this fill an item would read as "no definition recorded", a
+ * non-regression, hiding the very case the replay is for. */
+export interface ReportItemDefinition {
+  file?: string;
+  line?: number;
+  before?: string;
+  after?: string;
+}
+
+/** The `mutant` record of one mutant's envelope record, as far as the
+ * report reads it. */
+type ReportMutantRecord = {
+  file?: string;
+  line?: number;
+  before?: string;
+  after?: string;
+};
+
+/** The `mutation_probe` object of one mutant's envelope record, as far
+ * as the report reads it. */
+type ReportProbeRecord = {
+  mutant?: string;
+  verified_applied_via?: string;
+  result?: string;
+  restored_verified?: boolean;
+  reason?: string;
+  expectation?: string;
+};
+
+/**
+ * One `mutation_probes` item from one mutant's record:
+ *
+ * - `file`, `anchor`, `before`, `after` come from the `mutant` record
+ *   (`anchor` is the line number the record carries), a plan entry whose
+ *   mutant was never computed falling back to the run record's own
+ *   `file`, and a probe with no `mutant` record at all falling back to
+ *   the definition it was given (`definition`, see its own docblock:
+ *   `--file`/`-n` or the entry's file and line, `-M`/`-w` or the entry's
+ *   match/with, an empty `before` with `-r`'s replacement as `after`);
+ * - `mutant`, `verified_applied_via`, `restored_verified` come from
+ *   `mutation_probe`;
+ * - `result` is the `killed`/`survived` verdict read ONLY from
+ *   `mutation_probe.result`: every other internal value (`not_run`,
+ *   `inconclusive`) and an absent `mutation_probe` map to
+ *   `not_applicable`, because a real record never carries a measured
+ *   result without the probe that measured it, and reading the run's
+ *   own `status` in its place would invent one;
+ * - `expectation` is the probe's `met`/`violated`, and always
+ *   `not_applicable` when `result` is `not_applicable` (nothing was
+ *   measured to compare against an expectation);
+ * - `reason` is the empty string unless `result` is `not_applicable`;
+ *   then `mutant_not_applicable` becomes the contract's canonical
+ *   `target text no longer present` (that code's several causes are
+ *   named by the default envelope's `warnings`), and any other internal
+ *   reason string is carried verbatim. A row that carries neither a
+ *   `mutation_probe.reason` nor a row `reason` falls back to the
+ *   `fallbackReason` argument (the run envelope's own top-level
+ *   `reason`, see `mutationProbeReportItems`); a row's own reason
+ *   always wins over the fallback;
+ * - `replayed` is the `--replayed` flag's value (`false` for a newly run
+ *   probe, `true` when the caller says these items replay prior-round
+ *   definitions).
+ */
+export function mutationProbeReportItem(
+  source: Record<string, unknown>,
+  replayed: boolean,
+  definition?: ReportItemDefinition,
+  fallbackReason?: string,
+): MutationProbeReportItem {
+  const probe = source.mutation_probe as ReportProbeRecord | undefined;
+  const mutant = source.mutant as ReportMutantRecord | undefined;
+  const file = source.file as string | undefined;
+  const recordReason = source.reason as string | undefined;
+  const measured = probe?.result;
+  const result: MutationProbeReportItem["result"] =
+    measured === "killed" || measured === "survived"
+      ? measured
+      : "not_applicable";
+  const expectation: MutationProbeReportItem["expectation"] =
+    result === "not_applicable"
+      ? "not_applicable"
+      : probe?.expectation === "met" || probe?.expectation === "violated"
+        ? probe.expectation
+        : "not_applicable";
+  const internalReason = probe?.reason ?? recordReason ?? fallbackReason;
+  const reason =
+    result === "not_applicable"
+      ? internalReason === MUTANT_NOT_APPLICABLE
+        ? TARGET_TEXT_NO_LONGER_PRESENT
+        : (internalReason ?? "")
+      : "";
+  return {
+    mutant: probe?.mutant ?? "",
+    file: mutant?.file ?? file ?? definition?.file ?? "",
+    anchor: mutant?.line ?? definition?.line ?? "",
+    before: mutant?.before ?? definition?.before ?? "",
+    after: mutant?.after ?? definition?.after ?? "",
+    verified_applied_via: probe?.verified_applied_via ?? "",
+    result,
+    expectation,
+    reason,
+    restored_verified: probe?.restored_verified ?? "",
+    replayed,
+  };
+}
+
+/** The `--report mutation-probes` array for a `--plan` run: one item per
+ * `plan.results[]` entry, in plan order (one per mutant, including the
+ * `not_run` entries a stopped plan never reached). `definitions` is
+ * indexed by a result's own `index` (the plan file's mutants in plan
+ * order) and carries each entry's replay definition for the rows whose
+ * `mutant` record was never computed. `fallbackReason` is the run
+ * envelope's own top-level `reason` (`baseline_failed` for a plan whose
+ * baseline failed, say): the `not_run` entries a stopped plan never
+ * reached carry no reason of their own, and the contract requires a
+ * reason with every `not_applicable` result; a row's own reason always
+ * wins. An envelope with no `plan` value (a run that refused before any
+ * mutant existed) reports the empty array. */
+export function mutationProbeReportItems(
+  plan: { results?: unknown } | undefined,
+  replayed: boolean,
+  definitions?: readonly (ReportItemDefinition | undefined)[],
+  fallbackReason?: string,
+): MutationProbeReportItem[] {
+  const rows =
+    plan !== undefined && Array.isArray(plan.results) ? plan.results : [];
+  return rows.map((row) => {
+    const index = (row as { index?: unknown }).index;
+    const definition =
+      typeof index === "number" ? definitions?.[index] : undefined;
+    return mutationProbeReportItem(
+      row as Record<string, unknown>,
+      replayed,
+      definition,
+      fallbackReason,
+    );
+  });
 }
