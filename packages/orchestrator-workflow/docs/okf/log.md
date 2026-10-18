@@ -1,5 +1,11 @@
 # Bundle log
 
+- 2026-10-18T19:38:34Z, charter CHANGELOG wording: the `[Unreleased]` entry no longer points to a clause map
+  outside the repository; it says a split safety-core sentence keeps each half whole at one site
+  and a reworded one states the same condition (same line count, no citation moved). Re-verified:
+  the claims of the re-stamped docs are unchanged. Re-stamped: `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md`.
+
 - 2026-10-18T19:35:50Z, charter move conditions restored and wording claims corrected: `run-state-and-harness.md` Intent
   again defines non-trivial work (appended to an existing line, so no citation moved);
   `trust-and-outward.md` says a grant class is added mid-run only on an operator message in the
