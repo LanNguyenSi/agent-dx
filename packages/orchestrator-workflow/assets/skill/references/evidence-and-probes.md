@@ -556,9 +556,10 @@ A plan alone is never evidence. A result binds plan identity to checked state, c
 
 # Run-internal identifiers
 
-Run-internal identifiers are the IDs the run files assign: criterion IDs in
-`00-goal.md` (`AC-` plus three digits), task IDs in `02-tasks.md` (`T-` plus
-three digits), decision IDs in `03-decisions.md` (`D-` plus three digits), and
+Run-internal identifiers are the IDs the run files assign: criterion IDs
+where a run file numbers its acceptance criteria (`AC-` plus three digits),
+task IDs in `02-tasks.md` (`T-` plus three digits), decision IDs in
+`03-decisions.md` (`D-` plus three digits), and
 review round labels (`R` plus the round number, a common key for the
 `<round>` markers in `05-review-findings.md`). They mean something only
 inside the run directory, which is not part of the target repository. Code,

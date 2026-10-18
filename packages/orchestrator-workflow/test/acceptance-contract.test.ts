@@ -92,6 +92,8 @@ const retiredVocabulary = [
   "Contract selection",
   "Acceptance contract:",
   "negative_space",
+  "baseline revision",
+  "frozen baseline",
 ];
 const unwrap = (text: string) => text.replace(/\s+/g, " ");
 const readFixture = (name: string) => readFileSync(join(FIXTURE, name), "utf8");
