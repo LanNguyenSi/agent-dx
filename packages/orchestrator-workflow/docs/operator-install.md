@@ -117,6 +117,19 @@ For a legacy opencode leaf without a recorded provider-qualified model id,
 doctor reports `Routing comparison incomplete` and includes
 `routingComparisonGaps` in JSON instead of declaring a false routing
 divergence. The gap alone does not change the target status.
+For a target whose manifest selects the `codex` harness, doctor also
+checks the Codex instruction budget: when the root instruction file Codex
+loads (`AGENTS.override.md` when present, else `AGENTS.md`) is larger than
+the `project_doc_max_bytes` budget Codex reads it under, doctor adds one
+`codex:` warning (`codexWarnings` in JSON) naming the file, its size in
+bytes, the budget, where the budget came from (project config
+`<target>/.codex/config.toml`, user config `$CODEX_HOME/config.toml`
+falling back to `~/.codex/config.toml`, or the default 32768), and the
+first heading that is lost entirely, because Codex silently truncates the
+file at the budget. Codex layers profiles, a system file, managed layers
+and `-c key=value` session flags over that resolution; this check
+considers none of them. Like the routing gap, such a warning never changes
+the target status or the doctor exit code.
 
 **`adopt [dir] [--json]`** brings a repository that already has the kit installed,
 by hand or by an earlier `init`, under the operator's management without

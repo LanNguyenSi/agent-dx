@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import type { Stats } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { PACKAGE_VERSION } from "./assets.js";
@@ -88,6 +89,20 @@ export interface TargetReport {
    * a documentation-locator drift, not a kit-file install drift.
    */
   knowledgeWarnings?: string[];
+  /**
+   * Codex instruction-budget warnings against this target's own filesystem:
+   * the target's manifest selects the `codex` harness and the root
+   * instruction file Codex would load (`AGENTS.override.md` when present,
+   * else `AGENTS.md`) is larger than the `project_doc_max_bytes` budget
+   * Codex would read it under, so Codex would silently truncate it (one
+   * warning per such file, naming the file, its size, the budget, the
+   * budget's source and the first heading lost). Omitted when there is
+   * none. Printed as `codex:` detail lines in the human output. Like the
+   * knowledge warnings, these never change `status` or the doctor exit
+   * code -- they surface an instruction-file truncation, not a kit-file
+   * install drift.
+   */
+  codexWarnings?: string[];
   /** Human-output-only: the repo's own profile, or null when unknown. */
   repoProfile: Profile | null;
   /** Human-output-only: the operator default profile, for the comparison line. */
@@ -134,6 +149,8 @@ export interface TargetReportJson {
   routingComparisonGaps?: string[];
   /** See {@link TargetReport.knowledgeWarnings}. */
   knowledgeWarnings?: string[];
+  /** See {@link TargetReport.codexWarnings}. */
+  codexWarnings?: string[];
   versionLag: boolean;
   reason: string | null;
 }
@@ -151,6 +168,9 @@ export function targetReportToJson(report: TargetReport): TargetReportJson {
       : {}),
     ...(report.knowledgeWarnings?.length
       ? { knowledgeWarnings: report.knowledgeWarnings }
+      : {}),
+    ...(report.codexWarnings?.length
+      ? { codexWarnings: report.codexWarnings }
       : {}),
     versionLag: report.versionLag,
     reason: report.reason,
@@ -356,6 +376,186 @@ function computeKnowledgeWarnings(
   return warnings;
 }
 
+/**
+ * The one byte budget Codex gives every project instruction file it loads.
+ * Read from the Codex source at codex-cli 0.163.0 (as were the layering and
+ * truncation facts below): the top-level `project_doc_max_bytes` key of a
+ * Codex `config.toml`, default `32 * 1024`. Codex loads project instruction
+ * files per directory from the project root (the directory with `.git`)
+ * down to the working directory, taking `AGENTS.override.md` over
+ * `AGENTS.md` in each directory; all of them share this one budget, and
+ * content past it is cut off with only a log warning.
+ */
+const CODEX_PROJECT_DOC_MAX_BYTES_DEFAULT = 32 * 1024;
+
+/** Where a resolved Codex instruction budget came from. The profiles, the
+ * system layer, managed layers and `-c` session flags are config layers
+ * Codex itself consults but are not considered here; only these three are. */
+type CodexBudgetSource = "project config" | "user config" | "default";
+
+/**
+ * The injectable filesystem inputs of the Codex user-config layer, so a
+ * test never reads the real home directory or the real `process.env`
+ * (defaults: {@link homedir} and `process.env`).
+ */
+export interface CodexBudgetInputs {
+  /** The user home directory, the fallback root when `env` has no
+   * `CODEX_HOME`: the user file is then `<homeDir>/.codex/config.toml`. */
+  homeDir: string;
+  /** The environment, read for `CODEX_HOME`. */
+  env: Record<string, string | undefined>;
+}
+
+/**
+ * The strict single-key read of one Codex `config.toml`: the first
+ * `project_doc_max_bytes` assignment in the top level (a `[table]` header
+ * ends the top level, so keys under any table are not this key). A bare
+ * decimal positive integer is the value; any other value text (a quoted
+ * string, `0`, a negative or fractional number, an overflow past
+ * `Number.MAX_SAFE_INTEGER`) is returned as ignored raw text. `undefined`
+ * means the key is absent, including when the file cannot be read.
+ */
+function readCodexProjectDocMaxBytes(
+  configFile: string,
+): { value: number } | { ignored: string } | undefined {
+  let text: string;
+  try {
+    text = readFileSync(configFile, "utf8");
+  } catch {
+    return undefined;
+  }
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("[")) return undefined;
+    const assignment = /^project_doc_max_bytes\s*=\s*(.*)$/.exec(trimmed);
+    if (!assignment) continue;
+    const raw = assignment[1].split("#")[0].trim();
+    if (!/^[0-9]+$/.test(raw)) return { ignored: raw };
+    const value = Number(raw);
+    return Number.isSafeInteger(value) && value > 0
+      ? { value }
+      : { ignored: raw };
+  }
+  return undefined;
+}
+
+/** The winning budget, its source layer, and the raw texts of the layers
+ * consulted above it whose value was ignored for not being a positive
+ * integer, each as `<source>: <raw text>`. */
+interface CodexBudget {
+  bytes: number;
+  source: CodexBudgetSource;
+  ignored: string[];
+}
+
+/**
+ * Resolves the instruction budget for one target across the layers this
+ * kit considers, highest first: the project file
+ * `<target>/.codex/config.toml`, then the user file `$CODEX_HOME/
+ * config.toml` (`<homeDir>/.codex/config.toml` when the environment does
+ * not set `CODEX_HOME`), then the default. A layer's value that is present
+ * but not a positive integer is ignored and the next layer applies.
+ */
+function resolveCodexBudget(
+  targetPath: string,
+  inputs: CodexBudgetInputs,
+): CodexBudget {
+  const codexHome = inputs.env["CODEX_HOME"];
+  const layers: Array<{ configFile: string; source: CodexBudgetSource }> = [
+    {
+      configFile: join(targetPath, ".codex", "config.toml"),
+      source: "project config",
+    },
+    {
+      configFile: join(
+        codexHome ? codexHome : join(inputs.homeDir, ".codex"),
+        "config.toml",
+      ),
+      source: "user config",
+    },
+  ];
+  const ignored: string[] = [];
+  for (const layer of layers) {
+    const read = readCodexProjectDocMaxBytes(layer.configFile);
+    if (!read) continue;
+    if ("value" in read) {
+      return { bytes: read.value, source: layer.source, ignored };
+    }
+    ignored.push(`${layer.source}: ${read.ignored}`);
+  }
+  return {
+    bytes: CODEX_PROJECT_DOC_MAX_BYTES_DEFAULT,
+    source: "default",
+    ignored,
+  };
+}
+
+const ATX_HEADING_LINE = /^ {0,3}#{1,6}( |\t|$)/;
+
+/**
+ * The text of the first Markdown heading line that starts at or after
+ * `budget` bytes into `content` -- the first heading Codex loses entirely
+ * -- or `null` when no heading starts at or after the budget.
+ */
+function firstLostHeading(content: string, budget: number): string | null {
+  let offset = 0;
+  for (const line of content.split("\n")) {
+    if (offset >= budget && ATX_HEADING_LINE.test(line)) {
+      return line.trim();
+    }
+    offset += Buffer.byteLength(line, "utf8") + 1;
+  }
+  return null;
+}
+
+/**
+ * One warning per target whose manifest selects the `codex` harness and
+ * whose root Codex instruction file -- `AGENTS.override.md` when present,
+ * else `AGENTS.md` -- is larger than the resolved instruction budget,
+ * because Codex silently truncates it to that budget. The warning names the
+ * file, its size in bytes, the budget, where the budget came from (project
+ * config, user config, or default), the first heading that is lost entirely
+ * (or says none is), and any layer value that was ignored for not being a
+ * positive integer. Absent file, other harnesses, and files within the
+ * budget warn nothing; like the knowledge warnings this never changes
+ * `status` or the doctor exit code. Profiles, the system layer, managed
+ * layers and `-c` session flags are config layers Codex itself consults
+ * that this check does not consider.
+ */
+function computeCodexBudgetWarnings(
+  targetPath: string,
+  manifest: Manifest,
+  inputs: CodexBudgetInputs,
+): string[] {
+  if (!manifest.harnesses.includes("codex")) return [];
+  const overrideFile = join(targetPath, "AGENTS.override.md");
+  const hasOverride = existsSync(overrideFile);
+  const instructionFile = hasOverride
+    ? overrideFile
+    : join(targetPath, "AGENTS.md");
+  let content: Buffer;
+  try {
+    content = readFileSync(instructionFile);
+  } catch {
+    return [];
+  }
+  const size = content.length;
+  const budget = resolveCodexBudget(targetPath, inputs);
+  if (size <= budget.bytes) return [];
+  const lost = firstLostHeading(content.toString("utf8"), budget.bytes);
+  return [
+    [
+      `codex budget: ${hasOverride ? "AGENTS.override.md" : "AGENTS.md"} is ${size} bytes, over the ${budget.bytes}-byte project_doc_max_bytes budget from ${budget.source}`,
+      lost === null
+        ? "Codex silently truncates the file and no heading starts at or after the budget, so no heading is lost entirely"
+        : `Codex silently truncates the file; first heading lost entirely: "${lost}"`,
+      ...budget.ignored.map(
+        (note) => `ignored ${note} (not a positive integer)`,
+      ),
+    ].join("; "),
+  ];
+}
+
 function baseReport(
   target: OperatorTarget,
   operator: OperatorManifest,
@@ -404,12 +604,15 @@ export function statOrClassify(
  * read-only I/O (existence checks, file hashing, reading the target's own
  * repo manifest); no printing, no `process.exit`. Exported standalone so a
  * later `adopt` command can reuse the same per-target computation `doctor`
- * uses.
+ * uses. `codexInputs` overrides the home directory and environment the
+ * Codex budget check reads (it defaults to the real {@link homedir} and
+ * `process.env`); `runDoctor` threads its own test-only option through.
  */
 export function inspectTarget(
   target: OperatorTarget,
   operator: OperatorManifest,
   kitVersion: string,
+  codexInputs?: CodexBudgetInputs,
 ): TargetReport {
   const dirStat = statOrClassify(target.path);
   if (dirStat.kind === "enoent") {
@@ -488,6 +691,11 @@ export function inspectTarget(
     : manifest.version !== kitVersion;
 
   const knowledgeWarnings = computeKnowledgeWarnings(target.path, manifest);
+  const codexWarnings = computeCodexBudgetWarnings(
+    target.path,
+    manifest,
+    codexInputs ?? { homeDir: homedir(), env: process.env },
+  );
 
   let status: TargetStatus;
   if (driftFiles.length > 0) {
@@ -516,6 +724,7 @@ export function inspectTarget(
       ? { routingComparisonGaps: routingComparison.gaps }
       : {}),
     ...(knowledgeWarnings.length > 0 ? { knowledgeWarnings } : {}),
+    ...(codexWarnings.length > 0 ? { codexWarnings } : {}),
     repoProfile: manifest.profile,
     operatorProfile: operator.defaults.profile,
     repoTiers: manifest.tiers,
@@ -579,7 +788,10 @@ function countRawTargets(home: string): number | null {
  * `options.lockOptions` is exposed only so tests can shrink
  * `updateOperatorManifest`'s lock-acquire timeout/staleness/poll windows
  * below their production defaults (see `OperatorManifestLockOptions`);
- * production callers should omit it entirely. `updateOperatorManifest`
+ * production callers should omit it entirely. `options.codexInputs` is
+ * likewise test-only: it replaces the real home directory and `process.env`
+ * the Codex user-config layer of {@link TargetReport.codexWarnings} reads.
+ * `updateOperatorManifest`
  * (via `withOperatorManifestLock`) can itself throw rather than return,
  * most commonly `OperatorManifestLockTimeoutError` (another
  * orchestrator-workflow command holds the lock past the timeout) or any
@@ -591,7 +803,11 @@ function countRawTargets(home: string): number | null {
  */
 export function runDoctor(
   home: string,
-  options: { prune?: boolean; lockOptions?: OperatorManifestLockOptions } = {},
+  options: {
+    prune?: boolean;
+    lockOptions?: OperatorManifestLockOptions;
+    codexInputs?: CodexBudgetInputs;
+  } = {},
 ): DoctorReport {
   const state: OperatorManifestState = operatorManifestState(home);
   if (state.kind !== "ok") {
@@ -637,7 +853,7 @@ export function runDoctor(
           return undefined;
         }
         const reports = current.targets.map((target) =>
-          inspectTarget(target, current, PACKAGE_VERSION),
+          inspectTarget(target, current, PACKAGE_VERSION, options.codexInputs),
         );
         computedReports = reports;
 
@@ -704,7 +920,12 @@ export function runDoctor(
     );
   } else {
     targets = state.manifest.targets.map((target) =>
-      inspectTarget(target, state.manifest, PACKAGE_VERSION),
+      inspectTarget(
+        target,
+        state.manifest,
+        PACKAGE_VERSION,
+        options.codexInputs,
+      ),
     );
   }
 

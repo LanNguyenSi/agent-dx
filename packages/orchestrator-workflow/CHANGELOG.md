@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `doctor` now warns when a target that selects the codex harness has a
+  root instruction file (`AGENTS.override.md` when present, else
+  `AGENTS.md`) larger than Codex's `project_doc_max_bytes` instruction
+  budget, which Codex silently truncates. One warning per such target
+  names the file, its size, the budget and its source (project config,
+  user config, or the default 32768), and the first heading lost entirely.
+  The check does not consider profiles, the system layer, managed layers
+  or `-c` session flags; it is a warning only, and the doctor exit code
+  is unchanged.
+
 ## [0.45.0] - 2026-10-18
 
 - The package's runbook-sentence guard keeps its wording, and its segmenter
