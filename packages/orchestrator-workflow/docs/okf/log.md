@@ -1,5 +1,12 @@
 # Bundle log
 
+- 2026-10-18T12:47:41Z, reviewer prompt replay evaluation, isolation rework, re-stamp:
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and
+  `subagent-contracts-superset.md` list `CHANGELOG.md` as a source and went stale on the
+  longer `[Unreleased]` bullet. Their `CHANGELOG.md` citations all name released entries by
+  heading and anchor, the headings and anchors still resolve, and the bullet adds no rule the
+  three docs describe, so the claims are unchanged and only the timestamps move.
+
 - 2026-10-18T12:45:38Z, reviewer prompt replay evaluation, isolation rework: the `[Unreleased]` bullet in
   `CHANGELOG.md` grew from twelve to fifteen lines (sandbox, environment allowlist, guard,
   canary, paired comparison), which shifted every line below it by three, so this log's
