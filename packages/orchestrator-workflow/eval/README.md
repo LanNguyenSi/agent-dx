@@ -82,7 +82,7 @@ npm run eval -- validate-dataset --dataset <dir>
 npm run eval -- run --dataset <dir> --out <results> --variant current \
   --scratch <dir outside any repository> [--only id,id] [--kind control] \
   [--repeat 2] [--model opus] [--effort high] [--timeout-min 45] \
-  [--budget-usd 15]
+  [--budget-usd 15] [--jobs 1]
 
 npm run eval -- judge   --dataset <dir> --out <results> [--judge-model sonnet]
 npm run eval -- score   --dataset <dir> --out <results>
@@ -99,6 +99,11 @@ Variants (`--variant`):
   from `current` does not discriminate.
 - `file:<path>`: any prompt file, for example a shortened candidate. Give it an
   id with `--variant-id`.
+
+Sessions run one after the other by default. `--jobs <n>` runs up to n at
+once, each in its own checkout; mind the API rate limit and the load, since
+every session runs tests in its checkout. Progress lines then arrive in
+completion order.
 
 A result directory keeps one folder per variant id; reusing an id for a
 different prompt is refused. Every run folder has `result.json` (variant id and

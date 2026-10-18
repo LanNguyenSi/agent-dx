@@ -256,6 +256,55 @@ describe("evaluation CLI", () => {
     expect(missing.errors[0]).toContain("gamma");
   }, 120_000);
 
+  it("runs sessions in parallel with --jobs and still writes every record", async () => {
+    const delta = promptFile("delta.md", "Delta body.");
+    const finalText = textFile("par.txt", reviewerReturn());
+    const parallelRecords = join(work, "rec-parallel");
+    mkdirSync(parallelRecords);
+    const r = io({
+      STUB_FINAL_TEXT_FILE: finalText,
+      STUB_DELAY_MS: "2500",
+      STUB_RECORD_DIR: parallelRecords,
+    });
+    const code = await main(
+      [
+        "run",
+        ...common(),
+        "--variant",
+        `file:${delta}`,
+        "--claude",
+        STUB,
+        "--scratch",
+        scratch,
+        "--repeat",
+        "2",
+        "--jobs",
+        "4",
+      ],
+      r,
+    );
+    expect(code).toBe(0);
+    expect(r.lines.at(-1)).toContain("4 completed, 0 not completed");
+    expect(loadRunResults(out, "delta")).toHaveLength(4);
+    const spans = readdirSync(parallelRecords)
+      .filter((f) => f.startsWith("call-"))
+      .map((f) => JSON.parse(readFileSync(join(parallelRecords, f), "utf8")))
+      .map((c) => [c.startedAt as number, c.endedAt as number]);
+    expect(spans).toHaveLength(4);
+    // One at a time, no two sessions would overlap; with four workers several do.
+    const overlapping = spans.filter(([start, end], i) =>
+      spans.some(([s2, e2], k) => k !== i && s2 < end && start < e2),
+    );
+    expect(overlapping.length).toBeGreaterThanOrEqual(2);
+    const bad = io();
+    expect(
+      await main(
+        ["run", ...common(), "--variant", `file:${delta}`, "--jobs", "0"],
+        bad,
+      ),
+    ).toBe(2);
+  }, 60_000);
+
   it("refuses to reuse a variant id for a different prompt", async () => {
     const changed = promptFile("alpha.md", "Alpha body, edited.");
     const r = io();

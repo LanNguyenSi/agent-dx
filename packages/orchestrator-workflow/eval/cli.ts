@@ -45,6 +45,7 @@ Commands:
           [--claude <bin>] [--timeout-min 45] [--budget-usd 15]
           [--scratch <dir>] [--keep-checkout] [--force] [--no-bare]
           [--keep-home] [--api-key-env ANTHROPIC_API_KEY] [--repo-root <dir>]
+          [--jobs <n>]
   judge   --dataset <dir> --out <dir> [--judge-model sonnet] [--claude <bin>]
           [--budget-usd 2] [--attempts 2] [--no-bare] [--api-key-env NAME]
   score   --dataset <dir> --out <dir>
@@ -172,6 +173,7 @@ async function commandRun(args: string[], io: Io): Promise<number> {
       "keep-home": { type: "boolean" },
       "api-key-env": { type: "string" },
       "repo-root": { type: "string" },
+      jobs: { type: "string" },
     },
     strict: true,
   });
@@ -245,14 +247,26 @@ async function commandRun(args: string[], io: Io): Promise<number> {
   io.out(
     `variant ${variant.id} (${variant.source}, sha256 ${variant.sha256.slice(0, 12)}): ${entries.length} entries x ${repeat} repeat = ${sessions} sessions, model ${options.model}, effort ${options.effort}, cap ${options.budgetUsd} USD each (worst case ${(sessions * options.budgetUsd).toFixed(0)} USD)`,
   );
-  let failed = 0;
+  const jobs = Math.floor(positive(values.jobs, 1, "--jobs"));
+  const work: { entry: DatasetEntry; repeat: number }[] = [];
   for (let r = 1; r <= repeat; r += 1) {
-    for (const entry of entries) {
-      const result = await runEntry(entry, variant, r, options);
+    for (const entry of entries) work.push({ entry, repeat: r });
+  }
+  let failed = 0;
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const item = work[next];
+      next += 1;
+      if (item === undefined) return;
+      const result = await runEntry(item.entry, variant, item.repeat, options);
       io.out(summarizeRun(result));
       if (result.status !== "completed") failed += 1;
     }
-  }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(jobs, work.length) }, () => worker()),
+  );
   io.out(
     `done: ${sessions - failed} completed, ${failed} not completed; records in ${outDir}`,
   );

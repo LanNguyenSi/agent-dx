@@ -2,9 +2,10 @@
 // Stand-in for the claude binary in the evaluation runner tests. It records
 // what it was started with, then answers like `claude -p --output-format json`.
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+const startedAt = Date.now();
 const argv = process.argv.slice(2);
 const recordDir = process.env.STUB_RECORD_DIR;
 const mode = process.env.STUB_MODE ?? "ok";
@@ -22,39 +23,60 @@ function git(args) {
 
 const agentsIndex = argv.indexOf("--agents");
 const isReviewer = agentsIndex >= 0;
+
+// Claims the next free call-<n>.json atomically, so parallel stubs never share a record.
+let recordPath = null;
 if (recordDir) {
-  const n = readdirSync(recordDir).filter((f) => f.startsWith("call-")).length;
-  writeFileSync(
-    join(recordDir, `call-${n}.json`),
-    JSON.stringify(
-      {
-        argv,
-        cwd: process.cwd(),
-        stdin,
-        env: {
-          GH_TOKEN: process.env.GH_TOKEN,
-          GITHUB_TOKEN: process.env.GITHUB_TOKEN,
-          ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
-          HOME: process.env.HOME,
-          CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR,
-        },
-        agents: isReviewer ? JSON.parse(readFileSync(argv[agentsIndex + 1], "utf8")) : null,
-        remotes: isReviewer ? git(["remote"]) : null,
-        head: isReviewer ? git(["rev-parse", "HEAD"]) : null,
-        branch: isReviewer ? git(["branch", "--show-current"]) : null,
-        refs: isReviewer ? git(["for-each-ref", "--format=%(refname)"]) : null,
-        futureReachable: isReviewer && process.env.STUB_FUTURE_SHA
+  let n = readdirSync(recordDir).filter((f) => f.startsWith("call-")).length;
+  for (;;) {
+    const candidate = join(recordDir, `call-${n}.json`);
+    try {
+      closeSync(openSync(candidate, "wx"));
+      recordPath = candidate;
+      break;
+    } catch {
+      n += 1;
+    }
+  }
+}
+
+const record = recordDir
+  ? {
+      argv,
+      cwd: process.cwd(),
+      stdin,
+      startedAt,
+      endedAt: null,
+      env: {
+        GH_TOKEN: process.env.GH_TOKEN,
+        GITHUB_TOKEN: process.env.GITHUB_TOKEN,
+        ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+        HOME: process.env.HOME,
+        CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR,
+      },
+      agents: isReviewer ? JSON.parse(readFileSync(argv[agentsIndex + 1], "utf8")) : null,
+      remotes: isReviewer ? git(["remote"]) : null,
+      head: isReviewer ? git(["rev-parse", "HEAD"]) : null,
+      branch: isReviewer ? git(["branch", "--show-current"]) : null,
+      refs: isReviewer ? git(["for-each-ref", "--format=%(refname)"]) : null,
+      futureReachable:
+        isReviewer && process.env.STUB_FUTURE_SHA
           ? git(["cat-file", "-e", `${process.env.STUB_FUTURE_SHA}^{commit}`]).startsWith("error")
             ? "no"
             : "yes"
           : null,
-        setupMarker: isReviewer ? existsSync("node_modules/marker") : null,
-        fetchHead: isReviewer ? existsSync(".git/FETCH_HEAD") : null,
-      },
-      null,
-      2,
-    ),
-  );
+      setupMarker: isReviewer ? existsSync("node_modules/marker") : null,
+      fetchHead: isReviewer ? existsSync(".git/FETCH_HEAD") : null,
+    }
+  : null;
+if (record) writeFileSync(recordPath, JSON.stringify(record, null, 2));
+
+if (process.env.STUB_DELAY_MS) {
+  await new Promise((resolve) => setTimeout(resolve, Number(process.env.STUB_DELAY_MS)));
+}
+if (record) {
+  record.endedAt = Date.now();
+  writeFileSync(recordPath, JSON.stringify(record, null, 2));
 }
 
 if (mode === "hang" || mode === "hang-stubborn") {
