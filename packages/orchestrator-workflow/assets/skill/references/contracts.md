@@ -75,11 +75,13 @@ expected_output:
 ```
 
 `verification_set` is optional: name it in an implementer or reviewer briefing
-only when the run uses a repository-bound verification set. A briefing that
-names it also carries that set's rules, copied from
-[verification set rules](verification-set-rules.md) as evidence-and-probes.md's
-Verification sets section says; a briefing that does not name it carries no
-such rules.
+only when the repository has a resolved verification set. A briefing names a
+`verification_set` (a non-empty `verification_set.reference`, as
+evidence-and-probes.md's Verification sets section defines) and then also
+carries that set's rules, copied from
+[verification set rules](verification-set-rules.md) as that section says; a
+briefing with an empty or absent `verification_set.reference` names no set and
+carries no such rules.
 `verification_set.reference` identifies the checked-in set selected for this
 repository. The briefing also carries its repository identity and run-local
 frozen snapshot: naming that set by reference plus its frozen digest and

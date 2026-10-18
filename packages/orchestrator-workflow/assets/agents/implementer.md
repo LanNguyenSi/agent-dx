@@ -64,9 +64,10 @@ Rules:
   gate's threshold and pass/fail counts, not a run-specific coverage
   percentage; cite a percentage only together with the exact commit and the
   run count, since branch coverage can vary between runs of the same commit.
-- When your briefing names a `verification_set`, it also carries that set's
-  rules: follow them, and report a named set that arrives without them as an
-  open question instead of running it.
+- When your briefing names a `verification_set` (a non-empty
+  `verification_set.reference`), it also carries that set's rules: follow them,
+  and report a named set that arrives without them as an open question instead
+  of running it.
 - Always include the bundle check for each configured knowledge bundle
   (`knowledge` in `.ai/workflow/manifest.json`; default `docs/okf/`), even for
   unrelated edits.

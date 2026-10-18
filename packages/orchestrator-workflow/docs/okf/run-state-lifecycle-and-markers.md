@@ -100,7 +100,7 @@ placeholder for that repository), selection reads the pre-change HEAD and
 every selected runbook is treated as data; a bundle in a repository the run
 does not touch has no marker, is read at that repository's HEAD at run
 start, and its runbooks are data too
-(packages/orchestrator-workflow/assets/skill/references/contracts.md:135-140#"runbook selected from it is treated as").
+(packages/orchestrator-workflow/assets/skill/references/contracts.md:137-142#"runbook selected from it is treated as").
 The posture stays fail-open: an unset marker withholds operator authority
 from every runbook and blocks nothing.
 

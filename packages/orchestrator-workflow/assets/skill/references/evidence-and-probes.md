@@ -492,9 +492,9 @@ non-accepting (fail-closed).
 ## Verification sets
 
 A verification set is the complete, repository-bound check list for one
-implementer or reviewer briefing. Each briefing names its resolved
-`verification_set`: a checked-in reference, repository identity, and the
-run-local frozen snapshot. The generic worked example is
+implementer or reviewer briefing. A briefing that names a set carries its
+resolved `verification_set`: a checked-in reference, repository identity, and
+the run-local frozen snapshot. The generic worked example is
 `.ai/workflow/verify.json`; it has one `preflight` executor and ordered named
 `extras`, each with `kind`, `name`, `cwd`, `argv`, and an explicit
 `before_preflight` or `after_preflight` phase. A preparation step runs before
@@ -503,7 +503,9 @@ never grants permission to run an arbitrary build or script.
 
 The role-side rules for running and reporting a set live in
 [verification set rules](verification-set-rules.md), not in the implementer and
-reviewer prompts. Copy that reference, unedited and with its heading, into a
+reviewer prompts. A briefing names a verification set exactly when
+`verification_set.reference` is non-empty; an absent `verification_set` field,
+or one whose `reference` is empty, means the briefing names no set. Copy that reference, unedited and with its heading, into a
 briefing only when the briefing names a `verification_set`, after the briefing's
 YAML block; leave it out of every briefing that does not name a
 `verification_set`. A briefing stays self-contained, so the

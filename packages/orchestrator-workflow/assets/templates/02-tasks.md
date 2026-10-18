@@ -37,7 +37,7 @@ acceptance_criteria:
 
 **Verification Set**
 
-<!-- Leave this section empty when the task has no resolved verification set.
+<!-- Leave this section empty when the repository has no resolved verification set.
 Otherwise: checked-in path, repository identity, and run-local frozen snapshot. The
 digest recorded in the briefing is what carries the orchestrator's approval
 of the resolved argv to the implementer and reviewer. The

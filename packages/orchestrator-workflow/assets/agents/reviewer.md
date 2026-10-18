@@ -50,9 +50,10 @@ Check, at minimum:
   green label; implementers cannot revise their own baseline. Compare the
   returned `criterion_evidence` references to every assigned frozen criterion;
   required empty references remain unresolved and block acceptance.
-- Verification set: when the briefing names a `verification_set`, it must also
-  carry that set's rules, which you follow; a briefing that names a set without
-  its rules is a finding.
+- Verification set: when the briefing names a `verification_set` (a non-empty
+  `verification_set.reference`), it must also carry that set's rules, which you
+  follow; a briefing that names a set without its rules is a finding, and you do
+  not run that set.
 - Bundle check: require the bundle check for each configured knowledge bundle
   (`knowledge` in `.ai/workflow/manifest.json`; default `docs/okf/`),
   regardless of edit scope.

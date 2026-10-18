@@ -115,7 +115,7 @@ describe("documented verification sets", () => {
 
   it("states the inclusion rule once, in evidence-and-probes.md: copy the reference only into a briefing that names a set", () => {
     const rule = unwrap(
-      "Copy that reference, unedited and with its heading, into a briefing only when the briefing names a `verification_set`, after the briefing's YAML block; leave it out of every briefing that does not name a `verification_set`.",
+      "A briefing names a verification set exactly when `verification_set.reference` is non-empty; an absent `verification_set` field, or one whose `reference` is empty, means the briefing names no set. Copy that reference, unedited and with its heading, into a briefing only when the briefing names a `verification_set`, after the briefing's YAML block; leave it out of every briefing that does not name a `verification_set`.",
     );
     const evidence = unwrap(
       readRawAsset("skill/references/evidence-and-probes.md"),
@@ -126,19 +126,54 @@ describe("documented verification sets", () => {
     }
   });
 
+  it("uses the one definition of naming a set in every condition that branches on it", () => {
+    const phrase = "a non-empty `verification_set.reference`";
+    for (const file of [
+      "agents/implementer.md",
+      "agents/reviewer.md",
+      "agents/task-slicer.md",
+      "skill/SKILL.md",
+      "skill/references/contracts.md",
+    ]) {
+      expect(unwrap(readRawAsset(file)), file).toContain(phrase);
+    }
+    expect(
+      unwrap(readRawAsset("skill/references/evidence-and-probes.md")),
+    ).toContain("means the briefing names no set");
+    for (const file of [
+      "skill/references/contracts.md",
+      "agents/task-slicer.md",
+    ]) {
+      expect(unwrap(readRawAsset(file)), file).toContain(
+        "the repository has a resolved verification set",
+      );
+    }
+    expect(unwrap(readRawAsset("templates/02-tasks.md"))).toContain(
+      "the repository has no resolved verification set",
+    );
+  });
+
   it("has the reviewer flag a briefing that names a verification_set without carrying its rules", () => {
     expect(unwrap(readRawAsset("agents/reviewer.md"))).toContain(
-      "- Verification set: when the briefing names a `verification_set`, it must also carry that set's rules, which you follow; a briefing that names a set without its rules is a finding.",
+      "- Verification set: when the briefing names a `verification_set` (a non-empty `verification_set.reference`), it must also carry that set's rules, which you follow; a briefing that names a set without its rules is a finding, and you do not run that set.",
     );
   });
 
   it("has the implementer follow the rules a briefing carries with its verification_set", () => {
     expect(unwrap(readRawAsset("agents/implementer.md"))).toContain(
-      "- When your briefing names a `verification_set`, it also carries that set's rules: follow them, and report a named set that arrives without them as an open question instead of running it.",
+      "- When your briefing names a `verification_set` (a non-empty `verification_set.reference`), it also carries that set's rules: follow them, and report a named set that arrives without them as an open question instead of running it.",
     );
   });
 
-  it("keeps the knowledge-bundle check obligation in both role prompts as its own bullet", () => {
+  it("keeps the knowledge-bundle check obligation in both role prompts as its own top-level bullet", () => {
+    // Raw text, before unwrapping: an indented bullet would nest the
+    // obligation under the verification-set bullet and make it look conditional.
+    expect(readRawAsset("agents/implementer.md")).toMatch(
+      /^- Always include the bundle check for each configured knowledge bundle/m,
+    );
+    expect(readRawAsset("agents/reviewer.md")).toMatch(
+      /^- Bundle check: require the bundle check for each configured knowledge bundle/m,
+    );
     expect(unwrap(readRawAsset("agents/implementer.md"))).toContain(
       "- Always include the bundle check for each configured knowledge bundle (`knowledge` in `.ai/workflow/manifest.json`; default `docs/okf/`), even for unrelated edits.",
     );

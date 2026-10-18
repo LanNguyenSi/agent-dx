@@ -37,12 +37,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   briefing names a `verification_set`, so a briefing without a set no longer
   carries the roughly 380 words per role it never uses; each role prompt keeps one
   sentence about sets, and the reviewer flags a briefing that names a set
-  without its rules. The knowledge-bundle check obligation stays in both role
-  prompts as its own bullet and applies to every briefing. The task slicer
+  without its rules and does not run that set. A briefing names a set exactly
+  when its `verification_set.reference` is non-empty. The knowledge-bundle check
+  obligation stays in both role prompts as its own bullet and applies to every
+  briefing. The task slicer
   names a `verification_set` only when the repository has a resolved set. The
   `verification_set` field shape and the set rules themselves are unchanged, so
   a briefing that carries a set behaves as before. The installed implementer,
-  reviewer, task slicer, and skill files report as outdated until refreshed.
+  reviewer, task slicer, skill, and 02-tasks.md template files report as outdated
+  until refreshed.
 
 ## [0.45.0] - 2026-10-18
 
