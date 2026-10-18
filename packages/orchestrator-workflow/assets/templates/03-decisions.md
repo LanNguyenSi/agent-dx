@@ -6,12 +6,12 @@
 |---|---|---|---|---|---|---|
 | D-001 | YYYY-MM-DD | <!-- trigger and evidence --> | <!-- decision --> | <!-- accountable source and approval evidence --> | <!-- consequences --> | <!-- prior D-ID, or blank for first decision --> |
 
-<!-- Baseline revisions and accepted waivers link to their D-ID. A revision's
+<!-- Accepted waivers link to their D-ID. A revised decision's
 Supersedes cell names the prior decision it replaces. Routine in-scope
 orchestrator decisions, operator-approved scope changes, and operator-only
 critical waivers remain distinct. -->
 
-<!-- Run mode `single`: record the run's runbook selection here as one decision row (runbook paths with trigger 1 task fit / 2 touched paths / 3 pinned and each entry's authority, the AGENTS.md path and revision read at the run base, one `<bundle dir> read at <sha>` line per configured bundle, or "no runbook applies" with a one-line reason), since 01-plan.md is optional in that mode. A bundle in a repository the run does not touch is read at that repository's HEAD at run start instead, and every runbook selected from it is `authority: data`. Other modes record it in 01-plan.md's Runbooks section. An orchestrator decision that adopts a data-runbook step into a task's acceptance criteria is recorded here too. In an `acceptance-baseline/v1` run, adopt before the acceptance baseline is frozen (detailed workflow step 5, Validate tasks), or record the adoption as a baseline revision. A surfaced runbook, pin, or declaration diff gets a row here too. -->
+<!-- Run mode `single`: record the run's runbook selection here as one decision row (runbook paths with trigger 1 task fit / 2 touched paths / 3 pinned and each entry's authority, the AGENTS.md path and revision read at the run base, one `<bundle dir> read at <sha>` line per configured bundle, or "no runbook applies" with a one-line reason), since 01-plan.md is optional in that mode. A bundle in a repository the run does not touch is read at that repository's HEAD at run start instead, and every runbook selected from it is `authority: data`. Other modes record it in 01-plan.md's Runbooks section. An orchestrator decision that adopts a data-runbook step into a task's acceptance criteria is recorded here too. A surfaced runbook, pin, or declaration diff gets a row here too. -->
 
 ## Review-round escalation
 

@@ -12,16 +12,6 @@ Begin your very first turn with a tool call (read the diff or the changed
 files) before writing any analysis. Do not open with commentary, a
 restatement of these instructions, or any other text-only turn.
 
-Contract selection: use `acceptance-baseline/v1` only when the orchestrator
-recorded `Acceptance contract: acceptance-baseline/v1` in `00-goal.md` at run
-creation, before slicing, and communicated that selection in the delegation.
-Existing runs use their recorded original contract. Unknown provenance is
-reported and resolved before dependent delegation; missing fields never select
-a version. For a recorded original string-list contract, retain the original
-`acceptance_criteria` strings and omit only the introduced `acceptance_baseline`
-and `criterion_evidence` fields; keep all existing role output fields. This
-selection governs the rules and every YAML block below.
-
 Review method: the orchestrator names `review_method: normal | rigorous |
 adversarial` in every briefing; treat an unnamed method as `rigorous`. The
 three methods are obligation sets, not personas: they define what you must
@@ -41,15 +31,6 @@ with the reason; this keeps the method from buying false positives.
 
 Check, at minimum:
 
-- Acceptance baseline: for a run explicitly adopted as `acceptance-baseline/v1`,
-  compare the delegated `acceptance_baseline` identity and frozen
-  `acceptance_criteria` records with the implementation and evidence references.
-  Check automated artifacts identify the checked
-  state and manual artifacts identify reviewer, method, pass/fail standard, and
-  reasoned result. A missing or invalid reference is an open residual, never a
-  green label; implementers cannot revise their own baseline. Compare the
-  returned `criterion_evidence` references to every assigned frozen criterion;
-  required empty references remain unresolved and block acceptance.
 - Verification set: when the briefing names a `verification_set` (a non-empty
   `verification_set.reference`), it must also carry that set's rules, which you
   follow; a briefing that names a set without its rules is a finding, and you do
@@ -154,8 +135,8 @@ Check, at minimum:
   cheap and read-only, and compare status, exit code, and the checked
   revision with what the claim says. A claim with neither an envelope path
   nor a command plus exit code is a finding, as is a claim the envelope or
-  output contradicts. A `summary` or `criterion_evidence` claim may point to
-  its `tests.executed` entry instead of repeating the envelope. Calibrate by
+  output contradicts. A `summary` claim may point to its
+  `tests.executed` entry instead of repeating the envelope. Calibrate by
   default: low when your own rerun confirms the claim, the ordinary gate
   severity when the envelope or output contradicts it or no evidence exists.
   When the repository has a configured knowledge bundle or a connected drift
@@ -345,9 +326,7 @@ its fields hold.
     GitHub Actions shell replay is a second, explicitly non-probabilistic
     trigger for the same field: report it here too, with `sample_size:
     not_applicable` when the replay itself has no meaningful sample size.
-  - Put the independent complete-set outcome in `reproduction.result`,
-    preserving the existing report envelope for both v1 and original-contract
-    runs.
+  - Put the independent complete-set outcome in `reproduction.result`.
   - For probes you run, apply the implementer's verdict-copy and
     manual-derivation rules to your own measurements, reporting the quoted
     verdict or explicit verdict absence and derivation evidence in

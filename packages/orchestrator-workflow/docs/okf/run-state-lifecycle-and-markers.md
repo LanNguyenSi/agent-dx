@@ -42,26 +42,17 @@ decide *which* value goes into the markers live in
 YAML contracts referenced below live in
 [subagent-contracts-superset.md](subagent-contracts-superset.md).
 
-## Explicit acceptance-baseline adoption
+## One acceptance contract
 
-`acceptance-baseline/v1` is a workflow record for a new run, not a
-machine-authorization marker. Before planning, slicing, or delegation, an
-adopting run records `Acceptance contract: acceptance-baseline/v1` in
-`00-goal.md` with the canonical baseline identity and criterion records. A
-missing v1 field never identifies a run as legacy: existing runs continue
-under their recorded original contract. For a recorded original string-list
-contract, keep the criterion strings and existing role output fields, omitting
-only the introduced baseline and criterion-evidence fields. Unknown provenance
-is resolved before dependent delegation, and the recorded selection travels
-with the task.
-
-The v1 task block in `02-tasks.md` copies the full assigned criterion records
-unchanged; its checklist is non-normative tracking by frozen ID. Implementers
-return the baseline identity and criterion evidence references. The coverage
-and required-residual sections in `04-implementation-summary.md` apply only
-to v1 and index those references relative to the owning run directory; they
-do not create a result store or acceptance verdict. Existing runs retain
-their original summary and checklist semantics.
+There is no contract-selection marker. `00-goal.md` carries the run-base, mode,
+and outward markers and no acceptance-contract declaration, and each task's
+`acceptance_criteria` is a list of plain strings in `02-tasks.md` and in the
+delegation input. The earlier `acceptance-baseline/v1` record (a baseline
+identity with structured criterion records, an evidence index in
+`04-implementation-summary.md`, and a `Acceptance contract:` line in
+`00-goal.md`) is retired; 0.45.x was the last release that supports it. No
+kit source reads a contract marker, so a run that still carries one is plain
+prose to the kit.
 
 ## The run-base marker: change-binding, fails OPEN
 
@@ -100,7 +91,7 @@ placeholder for that repository), selection reads the pre-change HEAD and
 every selected runbook is treated as data; a bundle in a repository the run
 does not touch has no marker, is read at that repository's HEAD at run
 start, and its runbooks are data too
-(packages/orchestrator-workflow/assets/skill/references/contracts.md:137-142#"runbook selected from it is treated as").
+(packages/orchestrator-workflow/assets/skill/references/contracts.md:113-118#"runbook selected from it is treated as").
 The posture stays fail-open: an unset marker withholds operator authority
 from every runbook and blocks nothing.
 
@@ -145,7 +136,7 @@ packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:
 The policy section installed into `AGENTS.md` carries the same two facts in
 one bullet: every touched worktree gets the pointer, and `00-goal.md` gets
 one keyed `run-base[<repo-basename>]` marker per repository for a multi-repo
-run (packages/orchestrator-workflow/assets/agents-md-section.md:314#"marker per repository for multi-repo runs").
+run (packages/orchestrator-workflow/assets/agents-md-section.md:311#"marker per repository for multi-repo runs").
 
 For a run that touches more than one repository, the orchestrator records
 one keyed marker per repository on its own line beside the unkeyed one,
@@ -202,9 +193,9 @@ section as the one site that specifies the pointer and the keyed marker:
 the `.ai/run` contract with its own specific phrases
 (docs-consistency.test.ts:464-470#"make sure it is ignored"), the keyed
 example verbatim
-(docs-consistency.test.ts:473-475#"run-base[<repo-basename>] = <sha>"), and the
+(docs-consistency.test.ts:473-474#"run-base[<repo-basename>] = <sha>"), and the
 keyed-marker grammar rule with both deviation outcomes
-(docs-consistency.test.ts:477-482#"either rejected (it blocks the run) or not recognised at all"). The other
+(docs-consistency.test.ts:477-480#"either rejected (it blocks the run) or not recognised at all"). The other
 places that mention the pointer (step 1, the harness notes, the policy
 section's Run state bullet, the README, and the INSTALL-AGENT.md write-surface
 listings) are copies of that section and carry no sentence pin.
@@ -225,10 +216,10 @@ SKILL.md's closing instruction: "replace the `TODO` in each
 `<!-- solution-acceptance: ... = TODO -->` marker with the chosen enum
 value. That marker line is the machine-readable signal the harness
 solution-acceptance run-gate reads, so leaving it as `TODO` keeps the run
-non-accepting (fail-closed)" (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:490#"non-accepting (fail-closed)."). A freshly-copied run is
+non-accepting (fail-closed)" (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:450#"non-accepting (fail-closed)."). A freshly-copied run is
 therefore non-accepting by construction; this contract shipped in 0.7.0
 (`CHANGELOG.md:#[0.7.0]`). Consumer is "the harness solution-acceptance
-run-gate" per packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:488#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
+run-gate" per packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:448#"value. That marker line is the machine-readable signal"; this doc cites that in-repo statement only, it
 does not assert the external gate's internals. Pinned by
 template-markers.test.ts:32-34#"/solution-acceptance:\s*acceptance-recommendation\s*=\s*" (regexes) and template-markers.test.ts:37-38#"const matches = [...handoffTemplate.matchAll(finalStatusRe)];" and template-markers.test.ts:43-44#"const matches = [...reviewTemplate.matchAll(recommendationRe)];" (one marker per
 template, default `TODO`).
@@ -240,7 +231,7 @@ trigger/evidence, decision, accountable authority/source, consequences, and
 an optional superseded decision reference (`03-decisions.md:5#"| ID | Date | Trigger / Evidence |"`). Its review-round escalation table and
 `review-round-escalation` marker remain a separate, unchanged reader
 convention. The decision table records the source and approval evidence for a
-baseline revision or waiver; no reader grants approval merely because a row
+waiver; no reader grants approval merely because a row
 exists.
 
 ## The findings-table Severity/Decision header: the machine-read surface behind acceptance-recommendation
@@ -289,7 +280,7 @@ replace the row when transferring findings, or delete it outright for a
 genuine zero-findings review (a header row with no data rows is valid;
 leaving the legend row next to real finding rows is also fine), and
 SKILL.md's step 7 carries the same one-sentence rule
-(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:357#"rows as the template never having been filled in. When"). The runtime half (grounding-mcp's reader treating a
+(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:322#"rows as the template never having been filled in. When"). The runtime half (grounding-mcp's reader treating a
 survived, unaccompanied placeholder row as an explicit format blocker,
 instead of silently reporting zero findings) is a lockstep sibling change in
 the grounding-mcp repo, out of scope for this bundle; this doc, like the
@@ -329,28 +320,28 @@ applying this guidance before filling the file: check whether the change
 touched any path a bundle doc claims as a `sources:` entry, and if so either
 update the affected docs (re-verify and re-stamp) or record a follow-up
 task, running the bundle validator when one is available (for example
-`okf-kit check`) (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:477#"validator when one is available (for example"). It is explicitly non-gating: "apply
+`okf-kit check`) (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:437#"validator when one is available (for example"). It is explicitly non-gating: "apply
 this optional guidance" and "Repos without a bundle are unaffected"
-(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:471#"guidance: when the repo carries a curated knowledge"; packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:478#"without a bundle are unaffected"). Step 9 is a safety net for sources
+(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:431#"guidance: when the repo carries a curated knowledge"; packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:438#"without a bundle are unaffected"). Step 9 is a safety net for sources
 the task list missed: bundle docs whose sources a task changes are listed in
 that task's `relevant_docs` at slicing and re-stamped by that task, so the
 hand-off check covers only sources no task re-stamped
-(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:467-469#"hand-off check is a safety net for sources the task list missed. Before"). Since 0.24.0 (placement rule) step 9 also
+(packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:427-429#"hand-off check is a safety net for sources the task list missed. Before"). Since 0.24.0 (placement rule) step 9 also
 carries a one-sentence placement check for the orchestrator: before handing
 off, check that no org-, machine- or point-in-time-bound evidence was added
-to a reusable instruction file (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:484#"or the consuming workspace, with a pointer left behind."); the fix is to move the
+to a reusable instruction file (packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:444#"or the consuming workspace, with a pointer left behind."); the fix is to move the
 evidence to the changelog, the run files, or the consuming workspace, with a
 pointer left behind. `reviewer.md`'s "Check, at minimum" list carries a
 matching check for the same thing on the implementer side of a run. This is
 the symmetric counterpart to the 0.8.0
 discovery-side rule (the Discover step already checks each configured knowledge bundle, default `docs/okf/`, before
-hand-mapping terrain, packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:32#"with an index) before mapping terrain by hand, treating"); the 0.12.0 changelog entry names it
+hand-mapping terrain, packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:21#"with an index) before mapping terrain by hand, treating"); the 0.12.0 changelog entry names it
 the loop-closer and cites the motivating evidence: four upkeep sweeps on
 2026-07-16 found 48/24/11/8 stale claims across the four oldest bundles
 (`CHANGELOG.md:#[0.12.0]`). The hook's sentences carry no sentence pin; the
 template side is the contract and stays pinned: the optional Knowledge Bundle
 section of `06-handoff.md` and its outcome vocabulary
-(docs-consistency.test.ts:437-442#"Outcome: updated | not affected | follow-up filed.",
+(docs-consistency.test.ts:437-440#"Outcome: updated | not affected | follow-up filed.",
 checked as `## Knowledge Bundle` plus `Outcome: updated | not affected |
 follow-up filed.`).
 
@@ -373,7 +364,7 @@ anything inside it.
 (role enumeration, the safety core, task-slicer/subagent-contract field
 superset); only its Run state `describe` block above and its
 `06-handoff.md template carries the Knowledge Bundle section`
-(docs-consistency.test.ts:434-443#"Outcome: updated | not affected | follow-up filed.") `describe` block are this doc's topic.
+(docs-consistency.test.ts:434-440#"Outcome: updated | not affected | follow-up filed.") `describe` block are this doc's topic.
 The review-gate decision procedure that produces the values written into
 `acceptance-recommendation`/`final-status` (severities, waiver rules, who
 signs off) is out of scope here; see
@@ -429,11 +420,10 @@ section
 `SKILL.md` and the reference's Intent only point there. `single` makes
 `01-plan.md` and `02-tasks.md` optional (it records its runbook selection in `03-decisions.md` instead of `01-plan.md`'s `## Runbooks` section) and keeps `04-implementation-summary.md`
 (packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md:244#"Run files per mode:"),
-because the verification set, the mutation probes, the baseline coverage
-table, and the run's own runbook consultation record
-(packages/orchestrator-workflow/assets/templates/04-implementation-summary.md:125#"## Runbooks Consulted")
+because the verification set, the mutation probes, and the run's own runbook consultation record
+(packages/orchestrator-workflow/assets/templates/04-implementation-summary.md:87#"## Runbooks Consulted")
 live there; `batch` adds an Integration section to the same template
-(packages/orchestrator-workflow/assets/templates/04-implementation-summary.md:140#"## Integration").
+(packages/orchestrator-workflow/assets/templates/04-implementation-summary.md:102#"## Integration").
 The marker line and its explanatory comment deliberately avoid naming both
 tokens of a run-base marker, which the consuming reader would flag as a
 malformed run-base attempt; the pin for that is
@@ -451,7 +441,7 @@ normative place. The Core rules bullet on implementation now reads
 it names `delegated` as the default and the other two modes in one clause
 each, and ends by pointing to the skill's Run mode section. The Run state
 list of the policy section names the marker beside the keyed run-base marker
-(packages/orchestrator-workflow/assets/agents-md-section.md:314#"marker per repository for multi-repo runs").
+(packages/orchestrator-workflow/assets/agents-md-section.md:311#"marker per repository for multi-repo runs").
 The README has a short "Run modes" section
 (packages/orchestrator-workflow/README.md:204#"## Run modes")
 that links the reference. Both sites only name the modes and point to the
@@ -488,16 +478,16 @@ The grant is deliberately narrow. `push-branch` covers a push of one of the
 run's own task branches and `open-pr` opening a pull request from one of
 them; neither ever covers a force push, a push to the default branch, or a
 merge into it
-(packages/orchestrator-workflow/assets/agents-md-section.md:258-262#"into the default branch."). Every other outward action (merging, commenting,
+(packages/orchestrator-workflow/assets/agents-md-section.md:255-259#"into the default branch."). Every other outward action (merging, commenting,
 creating, editing, transitioning, or closing a ticket or pull request,
 approving, deleting a remote branch, triggering CI or a deployment,
 releasing, publishing, messaging, any other external write) always needs
 per-action operator confirmation and cannot be granted by the marker at all
-(packages/orchestrator-workflow/assets/agents-md-section.md:263-268#"any other write to an external system."). The marker only ever waives the
+(packages/orchestrator-workflow/assets/agents-md-section.md:260-265#"any other write to an external system."). The marker only ever waives the
 orchestrator's own per-action confirmation; it never authorizes a subagent,
 and an outward action stays orchestrator-only whether or not the marker
 grants its class
-(packages/orchestrator-workflow/assets/agents-md-section.md:248-249#"only the orchestrator ever performs").
+(packages/orchestrator-workflow/assets/agents-md-section.md:245-246#"only the orchestrator ever performs").
 
 The grant condition sits on the reader side, not only on the writer: a class
 counts as granted only when `03-decisions.md` carries the
@@ -519,7 +509,7 @@ scope in their own words. AGENTS.md's Outward-facing actions section
 defines an outward action itself by boundary (any write to a system outside
 the local checkout and the run directory), with the named actions as
 examples of that boundary, not the complete membership test
-(packages/orchestrator-workflow/assets/agents-md-section.md:237-246#"spawned it.").
+(packages/orchestrator-workflow/assets/agents-md-section.md:234-243#"spawned it.").
 Pinned by `test/outward-actions.test.ts`, a sibling to
 `template-markers.test.ts` and `run-mode.test.ts` for this marker: the rule
 is a safety-core rule, so its sentences are pinned in full at one site, the
