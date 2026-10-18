@@ -343,6 +343,21 @@ describe("runGrouped", () => {
     expect(() => process.kill(childPid, 0)).toThrow();
   }, 30_000);
 
+  it("ends a cooperative group on SIGTERM without waiting for the kill grace", async () => {
+    const out = join(work, "c.out");
+    const started = Date.now();
+    const result = await runGrouped(STUB, [], {
+      cwd: work,
+      env: { ...process.env, STUB_MODE: "hang", STUB_RECORD_DIR: recordDir },
+      timeoutMs: 600,
+      killGraceMs: 20_000,
+      stdoutFile: out,
+      stderrFile: out,
+    });
+    expect(result.timedOut).toBe(true);
+    expect(Date.now() - started).toBeLessThan(8000);
+  }, 60_000);
+
   it("kills a group member the leader left behind after exiting", async () => {
     const out = join(work, "h.out");
     const pidFile = join(work, "h.pid");

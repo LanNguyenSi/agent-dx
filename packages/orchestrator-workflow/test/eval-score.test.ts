@@ -507,6 +507,27 @@ describe("compareVariants", () => {
     });
   });
 
+  it("treats a delta exactly as large as the noise range as within noise", () => {
+    // Recall by repeat is 1 and 0.5 (range 0.5, mean 0.75); B scores 0.25.
+    const a = [
+      s({
+        repeat: 1,
+        known_total: 2,
+        known_matched: 2,
+        matched_ids: ["K1", "K2"],
+      }),
+      s({ repeat: 2, known_total: 2, known_matched: 1, matched_ids: ["K1"] }),
+    ];
+    const b = [s({ known_total: 4, known_matched: 1, matched_ids: ["K1"] })];
+    const comparison = compareVariants(
+      { aggregate: aggregate("a", a), scores: a, noise: computeNoise(a) },
+      { aggregate: aggregate("b", b), scores: b },
+    );
+    expect(comparison.recall.delta).toBe(-0.5);
+    expect(comparison.recall.noise).toBe(0.5);
+    expect(comparison.recall.exceeds_noise).toBe(false);
+  });
+
   it("marks a delta within the noise range", () => {
     const b = aRuns.map((r) => ({ ...r }));
     const comparison = compareVariants(
