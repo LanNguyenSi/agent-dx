@@ -1,7 +1,7 @@
 # Bundle log
 
-- 2026-10-18T19:38:34Z, charter CHANGELOG wording: the `[Unreleased]` entry no longer points to a clause map
-  outside the repository; it says a split safety-core sentence keeps each half whole at one site
+- 2026-10-18T19:38:34Z, charter CHANGELOG wording: the `[Unreleased]` entry describes the split and reworded
+  safety-core sentences directly; it says a split one keeps each half whole at one site
   and a reworded one states the same condition (same line count, no citation moved). Re-verified:
   the claims of the re-stamped docs are unchanged. Re-stamped: `review-gate-and-waivers.md`,
   `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md`.
