@@ -1,5 +1,13 @@
 # Bundle log
 
+- 2026-10-18T16:11:58Z, doctor parses Codex config files with a TOML parser: `doctor.ts` and
+  `doctor.test.ts` changed, the `CHANGELOG.md` bullet was reworded and the sibling-drift
+  allowlist geometry in `docs-consistency.test.ts` followed. Re-verified against the change:
+  none of these docs describes the Codex config reader, their claims are unchanged.
+  Re-stamped: `install-fence-mechanics.md`, `model-preselection.md`,
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and
+  `subagent-contracts-superset.md`.
+
 - 2026-10-18T16:00:28Z, Codex budget round 2 (real TOML parser): the
   hand-written one-key `project_doc_max_bytes` reader and its integer regex
   in `doctor.ts` are gone; each layer's `config.toml` is now parsed whole
