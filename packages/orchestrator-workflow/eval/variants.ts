@@ -5,6 +5,9 @@ import { basename, extname } from "node:path";
 
 import { parse as parseYaml } from "yaml";
 
+import { ID_PATTERN, isValidId } from "./dataset.js";
+import { hostGitEnv } from "./isolation.js";
+
 /** Repository-relative path of the shipped reviewer prompt. */
 export const REVIEWER_PROMPT_PATH =
   "packages/orchestrator-workflow/assets/agents/reviewer.md";
@@ -27,20 +30,38 @@ export function sha256(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
 
+/**
+ * A variant id names a results directory, so it follows the entry id
+ * pattern: no `/`, no `..`, nothing that leaves the results directory.
+ */
 export function makeVariant(
   id: string,
   source: string,
   text: string,
 ): PromptVariant {
+  if (!isValidId(id)) {
+    throw new Error(
+      `variant id ${JSON.stringify(id)} must match ${ID_PATTERN.source}; pass --variant-id`,
+    );
+  }
   return { id, source, text, sha256: sha256(text) };
 }
 
 /** Reads the shipped reviewer prompt at a git revision of `repoRoot`. */
-export function readReviewerAtRevision(repoRoot: string, rev: string): string {
+export function readReviewerAtRevision(
+  repoRoot: string,
+  rev: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
   return execFileSync(
     "git",
     ["-C", repoRoot, "show", `${rev}:${REVIEWER_PROMPT_PATH}`],
-    { encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
+    {
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+      env: hostGitEnv(env),
+      timeout: 60_000,
+    },
   );
 }
 
@@ -93,13 +114,14 @@ export interface VariantRequest {
   id?: string;
   repoRoot: string;
   revision: string;
+  env?: NodeJS.ProcessEnv;
 }
 
 /** Resolves a `--variant` argument to a prompt variant. */
 export function resolveVariant(request: VariantRequest): PromptVariant {
   const { spec, repoRoot, revision } = request;
   if (spec === "current" || spec === "degraded") {
-    const base = readReviewerAtRevision(repoRoot, revision);
+    const base = readReviewerAtRevision(repoRoot, revision, request.env);
     const source = `git:${revision}:${REVIEWER_PROMPT_PATH}`;
     if (spec === "current") {
       return makeVariant(request.id ?? "current", source, base);

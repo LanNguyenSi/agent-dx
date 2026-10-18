@@ -13,18 +13,35 @@ import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { datasetCounts, loadDataset, MEDIUM_PLUS } from "./dataset.js";
-import type { Dataset, DatasetEntry } from "./dataset.js";
+import { renderCanary, runCanary } from "./canary.js";
+import {
+  LEAK_TAGS,
+  datasetCounts,
+  loadDataset,
+  MEDIUM_PLUS,
+} from "./dataset.js";
+import type { Dataset, DatasetEntry, LeakTag } from "./dataset.js";
+import {
+  checkPlacement,
+  createRunScratch,
+  hostGitEnv,
+  protectedHome,
+  redactPaths,
+  sessionEnv,
+} from "./isolation.js";
+import { runGuarded } from "./processes.js";
 import { renderAggregates, renderComparison } from "./report.js";
-import { runEntry, runGrouped, scrubEnv, summarizeRun } from "./runner.js";
+import { removeTree, runEntry, summarizeRun } from "./runner.js";
 import type { RunnerOptions } from "./runner.js";
 import {
   aggregate,
   buildJudgePrompt,
   compareVariants,
   computeNoise,
+  DEFAULT_NOISE_FLOOR_ENTRIES,
   parseJudgeAnswer,
   scoreRun,
+  splitByLeak,
 } from "./score.js";
 import type { JudgeFile, RunResult, RunScore } from "./score.js";
 import { DEFAULT_REVISION, resolveVariant } from "./variants.js";
@@ -39,23 +56,34 @@ const USAGE = `Usage: eval <command> [options]
 
 Commands:
   validate-dataset --dataset <dir>
+  canary  --dataset <dir> --out <dir> [--model opus] [--effort high]
+          [--claude <bin>] [--guard <bin>] [--timeout-min 15] [--budget-usd 2]
+          [--max-rss-mib 8192] [--scratch <dir>] [--no-bare]
+          [--api-key-env ANTHROPIC_API_KEY]
   run     --dataset <dir> --out <dir> --variant current|degraded|file:<path>
           [--variant-id <id>] [--rev <git rev>] [--repeat <n>] [--only id,id]
           [--kind finding|control] [--model opus] [--effort high]
-          [--claude <bin>] [--timeout-min 45] [--budget-usd 15]
-          [--scratch <dir>] [--keep-checkout] [--force] [--no-bare]
-          [--keep-home] [--api-key-env ANTHROPIC_API_KEY] [--repo-root <dir>]
-          [--jobs <n>]
+          [--claude <bin>] [--guard <bin>] [--timeout-min 45]
+          [--budget-usd 15] [--max-rss-mib 8192] [--scratch <dir>]
+          [--keep-checkout] [--force] [--no-retry] [--no-bare]
+          [--api-key-env ANTHROPIC_API_KEY] [--repo-root <dir>] [--jobs <n>]
   judge   --dataset <dir> --out <dir> [--judge-model sonnet] [--claude <bin>]
-          [--budget-usd 2] [--attempts 2] [--no-bare] [--api-key-env NAME]
-  score   --dataset <dir> --out <dir>
+          [--guard <bin>] [--budget-usd 2] [--attempts 2] [--no-bare]
+          [--api-key-env ANTHROPIC_API_KEY]
+  score   --dataset <dir> --out <dir> [--exclude-leak high|none|<tag,tag>]
   compare --dataset <dir> --out <dir> --a <variant id> --b <variant id>
+          [--exclude-leak high] [--noise-floor <entries>]
 `;
 
-const DEFAULT_REPO_ROOT = (): string => {
+const DEFAULT_GUARD = "agent-primitives";
+const DEFAULT_MAX_RSS_MIB = 8192;
+
+const DEFAULT_REPO_ROOT = (env: NodeJS.ProcessEnv): string => {
   const here = dirname(fileURLToPath(import.meta.url));
   return execFileSync("git", ["-C", here, "rev-parse", "--show-toplevel"], {
     encoding: "utf8",
+    env: hostGitEnv(env),
+    timeout: 60_000,
   }).trim();
 };
 
@@ -149,29 +177,165 @@ function positive(
   return n;
 }
 
+function nonNegative(
+  value: string | undefined,
+  fallback: number,
+  name: string,
+): number {
+  if (value === undefined) return fallback;
+  const n = Number(value);
+  if (!(n >= 0) || !Number.isFinite(n))
+    throw new Error(`${name} must be zero or a positive number`);
+  return n;
+}
+
+/** `--exclude-leak`: `none` keeps every entry; otherwise a comma list of tags (default `high`). */
+export function parseLeakExclusion(value: string | undefined): LeakTag[] {
+  if (value === undefined) return ["high"];
+  if (value.trim() === "none") return [];
+  const tags = value.split(",").map((s) => s.trim());
+  for (const tag of tags) {
+    if (!(LEAK_TAGS as readonly string[]).includes(tag)) {
+      throw new Error(
+        `--exclude-leak takes none or a list of ${LEAK_TAGS.join(", ")} (got ${tag})`,
+      );
+    }
+  }
+  return tags as LeakTag[];
+}
+
+function requireKey(io: Io, apiKeyEnv: string): boolean {
+  if (io.env[apiKeyEnv] === undefined || io.env[apiKeyEnv] === "") {
+    io.err(
+      `${apiKeyEnv} is not set: sessions authenticate with an API key from that variable (see --api-key-env)`,
+    );
+    return false;
+  }
+  return true;
+}
+
+const SESSION_OPTIONS = {
+  dataset: { type: "string" },
+  out: { type: "string" },
+  model: { type: "string" },
+  effort: { type: "string" },
+  claude: { type: "string" },
+  guard: { type: "string" },
+  "timeout-min": { type: "string" },
+  "budget-usd": { type: "string" },
+  "max-rss-mib": { type: "string" },
+  scratch: { type: "string" },
+  "no-bare": { type: "boolean" },
+  "api-key-env": { type: "string" },
+} as const;
+
+type SessionValues = {
+  dataset?: string;
+  out?: string;
+  model?: string;
+  effort?: string;
+  claude?: string;
+  guard?: string;
+  "timeout-min"?: string;
+  "budget-usd"?: string;
+  "max-rss-mib"?: string;
+  scratch?: string;
+  "no-bare"?: boolean;
+  "api-key-env"?: string;
+};
+
+/** Runner options shared by `run` and `canary`, or an error already reported. */
+function sessionOptions(
+  values: SessionValues,
+  dataset: Dataset,
+  io: Io,
+  defaults: { timeoutMin: number; budgetUsd: number },
+): RunnerOptions | null {
+  if (values.out === undefined) {
+    io.err("--out is required");
+    return null;
+  }
+  const apiKeyEnv = values["api-key-env"] ?? "ANTHROPIC_API_KEY";
+  if (!requireKey(io, apiKeyEnv)) return null;
+  const outDir = resolve(values.out);
+  const scratchRoot = resolve(values.scratch ?? join(tmpdir(), "ow-eval"));
+  const placement = checkPlacement({
+    scratchRoot,
+    outDir,
+    datasetDir: dataset.dir,
+    home: protectedHome(io.env),
+  });
+  if (placement !== null) {
+    io.err(placement);
+    return null;
+  }
+  return {
+    claudeBin: values.claude ?? "claude",
+    guardBin: values.guard ?? DEFAULT_GUARD,
+    model: values.model ?? "opus",
+    effort: values.effort ?? "high",
+    timeoutMs:
+      positive(values["timeout-min"], defaults.timeoutMin, "--timeout-min") *
+      60_000,
+    budgetUsd: positive(
+      values["budget-usd"],
+      defaults.budgetUsd,
+      "--budget-usd",
+    ),
+    maxRssMiB: positive(
+      values["max-rss-mib"],
+      DEFAULT_MAX_RSS_MIB,
+      "--max-rss-mib",
+    ),
+    scratchRoot,
+    outDir,
+    datasetDir: dataset.dir,
+    bare: values["no-bare"] !== true,
+    apiKeyEnv,
+    keepCheckout: false,
+    force: false,
+    retryFailed: true,
+    env: io.env,
+  };
+}
+
+async function commandCanary(args: string[], io: Io): Promise<number> {
+  const { values } = parseArgs({
+    args,
+    options: SESSION_OPTIONS,
+    strict: true,
+  });
+  const dataset = loadOrReport(values.dataset, io);
+  if (dataset === null) return 2;
+  const options = sessionOptions(values, dataset, io, {
+    timeoutMin: 15,
+    budgetUsd: 2,
+  });
+  if (options === null) return 2;
+  const recordDir = join(
+    options.outDir,
+    "canary",
+    new Date().toISOString().replace(/[:.]/g, "-"),
+  );
+  const result = await runCanary(options, recordDir);
+  io.out(renderCanary(result));
+  return result.status === "pass" ? 0 : 1;
+}
+
 async function commandRun(args: string[], io: Io): Promise<number> {
   const { values } = parseArgs({
     args,
     options: {
-      dataset: { type: "string" },
-      out: { type: "string" },
+      ...SESSION_OPTIONS,
       variant: { type: "string" },
       "variant-id": { type: "string" },
       rev: { type: "string" },
       repeat: { type: "string" },
       only: { type: "string" },
       kind: { type: "string" },
-      model: { type: "string" },
-      effort: { type: "string" },
-      claude: { type: "string" },
-      "timeout-min": { type: "string" },
-      "budget-usd": { type: "string" },
-      scratch: { type: "string" },
       "keep-checkout": { type: "boolean" },
       force: { type: "boolean" },
-      "no-bare": { type: "boolean" },
-      "keep-home": { type: "boolean" },
-      "api-key-env": { type: "string" },
+      "no-retry": { type: "boolean" },
       "repo-root": { type: "string" },
       jobs: { type: "string" },
     },
@@ -191,30 +355,16 @@ async function commandRun(args: string[], io: Io): Promise<number> {
     io.err("--kind must be finding or control");
     return 2;
   }
-  const bare = values["no-bare"] !== true;
-  const apiKeyEnv = values["api-key-env"] ?? "ANTHROPIC_API_KEY";
-  if (bare && io.env[apiKeyEnv] === undefined) {
-    io.err(
-      `bare mode authenticates with ${apiKeyEnv}, which is not set (or pass --no-bare)`,
-    );
-    return 2;
-  }
-  const outDir = resolve(values.out);
-  const scratchRoot = resolve(values.scratch ?? join(tmpdir(), "ow-eval"));
+  const base = sessionOptions(values, dataset, io, {
+    timeoutMin: 45,
+    budgetUsd: 15,
+  });
+  if (base === null) return 2;
   const options: RunnerOptions = {
-    claudeBin: values.claude ?? "claude",
-    model: values.model ?? "opus",
-    effort: values.effort ?? "high",
-    timeoutMs: positive(values["timeout-min"], 45, "--timeout-min") * 60_000,
-    budgetUsd: positive(values["budget-usd"], 15, "--budget-usd"),
-    scratchRoot,
-    outDir,
-    bare,
-    isolateHome: bare && values["keep-home"] !== true,
-    apiKeyEnv,
+    ...base,
     keepCheckout: values["keep-checkout"] === true,
     force: values.force === true,
-    env: io.env,
+    retryFailed: values["no-retry"] !== true,
   };
   const repeat = Math.floor(positive(values.repeat, 1, "--repeat"));
   const entries = selectEntries(dataset, values.only, values.kind);
@@ -225,14 +375,15 @@ async function commandRun(args: string[], io: Io): Promise<number> {
   const variant = resolveVariant({
     spec: values.variant,
     id: values["variant-id"],
-    repoRoot: resolve(values["repo-root"] ?? DEFAULT_REPO_ROOT()),
+    repoRoot: resolve(values["repo-root"] ?? DEFAULT_REPO_ROOT(io.env)),
     revision: values.rev ?? DEFAULT_REVISION,
+    env: io.env,
   });
-  const variantDir = join(outDir, variant.id);
+  const variantDir = join(options.outDir, variant.id);
   const snapshot = join(variantDir, "variant-prompt.md");
   if (existsSync(snapshot) && readFileSync(snapshot, "utf8") !== variant.text) {
     io.err(
-      `variant id ${variant.id} already exists in ${outDir} with a different prompt; use another --variant-id or --out`,
+      `variant id ${variant.id} already exists in ${options.outDir} with a different prompt; use another --variant-id or --out`,
     );
     return 2;
   }
@@ -268,9 +419,40 @@ async function commandRun(args: string[], io: Io): Promise<number> {
     Array.from({ length: Math.min(jobs, work.length) }, () => worker()),
   );
   io.out(
-    `done: ${sessions - failed} completed, ${failed} not completed; records in ${outDir}`,
+    `done: ${sessions - failed} completed, ${failed} not completed; records in ${options.outDir}`,
   );
   return 0;
+}
+
+/**
+ * The review text the judge sees: the session's own paths, the results and
+ * dataset trees and the home directory replaced by labels, and the entry id
+ * removed, so nothing in it names the variant, the entry or the dataset.
+ */
+export function judgeView(
+  result: RunResult,
+  context: { outDir: string; datasetDir: string; home: string },
+): string {
+  const paths = [
+    ...(result.paths === undefined
+      ? []
+      : [
+          { path: result.paths.worktree, label: "<worktree>" },
+          { path: result.paths.evidence, label: "<evidence>" },
+          { path: result.paths.run_files, label: "<run-files>" },
+        ]),
+    { path: context.outDir, label: "<results>", whole: true },
+    { path: context.datasetDir, label: "<dataset>", whole: true },
+    {
+      path: dirname(context.datasetDir),
+      label: "<dataset-parent>",
+      whole: true,
+    },
+    { path: context.home, label: "<home>", whole: true },
+  ];
+  return redactPaths(result.final_text, paths)
+    .split(result.entry_id)
+    .join("<entry>");
 }
 
 async function commandJudge(args: string[], io: Io): Promise<number> {
@@ -281,6 +463,7 @@ async function commandJudge(args: string[], io: Io): Promise<number> {
       out: { type: "string" },
       "judge-model": { type: "string" },
       claude: { type: "string" },
+      guard: { type: "string" },
       "budget-usd": { type: "string" },
       attempts: { type: "string" },
       "no-bare": { type: "boolean" },
@@ -296,17 +479,15 @@ async function commandJudge(args: string[], io: Io): Promise<number> {
   }
   const bare = values["no-bare"] !== true;
   const apiKeyEnv = values["api-key-env"] ?? "ANTHROPIC_API_KEY";
-  if (bare && io.env[apiKeyEnv] === undefined) {
-    io.err(
-      `bare mode authenticates with ${apiKeyEnv}, which is not set (or pass --no-bare)`,
-    );
-    return 2;
-  }
+  if (!requireKey(io, apiKeyEnv)) return 2;
+  const apiKey = io.env[apiKeyEnv];
   const model = values["judge-model"] ?? "sonnet";
   const claude = values.claude ?? "claude";
+  const guardBin = values.guard ?? DEFAULT_GUARD;
   const budget = positive(values["budget-usd"], 2, "--budget-usd");
   const attempts = Math.floor(positive(values.attempts, 2, "--attempts"));
   const outDir = resolve(values.out);
+  const home = protectedHome(io.env);
   const byId = new Map(dataset.entries.map((e) => [e.id, e]));
   const workRoot = mkdtempSync(join(tmpdir(), "ow-eval-judge-"));
   let judged = 0;
@@ -323,19 +504,22 @@ async function commandJudge(args: string[], io: Io): Promise<number> {
       const known = entry.known_findings.filter((k) =>
         MEDIUM_PLUS.includes(k.severity),
       );
-      const prompt = buildJudgePrompt(known, result.final_text);
+      const prompt = buildJudgePrompt(
+        known,
+        judgeView(result, { outDir, datasetDir: dataset.dir, home }),
+      );
       writeFileSync(join(dir, "judge-prompt.md"), prompt);
       let done = false;
       let lastErrors: string[] = [];
       for (let attempt = 1; attempt <= attempts && !done; attempt += 1) {
-        // A fresh empty directory per call: the judge has no files to read and
-        // nothing in its path names the variant.
-        const work = mkdtempSync(join(workRoot, "j-"));
-        const stdoutFile = join(work, "out.json");
-        const extra: Record<string, string> = {};
-        const key = io.env[apiKeyEnv];
-        if (bare && key !== undefined) extra.ANTHROPIC_API_KEY = key;
-        const run = await runGrouped(
+        // A fresh, empty scratch per call: the judge has no files to read and
+        // nothing in its paths names the variant or the entry.
+        const scratch = createRunScratch(workRoot);
+        mkdirSync(scratch.checkout);
+        const promptFile = join(scratch.meta, "judge-prompt.md");
+        writeFileSync(promptFile, prompt);
+        const stdoutFile = join(scratch.meta, "out.json");
+        await runGuarded(
           claude,
           [
             "-p",
@@ -343,6 +527,11 @@ async function commandJudge(args: string[], io: Io): Promise<number> {
             model,
             "--tools",
             "",
+            "--strict-mcp-config",
+            "--mcp-config",
+            '{"mcpServers":{}}',
+            "--settings",
+            '{"crossSessionInbound":"refuse"}',
             "--no-session-persistence",
             "--output-format",
             "json",
@@ -351,16 +540,25 @@ async function commandJudge(args: string[], io: Io): Promise<number> {
             ...(bare ? ["--bare"] : []),
           ],
           {
-            cwd: work,
-            env: scrubEnv(io.env, extra),
+            guardBin,
+            cwd: scratch.checkout,
+            env: sessionEnv(io.env, {
+              scratch,
+              npmCache: join(scratch.tmp, "npm-cache"),
+              apiKey,
+            }),
             timeoutMs: 10 * 60_000,
-            stdin: prompt,
+            maxRssMiB: DEFAULT_MAX_RSS_MIB,
+            stdinFile: promptFile,
             stdoutFile,
-            stderrFile: join(work, "err.log"),
+            stderrFile: join(scratch.meta, "err.log"),
+            logDir: join(scratch.meta, "guard"),
+            sweepRoots: [scratch.root],
           },
         );
         let answer = "";
         let cost: number | null = null;
+        let parsedOk = true;
         try {
           const json = JSON.parse(readFileSync(stdoutFile, "utf8")) as Record<
             string,
@@ -372,7 +570,11 @@ async function commandJudge(args: string[], io: Io): Promise<number> {
               ? json.total_cost_usd
               : null;
         } catch {
-          lastErrors = [`judge session produced no JSON (exit ${run.code})`];
+          parsedOk = false;
+        }
+        removeTree(scratch.root);
+        if (!parsedOk) {
+          lastErrors = ["judge session produced no JSON"];
           continue;
         }
         const parsed = parseJudgeAnswer(
@@ -408,7 +610,7 @@ async function commandJudge(args: string[], io: Io): Promise<number> {
       }
     }
   } finally {
-    rmSync(workRoot, { recursive: true, force: true });
+    removeTree(workRoot);
   }
   io.out(`judged ${judged} run(s), ${failed} failed`);
   return failed === 0 ? 0 : 1;
@@ -417,7 +619,11 @@ async function commandJudge(args: string[], io: Io): Promise<number> {
 function commandScore(args: string[], io: Io): number {
   const { values } = parseArgs({
     args,
-    options: { dataset: { type: "string" }, out: { type: "string" } },
+    options: {
+      dataset: { type: "string" },
+      out: { type: "string" },
+      "exclude-leak": { type: "string" },
+    },
     strict: true,
   });
   const dataset = loadOrReport(values.dataset, io);
@@ -426,24 +632,41 @@ function commandScore(args: string[], io: Io): number {
     io.err("--out is required");
     return 2;
   }
+  const excluded = parseLeakExclusion(values["exclude-leak"]);
   const outDir = resolve(values.out);
   const grouped = scoresByVariant(dataset, outDir);
   if (grouped.size === 0) {
     io.err(`no run records under ${outDir}`);
     return 2;
   }
-  const rows = [...grouped.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([id, scores]) => ({
-      aggregate: aggregate(id, scores),
-      noise: computeNoise(scores),
-      scores,
-    }));
+  const rows = (pick: "kept" | "excluded") =>
+    [...grouped.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([id, all]) => {
+        const scores = splitByLeak(all, excluded)[pick];
+        return {
+          aggregate: aggregate(id, scores),
+          noise: computeNoise(scores),
+          scores,
+        };
+      });
+  const primary = rows("kept");
+  const left = excluded.length === 0 ? [] : rows("excluded");
   writeFileSync(
     join(outDir, "scores.json"),
-    `${JSON.stringify(rows, null, 2)}\n`,
+    `${JSON.stringify({ exclude_leak: excluded, primary, excluded: left }, null, 2)}\n`,
   );
-  io.out(renderAggregates(rows));
+  io.out(
+    excluded.length === 0
+      ? "All entries."
+      : `Primary score: entries tagged leak ${excluded.join(", ")} are left out (reported below).`,
+  );
+  io.out(renderAggregates(primary));
+  if (left.some((r) => r.scores.length > 0)) {
+    io.out("");
+    io.out(`Entries tagged leak ${excluded.join(", ")} only:`);
+    io.out(renderAggregates(left.filter((r) => r.scores.length > 0)));
+  }
   return 0;
 }
 
@@ -455,6 +678,8 @@ function commandCompare(args: string[], io: Io): number {
       out: { type: "string" },
       a: { type: "string" },
       b: { type: "string" },
+      "exclude-leak": { type: "string" },
+      "noise-floor": { type: "string" },
     },
     strict: true,
   });
@@ -468,6 +693,12 @@ function commandCompare(args: string[], io: Io): number {
     io.err("--out, --a and --b are required");
     return 2;
   }
+  const excluded = parseLeakExclusion(values["exclude-leak"]);
+  const floor = nonNegative(
+    values["noise-floor"],
+    DEFAULT_NOISE_FLOOR_ENTRIES,
+    "--noise-floor",
+  );
   const outDir = resolve(values.out);
   const grouped = scoresByVariant(dataset, outDir);
   const a = grouped.get(values.a);
@@ -478,15 +709,31 @@ function commandCompare(args: string[], io: Io): number {
     );
     return 2;
   }
-  const comparison = compareVariants(
-    { aggregate: aggregate(values.a, a), scores: a, noise: computeNoise(a) },
-    { aggregate: aggregate(values.b, b), scores: b },
-  );
+  const compare = (pick: "kept" | "excluded") => {
+    const sa = splitByLeak(a, excluded)[pick];
+    const sb = splitByLeak(b, excluded)[pick];
+    return compareVariants(
+      { id: values.a!, scores: sa, noise: computeNoise(sa) },
+      { id: values.b!, scores: sb },
+      floor,
+    );
+  };
+  const primary = compare("kept");
+  const left = excluded.length === 0 ? null : compare("excluded");
   writeFileSync(
     join(outDir, `compare-${values.a}-vs-${values.b}.json`),
-    `${JSON.stringify(comparison, null, 2)}\n`,
+    `${JSON.stringify({ exclude_leak: excluded, primary, excluded: left }, null, 2)}\n`,
   );
-  io.out(renderComparison(comparison));
+  if (excluded.length > 0)
+    io.out(
+      `Primary comparison: entries tagged leak ${excluded.join(", ")} are left out (reported below).`,
+    );
+  io.out(renderComparison(primary));
+  if (left !== null && left.recall.n > 0) {
+    io.out("");
+    io.out(`Entries tagged leak ${excluded.join(", ")} only:`);
+    io.out(renderComparison(left));
+  }
   return 0;
 }
 
@@ -508,6 +755,8 @@ export async function main(argv: string[], io: Io): Promise<number> {
         );
         return 0;
       }
+      case "canary":
+        return await commandCanary(rest, io);
       case "run":
         return await commandRun(rest, io);
       case "judge":

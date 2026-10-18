@@ -53,6 +53,22 @@ describe("validateEntry", () => {
     expect(errors.some((e) => e.startsWith("review_method:"))).toBe(true);
   });
 
+  it("requires a leak tag, and none on a control entry", () => {
+    const { leak: _leak, ...untagged } = entry();
+    expect(errorsOf(untagged)).toContain(
+      "leak: expected high | partial | none",
+    );
+    expect(errorsOf({ ...entry(), leak: "some" })).toContain(
+      "leak: expected high | partial | none",
+    );
+    for (const leak of ["high", "partial", "none"] as const) {
+      expect(validateEntry(entry({ leak })).valid, leak).toBe(true);
+    }
+    expect(
+      errorsOf(entry({ kind: "control", known_findings: [], leak: "partial" })),
+    ).toContain("leak: a control entry has no known defect to leak (use none)");
+  });
+
   it("requires full shas that differ", () => {
     const base = entry();
     expect(
@@ -241,6 +257,18 @@ describe("loadDataset", () => {
       }),
     );
     expect(loadDataset(dir).errors[0]).toContain("does not match index id");
+  });
+
+  it("resolves a relative repository path against the dataset directory", () => {
+    const dir = fresh();
+    const relative = entry({ id: "f-1" });
+    relative.repo = { ...relative.repo, path: "pins/fixture.git" };
+    writeDataset(dir, [relative, entry({ id: "f-2" })]);
+    const loaded = loadDataset(dir);
+    expect(loaded.errors).toEqual([]);
+    const byId = new Map(loaded.dataset!.entries.map((e) => [e.id, e]));
+    expect(byId.get("f-1")!.repo.path).toBe(join(dir, "pins", "fixture.git"));
+    expect(byId.get("f-2")!.repo.path).toBe("/repo/local");
   });
 
   it("rejects duplicate index ids and escaping file paths", () => {

@@ -2,7 +2,12 @@ import { parse as parseYaml } from "yaml";
 
 import { validateReviewReport } from "../src/review-report.js";
 import { MEDIUM_PLUS } from "./dataset.js";
-import type { DatasetEntry, EntryKind, KnownFinding } from "./dataset.js";
+import type {
+  DatasetEntry,
+  EntryKind,
+  KnownFinding,
+  LeakTag,
+} from "./dataset.js";
 
 /* ------------------------------------------------------------------ */
 /* Return validity                                                      */
@@ -165,6 +170,23 @@ export type RunStatus =
   | "session_failed"
   | "setup_failed";
 
+/** What a guarded command left behind, as the run record keeps it. */
+export interface ProcessRecord {
+  /** `agent-primitives guard`'s reason (`none`, `timeout`, `rss_cap`, `leftover`, ...), or null when it reported nothing. */
+  guard_reason: string | null;
+  /** Processes guard killed after the command ended on its own, plus its survivors. */
+  guard_leftovers: number;
+  /** Processes killed at a limit (timeout or memory cap). */
+  guard_killed: number;
+  leftover_check_failed: boolean;
+  peak_rss_mib: number | null;
+  /** Processes still working inside the run's scratch afterwards, killed by the sweep. */
+  swept: { pid: number; cwd: string }[];
+  sweep_unavailable: string | null;
+  /** First entries of guard's own process lists. */
+  processes: { pid: number; in_group: boolean; command: string }[];
+}
+
 export interface RunResult {
   schema: number;
   entry_id: string;
@@ -176,6 +198,8 @@ export interface RunResult {
   model: string;
   effort: string;
   status: RunStatus;
+  /** Why a run did not complete, or null. */
+  failure: string | null;
   exit_code: number | null;
   signal: string | null;
   /** Whole run, checkout and setup included. */
@@ -187,12 +211,19 @@ export interface RunResult {
   session_ms: number | null;
   final_text: string;
   check: ReturnCheck;
+  /** Opaque name of the run's scratch directory. */
+  scratch_id: string;
+  /** The paths the session saw, for redaction before judging. */
+  paths: { worktree: string; evidence: string; run_files: string };
   checkout: {
     head_sha: string;
     setup_ok: boolean;
     dirty_after_setup: boolean;
     cleaned_up: boolean;
   };
+  processes: { setup: ProcessRecord[]; session: ProcessRecord | null };
+  /** Status of the record this run replaced when a failed run was retried. */
+  previous_status: RunStatus | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -340,6 +371,7 @@ export interface JudgeFile {
 export interface RunScore {
   entry_id: string;
   kind: EntryKind;
+  leak: LeakTag;
   repeat: number;
   status: RunStatus;
   valid: boolean;
@@ -363,6 +395,7 @@ export function scoreRun(
   judge: JudgeFile | null,
 ): RunScore {
   const known = knownMediumPlus(entry);
+  const knownIds = new Set(known.map((k) => k.id));
   let matchedIds: string[] = [];
   let knownMatched: number | null = null;
   if (entry.kind === "control") {
@@ -370,14 +403,21 @@ export function scoreRun(
   } else if (result.final_text.trim().length === 0) {
     knownMatched = 0;
   } else if (judge !== null) {
-    matchedIds = judge.matches
-      .filter((m) => m.matched && known.some((k) => k.id === m.id))
-      .map((m) => m.id);
+    // Only known medium-or-higher ids count; a judge file naming a low or an
+    // unknown id does not raise recall.
+    matchedIds = [
+      ...new Set(
+        judge.matches
+          .filter((m) => m.matched && knownIds.has(m.id))
+          .map((m) => m.id),
+      ),
+    ];
     knownMatched = matchedIds.length;
   }
   return {
     entry_id: entry.id,
     kind: entry.kind,
+    leak: entry.leak,
     repeat: result.repeat,
     status: result.status,
     valid: result.check.valid,
@@ -390,81 +430,219 @@ export function scoreRun(
   };
 }
 
+/** A run whose return is scored: the session ran to its end. */
+export function isCompleted(score: RunScore): boolean {
+  return score.status === "completed";
+}
+
+/** A run that started a session (a setup failure never did). */
+function ranSession(score: RunScore): boolean {
+  return score.status !== "setup_failed";
+}
+
+/** Splits scores into those kept and those of entries with an excluded leak tag. */
+export function splitByLeak(
+  scores: RunScore[],
+  excluded: readonly LeakTag[],
+): { kept: RunScore[]; excluded: RunScore[] } {
+  return {
+    kept: scores.filter((s) => !excluded.includes(s.leak)),
+    excluded: scores.filter((s) => excluded.includes(s.leak)),
+  };
+}
+
+interface EntryMeans {
+  kind: EntryKind;
+  known_total: number;
+  /** Mean matched count over the entry's judged completed runs, or null. */
+  matched: number | null;
+  /** Mean medium-or-higher count over the entry's completed runs, or null. */
+  medium_plus: number | null;
+  /** Share of the entry's completed runs that are valid, or null. */
+  valid: number | null;
+  /** Mean cost over the entry's sessions with a reported cost, or null. */
+  cost: number | null;
+  /** Mean session wall time over the entry's sessions, or null. */
+  wall_ms: number | null;
+  /** Repeats behind `matched`, behind the other quality means, and behind cost and time. */
+  judged_repeats: number[];
+  completed_repeats: number[];
+  session_repeats: number[];
+}
+
+function mean(values: number[]): number | null {
+  return values.length === 0
+    ? null
+    : values.reduce((a, b) => a + b, 0) / values.length;
+}
+
+/**
+ * Per-entry means over repeats. Every entry then weighs the same however
+ * many repeats it has, so unequal repeat counts do not tilt a total.
+ */
+export function entryMeans(scores: RunScore[]): Map<string, EntryMeans> {
+  const groups = new Map<string, RunScore[]>();
+  for (const s of scores) {
+    const list = groups.get(s.entry_id) ?? [];
+    list.push(s);
+    groups.set(s.entry_id, list);
+  }
+  const out = new Map<string, EntryMeans>();
+  for (const [id, runs] of groups) {
+    const completed = runs.filter(isCompleted);
+    const judged = completed.filter(
+      (s) => s.kind === "finding" && s.known_matched !== null,
+    );
+    const sessions = runs.filter(ranSession);
+    const costs = sessions
+      .map((s) => s.cost_usd)
+      .filter((c): c is number => c !== null);
+    out.set(id, {
+      kind: runs[0].kind,
+      known_total: runs[0].known_total,
+      matched: mean(judged.map((s) => s.known_matched ?? 0)),
+      medium_plus: mean(completed.map((s) => s.medium_plus)),
+      valid: mean(completed.map((s) => (s.valid ? 1 : 0))),
+      cost: mean(costs),
+      wall_ms: mean(sessions.map((s) => s.wall_ms)),
+      judged_repeats: judged.map((s) => s.repeat),
+      completed_repeats: completed.map((s) => s.repeat),
+      session_repeats: sessions.map((s) => s.repeat),
+    });
+  }
+  return out;
+}
+
+export interface RepeatRecall {
+  repeat: number;
+  recall: number | null;
+  entries: number;
+}
+
 export interface VariantAggregate {
   variant_id: string;
-  /** Runs counted (setup failures excluded). */
+  /** Runs that started a session (setup failures excluded). */
   n_runs: number;
-  n_excluded: number;
+  n_setup_failed: number;
+  n_completed: number;
+  /** Sessions that ended with an error or without a parseable result. */
+  n_session_failed: number;
+  n_timeouts: number;
+  /** Entries with at least one completed run. */
   n_entries: number;
+  /** Distinct repeat numbers among the completed runs. */
+  n_repeats: number;
   n_finding_runs: number;
   n_control_runs: number;
+  /** Mean over entries of the share of valid completed runs. */
   validity_rate: number | null;
-  /** Matched known defects over all known defects of judged finding runs. */
+  /** Sum over finding entries of the mean matched count, over the sum of their known defects. */
   recall: number | null;
-  /** Mean of the per-run recall values. */
+  /** Finding entries behind `recall`: those with a judged completed run. */
+  recall_entries: number;
+  /** Mean over those entries of their mean per-run recall. */
   recall_macro: number | null;
+  /** Recall of each repeat on its own judged completed runs. */
+  recall_by_repeat: RepeatRecall[];
   judged_finding_runs: number;
   unjudged_finding_runs: number;
-  /** Medium-or-higher findings reported on control runs. */
+  /** Medium-or-higher findings reported on completed control runs, in total. */
   false_positives: number;
+  /** Sum over control entries of the mean medium-or-higher count, over the number of those entries. */
   false_positives_per_control_run: number | null;
+  control_entries: number;
   controls_with_false_positive: number;
   cost_total_usd: number;
   cost_mean_usd: number | null;
   wall_total_s: number;
   wall_mean_s: number | null;
-  timeouts: number;
 }
 
 function ratio(num: number, den: number): number | null {
   return den === 0 ? null : num / den;
 }
 
+/**
+ * Aggregate of one variant. Only completed runs count toward validity,
+ * recall and false positives; session failures and timeouts are counted on
+ * their own, and setup failures are left out of everything but their count.
+ * Repeats enter as per-entry means (see `entryMeans`).
+ */
 export function aggregate(
   variantId: string,
   scores: RunScore[],
 ): VariantAggregate {
-  const counted = scores.filter((s) => s.status !== "setup_failed");
-  const findingRuns = counted.filter((s) => s.kind === "finding");
-  const controlRuns = counted.filter((s) => s.kind === "control");
+  const sessions = scores.filter(ranSession);
+  const completed = sessions.filter(isCompleted);
+  const findingRuns = completed.filter((s) => s.kind === "finding");
+  const controlRuns = completed.filter((s) => s.kind === "control");
   const judged = findingRuns.filter((s) => s.known_matched !== null);
-  const known = judged.reduce((sum, s) => sum + s.known_total, 0);
-  const matched = judged.reduce((sum, s) => sum + (s.known_matched ?? 0), 0);
-  const perRun = judged
-    .filter((s) => s.known_total > 0)
-    .map((s) => (s.known_matched ?? 0) / s.known_total);
-  const falsePositives = controlRuns.reduce((sum, s) => sum + s.medium_plus, 0);
-  const costs = counted
+  const means = [...entryMeans(scores).values()];
+
+  const recallEntries = means.filter(
+    (m) => m.kind === "finding" && m.matched !== null && m.known_total > 0,
+  );
+  const known = recallEntries.reduce((sum, m) => sum + m.known_total, 0);
+  const matched = recallEntries.reduce((sum, m) => sum + (m.matched ?? 0), 0);
+  const controls = means.filter(
+    (m) => m.kind === "control" && m.medium_plus !== null,
+  );
+  const validities = means
+    .map((m) => m.valid)
+    .filter((v): v is number => v !== null);
+
+  const repeats = [...new Set(completed.map((s) => s.repeat))].sort(
+    (a, b) => a - b,
+  );
+  const byRepeat = repeats.map((repeat) => {
+    const runs = judged.filter((s) => s.repeat === repeat && s.known_total > 0);
+    return {
+      repeat,
+      recall: ratio(
+        runs.reduce((sum, s) => sum + (s.known_matched ?? 0), 0),
+        runs.reduce((sum, s) => sum + s.known_total, 0),
+      ),
+      entries: runs.length,
+    };
+  });
+
+  const costs = sessions
     .map((s) => s.cost_usd)
     .filter((c): c is number => c !== null);
-  const wallTotal = counted.reduce((sum, s) => sum + s.wall_ms, 0) / 1000;
+  const wallTotal = sessions.reduce((sum, s) => sum + s.wall_ms, 0) / 1000;
   return {
     variant_id: variantId,
-    n_runs: counted.length,
-    n_excluded: scores.length - counted.length,
-    n_entries: new Set(counted.map((s) => s.entry_id)).size,
+    n_runs: sessions.length,
+    n_setup_failed: scores.length - sessions.length,
+    n_completed: completed.length,
+    n_session_failed: sessions.filter((s) => s.status === "session_failed")
+      .length,
+    n_timeouts: sessions.filter((s) => s.status === "timeout").length,
+    n_entries: new Set(completed.map((s) => s.entry_id)).size,
+    n_repeats: repeats.length,
     n_finding_runs: findingRuns.length,
     n_control_runs: controlRuns.length,
-    validity_rate: ratio(counted.filter((s) => s.valid).length, counted.length),
+    validity_rate: mean(validities),
     recall: ratio(matched, known),
-    recall_macro:
-      perRun.length === 0
-        ? null
-        : perRun.reduce((a, b) => a + b, 0) / perRun.length,
+    recall_entries: recallEntries.length,
+    recall_macro: mean(
+      recallEntries.map((m) => (m.matched ?? 0) / m.known_total),
+    ),
+    recall_by_repeat: byRepeat,
     judged_finding_runs: judged.length,
     unjudged_finding_runs: findingRuns.length - judged.length,
-    false_positives: falsePositives,
-    false_positives_per_control_run: ratio(falsePositives, controlRuns.length),
+    false_positives: controlRuns.reduce((sum, s) => sum + s.medium_plus, 0),
+    false_positives_per_control_run: ratio(
+      controls.reduce((sum, m) => sum + (m.medium_plus ?? 0), 0),
+      controls.length,
+    ),
+    control_entries: controls.length,
     controls_with_false_positive: controlRuns.filter((s) => s.medium_plus > 0)
       .length,
     cost_total_usd: costs.reduce((a, b) => a + b, 0),
-    cost_mean_usd:
-      costs.length === 0
-        ? null
-        : costs.reduce((a, b) => a + b, 0) / costs.length,
+    cost_mean_usd: mean(costs),
     wall_total_s: wallTotal,
-    wall_mean_s: counted.length === 0 ? null : wallTotal / counted.length,
-    timeouts: counted.filter((s) => s.status === "timeout").length,
+    wall_mean_s: sessions.length === 0 ? null : wallTotal / sessions.length,
   };
 }
 
@@ -474,15 +652,20 @@ export function aggregate(
 
 export interface NoiseReport {
   repeats: number[];
-  /** Entries present in every repeat (and judged, for the recall figures). */
+  /** Entries with a completed run in every repeat. */
   entries_compared: number;
+  /** Finding entries among them judged in every repeat: the recall figures use only these. */
+  recall_entries: number;
+  /** Control entries among them: the false-positive figures use only these. */
+  control_entries: number;
   recall_by_repeat: (number | null)[];
   false_positives_by_repeat: number[];
+  /** False positives per control entry, per repeat. */
+  false_positive_rate_by_repeat: (number | null)[];
   validity_by_repeat: (number | null)[];
   /** Largest minus smallest value across the repeats. */
   recall_range: number | null;
   false_positives_range: number;
-  /** Range of the per-control-entry false-positive rate across repeats. */
   false_positive_rate_range: number | null;
   validity_range: number | null;
   /** Known defects matched in some repeat and missed in another. */
@@ -497,16 +680,18 @@ function spread(values: (number | null)[]): number | null {
 
 /**
  * Run-to-run noise of one variant: the same entries scored once per repeat,
- * compared across repeats. Needs at least two repeats; returns null otherwise.
+ * compared across repeats. Only completed runs count, and every figure uses
+ * one fixed set of entries in every repeat (recall: the finding entries
+ * judged in every repeat). Needs at least two repeats; returns null otherwise.
  */
 export function computeNoise(scores: RunScore[]): NoiseReport | null {
-  const counted = scores.filter((s) => s.status !== "setup_failed");
-  const repeats = [...new Set(counted.map((s) => s.repeat))].sort(
+  const completed = scores.filter(isCompleted);
+  const repeats = [...new Set(completed.map((s) => s.repeat))].sort(
     (a, b) => a - b,
   );
   if (repeats.length < 2) return null;
   const byEntry = new Map<string, Map<number, RunScore>>();
-  for (const s of counted) {
+  for (const s of completed) {
     const inner = byEntry.get(s.entry_id) ?? new Map<number, RunScore>();
     inner.set(s.repeat, s);
     byEntry.set(s.entry_id, inner);
@@ -514,40 +699,38 @@ export function computeNoise(scores: RunScore[]): NoiseReport | null {
   const common = [...byEntry.entries()]
     .filter(([, inner]) => repeats.every((r) => inner.has(r)))
     .map(([id]) => id);
-  const pick = (repeat: number): RunScore[] =>
-    common.map((id) => byEntry.get(id)!.get(repeat)!);
+  const runsOf = (id: string): RunScore[] =>
+    repeats.map((r) => byEntry.get(id)!.get(r)!);
+  const recallSet = common.filter((id) =>
+    runsOf(id).every((s) => s.kind === "finding" && s.known_matched !== null),
+  );
+  const controlSet = common.filter((id) => runsOf(id)[0].kind === "control");
 
   const recallBy: (number | null)[] = [];
   const fpBy: number[] = [];
   const fpRateBy: (number | null)[] = [];
   const validBy: (number | null)[] = [];
   for (const repeat of repeats) {
-    const runs = pick(repeat);
-    const findings = runs.filter(
-      (s) => s.kind === "finding" && s.known_matched !== null,
-    );
+    const at = (id: string): RunScore => byEntry.get(id)!.get(repeat)!;
+    const findings = recallSet.map(at);
     recallBy.push(
       ratio(
         findings.reduce((sum, s) => sum + (s.known_matched ?? 0), 0),
         findings.reduce((sum, s) => sum + s.known_total, 0),
       ),
     );
-    const controls = runs.filter((s) => s.kind === "control");
-    const fp = controls.reduce((sum, s) => sum + s.medium_plus, 0);
+    const fp = controlSet.map(at).reduce((sum, s) => sum + s.medium_plus, 0);
     fpBy.push(fp);
-    fpRateBy.push(ratio(fp, controls.length));
-    validBy.push(ratio(runs.filter((s) => s.valid).length, runs.length));
+    fpRateBy.push(ratio(fp, controlSet.length));
+    validBy.push(
+      ratio(common.map(at).filter((s) => s.valid).length, common.length),
+    );
   }
 
   let flips = 0;
   let pairs = 0;
-  for (const id of common) {
-    const runs = repeats.map((r) => byEntry.get(id)!.get(r)!);
-    if (
-      runs[0].kind !== "finding" ||
-      runs.some((s) => s.known_matched === null)
-    )
-      continue;
+  for (const id of recallSet) {
+    const runs = runsOf(id);
     const allIds = new Set(runs.flatMap((s) => s.matched_ids));
     // Each matched id counts as a pair; a pair flips when a repeat misses it.
     for (const kid of allIds) {
@@ -559,8 +742,11 @@ export function computeNoise(scores: RunScore[]): NoiseReport | null {
   return {
     repeats,
     entries_compared: common.length,
+    recall_entries: recallSet.length,
+    control_entries: controlSet.length,
     recall_by_repeat: recallBy,
     false_positives_by_repeat: fpBy,
+    false_positive_rate_by_repeat: fpRateBy,
     validity_by_repeat: validBy,
     recall_range: spread(recallBy),
     false_positives_range: Math.max(...fpBy) - Math.min(...fpBy),
@@ -570,26 +756,39 @@ export function computeNoise(scores: RunScore[]): NoiseReport | null {
   };
 }
 
+/** Default noise floor: one entry's worth of the metric. */
+export const DEFAULT_NOISE_FLOOR_ENTRIES = 1;
+
 export interface MetricDelta {
   a: number | null;
   b: number | null;
-  /** b minus a. */
+  /** b minus a, on the paired entries. */
   delta: number | null;
+  /** Entries both variants have values for; a and b are computed on exactly these. */
+  n: number;
+  /** Distinct repeats behind a and b on those entries. */
+  a_repeats: number;
+  b_repeats: number;
   /** Noise range of variant a for this metric, when measured. */
   noise: number | null;
-  /** True when |delta| is larger than the noise range; null when unmeasured. */
+  /** Noise floor: the configured number of entries' worth of the metric (entries / n). */
+  floor: number | null;
+  /** The larger of noise and floor: what |delta| has to exceed. */
+  threshold: number | null;
+  /** True when |delta| is larger than the threshold; null when a's noise is unmeasured. */
   exceeds_noise: boolean | null;
 }
 
 export interface Comparison {
   a: string;
   b: string;
+  noise_floor_entries: number;
   recall: MetricDelta;
   false_positives: MetricDelta;
   validity: MetricDelta;
   cost_mean_usd: MetricDelta;
   wall_mean_s: MetricDelta;
-  /** Entries both variants ran, with b's mean recall above, equal to or below a's. */
+  /** Paired finding entries with b's mean recall above, equal to or below a's. */
   paired_recall: {
     entries: number;
     b_higher: number;
@@ -598,82 +797,168 @@ export interface Comparison {
   };
 }
 
-function delta(
-  a: number | null,
-  b: number | null,
+function distinct(list: number[]): number {
+  return new Set(list).size;
+}
+
+function pairedDelta(
+  ma: Map<string, EntryMeans>,
+  mb: Map<string, EntryMeans>,
+  pick: (m: EntryMeans) => number | null,
+  repeatsOf: (m: EntryMeans) => number[],
+  combine: (values: { a: number; b: number; m: EntryMeans }[]) => {
+    a: number | null;
+    b: number | null;
+  },
   noise: number | null,
+  /** Entries' worth of the floor; null for a metric that is not a rate over entries. */
+  floorEntries: number | null,
 ): MetricDelta {
+  const rows: { a: number; b: number; m: EntryMeans }[] = [];
+  const aRepeats: number[] = [];
+  const bRepeats: number[] = [];
+  for (const [id, ea] of ma) {
+    const eb = mb.get(id);
+    if (eb === undefined) continue;
+    const va = pick(ea);
+    const vb = pick(eb);
+    if (va === null || vb === null) continue;
+    rows.push({ a: va, b: vb, m: ea });
+    aRepeats.push(...repeatsOf(ea));
+    bRepeats.push(...repeatsOf(eb));
+  }
+  const { a, b } = combine(rows);
   const d = a === null || b === null ? null : b - a;
+  const n = rows.length;
+  const floor = n === 0 || floorEntries === null ? null : floorEntries / n;
+  const threshold = noise === null ? null : Math.max(noise, floor ?? 0);
   return {
     a,
     b,
     delta: d,
+    n,
+    a_repeats: distinct(aRepeats),
+    b_repeats: distinct(bRepeats),
     noise,
-    exceeds_noise: d === null || noise === null ? null : Math.abs(d) > noise,
+    floor,
+    threshold,
+    exceeds_noise:
+      d === null || threshold === null ? null : Math.abs(d) > threshold,
   };
 }
 
-function meanRecallByEntry(scores: RunScore[]): Map<string, number> {
-  const sums = new Map<string, { sum: number; n: number }>();
-  for (const s of scores) {
-    if (s.kind !== "finding" || s.known_matched === null || s.known_total === 0)
-      continue;
-    if (s.status === "setup_failed") continue;
-    const cur = sums.get(s.entry_id) ?? { sum: 0, n: 0 };
-    cur.sum += s.known_matched / s.known_total;
-    cur.n += 1;
-    sums.set(s.entry_id, cur);
-  }
-  return new Map([...sums].map(([id, v]) => [id, v.sum / v.n]));
+const meanOf =
+  (side: "a" | "b") =>
+  (rows: { a: number; b: number }[]): number | null =>
+    mean(rows.map((r) => r[side]));
+
+function meanBoth(rows: { a: number; b: number }[]): {
+  a: number | null;
+  b: number | null;
+} {
+  return { a: meanOf("a")(rows), b: meanOf("b")(rows) };
 }
 
+/**
+ * Variant B against variant A. Every metric is paired: it is computed for
+ * both variants on exactly the entries both have values for, from per-entry
+ * means over repeats. The verdict compares |delta| with the larger of A's
+ * run-to-run range and a floor of `noiseFloorEntries` entries' worth of the
+ * metric, so a zero range from identical repeats does not turn every delta
+ * into a difference.
+ */
 export function compareVariants(
-  a: {
-    aggregate: VariantAggregate;
-    scores: RunScore[];
-    noise: NoiseReport | null;
-  },
-  b: { aggregate: VariantAggregate; scores: RunScore[] },
+  a: { id: string; scores: RunScore[]; noise: NoiseReport | null },
+  b: { id: string; scores: RunScore[] },
+  noiseFloorEntries: number = DEFAULT_NOISE_FLOOR_ENTRIES,
 ): Comparison {
-  const ma = meanRecallByEntry(a.scores);
-  const mb = meanRecallByEntry(b.scores);
+  const ma = entryMeans(a.scores);
+  const mb = entryMeans(b.scores);
+  const finding = (m: EntryMeans): boolean =>
+    m.kind === "finding" && m.known_total > 0;
+
+  const recall = pairedDelta(
+    ma,
+    mb,
+    (m) => (finding(m) ? m.matched : null),
+    (m) => m.judged_repeats,
+    (rows) => {
+      const known = rows.reduce((sum, r) => sum + r.m.known_total, 0);
+      return {
+        a: ratio(
+          rows.reduce((sum, r) => sum + r.a, 0),
+          known,
+        ),
+        b: ratio(
+          rows.reduce((sum, r) => sum + r.b, 0),
+          known,
+        ),
+      };
+    },
+    a.noise?.recall_range ?? null,
+    noiseFloorEntries,
+  );
+
   let higher = 0;
   let equal = 0;
   let lower = 0;
-  let entries = 0;
-  for (const [id, va] of ma) {
-    const vb = mb.get(id);
-    if (vb === undefined) continue;
-    entries += 1;
+  for (const [id, ea] of ma) {
+    const eb = mb.get(id);
+    if (eb === undefined || !finding(ea)) continue;
+    if (ea.matched === null || eb.matched === null) continue;
+    const va = ea.matched / ea.known_total;
+    const vb = eb.matched / eb.known_total;
     if (Math.abs(vb - va) < 1e-9) equal += 1;
     else if (vb > va) higher += 1;
     else lower += 1;
   }
-  const noise = a.noise;
+
   return {
-    a: a.aggregate.variant_id,
-    b: b.aggregate.variant_id,
-    recall: delta(
-      a.aggregate.recall,
-      b.aggregate.recall,
-      noise?.recall_range ?? null,
+    a: a.id,
+    b: b.id,
+    noise_floor_entries: noiseFloorEntries,
+    recall,
+    false_positives: pairedDelta(
+      ma,
+      mb,
+      (m) => (m.kind === "control" ? m.medium_plus : null),
+      (m) => m.completed_repeats,
+      meanBoth,
+      a.noise?.false_positive_rate_range ?? null,
+      noiseFloorEntries,
     ),
-    false_positives: delta(
-      a.aggregate.false_positives_per_control_run,
-      b.aggregate.false_positives_per_control_run,
-      noise?.false_positive_rate_range ?? null,
+    validity: pairedDelta(
+      ma,
+      mb,
+      (m) => m.valid,
+      (m) => m.completed_repeats,
+      meanBoth,
+      a.noise?.validity_range ?? null,
+      noiseFloorEntries,
     ),
-    validity: delta(
-      a.aggregate.validity_rate,
-      b.aggregate.validity_rate,
-      noise?.validity_range ?? null,
-    ),
-    cost_mean_usd: delta(
-      a.aggregate.cost_mean_usd,
-      b.aggregate.cost_mean_usd,
+    cost_mean_usd: pairedDelta(
+      ma,
+      mb,
+      (m) => m.cost,
+      (m) => m.session_repeats,
+      meanBoth,
+      null,
       null,
     ),
-    wall_mean_s: delta(a.aggregate.wall_mean_s, b.aggregate.wall_mean_s, null),
-    paired_recall: { entries, b_higher: higher, equal, b_lower: lower },
+    wall_mean_s: pairedDelta(
+      ma,
+      mb,
+      (m) => (m.wall_ms === null ? null : m.wall_ms / 1000),
+      (m) => m.session_repeats,
+      meanBoth,
+      null,
+      null,
+    ),
+    paired_recall: {
+      entries: higher + equal + lower,
+      b_higher: higher,
+      equal,
+      b_lower: lower,
+    },
   };
 }

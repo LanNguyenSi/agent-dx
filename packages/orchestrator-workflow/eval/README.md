@@ -7,8 +7,8 @@ historical changes with a prompt variant and scores the return.
 This directory is a maintainer tool. It is not part of the published package:
 `package.json` `files` does not list it, `tsconfig.json` does not compile it,
 and a test pins both. It runs through `tsx` and is covered by the package
-tests (`test/eval-*.test.ts`), which use a stub in place of the `claude`
-binary and never start a model session.
+tests (`test/eval-*.test.ts`), which use stubs in place of the `claude` and
+`agent-primitives` binaries and never start a model session.
 
 The dataset is not in this repository. It is built from private run records
 (briefs name organisation internals), so each maintainer builds their own and
@@ -26,14 +26,20 @@ final message. The scorer then reports, per variant:
 - **Recall**: the share of known medium-or-higher defects (entries of kind
   `finding`) that the review reports, decided per defect class by a blind
   judge session. The judge sees the rubric, the known defects and the review
-  text, and nothing that names the variant or the entry.
+  text with the run's paths replaced by labels (`<worktree>`, `<results>`),
+  and nothing that names the variant or the entry.
 - **False positives**: medium-or-higher findings reported on entries of kind
   `control` (changes the original review accepted without such a finding). A
   control finding can be a real defect the original review missed, so
   spot-check before reading a difference as a regression.
+- **Session failures and timeouts**, counted on their own. Validity, recall and
+  false positives use completed sessions only.
 - **Cost and duration**: the session's reported USD cost and wall time.
 - **Noise**: the same variant run more than once on the same entries; the
   range between repeats is the yardstick for a difference between variants.
+
+Repeats enter every figure as per-entry means, so an entry run three times
+weighs as much as one run once.
 
 ## Dataset format
 
@@ -54,9 +60,10 @@ violation):
 | `schema` | `1` |
 | `id` | `[a-z0-9-]`, unique, also the file stem |
 | `kind` | `finding` (at least one known medium-or-higher defect) or `control` (no known finding) |
-| `repo` | `name`, `path` (a local repository to fetch from), `head_sha` and `base_sha` (full 40-character shas), optional `fetch_note` |
+| `repo` | `name`, `path` (a local repository to fetch from; a relative path is resolved against the dataset directory, so a bare repository kept next to the entries works), `head_sha` and `base_sha` (full 40-character shas), optional `fetch_note` |
 | `setup` | list of `{cwd, argv, timeout_s?}` run inside the checkout (for example `npm ci`); `cwd` stays inside the checkout, `argv` is not a shell string |
 | `review_method` | `normal`, `rigorous` or `adversarial` |
+| `leak` | how much the briefing points at the known defect: `high`, `partial` or `none` (always `none` for a control) |
 | `brief` | the reviewer briefing text, machine paths replaced by placeholders |
 | `task_spec` | the task specification text, inlined (the session has no tracker) |
 | `known_findings` | for `finding`: `{id: "K<n>", severity, category, description, files?}`; for `control`: empty |
@@ -64,9 +71,10 @@ violation):
 
 Placeholders in `brief` and `task_spec`: `{{WORKTREE}}`, `{{EVIDENCE_DIR}}`,
 `{{RUN_DIR}}`, `{{BASE_SHA}}`, `{{HEAD_SHA}}`. The runner replaces them with
-the checkout, a per-run evidence directory, a per-run (empty) run directory and
-the two shas. Validation rejects a brief or spec that still contains a home
-directory path.
+the checkout, the session's evidence directory, an empty stand-in for the run
+directory and the two shas. Validation rejects a brief or spec that still
+contains a home directory path, and the runner refuses a run whose prompt
+would name the entry id, the results or dataset tree, or the home directory.
 
 Choose entries whose commits can be rebuilt from a local repository:
 `git cat-file -e <sha>^{commit}` succeeds, or the commit was fetched into
@@ -74,20 +82,34 @@ Choose entries whose commits can be rebuilt from a local repository:
 
 ## Running
 
-All commands run from `packages/orchestrator-workflow`:
+All commands run from `packages/orchestrator-workflow`. Every session,
+the judge's included, authenticates with an API key read from the variable
+named by `--api-key-env` (default `ANTHROPIC_API_KEY`); `agent-primitives`
+must be on `PATH` (or pass `--guard <bin>`).
 
 ```
 npm run eval -- validate-dataset --dataset <dir>
 
+npm run eval -- canary --dataset <dir> --out <results> [--scratch <dir>]
+
 npm run eval -- run --dataset <dir> --out <results> --variant current \
-  --scratch <dir outside any repository> [--only id,id] [--kind control] \
-  [--repeat 2] [--model opus] [--effort high] [--timeout-min 45] \
-  [--budget-usd 15] [--jobs 1]
+  [--scratch <dir>] [--only id,id] [--kind control] [--repeat 2] \
+  [--model opus] [--effort high] [--timeout-min 45] [--budget-usd 15] \
+  [--max-rss-mib 8192] [--jobs 1] [--no-retry]
 
 npm run eval -- judge   --dataset <dir> --out <results> [--judge-model sonnet]
-npm run eval -- score   --dataset <dir> --out <results>
-npm run eval -- compare --dataset <dir> --out <results> --a current --b degraded
+npm run eval -- score   --dataset <dir> --out <results> [--exclude-leak high]
+npm run eval -- compare --dataset <dir> --out <results> --a current --b degraded \
+  [--exclude-leak high] [--noise-floor 1]
 ```
+
+`--scratch` (default: a directory in the system temp directory) and `--out`
+must lie outside the dataset's parent directory, and the scratch directory
+outside the home directory and outside `--out`; the commands refuse
+otherwise, since the session may read neither.
+
+Run `canary` before every batch and after every Claude Code update (see
+Isolation). It exits 0 only when every check passed.
 
 Variants (`--variant`):
 
@@ -98,20 +120,23 @@ Variants (`--variant`):
   byte-identical. It is the negative control: a benchmark that cannot tell it
   from `current` does not discriminate.
 - `file:<path>`: any prompt file, for example a shortened candidate. Give it an
-  id with `--variant-id`.
+  id with `--variant-id`. A variant id follows the entry id pattern.
 
 Sessions run one after the other by default. `--jobs <n>` runs up to n at
-once, each in its own checkout; mind the API rate limit and the load, since
-every session runs tests in its checkout. Progress lines then arrive in
+once, each in its own scratch directory; mind the API rate limit and the load,
+since every session runs tests in its checkout. Progress lines then arrive in
 completion order.
 
 A result directory keeps one folder per variant id; reusing an id for a
 different prompt is refused. Every run folder has `result.json` (variant id and
-file hash, prompt hash, model, effort, status, exit code, cost, turns, session
-time, final text, validity), the composed `prompt.md`, the raw `session.json`,
-`stderr.log`, `setup.log` and `agents.json`. A run that already has a
-`result.json` is skipped unless `--force` is given, so an interrupted batch
-resumes.
+file hash, prompt hash, model, effort, status and failure reason, exit code,
+cost, turns, session time, final text, validity, the processes guard and the
+sweep killed), the composed `prompt.md`, the raw `session.json`,
+`stderr.log`, `setup.log`, `agents.json`, `settings.json`, guard's own
+reports under `guard/` and a copy of the session's `evidence/`. A run that
+already has a completed `result.json` is skipped unless `--force` is given,
+so an interrupted batch resumes; a stored run that did not complete is run
+again unless `--no-retry` is given.
 
 `judge` writes `judge.json` next to each finding-run result that has none; an
 unparseable answer is retried (`--attempts`) and otherwise leaves a
@@ -119,38 +144,106 @@ unparseable answer is retried (`--attempts`) and otherwise leaves a
 recall and says how many there are. Runs whose setup failed are excluded from
 every tally and counted separately.
 
+### Scoring and comparing
+
+Entries tagged `leak: high` measure whether a reviewer follows a pointer in
+its briefing as much as the prompt, so `score` and `compare` leave them out of
+the primary result by default and report them in a section of their own.
+`--exclude-leak none` keeps every entry; `--exclude-leak high,partial`
+leaves out both tags.
+
 Repeat a variant (`--repeat 2` or more; a later `run` with a larger
 `--repeat` adds the missing repeats and skips the existing ones) to get its
-noise. `compare`
-prints A against B with the noise range of A next to each delta and a verdict
-(above noise, within noise, or no noise reference).
+noise. The noise figures use one fixed set of entries in every repeat: those
+with a completed run in every repeat (recall: also judged in every repeat).
+
+`compare` pairs the two variants: each metric is computed for both on exactly
+the entries both have values for, from per-entry means over repeats. The
+verdict compares the delta with the larger of A's run-to-run range and a
+noise floor of `--noise-floor` entries' worth of the metric (default 1, so the
+floor is one over the number of paired entries): a zero range from identical
+repeats does not make every delta a difference. Each verdict prints the
+number of paired entries and the repeats behind A and B. A's range is measured
+on single repeats while the delta compares means, which makes the verdict
+conservative.
 
 ## Isolation
 
-- The checkout is a fresh repository that fetches only the head and base
-  commits from the local source, so no later history, branch or tag is
-  reachable. The remote is removed again before anything runs, and the fetch
-  bookkeeping file is deleted. Nothing is cloned into or modified in a shared
-  worktree.
-- `GH_TOKEN`, `GITHUB_TOKEN` and the other listed token variables are blanked
-  in every child process. The session gets an empty MCP configuration, no
-  subagent tool and no web tools, and cannot edit files (the shipped agent
-  already denies `Edit`, `Write` and `NotebookEdit`).
-- In the default bare mode `HOME` and the Claude config directory point at a
-  scratch folder for the session, so a session cannot touch the real user
-  configuration (`--keep-home` turns this off).
-- Every child (setup commands and the session) runs in its own process group
-  with a wall-clock bound; on expiry the group gets SIGTERM and then SIGKILL,
-  and group members left behind by an exited leader are killed too. The tool
-  has no memory cap of its own: wrap a whole batch in
-  `agent-primitives guard <timeout-s> <max-rss-MiB> -- npm run eval -- ...` when
-  one is wanted.
+What contains a session:
+
+- **Checkout**: a fresh repository in the run's scratch directory that fetches
+  only the head and base commits from the local source, so no later history,
+  branch or tag is reachable. The remote is removed again before anything
+  runs, and the fetch bookkeeping file is deleted. Nothing is cloned into or
+  modified in a shared worktree.
+- **Opaque paths**: every run gets `<scratch>/<random id>/` with `checkout/`,
+  `evidence/`, `run/`, `home/`, `tmp/`, `gh/` and `meta/`. No path the session
+  or the judge sees names the variant, the entry or the dataset.
+- **Environment allowlist** for setup commands and the session alike: `PATH`,
+  `LANG`, `LC_*`, `TERM`, `USER`, `LOGNAME`, `SHELL`; `HOME`,
+  `CLAUDE_CONFIG_DIR`, `TMPDIR`, `GH_CONFIG_DIR` and the npm cache point into
+  the scratch directory; git gets `GIT_CONFIG_NOSYSTEM=1`,
+  `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_SSH_COMMAND=false` and
+  `GIT_TERMINAL_PROMPT=0`. Nothing else of the invoking environment passes:
+  no tokens, no agent socket, no session or messaging variables. The API key
+  goes to the claude process only, as `ANTHROPIC_API_KEY`, and
+  `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` keeps it out of the session's Bash
+  commands. A record never holds the key: it is redacted if a session prints
+  it.
+- **Claude Code sandbox** (a per-run settings file passed with `--settings`;
+  each key names its documentation section in `eval/isolation.ts`): Bash
+  commands are sandboxed, the session exits if the sandbox cannot start, there
+  is no unsandboxed retry and no excluded command. Their network is a strict
+  allowlist with no host on it, no Unix socket and no local listening port.
+  They cannot read the invoking user's home, the dataset's parent tree, the
+  results directory, the source repositories or the other runs' scratch
+  directories, and they write only to the checkout, the evidence directory and
+  Claude Code's per-user temp directory. `CLAUDE_CODE_TMPDIR` moves that
+  directory into the run's scratch; for a long scratch path Claude Code may
+  use a short directory under the system temp root instead (Claude Code
+  environment variable docs), so keep `--scratch` short.
+- **File tools**: Read and Edit deny rules cover the same trees and the run's
+  `meta/` directory, and reads outside the working directories (the checkout
+  and the evidence directory) are refused in every permission mode. File
+  edits, subagents, web tools and every tool that reaches another session, a
+  remote service, a schedule or a notification are disallowed; inbound
+  messages from other sessions are refused, and in the default bare mode the
+  session binds no inbox socket at all. No MCP server is configured.
+- **Processes**: setup commands and the session each run under
+  `agent-primitives guard <timeout-s> <max-rss-MiB>`, which kills the whole
+  process tree at the wall-clock bound or the memory cap (`--max-rss-mib`,
+  default 8192) and reports what was left running. Afterwards every process
+  still working inside the run's scratch directory is killed as well, which
+  catches a descendant that left its process group between two of guard's
+  samples. Both counts go into `result.json`.
+- The scratch directory is deleted after each run (`--keep-checkout` keeps
+  it); records stay in the results directory.
+
+What it does not contain:
+
+- **Setup commands** (`npm ci` and the like) run outside the Claude Code
+  sandbox, with network, because they need the package registry; only the
+  environment allowlist, the scratch home and guard apply. Dependency install
+  scripts run there with the user's file access.
+- **The claude process itself** runs unsandboxed and needs the network for
+  its API calls. The file tools are held by permission rules, which Claude
+  Code applies to Grep and Glob as a best effort, not by the operating system.
+- **Settings keys are not validated**: in `-p` mode a settings file Claude
+  Code does not accept is ignored without an error. The `canary` command is
+  the proof that the settings took effect; run it again after a Claude Code
+  update.
+- **The canary's report is partly self-reported**: the host itself checks the
+  touch target, the checkout write, the node version and that no record holds
+  a secret; whether ssh, the file reads, curl and the Read tool failed comes
+  from the session's own answer. An action the session declined to attempt
+  makes the canary inconclusive, never a pass.
+- The sandbox runs on macOS, Linux and WSL2; on Linux it needs `bubblewrap`
+  and `socat`. Some network keys (`allowUnixSockets`, `allowLocalBinding`)
+  only apply on macOS, where the session's tests also cannot start a local
+  server.
 - The session runs with `--permission-mode bypassPermissions` so the reviewer
-  can run tests in the checkout without prompts. The checkout has no remote and
-  no credentials, but a bypassing session is not a sandbox for the rest of the
-  machine; run batches on a machine where that is acceptable.
-- The checkout is deleted after each run (`--keep-checkout` keeps it); logs
-  and records stay in the results directory.
+  can run tests in the checkout without prompts; the containment above is
+  what limits it, not the permission mode.
 
 ## Deviations from the production route
 
@@ -168,24 +261,26 @@ closest headless equivalent, not an identical one:
   `session.json` for the model the session reports.
 - `--bare` (default; `--no-bare` omits it) skips hooks, plugin sync,
   auto-memory and `CLAUDE.md` discovery, so the project instruction files a
-  production subagent would see are absent, and it authenticates with an API
-  key from the environment (`ANTHROPIC_API_KEY`, or the variable named by
-  `--api-key-env`) instead of the login. Without `--bare`, user settings and
-  hooks apply and the home directory is not isolated.
+  production subagent would see are absent. Without `--bare`, project
+  `CLAUDE.md` files of the checkout are discovered and the session binds an
+  inbox socket (inbound messages are still refused); the home directory stays
+  the scratch one in both modes, and both authenticate with the API key.
+- The sandbox, the deny rules and the reduced environment above are not part
+  of the production route: a command that needs the network or a file outside
+  the checkout fails in the replay where it could succeed in production.
 - No MCP servers (the production reviewer may have a tracker or code-search
-  server), and the subagent, web-fetch and web-search tools are denied.
+  server), and the subagent, web and cross-session tools are denied.
 - Run files named by the briefing (other briefs, evidence, run notes, tracker
   pages) do not exist. The runner appends a fixed paragraph that says so and
   that missing run files are not findings; the common reviewer rules and the
   task specification are inlined into the entry by whoever builds it.
 - A briefing written by an orchestrator can describe the defect it expects
   (a focus list). That makes recall higher than for a neutral briefing and
-  lowers the room to show a loss; record how many entries are affected when
-  reading a result.
+  lowers the room to show a loss; the `leak` tag records it per entry.
 - The argument list is pinned by tests against a stub binary. Whether the
-  installed Claude Code build interprets the flag combination as intended
-  is confirmed by the first real run: start with one entry (`--only`) and
-  read its `session.json` and `result.json` before a batch.
+  installed Claude Code build interprets the flags and settings as intended
+  is what `canary` checks; then start with one entry (`--only`) and read its
+  `session.json` and `result.json` before a batch.
 
 ## Cost
 
@@ -194,14 +289,21 @@ variant by `score`; `--budget-usd` caps one session, and the `run` command
 prints the worst case (entries times repeats times the cap) before it starts.
 A full run costs about the number of entries times the mean per-session cost
 at the chosen model and effort; measure the mean on a few entries first. The
-judge is a short session per finding run (default model `sonnet`).
+judge is a short session per finding run (default model `sonnet`), and the
+canary one short session.
 
 ## Tests
 
-`npm test` runs `test/eval-dataset.test.ts` (schema and placeholders),
-`test/eval-score.test.ts` (return validity, judge prompt and answer, scoring,
-aggregation, noise, comparison, variants), `test/eval-runner.test.ts`
-(checkout isolation, environment blanking, session flags, timeouts and process
-groups, record files, cleanup) and `test/eval-cli.test.ts` (run, judge, score
-and compare end to end). They use `test/fixtures/eval/stub-claude.mjs` and a
-throwaway repository; no network and no model are involved.
+`npm test` runs `test/eval-dataset.test.ts` (schema, leak tag, placeholders,
+relative repository paths), `test/eval-score.test.ts` (return validity, judge
+prompt and answer, scoring, per-entry aggregation, failures, noise, paired
+comparison and noise floor, leak split, variants), `test/eval-isolation.test.ts`
+(scratch layout, placement checks, session settings, secret scan and
+redaction, guard envelope, process sweep), `test/eval-runner.test.ts`
+(checkout isolation, environment allowlist, session flags and settings,
+timeouts and process groups, leftover processes, records, retries, blindness)
+and `test/eval-cli.test.ts` (canary, run, judge, score and compare end to
+end). They use `test/fixtures/eval/stub-claude.mjs`,
+`test/fixtures/eval/fake-guard.mjs` and a throwaway repository; no network
+and no model are involved. One runner test also runs under the real
+`agent-primitives guard` when it is on `PATH`.

@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 /**
  * Dataset format of the reviewer replay evaluation: one JSON file per entry
@@ -17,6 +17,15 @@ export type ReviewMethod = (typeof REVIEW_METHODS)[number];
 
 export const SEVERITIES = ["low", "medium", "high", "critical"] as const;
 export type Severity = (typeof SEVERITIES)[number];
+
+/**
+ * How much the briefing tells the reviewer about the known defect: `high`
+ * when it points at the defect, `partial` when it names the area only,
+ * `none` when it is neutral. A `high` entry measures the briefing as much as
+ * the prompt, so the primary score leaves those entries out.
+ */
+export const LEAK_TAGS = ["high", "partial", "none"] as const;
+export type LeakTag = (typeof LEAK_TAGS)[number];
 
 /** Severities that count toward recall and false-positive tallies. */
 export const MEDIUM_PLUS: readonly string[] = ["medium", "high", "critical"];
@@ -52,7 +61,10 @@ export interface DatasetEntry {
   kind: EntryKind;
   repo: {
     name: string;
-    /** Local repository the checkout is cloned from. */
+    /**
+     * Local repository the checkout is fetched from. A relative path is
+     * resolved against the dataset directory when the dataset is loaded.
+     */
     path: string;
     head_sha: string;
     base_sha: string;
@@ -61,6 +73,7 @@ export interface DatasetEntry {
   };
   setup: SetupCommand[];
   review_method: ReviewMethod;
+  leak: LeakTag;
   brief: string;
   task_spec: string;
   known_findings: KnownFinding[];
@@ -83,7 +96,12 @@ export interface Dataset {
   entries: DatasetEntry[];
 }
 
-const ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,63}$/;
+export const ID_PATTERN = /^[a-z0-9][a-z0-9-]{1,63}$/;
+
+/** True for an id usable as a directory name: `[a-z0-9-]`, no `/`, no `..`. */
+export function isValidId(id: string): boolean {
+  return ID_PATTERN.test(id);
+}
 const SHA_PATTERN = /^[0-9a-f]{40}$/;
 const KNOWN_ID_PATTERN = /^K[0-9]{1,3}$/;
 
@@ -219,6 +237,11 @@ export function validateEntry(raw: unknown): EntryValidation {
   }
   if (!REVIEW_METHODS.includes(raw.review_method as ReviewMethod)) {
     errors.push(`review_method: expected ${REVIEW_METHODS.join(" | ")}`);
+  }
+  if (!LEAK_TAGS.includes(raw.leak as LeakTag)) {
+    errors.push(`leak: expected ${LEAK_TAGS.join(" | ")}`);
+  } else if (raw.kind === "control" && raw.leak !== "none") {
+    errors.push("leak: a control entry has no known defect to leak (use none)");
   }
 
   const repo = raw.repo;
@@ -360,6 +383,8 @@ export function loadDataset(dir: string): DatasetLoad {
       );
       continue;
     }
+    const repoPath = result.entry.repo.path;
+    if (!isAbsolute(repoPath)) result.entry.repo.path = resolve(dir, repoPath);
     entries.push(result.entry);
   }
   if (errors.length > 0) return { dataset: null, errors };

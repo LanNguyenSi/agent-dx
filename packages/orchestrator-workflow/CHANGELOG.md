@@ -12,12 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   isolated checkout of the reviewed commit, scores return validity
   deterministically, scores recall of known defects with a blind judge session
   and counts false positives on controls, and reports run-to-run noise and a
-  comparison of two prompt variants (the shipped prompt, a degraded negative
-  control, or any prompt file). The dataset stays private to whoever builds it;
-  `eval/README.md` documents its format, the isolation and the deviations from
-  the production route. The tooling is not part of the published package (it is
-  not in `files` and not compiled into `dist`), and its tests use a stub in
-  place of the model binary.
+  paired comparison of two prompt variants (the shipped prompt, a degraded
+  negative control, or any prompt file). Every session runs in the Claude Code
+  sandbox with an environment allowlist and under `agent-primitives guard`, and
+  a `canary` command checks that isolation before a batch. The dataset stays
+  private to whoever builds it; `eval/README.md` documents its format, what the
+  isolation contains and what it does not, and the deviations from the
+  production route. The tooling is not part of the published package (it is
+  not in `files` and not compiled into `dist`), and its tests use stubs in place
+  of the model and guard binaries.
 
 ## [0.45.0] - 2026-10-18
 

@@ -26,19 +26,21 @@ export function renderAggregates(
   rows: { aggregate: VariantAggregate; noise: NoiseReport | null }[],
 ): string {
   const lines = [
-    "| variant | runs | entries | validity | recall | recall (per-run mean) | false positives (controls) | cost total USD | cost mean USD | wall mean s | timeouts |",
-    "|---|---|---|---|---|---|---|---|---|---|---|",
+    "| variant | sessions | completed | session failed | timeouts | entries | repeats | validity | recall | recall (per-entry mean) | false positives (controls) | cost total USD | cost mean USD | wall mean s |",
+    "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
   ];
   for (const { aggregate: a } of rows) {
     lines.push(
-      `| ${a.variant_id} | ${a.n_runs} | ${a.n_entries} | ${pct(a.validity_rate)} | ${pct(a.recall)} | ${pct(a.recall_macro)} | ${a.false_positives} in ${a.n_control_runs} runs (${a.controls_with_false_positive} runs affected) | ${usd(a.cost_total_usd)} | ${usd(a.cost_mean_usd)} | ${num(a.wall_mean_s, 0)} | ${a.timeouts} |`,
+      `| ${a.variant_id} | ${a.n_runs} | ${a.n_completed} | ${a.n_session_failed} | ${a.n_timeouts} | ${a.n_entries} | ${a.n_repeats} | ${pct(a.validity_rate)} | ${pct(a.recall)} (n=${a.recall_entries}) | ${pct(a.recall_macro)} | ${a.false_positives} in ${a.n_control_runs} runs, ${num(a.false_positives_per_control_run, 3)} per control entry (n=${a.control_entries}) | ${usd(a.cost_total_usd)} | ${usd(a.cost_mean_usd)} | ${num(a.wall_mean_s, 0)} |`,
     );
   }
-  const notes: string[] = [];
+  const notes: string[] = [
+    "Validity, recall and false positives count completed runs only, as per-entry means over repeats; session failures and timeouts are counted on their own.",
+  ];
   for (const { aggregate: a } of rows) {
-    if (a.n_excluded > 0) {
+    if (a.n_setup_failed > 0) {
       notes.push(
-        `${a.variant_id}: ${a.n_excluded} run(s) excluded after a setup failure.`,
+        `${a.variant_id}: ${a.n_setup_failed} run(s) excluded after a setup failure.`,
       );
     }
     if (a.unjudged_finding_runs > 0) {
@@ -46,11 +48,16 @@ export function renderAggregates(
         `${a.variant_id}: ${a.unjudged_finding_runs} finding run(s) have no judgment yet and are left out of recall.`,
       );
     }
+    if (a.recall_by_repeat.length > 1) {
+      notes.push(
+        `${a.variant_id} recall by repeat: ${a.recall_by_repeat.map((r) => `run-${r.repeat} ${pct(r.recall)} (n=${r.entries})`).join(", ")}.`,
+      );
+    }
   }
   for (const { aggregate: a, noise } of rows) {
     if (noise === null) continue;
     notes.push(
-      `${a.variant_id} noise over ${noise.repeats.length} repeats on ${noise.entries_compared} common entries: recall range ${pct(noise.recall_range)}, false-positive rate range ${pct(noise.false_positive_rate_range)} (absolute range ${noise.false_positives_range}), validity range ${pct(noise.validity_range)}, flip rate ${pct(noise.flip_rate)}.`,
+      `${a.variant_id} noise over ${noise.repeats.length} repeats on ${noise.entries_compared} common entries: recall range ${pct(noise.recall_range)} (n=${noise.recall_entries}), false-positive rate range ${num(noise.false_positive_rate_range, 3)} per control entry (n=${noise.control_entries}, absolute range ${noise.false_positives_range}), validity range ${pct(noise.validity_range)}, flip rate ${pct(noise.flip_rate)}.`,
     );
   }
   return [...lines, "", ...notes.map((n) => `- ${n}`)].join("\n");
@@ -67,17 +74,17 @@ function deltaRow(
       : m.exceeds_noise
         ? "above noise"
         : "within noise";
-  return `| ${label} | ${format(m.a)} | ${format(m.b)} | ${format(m.delta)} | ${format(m.noise)} | ${verdict} |`;
+  return `| ${label} | ${format(m.a)} | ${format(m.b)} | ${format(m.delta)} | ${format(m.noise)} | ${format(m.floor)} | ${verdict} (n=${m.n}, A ${m.a_repeats} repeat(s), B ${m.b_repeats} repeat(s)) |`;
 }
 
 export function renderComparison(c: Comparison): string {
   return [
-    `Variant A: ${c.a}. Variant B: ${c.b}. Delta is B minus A; noise is the run-to-run range of A.`,
+    `Variant A: ${c.a}. Variant B: ${c.b}. Each metric is paired: both variants on the same entries, per-entry means over repeats. Delta is B minus A; the verdict compares it with the larger of A's run-to-run range and a floor of ${c.noise_floor_entries} entry's worth (floor = entries / n).`,
     "",
-    "| metric | A | B | delta | noise of A | verdict |",
-    "|---|---|---|---|---|---|",
+    "| metric | A | B | delta | noise of A | floor | verdict |",
+    "|---|---|---|---|---|---|---|",
     deltaRow("recall", c.recall, pct),
-    deltaRow("false positives per control run", c.false_positives, (v) =>
+    deltaRow("false positives per control entry", c.false_positives, (v) =>
       num(v, 3),
     ),
     deltaRow("validity", c.validity, pct),
