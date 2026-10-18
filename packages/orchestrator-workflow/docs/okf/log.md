@@ -1,5 +1,16 @@
 # Bundle log
 
+- 2026-10-18T18:50:44Z, GitHub Actions replay in run mode single: the trigger site in `evidence-and-probes.md`
+  step 6 now says the orchestrator applies the implementer part of the replay rules itself to a
+  workflow or action diff in run mode `single` (the sentence was appended to the paragraph's last
+  line, so no citation moved); the reviewer's safety-net sentence says `action.yml` or
+  `action.yaml` at any depth; `subagent-contracts-superset.md` names `github-actions-replay.md`
+  and lists it as a source, which moved that doc's lines down by one, so the two anchored log
+  citations into it and the doc's two sibling-drift allowlist entries in
+  `docs-consistency.test.ts` follow. Re-verified: the claims of the re-stamped docs are
+  unchanged. Re-stamped: `model-preselection.md`, `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md`.
+
 - 2026-10-18T18:36:05Z, GitHub Actions replay rules load only for workflow or action diffs: the replay rule left the
   implementer and reviewer prompts for the new `github-actions-replay.md` skill reference, the
   trigger and copy instruction sit once in `evidence-and-probes.md` step 6, and the reviewer's
