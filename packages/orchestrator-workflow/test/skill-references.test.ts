@@ -86,6 +86,7 @@ describe("packaged skill references", () => {
       "bundle-gate-in-ci.md",
       "contracts.md",
       "evidence-and-probes.md",
+      "github-actions-replay.md",
       "review-and-recovery.md",
       "run-state-and-harness.md",
       "verification-set-rules.md",

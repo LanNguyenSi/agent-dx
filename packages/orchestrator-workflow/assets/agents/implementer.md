@@ -127,17 +127,9 @@ Rules:
   platforms lack `setsid(1)` and a per-child virtual-memory limit; use the
   language runtime's process-group spawn, or an equivalent, and watch
   resident memory from outside.
-- For any diff that adds or changes a GitHub Actions `run:` step, replay it
-  locally under the shell the step actually runs: `bash --noprofile --norc
-  -eo pipefail` when `shell: bash` is set on the step or via
-  `defaults.run.shell`, `bash -e` otherwise on Linux and macOS runners
-  (Actions' default for `run:` with no `shell:` key; Windows runners default
-  to pwsh), with the expected-success and the expected-failure inputs,
-  before treating it as tested; for a job, replay its steps in their
-  committed order. A step that expects a non-zero command captures the
-  status inside an `if` or a `set +e`/`set -e` guard. Substitute `${{ }}`
-  expressions with representative values before replaying, and never paste
-  untrusted event data into your shell.
+- When your briefing carries the GitHub Actions replay rules, follow them; if
+  your diff adds or changes a GitHub Actions `run:` step and the briefing lacks
+  them, report that as an open question.
 - Before committing, when slop-detector is available run `slop-detector
   check <changed file> [<changed file> ...] --pack review-slop` over every
   changed file, and `git log -1 --format=%B | slop-detector check

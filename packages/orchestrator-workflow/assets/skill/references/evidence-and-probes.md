@@ -159,11 +159,15 @@ directory and the subagents.
    text is multi-line or contains an unescaped `|`, or the mutant is a
    patch/diff rather than a text swap, the full text or diff goes in the
    implementer report or a fenced block placed directly under the table,
-   with the row noting where it lives. For any diff that adds or
-   changes a GitHub Actions `run:` step, the installed `implementer.md`
-   prompt requires replaying it locally under the shell the step actually
-   runs, with the expected-success and the expected-failure inputs, before
-   treating it as tested.
+   with the row noting where it lives. When the diff will touch
+   `.github/workflows/**` or an `action.yml` or `action.yaml` at any depth (an
+   implementer briefing judges this from the task's allowed changes, a reviewer
+   briefing from the actual diff), copy [GitHub Actions replay
+   rules](github-actions-replay.md), unedited and with its heading, into the
+   briefing after its YAML block; leave it out of every briefing for a diff
+   that touches none of those paths. The rules replay any added or changed
+   GitHub Actions `run:` step locally, and they travel inside the briefing so
+   the role is never sent to look them up. In run mode `single`, where no implementer briefing exists, the orchestrator applies the implementer part of those rules itself to such a diff before it records the change as tested.
    Repros, hang probes, fuzz loops, and ad-hoc runs against adversarial or
    circular fixtures, including the orchestrator's own runs, follow the
    installed `implementer.md` prompt's bounded-run rule: own process
@@ -275,7 +279,9 @@ directory and the subagents.
    classifies a deviation by the runbook's authority, as contracts.md defines.
    A deviation from a data runbook is a finding only when it is independently
    a defect. For a briefing that names a `verification_set`,
-   the Verification sets section below says how its rules are carried. Name the operator-curated bundle dirs and the pinned runbook
+   the Verification sets section below says how its rules are carried. For a
+   diff that touches the paths step 6 names, the briefing carries the GitHub Actions
+   replay rules as step 6 says. Name the operator-curated bundle dirs and the pinned runbook
    paths, as read at the run base, in the briefing's `constraints`, so the
    reviewer can tell whether a diff touches an operator runbook. When tier
    variants are installed, pick the reviewer tier (the installed
@@ -327,8 +333,8 @@ directory and the subagents.
    against the implementer's claim in the reviewer output contract's
    `reproduction` field. This does not apply to deterministic checks (a single
    test run, `tsc`, lint): only claims that could vary run to run trigger it.
-   The GitHub Actions shell replay named in step 6 is a second, explicitly
-   non-probabilistic trigger for the same field, with `sample_size:
+   The GitHub Actions replay that the rules named in step 6 call for is a
+   second, explicitly non-probabilistic trigger for the same field, with `sample_size:
    not_applicable` allowed when the replay itself has no meaningful sample
    size. When citing a coverage gate, the installed `reviewer.md` prompt has
    the reviewer cite the threshold and pass/fail counts, not a run-specific

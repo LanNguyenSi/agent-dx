@@ -383,7 +383,7 @@ describe("safety core: the reviewer's read-only rule is pinned at reviewer.md", 
 
   it("limits writes outside the reviewed tree to the scratchpad and the run directory's evidence", () => {
     expect(reviewerMd).toContain(
-      "Outside the reviewed tree, write only to your scratchpad (a scratch copy or replay of the repository, per the GitHub Actions replay rule above) and to the run directory's `evidence/`.",
+      "Outside the reviewed tree, write only to your scratchpad (for example a scratch copy of the repository to replay a step in) and to the run directory's `evidence/`.",
     );
   });
 
@@ -5733,7 +5733,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 80,
     end: 85,
     anchorKey: "5633dd3c",
-    paragraphLine: 73,
+    paragraphLine: 74,
     uncitedLines: [174, 187],
     claim:
       'line 85 cites `advisor: "opus",`; uncited 174 and 187 is instead line 174 in `advisor: ["high", "xhigh"],`; and line 187 in `advisor: "high",`, a different site the citing sentence never names.',
@@ -5745,7 +5745,7 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     start: 639,
     end: 639,
     anchorKey: "9e1acc22",
-    paragraphLine: 257,
+    paragraphLine: 258,
     uncitedLines: [532, 603],
     claim:
       "line 639 is the slicer-output match inside the test proving no subagent-input field is absent from the slicer output schema, the test this sentence describes; uncited 532 is the list-shape helper's own field regex, and uncited 603 is the same match inside the separate excludes-only-the-envelope-and-orchestrator-set-fields test, neither of which this sentence names.",

@@ -44,6 +44,9 @@ role definitions where available rather than improvising prompts.
   implementer or reviewer briefing:** also
   copy [verification set rules](references/verification-set-rules.md) into that
   briefing.
+- **Delegate a diff that touches workflow or action files:** also copy
+  [GitHub Actions replay rules](references/github-actions-replay.md) into the
+  implementer and reviewer briefings, as the detailed workflow says.
 - **Run a knowledge-bundle check in CI or before a commit:** read
   [bundle gate in CI](references/bundle-gate-in-ci.md).
 
