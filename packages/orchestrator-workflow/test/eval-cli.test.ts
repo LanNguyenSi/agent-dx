@@ -56,6 +56,8 @@ function io(
     },
     // The fixture scratch lives under the system temp root; production refuses that.
     tempRoots: [],
+    // Likewise its path is longer than a production scratch tmp path may be.
+    maxTmpPath: Infinity,
   };
 }
 
@@ -226,6 +228,30 @@ describe("evaluation CLI", { timeout: 120_000 }, () => {
     expect(env.errors[0]).toContain("inside a temp root");
     expect(env.errors[0]).toContain("own checkout");
     expect(existsSync(join(work, "elsewhere"))).toBe(false);
+  });
+
+  it("refuses a --scratch whose tmp path exceeds the limit, naming the fallback", async () => {
+    const alpha = promptFile("alpha.md", "Alpha body.");
+    const env = { ...io(), maxTmpPath: undefined };
+    const longRoot = join(work, "a-scratch-directory-with-a-rather-long-name");
+    const code = await main(
+      [
+        "run",
+        ...common(),
+        "--variant",
+        `file:${alpha}`,
+        "--claude",
+        claude(),
+        ...guard,
+        "--scratch",
+        longRoot,
+      ],
+      env,
+    );
+    expect(code).toBe(2);
+    expect(env.errors[0]).toContain("too long");
+    expect(env.errors[0]).toContain("/tmp/claude-<uid>");
+    expect(existsSync(longRoot)).toBe(false);
   });
 
   it("requires --scratch where the host has no default, and uses the default where it has one", async () => {
@@ -946,6 +972,8 @@ describe("canary", { timeout: 120_000 }, () => {
   const canary = async (
     scenario: string,
     vars: Record<string, string> = {},
+    /** Host environment of the runner: a string sets a variable, undefined removes it. */
+    hostEnv: Record<string, string | undefined> = {},
   ): Promise<{
     code: number;
     result: Record<string, any>;
@@ -956,6 +984,10 @@ describe("canary", { timeout: 120_000 }, () => {
     const canaryOut = mkdtempSync(join(work, "canary-out-"));
     const records = mkdtempSync(join(work, "rec-canary-"));
     const r = io({ HOME: home });
+    for (const [name, value] of Object.entries(hostEnv)) {
+      if (value === undefined) delete r.env[name];
+      else r.env[name] = value;
+    }
     const code = await main(
       [
         "canary",
@@ -1073,7 +1105,12 @@ describe("canary", { timeout: 120_000 }, () => {
     const clean = await canary("names-git");
     expect(clean.code).toBe(0);
     expect(clean.result.status).toBe("pass");
-    const mixed = await canary("names-git-mixed");
+    // FOO_SECRET is a name of the runner's own environment here, so it counts.
+    const mixed = await canary(
+      "names-git-mixed",
+      {},
+      { FOO_SECRET: "foo-secret-host-value" },
+    );
     expect(mixed.code).toBe(1);
     const check = mixed.result.checks.find(
       (c: any) => c.id === "env_secret_names",
@@ -1081,6 +1118,38 @@ describe("canary", { timeout: 120_000 }, () => {
     expect(check.pass).toBe(false);
     expect(check.detail).toContain("FOO_SECRET");
     expect(check.detail).not.toContain("GIT_CONFIG_KEY_0");
+  });
+
+  it("does not count names only the sandbox injects, such as its proxy password", async () => {
+    const proxy = await canary(
+      "names-proxy",
+      {},
+      {
+        CLOUDSDK_PROXY_PASSWORD: undefined,
+        FOO_SECRET: undefined,
+      },
+    );
+    expect(proxy.code).toBe(0);
+    expect(proxy.result.status).toBe("pass");
+    const check = proxy.result.checks.find(
+      (c: any) => c.id === "env_secret_names",
+    );
+    expect(check.pass).toBe(true);
+    expect(check.detail).toContain("CLOUDSDK_PROXY_PASSWORD");
+    // The same name counts when the runner's own environment holds it.
+    const host = await canary(
+      "names-proxy",
+      {},
+      {
+        CLOUDSDK_PROXY_PASSWORD: "proxy-password-host-value",
+      },
+    );
+    expect(host.code).toBe(1);
+    const hostCheck = host.result.checks.find(
+      (c: any) => c.id === "env_secret_names",
+    );
+    expect(hostCheck.pass).toBe(false);
+    expect(hostCheck.detail).toContain("CLOUDSDK_PROXY_PASSWORD");
   });
 
   it("asks the session to list credential-looking names and to leave out the git configuration names", async () => {

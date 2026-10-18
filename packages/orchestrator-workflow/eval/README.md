@@ -107,8 +107,10 @@ npm run eval -- compare --dataset <dir> --out <results> --a current --b degraded
 `--scratch` and `--out` must lie outside the dataset's parent directory, and
 the scratch directory outside the home directory, outside every temp root and
 outside `--out`; the commands refuse otherwise, since the session may read
-none of them. The default scratch directory is `/Users/Shared/ow-eval` on macOS;
-on any other host `--scratch` is required.
+none of them. The default scratch directory is `/Users/Shared/oe` on macOS;
+on any other host `--scratch` is required. The path is deliberately short: a
+run's tmp path (`<scratch>/<8 hex>/tmp`) may not exceed 32 characters, and the
+commands refuse a longer `--scratch` (see "Claude Code sandbox" below for why).
 
 Run `canary` before every batch and after every Claude Code update (see
 Isolation). It exits 0 only when every check passed.
@@ -183,13 +185,15 @@ What contains a session:
   branch or tag is reachable. The remote is removed again before anything
   runs, and the fetch bookkeeping file is deleted. Nothing is cloned into or
   modified in a shared worktree.
-- **Opaque paths**: every run gets `<scratch>/<random id>/` with `checkout/`,
+- **Opaque paths**: every run gets `<scratch>/<random id>/` (8 hex characters) with `checkout/`,
   `evidence/`, `run/`, `home/`, `tmp/`, `gh/` and `meta/`. No path the session
   or the judge sees names the variant, the entry or the dataset.
 - **Environment allowlist** for setup commands and the session alike: `PATH`,
   `LANG`, `LC_*`, `TERM`, `USER`, `LOGNAME`, `SHELL`; `HOME`,
   `CLAUDE_CONFIG_DIR`, `TMPDIR`, `GH_CONFIG_DIR` and the npm cache point into
-  the scratch directory; git gets `GIT_CONFIG_NOSYSTEM=1`,
+  the scratch directory (the session's npm cache is `home/.npm`, the setup
+  commands share one under the scratch root; the variable is left out rather
+  than set to a malformed path); git gets `GIT_CONFIG_NOSYSTEM=1`,
   `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_SSH_COMMAND=false` and
   `GIT_TERMINAL_PROMPT=0`. Nothing else of the invoking environment passes:
   no tokens, no agent socket, no session or messaging variables. The API key
@@ -209,13 +213,18 @@ What contains a session:
   and they write only to the checkout, the evidence directory and the run's
   scratch temp directory and home (the session's `TMPDIR` and
   `CLAUDE_CODE_TMPDIR` point at the scratch temp directory, so Claude Code's
-  per-user temp directory lies inside the run's scratch); for a long scratch
-  path Claude Code may use a short directory under the system temp root
-  instead (Claude Code environment variable docs), so keep `--scratch` short.
+  per-user temp directory lies inside the run's scratch). With the sandbox
+  enabled, Claude Code honours `CLAUDE_CODE_TMPDIR` only for a short path: a
+  38 character tmp path was measured to fall back silently to
+  `/tmp/claude-<uid>` (denied, so every sandboxed command failed on Claude
+  Code's own working-directory file), while 31 and 29 characters worked
+  (Claude Code 2.1.302, macOS). The hard limit is therefore 32 characters for
+  `<scratch>/<8 hex>/tmp`, and the placement check refuses a longer
+  `--scratch`; the default `/Users/Shared/oe` gives 29.
 - **Scratch location**: the file-tool deny rules below cover the home
   directory and the temp roots, and a deny rule always wins over an allow
   entry, so a checkout inside either would be unreadable to its own session.
-  The scratch directory therefore lives outside both: `/Users/Shared/ow-eval`
+  The scratch directory therefore lives outside both: `/Users/Shared/oe`
   by default on macOS, `--scratch` elsewhere. `TMPDIR` and
   `CLAUDE_CODE_TMPDIR` still point into the run's own scratch directory.
 - **File tools**: Read and Edit deny rules cover the same trees, the shared

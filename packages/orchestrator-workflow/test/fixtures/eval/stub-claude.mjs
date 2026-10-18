@@ -155,6 +155,7 @@ function canaryAnswer() {
       names: ["CLAUDE_CODE_MESSAGING_TOKEN"],
       "names-git": ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_KEY_1", "GIT_CONFIG_VALUE_0"],
       "names-git-mixed": ["GIT_CONFIG_KEY_0", "FOO_SECRET"],
+      "names-proxy": ["CLOUDSDK_PROXY_PASSWORD", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"],
     };
     if (id === "env_secret_names") item.names = namesByScenario[scenario] ?? [];
     if (id === "env_secret_names" && scenario in namesByScenario) item.succeeded = true;

@@ -667,7 +667,6 @@ export async function runEntry(
       cwd: scratch.checkout,
       env: sessionEnv(options.env, {
         scratch,
-        npmCache: join(scratch.tmp, "npm-cache"),
         apiKey,
       }),
       timeoutMs: options.timeoutMs,

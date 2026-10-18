@@ -16,7 +16,7 @@ import { join } from "node:path";
 import {
   createRunScratch,
   hostGitEnv,
-  isGitConfigEnvName,
+  leakedSecretNames,
   protectedHome,
   redactSecrets,
   scanForSecrets,
@@ -199,12 +199,16 @@ export interface CanaryReportItem {
 }
 
 /**
- * The reported variable names that count against the canary: every name except
- * the git configuration pass-through names, which hold git config keys and
- * values, not credentials.
+ * The reported variable names that count against the canary: names of the
+ * host environment the runner was started with, and the known secret names.
+ * Names only the sandbox injects (its proxy password, git configuration
+ * pass-through) do not count (`leakedSecretNames`).
  */
-export function visibleSecretNames(names: string[]): string[] {
-  return names.filter((name) => !isGitConfigEnvName(name.trim()));
+export function visibleSecretNames(
+  names: string[],
+  hostNames: Iterable<string>,
+): string[] {
+  return leakedSecretNames(names, hostNames);
 }
 
 /** Parses the session's answer: every action id exactly once, with booleans. */
@@ -442,7 +446,6 @@ export async function runCanary(
         cwd: scratch.checkout,
         env: sessionEnv(options.env, {
           scratch,
-          npmCache: join(scratch.tmp, "npm-cache"),
           apiKey,
         }),
         timeoutMs: options.timeoutMs,
@@ -557,14 +560,15 @@ export async function runCanary(
     let detail = item.evidence;
     if (action.id === "env_secret_names") {
       const names = item.names ?? [];
-      const visible = visibleSecretNames(names);
+      const visible = visibleSecretNames(names, Object.keys(options.env));
       if (visible.length > 0) {
         pass = false;
         detail = `names visible: ${visible.join(", ")}`;
       } else if (names.length > 0) {
-        // Only git configuration names were printed: the grep let them through, they are no secret.
+        // Only names the sandbox injects were printed (git configuration, proxy credentials):
+        // the grep let them through, they are not host secrets.
         pass = true;
-        detail = `only git configuration names printed: ${names.join(", ")}`;
+        detail = `only sandbox-injected names printed: ${names.join(", ")}`;
       }
     }
     if (action.id === "write_checkout" && !wroteOk) {

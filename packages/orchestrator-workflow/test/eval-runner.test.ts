@@ -22,7 +22,12 @@ import {
   runGrouped,
 } from "../eval/runner.js";
 import type { RunnerOptions } from "../eval/runner.js";
-import { PASSED_ENV, sessionEnv, setupEnv } from "../eval/isolation.js";
+import {
+  PASSED_ENV,
+  sessionEnv,
+  sessionNpmCache,
+  setupEnv,
+} from "../eval/isolation.js";
 import { makeVariant, sha256 } from "../eval/variants.js";
 import {
   FAKE_GUARD,
@@ -235,6 +240,10 @@ describe("runEntry with a stub session", { timeout: 60_000 }, () => {
     expect(setup.GIT_SSH_COMMAND).toBe("false");
     expect(setup.GIT_TERMINAL_PROMPT).toBe("0");
     expect(setup.npm_config_cache).toBe(join(opts.scratchRoot, "npm-cache"));
+    // The session's npm cache is a real directory path inside its scratch home.
+    expect(session.env.npm_config_cache).toBe(
+      join(opts.scratchRoot, result.scratch_id, "home", ".npm"),
+    );
     expect(setup.GH_CONFIG_DIR).toBe(
       join(opts.scratchRoot, result.scratch_id, "gh"),
     );
@@ -442,7 +451,7 @@ describe("runEntry with a stub session", { timeout: 60_000 }, () => {
     });
     const result = await runEntry(control, variant, 1, opts);
     expect(result.status).toBe("completed");
-    expect(result.scratch_id).toMatch(/^[0-9a-f]{12}$/);
+    expect(result.scratch_id).toMatch(/^[0-9a-f]{8}$/);
     const rec = call();
     for (const text of [rec.stdin, rec.cwd, JSON.stringify(rec.argv)]) {
       expect(text).not.toContain("zz-sample-control");
@@ -763,7 +772,6 @@ describe("environment allowlist, buildSessionArgs, composePrompt", () => {
     const setup = setupEnv(base, { scratch, npmCache: "/s/npm" });
     const session = sessionEnv(base, {
       scratch,
-      npmCache: "/s/npm",
       apiKey: "sk-session",
     });
     for (const env of [setup, session]) {
@@ -777,19 +785,53 @@ describe("environment allowlist, buildSessionArgs, composePrompt", () => {
       expect(env.TMPDIR).toBe("/s/tmp");
       expect(env.CLAUDE_CONFIG_DIR).toBe("/s/home/.claude");
       expect(env.GH_CONFIG_DIR).toBe("/s/gh");
-      expect(env.npm_config_cache).toBe("/s/npm");
       expect(env.GIT_CONFIG_GLOBAL).toBe("/dev/null");
     }
+    expect(setup.npm_config_cache).toBe("/s/npm");
+    // The session's cache lies inside its scratch home, whatever the setup cache is.
+    expect(session.npm_config_cache).toBe("/s/home/.npm");
+    expect(session.npm_config_cache).toBe(sessionNpmCache(scratch));
     expect(setup.ANTHROPIC_API_KEY).toBeUndefined();
     expect(setup.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBeUndefined();
     // The session key is the one handed over, never the inherited variable.
     expect(session.ANTHROPIC_API_KEY).toBe("sk-session");
-    expect(
-      sessionEnv(base, { scratch, npmCache: "/s/npm" }).ANTHROPIC_API_KEY,
-    ).toBeUndefined();
+    expect(sessionEnv(base, { scratch }).ANTHROPIC_API_KEY).toBeUndefined();
     // Neither set nor inherited: it would force the permission mode to default.
     expect(session.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBeUndefined();
     expect(base.GH_TOKEN).toBe("gh-secret");
+  });
+
+  it("never passes a stringified undefined as the npm cache", () => {
+    const scratch = {
+      home: "/s/home",
+      configDir: "/s/home/.claude",
+      tmp: "/s/tmp",
+      gh: "/s/gh",
+    };
+    const bad = [undefined, "undefined", "null", "", "relative/dir"];
+    for (const npmCache of bad) {
+      const env = setupEnv(
+        { PATH: "/bin" },
+        {
+          scratch,
+          npmCache: npmCache as unknown as string,
+        },
+      );
+      expect(Object.keys(env), String(npmCache)).not.toContain(
+        "npm_config_cache",
+      );
+    }
+    // Whatever the caller hands in, the session's cache is inside the scratch home.
+    const session = sessionEnv({ PATH: "/bin" }, {
+      scratch,
+      npmCache: "undefined",
+    } as never);
+    expect(session.npm_config_cache).toBe("/s/home/.npm");
+    for (const env of [
+      session,
+      setupEnv({ PATH: "/bin" }, { scratch, npmCache: "/s/npm" }),
+    ])
+      expect(Object.values(env)).not.toContain("undefined");
   });
 
   it("adds --bare only in bare mode", () => {

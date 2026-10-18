@@ -39,7 +39,30 @@ export interface RunScratch {
   meta: string;
 }
 
-const ID_BYTES = 6;
+/** Random bytes of a run id: 8 hex characters, short because the temp path must stay short. */
+const ID_BYTES = 4;
+
+/**
+ * Longest scratch tmp path (`<scratch root>/<run id>/tmp`) Claude Code accepts
+ * as `CLAUDE_CODE_TMPDIR` with the sandbox enabled (measured on Claude Code
+ * 2.1.302, macOS): a 38 character path was ignored and Claude Code fell back
+ * to `/tmp/claude-<uid>`, which the session's deny rules cover, so every
+ * sandboxed command then failed on its own working-directory file; 31 and 29
+ * characters worked. 32 is the hard limit.
+ */
+export const MAX_TMP_PATH_LENGTH = 32;
+
+/** Characters of a run id (hex), for the placement check's length estimate. */
+export const RUN_ID_LENGTH = ID_BYTES * 2;
+
+/**
+ * Length of the tmp path a run under `scratchRoot` gets, in the longest form
+ * of the root (symlinks followed or not): `<root>/<run id>/tmp`.
+ */
+export function scratchTmpPathLength(scratchRoot: string): number {
+  const longest = Math.max(...pathForms(scratchRoot).map((p) => p.length));
+  return longest + 1 + RUN_ID_LENGTH + "/tmp".length;
+}
 
 /** Creates a fresh run directory with an opaque name under `scratchRoot`. */
 export function createRunScratch(scratchRoot: string): RunScratch {
@@ -80,14 +103,15 @@ export function createRunScratch(scratchRoot: string): RunScratch {
  * every temp root, because the session's file-tool deny rules cover both (a
  * checkout inside either would be unreadable to its own session). Only macOS
  * has such a place without configuration (`/Users/Shared`); elsewhere the
- * caller must pass `--scratch`, and this returns null.
+ * caller must pass `--scratch`, and this returns null. The name is short on
+ * purpose: the run's tmp path may not exceed `MAX_TMP_PATH_LENGTH`.
  */
 export function defaultScratchRoot(
   platform: NodeJS.Platform = process.platform,
   exists: (path: string) => boolean = existsSync,
 ): string | null {
   if (platform === "darwin" && exists("/Users/Shared"))
-    return "/Users/Shared/ow-eval";
+    return "/Users/Shared/oe";
   return null;
 }
 
@@ -150,7 +174,8 @@ export interface ChildEnvOptions {
 
 /**
  * Environment of a setup command: the allowlist, a scratch HOME, TMPDIR,
- * Claude config dir, empty gh config and npm cache, and the fixed git
+ * Claude config dir, empty gh config and npm cache (omitted when the path is
+ * not an absolute path), and the fixed git
  * settings. Everything else in `base` (tokens, sockets, session ids, the API
  * key) is dropped. SSH_AUTH_SOCK is never set.
  */
@@ -158,15 +183,34 @@ export function setupEnv(
   base: NodeJS.ProcessEnv,
   options: Omit<ChildEnvOptions, "apiKey">,
 ): NodeJS.ProcessEnv {
-  return {
+  const env: NodeJS.ProcessEnv = {
     ...passed(base),
     ...FIXED_ENV,
     HOME: options.scratch.home,
     CLAUDE_CONFIG_DIR: options.scratch.configDir,
     TMPDIR: options.scratch.tmp,
     GH_CONFIG_DIR: options.scratch.gh,
-    npm_config_cache: options.npmCache,
   };
+  // A missing or malformed cache path is left out: a stringified `undefined` would name a
+  // directory called "undefined" in the working directory.
+  if (usableCache(options.npmCache)) env.npm_config_cache = options.npmCache;
+  return env;
+}
+
+export interface SessionEnvOptions {
+  scratch: Pick<RunScratch, "home" | "configDir" | "tmp" | "gh">;
+  /** The API key, for the claude process only (see `ChildEnvOptions`). */
+  apiKey?: string;
+}
+
+/** npm cache of the session: a directory inside the scratch home. */
+export function sessionNpmCache(scratch: Pick<RunScratch, "home">): string {
+  return join(scratch.home, ".npm");
+}
+
+/** True for a value usable as `npm_config_cache`: an absolute path, so never the literal "undefined". */
+function usableCache(value: unknown): value is string {
+  return typeof value === "string" && isAbsolute(value);
 }
 
 /**
@@ -182,10 +226,13 @@ export function setupEnv(
  */
 export function sessionEnv(
   base: NodeJS.ProcessEnv,
-  options: ChildEnvOptions,
+  options: SessionEnvOptions,
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
-    ...setupEnv(base, options),
+    ...setupEnv(base, {
+      scratch: options.scratch,
+      npmCache: sessionNpmCache(options.scratch),
+    }),
     CLAUDE_CODE_TMPDIR: options.scratch.tmp,
   };
   if (options.apiKey !== undefined) env.ANTHROPIC_API_KEY = options.apiKey;
@@ -238,6 +285,8 @@ export function checkPlacement(options: {
   home: string;
   /** Shared temp roots; defaults to `systemTempRoots()`. */
   tempRoots?: string[];
+  /** Longest scratch tmp path; defaults to `MAX_TMP_PATH_LENGTH` (test seam). */
+  maxTmpPath?: number;
 }): string | null {
   const scratch = pathForms(options.scratchRoot);
   const out = pathForms(options.outDir);
@@ -258,6 +307,10 @@ export function checkPlacement(options: {
     return `--scratch ${options.scratchRoot} is inside a temp root (${tempRoots.join(", ")}), which the file-tool deny rules cover, so the session could not read its own checkout; choose a directory outside the home directory and the temp roots`;
   if (inside(scratch, out))
     return `--scratch ${options.scratchRoot} is inside --out, which the session may not read`;
+  const maxTmpPath = options.maxTmpPath ?? MAX_TMP_PATH_LENGTH;
+  const tmpLength = scratchTmpPathLength(options.scratchRoot);
+  if (tmpLength > maxTmpPath)
+    return `--scratch ${options.scratchRoot} is too long: the run's tmp path would be ${tmpLength} characters (<scratch>/<8 hex>/tmp), and the limit is ${maxTmpPath}. Beyond it Claude Code ignores CLAUDE_CODE_TMPDIR under the sandbox and silently falls back to /tmp/claude-<uid>, which is denied, so every sandboxed command fails (38 characters measured to fall back). Choose a shorter directory, for example /Users/Shared/oe`;
   for (const path of [...scratch, ...out, ...datasetParent, ...home]) {
     if (RULE_UNSAFE.test(path))
       return `path ${path} contains a character that permission rules treat as a pattern`;
@@ -459,6 +512,40 @@ const GIT_CONFIG_ENV_NAME = /^GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+)$/;
 /** True for the git configuration pass-through names (never a secret by name). */
 export function isGitConfigEnvName(name: string): boolean {
   return GIT_CONFIG_ENV_NAME.test(name);
+}
+
+/**
+ * Variable names that are secrets whether or not the host environment holds
+ * them: if one shows up in the session, it leaked from somewhere.
+ */
+export const KNOWN_SECRET_NAMES = [
+  "ANTHROPIC_API_KEY",
+  "AGENT_TASKS_TOKEN",
+  "GH_TOKEN",
+  "GITHUB_TOKEN",
+  "CLAUDE_CODE_MESSAGING_TOKEN",
+  "CLAUDE_CODE_MESSAGING_SOCKET",
+] as const;
+
+/**
+ * The reported variable names that count as leaked secrets: a name of the
+ * host environment the runner itself was started with (the session got it
+ * from there), or a known secret name. A name only the sandbox injects into
+ * the session (its network proxy sets `CLOUDSDK_PROXY_PASSWORD`; git
+ * configuration passes through `GIT_CONFIG_KEY_<n>`) is neither, so it does
+ * not count.
+ */
+export function leakedSecretNames(
+  names: string[],
+  hostNames: Iterable<string>,
+): string[] {
+  const host = new Set(hostNames);
+  const known = new Set<string>(KNOWN_SECRET_NAMES);
+  return names.filter((raw) => {
+    const name = raw.trim();
+    if (isGitConfigEnvName(name)) return false;
+    return host.has(name) || known.has(name);
+  });
 }
 
 export const SECRET_PATTERNS: { name: string; pattern: RegExp }[] = [

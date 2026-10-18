@@ -58,6 +58,8 @@ export interface Io {
   tempRoots?: string[];
   /** Test seam: the scratch root used without `--scratch` (null: none); defaults to the host's. */
   defaultScratch?: string | null;
+  /** Test seam: the longest scratch tmp path the placement check accepts; defaults to the measured limit. */
+  maxTmpPath?: number;
 }
 
 const USAGE = `Usage: eval <command> [options]
@@ -279,6 +281,7 @@ function sessionOptions(
   const scratchRoot = resolve(scratchChoice);
   const placement = checkPlacement({
     tempRoots: io.tempRoots,
+    maxTmpPath: io.maxTmpPath,
     scratchRoot,
     outDir,
     datasetDir: dataset.dir,
@@ -579,7 +582,6 @@ async function commandJudge(args: string[], io: Io): Promise<number> {
             cwd: scratch.checkout,
             env: sessionEnv(io.env, {
               scratch,
-              npmCache: join(scratch.tmp, "npm-cache"),
               apiKey,
             }),
             timeoutMs: 10 * 60_000,

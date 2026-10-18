@@ -18,6 +18,10 @@ import {
   checkPlacement,
   createRunScratch,
   defaultScratchRoot,
+  MAX_TMP_PATH_LENGTH,
+  leakedSecretNames,
+  scratchTmpPathLength,
+  sessionNpmCache,
   hostGitEnv,
   isGitConfigEnvName,
   isInside,
@@ -51,7 +55,7 @@ describe("run scratch", () => {
   it("creates an opaque run directory with empty session directories", () => {
     const a = createRunScratch(join(work, "s"));
     const b = createRunScratch(join(work, "s"));
-    expect(a.id).toMatch(/^[0-9a-f]{12}$/);
+    expect(a.id).toMatch(/^[0-9a-f]{8}$/);
     expect(a.id).not.toBe(b.id);
     expect(a.root).toBe(join(work, "s", a.id));
     for (const dir of [a.evidence, a.runFiles, a.tmp, a.gh, a.meta]) {
@@ -120,6 +124,33 @@ describe("placement of scratch and results", () => {
     ).toContain("inside --out");
   });
 
+  it("refuses a scratch whose tmp path is over the limit, naming the fallback", () => {
+    // /srv/scratch + / + 8 hex + /tmp = 25 characters: fine.
+    expect(scratchTmpPathLength("/srv/scratch")).toBe(25);
+    expect(checkPlacement(base)).toBeNull();
+    // Exactly at the limit passes, one over is refused (the 38 character case measured to fall back).
+    const atLimit = "/srv/" + "x".repeat(MAX_TMP_PATH_LENGTH - 5 - 13);
+    expect(scratchTmpPathLength(atLimit)).toBe(MAX_TMP_PATH_LENGTH);
+    expect(checkPlacement({ ...base, scratchRoot: atLimit })).toBeNull();
+    const over = checkPlacement({ ...base, scratchRoot: `${atLimit}x` });
+    expect(over).toContain("--scratch");
+    expect(over).toContain("too long");
+    expect(over).toContain(`${MAX_TMP_PATH_LENGTH + 1} characters`);
+    expect(over).toContain("/tmp/claude-<uid>");
+    const measured = "/Users/Shared/ow-eval";
+    expect(scratchTmpPathLength(measured)).toBe(34);
+    expect(
+      checkPlacement({
+        ...base,
+        scratchRoot: "/Users/Shared/ow-eval/ab12cd34ef56",
+      }),
+    ).toContain("too long");
+    // The seam raises the limit.
+    expect(
+      checkPlacement({ ...base, scratchRoot: `${atLimit}x`, maxTmpPath: 40 }),
+    ).toBeNull();
+  });
+
   it("refuses a path a permission rule would read as a pattern", () => {
     expect(checkPlacement({ ...base, outDir: "/srv/res*ults" })).toContain(
       "pattern",
@@ -135,10 +166,14 @@ describe("placement of scratch and results", () => {
 });
 
 describe("default scratch root", () => {
-  it("is /Users/Shared/ow-eval on macOS when /Users/Shared exists", () => {
-    expect(defaultScratchRoot("darwin", () => true)).toBe(
-      "/Users/Shared/ow-eval",
-    );
+  it("is /Users/Shared/oe on macOS when /Users/Shared exists", () => {
+    expect(defaultScratchRoot("darwin", () => true)).toBe("/Users/Shared/oe");
+  });
+
+  it("leaves room for the run id and the tmp directory within the limit", () => {
+    const root = defaultScratchRoot("darwin", () => true)!;
+    expect(scratchTmpPathLength(root)).toBe(29);
+    expect(scratchTmpPathLength(root)).toBeLessThanOrEqual(MAX_TMP_PATH_LENGTH);
   });
 
   it("is absent elsewhere, so --scratch is required", () => {
@@ -347,6 +382,47 @@ describe("secrets and redaction", () => {
       "GIT_CONFIG_GLOBAL",
     ])
       expect(isGitConfigEnvName(name), name).toBe(false);
+  });
+
+  it("counts a reported name as a leak only when the host holds it or it is a known secret name", () => {
+    const host = ["PATH", "HOME", "MY_HOST_TOKEN"];
+    // Sandbox-injected names are not host secrets.
+    expect(
+      leakedSecretNames(
+        [
+          "CLOUDSDK_PROXY_PASSWORD",
+          "GIT_CONFIG_KEY_0",
+          "GIT_CONFIG_VALUE_3",
+          "GIT_CONFIG_COUNT",
+        ],
+        host,
+      ),
+    ).toEqual([]);
+    // A name of the host environment counts, with surrounding whitespace ignored.
+    expect(leakedSecretNames(["MY_HOST_TOKEN ", "FOO_SECRET"], host)).toEqual([
+      "MY_HOST_TOKEN ",
+    ]);
+    // The same sandbox name counts once the host holds it.
+    expect(
+      leakedSecretNames(
+        ["CLOUDSDK_PROXY_PASSWORD"],
+        [...host, "CLOUDSDK_PROXY_PASSWORD"],
+      ),
+    ).toEqual(["CLOUDSDK_PROXY_PASSWORD"]);
+    // Known names count with an empty host environment.
+    for (const name of [
+      "ANTHROPIC_API_KEY",
+      "AGENT_TASKS_TOKEN",
+      "GH_TOKEN",
+      "GITHUB_TOKEN",
+      "CLAUDE_CODE_MESSAGING_TOKEN",
+      "CLAUDE_CODE_MESSAGING_SOCKET",
+    ])
+      expect(leakedSecretNames([name], []), name).toEqual([name]);
+    // A git configuration name never counts, even if the host holds it.
+    expect(
+      leakedSecretNames(["GIT_CONFIG_KEY_0"], ["GIT_CONFIG_KEY_0"]),
+    ).toEqual([]);
   });
 
   it("never treats an empty value as a match", () => {
