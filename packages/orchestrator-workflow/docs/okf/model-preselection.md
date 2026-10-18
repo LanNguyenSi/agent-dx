@@ -19,7 +19,8 @@ sources:
   - packages/orchestrator-workflow/README.md
   - packages/orchestrator-workflow/docs/model-routing-reference.md
   - packages/orchestrator-workflow/INSTALL-AGENT.md
-  - packages/orchestrator-workflow/assets/agents-md-section.md
+  - packages/orchestrator-workflow/assets/skill/references/delegation-and-tiers.md
+  - packages/orchestrator-workflow/assets/skill/references/run-state-and-harness.md
   - packages/orchestrator-workflow/test/docs-consistency.test.ts
   - packages/orchestrator-workflow/test/init.test.ts
   - packages/orchestrator-workflow/test/routing.test.ts
@@ -451,12 +452,12 @@ cited above. `docs/model-routing-reference.md`'s "Effort tiers" section
 default file carries its own pinned effort, independent of `--tiers`"
 paragraph stating the same rule (`packages/orchestrator-workflow/docs/model-routing-reference.md:155#"effort deterministic and independent of the caller's session."`), and the CHANGELOG
 0.22.0 entry leads with this behavior change since it is user-visible and
-session-effort-dependent, not just an additive feature. `agents-md-section.md`'s
-Scaling delegation bullet list gained a dedicated bullet (deliberately
-sitting outside the pre-existing "When tier variants are installed..."
-tiers-gated bullet, so it cannot be misread as `--tiers`-only) and
-`SKILL.md` step 6 gained a matching parenthetical on the implementer tier
-choice; the effort claim in each is covered by review and the
+session-effort-dependent, not just an additive feature. the skill's
+`references/delegation-and-tiers.md` states it once, in a dedicated bullet
+of its Effort tiers list (deliberately sitting outside the "When tier
+variants are installed..." tiers-gated bullet, so it cannot be misread as
+`--tiers`-only); the delegation step in `evidence-and-probes.md` points
+there. The effort claim is covered by review and the
 behaviour eval set, not by a sentence pin (see "Docs-consistency pins"
 below for what is still guarded against `models.ts`).
 
@@ -584,12 +585,14 @@ validate native definitions.
 
 ## Orchestrator-runs-on-session-model policy
 
-The installed `AGENTS.md` policy section carries a `### Models` subsection
-verbatim (`assets/agents-md-section.md:319#"implementer, reviewer, advisor) are recorded in"`):
+The skill's `references/delegation-and-tiers.md` carries a `### Models`
+subsection (`assets/skill/references/delegation-and-tiers.md:85#"implementer, reviewer, advisor) are recorded in"`):
 the orchestrator stays on the session model while exact role/tier routing is
-recorded in the repo manifest and agent definitions. The following bullets
-make upgrades deliberate, retain prior routing as rollback input, and define
-the three capability-aware Codex dispatch paths.
+recorded in the repo manifest and agent definitions. Its further bullet makes
+upgrades deliberate and retains prior routing as rollback input. The three
+capability-aware Codex dispatch paths live once, in the Codex entry of the
+Harness notes in `references/run-state-and-harness.md`; the AGENTS.md charter
+carries none of this.
 
 ## Docs-consistency pins (model-specific)
 
@@ -607,7 +610,7 @@ the "Solution-neutral notes" section below describes.
   (`test/docs-consistency.test.ts:104#"INSTALL-AGENT.md --models example names every role"`, checks for `<role>=<model>` per role).
 - `INSTALL-AGENT.md`'s manifest example JSON has one `models` key per role
   (`test/docs-consistency.test.ts:119#"expect(Object.keys(manifest.models).sort()).toEqual(sortedRoles);"`, parses the fenced JSON block and compares sorted keys).
-- `agents-md-section.md`'s "Per-role model preferences (...)" parenthetical
+- `delegation-and-tiers.md`'s "Per-role and per-tier model/effort selections (...)" parenthetical
   lists every role (`test/docs-consistency.test.ts:130#"expect(listed.sort()).toEqual(sortedRoles);"`).
 
 A fifth, adjacent test guards the read-only-role brace lists
@@ -634,8 +637,8 @@ README.md), Tier -> model class -> model alias -> requested effort, against
 way; before this fix nothing guarded that second table, so it could drift
 from its source maps silently (this table is keyed by `Tier`, not `Role`,
 so it is unaffected by the role count itself). The opencode-effort prose of the same section and the pinned-default-effort
-and tier-selection policy sentences in `agents-md-section.md` and `SKILL.md`
-step 6 used to carry derivation-based sentence pins against these maps. Those
+and tier-selection sentences in `delegation-and-tiers.md` (and, before they
+moved there, in `agents-md-section.md` and `evidence-and-probes.md` step 6) used to carry derivation-based sentence pins against these maps. Those
 pins were removed together with the other non-core prose pins; the two tables
 above remain the only effort-tier claims guarded directly against
 `ROLE_TIERS`, `DEFAULT_TIER`, `TIER_DEFS`, and `CLASS_MODELS`.

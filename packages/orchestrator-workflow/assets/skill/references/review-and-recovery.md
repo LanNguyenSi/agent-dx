@@ -10,13 +10,10 @@ mutation probes to run, or that omits the `commits` field even though the
 task assignment asked for a commit, or that omits the `class_closure`
 field on any round after the task's first, or that reports an outward
 action (see AGENTS.md's Outward-facing actions rule) as executed, since a
-task assignment never authorizes one. Performing an outward action is
-forbidden, but reporting one that was actually performed is still
-mandatory: recovering the return as a misfire (it is not evidence) does not
-excuse the orchestrator from also treating the report itself as an
-incident, informing the operator immediately, recording it in
-`03-decisions.md`, and listing it in `06-handoff.md`'s Sent / Drafted
-Outward section as unauthorized. When a subagent returns near-instantly
+task assignment never authorizes one. Recovering such a return as a
+misfire (it is not evidence) does not excuse the orchestrator from also
+handling the report itself as an unauthorized-action incident, as
+[trust and outward](trust-and-outward.md) says. When a subagent returns near-instantly
 with no tool activity, treat that as a misfire signal rather than proof:
 check the output against the contract with extra suspicion, and accept it
 only if it is contract-valid and the assignment was answerable from the
@@ -166,6 +163,18 @@ critical finding of any category still blocks and is never capped away, and
 accepting one follows the waiver rules. Anchored by an observed run; see
 the entry for this rule in the orchestrator-workflow CHANGELOG.
 
+## Docs-only closure
+
+After independent review, the orchestrator may close a docs-only delta
+without another reviewer round only when its entire unreviewed delta is
+explanatory documentation, comments, or citations; has no source- or
+test-file edits or semantic changes to executable commands, configuration,
+policy, instructions, or behavior; and closes only low/medium documentation
+or maintainability findings. It never closes a high/critical or other
+ineligible finding, and records the concrete verification in a
+`05-review-findings.md` row with its Severity and Decision headers unchanged
+and Decision `accepted`.
+
 ## Final acceptance rule
 
 Subagents provide evidence. The orchestrator decides. The operator receives
@@ -175,7 +184,6 @@ the final handoff.
 
 Persist a recovery cursor in the existing run state (normally the task row or a `03-decisions.md` entry): failed step, evidence owner, next action, prerequisite, and resume point. On invalid/missing agent return, inconclusive/not-run probe, interrupted/blocked/partial run, or repeated finding, restore the applicable state before rerunning; verify revision and stale evidence. A cursor is not a new mandatory file and partial work is not proof.
 
-Recovery retains existing authority and halt qualifiers: a critical waiver remains operator-only; a high waiver requires orchestrator rationale; the round-2 signal remains limited to a fixed defect class, introduced-by-delta yes/unknown, and case-enumeration recurrence. Do not require probes for all findings.
+Recovery retains the review gate's waiver authority (AGENTS.md) and the halt qualifiers: the round-2 signal remains limited to a fixed defect class, introduced-by-delta yes/unknown, and case-enumeration recurrence. Do not require probes for all findings.
 
-Only the operator may authorize a critical waiver.
 Do not broaden this into a halt on any repeated finding.

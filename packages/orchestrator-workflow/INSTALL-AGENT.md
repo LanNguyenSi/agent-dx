@@ -79,8 +79,8 @@ The install creates or touches only these paths:
   different directory, gains or updates its record of this repository,
   guarded by a transient `.manifest.lock` directory held only for the
   duration of that write. Neither path lives inside the target repository.
-- `AGENTS.md`: the marker-fenced workflow section is appended (file created
-  when missing); content outside the
+- `AGENTS.md`: the marker-fenced workflow charter (under 800 words) is
+  appended (file created when missing); content outside the
   `<!-- orchestrator-workflow:begin -->` / `<!-- orchestrator-workflow:end -->`
   markers is never modified
 - `CLAUDE.md`: one `@AGENTS.md` import line appended when missing; the file

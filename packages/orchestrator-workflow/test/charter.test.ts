@@ -1,0 +1,179 @@
+import { describe, expect, it } from "vitest";
+
+import { listSkillReferenceNames, readAsset } from "../src/assets.js";
+
+// The AGENTS.md section is a charter: a short, always-loaded statement of the
+// rules every session must hold. Everything else lives once in the skill
+// references. This file pins the size bound, that every pointer resolves, and
+// that a sentence the charter or a rule-holding reference states is not
+// restated anywhere else in the skill.
+
+const BEGIN = "<!-- orchestrator-workflow:begin -->";
+const END = "<!-- orchestrator-workflow:end -->";
+const MAX_CHARTER_WORDS = 800;
+const MIN_CHARTER_WORDS = 600;
+
+const charterFile = readAsset("agents-md-section.md");
+const skillMd = readAsset("skill/SKILL.md");
+const referenceNames = listSkillReferenceNames();
+const references = new Map(
+  referenceNames.map((name) => [name, readAsset(`skill/references/${name}`)]),
+);
+
+/** Same tokenizer as `wc -w`: runs of non-whitespace. */
+const wordCount = (text: string) => text.split(/\s+/).filter(Boolean).length;
+const unwrap = (text: string) => text.replace(/\s+/g, " ");
+/** Unwrap and drop list markers, so a bullet matches the sentence it holds. */
+const flatten = (text: string) =>
+  unwrap(
+    text
+      .split(/\r?\n/)
+      .map((line) => line.replace(/^\s*-\s+/, ""))
+      .join("\n"),
+  );
+
+const between = () => {
+  const start = charterFile.indexOf(BEGIN);
+  const end = charterFile.indexOf(END);
+  expect(start, "begin marker").toBeGreaterThanOrEqual(0);
+  expect(end, "end marker").toBeGreaterThan(start);
+  return charterFile.slice(start + BEGIN.length, end);
+};
+
+/** Sentences of a markdown body: headings and fenced lines dropped, wraps joined. */
+function sentences(text: string): string[] {
+  const body = text
+    .split(/\r?\n/)
+    .filter((line) => !/^#{1,6}\s/.test(line) && !line.startsWith("```"))
+    .map((line) => line.replace(/^\s*-\s+/, ""))
+    .join("\n");
+  return unwrap(body)
+    .split(/(?<=\.)\s+(?=[A-Z`])/)
+    .map((sentence) => sentence.replace(/^[-\s]+/, "").trim())
+    .filter((sentence) => wordCount(sentence) >= 8);
+}
+
+/** Every file the skill loads next to the charter. */
+function corpus(): Map<string, string> {
+  const all = new Map<string, string>();
+  all.set("agents-md-section.md", flatten(between()));
+  all.set("SKILL.md", flatten(skillMd));
+  for (const [name, text] of references) {
+    all.set(`references/${name}`, flatten(text));
+  }
+  return all;
+}
+
+function occurrences(haystack: string, needle: string): number {
+  let count = 0;
+  let from = 0;
+  for (;;) {
+    const at = haystack.indexOf(needle, from);
+    if (at === -1) return count;
+    count += 1;
+    from = at + needle.length;
+  }
+}
+
+function sitesOf(sentence: string): string[] {
+  const sites: string[] = [];
+  for (const [name, text] of corpus()) {
+    for (let i = 0; i < occurrences(text, sentence); i += 1) sites.push(name);
+  }
+  return sites;
+}
+
+describe("the AGENTS.md section is a charter of at most 800 words", () => {
+  it(`has at most ${MAX_CHARTER_WORDS} words between the markers and in the whole file`, () => {
+    expect(wordCount(between())).toBeLessThanOrEqual(MAX_CHARTER_WORDS);
+    expect(wordCount(charterFile)).toBeLessThanOrEqual(MAX_CHARTER_WORDS);
+  });
+
+  it(`has at least ${MIN_CHARTER_WORDS} words between the markers`, () => {
+    expect(wordCount(between())).toBeGreaterThanOrEqual(MIN_CHARTER_WORDS);
+  });
+
+  it("is a single fenced block with one begin and one end marker", () => {
+    expect(occurrences(charterFile, BEGIN)).toBe(1);
+    expect(occurrences(charterFile, END)).toBe(1);
+    expect(charterFile.startsWith(`${BEGIN}\n`)).toBe(true);
+    expect(charterFile.trimEnd().endsWith(END)).toBe(true);
+  });
+
+  it("keeps the five charter parts and drops the detail sections", () => {
+    const headings = charterFile
+      .split(/\r?\n/)
+      .filter((line) => /^###? /.test(line));
+    expect(headings).toEqual([
+      "## Agentic Coding Workflow",
+      "### Roles and run modes",
+      "### Review gate",
+      "### Instruction trust boundary",
+      "### Outward-facing actions",
+      "### Definition of done",
+    ]);
+  });
+});
+
+describe("every pointer in the charter and SKILL.md resolves to a shipped reference", () => {
+  const pointed = (text: string) =>
+    [...text.matchAll(/references\/([A-Za-z0-9-]+\.md)/g)].map(
+      (match) => match[1],
+    );
+
+  it("the charter names only shipped references, and names the two it depends on", () => {
+    const names = new Set(pointed(charterFile));
+    for (const name of names) expect(referenceNames).toContain(name);
+    expect(names).toContain("trust-and-outward.md");
+    expect(names).toContain("review-and-recovery.md");
+  });
+
+  it("SKILL.md routes to every shipped reference", () => {
+    const names = new Set(pointed(skillMd));
+    for (const name of referenceNames) expect(names).toContain(name);
+  });
+});
+
+describe("a charter sentence is normative once: no skill file restates it", () => {
+  const charterSentences = sentences(between());
+
+  it("found the charter's sentences (sanity: not vacuously true)", () => {
+    expect(charterSentences.length).toBeGreaterThan(20);
+  });
+
+  for (const sentence of charterSentences) {
+    it(`states once: ${sentence.slice(0, 70)}`, () => {
+      expect(sitesOf(sentence)).toEqual(["agents-md-section.md"]);
+    });
+  }
+});
+
+describe("a rule-holding reference states each of its sentences once", () => {
+  const holders = ["trust-and-outward.md", "delegation-and-tiers.md"] as const;
+
+  for (const name of holders) {
+    const own = sentences(references.get(name) as string);
+
+    it(`${name}: found sentences (sanity: not vacuously true)`, () => {
+      expect(own.length).toBeGreaterThan(10);
+    });
+
+    for (const sentence of own) {
+      it(`${name} states once: ${sentence.slice(0, 60)}`, () => {
+        expect(sitesOf(sentence)).toEqual([`references/${name}`]);
+      });
+    }
+  }
+
+  it("the docs-only closing rule sits only in review-and-recovery.md", () => {
+    const rule =
+      "After independent review, the orchestrator may close a docs-only delta without another reviewer round only when its entire unreviewed delta is explanatory documentation, comments, or citations;";
+    expect(sitesOf(rule)).toEqual(["references/review-and-recovery.md"]);
+  });
+
+  it("the runbook selection rule sits only in trust-and-outward.md", () => {
+    const rule =
+      "In every run, in every run mode, and whether or not discovery runs, the orchestrator selects the applicable runbooks";
+    expect(sitesOf(rule)).toEqual(["references/trust-and-outward.md"]);
+  });
+});

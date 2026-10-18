@@ -85,10 +85,12 @@ describe("packaged skill references", () => {
     expect(references).toEqual([
       "bundle-gate-in-ci.md",
       "contracts.md",
+      "delegation-and-tiers.md",
       "evidence-and-probes.md",
       "github-actions-replay.md",
       "review-and-recovery.md",
       "run-state-and-harness.md",
+      "trust-and-outward.md",
       "verification-set-rules.md",
     ]);
 

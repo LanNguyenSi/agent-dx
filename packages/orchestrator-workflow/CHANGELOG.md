@@ -86,6 +86,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the prompts. The installed implementer, reviewer, and skill files report as
   outdated until refreshed.
 
+- The AGENTS.md section becomes a charter. It shrinks from about 3,050 words
+  (20.5 KB) to about 790 words (5.5 KB), and a test bounds it at 800 words:
+  roles and run modes, the review gate, the instruction trust boundary, the
+  outward-facing actions rule, and the definition of done. Every other rule
+  now has one normative site in the skill references. A new reference,
+  `trust-and-outward.md`, holds runbook selection, runbook authority (pins,
+  operator-curated bundles, adoption, run-base reading, diffs to a pin or
+  runbook) and the outward-action examples and records; a new reference,
+  `delegation-and-tiers.md`, holds the effort-tier rules, the `review_method`
+  minimums, the advisor triggers, and the model rules. `review-and-recovery.md`
+  gains the docs-only closure rule and keeps the escalation budget as its only
+  statement. `SKILL.md` routes to both new references, and its two sections
+  that repeated the trust boundary and the outward rule shrink to a pointer.
+  The detailed workflow, `contracts.md`, and `run-state-and-harness.md` point
+  to these sites instead of restating the rules. Safety-core sentences (trust
+  boundary, outward actions, review gate) keep their wording; where a
+  sentence was split, each half stays whole at one site. The always-loaded
+  section matters most for Codex, which truncates project docs at 32 KiB, and
+  for every session that loads it. Not breaking for a consumer's own content:
+  the installer replaces only the fenced section and the skill files, and
+  leaves everything outside the markers byte for byte. Installed AGENTS.md
+  sections and skill files report as outdated until refreshed. A consumer's
+  own text that points into the old fence sections (for example "Scaling
+  delegation" or "Core rules" in the fence above) needs a local update, since
+  those headings no longer exist; the Outward-facing actions, Review gate,
+  Instruction trust boundary, and Definition of done headings stay.
+
 ## [0.45.0] - 2026-10-18
 
 - The package's runbook-sentence guard keeps its wording, and its segmenter
