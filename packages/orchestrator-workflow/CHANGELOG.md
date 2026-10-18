@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-10-18
+
 - `doctor` now warns when a target that selects the codex harness has a
   root instruction file (`AGENTS.override.md` when it is a regular file,
   else `AGENTS.md`) larger than Codex's `project_doc_max_bytes`
