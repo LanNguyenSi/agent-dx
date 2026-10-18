@@ -56,15 +56,21 @@ Before claiming that a test discriminates a change, run one mutation
 probe per named case through `agent-primitives probe` instead of editing
 the file by hand: it confirms the unmutated test passes first, applies
 exactly one mutant, reruns the test, and restores the file, verified by
-hash. An implementer report needs eleven fields: take `file`, `anchor`
-(`line`), `before`, and `after` from the sibling `mutant` record; take
-`mutant`, `verified_applied_via`, `result`, `expectation`, `reason`, and
-`restored_verified` from `mutation_probe`; set `replayed` to `false` for
-a new probe and `true` for a replay. Use `not_applicable` for an absent
-`expectation` and an empty string for an absent `reason`; never invent a
-missing sibling record. The agent-primitives package's docs/probe.md's
-“Mapping a probe result into an implementer report” section gives the
-complete mapping, including `--plan` results.
+hash. An implementer report needs eleven fields per probe: add
+`--report mutation-probes` to the probe run and paste its printed items
+(one per mutant, all eleven fields merged for you, exit codes unchanged;
+`--replayed` prints `replayed: true` for replayed definitions; the option
+is mutually exclusive with `--summary` and `--print`; if the array does
+not fit `-m` it is cut to whole items, staying valid JSON, and one
+warning on stderr names the omitted count and the file holding the full
+result); a patch
+mutant with no `mutant` record fills only `file` and `anchor` from a plan
+entry, and none of the four from a bare `-p`, so carry its patch path,
+which is what the replay applies. For an older
+`probe` without the option, merge the records by hand instead per the
+agent-primitives package's docs/probe.md's “Mapping a probe result into
+an implementer report” section, never inventing a missing sibling
+record.
 `result` is the mutant's actual outcome (`killed` when the test command
 failed with it applied, `survived` when it passed), independent of
 `--expect`; when `mutation_probe.expectation` is present, copy its
