@@ -3,7 +3,7 @@ type: module
 title: Run-state lifecycle and machine-readable markers
 description: The .ai/runs/ directory model plus the solution-acceptance marker family (run-base, acceptance-recommendation, final-status), the per-worktree .ai/run pointer and keyed run-base[<repo-basename>] marker for multi-repo runs, the findings-table header and placeholder-row convention, and why 02-tasks.md sits outside the completeness check.
 tags: [run-lifecycle, solution-acceptance-markers, fail-open-fail-closed, findings-table, knowledge-bundle-handoff, multi-repo-run-pointer]
-timestamp: 2026-10-18T20:10:09Z
+timestamp: 2026-10-18T20:19:11Z
 sources:
   - packages/orchestrator-workflow/assets/templates/00-goal.md
   - packages/orchestrator-workflow/assets/templates/02-tasks.md
@@ -197,28 +197,17 @@ that it sits directly below the unkeyed marker
 fourth pins that the existing unkeyed-marker regex still matches exactly
 once, i.e. the keyed line's bracket does not get mistaken for the unkeyed
 one (template-markers.test.ts:99-100#"goalTemplate.matchAll(runBaseRe)"). In
-`docs-consistency.test.ts`, one new `describe` block pins that each doc that
-instructs writing the pointer or the keyed marker actually says so. Six of
-the seven checks (all but the SKILL.md Run state contract check itself)
-route through one `expectPointerMention` helper that asserts the exact
-phrase "`.ai/run` pointer" rather than the bare, incident-prone substring
-`.ai/run`
-(docs-consistency.test.ts:438-445#"expect(slice).toContain("):
-SKILL.md Run state documents the `.ai/run` contract with its own specific
-phrases (docs-consistency.test.ts:447-453#"make sure it is ignored") and
-carries the keyed example verbatim
-(docs-consistency.test.ts:456-457#"run-base[<repo-basename>] = <sha>");
-step 1 mentions the pointer via the helper
-(docs-consistency.test.ts:467-473#"expectPointerMention(step1)"); each of
-the three harness bullets mentions it via the helper, in a loop
-(docs-consistency.test.ts:476-493#"expectPointerMention(bullet)"); the
-policy-section bullet carries both facts
-(docs-consistency.test.ts:497-504#"run-base[<repo-basename>]"); and the
-README and both INSTALL-AGENT.md write-surface listings mention the pointer
-via the helper and `.gitignore` by substring
-(docs-consistency.test.ts:507-513#"expectPointerMention(section)";
-docs-consistency.test.ts:517-523#"expectPointerMention(section)";
-docs-consistency.test.ts:527-533#"expectPointerMention(section)").
+`docs-consistency.test.ts`, one `describe` block pins the skill's Run state
+section as the one site that specifies the pointer and the keyed marker:
+the `.ai/run` contract with its own specific phrases
+(docs-consistency.test.ts:464-470#"make sure it is ignored"), the keyed
+example verbatim
+(docs-consistency.test.ts:473-475#"run-base[<repo-basename>] = <sha>"), and the
+keyed-marker grammar rule with both deviation outcomes
+(docs-consistency.test.ts:477-482#"either rejected (it blocks the run) or not recognised at all"). The other
+places that mention the pointer (step 1, the harness notes, the policy
+section's Run state bullet, the README, and the INSTALL-AGENT.md write-surface
+listings) are copies of that section and carry no sentence pin.
 
 ## The verdict markers: acceptance signals, fail CLOSED
 
@@ -358,14 +347,12 @@ discovery-side rule (the Discover step already checks each configured knowledge 
 hand-mapping terrain, packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:32#"with an index) before mapping terrain by hand, treating"); the 0.12.0 changelog entry names it
 the loop-closer and cites the motivating evidence: four upkeep sweeps on
 2026-07-16 found 48/24/11/8 stale claims across the four oldest bundles
-(`CHANGELOG.md:#[0.12.0]`). Pinned by
-docs-consistency.test.ts:357-362#"apply this optional guidance: when the repo carries a" (the hook's opening phrase, anchored so a
-deletion is detected even though "curated knowledge bundle" and
-"docs/okf/" also occur in the Discover-step test), docs-consistency.test.ts:366-368#"whether the change touches paths any bundle doc claims as sources" (source-overlap
-check phrase), docs-consistency.test.ts:372-374#"update the affected docs (re-verify and re-stamp) or record a follow-up task" (both responses named), docs-consistency.test.ts:378-379#"run the bundle validator when one is available" (validator-run
-phrase, `okf-kit check` framed as an example), docs-consistency.test.ts:383-385#"Repos without a bundle are unaffected" (non-gate
-optionality phrase), and docs-consistency.test.ts:388-391#"Outcome: updated | not affected | follow-up filed." (the template section, its outcome
-vocabulary, and that it is marked Optional and bundle-scoped).
+(`CHANGELOG.md:#[0.12.0]`). The hook's sentences carry no sentence pin; the
+template side is the contract and stays pinned: the optional Knowledge Bundle
+section of `06-handoff.md` and its outcome vocabulary
+(docs-consistency.test.ts:437-442#"Outcome: updated | not affected | follow-up filed.",
+checked as `## Knowledge Bundle` plus `Outcome: updated | not affected |
+follow-up filed.`).
 
 ## Where the shapes are pinned, and what belongs to sibling docs
 
@@ -383,12 +370,10 @@ mutation-checked; the replace/delete rule documented next to it).
 completeness check" section above cites it, not because this doc pins
 anything inside it.
 `packages/orchestrator-workflow/test/docs-consistency.test.ts` is broader
-(role enumeration, review-gate wording, instruction trust boundary,
-subagent misfire rule, task-slicer/subagent-contract field superset); only
-its `run-base fill instruction ships in the skill`
-(docs-consistency.test.ts:406-412#"before the first implementation commit") and
-`hand off keeps a curated knowledge bundle current`
-(docs-consistency.test.ts:353-401#"Optional") `describe` blocks are this doc's topic.
+(role enumeration, the safety core, task-slicer/subagent-contract field
+superset); only its Run state `describe` block above and its
+`06-handoff.md template carries the Knowledge Bundle section`
+(docs-consistency.test.ts:434-443#"Outcome: updated | not affected | follow-up filed.") `describe` block are this doc's topic.
 The review-gate decision procedure that produces the values written into
 `acceptance-recommendation`/`final-status` (severities, waiver rules, who
 signs off) is out of scope here; see
@@ -455,9 +440,9 @@ malformed run-base attempt; the pin for that is
 packages/orchestrator-workflow/test/template-markers.test.ts:610#"adds no line that names both tokens of a run-base marker",
 next to the count-and-default pin
 (packages/orchestrator-workflow/test/template-markers.test.ts:593#"has exactly one mode marker, defaulting to delegated").
-The section's sentences are pinned as constants in
-`test/run-mode-constants.ts`, and `test/run-mode.test.ts` checks that no
-pointer site restates them.
+`test/run-mode.test.ts` pins the marker line, its closed value set, and the
+fail-open default against the constants of `test/run-mode-constants.ts`; the
+sentences that define each mode carry no sentence pin.
 
 The generated policy section and the README follow the same rule of one
 normative place. The Core rules bullet on implementation now reads
@@ -469,10 +454,8 @@ list of the policy section names the marker beside the keyed run-base marker
 (packages/orchestrator-workflow/assets/agents-md-section.md:314#"marker per repository for multi-repo runs").
 The README has a short "Run modes" section
 (packages/orchestrator-workflow/README.md:204#"## Run modes")
-that links the reference. Both sites are pinned against restating a
-definition, a file list, the switch rule or the default's wording by the last
-block of `test/docs-consistency.test.ts`, which imports the constants of
-`test/run-mode-constants.ts` rather than spelling the mode names again. All
+that links the reference. Both sites only name the modes and point to the
+section; no test pins that they stay free of a definition. All
 policy-section edits replace text within existing lines, so the lines other
 bundle docs cite there did not move; a policy-section change reaches an
 existing install only with its next `init` or `apply`.
@@ -538,13 +521,13 @@ the local checkout and the run directory), with the named actions as
 examples of that boundary, not the complete membership test
 (packages/orchestrator-workflow/assets/agents-md-section.md:237-246#"spawned it.").
 Pinned by `test/outward-actions.test.ts`, a sibling to
-`template-markers.test.ts` and `run-mode.test.ts` for this marker:
-`describe` blocks covering every file that carries the rule (the policy
-section, `SKILL.md`, the template, this marker's reference subsection, the
-implementer, reviewer, explorer, task-slicer, and advisor prompts, both
-output contracts in `contracts.md`, the orchestrator's mechanical
-cross-check, the misfire rule, and the handoff template), full-sentence pins
-on the rule sentences (an example list is covered as part of the sentence
-that carries it, not example by example), a check that the grantable-class
-sentence in `agents-md-section.md` names exactly `push-branch` and
-`open-pr`, and a guard that no retired class token appears in the kit text.
+`template-markers.test.ts` and `run-mode.test.ts` for this marker: the rule
+is a safety-core rule, so its sentences are pinned in full at one site, the
+policy section (an example list is covered as part of the sentence that
+carries it, not example by example), together with a check that the
+grantable-class sentence in `agents-md-section.md` names exactly `push-branch`
+and `open-pr`; the `00-goal.md` marker line and the marker value grammar in
+this marker's reference subsection are pinned as contract; and a guard checks
+that no retired class token appears in the kit text. The copies in
+`SKILL.md`, the agent prompts, `contracts.md`, the misfire rule, and the
+orchestrator's mechanical cross-check carry no sentence pin.

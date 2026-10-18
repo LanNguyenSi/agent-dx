@@ -3,7 +3,7 @@ type: invariant
 title: Review gate and waiver semantics
 description: Review is never skipped; the severity ladder, waiver rules, and the Decision-column vocabulary that gate acceptance across policy, skill, and templates.
 tags: [review-gate, waivers, severity-ladder, decision-legend, misfire-rule]
-timestamp: 2026-10-18T20:10:09Z
+timestamp: 2026-10-18T20:19:11Z
 sources:
   - packages/orchestrator-workflow/assets/agents-md-section.md
   - packages/orchestrator-workflow/assets/agents/reviewer.md
@@ -54,9 +54,8 @@ first `recurrence: repeated` finding whose class a previous round's fix already 
 and the Round-2 halt rule's own cross-reference to step 8 states the
 identical scope, both clauses
 (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:61#"Step 8 of the detailed workflow states the operational"`),
-both built from one shared test constant so dropping either clause at
-either site fails that site's own test
-(`packages/orchestrator-workflow/test/docs-consistency.test.ts:1431#"built from one shared constant"`).
+and no test pins the two sites against each other; review covers the
+wording.
 Full field-shape treatment of the implementer-side `class_closure` field
 that produces `recurrence: repeated`'s class match is out of this doc's
 lane; see
@@ -172,7 +171,8 @@ and set the row's Decision to `accepted`
 (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:448#"unchanged and setting Decision to"`; `05-review-findings.md:16#"| Severity | Category | Description | Suggested Fix | Decision |"`).
 No reader or template schema changes: the existing Decision legend and all
 high/critical waiver and escalation rules continue to apply. The policy is
-pinned in `test/docs-consistency.test.ts:4901#"docs-only closing deltas stay narrowly bounded"`.
+pinned as sentences in the policy section only, in
+`test/docs-consistency.test.ts:3098#"safety core: the docs-only closing delta stays narrowly bounded at the policy section"`; the copy in `SKILL.md` carries no sentence pin.
 
 ## The Decision legend in 05-review-findings.md
 
@@ -224,19 +224,26 @@ exactly one marker per template, each defaulting to `TODO`. This is a
 different fail-closed design than the run-base marker, which fails open; see
 [run-state-lifecycle-and-markers.md](run-state-lifecycle-and-markers.md).
 
-## Three surfaces kept in sync
+## The gate is pinned at one site
 
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:194#"addressed or consciously accepted by the orchestrator"`
-("review gate ships in the policy, skill, and handoff template") pins the
-invariant across all three: `agents-md-section.md`'s `### Review gate`
-heading plus "block final acceptance until fixed or explicitly waived" and
-"waived by the operator" (test lines 117-123); `SKILL.md`'s "block acceptance
-until fixed or explicitly waived" and "Accepted Waivers section of
-`06-handoff.md`" phrasing (test lines 125-130); `06-handoff.md`'s `##
-Accepted Waivers` heading and its `Finding | Severity | Rationale` header
-(test lines 132-135). A negative pin (test lines 137-141) guards against a
-superseded softer wording, "addressed or consciously accepted by the
-orchestrator", reappearing in `agents-md-section.md`. A second suite,
+`packages/orchestrator-workflow/test/docs-consistency.test.ts:186#"safety core: the review gate is pinned at the policy section"`
+pins the gate as sentences at one normative site, `agents-md-section.md`: the
+`### Review gate` heading with "High or critical reviewer findings block
+final acceptance until fixed or explicitly waived", the whole sentence that
+deferring counts as a waiver and the gate applies to every review pass
+(including the orchestrator's own review of a trivial change), the sentence
+that leaves medium and low findings addressed or consciously accepted at the
+orchestrator's judgment, the sentence that only the
+operator waives a critical finding, the sentence that the orchestrator waives
+a high finding only with a recorded rationale, and the sentence that records
+every waiver in `03-decisions.md` and the handoff (test lines 190-222). The
+restatements of the gate in `SKILL.md` and the references carry no sentence
+pin. Two pieces stay pinned beyond the policy section because they are not
+prose rules: `06-handoff.md`'s `## Accepted Waivers` heading and its `Finding
+| Severity | Rationale` header, a template the orchestrator fills (test lines
+224-227), and a negative pin against a superseded softer wording, "addressed
+or consciously accepted by the orchestrator", reappearing in
+`agents-md-section.md` (test lines 229-233). A second suite,
 `test/template-markers.test.ts:266#"expect(reviewTemplate).toMatch(/arms? the"`, independently pins the
 findings-table header convention and the Decision-legend vocabulary above.
 
@@ -247,8 +254,7 @@ Added in 0.11.0 after a live incident: a reviewer subagent spawn returned in
 reviewer output contract (`CHANGELOG.md:#[0.11.0]`). The Subagent misfire rule
 states the review-specific consequence: "a misfired review is not a
 review and never satisfies the review gate, since review is never skipped"
-(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:41#"review and never satisfies the review gate, since"`), pinned by
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:580#"never satisfies the review gate"`. Since
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:41#"review and never satisfies the review gate, since"`), not pinned by any test. Since
 0.18.0 the rule also names resume over a fresh respawn as the preferred
 response for the near-instant, no-tool-activity signal specifically (scoped
 away from a separately measured mid-run watchdog-stall class where resume
@@ -312,8 +318,9 @@ Motivated by the same 16-round dogfood as the mutation-probes hardening in
 [subagent-contracts-superset.md](subagent-contracts-superset.md#mutation-probes-requirement-0160)
 (`CHANGELOG.md:#[0.16.0]#"as a hard-mandatory"`, agent-tasks task 16637a96): one reviewer round in
 that dogfood omitted `acceptance_recommendation` entirely.
-`packages/orchestrator-workflow/test/docs-consistency.test.ts:1480#"the orchestrator asks the reviewer to resupply it"` pins
-the rule in both the installed prompt and `SKILL.md`'s reference copy.
+The mandatory rule is pinned in the installed reviewer prompt only
+(`packages/orchestrator-workflow/test/docs-consistency.test.ts:977#"is mandatory: always set it in your output"`);
+`SKILL.md`'s ask-back sentence carries no sentence pin.
 
 ## Review-round escalation budget
 
@@ -400,8 +407,9 @@ Step 8 of the workflow points to it without restating the trigger
 (`packages/orchestrator-workflow/assets/skill/references/evidence-and-probes.md:454#"record the Fix-regression decision point"`).
 The rule lives only in the skill references; `agents-md-section.md` does
 not carry it, so it needs no AGENTS.md re-install and reaches an existing
-install with the next kit re-install. Pinned by
-`test/probe-plans-recovery.test.ts`.
+install with the next kit re-install. No test pins the section's clauses;
+`test/probe-plans-recovery.test.ts` only checks that every packaged reference
+is routed from the entrypoint.
 
 ## Ceremony rules: baseline revisions, docs-only review default, pinned prose
 
@@ -423,34 +431,33 @@ whatever the file type, and the minimums named above are unaffected."
 to this refinement.
 
 Pinned-prose changes (`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:135#"## Pinned-prose changes"`)
-cover a change whose acceptance rests on tests that pin documentation
-wording. The reason given is that
+cover a change to documentation wording that a test pins or could pin. The
+section is installed into every consumer repository, so it states the pin
+model generically: tests pin the machine contract (return field names, enums
+and mandatory-field rules, template markers, and the headings a reader
+consumes) and the safety rules the repository itself declares as its core,
+each as whole sentences at exactly one normative site, and pin no other
+prose. It names no rule of this package; this package's own four safety rules
+are listed in the header comment above the safety-core tests of
+`test/docs-consistency.test.ts` and in the CHANGELOG. The reason given for the
+bound is that
 "A prose mutant survives exactly when its bytes sit in no assertion"
-(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:139#"mutant survives exactly when its bytes sit in no assertion"`),
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:139#"when its bytes sit in no assertion, so for prose outside the pinned set a"`),
 so rounds that hunt for the next unpinned sentence do not converge. The
-section asks for one normative site per rule, a claim list in the acceptance
-criterion as the pin obligation: "Every normative sentence the change adds or
-alters at that site is pinned; one left unpinned is named in the criterion with
-the reason it is not load-bearing." A briefing bounds the reviewer's prose
-mutant space to that list, and "When the briefing bounds the prose mutant space
-to a claim list, respect that bound and put scope notes in `residual_risks`,
-unless an unlisted sentence is shown to be load-bearing." Copies are bound by
-one shared test constant, and
-"Cap test-adequacy review rounds on the change at two."
-(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:156#"Cap test-adequacy review rounds on the change at two."`).
-"A test-adequacy review round is one whose returned findings are all `tests`
-findings of severity `low` or `medium` about pin gaps on the pinned prose; a
-round returning any other finding is an ordinary round outside the cap." "The
-cap changes neither the Round-2 halt rule, the Review-round escalation budget
-nor the Fix-regression decision point: a test-adequacy review round still
-counts as a negative round where it is one." It exempts semantic findings from
-bound and cap and leaves the review gate as it is. Step 7 of the workflow
-points to the section without restating it. Pinned by
-`test/probe-plans-recovery.test.ts`, which asserts the quoted clauses against
-the references and this section. The CHANGELOG's 0.37.0 entry that first
-shipped these rules stays as released and is not part of that pin; the
-0.39.0 entry summarizes the docs-only and pinned-prose tightening without
-repeating it verbatim.
+briefing's claim list is the contract plus the declared safety core, and it
+bounds the reviewer's prose mutant space; a survivor outside the list is a
+scope note in `residual_risks`, not a finding, unless the reviewer shows the
+sentence is load-bearing. The cap stays: "Cap test-adequacy review rounds on
+the change at two."
+(`packages/orchestrator-workflow/assets/skill/references/review-and-recovery.md:154#"Cap test-adequacy review rounds on the change at two."`),
+where a test-adequacy round returns only `tests` findings of severity `low`
+or `medium` about pin gaps, and a round returning any other finding is an
+ordinary round outside the cap. Semantic findings are exempt from the bound
+and the cap, and the cap changes neither the Round-2 halt rule, the
+Review-round escalation budget, nor the Fix-regression decision point: a
+test-adequacy round still counts as a negative round where it is one. The
+review gate is unchanged. Step 7 of the workflow points to the section
+without restating it. No test pins the section's clauses.
 
 ## See also
 

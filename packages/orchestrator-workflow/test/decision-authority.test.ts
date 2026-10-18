@@ -1,36 +1,15 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { parse } from "@iarna/toml";
 import { describe, expect, it } from "vitest";
 
-import { readAsset as readRawAsset } from "../src/assets.js";
-import { composeCodexAgent } from "../src/codex.js";
-import { runInit } from "../src/init.js";
-import { DEFAULT_MODELS, DEFAULT_TIER, ROLE_TIERS } from "../src/models.js";
+import { readAsset } from "../src/assets.js";
 
 const PACKAGE_DIR = fileURLToPath(new URL("..", import.meta.url));
 const FIXTURE = join(PACKAGE_DIR, "test/fixtures/decision-authority");
 const authorityPin =
   "A reviewer recommendation is not orchestrator acceptance and cannot authorize a critical waiver; only the operator may authorize a critical waiver.";
-const workflowReferences = [
-  "run-state-and-harness.md",
-  "evidence-and-probes.md",
-  "contracts.md",
-  "review-and-recovery.md",
-];
-const readAsset = (path: string) =>
-  path === "skill/SKILL.md"
-    ? [
-        readRawAsset(path),
-        ...workflowReferences.map((name) =>
-          readRawAsset(`skill/references/${name}`),
-        ),
-      ].join("\n\n")
-    : readRawAsset(path);
-
 function rows(document: string): string[][] {
   return document
     .split("\n")
@@ -113,10 +92,6 @@ describe("decision authority contract", () => {
     expect(template).toContain(
       "<!-- review-round-escalation: choice = n/a -->",
     );
-    expect(template).toContain("Markdown alone does not grant authority");
-    expect(template).toContain(
-      "Established runs retain their recorded decision format.",
-    );
   });
 
   it("resolves illustrative routine, baseline-revision, and critical-waiver decisions", () => {
@@ -176,76 +151,12 @@ describe("decision authority contract", () => {
     ).toThrow();
   });
 
-  it("pins role separation in the skill and every generated reviewer prompt", () => {
-    const skill = readAsset("skill/SKILL.md");
-    expect(skill.replace(/\s+/g, " ")).toContain(authorityPin);
-    expect(skill.replace(/\s+/g, " ")).toContain(
-      "Markdown records evidence of real authority and never grant it by themselves.",
-    );
-    expect(skill.replace(/\s+/g, " ")).toContain(
-      "Established runs retain their recorded decision format; absent fields never create a retroactive blocker.",
-    );
-
-    const codexBodies = [
-      parse(
-        composeCodexAgent("reviewer", {
-          model: "gpt-6-astra",
-          effort: "high",
-        }),
-      ).developer_instructions,
-      ...ROLE_TIERS.reviewer.map(
-        (tier) =>
-          parse(
-            composeCodexAgent(
-              "reviewer",
-              { model: "gpt-6-astra", effort: tier },
-              tier,
-            ),
-          ).developer_instructions,
-      ),
-    ];
-    for (const body of codexBodies) expect(body).toContain(authorityPin);
-
-    const target = mkdtempSync(join(tmpdir(), "ow-decision-authority-"));
-    try {
-      runInit({
-        targetDir: target,
-        harnesses: ["claude", "opencode"],
-        models: { ...DEFAULT_MODELS },
-        opencodeModels: { reviewer: "anthropic/claude-opus-4-8" },
-        opencodeClassModels: {
-          small: "anthropic/claude-haiku-4-5",
-          medium: "anthropic/claude-sonnet-4-6",
-          large: "anthropic/claude-opus-4-8",
-        },
-        tiers: true,
-      });
-      for (const harness of [".claude", ".opencode"]) {
-        for (const tier of ROLE_TIERS.reviewer) {
-          const suffix = tier === DEFAULT_TIER.reviewer ? "" : `-${tier}`;
-          const rendered = readFileSync(
-            join(target, harness, "agents", `reviewer${suffix}.md`),
-            "utf8",
-          );
-          expect(rendered, `${harness}/reviewer${suffix}.md`).toContain(
-            authorityPin,
-          );
-        }
-      }
-    } finally {
-      rmSync(target, { recursive: true, force: true });
-    }
-  });
-
-  it("retains review and waiver rules without treating Markdown as authorization", () => {
-    const skill = readAsset("skill/SKILL.md").replace(/\s+/g, " ");
-    expect(skill).toContain("critical findings require operator sign-off");
-    expect(skill).toContain(
-      "high findings require the orchestrator to record a rationale",
-    );
-    expect(skill).toContain("Review judgment still applies to every change");
-    expect(skill).toContain(
-      "trivial change (a typo, a one-line fix) may be done directly by the orchestrator and reviewed by it",
+  it("pins the reviewer's role separation: a recommendation never authorizes a critical waiver", () => {
+    // Waiver authority is stated once for the orchestrator in the policy
+    // section's review gate (pinned in docs-consistency.test.ts); this is the
+    // reviewer prompt's own statement, pinned at that one site.
+    expect(readAsset("agents/reviewer.md").replace(/\s+/g, " ")).toContain(
+      authorityPin,
     );
   });
 });

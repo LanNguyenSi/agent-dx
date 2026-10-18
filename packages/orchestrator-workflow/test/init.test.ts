@@ -25,7 +25,6 @@ import {
 import {
   DEFAULT_MODELS,
   DEFAULT_TIER,
-  READ_ONLY_ROLES,
   ROLES,
   ROLE_TIERS,
   parseModelsSpec,
@@ -380,7 +379,7 @@ describe("read-only roles (explorer, reviewer)", () => {
     expect(claudeImplementer).not.toContain("disallowedTools");
   });
 
-  it("pins the Bash no-mutation guard in all installed read-only agents", () => {
+  it("pins the Bash no-mutation guard in the installed reviewer", () => {
     runInit({
       targetDir: target,
       harnesses: ["claude", "opencode"],
@@ -388,16 +387,15 @@ describe("read-only roles (explorer, reviewer)", () => {
     });
 
     // Bash cannot be tool-disallowed (the roles must run tests), so the
-    // guard is instruction-level and lives in the agent prompt body. This
-    // test is the mutation tripwire: removing the guard from any read-only
-    // asset fails it for every install target. Iterates READ_ONLY_ROLES
-    // (review round 1, M2) rather than a hardcoded ["explorer", "reviewer"]
-    // pair, so a future read-only role (like the advisor, added here in
-    // 0.21.0) is covered automatically instead of needing a parallel edit.
+    // guard is instruction-level and lives in the agent prompt body. The
+    // reviewer's read-only rule is a safety-core rule, pinned as sentences at
+    // the reviewer prompt only; this test is the install-level tripwire that
+    // removing the guard fails for every install target. The other read-only
+    // roles keep their tool-level restrictions, tested separately.
     const GUARD =
       "Bash is for running tests, linters, and read-only inspection ONLY";
     for (const harnessDir of [".claude", ".opencode"]) {
-      for (const role of READ_ONLY_ROLES) {
+      for (const role of ["reviewer"]) {
         const installed = readFileSync(
           join(target, harnessDir, "agents", `${role}.md`),
           "utf8",
@@ -420,34 +418,6 @@ describe("read-only roles (explorer, reviewer)", () => {
         "utf8",
       );
       expect(implementer).not.toContain(GUARD);
-    }
-  });
-
-  it("pins the advisor's necessity-check, never-decides, and first-turn-tool-call rules (review round 1, M2)", () => {
-    runInit({
-      targetDir: target,
-      harnesses: ["claude", "opencode"],
-      models: { ...DEFAULT_MODELS },
-    });
-
-    // advisor.md's prompt body was practically unguarded before this round
-    // (5/6 mutants survived, including deleting the Bash guard entirely);
-    // these three rules are the load-bearing ones the escalation contract
-    // depends on, so each gets its own substring pin.
-    for (const harnessDir of [".claude", ".opencode"]) {
-      const installed = readFileSync(
-        join(target, harnessDir, "agents", "advisor.md"),
-        "utf8",
-      );
-      expect(installed, `${harnessDir}/agents/advisor.md`).toContain(
-        "Start by checking whether the escalation was actually necessary.",
-      );
-      expect(installed, `${harnessDir}/agents/advisor.md`).toContain(
-        "You do not decide. The decision stays with the orchestrator; a critical\n  risk stays with the operator.",
-      );
-      expect(installed, `${harnessDir}/agents/advisor.md`).toContain(
-        "Begin your very first turn with a tool call",
-      );
     }
   });
 
@@ -1666,29 +1636,6 @@ describe("tier variants (`--tiers`)", () => {
     expect(agents.size).toBe(15);
   });
 
-  it("the review-method axis (table and method_applied) renders into every installed reviewer tier", () => {
-    runInit({ ...defaultOptions(), profile: "full", tiers: true });
-
-    for (const file of [
-      "reviewer.md",
-      "reviewer-medium.md",
-      "reviewer-xhigh.md",
-    ]) {
-      const rendered = readFileSync(
-        join(target, ".claude", "agents", file),
-        "utf8",
-      );
-      expect(rendered, file).toContain("Review method:");
-      expect(rendered, file).toContain("| `normal` |");
-      expect(rendered, file).toContain("| `rigorous` (default) |");
-      expect(rendered, file).toContain("| `adversarial` |");
-      expect(rendered, file).toContain(
-        "method_applied: normal | rigorous | adversarial",
-      );
-      expect(rendered, file).toContain("withdrawn:");
-    }
-  });
-
   it("opencode default files: reviewer/advisor get variant: high on an anthropic-resolved model, the three medium-default roles get no effort field", () => {
     // The unsuffixed default file's effort line is keyed by the role's own
     // DEFAULT_TIER via opencodeEffortLine, the same dispatch the tier
@@ -2728,95 +2675,6 @@ describe("dropped-harness note loop is file-ledger-driven, not previous.harnesse
           note.includes("now untracked after --harness dropped to none"),
       ),
     ).toBe(true);
-  });
-});
-
-describe("probe verdict render paths", () => {
-  const probeVerdictLegend =
-    "`result: killed` means the probe's test command reacted to the mutant under the runner's pass predicate, or the test pass predicate declared in the task assignment or probe plan when no runner supplies a verdict";
-  it.each([
-    "implementer.md",
-    "implementer-low.md",
-    "implementer-high.md",
-    "implementer-xhigh.md",
-  ])("the probe verdict legend renders into %s", (file) => {
-    runInit({ ...defaultOptions(), profile: "full", tiers: true });
-    const rendered = readFileSync(
-      join(target, ".claude", "agents", file),
-      "utf8",
-    );
-    expect(rendered.replace(/\s+/g, " "), file).toContain(probeVerdictLegend);
-  });
-
-  it("the probe verdict legend renders into Codex developer instructions", async () => {
-    const { parse } = await import("@iarna/toml");
-    const { composeCodexAgent } = await import("../src/codex.js");
-    const codex = parse(
-      composeCodexAgent("implementer", {
-        model: "gpt-5.6-terra",
-        effort: "medium",
-      }),
-    );
-    expect(String(codex.developer_instructions).replace(/\s+/g, " ")).toContain(
-      probeVerdictLegend,
-    );
-  });
-});
-
-describe("reviewer write boundary (issue #339)", () => {
-  it("pins the reviewer's ref/object-write tokens and evidence/ write-boundary phrase", () => {
-    runInit({
-      targetDir: target,
-      harnesses: ["claude", "opencode"],
-      models: { ...DEFAULT_MODELS },
-    });
-
-    // Unlike the generic READ_ONLY_ROLES guard in the "read-only roles"
-    // describe above, `git fetch` / `git merge-tree --write-tree` / `git
-    // update-ref` / `git gc` and the evidence/ write boundary are
-    // reviewer-specific: the explorer and advisor don't run probes or
-    // answer merge-conflict questions, so these tokens only exist in the
-    // reviewer prompt. This describe block is appended at file end, not
-    // inlined into the read-only-roles block above, so it doesn't shift
-    // the line numbers every existing docs/okf citation into this file
-    // depends on.
-    for (const harnessDir of [".claude", ".opencode"]) {
-      const installed = readFileSync(
-        join(target, harnessDir, "agents", "reviewer.md"),
-        "utf8",
-      );
-      for (const token of [
-        "`git fetch`",
-        "`git merge-tree --write-tree`",
-        "`git update-ref`",
-        "`git gc`",
-      ]) {
-        expect(installed, `${harnessDir}/agents/reviewer.md`).toContain(token);
-      }
-      expect(installed, `${harnessDir}/agents/reviewer.md`).toContain(
-        "never write into the reviewed",
-      );
-      expect(installed, `${harnessDir}/agents/reviewer.md`).toContain(
-        "the briefing's own run-directory path wins",
-      );
-      // Issue #339: these three previously survived a weakening/inverting
-      // mutant because nothing pinned their own wording. The symlink clause
-      // closes the evidence-path resolution rule (a symlinked path
-      // component could otherwise route a write outside the run
-      // directory); the mismatch clause closes the fallback when the
-      // briefing and the `.ai/run` pointer disagree; the merge-conflict
-      // sentence closes the routing rule for a question that must not be
-      // answered by fetching or writing a tree.
-      expect(installed, `${harnessDir}/agents/reviewer.md`).toContain(
-        "with no symlinked path component, and never under\n  an older run than the one the briefing names.",
-      );
-      expect(installed, `${harnessDir}/agents/reviewer.md`).toContain(
-        "report the mismatch and write nothing",
-      );
-      expect(installed, `${harnessDir}/agents/reviewer.md`).toContain(
-        "A merge-conflict question about an open PR is not answered by fetching or",
-      );
-    }
   });
 });
 

@@ -3,7 +3,7 @@ type: module
 title: Model preselection and routing
 description: How legacy role models and harness-specific role/tier selections flow through the CLI and manifests into agent definitions.
 tags: [models, routing, cli, manifest, per-role, harness-adapters]
-timestamp: 2026-10-18T16:44:54Z
+timestamp: 2026-10-18T20:19:11Z
 sources:
   - packages/orchestrator-workflow/src/models.ts
   - packages/orchestrator-workflow/src/routing.ts
@@ -131,10 +131,10 @@ below.
   `src/models.ts:22#"export const READ_ONLY_ROLES: ReadonlySet<Role> = new"`) additionally get
   `disallowedTools: Edit, Write, NotebookEdit` right after `effort:`
   (`src/init.ts:549-550#"disallowedTools: Edit, Write, NotebookEdit"`). Test coverage:
-  `test/init.test.ts:109-114#"model: sonnet"` (`model: sonnet` present) and
-  `test/init.test.ts:115-120#"{{MODEL}}"` (`model: opus` present, and the
+  `test/init.test.ts:108-113#"model: sonnet"` (`model: sonnet` present) and
+  `test/init.test.ts:114-119#"{{MODEL}}"` (`model: opus` present, and the
   `{{MODEL}}` placeholder is not left unsubstituted) and
-  `test/init.test.ts:515-559#"expect(claudeSlicer).toContain("` (per-role alias mix installs correctly for Claude while
+  `test/init.test.ts:485-529#"expect(claudeSlicer).toContain("` (per-role alias mix installs correctly for Claude while
   opencode differs, see below).
 - **opencode.** opencode needs a fully-qualified `provider/model-id`.
   `opencodeModelValue` (the pure fallback used when the CLI has not already
@@ -159,14 +159,14 @@ below.
   default effort (0.22.0)" below for the dispatch rule. Nested-path providers
   such as `openrouter/anthropic/claude-...` are never alias-auto-resolved and
   must be passed as fully-qualified `--models` entries (`packages/orchestrator-workflow/docs/model-routing-reference.md:129#"reviewer=openrouter/anthropic/claude-opus-4.8"`,
-  confirmed by `test/init.test.ts:530-553#"expect(slicer).not.toContain("`, `openrouter/some-model` passes
+  confirmed by `test/init.test.ts:500-523#"expect(slicer).not.toContain("`, `openrouter/some-model` passes
   through unchanged). Confirmed end-to-end when the `opencode` binary is
-  absent: every role's file omits `model:` (`test/init.test.ts:2213-2221#"${role}.md must not contain model:"`,
+  absent: every role's file omits `model:` (`test/init.test.ts:2160-2168#"${role}.md must not contain model:"`,
   the loop is `for (const role of ROLES)` so it already covers `advisor` for
   free, no test edit needed for the 0.21.0 role addition; an omitted `model:`
   also means `opencodeEffortLine` short-circuits to no effort line, so this
   case is unaffected by the 0.22.0 pin), and the disambiguation hint goes to
-  stderr, never stdout (`test/init.test.ts:2227-2233#"expect(result.stdout).not.toContain("`).
+  stderr, never stdout (`test/init.test.ts:2174-2180#"expect(result.stdout).not.toContain("`).
 - **Codex.** Codex receives native `.codex/agents/<role>.toml` definitions
   selected by `--profile`, plus non-default `<role>-<tier>.toml` variants when
   `--tiers` is enabled. Each file carries `model`,
@@ -351,17 +351,16 @@ needs no live catalog lookup at all. The corrected wording
 "<alias>") could not be resolved to an opencode model id (<reason>); no
 opencode effort-tier variant files will be rendered for this class (Claude
 Code variants are unaffected).`, stating both the real rendering effect and
-the real harness scope; `test/init.test.ts:2246-2267#"expect(agents.sort()).toEqual(["` asserts the full
+the real harness scope; `test/init.test.ts:2193-2214#"expect(agents.sort()).toEqual(["` asserts the full
 wording verbatim (a review-round-2 strengthening of the fix-round-1 tests,
 which had only asserted the model class name appeared somewhere in
 stderr). `docs/model-routing-reference.md`'s opencode-effort prose (moved
 out of README.md) and the CHANGELOG 0.19.0 entry carried the same two stale
 claims (the pre-M4 provider-keyed framing and this pre-fix-round-1 "model:
 will be omitted" phrasing); both were corrected in the same fix-round-2
-pass, and `test/docs-consistency.test.ts`'s
-"model-routing-reference.md opencode-effort prose uses family terms" `describe`
-(review finding R2-M1) guards that prose against regressing back to either
-stale claim.
+pass. No test pins that prose any more: the tier and model-class tables of
+the same section are guarded against `models.ts` (see "Docs-consistency
+pins" below), the sentences around them are covered by review.
 
 **Rendering (`init.ts:1123-1189#"effortLine,"`).** For each harness and each role
 `rolesForProfile(profile)` selects, `runInit` writes the base file exactly
@@ -377,15 +376,15 @@ since 0.22.0, to pre-0.19.0: the base file's own content changed with the
 silent model downgrade (the reviewer's `opus` default in particular),
 pinned with a content assertion (not just a file-set check) on the
 legacy-manifest path since fix-round-1 (review finding L1,
-`test/init.test.ts:1502-1518#"effort: medium"`, five-line frontmatter including the 0.22.0
+`test/init.test.ts:1472-1488#"effort: medium"`, five-line frontmatter including the 0.22.0
 `effort: medium` line) plus, since 0.22.0, a dedicated two-target diff test
-(`test/init.test.ts:1523-1557#"tiers: false,"`) that installs into two separate targets,
+(`test/init.test.ts:1493-1527#"tiers: false,"`) that installs into two separate targets,
 one with `tiers: true` and one with `tiers: false`, and asserts every
 role's default file is byte-for-byte identical between them on both
 harnesses. With `--profile full` and tiers on, that is 5 base files plus 10
 variants since 0.21.0 (was 4 base files plus 9 variants: 13 total, before
 advisor added its own base file plus one `xhigh` variant): 15 total per
-harness (`test/init.test.ts:1594-1639#"advisor's only variant is xhigh"` pins the count and, as a dedicated
+harness (`test/init.test.ts:1564-1609#"advisor's only variant is xhigh"` pins the count and, as a dedicated
 anti-downgrade check, that `reviewer.md` and, since 0.21.0, `advisor.md`
 still carry `model: opus`, now with `effort: high` rather than no `effort:`
 line since 0.22.0). opencode's variant `model:` values come from a new,
@@ -393,21 +392,21 @@ separate resolution pass keyed by `ModelClass` instead of `Role`
 (`InitOptions.opencodeClassModels`, `init.ts:77-86#"opencodeClassModels?: Partial<Record<ModelClass, string | undefined>>;"`; resolved in `resolveInitInputs` at
 `cli-inputs.ts:462#"// and need no live catalog lookup, so they are unaffected)."`, mirroring the existing per-role opencode resolution just above
 it at `cli-inputs.ts:463#"warnings.push("`). The Claude-family-`variant:` and Ollama-no-effort-field
-provider-branch outcomes are pinned at `test/init.test.ts:1821-1854#"expect(implementerLow).not.toContain(" and test/init.test.ts:1858-1876#"model: ollama/llama3"`; a
+provider-branch outcomes are pinned at `test/init.test.ts:1768-1801#"expect(implementerLow).not.toContain(" and test/init.test.ts:1805-1823#"model: ollama/llama3"`; a
 resolved class id with no provider prefix at all (no `/`) reaches the same
 no-effort-field outcome as Ollama but via `opencodeEffortLine`'s
 `provider === undefined` branch rather than its `provider === "ollama"`
 one, a case review round 3 (R3-L2/R3-L4) found missing from both this
-doc's own prose and README's, pinned separately at `test/init.test.ts:1881-1904#"model: local-model"`; the plain
+doc's own prose and README's, pinned separately at `test/init.test.ts:1828-1851#"model: local-model"`; the plain
 `reasoningEffort:` outcome for every other non-Claude-family, non-Ollama,
-provider-qualified model is pinned at `test/init.test.ts:1909-1927#"reasoningEffort: high"`. The fix-round-1
+provider-qualified model is pinned at `test/init.test.ts:1856-1874#"reasoningEffort: high"`. The fix-round-1
 family-dispatch correction adds two more cases pinning that the `variant:`
 rule follows the model regardless of provider: `github-copilot/claude-sonnet-4.6`
-(`test/init.test.ts:1931-1950#"model: github-copilot/claude-sonnet-4.6"`) and the nested `openrouter/anthropic/claude-sonnet-4.6`
-(`test/init.test.ts:1956-1978#"expect(reviewerXhigh).not.toContain("`) both still resolve to `variant:`, not `reasoningEffort:`. The
-unresolved-class guard is pinned at `test/init.test.ts:1981-2017#"Object.keys(manifest.files).some((path) => path.includes("` (an omitted
+(`test/init.test.ts:1878-1897#"model: github-copilot/claude-sonnet-4.6"`) and the nested `openrouter/anthropic/claude-sonnet-4.6`
+(`test/init.test.ts:1903-1925#"expect(reviewerXhigh).not.toContain("`) both still resolve to `variant:`, not `reasoningEffort:`. The
+unresolved-class guard is pinned at `test/init.test.ts:1928-1964#"Object.keys(manifest.files).some((path) => path.includes("` (an omitted
 `opencodeClassModels` renders zero variant files and leaves no ledger
-entry), and a standalone invariant test (`test/init.test.ts:2021-2023#"expect(ROLE_TIERS[role], role).toContain(DEFAULT_TIER[role]);"`) asserts
+entry), and a standalone invariant test (`test/init.test.ts:1968-1970#"expect(ROLE_TIERS[role], role).toContain(DEFAULT_TIER[role]);"`) asserts
 `DEFAULT_TIER[role]` is always a member of `ROLE_TIERS[role]` for every
 role: nothing in the type system enforces that relationship, so a
 hand-edited `models.ts` could otherwise define a default tier the role's
@@ -443,7 +442,7 @@ effort field either way, identical to the tiers-off era's own output on
 that specific axis. `opencodeVariantEffortLine` was renamed to
 `opencodeEffortLine` in the same commit since the function is no longer
 variant-exclusive; its own dispatch logic is unchanged. Test coverage:
-`test/init.test.ts:1692-1698#"// no-effort-pin era output byte for byte on this axis."` (opencode default files: reviewer/advisor get
+`test/init.test.ts:1639-1645#"// no-effort-pin era output byte for byte on this axis."` (opencode default files: reviewer/advisor get
 `variant: high` on an anthropic-resolved model, the three medium-default
 roles get no effort field at all, matching the pre-0.22.0 byte shape on
 that axis) plus the legacy-frontmatter and two-target byte-identity tests
@@ -457,11 +456,9 @@ Scaling delegation bullet list gained a dedicated bullet (deliberately
 sitting outside the pre-existing "When tier variants are installed..."
 tiers-gated bullet, so it cannot be misread as `--tiers`-only) and
 `SKILL.md` step 6 gained a matching parenthetical on the implementer tier
-choice; both are pinned by a dedicated, derivation-based
-`test/docs-consistency.test.ts` `describe` (see "Docs-consistency pins"
-below) rather than a hand-maintained role list, so a future role addition
-or a wrong effort claim in either doc fails there instead of drifting
-silently.
+choice; the effort claim in each is covered by review and the
+behaviour eval set, not by a sentence pin (see "Docs-consistency pins"
+below for what is still guarded against `models.ts`).
 
 **Manifest and re-install.** The chosen value is recorded in a new `tiers`
 boolean on `.ai/workflow/manifest.json` (`Manifest.tiers`, `init.ts:153-154#"tiers: boolean;"`).
@@ -482,9 +479,9 @@ negatable-option pairing (`--tiers` / `--no-tiers` declared under the same
 when `--tiers` is passed, `false` when `--no-tiers` is passed, and
 `undefined` when neither is passed; verified end-to-end against the
 installed commander version rather than assuming the pairing behavior:
-`test/init.test.ts:2113#"no previous manifest to persist"` (`--no-tiers`
+`test/init.test.ts:2060#"no previous manifest to persist"` (`--no-tiers`
 on a fresh install with no previous manifest to persist) and
-`test/init.test.ts:2125-2142#"now untracked after tiers were turned off"`
+`test/init.test.ts:2072-2089#"now untracked after tiers were turned off"`
 (the true->false transition on a re-run). An
 explicit `--tiers` or `--no-tiers` always turns it on or off; a plain
 re-run (neither flag) keeps whatever the previous install had; a fresh
@@ -496,7 +493,7 @@ M2; before the fix this transition was silent, see
 `full -> minimal` downgrade that also had `tiers: true` now notes the
 dropped roles' tier-variant files too, not just their base files
 (`init.ts:850-859#"variantPath}: now untracked after the full"`, review finding M3;
-`test/init.test.ts:899-936#"The variant files themselves are untouched, only untracked, same as"` pins the note count, since 0.21.0 asserting 8
+`test/init.test.ts:869-906#"The variant files themselves are untouched, only untracked, same as"` pins the note count, since 0.21.0 asserting 8
 notes rather than 6 for the base-plus-tiers case: advisor became a third
 dropped role, contributing 1 base-file note plus 1 non-default-tier note of
 its own, purely from `ROLES` growing by one in `src/models.ts`, no code
@@ -510,10 +507,10 @@ misreported as a leftover, and a real leftover under a harness this run
 happens to drop is still reported; see
 [install-fence-mechanics.md](install-fence-mechanics.md)'s "What `init`
 writes" section for the full mechanics, and
-`test/init.test.ts:957-1021#"The .opencode harness was only just added this run and was never"`'s dedicated `describe` for both cases exercised
+`test/init.test.ts:927-991#"The .opencode harness was only just added this run and was never"`'s dedicated `describe` for both cases exercised
 directly. That block's own mutation probe covered only the *tiers-off* note
 loop's ledger gate; review round 3 (R3-L1) added a sibling
-`test/init.test.ts:1045-1079#"note) => !note.includes("` `describe` proving the ledger gate inside the
+`test/init.test.ts:1015-1049#"note) => !note.includes("` `describe` proving the ledger gate inside the
 *full -> minimal profile-downgrade* loop's own tier-variant sub-loop
 (`init.ts` ~453) the same way, after a mutant that always pushed that note
 (`if (true)` in place of the `previous.files` check) survived the full
@@ -553,7 +550,7 @@ override-vs-persist rule now also covers `--profile` (`src/cli-inputs.ts:352#"if
 and, since 0.19.0, `--tiers`/`--no-tiers` (`src/cli-inputs.ts:386#"const tiers = opts.tiers ?? previous?.tiers ?? false;"`, see
 "Effort tiers" above): a plain re-run keeps the previously installed value
 for each, an explicit flag overrides it. Test:
-`test/init.test.ts:1162-1181#"model: haiku"` runs `init --models implementer=haiku`, then a
+`test/init.test.ts:1132-1151#"model: haiku"` runs `init --models implementer=haiku`, then a
 plain `init` re-run, and asserts the manifest and the installed
 `.claude/agents/implementer.md` both still carry `haiku`. A hand-edited or
 damaged manifest degrades gracefully per-field: a non-object `harnesses`
@@ -561,13 +558,13 @@ falls back to `[]` filtered against known harnesses, each model id is
 re-validated, with invalid entries dropped back to that role's default, a
 missing `profile` field degrades to `"full"` rather than `"minimal"`, and
 (since 0.19.0) a missing `tiers` field degrades to `false`
-(`src/init.ts:394-496#"? { pin: candidate.pin.trim() }"`; end-to-end proof at `test/init.test.ts:283-324#"expect(manifest.models.implementer).toBe("`,
+(`src/init.ts:394-496#"? { pin: candidate.pin.trim() }"`; end-to-end proof at `test/init.test.ts:282-323#"expect(manifest.models.implementer).toBe("`,
 where a malformed `reviewer: 'opus: "x"'` is dropped to `opus` while a valid
 sibling `implementer: "haiku"` survives; the `profile`-fallback proof is
-`test/init.test.ts:778-807#"should exist under the full-profile fallback"`, see
+`test/init.test.ts:748-777#"should exist under the full-profile fallback"`, see
 [install-fence-mechanics.md](install-fence-mechanics.md) for why that test
 starts from a target with no prior `full` install; the `tiers`-fallback
-proof is `test/init.test.ts:1464-1509#"explorer.md has no frontmatter block"`, see "Effort tiers" above).
+proof is `test/init.test.ts:1434-1479#"explorer.md has no frontmatter block"`, see "Effort tiers" above).
 
 The recommended agent-led install path inspects detected harnesses, existing
 repo and operator manifests, native capabilities, and authorization before it
@@ -605,20 +602,20 @@ fifth role, the same "did I update every place a role is enumerated" check
 the "Solution-neutral notes" section below describes.
 
 - `docs/model-routing-reference.md`'s model-preselection table (moved from README.md) has one row per role
-  (`test/docs-consistency.test.ts:95#"expect(modelRoutingDoc).toMatch(new RegExp("`, matches `^\| <role> \|`).
+  (`test/docs-consistency.test.ts:91#"expect(modelRoutingDoc).toMatch(new RegExp("`, matches `^\| <role> \|`).
 - `INSTALL-AGENT.md`'s `--models` example names every role
-  (`test/docs-consistency.test.ts:108#"INSTALL-AGENT.md --models example names every role"`, checks for `<role>=<model>` per role).
+  (`test/docs-consistency.test.ts:104#"INSTALL-AGENT.md --models example names every role"`, checks for `<role>=<model>` per role).
 - `INSTALL-AGENT.md`'s manifest example JSON has one `models` key per role
-  (`test/docs-consistency.test.ts:123#"expect(Object.keys(manifest.models).sort()).toEqual(sortedRoles);"`, parses the fenced JSON block and compares sorted keys).
+  (`test/docs-consistency.test.ts:119#"expect(Object.keys(manifest.models).sort()).toEqual(sortedRoles);"`, parses the fenced JSON block and compares sorted keys).
 - `agents-md-section.md`'s "Per-role model preferences (...)" parenthetical
-  lists every role (`test/docs-consistency.test.ts:134#"expect(listed.sort()).toEqual(sortedRoles);"`).
+  lists every role (`test/docs-consistency.test.ts:130#"expect(listed.sort()).toEqual(sortedRoles);"`).
 
 A fifth, adjacent test guards the read-only-role brace lists
 (`agents/{explorer,task-slicer,implementer,reviewer,advisor}.md`) in
-`INSTALL-AGENT.md` (`test/docs-consistency.test.ts:104#"expect(listed.sort()).toEqual(sortedRoles);"`); it is role-enumeration generally, not
+`INSTALL-AGENT.md` (`test/docs-consistency.test.ts:100#"expect(listed.sort()).toEqual(sortedRoles);"`); it is role-enumeration generally, not
 model-specific, but shares the same drift-prevention purpose.
 
-Since 0.19.0, a standalone `describe` (`test/docs-consistency.test.ts:1956#"defaultTier: defaultTierCell.trim(),"`) guards a tier-specific
+Since 0.19.0, a standalone `describe` (`test/docs-consistency.test.ts:1147#"defaultTier: defaultTierCell.trim(),"`) guards a tier-specific
 enumeration site: `docs/model-routing-reference.md`'s "Effort tiers"
 role/tier table (moved from README.md) against `ROLE_TIERS` and
 `DEFAULT_TIER` directly, per role and column
@@ -630,35 +627,18 @@ also covers the advisor row (`ROLE_TIERS.advisor = ["high", "xhigh"]`,
 `DEFAULT_TIER.advisor = "high"`), the test iterating `ROLES` so the new
 per-role assertions came for free from the `models.ts` addition alone, no
 test edit required. Since fix-round-1
-(review finding L4), a second, sibling `describe` (`test/docs-consistency.test.ts:2035#"const def = TIER_DEFS[tier];"`) guards
+(review finding L4), a second, sibling `describe` (`test/docs-consistency.test.ts:1226#"const def = TIER_DEFS[tier];"`) guards
 `docs/model-routing-reference.md`'s other tier-shaped table (moved from
 README.md), Tier -> model class -> model alias -> requested effort, against
 `TIER_DEFS`/`CLASS_MODELS` directly, the same
 way; before this fix nothing guarded that second table, so it could drift
 from its source maps silently (this table is keyed by `Tier`, not `Role`,
-so it is unaffected by the role count itself). Since fix-round-2 (review finding R2-M1), a
-third, site-specific `describe` (`test/docs-consistency.test.ts:2096#"return modelRoutingDoc.slice(startIdx, endIdx);"`)
-guards the opencode-effort prose, moved to `docs/model-routing-reference.md`'s "Effort tiers" section,
-directly: it isolates that prose block by its own lead-in phrase and the
-next bold lead-in that follows it, then asserts the prose contains the
-family-based framing ("Claude-family") and does not contain either of the
-two stale claims R2-M1 corrected (the "provider-dependent" framing and the
-scope phrase `` `anthropic/...` model ids ``, plus the pre-fix-round-1
-"model: will be omitted" wording), so a regression back to either stale
-claim fails a targeted assertion instead of only showing up as an
-unguarded prose diff.
-
-Since 0.22.0, a fourth, site-specific `describe`
-(`test/docs-consistency.test.ts:2701#"must not sit inside the tiers-gated clause"`) guards the pinned-default-effort
-policy in `agents-md-section.md`'s Scaling delegation bullet list and
-`SKILL.md` step 6: a derivation-based check (not a hand-maintained role
-list, the same discipline the 0.20.0 tier-selection-policy guard above
-uses) parses the medium/high role split the prose claims and asserts it
-against `ROLES.filter((role) => TIER_DEFS[DEFAULT_TIER[role]].effort ===
-"medium"/"high")` directly, plus a positional check that the bullet sits
-strictly after the pre-existing tiers-gated bullet's own "use the default."
-close, so the pinned-default-effort bullet cannot be folded back inside the
-`--tiers`-conditional framing without failing a dedicated assertion.
+so it is unaffected by the role count itself). The opencode-effort prose of the same section and the pinned-default-effort
+and tier-selection policy sentences in `agents-md-section.md` and `SKILL.md`
+step 6 used to carry derivation-based sentence pins against these maps. Those
+pins were removed together with the other non-core prose pins; the two tables
+above remain the only effort-tier claims guarded directly against
+`ROLE_TIERS`, `DEFAULT_TIER`, `TIER_DEFS`, and `CLASS_MODELS`.
 
 ## Solution-neutral notes for future edits
 
