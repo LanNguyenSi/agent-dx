@@ -1,5 +1,193 @@
 # Bundle log
 
+- 2026-10-18T20:24:28Z, merge of the conditional GitHub Actions replay rules with master: master's `[Unreleased]` bullets now sit above
+  this change's, so every historical log citation into the released `CHANGELOG.md` entries moved
+  by both insertions together; each was re-pointed and its anchor text confirmed on the new line.
+  The five re-stamped docs list `CHANGELOG.md` or a merged file as a source; their claims are
+  unchanged and only the timestamps move. Re-stamped: `install-fence-mechanics.md`,
+  `model-preselection.md`, `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`
+  and `subagent-contracts-superset.md`.
+
+- 2026-10-18T20:23:00Z, merge of the single acceptance contract with master: master's `[Unreleased]` bullets now sit above
+  this change's, so every historical log citation into the released `CHANGELOG.md` entries moved
+  by both insertions together; each was re-pointed and its anchor text confirmed on the new line.
+  The five re-stamped docs list `CHANGELOG.md` or a merged file as a source; their claims are
+  unchanged and only the timestamps move. Re-stamped: `install-fence-mechanics.md`,
+  `model-preselection.md`, `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`
+  and `subagent-contracts-superset.md`.
+
+- 2026-10-18T20:21:39Z, merge of the conditional verification-set rules with master: master's
+  `[Unreleased]` bullets now sit above this change's, so every historical log citation into the
+  released `CHANGELOG.md` entries moved by both insertions together; each was re-pointed and its
+  anchor text confirmed on the new line. The five re-stamped docs list `CHANGELOG.md` or a merged
+  file as a source; their claims are unchanged and only the timestamps move. Re-stamped:
+  `install-fence-mechanics.md`, `model-preselection.md`, `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md`.
+
+- 2026-10-18T20:19:11Z, merge of the contract-and-safety-core test pins with master: both added `[Unreleased]`
+  bullets at the top of `CHANGELOG.md` (the test-pin bullet now follows master's), so every
+  historical log citation into the released `CHANGELOG.md` entries moved by both insertions
+  together; each was re-pointed and its anchor text confirmed on the new line. The five docs
+  re-stamped here list `CHANGELOG.md` or a merged test file as a source; their claims are
+  unchanged and only the timestamps move. Re-stamped: `install-fence-mechanics.md`,
+  `model-preselection.md`, `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`
+  and `subagent-contracts-superset.md`.
+
+- 2026-10-18T20:10:09Z, merge of the reviewer prompt replay evaluation with the doctor Codex budget
+  warning: both added an `[Unreleased]` bullet at the top of `CHANGELOG.md` (the evaluation
+  bullet now follows the doctor bullet), so every historical log citation into the released
+  `CHANGELOG.md` entries moved by both insertions together; each was re-pointed and its anchor
+  text confirmed on the new line. `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md` list `CHANGELOG.md`
+  as a source; their `CHANGELOG.md` citations name released entries by heading and anchor, which
+  still resolve, so the claims are unchanged and only the timestamps move.
+
+- 2026-10-18T16:55:56Z, doctor mismatch list completed: the `doctor.ts` comment (same line count, no
+  citation moved) and `operator-install-and-registry.md` now name the fourth known mismatch
+  (a file the TOML 0.5 parser accepts but Codex rejects whole still yields its budget), and
+  `doctor.test.ts` pins a negative-narrowed BigInt as unknown. Re-stamped:
+  `install-fence-mechanics.md` (claims unchanged) and `operator-install-and-registry.md`.
+
+- 2026-10-18T16:44:54Z, doctor reports what its TOML 0.5 parser cannot know: `doctor.ts`,
+  `doctor.test.ts`, the `CHANGELOG.md` bullet and `operator-install.md` changed.
+  A Codex config file that `@iarna/toml` (TOML 0.5) cannot read, or an integer
+  it returns as a narrowed `BigInt`, is now reported as a layer whose budget is
+  unknown (Codex reads TOML 1.1 and may load the file), with the AGENTS.md
+  size and the default budget for context and no size comparison; it is no
+  longer called a Codex rejection. Values Codex rejects that the parser reads
+  exactly (a string, a negative or fractional number) are unchanged, and the
+  integer-valued float mismatch stays documented. The `codexWarnings`
+  paragraph in `operator-install-and-registry.md` was re-verified against the
+  code and rewritten, its `doctor.ts` citations were re-pointed by locating
+  each anchor on its new line (a uniform +8 below the budget code), the two
+  `doctor.ts:1071-1079` allowlist entries in `docs-consistency.test.ts`
+  followed, and this log's `CHANGELOG.md` self-citations moved by the
+  bullet's +3 lines to `CHANGELOG.md:1095#"The implementer"` and
+  `CHANGELOG.md:1472#"Citation scanning is paragraph-joined"`. Re-stamped:
+  `install-fence-mechanics.md`, `model-preselection.md`,
+  `operator-install-and-registry.md`, `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md`.
+
+- 2026-10-18T16:11:58Z, doctor parses Codex config files with a TOML parser: `doctor.ts` and
+  `doctor.test.ts` changed, the `CHANGELOG.md` bullet was reworded and the sibling-drift
+  allowlist geometry in `docs-consistency.test.ts` followed. Re-verified against the change:
+  none of these docs describes the Codex config reader, their claims are unchanged.
+  Re-stamped: `install-fence-mechanics.md`, `model-preselection.md`,
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and
+  `subagent-contracts-superset.md`.
+
+- 2026-10-18T16:00:28Z, Codex budget round 2 (real TOML parser): the
+  hand-written one-key `project_doc_max_bytes` reader and its integer regex
+  in `doctor.ts` are gone; each layer's `config.toml` is now parsed whole
+  with `@iarna/toml` (promoted from devDependency to dependency), so a file
+  Codex rejects (a TOML syntax error, a key set twice) is reported as
+  rejected with the parser's message, quoted keys, inline comments and
+  multi-line strings read as TOML says, only the top-level key counts, and
+  `0`/`-0` warn "loads no project instruction file". A `BigInt` the parser
+  returns for an integer above the safe JS range (it narrows to a signed 64
+  bits) warns nothing while positive and rejects while not positive; the
+  two parser-forced divergences from Codex (an above-64-bit integer whose
+  narrowing stays positive; an integer-valued float like `65536.0`,
+  indistinguishable from that integer in JavaScript) are pinned by tests.
+  `firstLostHeading` is unchanged and gained a test pinning that a `~~~`
+  line inside a ``` fence does not close it. Every live `doctor.ts`
+  citation in `operator-install-and-registry.md` was re-pointed by locating
+  its anchor text on the new line (a uniform +1 above the budget code and
+  +54 to +56 below it), the two geometry-bearing allowlist entries in
+  `docs-consistency.test.ts` (`doctor.ts:148-158` wrong-sibling-anchor,
+  `doctor.ts:1063-1071` distant-duplicate-anchor twice) were re-pointed to
+  the same shift, this log's `CHANGELOG.md` self-citations moved by the
+  bullet's +3 lines to `CHANGELOG.md:1095#"The implementer"` and
+  `CHANGELOG.md:1472#"Citation scanning is paragraph-joined"` across every
+  occurrence, and the `codexWarnings` sentence was re-verified and
+  rewritten for the parser posture. `docs/operator-install.md` and the
+  `CHANGELOG.md` bullet gained the rejection wording. Re-stamped:
+  `operator-install-and-registry.md`; no other doc changed.
+
+- 2026-10-18T14:08:01Z, Codex budget review round: `doctor.ts` now lets the
+  highest layer that sets `project_doc_max_bytes` decide (a deciding `0`
+  warns that Codex loads no project instruction file at all, a deciding
+  invalid value warns that Codex refuses to load that config file, neither
+  falls through and neither does a size comparison), the value parser
+  accepts the TOML integer forms (underscores, a leading `+`, `0x`/`0o`/`0b`)
+  and the safe-integer bound, `firstLostHeading` skips fenced `#` lines, and
+  `AGENTS.override.md` is now taken only when it is a regular file. Every
+  live `doctor.ts` citation in `operator-install-and-registry.md` was
+  re-pointed by locating its anchor text on the new line (a uniform +2 above
+  the budget code and +75 below it), the two `doctor.ts` entries of the
+  citation-sibling-drift allowlist in `docs-consistency.test.ts` were
+  re-pointed to the same geometry, and this log's `CHANGELOG.md`
+  self-citations moved to `CHANGELOG.md:1095#"The implementer"` and
+  `CHANGELOG.md:1472#"Citation scanning is paragraph-joined"` across every
+  occurrence. The `doctor` contract paragraph's `codexWarnings` sentence was
+  re-verified and rewritten for the no-fall-through rule; `README.md`,
+  `docs/operator-install.md` and the `CHANGELOG.md` bullet gained the new
+  warning's wording. Re-stamped: `install-fence-mechanics.md`,
+  `model-preselection.md`, `operator-install-and-registry.md`,
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and
+  `subagent-contracts-superset.md`; no other claim changed.
+
+- 2026-10-18T13:11:05Z, doctor Codex instruction budget: `doctor.ts` gained the Codex budget warning,
+  `cli.ts` prints it as a `codex:` detail line, `doctor.test.ts` covers it, the
+  `CHANGELOG.md` bullet shifts lines below it and the sibling-drift allowlist geometry in
+  `docs-consistency.test.ts` followed. Re-verified against the change: the docs' claims about
+  install mechanics, routing, the review gate, run state and the contract pairs are unchanged.
+  Re-stamped: `install-fence-mechanics.md`, `model-preselection.md`,
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and
+  `subagent-contracts-superset.md`.
+
+- 2026-10-18T12:58:16Z, Codex instruction-budget doctor warning: new
+  `codexWarnings` reporting landed in `doctor.ts` and `cli.ts`, and a
+  `CHANGELOG.md` bullet was added under `[Unreleased]`, shifting the
+  citations into those files. Every live `doctor.ts` and `cli.ts`
+  citation in `operator-install-and-registry.md` and every
+  `CHANGELOG.md` self-citation in this log was re-pointed by locating
+  its anchor text on the new line; the one anchor whose own text the
+  implementation edited (the `runDoctor` plain-path `inspectTarget`
+  call) was re-anchored on the new wording. The citation-sibling-drift
+  allowlist's recorded ranges and uncited lines into the two files were
+  re-pointed to the same geometry; no allowlist verdict changed. The
+  `doctor` contract paragraph was extended with the `codexWarnings` key
+  and the config layers its budget check does not consider, and the doc
+  was re-stamped; no claim changed.
+
+- 2026-10-18T15:22:09Z, reviewer prompt replay evaluation, permission mode and canary fix, re-stamp:
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and
+  `subagent-contracts-superset.md` list `CHANGELOG.md` as a source and went stale on the
+  reworded `[Unreleased]` bullet (reviewer and canary sessions sandboxed, the judge without
+  tools; same line count). Their `CHANGELOG.md` citations all name released entries by heading
+  and anchor, which still resolve, and the bullet adds no rule the three docs describe, so the
+  claims are unchanged and only the timestamps move.
+
+- 2026-10-18T12:47:41Z, reviewer prompt replay evaluation, isolation rework, re-stamp:
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and
+  `subagent-contracts-superset.md` list `CHANGELOG.md` as a source and went stale on the
+  longer `[Unreleased]` bullet. Their `CHANGELOG.md` citations all name released entries by
+  heading and anchor, the headings and anchors still resolve, and the bullet adds no rule the
+  three docs describe, so the claims are unchanged and only the timestamps move.
+
+- 2026-10-18T12:45:38Z, reviewer prompt replay evaluation, isolation rework: the `[Unreleased]` bullet in
+  `CHANGELOG.md` grew from twelve to fifteen lines (sandbox, environment allowlist, guard,
+  canary, paired comparison), which shifted every line below it by three, so this log's
+  thirty live self-citations into `CHANGELOG.md` (the fifteen with anchor "The implementer"
+  and the fifteen with anchor "Citation scanning is paragraph-joined") are re-pointed by +3,
+  each by locating its anchor text on the new line. The tooling lives outside the bundle's
+  sources; no bundle claim changed.
+
+- 2026-10-18T11:02:22Z, reviewer prompt replay evaluation, re-stamp: `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md` list `CHANGELOG.md`
+  as a source and went stale on the new `[Unreleased]` bullet. Their `CHANGELOG.md`
+  citations all name released entries by heading and anchor, the headings and anchors still
+  resolve, and the bullet adds no rule the three docs describe, so the claims are unchanged
+  and only the timestamps move.
+
+- 2026-10-18T11:01:39Z, reviewer prompt replay evaluation: the new `[Unreleased]` bullet in `CHANGELOG.md`
+  (twelve lines) shifted every line below it by twelve, so this log's thirty live
+  self-citations into `CHANGELOG.md` (the fifteen with anchor "The implementer" and the
+  fifteen with anchor "Citation scanning is paragraph-joined") are re-pointed by +12, each
+  by locating its anchor text on the new line. The tooling lives outside the bundle's
+  sources; no bundle claim changed.
+
 - 2026-10-18T18:50:44Z, GitHub Actions replay in run mode single: the trigger site in `evidence-and-probes.md`
   step 6 now says the orchestrator applies the implementer part of the replay rules itself to a
   workflow or action diff in run mode `single` (the sentence was appended to the paragraph's last
@@ -436,8 +624,8 @@
   are re-pointed by the same offset and re-verified by anchor. The
   `CHANGELOG.md` entry this change added ahead of the existing
   `[Unreleased]` bullet also shifts this file's own two live self-citations
-  into `CHANGELOG.md` (`CHANGELOG.md:1060#"The implementer"` and
-  `CHANGELOG.md:1437#"Citation scanning is paragraph-joined"`), re-pointed
+  into `CHANGELOG.md` (`CHANGELOG.md:1095#"The implementer"` and
+  `CHANGELOG.md:1472#"Citation scanning is paragraph-joined"`), re-pointed
   the same way across every occurrence in this file's history. The three
   docs listing `evidence-and-probes.md` under `sources` are re-stamped.
 
@@ -761,8 +949,8 @@
   describes the three entry-form rules, with its intersection citations into
   `contracts.md` and `task-slicer.md` re-pointed after re-reading each anchor.
   The new `CHANGELOG.md` bullet moved the two live self-citations
-  (`CHANGELOG.md:1060#"The implementer"` and
-  `CHANGELOG.md:1437#"Citation scanning is paragraph-joined"`), re-pointed in
+  (`CHANGELOG.md:1095#"The implementer"` and
+  `CHANGELOG.md:1472#"Citation scanning is paragraph-joined"`), re-pointed in
   the live sites and in the earlier entries that quote them; the task-slicer
   and advisor contract citations moved with the inserted lines.
   `review-gate-and-waivers.md` and `run-state-lifecycle-and-markers.md`
@@ -799,8 +987,8 @@
   doc cites the reference or the test file, and every `CHANGELOG.md` citation
   in the bundle docs is heading-anchored to a released section, so no claim
   changed. The new bullet moves the two live self-citations of this log to
-  `CHANGELOG.md:1060#"The implementer"` and
-  `CHANGELOG.md:1437#"Citation scanning is paragraph-joined"`, re-pointed in
+  `CHANGELOG.md:1095#"The implementer"` and
+  `CHANGELOG.md:1472#"Citation scanning is paragraph-joined"`, re-pointed in
   the live sites and in the earlier entries that quote them after re-reading
   both anchors at the new lines. The docs whose `sources` list `CHANGELOG.md`
   were re-checked and re-stamped.
@@ -1059,8 +1247,8 @@
 
 - 2026-09-24T06:16:59Z (task 19a63460): rebased onto the 0.37.0 CHANGELOG restore; its
   `[Unreleased]` bullet and this change's bullet together move the two live
-  self-citations to `CHANGELOG.md:1060#"The implementer"` and
-  `CHANGELOG.md:1437#"Citation scanning is paragraph-joined"`, re-pointed in the
+  self-citations to `CHANGELOG.md:1095#"The implementer"` and
+  `CHANGELOG.md:1472#"Citation scanning is paragraph-joined"`, re-pointed in the
   live sites and in the earlier entries that quote them after re-reading both
   anchors at the new lines. `review-gate-and-waivers.md`,
   `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md`
@@ -2678,7 +2866,7 @@
   sentence reverted to its pre-change wording, fails the exact-sub-field
   and regression-signal tests above; restored, the suite is green again.
   `CHANGELOG.md`'s own prose copy of this change is
-  (`CHANGELOG.md:1060#"The implementer"`).
+  (`CHANGELOG.md:1095#"The implementer"`).
 
   Verified on the committed tree: the full package suite (`npm test`),
   `typecheck`, `typecheck:test`, and `format:check`, all clean. Re-pointed
@@ -2946,7 +3134,7 @@
   that binding rather than second-guessing it.
 
   The CHANGELOG bullet for this round is
-  `CHANGELOG.md:1437#"Citation scanning is paragraph-joined"`. Verified on
+  `CHANGELOG.md:1472#"Citation scanning is paragraph-joined"`. Verified on
   the committed tree: the full package suite, `docs-consistency.test.ts`
   on its own, `typecheck`, `typecheck:test` and `format:check`; the
   figures each guard measured are in its own computed test name, per the
@@ -11766,9 +11954,9 @@ metadata stripped before it.
 
 The 19-line insertion re-pointed this log's own two live self-citations
 into `CHANGELOG.md`, from line 179 to line 198 (moved again to line 296
-by later rounds, `CHANGELOG.md:1060#"The implementer"`) and from line
+by later rounds, `CHANGELOG.md:1095#"The implementer"`) and from line
 556 to line 575 (moved again to line 673,
-`CHANGELOG.md:1437#"Citation scanning is paragraph-joined"`); both were
+`CHANGELOG.md:1472#"Citation scanning is paragraph-joined"`); both were
 re-read at their new lines before the re-point. Re-verified and
 re-stamped the three docs whose `sources:` list `CHANGELOG.md`
 (`run-state-lifecycle-and-markers.md`, `subagent-contracts-superset.md`,
@@ -11795,8 +11983,8 @@ empty prerelease heading `## [1.0.0-]`), plus the round-1 mismatch test
 was tightened to assert the exact mismatch message instead of only the
 `[version-heading]` tag. The 4-line bullet growth re-pointed this log's
 two live self-citations again, from line 198 to line 202 (moved again to line 296 by a later
-round, `CHANGELOG.md:1060#"The implementer"`) and from line 575 to line 579
-(moved again to line 673, `CHANGELOG.md:1437#"Citation scanning is paragraph-joined"`); both were
+round, `CHANGELOG.md:1095#"The implementer"`) and from line 575 to line 579
+(moved again to line 673, `CHANGELOG.md:1472#"Citation scanning is paragraph-joined"`); both were
 re-read at their new lines before the re-point.
 
 Verified from the worktree root: `build`, `typecheck`, `typecheck:test`,
@@ -11845,9 +12033,9 @@ the same name covering the trigger, the four recorded outcomes and the
 boundaries against the halt rule and the budget, with five anchored
 citations. The 19-line `CHANGELOG.md` bullet re-pointed this log's two live
 self-citations, from line 202 to line 221 (moved again to line 296 by a
-later change, `CHANGELOG.md:1060#"The implementer"`) and from line 579 to
+later change, `CHANGELOG.md:1095#"The implementer"`) and from line 579 to
 line 598 (moved again to line 673,
-`CHANGELOG.md:1437#"Citation scanning is paragraph-joined"`), in the two
+`CHANGELOG.md:1472#"Citation scanning is paragraph-joined"`), in the two
 live sites and in the two earlier entries that quote them; both were
 re-read at their new lines before the re-point. Re-verified and re-stamped
 the three docs whose `sources:` list the changed files
@@ -11913,9 +12101,9 @@ tests hold those clauses as constants and assert them against the references,
 the changelog bullet and that doc, the pattern the previous entry arrived at.
 The 39-line `CHANGELOG.md` bullet re-pointed this log's two live
 self-citations, from line 221 to line 260 (moved again to line 296 by a
-later change, `CHANGELOG.md:1060#"The implementer"`) and from line 598 to
+later change, `CHANGELOG.md:1095#"The implementer"`) and from line 598 to
 line 637 (moved again to line 673,
-`CHANGELOG.md:1437#"Citation scanning is paragraph-joined"`), in the live
+`CHANGELOG.md:1472#"Citation scanning is paragraph-joined"`), in the live
 sites and in the earlier entries that quote them; both were re-read at their
 new lines. Re-verified and re-stamped the three docs whose `sources:` list the
 changed files: every anchored citation into the two references resolves at
@@ -11953,9 +12141,9 @@ section quoting the three sentences with three anchored citations; the tests
 hold them as constants and assert them against every site. The
 34-line `CHANGELOG.md` bullet re-pointed this log's two live
 self-citations, from line 260 to line 294 (moved again to line 296 by a
-later change, `CHANGELOG.md:1060#"The implementer"`) and from line 637 to
+later change, `CHANGELOG.md:1095#"The implementer"`) and from line 637 to
 line 671 (moved again to line 673,
-`CHANGELOG.md:1437#"Citation scanning is paragraph-joined"`), in the live
+`CHANGELOG.md:1472#"Citation scanning is paragraph-joined"`), in the live
 sites and in the earlier entries that quote them; both were re-read at their
 new lines. Re-verified and re-stamped the docs whose `sources:` list the
 changed files.
@@ -11987,9 +12175,9 @@ two new step rules, one prompt rule, and the `validate-review-report` and
 0.36.0). One consumer-visible behaviour change: `validate-review-report` is
 stricter, so a reviewer return with a non-string element in a string-array
 field now exits 1 where 0.36.0 exited 0. The two-line insertion shifted this log's two live self-citations
-from line 294 to line 296 (`CHANGELOG.md:1060#"The implementer"`) and from
+from line 294 to line 296 (`CHANGELOG.md:1095#"The implementer"`) and from
 line 671 to line 673
-(`CHANGELOG.md:1437#"Citation scanning is paragraph-joined"`); both were
+(`CHANGELOG.md:1472#"Citation scanning is paragraph-joined"`); both were
 re-pointed after re-reading their anchors at the new lines, in the live sites
 and in the earlier entries that quote them. Re-stamped the three bundle docs
 whose `sources:` list `CHANGELOG.md` after confirming that none of their own
@@ -12016,8 +12204,8 @@ apart from the opening words of the second bullet the text is otherwise
 unchanged. Heading and re-wrap together moved
 everything below the section down by twenty-eight lines, which shifted this
 log's two live self-citations from line 313 to line 341
-(`CHANGELOG.md:1060#"The implementer"`) and from line 690 to line 718
-(`CHANGELOG.md:1437#"Citation scanning is paragraph-joined"`); both were
+(`CHANGELOG.md:1095#"The implementer"`) and from line 690 to line 718
+(`CHANGELOG.md:1472#"Citation scanning is paragraph-joined"`); both were
 re-pointed mechanically after checking that each anchor sits on its new
 line, in the live sites and in the earlier entries that quote them.
 Re-stamped the bundle docs whose `sources:` list `CHANGELOG.md` after
@@ -12236,8 +12424,8 @@ bullet to the file's usual width, a qualifier marking its first bullet as a
 repository lint that ships in no package file, and a blank line before the
 next heading moved everything below the section down by five lines, which
 shifted this log's two live self-citations from line 346 to line 351
-(`CHANGELOG.md:1060#"The implementer"`) and from line 723 to line 728
-(`CHANGELOG.md:1437#"Citation scanning is paragraph-joined"`); both were
+(`CHANGELOG.md:1095#"The implementer"`) and from line 723 to line 728
+(`CHANGELOG.md:1472#"Citation scanning is paragraph-joined"`); both were
 re-pointed mechanically after checking that each anchor sits on its new
 line, in the live sites and in the earlier entries that quote them.
 Re-stamped the bundle docs whose `sources:` list `CHANGELOG.md` after
@@ -12469,8 +12657,8 @@ lines and the new section sits at the end of its file, so no citation into
 those three files moved. The new `[Unreleased]` entry at the top of
 CHANGELOG.md moved everything below it down by sixteen lines, which shifted
 this log's two live self-citations from line 526 to line 542
-(`CHANGELOG.md:1060#"The implementer"`) and from line 903 to line 919
-(`CHANGELOG.md:1437#"Citation scanning is paragraph-joined"`); both were
+(`CHANGELOG.md:1095#"The implementer"`) and from line 903 to line 919
+(`CHANGELOG.md:1472#"Citation scanning is paragraph-joined"`); both were
 re-pointed after checking that each anchor sits on its new line, in the
 live sites and in the earlier entries that quote them. Re-stamped review
 gate and waivers, run-state lifecycle and markers, and the subagent
@@ -12562,8 +12750,8 @@ log's own repeated self-citations to the implementer output contract
 paragraph and the paragraph-joined citation-scanning paragraph (13
 occurrences of each, spread across both live and historical narration
 throughout this file, formerly at line 718 and line 1095) were all
-re-pointed to `CHANGELOG.md:1060#"The implementer"` and
-`CHANGELOG.md:1437#"Citation scanning is paragraph-joined"` respectively;
+re-pointed to `CHANGELOG.md:1095#"The implementer"` and
+`CHANGELOG.md:1472#"Citation scanning is paragraph-joined"` respectively;
 every other `CHANGELOG.md:` citation across the bundle is
 heading-anchored (`#[x.y.z]`) and unaffected by a line shift. Confirmed
 both anchor strings still read at their new lines before re-pointing.
