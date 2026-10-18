@@ -19,11 +19,13 @@ import {
   createRunScratch,
   hostGitEnv,
   isInside,
+  pathForms,
   redactPaths,
   redactSecrets,
   scanForSecrets,
   secretValues,
   sessionSettings,
+  systemTempRoots,
 } from "../eval/isolation.js";
 import {
   leftoverTotal,
@@ -112,7 +114,39 @@ describe("session settings", () => {
       scratch,
       scratchRoot: join(work, "settings"),
       denied: ["/home/someone", "/srv/data"],
+      tempRoots: systemTempRoots(),
     });
+  });
+
+  it("keeps the API key out of Bash commands through the sandbox, not the scrub variable", () => {
+    expect(settings.sandbox.credentials).toEqual({
+      envVars: [{ name: "ANTHROPIC_API_KEY", mode: "deny" }],
+    });
+  });
+
+  it("denies reads of the shared temp roots and re-opens only this run's scratch", () => {
+    const roots = systemTempRoots();
+    expect(roots).toEqual(expect.arrayContaining(pathForms(tmpdir())));
+    if (process.platform === "darwin")
+      expect(roots).toEqual(expect.arrayContaining(["/tmp", "/private/tmp"]));
+    const fs = settings.sandbox.filesystem;
+    expect(fs.denyRead).toEqual(expect.arrayContaining(roots));
+    // The scratch lives under the system temp root here, as it does by default:
+    // each of its own directories sits inside a denied root and is re-opened
+    // by an allowRead entry that is strictly narrower than that root.
+    const realTmp = realpathSync(tmpdir());
+    for (const dir of fs.allowRead as string[]) {
+      expect(isInside(dir, realTmp), dir).toBe(true);
+      const covering = (fs.denyRead as string[]).filter((d) =>
+        isInside(dir, d),
+      );
+      expect(covering.length, dir).toBeGreaterThan(0);
+      for (const d of covering) expect(dir.length, d).toBeGreaterThan(d.length);
+    }
+    expect(
+      (fs.denyRead as string[]).some((d) => isInside(scratch.meta, d)),
+    ).toBe(true);
+    expect(fs.allowRead).not.toContain(scratch.meta);
   });
 
   it("turns the sandbox on, strict, with no way out", () => {

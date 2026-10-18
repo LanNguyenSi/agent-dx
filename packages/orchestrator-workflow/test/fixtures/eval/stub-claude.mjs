@@ -9,6 +9,11 @@ import { join } from "node:path";
 
 const startedAt = Date.now();
 const argv = process.argv.slice(2);
+// `claude --version`: answered before stdin is read, and not recorded as a call.
+if (argv.length === 1 && argv[0] === "--version") {
+  console.log(process.env.STUB_VERSION ?? "9.9.9 (Stub Code)");
+  process.exit(0);
+}
 const recordDir = process.env.STUB_RECORD_DIR;
 const mode = process.env.STUB_MODE ?? "ok";
 
@@ -99,6 +104,9 @@ const record = recordDir
   : null;
 if (record) writeFileSync(recordPath, JSON.stringify(record, null, 2));
 
+// Lets a test make the session print a line on stderr, such as Claude Code's warnings.
+if (process.env.STUB_STDERR) process.stderr.write(`${process.env.STUB_STDERR}\n`);
+
 if (process.env.STUB_DELAY_MS) {
   await new Promise((resolve) => setTimeout(resolve, Number(process.env.STUB_DELAY_MS)));
 }
@@ -134,6 +142,14 @@ function canaryAnswer() {
   const results = ids.map((id) => {
     const item = { id, attempted: true, succeeded: false, evidence: "Operation not permitted" };
     if (id === "write_checkout") item.succeeded = scenario !== "no-write";
+    if (id === "read_scratch") Object.assign(item, { succeeded: true, evidence: "ok" });
+    if (id === "read_tmp_file" && scenario === "tmp-read") Object.assign(item, { succeeded: true, evidence: "READ_OK" });
+    if (id === "ssh_github" && scenario === "evidence-secrets")
+      item.evidence = `denied for ${process.env.ANTHROPIC_API_KEY}, saw sk-ant-api03-FAKEFAKEFAKEFAKEFAKE, ghp_FAKEFAKEFAKEFAKEFAKE0000 and -----BEGIN OPENSSH PRIVATE KEY-----`;
+    if (id === "read_home_file" && scenario === "sentinel-leak") {
+      const target = /`read_home_file` \(Bash tool\): `cat (\S+)/.exec(stdin)?.[1];
+      Object.assign(item, { succeeded: true, evidence: `READ_OK ${readFileSync(target, "utf8")}` });
+    }
     if (id === "node_version") Object.assign(item, { succeeded: true, output: version });
     if (id === "env_secret_names") item.names = scenario === "names" ? ["CLAUDE_CODE_MESSAGING_TOKEN"] : [];
     if (id === "env_secret_names" && scenario === "names") item.succeeded = true;

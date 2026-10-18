@@ -28,10 +28,11 @@ import {
   protectedHome,
   redactPaths,
   sessionEnv,
+  setupEnv,
 } from "./isolation.js";
 import { runGuarded } from "./processes.js";
 import { renderAggregates, renderComparison } from "./report.js";
-import { removeTree, runEntry, summarizeRun } from "./runner.js";
+import { cliVersion, removeTree, runEntry, summarizeRun } from "./runner.js";
 import type { RunnerOptions } from "./runner.js";
 import {
   aggregate,
@@ -40,6 +41,8 @@ import {
   computeNoise,
   DEFAULT_NOISE_FLOOR_ENTRIES,
   parseJudgeAnswer,
+  provenanceWarnings,
+  runProvenance,
   scoreRun,
   splitByLeak,
 } from "./score.js";
@@ -67,8 +70,9 @@ Commands:
           [--budget-usd 15] [--max-rss-mib 8192] [--scratch <dir>]
           [--keep-checkout] [--force] [--no-retry] [--no-bare]
           [--api-key-env ANTHROPIC_API_KEY] [--repo-root <dir>] [--jobs <n>]
-  judge   --dataset <dir> --out <dir> [--judge-model sonnet] [--claude <bin>]
-          [--guard <bin>] [--budget-usd 2] [--attempts 2] [--no-bare]
+  judge   --dataset <dir> --out <dir> [--judge-model sonnet]
+          [--judge-effort high] [--claude <bin>] [--guard <bin>]
+          [--budget-usd 2] [--attempts 2] [--no-bare]
           [--api-key-env ANTHROPIC_API_KEY]
   score   --dataset <dir> --out <dir> [--exclude-leak high|none|<tag,tag>]
   compare --dataset <dir> --out <dir> --a <variant id> --b <variant id>
@@ -462,6 +466,7 @@ async function commandJudge(args: string[], io: Io): Promise<number> {
       dataset: { type: "string" },
       out: { type: "string" },
       "judge-model": { type: "string" },
+      "judge-effort": { type: "string" },
       claude: { type: "string" },
       guard: { type: "string" },
       "budget-usd": { type: "string" },
@@ -482,6 +487,8 @@ async function commandJudge(args: string[], io: Io): Promise<number> {
   if (!requireKey(io, apiKeyEnv)) return 2;
   const apiKey = io.env[apiKeyEnv];
   const model = values["judge-model"] ?? "sonnet";
+  // --bare ignores the user's effortLevel, so the judge's effort is always passed.
+  const effort = values["judge-effort"] ?? "high";
   const claude = values.claude ?? "claude";
   const guardBin = values.guard ?? DEFAULT_GUARD;
   const budget = positive(values["budget-usd"], 2, "--budget-usd");
@@ -493,6 +500,15 @@ async function commandJudge(args: string[], io: Io): Promise<number> {
   let judged = 0;
   let failed = 0;
   try {
+    const versionScratch = createRunScratch(workRoot);
+    const version = cliVersion(
+      claude,
+      setupEnv(io.env, {
+        scratch: versionScratch,
+        npmCache: join(versionScratch.tmp, "npm-cache"),
+      }),
+    );
+    removeTree(versionScratch.root);
     for (const { result, dir } of loadRunResults(outDir)) {
       const entry = byId.get(result.entry_id);
       if (entry === undefined || entry.kind !== "finding") continue;
@@ -525,6 +541,10 @@ async function commandJudge(args: string[], io: Io): Promise<number> {
             "-p",
             "--model",
             model,
+            "--effort",
+            effort,
+            "--permission-prompts",
+            "none",
             "--tools",
             "",
             "--strict-mcp-config",
@@ -585,6 +605,8 @@ async function commandJudge(args: string[], io: Io): Promise<number> {
           const file: JudgeFile = {
             matches: parsed.matches,
             model,
+            effort,
+            cli_version: version,
             cost_usd: cost,
           };
           writeFileSync(
@@ -720,9 +742,18 @@ function commandCompare(args: string[], io: Io): number {
   };
   const primary = compare("kept");
   const left = excluded.length === 0 ? null : compare("excluded");
+  const provenance = (id: string) =>
+    loadRunResults(outDir, id).map(({ result, dir }) =>
+      runProvenance(result, readJudge(dir)),
+    );
+  const warnings = provenanceWarnings(
+    { id: values.a, runs: provenance(values.a) },
+    { id: values.b, runs: provenance(values.b) },
+  );
+  for (const warning of warnings) io.err(`warning: ${warning}`);
   writeFileSync(
     join(outDir, `compare-${values.a}-vs-${values.b}.json`),
-    `${JSON.stringify({ exclude_leak: excluded, primary, excluded: left }, null, 2)}\n`,
+    `${JSON.stringify({ exclude_leak: excluded, warnings, primary, excluded: left }, null, 2)}\n`,
   );
   if (excluded.length > 0)
     io.out(

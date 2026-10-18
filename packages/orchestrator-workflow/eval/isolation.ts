@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 /**
@@ -155,14 +155,14 @@ export function setupEnv(
 
 /**
  * Environment of the claude process: the setup environment plus the API key
- * and two Claude Code variables. CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 strips
- * credentials (the API key included) from the environment of the
- * subprocesses Claude Code starts, such as Bash commands (env-vars docs,
- * "What the subprocess environment scrub removes"). CLAUDE_CODE_TMPDIR moves
- * Claude Code's own temp files, and the per-user temp directory sandboxed
- * commands may write to, into the run scratch (env-vars docs,
- * CLAUDE_CODE_TMPDIR) instead of the temp root shared with the user's other
- * sessions.
+ * and CLAUDE_CODE_TMPDIR, which moves Claude Code's own temp files, and the
+ * per-user temp directory sandboxed commands may write to, into the run
+ * scratch (env-vars docs, CLAUDE_CODE_TMPDIR) instead of the temp root shared
+ * with the user's other sessions. CLAUDE_CODE_SUBPROCESS_ENV_SCRUB is never
+ * set: in Claude Code 2.1.302 it forces the permission mode to `default`
+ * whatever `--permission-mode` says, and a headless session then stalls on
+ * its first approval. The sandbox's credential setting keeps the key out of
+ * Bash commands instead (`sessionSettings`).
  */
 export function sessionEnv(
   base: NodeJS.ProcessEnv,
@@ -170,7 +170,6 @@ export function sessionEnv(
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     ...setupEnv(base, options),
-    CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
     CLAUDE_CODE_TMPDIR: options.scratch.tmp,
   };
   if (options.apiKey !== undefined) env.ANTHROPIC_API_KEY = options.apiKey;
@@ -289,10 +288,25 @@ export interface SessionSettingsInput {
   scratchRoot: string;
   /** Directories the session may not read at all: the user's home, the dataset tree, the results directory, the source repositories. */
   denied: string[];
+  /** Shared temp roots (`systemTempRoots()`): read-denied to Bash commands; this run's own scratch is re-opened by the narrower allowRead entries. */
+  tempRoots: string[];
 }
 
 function uniq(list: string[]): string[] {
   return [...new Set(list)];
+}
+
+/**
+ * The host's shared temp roots: the resolved `os.tmpdir()` and `/private/tmp`
+ * with its `/tmp` alias, each in every form that exists. Other sessions keep
+ * their task output there.
+ */
+export function systemTempRoots(): string[] {
+  return uniq(
+    [tmpdir(), "/private/tmp", "/tmp"]
+      .filter((path) => existsSync(path))
+      .flatMap(pathForms),
+  );
 }
 
 /** `//abs/path` form of a permission rule path (permissions docs, "Read and Edit"). */
@@ -349,9 +363,19 @@ export function sessionSettings(
         // settings-reference#sandbox-network-allowlocalbinding: no listening, no localhost connections (macOS).
         allowLocalBinding: false,
       },
+      // Settings schema of Claude Code 2.1.302, sandbox.credentials.envVars: "`deny` unsets the
+      // variable for sandboxed commands". Keeps the API key out of Bash commands.
+      credentials: {
+        envVars: [{ name: "ANTHROPIC_API_KEY", mode: "deny" }],
+      },
       filesystem: {
-        // settings-reference#sandbox-filesystem-denyread: the protected trees and every other run's scratch.
-        denyRead: uniq([...denied, ...pathForms(input.scratchRoot)]),
+        // settings-reference#sandbox-filesystem-denyread: the protected trees, every other run's
+        // scratch and the shared temp roots.
+        denyRead: uniq([
+          ...denied,
+          ...pathForms(input.scratchRoot),
+          ...input.tempRoots.flatMap(pathForms),
+        ]),
         // settings-reference#sandbox-filesystem-allowread: the narrower path wins (sandboxing docs,
         // "Configure sandboxing"), so this re-opens only this run's own directories; meta stays denied.
         allowRead: own,

@@ -12,6 +12,8 @@ import {
   entryMeans,
   fencedBlocks,
   parseJudgeAnswer,
+  provenanceWarnings,
+  runProvenance,
   scoreRun,
   splitByLeak,
 } from "../eval/score.js";
@@ -768,6 +770,45 @@ describe("compareVariants", () => {
       { id: "b", scores: bRuns },
     );
     expect(comparison.recall.exceeds_noise).toBeNull();
+  });
+});
+
+describe("provenance warnings", () => {
+  const run = (over: Partial<RunResult> = {}): RunResult =>
+    ({ effort: "high", cli_version: "2.1.302", ...over }) as RunResult;
+  const judge = (over: Partial<JudgeFile> = {}): JudgeFile => ({
+    matches: [],
+    model: "sonnet",
+    effort: "high",
+    cli_version: "2.1.302",
+    cost_usd: null,
+    ...over,
+  });
+
+  it("is silent when both variants ran and were judged with the same settings", () => {
+    const same = [runProvenance(run(), judge()), runProvenance(run(), null)];
+    expect(
+      provenanceWarnings({ id: "a", runs: same }, { id: "b", runs: same }),
+    ).toEqual([]);
+  });
+
+  it("counts a field missing from an older record as unknown, and no judged run as none", () => {
+    const old = { effort: "high" } as RunResult;
+    const legacy = {
+      matches: [],
+      model: "sonnet",
+      cost_usd: null,
+    } as JudgeFile;
+    const warnings = provenanceWarnings(
+      { id: "a", runs: [runProvenance(old, legacy)] },
+      { id: "b", runs: [runProvenance(run(), null)] },
+    );
+    expect(warnings).toEqual([
+      "a and b differ in judge model (a: sonnet; b: none); the comparison mixes settings",
+      "a and b differ in judge effort (a: unknown; b: none); the comparison mixes settings",
+      "a and b differ in judge CLI version (a: unknown; b: none); the comparison mixes settings",
+      "a and b differ in reviewer CLI version (a: unknown; b: 2.1.302); the comparison mixes settings",
+    ]);
   });
 });
 

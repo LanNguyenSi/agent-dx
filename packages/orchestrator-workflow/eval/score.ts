@@ -197,6 +197,8 @@ export interface RunResult {
   prompt_sha256: string;
   model: string;
   effort: string;
+  /** `claude --version` of the binary that ran the session, or null when it could not be read (absent in older records). */
+  cli_version?: string | null;
   status: RunStatus;
   /** Why a run did not complete, or null. */
   failure: string | null;
@@ -361,6 +363,10 @@ export function parseJudgeAnswer(text: string, knownIds: string[]): JudgeParse {
 export interface JudgeFile {
   matches: JudgeMatch[];
   model: string | null;
+  /** The judge's `--effort` (absent in older files). */
+  effort?: string | null;
+  /** `claude --version` of the judge binary (absent in older files). */
+  cli_version?: string | null;
   cost_usd: number | null;
 }
 
@@ -961,4 +967,82 @@ export function compareVariants(
       b_lower: lower,
     },
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* Provenance of a comparison                                           */
+/* ------------------------------------------------------------------ */
+
+/** What a run and its judgment were produced with. */
+export interface RunProvenance {
+  reviewer_effort: string | null;
+  reviewer_cli: string | null;
+  /** null when the run has no judgment. */
+  judge: {
+    model: string | null;
+    effort: string | null;
+    cli: string | null;
+  } | null;
+}
+
+export function runProvenance(
+  result: RunResult,
+  judge: JudgeFile | null,
+): RunProvenance {
+  return {
+    reviewer_effort: result.effort ?? null,
+    reviewer_cli: result.cli_version ?? null,
+    judge:
+      judge === null
+        ? null
+        : {
+            model: judge.model ?? null,
+            effort: judge.effort ?? null,
+            cli: judge.cli_version ?? null,
+          },
+  };
+}
+
+const PROVENANCE_FIELDS: {
+  label: string;
+  pick: (p: RunProvenance) => string | null | undefined;
+  judged: boolean;
+}[] = [
+  { label: "judge model", pick: (p) => p.judge?.model, judged: true },
+  { label: "judge effort", pick: (p) => p.judge?.effort, judged: true },
+  { label: "judge CLI version", pick: (p) => p.judge?.cli, judged: true },
+  { label: "reviewer effort", pick: (p) => p.reviewer_effort, judged: false },
+  { label: "reviewer CLI version", pick: (p) => p.reviewer_cli, judged: false },
+];
+
+/**
+ * One warning per setting in which variants A and B differ: judge model,
+ * judge effort, reviewer effort and the CLI versions. A value missing from a
+ * record counts as `unknown`; a variant without any judged run as `none`.
+ */
+export function provenanceWarnings(
+  a: { id: string; runs: RunProvenance[] },
+  b: { id: string; runs: RunProvenance[] },
+): string[] {
+  const valuesOf = (
+    runs: RunProvenance[],
+    field: (typeof PROVENANCE_FIELDS)[number],
+  ): string => {
+    const values = new Set(
+      runs
+        .filter((p) => !field.judged || p.judge !== null)
+        .map((p) => field.pick(p) ?? "unknown"),
+    );
+    return values.size === 0 ? "none" : [...values].sort().join(" + ");
+  };
+  const warnings: string[] = [];
+  for (const field of PROVENANCE_FIELDS) {
+    const va = valuesOf(a.runs, field);
+    const vb = valuesOf(b.runs, field);
+    if (va !== vb)
+      warnings.push(
+        `${a.id} and ${b.id} differ in ${field.label} (${a.id}: ${va}; ${b.id}: ${vb}); the comparison mixes settings`,
+      );
+  }
+  return warnings;
 }

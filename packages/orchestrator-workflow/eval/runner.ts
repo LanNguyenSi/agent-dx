@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
@@ -23,6 +23,7 @@ import {
   sessionSettings,
   setupEnv,
   setupNpmCache,
+  systemTempRoots,
 } from "./isolation.js";
 import type { RunScratch } from "./isolation.js";
 import { runGuarded } from "./processes.js";
@@ -251,6 +252,10 @@ export function buildSessionArgs(options: {
     options.effort,
     "--permission-mode",
     "bypassPermissions",
+    // `claude --help` (2.1.302): with "none" anything that would prompt is denied
+    // automatically instead of waiting for an answer nobody gives.
+    "--permission-prompts",
+    "none",
     "--settings",
     options.settingsFile,
     "--strict-mcp-config",
@@ -336,7 +341,24 @@ export function settingsForRun(
       options.outDir,
       ...(entry === null ? [] : [entry.repo.path]),
     ],
+    tempRoots: systemTempRoots(),
   });
+}
+
+/** `claude --version` of a binary, run with `env` (no key), or null when it fails. */
+export function cliVersion(
+  claudeBin: string,
+  env: NodeJS.ProcessEnv,
+): string | null {
+  const r = spawnSync(claudeBin, ["--version"], {
+    env,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    timeout: 60_000,
+    killSignal: "SIGKILL",
+  });
+  const out = r.status === 0 ? r.stdout.trim() : "";
+  return out.length > 0 ? out : null;
 }
 
 /** Writes the agent definition the session runs as. */
@@ -385,11 +407,36 @@ export function parseSession(stdoutFile: string): SessionJson | null {
   }
 }
 
+/**
+ * What Claude Code prints to stderr when it ignores `--permission-mode` and
+ * runs in `default` mode, where a headless session stalls on its first
+ * approval.
+ */
+export const FORCED_MODE_MARKER = "Permission mode forced";
+
+/** The session's stderr, or "" when it is missing. */
+export function readStderr(file: string): string {
+  try {
+    return readFileSync(file, "utf8");
+  } catch {
+    return "";
+  }
+}
+
 /** Status of a finished session, with the reason when it did not complete. */
 export function sessionStatus(
   session: GuardedResult,
   json: SessionJson | null,
+  stderr: string,
 ): { status: RunStatus; failure: string | null } {
+  const forced = stderr
+    .split("\n")
+    .find((line) => line.includes(FORCED_MODE_MARKER));
+  if (forced !== undefined)
+    return {
+      status: "session_failed",
+      failure: `permission mode not applied: ${forced.trim().slice(0, 200)}`,
+    };
   if (session.timedOut)
     return { status: "timeout", failure: "wall-clock bound" };
   if (session.spawnError !== null)
@@ -482,13 +529,15 @@ export async function runEntry(
   };
 
   const setupLog = join(runDir, "setup.log");
+  const childSetupEnv = setupEnv(options.env, {
+    scratch,
+    npmCache: setupNpmCache(options.scratchRoot),
+  });
+  const version = cliVersion(options.claudeBin, childSetupEnv);
   const checkout = await prepareCheckout(
     entry,
     scratch.checkout,
-    setupEnv(options.env, {
-      scratch,
-      npmCache: setupNpmCache(options.scratchRoot),
-    }),
+    childSetupEnv,
     setupLog,
     guard,
   );
@@ -548,6 +597,7 @@ export async function runEntry(
       prompt_sha256: sha256(composedPrompt),
       model: options.model,
       effort: options.effort,
+      cli_version: version,
       status,
       failure,
       exit_code: session.code,
@@ -633,7 +683,11 @@ export async function runEntry(
 
   const json = session.timedOut ? null : parseSession(stdoutFile);
   const finalText = json && typeof json.result === "string" ? json.result : "";
-  const { status, failure } = sessionStatus(session, json);
+  const { status, failure } = sessionStatus(
+    session,
+    json,
+    readStderr(join(scratch.meta, "stderr.log")),
+  );
   return record(status, failure, {
     code: session.code,
     finalText,

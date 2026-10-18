@@ -97,7 +97,8 @@ npm run eval -- run --dataset <dir> --out <results> --variant current \
   [--model opus] [--effort high] [--timeout-min 45] [--budget-usd 15] \
   [--max-rss-mib 8192] [--jobs 1] [--no-retry]
 
-npm run eval -- judge   --dataset <dir> --out <results> [--judge-model sonnet]
+npm run eval -- judge   --dataset <dir> --out <results> [--judge-model sonnet] \
+  [--judge-effort high]
 npm run eval -- score   --dataset <dir> --out <results> [--exclude-leak high]
 npm run eval -- compare --dataset <dir> --out <results> --a current --b degraded \
   [--exclude-leak high] [--noise-floor 1]
@@ -137,6 +138,11 @@ reports under `guard/` and a copy of the session's `evidence/`. A run that
 already has a completed `result.json` is skipped unless `--force` is given,
 so an interrupted batch resumes; a stored run that did not complete is run
 again unless `--no-retry` is given.
+
+`result.json` also records `claude --version` of the binary that ran the
+session, and `judge.json` the judge's model, effort and CLI version; `compare`
+prints a warning when the two variants differ in any of these or in the
+reviewer effort.
 
 `judge` writes `judge.json` next to each finding-run result that has none; an
 unparseable answer is retried (`--attempts`) and otherwise leaves a
@@ -186,18 +192,20 @@ What contains a session:
   `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_SSH_COMMAND=false` and
   `GIT_TERMINAL_PROMPT=0`. Nothing else of the invoking environment passes:
   no tokens, no agent socket, no session or messaging variables. The API key
-  goes to the claude process only, as `ANTHROPIC_API_KEY`, and
-  `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1` keeps it out of the session's Bash
-  commands. A record never holds the key: it is redacted if a session prints
-  it.
+  goes to the claude process only, as `ANTHROPIC_API_KEY`, and a
+  `sandbox.credentials.envVars` deny entry keeps it out of the session's Bash
+  commands (`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` is never set: it would force
+  the permission mode to `default`). A record never holds the key: it is
+  redacted if a session prints it.
 - **Claude Code sandbox** (a per-run settings file passed with `--settings`;
   each key names its documentation section in `eval/isolation.ts`): Bash
   commands are sandboxed, the session exits if the sandbox cannot start, there
   is no unsandboxed retry and no excluded command. Their network is a strict
   allowlist with no host on it, no Unix socket and no local listening port.
   They cannot read the invoking user's home, the dataset's parent tree, the
-  results directory, the source repositories or the other runs' scratch
-  directories, and they write only to the checkout, the evidence directory and
+  results directory, the source repositories, the other runs' scratch
+  directories or the shared temp roots (the system temp directory and `/tmp`;
+  the run's own scratch directories are re-opened), and they write only to the checkout, the evidence directory and
   Claude Code's per-user temp directory. `CLAUDE_CODE_TMPDIR` moves that
   directory into the run's scratch; for a long scratch path Claude Code may
   use a short directory under the system temp root instead (Claude Code
@@ -233,17 +241,23 @@ What it does not contain:
   the proof that the settings took effect; run it again after a Claude Code
   update.
 - **The canary's report is partly self-reported**: the host itself checks the
-  touch target, the checkout write, the node version and that no record holds
-  a secret; whether ssh, the file reads, curl and the Read tool failed comes
-  from the session's own answer. An action the session declined to attempt
+  touch target, the checkout write, the node version, the permission mode and
+  that no record holds a secret; whether ssh, the file reads, curl and the Read
+  tool failed comes from the session's own answer. The read probes target
+  sentinel files with random content that the host plants under the home
+  directory and the temp root just before the session and deletes after it,
+  so a read that worked shows up as a leak. An action the session declined to attempt
   makes the canary inconclusive, never a pass.
 - The sandbox runs on macOS, Linux and WSL2; on Linux it needs `bubblewrap`
   and `socat`. Some network keys (`allowUnixSockets`, `allowLocalBinding`)
   only apply on macOS, where the session's tests also cannot start a local
   server.
 - The session runs with `--permission-mode bypassPermissions` so the reviewer
-  can run tests in the checkout without prompts; the containment above is
-  what limits it, not the permission mode.
+  can run tests in the checkout without prompts, and with
+  `--permission-prompts none`, so anything that would still prompt is denied
+  instead of waiting; the containment above is what limits it, not the
+  permission mode. A session whose stderr says Claude Code forced the
+  permission mode to `default` is recorded as failed and fails the canary.
 
 ## Deviations from the production route
 

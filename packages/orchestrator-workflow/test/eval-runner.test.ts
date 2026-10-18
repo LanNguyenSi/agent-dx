@@ -138,6 +138,7 @@ describe("runEntry with a stub session", { timeout: 60_000 }, () => {
     expect(result.session_wall_ms).toBeLessThanOrEqual(result.wall_ms);
     expect(result.model).toBe("opus");
     expect(result.effort).toBe("high");
+    expect(result.cli_version).toBe("9.9.9 (Stub Code)");
     expect(result.variant).toEqual({
       id: "stub-variant",
       source: "test",
@@ -159,7 +160,33 @@ describe("runEntry with a stub session", { timeout: 60_000 }, () => {
     expect(rec.env.CLAUDE_CONFIG_DIR).toBe(join(rec.env.HOME, ".claude"));
     expect(rec.env.TMPDIR).toBe(join(runRoot, "tmp"));
     expect(rec.env.CLAUDE_CODE_TMPDIR).toBe(join(runRoot, "tmp"));
-    expect(rec.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe("1");
+    // It would force the permission mode to default (Claude Code 2.1.302).
+    expect(rec.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBeUndefined();
+    // The version call is not a session: the session is the only recorded call.
+    expect(readdirSync(recordDir).filter((f) => f.startsWith("call-"))).toEqual(
+      ["call-0.json"],
+    );
+  });
+
+  it("records the version of the claude binary that ran the session", async () => {
+    const opts = options({
+      claudeBin: claude({ STUB_VERSION: "2.1.302 (Claude Code)" }),
+    });
+    const result = await runEntry(makeEntry(repo), variant, 1, opts);
+    expect(result.cli_version).toBe("2.1.302 (Claude Code)");
+  });
+
+  it("fails closed when Claude Code forces the permission mode to default", async () => {
+    const opts = options({
+      claudeBin: claude({
+        STUB_STDERR:
+          "\u26a0 Permission mode forced to default \u2014 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB is set",
+      }),
+    });
+    const result = await runEntry(makeEntry(repo), variant, 1, opts);
+    expect(result.status).toBe("session_failed");
+    expect(result.failure).toContain("permission mode not applied");
+    expect(result.failure).toContain("Permission mode forced to default");
   });
 
   it("passes the session only the allowlist, and the key to the session alone", async () => {
@@ -222,7 +249,6 @@ describe("runEntry with a stub session", { timeout: 60_000 }, () => {
       "GIT_CONFIG_GLOBAL",
       "GIT_SSH_COMMAND",
       "GIT_TERMINAL_PROMPT",
-      "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
       "CLAUDE_CODE_TMPDIR",
       "ANTHROPIC_API_KEY",
     ]);
@@ -250,6 +276,7 @@ describe("runEntry with a stub session", { timeout: 60_000 }, () => {
     expect(valueOf("--model")).toBe("opus");
     expect(valueOf("--effort")).toBe("high");
     expect(valueOf("--permission-mode")).toBe("bypassPermissions");
+    expect(valueOf("--permission-prompts")).toBe("none");
     expect(valueOf("--settings")).toBe(join(runRoot, "meta", "settings.json"));
     expect(valueOf("--add-dir")).toBe(join(runRoot, "evidence"));
     expect(argv).toContain("--strict-mcp-config");
@@ -307,6 +334,9 @@ describe("runEntry with a stub session", { timeout: 60_000 }, () => {
         allowLocalBinding: false,
       },
     });
+    expect(settings.sandbox.credentials).toEqual({
+      envVars: [{ name: "ANTHROPIC_API_KEY", mode: "deny" }],
+    });
     const fs = settings.sandbox.filesystem;
     expect(fs.denyRead).toEqual(
       expect.arrayContaining([
@@ -315,6 +345,7 @@ describe("runEntry with a stub session", { timeout: 60_000 }, () => {
         opts.outDir,
         repo.dir,
         opts.scratchRoot,
+        realpathSync(tmpdir()),
       ]),
     );
     expect(fs.allowRead).toEqual(
@@ -739,7 +770,8 @@ describe("environment allowlist, buildSessionArgs, composePrompt", () => {
     expect(
       sessionEnv(base, { scratch, npmCache: "/s/npm" }).ANTHROPIC_API_KEY,
     ).toBeUndefined();
-    expect(session.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBe("1");
+    // Neither set nor inherited: it would force the permission mode to default.
+    expect(session.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBeUndefined();
     expect(base.GH_TOKEN).toBe("gh-secret");
   });
 
@@ -756,6 +788,10 @@ describe("environment allowlist, buildSessionArgs, composePrompt", () => {
     expect(buildSessionArgs({ ...common, bare: false })).not.toContain(
       "--bare",
     );
+    for (const bare of [true, false]) {
+      const args = buildSessionArgs({ ...common, bare });
+      expect(args[args.indexOf("--permission-prompts") + 1]).toBe("none");
+    }
   });
 
   it("composes briefing, target block and task specification in that order", () => {

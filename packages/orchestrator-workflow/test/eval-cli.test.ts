@@ -296,7 +296,17 @@ describe("evaluation CLI", { timeout: 120_000 }, () => {
       expect(c.stdin).not.toMatch(/alpha|beta|entry-a|entry-c/);
       expect(c.cwd).not.toContain(out);
       expect(c.argv).toContain("--tools");
+      expect(c.argv[c.argv.indexOf("--effort") + 1]).toBe("high");
+      expect(c.argv[c.argv.indexOf("--permission-prompts") + 1]).toBe("none");
     }
+    const judgeFile = JSON.parse(
+      readFileSync(join(alphaDir, "judge.json"), "utf8"),
+    );
+    expect(judgeFile).toMatchObject({
+      model: "sonnet",
+      effort: "high",
+      cli_version: "9.9.9 (Stub Code)",
+    });
 
     const runB = io();
     expect(await main(runArgs(beta, "1", clean), runB)).toBe(0);
@@ -349,6 +359,8 @@ describe("evaluation CLI", { timeout: 120_000 }, () => {
       ),
     ).toBe(0);
     const text = compare.lines.join("\n");
+    // Same reviewer and judge settings on both sides: no warning.
+    expect(compare.errors).toEqual([]);
     expect(text).toContain("| recall | 100.0% | 0.0% | -100.0% |");
     // One finding entry: a full flip is one entry's worth, which the default floor holds.
     expect(text).toContain("within noise (n=1, A 2 repeat(s), B 1 repeat(s))");
@@ -382,6 +394,101 @@ describe("evaluation CLI", { timeout: 120_000 }, () => {
       ),
     ).toBe(2);
     expect(missing.errors[0]).toContain("gamma");
+  });
+
+  it("warns when the compared variants differ in judge or reviewer settings or CLI version", async () => {
+    const provOut = join(work, "prov-out");
+    const finding = textFile(
+      "prov-finding.txt",
+      reviewerReturn([{ severity: "medium" }]),
+    );
+    const yes = textFile(
+      "prov-judge.txt",
+      '```json\n{"matches":[{"id":"K1","matched":true,"evidence":"found"}]}\n```',
+    );
+    const step = async (
+      variant: string,
+      reviewer: string[],
+      judge: string[],
+      version: string,
+    ): Promise<void> => {
+      const bin = claude({
+        STUB_FINAL_TEXT_FILE: finding,
+        STUB_JUDGE_TEXT_FILE: yes,
+        STUB_VERSION: version,
+      });
+      const base = [
+        "--dataset",
+        dataset,
+        "--out",
+        provOut,
+        "--claude",
+        bin,
+        ...guard,
+      ];
+      expect(
+        await main(
+          [
+            "run",
+            ...base,
+            "--variant",
+            `file:${promptFile(`${variant}.md`, variant)}`,
+            "--scratch",
+            scratch,
+            "--only",
+            "entry-a",
+            ...reviewer,
+          ],
+          io(),
+        ),
+      ).toBe(0);
+      expect(await main(["judge", ...base, ...judge], io())).toBe(0);
+    };
+    await step("pone", [], [], "1.0.0");
+    await step(
+      "ptwo",
+      ["--effort", "medium"],
+      ["--judge-effort", "low", "--judge-model", "opus"],
+      "2.0.0",
+    );
+    const [two] = loadRunResults(provOut, "ptwo");
+    expect(two.result.cli_version).toBe("2.0.0");
+    expect(
+      JSON.parse(readFileSync(join(two.dir, "judge.json"), "utf8")),
+    ).toMatchObject({ model: "opus", effort: "low", cli_version: "2.0.0" });
+
+    const compare = io();
+    expect(
+      await main(
+        [
+          "compare",
+          "--dataset",
+          dataset,
+          "--out",
+          provOut,
+          "--a",
+          "pone",
+          "--b",
+          "ptwo",
+        ],
+        compare,
+      ),
+    ).toBe(0);
+    const warnings = compare.errors.join("\n");
+    for (const label of [
+      "judge model (pone: sonnet; ptwo: opus)",
+      "judge effort (pone: high; ptwo: low)",
+      "judge CLI version (pone: 1.0.0; ptwo: 2.0.0)",
+      "reviewer effort (pone: high; ptwo: medium)",
+      "reviewer CLI version (pone: 1.0.0; ptwo: 2.0.0)",
+    ]) {
+      expect(warnings).toContain(`warning: pone and ptwo differ in ${label}`);
+    }
+    expect(compare.errors).toHaveLength(5);
+    const saved = JSON.parse(
+      readFileSync(join(provOut, "compare-pone-vs-ptwo.json"), "utf8"),
+    );
+    expect(saved.warnings).toHaveLength(5);
   });
 
   it("reports high-leak entries apart from the primary score, unless told to keep them", async () => {
@@ -768,10 +875,13 @@ describe("evaluation CLI", { timeout: 120_000 }, () => {
 describe("canary", { timeout: 120_000 }, () => {
   const canary = async (
     scenario: string,
+    vars: Record<string, string> = {},
   ): Promise<{
     code: number;
     result: Record<string, any>;
     lines: string[];
+    session: Record<string, any>;
+    text: string;
   }> => {
     const canaryOut = mkdtempSync(join(work, "canary-out-"));
     const records = mkdtempSync(join(work, "rec-canary-"));
@@ -784,7 +894,7 @@ describe("canary", { timeout: 120_000 }, () => {
         "--out",
         canaryOut,
         "--claude",
-        claude({ STUB_CANARY: scenario }, records),
+        claude({ STUB_CANARY: scenario, ...vars }, records),
         ...guard,
         "--scratch",
         scratch,
@@ -793,16 +903,25 @@ describe("canary", { timeout: 120_000 }, () => {
     );
     const dir = join(canaryOut, "canary");
     const [stamp] = readdirSync(dir);
-    const result = JSON.parse(
-      readFileSync(join(dir, stamp, "canary.json"), "utf8"),
-    );
+    const text = readFileSync(join(dir, stamp, "canary.json"), "utf8");
+    const result = JSON.parse(text);
     const session = calls(records)[0];
     // The canary runs with the production flags and the production settings.
     expect(session.argv).toContain("--settings");
+    expect(session.argv[session.argv.indexOf("--permission-prompts") + 1]).toBe(
+      "none",
+    );
     expect(session.settings.sandbox.network.strictAllowlist).toBe(true);
     expect(session.settings.sandbox.filesystem.denyRead).toContain(home);
+    expect(session.settings.sandbox.filesystem.denyRead).toContain(
+      realpathSync(tmpdir()),
+    );
+    expect(session.settings.sandbox.credentials.envVars).toEqual([
+      { name: "ANTHROPIC_API_KEY", mode: "deny" },
+    ]);
+    expect(session.env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBeUndefined();
     expect(session.envNames).not.toContain("AGENT_TASKS_TOKEN");
-    return { code, result, lines: r.lines };
+    return { code, result, lines: r.lines, session, text };
   };
 
   it("passes when every forbidden action failed and both allowed ones succeeded", async () => {
@@ -815,12 +934,15 @@ describe("canary", { timeout: 120_000 }, () => {
         "ssh_github",
         "read_home_file",
         "read_home_file_node",
+        "read_tmp_file",
         "curl_example",
         "touch_home",
-        "read_settings_tool",
+        "read_home_file_tool",
         "env_secret_names",
         "write_checkout",
+        "read_scratch",
         "node_version",
+        "host:permission_mode_applied",
         "host:touch_target_absent",
         "host:checkout_file_written",
         "host:no_secret_in_records",
@@ -881,6 +1003,100 @@ describe("canary", { timeout: 120_000 }, () => {
     const { code, result } = await canary("refuse");
     expect(code).toBe(1);
     expect(result.status).toBe("inconclusive");
+  });
+
+  it("points every read probe at a host-planted sentinel and removes the sentinels afterwards", async () => {
+    const { result, session } = await canary("pass");
+    expect(result.status).toBe("pass");
+    const prompt: string = session.stdin;
+    const target = (id: string, re: RegExp): string => {
+      const line = prompt.split("\n").find((l) => l.includes(`\`${id}\``))!;
+      return re.exec(line)![1];
+    };
+    const homeSentinel = target("read_home_file", /`cat (\S+) /);
+    expect(homeSentinel.startsWith(join(home, ".eval-canary-sentinel-"))).toBe(
+      true,
+    );
+    expect(target("read_home_file_node", /" (\S+)`\./)).toBe(homeSentinel);
+    expect(target("read_home_file_tool", /Read `(\S+)`/)).toBe(homeSentinel);
+    const tmpSentinel = target("read_tmp_file", /`cat (\S+) /);
+    expect(
+      tmpSentinel.startsWith(join(realpathSync(tmpdir()), "eval-canary-")),
+    ).toBe(true);
+    expect(tmpSentinel.startsWith(scratch)).toBe(false);
+    for (const former of [
+      ".ssh",
+      "id_ed25519",
+      ".claude/settings.json",
+      ".gitconfig",
+      ".zshrc",
+    ]) {
+      expect(prompt, former).not.toContain(former);
+    }
+    expect(existsSync(homeSentinel)).toBe(false);
+    expect(existsSync(tmpSentinel)).toBe(false);
+  });
+
+  it("fails when a sentinel's content reaches the session's answer, and records it redacted", async () => {
+    const { code, result, lines, text } = await canary("sentinel-leak");
+    expect(code).toBe(1);
+    expect(result.status).toBe("fail");
+    const leak = result.checks.find(
+      (c: any) => c.id === "host:no_secret_in_records",
+    );
+    expect(leak.pass).toBe(false);
+    expect(leak.detail).toContain("the home sentinel's content");
+    const content = /eval-canary-sentinel-[0-9a-f]{48}/;
+    expect(text).not.toMatch(content);
+    expect(lines.join("\n")).not.toMatch(content);
+    expect(
+      readFileSync(join(result.record_dir, "session.json"), "utf8"),
+    ).not.toMatch(content);
+  });
+
+  it("fails when the temp-root sentinel outside the scratch was readable", async () => {
+    const { code, result } = await canary("tmp-read");
+    expect(code).toBe(1);
+    expect(result.status).toBe("fail");
+    expect(result.checks.find((c: any) => c.id === "read_tmp_file").pass).toBe(
+      false,
+    );
+  });
+
+  it("redacts secrets quoted in the session's evidence from canary.json and the table", async () => {
+    const { code, result, lines, text } = await canary("evidence-secrets");
+    expect(code).toBe(1);
+    expect(result.status).toBe("fail");
+    const printed = lines.join("\n");
+    for (const secret of [
+      "sk-test-cli-key-value",
+      "sk-ant-api03-FAKEFAKE",
+      "ghp_FAKEFAKE",
+      "BEGIN OPENSSH PRIVATE KEY",
+    ]) {
+      expect(text, secret).not.toContain(secret);
+      expect(printed, secret).not.toContain(secret);
+    }
+    const ssh = result.checks.find((c: any) => c.id === "ssh_github");
+    expect(ssh.detail).toContain("<redacted: the API key>");
+    expect(ssh.detail).toContain("<redacted: Anthropic key>");
+    expect(printed).toContain("<redacted: the API key>");
+  });
+
+  it("fails closed when Claude Code forced the permission mode to default", async () => {
+    const { code, result, lines } = await canary("pass", {
+      STUB_STDERR:
+        "\u26a0 Permission mode forced to default \u2014 CLAUDE_CODE_SUBPROCESS_ENV_SCRUB is set",
+    });
+    expect(code).toBe(1);
+    expect(result.status).toBe("fail");
+    expect(result.session_status).toBe("session_failed");
+    expect(result.session_failure).toContain("permission mode not applied");
+    expect(
+      result.checks.find((c: any) => c.id === "host:permission_mode_applied")
+        .pass,
+    ).toBe(false);
+    expect(lines[0]).toContain("canary fail");
   });
 
   it("fails when the allowed write into the checkout did not happen", async () => {
