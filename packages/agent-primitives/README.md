@@ -29,6 +29,10 @@ for teams shipping with AI agents.
 - `probe`: runs one mutation probe (or a `--plan` of several), confirms the
   baseline passes first, and reports whether the target test caught the
   mutant, restoring the file afterward either way.
+  `--report mutation-probes` prints the run as ready-to-paste
+  `mutation_probes` items (the orchestrator implementer contract's eleven
+  fields per mutant, merged from the `mutant` record and `mutation_probe`;
+  `--replayed` marks them as replays) instead of the JSON envelope.
   A mutant can be a line edit (`-r`, `-M`/`-w`) or a unified diff (`-p/--patch`,
   also `"patch"` in a plan entry): the diff's paths must be `a/` and `b/`
   prefixed and relative to the repository root (not to `-C`), as plain
