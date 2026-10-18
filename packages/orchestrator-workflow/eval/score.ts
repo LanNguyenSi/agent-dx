@@ -975,6 +975,7 @@ export function compareVariants(
 
 /** What a run and its judgment were produced with. */
 export interface RunProvenance {
+  reviewer_model: string | null;
   reviewer_effort: string | null;
   reviewer_cli: string | null;
   /** null when the run has no judgment. */
@@ -990,6 +991,7 @@ export function runProvenance(
   judge: JudgeFile | null,
 ): RunProvenance {
   return {
+    reviewer_model: result.model ?? null,
     reviewer_effort: result.effort ?? null,
     reviewer_cli: result.cli_version ?? null,
     judge:
@@ -1011,13 +1013,14 @@ const PROVENANCE_FIELDS: {
   { label: "judge model", pick: (p) => p.judge?.model, judged: true },
   { label: "judge effort", pick: (p) => p.judge?.effort, judged: true },
   { label: "judge CLI version", pick: (p) => p.judge?.cli, judged: true },
+  { label: "reviewer model", pick: (p) => p.reviewer_model, judged: false },
   { label: "reviewer effort", pick: (p) => p.reviewer_effort, judged: false },
   { label: "reviewer CLI version", pick: (p) => p.reviewer_cli, judged: false },
 ];
 
 /**
  * One warning per setting in which variants A and B differ: judge model,
- * judge effort, reviewer effort and the CLI versions. A value missing from a
+ * judge effort, reviewer model, reviewer effort and the CLI versions. A value missing from a
  * record counts as `unknown`; a variant without any judged run as `none`.
  */
 export function provenanceWarnings(

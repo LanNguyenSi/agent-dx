@@ -792,6 +792,25 @@ describe("provenance warnings", () => {
     ).toEqual([]);
   });
 
+  it("warns when the variants ran on different reviewer models", () => {
+    const opus = [runProvenance(run({ model: "opus" }), judge())];
+    const mixed = [
+      runProvenance(run({ model: "opus" }), judge()),
+      runProvenance(run({ model: "sonnet" }), judge()),
+    ];
+    expect(runProvenance(run({ model: "opus" }), null).reviewer_model).toBe(
+      "opus",
+    );
+    expect(
+      provenanceWarnings({ id: "a", runs: opus }, { id: "b", runs: mixed }),
+    ).toEqual([
+      "a and b differ in reviewer model (a: opus; b: opus + sonnet); the comparison mixes settings",
+    ]);
+    expect(
+      provenanceWarnings({ id: "a", runs: opus }, { id: "b", runs: opus }),
+    ).toEqual([]);
+  });
+
   it("counts a field missing from an older record as unknown, and no judged run as none", () => {
     const old = { effort: "high" } as RunResult;
     const legacy = {

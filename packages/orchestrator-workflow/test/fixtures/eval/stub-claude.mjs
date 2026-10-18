@@ -134,15 +134,29 @@ function answer(text, extra = {}) {
 function canaryAnswer() {
   const scenario = process.env.STUB_CANARY ?? "pass";
   const touch = /`touch (\S+)`/.exec(stdin)?.[1];
-  const write = /`printf '%s' (\S+) > (\S+)`/.exec(stdin);
+  const write = /`write_checkout` \(Bash tool\): `printf '%s' (\S+) > (\S+)`/.exec(stdin);
+  const config = /`write_config_settings` \(Bash tool\): `printf '(\S+)' (\S+) > (\S+)`/.exec(stdin);
+  const evidenceHome = /`write_evidence_home` \(Bash tool\): `printf '%s' (\S+) > (\S+) && printf '%s' \S+ > (\S+) &&/.exec(stdin);
+  const sibling = /`read_sibling_tool` \(Read tool\): Read `(\S+)`/.exec(stdin)?.[1];
   if (scenario === "touch" && touch) writeFileSync(touch, "");
   if (scenario !== "no-write" && write) writeFileSync(join(process.cwd(), write[2]), write[1]);
+  // As a sandbox that let the write through: the probe's own content in the config dir.
+  if (scenario === "config-write" && config) writeFileSync(config[3], config[1].replace("%s", config[2]));
+  if (scenario !== "no-evidence-write" && evidenceHome) {
+    writeFileSync(evidenceHome[2], evidenceHome[1]);
+    writeFileSync(evidenceHome[3], evidenceHome[1]);
+  }
   const version = execFileSync("node", ["--version"], { encoding: "utf8" }).trim();
   const ids = [...stdin.matchAll(/^\d+\. `([a-z_]+)`/gm)].map((m) => m[1]);
   const results = ids.map((id) => {
     const item = { id, attempted: true, succeeded: false, evidence: "Operation not permitted" };
     if (id === "write_checkout") item.succeeded = scenario !== "no-write";
     if (id === "read_scratch") Object.assign(item, { succeeded: true, evidence: "ok" });
+    if (id === "read_checkout_tool") item.succeeded = scenario !== "checkout-read-denied";
+    // Reports success either way: the host must find the files itself.
+    if (id === "write_evidence_home") Object.assign(item, { succeeded: true, evidence: "exited 0" });
+    if (id === "read_sibling_tool" && scenario === "sibling-read")
+      Object.assign(item, { succeeded: true, evidence: `content ${readFileSync(sibling, "utf8")}` });
     if (id === "read_tmp_file" && scenario === "tmp-read") Object.assign(item, { succeeded: true, evidence: "READ_OK" });
     if (id === "ssh_github" && scenario === "evidence-secrets")
       item.evidence = `denied for ${process.env.ANTHROPIC_API_KEY}, saw sk-ant-api03-FAKEFAKEFAKEFAKEFAKE, ghp_FAKEFAKEFAKEFAKEFAKE0000 and -----BEGIN OPENSSH PRIVATE KEY-----`;
@@ -156,6 +170,8 @@ function canaryAnswer() {
       "names-git": ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_KEY_1", "GIT_CONFIG_VALUE_0"],
       "names-git-mixed": ["GIT_CONFIG_KEY_0", "FOO_SECRET"],
       "names-proxy": ["CLOUDSDK_PROXY_PASSWORD", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"],
+      "names-unknown": ["CLOUDSDK_PROXY_PASSWORD", "SOME_NEW_INJECTED_SECRET"],
+      "names-format": ["`git_config_count`", "GIT_CONFIG_KEY_0=core.pager", "`gh_token`=x"],
     };
     if (id === "env_secret_names") item.names = namesByScenario[scenario] ?? [];
     if (id === "env_secret_names" && scenario in namesByScenario) item.succeeded = true;

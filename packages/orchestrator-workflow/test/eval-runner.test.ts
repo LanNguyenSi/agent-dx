@@ -286,6 +286,12 @@ describe("runEntry with a stub session", { timeout: 60_000 }, () => {
     expect(valueOf("--effort")).toBe("high");
     expect(valueOf("--permission-mode")).toBe("bypassPermissions");
     expect(valueOf("--permission-prompts")).toBe("none");
+    // No user, project or local settings file: an empty source list, flag settings only.
+    expect(argv.filter((a) => a === "--setting-sources")).toHaveLength(1);
+    expect(valueOf("--setting-sources")).toBe("");
+    expect(argv.indexOf("--setting-sources")).toBeLessThan(
+      argv.indexOf("--settings"),
+    );
     expect(valueOf("--settings")).toBe(join(runRoot, "meta", "settings.json"));
     expect(valueOf("--add-dir")).toBe(join(runRoot, "evidence"));
     expect(argv).toContain("--strict-mcp-config");
@@ -377,10 +383,18 @@ describe("runEntry with a stub session", { timeout: 60_000 }, () => {
         `Read(/${join(work, "data")}/**)`,
         `Read(/${opts.outDir}/**)`,
         `Read(/${join(runRoot, "meta")}/**)`,
+        `Read(/${join(runRoot, "home", ".claude")}/**)`,
+        `Edit(/${join(runRoot, "home", ".claude")}/**)`,
+        `Read(/${opts.scratchRoot}/*/meta/**)`,
+        `Edit(/${opts.scratchRoot}/*/meta/**)`,
+        `Read(/${opts.scratchRoot}/*/evidence/**)`,
+        `Read(/${opts.scratchRoot}/*/home/**)`,
         "SendMessage",
         "ListAgents",
       ]),
     );
+    // The session's own config dir is closed to Bash writes inside its writable home.
+    expect(fs.denyWrite).toContain(join(runRoot, "home", ".claude"));
     // Read and Edit are denied on the temp roots, in the production run's settings.
     const realTmp = realpathSync(tmpdir());
     expect(settings.permissions.deny).toEqual(
@@ -850,6 +864,7 @@ describe("environment allowlist, buildSessionArgs, composePrompt", () => {
     for (const bare of [true, false]) {
       const args = buildSessionArgs({ ...common, bare });
       expect(args[args.indexOf("--permission-prompts") + 1]).toBe("none");
+      expect(args[args.indexOf("--setting-sources") + 1]).toBe("");
     }
   });
 

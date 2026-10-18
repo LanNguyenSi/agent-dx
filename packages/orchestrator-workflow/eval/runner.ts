@@ -230,6 +230,15 @@ export function runDirFor(
   return join(outDir, variantId, entryId, `run-${repeat}`);
 }
 
+/**
+ * Loads no user, project or local settings file: not the scratch config
+ * dir's `settings.json`, not a `.claude/settings.json` in the reviewed
+ * checkout. `claude --help` (2.1.302) lists user, project and local as the
+ * sources; its parser maps an empty list to none, and flag settings
+ * (`--settings`) and managed policy stay enabled whatever the list says.
+ */
+export const NO_SETTING_SOURCES = ["--setting-sources", ""] as const;
+
 /** Arguments of the headless session; the prompt itself goes in on stdin. */
 export function buildSessionArgs(options: {
   agentsFile: string;
@@ -256,6 +265,7 @@ export function buildSessionArgs(options: {
     // automatically instead of waiting for an answer nobody gives.
     "--permission-prompts",
     "none",
+    ...NO_SETTING_SOURCES,
     "--settings",
     options.settingsFile,
     "--strict-mcp-config",

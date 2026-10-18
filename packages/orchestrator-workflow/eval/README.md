@@ -109,8 +109,12 @@ the scratch directory outside the home directory, outside every temp root and
 outside `--out`; the commands refuse otherwise, since the session may read
 none of them. The default scratch directory is `/Users/Shared/oe` on macOS;
 on any other host `--scratch` is required. The path is deliberately short: a
-run's tmp path (`<scratch>/<8 hex>/tmp`) may not exceed 32 characters, and the
+run's tmp path (`<scratch>/<8 hex>/tmp`) may not exceed 44 bytes less one for
+the separator and the bytes of `claude-<uid>` (33 bytes for uid 501), and the
 commands refuse a longer `--scratch` (see "Claude Code sandbox" below for why).
+They also refuse a scratch directory that is a symbolic link, belongs to
+another user, or that the group or others can write; one that does not exist
+yet is created with mode 0700.
 
 Run `canary` before every batch and after every Claude Code update (see
 Isolation). It exits 0 only when every check passed.
@@ -145,7 +149,7 @@ again unless `--no-retry` is given.
 `result.json` also records `claude --version` of the binary that ran the
 session, and `judge.json` the judge's model, effort and CLI version; `compare`
 prints a warning when the two variants differ in any of these or in the
-reviewer effort.
+reviewer model or effort.
 
 `judge` writes `judge.json` next to each finding-run result that has none; an
 unparseable answer is retried (`--attempts`) and otherwise leaves a
@@ -185,9 +189,10 @@ What contains a session:
   branch or tag is reachable. The remote is removed again before anything
   runs, and the fetch bookkeeping file is deleted. Nothing is cloned into or
   modified in a shared worktree.
-- **Opaque paths**: every run gets `<scratch>/<random id>/` (8 hex characters) with `checkout/`,
-  `evidence/`, `run/`, `home/`, `tmp/`, `gh/` and `meta/`. No path the session
-  or the judge sees names the variant, the entry or the dataset.
+- **Opaque paths**: every run gets `<scratch>/<random id>/` (8 hex characters,
+  mode 0700) with `checkout/`, `evidence/`, `run/`, `home/`, `tmp/`, `gh/` and
+  `meta/`. No path the session or the judge sees names the variant, the entry
+  or the dataset.
 - **Environment allowlist** for setup commands and the session alike: `PATH`,
   `LANG`, `LC_*`, `TERM`, `USER`, `LOGNAME`, `SHELL`; `HOME`,
   `CLAUDE_CONFIG_DIR`, `TMPDIR`, `GH_CONFIG_DIR` and the npm cache point into
@@ -213,22 +218,41 @@ What contains a session:
   and they write only to the checkout, the evidence directory and the run's
   scratch temp directory and home (the session's `TMPDIR` and
   `CLAUDE_CODE_TMPDIR` point at the scratch temp directory, so Claude Code's
-  per-user temp directory lies inside the run's scratch). With the sandbox
-  enabled, Claude Code honours `CLAUDE_CODE_TMPDIR` only for a short path: a
-  38 character tmp path was measured to fall back silently to
-  `/tmp/claude-<uid>` (denied, so every sandboxed command failed on Claude
-  Code's own working-directory file), while 31 and 29 characters worked
-  (Claude Code 2.1.302, macOS). The hard limit is therefore 32 characters for
-  `<scratch>/<8 hex>/tmp`, and the placement check refuses a longer
+  per-user temp directory lies inside the run's scratch). The session's own
+  Claude Code config directory (`home/.claude`, its `CLAUDE_CONFIG_DIR`) is
+  excepted from the writable home in every path form: user settings there are
+  a trusted tier, for example for `sandbox.excludedCommands`, and Claude Code
+  reloads a changed settings file. Claude Code 2.1.302 keeps
+  `CLAUDE_CODE_TMPDIR` only while `<tmp>/claude-<uid>` fits in 44 bytes (the
+  constant `E1r = 44` in its bundled source); over it, it falls back silently
+  to `/tmp/claude-<uid>`, which is denied, so every sandboxed command fails on
+  Claude Code's own working-directory file. The limit for
+  `<scratch>/<8 hex>/tmp` is therefore 44 bytes less one for the separator and
+  the bytes of `claude-<uid>`: 33 bytes for uid 501, which matches the
+  measurements (a 38 byte tmp path fell back, 31 and 29 bytes worked). The
+  placement check computes it for the current uid and refuses a longer
   `--scratch`; the default `/Users/Shared/oe` gives 29.
+- **Settings sources**: every session (reviewer, canary and judge) runs with
+  `--setting-sources ""`, so Claude Code loads no user, project or local
+  settings file (not the scratch config directory's, not a
+  `.claude/settings.json` in the reviewed checkout); the per-run file passed
+  with `--settings` and managed policy still apply.
 - **Scratch location**: the file-tool deny rules below cover the home
   directory and the temp roots, and a deny rule always wins over an allow
   entry, so a checkout inside either would be unreadable to its own session.
   The scratch directory therefore lives outside both: `/Users/Shared/oe`
   by default on macOS, `--scratch` elsewhere. `TMPDIR` and
   `CLAUDE_CODE_TMPDIR` still point into the run's own scratch directory.
-- **File tools**: Read and Edit deny rules cover the same trees, the shared
-  temp roots in every path form, and the run's `meta/` directory. The
+- **File tools**: Read and Edit deny rules cover the invoking user's home,
+  the dataset's parent tree, the results directory and the source
+  repositories, the shared temp roots in every path form, the run's `meta/`
+  directory and its Claude Code config directory. Read deny rules also cover
+  `meta/`, `evidence/` and `home/` of every run under the scratch root, as
+  `<scratch>/*/meta` and so on, which includes this run's own evidence and
+  home: the session reaches those through Bash. Edit rules cover only `meta/`
+  there, because Claude Code 2.1.302 also turns Edit deny rules into sandbox
+  write denials, which win over the writable directories, while Edit, Write
+  and NotebookEdit are disallowed anyway. The
   `permissions.blockReadsOutsideWorkingDirectories` setting is not used: with
   the sandbox enabled it hangs Claude Code 2.1.302 before the first tool call.
   File edits, subagents, web tools and every tool that reaches another session, a
@@ -254,18 +278,29 @@ What it does not contain:
 - **The claude process itself** runs unsandboxed and needs the network for
   its API calls. The file tools are held by permission rules, which Claude
   Code applies to Grep and Glob as a best effort, not by the operating system.
+- **Other runs' checkouts while `--jobs` is above 1**: the Read tool (and Grep
+  and Glob) can still read another run's `checkout/` and its scratch `tmp/`
+  under the same scratch root, if the session learns that run's 8 hex id;
+  only Bash is denied there. A run's prompt, evidence and home are covered
+  (see "File tools" above). With the default `--jobs 1` no other run exists.
 - **Settings keys are not validated**: in `-p` mode a settings file Claude
   Code does not accept is ignored without an error. The `canary` command is
   the proof that the settings took effect; run it again after a Claude Code
   update.
 - **The canary's report is partly self-reported**: the host itself checks the
-  touch target, the checkout write, the node version, the permission mode and
-  that no record holds a secret; whether ssh, the file reads, curl and the Read
-  tool failed comes from the session's own answer. The read probes target
-  sentinel files with random content that the host plants under the home
-  directory and the temp root just before the session and deletes after it,
-  so a read that worked shows up as a leak. An action the session declined to attempt
-  makes the canary inconclusive, never a pass.
+  touch target, that no settings file appeared in the session's config
+  directory, the checkout write, the evidence and home writes, the node
+  version, the permission mode and that no record holds a secret; whether ssh,
+  the file reads, curl and the Read tool failed (or, on the session's own
+  checkout, worked) comes from the session's own answer. The read probes
+  target sentinel files with random content that the host plants under the
+  home directory, the temp root and another run directory under the scratch
+  root just before the session and deletes after it, so a read that worked
+  shows up as a leak. Every credential-looking variable name the session
+  prints fails the canary, except a name the sandbox itself injects (its proxy
+  password and the git configuration it passes through the environment) that
+  the runner's own environment does not hold. An action the session declined
+  to attempt makes the canary inconclusive, never a pass.
 - The sandbox runs on macOS, Linux and WSL2; on Linux it needs `bubblewrap`
   and `socat`. Some network keys (`allowUnixSockets`, `allowLocalBinding`)
   only apply on macOS, where the session's tests also cannot start a local
@@ -330,8 +365,9 @@ canary one short session.
 relative repository paths), `test/eval-score.test.ts` (return validity, judge
 prompt and answer, scoring, per-entry aggregation, failures, noise, paired
 comparison and noise floor, leak split, variants), `test/eval-isolation.test.ts`
-(scratch layout, placement checks, session settings, secret scan and
-redaction, guard envelope, process sweep), `test/eval-runner.test.ts`
+(scratch layout and permissions, placement checks and the tmp path limit,
+session settings, secret names, secret scan and redaction, guard envelope,
+process sweep), `test/eval-runner.test.ts`
 (checkout isolation, environment allowlist, session flags and settings,
 timeouts and process groups, leftover processes, records, retries, blindness)
 and `test/eval-cli.test.ts` (canary, run, judge, score and compare end to

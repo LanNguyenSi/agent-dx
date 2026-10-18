@@ -1,5 +1,11 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, realpathSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  realpathSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
@@ -43,35 +49,102 @@ export interface RunScratch {
 const ID_BYTES = 4;
 
 /**
- * Longest scratch tmp path (`<scratch root>/<run id>/tmp`) Claude Code accepts
- * as `CLAUDE_CODE_TMPDIR` with the sandbox enabled (measured on Claude Code
- * 2.1.302, macOS): a 38 character path was ignored and Claude Code fell back
- * to `/tmp/claude-<uid>`, which the session's deny rules cover, so every
- * sandboxed command then failed on its own working-directory file; 31 and 29
- * characters worked. 32 is the hard limit.
+ * Claude Code 2.1.302 keeps `CLAUDE_CODE_TMPDIR` only while
+ * `Buffer.byteLength(join(CLAUDE_CODE_TMPDIR, "claude-<uid>")) <= 44` (the
+ * constant `E1r = 44` in its bundled source, with the warning "Shorten
+ * CLAUDE_CODE_TMPDIR to <=~30 bytes"). Over it, Claude Code falls back to
+ * `/tmp/claude-<uid>`, which the session's deny rules cover, so every
+ * sandboxed command fails on its own working-directory file (measured: a 38
+ * byte tmp path fell back for uid 501, 31 and 29 bytes worked).
  */
-export const MAX_TMP_PATH_LENGTH = 32;
+export const CLAUDE_TMPDIR_MAX_BYTES = 44;
 
-/** Characters of a run id (hex), for the placement check's length estimate. */
+/** The uid Claude Code puts into its temp directory name (`process.getuid?.() ?? 0`, as Claude Code itself). */
+export function currentUid(): number {
+  return process.getuid?.() ?? 0;
+}
+
+/**
+ * Longest scratch tmp path (`<scratch root>/<run id>/tmp`), in bytes, that
+ * Claude Code accepts as `CLAUDE_CODE_TMPDIR` for `uid`: 44, less the path
+ * separator, less the bytes of `claude-<uid>` (33 for uid 501).
+ */
+export function maxTmpPathBytes(uid: number = currentUid()): number {
+  return CLAUDE_TMPDIR_MAX_BYTES - 1 - Buffer.byteLength(`claude-${uid}`);
+}
+
+/** Characters of a run id (hex, one byte each), for the placement check's length estimate. */
 export const RUN_ID_LENGTH = ID_BYTES * 2;
 
 /**
- * Length of the tmp path a run under `scratchRoot` gets, in the longest form
+ * Bytes of the tmp path a run under `scratchRoot` gets, in the longest form
  * of the root (symlinks followed or not): `<root>/<run id>/tmp`.
  */
-export function scratchTmpPathLength(scratchRoot: string): number {
-  const longest = Math.max(...pathForms(scratchRoot).map((p) => p.length));
+export function scratchTmpPathBytes(scratchRoot: string): number {
+  const longest = Math.max(
+    ...pathForms(scratchRoot).map((p) => Buffer.byteLength(p)),
+  );
   return longest + 1 + RUN_ID_LENGTH + "/tmp".length;
 }
 
-/** Creates a fresh run directory with an opaque name under `scratchRoot`. */
+/** Mode of the scratch root and of every run directory: only the owner can enter them. */
+export const SCRATCH_DIR_MODE = 0o700;
+
+/**
+ * Refuses a scratch root another account could control: a symbolic link, a
+ * directory owned by another uid, or one the group or others can write (the
+ * default root sits in the world-writable `/Users/Shared`, where another
+ * account could create it first). A root that does not exist yet passes:
+ * `createRunScratch` creates it with mode 0700. Returns an error message, or
+ * null.
+ */
+export function checkScratchRoot(
+  scratchRoot: string,
+  uid: number | null = process.getuid?.() ?? null,
+): string | null {
+  let st: ReturnType<typeof lstatSync>;
+  try {
+    st = lstatSync(scratchRoot);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    return `--scratch ${scratchRoot} cannot be inspected: ${error instanceof Error ? error.message : error}`;
+  }
+  if (st.isSymbolicLink())
+    return `--scratch ${scratchRoot} is a symbolic link; pass the directory itself, owned by you and writable only by you`;
+  if (!st.isDirectory()) return `--scratch ${scratchRoot} is not a directory`;
+  if (uid !== null && st.uid !== uid)
+    return `--scratch ${scratchRoot} is owned by uid ${st.uid}, not by you (uid ${uid}); another account could read or replace the runs in it`;
+  if ((st.mode & 0o022) !== 0)
+    return `--scratch ${scratchRoot} can be written by the group or others (mode ${(st.mode & 0o777).toString(8)}); run chmod go-w on it or choose another directory`;
+  return null;
+}
+
+/**
+ * Creates a fresh run directory with an opaque name under `scratchRoot`, with
+ * mode 0700 (and the root too, if it has to be created). Throws when the root
+ * fails `checkScratchRoot`.
+ */
 export function createRunScratch(scratchRoot: string): RunScratch {
-  mkdirSync(scratchRoot, { recursive: true });
+  if (
+    mkdirSync(scratchRoot, { recursive: true, mode: SCRATCH_DIR_MODE }) !==
+    undefined
+  )
+    chmodSync(scratchRoot, SCRATCH_DIR_MODE);
+  const refused = checkScratchRoot(scratchRoot);
+  if (refused !== null) throw new Error(refused);
   const base = realpathSync(scratchRoot);
   for (;;) {
     const id = randomBytes(ID_BYTES).toString("hex");
     const root = join(base, id);
-    if (existsSync(root)) continue;
+    try {
+      // Not recursive: an existing directory of that name is never adopted.
+      mkdirSync(root, { mode: SCRATCH_DIR_MODE });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") continue;
+      throw error;
+    }
+    // The umask can only narrow mkdir's mode; this makes it exactly 0700.
+    chmodSync(root, SCRATCH_DIR_MODE);
     const scratch: RunScratch = {
       root,
       id,
@@ -104,7 +177,7 @@ export function createRunScratch(scratchRoot: string): RunScratch {
  * checkout inside either would be unreadable to its own session). Only macOS
  * has such a place without configuration (`/Users/Shared`); elsewhere the
  * caller must pass `--scratch`, and this returns null. The name is short on
- * purpose: the run's tmp path may not exceed `MAX_TMP_PATH_LENGTH`.
+ * purpose: the run's tmp path may not exceed `maxTmpPathBytes()`.
  */
 export function defaultScratchRoot(
   platform: NodeJS.Platform = process.platform,
@@ -285,7 +358,7 @@ export function checkPlacement(options: {
   home: string;
   /** Shared temp roots; defaults to `systemTempRoots()`. */
   tempRoots?: string[];
-  /** Longest scratch tmp path; defaults to `MAX_TMP_PATH_LENGTH` (test seam). */
+  /** Longest scratch tmp path in bytes; defaults to `maxTmpPathBytes()` for this uid (test seam). */
   maxTmpPath?: number;
 }): string | null {
   const scratch = pathForms(options.scratchRoot);
@@ -307,10 +380,10 @@ export function checkPlacement(options: {
     return `--scratch ${options.scratchRoot} is inside a temp root (${tempRoots.join(", ")}), which the file-tool deny rules cover, so the session could not read its own checkout; choose a directory outside the home directory and the temp roots`;
   if (inside(scratch, out))
     return `--scratch ${options.scratchRoot} is inside --out, which the session may not read`;
-  const maxTmpPath = options.maxTmpPath ?? MAX_TMP_PATH_LENGTH;
-  const tmpLength = scratchTmpPathLength(options.scratchRoot);
-  if (tmpLength > maxTmpPath)
-    return `--scratch ${options.scratchRoot} is too long: the run's tmp path would be ${tmpLength} characters (<scratch>/<8 hex>/tmp), and the limit is ${maxTmpPath}. Beyond it Claude Code ignores CLAUDE_CODE_TMPDIR under the sandbox and silently falls back to /tmp/claude-<uid>, which is denied, so every sandboxed command fails (38 characters measured to fall back). Choose a shorter directory, for example /Users/Shared/oe`;
+  const maxTmpPath = options.maxTmpPath ?? maxTmpPathBytes();
+  const tmpBytes = scratchTmpPathBytes(options.scratchRoot);
+  if (tmpBytes > maxTmpPath)
+    return `--scratch ${options.scratchRoot} is too long: the run's tmp path would be ${tmpBytes} bytes (<scratch>/<8 hex>/tmp), and the limit is ${maxTmpPath} bytes (${CLAUDE_TMPDIR_MAX_BYTES}, less the separator and claude-<uid>). Beyond it Claude Code ignores CLAUDE_CODE_TMPDIR and silently falls back to /tmp/claude-<uid>, which is denied, so every sandboxed command fails. Choose a shorter directory, for example /Users/Shared/oe`;
   for (const path of [...scratch, ...out, ...datasetParent, ...home]) {
     if (RULE_UNSAFE.test(path))
       return `path ${path} contains a character that permission rules treat as a pattern`;
@@ -358,7 +431,7 @@ export const DISALLOWED_TOOLS = [
 export interface SessionSettingsInput {
   scratch: Pick<
     RunScratch,
-    "checkout" | "evidence" | "runFiles" | "home" | "tmp" | "meta"
+    "checkout" | "evidence" | "runFiles" | "home" | "configDir" | "tmp" | "meta"
   >;
   /** The scratch root: other runs' directories live there. */
   scratchRoot: string;
@@ -391,6 +464,47 @@ function rulePath(path: string): string {
 }
 
 /**
+ * Every form of a path inside the scratch: its own forms, and the same path
+ * under each form of the scratch root (a run's paths are built from the
+ * resolved root, the caller may name the root through a symlink).
+ */
+export function scratchPathForms(path: string, scratchRoot: string): string[] {
+  const realRoot = realOrSelf(resolve(scratchRoot));
+  const rel = relative(realRoot, path);
+  const under =
+    rel.startsWith("..") || isAbsolute(rel)
+      ? []
+      : pathForms(scratchRoot).map((root) => join(root, rel));
+  return uniq([...pathForms(path), ...under]);
+}
+
+/**
+ * The private parts of every run under the scratch root, as `*` patterns
+ * (one path segment: the run id): meta (prompt, settings, raw output),
+ * evidence and home. The patterns cover this run's own evidence and home as
+ * well, which the session reaches through Bash, not through the file tools.
+ */
+const PRIVATE_RUN_PARTS = ["meta", "evidence", "home"] as const;
+
+function privateRunPatterns(
+  scratchRoot: string,
+  parts: readonly (typeof PRIVATE_RUN_PARTS)[number][],
+): string[] {
+  return pathForms(scratchRoot).flatMap((root) =>
+    parts.map((part) => `${root}/*/${part}`),
+  );
+}
+
+function denyRules(tools: ("Read" | "Edit")[], paths: string[]): string[] {
+  return paths.flatMap((path) =>
+    tools.flatMap((tool) => [
+      `${tool}(${rulePath(path)})`,
+      `${tool}(${rulePath(path)}/**)`,
+    ]),
+  );
+}
+
+/**
  * The per-run settings passed with `--settings`. Paths are absolute; the
  * permission rules use the `//` prefix, which anchors at the filesystem root
  * (permissions docs, "Read and Edit": a single leading slash anchors at the
@@ -412,14 +526,36 @@ export function sessionSettings(
   // output there, and Read/Edit are not covered by the sandbox's denyRead. The run's own
   // scratch must therefore lie outside them (`checkPlacement`).
   const tempDenied = uniq(input.tempRoots.flatMap(pathForms));
-  const fileRules = uniq([...denied, ...tempDenied, scratch.meta]).flatMap(
-    (path) => [
-      `Read(${rulePath(path)})`,
-      `Read(${rulePath(path)}/**)`,
-      `Edit(${rulePath(path)})`,
-      `Edit(${rulePath(path)}/**)`,
-    ],
-  );
+  // CLAUDE_CONFIG_DIR of the session: user settings there are a trusted tier (for example for
+  // sandbox.excludedCommands) and Claude Code reloads a changed settings file, so neither a
+  // sandboxed command nor a file tool may write it. Claude Code adds it to the sandbox's
+  // denyWrite on its own only under CLAUDE_CODE_SUBPROCESS_ENV_SCRUB, which is never set
+  // (`sessionEnv`). Bash may still read it: every Bash command first runs Claude Code's
+  // shell snapshot from there.
+  const configDir = scratchPathForms(scratch.configDir, input.scratchRoot);
+  // Other runs' prompts, evidence and homes, which the file tools could otherwise read while
+  // `--jobs` runs sessions side by side (the sandbox's denyRead covers Bash only). Claude Code
+  // 2.1.302 also merges Read deny rules into the sandbox's read denial, where this run's
+  // allowRead entries win, and Edit deny rules into its write denial, which wins over
+  // allowWrite. So evidence and home get Read rules only: an Edit rule there would take this
+  // run's own evidence and home from Bash, and it would hold nothing back from the file tools,
+  // since Edit, Write and NotebookEdit are disallowed and other runs lie outside allowWrite.
+  const fileRules = uniq([
+    ...denyRules(
+      ["Read", "Edit"],
+      uniq([
+        ...denied,
+        ...tempDenied,
+        scratch.meta,
+        ...configDir,
+        ...privateRunPatterns(input.scratchRoot, ["meta"]),
+      ]),
+    ),
+    ...denyRules(
+      ["Read"],
+      privateRunPatterns(input.scratchRoot, ["evidence", "home"]),
+    ),
+  ]);
   return {
     sandbox: {
       // settings-reference#sandbox-enabled: sandbox Bash commands.
@@ -472,8 +608,10 @@ export function sessionSettings(
           scratch.tmp,
           scratch.home,
         ],
-        // settings-reference#sandbox-filesystem-denywrite: never the protected trees.
-        denyWrite: denied,
+        // settings-reference#sandbox-filesystem-denywrite: never the protected trees, and never
+        // the session's own Claude Code config directory inside the writable home (the narrower
+        // path wins).
+        denyWrite: uniq([...denied, ...configDir]),
       },
     },
     permissions: {
@@ -499,53 +637,83 @@ export function sessionSettings(
 /* ------------------------------------------------------------------ */
 
 const SECRET_NAME = /TOKEN|SECRET|PASSW|CREDENTIAL|API_?KEY|_KEY$|AUTH/i;
+/**
+ * Git configuration passed through the environment: a value can carry a
+ * credential (an `http.extraHeader` with a token) without its name looking
+ * like one.
+ */
+const GIT_CONFIG_VALUE_NAME = /^GIT_CONFIG_VALUE_\d+$/i;
 const MIN_SECRET_VALUE = 12;
 
 /**
- * Names the sandbox and git use to pass git configuration through the
- * environment (`GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>`, `GIT_CONFIG_VALUE_<n>`).
- * They hold git config key names and values, not credentials, so a name check
- * that matches on "KEY" must not count them.
+ * Git configuration pass-through names (`GIT_CONFIG_COUNT`,
+ * `GIT_CONFIG_KEY_<n>`, `GIT_CONFIG_VALUE_<n>`), compared without case.
  */
-const GIT_CONFIG_ENV_NAME = /^GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+)$/;
+const GIT_CONFIG_ENV_NAME = /^GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+)$/i;
 
-/** True for the git configuration pass-through names (never a secret by name). */
+/** True for the git configuration pass-through names. */
 export function isGitConfigEnvName(name: string): boolean {
   return GIT_CONFIG_ENV_NAME.test(name);
 }
 
 /**
+ * True for a name the Claude Code sandbox itself puts into a sandboxed
+ * command's environment: its network proxy's password
+ * (`CLOUDSDK_PROXY_PASSWORD`) and the git configuration it passes through the
+ * environment. Compared without case.
+ */
+export function isSandboxInjectedName(name: string): boolean {
+  return (
+    name.toUpperCase() === "CLOUDSDK_PROXY_PASSWORD" || isGitConfigEnvName(name)
+  );
+}
+
+/**
  * Variable names that are secrets whether or not the host environment holds
- * them: if one shows up in the session, it leaked from somewhere.
+ * them: if one shows up in the session, it leaked from somewhere. None of them
+ * is a sandbox-injected name, so each always counts in `leakedSecretNames`;
+ * the canary's name probe must catch each of them.
  */
 export const KNOWN_SECRET_NAMES = [
   "ANTHROPIC_API_KEY",
+  "ANTHROPIC_AUTH_TOKEN",
   "AGENT_TASKS_TOKEN",
   "GH_TOKEN",
   "GITHUB_TOKEN",
+  "CLAUDE_CODE_OAUTH_TOKEN",
   "CLAUDE_CODE_MESSAGING_TOKEN",
   "CLAUDE_CODE_MESSAGING_SOCKET",
 ] as const;
 
 /**
- * The reported variable names that count as leaked secrets: a name of the
- * host environment the runner itself was started with (the session got it
- * from there), or a known secret name. A name only the sandbox injects into
- * the session (its network proxy sets `CLOUDSDK_PROXY_PASSWORD`; git
- * configuration passes through `GIT_CONFIG_KEY_<n>`) is neither, so it does
- * not count.
+ * A variable name as the session reported it, reduced to the name: trimmed,
+ * backticks removed, and anything from the first `=` on dropped (a printed
+ * `NAME=value` never carries its value into a record).
+ */
+export function normalizeEnvName(raw: string): string {
+  return raw.trim().replace(/`/g, "").split("=")[0].trim();
+}
+
+/**
+ * The reported variable names that count as leaked, normalized
+ * (`normalizeEnvName`). Every name counts except a sandbox-injected one
+ * (`isSandboxInjectedName`) that the host environment the runner was started
+ * with does not hold, compared without case: an unknown name fails the check
+ * instead of passing it.
  */
 export function leakedSecretNames(
   names: string[],
   hostNames: Iterable<string>,
 ): string[] {
-  const host = new Set(hostNames);
-  const known = new Set<string>(KNOWN_SECRET_NAMES);
-  return names.filter((raw) => {
-    const name = raw.trim();
-    if (isGitConfigEnvName(name)) return false;
-    return host.has(name) || known.has(name);
-  });
+  const host = new Set([...hostNames].map((name) => name.toUpperCase()));
+  const leaked: string[] = [];
+  for (const raw of names) {
+    const name = normalizeEnvName(raw);
+    if (name.length === 0) continue;
+    if (isSandboxInjectedName(name) && !host.has(name.toUpperCase())) continue;
+    leaked.push(name);
+  }
+  return uniq(leaked);
 }
 
 export const SECRET_PATTERNS: { name: string; pattern: RegExp }[] = [
@@ -562,7 +730,8 @@ export const SECRET_PATTERNS: { name: string; pattern: RegExp }[] = [
 
 /**
  * Values that must never appear in a record: the API key and every value of
- * a credential-looking variable of the invoking environment.
+ * a credential-looking variable of the invoking environment, git
+ * configuration values included.
  */
 export function secretValues(
   base: NodeJS.ProcessEnv,
@@ -575,7 +744,7 @@ export function secretValues(
     if (
       value !== undefined &&
       value.length >= MIN_SECRET_VALUE &&
-      SECRET_NAME.test(name)
+      (SECRET_NAME.test(name) || GIT_CONFIG_VALUE_NAME.test(name))
     ) {
       out.push({ name: `the value of ${name}`, value });
     }

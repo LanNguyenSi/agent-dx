@@ -42,6 +42,23 @@ export function stubBin(
   return file;
 }
 
+/** The fake guard as a binary started with these variables (the guard gets only the session's allowlist too). */
+export function guardBin(
+  dir: string,
+  vars: Record<string, string> = {},
+): string {
+  const file = join(mkdtempSync(join(dir, "guard-")), "agent-primitives");
+  const assigns = Object.entries(vars)
+    .map(([name, value]) => `${name}=${shellQuote(value)}`)
+    .join(" ");
+  writeFileSync(
+    file,
+    `#!/bin/sh\n${assigns.length > 0 ? `export ${assigns}\n` : ""}exec ${shellQuote(process.execPath)} ${shellQuote(FAKE_GUARD)} "$@"\n`,
+    { mode: 0o755 },
+  );
+  return file;
+}
+
 export interface FakeFinding {
   severity: string;
   description?: string;

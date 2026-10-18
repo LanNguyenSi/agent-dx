@@ -1,11 +1,14 @@
 import { spawn } from "node:child_process";
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
   realpathSync,
   rmSync,
+  statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,17 +17,24 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  CLAUDE_TMPDIR_MAX_BYTES,
   DISALLOWED_TOOLS,
+  KNOWN_SECRET_NAMES,
   checkPlacement,
+  checkScratchRoot,
   createRunScratch,
+  currentUid,
   defaultScratchRoot,
-  MAX_TMP_PATH_LENGTH,
   leakedSecretNames,
-  scratchTmpPathLength,
+  maxTmpPathBytes,
+  normalizeEnvName,
+  scratchPathForms,
+  scratchTmpPathBytes,
   sessionNpmCache,
   hostGitEnv,
   isGitConfigEnvName,
   isInside,
+  isSandboxInjectedName,
   pathForms,
   redactPaths,
   redactSecrets,
@@ -42,6 +52,24 @@ import {
 import { FAKE_GUARD } from "./eval-helpers.js";
 
 let work: string;
+
+/**
+ * Whether a `Tool(//abs/path)` deny rule in `rules` covers `path`, read the
+ * way Claude Code reads Read and Edit paths (gitignore style): `*` stays
+ * within one path segment, a trailing `/**` covers everything below.
+ */
+function denies(rules: string[], tool: string, path: string): boolean {
+  const escape = (s: string) => s.replace(/[.+?^${}()|[\]\\]/g, "\\$&");
+  return rules.some((rule) => {
+    const m = new RegExp(`^${tool}\\(/(/.*)\\)$`).exec(rule);
+    if (m === null) return false;
+    const source = m[1]
+      .split("/**")
+      .map((part) => part.split("*").map(escape).join("[^/]*"))
+      .join("(?:/.*)?");
+    return new RegExp(`^${source}$`).test(path);
+  });
+}
 
 beforeAll(() => {
   work = realpathSync(mkdtempSync(join(tmpdir(), "ow-eval-iso-")));
@@ -63,6 +91,74 @@ describe("run scratch", () => {
     }
     expect(readdirSync(a.home)).toEqual([".claude"]);
     expect(a.configDir).toBe(join(a.home, ".claude"));
+  });
+
+  it("creates the scratch root and every run directory for the owner only", () => {
+    const root = join(work, "private-root");
+    const previous = process.umask(0o022);
+    try {
+      const a = createRunScratch(root);
+      expect(statSync(root).mode & 0o777).toBe(0o700);
+      expect(statSync(a.root).mode & 0o777).toBe(0o700);
+    } finally {
+      process.umask(previous);
+    }
+    // A umask that takes one of the owner's own bits still leaves both directories 0700.
+    const narrow = process.umask(0o400);
+    let b: ReturnType<typeof createRunScratch>;
+    try {
+      b = createRunScratch(join(work, "narrow-root"));
+    } finally {
+      process.umask(narrow);
+    }
+    expect(statSync(b.root).mode & 0o777).toBe(0o700);
+    expect(statSync(join(work, "narrow-root")).mode & 0o777).toBe(0o700);
+    // The session directories inside keep the umask's mode; make them listable for the cleanup.
+    for (const dir of [
+      b.evidence,
+      b.runFiles,
+      b.home,
+      b.configDir,
+      b.tmp,
+      b.gh,
+      b.meta,
+    ])
+      chmodSync(dir, 0o700);
+  });
+
+  it("refuses a scratch root that is a symlink, foreign or writable by others", () => {
+    const real = join(work, "real-root");
+    mkdirSync(real, { mode: 0o700 });
+    expect(checkScratchRoot(real)).toBeNull();
+    // A root that does not exist yet passes: it is created 0700.
+    expect(checkScratchRoot(join(work, "not-yet"))).toBeNull();
+
+    const link = join(work, "link-root");
+    symlinkSync(real, link);
+    expect(checkScratchRoot(link)).toContain("symbolic link");
+    expect(() => createRunScratch(link)).toThrow(/symbolic link/);
+
+    const open = join(work, "open-root");
+    mkdirSync(open);
+    for (const mode of [0o777, 0o775, 0o757]) {
+      chmodSync(open, mode);
+      expect(checkScratchRoot(open), mode.toString(8)).toContain(
+        "group or others",
+      );
+    }
+    chmodSync(open, 0o755);
+    expect(checkScratchRoot(open)).toBeNull();
+    chmodSync(open, 0o777);
+    expect(() => createRunScratch(open)).toThrow(/group or others/);
+    expect(readdirSync(open)).toEqual([]);
+
+    const uid = statSync(real).uid;
+    expect(checkScratchRoot(real, uid)).toBeNull();
+    expect(checkScratchRoot(real, uid + 1)).toContain(`owned by uid ${uid}`);
+
+    const file = join(work, "file-root");
+    writeFileSync(file, "");
+    expect(checkScratchRoot(file)).toContain("not a directory");
   });
 });
 
@@ -125,30 +221,59 @@ describe("placement of scratch and results", () => {
   });
 
   it("refuses a scratch whose tmp path is over the limit, naming the fallback", () => {
-    // /srv/scratch + / + 8 hex + /tmp = 25 characters: fine.
-    expect(scratchTmpPathLength("/srv/scratch")).toBe(25);
+    // /srv/scratch + / + 8 hex + /tmp = 25 bytes: fine.
+    expect(scratchTmpPathBytes("/srv/scratch")).toBe(25);
     expect(checkPlacement(base)).toBeNull();
-    // Exactly at the limit passes, one over is refused (the 38 character case measured to fall back).
-    const atLimit = "/srv/" + "x".repeat(MAX_TMP_PATH_LENGTH - 5 - 13);
-    expect(scratchTmpPathLength(atLimit)).toBe(MAX_TMP_PATH_LENGTH);
+    // Exactly at this uid's limit passes, one byte over is refused.
+    const limit = maxTmpPathBytes();
+    const atLimit = "/srv/" + "x".repeat(limit - 5 - 13);
+    expect(scratchTmpPathBytes(atLimit)).toBe(limit);
     expect(checkPlacement({ ...base, scratchRoot: atLimit })).toBeNull();
     const over = checkPlacement({ ...base, scratchRoot: `${atLimit}x` });
     expect(over).toContain("--scratch");
     expect(over).toContain("too long");
-    expect(over).toContain(`${MAX_TMP_PATH_LENGTH + 1} characters`);
+    expect(over).toContain(`${limit + 1} bytes`);
+    expect(over).toContain(`the limit is ${limit} bytes`);
     expect(over).toContain("/tmp/claude-<uid>");
+    // The 38 byte path measured to fall back for uid 501 is refused there.
     const measured = "/Users/Shared/ow-eval";
-    expect(scratchTmpPathLength(measured)).toBe(34);
+    expect(scratchTmpPathBytes(measured)).toBe(34);
     expect(
-      checkPlacement({
-        ...base,
-        scratchRoot: "/Users/Shared/ow-eval/ab12cd34ef56",
-      }),
+      checkPlacement({ ...base, scratchRoot: measured, maxTmpPath: 33 }),
     ).toContain("too long");
     // The seam raises the limit.
     expect(
       checkPlacement({ ...base, scratchRoot: `${atLimit}x`, maxTmpPath: 40 }),
     ).toBeNull();
+  });
+
+  it("derives the limit from Claude Code's 44 byte bound and the uid, in bytes", () => {
+    expect(CLAUDE_TMPDIR_MAX_BYTES).toBe(44);
+    // 44 - "/" - "claude-501" (10 bytes) = 33: the measured 31 worked, the measured 38 fell back.
+    expect(maxTmpPathBytes(501)).toBe(33);
+    expect(maxTmpPathBytes(0)).toBe(35);
+    // A five-digit uid leaves 31, a ten-digit one 26: the default root (29) no longer fits.
+    expect(maxTmpPathBytes(12345)).toBe(31);
+    expect(maxTmpPathBytes(1234567890)).toBe(26);
+    expect(maxTmpPathBytes()).toBe(maxTmpPathBytes(currentUid()));
+    const root = defaultScratchRoot("darwin", () => true)!;
+    expect(
+      checkPlacement({
+        ...base,
+        scratchRoot: root,
+        maxTmpPath: maxTmpPathBytes(1234567890),
+      }),
+    ).toContain("too long");
+    // Bytes, not characters: each "é" is two bytes in UTF-8.
+    expect(scratchTmpPathBytes("/srv/é")).toBe(
+      scratchTmpPathBytes("/srv/e") + 1,
+    );
+    const accented = "/srv/" + "é".repeat(8);
+    expect(accented.length + 13).toBe(26);
+    expect(scratchTmpPathBytes(accented)).toBe(34);
+    expect(
+      checkPlacement({ ...base, scratchRoot: accented, maxTmpPath: 33 }),
+    ).toContain("too long");
   });
 
   it("refuses a path a permission rule would read as a pattern", () => {
@@ -172,8 +297,8 @@ describe("default scratch root", () => {
 
   it("leaves room for the run id and the tmp directory within the limit", () => {
     const root = defaultScratchRoot("darwin", () => true)!;
-    expect(scratchTmpPathLength(root)).toBe(29);
-    expect(scratchTmpPathLength(root)).toBeLessThanOrEqual(MAX_TMP_PATH_LENGTH);
+    expect(scratchTmpPathBytes(root)).toBe(29);
+    expect(scratchTmpPathBytes(root)).toBeLessThanOrEqual(maxTmpPathBytes(501));
   });
 
   it("is absent elsewhere, so --scratch is required", () => {
@@ -199,6 +324,8 @@ describe("default scratch root", () => {
 describe("session settings", () => {
   let scratch: ReturnType<typeof createRunScratch>;
   let settings: Record<string, any>;
+  /** The same run placed as in production: no temp root covers its scratch. */
+  let placed: Record<string, any>;
   beforeAll(() => {
     scratch = createRunScratch(join(work, "settings"));
     settings = sessionSettings({
@@ -206,6 +333,12 @@ describe("session settings", () => {
       scratchRoot: join(work, "settings"),
       denied: ["/home/someone", "/srv/data"],
       tempRoots: systemTempRoots(),
+    });
+    placed = sessionSettings({
+      scratch,
+      scratchRoot: join(work, "settings"),
+      denied: ["/home/someone", "/srv/data"],
+      tempRoots: [],
     });
   });
 
@@ -275,7 +408,113 @@ describe("session settings", () => {
     ]);
     expect(fs.allowWrite).not.toContain(scratch.meta);
     expect(fs.allowWrite).not.toContain(scratch.runFiles);
-    expect(fs.denyWrite).toEqual(["/home/someone", "/srv/data"]);
+    expect(fs.denyWrite).toEqual([
+      "/home/someone",
+      "/srv/data",
+      scratch.configDir,
+    ]);
+  });
+
+  it("keeps the session's own Claude Code config dir from Bash writes and from the file tools", () => {
+    const fs = settings.sandbox.filesystem;
+    // Inside the writable home, so only the narrower denyWrite entry (which wins) holds it.
+    expect(isInside(scratch.configDir, scratch.home)).toBe(true);
+    expect(fs.allowWrite).toContain(scratch.home);
+    expect(fs.denyWrite).toContain(scratch.configDir);
+    // Bash may still read it: every Bash command runs Claude Code's shell snapshot from there.
+    expect(fs.denyRead).not.toContain(scratch.configDir);
+    const deny: string[] = settings.permissions.deny;
+    for (const tool of ["Read", "Edit"]) {
+      expect(deny).toContain(`${tool}(/${scratch.configDir})`);
+      expect(deny).toContain(`${tool}(/${scratch.configDir}/**)`);
+    }
+    expect(denies(deny, "Edit", join(scratch.configDir, "settings.json"))).toBe(
+      true,
+    );
+  });
+
+  it("denies the config dir in every form when the scratch root is reached through a symlink", () => {
+    const realParent = join(work, "real-parent");
+    mkdirSync(realParent);
+    const linkParent = join(work, "link-parent");
+    symlinkSync(realParent, linkParent);
+    const root = join(linkParent, "root");
+    const linked = createRunScratch(root);
+    expect(linked.configDir.startsWith(realParent)).toBe(true);
+    const viaLink = join(root, linked.id, "home", ".claude");
+    expect(scratchPathForms(linked.configDir, root)).toEqual([
+      linked.configDir,
+      viaLink,
+    ]);
+    const s: Record<string, any> = sessionSettings({
+      scratch: linked,
+      scratchRoot: root,
+      denied: ["/home/someone"],
+      tempRoots: [],
+    });
+    expect(s.sandbox.filesystem.denyWrite).toEqual(
+      expect.arrayContaining([linked.configDir, viaLink]),
+    );
+    for (const path of [linked.configDir, viaLink])
+      expect(s.permissions.deny).toContain(`Edit(/${path}/**)`);
+    // A path outside the scratch root keeps only its own forms.
+    expect(scratchPathForms("/elsewhere/x", root)).toEqual(["/elsewhere/x"]);
+  });
+
+  it("denies the file tools every run's prompt, evidence and home, and leaves this run's checkout readable", () => {
+    const root = join(work, "settings");
+    const sibling = createRunScratch(root);
+    const deny: string[] = placed.permissions.deny;
+    for (const part of ["meta", "evidence", "home"]) {
+      expect(deny).toContain(`Read(/${root}/*/${part})`);
+      expect(deny).toContain(`Read(/${root}/*/${part}/**)`);
+    }
+    for (const target of [
+      join(sibling.meta, "prompt.md"),
+      join(sibling.meta, "session.json"),
+      join(sibling.evidence, "notes.txt"),
+      join(sibling.home, ".npm", "x"),
+      join(sibling.configDir, "settings.json"),
+    ])
+      expect(denies(deny, "Read", target), target).toBe(true);
+    // This run's own checkout stays open to the file tools.
+    for (const target of [
+      scratch.checkout,
+      join(scratch.checkout, "README.md"),
+      join(scratch.checkout, "src", "a.ts"),
+    ])
+      expect(denies(deny, "Read", target), target).toBe(false);
+    // Its own evidence and home are reached through Bash: re-opened there for reading and writing.
+    const fs = placed.sandbox.filesystem;
+    for (const dir of [scratch.evidence, scratch.home]) {
+      expect(denies(deny, "Read", join(dir, "x")), dir).toBe(true);
+      expect(fs.allowRead).toContain(dir);
+      expect(fs.allowWrite).toContain(dir);
+    }
+  });
+
+  it("writes no Edit rule over a directory Bash must write, since Claude Code turns Edit rules into sandbox write denials", () => {
+    const deny: string[] = placed.permissions.deny;
+    const sibling = createRunScratch(join(work, "settings"));
+    // Writable to Bash: none of these may fall under an Edit rule.
+    for (const target of [
+      join(scratch.checkout, "out.txt"),
+      join(scratch.evidence, "log.txt"),
+      join(scratch.home, "canary.txt"),
+      join(scratch.home, ".npm", "_cacache", "x"),
+      join(scratch.tmp, "claude-501", "cwd"),
+    ])
+      expect(denies(deny, "Edit", target), target).toBe(false);
+    // The private parts that are never written: Edit rules there are harmless and kept.
+    for (const target of [
+      join(scratch.meta, "settings.json"),
+      join(sibling.meta, "prompt.md"),
+      join(scratch.configDir, "settings.json"),
+    ])
+      expect(denies(deny, "Edit", target), target).toBe(true);
+    // The file-writing tools themselves are disallowed outright.
+    for (const tool of ["Edit", "Write", "NotebookEdit"])
+      expect(DISALLOWED_TOOLS).toContain(tool);
   });
 
   it("denies the file tools the protected trees and the session's own meta files", () => {
@@ -384,7 +623,7 @@ describe("secrets and redaction", () => {
       expect(isGitConfigEnvName(name), name).toBe(false);
   });
 
-  it("counts a reported name as a leak only when the host holds it or it is a known secret name", () => {
+  it("counts every reported name except a sandbox-injected one the host does not hold", () => {
     const host = ["PATH", "HOME", "MY_HOST_TOKEN"];
     // Sandbox-injected names are not host secrets.
     expect(
@@ -398,10 +637,21 @@ describe("secrets and redaction", () => {
         host,
       ),
     ).toEqual([]);
-    // A name of the host environment counts, with surrounding whitespace ignored.
+    // A name of the host environment counts, and so does a name it does not hold (fail closed).
     expect(leakedSecretNames(["MY_HOST_TOKEN ", "FOO_SECRET"], host)).toEqual([
-      "MY_HOST_TOKEN ",
+      "MY_HOST_TOKEN",
+      "FOO_SECRET",
     ]);
+    for (const name of [
+      "SOME_NEW_INJECTED_SECRET",
+      "CLAUDE_CODE_OAUTH_TOKEN",
+      "ANTHROPIC_AUTH_TOKEN",
+      "GIT_CONFIG_KEY_",
+      "GIT_CONFIG_GLOBAL",
+      "MY_GIT_CONFIG_KEY_0",
+      "CLOUDSDK_PROXY_PASSWORD_2",
+    ])
+      expect(leakedSecretNames([name], []), name).toEqual([name]);
     // The same sandbox name counts once the host holds it.
     expect(
       leakedSecretNames(
@@ -409,20 +659,81 @@ describe("secrets and redaction", () => {
         [...host, "CLOUDSDK_PROXY_PASSWORD"],
       ),
     ).toEqual(["CLOUDSDK_PROXY_PASSWORD"]);
-    // Known names count with an empty host environment.
+    // An empty line is no name.
+    expect(leakedSecretNames(["", "  ", "``", "=x"], [])).toEqual([]);
+  });
+
+  it("counts a git configuration name the host holds, like any other host name", () => {
     for (const name of [
-      "ANTHROPIC_API_KEY",
-      "AGENT_TASKS_TOKEN",
-      "GH_TOKEN",
-      "GITHUB_TOKEN",
-      "CLAUDE_CODE_MESSAGING_TOKEN",
-      "CLAUDE_CODE_MESSAGING_SOCKET",
-    ])
-      expect(leakedSecretNames([name], []), name).toEqual([name]);
-    // A git configuration name never counts, even if the host holds it.
+      "GIT_CONFIG_KEY_0",
+      "GIT_CONFIG_VALUE_0",
+      "GIT_CONFIG_COUNT",
+    ]) {
+      expect(leakedSecretNames([name], [name]), name).toEqual([name]);
+      expect(leakedSecretNames([name], ["PATH"]), name).toEqual([]);
+    }
+    // Held under another case by the host, still held.
     expect(
-      leakedSecretNames(["GIT_CONFIG_KEY_0"], ["GIT_CONFIG_KEY_0"]),
+      leakedSecretNames(["GIT_CONFIG_KEY_0"], ["git_config_key_0"]),
+    ).toEqual(["GIT_CONFIG_KEY_0"]);
+  });
+
+  it("normalizes a reported name before comparing: spaces, backticks, a value after =, case", () => {
+    const host = ["GH_TOKEN", "PATH"];
+    expect(normalizeEnvName(" `GH_TOKEN` ")).toBe("GH_TOKEN");
+    expect(normalizeEnvName("GH_TOKEN=ghp_value")).toBe("GH_TOKEN");
+    expect(normalizeEnvName("` GH_TOKEN =x`")).toBe("GH_TOKEN");
+    for (const raw of ["`GH_TOKEN`", "GH_TOKEN=x", "gh_token", " GH_TOKEN "])
+      expect(leakedSecretNames([raw], host), raw).toHaveLength(1);
+    // A value printed after the name never reaches the result.
+    expect(leakedSecretNames(["GH_TOKEN=ghp_secretvalue"], host)).toEqual([
+      "GH_TOKEN",
+    ]);
+    // Injected names are recognised in any spelling, while the host does not hold them.
+    expect(
+      leakedSecretNames(
+        [
+          "`git_config_count`",
+          "GIT_CONFIG_KEY_0=core.pager",
+          " cloudsdk_proxy_password ",
+        ],
+        host,
+      ),
     ).toEqual([]);
+    expect(isSandboxInjectedName("cloudsdk_proxy_password")).toBe(true);
+    expect(isSandboxInjectedName("Git_Config_Value_7")).toBe(true);
+    expect(isSandboxInjectedName("GH_TOKEN")).toBe(false);
+  });
+
+  it("counts every known secret name, none of which is sandbox-injected", () => {
+    expect(KNOWN_SECRET_NAMES).toEqual(
+      expect.arrayContaining([
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "GH_TOKEN",
+        "CLAUDE_CODE_MESSAGING_SOCKET",
+      ]),
+    );
+    for (const name of KNOWN_SECRET_NAMES) {
+      expect(isSandboxInjectedName(name), name).toBe(false);
+      expect(leakedSecretNames([name], []), name).toEqual([name]);
+      expect(leakedSecretNames([name.toLowerCase()], []), name).toHaveLength(1);
+    }
+  });
+
+  it("scans for the host's git configuration values, which can carry a credential", () => {
+    const values = secretValues({
+      GIT_CONFIG_VALUE_0: "AUTHORIZATION: bearer abcdefghijkl",
+      GIT_CONFIG_KEY_0: "http.extraHeader",
+      GIT_CONFIG_VALUE_1: "short",
+    });
+    expect(values).toEqual([
+      {
+        name: "the value of GIT_CONFIG_VALUE_0",
+        value: "AUTHORIZATION: bearer abcdefghijkl",
+      },
+    ]);
   });
 
   it("never treats an empty value as a match", () => {

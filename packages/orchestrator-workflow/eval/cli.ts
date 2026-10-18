@@ -23,6 +23,7 @@ import {
 import type { Dataset, DatasetEntry, LeakTag } from "./dataset.js";
 import {
   checkPlacement,
+  checkScratchRoot,
   createRunScratch,
   defaultScratchRoot,
   hostGitEnv,
@@ -33,7 +34,13 @@ import {
 } from "./isolation.js";
 import { runGuarded } from "./processes.js";
 import { renderAggregates, renderComparison } from "./report.js";
-import { cliVersion, removeTree, runEntry, summarizeRun } from "./runner.js";
+import {
+  NO_SETTING_SOURCES,
+  cliVersion,
+  removeTree,
+  runEntry,
+  summarizeRun,
+} from "./runner.js";
 import type { RunnerOptions } from "./runner.js";
 import {
   aggregate,
@@ -58,7 +65,7 @@ export interface Io {
   tempRoots?: string[];
   /** Test seam: the scratch root used without `--scratch` (null: none); defaults to the host's. */
   defaultScratch?: string | null;
-  /** Test seam: the longest scratch tmp path the placement check accepts; defaults to the measured limit. */
+  /** Test seam: the longest scratch tmp path (bytes) the placement check accepts; defaults to the limit for this uid. */
   maxTmpPath?: number;
 }
 
@@ -289,6 +296,11 @@ function sessionOptions(
   });
   if (placement !== null) {
     io.err(placement);
+    return null;
+  }
+  const ownership = checkScratchRoot(scratchRoot);
+  if (ownership !== null) {
+    io.err(ownership);
     return null;
   }
   return {
@@ -568,6 +580,7 @@ async function commandJudge(args: string[], io: Io): Promise<number> {
             "--strict-mcp-config",
             "--mcp-config",
             '{"mcpServers":{}}',
+            ...NO_SETTING_SOURCES,
             "--settings",
             '{"crossSessionInbound":"refuse"}',
             "--no-session-persistence",

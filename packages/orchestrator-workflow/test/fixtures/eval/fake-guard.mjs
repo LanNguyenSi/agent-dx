@@ -86,5 +86,14 @@ child.on("exit", (code, signal) => {
       leftovers: [{ pid: -1, pgid: child.pid, rssMiB: 1, inGroup: true, command: "(group member)" }],
     });
   }
+  // Lets a test (through a wrapper script, see guardBin) make guard report a leftover with this command line.
+  if (process.env.FAKE_GUARD_LEFTOVER_COMMAND) {
+    envelope("leftover", 122, childExitCode, {
+      leftoverCount: 1,
+      leftovers: [
+        { pid: -1, pgid: -1, rssMiB: 1, inGroup: false, command: process.env.FAKE_GUARD_LEFTOVER_COMMAND },
+      ],
+    });
+  }
   envelope("none", childExitCode, childExitCode);
 });

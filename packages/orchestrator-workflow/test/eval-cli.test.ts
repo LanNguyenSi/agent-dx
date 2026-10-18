@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -6,6 +7,7 @@ import {
   readdirSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,7 +23,12 @@ import {
 } from "../eval/cli.js";
 import type { Io } from "../eval/cli.js";
 import {
+  KNOWN_SECRET_NAMES,
+  isSandboxInjectedName,
+} from "../eval/isolation.js";
+import {
   FAKE_GUARD,
+  guardBin,
   makeEntry,
   makeFixtureRepo,
   reviewerReturn,
@@ -254,6 +261,39 @@ describe("evaluation CLI", { timeout: 120_000 }, () => {
     expect(existsSync(longRoot)).toBe(false);
   });
 
+  it("refuses a --scratch that is a symlink or that others can write, before any session", async () => {
+    const records = mkdtempSync(join(work, "rec-owner-"));
+    const real = join(work, "owned-scratch");
+    mkdirSync(real, { mode: 0o700 });
+    const link = join(work, "linked-scratch");
+    symlinkSync(real, link);
+    const open = join(work, "open-scratch");
+    mkdirSync(open);
+    chmodSync(open, 0o777);
+    for (const [dir, reason] of [
+      [link, "symbolic link"],
+      [open, "group or others"],
+    ]) {
+      const env = io();
+      const code = await main(
+        [
+          "canary",
+          ...common(),
+          "--claude",
+          claude({}, records),
+          ...guard,
+          "--scratch",
+          dir,
+        ],
+        env,
+      );
+      expect(code, dir).toBe(2);
+      expect(env.errors[0], dir).toContain(reason);
+    }
+    expect(calls(records)).toEqual([]);
+    expect(readdirSync(open)).toEqual([]);
+  });
+
   it("requires --scratch where the host has no default, and uses the default where it has one", async () => {
     const alpha = promptFile("alpha.md", "Alpha body.");
     const args = (): string[] => [
@@ -394,6 +434,11 @@ describe("evaluation CLI", { timeout: 120_000 }, () => {
       expect(c.argv).toContain("--tools");
       expect(c.argv[c.argv.indexOf("--effort") + 1]).toBe("high");
       expect(c.argv[c.argv.indexOf("--permission-prompts") + 1]).toBe("none");
+      // No user, project or local settings file; the --settings JSON still applies.
+      expect(c.argv[c.argv.indexOf("--setting-sources") + 1]).toBe("");
+      expect(c.argv[c.argv.indexOf("--settings") + 1]).toBe(
+        '{"crossSessionInbound":"refuse"}',
+      );
     }
     const judgeFile = JSON.parse(
       readFileSync(join(alphaDir, "judge.json"), "utf8"),
@@ -543,12 +588,13 @@ describe("evaluation CLI", { timeout: 120_000 }, () => {
     await step("pone", [], [], "1.0.0");
     await step(
       "ptwo",
-      ["--effort", "medium"],
+      ["--effort", "medium", "--model", "sonnet"],
       ["--judge-effort", "low", "--judge-model", "opus"],
       "2.0.0",
     );
     const [two] = loadRunResults(provOut, "ptwo");
     expect(two.result.cli_version).toBe("2.0.0");
+    expect(two.result.model).toBe("sonnet");
     expect(
       JSON.parse(readFileSync(join(two.dir, "judge.json"), "utf8")),
     ).toMatchObject({ model: "opus", effort: "low", cli_version: "2.0.0" });
@@ -575,16 +621,17 @@ describe("evaluation CLI", { timeout: 120_000 }, () => {
       "judge model (pone: sonnet; ptwo: opus)",
       "judge effort (pone: high; ptwo: low)",
       "judge CLI version (pone: 1.0.0; ptwo: 2.0.0)",
+      "reviewer model (pone: opus; ptwo: sonnet)",
       "reviewer effort (pone: high; ptwo: medium)",
       "reviewer CLI version (pone: 1.0.0; ptwo: 2.0.0)",
     ]) {
       expect(warnings).toContain(`warning: pone and ptwo differ in ${label}`);
     }
-    expect(compare.errors).toHaveLength(5);
+    expect(compare.errors).toHaveLength(6);
     const saved = JSON.parse(
       readFileSync(join(provOut, "compare-pone-vs-ptwo.json"), "utf8"),
     );
-    expect(saved.warnings).toHaveLength(5);
+    expect(saved.warnings).toHaveLength(6);
   });
 
   it("reports high-leak entries apart from the primary score, unless told to keep them", async () => {
@@ -756,6 +803,8 @@ describe("evaluation CLI", { timeout: 120_000 }, () => {
       '{"mcpServers":{}}',
     );
     expect(judge.argv[judge.argv.indexOf("--tools") + 1]).toBe("");
+    // Without --bare as well, no settings file of the scratch home or the cwd is loaded.
+    expect(judge.argv[judge.argv.indexOf("--setting-sources") + 1]).toBe("");
   });
 
   it("hands the judge the key from --api-key-env as ANTHROPIC_API_KEY", async () => {
@@ -974,6 +1023,7 @@ describe("canary", { timeout: 120_000 }, () => {
     vars: Record<string, string> = {},
     /** Host environment of the runner: a string sets a variable, undefined removes it. */
     hostEnv: Record<string, string | undefined> = {},
+    guardBinary: string = FAKE_GUARD,
   ): Promise<{
     code: number;
     result: Record<string, any>;
@@ -984,6 +1034,10 @@ describe("canary", { timeout: 120_000 }, () => {
     const canaryOut = mkdtempSync(join(work, "canary-out-"));
     const records = mkdtempSync(join(work, "rec-canary-"));
     const r = io({ HOME: home });
+    // Whatever shell runs the tests (a sandboxed one sets them too): the runner's own
+    // environment holds no sandbox-injected name unless a test puts one there.
+    for (const name of Object.keys(r.env))
+      if (isSandboxInjectedName(name)) delete r.env[name];
     for (const [name, value] of Object.entries(hostEnv)) {
       if (value === undefined) delete r.env[name];
       else r.env[name] = value;
@@ -997,7 +1051,8 @@ describe("canary", { timeout: 120_000 }, () => {
         canaryOut,
         "--claude",
         claude({ STUB_CANARY: scenario, ...vars }, records),
-        ...guard,
+        "--guard",
+        guardBinary,
         "--scratch",
         scratch,
       ],
@@ -1012,6 +1067,12 @@ describe("canary", { timeout: 120_000 }, () => {
     expect(session.argv).toContain("--settings");
     expect(session.argv[session.argv.indexOf("--permission-prompts") + 1]).toBe(
       "none",
+    );
+    expect(session.argv[session.argv.indexOf("--setting-sources") + 1]).toBe(
+      "",
+    );
+    expect(session.settings.sandbox.filesystem.denyWrite).toContain(
+      session.env.CLAUDE_CONFIG_DIR,
     );
     expect(session.settings.sandbox.network.strictAllowlist).toBe(true);
     expect(session.settings.sandbox.filesystem.denyRead).toContain(home);
@@ -1041,16 +1102,109 @@ describe("canary", { timeout: 120_000 }, () => {
         "touch_home",
         "read_home_file_tool",
         "env_secret_names",
+        "write_config_settings",
+        "read_sibling_tool",
         "write_checkout",
         "read_scratch",
+        "read_checkout_tool",
+        "write_evidence_home",
         "node_version",
         "host:permission_mode_applied",
         "host:touch_target_absent",
         "host:checkout_file_written",
+        "host:config_settings_absent",
         "host:no_secret_in_records",
       ]),
     );
     expect(lines[0]).toContain("canary pass");
+  });
+
+  it("fails when a settings file appears in the session's config dir, whatever the session reports", async () => {
+    const { code, result, session } = await canary("config-write");
+    expect(code).toBe(1);
+    expect(result.status).toBe("fail");
+    const host = result.checks.find(
+      (c: any) => c.id === "host:config_settings_absent",
+    );
+    expect(host.pass).toBe(false);
+    expect(host.detail).toContain("written by the probe");
+    // The session itself said the write failed; the host check is what catches it.
+    expect(
+      result.checks.find((c: any) => c.id === "write_config_settings").pass,
+    ).toBe(true);
+    // The probe targets the session's own CLAUDE_CONFIG_DIR.
+    const line = (session.stdin as string)
+      .split("\n")
+      .find((l) => l.includes("`write_config_settings`"))!;
+    expect(line).toContain(`> ${session.env.CLAUDE_CONFIG_DIR}/settings.json`);
+  });
+
+  it("fails when another run's meta file was readable to the Read tool, and records it redacted", async () => {
+    const { code, result, text, session } = await canary("sibling-read");
+    expect(code).toBe(1);
+    expect(result.status).toBe("fail");
+    expect(
+      result.checks.find((c: any) => c.id === "read_sibling_tool").pass,
+    ).toBe(false);
+    const leak = result.checks.find(
+      (c: any) => c.id === "host:no_secret_in_records",
+    );
+    expect(leak.pass).toBe(false);
+    expect(leak.detail).toContain("the other run's sentinel content");
+    expect(text).not.toMatch(/eval-canary-sentinel-[0-9a-f]{48}/);
+    // The sentinel sat in another run directory under the same scratch root, removed afterwards.
+    const target = /`read_sibling_tool` \(Read tool\): Read `(\S+)`/.exec(
+      session.stdin,
+    )![1];
+    expect(target.startsWith(realpathSync(scratch) + "/")).toBe(true);
+    expect(target.endsWith("/meta/prompt.md")).toBe(true);
+    expect(target).not.toContain(session.cwd.split("/checkout")[0]);
+    expect(existsSync(join(target, "..", ".."))).toBe(false);
+  });
+
+  it("fails when the Read tool could not read the session's own checkout", async () => {
+    const { code, result } = await canary("checkout-read-denied");
+    expect(code).toBe(1);
+    expect(result.status).toBe("fail");
+    expect(
+      result.checks.find((c: any) => c.id === "read_checkout_tool").pass,
+    ).toBe(false);
+  });
+
+  it("fails when Bash did not write the session's own evidence and home, whatever the session reports", async () => {
+    const pass = await canary("pass");
+    const line = (pass.session.stdin as string)
+      .split("\n")
+      .find((l) => l.includes("`write_evidence_home`"))!;
+    const root = pass.session.cwd.split("/checkout")[0];
+    expect(line).toContain(`> ${root}/evidence/canary-`);
+    expect(line).toContain(`> ${root}/home/canary-`);
+    expect(
+      pass.result.checks.find((c: any) => c.id === "write_evidence_home").pass,
+    ).toBe(true);
+
+    const { code, result } = await canary("no-evidence-write");
+    expect(code).toBe(1);
+    expect(result.status).toBe("fail");
+    const check = result.checks.find(
+      (c: any) => c.id === "write_evidence_home",
+    );
+    expect(check.pass).toBe(false);
+    expect(check.detail).toContain("reported success");
+  });
+
+  it("redacts canary.json and fails when guard reports a process command line holding the key", async () => {
+    const leaky = guardBin(work, {
+      FAKE_GUARD_LEFTOVER_COMMAND:
+        "node worker.js --api-key sk-test-cli-key-value",
+    });
+    const { code, result, text, lines } = await canary("pass", {}, {}, leaky);
+    expect(code).toBe(1);
+    expect(result.status).toBe("fail");
+    expect(text).not.toContain("sk-test-cli-key-value");
+    expect(text).toContain("node worker.js --api-key <redacted: the API key>");
+    expect(result.processes.guard_reason).toBe("leftover");
+    expect(lines.join("\n")).not.toContain("sk-test-cli-key-value");
   });
 
   it("fails when the touch target appears under the home directory, and removes it", async () => {
@@ -1152,7 +1306,7 @@ describe("canary", { timeout: 120_000 }, () => {
     expect(hostCheck.detail).toContain("CLOUDSDK_PROXY_PASSWORD");
   });
 
-  it("asks the session to list credential-looking names and to leave out the git configuration names", async () => {
+  it("asks the session to list every credential-looking name, the git configuration names included", async () => {
     const { session } = await canary("pass");
     const line = (session.stdin as string)
       .split("\n")
@@ -1166,7 +1320,48 @@ describe("canary", { timeout: 120_000 }, () => {
       "AUTH",
     ])
       expect(line).toContain(word);
-    expect(line).toContain("GIT_CONFIG_(COUNT|KEY_[0-9]+|VALUE_[0-9]+)");
+    // Nothing is filtered out in the session: the host decides which names are injected.
+    expect(line).not.toContain("grep -v");
+    expect(line).not.toContain("GIT_CONFIG");
+    // The session's grep catches every known secret name.
+    const pattern = new RegExp(/grep -iE '([^']+)'/.exec(line)![1], "i");
+    for (const name of KNOWN_SECRET_NAMES)
+      expect(pattern.test(name), name).toBe(true);
+  });
+
+  it("fails on a printed name that is not sandbox-injected, held by the host or not", async () => {
+    const unknown = await canary("names-unknown");
+    expect(unknown.code).toBe(1);
+    expect(unknown.result.status).toBe("fail");
+    const check = unknown.result.checks.find(
+      (c: any) => c.id === "env_secret_names",
+    );
+    expect(check.pass).toBe(false);
+    expect(check.detail).toBe("names visible: SOME_NEW_INJECTED_SECRET");
+  });
+
+  it("fails on a git configuration name the runner's own environment holds", async () => {
+    const held = await canary(
+      "names-git",
+      {},
+      { GIT_CONFIG_KEY_0: "http.extraHeader" },
+    );
+    expect(held.code).toBe(1);
+    const check = held.result.checks.find(
+      (c: any) => c.id === "env_secret_names",
+    );
+    expect(check.pass).toBe(false);
+    expect(check.detail).toBe("names visible: GIT_CONFIG_KEY_0");
+  });
+
+  it("normalizes the printed names: backticks, a value after =, lower case", async () => {
+    const { code, result, text } = await canary("names-format");
+    expect(code).toBe(1);
+    const check = result.checks.find((c: any) => c.id === "env_secret_names");
+    expect(check.pass).toBe(false);
+    // The injected names in other spellings are recognised; the lower-case secret name is not let through.
+    expect(check.detail).toBe("names visible: gh_token");
+    expect(text).not.toContain("gh_token`=x");
   });
 
   it("is inconclusive, not a pass, when an action was not attempted", async () => {
@@ -1194,6 +1389,11 @@ describe("canary", { timeout: 120_000 }, () => {
       tmpSentinel.startsWith(join(realpathSync(tmpdir()), "eval-canary-")),
     ).toBe(true);
     expect(tmpSentinel.startsWith(scratch)).toBe(false);
+    const siblingSentinel = target("read_sibling_tool", /Read `(\S+)`/);
+    // The only settings file named is the write probe's target in the session's own scratch config dir.
+    const ownSettings = join(session.env.CLAUDE_CONFIG_DIR, "settings.json");
+    expect(prompt).toContain(ownSettings);
+    const rest = prompt.split(ownSettings).join("<own settings>");
     for (const former of [
       ".ssh",
       "id_ed25519",
@@ -1201,10 +1401,11 @@ describe("canary", { timeout: 120_000 }, () => {
       ".gitconfig",
       ".zshrc",
     ]) {
-      expect(prompt, former).not.toContain(former);
+      expect(rest, former).not.toContain(former);
     }
     expect(existsSync(homeSentinel)).toBe(false);
     expect(existsSync(tmpSentinel)).toBe(false);
+    expect(existsSync(siblingSentinel)).toBe(false);
   });
 
   it("fails when a sentinel's content reaches the session's answer, and records it redacted", async () => {
