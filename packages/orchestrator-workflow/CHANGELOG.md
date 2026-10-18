@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- Tests pin the machine contract and a small safety core instead of pinning
+  prose rules at several sites. The safety core is the instruction trust
+  boundary (runbook authority included), outward actions only by the
+  orchestrator, and the review gate severities and waiver authority, each
+  pinned as sentences in the policy section only, plus the reviewer's
+  read-only rule, pinned in the reviewer prompt only. Return field names,
+  enums, mandatory-field rules, template markers, and the headings a reader
+  consumes stay pinned. Every other prose rule loses its sentence pin and is
+  covered by behaviour measurement and review. The cross-asset runbook
+  sentence guard and its fixture are retired, and a new test checks that
+  every rendered role variant in every harness carries its asset body. The
+  "Pinned-prose changes" section of the review and recovery reference
+  describes this model; no other installed file changes, and the installed
+  copy of that reference reports as outdated until refreshed.
+
 ## [0.45.0] - 2026-10-18
 
 - The package's runbook-sentence guard keeps its wording, and its segmenter

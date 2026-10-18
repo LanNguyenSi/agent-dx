@@ -134,40 +134,35 @@ entry for this rule in the orchestrator-workflow CHANGELOG.
 
 ## Pinned-prose changes
 
-This applies to a change whose acceptance rests on tests that pin
-documentation wording (a rule text asserted by string match). A prose
-mutant survives exactly when its bytes sit in no assertion, so a surviving
-mutant alone says nothing about quality, and review rounds that hunt for
-the next unpinned sentence do not converge. For such a change:
+This applies to a change to documentation wording that a test pins or could
+pin (a rule text asserted by string match). Tests pin the machine contract
+and a small safety core. A prose mutant survives exactly when its bytes sit
+in no assertion, so for any other rule a surviving mutant alone says nothing
+about quality, and review rounds that hunt for the next unpinned sentence do
+not converge. For such a change:
 
-- Name one normative site per rule when slicing; every other site that
-  states the rule is a copy.
-- List the load-bearing claims of the normative site in the acceptance
-  criterion, and pin each one as the whole sentence or clause that carries
-  it. That list is the pin obligation. Every normative sentence the change
-  adds or alters at that site is pinned; one left unpinned is named in the
-  criterion with the reason it is not load-bearing.
-- Bound the reviewer's prose mutant space to that list in the briefing. A
-  survivor outside the list is a scope note in the reviewer's
-  `residual_risks`, not a finding, unless the reviewer shows that the
-  unlisted sentence is load-bearing.
-- Bind each copy to the normative site through one shared test constant,
-  and let a pointer point without restating the rule.
-- Cap test-adequacy review rounds on the change at two. A test-adequacy
-  review round is one whose returned findings are all `tests` findings of
-  severity `low` or `medium` about pin gaps on the pinned prose; a round
-  returning any other finding is an ordinary round outside the cap. Pin gaps that remain
-  become accepted notes or a follow-up.
+- Pin the machine contract: return field names, enums and mandatory-field
+  rules, template markers, and the headings a reader consumes.
+- Pin the safety core as whole sentences at exactly one normative site each:
+  the instruction trust boundary (runbook authority included), outward
+  actions only by the orchestrator, the review gate severities and waiver
+  authority, and the reviewer's read-only rule. Name that site when slicing;
+  every other site that states the rule is a copy and is not pinned.
+- Pin no other prose. Behaviour measurement and review cover it. Bound the
+  reviewer's prose mutant space to the contract and the safety core in the
+  briefing; a survivor outside them is a scope note in `residual_risks`,
+  not a finding, unless the reviewer shows the sentence is load-bearing.
+- Cap test-adequacy review rounds on the change at two. Such a round returns
+  only `tests` findings of severity `low` or `medium` about pin gaps; a
+  round returning any other finding is an ordinary round outside the cap.
 
 Semantic findings are exempt from the bound and from the cap: two sites
 stating different rules, a contradiction with another rule, and a false
-claim are defects at whatever severity they deserve. The cap changes
-neither the Round-2 halt rule, the Review-round escalation budget nor the
-Fix-regression decision point: a test-adequacy review round still counts as a negative
-round where it is one. The review gate is unchanged: a high or critical
-finding of any category still blocks and is never capped away, and
-accepting one follows the waiver rules. Anchored by an observed run; see
-the entry for this rule in the orchestrator-workflow CHANGELOG.
+claim are defects at whatever severity they deserve. The cap does not
+change the Round-2 halt rule, the Review-round escalation budget, the
+Fix-regression decision point, or the review gate: a high or critical
+finding of any category still blocks, and accepting one follows the waiver
+rules.
 
 ## Final acceptance rule
 

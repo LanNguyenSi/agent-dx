@@ -16,81 +16,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { readAsset } from "../src/assets.js";
 
 const bundleGate = readAsset("skill/references/bundle-gate-in-ci.md");
-const skillMd = readAsset("skill/SKILL.md");
 
-// Collapse line wraps and indentation so a pin matches a whole sentence
-// regardless of where the asset wraps it.
+// Collapse line wraps and indentation so a comparison ignores wrapping.
 const unwrap = (text: string) => text.replace(/\s+/g, " ");
 
-const pin = (doc: string, sentence: string) => {
-  expect(unwrap(doc)).toContain(sentence);
-};
-
-/** The hand-off step of the SKILL.md orchestration sequence, alone. */
-function handOffStep(): string {
-  const start = skillMd.indexOf("6. **Hand off.**");
-  expect(start, "hand-off step not found in SKILL.md").toBeGreaterThan(-1);
-  const end = skillMd.indexOf("\n## ", start);
-  return skillMd.slice(start, end === -1 ? undefined : end);
-}
-
+// The prose of the reference is covered by the behaviour eval set and by
+// review; what stays is the integrity of its runnable example.
 describe("bundle gate in CI reference", () => {
-  it("is linked from the SKILL.md hand-off step", () => {
-    pin(
-      handOffStep(),
-      "To catch drift between runs as well, gate the bundles in CI as described in [bundle gate in CI](references/bundle-gate-in-ci.md).",
-    );
-  });
-
-  it("states the limit of what the gate proves", () => {
-    pin(
-      bundleGate,
-      "The gate proves that a doc was re-stamped after its sources changed, not that its content is correct; review of the doc against its sources stays mandatory.",
-    );
-  });
-
-  it("requires a full-history checkout and says why", () => {
-    pin(
-      bundleGate,
-      "Check out the full history (`fetch-depth: 0` with `actions/checkout`): the `sources-fresh` rule dates each source by its last commit and asks whether the doc's own last commit re-stamped the doc, and a shallow clone cannot answer that, so it reports `staleness not assessable` notices instead of a STALE verdict.",
-    );
-    expect(bundleGate).toContain("fetch-depth: 0\n");
-  });
-
-  it("names the three rollout stages", () => {
-    pin(
-      bundleGate,
-      "1. Stage 1, warn-only: run the check on every change, publish every finding as an annotation and in the job summary, and never fail the job on a finding.",
-    );
-    pin(
-      bundleGate,
-      "2. Stage 2, block on structure and staleness: fail the job on any error-severity finding (structure: frontmatter, links, sources shape) and on any `sources-fresh` or `sources-fresh-future` warning, selected from the `--json` report with a filter; other warnings stay advisory.",
-    );
-    pin(
-      bundleGate,
-      "3. Stage 3, strict: run the check with `--strict`, which fails on every warning from every rule.",
-    );
-    pin(
-      bundleGate,
-      "The exit code alone is not the signal for stage 1 or stage 2: `okf-kit check` exits 0 when it finds only warnings (STALE and FUTURE-DATED findings are warnings) and 1 when it finds an error, so read the JSON report to decide.",
-    );
-  });
-
-  it("gives the pre-commit recipe with --dirty-as-now", () => {
-    pin(
-      bundleGate,
-      "Run `okf-kit check <bundle> --repo-root <repoRoot> --dirty-as-now` before committing: it treats every uncommitted change as one virtual commit made now, so the local run reports the same `sources-fresh` and `sources-fresh-future` verdict CI will report once the commit lands.",
-    );
-  });
-
-  it("covers every configured bundle with its own repo root", () => {
-    pin(
-      bundleGate,
-      "Run one check per bundle and pass `--repo-root <repoRoot>` explicitly:",
-    );
-    expect(bundleGate).toContain('--repo-root "$REPO_ROOT"');
-  });
-
   it("keeps the example free of a concrete pin and a hard-coded runner", () => {
     expect(bundleGate).toContain("okf-kit@<pinned-version>");
     expect(bundleGate).not.toMatch(/okf-kit@\d/);
@@ -128,63 +60,6 @@ function shBlockAfter(marker: string): string {
 }
 
 describe("bundle gate in CI reference: could-not-run and report placement", () => {
-  it("fails every stage when the checker could not run", () => {
-    pin(
-      bundleGate,
-      "Any other outcome means the checker could not run: an exit status other than 0 or 1, or a report that does not parse. It fails the job at every stage, including stage 1.",
-    );
-  });
-
-  it("keeps the exit-2 usage error apart from the other could-not-run causes", () => {
-    pin(
-      bundleGate,
-      "The checker itself exits 2 whenever it cannot complete the check, for example on a usage error such as a missing bundle directory. The other could-not-run causes carry other statuses: a missing command exits 127 and is caught by the exit status check; a failed install exits 1 from the package runner (`npx`), the same status as a finding, and is caught only because it leaves no parseable report; a report that does not parse is caught by the report check when the status is 0 or 1 (any other status already failed the exit status check).",
-    );
-    expect(unwrap(bundleGate)).not.toMatch(
-      /exit 2 for a usage error such as[^.]*(failed install|missing command)/,
-    );
-  });
-
-  it("names jq as a prerequisite of the example", () => {
-    pin(
-      bundleGate,
-      "the example below uses `jq`, so it needs `jq` on the runner;",
-    );
-  });
-
-  it("describes the annotation escaping", () => {
-    pin(
-      bundleGate,
-      "The annotation line escapes `%`, carriage return and line feed in the message, and additionally `:` and `,` in the `file` property, as the workflow command syntax requires, so a message with a line break stays one whole annotation.",
-    );
-  });
-
-  it("describes the pre-commit cleanup and where the trap belongs", () => {
-    pin(
-      bundleGate,
-      "The `trap` removes the temporary report when the hook exits, also when the check fails.",
-    );
-    pin(
-      bundleGate,
-      "Create the report and set the trap once, above the loop, and reuse the one file for every bundle: a trap set inside the loop is re-armed for the latest report only and leaves the earlier ones behind.",
-    );
-    pin(
-      bundleGate,
-      "The `trap` replaces an EXIT trap the hook already set; a hook that has one adds the `rm` to that trap instead.",
-    );
-  });
-
-  it("states that the pre-commit loop carries the verdict without set -e", () => {
-    pin(
-      bundleGate,
-      "The loop checks each exit status itself, as the CI example does, so the hook fails with the checker's verdict whether or not it runs under `set -e`: exit 2 when the checker exits with a status other than 0 or 1, exit 1 on a failing check, exit 2 when the bundle list is not made of whole `<bundle> <repoRoot>` pairs, and 0 otherwise. Reading the report belongs to the stage decision at the comment.",
-    );
-    pin(
-      bundleGate,
-      "The `set --` line replaces the hook's positional parameters with the bundle list; git passes a pre-commit hook none, and a hook that needs its own arguments saves them before the loop.",
-    );
-  });
-
   it("carries the pin as an environment value", () => {
     expect(bundleGate).toContain(
       "          OKF_KIT_VERSION: <pinned-version>\n",
