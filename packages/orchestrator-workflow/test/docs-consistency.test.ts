@@ -5750,13 +5750,13 @@ const SIBLING_GUARD_BUNDLE_ALLOWLIST: SiblingGuardAllowlistEntry[] = [
     doc: "subagent-contracts-superset.md",
     kind: "distant-duplicate-anchor",
     real: "packages/orchestrator-workflow/test/docs-consistency.test.ts",
-    start: 604,
-    end: 604,
+    start: 646,
+    end: 646,
     anchorKey: "9e1acc22",
-    paragraphLine: 259,
-    uncitedLines: [489, 567],
+    paragraphLine: 262,
+    uncitedLines: [531, 609],
     claim:
-      "line 604 is the slicer-output match inside the test proving no subagent-input field is absent from the slicer output schema, the test this sentence describes; uncited 489 is the list-shape helper's own field regex, and uncited 567 is the same match inside the separate excludes-only-the-envelope-and-orchestrator-set-fields test, neither of which this sentence names.",
+      "line 646 is the slicer-output match inside the test proving no subagent-input field is absent from the slicer output schema, the test this sentence describes; uncited 531 is the list-shape helper's own field regex, and uncited 609 is the same match inside the separate excludes-only-the-envelope-and-orchestrator-set-fields test, neither of which this sentence names.",
   },
 ];
 
