@@ -1,5 +1,11 @@
 # Bundle log
 
+- 2026-10-18T17:58:17Z, verification-set condition worded conditionally: `contracts.md` (same line count, no
+  citation moved) and `docs/verification-sets.md` now say a briefing that names a set (a
+  non-empty `verification_set.reference`) carries its rules. Re-verified: the claims are
+  unchanged. Re-stamped: `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md`
+  and `subagent-contracts-superset.md`.
+
 - 2026-10-18T17:52:30Z, sibling-drift allowlist follows the moved paragraph line again: the allowlist entry for the
   `docs-consistency.test.ts` citation in `subagent-contracts-superset.md` records its paragraph line
   at the position the one-line addition to the verification-set paragraph moved it to; no
