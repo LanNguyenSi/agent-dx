@@ -383,7 +383,7 @@ describe("safety core: the reviewer's read-only rule is pinned at reviewer.md", 
 
   it("limits writes outside the reviewed tree to the scratchpad and the run directory's evidence", () => {
     expect(reviewerMd).toContain(
-      "Outside the reviewed tree, write only to your scratchpad (a scratch copy or replay of the repository, per the GitHub Actions replay rule above) and to the run directory's `evidence/`.",
+      "Outside the reviewed tree, write only to your scratchpad (for example a scratch copy of the repository to replay a step in) and to the run directory's `evidence/`.",
     );
   });
 

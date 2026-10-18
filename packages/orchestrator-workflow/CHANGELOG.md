@@ -68,6 +68,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reviewer, task slicer, skill, and 02-tasks.md template files report as outdated
   until refreshed.
 
+- The GitHub Actions shell replay rule moves out of the implementer and
+  reviewer prompts into a new skill reference, `github-actions-replay.md`,
+  installed beside `SKILL.md`. The orchestrator copies it into an implementer
+  or reviewer briefing only when the diff touches `.github/workflows/**`, an
+  `action.yml`, or an `action.yaml`, so a briefing for any other diff no longer
+  carries the replay text (roughly 120 words in the implementer prompt and 200
+  in the reviewer prompt). Each role prompt keeps one sentence; the reviewer
+  flags a diff that touches those paths while its briefing lacks the rules, and
+  the implementer reports the same gap as an open question. The reviewer's
+  method table, read-only rule, and `reproduction` note are reworded so they
+  hold without the block; the scratchpad allowance of the read-only rule stands
+  on its own terms. The replay rules themselves, including the reviewer's
+  scratch-copy requirement, are unchanged, so a briefing that carries them
+  behaves as before. The process-group and memory-cap rule, the byte-count
+  ceiling rule, the coverage-percentage rule, and the BSD `sed -i` rule stay in
+  the prompts. The installed implementer, reviewer, and skill files report as
+  outdated until refreshed.
+
 ## [0.45.0] - 2026-10-18
 
 - The package's runbook-sentence guard keeps its wording, and its segmenter

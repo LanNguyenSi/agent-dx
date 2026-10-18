@@ -20,7 +20,7 @@ not how skeptical to sound.
 
 | Method | Obligations |
 |---|---|
-| `normal` | Read the diff and the spec; run the declared tests once; findings come only from what you read. `normal` adds nothing beyond the obligations already stated in the Check list and the Rules below, and suspends none of them: the empirical-reproduction rule, the GitHub Actions shell replay rule, and the probe replay of a run mode `single` briefing apply under every method. `normal` only means no further independent reproduction beyond what those already require. Fits docs, renames, and batch cosmetics. |
+| `normal` | Read the diff and the spec; run the declared tests once; findings come only from what you read. `normal` adds nothing beyond the obligations already stated in the Check list and the Rules below, and suspends none of them: the empirical-reproduction rule, the GitHub Actions replay rules when the briefing carries them, and the probe replay of a run mode `single` briefing apply under every method. `normal` only means no further independent reproduction beyond what those already require. Fits docs, renames, and batch cosmetics. |
 | `rigorous` (default) | Everything `normal` requires, plus: your own extract of the change, a base-attribution control, classifying every change, and reproducing every empirical claim yourself. `reproduction` and `matches_implementer_claim` are mandatory, as already required below. |
 | `adversarial` | Everything `rigorous` requires, plus: one discriminating probe or negative control per acceptance criterion; an active search of the neighbouring scenario space (environment, install modes, platform, ordering, concurrency); an attempt to break the claimed invariant; and an explicit list of break attempts that failed. |
 
@@ -114,21 +114,9 @@ Check, at minimum:
   mode `single` there is no separate implementer `class_closure` report
   to compare against; compare your search's hits against the Class Closure row of
   `04-implementation-summary.md` plus its Risks / Notes section instead.
-- GitHub Actions shell replay: for any diff that adds or changes a GitHub
-  Actions `run:` step, replay it yourself under the shell the step actually
-  runs: `bash --noprofile --norc -eo pipefail` when `shell: bash` is set on
-  the step or via `defaults.run.shell`, `bash -e` otherwise on Linux and
-  macOS runners (Actions' default for `run:` with no `shell:` key; Windows
-  runners default to pwsh), with the expected-success and the
-  expected-failure inputs; for a job, replay its steps in their committed
-  order, and confirm a step that expects a non-zero command captures the
-  status inside an `if` or a `set +e`/`set -e` guard. Substitute `${{ }}`
-  expressions with representative values before replaying, and never paste
-  untrusted event data into your shell. Do the replay in a scratch copy of
-  the repository outside the reviewed working tree (a temporary clone or a
-  copied checkout in your scratchpad directory) so it never runs against,
-  or writes into, the tree you are reviewing; this keeps the replay
-  compatible with the read-only Bash rule below.
+- GitHub Actions shell replay: when the briefing carries the GitHub Actions
+  replay rules, follow them; a diff that touches `.github/workflows/**`,
+  `action.yml` or `action.yaml` while the briefing lacks them is a finding.
 - Claimed checks: verify every check result the implementer claims against
   the recorded verify envelope or the exact command plus exit code it cites,
   not against the prose; open the envelope, or rerun the command when it is
@@ -185,9 +173,9 @@ Rules:
   no `git merge-tree --write-tree`, no `git update-ref`, no `git gc`. This
   is a location rule, not a single exception: never write into the reviewed
   tree, its index, its refs, or its object store, anywhere in the review.
-  Outside the reviewed tree, write only to your scratchpad (a scratch copy
-  or replay of the repository, per the GitHub Actions replay rule above)
-  and to the run directory's `evidence/`. A write made by a tool these
+  Outside the reviewed tree, write only to your scratchpad (for example a
+  scratch copy of the repository to replay a step in) and to the run
+  directory's `evidence/`. A write made by a tool these
   rules direct you to run, a declared check (including build or test
   artifacts a side effect leaves in the reviewed tree) or the probe runner
   operating in its own default isolation, is expected wherever that tool
@@ -322,10 +310,11 @@ its fields hold.
   leave it blank or omit it.
 - `reproduction`:
   - When acceptance rests on empirical or probabilistic evidence, record the
-    method, sample size, and result against the implementer's claim here. The
-    GitHub Actions shell replay is a second, explicitly non-probabilistic
-    trigger for the same field: report it here too, with `sample_size:
-    not_applicable` when the replay itself has no meaningful sample size.
+    method, sample size, and result against the implementer's claim here. A
+    replay that the GitHub Actions replay rules call for, when the briefing
+    carries them, is a second, explicitly non-probabilistic trigger for the
+    same field: report it here too, with `sample_size: not_applicable` when
+    the replay itself has no meaningful sample size.
   - Put the independent complete-set outcome in `reproduction.result`.
   - For probes you run, apply the implementer's verdict-copy and
     manual-derivation rules to your own measurements, reporting the quoted
