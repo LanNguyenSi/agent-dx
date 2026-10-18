@@ -1,5 +1,14 @@
 # Bundle log
 
+- 2026-10-18T17:49:39Z, what names a verification set is defined once: a briefing names a set exactly when
+  `verification_set.reference` is non-empty (an absent field or an empty reference means no set),
+  and the contracts reference, the task slicer, the skill routing and both role prompts use that
+  wording; the reviewer prompt also says not to run a set whose rules the briefing does not
+  carry. `subagent-contracts-superset.md` now records the definition and the reviewer safeguard.
+  The anchored citations into the shifted files were re-pointed by mapping each cited line
+  through the diff. Re-stamped: `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md`.
+
 - 2026-10-18T17:35:36Z, sibling-drift allowlist follows the moved paragraph lines: the two allowlist entries
   for `subagent-contracts-superset.md` in `docs-consistency.test.ts` record the paragraph lines of
   their citations at the positions the verification-set edit moved them to; no citation or claim
