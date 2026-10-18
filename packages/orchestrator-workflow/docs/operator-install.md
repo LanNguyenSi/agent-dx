@@ -128,13 +128,18 @@ config `<target>/.codex/config.toml`, user config
 default 32768), and the first heading that is lost entirely, because
 Codex silently truncates the file at the budget. The highest layer that
 sets the key decides, and a lower layer never applies because a higher
-layer's value is unusable: a value of `0` warns that Codex loads no
-project instruction file at all (naming that layer's file), and a value
-that is not a non-negative integer warns that Codex refuses to load that
-configuration file (naming the file and the value); neither does a size
-comparison. The check assumes Codex trusts the project; for a project it
-does not trust, Codex loads neither the project config nor any project
-instruction file. Codex layers profiles, a system file, managed layers
+layer's file is unusable: a value of `0` warns that Codex loads no
+project instruction file at all (naming that layer's file), and a file
+Codex rejects warns that Codex refuses to load that configuration file
+(naming the file and the reason): any file that is not valid
+TOML (a syntax error, a key set twice), and any top-level
+`project_doc_max_bytes` value Codex cannot use (a string, a table, a
+negative or fractional number); neither does a size comparison. doctor
+reads the config file with a real TOML parser, so a parse error, a
+duplicate key or an unusable value means Codex rejects the file, and
+doctor says so. The check assumes Codex trusts the project; for a
+project it does not trust, Codex loads neither the project config nor
+any project instruction file. Codex layers profiles, a system file, managed layers
 and `-c key=value` session flags over that resolution; this check
 considers none of them. Like the routing gap, such a warning never
 changes the target status or the doctor exit code.

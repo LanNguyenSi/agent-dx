@@ -15,8 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (project config, user config, or the default 32768), and the first
   heading lost entirely. The highest layer that sets the key decides: a
   value of `0` warns that Codex loads no project instruction file at all,
-  and a value that is not a non-negative integer warns that Codex refuses
-  to load that configuration file; neither falls back to a lower layer.
+  and a config file Codex rejects warns that it refuses to load that
+  configuration file, naming the reason (a TOML syntax error, a key set
+  twice, or a value that is not a non-negative integer); neither falls
+  back to a lower layer. The config file is read with a real TOML parser
+  (`@iarna/toml`, now a runtime dependency), the way Codex reads it.
   The check assumes Codex trusts the project and does not consider
   profiles, the system layer, managed layers or `-c` session flags; it is
   a warning only, and the doctor exit code is unchanged.

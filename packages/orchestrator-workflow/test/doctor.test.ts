@@ -1589,19 +1589,21 @@ describe("runDoctor: Codex instruction-budget warnings", () => {
     expect(report.exitCode).toBe(0);
   });
 
-  it("a value above Number.MAX_SAFE_INTEGER makes Codex refuse to load that configuration", () => {
+  // Updated from the old reader, which returned any value above
+  // Number.MAX_SAFE_INTEGER as invalid raw text. The TOML parser narrows a
+  // huge integer to 64 bits, and this one wraps back to a positive BigInt,
+  // so doctor reads it as a huge budget and warns nothing (real Codex
+  // rejects the file; a known limit of the parser, not of this check).
+  it("an integer above 2^64-1 whose 64-bit narrowing is positive (99999999999999999999) is read as a huge budget, so nothing warns", () => {
     const repo = makeCodexRepo();
-    writeFileSync(join(repo, "AGENTS.md"), "small\n", "utf8");
+    writeFileSync(join(repo, "AGENTS.md"), "x".repeat(33000), "utf8");
     writeCodexConfigAt(
       join(home, "fake-user-home", ".codex"),
       "project_doc_max_bytes = 99999999999999999999\n",
     );
     registerHome(defaults(), [repo]);
     const report = runDoctor(home, codexRun());
-    expect(report.targets[0].codexWarnings?.[0]).toContain(
-      "project_doc_max_bytes = 99999999999999999999 is not a " +
-        "non-negative integer, so Codex refuses to load that configuration",
-    );
+    expect(report.targets[0].codexWarnings).toBeUndefined();
     expect(report.exitCode).toBe(0);
   });
 
@@ -1668,11 +1670,178 @@ describe("runDoctor: Codex instruction-budget warnings", () => {
     });
   }
 
+  /** Writes the user config with this exact text and expects the warning
+   * that says Codex rejects that file, naming the file, quoting the given
+   * part of the reason, and comparing no size at all. */
+  function expectUserConfigRejected(text: string, contains: string): void {
+    const repo = makeCodexRepo();
+    writeFileSync(join(repo, "AGENTS.md"), "small\n", "utf8");
+    const userDir = join(home, "fake-user-home", ".codex");
+    writeCodexConfigAt(userDir, text);
+    registerHome(defaults(), [repo]);
+    const report = runDoctor(home, codexRun());
+    const warning = report.targets[0].codexWarnings?.[0];
+    expect(warning).toContain(
+      "codex budget: Codex rejects the user config file " +
+        join(userDir, "config.toml") +
+        ": ",
+    );
+    expect(warning).toContain(contains);
+    expect(warning).toContain(", so Codex refuses to load that configuration");
+    expect(warning).not.toContain("bytes, over the");
+    expect(report.exitCode).toBe(0);
+  }
+
+  it("a radix integer with a sign (+0x64) is a TOML syntax error, so Codex rejects the whole file", () => {
+    expectUserConfigRejected(
+      "project_doc_max_bytes = +0x64\n",
+      "Unexpected character",
+    );
+  });
+
+  it("a key set twice is a TOML error, so Codex rejects the whole file", () => {
+    expectUserConfigRejected(
+      "project_doc_max_bytes = 16384\nproject_doc_max_bytes = 8192\n",
+      "Can't redefine existing key",
+    );
+  });
+
+  it("a TOML syntax error makes Codex reject the whole file, and the warning quotes the parser", () => {
+    expectUserConfigRejected(
+      "project_doc_max_bytes = \n",
+      "expecting string, number, datetime, boolean",
+    );
+  });
+
+  it('a string value ("65536") is not a non-negative integer, so Codex rejects the file', () => {
+    expectUserConfigRejected(
+      'project_doc_max_bytes = "65536"\n',
+      'project_doc_max_bytes = "65536" is not a non-negative integer',
+    );
+  });
+
+  it("a float that is not an integer value (65536.5) is not a non-negative integer, so Codex rejects the file", () => {
+    expectUserConfigRejected(
+      "project_doc_max_bytes = 65536.5\n",
+      "project_doc_max_bytes = 65536.5 is not a non-negative integer",
+    );
+  });
+
+  it("an integer above 2^64-1 (18446744073709551616) is outside the range Codex accepts, so Codex rejects the file", () => {
+    expectUserConfigRejected(
+      "project_doc_max_bytes = 18446744073709551616\n",
+      "project_doc_max_bytes is an integer outside the range Codex accepts",
+    );
+  });
+
+  it("a project_doc_max_bytes of -0 is the integer 0, so Codex loads no project instruction file at all", () => {
+    const repo = makeCodexRepo();
+    writeFileSync(join(repo, "AGENTS.md"), "small\n", "utf8");
+    writeCodexConfigAt(
+      join(home, "fake-user-home", ".codex"),
+      "project_doc_max_bytes = -0\n",
+    );
+    registerHome(defaults(), [repo]);
+    const report = runDoctor(home, codexRun());
+    expect(report.targets[0].codexWarnings).toEqual([
+      "codex budget: AGENTS.md is never loaded: the user config file " +
+        join(home, "fake-user-home", ".codex", "config.toml") +
+        " sets project_doc_max_bytes = 0, and Codex loads no project " +
+        "instruction file at all",
+    ]);
+    expect(report.exitCode).toBe(0);
+  });
+
+  it("a multi-line string holding a project_doc_max_bytes line is not that key, so the default budget applies", () => {
+    const repo = makeCodexRepo();
+    writeFileSync(join(repo, "AGENTS.md"), "x".repeat(33000), "utf8");
+    writeCodexConfigAt(
+      join(home, "fake-user-home", ".codex"),
+      'title = """\nproject_doc_max_bytes = 1\n"""\n',
+    );
+    registerHome(defaults(), [repo]);
+    const report = runDoctor(home, codexRun());
+    expect(report.targets[0].codexWarnings?.[0]).toContain(
+      "over the 32768-byte project_doc_max_bytes budget from default",
+    );
+    expect(report.exitCode).toBe(0);
+  });
+
+  it('a quoted top-level key "project_doc_max_bytes" = 16384 is recognised as the budget', () => {
+    const repo = makeCodexRepo();
+    writeFileSync(
+      join(repo, "AGENTS.md"),
+      agentsWithHeadingAt(20000, 16384, "## Lost\n"),
+      "utf8",
+    );
+    writeCodexConfigAt(
+      join(home, "fake-user-home", ".codex"),
+      '"project_doc_max_bytes" = 16384\n',
+    );
+    registerHome(defaults(), [repo]);
+    const report = runDoctor(home, codexRun());
+    expect(report.targets[0].codexWarnings?.[0]).toContain(
+      "over the 16384-byte project_doc_max_bytes budget from user config",
+    );
+    expect(report.exitCode).toBe(0);
+  });
+
+  it("an integer above the safe JS range and up to 2^64-1 (9007199254740993) is a budget no real file can exceed, so nothing warns", () => {
+    const repo = makeCodexRepo();
+    writeFileSync(join(repo, "AGENTS.md"), "x".repeat(33000), "utf8");
+    writeCodexConfigAt(
+      join(home, "fake-user-home", ".codex"),
+      "project_doc_max_bytes = 9007199254740993\n",
+    );
+    registerHome(defaults(), [repo]);
+    const report = runDoctor(home, codexRun());
+    expect(report.targets[0].codexWarnings).toBeUndefined();
+    expect(report.exitCode).toBe(0);
+  });
+
+  // Known divergence from Codex, pinned here so it stays visible: TOML
+  // spells 65536.0 a float and Codex rejects it, but the TOML parser hands
+  // JavaScript the number 65536, exactly the integer, and nothing about it
+  // says it was a float. doctor therefore reads a 65536-byte budget.
+  it("a float with an integer value (65536.0) is the number 65536 to the parser, so doctor reads it as a budget where Codex would reject the file", () => {
+    const repo = makeCodexRepo();
+    writeFileSync(join(repo, "AGENTS.md"), "x".repeat(70000), "utf8");
+    writeCodexConfigAt(
+      join(home, "fake-user-home", ".codex"),
+      "project_doc_max_bytes = 65536.0\n",
+    );
+    registerHome(defaults(), [repo]);
+    const report = runDoctor(home, codexRun());
+    expect(report.targets[0].codexWarnings?.[0]).toContain(
+      "over the 65536-byte project_doc_max_bytes budget from user config",
+    );
+    expect(report.exitCode).toBe(0);
+  });
+
   it("a fenced # line past the budget is not a heading, so no heading is lost entirely", () => {
     const repo = makeCodexRepo();
     writeFileSync(
       join(repo, "AGENTS.md"),
       agentsWithHeadingAt(33000, 32768, "```\n# not a heading\n```\n"),
+      "utf8",
+    );
+    registerHome(defaults(), [repo]);
+    const report = runDoctor(home, codexRun());
+    expect(report.targets[0].codexWarnings?.[0]).toContain(
+      "no heading starts at or after the budget, so no heading is lost entirely",
+    );
+    expect(report.exitCode).toBe(0);
+  });
+
+  it("a ~~~ line inside a ``` fence past the budget does not close that fence, so the heading under it is still fenced off", () => {
+    const repo = makeCodexRepo();
+    writeFileSync(
+      join(repo, "AGENTS.md"),
+      agentsWithHeadingAt(
+        33000,
+        32768,
+        "```\n~~~\n## still fenced\n~~~\n```\n",
+      ),
       "utf8",
     );
     registerHome(defaults(), [repo]);
