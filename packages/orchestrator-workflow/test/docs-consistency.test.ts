@@ -9776,3 +9776,22 @@ describe("README section pointers in shipped, fetched-raw agent docs stay valid"
     expect(extractHeadings(fixtureReadme).has("Run modes")).toBe(true);
   });
 });
+
+// Appended at the end of the file on purpose: the knowledge bundle and the
+// sibling-drift allowlist cite this file by line, so new pins go below every
+// cited line. Same normative site as the read-only block above (reviewer.md).
+describe("safety core: the reviewer's in-place exception is pinned whole at reviewer.md", () => {
+  const reviewerMd = unwrap(readAsset("agents/reviewer.md"));
+
+  it("allows the runner's in-place mode only when worktree isolation is unusable", () => {
+    expect(reviewerMd).toContain(
+      "A briefing may authorize the probe runner's own in-place mode when worktree isolation is unusable.",
+    );
+  });
+
+  it("keeps the in-place mode a bounded exception applied only by the runner", () => {
+    expect(reviewerMd).toContain(
+      'That stays a bounded exception to "never in the reviewed tree," not a redefinition of it: only the orchestrator\'s briefing authorizes it, only the runner itself applies the mutant (never you by hand), the runner must report `restored_verified: true` for every such probe (a missing or `false` value is a finding), the tree must be clean and at the reviewed head before the runner starts, and no other agent may be active in that tree at the same time (see the concurrency rule in step 7 of the detailed workflow).',
+    );
+  });
+});
