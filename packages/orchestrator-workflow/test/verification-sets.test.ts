@@ -292,6 +292,9 @@ describe("documented verification sets", () => {
       ),
     );
     expect(compact(evidenceAndProbes)).toContain(
+      "Bind every result attempt to its checked revision and dirty state.",
+    );
+    expect(compact(evidenceAndProbes)).toContain(
       compact(
         "\"Scripts\" here means every package-manager script entry plus every file an extra's or preflight's argv or such a script entry invokes directly, and repository configuration files the executed tools load count as effective configuration; code under test is not a component.",
       ),
