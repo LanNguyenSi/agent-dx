@@ -1,5 +1,24 @@
 # Bundle log
 
+- 2026-10-18T05:49:56Z, prompt structure tightening: `implementer.md` and `reviewer.md` list the
+  verification-set rule as labelled sub-bullets (approval, comparison, path rule, snapshot, reporting,
+  outcomes, bundle check) and define each return field in "Field notes" directly under the output
+  structure, so the rule bullets above it keep the conduct only. The revision half of the
+  snapshot clause is no longer stated twice (the path rule carries it), the `expectation` meaning is
+  stated once, and the reviewer's shell-replay reporting sentence is folded into the `reproduction`
+  note. `evidence-and-probes.md` splits its acceptance-decision, review-method, and
+  freeze-resolution paragraphs into short sentences. The implementer hygiene bullet and its mirror in
+  `subagent-contracts-superset.md` are re-wrapped to the files' normal width, words unchanged. The
+  edits shifted every anchored line citation into those three files and into `CHANGELOG.md`, in
+  `subagent-contracts-superset.md`, `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md`, and this log; each was re-pointed by locating its anchor on
+  the new line, and the anchors whose text moved (`expectation`, the field enumeration, the
+  `commits` sentences, the `closed` sentence, the withdrawn sentence, the reviewer reproduction
+  trigger) were re-anchored on the new wording. The doc claims that named a prompt "rule bullet" for
+  `mutation_probes` and `commits` now name the field notes, and the contract-location paragraph says
+  where the field notes sit. The four docs listing the changed sources were re-read against the
+  changed prompts and re-stamped; no contract claim changed.
+
 - 2026-10-17T19:39:53Z, prompt dedupe: `implementer.md` states the foreground rule for verification plans,
   probe plans, and repeat tallies once, next to the other foreground-run rule, and `reviewer.md`'s
   single-mode probe duty names the mismatch consequence once. The moved and removed lines shifted

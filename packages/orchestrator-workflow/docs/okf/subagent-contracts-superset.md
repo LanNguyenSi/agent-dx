@@ -3,7 +3,7 @@ type: invariant
 title: Subagent Contracts and the Slicer-Superset Invariant
 description: The five subagent I/O contracts, where they are duplicated, the task-slicer-superset invariant, and the misfire rule that keeps subagent output honest.
 tags: [subagent-contracts, slicer-superset, misfire-rule, io-contract-duplication, read-only-roles]
-timestamp: 2026-10-17T20:31:53Z
+timestamp: 2026-10-18T05:49:56Z
 sources:
   - packages/orchestrator-workflow/assets/agents/explorer.md
   - packages/orchestrator-workflow/assets/agents/task-slicer.md
@@ -111,7 +111,7 @@ the comparison
 
 Every role's output contract is written twice: once in `SKILL.md`'s own
 fenced yaml block (the orchestrator's reference copy), once in the role's
-installed prompt, in its trailing "Return exactly this structure" block.
+installed prompt, in its "Return exactly this structure" block (field notes follow).
 The implementer and slicer blocks explicitly select the recorded contract:
 v1 uses the shown nested fields; a recorded original string-list contract
 retains its strings and omits only the added baseline/evidence-index fields.
