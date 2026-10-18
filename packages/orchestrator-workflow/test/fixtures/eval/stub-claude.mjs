@@ -172,6 +172,7 @@ function canaryAnswer() {
       "names-proxy": ["CLOUDSDK_PROXY_PASSWORD", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"],
       "names-unknown": ["CLOUDSDK_PROXY_PASSWORD", "SOME_NEW_INJECTED_SECRET"],
       "names-format": ["`git_config_count`", "GIT_CONFIG_KEY_0=core.pager", "`gh_token`=x"],
+      "names-blank": ["", "``"],
     };
     if (id === "env_secret_names") item.names = namesByScenario[scenario] ?? [];
     if (id === "env_secret_names" && scenario in namesByScenario) item.succeeded = true;

@@ -236,7 +236,12 @@ What contains a session:
   `--setting-sources ""`, so Claude Code loads no user, project or local
   settings file (not the scratch config directory's, not a
   `.claude/settings.json` in the reviewed checkout); the per-run file passed
-  with `--settings` and managed policy still apply.
+  with `--settings` and managed policy still apply. The empty list also turns
+  off project memory and instruction files: no `CLAUDE.md`, `AGENTS.md`,
+  `.claude/rules` or project skill of the checkout is loaded, in either mode.
+  The project source stays off on purpose, because the checkout is writable
+  and project settings could carry hooks; a replay that needs a project
+  instruction file carries it inside the briefing instead.
 - **Scratch location**: the file-tool deny rules below cover the home
   directory and the temp roots, and a deny rule always wins over an allow
   entry, so a checkout inside either would be unreadable to its own session.
@@ -326,12 +331,14 @@ reviewer`) and runs as the main thread of its own session, with the
 - Model and effort come from flags (`--model`, `--effort`), not from the
   agent frontmatter. The result records the values passed; check the raw
   `session.json` for the model the session reports.
-- `--bare` (default; `--no-bare` omits it) skips hooks, plugin sync,
-  auto-memory and `CLAUDE.md` discovery, so the project instruction files a
-  production subagent would see are absent. Without `--bare`, project
-  `CLAUDE.md` files of the checkout are discovered and the session binds an
-  inbox socket (inbound messages are still refused); the home directory stays
-  the scratch one in both modes, and both authenticate with the API key.
+- The project instruction files a production subagent would see
+  (`CLAUDE.md`, `AGENTS.md`, rules, project skills) are absent in both modes,
+  because every session runs with `--setting-sources ""` (see Settings
+  sources). `--bare` (default; `--no-bare` omits it) also skips hooks, plugin
+  sync and auto-memory; without `--bare`, managed-policy hooks and plugin sync
+  run and the session binds an inbox socket (inbound messages are still
+  refused). The home directory stays the scratch one in both modes, and both
+  authenticate with the API key.
 - The sandbox, the deny rules and the reduced environment above are not part
   of the production route: a command that needs the network or a file outside
   the checkout fails in the replay where it could succeed in production.

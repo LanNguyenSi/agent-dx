@@ -263,6 +263,7 @@ describe("evaluation CLI", { timeout: 120_000 }, () => {
 
   it("refuses a --scratch that is a symlink or that others can write, before any session", async () => {
     const records = mkdtempSync(join(work, "rec-owner-"));
+    const freshOut = mkdtempSync(join(work, "out-owner-"));
     const real = join(work, "owned-scratch");
     mkdirSync(real, { mode: 0o700 });
     const link = join(work, "linked-scratch");
@@ -278,7 +279,10 @@ describe("evaluation CLI", { timeout: 120_000 }, () => {
       const code = await main(
         [
           "canary",
-          ...common(),
+          "--dataset",
+          dataset,
+          "--out",
+          freshOut,
           "--claude",
           claude({}, records),
           ...guard,
@@ -292,6 +296,8 @@ describe("evaluation CLI", { timeout: 120_000 }, () => {
     }
     expect(calls(records)).toEqual([]);
     expect(readdirSync(open)).toEqual([]);
+    // The refusal comes before any work: no canary record directory under --out.
+    expect(existsSync(join(freshOut, "canary"))).toBe(false);
   });
 
   it("requires --scratch where the host has no default, and uses the default where it has one", async () => {
@@ -1362,6 +1368,14 @@ describe("canary", { timeout: 120_000 }, () => {
     // The injected names in other spellings are recognised; the lower-case secret name is not let through.
     expect(check.detail).toBe("names visible: gh_token");
     expect(text).not.toContain("gh_token`=x");
+  });
+
+  it("does not pass a reported success whose printed names are all blank", async () => {
+    const { code, result } = await canary("names-blank");
+    expect(code).toBe(1);
+    const check = result.checks.find((c: any) => c.id === "env_secret_names");
+    expect(check.pass).toBe(false);
+    expect(check.detail).not.toContain("only sandbox-injected names printed");
   });
 
   it("is inconclusive, not a pass, when an action was not attempted", async () => {
