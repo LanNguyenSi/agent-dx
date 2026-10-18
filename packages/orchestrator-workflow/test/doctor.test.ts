@@ -1589,22 +1589,16 @@ describe("runDoctor: Codex instruction-budget warnings", () => {
     expect(report.exitCode).toBe(0);
   });
 
-  // Updated from the old reader, which returned any value above
-  // Number.MAX_SAFE_INTEGER as invalid raw text. The TOML parser narrows a
-  // huge integer to 64 bits, and this one wraps back to a positive BigInt,
-  // so doctor reads it as a huge budget and warns nothing (real Codex
-  // rejects the file; a known limit of the parser, not of this check).
-  it("an integer above 2^64-1 whose 64-bit narrowing is positive (99999999999999999999) is read as a huge budget, so nothing warns", () => {
-    const repo = makeCodexRepo();
-    writeFileSync(join(repo, "AGENTS.md"), "x".repeat(33000), "utf8");
-    writeCodexConfigAt(
-      join(home, "fake-user-home", ".codex"),
+  // @iarna/toml returns an integer outside the safe JS range as
+  // BigInt.asIntN(64, literal): the high bits are gone, so doctor cannot
+  // tell what the literal was and reports the budget as unknown. Codex
+  // itself accepts integers up to 9223372036854775807 and rejects larger
+  // ones.
+  it("an integer literal beyond the safe JS range whose 64-bit narrowing is positive (99999999999999999999) is reported as unknown, never as rejected or as a budget", () => {
+    expectUserBudgetUnknown(
       "project_doc_max_bytes = 99999999999999999999\n",
+      "outside the range doctor can read exactly; Codex accepts up to 9223372036854775807",
     );
-    registerHome(defaults(), [repo]);
-    const report = runDoctor(home, codexRun());
-    expect(report.targets[0].codexWarnings).toBeUndefined();
-    expect(report.exitCode).toBe(0);
   });
 
   it("a project_doc_max_bytes line under a [table] header is not a top-level value, so the default budget applies", () => {
@@ -1692,25 +1686,102 @@ describe("runDoctor: Codex instruction-budget warnings", () => {
     expect(report.exitCode).toBe(0);
   }
 
-  it("a radix integer with a sign (+0x64) is a TOML syntax error, so Codex rejects the whole file", () => {
-    expectUserConfigRejected(
+  /** Writes the user config with this exact text and expects the warning
+   * that says the budget of that layer is unknown, never that Codex
+   * rejects the file. `cause` is the part of the warning that says why;
+   * the warning gives the AGENTS.md size and the default budget for
+   * context and makes no size comparison. */
+  function expectUserBudgetUnknown(text: string, cause: string): string {
+    const repo = makeCodexRepo();
+    writeFileSync(join(repo, "AGENTS.md"), "x".repeat(33000), "utf8");
+    const userDir = join(home, "fake-user-home", ".codex");
+    writeCodexConfigAt(userDir, text);
+    registerHome(defaults(), [repo]);
+    const report = runDoctor(home, codexRun());
+    expect(report.targets[0].codexWarnings).toHaveLength(1);
+    const warning = report.targets[0].codexWarnings?.[0] ?? "";
+    expect(warning).toContain("codex budget: ");
+    expect(warning).toContain(cause);
+    expect(warning).toContain(join(userDir, "config.toml"));
+    expect(warning).toContain(
+      "the budget from this layer is unknown, so no size comparison is made " +
+        "(AGENTS.md is 33000 bytes, the default budget is 32768 bytes)",
+    );
+    expect(warning).not.toContain("Codex rejects");
+    expect(warning).not.toContain("refuses to load");
+    expect(warning).not.toContain("over the");
+    expect(report.exitCode).toBe(0);
+    return warning;
+  }
+
+  it("a radix integer with a sign (+0x64) is a TOML syntax error for doctor's parser, so the budget is unknown", () => {
+    const userDir = join(home, "fake-user-home", ".codex");
+    const warning = expectUserBudgetUnknown(
       "project_doc_max_bytes = +0x64\n",
-      "Unexpected character",
+      "doctor could not read the user config file " +
+        join(userDir, "config.toml") +
+        " with its TOML 0.5 parser (Unexpected character",
+    );
+    expect(warning).toContain(
+      "); Codex reads TOML 1.1 and may load the file; the budget from this layer is unknown",
     );
   });
 
-  it("a key set twice is a TOML error, so Codex rejects the whole file", () => {
-    expectUserConfigRejected(
+  it("a key set twice is an error for doctor's parser, so the budget is unknown", () => {
+    expectUserBudgetUnknown(
       "project_doc_max_bytes = 16384\nproject_doc_max_bytes = 8192\n",
-      "Can't redefine existing key",
+      "with its TOML 0.5 parser (Can't redefine existing key",
     );
   });
 
-  it("a TOML syntax error makes Codex reject the whole file, and the warning quotes the parser", () => {
-    expectUserConfigRejected(
+  it("a genuine TOML syntax error makes the budget unknown and quotes the parser's first line, never that Codex rejects the file", () => {
+    expectUserBudgetUnknown(
       "project_doc_max_bytes = \n",
-      "expecting string, number, datetime, boolean",
+      "with its TOML 0.5 parser (Unexpected character, expecting string, number, datetime, boolean",
     );
+  });
+
+  // TOML 1.0 allows arrays of mixed types; the 0.5 parser refuses them and
+  // Codex 0.163.0 loads such a file.
+  it("a mixed-type array (TOML 1.0) that doctor's parser refuses makes the budget unknown, never that Codex rejects the file", () => {
+    expectUserBudgetUnknown(
+      'project_doc_max_bytes = 16384\nmix = [1, "a"]\n',
+      "with its TOML 0.5 parser (",
+    );
+  });
+
+  // TOML 1.1 allows an inline table over several lines; the 0.5 parser
+  // refuses it and Codex 0.163.0 loads such a file.
+  it("an inline table spread over several lines (TOML 1.1) that doctor's parser refuses makes the budget unknown, never that Codex rejects the file", () => {
+    expectUserBudgetUnknown(
+      "project_doc_max_bytes = 16384\n" +
+        '[mcp_servers.a]\nenv = { A = "1",\n B = "2" }\n',
+      "with its TOML 0.5 parser (",
+    );
+  });
+
+  it("an unreadable project config makes the budget unknown for the project layer and the user value is not consulted", () => {
+    const repo = makeCodexRepo();
+    writeFileSync(join(repo, "AGENTS.md"), "x".repeat(33000), "utf8");
+    writeCodexConfigAt(join(repo, ".codex"), 'mix = [1, "a"]\n');
+    writeCodexConfigAt(
+      join(home, "fake-user-home", ".codex"),
+      "project_doc_max_bytes = 100\n",
+    );
+    registerHome(defaults(), [repo]);
+    const report = runDoctor(home, codexRun());
+    const warning = report.targets[0].codexWarnings?.[0] ?? "";
+    expect(report.targets[0].codexWarnings).toHaveLength(1);
+    expect(warning).toContain(
+      "could not read the project config file " +
+        join(repo, ".codex", "config.toml"),
+    );
+    expect(warning).toContain(
+      "the budget from this layer is unknown, so no size comparison is made",
+    );
+    expect(warning).not.toContain("Codex rejects");
+    expect(warning).not.toContain("user config");
+    expect(report.exitCode).toBe(0);
   });
 
   it('a string value ("65536") is not a non-negative integer, so Codex rejects the file', () => {
@@ -1727,10 +1798,20 @@ describe("runDoctor: Codex instruction-budget warnings", () => {
     );
   });
 
-  it("an integer above 2^64-1 (18446744073709551616) is outside the range Codex accepts, so Codex rejects the file", () => {
-    expectUserConfigRejected(
+  // 2^64 narrows to exactly 0 in 64 bits; the test pins that doctor does
+  // not read it as the integer 0 ("no project instruction file").
+  it("an integer literal beyond the safe JS range that narrows to 0 (18446744073709551616) is reported as unknown, not as the integer 0", () => {
+    const warning = expectUserBudgetUnknown(
       "project_doc_max_bytes = 18446744073709551616\n",
-      "project_doc_max_bytes is an integer outside the range Codex accepts",
+      "outside the range doctor can read exactly; Codex accepts up to 9223372036854775807",
+    );
+    expect(warning).not.toContain("never loaded");
+  });
+
+  it("a negative integer literal below -2^63 (-9223372036854775809) is reported as unknown, never as a budget", () => {
+    expectUserBudgetUnknown(
+      "project_doc_max_bytes = -9223372036854775809\n",
+      "outside the range doctor can read exactly; Codex accepts up to 9223372036854775807",
     );
   });
 
@@ -1786,17 +1867,11 @@ describe("runDoctor: Codex instruction-budget warnings", () => {
     expect(report.exitCode).toBe(0);
   });
 
-  it("an integer above the safe JS range and up to 2^64-1 (9007199254740993) is a budget no real file can exceed, so nothing warns", () => {
-    const repo = makeCodexRepo();
-    writeFileSync(join(repo, "AGENTS.md"), "x".repeat(33000), "utf8");
-    writeCodexConfigAt(
-      join(home, "fake-user-home", ".codex"),
+  it("the first integer above the safe JS range (9007199254740993, which Codex accepts) is reported as unknown because doctor cannot read it exactly", () => {
+    expectUserBudgetUnknown(
       "project_doc_max_bytes = 9007199254740993\n",
+      "outside the range doctor can read exactly; Codex accepts up to 9223372036854775807",
     );
-    registerHome(defaults(), [repo]);
-    const report = runDoctor(home, codexRun());
-    expect(report.targets[0].codexWarnings).toBeUndefined();
-    expect(report.exitCode).toBe(0);
   });
 
   // Known divergence from Codex, pinned here so it stays visible: TOML

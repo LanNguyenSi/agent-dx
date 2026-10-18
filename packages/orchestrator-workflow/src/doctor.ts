@@ -389,10 +389,9 @@ function computeKnowledgeWarnings(
  * `AGENTS.md` in each directory; all of them share this one budget, and
  * content past it is cut off with only a log warning. Codex keeps the
  * value of the highest layer that sets the key: `0` is accepted and makes
- * it load no project instruction file at all, a value that is not a
- * non-negative integer makes it refuse to load that configuration, and a
- * file it cannot parse at all (a TOML syntax error, a key set twice) it
- * rejects whole; none of these falls back to a lower layer. For a project
+ * it load no project instruction file at all, and a value that is not an
+ * integer from 0 up to 9223372036854775807 makes it refuse to load that
+ * configuration; none of these falls back to a lower layer. For a project
  * Codex does not trust it loads neither the project config nor any
  * instruction file; this check assumes a trusted project.
  */
@@ -417,21 +416,23 @@ export interface CodexBudgetInputs {
 }
 
 /** One layer's read of its Codex `config.toml`: `{ parseError }` when the
- * file is present but is not valid TOML (a syntax error, a key set
- * twice, ...), which is a file Codex rejects whole; `{ value }` when it
+ * file is present but doctor's TOML 0.5 parser cannot read it (a syntax
+ * error, a key set twice, or a TOML 1.0 / 1.1 form Codex may accept);
+ * `{ value }` when it
  * parses and the top-level `project_doc_max_bytes` key is set (a key
  * inside a `[table]` header is a different key and does not count);
  * `undefined` when the file is absent or sets no top-level key. */
 type CodexConfigRead = { value: unknown } | { parseError: string } | undefined;
 
 /**
- * Reads one Codex `config.toml` the way Codex reads one: the file is
- * parsed with a real TOML parser ({@link parseToml}), so every file Codex
- * rejects (a syntax error, a key set twice, ...) is reported with its
- * parser message, and every valid file is understood in full (quoted
- * keys, inline comments, multi-line strings, all integer forms). Only
- * the top-level `project_doc_max_bytes` key counts; its parsed value is
- * returned untouched and what Codex makes of it is decided in
+ * Reads one Codex `config.toml` with a TOML parser ({@link parseToml},
+ * `@iarna/toml`, which implements TOML 0.5 while Codex reads TOML 1.1):
+ * quoted keys, inline comments, multi-line strings and every integer
+ * form 0.5 knows are understood in full. A file the parser cannot read
+ * is reported with its first message line and is not claimed to be
+ * rejected by Codex, which may load it. Only the top-level
+ * `project_doc_max_bytes` key counts; its parsed value is returned
+ * untouched and what Codex makes of it is decided in
  * {@link decideCodexBudgetValue}. A file that cannot be read at all is
  * treated as absent.
  */
@@ -459,35 +460,33 @@ function parseTomlFirstLine(error: unknown): string {
   return (message.split("\n", 1)[0] ?? "").replace(/:$/, "");
 }
 
-/** What Codex makes of the parsed value of the top-level
- * `project_doc_max_bytes` key: the integer `0` (TOML spells `-0` that
- * same value) makes it load no project instruction file at all, a
- * positive integer is the byte budget, and anything else (a negative
- * integer, a float, a string, a boolean, an array, a table) makes it
- * reject the whole file. The two ways `@iarna/toml` represents integers
- * outside `Number.MAX_SAFE_INTEGER` are handled with it, not against it:
- * a huge integer literal comes back as a `BigInt` narrowed to a signed
- * 64 bits, so a positive one is an integer no real instruction file
- * could ever exceed (`huge`, never worth a warning) while a zero or
- * negative one is an integer outside the range Codex accepts; and a
- * float that is not an integer value is rejected, while one with an
- * integer value (`65536.0`) is what the parser hands back as exactly
- * that integer, the one known place this check can differ from Codex. */
+/** What doctor makes of the parsed value of the top-level
+ * `project_doc_max_bytes` key. Codex accepts integers from 0 up to
+ * 9223372036854775807: `0` (TOML spells `-0` that same value) makes it
+ * load no project instruction file at all, a positive integer is the
+ * byte budget, and a negative integer, a float, a string, a boolean, an
+ * array or a table makes it reject the whole file. Doctor cannot match
+ * Codex in three known places, and says what it does not know instead of
+ * claiming a rejection: (1) the parser reads TOML 0.5 and Codex reads
+ * TOML 1.1, so a file the parser refuses may still load in Codex (see
+ * {@link readCodexProjectDocMaxBytes}); (2) the parser returns an
+ * integer outside the safe JS range as `BigInt.asIntN(64, literal)`,
+ * which drops the high bits, so a `BigInt` is a literal outside the
+ * range doctor can read exactly and its budget is unknown; (3) the
+ * parser returns an integer-valued float (`65536.0`, `1e2`) as the plain
+ * number, indistinguishable from the integer, so doctor reads it as that
+ * integer although Codex rejects it. */
 function decideCodexBudgetValue(
   value: unknown,
   configFile: string,
   source: CodexBudgetSource,
 ): CodexBudgetDecision {
   if (typeof value === "bigint") {
-    return value > 0n
-      ? { kind: "huge", source }
-      : {
-          kind: "reject",
-          configFile,
-          source,
-          reason:
-            "project_doc_max_bytes is an integer outside the range Codex accepts",
-        };
+    return {
+      kind: "unknown",
+      source,
+      reason: `project_doc_max_bytes in the ${source} file ${configFile} is outside the range doctor can read exactly; Codex accepts up to 9223372036854775807`,
+    };
   }
   if (typeof value === "number" && Number.isInteger(value) && value >= 0) {
     return value === 0
@@ -519,14 +518,16 @@ function describeCodexValue(value: unknown): string {
  * highest layer that sets the key decides and no lower layer ever
  * applies: `budget` is a winning positive byte count and its layer;
  * `zero` means the winning value is `0`, and Codex then loads no project
- * instruction file at all; `huge` means the winning value is a positive
- * integer above the safe JS range, a budget no real instruction file
- * could exceed; `reject` means Codex refuses to load that config file,
- * and `reason` says why (a TOML parse error, or an unusable value). */
+ * instruction file at all; `unknown` means doctor cannot tell the budget
+ * of the winning layer (its TOML 0.5 parser cannot read the file, or the
+ * value is outside the integer range doctor reads exactly), `reason`
+ * says why, and no size comparison is made; `reject` means Codex refuses
+ * to load that config file because of its unusable value, and `reason`
+ * says why. */
 type CodexBudgetDecision =
   | { kind: "budget"; bytes: number; source: CodexBudgetSource }
   | { kind: "zero"; configFile: string; source: CodexBudgetSource }
-  | { kind: "huge"; source: CodexBudgetSource }
+  | { kind: "unknown"; source: CodexBudgetSource; reason: string }
   | {
       kind: "reject";
       configFile: string;
@@ -541,10 +542,11 @@ type CodexBudgetDecision =
  * config.toml` (`<homeDir>/.codex/config.toml` when the environment does
  * not set `CODEX_HOME`), then the default. The highest layer that sets
  * the key decides: its positive integer value is the budget, its `0`
- * means Codex loads no project instruction file at all, and a file it
- * cannot parse or whose value Codex cannot use means Codex rejects that
- * file; none of these falls back to a lower layer, so a parse error in
- * either file is reported whatever the other file says.
+ * means Codex loads no project instruction file at all, a value Codex
+ * cannot use means Codex rejects that file, and a file doctor cannot
+ * parse or a value outside its exact integer range leaves the budget
+ * unknown; none of these falls back to a lower layer, so a file doctor
+ * cannot parse is reported whatever the other file says.
  */
 function resolveCodexBudget(
   targetPath: string,
@@ -569,10 +571,9 @@ function resolveCodexBudget(
     if (read === undefined) continue;
     if ("parseError" in read) {
       return {
-        kind: "reject",
-        configFile: layer.configFile,
+        kind: "unknown",
         source: layer.source,
-        reason: read.parseError,
+        reason: `doctor could not read the ${layer.source} file ${layer.configFile} with its TOML 0.5 parser (${read.parseError}); Codex reads TOML 1.1 and may load the file`,
       };
     }
     return decideCodexBudgetValue(read.value, layer.configFile, layer.source);
@@ -635,11 +636,14 @@ function isRegularFile(path: string): boolean {
  * (project config, user config, or default) and the first heading that is
  * lost entirely (or says none is); the deciding value is `0`, and the
  * warning says Codex loads no project instruction file at all (no size
- * comparison); the deciding file is one Codex rejects (it does not parse,
- * or holds a value Codex cannot use), and the warning says so, naming the
- * file and the reason (no size comparison). Absent file, other harnesses,
- * files within the budget, and a deciding budget too large for any real
- * file warn nothing; like the knowledge warnings this never changes
+ * comparison); the deciding file holds a value Codex rejects, and the
+ * warning says so, naming the file and the reason (no size comparison);
+ * the deciding layer's budget is unknown to doctor (its TOML 0.5 parser
+ * cannot read the file, which Codex's TOML 1.1 reader may load, or the
+ * value is outside the integer range doctor reads exactly), and the
+ * warning says so, with the file's size and the default budget for
+ * context and no size comparison. Absent file, other harnesses and files
+ * within the budget warn nothing; like the knowledge warnings this never changes
  * `status` or the doctor exit code. The check assumes Codex trusts the
  * project. Profiles, the system layer, managed layers and `-c` session
  * flags are config layers Codex itself consults that this check does not
@@ -663,7 +667,11 @@ function computeCodexBudgetWarnings(
     return [];
   }
   const decision = resolveCodexBudget(targetPath, inputs);
-  if (decision.kind === "huge") return [];
+  if (decision.kind === "unknown") {
+    return [
+      `codex budget: ${decision.reason}; the budget from this layer is unknown, so no size comparison is made (${hasOverride ? "AGENTS.override.md" : "AGENTS.md"} is ${content.length} bytes, the default budget is ${CODEX_PROJECT_DOC_MAX_BYTES_DEFAULT} bytes)`,
+    ];
+  }
   if (decision.kind === "reject") {
     return [
       `codex budget: Codex rejects the ${decision.source} file ${decision.configFile}: ${decision.reason}, so Codex refuses to load that configuration`,

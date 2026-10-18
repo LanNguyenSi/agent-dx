@@ -90,7 +90,7 @@ The manifest is never written directly outside of one function,
 write from `setup`, `apply`, `doctor --prune`, and `adopt` goes through it, so
 no command can bypass the lock and race another's read-modify-write. It runs
 the whole re-read, `mutate`, and write inside one locked critical section: the
-manifest handed to `mutate` is re-read *inside* the lock, not whatever the
+manifest handed to `mutate` is re-read _inside_ the lock, not whatever the
 caller read earlier (which can already be stale by the time the lock is
 granted). Returning `undefined` from `mutate` means "write nothing" and yields
 `written: false`
@@ -212,7 +212,7 @@ producing a false mismatch.
 A repo manifest can carry a kit-version pin. A plain `apply` is skipped with
 no changes when the repo's recorded pin differs from the running operator
 install's version (cli.ts:887-893#"Repository is pinned at"), unless the
-operator explicitly overrides the gate: `--force-pin` advances an *existing*
+operator explicitly overrides the gate: `--force-pin` advances an _existing_
 pin to the current kit version, with no effect on a target that has no pin
 recorded at all (cli.ts:753-755#"has no effect on a target with no pin recorded",
 cli.ts:977-982#"? PACKAGE_VERSION"); `--pin <version>` sets or replaces the
@@ -267,7 +267,7 @@ Precedence is fixed: `drift` outranks `divergent`, which outranks
 `version-lag`, which outranks `clean`
 (doctor.ts:836-841#"else if (versionLag) {"); `unverifiable` is a distinct
 case from both `missing` and `no-manifest`: it means the target directory or
-its repo manifest could not even be *checked* (a stat failure other than
+its repo manifest could not even be _checked_ (a stat failure other than
 ENOENT, or a manifest file present but unreadable), so nothing is actually
 known about that target's real state
 (doctor.ts:31-46#"that basis would be an unrecoverable guess."). Only a
@@ -277,7 +277,7 @@ subset of `TargetReport`'s fields is part of the `--json` contract,
 doctor.ts:167-179#"reason: report.reason,"); the fields outside that
 contract exist only for the human-output printer in `cli.ts`, to render
 detail lines without recomputing values `inspectTarget` already worked out
-(doctor.ts:65-70#"render detail lines without recomputing values"). The contract's optional `knowledgeWarnings` key carries the knowledge-bundle warnings (a configured `path` or `repoRoot` that is not a directory, a malformed manifest `knowledge` entry ignored on read, a non-empty list omitting an existing `docs/okf/`) and is omitted when there is none (doctor.ts:173#"? { knowledgeWarnings: report.knowledgeWarnings }"); the human output prints each one as a `knowledge:` detail line under any status (cli.ts:1279#"knowledge: ${warning}"), and they never change the status or the exit code. The contract's optional `codexWarnings` key (doctor.ts:176#"? { codexWarnings: report.codexWarnings }") likewise carries at most one Codex instruction-budget warning per codex-selecting target, decided without fall-through by the highest config layer that sets `project_doc_max_bytes` (the project config, the user config, or the 32768 default). Each layer's file is read the way Codex reads it: parsed whole with the real TOML parser `@iarna/toml` (doctor.ts:438#"function readCodexProjectDocMaxBytes"), never line-scanned, so any file Codex rejects is reported as one -- a file that does not parse (a TOML syntax error, a key set twice) is rejected whole with the parser's first message line quoted back (doctor.ts:457#"function parseTomlFirstLine"), and a parsed file whose top-level value is not one Codex can use (a string, a table, a negative or fractional number) is rejected for that reason (doctor.ts:476#"function decideCodexBudgetValue"); only the top-level key counts, a key inside a `[table]` header is a different key. A value is used only when it is a non-negative integer: the deciding budget below the file's size (`AGENTS.override.md` when it is a regular file, else `AGENTS.md`) warns that Codex silently truncates it to the budget; the deciding value `0` warns that Codex loads no project instruction file at all; and a rejected file warns that Codex refuses to load it, naming the reason -- the last two with no size comparison, and the check assumes Codex trusts the project. A huge positive integer the parser returns as a `BigInt` (what it does for any integer literal above the safe JS range, narrowed to 64 bits, doctor.ts:482#"return value > 0n") is a budget no real instruction file could exceed and warns nothing; its two divergences from Codex (an above-64-bit integer whose narrowing stays positive reads as a huge budget instead of a rejection, and an integer-valued float like `65536.0` is indistinguishable from that integer in JavaScript and reads as the budget too) are pinned by tests. With profiles, the system layer, managed layers and `-c` session flags not considered, it prints as a `codex:` detail line (cli.ts:1284#"codex: ${warning}") and never changes the status or the exit code either.
+(doctor.ts:65-70#"render detail lines without recomputing values"). The contract's optional `knowledgeWarnings` key carries the knowledge-bundle warnings (a configured `path` or `repoRoot` that is not a directory, a malformed manifest `knowledge` entry ignored on read, a non-empty list omitting an existing `docs/okf/`) and is omitted when there is none (doctor.ts:173#"? { knowledgeWarnings: report.knowledgeWarnings }"); the human output prints each one as a `knowledge:` detail line under any status (cli.ts:1279#"knowledge: ${warning}"), and they never change the status or the exit code. The contract's optional `codexWarnings` key (doctor.ts:176#"? { codexWarnings: report.codexWarnings }") likewise carries at most one Codex instruction-budget warning per codex-selecting target, decided without fall-through by the highest config layer that sets `project_doc_max_bytes` (the project config, the user config, or the 32768 default). Each layer's file is parsed whole with `@iarna/toml` (doctor.ts:439#"function readCodexProjectDocMaxBytes"), never line-scanned, and that parser implements TOML 0.5 while Codex reads TOML 1.1, so doctor never claims Codex rejects a file the parser refuses: such a file is reported as a layer whose budget is unknown, with the parser's first message line quoted back (doctor.ts:458#"function parseTomlFirstLine"), Codex noted as possibly loading it, and the AGENTS.md size and the default budget given for context. Only the top-level key counts, a key inside a `[table]` header is a different key. A parsed value is used only when it is an integer from 0 up to 9223372036854775807 (doctor.ts:479#"function decideCodexBudgetValue"): the deciding budget below the file's size (`AGENTS.override.md` when it is a regular file, else `AGENTS.md`) warns that Codex silently truncates it to the budget; the deciding value `0` warns that Codex loads no project instruction file at all; a value Codex cannot use (a string, a boolean, an array, a table, a negative or fractional number) warns that Codex refuses to load the file, naming the reason; and an unknown layer (an unreadable file, or a `BigInt` the parser returns for any integer literal above the safe JS range, narrowed to 64 bits with the high bits dropped, doctor.ts:488#"outside the range doctor can read exactly") warns that the budget is unknown -- every one of these with no size comparison, and the check assumes Codex trusts the project. One known mismatch is not detected: an integer-valued float like `65536.0` is indistinguishable from that integer in JavaScript and reads as the budget although Codex rejects it; a test pins it. With profiles, the system layer, managed layers and `-c` session flags not considered, it prints as a `codex:` detail line (cli.ts:1284#"codex: ${warning}") and never changes the status or the exit code either.
 
 Exit codes: `2` when no operator manifest exists at all (nothing else is
 evaluated), whether the file is simply absent or present-but-unreadable
@@ -369,7 +369,7 @@ to clear, `undefined` to carry the previous value forward unchanged
 whitespace-only is treated as no pin at all, both on write and on read back
 (init.ts:492-496#"? { pin: candidate.pin.trim() }"). `doctor`'s `versionLag`
 computation applies the pin rule precisely: a recorded pin suppresses
-`version-lag` only when the pin equals the repo's own *installed* version;
+`version-lag` only when the pin equals the repo's own _installed_ version;
 that is the expected, deliberate-stay state. When the pin and the installed
 version differ (someone changed the pin without reapplying, or the installed
 version drifted some other way), the target is still reported `version-lag`
