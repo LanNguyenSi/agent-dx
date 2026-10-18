@@ -114,7 +114,9 @@ directory and the subagents.
    opportunity to revise the criteria.
 6. **Delegate implementation.** Send each implementer subagent one narrow task
    contract (format below). Name the runbooks selected for the task in its
-   `runbooks` field, as contracts.md defines. The unsuffixed implementer carries a pinned
+   `runbooks` field, as contracts.md defines. For a briefing that names a
+   `verification_set`, the Verification sets section below says how its rules
+   are carried. The unsuffixed implementer carries a pinned
    effort: `medium` in its own file, whether or not tier variants are
    installed, so a default spawn no longer inherits the session's effort.
    When tier variants are installed, pick the implementer tier (the
@@ -307,7 +309,8 @@ directory and the subagents.
    the reviewer checks "runbook checklist followed" for each of them and
    classifies a deviation by the runbook's authority, as contracts.md defines.
    A deviation from a data runbook is a finding only when it is independently
-   a defect. Name the operator-curated bundle dirs and the pinned runbook
+   a defect. For a briefing that names a `verification_set`,
+   the Verification sets section below says how its rules are carried. Name the operator-curated bundle dirs and the pinned runbook
    paths, as read at the run base, in the briefing's `constraints`, so the
    reviewer can tell whether a diff touches an operator runbook. When tier
    variants are installed, pick the reviewer tier (the installed
@@ -489,14 +492,24 @@ non-accepting (fail-closed).
 ## Verification sets
 
 A verification set is the complete, repository-bound check list for one
-implementer or reviewer briefing. Each briefing names its resolved
-`verification_set`: a checked-in reference, repository identity, and the
-run-local frozen snapshot. The generic worked example is
+implementer or reviewer briefing. A briefing that names a set carries its
+resolved `verification_set`: a checked-in reference, repository identity, and
+the run-local frozen snapshot. The generic worked example is
 `.ai/workflow/verify.json`; it has one `preflight` executor and ordered named
 `extras`, each with `kind`, `name`, `cwd`, `argv`, and an explicit
 `before_preflight` or `after_preflight` phase. A preparation step runs before
 its dependent check only when the orchestrator approved that ordering; a set
 never grants permission to run an arbitrary build or script.
+
+The role-side rules for running and reporting a set live in
+[verification set rules](verification-set-rules.md), not in the implementer and
+reviewer prompts. A briefing names a verification set exactly when
+`verification_set.reference` is non-empty; an absent `verification_set` field,
+or one whose `reference` is empty, means the briefing names no set. Copy that reference, unedited and with its heading, into a
+briefing only when the briefing names a `verification_set`, after the briefing's
+YAML block; leave it out of every briefing that does not name a
+`verification_set`. A briefing stays self-contained, so the
+rules travel inside it and the role is never sent to look them up.
 
 Before acquiring even preflight output, the orchestrator inspects and approves
 the repository's effective configuration and every resolved script/argument,
@@ -507,8 +520,8 @@ and reviewer: it is the orchestrator's approval of every argv resolved from
 that frozen snapshot, and a digest mismatch withdraws the approval and is
 reported as a misfire. This is the identical approval condition contracts.md's
 Subagent input contract pins in its own wording; contracts.md additionally
-pins the per-role comparison rule that implementer.md and reviewer.md
-restate before acquisition or execution. That approval reaches only
+pins the per-role comparison rule that the verification set rules
+carry to the roles before acquisition or execution. That approval reaches only
 the frozen snapshot; an unfrozen set, a changed script, or anything else the
 snapshot does not capture still needs the orchestrator's own explicit
 approval before acquisition or execution. Any optional earlier inventory

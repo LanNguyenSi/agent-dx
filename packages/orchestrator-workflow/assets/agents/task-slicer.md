@@ -44,13 +44,15 @@ Rules:
   boundaries for the task — which files or areas the implementer may touch
   and must not touch — not implementation instructions. Apply Contract
   selection above to those fields for a recorded original contract.
-- Include a repository-bound `verification_set` reference in every implementer
-  and reviewer briefing: its checked-in path, repository identity, and
-  run-local frozen snapshot. The digest recorded in the briefing is what
-  carries the orchestrator's approval of the resolved argv to the implementer
-  and reviewer. The orchestrator approves effective config and
+- Name a `verification_set` (a non-empty `verification_set.reference`, as
+  evidence-and-probes.md's Verification sets section defines) in an implementer
+  or reviewer briefing only when the repository has a resolved verification
+  set: its checked-in path, repository identity, and run-local frozen
+  snapshot. Leave every sub-field empty when it has none. The digest recorded in the
+  briefing is what carries the orchestrator's approval of the resolved argv to
+  the implementer and reviewer. The orchestrator approves effective config and
   scripts before any preflight acquisition or command execution; the set does
-  not grant that authority. Include an ordered bundle check for each
+  not grant that authority. Include an ordered bundle check in that set for each
   configured knowledge bundle (`knowledge` in `.ai/workflow/manifest.json`;
   default `docs/okf/`), regardless of task scope.
 - For every identifier, config value, build context, or documented command a

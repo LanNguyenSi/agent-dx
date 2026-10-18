@@ -40,6 +40,10 @@ role definitions where available rather than improvising prompts.
   returns, inconclusive probes, interrupted, blocked, or partial runs,
   repeated findings, misfires, halts, and escalation, also read
   [review and recovery](references/review-and-recovery.md).
+- **Name a `verification_set` (a non-empty `verification_set.reference`) in an
+  implementer or reviewer briefing:** also
+  copy [verification set rules](references/verification-set-rules.md) into that
+  briefing.
 - **Run a knowledge-bundle check in CI or before a commit:** read
   [bundle gate in CI](references/bundle-gate-in-ci.md).
 
