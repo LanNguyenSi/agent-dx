@@ -1,5 +1,14 @@
 # Bundle log
 
+- 2026-10-18T18:33:39Z, run-internal criterion IDs named without the goal template: the Run-internal
+  identifiers section of `evidence-and-probes.md` no longer says `00-goal.md` assigns criterion
+  IDs (it assigns none since the single acceptance contract); it names them as the IDs a run file
+  carries where it numbers its acceptance criteria. The retired-vocabulary scan in
+  `acceptance-contract.test.ts` also covers "baseline revision" and "frozen baseline". No
+  citation points into the reflowed paragraph or the scan list. Re-verified: the claims of the
+  re-stamped docs are unchanged. Re-stamped: `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md`.
+
 - 2026-10-18T18:13:56Z, one acceptance contract: the `acceptance-baseline/v1` contract is retired and
   the original string-list contract is the only one (0.45.x was the last release that
   supports v1). `subagent-contracts-superset.md` now states the single `acceptance_criteria`
