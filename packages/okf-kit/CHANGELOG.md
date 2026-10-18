@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-10-18
+
 - `citations-resolve` now recognises `.prisma` among its citation target
   extensions: a `` `path:N` ``/`` `path:N-M` `` citation into a `.prisma` file
   is collected and checked like the same citation into `.ts` or `.json`, where
