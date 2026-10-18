@@ -1174,7 +1174,7 @@ describe("mutation probe naming and not-applicable signal ship in step 6 and bot
 
   it("the installed prompt scopes expectation's met/violated values to a measured result and reserves not_applicable otherwise", () => {
     const expectationScopeClause =
-      "only alongside a measured `killed` or `survived` `result`; it is `not_applicable` otherwise";
+      "and `violated` means it does not; both fields are `not_applicable` when no result was measured. - `expectation` needs a measured `result`: when none was measured, for example because the mutant could not be applied, it is `not_applicable`.";
     expect(skillMd).toContain("evidence-and-probes.md workflow step 6");
     expect(implementerMd).toContain(expectationScopeClause);
   });
@@ -1230,7 +1230,7 @@ describe("commits field ships in the skill and the implementer prompt", () => {
 
   it("the installed implementer prompt instructs reporting the full sha of every commit produced, in order", () => {
     expect(implementerMd).toContain(
-      "Report the full sha of every commit you produced on the task branch, in",
+      "report the full sha of every commit you produced on the task branch, in order",
     );
     expect(implementerMd).toContain("`commits` field");
     expect(implementerMd).toContain(
@@ -1314,13 +1314,13 @@ describe("class_closure fix-round obligation ships in the implementer prompt and
 
   it("the installed implementer prompt states the class_closure field's kind/command/sites semantics", () => {
     expect(implementerMd).toContain(
-      "Report the result in the output contract's `class_closure` field: `kind: enumerated | source | not_applicable` (`not_applicable` only on the task's first round, when there is no review finding yet to fix), the search `command` that produced the hit list (empty when `kind` is not `enumerated`), and the `sites` list of every hit found (empty when `kind` is not `enumerated`),",
+      "`kind: enumerated | source | not_applicable` (`not_applicable` only on the task's first round, when there is no review finding yet to fix). - `command` is the search command that produced the hit list, and `sites` is the list of every hit found; both are empty when `kind` is not `enumerated`.",
     );
   });
 
   it("the installed implementer prompt states the closed field semantics and the unclosed-site risks requirement", () => {
     expect(implementerMd).toContain(
-      "and `closed: true` when every site the round found (by search or by source-level closure) is fixed this round, `false` when a found site is not; name an unclosed site in `risks` with the reason.",
+      "`closed: true` when every site the round found (by search or by source-level closure) is fixed this round, `false` when a found site is not; name an unclosed site in `risks` with the reason.",
     );
   });
 
@@ -5386,16 +5386,16 @@ describe("GitHub Actions run-step shell replay ships in the implementer prompt, 
 
   it("only the reviewer prompt reports the replay in the reproduction field", () => {
     expect(reviewerMd).toContain(
-      "Report the replay in the `reproduction` field",
+      "report it here too, with `sample_size: not_applicable` when the replay itself has no meaningful sample size",
     );
-    expect(implementerMd).not.toContain(
-      "Report the replay in the `reproduction` field",
-    );
+    expect(implementerMd).not.toContain("`reproduction`");
+    expect(implementerMd).not.toContain("sample_size");
+    expect(implementerMd).not.toContain("non-probabilistic");
   });
 
   it("the reviewer prompt's reproduction trigger names the shell replay as a second, non-probabilistic trigger", () => {
     expect(reviewerMd).toContain(
-      "The GitHub Actions shell replay above is a second, explicitly non-probabilistic trigger for the same field",
+      "The GitHub Actions shell replay is a second, explicitly non-probabilistic trigger for the same field",
     );
   });
 

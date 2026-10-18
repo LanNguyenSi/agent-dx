@@ -322,7 +322,21 @@ directory and the subagents.
    cosmetics; `rigorous` otherwise. The method is orthogonal to the tier and
    never substitutes for it: do not pair `adversarial` with the `-medium`
    reviewer tier, a budget mismatch that names probes without the effort to run
-   them; tiers themselves are unchanged by this axis. For a review round whose entire delta contains only explanatory documentation, comments, or citations and contains no source- or test-file edits and no semantic change to executable commands, configuration, policy, instructions, or behavior, default to the `-medium` reviewer tier with `review_method: normal` where tier variants are installed. This refines the general tier default above for that one class only: there `-medium` is the default and a higher tier is the non-default choice recorded with a one-line reason. A review round that touches an instruction, policy, template or prompt file (for example a SKILL.md instruction) keeps the general default, whatever the file type, and the minimums named above are unaffected. For a change whose acceptance rests on tests that pin documentation wording, write the briefing as the Pinned-prose changes section of [review and recovery](review-and-recovery.md) requires. When the reviewer's
+   them; tiers themselves are unchanged by this axis.
+   For a review round whose entire delta contains only explanatory
+   documentation, comments, or citations and contains no source- or test-file
+   edits and no semantic change to executable commands, configuration, policy,
+   instructions, or behavior, default to the `-medium` reviewer tier with
+   `review_method: normal` where tier variants are installed.
+   This refines the general tier default above for that one class only; a higher
+   tier there is the non-default choice, recorded with a one-line reason.
+   A review round that touches an instruction, policy, template or prompt file
+   (for example a SKILL.md instruction) keeps the general default, whatever the
+   file type, and the minimums named above are unaffected.
+   For a change whose acceptance rests on tests that pin documentation wording,
+   write the briefing as the Pinned-prose changes section of [review and
+   recovery](review-and-recovery.md) requires.
+   When the reviewer's
    environment cannot use version control to see the diff (for example a
    policy-gated repository), supply the diff as a pre-generated file in the
    briefing instead of expecting the reviewer to derive it, and have the
@@ -408,7 +422,19 @@ directory and the subagents.
    findings require the orchestrator to record a rationale. Deferring a high
    or critical finding counts as a waiver and follows the same rules. Record
    all decisions and waivers in `03-decisions.md` and summarize waivers in
-   the Accepted Waivers section of `06-handoff.md`. A reviewer recommendation is not orchestrator acceptance and cannot authorize a critical waiver; only the operator may authorize a critical waiver. For newly created decision records, identify a stable ID, trigger/evidence, decision, accountable authority/source with concrete approval evidence, consequences, and a superseded decision ID when revising a prior decision. Link baseline revisions and waivers to those decision IDs. Established runs retain their recorded decision format; absent fields never create a retroactive blocker. Routine decisions within the delegated contract remain the orchestrator's responsibility; an out-of-scope change requires an operator decision. Markdown records evidence of real authority and never grant it by themselves. Do not accept while a
+   the Accepted Waivers section of `06-handoff.md`.
+   A reviewer recommendation is not orchestrator acceptance and cannot authorize
+   a critical waiver; only the operator may authorize a critical waiver.
+   For newly created decision records, identify a stable ID, trigger/evidence,
+   decision, accountable authority/source with concrete approval evidence,
+   consequences, and a superseded decision ID when revising a prior decision.
+   Link baseline revisions and waivers to those decision IDs.
+   Established runs retain their recorded decision format; absent fields never
+   create a retroactive blocker.
+   Routine decisions within the delegated contract remain the orchestrator's
+   responsibility; an out-of-scope change requires an operator decision.
+   Markdown records evidence of real authority and never grant it by themselves.
+   Do not accept while a
    required baseline criterion in an explicitly adopted v1 run has an open
    residual; a residual retains its ID and cannot be converted away. After independent review,
    the orchestrator may close a docs-only delta without another reviewer round only
@@ -498,22 +524,42 @@ not command discovery or a substitute for inspecting the actual configuration.
 
 Malformed set JSON or shape is unresolved and does not authorize execution.
 
-Freeze the resolution in the run before execution; the orchestrator records
-that snapshot at a run-local path it names in the briefing. Its identity
-includes the set reference path and digest, repository identity/revision and
-dirty state, the effective configuration and scripts, the preflight
-executable path, version, digest, and approved definition, plus every
+Freeze the resolution in the run before execution; the orchestrator records that
+snapshot at a run-local path it names in the briefing.
+Its identity includes the set reference path and digest, repository
+identity/revision and dirty state, the effective configuration and scripts, the
+preflight executable path, version, digest, and approved definition, plus every
 resolved extra. "Scripts" here means every package-manager script entry plus
-every file an extra's or preflight's argv or such a script entry invokes directly, and repository configuration files the executed tools load count as effective configuration; code under test
-is not a component. Identify
-each result by `(kind, name, occurrence)` in declared order: duplicate
-`(kind, name)` values are distinct occurrences, never a map entry overwritten
-by name. Bind every result attempt to its checked revision and dirty state. A
-source edit makes an old result inapplicable to the new state, but does not
+every file an extra's or preflight's argv or such a script entry invokes
+directly, and repository configuration files the executed tools load count as
+effective configuration; code under test is not a component.
+Identify each result by `(kind, name, occurrence)` in declared order: duplicate
+`(kind, name)` values are distinct occurrences, never a map entry overwritten by
+name.
+Bind every result attempt to its checked revision and dirty state.
+
+A source edit makes an old result inapplicable to the new state, but does not
 itself require re-resolving an unchanged set; re-resolve when an executable
 definition, effective config/script, tool identity, set digest, or approved
-snapshot changes. An unresolvable reference is stale and invalidates the
-result. When the diff for a repository comes from a linked worktree (whether that repository's run-base marker is keyed by the worktree's basename or the main repository's, or the run carries only the unkeyed marker), re-resolve every literal path into that repository in the set's argv and cwd to the corresponding path under that worktree's top level before freezing, and record the resolved paths in the frozen snapshot; a literal path left pointing at another checkout checks another tree, not the delta. Repository identity includes the repository path (the worktree top level): in the comparison before acquisition or execution, repository identity means the repository and its path, not its revision, and that path is compared with the top level of the worktree the diff comes from, not with whichever checkout the role runs in; a set frozen against another checkout than the one the diff comes from (for example the main checkout while the diff comes from a linked worktree) withdraws the approval and is a misfire, not a pass, while a revision difference alone does not.
+snapshot changes.
+An unresolvable reference is stale and invalidates the result.
+
+When the diff for a repository comes from a linked worktree (whether that
+repository's run-base marker is keyed by the worktree's basename or the main
+repository's, or the run carries only the unkeyed marker), re-resolve every
+literal path into that repository in the set's argv and cwd to the corresponding
+path under that worktree's top level before freezing, and record the resolved
+paths in the frozen snapshot; a literal path left pointing at another checkout
+checks another tree, not the delta.
+
+Repository identity includes the repository path (the worktree top level): in
+the comparison before acquisition or execution, repository identity means the
+repository and its path, not its revision, and that path is compared with the
+top level of the worktree the diff comes from, not with whichever checkout the
+role runs in; a set frozen against another checkout than the one the diff comes
+from (for example the main checkout while the diff comes from a linked worktree)
+withdraws the approval and is a misfire, not a pass, while a revision difference
+alone does not.
 
 Both implementer and reviewer run the complete frozen set and report every
 named executor, extra, and raw preflight child occurrence, with cwd and result

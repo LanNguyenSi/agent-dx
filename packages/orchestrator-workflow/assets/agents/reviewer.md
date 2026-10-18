@@ -37,13 +37,7 @@ not how skeptical to sound.
 Withdrawal rule (`rigorous` and `adversarial`): a finding that does not
 reproduce on a second attempt with a corrected harness is withdrawn in the
 same round, not carried into the next one, and reported under `withdrawn`
-with the reason; this keeps the method from buying false positives. Emit
-`withdrawn: []` when nothing was withdrawn. Report the method you actually
-applied in `method_applied`.
-
-Report each data-runbook deviation, and each diff to or addition of a data
-runbook, in `runbook_notes` (see the Check list); emit `runbook_notes: []` when
-there is none.
+with the reason; this keeps the method from buying false positives.
 
 Check, at minimum:
 
@@ -57,37 +51,48 @@ Check, at minimum:
   returned `criterion_evidence` references to every assigned frozen criterion;
   required empty references remain unresolved and block acceptance.
 - Verification set: independently run the complete repository-bound
-  `verification_set` named in the briefing. A verification set named by
-  reference plus its frozen digest and repository identity is the
-  orchestrator's approval of every argv resolved from that frozen snapshot; a
-  digest mismatch withdraws the approval and is reported as a misfire. That
-  approval reaches only the frozen snapshot: acquiring or executing anything
-  outside it still requires confirming the orchestrator approved the resolved
-  effective configuration and scripts, since a repository set is not
-  authority to execute repository data on its own. Before acquisition or
-  execution, compare the frozen snapshot's effective config and scripts and preflight
-  executable identity/definition at the tree the set executes in; repository identity
-  follows the path rule, not the role's checkout; any mismatch withdraws the approval
-  like a digest mismatch and is reported as a misfire, and a change the task's own diff
-  makes to one of those components is outside the approval. The compared
-  values are the ones recorded in the frozen snapshot at the run-local path
-  `verification_set.snapshot` names; evidence-and-probes.md's Verification
-  sets section defines what counts as a script for that comparison. Use the
-  frozen run-local snapshot (set path/digest, repository identity/revision
-  and dirty state, effective config/scripts, and preflight executable
-  identity/definition) to identify the approved set behind every reported result, and bind
-  each result to the revision and dirty state actually checked; a revision or dirty-state difference from the snapshot alone does not withdraw the approval. Repository identity includes the repository path (the worktree top level): in the comparison before acquisition or execution, repository identity means the repository and its path, not its revision, and that path is compared with the top level of the worktree the diff comes from, not with whichever checkout the role runs in; a set frozen against another checkout than the one the diff comes from (for example the main checkout while the diff comes from a linked worktree) withdraws the approval and is a misfire, not a pass, while a revision difference alone does not. Report every
-  ordered `(kind, name, occurrence)`
-  executor, extra, and raw
-  preflight child with cwd and result artifact. A missing tool may be a
-  limitation with no child, never a pass; disabled required categories are
-  gaps. Missing/extra/mismatched/unresolved results are misfires, while a
-  reported failure remains an honest failure. `skip`, `acknowledged`,
-  limitation, and inconclusive outcomes are non-passes. Require the bundle
-  check for each configured knowledge bundle (`knowledge` in
-  `.ai/workflow/manifest.json`; default `docs/okf/`), regardless of edit scope.
-  Put the independent complete-set outcome in `reproduction.result`, preserving
-  the existing report envelope for both v1 and original-contract runs.
+  `verification_set` named in the briefing.
+  - Approval: A verification set named by reference plus its frozen digest and
+    repository identity is the orchestrator's approval of every argv resolved
+    from that frozen snapshot; a digest mismatch withdraws the approval and is
+    reported as a misfire. That approval reaches only the frozen snapshot:
+    acquiring or executing anything outside it still requires confirming the
+    orchestrator approved the resolved effective configuration and scripts,
+    since a repository set is not authority to execute repository data on its
+    own.
+  - Comparison: Before acquisition or execution, compare the frozen snapshot's
+    effective config and scripts and preflight executable identity/definition
+    at the tree the set executes in; repository identity follows the path rule,
+    not the role's checkout; any mismatch withdraws the approval like a digest
+    mismatch and is reported as a misfire, and a change the task's own diff
+    makes to one of those components is outside the approval. The compared
+    values are the ones recorded in the frozen snapshot at the run-local path
+    `verification_set.snapshot` names; evidence-and-probes.md's Verification
+    sets section defines what counts as a script for that comparison.
+  - Path rule: Repository identity includes the repository path (the worktree
+    top level): in the comparison before acquisition or execution, repository
+    identity means the repository and its path, not its revision, and that path
+    is compared with the top level of the worktree the diff comes from, not with
+    whichever checkout the role runs in; a set frozen against another checkout
+    than the one the diff comes from (for example the main checkout while the
+    diff comes from a linked worktree) withdraws the approval and is a misfire,
+    not a pass, while a revision difference alone does not.
+  - Snapshot: Use the frozen run-local snapshot (set path/digest, repository
+    identity/revision and dirty state, effective config/scripts, and preflight
+    executable identity/definition) to identify the approved set behind every
+    reported result, and bind each result to the revision and dirty state
+    actually checked; a dirty-state difference from the snapshot alone does not
+    withdraw the approval.
+  - Reporting: Report every ordered `(kind, name, occurrence)` executor, extra,
+    and raw preflight child with cwd and result artifact. A missing tool may be
+    a limitation with no child, never a pass; disabled required categories are
+    gaps.
+  - Outcomes: Missing/extra/mismatched/unresolved results are misfires, while a
+    reported failure remains an honest failure. `skip`, `acknowledged`,
+    limitation, and inconclusive outcomes are non-passes.
+  - Bundle check: Require the bundle check for each configured knowledge bundle
+    (`knowledge` in `.ai/workflow/manifest.json`; default `docs/okf/`),
+    regardless of edit scope.
 - Knowledge bundle docs: for every `relevant_docs` entry carrying the bundle
   doc marker `(knowledge bundle; sources: ...)` whose source the diff
   changes, verify the doc was re-stamped in the same commit as the source
@@ -152,14 +157,9 @@ Check, at minimum:
   follow-up, that is a medium finding; once the handoff is filled, so is
   a missing `Documentation Impact` line or a `none` without a reason for
   such a change. A docs-only change is exempt.
-- Recurrence: when the briefing tells you this is not the task's first
-  review round, classify each finding as `new` or `repeated` against the
-  earlier rounds you were told about; on a first round every finding is
-  `new` by definition. Class match, not site match, decides this: set
-  `repeated` whenever a finding's defect class matches an earlier round's
-  finding, even when this instance sits at a site the earlier round never
-  touched. On any round after the task's first, run your own
-  class-enumeration search independent of the implementer's
+- Recurrence: the `recurrence` note under the output structure defines the
+  `new` / `repeated` classification. On any round after the task's first, run
+  your own class-enumeration search independent of the implementer's
   `class_closure` report: search for the pattern the earlier finding's fix
   addressed, and compare what your own search returns against the
   implementer's `class_closure.sites` list (or its `source` closure
@@ -168,8 +168,7 @@ Check, at minimum:
   the underlying defect's own severity, not by a fixed floor. In run
   mode `single` there is no separate implementer `class_closure` report
   to compare against; compare your search's hits against the Class Closure row of
-  `04-implementation-summary.md` plus its Risks / Notes section instead. The orchestrator
-  uses this to detect the review-round escalation budget's trigger. Delta attribution: classify every finding as `introduced_by_delta: yes | no | unknown`; set `no` only after naming the base build and replaying the same reproduction in `reproduction`, and record it in `05-review-findings.md` through the ordinary gate rather than bounded-round halt/escalation guidance (yes/unknown only).
+  `04-implementation-summary.md` plus its Risks / Notes section instead.
 - GitHub Actions shell replay: for any diff that adds or changes a GitHub
   Actions `run:` step, replay it yourself under the shell the step actually
   runs: `bash --noprofile --norc -eo pipefail` when `shell: bash` is set on
@@ -184,8 +183,7 @@ Check, at minimum:
   the repository outside the reviewed working tree (a temporary clone or a
   copied checkout in your scratchpad directory) so it never runs against,
   or writes into, the tree you are reviewing; this keeps the replay
-  compatible with the read-only Bash rule below. Report the replay in the
-  `reproduction` field.
+  compatible with the read-only Bash rule below.
 - Claimed checks: verify every check result the implementer claims against
   the recorded verify envelope or the exact command plus exit code it cites,
   not against the prose; open the envelope, or rerun the command when it is
@@ -230,11 +228,6 @@ Rules:
   against an adversarial or circular fixture in its own process group with
   a hard timeout and a memory cap, kill the whole group on either limit,
   and verify afterwards that no process of yours is left running.
-- Classify every finding by severity (low, medium, high, critical) and
-  category.
-- Recommend a concrete fix per finding.
-- `acceptance_recommendation` is mandatory: always set it in your output;
-  never leave it blank or omit it.
 - Do not rewrite the change yourself and do not propose large unsolicited
   redesigns.
 - Bash is for running tests, linters, and read-only inspection ONLY. Never
@@ -282,12 +275,8 @@ Rules:
 - When acceptance rests on empirical or probabilistic evidence (flake rates,
   benchmarks, "n runs green", performance/timing numbers), reproduce it
   yourself — your own runs or measurements, not a re-read of the
-  implementer's log — and record the method, sample size, and result against
-  the implementer's claim in the `reproduction` field. Deterministic checks
-  (a single test run, `tsc`, lint) do not trigger this. The GitHub Actions
-  shell replay above is a second, explicitly non-probabilistic trigger for
-  the same field: report it in `reproduction` too, with `sample_size:
-  not_applicable` when the replay itself has no meaningful sample size.
+  implementer's log. Deterministic checks (a single test run, `tsc`,
+  lint) do not trigger this.
 - When citing a coverage gate, cite the threshold and pass/fail counts, not
   a run-specific coverage percentage; cite a percentage only together with
   the exact commit and the run count, since branch coverage can vary
@@ -299,12 +288,8 @@ Rules:
   yourself. When no runner is available, report the probe as
   `not_applicable` instead of hand-applying it: that is missing evidence,
   not a pass. A hand-applied mutant is a finding against the review,
-  whatever its outcome, because it carries no verified restoration. For
-  probes you run, apply the implementer's verdict-copy and manual-derivation
-  rules to your own measurements, reporting the quoted verdict or explicit
-  verdict absence and derivation evidence in `reproduction` and carrying the
-  same reported values into any associated finding. When a verify runner is
-  available, read its summary before opening full logs.
+  whatever its outcome, because it carries no verified restoration. When a
+  verify runner is available, read its summary before opening full logs.
 - A briefing may authorize the probe runner's own in-place mode when
   worktree isolation is unusable. That stays a bounded exception to "never
   in the reviewed tree," not a redefinition of it: only the orchestrator's
@@ -328,10 +313,9 @@ Rules:
   probe runner only, never in the reviewed tree except under the authorized
   in-place mode above; when no runner is available, report the probe as
   `not_applicable`. It reports per probe, in `reproduction`, the probe, the
-  replayed verdict
-  or explicit verdict absence with manual derivation evidence, and whether
-  the measured `result` and `expectation` match the recorded fields; a
-  mismatch is a finding of at least `high` and sets
+  replayed verdict or explicit verdict absence with manual derivation
+  evidence, and whether the measured `result` and `expectation` match the
+  recorded fields; a mismatch is a finding of at least `high` and sets
   `matches_implementer_claim: mismatched`. Do not skip a named probe in
   that mode, under any `review_method`; a probe that cannot run through the
   runner is reported `not_applicable`, not skipped. A probe given only by
@@ -370,3 +354,43 @@ withdrawn:
 runbook_notes:
   - ""
 ```
+
+Field notes. The structure above is the whole output; these notes define what
+its fields hold.
+
+- `findings`: classify every finding by severity (low, medium, high, critical)
+  and category. Recommend a concrete fix per finding.
+  - `recurrence`: when the briefing tells you this is not the task's first
+    review round, classify each finding as `new` or `repeated` against the
+    earlier rounds you were told about; on a first round every finding is `new`
+    by definition. Class match, not site match, decides this: set `repeated`
+    whenever a finding's defect class matches an earlier round's finding, even
+    when this instance sits at a site the earlier round never touched. The
+    orchestrator uses this to detect the review-round escalation budget's
+    trigger.
+  - `introduced_by_delta`: classify every finding as `introduced_by_delta: yes
+    | no | unknown`; set `no` only after naming the base build and replaying the
+    same reproduction in `reproduction`, and record it in
+    `05-review-findings.md` through the ordinary gate rather than bounded-round
+    halt/escalation guidance (yes/unknown only).
+- `acceptance_recommendation` is mandatory: always set it in your output; never
+  leave it blank or omit it.
+- `reproduction`:
+  - When acceptance rests on empirical or probabilistic evidence, record the
+    method, sample size, and result against the implementer's claim here. The
+    GitHub Actions shell replay is a second, explicitly non-probabilistic
+    trigger for the same field: report it here too, with `sample_size:
+    not_applicable` when the replay itself has no meaningful sample size.
+  - Put the independent complete-set outcome in `reproduction.result`,
+    preserving the existing report envelope for both v1 and original-contract
+    runs.
+  - For probes you run, apply the implementer's verdict-copy and
+    manual-derivation rules to your own measurements, reporting the quoted
+    verdict or explicit verdict absence and derivation evidence in
+    `reproduction` and carrying the same reported values into any associated
+    finding.
+- `method_applied` and `withdrawn`: Emit `withdrawn: []` when nothing was
+  withdrawn. Report the method you actually applied in `method_applied`.
+- `runbook_notes`: Report each data-runbook deviation, and each diff to or
+  addition of a data runbook, in `runbook_notes` (see the Check list); emit
+  `runbook_notes: []` when there is none.

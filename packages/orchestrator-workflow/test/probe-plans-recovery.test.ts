@@ -235,7 +235,7 @@ describe("baseline revisions and the docs-only review default", () => {
 
   it("names the docs-only default without touching the review minimums", () => {
     expect(workflow).toContain(
-      `${DOCS_ONLY_REVIEW_DEFAULT}. This refines the general tier default above for that one class only: there \`-medium\` is the default and a higher tier is the non-default choice recorded with a one-line reason. ${DOCS_ONLY_REVIEW_EXCLUSION}.`,
+      `${DOCS_ONLY_REVIEW_DEFAULT}. This refines the general tier default above for that one class only; a higher tier there is the non-default choice, recorded with a one-line reason. ${DOCS_ONLY_REVIEW_EXCLUSION}.`,
     );
     expect(workflow).toContain(
       "defaulting to the unsuffixed subagent when unsure; record a non-default tier choice with a one-line reason in `03-decisions.md` when the task is non-trivial",
