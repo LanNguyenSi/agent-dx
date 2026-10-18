@@ -1,5 +1,12 @@
 # Bundle log
 
+- 2026-10-18T19:12:21Z, run mode single names the conditional briefing rules: the Run mode section of
+  `run-state-and-harness.md` says the verification set rules and the GitHub Actions replay rules
+  a briefing would carry apply to the orchestrator directly in run mode `single` (appended to the
+  `single` bullet's last line, so no citation moved). Re-verified: the claims of the re-stamped
+  docs are unchanged. Re-stamped: `model-preselection.md`, `review-gate-and-waivers.md`,
+  `run-state-lifecycle-and-markers.md` and `subagent-contracts-superset.md`.
+
 - 2026-10-18T19:08:18Z, AGENTS.md section became a short charter: the always-loaded section keeps roles and run
   modes, the review gate, the instruction trust boundary, the outward-facing actions rule and the
   definition of done, and a test bounds it at 800 words. Runbook selection and authority and the
