@@ -1,5 +1,19 @@
 # Bundle log
 
+- 2026-10-18T19:35:50Z, charter move conditions restored and wording claims corrected: `run-state-and-harness.md` Intent
+  again defines non-trivial work (appended to an existing line, so no citation moved);
+  `trust-and-outward.md` says a grant class is added mid-run only on an operator message in the
+  session that instructs it, and puts "or a skipped checklist item" back into the operator-runbook
+  rule; `contracts.md` limits its `runbook_notes` clause to data-runbook deviations. The
+  `install-fence-mechanics.md` sentence about the advisor paragraph now says it ships in
+  `delegation-and-tiers.md`, and the `review-gate-and-waivers.md` and
+  `run-state-lifecycle-and-markers.md` statements about `test/charter.test.ts` name what it checks
+  (an exact second copy of a sentence of 8 or more words). Re-verified: the grant-condition and
+  runbook-deviation claims of the re-stamped docs still match the shipped text, and the other claims
+  are unchanged. Re-stamped: `install-fence-mechanics.md`, `model-preselection.md`,
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and
+  `subagent-contracts-superset.md`.
+
 - 2026-10-18T19:12:21Z, run mode single names the conditional briefing rules: the Run mode section of
   `run-state-and-harness.md` says the verification set rules and the GitHub Actions replay rules
   a briefing would carry apply to the orchestrator directly in run mode `single` (appended to the
