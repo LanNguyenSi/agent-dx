@@ -1,5 +1,14 @@
 # Bundle log
 
+- 2026-10-18T13:11:05Z, doctor Codex instruction budget: `doctor.ts` gained the Codex budget warning,
+  `cli.ts` prints it as a `codex:` detail line, `doctor.test.ts` covers it, the
+  `CHANGELOG.md` bullet shifts lines below it and the sibling-drift allowlist geometry in
+  `docs-consistency.test.ts` followed. Re-verified against the change: the docs' claims about
+  install mechanics, routing, the review gate, run state and the contract pairs are unchanged.
+  Re-stamped: `install-fence-mechanics.md`, `model-preselection.md`,
+  `review-gate-and-waivers.md`, `run-state-lifecycle-and-markers.md` and
+  `subagent-contracts-superset.md`.
+
 - 2026-10-18T12:58:16Z, Codex instruction-budget doctor warning: new
   `codexWarnings` reporting landed in `doctor.ts` and `cli.ts`, and a
   `CHANGELOG.md` bullet was added under `[Unreleased]`, shifting the
