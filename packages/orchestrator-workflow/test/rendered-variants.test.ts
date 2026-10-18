@@ -7,7 +7,12 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { readAgentAsset } from "../src/assets.js";
 import { runInit } from "../src/init.js";
-import { DEFAULT_MODELS, ROLES, ROLE_TIERS } from "../src/models.js";
+import {
+  DEFAULT_MODELS,
+  DEFAULT_TIER,
+  ROLES,
+  ROLE_TIERS,
+} from "../src/models.js";
 
 /**
  * Generation parity: every rendered variant of a role prompt (every harness,
@@ -39,21 +44,43 @@ describe("rendered role prompts carry the asset body in every harness and tier",
         models: { ...DEFAULT_MODELS },
         profile: "full",
         tiers: true,
+        // opencode writes a tier variant only for a resolved class model, so
+        // the opencode case resolves all three classes; without them no
+        // variant file exists and the composer would go unexercised.
+        opencodeClassModels: {
+          small: "anthropic/claude-haiku-4-5",
+          medium: "anthropic/claude-sonnet-4-6",
+          large: "anthropic/claude-opus-4-8",
+        },
       });
       const agentsDir = join(target, dir, "agents");
       const files = readdirSync(agentsDir);
       let checked = 0;
+      let expectedCount = 0;
       for (const role of ROLES) {
         const body = readAgentAsset(role).body.trimEnd();
-        const variants = files.filter(
-          (file) =>
-            file === `${role}${extension}` ||
-            ROLE_TIERS[role].some(
-              (tier) => file === `${role}-${tier}${extension}`,
-            ),
-        );
-        expect(variants.length, `${harness}: ${role} variants`).toBeGreaterThan(
-          0,
+        const expected = [
+          `${role}${extension}`,
+          ...ROLE_TIERS[role]
+            .filter((tier) => tier !== DEFAULT_TIER[role])
+            .map((tier) => `${role}-${tier}${extension}`),
+        ].sort();
+        expectedCount += expected.length;
+        const variants = files
+          .filter(
+            (file) =>
+              file === `${role}${extension}` ||
+              ROLE_TIERS[role].some(
+                (tier) => file === `${role}-${tier}${extension}`,
+              ),
+          )
+          .sort();
+        // One default file plus one file per non-default tier of the role.
+        expect(variants, `${harness}: ${role} variants`).toEqual(expected);
+        expect(variants.length).toBe(
+          1 +
+            ROLE_TIERS[role].filter((tier) => tier !== DEFAULT_TIER[role])
+              .length,
         );
         for (const file of variants) {
           const text = readFileSync(join(agentsDir, file), "utf8");
@@ -65,7 +92,8 @@ describe("rendered role prompts carry the asset body in every harness and tier",
           checked += 1;
         }
       }
-      expect(checked).toBeGreaterThanOrEqual(ROLES.length);
+      expect(checked).toBe(expectedCount);
+      expect(checked).toBeGreaterThan(ROLES.length);
     },
   );
 });

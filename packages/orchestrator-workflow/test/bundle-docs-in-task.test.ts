@@ -12,6 +12,7 @@ const contracts = readAsset("skill/references/contracts.md");
 const taskSlicerMd = readAsset("agents/task-slicer.md");
 const implementerMd = readAsset("agents/implementer.md");
 const reviewerMd = readAsset("agents/reviewer.md");
+const tasksTemplate = readAsset("templates/02-tasks.md");
 
 // Collapse line wraps and indentation so a pin matches a whole sentence
 // regardless of where the asset wraps it.
@@ -35,5 +36,23 @@ describe("no role contract adds a separate knowledge-docs field", () => {
     for (const doc of [contracts, taskSlicerMd, implementerMd, reviewerMd]) {
       expect(doc).not.toMatch(/knowledge_docs/);
     }
+  });
+});
+
+// The marker literal is shared between its producer (the task slicer and the
+// 02-tasks.md template) and its consumers (implementer, reviewer), and
+// contracts.md defines it. Only the literal is pinned here, not the prose
+// around it.
+const MARKER_LITERAL = "(knowledge bundle; sources:";
+
+describe("every site that names the bundle doc marker carries the identical literal", () => {
+  it.each([
+    ["contracts.md", contracts],
+    ["task-slicer.md", taskSlicerMd],
+    ["implementer.md", implementerMd],
+    ["reviewer.md", reviewerMd],
+    ["02-tasks.md", tasksTemplate],
+  ])("%s carries the marker literal", (_name, doc) => {
+    expect(unwrap(doc)).toContain(MARKER_LITERAL);
   });
 });

@@ -11,16 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prose rules at several sites. The safety core is the instruction trust
   boundary (runbook authority included), outward actions only by the
   orchestrator, and the review gate severities and waiver authority, each
-  pinned as sentences in the policy section only, plus the reviewer's
+  pinned as whole sentences in the policy section only, plus the reviewer's
   read-only rule, pinned in the reviewer prompt only. Return field names,
   enums, mandatory-field rules, template markers, and the headings a reader
-  consumes stay pinned. Every other prose rule loses its sentence pin and is
-  covered by behaviour measurement and review. The cross-asset runbook
-  sentence guard and its fixture are retired, and a new test checks that
-  every rendered role variant in every harness carries its asset body. The
-  "Pinned-prose changes" section of the review and recovery reference
-  describes this model; no other installed file changes, and the installed
-  copy of that reference reports as outdated until refreshed.
+  consumes stay pinned; the explorer return block is now pinned like the
+  advisor's, the two slop-detector argv shapes the implementer prompt
+  prescribes stay pinned because another package runs them, and one check
+  confirms every site carries the identical knowledge-bundle doc marker
+  literal. Every other prose rule loses its sentence pin and is covered by
+  behaviour measurement and review. The cross-asset runbook sentence guard
+  and its fixture are retired, and a new test checks that every rendered
+  role variant in every harness, opencode tier variants included, carries
+  its asset body. The "Pinned-prose changes" section of the review and
+  recovery reference states the rule generically (pin the machine contract
+  and the safety rules a repository declares as its core, each at one
+  normative site, and no other prose) and defines the briefing's claim list
+  as the contract plus the declared safety core; no other installed file
+  changes, and the installed copy of that reference reports as outdated
+  until refreshed.
 
 ## [0.45.0] - 2026-10-18
 

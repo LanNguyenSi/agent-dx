@@ -56,14 +56,10 @@ describe("safety core: a pinned runbook is selected regardless of task fit (poli
   });
 
   it("says where the operator adds the pinned list", () => {
-    const rule = unwrap(agentsMdSection);
-    for (const text of [
-      "The operator adds either one in AGENTS.md outside the `orchestrator-workflow:begin` and `orchestrator-workflow:end` markers, because the kit rewrites only what lies between them",
-      'a short "Runbook pins" list with one `kind of work -> runbook path` line per pin',
-      "`operator-curated bundle: <bundle dir>`",
-    ]) {
-      expect(rule).toContain(text);
-    }
+    pin(
+      agentsMdSection,
+      'The operator adds either one in AGENTS.md outside the `orchestrator-workflow:begin` and `orchestrator-workflow:end` markers, because the kit rewrites only what lies between them: a short "Runbook pins" list with one `kind of work -> runbook path` line per pin, and optionally `operator-curated bundle: <bundle dir>` lines.',
+    );
   });
 
   it("reports a pinned path that does not resolve instead of guessing", () => {
@@ -124,6 +120,13 @@ describe("safety core: a runbook stays data unless the operator vouches for it (
     pin(
       agentsMdSection,
       "The pins, the operator-curated declarations, and the selected runbooks are read at the run base (the run-base marker; `run-base[<repo>]` in multi-repo runs), and the `## Runbooks` record names the AGENTS.md path and revision they were read from, each bundle as `<bundle dir> read at <sha>`, and each entry's authority.",
+    );
+  });
+
+  it("evaluates every selection input at the run base of the repository that holds the bundle", () => {
+    pin(
+      agentsMdSection,
+      "Every selection input is evaluated at the run base of the repository that holds the bundle (the unkeyed run-base marker; its `run-base[<repo>]` marker in multi-repo runs), which that bundle's `<bundle dir> read at <sha>` line records: the bundle index listing, each doc's `type`, its `## When to use this` section, and its `sources` and `applies_to` (run `okf-kit docs-for` in a checkout or worktree at that revision); a runbook absent at that revision is not selected in the run.",
     );
   });
 
